@@ -1,0 +1,124 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-07-24 09:00:00.000000",
+ "description": "Append-only record of every MCP call \u2014 reads included \u2014 with its arguments, outcome and any document-state change.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "timestamp",
+  "tool_name",
+  "result_status",
+  "log_col_1",
+  "caller_ip",
+  "docstatus_delta",
+  "detail_section",
+  "result_summary",
+  "arguments_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Timestamp",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Tool that was called, or <transport> for a call rejected before dispatch.",
+   "fieldname": "tool_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Tool Name",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Success: the tool ran. Error: it failed or was asked for something impossible. Blocked: the tool exists but its switch is off. Unauthorized: the caller never reached a tool.",
+   "fieldname": "result_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Result Status",
+   "options": "Success\nError\nBlocked\nUnauthorized",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "log_col_1",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Nearest-hop client address. Behind a reverse proxy this is the rightmost X-Forwarded-For entry \u2014 the one a client cannot forge.",
+   "fieldname": "caller_ip",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Caller IP",
+   "read_only": 1
+  },
+  {
+   "description": "Document-state change, for mutations only: 'none to 0 (draft)', '0 to 1 (submitted)', '1 to 2 (cancelled)'. Empty for reads.",
+   "fieldname": "docstatus_delta",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Docstatus Delta",
+   "read_only": 1
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "Detail"
+  },
+  {
+   "description": "One line describing what happened, written by the tool itself.",
+   "fieldname": "result_summary",
+   "fieldtype": "Small Text",
+   "label": "Result Summary",
+   "read_only": 1
+  },
+  {
+   "description": "Arguments as received, with any secret-looking key redacted.",
+   "fieldname": "arguments_json",
+   "fieldtype": "Code",
+   "label": "Arguments",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-24 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "MCP Action Log",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "tool_name,result_status,caller_ip",
+ "sort_field": "timestamp",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "tool_name",
+ "track_changes": 0
+}

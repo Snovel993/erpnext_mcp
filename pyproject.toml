@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT
+[project]
+name = "erpnext_mcp"
+authors = [{ name = "Tim Polehn", email = "polehntim@gmail.com" }]
+description = "Model Context Protocol (MCP) server for ERPNext, as a Frappe app."
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+license = { text = "MIT" }
+keywords = ["frappe", "erpnext", "mcp", "model-context-protocol", "ai"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Framework :: Frappe",
+]
+
+# No runtime dependencies beyond Frappe/ERPNext itself. The MCP wire protocol
+# is JSON-RPC 2.0 over HTTP, which this app speaks with the standard library —
+# pulling in the `mcp` SDK would add an asyncio server runtime that a
+# Frappe/Werkzeug (synchronous WSGI) request never uses.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/tpolehn/erpnext_mcp"
+Source = "https://github.com/tpolehn/erpnext_mcp"
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.module]
+name = "erpnext_mcp"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "RUF"]
+ignore = [
+  "B017", # assertRaises(Exception)
+  "B023", # function definition does not bind loop variable
+  "E101", # indentation contains mixed spaces and tabs
+  "E501", # line too long
+  "F403", # can't detect undefined names from star imports
+  "W191", # indentation contains tabs
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"
