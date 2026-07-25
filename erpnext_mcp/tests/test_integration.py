@@ -189,18 +189,88 @@ class Migration(MCPIntegrationTestCase):
 				self.assertTrue(meta.has_field(fieldname))
 
 
+class InstallHooks(MCPIntegrationTestCase):
+	"""Regression for v0.2.1: `after_migrate` crashed `bench migrate` on a real site.
+
+	`seed_defaults` read `tabSingles` through `frappe.db.get_values` with no
+	`order_by`. That helper defaults to ordering by `modified`, and `tabSingles`
+	has three columns — doctype, field, value — so MariaDB answered
+	`(1054, "Unknown column 'modified' in 'ORDER BY'")` and every migrate on an
+	installed site died.
+
+	It shipped because nothing exercised the hook against a real database: the
+	standalone double answered the query happily. It now refuses it, and these
+	tests run the hooks for real, which is the other half of the fix. If you add
+	anything to `install.py`, add a test here that calls it.
+	"""
+
+	def test_after_migrate_runs_without_raising(self):
+		"""The exact call `bench migrate` makes. This is the regression."""
+		from erpnext_mcp import install
+
+		install.after_migrate()
+
+	def test_the_migrate_patch_runs_without_raising(self):
+		"""`patches.txt` runs the same seeding a second way, on its own path."""
+		from erpnext_mcp.patches import set_default_tool_switches
+
+		set_default_tool_switches.execute()
+
+	def test_seed_defaults_is_idempotent_against_a_real_singles_table(self):
+		before = frappe.db.get_singles_dict(settings.SETTINGS_DOCTYPE)
+		settings.seed_defaults()
+		settings.seed_defaults()
+		after = frappe.db.get_singles_dict(settings.SETTINGS_DOCTYPE)
+		# `modified` is a genuine tabSingles row for a Single and moves on save.
+		before.pop("modified", None)
+		after.pop("modified", None)
+		self.assertEqual(before, after)
+
+	def test_seed_defaults_does_not_overwrite_a_stored_choice(self):
+		self.doc.allow_search_accounts = 0
+		self.doc.flags.ignore_permissions = True
+		self.doc.save()
+		frappe.clear_cache(doctype=settings.SETTINGS_DOCTYPE)
+		settings.seed_defaults()
+		frappe.clear_cache(doctype=settings.SETTINGS_DOCTYPE)
+		self.assertFalse(settings.tool_enabled("search_accounts"))
+
+	def test_stored_fieldnames_reads_the_real_table(self):
+		stored = settings.stored_fieldnames()
+		self.assertIn("enabled", stored)
+		self.assertIn("allowed_cidrs", stored)
+		self.assertNotIn("doctype", stored, "doctype is the filter, not a field")
+
+	def test_get_singles_dict_exists_on_this_frappe(self):
+		"""The accessor the fix depends on. Core since v13, but this app claims
+		v14 to v16 support and the claim should be checked rather than assumed."""
+		self.assertTrue(callable(getattr(frappe.db, "get_singles_dict", None)))
+
+	def test_tabsingles_really_has_no_modified_column_in_its_schema(self):
+		"""Why the generic helpers cannot be used here, demonstrated rather than
+		asserted from memory. `modified` exists as a *row* (field='modified'), not
+		as a column — which is exactly the trap."""
+		columns = {row[0] for row in frappe.db.sql("DESC `tabSingles`")}
+		self.assertEqual(columns, {"doctype", "field", "value"})
+
+	# Deliberately NOT testing install.after_install(): it ends with
+	# frappe.db.commit(), which would escape FrappeTestCase's rollback and
+	# persist this class's setUp — an enabled endpoint with a known token — onto
+	# whatever site the suite was run against. after_migrate covers the same
+	# seeding without the commit.
+
+
 class TokenStorage(MCPIntegrationTestCase):
 	def test_the_token_round_trips_through_frappes_encryption(self):
 		"""The standalone suite fakes the auth table; this proves the real one."""
 		self.assertEqual(settings.auth_token(), TOKEN)
 
 	def test_the_ciphertext_is_not_the_plaintext(self):
-		stored = frappe.db.get_value(
-			"Singles",
-			{"doctype": settings.SETTINGS_DOCTYPE, "field": "auth_token"},
-			"value",
-		)
-		self.assertNotEqual(stored, TOKEN)
+		# get_singles_dict, not get_value("Singles", ...): the generic helper
+		# defaults to ordering by `modified`, a column tabSingles does not have.
+		# See settings.stored_fieldnames.
+		stored = frappe.db.get_singles_dict(settings.SETTINGS_DOCTYPE)
+		self.assertNotEqual(stored.get("auth_token"), TOKEN)
 
 	def test_generate_token_replaces_the_working_token(self):
 		result = frappe.get_single(settings.SETTINGS_DOCTYPE).generate_token()

@@ -140,8 +140,7 @@ def seed_defaults() -> None:
 	in the DocType JSON.
 	"""
 	doc = frappe.get_doc(SETTINGS_DOCTYPE)
-	stored = frappe.db.get_values("Singles", {"doctype": SETTINGS_DOCTYPE}, ["field", "value"], as_dict=True)
-	present = {row["field"] for row in (stored or [])}
+	present = set(stored_fieldnames())
 	changed = False
 	for field in frappe.get_meta(SETTINGS_DOCTYPE).fields:
 		if field.fieldtype in ("Section Break", "Column Break", "HTML", "Tab Break"):
@@ -153,6 +152,26 @@ def seed_defaults() -> None:
 	if changed:
 		doc.flags.ignore_permissions = True
 		doc.save()
+
+
+def stored_fieldnames() -> set:
+	"""Which of this Single's fields actually have a row in `tabSingles`.
+
+	NEVER query `tabSingles` with `frappe.db.get_value` / `get_values` and no
+	explicit `order_by`. Both default to ordering by `modified`, and `tabSingles`
+	has three columns — `doctype`, `field`, `value` — so the query dies with
+	`Unknown column 'modified' in 'ORDER BY'`. It is not a DocType table and does
+	not get the framework columns. That is exactly how v0.2.0 shipped an
+	`after_migrate` hook that crashed `bench migrate` on a real site: the default
+	argument is invisible at the call site, and the standalone test double was
+	happy to answer a query MariaDB refuses.
+
+	`frappe.db.get_singles_dict` is the framework's own accessor for this table.
+	It issues its own `SELECT field, value FROM tabSingles WHERE doctype = %s`
+	with no ORDER BY at all, so there is no default to get wrong — which is the
+	real reason to prefer it over passing `order_by=None` to the generic helper.
+	"""
+	return set(frappe.db.get_singles_dict(SETTINGS_DOCTYPE) or {})
 
 
 def as_bool(value) -> bool:

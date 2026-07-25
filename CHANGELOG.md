@@ -3,6 +3,53 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.2.1 — 2026-07-25
+
+Hotfix. **v0.2.0 breaks `bench migrate` on any site it is installed on** — if you
+are on v0.2.0, upgrade before your next migrate.
+
+### Fixed
+
+- **`after_migrate` crashed with `Unknown column 'modified' in 'ORDER BY'`.**
+  `settings.seed_defaults` read `tabSingles` through `frappe.db.get_values`
+  without an `order_by`. That helper — and `get_value`, which is `get_values`
+  with `limit=1` underneath — defaults to ordering by `modified`. `tabSingles` is
+  not a DocType table: it has three columns, `doctype`, `field` and `value`, and
+  none of the framework columns. Every `bench migrate` on an installed site died
+  in the hook.
+
+  Both reads now go through `frappe.db.get_singles_dict`, the framework's own
+  accessor for that table, which issues no `ORDER BY` at all. Preferred over
+  passing `order_by=None` because there is then no default left to get wrong.
+
+- **A second instance of the same pattern** in the in-bench suite
+  (`test_the_ciphertext_is_not_the_plaintext` used
+  `frappe.db.get_value("Singles", …)`), which would have failed the same way the
+  first time anyone ran `bench run-tests` on a real site.
+
+### Why it shipped, and what stops the next one
+
+The standalone test double answered a query MariaDB refuses, so three existing
+`seed_defaults` tests passed against broken code. The double now models
+`tabSingles` — and the other frameworkless tables — as having no framework
+columns, and raises the real error when a query would default to ordering by
+`modified`. Those three tests now fail against v0.2.0, alongside five new ones:
+
+- `after_migrate` and the `patches.txt` patch each run end to end, standalone
+  **and** in-bench against a real database. The hook that broke had no test at
+  all; it does now.
+- A grep-as-a-test fails if any source file queries `Singles` through
+  `get_value` / `get_values` / `get_all` / `get_list` again.
+- An in-bench test asserts `DESC tabSingles` really is those three columns, so
+  the reason for all of the above is demonstrated rather than remembered.
+
+Also fixed: `__version__` still read `"0.1.0"` after the v0.2.0 tag, so the MCP
+handshake reported the wrong server version to every client. A test now compares
+it against the newest CHANGELOG heading.
+
+No behaviour, tool or API changes. 443 standalone tests (was 433), 103 in-bench
+(was 96).
+
 ## 0.2.0 — 2026-07-25
 
 **35 tools** (was 15): workflow, reports, attachments, comments and tasks, HR,

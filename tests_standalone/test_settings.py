@@ -186,6 +186,111 @@ class MissingValues(SeededTestCase):
 			META["ERPNext MCP Settings"] = removed
 
 
+class SinglesTableQueries(SeededTestCase):
+	"""Regression: v0.2.0's `after_migrate` crashed `bench migrate` on a real site.
+
+	`tabSingles` has three columns — doctype, field, value. It is not a DocType
+	table and has none of the framework columns. `frappe.db.get_value` and
+	`get_values` both default to ordering by `modified`, so querying tabSingles
+	through either without an explicit `order_by` is
+	`Unknown column 'modified' in 'ORDER BY'`.
+
+	v0.2.0 shipped that in `settings.seed_defaults`, wired to `after_migrate`, so
+	every `bench migrate` on an installed site died. The standalone double
+	answered the query happily, which is the reason it got out — so the double
+	now refuses it too, and these tests are what would have caught it.
+	"""
+
+	def test_seed_defaults_does_not_query_singles_with_a_default_order_by(self):
+		"""The regression itself: this raised OperationalError on v0.2.0."""
+		STORE.singles["ERPNext MCP Settings"] = {"doctype": "ERPNext MCP Settings"}
+		settings.seed_defaults()
+		self.assertEqual(STORE.singles["ERPNext MCP Settings"]["allow_get_company_topology"], "1")
+
+	def test_after_migrate_runs_clean(self):
+		"""The hook as `hooks.py` calls it, not just the function underneath."""
+		from erpnext_mcp import install
+
+		STORE.singles["ERPNext MCP Settings"] = {"doctype": "ERPNext MCP Settings"}
+		install.after_migrate()
+		self.assertFalse(settings.is_enabled())
+		self.assertTrue(settings.tool_enabled("get_company_topology"))
+
+	def test_after_install_runs_clean(self):
+		from erpnext_mcp import install
+
+		STORE.singles["ERPNext MCP Settings"] = {"doctype": "ERPNext MCP Settings"}
+		install.after_install()
+		self.assertEqual(STORE.singles["ERPNext MCP Settings"]["enabled"], "0")
+
+	def test_stored_fieldnames_reports_what_is_set(self):
+		self.configure(enabled=1, allow_search_accounts=0)
+		stored = settings.stored_fieldnames()
+		self.assertIn("enabled", stored)
+		self.assertIn("allow_search_accounts", stored)
+		self.assertNotIn("doctype", stored, "doctype is the filter, not a field")
+
+	def test_the_double_refuses_the_query_that_broke_production(self):
+		"""Belt to the braces: if somebody reintroduces the pattern anywhere, the
+		standalone suite fails instead of a customer's `bench migrate`."""
+		with self.assertRaises(Exception) as caught:
+			frappe.db.get_values("Singles", {"doctype": settings.SETTINGS_DOCTYPE}, ["field", "value"])
+		self.assertIn("Unknown column 'modified'", str(caught.exception))
+
+	def test_the_double_refuses_get_value_on_singles_too(self):
+		"""get_value is get_values(limit=1) underneath, so it has the same bug —
+		and v0.2.0 had a second instance of it in the in-bench suite."""
+		with self.assertRaises(Exception) as caught:
+			frappe.db.get_value(
+				"Singles",
+				{"doctype": settings.SETTINGS_DOCTYPE, "field": "auth_token"},
+				"value",
+			)
+		self.assertIn("Unknown column 'modified'", str(caught.exception))
+
+	def test_an_explicit_order_by_none_is_allowed(self):
+		"""The default is the bug, not the table. A caller who says what they mean
+		is fine."""
+		rows = frappe.db.get_values(
+			"Singles",
+			{"doctype": settings.SETTINGS_DOCTYPE},
+			["field", "value"],
+			order_by=None,
+		)
+		self.assertTrue(rows)
+
+	def test_normal_doctypes_are_unaffected(self):
+		"""Every real DocType table has `modified`, so the default is fine there —
+		the refusal must not become a blanket ban."""
+		self.assertIsNotNone(frappe.db.get_value("Company", {"abbr": "ETC"}, "name"))
+
+	def test_no_source_file_queries_singles_through_the_generic_helpers(self):
+		"""A grep, as a test — the cheapest guard against this coming back.
+
+		Comments are stripped first, because this file and several others discuss
+		the bad pattern by name and the point is to catch calls, not prose.
+		"""
+		import ast
+		import pathlib
+		import re
+
+		app = pathlib.Path(__file__).resolve().parents[1] / "erpnext_mcp"
+		unsafe = re.compile(r"""get_(?:value|values|all|list)\s*\(\s*["']Singles["']""")
+		offenders = []
+		for path in sorted(app.rglob("*.py")):
+			source = path.read_text()
+			# ast.unparse round-trips the code without comments.
+			code = ast.unparse(ast.parse(source))
+			if unsafe.search(code):
+				offenders.append(str(path.relative_to(app.parent)))
+		self.assertEqual(
+			offenders,
+			[],
+			f"tabSingles queried through a helper that defaults to ORDER BY modified: {offenders}. "
+			"Use frappe.db.get_singles_dict.",
+		)
+
+
 class CidrParsing(SeededTestCase):
 	def test_newlines_and_commas_both_separate(self):
 		self.configure(enabled=1, allowed_cidrs="10.0.0.0/8\n192.168.0.0/16, 127.0.0.1/32")

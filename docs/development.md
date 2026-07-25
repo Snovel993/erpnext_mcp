@@ -40,6 +40,15 @@ real bugs:
   into a separate table and leaves asterisks in the row, as Frappe does. That is
   what makes "the token is never returned to a caller" a thing the tests can check
   rather than take on trust.
+- **Frameworkless tables refuse a default ORDER BY.** `tabSingles` and friends
+  have no `modified` column, so `FakeDB` raises the real MariaDB error when a
+  query would order by it implicitly. This is the double catching up with a bug
+  that reached production in v0.2.0: it had answered the query happily, which is
+  why three `seed_defaults` tests passed against code that could not migrate.
+
+The pattern in all three: when the double is *more permissive* than the
+framework, tests pass and sites break. Where a real constraint is cheap to
+model, model it.
 
 Reaching for a framework function the double does not implement raises an
 `AttributeError` naming it, rather than quietly returning `None`. If you hit that,
@@ -216,6 +225,13 @@ contract live.
   script for one site.
 - **No field selected without checking it exists.** Selecting a missing column is a
   hard SQL error. Use `compat.existing_fields()` / `compat.first_field()`.
+- **Never query `tabSingles` with `frappe.db.get_value` / `get_values` /
+  `get_all`.** They default to `order_by="modified"`, and `tabSingles` is not a
+  DocType table — three columns, no framework columns — so the query dies with
+  `Unknown column 'modified' in 'ORDER BY'`. Use `frappe.db.get_singles_dict`,
+  which issues no ORDER BY at all. This shipped as v0.2.0 and broke `bench
+  migrate` on a live site; the double now refuses the query, and a
+  grep-as-a-test fails if it comes back.
 - **Nothing that logs, echoes or returns the auth token.** Not in a tool result,
   not in `selftest`, not in an error message.
 
@@ -298,8 +314,10 @@ sees "this install does not track that" instead of a traceback.
 
 ## Releasing
 
-1. Bump `__version__` in `erpnext_mcp/__init__.py`. It is what `initialize` reports
-   as `serverInfo.version`, and a test asserts they agree.
+1. Bump `__version__` in `erpnext_mcp/__init__.py`. It is what `initialize`
+   reports as `serverInfo.version`. v0.2.0 tagged without doing this and shipped
+   a handshake claiming 0.1.0, so there is now a test asserting it matches the
+   newest heading in `CHANGELOG.md`.
 2. Update `CHANGELOG.md`.
 3. Run both suites.
 4. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push --tags`.

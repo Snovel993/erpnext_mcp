@@ -35,6 +35,24 @@ class Handshake(SeededTestCase):
 		body, _ = self.call("initialize", {})
 		self.assertEqual(body["result"]["serverInfo"]["version"], __version__)
 
+	def test_the_app_version_matches_the_changelog(self):
+		"""v0.2.0 tagged and shipped with `__version__` still reading "0.1.0", so
+		every client's handshake reported the wrong server version. Comparing the
+		two things a release has to keep in step costs one test."""
+		import pathlib
+		import re
+
+		from erpnext_mcp import __version__
+
+		changelog = pathlib.Path(__file__).resolve().parents[1] / "CHANGELOG.md"
+		latest = re.search(r"^## (\d+\.\d+\.\d+)", changelog.read_text(), re.M)
+		self.assertIsNotNone(latest, "no version heading in CHANGELOG.md")
+		self.assertEqual(
+			__version__,
+			latest.group(1),
+			"erpnext_mcp.__version__ and the newest CHANGELOG heading disagree",
+		)
+
 
 class Methods(SeededTestCase):
 	def test_unknown_method_is_32601(self):

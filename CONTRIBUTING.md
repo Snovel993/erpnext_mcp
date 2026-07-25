@@ -107,6 +107,9 @@ and `test_every_switch_has_a_tool` fails when a switch outlives its tool.
 - A field selected without checking it exists. Use `compat.existing_fields()` /
   `compat.first_field()` — selecting a missing column is a hard SQL error.
 - Anything that logs, echoes or returns the auth token.
+- A `frappe.db.get_value` / `get_values` / `get_all` against `Singles`. Those
+  default to `order_by="modified"` and `tabSingles` has no such column — it is
+  how v0.2.0 broke `bench migrate`. Use `frappe.db.get_singles_dict`.
 - A second copy of the tool catalogue. The JavaScript asks the server; so should
   anything else.
 

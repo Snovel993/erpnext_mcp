@@ -806,6 +806,49 @@ STORE = Store()
 
 
 # ── the fake frappe.db ──────────────────────────────────────────────────────
+#: Sentinel for "the caller did not pass order_by", so the double can tell that
+#: apart from an explicit None. Real Frappe uses the same trick, which is what
+#: makes the default invisible at the call site and therefore easy to get wrong.
+DEFAULT_ORDER_BY = object()
+
+#: Tables that are NOT DocType tables and so have none of the framework columns.
+#: `tabSingles` is three columns: doctype, field, value. Ordering by `modified`
+#: — which `frappe.db.get_value` and `get_values` do unless told otherwise —
+#: is `Unknown column 'modified' in 'ORDER BY'`.
+#:
+#: v0.2.0 shipped an `after_migrate` hook that did exactly that and broke
+#: `bench migrate` on a live site. The double answered the query happily, which
+#: is why the standalone suite did not catch it. It refuses now.
+FRAMEWORKLESS_TABLES = {"Singles", "__Auth", "__global_search", "tabSeries"}
+
+#: Columns every real DocType table has, whether or not this fixture's schema
+#: bothers to list them.
+FRAMEWORK_COLUMNS = frozenset({"name", "owner", "creation", "modified", "modified_by", "docstatus", "idx"})
+
+
+class OperationalError(Exception):
+	"""What pymysql raises for a bad column. Mirrored so tests can assert on it."""
+
+
+def _reject_default_ordering(doctype: str, order_by) -> None:
+	"""Fail the way MariaDB does when a query would ORDER BY a missing column.
+
+	Only the default is rejected. A caller that passed `order_by=None`, or named
+	a column the table has, knows what it is doing — the bug this reproduces is
+	specifically the one you cannot see at the call site.
+	"""
+	if order_by is not DEFAULT_ORDER_BY:
+		return
+	if doctype not in FRAMEWORKLESS_TABLES:
+		return
+	raise OperationalError(
+		f"(1054, \"Unknown column 'modified' in 'ORDER BY'\") — `tab{doctype}` is "
+		"not a DocType table and has no framework columns. Pass order_by=None, or "
+		"use the framework's own accessor (frappe.db.get_singles_dict for "
+		"tabSingles)."
+	)
+
+
 class FakeDB:
 	def get_all(
 		self,
@@ -839,7 +882,18 @@ class FakeDB:
 			return [FrappeDict({f: row.get(f) for f in fields}) for row in rows]
 		return [FrappeDict(copy.deepcopy(row)) for row in rows]
 
-	def get_value(self, doctype, filters=None, fieldname="name", as_dict=False, **kwargs):
+	def get_value(
+		self,
+		doctype,
+		filters=None,
+		fieldname="name",
+		as_dict=False,
+		order_by=DEFAULT_ORDER_BY,
+		**kwargs,
+	):
+		# Real `get_value` is `get_values(..., limit=1)`, so it inherits the same
+		# default ordering and the same failure on a frameworkless table.
+		_reject_default_ordering(doctype, order_by)
 		rows = self.get_all(doctype, filters=filters)
 		if not rows:
 			return None
@@ -852,7 +906,16 @@ class FakeDB:
 			return FrappeDict({fieldname: row.get(fieldname)})
 		return row.get(fieldname)
 
-	def get_values(self, doctype, filters=None, fieldname="name", as_dict=False, **kwargs):
+	def get_values(
+		self,
+		doctype,
+		filters=None,
+		fieldname="name",
+		as_dict=False,
+		order_by=DEFAULT_ORDER_BY,
+		**kwargs,
+	):
+		_reject_default_ordering(doctype, order_by)
 		if doctype == "Singles":
 			target = (filters or {}).get("doctype")
 			return [
@@ -862,6 +925,17 @@ class FakeDB:
 		rows = self.get_all(doctype, filters=filters)
 		fields = fieldname if isinstance(fieldname, (list, tuple)) else [fieldname]
 		return [FrappeDict({f: row.get(f) for f in fields}) for row in rows]
+
+	def get_singles_dict(self, doctype, debug=False, *, for_update=False, cast=False):
+		"""The framework's own reader for `tabSingles` — no ORDER BY to get wrong.
+
+		Returns `{fieldname: value}` for the fields that have a stored row, which
+		is exactly the "which fields are already set" question `seed_defaults`
+		asks. `doctype` and `name` are excluded because tabSingles rows are
+		(doctype, field, value) — the doctype is the filter, not a field.
+		"""
+		stored = STORE.singles.get(doctype) or {}
+		return FrappeDict({k: copy.deepcopy(v) for k, v in stored.items() if k not in ("doctype", "name")})
 
 	def get_single_value(self, doctype, fieldname):
 		return (STORE.singles.get(doctype) or {}).get(fieldname)
