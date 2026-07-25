@@ -294,9 +294,7 @@ class CancelJournalEntry(SeededTestCase):
 		self.assertIn("reason is required", message)
 
 	def test_a_placeholder_reason_is_refused(self):
-		message = self.tool_error(
-			"cancel_journal_entry", {"name": "ACC-JV-2026-00001", "reason": "x"}
-		)
+		message = self.tool_error("cancel_journal_entry", {"name": "ACC-JV-2026-00001", "reason": "x"})
 		self.assertIn("real explanation", message)
 
 	def test_a_draft_is_refused_with_advice(self):
@@ -493,6 +491,7 @@ class ReconcileBankTransaction(SeededTestCase):
 		def patched(*args, **kwargs):
 			doc = original(*args, **kwargs)
 			if args and args[0] == "Bank Transaction":
+
 				def add_payment_entries(vouchers):
 					called["vouchers"] = vouchers
 					doc.status = "Reconciled"

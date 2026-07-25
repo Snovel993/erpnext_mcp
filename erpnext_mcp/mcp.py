@@ -67,9 +67,7 @@ def handle():
 		caller_ip = security.authorize()
 	except AuthError as exc:
 		_audit_rejection(exc)
-		return _respond(
-			protocol.rpc_error(None, protocol.INVALID_REQUEST, str(exc)), exc.http_status
-		)
+		return _respond(protocol.rpc_error(None, protocol.INVALID_REQUEST, str(exc)), exc.http_status)
 
 	frappe.set_user(settings.effective_user())
 
@@ -100,8 +98,13 @@ def selftest():
 	frappe.only_for("System Manager")
 	from . import registry
 
-	enabled_tools = [name for name in registry.TOOLS if settings.tool_enabled(name)]
-	mutating_on = [name for name in registry.MUTATING_TOOLS if settings.tool_enabled(name)]
+	enabled_tools = [
+		name for name in registry.TOOLS if settings.tool_enabled(name) and registry.is_available(name)
+	]
+	mutating_on = [name for name in mutating_tool_names() if settings.tool_enabled(name)]
+	unavailable = {
+		name: registry.TOOLS[name]["requires"] for name in registry.TOOLS if not registry.is_available(name)
+	}
 	return {
 		"enabled": settings.is_enabled(),
 		"token_configured": bool(settings.auth_token()),
@@ -113,8 +116,23 @@ def selftest():
 		"tools_total": len(registry.TOOLS),
 		"tools_enabled": enabled_tools,
 		"mutating_tools_enabled": mutating_on,
+		"tools_unavailable": unavailable,
 		"ready": bool(settings.is_enabled() and settings.auth_token() and enabled_tools),
 	}
+
+
+@frappe.whitelist()
+def mutating_tool_names() -> list:
+	"""Every tool that can change data, straight from the registry.
+
+	Whitelisted because the settings form needs it: hardcoding the list in
+	JavaScript is how a form ends up quietly telling an operator "read-only" while
+	a write tool is live. The form asks the server, and the server derives the
+	answer from the same structure the dispatcher gates on.
+	"""
+	from . import registry as tool_registry
+
+	return list(tool_registry.MUTATING_TOOLS)
 
 
 def _audit_rejection(exc: AuthError) -> None:

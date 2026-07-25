@@ -26,7 +26,7 @@ class MasterSwitch(SeededTestCase):
 		you least want the endpoint answering.
 		"""
 		self.set_token("")
-		body, status = self.call("tools/list")
+		_body, status = self.call("tools/list")
 		self.assertEqual(status, 404)
 
 	def test_disabled_endpoint_writes_no_audit_rows(self):
@@ -43,11 +43,11 @@ class BearerToken(SeededTestCase):
 		self.assertEqual(body["result"], {})
 
 	def test_wrong_token_is_401(self):
-		body, status = self.call("ping", token="w" * 48)
+		_body, status = self.call("ping", token="w" * 48)
 		self.assertEqual(status, 401)
 
 	def test_missing_header_is_401(self):
-		body, status = self.call("ping", token=False)
+		_body, status = self.call("ping", token=False)
 		self.assertEqual(status, 401)
 
 	def test_rejection_does_not_say_which_gate_failed(self):
@@ -58,10 +58,28 @@ class BearerToken(SeededTestCase):
 		self.assertEqual(bad_token["error"]["message"], bad_ip["error"]["message"])
 		self.assertEqual(bad_token["error"]["message"], "unauthorized")
 
-	def test_x_mcp_token_header_also_works(self):
-		"""The documented fallback for a Frappe version that eats Bearer."""
-		body, status = self.call("ping", token=False, headers={"X-MCP-Token": self.TOKEN})
+	def test_authorization_bearer_is_accepted_too(self):
+		"""Not the documented header — Frappe's OAuth layer intercepts it on some
+		versions — but a client that tries it should work where it survives."""
+		_body, status = self.call("ping", token=False, headers={"Authorization": f"Bearer {self.TOKEN}"})
 		self.assertEqual(status, 200)
+
+	def test_x_mcp_token_wins_when_both_are_sent(self):
+		"""A stale Authorization header left over from another integration must
+		not override the header this app told the operator to use."""
+		_body, status = self.call(
+			"ping",
+			token=False,
+			headers={
+				"X-MCP-Token": self.TOKEN,
+				"Authorization": "Bearer a-different-and-wrong-token",
+			},
+		)
+		self.assertEqual(status, 200)
+
+	def test_a_wrong_bearer_is_still_rejected(self):
+		_body, status = self.call("ping", token=False, headers={"Authorization": "Bearer nope"})
+		self.assertEqual(status, 401)
 
 	def test_token_never_appears_in_a_response(self):
 		body, _ = self.call("initialize", {"protocolVersion": "2025-06-18"})
@@ -215,7 +233,7 @@ class TransportAudit(SeededTestCase):
 	def test_rejected_call_is_logged_with_the_real_reason(self):
 		self.call("ping", token="w" * 48)
 		row = self.assertAudited("<transport>", status="Unauthorized")
-		self.assertIn("bearer token", row["result_summary"])
+		self.assertIn("auth token", row["result_summary"])
 
 	def test_rejection_row_is_committed_immediately(self):
 		"""It has to outlive the request even if nothing else commits."""
@@ -230,9 +248,7 @@ class UserContext(SeededTestCase):
 		self.assertEqual(frappe.session.user, "Administrator")
 
 	def test_runs_as_the_configured_mcp_system_user(self):
-		self.configure(
-			enabled=1, require_user_context=1, mcp_system_user="mcp@example.test"
-		)
+		self.configure(enabled=1, require_user_context=1, mcp_system_user="mcp@example.test")
 		self.call("ping")
 		self.assertEqual(frappe.session.user, "mcp@example.test")
 
@@ -245,8 +261,6 @@ class UserContext(SeededTestCase):
 		self.assertEqual(frappe.session.user, "Administrator")
 
 	def test_require_user_context_off_uses_administrator(self):
-		self.configure(
-			enabled=1, require_user_context=0, mcp_system_user="mcp@example.test"
-		)
+		self.configure(enabled=1, require_user_context=0, mcp_system_user="mcp@example.test")
 		self.call("ping")
 		self.assertEqual(frappe.session.user, "Administrator")

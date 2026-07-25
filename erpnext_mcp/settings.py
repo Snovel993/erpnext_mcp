@@ -140,9 +140,7 @@ def seed_defaults() -> None:
 	in the DocType JSON.
 	"""
 	doc = frappe.get_doc(SETTINGS_DOCTYPE)
-	stored = frappe.db.get_values(
-		"Singles", {"doctype": SETTINGS_DOCTYPE}, ["field", "value"], as_dict=True
-	)
+	stored = frappe.db.get_values("Singles", {"doctype": SETTINGS_DOCTYPE}, ["field", "value"], as_dict=True)
 	present = {row["field"] for row in (stored or [])}
 	changed = False
 	for field in frappe.get_meta(SETTINGS_DOCTYPE).fields:

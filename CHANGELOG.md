@@ -1,42 +1,132 @@
 # Changelog
 
+All notable changes to this project are documented here. Versions follow
+[semantic versioning](https://semver.org).
+
+## 0.2.0 — 2026-07-25
+
+**35 tools** (was 15): workflow, reports, attachments, comments and tasks, HR,
+sales and purchasing, and site-customisation metadata.
+
+### Added — tools
+
+**Workflow** (4 read, 1 write)
+`list_workflows`, `get_workflow_state`, `list_pending_approvals`,
+`list_available_actions`, and `advance_workflow` (**MUTATING**, default off).
+Transition availability and the action itself go through Frappe's own
+`get_transitions` / `apply_workflow`, so conditions, the self-approval rule and
+the resulting docstatus change behave exactly as the Desk button does.
+
+**Reports** (2 read)
+`list_reports`, `run_report`. Query and Script Reports run through
+`frappe.desk.query_report.run` (with `ignore_prepared_report`, so a prepared
+report returns rows rather than a job id); Report Builder reports are
+materialised from their saved column and filter config via
+`frappe.desk.reportview.get`, falling back to `frappe.get_list`. Old-style
+`"Label:Fieldtype/Options:Width"` columns are parsed into objects.
+
+**Attachments** (2 read)
+`list_attachments`, `get_attachment_content`. Both check `read` permission on
+the parent document; an unattached private file is treated as its owner's.
+Content is base64, capped at 2 MB by default and 8 MB absolutely.
+
+**Comments and tasks** (2 read, 1 write)
+`list_comments`, `list_assigned_todos`, and `create_todo` (**MUTATING**, default
+off). ToDo's `allocated_to`-vs-`owner` split and its missing `subject` field are
+both normalised, and the response says which happened.
+
+**HR** (3 read, only where `hrms` is installed)
+`list_employees`, `get_attendance_summary`, `get_leave_balance`. Attendance is
+aggregated per employee rather than returned day by day. Leave balances come
+from HR's own `get_leave_balance_on`, so carry-forward and expiry rules apply.
+
+**Sales and purchasing** (3 read)
+`list_sales_orders`, `get_outstanding_invoices`, `list_purchase_orders`.
+Receivables are aged into `current` / `0-30` / `31-60` / `61-90` / `90+` /
+`unknown`; not-yet-due invoices get their own bucket rather than inflating
+`0-30`.
+
+**Site customisation** (2 read)
+`list_custom_fields`, `list_client_scripts`. Script bodies are truncated to 500
+characters with the real length reported.
+
+### Added — behaviour
+
+- **Availability predicates.** A tool can declare a site prerequisite. One that
+  is unmet is not advertised in `tools/list` at all and cannot be called — a
+  tool that is listed and always fails is a trap for a model. Applied to the HR
+  tools (`hrms`), the sales/purchasing tools (`erpnext`), `get_bank_statement`
+  (the Bank Statement doctype) and `list_client_scripts` (Client Script, or
+  Custom Script on pre-v13). Refusals distinguish "your operator turned this
+  off" from "this site does not have that", because those need different
+  actions.
+- `selftest` reports `tools_unavailable`, and the settings form shows it.
+- New whitelisted `erpnext_mcp.mcp.mutating_tool_names`, so the settings form's
+  "write tools are live" banner is derived from the registry instead of a
+  hardcoded copy in JavaScript.
+- Settings form grouped into sections: Connection, Network, Attribution,
+  Accounting Read/Write, Workflow, Reports, Attachments, Comments & Tasks, HR,
+  Sales & Purchasing, Meta.
+
+### Changed
+
+- **`X-MCP-Token` is now the documented header.** Frappe's auth layer routes
+  `Authorization: Bearer` into its OAuth2 validator before a whitelisted method
+  runs, and an MCP token does not survive that on every version — confirmed on a
+  live v15 site. `X-MCP-Token` is a header Frappe has no opinion about.
+  `Authorization: Bearer` is still accepted, second, and wins nothing when both
+  are sent.
+- `list_client_scripts`' availability predicate now covers `Custom Script` too,
+  matching the fallback the tool already implemented.
+
+### Fixed
+
+- `max_bytes=0` on `get_attachment_content` was silently replaced by the default
+  instead of being refused (`x or DEFAULT` swallows an explicit zero). Same
+  pattern removed from `as_limit`.
+- An explicitly empty `status` now means "every status" on `list_employees` and
+  `list_assigned_todos`, as their descriptions promised. `as_str`'s default
+  fired on `""` as well as on absent; the new `as_filter` distinguishes them.
+
+### Packaging
+
+`CONTRIBUTING.md`, GitHub issue and pull-request templates, and a GitHub Actions
+workflow running the standalone suite on Python 3.10 and 3.11 plus `ruff check`,
+`ruff format --check` and an SPDX-header check. README gains a compatibility
+matrix, the full 35-tool catalogue, a roadmap and badges.
+
+### Tests
+
+433 standalone (was 228), 96 in-bench (was 53).
+
 ## 0.1.0 — 2026-07-24
 
-First release.
+Initial release: 15 tools, the `ERPNext MCP Settings` and `MCP Action Log`
+doctypes.
 
 An MCP server that installs into any Frappe/ERPNext bench as a custom app. One
 whitelisted endpoint, two doctypes, no hooks that change existing behaviour.
 
-**Tools — 15, in `erpnext_mcp/registry.py`.**
+**Tools.** Read-only, all on by default: `get_company_topology`,
+`get_account_balance`, `get_journal_entries`, `get_journal_entry`,
+`list_bank_transactions`, `get_bank_statement`, `list_fiscal_years`,
+`get_chart_of_accounts`, `list_unreconciled_bank_transactions`,
+`search_accounts`. Mutating, all off by default: `create_journal_entry` (draft
+only), `submit_journal_entry`, `cancel_journal_entry`, `create_bank_transaction`
+(draft only), `reconcile_bank_transaction`.
 
-Read-only, all on by default and individually switchable:
-`get_company_topology`, `get_account_balance`, `get_journal_entries`,
-`get_journal_entry`, `list_bank_transactions`, `get_bank_statement`,
-`list_fiscal_years`, `get_chart_of_accounts`,
-`list_unreconciled_bank_transactions`, `search_accounts`.
-
-Mutating, all **off** by default:
-`create_journal_entry` (draft only), `submit_journal_entry`,
-`cancel_journal_entry`, `create_bank_transaction` (draft only),
-`reconcile_bank_transaction`.
-
-**Security.** Master switch (off ⇒ 404), bearer token in a Password field
+**Security.** Master switch (off ⇒ 404), token in a Password field
 (constant-time compare), CIDR allowlist defaulting to loopback plus RFC1918.
 Rejections are opaque to the caller and specific in the audit log. The CIDR gate
 reads the rightmost `X-Forwarded-For` hop, the one a client cannot forge.
 
-**Audit.** New `MCP Action Log` doctype records every call — reads, writes,
-refusals and unknown tools — append-only, with a failure row committed after the
-failed work is rolled back so the attempt is recorded even though it did not
-happen.
+**Audit.** `MCP Action Log` records every call — reads, writes, refusals and
+unknown tools — append-only, with a failure row committed after the failed work
+is rolled back so the attempt is recorded even though it did not happen.
 
-**Compatibility.** Frappe/ERPNext v14–v16, Python 3.10+. Field and doctype presence
-is read from the site's own schema rather than pinned, so Bank Transaction's
-`deposit`/`withdrawal` vs signed `amount`, the presence of `unallocated_amount`,
-Company's cost-centre fieldname and the existence of Bank Statement are all handled
-without branching on a version number.
+**Compatibility.** Frappe/ERPNext v14–v16, Python 3.10+. Field and doctype
+presence is read from the site's own schema rather than pinned.
 
-**Tests.** 228 standalone tests (`python3 -m unittest discover -s tests_standalone -t .`,
-no bench required) plus an in-bench `FrappeTestCase` suite
-(`bench run-tests --app erpnext_mcp`) covering migration, encryption, real ERPNext
-validation and permission enforcement.
+**Tests.** 228 standalone (no bench required) plus an in-bench `FrappeTestCase`
+suite covering migration, encryption, real ERPNext validation and permission
+enforcement.

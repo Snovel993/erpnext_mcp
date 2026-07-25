@@ -142,8 +142,16 @@ def get_account_balance(args: dict) -> ToolResult:
 	meta = frappe.db.get_value(
 		"Account",
 		account,
-		["account_name", "account_number", "root_type", "account_type", "company",
-		 "account_currency", "is_group", "freeze_account"],
+		[
+			"account_name",
+			"account_number",
+			"root_type",
+			"account_type",
+			"company",
+			"account_currency",
+			"is_group",
+			"freeze_account",
+		],
 		as_dict=True,
 	)
 
@@ -187,9 +195,7 @@ def get_account_balance(args: dict) -> ToolResult:
 			"balance covers only entries booked directly against the group — use "
 			"get_chart_of_accounts to walk its children."
 		)
-	return ToolResult(
-		data, f"{account} balance {balance} as of {as_of} ({data['gl_entry_count']} GL rows)"
-	)
+	return ToolResult(data, f"{account} balance {balance} as of {as_of} ({data['gl_entry_count']} GL rows)")
 
 
 # ── 3. get_journal_entries ──────────────────────────────────────────────────
@@ -290,20 +296,53 @@ def get_journal_entry(args: dict) -> ToolResult:
 	header_fields = compat.existing_fields(
 		"Journal Entry",
 		[
-			"name", "posting_date", "company", "voucher_type", "naming_series",
-			"total_debit", "total_credit", "difference", "user_remark", "remark",
-			"cheque_no", "cheque_date", "bill_no", "bill_date", "finance_book",
-			"docstatus", "owner", "creation", "modified", "modified_by",
-			"is_opening", "clearance_date", "mode_of_payment", "multi_currency",
+			"name",
+			"posting_date",
+			"company",
+			"voucher_type",
+			"naming_series",
+			"total_debit",
+			"total_credit",
+			"difference",
+			"user_remark",
+			"remark",
+			"cheque_no",
+			"cheque_date",
+			"bill_no",
+			"bill_date",
+			"finance_book",
+			"docstatus",
+			"owner",
+			"creation",
+			"modified",
+			"modified_by",
+			"is_opening",
+			"clearance_date",
+			"mode_of_payment",
+			"multi_currency",
 		],
 	)
 	line_fields = compat.existing_fields(
 		"Journal Entry Account",
 		[
-			"idx", "account", "account_type", "party_type", "party", "debit", "credit",
-			"debit_in_account_currency", "credit_in_account_currency", "account_currency",
-			"exchange_rate", "against_account", "cost_center", "project",
-			"reference_type", "reference_name", "reference_due_date", "user_remark",
+			"idx",
+			"account",
+			"account_type",
+			"party_type",
+			"party",
+			"debit",
+			"credit",
+			"debit_in_account_currency",
+			"credit_in_account_currency",
+			"account_currency",
+			"exchange_rate",
+			"against_account",
+			"cost_center",
+			"project",
+			"reference_type",
+			"reference_name",
+			"reference_due_date",
+			"user_remark",
 			"is_advance",
 		],
 	)
@@ -313,9 +352,7 @@ def get_journal_entry(args: dict) -> ToolResult:
 	data["accounts"] = [
 		{field: line.get(field) for field in line_fields} for line in (doc.get("accounts") or [])
 	]
-	data["balanced"] = (
-		abs(float(doc.get("total_debit") or 0) - float(doc.get("total_credit") or 0)) < 0.005
-	)
+	data["balanced"] = abs(float(doc.get("total_debit") or 0) - float(doc.get("total_credit") or 0)) < 0.005
 	return ToolResult(
 		data,
 		f"{name}: {len(data['accounts'])} line(s), "
@@ -354,9 +391,22 @@ def list_bank_transactions(args: dict) -> ToolResult:
 	fields = compat.existing_fields(
 		"Bank Transaction",
 		[
-			"name", "date", "bank_account", "company", "description", "status",
-			"reference_number", "currency", "party_type", "party", "bank_party_name",
-			"docstatus", "deposit", "withdrawal", "amount", "allocated_amount",
+			"name",
+			"date",
+			"bank_account",
+			"company",
+			"description",
+			"status",
+			"reference_number",
+			"currency",
+			"party_type",
+			"party",
+			"bank_party_name",
+			"docstatus",
+			"deposit",
+			"withdrawal",
+			"amount",
+			"allocated_amount",
 			"unallocated_amount",
 		],
 	)
@@ -408,8 +458,17 @@ def get_bank_statement(args: dict) -> ToolResult:
 	doc = frappe.get_doc("Bank Statement", name)
 	# The field set has changed across versions, so mirror whatever is there
 	# rather than naming columns — minus the framework's own bookkeeping.
-	skip = {"doctype", "parent", "parentfield", "parenttype", "idx", "_user_tags",
-		"_comments", "_assign", "_liked_by"}
+	skip = {
+		"doctype",
+		"parent",
+		"parentfield",
+		"parenttype",
+		"idx",
+		"_user_tags",
+		"_comments",
+		"_assign",
+		"_liked_by",
+	}
 	data = {
 		key: value
 		for key, value in doc.as_dict(no_nulls=False).items()
@@ -482,9 +541,18 @@ def get_chart_of_accounts(args: dict) -> ToolResult:
 	fields = compat.existing_fields(
 		"Account",
 		[
-			"name", "account_name", "account_number", "parent_account", "is_group",
-			"root_type", "account_type", "account_currency", "disabled", "freeze_account",
-			"lft", "rgt",
+			"name",
+			"account_name",
+			"account_number",
+			"parent_account",
+			"is_group",
+			"root_type",
+			"account_type",
+			"account_currency",
+			"disabled",
+			"freeze_account",
+			"lft",
+			"rgt",
 		],
 	)
 	# `lft` is the nested-set left bound: ordering by it yields parents before
@@ -535,9 +603,22 @@ def list_unreconciled_bank_transactions(args: dict) -> ToolResult:
 	fields = compat.existing_fields(
 		"Bank Transaction",
 		[
-			"name", "date", "bank_account", "company", "description", "status",
-			"reference_number", "currency", "party_type", "party", "docstatus",
-			"deposit", "withdrawal", "amount", "allocated_amount", "unallocated_amount",
+			"name",
+			"date",
+			"bank_account",
+			"company",
+			"description",
+			"status",
+			"reference_number",
+			"currency",
+			"party_type",
+			"party",
+			"docstatus",
+			"deposit",
+			"withdrawal",
+			"amount",
+			"allocated_amount",
+			"unallocated_amount",
 		],
 	)
 	rows = frappe.db.get_all(
@@ -601,8 +682,16 @@ def search_accounts(args: dict) -> ToolResult:
 	fields = compat.existing_fields(
 		"Account",
 		[
-			"name", "account_name", "account_number", "company", "root_type",
-			"account_type", "is_group", "disabled", "parent_account", "account_currency",
+			"name",
+			"account_name",
+			"account_number",
+			"company",
+			"root_type",
+			"account_type",
+			"is_group",
+			"disabled",
+			"parent_account",
+			"account_currency",
 		],
 	)
 	pattern = f"%{query}%"
@@ -660,13 +749,10 @@ def _resolve_bank_account(value: str) -> str:
 	if len(matches) == 1:
 		return matches[0]
 	if len(matches) > 1:
-		raise ToolError(
-			f"{value!r} matches {len(matches)} Bank Accounts: {', '.join(sorted(matches)[:10])}"
-		)
+		raise ToolError(f"{value!r} matches {len(matches)} Bank Accounts: {', '.join(sorted(matches)[:10])}")
 	known = frappe.db.get_all("Bank Account", pluck="name", limit=25)
 	raise ToolError(
-		f"no Bank Account matching {value!r}. "
-		f"Known bank accounts: {', '.join(sorted(known)) or '<none>'}"
+		f"no Bank Account matching {value!r}. Known bank accounts: {', '.join(sorted(known)) or '<none>'}"
 	)
 
 

@@ -21,8 +21,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/tpolehn/erpnext_mcp"
-Source = "https://github.com/tpolehn/erpnext_mcp"
+Homepage = "https://github.com/polehntim-commits/erpnext_mcp"
+Source = "https://github.com/polehntim-commits/erpnext_mcp"
 
 [build-system]
 requires = ["flit_core >=3.4,<4"]

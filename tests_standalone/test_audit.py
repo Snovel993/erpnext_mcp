@@ -216,13 +216,9 @@ class MutationAudit(SeededTestCase):
 			},
 		)
 		self.tool_data("submit_journal_entry", {"name": created["name"]})
-		self.tool_data(
-			"cancel_journal_entry", {"name": created["name"], "reason": "Reversed next month"}
-		)
+		self.tool_data("cancel_journal_entry", {"name": created["name"], "reason": "Reversed next month"})
 		deltas = [row["docstatus_delta"] for row in self.audit_rows() if row["docstatus_delta"]]
-		self.assertEqual(
-			deltas, ["none → 0 (draft)", "0 → 1 (submitted)", "1 → 2 (cancelled)"]
-		)
+		self.assertEqual(deltas, ["none → 0 (draft)", "0 → 1 (submitted)", "1 → 2 (cancelled)"])
 
 	def test_a_read_call_records_no_docstatus_delta(self):
 		self.tool_data("list_fiscal_years")

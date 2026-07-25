@@ -89,20 +89,38 @@ that bypasses the base class does.
 
 ```
 tests_standalone/
-  harness.py            the frappe double + MCPTestCase
-  fixtures.py           an invented two-company ERPNext site + SeededTestCase
-  test_transport.py     the three gates, HTTP shape, SSE, user context
-  test_protocol.py      JSON-RPC, handshake, version negotiation, catalogue
-  test_read_tools.py    all ten read tools
-  test_mutate_tools.py  all five mutating tools + the default-off posture
-  test_audit.py         what gets logged, rollback survival, immutability
-  test_settings.py      shipped defaults, form validation, token generation
+  harness.py              the frappe double + MCPTestCase
+  fixtures.py             an invented two-company ERPNext site; SeededTestCase,
+                          V2TestCase (adds workflow/report/file/HR data) and
+                          HRTestCase (adds the hrms app)
+  test_transport.py       the three gates, HTTP shape, SSE, user context
+  test_protocol.py        JSON-RPC, handshake, version negotiation, catalogue
+  test_read_tools.py      the ten accounting read tools
+  test_mutate_tools.py    the five accounting write tools + default-off posture
+  test_workflow_tools.py  states, transitions, the worklist, advance_workflow
+  test_reports.py         all three report engines and the permission path
+  test_files.py           attachments and the permission checks on them
+  test_collab.py          comments and ToDos
+  test_hr.py              the HR tools, and their absence without hrms
+  test_trade.py           orders and receivables ageing
+  test_meta.py            custom fields and client scripts
+  test_audit.py           what gets logged, rollback survival, immutability
+  test_settings.py        shipped defaults, form validation, token generation,
+                          and that the settings JS keeps no copy of the catalogue
 
 erpnext_mcp/
-  tests/test_integration.py                       in-bench, end to end
+  tests/test_integration.py                       in-bench, v0.1.0 surface
+  tests/test_v2_tools.py                          in-bench, v0.2.0 categories
   erpnext_mcp/doctype/erpnext_mcp_settings/test_erpnext_mcp_settings.py
   erpnext_mcp/doctype/mcp_action_log/test_mcp_action_log.py
 ```
+
+`V2TestCase` and `HRTestCase` exist because the HR tools are gated on the `hrms`
+app: a test that wants them has to say so, and one that wants to prove they are
+*absent* has to not. `fixtures.install_hrms()` adds the app to the fake site's
+installed list and registers a stand-in for `get_leave_balance_on`, because the
+leave tool delegates to it and a test that skipped the delegation would not be
+testing the tool that ships.
 
 The fixture site has **two** companies on purpose. A single-company fixture would
 let `resolve_company`'s inference hide every place a tool needs an explicit
@@ -165,15 +183,22 @@ erpnext_mcp/                     repo root
     mcp.py                       the HTTP transport: handle(), selftest()
     protocol.py                  JSON-RPC 2.0 + MCP handshake
     registry.py                  THE TOOL CATALOGUE + dispatch()
-    security.py                  master switch, bearer token, CIDR allowlist
+    security.py                  master switch, auth token, CIDR allowlist
     settings.py                  reads of ERPNext MCP Settings
     audit.py                     writes to MCP Action Log
     args.py                      argument coercion, company/account resolution
     compat.py                    version tolerance — ask the site, don't assume
     errors.py                    ToolError, AuthError
     result.py                    ToolResult
-    tools/read.py                the ten read tools
-    tools/mutate.py              the five mutating tools
+    tools/read.py                the ten accounting read tools
+    tools/mutate.py              the five accounting write tools
+    tools/workflow.py            workflow states, worklist, advance_workflow
+    tools/reports.py             report discovery and execution
+    tools/files.py               attachments (checks Frappe permissions)
+    tools/collab.py              comments and ToDos
+    tools/hr.py                  employees, attendance, leave (needs hrms)
+    tools/trade.py               sales/purchase orders, receivables ageing
+    tools/meta.py                custom fields, client scripts
     erpnext_mcp/doctype/         ERPNext MCP Settings, MCP Action Log
 ```
 
@@ -206,8 +231,11 @@ contract live.
    Write the `summary` for an operator scanning the audit log in a month, not for
    the model. Set `docstatus_delta` on anything that changes a document's state.
 
-2. **Register it** in `TOOLS` in `registry.py`. The `description` is the entire
-   basis on which a model decides to call it — say what it returns, what it is for,
+2. **Register it** in `TOOLS` in `registry.py`. If it needs something not every
+   site has, give it an `available` predicate (`_app_installed("hrms")`,
+   `_needs_doctype("Bank Statement")`) and a `requires` sentence — the tool will
+   then be absent rather than broken on sites that lack it. The `description` is
+   the entire basis on which a model decides to call it — say what it returns, what it is for,
    and for a mutating tool, what it *cannot* do. Spell out "Read-only." or
    "MUTATING (default OFF)." in the text as well as the annotations, because a
    client that ignores annotations still shows the model the description.
@@ -257,7 +285,8 @@ Frappe's, because that is what a reviewer of this app will be reading:
 
 ## Compatibility policy
 
-Supported: Frappe/ERPNext v14, v15, v16 (`develop`); Python 3.10+.
+Supported: Frappe/ERPNext v14, v15, v16 (`develop`); Python 3.10+. Developed and
+run in production against v15.115.0.
 
 The rule is **ask the site, do not pin the version**. `compat.py` exists for this:
 `has_field`, `first_field`, `existing_fields`, `doctype_exists`. When a new ERPNext

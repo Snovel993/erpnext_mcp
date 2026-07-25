@@ -40,7 +40,7 @@
    "search_index": 1
   },
   {
-   "description": "Success: the tool ran. Error: it failed or was asked for something impossible. Blocked: the tool exists but its switch is off. Unauthorized: the caller never reached a tool.",
+   "description": "Success: the tool ran. Error: it failed or was asked for something impossible. Blocked: the tool exists but its switch is off, or this site lacks what it needs. Unauthorized: the caller never reached a tool.",
    "fieldname": "result_status",
    "fieldtype": "Select",
    "in_list_view": 1,
@@ -96,7 +96,7 @@
  "in_create": 1,
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-07-24 09:00:00.000000",
+ "modified": "2026-07-25 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "MCP Action Log",

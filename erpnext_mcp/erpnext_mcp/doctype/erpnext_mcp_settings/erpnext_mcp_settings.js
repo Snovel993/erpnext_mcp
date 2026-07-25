@@ -8,29 +8,7 @@
 frappe.ui.form.on("ERPNext MCP Settings", {
 	refresh(frm) {
 		frm.add_custom_button(__("Test Configuration"), () => show_selftest(frm));
-
-		if (!frm.doc.enabled) {
-			frm.dashboard.set_headline_alert(
-				__("The MCP endpoint is off. It answers 404 to every caller."),
-				"orange"
-			);
-		} else {
-			const live = mutating_tools(frm);
-			if (live.length) {
-				frm.dashboard.set_headline_alert(
-					__("MCP is live with {0} write tool(s) enabled: {1}", [
-						live.length,
-						live.join(", "),
-					]),
-					"red"
-				);
-			} else {
-				frm.dashboard.set_headline_alert(
-					__("MCP is live, read-only. No write tool is enabled."),
-					"green"
-				);
-			}
-		}
+		set_headline(frm);
 
 		frm.set_df_property(
 			"generate_token",
@@ -64,19 +42,47 @@ frappe.ui.form.on("ERPNext MCP Settings", {
 	},
 });
 
-function mutating_tools(frm) {
-	return Object.keys(frm.doc)
-		.filter((key) => key.startsWith("allow_") && frm.doc[key])
-		.map((key) => key.replace("allow_", ""))
-		.filter((name) =>
-			[
-				"create_journal_entry",
-				"submit_journal_entry",
-				"cancel_journal_entry",
-				"create_bank_transaction",
-				"reconcile_bank_transaction",
-			].includes(name)
+// The list of write tools comes from the server, not from a copy kept here.
+// Hardcoding it is how a form ends up telling an operator "read-only" while a
+// tool added in a later version is quietly live. Cached per page load.
+let MUTATING_TOOLS = null;
+
+function with_mutating_tools(callback) {
+	if (MUTATING_TOOLS) {
+		callback(MUTATING_TOOLS);
+		return;
+	}
+	frappe.call({ method: "erpnext_mcp.mcp.mutating_tool_names" }).then((r) => {
+		MUTATING_TOOLS = r.message || [];
+		callback(MUTATING_TOOLS);
+	});
+}
+
+function set_headline(frm) {
+	if (!frm.doc.enabled) {
+		frm.dashboard.set_headline_alert(
+			__("The MCP endpoint is off. It answers 404 to every caller."),
+			"orange"
 		);
+		return;
+	}
+	with_mutating_tools((names) => {
+		const live = names.filter((name) => frm.doc[`allow_${name}`]);
+		if (live.length) {
+			frm.dashboard.set_headline_alert(
+				__("MCP is live with {0} write tool(s) enabled: {1}", [
+					live.length,
+					live.join(", "),
+				]),
+				"red"
+			);
+		} else {
+			frm.dashboard.set_headline_alert(
+				__("MCP is live, read-only. No write tool is enabled."),
+				"green"
+			);
+		}
+	});
 }
 
 function show_token_once(payload) {
@@ -140,6 +146,17 @@ function show_selftest(frm) {
 					__("Write tools enabled"),
 					(d.mutating_tools_enabled || []).join(", ") ||
 						`<span class="text-success">${__("none")}</span>`
+				)}
+				${row(
+					__("Unavailable on this site"),
+					Object.keys(d.tools_unavailable || {})
+						.map(
+							(name) =>
+								`${frappe.utils.escape_html(name)} <span class="text-muted">(${frappe.utils.escape_html(
+									d.tools_unavailable[name] || "prerequisite missing"
+								)})</span>`
+						)
+						.join("<br>") || `<span class="text-muted">${__("none")}</span>`
 				)}
 			</table>`,
 		});

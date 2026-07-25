@@ -130,8 +130,7 @@ def _validated_lines(raw, company: str) -> list[dict]:
 		)
 	if len(raw) < 2:
 		raise ToolError(
-			"a Journal Entry needs at least two lines — one account cannot balance "
-			"against itself"
+			"a Journal Entry needs at least two lines — one account cannot balance against itself"
 		)
 
 	lines = []
@@ -161,8 +160,7 @@ def _validated_lines(raw, company: str) -> list[dict]:
 			)
 		if frappe.db.get_value("Account", account, "is_group"):
 			raise ToolError(
-				f"accounts[{index}] ({account}) is a group account; ERPNext posts "
-				"only to leaf accounts"
+				f"accounts[{index}] ({account}) is a group account; ERPNext posts only to leaf accounts"
 			)
 		line = {key: value for key, value in entry.items() if key in _LINE_FIELDS}
 		line["account"] = account
@@ -215,8 +213,7 @@ def submit_journal_entry(args: dict) -> ToolResult:
 	}
 	return ToolResult(
 		data,
-		f"submitted Journal Entry {doc.name} ({doc.company}, {doc.posting_date}, "
-		f"{doc.total_debit})",
+		f"submitted Journal Entry {doc.name} ({doc.company}, {doc.posting_date}, {doc.total_debit})",
 		docstatus_delta="0 → 1 (submitted)",
 	)
 
@@ -262,10 +259,7 @@ def cancel_journal_entry(args: dict) -> ToolResult:
 		"company": doc.company,
 		"posting_date": str(doc.posting_date),
 		"reason": reason,
-		"note": (
-			"ERPNext keeps cancelled entries and their reversing GL rows; nothing "
-			"was deleted."
-		),
+		"note": ("ERPNext keeps cancelled entries and their reversing GL rows; nothing was deleted."),
 	}
 	return ToolResult(
 		data,
@@ -320,9 +314,7 @@ def create_bank_transaction(args: dict) -> ToolResult:
 		doc.company = company or resolve_company(as_str(args, "company"), required=True)
 	if compat.has_field("Bank Transaction", "currency") and not doc.get("currency"):
 		account = frappe.db.get_value("Bank Account", bank_account, "account")
-		currency = (
-			frappe.db.get_value("Account", account, "account_currency") if account else None
-		)
+		currency = frappe.db.get_value("Account", account, "account_currency") if account else None
 		if currency:
 			doc.currency = currency
 
@@ -372,9 +364,7 @@ def reconcile_bank_transaction(args: dict) -> ToolResult:
 	vouchers = _validated_vouchers(args.get("payment_entries"))
 	money = compat.bank_transaction_amount_fields()
 	gross = round(compat.gross_amount(doc.as_dict(), money), 2)
-	already = (
-		round(float(doc.get(money["allocated"]) or 0), 2) if money["allocated"] else 0.0
-	)
+	already = round(float(doc.get(money["allocated"]) or 0), 2) if money["allocated"] else 0.0
 	requested = round(sum(v["allocated_amount"] for v in vouchers), 2)
 	if requested - (gross - already) > 0.005:
 		raise ToolError(
@@ -396,9 +386,7 @@ def reconcile_bank_transaction(args: dict) -> ToolResult:
 			doc.append("payment_entries", voucher)
 		doc.save()
 
-	unallocated = (
-		round(float(doc.get(money["unallocated"]) or 0), 2) if money["unallocated"] else None
-	)
+	unallocated = round(float(doc.get(money["unallocated"]) or 0), 2) if money["unallocated"] else None
 	data = {
 		"name": doc.name,
 		"bank_account": doc.get("bank_account"),
@@ -418,9 +406,7 @@ def reconcile_bank_transaction(args: dict) -> ToolResult:
 			for row in (doc.get("payment_entries") or [])
 		],
 		"applied_via": (
-			"ERPNext add_payment_entries"
-			if callable(delegate)
-			else "append + save (legacy ERPNext)"
+			"ERPNext add_payment_entries" if callable(delegate) else "append + save (legacy ERPNext)"
 		),
 	}
 	after = int(doc.docstatus or 0)
@@ -443,9 +429,7 @@ def _validated_vouchers(raw) -> list[dict]:
 	out = []
 	for index, entry in enumerate(raw, start=1):
 		if not isinstance(entry, dict):
-			raise ToolError(
-				f"payment_entries[{index}] must be an object, got {type(entry).__name__}"
-			)
+			raise ToolError(f"payment_entries[{index}] must be an object, got {type(entry).__name__}")
 		doctype = str(entry.get("payment_document") or "").strip()
 		docname = str(entry.get("payment_entry") or "").strip()
 		if not doctype or not docname:
@@ -454,14 +438,10 @@ def _validated_vouchers(raw) -> list[dict]:
 				"doctype, e.g. 'Payment Entry') and payment_entry (its name)"
 			)
 		if not compat.doctype_exists(doctype):
-			raise ToolError(
-				f"payment_entries[{index}]: no such DocType {doctype!r} on this site"
-			)
+			raise ToolError(f"payment_entries[{index}]: no such DocType {doctype!r} on this site")
 		if not frappe.db.exists(doctype, docname):
 			raise ToolError(f"payment_entries[{index}]: no {doctype} named {docname!r}")
-		allocated = as_float(
-			entry.get("allocated_amount"), f"payment_entries[{index}].allocated_amount"
-		)
+		allocated = as_float(entry.get("allocated_amount"), f"payment_entries[{index}].allocated_amount")
 		if allocated <= 0:
 			raise ToolError(f"payment_entries[{index}].allocated_amount must be positive")
 		out.append(

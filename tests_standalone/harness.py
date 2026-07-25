@@ -83,52 +83,340 @@ class PermissionError_(ValidationError):
 #: this, which is the same thing it does against a real site's meta.
 ERPNEXT_SCHEMA = {
 	"Company": [
-		"name", "abbr", "default_currency", "country", "chart_of_accounts",
-		"parent_company", "is_group", "tax_id", "cost_center",
+		"name",
+		"abbr",
+		"default_currency",
+		"country",
+		"chart_of_accounts",
+		"parent_company",
+		"is_group",
+		"tax_id",
+		"cost_center",
 	],
 	"Account": [
-		"name", "account_name", "account_number", "parent_account", "is_group",
-		"root_type", "account_type", "account_currency", "disabled", "freeze_account",
-		"lft", "rgt", "company",
+		"name",
+		"account_name",
+		"account_number",
+		"parent_account",
+		"is_group",
+		"root_type",
+		"account_type",
+		"account_currency",
+		"disabled",
+		"freeze_account",
+		"lft",
+		"rgt",
+		"company",
 	],
 	"GL Entry": [
-		"name", "account", "posting_date", "debit", "credit", "company",
-		"is_cancelled", "voucher_type", "voucher_no", "party", "party_type",
+		"name",
+		"account",
+		"posting_date",
+		"debit",
+		"credit",
+		"company",
+		"is_cancelled",
+		"voucher_type",
+		"voucher_no",
+		"party",
+		"party_type",
 	],
 	"Journal Entry": [
-		"name", "posting_date", "company", "voucher_type", "naming_series",
-		"total_debit", "total_credit", "difference", "user_remark", "remark",
-		"cheque_no", "cheque_date", "bill_no", "bill_date", "finance_book",
-		"docstatus", "owner", "creation", "modified", "modified_by", "is_opening",
-		"clearance_date", "mode_of_payment", "multi_currency", "accounts",
+		"name",
+		"posting_date",
+		"company",
+		"voucher_type",
+		"naming_series",
+		"total_debit",
+		"total_credit",
+		"difference",
+		"user_remark",
+		"remark",
+		"cheque_no",
+		"cheque_date",
+		"bill_no",
+		"bill_date",
+		"finance_book",
+		"docstatus",
+		"owner",
+		"creation",
+		"modified",
+		"modified_by",
+		"is_opening",
+		"clearance_date",
+		"mode_of_payment",
+		"multi_currency",
+		"accounts",
 	],
 	"Journal Entry Account": [
-		"idx", "account", "account_type", "party_type", "party", "debit", "credit",
-		"debit_in_account_currency", "credit_in_account_currency", "account_currency",
-		"exchange_rate", "against_account", "cost_center", "project",
-		"reference_type", "reference_name", "reference_due_date", "user_remark",
-		"is_advance", "parent", "parenttype", "bank_account",
+		"idx",
+		"account",
+		"account_type",
+		"party_type",
+		"party",
+		"debit",
+		"credit",
+		"debit_in_account_currency",
+		"credit_in_account_currency",
+		"account_currency",
+		"exchange_rate",
+		"against_account",
+		"cost_center",
+		"project",
+		"reference_type",
+		"reference_name",
+		"reference_due_date",
+		"user_remark",
+		"is_advance",
+		"parent",
+		"parenttype",
+		"bank_account",
 	],
 	"Fiscal Year": ["name", "year_start_date", "year_end_date", "disabled", "companies"],
 	"Fiscal Year Company": ["parent", "parenttype", "company"],
 	"Bank Account": ["name", "account_name", "bank", "company", "account", "iban"],
 	"Bank Transaction": [
-		"name", "date", "bank_account", "company", "description", "status",
-		"reference_number", "currency", "party_type", "party", "bank_party_name",
-		"docstatus", "deposit", "withdrawal", "allocated_amount",
-		"unallocated_amount", "payment_entries",
+		"name",
+		"date",
+		"bank_account",
+		"company",
+		"description",
+		"status",
+		"reference_number",
+		"currency",
+		"party_type",
+		"party",
+		"bank_party_name",
+		"docstatus",
+		"deposit",
+		"withdrawal",
+		"allocated_amount",
+		"unallocated_amount",
+		"payment_entries",
 	],
 	"Bank Transaction Payments": [
-		"payment_document", "payment_entry", "allocated_amount", "parent", "parenttype",
+		"payment_document",
+		"payment_entry",
+		"allocated_amount",
+		"parent",
+		"parenttype",
 	],
 	"Bank Statement": [
-		"name", "bank_account", "from_date", "to_date", "opening_balance",
-		"closing_balance", "company",
+		"name",
+		"bank_account",
+		"from_date",
+		"to_date",
+		"opening_balance",
+		"closing_balance",
+		"company",
 	],
 	"Payment Entry": ["name", "posting_date", "paid_amount", "docstatus", "company"],
 	"User": ["name", "enabled", "full_name"],
 	"DocType": ["name", "module", "issingle"],
 	"Singles": ["doctype", "field", "value"],
+	# ── v0.2.0 ──────────────────────────────────────────────────────────────
+	"Workflow": [
+		"name",
+		"workflow_name",
+		"document_type",
+		"is_active",
+		"workflow_state_field",
+		"send_email_alert",
+		"override_status",
+		"states",
+		"transitions",
+	],
+	"Workflow Document State": [
+		"state",
+		"doc_status",
+		"allow_edit",
+		"update_field",
+		"update_value",
+		"is_optional_state",
+		"message",
+		"parent",
+		"parenttype",
+	],
+	"Workflow Transition": [
+		"state",
+		"action",
+		"next_state",
+		"allowed",
+		"allow_self_approval",
+		"condition",
+		"parent",
+		"parenttype",
+	],
+	"Report": [
+		"name",
+		"report_name",
+		"ref_doctype",
+		"report_type",
+		"module",
+		"is_standard",
+		"disabled",
+		"prepared_report",
+		"add_total_row",
+		"json",
+		"query",
+	],
+	"File": [
+		"name",
+		"file_name",
+		"file_url",
+		"file_size",
+		"is_private",
+		"is_folder",
+		"attached_to_doctype",
+		"attached_to_name",
+		"attached_to_field",
+		"content_hash",
+		"folder",
+		"owner",
+		"creation",
+	],
+	"Comment": [
+		"name",
+		"comment_type",
+		"content",
+		"comment_by",
+		"comment_email",
+		"reference_doctype",
+		"reference_name",
+		"owner",
+		"creation",
+		"modified",
+	],
+	"ToDo": [
+		"name",
+		"status",
+		"priority",
+		"date",
+		"description",
+		"reference_type",
+		"reference_name",
+		"assigned_by",
+		"allocated_to",
+		"owner",
+		"creation",
+		"modified",
+	],
+	"Employee": [
+		"name",
+		"employee_name",
+		"employee_number",
+		"department",
+		"designation",
+		"status",
+		"date_of_joining",
+		"relieving_date",
+		"company",
+		"user_id",
+		"reports_to",
+		"branch",
+		"employment_type",
+	],
+	"Attendance": [
+		"name",
+		"employee",
+		"employee_name",
+		"attendance_date",
+		"status",
+		"department",
+		"company",
+		"docstatus",
+	],
+	"Leave Allocation": [
+		"name",
+		"employee",
+		"leave_type",
+		"from_date",
+		"to_date",
+		"new_leaves_allocated",
+		"total_leaves_allocated",
+		"docstatus",
+	],
+	"Leave Type": ["name", "max_leaves_allowed", "is_lwp"],
+	"Sales Order": [
+		"name",
+		"customer",
+		"customer_name",
+		"transaction_date",
+		"delivery_date",
+		"grand_total",
+		"rounded_total",
+		"currency",
+		"status",
+		"per_delivered",
+		"per_billed",
+		"docstatus",
+		"company",
+		"owner",
+	],
+	"Purchase Order": [
+		"name",
+		"supplier",
+		"supplier_name",
+		"transaction_date",
+		"schedule_date",
+		"grand_total",
+		"rounded_total",
+		"currency",
+		"status",
+		"per_received",
+		"per_billed",
+		"docstatus",
+		"company",
+		"owner",
+		"workflow_state",
+	],
+	"Sales Invoice": [
+		"name",
+		"customer",
+		"customer_name",
+		"posting_date",
+		"due_date",
+		"grand_total",
+		"outstanding_amount",
+		"currency",
+		"status",
+		"company",
+		"is_return",
+		"docstatus",
+	],
+	"Custom Field": [
+		"name",
+		"dt",
+		"fieldname",
+		"label",
+		"fieldtype",
+		"options",
+		"insert_after",
+		"idx",
+		"reqd",
+		"hidden",
+		"read_only",
+		"in_list_view",
+		"in_standard_filter",
+		"depends_on",
+		"default",
+		"description",
+		"module",
+		"owner",
+		"modified",
+	],
+	"Client Script": [
+		"name",
+		"dt",
+		"view",
+		"enabled",
+		"script",
+		"script_type",
+		"module",
+		"owner",
+		"modified",
+	],
+	"Purchase Receipt": ["name", "supplier", "posting_date", "docstatus"],
 }
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
@@ -167,9 +455,7 @@ class Meta:
 def _build_meta() -> dict:
 	metas = {}
 	for doctype, fields in ERPNEXT_SCHEMA.items():
-		metas[doctype] = Meta(
-			doctype, [Field(fieldname=name, fieldtype="Data") for name in fields]
-		)
+		metas[doctype] = Meta(doctype, [Field(fieldname=name, fieldtype="Data") for name in fields])
 	for doctype, folder in APP_DOCTYPES.items():
 		payload = _load_app_doctype(folder)
 		metas[doctype] = Meta(
@@ -236,9 +522,7 @@ def _match_one(row: dict, field: str, condition) -> bool:
 def _eq(actual, expected) -> bool:
 	if isinstance(expected, (int, float)) and not isinstance(expected, bool):
 		return float(actual or 0) == float(expected)
-	return str(actual if actual is not None else "") == str(
-		expected if expected is not None else ""
-	)
+	return str(actual if actual is not None else "") == str(expected if expected is not None else "")
 
 
 def _like(actual, pattern: str) -> bool:
@@ -271,6 +555,8 @@ CHILD_TABLES = {
 	("Journal Entry", "accounts"): "Journal Entry Account",
 	("Bank Transaction", "payment_entries"): "Bank Transaction Payments",
 	("Fiscal Year", "companies"): "Fiscal Year Company",
+	("Workflow", "states"): "Workflow Document State",
+	("Workflow", "transitions"): "Workflow Transition",
 }
 
 
@@ -395,6 +681,23 @@ class Document(FrappeDict):
 		return value
 
 
+class FileDocument(Document):
+	"""Only File has `get_content`, so only File gets it here.
+
+	Putting it on the base Document would make every doctype quack like a file
+	and hide a real bug where the app reads content off the wrong thing.
+	"""
+
+	def get_content(self):
+		if self.name not in STORE.file_contents:
+			raise OSError(f"no stored content for File {self.name}")
+		return STORE.file_contents[self.name]
+
+
+#: Doctypes whose stub behaviour differs from a plain Document.
+STUB_CONTROLLERS = {"File": FileDocument}
+
+
 class Store:
 	"""The in-memory database."""
 
@@ -402,6 +705,10 @@ class Store:
 		self.reset()
 
 	def reset(self):
+		self.file_contents: dict[str, bytes] = {}
+		self.denied_permissions: set = set()
+		self.installed_apps: list[str] = ["frappe", "erpnext"]
+		self.report_runners: dict = {}
 		self.tables: dict[str, dict[str, dict]] = {}
 		self.singles: dict[str, dict] = {}
 		self.passwords: dict[tuple, str] = {}
@@ -598,6 +905,8 @@ CHILD_TABLE_SOURCES = {
 	"Journal Entry Account": ("Journal Entry", "accounts"),
 	"Bank Transaction Payments": ("Bank Transaction", "payment_entries"),
 	"Fiscal Year Company": ("Fiscal Year", "companies"),
+	"Workflow Document State": ("Workflow", "states"),
+	"Workflow Transition": ("Workflow", "transitions"),
 }
 
 
@@ -681,10 +990,8 @@ def _controller(doctype: str):
 	"""Resolve a doctype to this app's controller class, as Frappe does."""
 	folder = APP_DOCTYPES.get(doctype)
 	if not folder:
-		return Document
-	module = __import__(
-		f"erpnext_mcp.erpnext_mcp.doctype.{folder}.{folder}", fromlist=["x"]
-	)
+		return STUB_CONTROLLERS.get(doctype, Document)
+	module = __import__(f"erpnext_mcp.erpnext_mcp.doctype.{folder}.{folder}", fromlist=["x"])
 	return getattr(module, doctype.replace(" ", ""), Document)
 
 
@@ -795,6 +1102,44 @@ def _build_frappe() -> types.ModuleType:
 		obj = __import__(".".join(parts[:-1]), fromlist=["x"])
 		return getattr(obj, parts[-1])
 
+	def get_installed_apps():
+		return list(STORE.installed_apps)
+
+	def has_permission(doctype=None, ptype="read", doc=None, user=None, throw=False, **kwargs):
+		"""Allow by default; tests deny specific (doctype, ptype) or (doctype, name).
+
+		Default-allow is the right polarity for a double: a test that forgets to
+		grant something should not silently pass because everything was denied,
+		and every permission test here is about a *refusal*, which it has to ask
+		for explicitly.
+		"""
+		name = doc if isinstance(doc, str) else (doc.get("name") if doc else None)
+		denied = (
+			(doctype, ptype) in STORE.denied_permissions
+			or (doctype, name) in STORE.denied_permissions
+			or (doctype, name, ptype) in STORE.denied_permissions
+		)
+		if denied and throw:
+			raise PermissionError_(f"no {ptype} permission for {doctype} {name}")
+		return not denied
+
+	def get_list(doctype, **kwargs):
+		"""`get_all` with the permission check `get_all` skips."""
+		if not has_permission(doctype, "read"):
+			raise PermissionError_(f"no read permission for {doctype}")
+		return module.db.get_all(doctype, **kwargs)
+
+	def scrub(text):
+		return str(text or "").replace(" ", "_").replace("-", "_").lower()
+
+	def delete_doc(doctype, name, force=False, ignore_permissions=False, **kwargs):
+		STORE.tables.get(doctype, {}).pop(name, None)
+
+	module.get_installed_apps = get_installed_apps
+	module.has_permission = has_permission
+	module.get_list = get_list
+	module.scrub = scrub
+	module.delete_doc = delete_doc
 	module.get_meta = get_meta
 	module.get_doc = get_doc
 	module.new_doc = new_doc
@@ -832,7 +1177,99 @@ def _build_frappe() -> types.ModuleType:
 	return module
 
 
-ROLES = {"Administrator": ["System Manager", "Accounts Manager", "Accounts User"]}
+ROLES = {
+	"Administrator": [
+		"System Manager",
+		"Accounts Manager",
+		"Accounts User",
+		"Purchase Manager",
+		"Purchase User",
+	]
+}
+
+
+def set_roles(user: str, roles) -> None:
+	"""Give a fake user a role set, for the permission and workflow tests."""
+	ROLES[user] = list(roles)
+
+
+# ── frappe.model.workflow ───────────────────────────────────────────────────
+def _active_workflow_for(doc):
+	name = frappe.db.get_value("Workflow", {"document_type": doc.doctype, "is_active": 1}, "name")
+	return frappe.get_doc("Workflow", name) if name else None
+
+
+def _stub_get_transitions(doc, workflow=None, raise_exception=False):
+	"""Frappe's transition resolution, faithfully enough to test against.
+
+	Role check, self-approval rule and condition evaluation — the three things
+	the app delegates rather than reimplementing, so the double has to do all
+	three or the delegation is untested.
+	"""
+	workflow = workflow or _active_workflow_for(doc)
+	if workflow is None:
+		return []
+	state_field = workflow.get("workflow_state_field") or "workflow_state"
+	current = doc.get(state_field)
+	roles = set(frappe.get_roles(frappe.session.user) or [])
+	out = []
+	for row in workflow.get("transitions") or []:
+		if row.get("state") != current:
+			continue
+		if row.get("allowed") and row["allowed"] not in roles:
+			continue
+		if not row.get("allow_self_approval") and doc.get("owner") == frappe.session.user:
+			continue
+		condition = row.get("condition")
+		# A real Frappe uses safe_eval here; the double uses eval because the
+		# only conditions it ever sees are the ones a test wrote.
+		if condition and not eval(condition, {"doc": doc, "frappe": frappe}):
+			continue
+		out.append(dict(row))
+	return out
+
+
+def _stub_apply_workflow(doc, action):
+	workflow = _active_workflow_for(doc)
+	if workflow is None:
+		raise ValidationError(f"no active workflow for {doc.doctype}")
+	state_field = workflow.get("workflow_state_field") or "workflow_state"
+	for row in _stub_get_transitions(doc, workflow):
+		if row.get("action") != action:
+			continue
+		next_state = row.get("next_state")
+		doc.set(state_field, next_state)
+		target = next((s for s in workflow.get("states") or [] if s.get("state") == next_state), {})
+		doc.docstatus = int(target.get("doc_status") or 0)
+		doc.save()
+		return doc
+	raise ValidationError(f"transition {action!r} is not allowed")
+
+
+# ── frappe.desk.query_report / reportview ───────────────────────────────────
+def _stub_query_report_run(report_name, filters=None, user=None, **kwargs):
+	ref_doctype = frappe.db.get_value("Report", report_name, "ref_doctype")
+	if not frappe.has_permission(ref_doctype, "report"):
+		raise PermissionError_(f"no report permission for {ref_doctype}")
+	runner = STORE.report_runners.get(report_name)
+	if runner is None:
+		raise ValidationError(f"stub has no runner registered for report {report_name!r}")
+	return runner(filters or {}, user)
+
+
+def _stub_reportview_get(doctype, *args, **kwargs):
+	params = getattr(frappe.local, "form_dict", None) or {}
+	if not frappe.has_permission(doctype, "read"):
+		raise PermissionError_(f"no read permission for {doctype}")
+	fields = json.loads(params.get("fields") or "[]")
+	conditions = json.loads(params.get("filters") or "[]")
+	rows = frappe.db.get_all(
+		doctype,
+		filters={condition[1]: (condition[2], condition[3]) for condition in conditions},
+		fields=fields,
+		limit=params.get("page_length"),
+	)
+	return {"keys": fields, "values": [[row.get(field) for field in fields] for row in rows]}
 
 
 def install() -> types.ModuleType:
@@ -846,11 +1283,28 @@ def install() -> types.ModuleType:
 	model = types.ModuleType("frappe.model")
 	document = types.ModuleType("frappe.model.document")
 	document.Document = Document
+	workflow = types.ModuleType("frappe.model.workflow")
+	workflow.get_transitions = _stub_get_transitions
+	workflow.apply_workflow = _stub_apply_workflow
 	model.document = document
+	model.workflow = workflow
 	sys.modules["frappe.model"] = model
 	sys.modules["frappe.model.document"] = document
+	sys.modules["frappe.model.workflow"] = workflow
 	sys.modules["frappe.utils"] = module.utils
 	module.model = model
+
+	desk = types.ModuleType("frappe.desk")
+	query_report = types.ModuleType("frappe.desk.query_report")
+	query_report.run = _stub_query_report_run
+	reportview = types.ModuleType("frappe.desk.reportview")
+	reportview.get = _stub_reportview_get
+	desk.query_report = query_report
+	desk.reportview = reportview
+	sys.modules["frappe.desk"] = desk
+	sys.modules["frappe.desk.query_report"] = query_report
+	sys.modules["frappe.desk.reportview"] = reportview
+	module.desk = desk
 	return module
 
 
@@ -903,9 +1357,7 @@ class MCPTestCase(unittest.TestCase):
 		values.update({"enabled": 1, "doctype": "ERPNext MCP Settings"})
 		values.update(overrides)
 		STORE.singles["ERPNext MCP Settings"] = values
-		STORE.passwords[("ERPNext MCP Settings", "ERPNext MCP Settings", "auth_token")] = (
-			self.TOKEN
-		)
+		STORE.passwords[("ERPNext MCP Settings", "ERPNext MCP Settings", "auth_token")] = self.TOKEN
 		return values
 
 	def set_token(self, token):
@@ -915,7 +1367,10 @@ class MCPTestCase(unittest.TestCase):
 		"""Point frappe.local.request at a fake request and return it."""
 		all_headers = {"Content-Type": "application/json"}
 		if token is not False:
-			all_headers["Authorization"] = f"Bearer {token or self.TOKEN}"
+			# X-MCP-Token, not Authorization: Bearer — see security.presented_token
+			# for why that is the documented header. The Bearer path has its own
+			# test rather than being the default the whole suite exercises.
+			all_headers["X-MCP-Token"] = token or self.TOKEN
 		all_headers.update(headers or {})
 		request = FakeRequest(
 			body=payload if isinstance(payload, str) else json.dumps(payload),
@@ -943,18 +1398,14 @@ class MCPTestCase(unittest.TestCase):
 
 	def tool(self, name, arguments=None, **kwargs):
 		"""Call one tool and return its parsed result dict."""
-		body, status = self.call(
-			"tools/call", {"name": name, "arguments": arguments or {}}, **kwargs
-		)
+		body, status = self.call("tools/call", {"name": name, "arguments": arguments or {}}, **kwargs)
 		self.assertEqual(status, 200, body)
 		return body["result"]
 
 	def tool_data(self, name, arguments=None, **kwargs):
 		"""Call one tool, assert it succeeded, and return its parsed payload."""
 		result = self.tool(name, arguments, **kwargs)
-		self.assertFalse(
-			result.get("isError"), f"{name} failed: {result['content'][0]['text']}"
-		)
+		self.assertFalse(result.get("isError"), f"{name} failed: {result['content'][0]['text']}")
 		return json.loads(result["content"][0]["text"])
 
 	def tool_error(self, name, arguments=None, **kwargs):

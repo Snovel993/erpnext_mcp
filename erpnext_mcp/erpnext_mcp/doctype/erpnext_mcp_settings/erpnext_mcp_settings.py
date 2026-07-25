@@ -91,10 +91,9 @@ class ERPNextMCPSettings(Document):
 		enabled = frappe.db.get_value("User", self.mcp_system_user, "enabled")
 		if not enabled:
 			frappe.throw(
-				_(
-					"MCP System User {0} is disabled. Mutating tools would fail on "
-					"every call."
-				).format(self.mcp_system_user),
+				_("MCP System User {0} is disabled. Mutating tools would fail on every call.").format(
+					self.mcp_system_user
+				),
 				title=_("Disabled User"),
 			)
 
@@ -105,11 +104,7 @@ class ERPNextMCPSettings(Document):
 		"submit_journal_entry is on" is worth reading once in plain language,
 		because it is the switch that lets an AI client move a balance.
 		"""
-		live = [
-			name
-			for name in registry.MUTATING_TOOLS
-			if settings.as_bool(self.get(f"allow_{name}"))
-		]
+		live = [name for name in registry.MUTATING_TOOLS if settings.as_bool(self.get(f"allow_{name}"))]
 		if not (settings.as_bool(self.enabled) and live):
 			return
 		frappe.msgprint(

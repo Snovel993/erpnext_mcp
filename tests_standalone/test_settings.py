@@ -17,6 +17,9 @@ from erpnext_mcp.erpnext_mcp.doctype.erpnext_mcp_settings.erpnext_mcp_settings i
 from .fixtures import SeededTestCase
 from .harness import META, STORE, _load_app_doctype, frappe
 
+#: Tools the default fixture site cannot run, because it has no `hrms`.
+HR_TOOLS = ("get_attendance_summary", "get_leave_balance", "list_employees")
+
 
 class ShippedDefaults(SeededTestCase):
 	def setUp(self):
@@ -81,6 +84,34 @@ class ShippedDefaults(SeededTestCase):
 					self.assertTrue(field.get("description"))
 
 
+class SettingsFormJS(SeededTestCase):
+	"""The form's JavaScript must not keep its own copy of the catalogue."""
+
+	def js(self):
+		import os
+
+		from .harness import DOCTYPE_DIR
+
+		path = os.path.join(DOCTYPE_DIR, "erpnext_mcp_settings", "erpnext_mcp_settings.js")
+		with open(path) as handle:
+			return handle.read()
+
+	def test_it_asks_the_server_which_tools_write(self):
+		self.assertIn("erpnext_mcp.mcp.mutating_tool_names", self.js())
+
+	def test_it_does_not_hardcode_the_write_tool_list(self):
+		"""A hardcoded copy is how the banner ends up saying "read-only" while a
+		tool added in a later version is live."""
+		body = self.js()
+		hardcoded = [name for name in registry.MUTATING_TOOLS if f'"{name}"' in body or f"'{name}'" in body]
+		self.assertEqual(hardcoded, [], f"write tool names hardcoded in the JS: {hardcoded}")
+
+	def test_the_whitelisted_helper_returns_the_registry_list(self):
+		from erpnext_mcp import mcp
+
+		self.assertEqual(mcp.mutating_tool_names(), list(registry.MUTATING_TOOLS))
+
+
 class BooleanCasting(SeededTestCase):
 	def test_the_string_zero_reads_as_off(self):
 		"""`tabSingles.value` is text, so a Check comes back as "0" — which Python
@@ -103,9 +134,7 @@ class BooleanCasting(SeededTestCase):
 	def test_a_string_zero_tool_switch_hides_the_tool(self):
 		self.configure(enabled=1, allow_search_accounts="0")
 		body, _ = self.call("tools/list")
-		self.assertNotIn(
-			"search_accounts", [tool["name"] for tool in body["result"]["tools"]]
-		)
+		self.assertNotIn("search_accounts", [tool["name"] for tool in body["result"]["tools"]])
 
 
 class MissingValues(SeededTestCase):
@@ -160,9 +189,7 @@ class MissingValues(SeededTestCase):
 class CidrParsing(SeededTestCase):
 	def test_newlines_and_commas_both_separate(self):
 		self.configure(enabled=1, allowed_cidrs="10.0.0.0/8\n192.168.0.0/16, 127.0.0.1/32")
-		self.assertEqual(
-			settings.allowed_cidrs(), ["10.0.0.0/8", "192.168.0.0/16", "127.0.0.1/32"]
-		)
+		self.assertEqual(settings.allowed_cidrs(), ["10.0.0.0/8", "192.168.0.0/16", "127.0.0.1/32"])
 
 	def test_trailing_comments_are_stripped(self):
 		self.configure(enabled=1, allowed_cidrs="10.0.0.0/8 # the office\n127.0.0.1/32")
@@ -222,9 +249,7 @@ class FormValidation(SeededTestCase):
 
 	def test_no_warning_when_only_read_tools_are_on(self):
 		self.doc(enabled=1).save()
-		self.assertFalse(
-			[c for c in STORE.comments if c.get("type") == "msgprint"]
-		)
+		self.assertFalse([c for c in STORE.comments if c.get("type") == "msgprint"])
 
 
 class TokenGeneration(SeededTestCase):
@@ -294,8 +319,11 @@ class SelfTest(SeededTestCase):
 		self.configure(enabled=1, allow_create_journal_entry=1)
 		report = mcp.selftest()
 		self.assertEqual(report["mutating_tools_enabled"], ["create_journal_entry"])
-		self.assertEqual(report["tools_total"], 15)
-		self.assertEqual(len(report["tools_enabled"]), 11)
+		self.assertEqual(report["tools_total"], 35)
+		# 28 read tools minus the three HR ones this site cannot run, plus the
+		# one write tool just enabled.
+		self.assertEqual(len(report["tools_enabled"]), 26)
+		self.assertEqual(sorted(report["tools_unavailable"]), sorted(HR_TOOLS))
 
 	def test_it_reports_not_ready_when_disabled(self):
 		from erpnext_mcp import mcp

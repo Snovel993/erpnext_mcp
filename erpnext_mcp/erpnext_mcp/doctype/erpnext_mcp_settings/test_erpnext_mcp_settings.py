@@ -42,9 +42,7 @@ class TestERPNextMCPSettings(BaseTestCase):
 		self.doc.auth_token = ""
 		self.doc.enabled = 0
 		self.doc.save()
-		frappe.db.delete(
-			"Singles", {"doctype": settings.SETTINGS_DOCTYPE, "field": "auth_token"}
-		)
+		frappe.db.delete("Singles", {"doctype": settings.SETTINGS_DOCTYPE, "field": "auth_token"})
 		frappe.clear_cache(doctype=settings.SETTINGS_DOCTYPE)
 		fresh = frappe.get_single(settings.SETTINGS_DOCTYPE)
 		fresh.flags.ignore_permissions = True

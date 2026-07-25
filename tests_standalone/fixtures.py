@@ -12,7 +12,11 @@ Nothing here refers to a real business, account number or person. The numbers
 are a plain textbook chart of accounts.
 """
 
-from .harness import STORE, MCPTestCase
+import json
+import sys
+import types
+
+from .harness import STORE, MCPTestCase, set_roles
 
 MAIN = "Example Trading Co"
 OTHER = "Second Example Ltd"
@@ -313,3 +317,672 @@ class SeededTestCase(MCPTestCase):
 	def setUp(self):
 		super().setUp()
 		seed_site()
+
+
+# ── v0.2.0 fixtures ─────────────────────────────────────────────────────────
+#: A synthetic approval workflow over Purchase Order. Three transitions, one
+#: terminal pair, one condition and one self-approval rule — the four shapes the
+#: workflow tools have to get right.
+WORKFLOW_NAME = "Purchase Order Approval"
+BUYER = "buyer@example.test"
+APPROVER = "approver@example.test"
+
+
+def seed_v2() -> None:
+	"""Everything the v0.2.0 tool categories read. Additive to `seed_site`."""
+	_people()
+	_workflow()
+	_trade()
+	_reports()
+	_attachments()
+	_collab()
+	_customisation()
+
+
+def _people() -> None:
+	STORE.seed(
+		"User",
+		[
+			{"name": BUYER, "enabled": 1, "full_name": "Bea Buyer"},
+			{"name": APPROVER, "enabled": 1, "full_name": "Avi Approver"},
+			{"name": "retired@example.test", "enabled": 0, "full_name": "Rex Retired"},
+		],
+	)
+	set_roles(BUYER, ["Purchase User"])
+	set_roles(APPROVER, ["Purchase Manager", "Purchase User"])
+	set_roles("retired@example.test", [])
+
+
+def _workflow() -> None:
+	STORE.seed(
+		"Workflow",
+		[
+			{
+				"name": WORKFLOW_NAME,
+				"workflow_name": WORKFLOW_NAME,
+				"document_type": "Purchase Order",
+				"is_active": 1,
+				"workflow_state_field": "workflow_state",
+				"send_email_alert": 1,
+				"states": [
+					{"state": "Draft", "doc_status": 0, "allow_edit": "Purchase User"},
+					{
+						"state": "Pending Approval",
+						"doc_status": 0,
+						"allow_edit": "Purchase Manager",
+					},
+					{"state": "Approved", "doc_status": 1, "allow_edit": "Purchase Manager"},
+					{"state": "Rejected", "doc_status": 0, "allow_edit": "Purchase Manager"},
+				],
+				"transitions": [
+					{
+						"state": "Draft",
+						"action": "Submit for Approval",
+						"next_state": "Pending Approval",
+						"allowed": "Purchase User",
+						"allow_self_approval": 1,
+					},
+					{
+						"state": "Pending Approval",
+						"action": "Approve",
+						"next_state": "Approved",
+						"allowed": "Purchase Manager",
+						# Nobody approves their own order — the rule the fallback
+						# path cannot enforce, which is why the tools delegate.
+						"allow_self_approval": 0,
+					},
+					{
+						"state": "Pending Approval",
+						"action": "Reject",
+						"next_state": "Rejected",
+						"allowed": "Purchase Manager",
+						"allow_self_approval": 1,
+						"condition": "doc.grand_total > 0",
+					},
+				],
+			},
+			{
+				"name": "Inactive Example",
+				"workflow_name": "Inactive Example",
+				"document_type": "Sales Order",
+				"is_active": 0,
+				"workflow_state_field": "workflow_state",
+				"states": [{"state": "Draft", "doc_status": 0}],
+				"transitions": [],
+			},
+		],
+	)
+
+
+def _trade() -> None:
+	STORE.seed(
+		"Purchase Order",
+		[
+			{
+				"name": "PUR-ORD-2026-00001",
+				"supplier": "Example Supplies Inc",
+				"supplier_name": "Example Supplies Inc",
+				"transaction_date": "2026-06-02",
+				"schedule_date": "2026-06-20",
+				"grand_total": 4200.0,
+				"currency": "USD",
+				"status": "To Receive and Bill",
+				"per_received": 0,
+				"per_billed": 0,
+				"docstatus": 0,
+				"company": MAIN,
+				"owner": BUYER,
+				"workflow_state": "Pending Approval",
+			},
+			{
+				"name": "PUR-ORD-2026-00002",
+				"supplier": "Second Supplier LLC",
+				"supplier_name": "Second Supplier LLC",
+				"transaction_date": "2026-05-11",
+				"schedule_date": "2026-05-30",
+				"grand_total": 875.5,
+				"currency": "USD",
+				"status": "Completed",
+				"per_received": 100,
+				"per_billed": 100,
+				"docstatus": 1,
+				"company": MAIN,
+				"owner": BUYER,
+				"workflow_state": "Approved",
+			},
+			{
+				"name": "PUR-ORD-2026-00003",
+				"supplier": "Example Supplies Inc",
+				"supplier_name": "Example Supplies Inc",
+				"transaction_date": "2026-06-18",
+				"schedule_date": "2026-07-01",
+				"grand_total": 150.0,
+				"currency": "USD",
+				"status": "Draft",
+				"docstatus": 0,
+				"company": MAIN,
+				"owner": APPROVER,
+				"workflow_state": "Draft",
+			},
+		],
+	)
+	STORE.seed(
+		"Sales Order",
+		[
+			{
+				"name": "SAL-ORD-2026-00001",
+				"customer": "Northwind Grocers",
+				"customer_name": "Northwind Grocers",
+				"transaction_date": "2026-06-05",
+				"delivery_date": "2026-06-19",
+				"grand_total": 12500.0,
+				"currency": "USD",
+				"status": "To Deliver and Bill",
+				"per_delivered": 0,
+				"per_billed": 0,
+				"docstatus": 1,
+				"company": MAIN,
+			},
+			{
+				"name": "SAL-ORD-2026-00002",
+				"customer": "Southgate Markets",
+				"customer_name": "Southgate Markets",
+				"transaction_date": "2026-04-22",
+				"delivery_date": "2026-05-06",
+				"grand_total": 3100.0,
+				"currency": "USD",
+				"status": "Completed",
+				"per_delivered": 100,
+				"per_billed": 100,
+				"docstatus": 1,
+				"company": MAIN,
+			},
+		],
+	)
+	# Ageing fixture: as_of 2026-07-24 puts one invoice in each bucket.
+	STORE.seed(
+		"Sales Invoice",
+		[
+			_invoice("ACC-SINV-2026-00001", "Northwind Grocers", "2026-08-30", 1000, 1000),
+			_invoice("ACC-SINV-2026-00002", "Northwind Grocers", "2026-07-10", 2000, 500),
+			_invoice("ACC-SINV-2026-00003", "Southgate Markets", "2026-06-10", 3000, 3000),
+			_invoice("ACC-SINV-2026-00004", "Southgate Markets", "2026-05-10", 4000, 4000),
+			_invoice("ACC-SINV-2026-00005", "Westbrook Cafe", "2026-01-02", 5000, 5000),
+			_invoice("ACC-SINV-2026-00006", "Westbrook Cafe", None, 600, 600),
+			# Settled and cancelled rows, which must not appear at all.
+			_invoice("ACC-SINV-2026-00007", "Northwind Grocers", "2026-06-01", 900, 0),
+			_invoice("ACC-SINV-2026-00008", "Northwind Grocers", "2026-06-01", 700, 700, docstatus=2),
+		],
+	)
+
+
+def _invoice(name, customer, due_date, grand_total, outstanding, docstatus=1):
+	return {
+		"name": name,
+		"customer": customer,
+		"customer_name": customer,
+		"posting_date": "2026-05-01",
+		"due_date": due_date,
+		"grand_total": grand_total,
+		"outstanding_amount": outstanding,
+		"currency": "USD",
+		"status": "Overdue" if outstanding else "Paid",
+		"company": MAIN,
+		"docstatus": docstatus,
+	}
+
+
+def _reports() -> None:
+	STORE.seed(
+		"Report",
+		[
+			{
+				"name": "Accounts Receivable Summary",
+				"report_name": "Accounts Receivable Summary",
+				"ref_doctype": "Sales Invoice",
+				"report_type": "Script Report",
+				"module": "Accounts",
+				"is_standard": "Yes",
+				"disabled": 0,
+			},
+			{
+				"name": "Cash Movement",
+				"report_name": "Cash Movement",
+				"ref_doctype": "GL Entry",
+				"report_type": "Query Report",
+				"module": "Accounts",
+				"is_standard": "No",
+				"disabled": 0,
+			},
+			{
+				"name": "Open Purchase Orders",
+				"report_name": "Open Purchase Orders",
+				"ref_doctype": "Purchase Order",
+				"report_type": "Report Builder",
+				"module": "Buying",
+				"is_standard": "No",
+				"disabled": 0,
+				"json": json.dumps(
+					{
+						"columns": [
+							["name", "Purchase Order"],
+							["supplier", "Purchase Order"],
+							["grand_total", "Purchase Order"],
+						],
+						"filters": [["Purchase Order", "status", "=", "Draft"]],
+						"sort_by": "transaction_date",
+						"sort_order": "desc",
+					}
+				),
+			},
+			{
+				"name": "Retired Report",
+				"report_name": "Retired Report",
+				"ref_doctype": "GL Entry",
+				"report_type": "Query Report",
+				"module": "Accounts",
+				"is_standard": "No",
+				"disabled": 1,
+			},
+			{
+				"name": "Exotic Report",
+				"report_name": "Exotic Report",
+				"ref_doctype": "GL Entry",
+				"report_type": "Custom Report",
+				"module": "Accounts",
+				"is_standard": "No",
+				"disabled": 0,
+			},
+		],
+	)
+
+	def receivable(filters, user):
+		rows = [
+			{"customer": "Northwind Grocers", "outstanding": 2500.0},
+			{"customer": "Southgate Markets", "outstanding": 7000.0},
+		]
+		if filters.get("customer"):
+			rows = [row for row in rows if row["customer"] == filters["customer"]]
+		return {
+			"columns": [
+				{
+					"fieldname": "customer",
+					"label": "Customer",
+					"fieldtype": "Link",
+					"options": "Customer",
+					"width": 200,
+				},
+				"Outstanding:Currency/USD:120",
+			],
+			"result": rows,
+			"message": "Aged as of report date",
+		}
+
+	def cash_movement(filters, user):
+		return {
+			"columns": ["Date:Date:100", "Amount:Currency/USD:120"],
+			"result": [["2026-01-15", 1000.0], ["2026-02-10", -250.0]],
+		}
+
+	STORE.report_runners["Accounts Receivable Summary"] = receivable
+	STORE.report_runners["Cash Movement"] = cash_movement
+
+
+ATTACHED_JE = "ACC-JV-2026-00001"
+
+
+def _attachments() -> None:
+	STORE.seed(
+		"File",
+		[
+			{
+				"name": "file-public-invoice",
+				"file_name": "invoice.txt",
+				"file_url": "/files/invoice.txt",
+				"file_size": 21,
+				"is_private": 0,
+				"attached_to_doctype": "Journal Entry",
+				"attached_to_name": ATTACHED_JE,
+				"owner": BUYER,
+			},
+			{
+				"name": "file-private-contract",
+				"file_name": "contract.pdf",
+				"file_url": "/private/files/contract.pdf",
+				"file_size": 9,
+				"is_private": 1,
+				"attached_to_doctype": "Journal Entry",
+				"attached_to_name": ATTACHED_JE,
+				"owner": APPROVER,
+			},
+			{
+				"name": "file-huge-export",
+				"file_name": "payroll-export.csv",
+				"file_url": "/private/files/payroll-export.csv",
+				"file_size": 5 * 1024 * 1024,
+				"is_private": 1,
+				"attached_to_doctype": "Journal Entry",
+				"attached_to_name": ATTACHED_JE,
+				"owner": APPROVER,
+			},
+			{
+				"name": "file-orphan-private",
+				"file_name": "scratch.txt",
+				"file_url": "/private/files/scratch.txt",
+				"file_size": 7,
+				"is_private": 1,
+				"owner": APPROVER,
+			},
+		],
+	)
+	STORE.file_contents["file-public-invoice"] = b"invoice line one\r\n---"
+	STORE.file_contents["file-private-contract"] = b"top secret"
+	STORE.file_contents["file-huge-export"] = b"x" * (5 * 1024 * 1024)
+	STORE.file_contents["file-orphan-private"] = b"scratch"
+
+
+def _collab() -> None:
+	STORE.seed(
+		"Comment",
+		[
+			{
+				"name": "comment-1",
+				"comment_type": "Comment",
+				"content": "Checked against the bank statement, agrees.",
+				"comment_by": "Avi Approver",
+				"comment_email": APPROVER,
+				"reference_doctype": "Journal Entry",
+				"reference_name": ATTACHED_JE,
+				"owner": APPROVER,
+				"creation": "2026-01-16 09:00:00",
+			},
+			{
+				"name": "comment-2",
+				"comment_type": "Info",
+				"content": "Submitted by Administrator",
+				"reference_doctype": "Journal Entry",
+				"reference_name": ATTACHED_JE,
+				"owner": "Administrator",
+				"creation": "2026-01-16 10:00:00",
+			},
+			{
+				"name": "comment-3",
+				"comment_type": "Comment",
+				"content": "Unrelated thread.",
+				"reference_doctype": "Journal Entry",
+				"reference_name": "ACC-JV-2026-00002",
+				"owner": BUYER,
+				"creation": "2026-02-11 08:00:00",
+			},
+		],
+	)
+	STORE.seed(
+		"ToDo",
+		[
+			{
+				"name": "todo-open-overdue",
+				"status": "Open",
+				"priority": "High",
+				"date": "2026-06-01",
+				"description": "Chase Northwind on ACC-SINV-2026-00003",
+				"reference_type": "Sales Invoice",
+				"reference_name": "ACC-SINV-2026-00003",
+				"allocated_to": APPROVER,
+				"assigned_by": "Administrator",
+				"owner": "Administrator",
+			},
+			{
+				"name": "todo-open-future",
+				"status": "Open",
+				"priority": "Medium",
+				"date": "2026-12-01",
+				"description": "Year-end close checklist",
+				"allocated_to": APPROVER,
+				"owner": "Administrator",
+			},
+			{
+				"name": "todo-closed",
+				"status": "Closed",
+				"priority": "Low",
+				"date": "2026-03-01",
+				"description": "Old task",
+				"allocated_to": BUYER,
+				"owner": "Administrator",
+			},
+		],
+	)
+
+
+def _customisation() -> None:
+	STORE.seed(
+		"Custom Field",
+		[
+			{
+				"name": "Journal Entry-orchard_block",
+				"dt": "Journal Entry",
+				"fieldname": "orchard_block",
+				"label": "Block",
+				"fieldtype": "Data",
+				"insert_after": "user_remark",
+				"idx": 1,
+				"hidden": 0,
+				"reqd": 0,
+			},
+			{
+				"name": "Journal Entry-hidden_note",
+				"dt": "Journal Entry",
+				"fieldname": "hidden_note",
+				"label": "Hidden Note",
+				"fieldtype": "Small Text",
+				"insert_after": "orchard_block",
+				"idx": 2,
+				"hidden": 1,
+				"reqd": 0,
+			},
+			{
+				"name": "Sales Order-delivery_window",
+				"dt": "Sales Order",
+				"fieldname": "delivery_window",
+				"label": "Delivery Window",
+				"fieldtype": "Select",
+				"insert_after": "delivery_date",
+				"idx": 1,
+			},
+		],
+	)
+	STORE.seed(
+		"Client Script",
+		[
+			{
+				"name": "Journal Entry autofill",
+				"dt": "Journal Entry",
+				"view": "Form",
+				"enabled": 1,
+				"script_type": "Client",
+				"script": "frappe.ui.form.on('Journal Entry', {\n" + ("// padding\n" * 120),
+			},
+			{
+				"name": "Sales Order legacy",
+				"dt": "Sales Order",
+				"view": "Form",
+				"enabled": 0,
+				"script_type": "Client",
+				"script": "console.log('disabled');",
+			},
+		],
+	)
+
+
+# ── HR, which only exists on sites with the hrms app ────────────────────────
+def install_hrms() -> None:
+	"""Make the fake site look like it has Frappe HR, and seed HR data.
+
+	Also registers a stand-in for HR's `get_leave_balance_on`, because the leave
+	tool delegates to it and a test that skipped the delegation would not be
+	testing the tool that ships.
+	"""
+	if "hrms" not in STORE.installed_apps:
+		STORE.installed_apps.append("hrms")
+	_hr_data()
+	_install_leave_api()
+
+
+EMPLOYEES = ("HR-EMP-00001", "HR-EMP-00002", "HR-EMP-00003")
+
+
+def _hr_data() -> None:
+	STORE.seed(
+		"Employee",
+		[
+			{
+				"name": "HR-EMP-00001",
+				"employee_name": "Ada Orchard",
+				"employee_number": "E-100",
+				"department": "Operations",
+				"designation": "Supervisor",
+				"status": "Active",
+				"date_of_joining": "2024-03-01",
+				"company": MAIN,
+				"user_id": APPROVER,
+			},
+			{
+				"name": "HR-EMP-00002",
+				"employee_name": "Ben Packhouse",
+				"employee_number": "E-101",
+				"department": "Operations",
+				"designation": "Operator",
+				"status": "Active",
+				"date_of_joining": "2025-01-15",
+				"company": MAIN,
+			},
+			{
+				"name": "HR-EMP-00003",
+				"employee_name": "Cara Office",
+				"employee_number": "E-102",
+				"department": "Administration",
+				"designation": "Bookkeeper",
+				"status": "Left",
+				"date_of_joining": "2022-06-01",
+				"relieving_date": "2026-02-28",
+				"company": MAIN,
+			},
+		],
+	)
+	attendance = []
+	pattern = [
+		("HR-EMP-00001", "Present", 3),
+		("HR-EMP-00001", "On Leave", 1),
+		("HR-EMP-00002", "Present", 2),
+		("HR-EMP-00002", "Absent", 1),
+		("HR-EMP-00002", "Half Day", 1),
+	]
+	day = 1
+	for employee, status, count in pattern:
+		for _ in range(count):
+			attendance.append(
+				{
+					"name": f"HR-ATT-{day:05d}",
+					"employee": employee,
+					"employee_name": "Ada Orchard" if employee == "HR-EMP-00001" else "Ben Packhouse",
+					"attendance_date": f"2026-06-{day:02d}",
+					"status": status,
+					"department": "Operations",
+					"company": MAIN,
+					"docstatus": 1,
+				}
+			)
+			day += 1
+	# A draft row, which must not be counted.
+	attendance.append(
+		{
+			"name": "HR-ATT-draft",
+			"employee": "HR-EMP-00002",
+			"employee_name": "Ben Packhouse",
+			"attendance_date": "2026-06-20",
+			"status": "Present",
+			"department": "Operations",
+			"company": MAIN,
+			"docstatus": 0,
+		}
+	)
+	STORE.seed("Attendance", attendance)
+	STORE.seed(
+		"Leave Type",
+		[{"name": "Annual Leave"}, {"name": "Sick Leave"}, {"name": "Unpaid Leave"}],
+	)
+	STORE.seed(
+		"Leave Allocation",
+		[
+			{
+				"name": "HR-LAL-00001",
+				"employee": "HR-EMP-00001",
+				"leave_type": "Annual Leave",
+				"from_date": "2026-01-01",
+				"to_date": "2026-12-31",
+				"total_leaves_allocated": 20,
+				"docstatus": 1,
+			},
+			{
+				"name": "HR-LAL-00002",
+				"employee": "HR-EMP-00001",
+				"leave_type": "Sick Leave",
+				"from_date": "2026-01-01",
+				"to_date": "2026-12-31",
+				"total_leaves_allocated": 10,
+				"docstatus": 1,
+			},
+			{
+				"name": "HR-LAL-00003",
+				"employee": "HR-EMP-00001",
+				"leave_type": "Unpaid Leave",
+				"from_date": "2025-01-01",
+				"to_date": "2025-12-31",
+				"total_leaves_allocated": 5,
+				"docstatus": 1,
+			},
+		],
+	)
+
+
+#: What the fake `get_leave_balance_on` returns, keyed by leave type. A test can
+#: replace an entry with an Exception to exercise the per-type failure path.
+LEAVE_BALANCES = {"Annual Leave": 12.5, "Sick Leave": 8.0}
+
+
+def _install_leave_api() -> None:
+	module_path = "hrms.hr.doctype.leave_application.leave_application"
+	if module_path in sys.modules:
+		return
+
+	def get_leave_balance_on(employee, leave_type, date, **kwargs):
+		value = LEAVE_BALANCES.get(leave_type, 0.0)
+		if isinstance(value, Exception):
+			raise value
+		return value
+
+	leaf = types.ModuleType(module_path)
+	leaf.get_leave_balance_on = get_leave_balance_on
+	built = []
+	parts = module_path.split(".")
+	for index in range(1, len(parts)):
+		name = ".".join(parts[:index])
+		if name not in sys.modules:
+			sys.modules[name] = types.ModuleType(name)
+			built.append(name)
+	sys.modules[module_path] = leaf
+
+
+class V2TestCase(SeededTestCase):
+	"""The fixture site plus everything v0.2.0 reads."""
+
+	def setUp(self):
+		super().setUp()
+		seed_v2()
+
+
+class HRTestCase(V2TestCase):
+	"""...and with Frappe HR installed."""
+
+	def setUp(self):
+		super().setUp()
+		install_hrms()

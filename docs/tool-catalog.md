@@ -1,6 +1,6 @@
 # Tool catalogue
 
-Every tool `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 35 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -14,7 +14,7 @@ All examples use the site `erp.example.com`, the company `Example Trading Co`
 ```bash
 curl -sS -X POST https://erp.example.com/api/method/erpnext_mcp.mcp.handle \
   -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "X-MCP-Token: $TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
        "params":{"name":"<tool>","arguments":{...}}}'
 ```
@@ -45,6 +45,14 @@ rejected; anything unparseable gets an error naming the expected format.
 not refused, and the response carries `limit` and `truncated` so a client knows it
 did not see everything.
 
+**Some tools are not on every site.** A tool with an unmet site prerequisite —
+no `hrms`, no Bank Statement doctype — is not advertised in `tools/list` and
+cannot be called. That is different from an operator switching a tool off, and
+the refusals say so differently: *"not available on this site: it requires the
+Frappe HR (hrms) app... This is not something an operator can switch on here"*
+versus *"switched off on this site. An operator must tick allow_&lt;tool&gt;"*.
+Which tools carry a prerequisite is noted below.
+
 **Errors are tool results, not JSON-RPC errors.** A bad argument or a missing
 document comes back as `isError: true` with a message written to be acted on. A
 JSON-RPC `error` object means the *call* was malformed — wrong method, non-object
@@ -64,8 +72,12 @@ ledger.
 
 # Read-only tools
 
-All ten are **on** by default and can be switched off individually. A tool that is
-off does not appear in `tools/list` at all.
+All 28 are **on** by default and can be switched off individually. A tool that is
+off does not appear in `tools/list` at all, and neither does one whose site
+prerequisite is missing.
+
+The first ten are the accounting surface v0.1.0 shipped; the rest were added in
+v0.2.0 and are grouped by what they touch.
 
 ---
 
@@ -477,12 +489,593 @@ substring, so the top hit is usually right.
   "note": "Ranked best-first: exact number, exact name, prefix, substring."
 }
 ```
+---
+
+# Workflow tools
+
+Four read tools and one write tool over Frappe's Workflow engine. All read-only
+unless marked.
+
+The hard part of a workflow question is not "what are the states" — it is
+"can *this* user take *this* action on *this* document *right now*", which
+depends on the transition's `allowed` role, its `allow_self_approval` flag and a
+`condition` expression evaluated against the document. Frappe already answers
+that in `frappe.model.workflow.get_transitions`, so `list_available_actions` and
+`advance_workflow` call it rather than producing a second opinion. Every response
+says which path ran.
+
+---
+
+## 11. `list_workflows`
+
+Every Workflow on the site. Call it to learn a site's approval structure before
+asking about any individual document.
+
+**Arguments:** none.
+
+**Returns** `workflows[]` with `name`, `workflow_name`, `document_type`,
+`is_active`, `workflow_state_field`, `states[]`, `transitions[]`,
+`terminal_states[]` and `roles[]`; plus `count` and `active_count`.
+
+`terminal_states` are states with no outgoing transition — a document in one is
+finished, not waiting. That distinction is what `list_pending_approvals` is
+built on.
+
+**Example**
+
+```json
+{"name": "list_workflows", "arguments": {}}
+```
+
+```json
+{
+  "workflows": [
+    {
+      "name": "Purchase Order Approval",
+      "workflow_name": "Purchase Order Approval",
+      "document_type": "Purchase Order",
+      "is_active": 1,
+      "workflow_state_field": "workflow_state",
+      "send_email_alert": 1,
+      "states": [
+        {"state": "Draft", "doc_status": 0, "allow_edit": "Purchase User"},
+        {"state": "Pending Approval", "doc_status": 0, "allow_edit": "Purchase Manager"},
+        {"state": "Approved", "doc_status": 1, "allow_edit": "Purchase Manager"},
+        {"state": "Rejected", "doc_status": 0, "allow_edit": "Purchase Manager"}
+      ],
+      "transitions": [
+        {"state": "Draft", "action": "Submit for Approval", "next_state": "Pending Approval",
+         "allowed": "Purchase User", "allow_self_approval": true,
+         "has_condition": false, "condition": null},
+        {"state": "Pending Approval", "action": "Approve", "next_state": "Approved",
+         "allowed": "Purchase Manager", "allow_self_approval": false,
+         "has_condition": false, "condition": null},
+        {"state": "Pending Approval", "action": "Reject", "next_state": "Rejected",
+         "allowed": "Purchase Manager", "allow_self_approval": true,
+         "has_condition": true, "condition": "doc.grand_total > 0"}
+      ],
+      "terminal_states": ["Approved", "Rejected"],
+      "roles": ["Purchase Manager", "Purchase User"]
+    }
+  ],
+  "count": 1,
+  "active_count": 1,
+  "note": "terminal_states have no outgoing transition — a document there is finished, not waiting."
+}
+```
+
+---
+
+## 12. `get_workflow_state`
+
+Where one document sits, and where it could go. Answers "who can move this";
+`list_available_actions` answers "can I move this".
+
+**Arguments:** `doctype` (required), `name` (required).
+
+**Returns** `workflow`, `workflow_state_field`, `current_state`,
+`current_state_detail`, `docstatus`, `docstatus_label`, `next_transitions[]`,
+`is_terminal`. A document whose state field is empty — created before the
+workflow was added — gets a `note` saying so rather than an error.
+
+**Refused:** a doctype no active workflow governs (the error lists the ones that
+are governed), an unknown document, an unknown doctype.
+
+**Example**
+
+```json
+{"name": "get_workflow_state",
+ "arguments": {"doctype": "Purchase Order", "name": "PUR-ORD-2026-00184"}}
+```
+
+```json
+{
+  "doctype": "Purchase Order",
+  "name": "PUR-ORD-2026-00184",
+  "workflow": "Purchase Order Approval",
+  "workflow_state_field": "workflow_state",
+  "current_state": "Pending Approval",
+  "current_state_detail": {"state": "Pending Approval", "doc_status": 0,
+                           "allow_edit": "Purchase Manager"},
+  "docstatus": 0,
+  "docstatus_label": "draft",
+  "next_transitions": [
+    {"state": "Pending Approval", "action": "Approve", "next_state": "Approved",
+     "allowed": "Purchase Manager", "allow_self_approval": false,
+     "has_condition": false, "condition": null}
+  ],
+  "is_terminal": false
+}
+```
+
+---
+
+## 13. `list_pending_approvals`
+
+The worklist. Documents parked in a state that still has an action available,
+grouped by workflow and state.
+
+**Arguments**
+
+| Name | Required | Notes |
+| --- | --- | --- |
+| `user` | no | Only states this user's roles can act on — the "what is waiting on me" question |
+| `workflow` | no | Restrict to one Workflow |
+| `limit` | no | Documents **per state**. Default 100, max 500 |
+
+**Returns** `pending[]` — one entry per (workflow, state) with `actions[]`,
+`allowed_roles[]`, `count`, `truncated` and `documents[]` — plus `group_count`,
+`document_count`, `user_roles` and `limit_per_state`.
+
+Terminal states are never listed. Cancelled documents (`docstatus 2`) are
+excluded.
+
+**Example**
+
+```json
+{"name": "list_pending_approvals", "arguments": {"user": "avi@example.com"}}
+```
+
+```json
+{
+  "pending": [
+    {
+      "workflow": "Purchase Order Approval",
+      "doctype": "Purchase Order",
+      "state": "Pending Approval",
+      "actions": ["Approve", "Reject"],
+      "allowed_roles": ["Purchase Manager"],
+      "count": 2,
+      "truncated": false,
+      "documents": [
+        {"name": "PUR-ORD-2026-00184", "owner": "bea@example.com",
+         "modified": "2026-07-11 09:14:02", "docstatus": 0}
+      ]
+    }
+  ],
+  "group_count": 1,
+  "document_count": 2,
+  "user": "avi@example.com",
+  "user_roles": ["Purchase Manager", "Purchase User"],
+  "limit_per_state": 100,
+  "note": "Only states with an outgoing transition are listed; terminal states are finished, not pending. Counts are per state and capped at limit_per_state."
+}
+```
+
+---
+
+## 14. `list_available_actions`
+
+What the acting MCP user can do to this document right now.
+
+"Acting MCP user" is the configured **MCP System User**, not the human at the
+other end of the chat. That is the honest answer, because it is the user the
+transition would actually run as.
+
+**Arguments:** `doctype` (required), `name` (required).
+
+**Returns** `user`, `user_roles[]`, `current_state`, `available_actions[]`,
+`transitions[]`, `resolved_via`, `conditions_evaluated`.
+
+`resolved_via` is `"frappe.model.workflow.get_transitions"` normally. On a
+Frappe that does not export it, this app falls back to a role-only check,
+`conditions_evaluated` is `false` and a `warning` says the list is a **superset**
+— an action in it may still be refused. Transitions carrying a condition are
+flagged `has_condition`.
+
+A condition expression that raises is reported, not swallowed: a site bug should
+not quietly become a laxer answer.
+
+**Example**
+
+```json
+{"name": "list_available_actions",
+ "arguments": {"doctype": "Purchase Order", "name": "PUR-ORD-2026-00184"}}
+```
+
+```json
+{
+  "doctype": "Purchase Order",
+  "name": "PUR-ORD-2026-00184",
+  "workflow": "Purchase Order Approval",
+  "user": "mcp@example.com",
+  "user_roles": ["Accounts User", "Purchase Manager"],
+  "current_state": "Pending Approval",
+  "available_actions": ["Approve", "Reject"],
+  "transitions": [
+    {"state": "Pending Approval", "action": "Approve", "next_state": "Approved",
+     "allowed": "Purchase Manager", "allow_self_approval": 0}
+  ],
+  "resolved_via": "frappe.model.workflow.get_transitions",
+  "conditions_evaluated": true
+}
+```
+
+---
+
+# Report tools
+
+## 15. `list_reports`
+
+**Arguments:** `module` (optional), `is_standard` (optional — `Yes`/`No`, or a
+boolean).
+
+**Returns** `reports[]` with `name`, `ref_doctype`, `report_type`, `module`,
+`is_standard`, `disabled`, `prepared_report`; plus `count` and `by_report_type`.
+
+`ref_doctype` is what the report reports on, and is what a permission check runs
+against when you call `run_report`.
+
+---
+
+## 16. `run_report`
+
+The highest-leverage tool in the catalogue. A site's reports are where its
+accounting questions have already been answered correctly by somebody who knew
+the schema.
+
+**Arguments**
+
+| Name | Required | Notes |
+| --- | --- | --- |
+| `name` | yes | Report docname, exactly as `list_reports` gives it |
+| `filters` | no | The report's own filter fieldnames, as an object. A JSON string is accepted too |
+| `user` | no | Run as this user instead of the configured MCP user |
+| `limit` | no | Rows returned. Default 100, max 500; `total_rows` reports how many the report produced |
+
+**Three engines, one tool.** Query and Script Reports run through
+`frappe.desk.query_report.run` with `ignore_prepared_report=True` — without that,
+a report configured as a Prepared Report queues a background job and hands back a
+job id instead of rows. Report Builder reports have no server-side "run", so they
+are materialised from their saved column/filter/sort config through
+`frappe.desk.reportview.get`, falling back to `frappe.get_list` on versions where
+that call has moved. `executed_via` names the path.
+
+**Permissions apply here.** Unlike the ledger read tools, this runs through the
+Desk APIs, which check the acting user's permission on `ref_doctype`. A report
+the MCP System User may not read fails with a message naming the doctype.
+
+**Returns** `report`, `report_type`, `ref_doctype`, `executed_as`,
+`executed_via`, `filters_applied`, `columns`, `columns_normalised`, `rows`,
+`row_count`, `total_rows`, `truncated`, `limit`, `row_format`, plus the report's
+own `message` / `chart` / `report_summary` where it produced them.
+
+`columns_normalised` parses the old colon-delimited column form
+(`"Outstanding:Currency/USD:120"`) into `{fieldname, label, fieldtype, options,
+width}` so a model does not have to.
+
+**Example**
+
+```json
+{"name": "run_report",
+ "arguments": {"name": "Accounts Receivable Summary",
+               "filters": {"company": "Example Trading Co", "report_date": "2026-06-30"},
+               "limit": 50}}
+```
+
+```json
+{
+  "report": "Accounts Receivable Summary",
+  "report_type": "Script Report",
+  "ref_doctype": "Sales Invoice",
+  "executed_as": "mcp@example.com",
+  "executed_via": "frappe.desk.query_report.run",
+  "filters_applied": {"company": "Example Trading Co", "report_date": "2026-06-30"},
+  "columns": [
+    {"fieldname": "party", "label": "Customer", "fieldtype": "Link", "options": "Customer", "width": 200},
+    "Outstanding:Currency/USD:120"
+  ],
+  "columns_normalised": [
+    {"fieldname": "party", "label": "Customer", "fieldtype": "Link", "options": "Customer", "width": 200},
+    {"fieldname": "outstanding", "label": "Outstanding", "fieldtype": "Currency", "options": "USD", "width": 120}
+  ],
+  "rows": [{"party": "Northwind Grocers", "outstanding": 2500.0}],
+  "row_count": 1,
+  "total_rows": 1,
+  "truncated": false,
+  "limit": 50,
+  "row_format": "objects"
+}
+```
+
+---
+
+# Attachment tools
+
+The two tools in this app that check Frappe permissions on the way in. A File is
+whatever somebody uploaded — a signed contract, a passport scan, a payroll export
+— and `is_private` is a promise the framework makes about who can see it.
+
+---
+
+## 17. `list_attachments`
+
+**Arguments:** `doctype` (required), `name` (required).
+
+**Returns** `attachments[]` with `file_name`, `file_url`, `file_size`,
+`size_human`, `mime_type`, `is_private`, `uploaded_by`, `uploaded_on` and
+`retrievable` (false for anything over the default size cap); plus `count`,
+`total_size` and `total_size_human`.
+
+**Refused** unless the acting user may `read` the parent document. Listing what
+is attached to a document you cannot read is itself a leak — filenames alone
+often say enough.
+
+---
+
+## 18. `get_attachment_content`
+
+**Arguments:** `name` (required — the **File docname**, not the filename),
+`max_bytes` (optional; default 2097152, hard ceiling 8388608).
+
+**Returns** `file_name`, `file_url`, `is_private`, `attached_to_doctype`,
+`attached_to_name`, `uploaded_by`, `uploaded_on`, `file_size`, `size_human`,
+`mime_type`, `encoding` (`"base64"`) and `content_base64`.
+
+**Authorization**, in three cases: attached to a document → the parent's `read`
+permission decides; unattached and private → only its owner or a System Manager;
+public and unattached → readable. The File doctype's own `has_permission` is
+consulted as well, so a site that has customised file access keeps it.
+
+**Size.** Base64 inflates by a third and a token is roughly four characters, so a
+2 MB file is on the order of 700k tokens. The cap is a guard against a hung
+request, not a suggestion. A stale `file_size` does not get past it — the bytes
+on disk are re-checked after reading.
+
+```
+payroll-export.csv is 5.0 MB, over the 2.0 MB cap. Raise max_bytes (hard ceiling
+8.0 MB), or fetch it from /private/files/payroll-export.csv. Base64 inflates
+content by a third, so anything past a few hundred kilobytes will not fit in a
+model's context anyway.
+```
+
+---
+
+# Comment and task tools
+
+## 19. `list_comments`
+
+**Arguments:** `doctype` (required), `name` (required), `comment_type`
+(optional), `limit` (optional).
+
+**Returns** `comments[]` with `comment_type`, `content`, `author`, `added_on`;
+plus `count` and `by_comment_type`.
+
+Frappe keeps framework chatter in the same table as things people typed.
+`comment_type: "Comment"` is a human remark; `Info`, `Assigned`, `Workflow`,
+`Edit` and friends are generated. Filter on it.
+
+**Refused** unless the acting user may `read` the document.
+
+---
+
+## 20. `list_assigned_todos`
+
+**Arguments:** `user` (optional), `status` (optional — `Open` by default; pass an
+empty string for every status), `limit` (optional).
+
+**Returns** `todos[]` with `assigned_to` (normalised), `status`, `priority`,
+`date`, `description`, `reference_type`, `reference_name` and `overdue`; plus
+`count`, `overdue_count` and `assignee_field`.
+
+**A naming trap, handled.** Frappe's `owner` is whoever *created* the ToDo; the
+assignee is `allocated_to` (and was `owner` on versions before that field
+existed). The response carries both plus a normalised `assigned_to`, and
+`assignee_field` says which column this site actually uses.
+
+---
+
+# HR tools
+
+**Only present where the `hrms` app is installed.** On a site without it these
+three are not advertised in `tools/list` and cannot be called.
+
+---
+
+## 21. `list_employees`
+
+**Arguments:** `status` (default `Active`; empty for all), `department`,
+`designation`, `company`, `limit`.
+
+**Returns** `employees[]` with `name` (the `HR-EMP-…` docname the other HR tools
+want), `employee_name`, `employee_number`, `department`, `designation`, `status`,
+`date_of_joining`; plus `count` and `by_department`.
+
+---
+
+## 22. `get_attendance_summary`
+
+**Arguments:** `from_date` (required), `to_date` (required), `employee`
+(optional — docname, employee number, name or user id), `department` (optional).
+
+**Returns** `employees[]`, each with `counts` keyed by every status seen on the
+site plus the standard five, and `total_marked`; plus site-wide `totals`,
+`records_counted` and `statuses[]`.
+
+Aggregated, not day-by-day: a month for a team of forty is 1,200 rows that say
+what a count says. Counts **submitted** Attendance only — a draft row is not
+evidence anybody turned up. Days with no Attendance record at all are absent from
+the counts rather than counted as Absent.
+
+**Example**
+
+```json
+{"name": "get_attendance_summary",
+ "arguments": {"from_date": "2026-06-01", "to_date": "2026-06-30",
+               "department": "Operations"}}
+```
+
+```json
+{
+  "from_date": "2026-06-01",
+  "to_date": "2026-06-30",
+  "employees": [
+    {"employee": "HR-EMP-00001", "employee_name": "Ada Orchard",
+     "department": "Operations",
+     "counts": {"Absent": 0, "Half Day": 0, "On Leave": 1, "Present": 19,
+                "Work From Home": 2},
+     "total_marked": 22}
+  ],
+  "employee_count": 1,
+  "totals": {"Absent": 0, "Half Day": 0, "On Leave": 1, "Present": 19, "Work From Home": 2},
+  "records_counted": 22,
+  "statuses": ["Absent", "Half Day", "On Leave", "Present", "Work From Home"]
+}
+```
+
+---
+
+## 23. `get_leave_balance`
+
+**Arguments:** `employee` (required), `leave_type` (optional — omit for every
+type the employee has an allocation for), `as_of` (optional, defaults to today).
+
+**Returns** `balances[]` of `{leave_type, balance}`, `total_balance`,
+`computed_via`, and `failed[]` if one leave type errored.
+
+Computed by HR's own `get_leave_balance_on`, which nets allocations against
+applications and handles carry-forward and expiry. Do not reproduce this by
+subtracting: those rules are the entire difficulty of the question. If the site's
+HR app does not export the function, the tool refuses and points at the Leave
+Balance report via `run_report` rather than guessing.
+
+Only leave types with an allocation covering `as_of` are included — a balance for
+a type nobody allocated is always zero and only adds noise. One misconfigured
+type lands in `failed[]` without losing the others.
+
+---
+
+# Sales and purchasing tools
+
+## 24. `list_sales_orders`
+
+**Arguments:** `status`, `from_date`, `to_date`, `customer`, `company`, `limit`.
+
+**Returns** `orders[]` with `customer`, `transaction_date`, `delivery_date`,
+`grand_total`, `currency`, `status`, `per_delivered`, `per_billed`,
+`docstatus_label`; plus `count`, `total_value` (of the rows returned — a partial
+figure when `truncated`), and `by_status`.
+
+---
+
+## 25. `get_outstanding_invoices`
+
+Submitted Sales Invoices with `outstanding_amount > 0`, aged against a date.
+
+**Arguments:** `customer`, `company`, `as_of` (defaults to today), `limit`.
+
+**Returns** `invoices[]`, each with `days_overdue` and `ageing_bucket`; plus
+`total_outstanding` and `buckets` totalling count and outstanding per bucket.
+
+**Buckets:** `current` (not yet due), `0-30`, `31-60`, `61-90`, `90+`, and
+`unknown` (no `due_date`). `days_overdue = as_of - due_date`.
+
+`current` exists because folding not-yet-due invoices into `0-30` makes an AR
+summary look worse than the business is — an invoice issued yesterday on 30-day
+terms is zero days of exposure, not thirty. `unknown` exists because an invoice
+nobody put terms on is a real problem, and hiding it in `current` is how it stays
+one.
+
+**Example**
+
+```json
+{"name": "get_outstanding_invoices",
+ "arguments": {"company": "Example Trading Co", "as_of": "2026-07-25"}}
+```
+
+```json
+{
+  "invoices": [
+    {"name": "ACC-SINV-2026-00005", "customer": "Westbrook Cafe",
+     "posting_date": "2025-12-02", "due_date": "2026-01-02",
+     "grand_total": 5000.0, "outstanding_amount": 5000.0, "currency": "USD",
+     "days_overdue": 204, "ageing_bucket": "90+"}
+  ],
+  "count": 1,
+  "as_of": "2026-07-25",
+  "total_outstanding": 5000.0,
+  "buckets": {
+    "current": {"count": 0, "outstanding": 0.0},
+    "0-30": {"count": 0, "outstanding": 0.0},
+    "31-60": {"count": 0, "outstanding": 0.0},
+    "61-90": {"count": 0, "outstanding": 0.0},
+    "90+": {"count": 1, "outstanding": 5000.0},
+    "unknown": {"count": 0, "outstanding": 0.0}
+  },
+  "bucket_definition": "days_overdue = as_of - due_date. 'current' is not yet due (days_overdue <= 0); '0-30', '31-60', '61-90' and '90+' are days past due; 'unknown' is an invoice with no due_date."
+}
+```
+
+---
+
+## 26. `list_purchase_orders`
+
+The mirror of `list_sales_orders`, with the nouns swapped: `supplier` instead of
+`customer`, `schedule_date` instead of `delivery_date`, `per_received` instead of
+`per_delivered`.
+
+**Arguments:** `status`, `from_date`, `to_date`, `supplier`, `company`, `limit`.
+
+---
+
+# Site-customisation tools
+
+## 27. `list_custom_fields`
+
+The "why is my custom field not showing up" tool.
+
+**Arguments:** `doctype` (optional), `limit` (optional).
+
+**Returns** `custom_fields[]` in form order with `dt`, `fieldname`, `label`,
+`fieldtype`, `options`, `insert_after`, `idx`, `reqd`, `hidden`, `read_only`,
+`depends_on`, `default`; plus `count` and `by_doctype`.
+
+A field that will not appear is usually hidden, gated by `depends_on`, or
+inserted after a fieldname that does not exist on this version — all three are
+visible in the response.
+
+---
+
+## 28. `list_client_scripts`
+
+**Arguments:** `doctype` (optional), `enabled` (default `true`; `false` for
+disabled only, `"any"` for both), `limit` (optional).
+
+**Returns** `client_scripts[]` with `dt`, `view`, `enabled`, `script_preview`
+(first 500 characters), `script_length` and `script_truncated`; plus
+`source_doctype` (`Client Script`, or `Custom Script` on pre-v13 sites) and
+`preview_chars`.
+
+The full body is never returned. Thousands of lines of form JavaScript is
+expensive and rarely the question; the useful facts are which doctype, which
+view, and whether it is on.
+
 
 ---
 
 # Mutating tools
 
-**All five are OFF on a fresh install** and stay off until an operator ticks the
+**All seven are OFF on a fresh install** and stay off until an operator ticks the
 matching `allow_<tool>` box in ERPNext MCP Settings. A call to a switched-off tool
 is refused by name, before its arguments are looked at, and logged as `Blocked`:
 
@@ -497,7 +1090,7 @@ dimensions and `on_submit` hooks all apply. There is no raw SQL.
 
 ---
 
-## 11. `create_journal_entry`
+## 29. `create_journal_entry`
 
 Creates a **draft** — `docstatus=0`, affecting no balance. It cannot submit, and
 there is no argument that makes it.
@@ -567,7 +1160,7 @@ debits (1450.0) do not equal credits (1400.0); difference 50.0. Nothing was crea
 
 ---
 
-## 12. `submit_journal_entry`
+## 30. `submit_journal_entry`
 
 `docstatus 0 → 1`. **This writes GL Entries and moves balances.**
 
@@ -606,7 +1199,7 @@ Audit row: `docstatus_delta = "0 → 1 (submitted)"`.
 
 ---
 
-## 13. `cancel_journal_entry`
+## 31. `cancel_journal_entry`
 
 `docstatus 1 → 2`, writing reversing GL Entries. Nothing is deleted.
 
@@ -646,7 +1239,7 @@ Annotated `destructiveHint: true` — the only tool in the catalogue that is.
 
 ---
 
-## 14. `create_bank_transaction`
+## 32. `create_bank_transaction`
 
 Inserts a **draft** Bank Transaction. `amount` is signed as a human reads a
 statement: positive money in, negative money out, mapped onto whichever columns
@@ -698,7 +1291,7 @@ ERPNext, and this app ships no tool for it.
 
 ---
 
-## 15. `reconcile_bank_transaction`
+## 33. `reconcile_bank_transaction`
 
 Attaches payment vouchers to a Bank Transaction.
 
@@ -766,13 +1359,136 @@ allocating 3000.0 would exceed Bank Transaction BT-2026-00412's remaining 2400.0
 
 ---
 
+## 34. `advance_workflow`
+
+**MUTATING (default OFF).** Take a workflow action on a document.
+
+Runs `frappe.model.workflow.apply_workflow`, the same code path the Desk button
+uses — so the state change, any `update_field` the target state sets, the
+docstatus change and the resulting submit or cancel all happen exactly as they
+would for a human. **A transition into a state with `doc_status: 1` submits the
+document.** There is no fallback: on a Frappe that does not export
+`apply_workflow`, this refuses rather than hand-rolling a state write.
+
+**Arguments:** `doctype` (required), `name` (required), `action` (required — the
+transition's action label, exactly as `list_available_actions` reports it).
+
+**Returns** `action`, `user`, `state_before`, `state_after`, `docstatus_before`,
+`docstatus_after`, `docstatus_label`.
+
+**Refused** — with the available actions listed — if the action is not open to
+the acting user in the document's current state. The check runs through the same
+resolution `list_available_actions` uses, so the self-approval rule and any
+condition apply.
+
+**Example**
+
+```json
+{"name": "advance_workflow",
+ "arguments": {"doctype": "Purchase Order", "name": "PUR-ORD-2026-00184",
+               "action": "Approve"}}
+```
+
+```json
+{
+  "doctype": "Purchase Order",
+  "name": "PUR-ORD-2026-00184",
+  "workflow": "Purchase Order Approval",
+  "action": "Approve",
+  "user": "mcp@example.com",
+  "state_before": "Pending Approval",
+  "state_after": "Approved",
+  "docstatus_before": 0,
+  "docstatus_after": 1,
+  "docstatus_label": "submitted"
+}
+```
+
+Audit row: `docstatus_delta = "0 → 1 (submitted)"`.
+
+Refusal:
+
+```
+'Approve' is not available to mcp@example.com on Purchase Order
+PUR-ORD-2026-00184 in state 'Pending Approval'. Available: Reject.
+```
+
+---
+
+## 35. `create_todo`
+
+**MUTATING (default OFF).** Assign a ToDo to a user, optionally against a
+document.
+
+The gentlest write in the catalogue — it touches no ledger and submits nothing —
+but it does put an item in somebody's queue and notify them, which is why it is
+still off by default.
+
+**Arguments**
+
+| Name | Required | Notes |
+| --- | --- | --- |
+| `subject` | yes | One-line summary |
+| `owner` | yes | The User it is assigned **to**. Must exist and be enabled |
+| `description` | no | Longer detail, appended below the subject |
+| `priority` | no | `Low`, `Medium` (default), `High` |
+| `reference_doctype` | no | Pass with `reference_name` or not at all |
+| `reference_name` | no | |
+| `date` | no | Due date, `YYYY-MM-DD` |
+
+**Two naming traps, both handled.** `owner` is the argument name because that is
+what a caller means by "assign it to them" — it is written to `allocated_to`,
+the assignee field, not to Frappe's `owner`, which is the creator. And stock ToDo
+has no `subject` field, so `subject` becomes the first line of `description`
+(and is set on a real `subject` field on sites that added one). The response's
+`assignee_field` and `subject_handling` say what actually happened, so the caller
+is never left guessing where its text went.
+
+**Returns** `name`, `assigned_to`, `assignee_field`, `assigned_by`, `subject`,
+`status`, `priority`, `date`, `reference_type`, `reference_name`,
+`subject_handling`.
+
+**Example**
+
+```json
+{"name": "create_todo",
+ "arguments": {"subject": "Chase Westbrook Cafe — 204 days overdue",
+               "owner": "avi@example.com", "priority": "High",
+               "reference_doctype": "Sales Invoice",
+               "reference_name": "ACC-SINV-2026-00005",
+               "date": "2026-08-01"}}
+```
+
+```json
+{
+  "name": "abc123def4",
+  "assigned_to": "avi@example.com",
+  "assignee_field": "allocated_to",
+  "assigned_by": "mcp@example.com",
+  "subject": "Chase Westbrook Cafe — 204 days overdue",
+  "status": "Open",
+  "priority": "High",
+  "date": "2026-08-01",
+  "reference_type": "Sales Invoice",
+  "reference_name": "ACC-SINV-2026-00005",
+  "subject_handling": "folded into description (ToDo has no subject field)"
+}
+```
+
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
 
-1. A handler in `erpnext_mcp/tools/read.py` or `erpnext_mcp/tools/mutate.py`
-   returning a `ToolResult(data, summary, docstatus_delta="")`.
-2. An entry in `TOOLS` in `erpnext_mcp/registry.py`.
+1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
+   `workflow`, `reports`, `files`, `collab`, `hr`, `trade` or `meta` — returning
+   a `ToolResult(data, summary, docstatus_delta="")`.
+2. An entry in `TOOLS` in `erpnext_mcp/registry.py`. If the tool needs something
+   not every site has, give it an `available` predicate and a `requires`
+   sentence; a tool that is advertised and always fails is worse than one that
+   is absent.
 
 Then add an `allow_<tool_name>` Check field to the ERPNext MCP Settings doctype —
 default `"1"` for a read tool, `"0"` for a mutating one. The standalone test

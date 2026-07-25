@@ -126,9 +126,7 @@ def handle_message(message: dict, caller_ip: str = ""):
 
 def _initialize(params: dict) -> dict:
 	requested = str(params.get("protocolVersion") or "").strip()
-	negotiated = (
-		requested if requested in SUPPORTED_PROTOCOL_VERSIONS else PREFERRED_PROTOCOL_VERSION
-	)
+	negotiated = requested if requested in SUPPORTED_PROTOCOL_VERSIONS else PREFERRED_PROTOCOL_VERSION
 	return {
 		"protocolVersion": negotiated,
 		"capabilities": {"tools": {"listChanged": False}},

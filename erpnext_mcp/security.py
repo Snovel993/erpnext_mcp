@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The transport gates: master switch, bearer token, network allowlist.
+"""The transport gates: master switch, auth token, network allowlist.
 
 Three checks run before any tool is looked up, in this order, and all three
 must pass:
@@ -8,9 +8,10 @@ must pass:
      should be indistinguishable from an app that was never installed, so a
      scanner learns nothing from probing the path.
 
-  2. BEARER TOKEN. Compared with `hmac.compare_digest`, so the comparison takes
-     the same time whatever the guess. No token configured → 404 as well; there
-     is no state in which this endpoint answers without a secret.
+  2. TOKEN. Presented as `X-MCP-Token`, compared with `hmac.compare_digest` so
+     the comparison takes the same time whatever the guess. No token configured
+     → 404 as well; there is no state in which this endpoint answers without a
+     secret.
 
   3. NETWORK ALLOWLIST. The caller's IP must fall inside one of the CIDRs in
      settings, OR the request must come from a browser page on this very site
@@ -35,7 +36,7 @@ one the nearest proxy appended itself, which a client cannot forge — and falls
 back to `remote_addr` when the header is absent. That is correct for the
 one-reverse-proxy topology every stock Frappe deployment has. Behind two or
 more proxy layers the rightmost entry is an inner proxy rather than the client,
-and the CIDR gate stops being meaningful: on that topology rely on the bearer
+and the CIDR gate stops being meaningful: on that topology rely on the auth
 token plus a firewall rule, per docs/security.md.
 """
 
@@ -60,22 +61,18 @@ def authorize() -> str:
 	ip = caller_ip()
 
 	if not settings.is_enabled():
-		raise AuthError(
-			"not found", http_status=404, log_reason="master switch (enabled) is off"
-		)
+		raise AuthError("not found", http_status=404, log_reason="master switch (enabled) is off")
 
 	configured = settings.auth_token()
 	if not configured:
-		raise AuthError(
-			"not found", http_status=404, log_reason="no auth_token configured"
-		)
+		raise AuthError("not found", http_status=404, log_reason="no auth_token configured")
 
 	presented = presented_token()
 	if not presented or not hmac.compare_digest(presented, configured):
 		raise AuthError(
 			_OPAQUE,
 			http_status=401,
-			log_reason="bearer token missing or incorrect",
+			log_reason="auth token missing or incorrect",
 		)
 
 	if not _network_allowed(ip):
@@ -89,23 +86,31 @@ def authorize() -> str:
 
 
 def presented_token() -> str:
-	"""The token the caller presented, from either accepted header.
+	"""The token the caller presented. `X-MCP-Token` first, `Bearer` accepted.
 
-	`Authorization: Bearer <token>` is the MCP norm and what every client sends
-	by default, so it is the primary. `X-MCP-Token: <token>` is accepted as
-	well because Frappe's own auth layer inspects `Authorization` first and
-	routes a `Bearer` value into its OAuth2 validator: an unknown token is
-	swallowed there and the request continues as Guest (which is what we want),
-	but that is incidental framework behaviour rather than a promise. The second
-	header is the supported escape hatch if a Frappe version ever starts
-	rejecting unknown bearer tokens outright. See docs/security.md.
+	`Authorization: Bearer <token>` is the MCP norm, and it is NOT the primary
+	header here, for a reason found the hard way on a live v15 site: Frappe's own
+	auth layer inspects `Authorization` before any whitelisted method runs, and
+	routes a `Bearer` value into its OAuth2 validator. A token that is not an
+	OAuth Bearer Token does not survive that trip intact on every version, so a
+	perfectly correct MCP client can arrive here with nothing to present.
+
+	`X-MCP-Token` is a header Frappe has no opinion about, so it reaches this
+	function exactly as the client sent it. It is what the README, the settings
+	form and the Claude Desktop example all use.
+
+	`Authorization: Bearer` is still accepted second, because it costs nothing
+	and it is what a client will try by default. On a site where Frappe leaves it
+	alone, it works. Where it does not, the failure is a 401 rather than
+	something subtler — see docs/security.md.
 	"""
+	token = (frappe.get_request_header("X-MCP-Token") or "").strip()
+	if token:
+		return token
 	header = frappe.get_request_header("Authorization") or ""
 	if header[:7].lower() == "bearer ":
-		token = header[7:].strip()
-		if token:
-			return token
-	return (frappe.get_request_header("X-MCP-Token") or "").strip()
+		return header[7:].strip()
+	return ""
 
 
 def caller_ip() -> str:

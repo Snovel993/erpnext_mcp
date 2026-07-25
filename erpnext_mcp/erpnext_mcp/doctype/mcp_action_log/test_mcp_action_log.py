@@ -43,9 +43,7 @@ class TestMCPActionLog(BaseTestCase):
 		reloaded.result_summary = "tampered"
 		with self.assertRaises(frappe.ValidationError):
 			reloaded.save(ignore_permissions=True)
-		self.assertEqual(
-			frappe.db.get_value(audit.LOG_DOCTYPE, doc.name, "result_summary"), "original"
-		)
+		self.assertEqual(frappe.db.get_value(audit.LOG_DOCTYPE, doc.name, "result_summary"), "original")
 
 	def test_a_row_can_still_be_deleted_so_the_log_can_be_pruned(self):
 		"""Deletion is the intended escape valve, and Frappe records it in
@@ -56,9 +54,7 @@ class TestMCPActionLog(BaseTestCase):
 
 	def test_result_status_is_constrained_to_the_four_outcomes(self):
 		options = frappe.get_meta(audit.LOG_DOCTYPE).get_field("result_status").options
-		self.assertEqual(
-			options.split("\n"), ["Success", "Error", "Blocked", "Unauthorized"]
-		)
+		self.assertEqual(options.split("\n"), ["Success", "Error", "Blocked", "Unauthorized"])
 
 	def test_the_doctype_does_not_write_version_rows(self):
 		doc = self.row()
@@ -76,14 +72,10 @@ class TestMCPActionLog(BaseTestCase):
 			caller_ip="127.0.0.1",
 		)
 		self.assertIsNotNone(name)
-		self.assertEqual(
-			frappe.db.get_value(audit.LOG_DOCTYPE, name, "result_status"), "Success"
-		)
+		self.assertEqual(frappe.db.get_value(audit.LOG_DOCTYPE, name, "result_status"), "Success")
 
 	def test_audit_record_redacts_secret_looking_arguments(self):
-		name = audit.record(
-			"hypothetical", {"api_key": "sk-live-abc"}, audit.STATUS_SUCCESS
-		)
+		name = audit.record("hypothetical", {"api_key": "sk-live-abc"}, audit.STATUS_SUCCESS)
 		self.assertIn(
 			"***redacted***",
 			frappe.db.get_value(audit.LOG_DOCTYPE, name, "arguments_json"),

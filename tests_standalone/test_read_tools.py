@@ -12,6 +12,20 @@ from .fixtures import (
 )
 from .harness import INSTALLED_DOCTYPES, STORE
 
+#: The ten read tools v0.1.0 shipped — what the no-write snapshot below covers.
+ACCOUNTING_READ_TOOLS = (
+	"get_company_topology",
+	"get_account_balance",
+	"get_journal_entries",
+	"get_journal_entry",
+	"list_bank_transactions",
+	"get_bank_statement",
+	"list_fiscal_years",
+	"get_chart_of_accounts",
+	"list_unreconciled_bank_transactions",
+	"search_accounts",
+)
+
 
 class Topology(SeededTestCase):
 	def test_reports_both_companies_with_their_roots(self):
@@ -20,9 +34,7 @@ class Topology(SeededTestCase):
 		names = [company["name"] for company in data["companies"]]
 		self.assertEqual(names, [MAIN, OTHER])
 		main = data["companies"][0]
-		self.assertEqual(
-			main["root_types"], ["Asset", "Expense", "Income", "Liability"]
-		)
+		self.assertEqual(main["root_types"], ["Asset", "Expense", "Income", "Liability"])
 
 	def test_reports_the_default_cost_center_under_whichever_fieldname(self):
 		data = self.tool_data("get_company_topology")
@@ -50,9 +62,7 @@ class Topology(SeededTestCase):
 
 class AccountBalance(SeededTestCase):
 	def test_sums_the_ledger_up_to_the_as_of_date(self):
-		data = self.tool_data(
-			"get_account_balance", {"account": cash(), "as_of": "2026-06-30"}
-		)
+		data = self.tool_data("get_account_balance", {"account": cash(), "as_of": "2026-06-30"})
 		self.assertEqual(data["total_debit"], 1000)
 		self.assertEqual(data["total_credit"], 250)
 		self.assertEqual(data["balance"], 750)
@@ -60,34 +70,24 @@ class AccountBalance(SeededTestCase):
 	def test_excludes_cancelled_gl_entries(self):
 		"""The 9999 debit in the fixture is cancelled. Including it is the single
 		easiest way to compute a wrong balance."""
-		data = self.tool_data(
-			"get_account_balance", {"account": cash(), "as_of": "2026-06-30"}
-		)
+		data = self.tool_data("get_account_balance", {"account": cash(), "as_of": "2026-06-30"})
 		self.assertEqual(data["gl_entry_count"], 2)
 		self.assertNotEqual(data["balance"], 750 + 9999)
 
 	def test_later_entries_are_excluded_by_as_of(self):
-		early = self.tool_data(
-			"get_account_balance", {"account": cash(), "as_of": "2026-06-30"}
-		)
-		late = self.tool_data(
-			"get_account_balance", {"account": cash(), "as_of": "2026-12-31"}
-		)
+		early = self.tool_data("get_account_balance", {"account": cash(), "as_of": "2026-06-30"})
+		late = self.tool_data("get_account_balance", {"account": cash(), "as_of": "2026-12-31"})
 		self.assertEqual(early["balance"], 750)
 		self.assertEqual(late["balance"], 1250)
 
 	def test_asset_balance_natural_matches_the_raw_balance(self):
-		data = self.tool_data(
-			"get_account_balance", {"account": cash(), "as_of": "2026-06-30"}
-		)
+		data = self.tool_data("get_account_balance", {"account": cash(), "as_of": "2026-06-30"})
 		self.assertEqual(data["balance"], data["balance_natural"])
 
 	def test_income_balance_natural_is_flipped(self):
 		"""A credit balance on an Income account is normal, and must not be
 		reported as a negative number a model will read as a loss."""
-		data = self.tool_data(
-			"get_account_balance", {"account": sales(), "as_of": "2026-06-30"}
-		)
+		data = self.tool_data("get_account_balance", {"account": sales(), "as_of": "2026-06-30"})
 		self.assertEqual(data["balance"], -1000)
 		self.assertEqual(data["balance_natural"], 1000)
 
@@ -104,7 +104,7 @@ class AccountBalance(SeededTestCase):
 		self.assertEqual(data["account"], cash())
 
 	def test_an_ambiguous_name_lists_the_candidates(self):
-		""""Cash" exists in both companies. Guessing one would be worse than
+		""" "Cash" exists in both companies. Guessing one would be worse than
 		asking."""
 		message = self.tool_error("get_account_balance", {"account": "Cash"})
 		self.assertIn("matches 2 accounts", message)
@@ -115,15 +115,11 @@ class AccountBalance(SeededTestCase):
 		self.assertIn("search_accounts", message)
 
 	def test_an_account_from_the_wrong_company_is_refused(self):
-		message = self.tool_error(
-			"get_account_balance", {"account": cash(), "company": OTHER}
-		)
+		message = self.tool_error("get_account_balance", {"account": cash(), "company": OTHER})
 		self.assertIn("belongs to company", message)
 
 	def test_a_group_account_says_so(self):
-		data = self.tool_data(
-			"get_account_balance", {"account": "Current Assets", "company": MAIN}
-		)
+		data = self.tool_data("get_account_balance", {"account": "Current Assets", "company": MAIN})
 		self.assertTrue(data["is_group"])
 		self.assertIn("group account", data["note"])
 
@@ -134,21 +130,15 @@ class AccountBalance(SeededTestCase):
 
 class JournalEntries(SeededTestCase):
 	def test_lists_headers_in_a_date_range_newest_first(self):
-		data = self.tool_data(
-			"get_journal_entries", {"from_date": "2026-01-01", "to_date": "2026-12-31"}
-		)
+		data = self.tool_data("get_journal_entries", {"from_date": "2026-01-01", "to_date": "2026-12-31"})
 		self.assertEqual(
 			[row["name"] for row in data["journal_entries"]],
 			["ACC-JV-2026-00002", "ACC-JV-2026-00001"],
 		)
 
 	def test_range_excludes_earlier_years(self):
-		data = self.tool_data(
-			"get_journal_entries", {"from_date": "2026-01-01", "to_date": "2026-12-31"}
-		)
-		self.assertNotIn(
-			"ACC-JV-2025-00009", [row["name"] for row in data["journal_entries"]]
-		)
+		data = self.tool_data("get_journal_entries", {"from_date": "2026-01-01", "to_date": "2026-12-31"})
+		self.assertNotIn("ACC-JV-2025-00009", [row["name"] for row in data["journal_entries"]])
 
 	def test_filters_by_docstatus_word_or_number(self):
 		by_word = self.tool_data(
@@ -159,15 +149,11 @@ class JournalEntries(SeededTestCase):
 			"get_journal_entries",
 			{"from_date": "2020-01-01", "to_date": "2030-01-01", "docstatus": 0},
 		)
-		self.assertEqual(
-			[row["name"] for row in by_word["journal_entries"]], ["ACC-JV-2026-00002"]
-		)
+		self.assertEqual([row["name"] for row in by_word["journal_entries"]], ["ACC-JV-2026-00002"])
 		self.assertEqual(by_word["journal_entries"], by_number["journal_entries"])
 
 	def test_labels_the_docstatus(self):
-		data = self.tool_data(
-			"get_journal_entries", {"from_date": "2026-01-01", "to_date": "2026-12-31"}
-		)
+		data = self.tool_data("get_journal_entries", {"from_date": "2026-01-01", "to_date": "2026-12-31"})
 		labels = {row["name"]: row["docstatus_label"] for row in data["journal_entries"]}
 		self.assertEqual(labels["ACC-JV-2026-00001"], "submitted")
 		self.assertEqual(labels["ACC-JV-2026-00002"], "draft")
@@ -177,9 +163,7 @@ class JournalEntries(SeededTestCase):
 			"get_journal_entries",
 			{"from_date": "2020-01-01", "to_date": "2030-01-01", "account": sales()},
 		)
-		self.assertEqual(
-			[row["name"] for row in data["journal_entries"]], ["ACC-JV-2026-00001"]
-		)
+		self.assertEqual([row["name"] for row in data["journal_entries"]], ["ACC-JV-2026-00001"])
 
 	def test_an_account_no_entry_touches_returns_empty_not_everything(self):
 		data = self.tool_data(
@@ -193,9 +177,7 @@ class JournalEntries(SeededTestCase):
 		self.assertEqual(data["count"], 0)
 
 	def test_inverted_date_range_is_refused(self):
-		message = self.tool_error(
-			"get_journal_entries", {"from_date": "2026-12-31", "to_date": "2026-01-01"}
-		)
+		message = self.tool_error("get_journal_entries", {"from_date": "2026-12-31", "to_date": "2026-01-01"})
 		self.assertIn("is after", message)
 
 	def test_limit_is_capped_and_truncation_is_reported(self):
@@ -220,9 +202,7 @@ class JournalEntries(SeededTestCase):
 		self.assertIn("YYYY-MM-DD", message)
 
 	def test_a_loose_date_is_normalised_rather_than_rejected(self):
-		data = self.tool_data(
-			"get_journal_entries", {"from_date": "2026-1-1", "to_date": "2026-12-31"}
-		)
+		data = self.tool_data("get_journal_entries", {"from_date": "2026-1-1", "to_date": "2026-12-31"})
 		self.assertEqual(data["filters"]["from_date"], "2026-01-01")
 
 
@@ -277,9 +257,7 @@ class BankTransactions(SeededTestCase):
 
 class Unreconciled(SeededTestCase):
 	def test_lists_only_transactions_with_money_left(self):
-		data = self.tool_data(
-			"list_unreconciled_bank_transactions", {"bank_account": BANK_ACCOUNT}
-		)
+		data = self.tool_data("list_unreconciled_bank_transactions", {"bank_account": BANK_ACCOUNT})
 		self.assertEqual([row["name"] for row in data["unreconciled"]], ["BT-2026-0001"])
 		self.assertEqual(data["unreconciled"][0]["unallocated_amount_effective"], 1000)
 		self.assertEqual(data["unallocated_source"], "column")
@@ -292,9 +270,7 @@ class Unreconciled(SeededTestCase):
 		meta = META["Bank Transaction"]
 		removed = meta._by_name.pop("unallocated_amount")
 		try:
-			data = self.tool_data(
-				"list_unreconciled_bank_transactions", {"bank_account": BANK_ACCOUNT}
-			)
+			data = self.tool_data("list_unreconciled_bank_transactions", {"bank_account": BANK_ACCOUNT})
 			self.assertEqual([row["name"] for row in data["unreconciled"]], ["BT-2026-0001"])
 			self.assertEqual(data["unallocated_source"], "computed (gross - allocated)")
 			self.assertEqual(data["unreconciled"][0]["unallocated_amount_effective"], 1000)
@@ -307,11 +283,16 @@ class BankStatement(SeededTestCase):
 		data = self.tool_data("get_bank_statement", {"name": "BS-2026-01"})
 		self.assertEqual(data["closing_balance"], 1000)
 
+	def test_is_not_advertised_on_a_site_without_the_doctype(self):
+		INSTALLED_DOCTYPES.discard("Bank Statement")
+		body, _ = self.call("tools/list")
+		self.assertNotIn("get_bank_statement", [tool["name"] for tool in body["result"]["tools"]])
+
 	def test_degrades_politely_on_a_site_without_the_doctype(self):
 		INSTALLED_DOCTYPES.discard("Bank Statement")
 		message = self.tool_error("get_bank_statement", {"name": "BS-2026-01"})
-		self.assertIn("not installed on this site", message)
-		self.assertIn("get_company_topology", message)
+		self.assertIn("not available on this site", message)
+		self.assertIn("Bank Statement DocType", message)
 
 
 class FiscalYears(SeededTestCase):
@@ -348,17 +329,13 @@ class ChartOfAccounts(SeededTestCase):
 	def test_root_type_filter_reparents_orphans_to_the_top(self):
 		"""Filtering to Income cuts the group above the leaf, so the leaf has to
 		surface rather than vanish."""
-		data = self.tool_data(
-			"get_chart_of_accounts", {"company": MAIN, "root_type": "Income"}
-		)
+		data = self.tool_data("get_chart_of_accounts", {"company": MAIN, "root_type": "Income"})
 		names = [node["account_name"] for node in data["accounts"]]
 		self.assertEqual(names, ["Income"])
 		self.assertEqual(data["accounts"][0]["children"][0]["account_name"], "Sales")
 
 	def test_bad_root_type_lists_the_valid_ones(self):
-		message = self.tool_error(
-			"get_chart_of_accounts", {"company": MAIN, "root_type": "Assets"}
-		)
+		message = self.tool_error("get_chart_of_accounts", {"company": MAIN, "root_type": "Assets"})
 		self.assertIn("Asset, Liability, Income, Expense, Equity", message)
 
 	def test_company_is_required_on_a_multi_company_site(self):
@@ -375,9 +352,7 @@ class ChartOfAccounts(SeededTestCase):
 class SearchAccounts(SeededTestCase):
 	def test_finds_by_substring_of_the_name(self):
 		data = self.tool_data("search_accounts", {"query": "clearing", "company": MAIN})
-		self.assertEqual(
-			[row["account_name"] for row in data["matches"]], ["Cash Clearing"]
-		)
+		self.assertEqual([row["account_name"] for row in data["matches"]], ["Cash Clearing"])
 
 	def test_ranks_an_exact_number_first(self):
 		data = self.tool_data("search_accounts", {"query": "1100", "company": MAIN})
@@ -393,9 +368,7 @@ class SearchAccounts(SeededTestCase):
 	def test_is_case_insensitive(self):
 		lower = self.tool_data("search_accounts", {"query": "cash", "company": MAIN})
 		upper = self.tool_data("search_accounts", {"query": "CASH", "company": MAIN})
-		self.assertEqual(
-			[row["name"] for row in lower["matches"]], [row["name"] for row in upper["matches"]]
-		)
+		self.assertEqual([row["name"] for row in lower["matches"]], [row["name"] for row in upper["matches"]])
 
 	def test_searches_all_companies_when_none_is_given(self):
 		data = self.tool_data("search_accounts", {"query": "clearing"})
@@ -414,9 +387,7 @@ class SearchAccounts(SeededTestCase):
 class ReadToolsDoNotWrite(SeededTestCase):
 	def test_no_read_tool_changes_a_row(self):
 		"""The whole read surface, checked against a snapshot of the site."""
-		before = {
-			doctype: len(rows) for doctype, rows in STORE.tables.items()
-		}
+		before = {doctype: len(rows) for doctype, rows in STORE.tables.items()}
 		calls = {
 			"get_company_topology": {},
 			"get_account_balance": {"account": cash(), "company": MAIN},
@@ -437,10 +408,13 @@ class ReadToolsDoNotWrite(SeededTestCase):
 		before.pop("MCP Action Log", None)
 		self.assertEqual(before, after)
 
-	def test_the_snapshot_covered_every_read_tool(self):
+	def test_the_snapshot_covered_every_accounting_read_tool(self):
+		"""The v0.1.0 ledger surface, all ten of it. Later categories have their
+		own no-write coverage in their own test modules."""
 		from erpnext_mcp import registry
 
-		self.assertEqual(len(registry.READ_TOOLS), 10)
+		self.assertEqual(len(registry.READ_TOOLS), 28)
+		self.assertTrue(set(ACCOUNTING_READ_TOOLS) <= set(registry.READ_TOOLS))
 
 
 class DisabledReadTool(SeededTestCase):

@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: MIT
+#
+# The standalone suite only. It needs no bench, no MariaDB, no redis and no
+# third-party packages — that is the whole point of the in-memory Frappe double
+# in tests_standalone/harness.py, and it is what makes CI a few seconds rather
+# than a bench build.
+#
+# The in-bench FrappeTestCase suite is NOT run here. Standing up Frappe, ERPNext
+# and a site in Actions to run it would take minutes per push and still would not
+# cover the sites that matter (an operator's own, with their own chart of
+# accounts and their own apps). Run it yourself against a dev bench before
+# tagging: `bench --site <site> run-tests --app erpnext_mcp`.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  standalone:
+    name: standalone (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install werkzeug
+        # The only third-party import in the app: erpnext_mcp.mcp returns a
+        # werkzeug Response so it can control the HTTP status. It arrives with
+        # Frappe in a real bench, so it is not a declared dependency.
+        run: python -m pip install --upgrade pip werkzeug
+
+      - name: Run the standalone suite
+        run: python -m unittest discover -s tests_standalone -t . -v
+
+      - name: Check every source file carries its SPDX header
+        run: |
+          missing=0
+          while IFS= read -r file; do
+            if ! head -3 "$file" | grep -q "SPDX-License-Identifier: MIT"; then
+              echo "missing SPDX header: $file"
+              missing=1
+            fi
+          done < <(git ls-files '*.py' '*.js' '*.yml')
+          exit $missing
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip ruff
+      - run: ruff check .
+      - run: ruff format --check .

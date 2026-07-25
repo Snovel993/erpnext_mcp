@@ -6,6 +6,7 @@ import json
 from erpnext_mcp import protocol, registry
 
 from .fixtures import SeededTestCase
+from .harness import STORE
 
 
 class Handshake(SeededTestCase):
@@ -16,9 +17,7 @@ class Handshake(SeededTestCase):
 
 	def test_initialize_answers_with_its_preferred_version_when_unknown(self):
 		body, _ = self.call("initialize", {"protocolVersion": "1999-01-01"})
-		self.assertEqual(
-			body["result"]["protocolVersion"], protocol.PREFERRED_PROTOCOL_VERSION
-		)
+		self.assertEqual(body["result"]["protocolVersion"], protocol.PREFERRED_PROTOCOL_VERSION)
 
 	def test_initialize_advertises_tools_only(self):
 		body, _ = self.call("initialize", {"protocolVersion": "2025-06-18"})
@@ -90,20 +89,43 @@ class Methods(SeededTestCase):
 
 
 class Catalogue(SeededTestCase):
-	def test_lists_every_tool_when_all_are_enabled(self):
+	def test_lists_every_available_tool_when_all_are_enabled(self):
 		self.configure(**{f"allow_{name}": 1 for name in registry.TOOLS}, enabled=1)
 		body, _ = self.call("tools/list")
 		self.assertEqual(
 			sorted(tool["name"] for tool in body["result"]["tools"]),
-			sorted(registry.TOOLS),
+			sorted(name for name in registry.TOOLS if registry.is_available(name)),
 		)
 
-	def test_default_catalogue_is_the_ten_read_tools(self):
+	def test_default_catalogue_is_every_available_read_tool(self):
 		"""Straight out of the box: everything readable, nothing writable."""
 		body, _ = self.call("tools/list")
 		names = sorted(tool["name"] for tool in body["result"]["tools"])
-		self.assertEqual(names, sorted(registry.READ_TOOLS))
-		self.assertEqual(len(names), 10)
+		self.assertEqual(names, sorted(n for n in registry.READ_TOOLS if registry.is_available(n)))
+		self.assertFalse(set(names) & set(registry.MUTATING_TOOLS))
+
+	def test_hr_tools_are_absent_without_the_hrms_app(self):
+		"""A tool that can never work here is not a tool that fails — it is a tool
+		that does not exist, and the catalogue should say so."""
+		self.configure(**{f"allow_{name}": 1 for name in registry.TOOLS}, enabled=1)
+		body, _ = self.call("tools/list")
+		names = {tool["name"] for tool in body["result"]["tools"]}
+		self.assertNotIn("get_leave_balance", names)
+		self.assertNotIn("list_employees", names)
+
+	def test_hr_tools_appear_once_hrms_is_installed(self):
+		STORE.installed_apps.append("hrms")
+		self.configure(**{f"allow_{name}": 1 for name in registry.TOOLS}, enabled=1)
+		body, _ = self.call("tools/list")
+		names = {tool["name"] for tool in body["result"]["tools"]}
+		self.assertIn("get_leave_balance", names)
+		self.assertIn("get_attendance_summary", names)
+
+	def test_an_unavailable_tool_says_it_cannot_be_switched_on(self):
+		message = self.tool_error("list_employees")
+		self.assertIn("not available on this site", message)
+		self.assertIn("hrms", message)
+		self.assertIn("not something an operator can switch on", message)
 
 	def test_disabled_tool_is_not_advertised_at_all(self):
 		self.configure(enabled=1, allow_search_accounts=0)
@@ -139,6 +161,15 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_split_is_ten_read_five_write(self):
-		self.assertEqual(len(registry.READ_TOOLS), 10)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 5)
+	def test_catalogue_is_thirty_five_tools_twenty_eight_read_seven_write(self):
+		self.assertEqual(len(registry.TOOLS), 35)
+		self.assertEqual(len(registry.READ_TOOLS), 28)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 7)
+
+	def test_every_tool_declares_why_it_might_be_unavailable(self):
+		"""A predicate with no `requires` sentence produces a refusal that says
+		nothing a caller can act on."""
+		for name, spec in registry.TOOLS.items():
+			with self.subTest(tool=name):
+				if spec["available"] is not registry._always:
+					self.assertTrue(spec["requires"], f"{name} has a predicate but no reason")

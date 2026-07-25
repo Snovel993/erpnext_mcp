@@ -40,9 +40,7 @@ def require_doctype(doctype: str, hint: str = "") -> None:
 	"""Raise a ToolError naming the missing doctype, with an actionable hint."""
 	if not doctype_exists(doctype):
 		suffix = f" {hint}" if hint else ""
-		raise ToolError(
-			f"the {doctype!r} DocType is not installed on this site.{suffix}"
-		)
+		raise ToolError(f"the {doctype!r} DocType is not installed on this site.{suffix}")
 
 
 def has_field(doctype: str, fieldname: str) -> bool:

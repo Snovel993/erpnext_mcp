@@ -12,14 +12,21 @@ client reconfiguration.
 
 ## Threat model
 
-**What is being protected.** Read access to a general ledger, and — where an
-operator has enabled it — the ability to create, post and cancel Journal Entries.
-Read access alone is serious: a chart of accounts plus balances is a fair
-description of a business's finances.
+**What is being protected.** Read access to a general ledger — and, as of v0.2.0,
+to a site's saved reports, its document attachments, its comment threads, its
+purchase-approval queue and (where Frappe HR is installed) its employee,
+attendance and leave records. Where an operator has enabled it, also the ability
+to create, post and cancel Journal Entries, take workflow actions, and assign
+work.
+
+Read access alone is serious, and got more so in v0.2.0. A chart of accounts plus
+balances is a fair description of a business's finances; add the attachments and
+you have whatever anybody uploaded against those documents, and add the HR tools
+and you have personal data about named people.
 
 **Who this defends against.**
 
-- Anyone on the network who has not been given the bearer token.
+- Anyone on the network who has not been given the auth token.
 - Anyone with the token who is calling from outside the configured CIDR range.
 - A token holder attempting an operation the operator has not enabled.
 - A model that misunderstands what it was asked to do and tries to post an
@@ -38,7 +45,7 @@ description of a business's finances.
 - **A compromised Frappe site.** If an attacker can run code on the site, this
   app's gates are the least of the problem.
 - **Traffic interception.** This app does not terminate TLS. It rides on your
-  site's existing reverse proxy; if that serves plain HTTP, the bearer token
+  site's existing reverse proxy; if that serves plain HTTP, the auth token
   crosses the network in the clear.
 
 ---
@@ -59,11 +66,11 @@ The settings form refuses to save `enabled` without a token, so the
 "enabled-but-tokenless" state only arises from a direct database edit or a
 half-finished restore — exactly when you least want the endpoint answering.
 
-### 2. Bearer token → 401
+### 2. Auth token → 401
 
-`Authorization: Bearer <token>`, compared with `hmac.compare_digest` so the
-comparison takes the same time whatever the guess. 48 hex characters (~192 bits)
-from `frappe.generate_hash`.
+`X-MCP-Token: <token>`, compared with `hmac.compare_digest` so the comparison
+takes the same time whatever the guess. 48 hex characters (~192 bits) from
+`frappe.generate_hash`.
 
 Stored in a **Password** field, which means Frappe keeps it in the encrypted auth
 table rather than in the document row. Consequences worth knowing:
@@ -78,14 +85,19 @@ table rather than in the document row. Consequences worth knowing:
   moment the new one saves, which is the behaviour you want when the reason you
   pressed the button is that the old one leaked.
 
-**On `X-MCP-Token`.** `Authorization: Bearer` is the primary header and what every
-MCP client sends. It is also the header Frappe's own auth layer inspects, and a
-`Bearer` value there is routed into Frappe's OAuth2 validator; an unknown token is
-swallowed and the request continues as Guest, which is what this app needs. That is
-incidental framework behaviour rather than a promise, so `X-MCP-Token: <token>` is
-accepted as an equivalent — the supported escape hatch if a Frappe version ever
-starts rejecting unknown bearer tokens outright. Use `Authorization` unless you
-have hit that problem.
+**Why not `Authorization: Bearer`.** That is the MCP norm, and it is deliberately
+*not* the primary header here. Frappe's own auth layer inspects `Authorization`
+before any whitelisted method runs and routes a `Bearer` value into its OAuth2
+validator; a token that is not an OAuth Bearer Token does not survive that trip
+intact on every version. This was found the hard way on a live v15 site: a
+correctly configured client arrived at the endpoint with nothing to present.
+
+`X-MCP-Token` is a header Frappe has no opinion about, so it reaches this app
+exactly as the client sent it. `Authorization: Bearer` is still accepted, second,
+because it costs nothing and it is what a client will try by default — where
+Frappe leaves it alone, it works. When both are sent, `X-MCP-Token` wins, so a
+stale `Authorization` header left over from another integration cannot override
+the one you configured.
 
 ### 3. Network allowlist → 403
 
@@ -115,7 +127,7 @@ back to `remote_addr` when the header is absent.
 
 > **If you run more than one proxy layer**, the rightmost entry is an inner proxy
 > rather than the client, and the CIDR gate stops being meaningful. On that
-> topology, rely on the bearer token plus a firewall rule (`iptables`, a security
+> topology, rely on the auth token plus a firewall rule (`iptables`, a security
 > group, a `deny` in nginx) and treat the allowlist as decoration.
 
 Note that `frappe.local.request_ip`, which the rest of Frappe uses, is the
@@ -140,7 +152,7 @@ should be able to lock them out of.
 ### Rejections are opaque
 
 Every refusal returns the same body: `unauthorized`, or `not found` for the 404
-cases. The *reason* — "bearer token missing or incorrect", "caller ip 203.0.113.7
+cases. The *reason* — "auth token missing or incorrect", "caller ip 203.0.113.7
 is outside allowed_cidrs" — goes to **MCP Action Log**, where the operator can read
 it and the caller cannot. Telling an unauthenticated caller "your IP is fine, your
 token is wrong" hands them a free oracle for exactly the two facts worth probing
@@ -150,11 +162,12 @@ for.
 
 ## Authorization inside the gates
 
-### Read tools: the token is the authorization
+### Ledger reads: the token is the authorization
 
-Read tools use `frappe.db.get_all` and `frappe.get_doc`, **neither of which
-consults Frappe role permissions.** A token holder can read everything the enabled
-read tools cover, regardless of what roles the MCP System User has.
+The accounting, workflow, trade and metadata read tools use `frappe.db.get_all`
+and `frappe.get_doc`, **neither of which consults Frappe role permissions.** A
+token holder can read everything those enabled tools cover, regardless of what
+roles the MCP System User has.
 
 This is deliberate, and you should decide whether you agree with it:
 
@@ -169,6 +182,31 @@ The granularity actually on offer is the per-tool switches. Turning
 `get_chart_of_accounts` and `search_accounts` off leaves a client able to answer
 questions about accounts it was told about and unable to go looking for others.
 If you need per-company scoping, run a second site.
+
+### Three read categories that DO enforce permissions
+
+The line is drawn at content that is not ledger data:
+
+- **Reports** (`run_report`) go through `frappe.desk.query_report.run` and
+  `frappe.desk.reportview.get`, which check the acting user's permission on the
+  report's `ref_doctype`. This is not a decision this app makes — it is what
+  those APIs do — but it has a real consequence: **a report can reach data the
+  individual read tools do not expose**, and the only thing bounding that is the
+  MCP System User's roles. If you enable `run_report`, the roles you give that
+  user are the security boundary. Give it the narrowest set that runs the reports
+  you care about.
+- **Attachments** (`list_attachments`, `get_attachment_content`) check `read` on
+  the parent document, and treat an unattached private file as its owner's. A
+  File is whatever somebody uploaded — a signed contract, a passport scan, a
+  payroll export — and `is_private` is a promise the framework makes. Handing
+  that to anyone holding an API token would be a different product.
+- **Comments** (`list_comments`) check `read` on the document, for the same
+  reason: a comment thread is what people said to each other about a document,
+  not a field of it.
+
+Yes, this is an inconsistency. It is a deliberate one, and the shape of it is:
+*numbers in the ledger are gated by the token; things a person wrote or uploaded
+are gated by Frappe.*
 
 ### Mutating tools: Frappe permissions apply in full
 
@@ -186,9 +224,14 @@ narrowest set that works — **Accounts User** is normally enough.
 
 ## Per-tool switches
 
-Fifteen tools, fifteen switches, on a form only System Manager can open.
+Thirty-five tools, thirty-five switches, on a form only System Manager can open.
+Five of the seven write switches sit in **Accounting Write Tools**; the other two
+— `advance_workflow` and `create_todo` — sit in their own category sections. The
+red banner at the top of the settings form always lists every write tool that is
+currently live, wherever its switch happens to be, and it reads that list from
+the server rather than from a copy in JavaScript.
 
-**All five mutating tools ship off.** A fresh install cannot change a single
+**All seven mutating tools ship off.** A fresh install cannot change a single
 document. A call to a disabled tool is refused *by name*, before its arguments are
 looked at, so nothing about the arguments — valid or not — can leak back. A
 disabled tool does not appear in `tools/list` either: a model cannot be tempted by
@@ -208,10 +251,37 @@ and nothing else — it cannot create the entry it submits. So:
 The middle row is the one most operators want, and it is the reason the two are
 not one tool.
 
+**`advance_workflow` deserves its own paragraph.** It is the only write tool whose
+blast radius depends on site configuration rather than on the tool: a transition
+into a state with `doc_status: 1` **submits the document**, so approving a
+Purchase Order through it does everything submitting that Purchase Order does.
+Read `list_workflows` before enabling it and check which states carry
+`doc_status: 1`. The upside is that it cannot invent a transition — it can only
+take one an operator already designed, as a user the operator chose, subject to
+the conditions the operator wrote.
+
 **Read tools are switchable too**, for surface control rather than security. An
 operator running this for bank reconciliation can turn the chart-of-accounts tools
 off and stop a client wandering through the whole ledger for context it does not
 need.
+
+### Availability is not the same as enabled
+
+Separately from the switches, a tool can declare a site prerequisite: the HR
+tools need the `hrms` app, the sales tools need ERPNext, `get_bank_statement`
+needs a doctype older versions do not ship, `list_client_scripts` needs Client
+Script (or its pre-v13 name). A tool whose prerequisite is unmet is not
+advertised in `tools/list` and cannot be called, **whatever the switches say**.
+
+The distinction is not cosmetic. A tool that is listed and always fails is a trap
+for a model, which decides what is possible from the catalogue and will keep
+trying. And the two refusals need different words: *"your operator turned this
+off"* sends somebody to go and ask, while *"this site does not have Frappe HR"*
+tells them to stop. Availability is checked before the switch, so nobody is sent
+to have a pointless conversation with an operator who could not help anyway.
+
+A predicate that raises is treated as unavailable. An availability check that
+errored is not evidence the tool would have worked.
 
 ---
 
@@ -257,6 +327,9 @@ Export first if you need the history; `before_uninstall` will remind you.
 - **Not an SSE stream.** POST-only. This server never initiates a message, so
   there is nothing for a stream to carry, and a `GET` returns a 405 saying so
   rather than an idle connection that looks like it is working.
+- **Not a per-caller identity model.** One token, one configured acting user.
+  Two clients that should see different things need two sites, or a v0.3 that
+  has per-token scopes — see the README roadmap.
 - **Not rate limited by this app.** If you want that, Frappe ships a decorator —
   add `@rate_limit(key="mcp", limit=120, seconds=60)` from `frappe.rate_limiter`
   above `handle()` in `erpnext_mcp/mcp.py`. It is left off by default because an
@@ -275,12 +348,18 @@ Export first if you need the history; `before_uninstall` will remind you.
       the narrowest one. If `create_journal_entry` is enough, do not enable
       `submit_journal_entry`.
 - [ ] Turn off any read tool the client does not need.
-- [ ] Serve the site over HTTPS. The bearer token is only as private as the
+- [ ] Serve the site over HTTPS. The auth token is only as private as the
       transport.
 - [ ] Firewall the port as well. The CIDR gate is defence in depth, not a firewall.
 - [ ] Watch **MCP Action Log** for `Unauthorized` rows — those are someone probing
       a live endpoint.
 - [ ] Rotate the token when a client machine is decommissioned. One button.
+- [ ] If you enable `run_report`, remember the MCP System User's roles are the
+      only bound on what reports can reach. Audit that user's Role Profile.
+- [ ] Decide deliberately about `get_attachment_content`. Files on an ERPNext
+      site are frequently the most sensitive thing on it.
+- [ ] Before enabling `advance_workflow`, run `list_workflows` and check which
+      target states carry `doc_status: 1` — those transitions submit documents.
 - [ ] Export the audit log before uninstalling.
 
 ## Reporting a vulnerability

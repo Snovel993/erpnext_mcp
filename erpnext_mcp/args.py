@@ -35,6 +35,20 @@ def as_str(args: dict, key: str, required: bool = False, default: str = "") -> s
 	return str(value).strip()
 
 
+def as_filter(args: dict, key: str, default: str = "") -> str:
+	"""A filter value where an explicit empty string means "no filter".
+
+	`as_str` cannot express this. It treats `""` the same as missing, so a tool
+	whose default is `"Active"` would silently override a caller who deliberately
+	passed an empty status meaning "every status" — and the tool's own
+	description promises that works. Absent → the default; present but empty →
+	no filter.
+	"""
+	if key not in args or args[key] is None:
+		return default
+	return str(args[key]).strip()
+
+
 def as_date(args: dict, key: str, required: bool = False) -> str | None:
 	"""An ISO `YYYY-MM-DD` date string, or None when absent and not required.
 
@@ -73,8 +87,15 @@ def as_float(value, key: str) -> float:
 
 
 def as_limit(args: dict, key: str = "limit") -> int:
-	"""A row limit, clamped to [1, MAX_LIMIT]."""
-	value = as_int(args, key, DEFAULT_LIMIT) or DEFAULT_LIMIT
+	"""A row limit, clamped to [1, MAX_LIMIT].
+
+	An explicit 0 clamps to 1 rather than falling back to the default: `x or
+	DEFAULT` reads nicely and quietly discards a caller's real answer, which is
+	the wrong trade when the caller is a model that may have meant it.
+	"""
+	value = as_int(args, key, DEFAULT_LIMIT)
+	if value is None:
+		value = DEFAULT_LIMIT
 	return max(1, min(MAX_LIMIT, value))
 
 
@@ -92,9 +113,7 @@ def as_docstatus(args: dict, key: str = "docstatus") -> int | None:
 		return words[raw.strip().lower()]
 	value = as_int(args, key)
 	if value not in (0, 1, 2):
-		raise ToolError(
-			f"{key} must be 0 (draft), 1 (submitted) or 2 (cancelled), got {raw!r}"
-		)
+		raise ToolError(f"{key} must be 0 (draft), 1 (submitted) or 2 (cancelled), got {raw!r}")
 	return value
 
 
@@ -121,8 +140,7 @@ def resolve_company(company: str = "", required: bool = False) -> str | None:
 		return names[0]
 	if required:
 		raise ToolError(
-			"company is required on a multi-company site. "
-			f"Known companies: {', '.join(names) or '<none>'}"
+			f"company is required on a multi-company site. Known companies: {', '.join(names) or '<none>'}"
 		)
 	return None
 
@@ -149,10 +167,7 @@ def resolve_account(account: str, company: str = "") -> str:
 	if frappe.db.exists("Account", account):
 		found = frappe.db.get_value("Account", account, ["name", "company"], as_dict=True)
 		if company and found and found["company"] != company:
-			raise ToolError(
-				f"account {account!r} belongs to company {found['company']!r}, "
-				f"not {company!r}"
-			)
+			raise ToolError(f"account {account!r} belongs to company {found['company']!r}, not {company!r}")
 		return account
 
 	for filters in (
@@ -171,10 +186,7 @@ def resolve_account(account: str, company: str = "") -> str:
 			)
 
 	scope = f" in company {company!r}" if company else ""
-	raise ToolError(
-		f"no Account matching {account!r}{scope}. "
-		"Try search_accounts to find the right name."
-	)
+	raise ToolError(f"no Account matching {account!r}{scope}. Try search_accounts to find the right name.")
 
 
 def _company_names() -> list[str]:

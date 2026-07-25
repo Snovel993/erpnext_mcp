@@ -62,7 +62,10 @@ class MCPIntegrationTestCase(BaseTestCase):
 		"""Build a real WSGI request and run the whitelisted endpoint on it."""
 		all_headers = {"Content-Type": "application/json"}
 		if token:
-			all_headers["Authorization"] = f"Bearer {token}"
+			# X-MCP-Token rather than Authorization: Bearer — Frappe's own auth
+			# layer intercepts the latter, which is why this app documents the
+			# former. See erpnext_mcp.security.presented_token.
+			all_headers["X-MCP-Token"] = token
 		all_headers.update(headers or {})
 		builder = EnvironBuilder(
 			method="POST",
@@ -260,18 +263,12 @@ class Permissions(MCPIntegrationTestCase):
 		user = self._plain_user()
 		frappe.set_user(user)
 		try:
-			self.assertFalse(
-				frappe.has_permission(audit.LOG_DOCTYPE, "read", user=user)
-			)
+			self.assertFalse(frappe.has_permission(audit.LOG_DOCTYPE, "read", user=user))
 		finally:
 			frappe.set_user("Administrator")
 
 	def test_nobody_has_write_permission_on_the_audit_log(self):
-		self.assertFalse(
-			frappe.db.get_value(
-				"DocPerm", {"parent": audit.LOG_DOCTYPE, "write": 1}, "name"
-			)
-		)
+		self.assertFalse(frappe.db.get_value("DocPerm", {"parent": audit.LOG_DOCTYPE, "write": 1}, "name"))
 
 	def test_selftest_requires_system_manager(self):
 		user = self._plain_user()
@@ -312,13 +309,16 @@ class ReadToolsAgainstTheRealSite(MCPIntegrationTestCase):
 		entry = next(c for c in data["companies"] if c["name"] == company)
 		if not entry["root_accounts"]:
 			self.skipTest(f"{company} has no chart of accounts")
-		self.assertTrue(set(entry["root_types"]) <= {
-			"Asset",
-			"Liability",
-			"Income",
-			"Expense",
-			"Equity",
-		})
+		self.assertTrue(
+			set(entry["root_types"])
+			<= {
+				"Asset",
+				"Liability",
+				"Income",
+				"Expense",
+				"Equity",
+			}
+		)
 
 	def test_a_balance_matches_a_direct_ledger_sum(self):
 		"""Compared against the query ERPNext's own General Ledger report uses, so
@@ -326,9 +326,7 @@ class ReadToolsAgainstTheRealSite(MCPIntegrationTestCase):
 		company = self.any_company()
 		account = self.leaf_accounts(company, 1)[0]
 		as_of = frappe.utils.today()
-		data = self.tool_data(
-			"get_account_balance", {"account": account, "company": company, "as_of": as_of}
-		)
+		data = self.tool_data("get_account_balance", {"account": account, "company": company, "as_of": as_of})
 		expected = frappe.db.get_all(
 			"GL Entry",
 			filters={"account": account, "posting_date": ("<=", as_of), "is_cancelled": 0},
@@ -392,9 +390,7 @@ class MutationsThroughRealERPNext(MCPIntegrationTestCase):
 		self.assertEqual(len(doc.accounts), 2)
 		self.assertEqual(doc.total_debit, 1)
 		self.assertEqual(
-			frappe.db.count(
-				"GL Entry", {"voucher_type": "Journal Entry", "voucher_no": doc.name}
-			),
+			frappe.db.count("GL Entry", {"voucher_type": "Journal Entry", "voucher_no": doc.name}),
 			0,
 			"a draft must not have written GL Entries",
 		)
@@ -553,7 +549,7 @@ class AuditTrail(MCPIntegrationTestCase):
 		)
 		self.assertTrue(row)
 		self.assertEqual(row[0].result_status, "Unauthorized")
-		self.assertIn("bearer token", row[0].result_summary)
+		self.assertIn("auth token", row[0].result_summary)
 
 	def test_an_audit_row_cannot_be_edited(self):
 		self.any_company()
