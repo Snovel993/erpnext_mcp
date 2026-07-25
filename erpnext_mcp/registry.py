@@ -39,7 +39,7 @@ from . import audit, settings
 from .compat import doctype_exists, traceback_text
 from .errors import ToolError
 from .result import ToolResult
-from .tools import collab, files, hr, meta, mutate, read, reports, trade, workflow
+from .tools import collab, files, hr, meta, mutate, packets, read, reports, trade, workflow
 
 _STRING = {"type": "string"}
 _NUMBER = {"type": "number"}
@@ -487,8 +487,19 @@ TOOLS = {
 	"advance_workflow": _tool(
 		workflow.advance_workflow,
 		"MUTATING (default OFF). Take a workflow action on a document, through "
-		"Frappe's own apply_workflow — the same path the Desk button uses, so the "
-		"state change and any resulting submit or cancel behave identically. "
+		"Frappe's own apply_workflow — the same path the Desk button uses.\n\n"
+		"RISK: a transition into a state whose doc_status is 1 SUBMITS the "
+		"document. On a Journal Entry that writes GL Entries and moves balances; "
+		"on an invoice it books revenue. A transition into doc_status 2 CANCELS "
+		"it. What a given action does therefore depends on the site's workflow "
+		"design, not on this tool — call list_workflows and read the target "
+		"state's doc_status before you rely on an action being harmless.\n\n"
+		"USE dry_run=true FIRST. It reports exactly what would happen — the "
+		"target state, whether the document would be submitted or cancelled, and "
+		"whether the action is even available to the acting user — without doing "
+		"any of it. Show that to the human, get agreement, then call again with "
+		"dry_run=false. A dry run never fails for an unavailable action; it "
+		"reports would_succeed=false and why.\n\n"
 		"Refuses, listing what IS available, if the action is not open to the "
 		"acting user in the document's current state.",
 		{
@@ -499,9 +510,15 @@ TOOLS = {
 				"The transition's action label, exactly as list_available_actions "
 				"reports it, e.g. 'Approve'.",
 			),
+			"dry_run": _field(
+				_BOOLEAN,
+				"true = report what would happen and change nothing. Default false. "
+				"Always worth doing first on a transition you have not taken before.",
+			),
 		},
 		required=("doctype", "name", "action"),
 		mutating=True,
+		destructive=True,
 		title="Advance a workflow",
 	),
 	# ── reports ─────────────────────────────────────────────────────────────
@@ -780,6 +797,48 @@ TOOLS = {
 		available=_needs_doctype("Client Script", "Custom Script"),
 		requires="the Client Script DocType (or Custom Script, its pre-v13 name)",
 	),
+	# ── compliance packets ──────────────────────────────────────────────────
+	"list_compliance_packets": _tool(
+		packets.list_compliance_packets,
+		"Which compliance packet types this site can produce, what each is for, "
+		"who reads it, and the filters it takes. Packet types are site-dependent "
+		"— some need apps this site may not have, and each has its own switch — "
+		"so call this before generate_compliance_packet rather than guessing a "
+		"packet_type. Read-only.",
+		{},
+		title="List compliance packets",
+	),
+	"generate_compliance_packet": _tool(
+		packets.generate_compliance_packet,
+		"Build a compliance packet: a structured, self-describing JSON artefact "
+		"for somebody who has to sign something off. Unlike the individual read "
+		"tools, a packet carries its own provenance (when, as whom, on which "
+		"site, and the MCP Action Log row for this call) and its own `flags` — "
+		"anomalies it detected in itself, each INFO/WARN/ERROR. An ERROR flag "
+		"means the numbers do not internally agree and the packet should not be "
+		"signed.\n\n"
+		"Nothing is stored, emailed or filed — the packet is returned to you to "
+		"render or hand on. Read-only.\n\n"
+		"Call list_compliance_packets for the available packet_types and the "
+		"filter shape each one takes.",
+		{
+			"packet_type": _field(
+				_STRING,
+				"e.g. 'reconciliation_packet' or 'fiscal_year_audit_packet'. "
+				"list_compliance_packets has the current set.",
+			),
+			"filters": _field(
+				_OBJECT,
+				"The packet's own arguments, e.g. "
+				'{"account": "1100", "period_start": "2026-07-01", '
+				'"period_end": "2026-07-31"}. Unknown keys are rejected by name '
+				"rather than ignored — a packet scoped differently from what you "
+				"asked for is worse than an error.",
+			),
+		},
+		required=("packet_type",),
+		title="Generate a compliance packet",
+	),
 }
 
 #: Tool names in catalogue order, read tools first. Used by the settings doctype
@@ -880,7 +939,7 @@ def dispatch(tool_name: str, arguments: dict, caller_ip: str = "") -> dict:
 		result = spec["handler"](arguments)
 		if not isinstance(result, ToolResult):  # pragma: no cover - contract guard
 			result = ToolResult(data=result or {}, summary="")
-		audit.record(
+		log_name = audit.record(
 			tool_name,
 			arguments,
 			audit.STATUS_SUCCESS,
@@ -888,7 +947,7 @@ def dispatch(tool_name: str, arguments: dict, caller_ip: str = "") -> dict:
 			docstatus_delta=result.docstatus_delta,
 			caller_ip=caller_ip,
 		)
-		return ok_result(result.data)
+		return ok_result(_stamp_action_log_id(result.data, log_name))
 
 	except ToolError as exc:
 		# Expected failure. Roll back first so a half-built document cannot be
@@ -928,6 +987,23 @@ def dispatch(tool_name: str, arguments: dict, caller_ip: str = "") -> dict:
 		except Exception:
 			pass
 		return error_result(summary)
+
+
+def _stamp_action_log_id(data, log_name):
+	"""Fill in a result's `mcp_action_log_id`, now that the audit row exists.
+
+	Compliance packets carry provenance, and the most useful piece of it is the
+	MCP Action Log row for the call that produced them — which cannot be known
+	inside the handler, because the row is written after it returns. A packet
+	ships the key set to None and this fills it, so the payload shape does not
+	depend on whether the audit write succeeded.
+
+	Deliberately narrow: only a key that is already present and still None is
+	touched. A tool that returns real data under that name is not overwritten.
+	"""
+	if isinstance(data, dict) and data.get("mcp_action_log_id", "absent") is None:
+		data["mcp_action_log_id"] = log_name
+	return data
 
 
 def ok_result(data) -> dict:

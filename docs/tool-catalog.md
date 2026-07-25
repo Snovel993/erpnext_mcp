@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 35 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 37 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 28 are **on** by default and can be switched off individually. A tool that is
+All 30 are **on** by default and can be switched off individually. A tool that is
 off does not appear in `tools/list` at all, and neither does one whose site
 prerequisite is missing.
 
@@ -1371,10 +1371,55 @@ document.** There is no fallback: on a Frappe that does not export
 `apply_workflow`, this refuses rather than hand-rolling a state write.
 
 **Arguments:** `doctype` (required), `name` (required), `action` (required — the
-transition's action label, exactly as `list_available_actions` reports it).
+transition's action label, exactly as `list_available_actions` reports it),
+`dry_run` (optional, default false).
 
 **Returns** `action`, `user`, `state_before`, `state_after`, `docstatus_before`,
 `docstatus_after`, `docstatus_label`.
+
+### `dry_run` — do this first
+
+With `dry_run: true` nothing is executed. The tool resolves the transition, reads
+the target state's `doc_status` and reports what *would* happen:
+
+```json
+{"name": "advance_workflow",
+ "arguments": {"doctype": "Purchase Order", "name": "PUR-ORD-2026-00184",
+               "action": "Approve", "dry_run": true}}
+```
+
+```json
+{
+  "dry_run": true,
+  "executed": false,
+  "current_state": "Pending Approval",
+  "current_docstatus": 0,
+  "would_succeed": true,
+  "would_move_to": "Approved",
+  "would_set_docstatus": 1,
+  "would_submit": true,
+  "would_cancel": false,
+  "effects": [
+    "workflow_state: 'Pending Approval' → 'Approved'",
+    "SUBMITS the document (target state has doc_status 1) — for a Journal Entry this writes GL Entries and moves balances"
+  ],
+  "available_actions": ["Approve", "Reject"],
+  "conditions_evaluated": true,
+  "refusal_reason": null,
+  "next_step": "Call again with dry_run=false to execute."
+}
+```
+
+**A dry run never raises for an unavailable action.** "It would be refused, and
+here is why" is the answer to the question, not a failure to answer it — so that
+case comes back as `would_succeed: false` with a `refusal_reason`. A malformed
+question (unknown document, no workflow, two active workflows) still errors,
+because there is nothing to answer.
+
+**What it cannot tell you.** A dry run resolves the *transition*. It does not run
+the document's own validation, so it cannot predict a submit that fails on a
+mandatory field, a closed period or a doctype hook. `would_succeed: true` means
+"this action is available to you", not "the resulting save will succeed".
 
 **Refused** — with the available actions listed — if the action is not open to
 the acting user in the document's current state. The check runs through the same
@@ -1478,13 +1523,180 @@ is never left guessing where its text went.
 
 ---
 
+# Compliance packet tools
+
+A packet is an artefact rather than an answer: a structured JSON document for
+somebody who has to sign something off. Both tools are read-only — nothing is
+stored, emailed or filed.
+
+Every packet carries the same envelope on top of its own body:
+
+| Field | Meaning |
+| --- | --- |
+| `packet_type`, `title`, `purpose`, `audience` | What this is and who reads it |
+| `filters` | The arguments it was built from, echoed back |
+| `flags[]` | `{code, severity, description, detail}`, worst first |
+| `flag_summary` | Counts per severity, `worst`, and `signable` (false if any ERROR) |
+| `generated_at`, `generated_by`, `site`, `generator`, `generator_version` | Provenance |
+| `mcp_action_log_id` | The MCP Action Log row for the call that produced this packet |
+| `external_sources[]` | Empty in v0.3.0. Reserved for external reconciliation sources |
+
+**Severity means something.** INFO is context. WARN is "a human should look".
+ERROR is "these numbers do not internally agree" — an arithmetic or integrity
+failure inside the packet, not merely an unusual business fact. A packet with an
+ERROR flag has `signable: false` and should not be signed.
+
+---
+
+## 36. `list_compliance_packets`
+
+**Arguments:** none.
+
+**Returns** `packets[]` (each with `packet_type`, `title`, `purpose`,
+`audience`, `filters` schema, `required_filters`, `switch`), plus `disabled[]`
+(a switch an operator can tick) and `unavailable[]` (a site prerequisite that
+cannot be ticked).
+
+Call it before `generate_compliance_packet`: packet types are site-dependent,
+and its `filters` schema is how a client learns to call a type this app's own
+MCP schema knows nothing about.
+
+---
+
+## 37. `generate_compliance_packet`
+
+**Arguments:** `packet_type` (required), `filters` (object, per the type).
+
+Unknown filter keys are rejected **by name** rather than ignored. Silently
+generating an unscoped packet when the caller thought they had scoped it is the
+worst outcome available.
+
+### `reconciliation_packet`
+
+**Filters:** `account` (required), `period_start` (required), `period_end`
+(required), `company`.
+
+| Key | Contents |
+| --- | --- |
+| `account` | `{name, number, type, root_type, company, currency, account_name}` |
+| `period` | `{start, end}` |
+| `opening_balance` | `{amount, as_of, source, gl_entry_count}` at `period_start - 1` |
+| `closing_balance` | Same shape, at `period_end` |
+| `movement_summary` | `total_debits`, `total_credits`, `net_change`, `count_transactions` |
+| `journal_entries[]` | Submitted JEs touching the account, each with `this_account_debit` / `_credit` / `_net` |
+| `unposted_drafts[]` | Same shape, `docstatus 0` — the movement that has not happened yet |
+| `cancelled_entries[]` | Same shape, `docstatus 2` — invisible to a balance query, which is why they are here |
+| `arithmetic_check` | `opening + net` vs `closing`, and whether it reconciles |
+
+Balances are summed from GL Entry excluding cancelled rows, matching ERPNext's
+own General Ledger report. The Journal Entry lists come from the
+`Journal Entry Account` child table instead, because that is the only source
+that can see drafts and cancellations.
+
+**Flags it raises:** `BALANCE_DOES_NOT_RECONCILE` (ERROR),
+`UNBALANCED_JOURNAL_ENTRY` (ERROR), `CANCELLED_ENTRIES` (WARN),
+`UNPOSTED_DRAFTS` (WARN), `NEGATIVE_BALANCE` (WARN), `NO_ACTIVITY` (INFO),
+`QUIET_PERIOD` (INFO), `FUTURE_DATED` (INFO), `LARGE_ENTRY` (INFO),
+`TRUNCATED` (WARN).
+
+**Example**
+
+```json
+{"name": "generate_compliance_packet",
+ "arguments": {"packet_type": "reconciliation_packet",
+               "filters": {"account": "1100", "period_start": "2026-01-01",
+                           "period_end": "2026-06-30"}}}
+```
+
+```json
+{
+  "packet_type": "reconciliation_packet",
+  "account": {"name": "1100 - Cash - ETC", "number": "1100", "type": "Cash",
+              "root_type": "Asset", "company": "Example Trading Co", "currency": "USD"},
+  "period": {"start": "2026-01-01", "end": "2026-06-30"},
+  "opening_balance": {"amount": 0.0, "as_of": "2025-12-31", "source": "GL Entry", "gl_entry_count": 0},
+  "closing_balance": {"amount": 750.0, "as_of": "2026-06-30", "source": "GL Entry", "gl_entry_count": 2},
+  "movement_summary": {"total_debits": 1000.0, "total_credits": 250.0,
+                       "net_change": 750.0, "count_transactions": 2},
+  "journal_entries": [
+    {"name": "ACC-JV-2026-00001", "posting_date": "2026-01-15", "docstatus": 1,
+     "user_remark": "Opening sale", "total_debit": 1000, "total_credit": 1000,
+     "this_account_debit": 1000.0, "this_account_credit": 0.0, "this_account_net": 1000.0}
+  ],
+  "unposted_drafts": [
+    {"name": "ACC-JV-2026-00002", "posting_date": "2026-02-10", "docstatus": 0,
+     "user_remark": "Stationery", "this_account_net": -250.0}
+  ],
+  "cancelled_entries": [
+    {"name": "ACC-JV-2025-00009", "posting_date": "2026-03-05", "docstatus": 2,
+     "this_account_net": -40.0}
+  ],
+  "arithmetic_check": {"opening_plus_net": 750.0, "closing": 750.0,
+                       "difference": 0.0, "reconciles": true},
+  "external_sources": [],
+  "flags": [
+    {"code": "CANCELLED_ENTRIES", "severity": "WARN",
+     "description": "1 Journal Entry/Entries touching this account were cancelled in the period, 40.0 in gross movement. Cancelled entries leave no live GL rows, so they do not appear in the balance — somebody posted these and then unposted them.",
+     "detail": {"count": 1, "gross_amount": 40.0, "entries": ["ACC-JV-2025-00009"]}},
+    {"code": "UNPOSTED_DRAFTS", "severity": "WARN",
+     "description": "1 draft Journal Entry/Entries dated in the period would move this account by -250.0 if submitted. The closing balance in this packet does not include them.",
+     "detail": {"count": 1, "net_if_submitted": -250.0, "entries": ["ACC-JV-2026-00002"]}},
+    {"code": "LARGE_ENTRY", "severity": "INFO",
+     "description": "1 entry/entries account for at least 25% of the period's gross movement each. Materiality is a judgement — this points, it does not conclude.",
+     "detail": {"threshold": 312.5, "entries": [{"name": "ACC-JV-2026-00001", "amount": 1000.0, "share_of_period": 0.8}]}}
+  ],
+  "flag_summary": {"ERROR": 0, "WARN": 2, "INFO": 1, "worst": "WARN", "signable": true},
+  "generated_at": "2026-07-26 09:14:22.117045",
+  "generated_by": "mcp@example.com",
+  "site": "erp.example.com",
+  "generator": "erpnext_mcp",
+  "generator_version": "0.3.0",
+  "mcp_action_log_id": "b7c41f9e2a"
+}
+```
+
+### `fiscal_year_audit_packet`
+
+**Filters:** `company` (required), `fiscal_year` (required).
+
+| Key | Contents |
+| --- | --- |
+| `date_range` | `{start, end, disabled}` from the Fiscal Year |
+| `trial_balance` | `by_root_type` (grouped rows), `totals_by_root_type`, `row_count` |
+| `trial_balance_totals` | One cumulative aggregate over every account — where debits must equal credits |
+| `income_statement` | `revenue`, `expenses`, `net_income`, movement within the year |
+| `balance_sheet` | `assets`, `liabilities`, `equity`, `liabilities_plus_equity`, cumulative |
+| `accounting_identity` | `Assets - (Liabilities + Equity)` vs `net_income`, and whether it holds |
+| `top_20_entries_by_amount` | Submitted JEs ranked by absolute amount, for materiality |
+| `intercompany_activity[]` | JEs whose account lines span more than one company |
+| `document_counts` | Sales/purchase invoices, JEs by docstatus, bank transactions. `null` = doctype not installed |
+
+**Two bases, stated per row.** Balance-sheet accounts carry forward, so their
+`basis` is `cumulative`. Profit-and-loss accounts reset each year, so theirs is
+`fiscal_year`. Mixing the two silently is how a trial balance stops balancing;
+`trial_balance_totals` is computed separately on a single cumulative basis, which
+is where debits and credits must agree.
+
+**Flags it raises:** `TRIAL_BALANCE_IMBALANCE` (ERROR),
+`ACCOUNTING_IDENTITY_FAILS` (ERROR), `INTERCOMPANY_ACTIVITY` (WARN),
+`CANCELLED_ENTRIES` (WARN), `DRAFT_ENTRIES_AT_YEAR_END` (WARN),
+`UNNATURAL_BALANCE` (WARN), `FISCAL_YEAR_NOT_LINKED` (WARN),
+`FISCAL_YEAR_DISABLED` (INFO), `NO_ACTIVITY` (INFO).
+
+Note on `ACCOUNTING_IDENTITY_FAILS`: for a year already closed to retained
+earnings, the two sides legitimately differ. The flag says so.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
 
 1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
-   `workflow`, `reports`, `files`, `collab`, `hr`, `trade` or `meta` — returning
-   a `ToolResult(data, summary, docstatus_delta="")`.
+   `workflow`, `reports`, `files`, `collab`, `hr`, `trade`, `meta` or `packets` —
+   returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
+   packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
+   `docs/development.md` has the recipe.
 2. An entry in `TOOLS` in `erpnext_mcp/registry.py`. If the tool needs something
    not every site has, give it an `available` predicate and a `requires`
    sentence; a tool that is advertised and always fails is worse than one that

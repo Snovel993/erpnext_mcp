@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **35 tools** — 28 read-only, 7 mutating.
+- **37 tools** — 30 read-only, 7 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -217,7 +217,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 35 tools
+## The 37 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -226,7 +226,7 @@ Tools whose site prerequisite is missing are not advertised at all — on a site
 without Frappe HR, the three HR tools simply do not exist as far as a client is
 concerned.
 
-### Read-only — 28, all ON by default, each individually switchable
+### Read-only — 30, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -296,6 +296,13 @@ concerned.
 | `list_custom_fields` | Custom Fields in form order. The "why is my field not showing up" tool. |
 | `list_client_scripts` | Client Scripts with a 500-character preview of each body. |
 
+**Compliance packets**
+
+| Tool | What it answers |
+| --- | --- |
+| `list_compliance_packets` | Which packet types this site can produce, and the filters each takes. |
+| `generate_compliance_packet` | Builds one. See [Compliance packets](#compliance-packets) below. |
+
 ### Mutating — 7, all OFF by default
 
 | Tool | What it does | What it cannot do |
@@ -305,8 +312,85 @@ concerned.
 | `cancel_journal_entry` | Cancels a submitted JE, `1 → 2`, writing reversing entries. `reason` mandatory. | Delete anything. |
 | `create_bank_transaction` | Inserts a **draft** Bank Transaction. | Submit it. |
 | `reconcile_bank_transaction` | Attaches payment vouchers, refusing to over-allocate. | Allocate past the remaining amount. |
-| `advance_workflow` | Takes a workflow action via `apply_workflow`. Can submit or cancel the document if the target state says so. | Take an action the acting user is not allowed. |
+| `advance_workflow` | Takes a workflow action via `apply_workflow`. **Can submit or cancel the document** if the target state says so. Supports `dry_run`. | Take an action the acting user is not allowed. |
 | `create_todo` | Assigns a ToDo. | Touch any ledger. |
+
+---
+
+## Compliance packets
+
+A packet is an artefact rather than an answer: a structured JSON document for
+somebody who has to sign something off. `generate_compliance_packet` returns one
+inline — nothing is stored, emailed or filed.
+
+```json
+{"name": "generate_compliance_packet",
+ "arguments": {"packet_type": "reconciliation_packet",
+               "filters": {"account": "1100", "period_start": "2026-07-01",
+                           "period_end": "2026-07-31"}}}
+```
+
+Three things make it more than a query:
+
+- **It says how it was made.** `generated_at`, `generated_by`, `site`,
+  `generator_version`, and `mcp_action_log_id` — the audit row for the very call
+  that produced it. A figure can be traced back to a request, an IP and a user
+  six months later.
+- **It never truncates quietly.** Any collection that hits the cap raises a WARN
+  naming how many rows were omitted. A packet that silently drops entries is a
+  lie with provenance attached.
+- **It reports what is wrong with itself.** `flags` carries INFO / WARN / ERROR
+  findings, and `flag_summary.signable` is false whenever an ERROR is present.
+  ERROR means the numbers do not internally agree — not merely that something is
+  unusual.
+
+| Packet type | Filters | What it contains |
+| --- | --- | --- |
+| `reconciliation_packet` | `account`, `period_start`, `period_end`, `company?` | Opening/closing balances, movement summary, every JE that touched the account, unposted drafts, cancelled entries, and a check that `opening + net == closing`. |
+| `fiscal_year_audit_packet` | `company`, `fiscal_year` | Trial balance (each row stating its basis), income statement, balance sheet, top 20 entries, intercompany activity, document counts, and a check that `Assets - (Liabilities + Equity) = Income - Expense`. |
+
+Each type has its own `allow_<packet_type>` switch, separate from the two tool
+switches — so you can expose a reconciliation packet without exposing a payroll
+one when that arrives.
+
+**Adding a type is a single file drop** in `erpnext_mcp/packets/`. The package
+auto-discovers every module that registers a `PacketSpec`; there is no list to
+update and no handler to touch. Roadmap: payroll, organic-transition
+attestations, tax-year summaries, SOX controls.
+
+---
+
+## Before you enable `advance_workflow`
+
+It is the one write tool whose blast radius is decided by your site rather than
+by the tool. A transition into a state with `doc_status: 1` **submits the
+document** — on a Journal Entry that writes GL Entries and moves balances.
+
+Run `list_workflows` first and check which target states carry `doc_status: 1`.
+Then use the dry run:
+
+```json
+{"name": "advance_workflow",
+ "arguments": {"doctype": "Purchase Order", "name": "PUR-ORD-2026-00184",
+               "action": "Approve", "dry_run": true}}
+```
+
+```json
+{"dry_run": true, "executed": false, "would_succeed": true,
+ "current_state": "Pending Approval", "would_move_to": "Approved",
+ "would_set_docstatus": 1, "would_submit": true,
+ "effects": ["workflow_state: 'Pending Approval' → 'Approved'",
+             "SUBMITS the document (target state has doc_status 1) — for a Journal Entry this writes GL Entries and moves balances"],
+ "next_step": "Call again with dry_run=false to execute."}
+```
+
+The intended pattern is dry-run, show the human, execute. A dry run never raises
+for an unavailable action — it reports `would_succeed: false` with the reason,
+because "it would be refused" is the answer to the question.
+
+One limit worth knowing: a dry run resolves the *transition*. It does not run the
+document's own validation, so it cannot predict a submit that fails on a
+mandatory field or a doctype hook.
 
 ---
 
@@ -380,7 +464,7 @@ attempt did not.
 
 | | Supported | Notes |
 | --- | --- | --- |
-| **Frappe** | v14, **v15**, v16 (`develop`) | Developed and run in production against **v15.115.0**. v15.100+ is the tested floor. |
+| **Frappe** | v14, **v15**, v16 (`develop`) | Developed and run in production against **v15.115.0**. v15.100+ is the tested floor. The in-bench workflow suite builds a real Workflow on a synthetic DocType, so it verifies the framework contract on whichever version you run it against. |
 | **ERPNext** | v14, v15, v16 | Required — `hooks.py` declares it, so `install-app` refuses on a Frappe-only site. |
 | **Frappe HR (`hrms`)** | optional | Present → the three HR tools appear. Absent → they are not advertised at all. |
 | **Python** | 3.10+ | CI runs 3.10 and 3.11. |
@@ -419,7 +503,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-433 standalone tests and 96 in-bench tests. The standalone suite installs an
+514 standalone tests and 156 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.
@@ -434,9 +518,17 @@ Candidates for v0.3, roughly in order of how often they come up:
 - **Auth.** Per-token scopes, so one client can be given the reconciliation
   tools and another the reporting tools without two sites. Token expiry and
   rotation without a manual button press. Optional mTLS for the LAN case.
-- **More workflow depth.** Bulk actions over a filtered set, workflow history
-  (who moved what, when) from the Version table, and a `preview_workflow_action`
-  that says what a transition *would* do before it does it.
+- **More workflow depth.** Bulk actions over a filtered set, and workflow history
+  (who moved what, when) from the Version table. The dry-run preview landed in
+  v0.3.0.
+- **More packet types.** `payroll_packet` (needs Frappe HR),
+  `organic_transition_packet`, `tax_year_packet`, `sox_control_packet` — each a
+  single file drop against the existing framework.
+- **Packets that reach outside ERPNext.** `external_sources` is already in the
+  payload shape, empty; Bank Bridge variance and its anchor chain go there.
+- **Packet persistence.** v0.3.0 returns packets inline only. Storing one as a
+  File against a document, with a hash, is what makes it evidence rather than a
+  transcript.
 - **Custom report authoring.** A mutating, default-off tool to create a Query
   Report from SQL an operator reviews first — the "I ask for a figure often
   enough that it should be a report" case.

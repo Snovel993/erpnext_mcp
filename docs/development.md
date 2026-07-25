@@ -113,6 +113,7 @@ tests_standalone/
   test_hr.py              the HR tools, and their absence without hrms
   test_trade.py           orders and receivables ageing
   test_meta.py            custom fields and client scripts
+  test_packets.py         the packet framework and both shipped types
   test_audit.py           what gets logged, rollback survival, immutability
   test_settings.py        shipped defaults, form validation, token generation,
                           and that the settings JS keeps no copy of the catalogue
@@ -120,6 +121,10 @@ tests_standalone/
 erpnext_mcp/
   tests/test_integration.py                       in-bench, v0.1.0 surface
   tests/test_v2_tools.py                          in-bench, v0.2.0 categories
+  tests/test_workflow_scenarios.py                in-bench, a real Workflow on a
+                                                  synthetic DocType
+  tests/test_packets.py                           in-bench, packet shape and
+                                                  integrity against real data
   erpnext_mcp/doctype/erpnext_mcp_settings/test_erpnext_mcp_settings.py
   erpnext_mcp/doctype/mcp_action_log/test_mcp_action_log.py
 ```
@@ -208,6 +213,10 @@ erpnext_mcp/                     repo root
     tools/hr.py                  employees, attendance, leave (needs hrms)
     tools/trade.py               sales/purchase orders, receivables ageing
     tools/meta.py                custom fields, client scripts
+    tools/packets.py             the two MCP tools over the packet framework
+    packets/base.py              PacketSpec, Flag, provenance envelope
+    packets/reconciliation.py    one account, one period
+    packets/fiscal_year_audit.py one company, one fiscal year
     erpnext_mcp/doctype/         ERPNext MCP Settings, MCP Action Log
 ```
 
@@ -236,6 +245,54 @@ contract live.
   not in `selftest`, not in an error message.
 
 ---
+
+## Adding a compliance packet type
+
+One file in `erpnext_mcp/packets/`, ending in `register(PacketSpec(...))`. The
+package auto-discovers every module there at import time, so there is nothing
+else to edit — no list, no handler, no MCP schema.
+
+```python
+# erpnext_mcp/packets/payroll.py
+from .base import Flag, PacketResult, PacketSpec, SEVERITY_WARN, register
+
+
+def build(filters: dict) -> PacketResult:
+	flags = []
+	...
+	return PacketResult(data={...}, flags=flags, summary="...")
+
+
+register(
+	PacketSpec(
+		packet_type="payroll_packet",
+		title="Payroll packet",
+		purpose="...",  # what it is for
+		audience="...",  # who reads it
+		build=build,
+		filters={"pay_period": {"type": "string", "description": "..."}},
+		required=("pay_period",),
+		available=lambda: "hrms" in frappe.get_installed_apps(),
+		requires="the Frappe HR (hrms) app",
+	)
+)
+```
+
+Then add `allow_payroll_packet` to the settings doctype JSON, default `"1"`, in
+the Compliance Packets section — `ShippedDefaults.test_every_packet_type_has_a_switch`
+fails if you forget.
+
+Writing the builder, three rules:
+
+- **Flag severity means something.** INFO is context, WARN is "a human should
+  look", ERROR is "these numbers do not internally agree". Only use ERROR for an
+  arithmetic or integrity failure *inside the packet*, because it sets
+  `signable: false`.
+- **Check the packet against itself.** The most valuable line in
+  `reconciliation.py` is the one asserting `opening + net == closing` from two
+  independent aggregates; the most valuable in `fiscal_year_audit.py` is the
+  accounting identity. Find the redundancy in your data and check it.
+- **Never truncate silently.** Use `cap(rows, flags, "collection_name")`.
 
 ## Adding a tool
 

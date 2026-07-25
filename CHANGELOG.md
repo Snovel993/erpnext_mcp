@@ -3,6 +3,89 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.3.0 — 2026-07-26
+
+**37 tools** (was 35): a compliance-packet framework with two packet types, plus
+`dry_run` on `advance_workflow` and end-to-end verification of the workflow tools
+against real Frappe.
+
+### Added — compliance packets
+
+A packet is an *artefact*, not an answer: a structured JSON document for somebody
+who has to sign something off. Three properties distinguish it from a query —
+it says how it was made (`generated_at`, `generated_by`, `site`,
+`generator_version` and the `mcp_action_log_id` of the call that produced it), it
+never truncates quietly (any cap that bites raises a WARN naming the number
+omitted), and it reports what is wrong with itself in `flags` (INFO / WARN /
+ERROR, where ERROR means the numbers do not internally agree and the packet
+should not be signed).
+
+- **`generate_compliance_packet(packet_type, filters)`** — builds one and returns
+  it inline. Nothing is stored, emailed or filed.
+- **`list_compliance_packets()`** — discovery. Packet types are site-dependent
+  and each has its own switch, so a client needs to ask rather than guess.
+- **`reconciliation_packet`** (`account`, `period_start`, `period_end`,
+  `company?`) — opening and closing balances, movement summary, every Journal
+  Entry that touched the account, the drafts that would change it, and the
+  cancellations a balance query cannot see. Checks `opening + net == closing` from
+  two independent aggregates and raises ERROR if they disagree. Detects cancelled
+  entries, unposted drafts, unbalanced entries, negative-balance dates, quiet
+  periods, future-dated postings and outsized single entries. `external_sources`
+  ships empty, ready for Bank Bridge variance in v0.4.
+- **`fiscal_year_audit_packet`** (`company`, `fiscal_year`) — trial balance with
+  each row stating its own basis (balance-sheet accounts cumulative,
+  profit-and-loss within the year), income statement, balance sheet, twenty
+  largest entries, intercompany activity found by resolving every line's account
+  to its company, and document counts. Checks that cumulative debits equal
+  credits, and that `Assets - (Liabilities + Equity) = Income - Expense`.
+
+Adding a packet type is a single file drop in `erpnext_mcp/packets/` — the
+package auto-discovers every module that registers a `PacketSpec`, so there is
+no list to update and no handler to touch. Roadmap types (payroll,
+organic-transition, tax-year, SOX) need nothing else.
+
+### Added — workflow verification
+
+- **`advance_workflow` gains `dry_run`.** It reports the target state, whether
+  the document would be **submitted** or **cancelled**, the effects in plain
+  words, and whether the action is even available — without executing. A dry run
+  never raises for an unavailable action: "it would be refused, and here is why"
+  is the answer to the question, not a failure to answer it. The intended pattern
+  is dry-run, show the human, then execute.
+- **`advance_workflow`'s description now states the risk model**: a transition
+  into a `doc_status: 1` state submits the document, which on a Journal Entry
+  writes GL Entries and moves balances, and what a given action does is a
+  property of the site's workflow design rather than of the tool.
+- **A real in-bench workflow suite** (`test_workflow_scenarios.py`) that builds a
+  custom submittable DocType, four Workflow States, three Workflow Actions, two
+  Roles, two Users and a Workflow, then walks documents through it: happy path,
+  permission denial, condition failure, self-approval denial, a submit that fails
+  validation, terminal states, and two workflows on one DocType.
+
+### Fixed
+
+- **`list_available_actions` and `dry_run` over-promised on self-approval.**
+  Frappe's `get_transitions` filters on role and condition only — the
+  `allow_self_approval` rule is enforced inside `apply_workflow` and throws at
+  execution time. So the tools advertised an action the acting user could not
+  take, and a dry run reported `would_succeed: true` for a transition destined to
+  throw. Both now apply Frappe's rule up front, and `list_available_actions`
+  reports what it withheld and why. Found by writing the in-bench suite; pinned
+  by a test that fails if a future Frappe starts filtering earlier.
+- **Two active Workflows on one DocType are now refused rather than resolved
+  arbitrarily.** Frappe deactivates the others when you save one active, so this
+  only arises from a direct database edit — but "which workflow governs this
+  document" has no defined answer there, and guessing on a submitting transition
+  is unrecoverable.
+- The standalone double enforced self-approval in the wrong place, which is why
+  the defect above survived v0.2. It now matches Frappe.
+- The standalone fixture's ledger did not balance — a 500 debit with no
+  counterpart. `fiscal_year_audit_packet` found it on its first run.
+
+### Tests
+
+514 standalone (was 443), 156 in-bench (was 103).
+
 ## 0.2.1 — 2026-07-25
 
 Hotfix. **v0.2.0 breaks `bench migrate` on any site it is installed on** — if you

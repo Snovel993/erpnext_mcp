@@ -179,9 +179,9 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_thirty_five_tools_twenty_eight_read_seven_write(self):
-		self.assertEqual(len(registry.TOOLS), 35)
-		self.assertEqual(len(registry.READ_TOOLS), 28)
+	def test_catalogue_is_thirty_seven_tools_thirty_read_seven_write(self):
+		self.assertEqual(len(registry.TOOLS), 37)
+		self.assertEqual(len(registry.READ_TOOLS), 30)
 		self.assertEqual(len(registry.MUTATING_TOOLS), 7)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):

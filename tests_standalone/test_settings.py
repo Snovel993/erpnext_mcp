@@ -9,7 +9,7 @@ build.
 
 import json
 
-from erpnext_mcp import registry, settings
+from erpnext_mcp import packets, registry, settings
 from erpnext_mcp.erpnext_mcp.doctype.erpnext_mcp_settings.erpnext_mcp_settings import (
 	TOKEN_LENGTH,
 )
@@ -36,12 +36,33 @@ class ShippedDefaults(SeededTestCase):
 					f"tool {name} has no allow_ field, so an operator cannot turn it off",
 				)
 
-	def test_every_switch_has_a_tool(self):
+	def test_every_packet_type_has_a_switch(self):
+		"""A packet type is gated separately from the tool that builds it, so an
+		operator can expose a reconciliation packet without exposing a payroll
+		one. A type with no switch is one they cannot refuse."""
+		for name in packets.names():
+			with self.subTest(packet=name):
+				self.assertIn(
+					f"allow_{name}",
+					self.by_name,
+					f"packet type {name} has no allow_ field",
+				)
+
+	def test_every_switch_has_a_tool_or_a_packet_type(self):
 		"""The other direction: a leftover switch is a control that does nothing."""
+		known = set(registry.TOOLS) | set(packets.names())
 		for fieldname in self.by_name:
 			if fieldname.startswith("allow_"):
 				with self.subTest(field=fieldname):
-					self.assertIn(fieldname[len("allow_") :], registry.TOOLS)
+					self.assertIn(fieldname[len("allow_") :], known)
+
+	def test_packet_types_default_on(self):
+		"""Packets are read-only artefacts — the gate that matters is the tool
+		switch above them, and defaulting the types off would mean an operator who
+		enabled the tool still got an empty catalogue."""
+		for name in packets.names():
+			with self.subTest(packet=name):
+				self.assertEqual(self.by_name[f"allow_{name}"]["default"], "1")
 
 	def test_read_tools_default_on(self):
 		for name in registry.READ_TOOLS:
@@ -424,10 +445,10 @@ class SelfTest(SeededTestCase):
 		self.configure(enabled=1, allow_create_journal_entry=1)
 		report = mcp.selftest()
 		self.assertEqual(report["mutating_tools_enabled"], ["create_journal_entry"])
-		self.assertEqual(report["tools_total"], 35)
-		# 28 read tools minus the three HR ones this site cannot run, plus the
+		self.assertEqual(report["tools_total"], 37)
+		# 30 read tools minus the three HR ones this site cannot run, plus the
 		# one write tool just enabled.
-		self.assertEqual(len(report["tools_enabled"]), 26)
+		self.assertEqual(len(report["tools_enabled"]), 28)
 		self.assertEqual(sorted(report["tools_unavailable"]), sorted(HR_TOOLS))
 
 	def test_it_reports_not_ready_when_disabled(self):

@@ -65,7 +65,13 @@
   "allow_list_purchase_orders",
   "meta_tools_section",
   "allow_list_custom_fields",
-  "allow_list_client_scripts"
+  "allow_list_client_scripts",
+  "packet_tools_section",
+  "allow_list_compliance_packets",
+  "allow_generate_compliance_packet",
+  "reconciliation_packet_col",
+  "allow_reconciliation_packet",
+  "allow_fiscal_year_audit_packet"
  ],
  "fields": [
   {
@@ -454,12 +460,51 @@
    "fieldname": "allow_list_client_scripts",
    "fieldtype": "Check",
    "label": "List Client Scripts"
+  },
+  {
+   "description": "Structured artefacts for somebody who has to sign something off \u2014 each carries its own provenance and its own anomaly flags, and an ERROR flag means the numbers do not internally agree. All read-only: nothing is stored, emailed or filed.<br><br>The first two switches are the MCP tools; the rest are the individual packet types, each gated separately so you can expose a reconciliation packet without exposing a payroll one.",
+   "fieldname": "packet_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance Packets"
+  },
+  {
+   "default": "1",
+   "description": "Which packet types this site can produce, and the filters each takes. Discovery only.",
+   "fieldname": "allow_list_compliance_packets",
+   "fieldtype": "Check",
+   "label": "List Compliance Packets"
+  },
+  {
+   "default": "1",
+   "description": "Build a packet and return it inline. Nothing is stored, emailed or filed. Reads only what the packet needs.",
+   "fieldname": "allow_generate_compliance_packet",
+   "fieldtype": "Check",
+   "label": "Generate Compliance Packet"
+  },
+  {
+   "fieldname": "reconciliation_packet_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "1",
+   "description": "One account, one period: opening and closing balances, every Journal Entry that touched it, the drafts that would change it, the cancellations a balance query cannot see, and a check that the arithmetic closes.",
+   "fieldname": "allow_reconciliation_packet",
+   "fieldtype": "Check",
+   "label": "Reconciliation Packet"
+  },
+  {
+   "default": "1",
+   "description": "A year for an outside CPA: trial balance, income statement, balance sheet, twenty largest entries, intercompany activity, document counts, and a check that the accounting identity holds.",
+   "fieldname": "allow_fiscal_year_audit_packet",
+   "fieldtype": "Check",
+   "label": "Fiscal Year Audit Packet"
   }
  ],
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-25 09:00:00.000000",
+ "modified": "2026-07-26 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

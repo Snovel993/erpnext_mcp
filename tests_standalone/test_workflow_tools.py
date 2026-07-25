@@ -11,6 +11,7 @@ from .harness import STORE
 PO_PENDING = "PUR-ORD-2026-00001"
 PO_APPROVED = "PUR-ORD-2026-00002"
 PO_DRAFT = "PUR-ORD-2026-00003"
+PO_PENDING_ACTION = "Approve"
 
 
 class ListWorkflows(V2TestCase):
@@ -304,3 +305,170 @@ class AdvanceWorkflow(V2TestCase):
 	def test_it_is_registered_as_a_mutating_tool(self):
 		self.assertIn("advance_workflow", registry.MUTATING_TOOLS)
 		self.assertFalse(registry.TOOLS["advance_workflow"]["annotations"]["readOnlyHint"])
+
+
+class DryRun(V2TestCase):
+	"""`dry_run=True` answers "what would this do" without doing any of it.
+
+	The point is the pattern: dry-run, show a human, then execute. So the dry run
+	has to surface the fact that makes this tool dangerous — that a transition
+	into a doc_status 1 state SUBMITS the document — and it has to answer rather
+	than raise when the action would be refused, because "it would be refused" is
+	the answer to the question.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, allow_advance_workflow=1)
+
+	def dry(self, action=PO_PENDING_ACTION, name=PO_PENDING, **kwargs):
+		return self.tool_data(
+			"advance_workflow",
+			{"doctype": "Purchase Order", "name": name, "action": action, "dry_run": True},
+			**kwargs,
+		)
+
+	def test_it_changes_nothing(self):
+		before = dict(STORE.get_raw("Purchase Order", PO_PENDING))
+		self.dry()
+		self.assertEqual(STORE.get_raw("Purchase Order", PO_PENDING), before)
+
+	def test_it_says_it_did_not_execute(self):
+		data = self.dry()
+		self.assertTrue(data["dry_run"])
+		self.assertFalse(data["executed"])
+
+	def test_it_reports_the_target_state(self):
+		data = self.dry()
+		self.assertEqual(data["current_state"], "Pending Approval")
+		self.assertEqual(data["would_move_to"], "Approved")
+		self.assertTrue(data["would_succeed"])
+
+	def test_it_warns_that_the_transition_submits_the_document(self):
+		"""The fact that makes this tool dangerous, and the one invisible from the
+		action's name: Approved is doc_status 1."""
+		data = self.dry()
+		self.assertTrue(data["would_submit"])
+		self.assertEqual(data["would_set_docstatus"], 1)
+		self.assertTrue(any("SUBMITS the document" in effect for effect in data["effects"]))
+
+	def test_a_non_submitting_transition_says_so(self):
+		data = self.dry(action="Submit for Approval", name=PO_DRAFT)
+		self.assertFalse(data["would_submit"])
+		self.assertEqual(data["would_set_docstatus"], 0)
+		self.assertTrue(any("leaves docstatus at 0" in effect for effect in data["effects"]))
+
+	def test_an_unavailable_action_is_answered_not_raised(self):
+		"""'It would be refused, and here is why' is the answer to the question,
+		not a failure to answer it."""
+		data = self.dry(action="Delete Everything")
+		self.assertFalse(data["would_succeed"])
+		self.assertIn("is not available", data["refusal_reason"])
+		self.assertIn("Nothing to execute", data["next_step"])
+
+	def test_a_self_approval_refusal_shows_up_in_the_dry_run(self):
+		self.configure(
+			enabled=1,
+			allow_advance_workflow=1,
+			require_user_context=1,
+			mcp_system_user=APPROVER,
+		)
+		STORE.get_raw("Purchase Order", PO_PENDING)["owner"] = APPROVER
+		data = self.dry()
+		self.assertFalse(data["would_succeed"])
+		self.assertEqual(data["available_actions"], ["Reject"])
+
+	def test_it_lists_what_is_available_instead(self):
+		data = self.dry(action="Delete Everything")
+		self.assertEqual(sorted(data["available_actions"]), ["Approve", "Reject"])
+
+	def test_it_points_at_how_to_execute(self):
+		data = self.dry()
+		self.assertIn("dry_run=false", data["next_step"])
+
+	def test_the_audit_row_records_no_docstatus_change(self):
+		self.dry()
+		row = self.assertAudited("advance_workflow", status="Success")
+		self.assertEqual(row["docstatus_delta"], "")
+		self.assertIn("dry run", row["result_summary"])
+
+	def test_a_dry_run_still_needs_the_switch(self):
+		"""It reads only, but it is the same tool — an operator who has not
+		enabled workflow writes has not enabled reasoning about them either."""
+		self.configure(enabled=1, allow_advance_workflow=0)
+		message = self.tool_error(
+			"advance_workflow",
+			{
+				"doctype": "Purchase Order",
+				"name": PO_PENDING,
+				"action": "Approve",
+				"dry_run": True,
+			},
+		)
+		self.assertIn("allow_advance_workflow", message)
+
+	def test_a_malformed_question_still_raises(self):
+		"""Unknown document is not "it would be refused" — the question itself
+		does not parse."""
+		message = self.tool_error(
+			"advance_workflow",
+			{"doctype": "Purchase Order", "name": "PUR-ORD-NOPE", "action": "Approve", "dry_run": True},
+		)
+		self.assertIn("no Purchase Order named", message)
+
+	def test_dry_run_accepts_the_string_a_model_will_send(self):
+		data = self.tool_data(
+			"advance_workflow",
+			{"doctype": "Purchase Order", "name": PO_PENDING, "action": "Approve", "dry_run": "true"},
+		)
+		self.assertTrue(data["dry_run"])
+
+	def test_omitting_dry_run_executes(self):
+		data = self.tool_data(
+			"advance_workflow",
+			{"doctype": "Purchase Order", "name": PO_PENDING, "action": "Approve"},
+		)
+		self.assertNotIn("dry_run", data)
+		self.assertEqual(data["state_after"], "Approved")
+
+
+class MultipleActiveWorkflows(V2TestCase):
+	"""Two active workflows on one DocType — a state Frappe prevents, and a
+	direct database edit can still produce."""
+
+	def activate_a_second(self):
+		STORE.get_raw("Workflow", "Inactive Example")["document_type"] = "Purchase Order"
+		STORE.get_raw("Workflow", "Inactive Example")["is_active"] = 1
+
+	def test_the_tools_refuse_rather_than_pick_one(self):
+		"""Which workflow governs a document is undefined here, and guessing on a
+		submitting transition is unrecoverable."""
+		self.activate_a_second()
+		message = self.tool_error("get_workflow_state", {"doctype": "Purchase Order", "name": PO_PENDING})
+		self.assertIn("2 Workflows are active", message)
+		self.assertIn("Inactive Example", message)
+		self.assertIn(WORKFLOW_NAME, message)
+
+	def test_the_refusal_says_how_to_fix_it(self):
+		self.activate_a_second()
+		message = self.tool_error("get_workflow_state", {"doctype": "Purchase Order", "name": PO_PENDING})
+		self.assertIn("deactivate all but one", message)
+
+	def test_advancing_is_refused_too(self):
+		self.activate_a_second()
+		self.configure(enabled=1, allow_advance_workflow=1)
+		message = self.tool_error(
+			"advance_workflow",
+			{"doctype": "Purchase Order", "name": PO_PENDING, "action": "Approve"},
+		)
+		self.assertIn("2 Workflows are active", message)
+		self.assertEqual(STORE.get_raw("Purchase Order", PO_PENDING)["workflow_state"], "Pending Approval")
+
+	def test_list_workflows_still_shows_both_for_diagnosis(self):
+		self.activate_a_second()
+		data = self.tool_data("list_workflows")
+		self.assertEqual(data["active_count"], 2)
+
+	def test_one_active_workflow_is_unaffected(self):
+		data = self.tool_data("get_workflow_state", {"doctype": "Purchase Order", "name": PO_PENDING})
+		self.assertEqual(data["workflow"], WORKFLOW_NAME)

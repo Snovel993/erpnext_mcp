@@ -861,6 +861,7 @@ class FakeDB:
 		pluck=None,
 		as_dict=True,
 		distinct=False,
+		group_by=None,
 		**kwargs,
 	):
 		rows = [row for row in STORE.rows(doctype) if _match(row, filters)]
@@ -869,6 +870,8 @@ class FakeDB:
 
 		aggregates = [f for f in (fields or []) if "(" in str(f)]
 		if aggregates:
+			if group_by:
+				return _grouped_aggregate(rows, fields, aggregates, group_by)
 			return [_aggregate(rows, aggregates)]
 
 		if order_by:
@@ -1012,6 +1015,23 @@ def _aggregate(rows: list[dict], expressions: list[str]) -> FrappeDict:
 	return out
 
 
+def _grouped_aggregate(rows, fields, aggregates, group_by):
+	"""`SELECT <key>, sum(...) ... GROUP BY <key>`, as the packets use it."""
+	key = str(group_by).split(",")[0].strip().strip("`").split(".")[-1]
+	plain = [f for f in (fields or []) if "(" not in str(f)]
+	buckets: dict = {}
+	for row in rows:
+		buckets.setdefault(row.get(key), []).append(row)
+	out = []
+	for value, group in buckets.items():
+		entry = _aggregate(group, aggregates)
+		for column in plain:
+			entry[column] = group[0].get(column)
+		entry[key] = value
+		out.append(entry)
+	return out
+
+
 def _sorted(rows: list[dict], order_by: str) -> list[dict]:
 	out = list(rows)
 	# Apply each clause in reverse so the leftmost wins, as SQL does.
@@ -1056,6 +1076,15 @@ def _build_utils() -> types.ModuleType:
 	module.flt = lambda value, precision=None: round(float(value or 0), precision or 2)
 	module.cint = lambda value: int(float(value or 0))
 	module.cstr = lambda value: "" if value is None else str(value)
+
+	def add_days(date, days):
+		return _getdate(date) + datetime.timedelta(days=days)
+
+	def date_diff(later, earlier):
+		return (_getdate(later) - _getdate(earlier)).days
+
+	module.add_days = add_days
+	module.date_diff = date_diff
 	return module
 
 
@@ -1276,9 +1305,11 @@ def _active_workflow_for(doc):
 def _stub_get_transitions(doc, workflow=None, raise_exception=False):
 	"""Frappe's transition resolution, faithfully enough to test against.
 
-	Role check, self-approval rule and condition evaluation — the three things
-	the app delegates rather than reimplementing, so the double has to do all
-	three or the delegation is untested.
+	Role and condition only. Frappe's get_transitions does NOT check
+	self-approval — that rule lives in apply_workflow and throws at execution
+	time — and a double that filtered it here would hide the fact that
+	`list_available_actions` has to apply the rule itself. Verified against a
+	real Workflow in erpnext_mcp/tests/test_workflow_scenarios.py.
 	"""
 	workflow = workflow or _active_workflow_for(doc)
 	if workflow is None:
@@ -1292,8 +1323,6 @@ def _stub_get_transitions(doc, workflow=None, raise_exception=False):
 			continue
 		if row.get("allowed") and row["allowed"] not in roles:
 			continue
-		if not row.get("allow_self_approval") and doc.get("owner") == frappe.session.user:
-			continue
 		condition = row.get("condition")
 		# A real Frappe uses safe_eval here; the double uses eval because the
 		# only conditions it ever sees are the ones a test wrote.
@@ -1304,6 +1333,7 @@ def _stub_get_transitions(doc, workflow=None, raise_exception=False):
 
 
 def _stub_apply_workflow(doc, action):
+	"""As Frappe does it — including enforcing self-approval *here*, late."""
 	workflow = _active_workflow_for(doc)
 	if workflow is None:
 		raise ValidationError(f"no active workflow for {doc.doctype}")
@@ -1311,6 +1341,12 @@ def _stub_apply_workflow(doc, action):
 	for row in _stub_get_transitions(doc, workflow):
 		if row.get("action") != action:
 			continue
+		if (
+			frappe.session.user != "Administrator"
+			and not row.get("allow_self_approval")
+			and doc.get("owner") == frappe.session.user
+		):
+			raise ValidationError("Self approval is not allowed")
 		next_state = row.get("next_state")
 		doc.set(state_field, next_state)
 		target = next((s for s in workflow.get("states") or [] if s.get("state") == next_state), {})

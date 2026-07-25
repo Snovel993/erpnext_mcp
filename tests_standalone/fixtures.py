@@ -159,8 +159,12 @@ def _gl_entries() -> None:
 			_gl(cash(), "2026-01-15", debit=1000),
 			_gl(cash(), "2026-02-10", credit=250),
 			_gl(cash(), "2026-03-01", debit=9999, is_cancelled=1),
-			# ...and one after the as_of date the balance tests use.
+			# ...and one after the as_of date the balance tests use, with its
+			# counterpart. Double entry has to hold across the whole fixture:
+			# fiscal_year_audit_packet checks that cumulative debits equal
+			# cumulative credits, and it was this stray 500 that first failed it.
 			_gl(cash(), "2026-12-31", debit=500),
+			_gl(sales(), "2026-12-31", credit=500),
 			_gl(sales(), "2026-01-15", credit=1000),
 			_gl(supplies(), "2026-02-10", debit=250),
 		],
