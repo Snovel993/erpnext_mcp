@@ -14,8 +14,11 @@
   "token_generated_on",
   "connection_col",
   "endpoint_info",
+  "claude_desktop_section",
+  "claude_desktop_html",
   "network_section",
   "allowed_cidrs",
+  "public_url",
   "attribution_section",
   "require_user_context",
   "mcp_system_user",
@@ -116,6 +119,18 @@
    "options": "<div class='form-message blue'><p><b>Endpoint</b><br><code>POST https://&lt;your-site&gt;/api/method/erpnext_mcp.mcp.handle</code></p><p><b>Header</b><br><code>X-MCP-Token: &lt;token&gt;</code></p><p>JSON-RPC 2.0 (MCP Streamable HTTP). POST only \u2014 this server sends no unsolicited messages, so there is no stream to open.</p><p>Every call, allowed or refused, is recorded in <a href='/app/mcp-action-log'>MCP Action Log</a>.</p></div>"
   },
   {
+   "depends_on": "eval:doc.enabled",
+   "description": "The config an MCP client needs, generated from this site's own URL and token. The preview is masked; Copy and Download fetch the real token separately, so this panel is safe to leave open on a shared screen.",
+   "fieldname": "claude_desktop_section",
+   "fieldtype": "Section Break",
+   "label": "Connect to Claude Desktop"
+  },
+  {
+   "fieldname": "claude_desktop_html",
+   "fieldtype": "HTML",
+   "label": "Client Configuration"
+  },
+  {
    "fieldname": "network_section",
    "fieldtype": "Section Break",
    "label": "Network"
@@ -126,6 +141,12 @@
    "fieldname": "allowed_cidrs",
    "fieldtype": "Small Text",
    "label": "Allowed CIDRs"
+  },
+  {
+   "description": "Base URL a client should use, if it differs from the one this site sees. Leave empty and the connection panel uses frappe.utils.get_url(). Set it for a site behind a Tailscale Funnel, a tunnel or a reverse proxy on another hostname \u2014 there is no way for the server to guess its own public name. Example: https://erp.tail1234.ts.net",
+   "fieldname": "public_url",
+   "fieldtype": "Data",
+   "label": "Public URL"
   },
   {
    "fieldname": "attribution_section",
@@ -504,7 +525,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-26 09:00:00.000000",
+ "modified": "2026-07-26 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

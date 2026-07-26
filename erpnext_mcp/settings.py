@@ -110,6 +110,17 @@ def tool_enabled(tool_name: str) -> bool:
 	return as_bool(_value(f"allow_{tool_name}"))
 
 
+def public_url() -> str:
+	"""An externally reachable base URL for this site, when one is configured.
+
+	`frappe.utils.get_url()` is correct for the server and can be useless to a
+	client: a site behind a Tailscale Funnel, a tunnel or a reverse proxy on
+	another hostname has no way of knowing its public name from inside a request.
+	So this is a field an operator fills in, and the connection panel prefers it.
+	"""
+	return str(_value("public_url") or "").strip()
+
+
 def require_user_context() -> bool:
 	return as_bool(_value("require_user_context"))
 

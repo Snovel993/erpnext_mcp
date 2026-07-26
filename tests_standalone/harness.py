@@ -1077,6 +1077,13 @@ def _build_utils() -> types.ModuleType:
 	module.cint = lambda value: int(float(value or 0))
 	module.cstr = lambda value: "" if value is None else str(value)
 
+	def get_url(uri=None, full_address=False):
+		"""frappe.utils.get_url — the site's own address, as the server sees it."""
+		base = "https://test.localhost"
+		return f"{base}/{str(uri).lstrip('/')}" if uri else base
+
+	module.get_url = get_url
+
 	def add_days(date, days):
 		return _getdate(date) + datetime.timedelta(days=days)
 
@@ -1112,6 +1119,9 @@ def _build_frappe() -> types.ModuleType:
 		session=FrappeDict(user="Guest", data=FrappeDict()),
 	)
 	module.flags = FrappeDict()
+	# What a whitelisted method fills in to serve a file. Frappe's
+	# `frappe.utils.response.as_binary` reads type/filename/filecontent off it.
+	module.response = FrappeDict()
 
 	def _translate(text, *args, **kwargs):
 		return text

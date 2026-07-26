@@ -114,6 +114,11 @@ the next part.
 5. Tick **Enabled** and save.
 6. Click **Test Configuration**. It reports whether the server is ready, which
    tools are enabled, and which are unavailable on this site.
+7. Use the **Connect to Claude Desktop** section that appears below the token to
+   copy or download a ready-made client config — no hand-editing JSON. If this
+   site is reached from outside on a different hostname (a Tailscale Funnel, a
+   tunnel, a reverse proxy), set **Public URL** first so the generated config
+   points somewhere the client can actually reach.
 
 Leave every switch in the write sections alone until you have a reason.
 
@@ -160,6 +165,12 @@ layer inspects `Authorization` before any whitelisted method runs and routes a
 `Bearer` value into its OAuth2 validator; an MCP token does not survive that trip
 on every version. `Authorization: Bearer` is still accepted where it works, but
 `X-MCP-Token` is the one that always arrives.
+
+> **The settings form will do this for you.** Once the endpoint is enabled, the
+> **Connect to Claude Desktop** section on ERPNext MCP Settings renders the exact
+> JSON for your site — right URL, right token — with copy and download buttons and
+> the config-file path for your platform. The rest of this section is what it
+> generates, for anyone who would rather write it by hand.
 
 ### Claude Desktop
 
@@ -503,7 +514,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-514 standalone tests and 156 in-bench tests. The standalone suite installs an
+551 standalone tests and 172 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.

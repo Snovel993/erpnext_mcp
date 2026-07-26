@@ -9,6 +9,7 @@ frappe.ui.form.on("ERPNext MCP Settings", {
 	refresh(frm) {
 		frm.add_custom_button(__("Test Configuration"), () => show_selftest(frm));
 		set_headline(frm);
+		render_connect_panel(frm);
 
 		frm.set_df_property(
 			"generate_token",
@@ -17,6 +18,14 @@ frappe.ui.form.on("ERPNext MCP Settings", {
 				? __("Generating a new token immediately invalidates the current one.")
 				: __("No token yet. The endpoint stays off until one exists.")
 		);
+	},
+
+	enabled(frm) {
+		render_connect_panel(frm);
+	},
+
+	public_url(frm) {
+		render_connect_panel(frm);
 	},
 
 	generate_token(frm) {
@@ -161,4 +170,168 @@ function show_selftest(frm) {
 			</table>`,
 		});
 	});
+}
+
+// ── Connect to Claude Desktop ───────────────────────────────────────────────
+//
+// The panel renders masked. Copy and Download re-fetch with reveal=1, so the
+// clipboard and the file get a working config while the screen stays safe to
+// share — the operator never has to choose between "usable" and "not on my
+// screenshot".
+
+const CONNECT_FIELD = "claude_desktop_html";
+
+function render_connect_panel(frm, revealed_payload) {
+	const wrapper = frm.get_field(CONNECT_FIELD) && frm.get_field(CONNECT_FIELD).$wrapper;
+	if (!wrapper) return;
+	if (!frm.doc.enabled) {
+		wrapper.empty();
+		return;
+	}
+
+	const draw = (d) => {
+		wrapper.empty().append(connect_panel_html(d || {}));
+		wire_connect_panel(frm, wrapper, d || {});
+	};
+
+	if (revealed_payload) {
+		draw(revealed_payload);
+		return;
+	}
+	frappe
+		.call({ method: "erpnext_mcp.onboarding.claude_desktop_config", args: { reveal: 0 } })
+		.then((r) => draw(r.message));
+}
+
+function connect_panel_html(d) {
+	if (!d.token_configured) {
+		return `<div class="form-message orange">${__(
+			"Generate an auth token above, then this panel will show the client configuration."
+		)}</div>`;
+	}
+
+	const esc = frappe.utils.escape_html;
+	const os_rows = Object.keys(d.config_paths || {})
+		.map((key) => {
+			const active = key === d.detected_os;
+			return `<tr class="${active ? "" : "text-muted"}">
+				<td style="padding:2px 12px 2px 0;white-space:nowrap">
+					${active ? "<b>" : ""}${esc(d.os_labels[key])}${active ? "</b> ←" : ""}
+				</td>
+				<td><code>${esc(d.config_paths[key])}</code></td>
+			</tr>`;
+		})
+		.join("");
+
+	const http_note = d.is_http
+		? `<p class="text-muted small">${__(
+				"This endpoint is plain HTTP, so the config includes <code>--allow-http</code>. mcp-remote refuses a non-HTTPS origin without it."
+		  )}</p>`
+		: "";
+
+	return `
+<div class="erpnext-mcp-connect">
+	<p><b>${__("1. Save this to your Claude Desktop config")}</b><br>
+	<span class="text-muted small">${__("Default location — highlighted row is the platform this browser reports.")}</span></p>
+	<table style="margin-bottom:12px">${os_rows}</table>
+
+	<pre data-connect="json" style="max-height:260px;overflow:auto;padding:10px;border-radius:4px">${esc(
+		d.config_json
+	)}</pre>
+	${http_note}
+	<p>
+		<button class="btn btn-xs btn-primary" data-connect-action="copy-json">${__("Copy config JSON")}</button>
+		<button class="btn btn-xs btn-default" data-connect-action="download">${__("Download config file")}</button>
+		<button class="btn btn-xs btn-default" data-connect-action="reveal">${
+			d.revealed ? __("Hide token") : __("Reveal for copy")
+		}</button>
+		<span class="text-muted small" style="margin-left:8px">${
+			d.revealed
+				? __("Token visible — do not screenshot.")
+				: __("Preview is masked. Copy and Download still give you the real token.")
+		}</span>
+	</p>
+
+	<p style="margin-top:16px"><b>${__("2. Restart Claude Desktop")}</b><br>
+	<span class="text-muted small">${__("Fully quit ({0}) and reopen — reloading the window is not enough.", [
+		esc(d.quit_keys[d.detected_os] || "⌘Q"),
+	])}</span></p>
+
+	<p><b>${__("3. Check it worked")}</b><br>
+	<span class="text-muted small">${__(
+		'Ask Claude "get the company topology from erpnext". The <code>erpnext__*</code> tools should be available.'
+	)}</span></p>
+
+	<p class="text-muted small">${__(
+		"If the file already exists, merge the <code>erpnext</code> key into your existing <code>mcpServers</code> object rather than replacing the file."
+	)}</p>
+
+	<hr>
+	<p><b>${__("Connect from Claude Code")}</b><br>
+	<span class="text-muted small">${__("No bridge needed — Claude Code speaks HTTP MCP directly.")}</span></p>
+	<pre data-connect="cli" style="padding:10px;border-radius:4px;white-space:pre-wrap">${esc(
+		d.claude_code_command
+	)}</pre>
+	<p><button class="btn btn-xs btn-default" data-connect-action="copy-cli">${__("Copy command")}</button></p>
+
+	<p class="text-muted small" style="margin-top:12px">${__("Endpoint")}:
+		<code>${esc(d.endpoint_url)}</code> <span>(${esc(d.url_source)})</span>
+	</p>
+</div>`;
+}
+
+function wire_connect_panel(frm, wrapper, current) {
+	wrapper.find("[data-connect-action]").on("click", function () {
+		const action = $(this).attr("data-connect-action");
+
+		if (action === "download") {
+			// A GET the browser can open. The token rides in the response body,
+			// never in the URL, so it stays out of proxy logs and history.
+			window.open(current.download_url, "_blank");
+			return;
+		}
+
+		if (action === "reveal") {
+			if (current.revealed) {
+				render_connect_panel(frm);
+				return;
+			}
+			with_revealed_config((payload) => render_connect_panel(frm, payload));
+			return;
+		}
+
+		// Copy always fetches the real token, whatever the preview is showing.
+		with_revealed_config((payload) => {
+			const text = action === "copy-cli" ? payload.claude_code_command : payload.config_json;
+			copy_text(text);
+		});
+	});
+}
+
+function with_revealed_config(callback) {
+	frappe
+		.call({ method: "erpnext_mcp.onboarding.claude_desktop_config", args: { reveal: 1 } })
+		.then((r) => r.message && callback(r.message));
+}
+
+function copy_text(text) {
+	if (frappe.utils && frappe.utils.copy_to_clipboard) {
+		frappe.utils.copy_to_clipboard(text);
+		frappe.show_alert({ message: __("Copied — includes your real token"), indicator: "green" });
+		return;
+	}
+	// Non-secure contexts (a LAN site on plain http) have no navigator.clipboard.
+	const area = document.createElement("textarea");
+	area.value = text;
+	area.style.position = "fixed";
+	area.style.opacity = "0";
+	document.body.appendChild(area);
+	area.select();
+	try {
+		document.execCommand("copy");
+		frappe.show_alert({ message: __("Copied — includes your real token"), indicator: "green" });
+	} catch (e) {
+		frappe.msgprint(__("Could not copy automatically. Select the text above and copy it."));
+	}
+	document.body.removeChild(area);
 }

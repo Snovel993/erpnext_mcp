@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.4.0 — 2026-07-26
+
+A **Connect to Claude Desktop** panel on the settings form. No new MCP tools —
+still 37 — this is the last mile of installation.
+
+### Added
+
+- **`Connect to Claude Desktop` section** on ERPNext MCP Settings, shown once the
+  master switch is on. It renders the `claude_desktop_config.json` entry built
+  from this site's own URL and token, the default config-file path for macOS,
+  Windows and Linux (with the platform the browser reports highlighted), and the
+  three next steps: save, fully quit and reopen Claude Desktop, then ask for the
+  company topology.
+- **Copy config JSON**, **Download config file** and **Reveal for copy**
+  buttons, plus a **Connect from Claude Code** subsection with the equivalent
+  `claude mcp add` one-liner and its own copy button.
+- **`public_url`** field. `frappe.utils.get_url()` is correct for the server and
+  useless to a client on a site behind a Tailscale Funnel, a tunnel or a reverse
+  proxy on another hostname, and there is no way to detect that from inside a
+  request — so it is a field an operator fills in, and the panel prefers it. The
+  payload says which source it used.
+- **`erpnext_mcp.onboarding`**, with two whitelisted methods:
+  `claude_desktop_config(reveal=0)` and
+  `download_claude_desktop_config()` (GET, `Content-Disposition: attachment`).
+  Both `frappe.only_for("System Manager")`.
+
+### Notes on the token
+
+This is the only place in the app that hands a plaintext token back to a caller,
+so the reasoning is worth stating. The gate is the same role that can open the
+form — somebody who can read this panel could press **Generate New Token** and
+read the result anyway, so nothing new is being given away.
+
+Everything else is belt. The preview renders masked (`••••••••…wxyz`), so the
+panel is safe on a shared screen or in a screenshot, while **Copy** and
+**Download** fetch the real value separately — an operator never has to choose
+between a working config and a safe screen. The token is never put in a URL: the
+download is a GET whose *response* carries it, so it stays out of proxy logs and
+browser history. The masked payload is asserted not to contain the token, in both
+suites.
+
+`--allow-http` is emitted only for an `http://` endpoint. `mcp-remote` refuses a
+non-HTTPS origin without it, and including it on an HTTPS config is noise that
+invites the question "why is this allowing http".
+
+### Tests
+
+551 standalone (was 514), 172 in-bench (was 156).
+
 ## 0.3.0 — 2026-07-26
 
 **37 tools** (was 35): a compliance-packet framework with two packet types, plus
