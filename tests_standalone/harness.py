@@ -535,11 +535,6 @@ APP_DOCTYPES = {
 	"Asset Depreciation Posting": "asset_depreciation_posting",
 }
 
-#: The app's own doctypes that have no controller file — the child tables. Their
-#: rows only ever exist inside a parent, so nothing calls `frappe.get_doc` on
-#: one, and `_controller` must not try to import a module that is not there.
-APP_CHILD_DOCTYPES = {"Asset Cost Center Allocation", "Asset Depreciation Posting"}
-
 
 def _load_app_doctype(folder: str) -> dict:
 	payload = _APP_DOCTYPE_CACHE.get(folder)
@@ -1574,9 +1569,16 @@ def _build_utils() -> types.ModuleType:
 
 # ── the module itself ───────────────────────────────────────────────────────
 def _controller(doctype: str):
-	"""Resolve a doctype to this app's controller class, as Frappe does."""
+	"""Resolve a doctype to this app's controller class, as Frappe does.
+
+	Including the child tables. Frappe imports `<folder>/<folder>.py` for every
+	DocType it loads and does not make an exception for a table, which is what
+	v0.7.0 learned the hard way — so neither does this. A folder with a JSON and
+	no module raises ImportError here for the same reason `bench migrate` raises
+	ModuleNotFoundError there.
+	"""
 	folder = APP_DOCTYPES.get(doctype)
-	if not folder or doctype in APP_CHILD_DOCTYPES:
+	if not folder:
 		return STUB_CONTROLLERS.get(doctype, Document)
 	module = __import__(f"erpnext_mcp.erpnext_mcp.doctype.{folder}.{folder}", fromlist=["x"])
 	return getattr(module, doctype.replace(" ", ""), Document)

@@ -76,18 +76,44 @@ class GovernanceIntegrationTestCase(MCPIntegrationTestCase):
 		return self.tool_data("create_cap_table_entry", payload)
 
 
+#: Every DocType v0.7.0 adds. Child tables included — see the module-import test.
+V7_DOCTYPES = (
+	"Cap Table Entry",
+	"Member Event",
+	"Governance Document",
+	"Asset Cost Profile",
+	"Asset Cost Center Allocation",
+	"Asset Depreciation Posting",
+)
+
+
 class DocTypesMigrated(GovernanceIntegrationTestCase):
 	def test_every_doctype_this_version_adds_is_on_the_site(self):
-		for doctype in (
-			"Cap Table Entry",
-			"Member Event",
-			"Governance Document",
-			"Asset Cost Profile",
-			"Asset Cost Center Allocation",
-			"Asset Depreciation Posting",
-		):
+		for doctype in V7_DOCTYPES:
 			with self.subTest(doctype=doctype):
 				self.assertTrue(frappe.db.exists("DocType", doctype), f"{doctype} did not migrate")
+
+	def test_frappe_can_import_every_doctypes_module(self):
+		"""The v0.7.0 regression, reproduced through the exact function that raised.
+
+		`frappe.db.exists("DocType", …)` reads a row, and a row can exist for a
+		doctype whose Python module cannot be imported — which is the gap v0.7.0
+		fell into: two child tables shipped with a JSON and no `.py`, and
+		`bench migrate` died with ModuleNotFoundError while the previous version of
+		this test passed. `load_doctype_module` is the frame at the top of that
+		traceback, and `get_controller` is what calls it.
+		"""
+		from frappe.modules.utils import load_doctype_module
+
+		for doctype in V7_DOCTYPES:
+			with self.subTest(doctype=doctype):
+				self.assertIsNotNone(load_doctype_module(doctype), f"{doctype} has no module")
+				controller = frappe.get_controller(doctype)
+				self.assertEqual(
+					controller.__name__,
+					doctype.replace(" ", ""),
+					f"{doctype} fell back to a base class, so its validation does not run",
+				)
 
 	def test_the_child_tables_really_are_child_tables(self):
 		for doctype in ("Asset Cost Center Allocation", "Asset Depreciation Posting"):

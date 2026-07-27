@@ -132,6 +132,8 @@ tests_standalone/
                           and that the settings JS keeps no copy of the catalogue
   test_governance.py      the cap table, the event trail and the archive
   test_assets.py          cost splits, the schedule, and the tenor check
+  test_packaging.py       that every shipped doctype folder is one Frappe can
+                          import — the v0.7.0 bench-migrate regression
 
 erpnext_mcp/
   tests/test_integration.py                       in-bench, v0.1.0 surface

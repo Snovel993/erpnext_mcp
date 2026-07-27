@@ -689,7 +689,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-894 standalone tests and 245 in-bench tests. The standalone suite installs an
+902 standalone tests and 246 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.

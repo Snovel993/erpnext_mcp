@@ -3,6 +3,60 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.7.1 — 2026-07-27
+
+**fix: missing Python controllers for child doctypes broke `bench migrate`.**
+
+v0.7.0 shipped `Asset Cost Center Allocation` and `Asset Depreciation Posting`
+with a DocType JSON, an `__init__.py`, and no `.py` module. On a live site
+`bench migrate` stopped with:
+
+```
+ModuleNotFoundError: No module named
+'erpnext_mcp.erpnext_mcp.doctype.asset_depreciation_posting.asset_depreciation_posting'
+```
+
+Frappe imports `<folder>/<folder>.py` for **every** DocType it loads —
+`frappe.modules.utils.load_doctype_module`, reached from `get_controller`, which
+migrate calls while syncing the JSON. Child tables are not an exception. Both
+tables were left without a module because neither has any server-side logic;
+their rules are properties of the whole table and live on the parent,
+`AssetCostProfile`. That reasoning was right about where the logic belongs and
+wrong about whether the file is optional. **An empty controller is mandatory.**
+
+Nothing else about v0.7.0 changes: no tool, no schema, no behaviour. A site that
+never got past the failed migrate loses nothing by upgrading straight to 0.7.1.
+
+### Fixed
+
+- Added `asset_cost_center_allocation.py` and `asset_depreciation_posting.py`,
+  each an empty `Document` subclass with a docstring explaining why an empty
+  controller is not optional.
+
+### Added — the tests that should have caught it
+
+The in-bench suite asserted `frappe.db.exists("DocType", …)` for all six new
+doctypes and passed. That is a different question: a row can exist for a doctype
+whose module cannot be imported, and the failure sat exactly in the gap between
+"the JSON is there" and "Frappe can load it".
+
+- **`tests_standalone/test_packaging.py`** — walks the app's doctype folders on
+  disk and asserts each is a package Frappe could import: `__init__.py` present,
+  `<folder>.py` present, the folder name equal to the scrubbed DocType name, a
+  controller class named after the DocType that subclasses `Document`, the module
+  set to this app, every child table flagged `istable`, and every `Table` field
+  pointing at a doctype this app actually ships. No bench needed, so CI runs it
+  on every push. Verified by deleting the controller again — it fails.
+- **`test_frappe_can_import_every_doctypes_module`** (in-bench) — reproduces the
+  regression through the exact frame at the top of the traceback,
+  `load_doctype_module`, and additionally checks `get_controller` returns the
+  app's class rather than silently falling back to a base `Document`, which would
+  disable every validation the controller declares.
+- The standalone harness no longer special-cases child tables when resolving a
+  controller, so the double now imports a module where Frappe would.
+
+902 standalone tests, all passing.
+
 ## 0.7.0 — 2026-07-27
 
 Family-office governance and asset accounting. Fifteen tools and six doctypes,
