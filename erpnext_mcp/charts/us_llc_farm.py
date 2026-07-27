@@ -206,14 +206,22 @@ _ASSETS = {
 					"Marketable Securities - Bonds & Fixed Income",
 					description="Debt positions at cost. Coupon income goes to 4210 Interest Income.",
 				),
-				_account(
+				_group(
 					"1830",
 					"Brokerage Cash & Money Market",
-					"Bank",
+					[],
 					description=(
-						"Uninvested cash sitting at the broker. Typed as Bank so it "
-						"reconciles like any other cash account — this is the account a "
-						"linked brokerage feed posts against."
+						"Uninvested cash sitting at the broker — ONE CHILD PER LINKED BROKERAGE "
+						"ACCOUNT, not one combined balance. Per-account visibility is what makes "
+						"anchor reconciliation, sweep tracing and per-account fee attribution "
+						"possible; collapsed into a single ledger, a paired-brokerage feed has no "
+						"way to say which account a movement belongs to.\n\n"
+						"Ships EMPTY on purpose. Which brokerage accounts exist is a property of "
+						"the install, not of the template, so the children are added as accounts "
+						"are linked: create_account under this group with account_type=Bank, one "
+						"per cash-services account. A group with no children is legal in ERPNext "
+						"and posts to nothing, which is the correct state until the first "
+						"brokerage account is connected."
 					),
 				),
 				_account(
@@ -663,6 +671,10 @@ register(
 			"brokerage without belonging to the trading segment. It is a bridge for "
 			"paired transactions, it should read zero, and it stays out of segment "
 			"reporting.",
+			"1830 Brokerage Cash & Money Market ships as an EMPTY GROUP and needs "
+			"one child per linked brokerage cash-services account, added with "
+			"create_account (account_type=Bank) once you know which accounts exist. "
+			"Until then it holds nothing and posts to nothing, which is correct.",
 			"2120 Current Pay Period - Due to Employees is meant to be updated "
 			"continuously as work lands, not written up once at period end. Read its "
 			"description before posting to it.",

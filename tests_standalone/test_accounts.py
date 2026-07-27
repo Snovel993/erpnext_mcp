@@ -591,6 +591,23 @@ class ProposeCleanChart(SeededTestCase):
 		# The open-options account points at the right one of the two.
 		self.assertIn("7310, not 7300", self.find(accounts, "1840")["description"])
 
+	def test_the_brokerage_cash_group_ships_empty(self):
+		"""One child per linked brokerage account, and which accounts exist is a
+		property of the install rather than of the template. Shipping defaults
+		here would mean every operator deleting somebody else's account numbers."""
+		node = self.find(self.tool_data("propose_clean_chart", {"company": MAIN})["accounts"], "1830")
+		self.assertTrue(node["is_group"])
+		self.assertEqual(node.get("children"), [])
+		self.assertNotIn("account_type", node)
+		self.assertIn("ONE CHILD PER LINKED BROKERAGE", node["description"])
+		self.assertIn("create_account", node["description"])
+
+	def test_the_operator_is_told_the_empty_group_needs_filling(self):
+		"""An empty group that nobody knows to fill is just a hole in the chart."""
+		notes = " ".join(self.tool_data("propose_clean_chart", {"company": MAIN})["notes"])
+		self.assertIn("1830", notes)
+		self.assertIn("EMPTY GROUP", notes)
+
 	def test_the_trading_costs_are_inside_the_segment_not_with_the_farm(self):
 		"""Filtering the segment has to show what the book costs to run, not only
 		what it earned — otherwise the answer flatters itself."""
@@ -1112,6 +1129,35 @@ class ImportExecute(ChartToolsTestCase):
 				self.assertIn(row["parent_account"], by_name, f"{row['name']} is orphaned")
 				self.assertTrue(by_name[row["parent_account"]]["is_group"])
 
+	def test_an_empty_group_imports_and_can_then_be_filled(self):
+		"""1830 ships empty and gets a child per linked brokerage account. Both
+		halves have to work: ERPNext has to accept a childless group, and
+		create_account has to accept it as a parent afterwards."""
+		self.fresh_company()
+		proposal = self.tool_data("propose_clean_chart", {"company": FRESH})
+		self.tool_data(
+			"import_chart_of_accounts",
+			{"company": FRESH, "accounts_json": proposal["accounts"], "dry_run": False},
+		)
+		group = f"1830 - Brokerage Cash & Money Market - {FRESH_ABBR}"
+		self.assertTrue(frappe.db.get_value("Account", group, "is_group"))
+		self.assertEqual(frappe.db.count("Account", {"parent_account": group}), 0)
+
+		child = self.tool_data(
+			"create_account",
+			{
+				"company": FRESH,
+				"account_number": "1831",
+				"account_name": "Brokerage Cash - 3158",
+				"root_type": "Asset",
+				"parent_account": group,
+				"account_type": "Bank",
+			},
+		)
+		self.assertEqual(child["parent_account"], group)
+		self.assertEqual(child["account_type"], "Bank")
+		self.assertEqual(frappe.db.count("Account", {"parent_account": group}), 1)
+
 	def test_descriptions_land_as_comments_when_the_doctype_has_no_field(self):
 		self.fresh_company()
 		proposal = self.tool_data("propose_clean_chart", {"company": FRESH})
@@ -1188,8 +1234,8 @@ class TemplateData(SeededTestCase):
 		reviewed before it ran."""
 		described = self.template().describe()
 		self.assertEqual(described["total_accounts"], 81)
-		self.assertEqual(described["group_accounts"], 16)
-		self.assertEqual(described["ledger_accounts"], 65)
+		self.assertEqual(described["group_accounts"], 17)
+		self.assertEqual(described["ledger_accounts"], 64)
 
 	def test_it_stays_shallow(self):
 		"""Compact is a property of the shape, not only the count. Two levels of

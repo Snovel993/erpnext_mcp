@@ -1931,7 +1931,7 @@ auto-discovers them, so a new one is a single file drop.
 
 ### `us_llc_farm`
 
-81 accounts — 16 groups, 65 ledgers — for a US farming LLC that also runs an
+81 accounts — 17 groups, 64 ledgers — for a US farming LLC that also runs an
 investment book. Numbering is the convention a US bookkeeper expects: 1000s
 assets, 2000s liabilities, 3000s equity, 4000s income, 5000s COGS, 6000s
 operating expenses, 7000s non-operating. Gaps are deliberate.
@@ -1974,6 +1974,17 @@ Four things it does that a generic chart does not:
   for most others. `7320` (advisory, time- and asset-based) and `7330`
   (custodian and per-transaction) are apart because read together they tell you
   neither.
+
+  **`1830 Brokerage Cash & Money Market` ships as an empty group.** It takes one
+  child per linked brokerage cash-services account, added after the import with
+  `create_account` (`account_type=Bank`) once you know which accounts exist.
+  Per-account visibility is what makes anchor reconciliation, sweep tracing and
+  per-account fee attribution possible — collapsed into one combined ledger, a
+  paired-brokerage feed cannot say which account a movement belongs to. The
+  template ships no default children because the account numbers are a property
+  of the install, not of the chart. An empty group is legal in ERPNext and posts
+  to nothing, which is the correct state until the first brokerage account is
+  connected.
 
   **One exception, and it matters for Bank Bridge.**
   `1130 Cash Clearing - Brokerage` carries the word "brokerage" but is NOT part

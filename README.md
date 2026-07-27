@@ -375,7 +375,7 @@ database dependency — which is what makes a proposal reviewable, diffable and
 version-controllable before anything happens. The package auto-discovers them,
 so adding `us_c_corp` is one file.
 
-The one that ships is **`us_llc_farm`**: 81 accounts (16 groups, 65 ledgers) for
+The one that ships is **`us_llc_farm`**: 81 accounts (17 groups, 64 ledgers) for
 a US farming LLC that also runs an investment book. Deliberately compact — nine
 flat operating-expense buckets rather than thirty-five, because a chart with a
 line for every conceivable cost is one where nobody finds the right line. Three
@@ -583,7 +583,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-690 standalone tests and 195 in-bench tests. The standalone suite installs an
+693 standalone tests and 195 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.

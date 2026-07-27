@@ -20,7 +20,7 @@ use. Templates live in `erpnext_mcp/charts/` and are pure Python literals with
 no database dependency, which is what makes the proposal reviewable before
 anything runs.
 
-The one shipped template is **`us_llc_farm`** — 81 accounts (16 groups, 65
+The one shipped template is **`us_llc_farm`** — 81 accounts (17 groups, 64
 ledgers) for a US farming LLC that also runs an investment book. Compact by
 design: nine flat operating-expense buckets and at most two levels of grouping,
 because a chart with a line for every conceivable cost is one where nobody finds
@@ -48,6 +48,11 @@ the right line.
   only keeps that meaning if nobody drops a month-end adjusting entry into it.
 - **Property tax appears in all three places it lives** — accrued (`2170`),
   prepaid (`1420`), expensed (`6650`).
+- **`1830 Brokerage Cash & Money Market` ships as an empty group**, to be filled
+  with one child per linked brokerage cash-services account. Which accounts
+  exist is a property of the install rather than of the template, and a single
+  combined ledger would leave a paired-brokerage feed no way to say which
+  account a movement belongs to.
 
 The package auto-discovers templates the way `packets/` does, so `us_c_corp`,
 `us_s_corp` and `us_partnership` are a file drop each.
