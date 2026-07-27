@@ -507,33 +507,106 @@ class ProposeCleanChart(SeededTestCase):
 			[{"account_number": leaf["account_number"], "account_name": leaf["account_name"]}],
 		)
 
+	#: The trading segment, as a filter an operator can actually type into a
+	#: report. Inclusive on both ends.
+	TRADING_RANGES = ((1800, 1849), (3500, 3500), (4200, 4249), (7300, 7339))
+
+	#: Accounts outside those ranges that legitimately carry trading vocabulary.
+	#: Kept as an explicit map so a new exemption has to be argued for in a diff
+	#: rather than appearing because somebody widened a regex.
+	TRADING_WORD_EXEMPT = (("1130", "Bank Bridge working account for paired transactions"),)
+
 	def test_the_trading_segment_is_reportable_as_one_range_set(self):
 		"""The whole reason the investment book has its own numbers: filter a
-		report to these four ranges and you have the trading business, exclude
-		them and you have the farm. A farm account that wandered into 18xx or
-		42xx would quietly break that, and nothing else would notice."""
-		data = self.tool_data("propose_clean_chart", {"company": MAIN})
-		flat = {}
-
-		def collect(nodes):
-			for node in nodes:
-				flat[node["account_number"]] = node["account_name"]
-				collect(node.get("children") or [])
-
-		collect(data["accounts"])
-		trading = {n for n in flat if (n.startswith("18") or n.startswith("42")) and len(n) == 4}
-		trading |= {"3500", "7300"}
+		report to these ranges and you have the trading business, exclude them and
+		you have the farm. A farm account that wandered into 18xx, 42xx or the
+		7300s would quietly break that, and nothing else would notice."""
+		flat = self.flatten(self.tool_data("propose_clean_chart", {"company": MAIN})["accounts"])
+		trading = {n for n in flat if any(low <= int(n) <= high for low, high in self.TRADING_RANGES)}
 		self.assertEqual(
 			trading,
-			{"1800", "1810", "1820", "1830", "1840", "4200", "4210", "4220", "4230", "4240", "3500", "7300"},
+			{
+				"1800",
+				"1810",
+				"1815",
+				"1820",
+				"1830",
+				"1840",
+				"3500",
+				"4200",
+				"4210",
+				"4220",
+				"4230",
+				"4240",
+				"7300",
+				"7310",
+				"7320",
+				"7330",
+			},
 		)
-		# ...and nothing outside those ranges mentions trading concepts.
+
+	def test_nothing_outside_the_ranges_reads_as_trading(self):
+		"""The half that rots. Ranges stay right on their own; what drifts is
+		somebody adding `6950 Brokerage Fees` two years from now and the filter
+		silently starting to miss things."""
+		flat = self.flatten(self.tool_data("propose_clean_chart", {"company": MAIN})["accounts"])
+		trading = {n for n in flat if any(low <= int(n) <= high for low, high in self.TRADING_RANGES)}
 		for number, name in flat.items():
-			if number in trading:
+			if number in trading or number in dict(self.TRADING_WORD_EXEMPT):
 				continue
 			lowered = name.lower()
-			for word in ("securities", "brokerage", "options", "capital gain", "capital loss"):
-				self.assertNotIn(word, lowered, f"{number} {name} belongs in the trading segment")
+			for word in ("securities", "brokerage", "custodian", "options", "capital gain", "capital loss"):
+				self.assertNotIn(
+					word,
+					lowered,
+					f"{number} {name} reads as trading but sits outside the segment ranges",
+				)
+
+	def test_the_exempt_accounts_are_the_ones_we_think_they_are(self):
+		"""An exemption that outlives the account it was written for is a hole in
+		the check above."""
+		flat = self.flatten(self.tool_data("propose_clean_chart", {"company": MAIN})["accounts"])
+		exempt = set(dict(self.TRADING_WORD_EXEMPT))
+		self.assertEqual(exempt & set(flat), exempt)
+		self.assertEqual(flat["1130"], "Cash Clearing - Brokerage")
+
+	def test_the_clearing_account_says_it_is_not_part_of_the_segment(self):
+		"""1130 is the one account a reader could reasonably mistake for a
+		trading account, so it has to say out loud that it is not one."""
+		node = self.find(self.tool_data("propose_clean_chart", {"company": MAIN})["accounts"], "1130")
+		self.assertEqual(node["account_type"], "Current Asset")
+		self.assertIn("NOT part of the", node["description"])
+		self.assertIn("should sit", node["description"])
+
+	def test_the_loss_accounts_are_split_for_tax_treatment(self):
+		"""7300 and 7310 exist apart because loss harvesting has to separate them
+		anyway; a combined account just moves the work downstream."""
+		accounts = self.tool_data("propose_clean_chart", {"company": MAIN})["accounts"]
+		equity_losses = self.find(accounts, "7300")
+		options_losses = self.find(accounts, "7310")
+		self.assertEqual(equity_losses["account_name"], "Realized Capital Losses")
+		self.assertEqual(options_losses["account_name"], "Options Losses")
+		self.assertIn("7310", equity_losses["description"])
+		self.assertIn("1256", options_losses["description"])
+		# The open-options account points at the right one of the two.
+		self.assertIn("7310, not 7300", self.find(accounts, "1840")["description"])
+
+	def test_the_trading_costs_are_inside_the_segment_not_with_the_farm(self):
+		"""Filtering the segment has to show what the book costs to run, not only
+		what it earned — otherwise the answer flatters itself."""
+		accounts = self.tool_data("propose_clean_chart", {"company": MAIN})["accounts"]
+		for number in ("7320", "7330"):
+			node = self.find(accounts, number)
+			self.assertIsNotNone(node, number)
+			self.assertEqual(node["account_type"], "Expense Account")
+		self.assertIn("7320", self.find(accounts, "6400")["description"])
+
+	def flatten(self, nodes, out=None):
+		out = {} if out is None else out
+		for node in nodes:
+			out[node["account_number"]] = node["account_name"]
+			self.flatten(node.get("children") or [], out)
+		return out
 
 	def test_the_tax_accounts_land_on_the_right_side(self):
 		"""Three things people mix up: the accrued obligation, the expense, and
@@ -1114,9 +1187,9 @@ class TemplateData(SeededTestCase):
 		"""A template that needed a site to describe itself could not be
 		reviewed before it ran."""
 		described = self.template().describe()
-		self.assertEqual(described["total_accounts"], 76)
+		self.assertEqual(described["total_accounts"], 81)
 		self.assertEqual(described["group_accounts"], 16)
-		self.assertEqual(described["ledger_accounts"], 60)
+		self.assertEqual(described["ledger_accounts"], 65)
 
 	def test_it_stays_shallow(self):
 		"""Compact is a property of the shape, not only the count. Two levels of
@@ -1130,7 +1203,7 @@ class TemplateData(SeededTestCase):
 	#: Deliberately carry no account_type. ERPNext offers nothing that fits a
 	#: securities or open-options position — the nearest, Stock, means trading
 	#: inventory and would pull them into the Stock module's valuation.
-	UNTYPED_BY_DESIGN = ("1810", "1820", "1840")
+	UNTYPED_BY_DESIGN = ("1810", "1815", "1820", "1840")
 
 	def test_every_number_is_unique_and_every_leaf_is_typed(self):
 		from erpnext_mcp import charts

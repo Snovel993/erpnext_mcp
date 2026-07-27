@@ -375,7 +375,7 @@ database dependency — which is what makes a proposal reviewable, diffable and
 version-controllable before anything happens. The package auto-discovers them,
 so adding `us_c_corp` is one file.
 
-The one that ships is **`us_llc_farm`**: 76 accounts (16 groups, 60 ledgers) for
+The one that ships is **`us_llc_farm`**: 81 accounts (16 groups, 65 ledgers) for
 a US farming LLC that also runs an investment book. Deliberately compact — nine
 flat operating-expense buckets rather than thirty-five, because a chart with a
 line for every conceivable cost is one where nobody finds the right line. Three
@@ -386,9 +386,10 @@ things it does that a generic chart does not:
   `6150 Employer Payroll Tax Expense` split out again so wage cost and true cost
   of employment read apart.
 - **The trading segment is its own range set** — assets `1800–1849`, income
-  `4200–4249`, losses `7300`, unrealised movement `3500`. Filter a P&L to those
-  and you have the investment book; exclude them and you have the farm. No
-  dashboard required.
+  `4200–4249`, losses and costs `7300–7339`, unrealised movement `3500`. Filter
+  a P&L to those and you have the investment book, running costs included;
+  exclude them and you have the farm. No dashboard required, and a test fails if
+  an account outside those ranges ever starts reading as trading.
 - **`2120 Current Pay Period - Due to Employees` is a live balance**, not an
   accrual: updated continuously as work lands, flushed to zero at payroll. Its
   description says so, because the account only keeps that meaning if nobody
@@ -582,7 +583,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-685 standalone tests and 195 in-bench tests. The standalone suite installs an
+690 standalone tests and 195 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.

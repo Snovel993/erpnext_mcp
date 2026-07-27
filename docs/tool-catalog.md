@@ -1931,7 +1931,7 @@ auto-discovers them, so a new one is a single file drop.
 
 ### `us_llc_farm`
 
-76 accounts — 16 groups, 60 ledgers — for a US farming LLC that also runs an
+81 accounts — 16 groups, 65 ledgers — for a US farming LLC that also runs an
 investment book. Numbering is the convention a US bookkeeper expects: 1000s
 assets, 2000s liabilities, 3000s equity, 4000s income, 5000s COGS, 6000s
 operating expenses, 7000s non-operating. Gaps are deliberate.
@@ -1954,16 +1954,36 @@ Four things it does that a generic chart does not:
 
   | Side | Range | |
   | --- | --- | --- |
-  | Asset | `1800-1849` | Investments & Trading — securities, brokerage cash, open options |
-  | Income | `4200-4249` | Interest, dividends, realised gains, options premium |
-  | Expense | `7300` | Realized Capital Losses & Options Losses |
-  | Equity | `3500` | Unrealized Gain/Loss on Investments — mark-to-market, outside the P&L until a position closes |
+  | Asset | `1800-1849` | stocks & ETFs, mutual funds, bonds, brokerage cash, open options |
+  | Income | `4200-4249` | interest, dividends, realised gains, options premium |
+  | Expense | `7300-7339` | realised capital losses, options losses, advisory fees, custodian & brokerage fees |
+  | Equity | `3500` | unrealised gain/loss — mark-to-market, outside the P&L until a position closes |
 
-  Filter a P&L or trial balance to those four and you have the trading business;
-  exclude them and you have the farm. Nothing else in the chart reaches into
-  those numbers, which is what keeps the split true as the chart grows.
-  `1840 Options Contracts Open` is separate from the underlying equity so a
-  covered-call programme's live exposure is visible on its own.
+  Filter a P&L or trial balance to those four and you have the trading business,
+  running costs included; exclude them and you have the farm. Nothing else in
+  the chart reaches into those numbers, which is what keeps the split true as
+  the chart grows — a standalone test walks the whole tree and fails if an
+  account outside the ranges starts reading as trading.
+
+  Three splits inside the segment are there because a combined account just
+  moves work downstream. `1810` (exchange-traded) and `1815` (mutual funds) are
+  apart because a fund prices once daily at NAV and an ETF prices continuously.
+  `7300` (equity, fund and bond losses) and `7310` (options losses) are apart
+  because loss harvesting separates short-term from long-term anyway, and
+  options treatment can differ again — Section 1256 for index options, ordinary
+  for most others. `7320` (advisory, time- and asset-based) and `7330`
+  (custodian and per-transaction) are apart because read together they tell you
+  neither.
+
+  **One exception, and it matters for Bank Bridge.**
+  `1130 Cash Clearing - Brokerage` carries the word "brokerage" but is NOT part
+  of the segment. It is the bridge for paired brokerage/companion transactions —
+  the pattern where one movement appears on both a brokerage account and its
+  linked cash-services account — and a reconciled pair passes through it on the
+  way to its real accounts. The balance is transient and should read zero; a
+  standing balance means a pair did not close. Leave it out of segment
+  reporting, and do not remove it if a bank feed posts paired investment
+  transactions, because that posting has nowhere else to land.
 - **`2120 Current Pay Period - Due to Employees`** is a live balance, not an
   accrual. It is meant to be updated continuously as work lands — bucket picks
   as they are recorded, hours as they accumulate — so it reads at any moment as
@@ -1979,7 +1999,8 @@ Four things it does that a generic chart does not:
   expensed through `6650 Property & Business Taxes` alongside vehicle
   registration, LLC filing fees and business licences.
 
-Three accounts carry no `account_type` on purpose — `1810`, `1820` and `1840`.
+Four accounts carry no `account_type` on purpose — `1810`, `1815`, `1820` and
+`1840`.
 ERPNext offers nothing that fits a securities or open-options position; the
 nearest, `Stock`, means trading inventory and would pull them into the Stock
 module's valuation. An account with no type still posts.

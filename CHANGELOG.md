@@ -20,7 +20,7 @@ use. Templates live in `erpnext_mcp/charts/` and are pure Python literals with
 no database dependency, which is what makes the proposal reviewable before
 anything runs.
 
-The one shipped template is **`us_llc_farm`** — 76 accounts (16 groups, 60
+The one shipped template is **`us_llc_farm`** — 81 accounts (16 groups, 65
 ledgers) for a US farming LLC that also runs an investment book. Compact by
 design: nine flat operating-expense buckets and at most two levels of grouping,
 because a chart with a line for every conceivable cost is one where nobody finds
@@ -31,10 +31,17 @@ the right line.
   cost of employment read apart — and neither is confused with `2140 Payroll Tax
   Withholdings`, which is employees' money and a liability.
 - **The trading segment is a range set**: assets `1800-1849`, income
-  `4200-4249`, losses `7300`, unrealised movement `3500`. Filter a P&L to those
-  and you have the investment book; exclude them and you have the farm. Open
-  option contracts get their own account so a covered-call programme's exposure
-  is visible without unpicking it from the underlying equity.
+  `4200-4249`, losses and costs `7300-7339`, unrealised movement `3500`. Filter
+  a P&L to those and you have the investment book — running costs included,
+  since advisory (`7320`) and custodian/brokerage fees (`7330`) sit inside the
+  segment rather than with the farm's professional services. Open option
+  contracts get their own asset account so a covered-call programme's exposure
+  is visible without unpicking it from the underlying equity, and their losses
+  their own expense account (`7310`) because options and equity capital losses
+  can be taxed differently. `1130 Cash Clearing - Brokerage` is the one account
+  whose name reads as trading while deliberately sitting outside the segment —
+  it is a bridge for paired brokerage/companion transactions and should hold
+  zero.
 - **`2120 Current Pay Period - Due to Employees`** is a live, continuously
   updated balance of what is owed for work already performed this period, not a
   period-end accrual. Its description says so explicitly, because the account

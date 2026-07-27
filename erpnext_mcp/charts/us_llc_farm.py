@@ -11,8 +11,11 @@ SMALL ON PURPOSE. Roughly seventy accounts, most groups only one level deep.
 A chart with a line for every conceivable expense is a chart where nobody can
 find the right line, so the operating expenses are nine buckets rather than
 thirty-five, and a sub-account gets added when a real transaction needs one.
-Numbering leaves gaps for exactly that — the next bank account is 1130, the next
+Numbering leaves gaps for exactly that — the next bank account is 1150, the next
 operating expense is the next free number in the 6000s.
+
+One account sits outside that split: 1130 Cash Clearing - Brokerage carries the
+word "brokerage" but is a working account, not a position. See its description.
 
 TWO BUSINESSES, ONE LEDGER. The farm and the investment book are kept
 structurally apart so "how did trading do this year" is a report filter, not a
@@ -20,7 +23,8 @@ reconstruction:
 
     assets       1800-1849   Investments & Trading
     income       4200-4249   Investment & Trading Income
-    expense      7300        Realized Capital Losses & Options Losses
+    expense      7300-7339   realised losses, options losses, advisory and
+                             custodian fees
     equity       3500        Unrealized Gain/Loss on Investments
 
 Filter a P&L or trial balance to those four ranges and you have the trading
@@ -78,6 +82,23 @@ _ASSETS = {
 			[
 				_account("1110", "Cash on Hand", "Cash"),
 				_account("1120", "Checking - Wells Fargo Primary", "Bank"),
+				_account(
+					"1130",
+					"Cash Clearing - Brokerage",
+					"Current Asset",
+					description=(
+						"Bridge account for paired brokerage transactions — the pattern where a "
+						"brokerage account and its cash-services companion are linked and one "
+						"movement shows up on both sides. A reconciled pair passes through here on "
+						"its way to its real accounts, so the balance is transient and should sit "
+						"at zero once both legs have landed. A standing balance means a pair did "
+						"not close and wants looking at.\n\n"
+						"Working account, not a position. It is deliberately NOT part of the "
+						"trading segment (1800-1849 / 4200-4249 / 3500 / 7300-7339) even though "
+						"its name says brokerage, and it must be left out when reporting on the "
+						"investment book."
+					),
+				),
 				_account("1140", "Savings", "Bank"),
 				_account("1200", "Accounts Receivable", "Receivable"),
 				_account(
@@ -165,9 +186,19 @@ _ASSETS = {
 					"1810",
 					"Marketable Securities - Stocks & ETFs",
 					description=(
-						"Equity positions at cost. Mark-to-market movement goes to 3500 "
-						"Unrealized Gain/Loss on Investments until a position closes, at "
-						"which point the result lands in 4230 or 7300."
+						"Exchange-traded equity positions at cost. Mark-to-market movement goes "
+						"to 3500 Unrealized Gain/Loss on Investments until a position closes, at "
+						"which point the result lands in 4230 or 7300. Mutual funds are 1815."
+					),
+				),
+				_account(
+					"1815",
+					"Marketable Securities - Mutual Funds",
+					description=(
+						"Open-end pooled fund positions at cost. Separate from 1810 because a "
+						"mutual fund prices once a day at NAV while an ETF trades and prices "
+						"continuously — the two do not reconcile the same way, and a combined "
+						"account hides which is which at a period end."
 					),
 				),
 				_account(
@@ -191,16 +222,19 @@ _ASSETS = {
 					description=(
 						"Open option positions, carried separately so a covered-call "
 						"programme's live exposure is visible without unpicking it from the "
-						"underlying equity. Premium received goes to 4240; a loss on close "
-						"goes to 7300."
+						"underlying equity. Premium received goes to 4240; a loss on close goes "
+						"to 7310, not 7300 — options and equity losses can be taxed differently "
+						"and are kept apart for that reason."
 					),
 				),
 			],
 			description=(
 				"The investment book. Everything in 1800-1849 belongs to the trading "
-				"segment, paired with income in 4200-4249, losses in 7300 and unrealised "
-				"movement in 3500. Filter a report to those ranges and you have the "
-				"trading business on its own."
+				"segment, paired with income in 4200-4249, losses and costs in 7300-7339, "
+				"and unrealised movement in 3500. Filter a report to those ranges and you "
+				"have the trading business on its own — including what it costs to run, "
+				"which is why advisory and custodian fees sit in the 7300s rather than "
+				"with the farm's professional services."
 			),
 		),
 	],
@@ -367,10 +401,11 @@ _EQUITY = {
 			"Unrealized Gain/Loss on Investments",
 			"Equity",
 			description=(
-				"Mark-to-market bucket for open positions in 1810/1820/1840. Movement "
+				"Mark-to-market bucket for open positions in 1810/1815/1820/1840. Movement "
 				"sits here — outside the income statement — until a position actually "
-				"closes, at which point it moves to 4230 Realized Capital Gains or 7300 "
-				"Realized Capital Losses & Options Losses. Part of the trading segment."
+				"closes, at which point it moves to 4230 Realized Capital Gains, 7300 "
+				"Realized Capital Losses, or 7310 Options Losses. Part of the trading "
+				"segment."
 			),
 		),
 	],
@@ -414,9 +449,9 @@ _INCOME = {
 					"Options Premium Income",
 					"Income Account",
 					description=(
-						"Premium collected on written contracts. A loss on closing one goes "
-						"to 7300 rather than being netted here, so the gross premium taken "
-						"in stays visible."
+						"Premium collected on written contracts. A loss on closing one goes to "
+						"7310 rather than being netted here, so the gross premium taken in stays "
+						"visible."
 					),
 				),
 			],
@@ -500,7 +535,12 @@ _OPEX = {
 			"6400",
 			"Professional Services",
 			"Expense Account",
-			description="Legal, accounting and tax preparation, consulting, advisory and management fees.",
+			description=(
+				"Legal, accounting and tax preparation, consulting, and management fees for "
+				"the business. Investment advisory fees are 7320 and brokerage charges are "
+				"7330 — those belong to the trading segment, so filtering it shows what the "
+				"investment book costs to run and not only what it earned."
+			),
 		),
 		_account("6500", "Office & Administrative", "Expense Account"),
 		_account(
@@ -544,13 +584,49 @@ _NON_OPERATING = {
 		_account("7200", "Loss on Sale of Fixed Assets", "Expense Account"),
 		_account(
 			"7300",
-			"Realized Capital Losses & Options Losses",
+			"Realized Capital Losses",
 			"Expense Account",
 			description=(
-				"The loss side of the trading segment: closed positions from 1810/1820 "
-				"and losses on closing contracts from 1840. Gains go to 4230 and premium "
-				"to 4240 rather than being netted here, so gross activity on both sides "
-				"stays visible."
+				"Losses on closed equity, mutual fund and bond positions — 1810, 1815 and "
+				"1820. Gains go to 4230 rather than being netted here, so gross activity on "
+				"both sides stays visible.\n\n"
+				"Options losses are 7310, not this account. Loss harvesting is analysed "
+				"short-term against long-term, and folding in contracts whose treatment can "
+				"differ (Section 1256 for index options, ordinary for most others) means "
+				"unbundling the account before the analysis can start."
+			),
+		),
+		_account(
+			"7310",
+			"Options Losses",
+			"Expense Account",
+			description=(
+				"Losses on closing option contracts from 1840. Separate from 7300 because "
+				"options tax treatment can differ from equity capital losses — Section 1256 "
+				"mark-to-market for index options, ordinary treatment for most others. "
+				"Premium collected is income and goes to 4240."
+			),
+		),
+		_account(
+			"7320",
+			"Investment Advisory Fees",
+			"Expense Account",
+			description=(
+				"Advisory fees on managed accounts — a percentage of assets billed quarterly, "
+				"or a flat arrangement. In the trading segment rather than in 6400 "
+				"Professional Services so that filtering the segment shows what the investment "
+				"book costs to run, not only what it earned. Legal, accounting and consulting "
+				"for the business stay in 6400."
+			),
+		),
+		_account(
+			"7330",
+			"Custodian & Brokerage Fees",
+			"Expense Account",
+			description=(
+				"Custodian fees, wire fees and per-transaction charges from the broker. Kept "
+				"apart from 7320 because these scale with activity while advisory fees scale "
+				"with time and assets — read together they tell you neither."
 			),
 		),
 	],
@@ -570,7 +646,7 @@ register(
 			"A compact numbered chart of accounts for a US farming LLC that also runs "
 			"an investment book. Crop labour is separated from administrative wages so "
 			"a cost per bin means something; the trading segment has its own asset, "
-			"income, loss and unrealised-gain accounts so it can be reported on "
+			"income, loss, cost and unrealised-gain accounts so it can be reported on "
 			"without being untangled; and the current-pay-period wage liability is a "
 			"live balance rather than a period-end accrual."
 		),
@@ -578,10 +654,15 @@ register(
 		notes=(
 			"A starting point, not tax advice. Have the entity's return preparer look "
 			"at the 3000s before anything is filed against them.",
-			"THE TRADING SEGMENT is assets 1800-1849, income 4200-4249, losses 7300 "
-			"and unrealised movement 3500. Filter a P&L or trial balance to those four "
-			"ranges to see the investment book on its own; exclude them to see the "
-			"farm. Nothing else in the chart reaches into those numbers.",
+			"THE TRADING SEGMENT is assets 1800-1849, income 4200-4249, losses and "
+			"costs 7300-7339, and unrealised movement 3500. Filter a P&L or trial "
+			"balance to those four ranges to see the investment book on its own; "
+			"exclude them to see the farm. Nothing else in the chart reaches into "
+			"those numbers.",
+			"1130 Cash Clearing - Brokerage is the one account whose name says "
+			"brokerage without belonging to the trading segment. It is a bridge for "
+			"paired transactions, it should read zero, and it stays out of segment "
+			"reporting.",
 			"2120 Current Pay Period - Due to Employees is meant to be updated "
 			"continuously as work lands, not written up once at period end. Read its "
 			"description before posting to it.",
@@ -591,8 +672,9 @@ register(
 			"Operating expenses are nine flat buckets on purpose. A chart with a line "
 			"for every conceivable cost is one where nobody finds the right line — add "
 			"a sub-account when a real transaction needs it.",
-			"Numbering leaves gaps on purpose. The next bank account is 1130, the next "
-			"operating expense the next free number in its decade.",
+			"Numbering leaves gaps on purpose. The next bank account is 1150, the next "
+			"operating expense the next free number in its decade, the next trading "
+			"cost 7340.",
 		),
 	)
 )
