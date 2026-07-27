@@ -27,7 +27,9 @@ functions here gives the download a short, stable URL
 the preview beside it.
 """
 
+import ipaddress
 import json
+from urllib.parse import urlsplit
 
 import frappe
 
@@ -102,20 +104,225 @@ def build_claude_code_command(url: str, token: str) -> str:
 	return f'claude mcp add --transport http {SERVER_KEY} {url} --header "X-MCP-Token: {token}"'
 
 
-# ── site-aware ───────────────────────────────────────────────────────────────
-def endpoint_url() -> str:
-	"""The URL a client should POST to.
+# ── working out the URL a client should use ─────────────────────────────────
+#
+# v0.4.0 asked `frappe.utils.get_url()` and pasted the answer. On a bare-IP
+# Umbrel that produced `http://100.69.162.122/api/...` — right host, no port —
+# and a config that silently does nothing.
+#
+# THE PORT IS NOT BEING DROPPED. It never arrives. frappe_docker's nginx proxies
+# with `proxy_set_header Host $host`, and nginx's `$host` is the *normalised*
+# host: lowercased, port removed (`$http_host` is the raw one). So by the time
+# Python sees the request, `frappe.local.request.host` is already `100.69.162.122`
+# and `get_url()` has nothing to preserve.
+#
+# Worse, the port `get_url()` *would* append in that branch is
+# `frappe.conf.http_port or webserver_port` — the container-internal 8000, not
+# the published 5300. A published Docker port is a property of the compose file;
+# nothing inside the container can see it.
+#
+# So the port has to come from something that was outside. The browser rendering
+# this form reached the site at the very address the operator will paste into a
+# client, and its `Origin` (or `Referer`) header carries that address with the
+# port intact. That is the strongest signal available, and it is the one v0.4.0
+# ignored.
+#
+# Candidates, best first. Each is labelled so the panel can show its work.
 
-	`public_url` on the settings doctype wins when set. A site behind a Tailscale
-	Funnel, an ngrok tunnel or a reverse proxy on another hostname has a
-	`frappe.utils.get_url()` that is correct for the server and useless to the
-	client, and there is no way to detect that from inside the request — so it is
-	a field an operator fills in rather than something guessed.
+FORWARDED_HOST_HEADERS = ("X-Forwarded-Host", "X-Original-Host")
+
+
+def _split(url: str):
+	"""(scheme, host_with_port) from a URL-ish string, or (None, None)."""
+	value = (url or "").strip().rstrip("/")
+	if not value:
+		return None, None
+	if "//" not in value:
+		value = "http://" + value
+	parts = urlsplit(value)
+	if not parts.netloc:
+		return None, None
+	return (parts.scheme or "http"), parts.netloc
+
+
+def _hostname(netloc: str) -> str:
+	return (netloc or "").rsplit("@", 1)[-1].rsplit(":", 1)[0].strip("[]").lower()
+
+
+def _port(netloc: str) -> str:
+	tail = (netloc or "").rsplit("@", 1)[-1]
+	if tail.startswith("["):  # IPv6 literal
+		tail = tail.split("]", 1)[-1]
+	return tail.rsplit(":", 1)[1] if ":" in tail else ""
+
+
+def is_bare_ip(url: str) -> bool:
+	"""Whether the URL's host is a literal address rather than a name."""
+	_scheme, netloc = _split(url)
+	try:
+		ipaddress.ip_address(_hostname(netloc))
+	except ValueError:
+		return False
+	return True
+
+
+def borrow_port(base: str, donor: str) -> str:
+	"""Give `base` the donor's port, when it has none and they name the same host.
+
+	The narrow case this exists for: a deployment sets `host_name` to
+	`umbrel.local` while the operator browses `umbrel.local:5300`. The configured
+	name is the right host and the browser knows the right port; neither alone is
+	a working URL. Hostnames must match, so a `host_name` pointing somewhere else
+	entirely is never given a port that does not belong to it.
 	"""
-	base = (settings.public_url() or "").strip()
-	if not base:
-		base = frappe.utils.get_url()
+	scheme, netloc = _split(base)
+	_donor_scheme, donor_netloc = _split(donor)
+	if not netloc or not donor_netloc:
+		return base
+	if _port(netloc) or not _port(donor_netloc):
+		return base
+	if _hostname(netloc) != _hostname(donor_netloc):
+		return base
+	return f"{scheme}://{netloc}:{_port(donor_netloc)}"
+
+
+def browser_origin() -> str:
+	"""Where the browser thinks it is — scheme, host and port, as typed.
+
+	`Origin` on the form's POST; `Referer` for the download, which is a plain GET
+	from a link and carries no Origin.
+	"""
+	origin = (frappe.get_request_header("Origin") or "").strip()
+	scheme, netloc = _split(origin)
+	if netloc:
+		return f"{scheme}://{netloc}"
+	scheme, netloc = _split(frappe.get_request_header("Referer") or "")
+	return f"{scheme}://{netloc}" if netloc else ""
+
+
+def configured_host_name() -> str:
+	"""`host_name` from site_config / common_site_config, if the operator set one.
+
+	This is the canonical name Frappe itself prefers inside `get_url()`, and on a
+	multi-site bench it is the name that actually routes — which is why it beats
+	whatever host the browser happened to use.
+	"""
+	conf = getattr(frappe, "conf", None) or {}
+	name = (conf.get("host_name") or conf.get("hostname") or "").strip()
+	scheme, netloc = _split(name)
+	return f"{scheme}://{netloc}" if netloc else ""
+
+
+def forwarded_base() -> str:
+	"""Reconstructed from proxy headers, for a proxy that sets them properly."""
+	host = ""
+	for header in FORWARDED_HOST_HEADERS:
+		host = (frappe.get_request_header(header) or "").split(",")[0].strip()
+		if host:
+			break
+	if not host:
+		return ""
+	scheme = (frappe.get_request_header("X-Forwarded-Proto") or "").split(",")[0].strip() or "http"
+	port = (frappe.get_request_header("X-Forwarded-Port") or "").split(",")[0].strip()
+	if port and ":" not in host:
+		host = f"{host}:{port}"
+	return f"{scheme}://{host}"
+
+
+def request_base() -> str:
+	"""The socket-level view. Portless behind nginx's `$host` — see the note above."""
+	request = getattr(frappe.local, "request", None)
+	host = (getattr(request, "host", "") or "").strip()
+	if not host:
+		return ""
+	scheme = (frappe.get_request_header("X-Forwarded-Proto") or "").split(",")[0].strip()
+	if not scheme:
+		scheme = getattr(request, "scheme", "") or "http"
+	return f"{scheme}://{host}"
+
+
+def url_candidates() -> list:
+	"""Every base considered, best first, each with where it came from.
+
+	Surfaced in the payload so an operator staring at a URL they did not expect
+	can see what was available and why this one won, rather than guessing.
+	"""
+	origin = browser_origin()
+	raw = [
+		("public_url", settings.public_url()),
+		("host_name (site config)", configured_host_name()),
+		("browser Origin/Referer", origin),
+		("X-Forwarded-* headers", forwarded_base()),
+		("request Host", request_base()),
+		("frappe.utils.get_url()", _safe_get_url()),
+	]
+	out = []
+	for source, base in raw:
+		base = (base or "").strip().rstrip("/")
+		if not base:
+			continue
+		# The configured name is the right host but often has no port; the browser
+		# knows the port. Neither is a working URL alone.
+		if source == "host_name (site config)" and origin:
+			base = borrow_port(base, origin)
+		out.append({"source": source, "base": base})
+	return out
+
+
+def _safe_get_url() -> str:
+	try:
+		return frappe.utils.get_url() or ""
+	except Exception:
+		return ""
+
+
+def resolve_base() -> tuple:
+	"""(base, source, candidates) — the winner and the reasoning behind it."""
+	candidates = url_candidates()
+	if not candidates:
+		return "", "none", []
+	return candidates[0]["base"], candidates[0]["source"], candidates
+
+
+def endpoint_url() -> str:
+	"""The URL a client should POST to."""
+	base, _source, _candidates = resolve_base()
 	return f"{base.rstrip('/')}{ENDPOINT_PATH}"
+
+
+def routing_warning(url: str) -> dict:
+	"""Whether this URL is likely to be refused by Frappe's site routing.
+
+	Frappe picks a site from the request: the `X-Frappe-Site-Name` header if a
+	proxy sets one, otherwise the Host, otherwise `default_site` from
+	common_site_config.json. A bare IP matches no site directory, so unless one of
+	the other two is in play the client gets a "site not found" page and no
+	explanation of why the browser works and the config does not.
+
+	Returns `{}` when there is nothing to say — the panel renders a banner only
+	for a truthy value.
+	"""
+	if not is_bare_ip(url):
+		return {}
+	conf = getattr(frappe, "conf", None) or {}
+	if (conf.get("default_site") or "").strip():
+		return {}
+	if (frappe.get_request_header("X-Frappe-Site-Name") or "").strip():
+		# A proxy is pinning the site for every request, so the Host is not used
+		# for routing and a bare IP is harmless.
+		return {}
+	return {
+		"code": "BARE_IP_NO_DEFAULT_SITE",
+		"message": (
+			"This URL uses a bare IP address. Frappe routes a request to a site by "
+			"its Host header, and an IP matches no site — so a client using this "
+			"URL may get a “site not found” error even though this browser works. "
+			"Fix it in one of three ways: set default_site in "
+			"common_site_config.json, set host_name to a name that resolves for "
+			"your clients, or put that name in Public URL above."
+		),
+		"host": _hostname(_split(url)[1]),
+	}
 
 
 @frappe.whitelist()
@@ -132,7 +339,8 @@ def claude_desktop_config(reveal=0) -> dict:
 	# `frappe.utils.password.get_decrypted_password` under the Password field,
 	# and already fails closed on a site whose encryption key has been rotated.
 	token = settings.auth_token()
-	url = endpoint_url()
+	base, source, candidates = resolve_base()
+	url = f"{base.rstrip('/')}{ENDPOINT_PATH}"
 	shown = token if frappe.utils.cint(reveal) and token else mask(token)
 	detected = detect_os(frappe.get_request_header("User-Agent") or "")
 
@@ -142,7 +350,9 @@ def claude_desktop_config(reveal=0) -> dict:
 		"token_configured": bool(token),
 		"revealed": bool(frappe.utils.cint(reveal) and token),
 		"endpoint_url": url,
-		"url_source": "public_url" if settings.public_url() else "frappe.utils.get_url()",
+		"url_source": source,
+		"url_candidates": candidates,
+		"routing_warning": routing_warning(url),
 		"is_http": url.lower().startswith("http://"),
 		"detected_os": detected,
 		"config_paths": CONFIG_PATHS,

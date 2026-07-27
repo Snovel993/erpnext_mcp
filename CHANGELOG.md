@@ -3,6 +3,63 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.4.1 — 2026-07-26
+
+Two bugs in the v0.4.0 connection panel, both found by adding a second Umbrel
+reached at a bare IP.
+
+### Fixed
+
+**The generated URL lost its port.** The panel emitted
+`http://100.69.162.122/api/method/...` where the operator needed
+`http://100.69.162.122:5300/...`, and the resulting config fails silently.
+
+The port was not being dropped — **it never arrived**. frappe_docker's nginx
+proxies with `proxy_set_header Host $host`, and nginx's `$host` is the
+*normalised* host: lowercased, port removed (`$http_host` is the raw one). By the
+time Python sees the request, `frappe.local.request.host` is already portless and
+`frappe.utils.get_url()` has nothing to preserve. Worse, the port `get_url()`
+*would* append in that branch is `frappe.conf.http_port or webserver_port` — the
+container-internal 8000, not the published 5300. A published Docker port is a
+property of the compose file and nothing inside the container can see it.
+
+So the port now comes from the one component that was outside: the browser
+rendering the settings form reached the site at the very address the operator
+will paste into a client, and its `Origin` header (or `Referer`, for the download
+link, which carries no Origin) has that address with the port intact.
+
+**A bare-IP URL may not route.** Frappe picks a site from the request Host, and
+an IP matches no site directory — so a client can get "site not found" while the
+operator's own browser works fine, which is a baffling asymmetry to debug. The
+panel now shows a red banner naming all three fixes: `default_site` in
+common_site_config.json, a `host_name` that resolves for clients, or Public URL.
+It stays quiet when `default_site` is set, when a proxy pins
+`X-Frappe-Site-Name` (that proxy serves the MCP client too), or when the host is
+a name rather than an address.
+
+### Changed
+
+URL derivation is now an ordered candidate list rather than a single call, and
+the panel reports which one won and what else was available:
+
+1. `public_url` — the explicit override, unchanged
+2. `host_name` from site config — the name Frappe itself prefers, and the one
+   that routes on a multi-site bench. If it has no port and the browser's origin
+   names the *same host* with one, the port is borrowed; a `host_name` pointing
+   elsewhere is never given a port that is not its own.
+3. the browser's `Origin` / `Referer`
+4. `X-Forwarded-Host` / `-Port` / `-Proto`
+5. the request Host
+6. `frappe.utils.get_url()` — now the last resort rather than the first choice
+
+The one visible behaviour change beyond the fixes: `url_source` reads
+`request Host` rather than `frappe.utils.get_url()` on a plain site. Same URL,
+more accurate label.
+
+### Tests
+
+572 standalone (was 551), 179 in-bench (was 172).
+
 ## 0.4.0 — 2026-07-26
 
 A **Connect to Claude Desktop** panel on the settings form. No new MCP tools —

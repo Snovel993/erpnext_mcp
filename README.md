@@ -115,10 +115,22 @@ the next part.
 6. Click **Test Configuration**. It reports whether the server is ready, which
    tools are enabled, and which are unavailable on this site.
 7. Use the **Connect to Claude Desktop** section that appears below the token to
-   copy or download a ready-made client config — no hand-editing JSON. If this
-   site is reached from outside on a different hostname (a Tailscale Funnel, a
-   tunnel, a reverse proxy), set **Public URL** first so the generated config
-   points somewhere the client can actually reach.
+   copy or download a ready-made client config — no hand-editing JSON. The panel
+   shows which address it used and what else it considered; if that address is
+   wrong, set **Public URL** and it always wins.
+
+   Two cases need **Public URL** set explicitly. A site reached from outside on a
+   different hostname (a Tailscale Funnel, a tunnel, a reverse proxy) has no way
+   of knowing its own public name. And a published Docker port is invisible from
+   inside the container — the panel recovers it from your browser's `Origin`
+   header, which works when you are looking at the form, but not if the address
+   you browse differs from the one clients use.
+
+   If the generated URL is a bare IP, the panel warns you: Frappe routes requests
+   to a site by Host header and an IP matches no site, so a client can get "site
+   not found" while your browser works. Set `default_site` in
+   `common_site_config.json`, or give the site a `host_name` that resolves for
+   your clients, or put that name in **Public URL**.
 
 Leave every switch in the write sections alone until you have a reason.
 
@@ -514,7 +526,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-551 standalone tests and 172 in-bench tests. The standalone suite installs an
+572 standalone tests and 179 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.

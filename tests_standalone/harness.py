@@ -1119,6 +1119,10 @@ def _build_frappe() -> types.ModuleType:
 		session=FrappeDict(user="Guest", data=FrappeDict()),
 	)
 	module.flags = FrappeDict()
+	# common_site_config.json merged with site_config.json. Real Frappe exposes
+	# the same object as frappe.conf and frappe.local.conf.
+	module.conf = FrappeDict()
+	module.local.conf = module.conf
 	# What a whitelisted method fills in to serve a file. Frappe's
 	# `frappe.utils.response.as_binary` reads type/filename/filecontent off it.
 	module.response = FrappeDict()
@@ -1433,12 +1437,21 @@ frappe = install()
 
 # ── request plumbing ────────────────────────────────────────────────────────
 class FakeRequest:
-	def __init__(self, body="", headers=None, remote_addr="127.0.0.1", method="POST", host="test.localhost"):
+	def __init__(
+		self,
+		body="",
+		headers=None,
+		remote_addr="127.0.0.1",
+		method="POST",
+		host="test.localhost",
+		scheme="https",
+	):
 		self.headers = {k: v for k, v in (headers or {}).items()}
 		self._body = body if isinstance(body, str) else json.dumps(body)
 		self.remote_addr = remote_addr
 		self.method = method
 		self.host = host
+		self.scheme = scheme
 
 	def get_data(self, as_text=False):
 		return self._body if as_text else self._body.encode()
@@ -1452,6 +1465,7 @@ class MCPTestCase(unittest.TestCase):
 
 	def setUp(self):
 		STORE.reset()
+		frappe.conf.clear()
 		INSTALLED_DOCTYPES.clear()
 		INSTALLED_DOCTYPES.update(set(ERPNEXT_SCHEMA) | set(APP_DOCTYPES))
 		frappe.local.request = None

@@ -177,10 +177,20 @@ class Payload(V2TestCase):
 		self.assertIn("%APPDATA%", payload["config_paths"]["windows"])
 
 	def test_it_says_where_the_url_came_from(self):
+		"""`request Host` outranks `get_url()` as of v0.4.1 — get_url is the last
+		resort, not the first choice."""
 		self.request_as()
-		self.assertEqual(onboarding.claude_desktop_config()["url_source"], "frappe.utils.get_url()")
+		self.assertEqual(onboarding.claude_desktop_config()["url_source"], "request Host")
 		self.configure(enabled=1, public_url="https://erp.example.com")
 		self.assertEqual(onboarding.claude_desktop_config()["url_source"], "public_url")
+
+	def test_it_shows_its_working(self):
+		"""An operator staring at a URL they did not expect can see what else was
+		available and why this one won."""
+		self.request_as()
+		sources = [row["source"] for row in onboarding.claude_desktop_config()["url_candidates"]]
+		self.assertIn("request Host", sources)
+		self.assertIn("frappe.utils.get_url()", sources)
 
 	def test_the_download_url_is_the_documented_path(self):
 		self.request_as()
@@ -257,3 +267,180 @@ class TheTokenDoesNotLeakElsewhere(V2TestCase):
 		before = len(STORE.rows("MCP Action Log"))
 		onboarding.claude_desktop_config()
 		self.assertEqual(len(STORE.rows("MCP Action Log")), before)
+
+
+class PortPreservation(V2TestCase):
+	"""v0.4.1 bug 1: the widget emitted `http://100.69.162.122/api/...`, no port.
+
+	The port was never dropped — it never arrived. frappe_docker's nginx proxies
+	with `proxy_set_header Host $host`, and nginx's `$host` is normalised: no
+	port. By the time Python sees the request there is nothing to preserve, and
+	the port `get_url()` would append is the container-internal one, not the
+	published one. The only component that knows the real external port is the
+	browser, and it tells us in `Origin`.
+	"""
+
+	def browsing_from(self, origin, host="100.69.162.122", **headers):
+		"""A request as nginx delivers it: portless Host, browser Origin intact."""
+		all_headers = {"Origin": origin} if origin else {}
+		all_headers.update(headers)
+		self.request({}, headers=all_headers, method="POST")
+		frappe.local.request.host = host
+		frappe.local.request.scheme = "http"
+		frappe.local.session.user = "Administrator"
+
+	def test_the_v0_4_0_regression(self):
+		"""Portless Host from nginx, browser on :5300 — the port must survive."""
+		self.browsing_from("http://100.69.162.122:5300")
+		self.assertEqual(
+			onboarding.endpoint_url(),
+			"http://100.69.162.122:5300/api/method/erpnext_mcp.mcp.handle",
+		)
+
+	def test_without_the_fix_the_host_alone_would_have_no_port(self):
+		"""Pins the thing that was wrong: request Host really is portless here."""
+		self.browsing_from("http://100.69.162.122:5300")
+		self.assertEqual(onboarding.request_base(), "http://100.69.162.122")
+
+	def test_referer_carries_the_port_when_origin_does_not(self):
+		"""The download is a GET from a link: no Origin, but a Referer."""
+		self.browsing_from(None, Referer="http://100.69.162.122:5300/app/erpnext-mcp-settings")
+		self.assertEqual(
+			onboarding.endpoint_url(),
+			"http://100.69.162.122:5300/api/method/erpnext_mcp.mcp.handle",
+		)
+
+	def test_a_default_port_is_not_invented(self):
+		"""Browsing on :80 gives an origin with no port, and none is added."""
+		self.browsing_from("http://umbrel.local")
+		self.assertEqual(onboarding.endpoint_url(), "http://umbrel.local/api/method/erpnext_mcp.mcp.handle")
+
+	def test_forwarded_headers_are_used_when_a_proxy_sets_them_properly(self):
+		self.request(
+			{},
+			headers={
+				"X-Forwarded-Host": "erp.example.com",
+				"X-Forwarded-Port": "8443",
+				"X-Forwarded-Proto": "https",
+			},
+		)
+		frappe.local.session.user = "Administrator"
+		self.assertEqual(onboarding.forwarded_base(), "https://erp.example.com:8443")
+
+	def test_a_forwarded_host_that_already_has_a_port_is_left_alone(self):
+		self.request(
+			{},
+			headers={"X-Forwarded-Host": "erp.example.com:9000", "X-Forwarded-Port": "8443"},
+		)
+		self.assertEqual(onboarding.forwarded_base(), "http://erp.example.com:9000")
+
+	def test_the_scheme_follows_the_browser(self):
+		self.browsing_from("https://erp.example.com:8443")
+		self.assertTrue(onboarding.endpoint_url().startswith("https://"))
+
+
+class HostNamePreference(V2TestCase):
+	"""v0.4.1 bug 2: a bare-IP Host may not route to any site."""
+
+	def configured(self, host_name, origin=None):
+		frappe.conf["host_name"] = host_name
+		headers = {"Origin": origin} if origin else {}
+		self.request({}, headers=headers)
+		frappe.local.request.host = "100.69.162.122"
+		frappe.local.session.user = "Administrator"
+
+	def test_host_name_beats_the_request_host(self):
+		"""It is the name Frappe itself prefers, and on a multi-site bench it is
+		the one that actually routes."""
+		self.configured("http://umbrel.local")
+		self.assertEqual(onboarding.endpoint_url(), "http://umbrel.local/api/method/erpnext_mcp.mcp.handle")
+		self.assertEqual(onboarding.claude_desktop_config()["url_source"], "host_name (site config)")
+
+	def test_a_bare_host_name_gains_a_scheme(self):
+		self.configured("umbrel.local")
+		self.assertTrue(onboarding.endpoint_url().startswith("http://umbrel.local/"))
+
+	def test_it_borrows_the_port_from_a_matching_browser_origin(self):
+		"""The configured name is the right host, the browser knows the right
+		port; neither alone is a working URL."""
+		self.configured("http://umbrel.local", origin="http://umbrel.local:5300")
+		self.assertEqual(
+			onboarding.endpoint_url(),
+			"http://umbrel.local:5300/api/method/erpnext_mcp.mcp.handle",
+		)
+
+	def test_it_does_not_borrow_a_port_from_a_different_host(self):
+		"""A host_name pointing somewhere else must never be given a port that
+		does not belong to it."""
+		self.configured("http://erp.internal", origin="http://100.69.162.122:5300")
+		self.assertEqual(onboarding.endpoint_url(), "http://erp.internal/api/method/erpnext_mcp.mcp.handle")
+
+	def test_a_host_name_with_its_own_port_is_not_modified(self):
+		self.configured("http://umbrel.local:9000", origin="http://umbrel.local:5300")
+		self.assertEqual(
+			onboarding.endpoint_url(),
+			"http://umbrel.local:9000/api/method/erpnext_mcp.mcp.handle",
+		)
+
+	def test_the_hostname_key_is_honoured_too(self):
+		"""get_url() accepts either spelling, so this must as well."""
+		frappe.conf["hostname"] = "erp.example.com"
+		self.request({})
+		self.assertEqual(onboarding.configured_host_name(), "http://erp.example.com")
+
+	def test_public_url_still_wins_over_host_name(self):
+		self.configured("http://umbrel.local")
+		self.configure(enabled=1, public_url="https://erp.tail1234.ts.net")
+		self.assertEqual(
+			onboarding.endpoint_url(),
+			"https://erp.tail1234.ts.net/api/method/erpnext_mcp.mcp.handle",
+		)
+
+
+class RoutingWarning(V2TestCase):
+	"""A bare IP reaches Frappe's site router and matches no site directory."""
+
+	def browsing_from_ip(self, **conf):
+		frappe.conf.update(conf)
+		self.request({}, headers={"Origin": "http://100.69.162.122:5300"})
+		frappe.local.request.host = "100.69.162.122"
+		frappe.local.session.user = "Administrator"
+
+	def test_a_bare_ip_without_a_default_site_warns(self):
+		self.browsing_from_ip()
+		warning = onboarding.claude_desktop_config()["routing_warning"]
+		self.assertEqual(warning["code"], "BARE_IP_NO_DEFAULT_SITE")
+		self.assertEqual(warning["host"], "100.69.162.122")
+
+	def test_the_warning_names_all_three_fixes(self):
+		"""An operator reading it should not have to go and find out what to do."""
+		self.browsing_from_ip()
+		message = onboarding.claude_desktop_config()["routing_warning"]["message"]
+		self.assertIn("default_site", message)
+		self.assertIn("host_name", message)
+		self.assertIn("Public URL", message)
+
+	def test_a_default_site_silences_it(self):
+		self.browsing_from_ip(default_site="frontend")
+		self.assertEqual(onboarding.claude_desktop_config()["routing_warning"], {})
+
+	def test_a_site_name_header_silences_it(self):
+		"""A proxy pinning X-Frappe-Site-Name routes every request regardless of
+		Host, so the IP is harmless — and the same proxy serves the MCP client."""
+		self.request(
+			{},
+			headers={"Origin": "http://100.69.162.122:5300", "X-Frappe-Site-Name": "frontend"},
+		)
+		frappe.local.request.host = "100.69.162.122"
+		frappe.local.session.user = "Administrator"
+		self.assertEqual(onboarding.claude_desktop_config()["routing_warning"], {})
+
+	def test_a_named_host_never_warns(self):
+		self.request({}, headers={"Origin": "http://umbrel.local:5300"})
+		frappe.local.session.user = "Administrator"
+		self.assertEqual(onboarding.claude_desktop_config()["routing_warning"], {})
+
+	def test_ipv6_literals_count_as_bare_ips(self):
+		self.assertTrue(onboarding.is_bare_ip("http://[::1]:5300/x"))
+		self.assertTrue(onboarding.is_bare_ip("http://10.0.0.5/x"))
+		self.assertFalse(onboarding.is_bare_ip("http://umbrel.local:5300/x"))

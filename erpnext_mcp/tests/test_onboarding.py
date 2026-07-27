@@ -157,3 +157,65 @@ class ConnectPanelOnThisSite(MCPIntegrationTestCase):
 			onboarding.claude_desktop_config()["detected_os"],
 			("macos", "windows", "linux"),
 		)
+
+
+class UrlDerivationOnThisSite(MCPIntegrationTestCase):
+	"""v0.4.1. The port bug was never `get_url()` dropping something — nginx's
+	`$host` strips the port before Python sees the request, and the port
+	`get_url()` would append is the container-internal one. These pin the pieces
+	the fix depends on against the real framework."""
+
+	def request_from(self, host, origin=None, **headers):
+		from werkzeug.test import EnvironBuilder
+		from werkzeug.wrappers import Request
+
+		all_headers = {"Host": host}
+		if origin:
+			all_headers["Origin"] = origin
+		all_headers.update(headers)
+		builder = EnvironBuilder(
+			method="POST",
+			path="/api/method/x",
+			headers=all_headers,
+			environ_base={"REMOTE_ADDR": "127.0.0.1"},
+		)
+		frappe.local.request = Request(builder.get_environ())
+
+	def test_get_url_is_still_reachable_as_a_last_resort(self):
+		frappe.local.request = None
+		self.assertTrue(onboarding._safe_get_url().startswith("http"))
+
+	def test_the_browser_origin_supplies_the_port(self):
+		"""The whole fix in one assertion."""
+		self.request_from("10.0.0.5", origin="http://10.0.0.5:5300")
+		self.assertEqual(onboarding.browser_origin(), "http://10.0.0.5:5300")
+		self.assertEqual(onboarding.endpoint_url(), "http://10.0.0.5:5300/api/method/erpnext_mcp.mcp.handle")
+
+	def test_a_portless_host_is_what_nginx_actually_delivers(self):
+		"""werkzeug keeps whatever Host it is given, so this documents the shape
+		the container sees rather than asserting nginx's behaviour."""
+		self.request_from("10.0.0.5")
+		self.assertEqual(onboarding.request_base(), "http://10.0.0.5")
+
+	def test_conf_is_readable_for_host_name_and_default_site(self):
+		"""Both live in common_site_config.json, which frappe.conf merges in."""
+		self.assertIsInstance(dict(frappe.conf), dict)
+		self.assertIn(onboarding.configured_host_name(), ("", frappe.conf.get("host_name") or ""))
+
+	def test_the_candidate_list_is_ordered_and_labelled(self):
+		self.request_from("10.0.0.5", origin="http://10.0.0.5:5300")
+		sources = [row["source"] for row in onboarding.url_candidates()]
+		self.assertEqual(sources[0], "browser Origin/Referer")
+		self.assertIn("frappe.utils.get_url()", sources)
+
+	def test_the_warning_fires_only_for_an_unroutable_bare_ip(self):
+		self.request_from("10.0.0.5", origin="http://10.0.0.5:5300")
+		warning = onboarding.routing_warning(onboarding.endpoint_url())
+		if (frappe.conf.get("default_site") or "").strip():
+			self.assertEqual(warning, {}, "default_site is set, so no warning is expected")
+		else:
+			self.assertEqual(warning["code"], "BARE_IP_NO_DEFAULT_SITE")
+
+	def test_a_named_host_never_warns_on_this_site(self):
+		self.request_from("erp.example.com", origin="https://erp.example.com:8443")
+		self.assertEqual(onboarding.routing_warning(onboarding.endpoint_url()), {})

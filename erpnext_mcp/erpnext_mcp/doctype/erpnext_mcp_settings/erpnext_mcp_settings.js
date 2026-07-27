@@ -223,6 +223,15 @@ function connect_panel_html(d) {
 		})
 		.join("");
 
+	// A bare-IP URL reaches Frappe's site router and matches no site directory,
+	// so a client can get "site not found" while this very browser works. That
+	// asymmetry is baffling without being told, so say it here.
+	const routing_warning = d.routing_warning && d.routing_warning.code
+		? `<div class="form-message red" style="margin-bottom:12px">
+			<b>${__("This URL uses a bare IP address")}</b><br>${esc(d.routing_warning.message)}
+		   </div>`
+		: "";
+
 	const http_note = d.is_http
 		? `<p class="text-muted small">${__(
 				"This endpoint is plain HTTP, so the config includes <code>--allow-http</code>. mcp-remote refuses a non-HTTPS origin without it."
@@ -231,6 +240,7 @@ function connect_panel_html(d) {
 
 	return `
 <div class="erpnext-mcp-connect">
+	${routing_warning}
 	<p><b>${__("1. Save this to your Claude Desktop config")}</b><br>
 	<span class="text-muted small">${__("Default location — highlighted row is the platform this browser reports.")}</span></p>
 	<table style="margin-bottom:12px">${os_rows}</table>
@@ -275,7 +285,19 @@ function connect_panel_html(d) {
 	<p><button class="btn btn-xs btn-default" data-connect-action="copy-cli">${__("Copy command")}</button></p>
 
 	<p class="text-muted small" style="margin-top:12px">${__("Endpoint")}:
-		<code>${esc(d.endpoint_url)}</code> <span>(${esc(d.url_source)})</span>
+		<code>${esc(d.endpoint_url)}</code> <span>${__("from")} ${esc(d.url_source)}</span>
+		${
+			(d.url_candidates || []).length > 1
+				? `<br><span title="${esc(
+						(d.url_candidates || [])
+							.map((c) => `${c.source}: ${c.base}`)
+							.join("\n")
+				  )}">${__("Other addresses were available — hover to see what was considered.")}</span>`
+				: ""
+		}
+		<br>${__(
+			"Wrong address? Set Public URL above — that always wins."
+		)}
 	</p>
 </div>`;
 }
