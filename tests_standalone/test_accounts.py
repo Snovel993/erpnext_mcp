@@ -486,10 +486,81 @@ class ProposeCleanChart(SeededTestCase):
 		data = self.tool_data("propose_clean_chart", {"company": MAIN})
 		charts.validate_tree(data["accounts"])
 
-	def test_it_lists_the_optional_accounts(self):
+	def test_the_optional_list_is_present_and_empty_for_this_template(self):
+		"""The mechanism still works — the shipped template just does not use it.
+		Every line in `us_llc_farm` earns its place, which is the point of a
+		compact chart; a template that ships fifty maybes is back to being long."""
 		data = self.tool_data("propose_clean_chart", {"company": MAIN})
-		numbers = {row["account_number"] for row in data["optional_accounts"]}
-		self.assertEqual(numbers, {"1130", "1750"})
+		self.assertEqual(data["optional_accounts"], [])
+
+	def test_an_optional_account_is_reported_when_a_template_has_one(self):
+		"""The path the shipped template leaves untested."""
+		from erpnext_mcp import charts
+
+		template = charts.get("us_llc_farm")
+		leaf = template.tree[0]["children"][0]["children"][0]
+		leaf["optional"] = True
+		self.addCleanup(leaf.pop, "optional", None)
+		data = self.tool_data("propose_clean_chart", {"company": MAIN})
+		self.assertEqual(
+			data["optional_accounts"],
+			[{"account_number": leaf["account_number"], "account_name": leaf["account_name"]}],
+		)
+
+	def test_the_trading_segment_is_reportable_as_one_range_set(self):
+		"""The whole reason the investment book has its own numbers: filter a
+		report to these four ranges and you have the trading business, exclude
+		them and you have the farm. A farm account that wandered into 18xx or
+		42xx would quietly break that, and nothing else would notice."""
+		data = self.tool_data("propose_clean_chart", {"company": MAIN})
+		flat = {}
+
+		def collect(nodes):
+			for node in nodes:
+				flat[node["account_number"]] = node["account_name"]
+				collect(node.get("children") or [])
+
+		collect(data["accounts"])
+		trading = {n for n in flat if (n.startswith("18") or n.startswith("42")) and len(n) == 4}
+		trading |= {"3500", "7300"}
+		self.assertEqual(
+			trading,
+			{"1800", "1810", "1820", "1830", "1840", "4200", "4210", "4220", "4230", "4240", "3500", "7300"},
+		)
+		# ...and nothing outside those ranges mentions trading concepts.
+		for number, name in flat.items():
+			if number in trading:
+				continue
+			lowered = name.lower()
+			for word in ("securities", "brokerage", "options", "capital gain", "capital loss"):
+				self.assertNotIn(word, lowered, f"{number} {name} belongs in the trading segment")
+
+	def test_the_tax_accounts_land_on_the_right_side(self):
+		"""Three things people mix up: the accrued obligation, the expense, and
+		the money withheld from somebody else."""
+		data = self.tool_data("propose_clean_chart", {"company": MAIN})
+		flat = {}
+
+		def collect(nodes, root_type=""):
+			for node in nodes:
+				flat[node["account_number"]] = (
+					node["account_name"],
+					node.get("root_type") or root_type,
+					node,
+				)
+				collect(node.get("children") or [], node.get("root_type") or root_type)
+
+		collect(data["accounts"])
+		self.assertEqual(flat["2170"][1], "Liability")
+		self.assertEqual(flat["6650"][1], "Expense")
+		self.assertEqual(flat["1420"][1], "Asset")
+		self.assertEqual(flat["6150"][1], "Expense")
+		self.assertEqual(flat["2141"][1], "Liability")
+		# The prepaid amortises into the expense, and both say so.
+		self.assertIn("6650", flat["1420"][2]["description"])
+		# Employer share is not the withheld share, and the account says which.
+		self.assertIn("2140", flat["6150"][2]["description"])
+		self.assertIn("6150", flat["2140"][2]["description"])
 
 	def test_it_warns_that_it_adds_roots_rather_than_replacing_them(self):
 		data = self.tool_data("propose_clean_chart", {"company": MAIN})
@@ -1043,9 +1114,23 @@ class TemplateData(SeededTestCase):
 		"""A template that needed a site to describe itself could not be
 		reviewed before it ran."""
 		described = self.template().describe()
-		self.assertEqual(described["total_accounts"], 128)
-		self.assertEqual(described["group_accounts"], 30)
-		self.assertEqual(described["ledger_accounts"], 98)
+		self.assertEqual(described["total_accounts"], 76)
+		self.assertEqual(described["group_accounts"], 16)
+		self.assertEqual(described["ledger_accounts"], 60)
+
+	def test_it_stays_shallow(self):
+		"""Compact is a property of the shape, not only the count. Two levels of
+		grouping is the limit this chart sets itself; the moment a third appears
+		somebody has started building the sprawling version again."""
+		from erpnext_mcp import charts
+
+		deepest = max(depth for _node, _parent, depth in charts.walk(self.template().tree))
+		self.assertLessEqual(deepest, 3)
+
+	#: Deliberately carry no account_type. ERPNext offers nothing that fits a
+	#: securities or open-options position — the nearest, Stock, means trading
+	#: inventory and would pull them into the Stock module's valuation.
+	UNTYPED_BY_DESIGN = ("1810", "1820", "1840")
 
 	def test_every_number_is_unique_and_every_leaf_is_typed(self):
 		from erpnext_mcp import charts
@@ -1057,7 +1142,7 @@ class TemplateData(SeededTestCase):
 			numbers.add(number)
 			if not node.get("is_group") and not node.get("account_type"):
 				untyped.append(number)
-		self.assertEqual(untyped, [])
+		self.assertEqual(tuple(untyped), self.UNTYPED_BY_DESIGN)
 
 	def test_the_five_root_types_are_all_represented(self):
 		roots = {node["root_type"] for node in self.template().tree}

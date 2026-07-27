@@ -20,15 +20,29 @@ use. Templates live in `erpnext_mcp/charts/` and are pure Python literals with
 no database dependency, which is what makes the proposal reviewable before
 anything runs.
 
-The one shipped template is **`us_llc_farm`** — 128 accounts (30 groups, 98
-ledgers) for a US farming LLC, written with tree fruit in mind. Crop labour is
-separated from administrative wages so a cost per bin means something,
-orchard-specific capital is broken out under machinery, and account 2120 is
-**Current Pay Period - Due to Employees**: a live, continuously-updated balance
-of what is owed to employees for work already performed this period, not a
-period-end accrual. Its description says so explicitly, because the account only
-keeps that meaning if nobody drops a month-end adjusting entry into it. The
-package auto-discovers templates the way `packets/` does, so `us_c_corp`,
+The one shipped template is **`us_llc_farm`** — 76 accounts (16 groups, 60
+ledgers) for a US farming LLC that also runs an investment book. Compact by
+design: nine flat operating-expense buckets and at most two levels of grouping,
+because a chart with a line for every conceivable cost is one where nobody finds
+the right line.
+
+- **Crop labour is separated from administrative wages** (`5150` vs `6100`), and
+  the employer's payroll tax splits out again at `6150` so wage cost and true
+  cost of employment read apart — and neither is confused with `2140 Payroll Tax
+  Withholdings`, which is employees' money and a liability.
+- **The trading segment is a range set**: assets `1800-1849`, income
+  `4200-4249`, losses `7300`, unrealised movement `3500`. Filter a P&L to those
+  and you have the investment book; exclude them and you have the farm. Open
+  option contracts get their own account so a covered-call programme's exposure
+  is visible without unpicking it from the underlying equity.
+- **`2120 Current Pay Period - Due to Employees`** is a live, continuously
+  updated balance of what is owed for work already performed this period, not a
+  period-end accrual. Its description says so explicitly, because the account
+  only keeps that meaning if nobody drops a month-end adjusting entry into it.
+- **Property tax appears in all three places it lives** — accrued (`2170`),
+  prepaid (`1420`), expensed (`6650`).
+
+The package auto-discovers templates the way `packets/` does, so `us_c_corp`,
 `us_s_corp` and `us_partnership` are a file drop each.
 
 **`create_account`** (mutating, default OFF). One account under an existing

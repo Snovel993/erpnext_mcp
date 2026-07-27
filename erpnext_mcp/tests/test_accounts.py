@@ -219,7 +219,7 @@ class RealValidationRefusals(ChartTestCase):
 				visit(node.get("children") or [], inherited)
 
 		visit(charts.get("us_llc_farm").tree, "")
-		self.assertGreater(checked, 90, "the template lost its account types")
+		self.assertGreater(checked, 50, "the template lost its account types")
 
 
 class RenameAgainstRealErpnext(ChartTestCase):

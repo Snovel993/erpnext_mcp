@@ -1931,31 +1931,71 @@ auto-discovers them, so a new one is a single file drop.
 
 ### `us_llc_farm`
 
-128 accounts — 30 groups, 98 ledgers — for a US farming LLC, written with tree
-fruit in mind. Numbering is the convention a US bookkeeper expects: 1000s
+76 accounts — 16 groups, 60 ledgers — for a US farming LLC that also runs an
+investment book. Numbering is the convention a US bookkeeper expects: 1000s
 assets, 2000s liabilities, 3000s equity, 4000s income, 5000s COGS, 6000s
 operating expenses, 7000s non-operating. Gaps are deliberate.
 
-Three things it does that a generic chart does not:
+**Compact on purpose.** Nine flat operating-expense buckets, no sub-groups, and
+at most two levels of grouping anywhere. A chart with a line for every
+conceivable cost is one where nobody finds the right line; the intent is that a
+sub-account gets added when a real transaction needs it, not in advance.
+
+Four things it does that a generic chart does not:
 
 - **Crop labour is separated from administrative wages** — `5150 Direct Farm
-  Labor` under COGS, `6110 Wages - Administrative` under operating expenses. A
-  cost per bin means nothing if the two are mixed.
-- **Orchard-specific capital is broken out** under `1730 Machinery & Equipment`:
-  trellis, netting, wind machines, frost fans, platforms.
+  Labor` under COGS, `6100 Payroll & Benefits` under operating expenses. A cost
+  per bin means nothing if the two are mixed. `6150 Employer Payroll Tax
+  Expense` splits out again, so wage cost and true cost of employment read
+  apart, and neither is confused with `2140 Payroll Tax Withholdings` — money
+  withheld from employees, which is a liability and never an expense.
+- **The trading segment is a range set, not a dashboard.** The investment book
+  has its own accounts on every side of the ledger:
+
+  | Side | Range | |
+  | --- | --- | --- |
+  | Asset | `1800-1849` | Investments & Trading — securities, brokerage cash, open options |
+  | Income | `4200-4249` | Interest, dividends, realised gains, options premium |
+  | Expense | `7300` | Realized Capital Losses & Options Losses |
+  | Equity | `3500` | Unrealized Gain/Loss on Investments — mark-to-market, outside the P&L until a position closes |
+
+  Filter a P&L or trial balance to those four and you have the trading business;
+  exclude them and you have the farm. Nothing else in the chart reaches into
+  those numbers, which is what keeps the split true as the chart grows.
+  `1840 Options Contracts Open` is separate from the underlying equity so a
+  covered-call programme's live exposure is visible on its own.
 - **`2120 Current Pay Period - Due to Employees`** is a live balance, not an
   accrual. It is meant to be updated continuously as work lands — bucket picks
   as they are recorded, hours as they accumulate — so it reads at any moment as
   real-time wage exposure, and flushes to zero when payroll is processed. Its
   description says exactly that, because a month-end adjusting entry dropped in
   on top double-counts against the continuous postings and destroys the one
-  property the account exists for.
+  property the account exists for. `2130 Employee Wage Advances` is its
+  counterpart for wages paid before payday, and is distinct again from
+  `1510 Employee Cash Advances`, which is money the business expects back.
+- **Property tax is tracked in all three places it lives** — accrued in
+  `2170 Property Tax Payable` (the county bills once or twice a year but the
+  obligation accrues monthly), prepaid in `1420 Prepaid Property Tax`, and
+  expensed through `6650 Property & Business Taxes` alongside vehicle
+  registration, LLC filing fees and business licences.
+
+Three accounts carry no `account_type` on purpose — `1810`, `1820` and `1840`.
+ERPNext offers nothing that fits a securities or open-options position; the
+nearest, `Stock`, means trading inventory and would pull them into the Stock
+module's valuation. An account with no type still posts.
+
+The 5000-series accounts are typed `Expense Account` rather than ERPNext's
+`Cost of Goods Sold`. If the Stock module is used against `1300`, the Item or
+Item Group default expense account has to be set by hand, because ERPNext looks
+for the `Cost of Goods Sold` type when it picks one automatically.
 
 Equity is the part that is entity-specific, which is why the entity type is in
 the template key rather than a flag: `us_c_corp`, `us_s_corp` and
 `us_partnership` will differ from this almost entirely in the 3000s, and
 pretending one chart covers all four would put the wrong equity structure on
 somebody's return. It is a starting point, not tax advice.
+
+---
 
 # Adding a tool
 

@@ -373,10 +373,26 @@ of the template's numbers are already taken, so you know before you run it.
 Templates live in `erpnext_mcp/charts/` as plain Python literals with no
 database dependency — which is what makes a proposal reviewable, diffable and
 version-controllable before anything happens. The package auto-discovers them,
-so adding `us_c_corp` is one file. The one that ships is `us_llc_farm`: 128
-accounts for a US farming LLC, crop labour kept separate from administrative
-wages, orchard-specific capital broken out, and a live current-pay-period wage
-liability rather than a period-end accrual.
+so adding `us_c_corp` is one file.
+
+The one that ships is **`us_llc_farm`**: 76 accounts (16 groups, 60 ledgers) for
+a US farming LLC that also runs an investment book. Deliberately compact — nine
+flat operating-expense buckets rather than thirty-five, because a chart with a
+line for every conceivable cost is one where nobody finds the right line. Three
+things it does that a generic chart does not:
+
+- **Crop labour is separate from administrative wages** — `5150 Direct Farm
+  Labor` under COGS, `6100 Payroll & Benefits` under operating expenses, and
+  `6150 Employer Payroll Tax Expense` split out again so wage cost and true cost
+  of employment read apart.
+- **The trading segment is its own range set** — assets `1800–1849`, income
+  `4200–4249`, losses `7300`, unrealised movement `3500`. Filter a P&L to those
+  and you have the investment book; exclude them and you have the farm. No
+  dashboard required.
+- **`2120 Current Pay Period - Due to Employees` is a live balance**, not an
+  accrual: updated continuously as work lands, flushed to zero at payroll. Its
+  description says so, because the account only keeps that meaning if nobody
+  books a month-end adjustment into it.
 
 ---
 
@@ -566,7 +582,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-681 standalone tests and 195 in-bench tests. The standalone suite installs an
+685 standalone tests and 195 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.

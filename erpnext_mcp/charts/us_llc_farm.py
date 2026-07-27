@@ -7,24 +7,34 @@ WHY THIS EXISTS. A fresh ERPNext company is created from one of the bundled
 farm is. Every operator then spends an evening renaming things, and each one
 arrives at a slightly different chart. This template is that evening, done once.
 
-WHAT IT IS NOT. It is a starting point, not tax advice, and not a filing
-position. Entity-level accounts live in the 3000s and are the part that differs
-by entity type — a single-member LLC's Member Capital is not an S corporation's
+SMALL ON PURPOSE. Roughly seventy accounts, most groups only one level deep.
+A chart with a line for every conceivable expense is a chart where nobody can
+find the right line, so the operating expenses are nine buckets rather than
+thirty-five, and a sub-account gets added when a real transaction needs one.
+Numbering leaves gaps for exactly that — the next bank account is 1130, the next
+operating expense is the next free number in the 6000s.
+
+TWO BUSINESSES, ONE LEDGER. The farm and the investment book are kept
+structurally apart so "how did trading do this year" is a report filter, not a
+reconstruction:
+
+    assets       1800-1849   Investments & Trading
+    income       4200-4249   Investment & Trading Income
+    expense      7300        Realized Capital Losses & Options Losses
+    equity       3500        Unrealized Gain/Loss on Investments
+
+Filter a P&L or trial balance to those four ranges and you have the trading
+segment; exclude them and you have the farm. Nothing else in the chart reaches
+into those numbers, which is what keeps the split true over time.
+
+WHAT IT IS NOT. A starting point, not tax advice, and not a filing position.
+Entity-level accounts live in the 3000s and are the part that differs by entity
+type — a single-member LLC's Member Capital is not an S corporation's
 Shareholder Distributions, and neither is a partnership's per-partner capital.
 That is why the entity type is in the template key rather than a flag: the
 sibling templates (`us_c_corp`, `us_s_corp`, `us_partnership`) will differ from
 this one almost entirely in the 3000s, and pretending one chart covers all four
 would put the wrong equity structure on somebody's return.
-
-THE NUMBERING follows the convention a US bookkeeper expects: 1000s assets,
-2000s liabilities, 3000s equity, 4000s income, 5000s cost of goods sold, 6000s
-operating expenses, 7000s non-operating. Gaps are deliberate — the space between
-1140 and 1200 is where the next bank account goes.
-
-ACCOUNTS MARKED `optional` are ones a small operation will not need. They are
-included rather than omitted because deleting a line from a proposed plan is
-easier than knowing it was an option: `propose_clean_chart` lists them so a
-reviewer can strike them before importing.
 """
 
 from .base import ChartTemplate, register
@@ -67,64 +77,52 @@ _ASSETS = {
 			"Current Assets",
 			[
 				_account("1110", "Cash on Hand", "Cash"),
-				_account("1120", "Checking - Primary", "Bank"),
-				_account(
-					"1130",
-					"Checking - Payroll",
-					"Bank",
-					description=(
-						"A second checking account funded only for payroll runs. Skip it "
-						"if the operation runs everything through one checking account."
-					),
-					optional=True,
-				),
+				_account("1120", "Checking - Wells Fargo Primary", "Bank"),
 				_account("1140", "Savings", "Bank"),
 				_account("1200", "Accounts Receivable", "Receivable"),
-				_group(
+				_account(
 					"1300",
-					"Inventory",
-					[
-						_account("1310", "Inventory - Crops in Storage", "Stock"),
-						_account("1320", "Inventory - Supplies", "Stock"),
-					],
-					account_type="Stock",
+					"Inventory - Crops & Supplies",
+					"Stock",
+					description=(
+						"Harvested crop held for sale and unused inputs on hand. One "
+						"account rather than two: split it only when the two are being "
+						"counted and valued separately."
+					),
 				),
 				_account(
 					"1400",
 					"Prepaid Expenses",
 					"Current Asset",
 					description=(
-						"Insurance, rent and licences paid ahead of the period they cover. "
-						"Amortise into the matching 6000-series expense as the period runs."
+						"Insurance, subscriptions and licences paid ahead of the period "
+						"they cover, amortised into the matching 6000-series expense as "
+						"the period runs. Property tax prepayments have their own account "
+						"at 1420."
 					),
 				),
-				_group(
-					"1500",
-					"Other Current Assets",
-					[
-						_account(
-							"1510",
-							"Employee Cash Advances",
-							"Current Asset",
-							description=(
-								"Money handed to an employee that the business expects back or "
-								"expects to recover from a future paycheque — an ASSET. Not to be "
-								"confused with 2130 Employee Wage Advances, which is wages already "
-								"earned and paid early, and is a liability offset."
-							),
-						),
-						_account(
-							"1520",
-							"Startup Costs § 195 Deferred",
-							"Current Asset",
-							description=(
-								"Organisational and start-up expenditure held for IRC § 195 "
-								"treatment rather than expensed as incurred. Talk to the return "
-								"preparer before clearing this account."
-							),
-						),
-						_account("1530", "Earnest Money Deposits", "Current Asset"),
-					],
+				_account(
+					"1420",
+					"Prepaid Property Tax",
+					"Current Asset",
+					description=(
+						"Property tax paid to the county (or equivalent taxing authority) "
+						"ahead of schedule, amortising into 6650 Property & Business Taxes "
+						"as time passes. Separate from 1400 so the balance answers 'how far "
+						"ahead are we on property tax' at a glance, which a combined "
+						"prepaid account cannot."
+					),
+				),
+				_account(
+					"1510",
+					"Employee Cash Advances",
+					"Current Asset",
+					description=(
+						"Money handed to an employee that the business expects back — an "
+						"ASSET. Not to be confused with 2130 Employee Wage Advances, which "
+						"is wages already earned, paid early, and recovered from the next "
+						"paycheque."
+					),
 				),
 			],
 		),
@@ -134,74 +132,75 @@ _ASSETS = {
 			[
 				_account("1710", "Land", "Fixed Asset"),
 				_account("1720", "Buildings", "Fixed Asset"),
-				_group(
+				_account(
 					"1730",
 					"Machinery & Equipment",
-					[
-						_account("1731", "Tractors & Prime Movers", "Fixed Asset"),
-						_account("1732", "Implements & Attachments", "Fixed Asset"),
-						_account("1733", "Irrigation Systems", "Fixed Asset"),
-						_account("1734", "Harvesting Equipment", "Fixed Asset"),
-						_account(
-							"1735",
-							"Orchard-Specific",
-							"Fixed Asset",
-							description=(
-								"Trellis, netting, wind machines, frost fans, platforms — capital "
-								"that only makes sense on a tree-fruit block."
-							),
-						),
-						_account("1736", "Utility Vehicles", "Fixed Asset"),
-						_account("1737", "Storage & Handling", "Fixed Asset"),
-					],
-					account_type="Fixed Asset",
-				),
-				_account("1740", "Office Equipment", "Fixed Asset"),
-				_account(
-					"1750",
-					"Software",
 					"Fixed Asset",
 					description=(
-						"Capitalised software licences. Most operations expense software "
-						"through 6520 Software Subscriptions instead; keep this only if "
-						"something is genuinely being capitalised and depreciated."
+						"Tractors, implements, irrigation, harvest equipment and "
+						"orchard-specific capital (trellis, netting, wind machines, frost "
+						"fans, platforms). Break it into sub-accounts when the depreciation "
+						"schedules diverge enough to be worth tracking apart."
 					),
-					optional=True,
 				),
-				_group(
+				_account("1740", "Vehicles", "Fixed Asset"),
+				_account("1750", "Software & IP", "Fixed Asset"),
+				_account(
 					"1780",
 					"Accumulated Depreciation",
-					[
-						_account("1781", "Accum Dep - Buildings", "Accumulated Depreciation"),
-						_account("1782", "Accum Dep - Machinery", "Accumulated Depreciation"),
-						_account("1783", "Accum Dep - Office", "Accumulated Depreciation"),
-					],
-					account_type="Accumulated Depreciation",
+					"Accumulated Depreciation",
 					description=(
-						"Contra-asset. These carry credit balances and reduce the gross "
-						"figures above; the matching charge is 6810 Depreciation Expense."
-					),
-				),
-				_account(
-					"1790",
-					"Construction in Progress",
-					"Capital Work in Progress",
-					description=(
-						"Capital spend on something not yet in service — a shed being built, "
-						"a block being planted. Nothing depreciates from here; move the total "
-						"to the right 1700-series account when the asset is placed in service."
+						"Contra-asset. Carries a credit balance and reduces the gross "
+						"figures above; the matching charge is 6700 Depreciation & "
+						"Amortization."
 					),
 				),
 			],
 		),
 		_group(
 			"1800",
-			"Investments",
-			[],
+			"Investments & Trading",
+			[
+				_account(
+					"1810",
+					"Marketable Securities - Stocks & ETFs",
+					description=(
+						"Equity positions at cost. Mark-to-market movement goes to 3500 "
+						"Unrealized Gain/Loss on Investments until a position closes, at "
+						"which point the result lands in 4230 or 7300."
+					),
+				),
+				_account(
+					"1820",
+					"Marketable Securities - Bonds & Fixed Income",
+					description="Debt positions at cost. Coupon income goes to 4210 Interest Income.",
+				),
+				_account(
+					"1830",
+					"Brokerage Cash & Money Market",
+					"Bank",
+					description=(
+						"Uninvested cash sitting at the broker. Typed as Bank so it "
+						"reconciles like any other cash account — this is the account a "
+						"linked brokerage feed posts against."
+					),
+				),
+				_account(
+					"1840",
+					"Options Contracts Open",
+					description=(
+						"Open option positions, carried separately so a covered-call "
+						"programme's live exposure is visible without unpicking it from the "
+						"underlying equity. Premium received goes to 4240; a loss on close "
+						"goes to 7300."
+					),
+				),
+			],
 			description=(
-				"Deliberately empty. A holding place for marketable securities or an "
-				"interest in another entity, so those do not end up filed under Other "
-				"Current Assets when they appear."
+				"The investment book. Everything in 1800-1849 belongs to the trading "
+				"segment, paired with income in 4200-4249, losses in 7300 and unrealised "
+				"movement in 3500. Filter a report to those ranges and you have the "
+				"trading business on its own."
 			),
 		),
 	],
@@ -244,29 +243,35 @@ _LIABILITIES = {
 					"Employee Wage Advances",
 					"Payable",
 					description=(
-						"Wages already earned and paid out ahead of the payroll run — a "
-						"reduction of what will be paid. Contrast 1510 Employee Cash "
-						"Advances, which is money the business expects back."
+						"Wages already earned and paid out ahead of the normal payday, "
+						"recovered against the next paycheque — a reduction of what will be "
+						"paid. Contrast 1510 Employee Cash Advances, which is money the "
+						"business expects back rather than wages brought forward."
 					),
 				),
 				_group(
 					"2140",
 					"Payroll Tax Withholdings",
 					[
-						_account("2141", "Federal Income Tax Withheld", "Payable"),
-						_account("2142", "State Income Tax Withheld", "Payable"),
-						_account("2143", "FICA Withheld", "Payable"),
-						_account("2144", "Medicare Withheld", "Payable"),
-						_account("2145", "Unemployment Insurance Payable", "Payable"),
+						_account("2141", "Federal & FICA Withheld", "Payable"),
+						_account("2142", "State Withheld", "Payable"),
 					],
 					account_type="Payable",
 					description=(
 						"Amounts withheld from employees and held on their behalf until "
 						"remitted. This is not the employer's own payroll tax cost, which is "
-						"an expense and belongs in 6120."
+						"an expense and belongs in 6150."
 					),
 				),
-				_account("2150", "Sales Tax Payable", "Tax"),
+				_account(
+					"2150",
+					"Sales Tax Payable",
+					"Tax",
+					description=(
+						"Sales tax collected from customers and owed onward. Not an expense "
+						"— the business is a collection agent for it."
+					),
+				),
 				_account(
 					"2160",
 					"Credit Card Payable",
@@ -275,24 +280,34 @@ _LIABILITIES = {
 						"One account per card is usually easier to reconcile than one combined balance."
 					),
 				),
-				_account("2170", "Accrued Interest Payable", "Payable"),
+				_account(
+					"2170",
+					"Property Tax Payable",
+					"Payable",
+					description=(
+						"Accrued property tax owed at any point in time. The county bills "
+						"once or twice a year, but the obligation accrues monthly, so "
+						"accruing it here keeps the balance sheet honest between bills. "
+						"Cleared when the bill is paid; the charge goes to 6650 Property & "
+						"Business Taxes."
+					),
+				),
 			],
 		),
 		_group(
 			"2500",
 			"Long-Term Liabilities",
 			[
-				_account("2510", "Notes Payable - Land", "Payable"),
-				_account("2520", "Notes Payable - Equipment", "Payable"),
 				_account(
-					"2590",
-					"Deferred Tax Liability",
+					"2510",
+					"Notes Payable",
 					"Payable",
 					description=(
-						"Normally only used where the entity is taxed at entity level. A "
-						"pass-through LLC often leaves this at zero all year."
+						"Land, equipment and operating notes. Give each note its own "
+						"sub-account once there is more than one, so a payoff schedule can "
+						"be read off the ledger."
 					),
-				),
+				)
 			],
 		),
 	],
@@ -347,6 +362,17 @@ _EQUITY = {
 			),
 		),
 		_account("3400", "Retained Earnings", "Equity"),
+		_account(
+			"3500",
+			"Unrealized Gain/Loss on Investments",
+			"Equity",
+			description=(
+				"Mark-to-market bucket for open positions in 1810/1820/1840. Movement "
+				"sits here — outside the income statement — until a position actually "
+				"closes, at which point it moves to 4230 Realized Capital Gains or 7300 "
+				"Realized Capital Losses & Options Losses. Part of the trading segment."
+			),
+		),
 	],
 }
 
@@ -359,17 +385,18 @@ _INCOME = {
 	"children": [
 		_group(
 			"4100",
-			"Operating Income",
+			"Farm Operations",
 			[
 				_account("4110", "Farm Sales", "Income Account"),
-				_account("4120", "Custom Farming Services", "Income Account"),
+				_account("4120", "Custom Services", "Income Account"),
 				_account(
 					"4130",
-					"Government Program Income",
+					"Government Programs",
 					"Income Account",
 					description=(
-						"Conservation, disaster and commodity program payments. Kept "
-						"separate from farm sales because it is reported separately."
+						"USDA program payments, EQIP and other conservation cost-share, and "
+						"disaster relief. Kept out of farm sales because it is reported "
+						"separately and is not revenue from a crop."
 					),
 				),
 				_account("4140", "Crop Insurance Proceeds", "Income Account"),
@@ -377,12 +404,23 @@ _INCOME = {
 		),
 		_group(
 			"4200",
-			"Investment Income",
+			"Investment & Trading Income",
 			[
 				_account("4210", "Interest Income", "Income Account"),
 				_account("4220", "Dividend Income", "Income Account"),
 				_account("4230", "Realized Capital Gains", "Income Account"),
+				_account(
+					"4240",
+					"Options Premium Income",
+					"Income Account",
+					description=(
+						"Premium collected on written contracts. A loss on closing one goes "
+						"to 7300 rather than being netted here, so the gross premium taken "
+						"in stays visible."
+					),
+				),
 			],
+			description="The income half of the trading segment. See 1800.",
 		),
 		_group(
 			"4300",
@@ -401,157 +439,97 @@ _COGS = {
 	"account_name": "Cost of Goods Sold",
 	"root_type": "Expense",
 	"is_group": True,
+	"description": (
+		"Direct cost of growing the crop. Note that these are typed Expense Account "
+		"rather than ERPNext's Cost of Goods Sold type: if the Stock module is used "
+		"against 1300, the Item or Item Group default expense account has to be set "
+		"by hand, because ERPNext looks for the Cost of Goods Sold type when it "
+		"picks one automatically."
+	),
 	"children": [
-		_group(
-			"5100",
-			"COGS - Farm Operations",
-			[
-				_account("5110", "Seeds & Plants", "Cost of Goods Sold"),
-				_account("5120", "Fertilizer & Soil Amendments", "Cost of Goods Sold"),
-				_account("5130", "Chemicals & Sprays", "Cost of Goods Sold"),
-				_account("5140", "Water & Irrigation", "Cost of Goods Sold"),
-				_account(
-					"5150",
-					"Direct Farm Labor",
-					"Cost of Goods Sold",
-					description=(
-						"Wages for work performed on the crop — picking, pruning, thinning, "
-						"irrigating. Administrative and office wages belong in 6110, and "
-						"keeping the two apart is what makes a cost-per-bin figure mean "
-						"anything."
-					),
-				),
-				_account("5190", "COGS Other", "Cost of Goods Sold"),
-			],
-		)
+		_account("5110", "Seeds, Fertilizer, Chemicals", "Expense Account"),
+		_account("5120", "Water & Irrigation", "Expense Account"),
+		_account(
+			"5150",
+			"Direct Farm Labor",
+			"Expense Account",
+			description=(
+				"Wages for work performed on the crop — picking, pruning, thinning, "
+				"irrigating. Administrative and management wages belong in 6100, and "
+				"keeping the two apart is what makes a cost per bin mean anything."
+			),
+		),
 	],
 }
 
 # ── 6000 Operating Expenses ─────────────────────────────────────────────────
+# Deliberately flat: nine buckets, no sub-groups. Add a sub-account under one
+# of these when a real transaction needs the detail, not in advance.
 _OPEX = {
 	"account_number": "6000",
 	"account_name": "Operating Expenses",
 	"root_type": "Expense",
 	"is_group": True,
 	"children": [
-		_group(
+		_account(
 			"6100",
 			"Payroll & Benefits",
-			[
-				_account(
-					"6110",
-					"Wages - Administrative",
-					"Expense Account",
-					description="Office and management wages. Crop labour goes to 5150.",
-				),
-				_account(
-					"6120",
-					"Payroll Tax Expense",
-					"Expense Account",
-					description=(
-						"The employer's own share. Amounts withheld from employees are not "
-						"an expense — they are a liability in 2140."
-					),
-				),
-				_account("6130", "Employee Benefits", "Expense Account"),
-				_account("6140", "Workers Compensation Insurance", "Expense Account"),
-			],
+			"Expense Account",
+			description=(
+				"Administrative and management wages, health cover and other benefits. "
+				"Crop labour goes to 5150; the employer's payroll tax goes to 6150."
+			),
 		),
-		_group(
-			"6200",
-			"Occupancy",
-			[
-				_account("6210", "Rent", "Expense Account"),
-				_account("6220", "Utilities", "Expense Account"),
-				_account("6230", "Property Insurance", "Expense Account"),
-				_account("6240", "Repairs & Maintenance", "Expense Account"),
-			],
+		_account(
+			"6150",
+			"Employer Payroll Tax Expense",
+			"Expense Account",
+			description=(
+				"The employer's own share of payroll taxes on wages paid — FICA (6.2%), "
+				"Medicare (1.45%), FUTA, SUTA, and workers comp premiums where treated "
+				"as such. Separated from 6100 so wage cost and true cost of employment "
+				"can be read apart.\n\n"
+				"Does NOT include amounts withheld from employees. Those are the "
+				"employees' money held on their behalf and go to the 2140 Payroll Tax "
+				"Withholdings liability group, never to expense."
+			),
 		),
-		_group(
-			"6300",
-			"Vehicles & Fuel",
-			[
-				_account("6310", "Fuel & Lubricants", "Expense Account"),
-				_account("6320", "Vehicle Insurance", "Expense Account"),
-				_account("6330", "Vehicle Maintenance & Repairs", "Expense Account"),
-				_account("6340", "Vehicle Registration", "Expense Account"),
-			],
-		),
-		_group(
+		_account("6200", "Occupancy & Utilities", "Expense Account"),
+		_account("6300", "Vehicles & Fuel", "Expense Account"),
+		_account(
 			"6400",
 			"Professional Services",
-			[
-				_account("6410", "Legal Fees", "Expense Account"),
-				_account("6420", "Accounting & Tax Preparation", "Expense Account"),
-				_account("6430", "Consulting Fees", "Expense Account"),
-				_account("6440", "Advisory & Management Fees", "Expense Account"),
-			],
+			"Expense Account",
+			description="Legal, accounting and tax preparation, consulting, advisory and management fees.",
 		),
-		_group(
-			"6500",
-			"Office & Administrative",
-			[
-				_account("6510", "Office Supplies", "Expense Account"),
-				_account("6520", "Software Subscriptions", "Expense Account"),
-				_account("6530", "Telephone & Internet", "Expense Account"),
-				_account("6540", "Postage & Delivery", "Expense Account"),
-				_account("6550", "Bank Charges", "Expense Account"),
-				_account("6560", "Licenses & Permits", "Expense Account"),
-				_account("6570", "Dues & Subscriptions", "Expense Account"),
-			],
-		),
-		_group(
+		_account("6500", "Office & Administrative", "Expense Account"),
+		_account(
 			"6600",
-			"Marketing & Sales",
-			[
-				_account("6610", "Marketing & Advertising", "Expense Account"),
-				_account(
-					"6620",
-					"Meals & Entertainment",
-					"Expense Account",
-					description=(
-						"Deductibility differs by category and by year. Keeping this out of "
-						"6630 Travel is what lets the preparer apply the right limit."
-					),
-				),
-				_account("6630", "Travel", "Expense Account"),
-			],
-		),
-		_group(
-			"6700",
 			"Insurance",
-			[
-				_account("6710", "Crop Insurance", "Expense Account"),
-				_account("6720", "Liability Insurance", "Expense Account"),
-				_account("6730", "Umbrella Insurance", "Expense Account"),
-			],
+			"Expense Account",
+			description=(
+				"Crop, liability and umbrella cover. Vehicle insurance goes to 6300 and "
+				"workers comp to 6150, so each sits with the cost it belongs to."
+			),
 		),
-		_group(
-			"6800",
-			"Depreciation & Amortization",
-			[
-				_account("6810", "Depreciation Expense", "Depreciation"),
-				_account("6820", "Amortization Expense", "Depreciation"),
-			],
+		_account(
+			"6650",
+			"Property & Business Taxes",
+			"Expense Account",
+			description=(
+				"Recurring taxes and fees the LLC owes regardless of income: property tax "
+				"on land, buildings and equipment; vehicle registration and weight tax on "
+				"farm trucks and tractors; LLC annual filing fees; state franchise or "
+				"minimum tax; business licences.\n\n"
+				"Does NOT include federal or state income tax (this is a pass-through "
+				"entity, so those are the members'), sales tax collected from customers "
+				"(2150 Sales Tax Payable — the business is only a collection agent), or "
+				"employer payroll taxes (6150)."
+			),
 		),
-		_group(
-			"6900",
-			"Other Operating",
-			[
-				_account(
-					"6910",
-					"Contract Labor",
-					"Expense Account",
-					description=(
-						"Payments to people who are not employees — the 1099 side. Employee "
-						"wages never belong here."
-					),
-				),
-				_account("6920", "Small Tools & Supplies", "Expense Account"),
-				_account("6930", "Training & Education", "Expense Account"),
-				_account("6990", "Miscellaneous Expense", "Expense Account"),
-			],
-		),
+		_account("6700", "Depreciation & Amortization", "Depreciation"),
+		_account("6800", "Repairs & Maintenance", "Expense Account"),
+		_account("6900", "Miscellaneous", "Expense Account"),
 	],
 }
 
@@ -564,7 +542,17 @@ _NON_OPERATING = {
 	"children": [
 		_account("7100", "Interest Expense", "Expense Account"),
 		_account("7200", "Loss on Sale of Fixed Assets", "Expense Account"),
-		_account("7300", "Realized Capital Losses", "Expense Account"),
+		_account(
+			"7300",
+			"Realized Capital Losses & Options Losses",
+			"Expense Account",
+			description=(
+				"The loss side of the trading segment: closed positions from 1810/1820 "
+				"and losses on closing contracts from 1840. Gains go to 4230 and premium "
+				"to 4240 rather than being netted here, so gross activity on both sides "
+				"stays visible."
+			),
+		),
 	],
 }
 
@@ -579,26 +567,32 @@ register(
 		entity_type="LLC",
 		jurisdiction="US",
 		summary=(
-			"A numbered chart of accounts for a US farming LLC, written with tree "
-			"fruit in mind: crop labour separated from administrative wages so a "
-			"cost per bin means something, orchard-specific capital broken out under "
-			"machinery, and a live current-pay-period wage liability rather than a "
-			"period-end accrual."
+			"A compact numbered chart of accounts for a US farming LLC that also runs "
+			"an investment book. Crop labour is separated from administrative wages so "
+			"a cost per bin means something; the trading segment has its own asset, "
+			"income, loss and unrealised-gain accounts so it can be reported on "
+			"without being untangled; and the current-pay-period wage liability is a "
+			"live balance rather than a period-end accrual."
 		),
 		tree=TREE,
 		notes=(
-			"A starting point, not tax advice. Have the entity's return preparer "
-			"look at the 3000s and at 1520 before anything is filed against them.",
-			"The 3000-series equity accounts are LLC-shaped. A C corporation, an S "
-			"corporation or a partnership needs a different structure there; those "
-			"are separate templates rather than a flag on this one.",
+			"A starting point, not tax advice. Have the entity's return preparer look "
+			"at the 3000s before anything is filed against them.",
+			"THE TRADING SEGMENT is assets 1800-1849, income 4200-4249, losses 7300 "
+			"and unrealised movement 3500. Filter a P&L or trial balance to those four "
+			"ranges to see the investment book on its own; exclude them to see the "
+			"farm. Nothing else in the chart reaches into those numbers.",
 			"2120 Current Pay Period - Due to Employees is meant to be updated "
 			"continuously as work lands, not written up once at period end. Read its "
 			"description before posting to it.",
-			"Accounts marked optional can be struck from the plan before importing "
-			"without breaking anything else in the tree.",
-			"Numbering leaves gaps on purpose. Add the next bank account at 1150, "
-			"the next expense category at the next free number in its group.",
+			"The 3000-series equity accounts are LLC-shaped. A C corporation, an S "
+			"corporation or a partnership needs a different structure there; those are "
+			"separate templates rather than a flag on this one.",
+			"Operating expenses are nine flat buckets on purpose. A chart with a line "
+			"for every conceivable cost is one where nobody finds the right line — add "
+			"a sub-account when a real transaction needs it.",
+			"Numbering leaves gaps on purpose. The next bank account is 1130, the next "
+			"operating expense the next free number in its decade.",
 		),
 	)
 )
