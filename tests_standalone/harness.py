@@ -471,14 +471,74 @@ ERPNEXT_SCHEMA = {
 		"modified",
 	],
 	"Purchase Receipt": ["name", "supplier", "posting_date", "docstatus"],
+	# ── v0.7.0: assets ──────────────────────────────────────────────────────
+	"Asset": [
+		"name",
+		"asset_name",
+		"item_code",
+		"asset_category",
+		"company",
+		"purchase_date",
+		"available_for_use_date",
+		"gross_purchase_amount",
+		"asset_quantity",
+		"is_existing_asset",
+		"calculate_depreciation",
+		"cost_center",
+		"location",
+		"status",
+		"docstatus",
+	],
+	"Asset Category": ["name", "asset_category_name", "accounts"],
+	"Asset Category Account": [
+		"company",
+		"fixed_asset_account",
+		"accumulated_depreciation_account",
+		"depreciation_expense_account",
+		"parent",
+		"parenttype",
+	],
+	"Item": [
+		"name",
+		"item_code",
+		"item_name",
+		"item_group",
+		"stock_uom",
+		"is_fixed_asset",
+		"is_stock_item",
+		"asset_category",
+		"disabled",
+	],
+	"Item Group": ["name", "is_group"],
+	"UOM": ["name", "enabled"],
+	# No "Location", deliberately: ERPNext's Asset requires one on some versions
+	# and not others, and this fixture is a site without it — which is what makes
+	# `create_asset`'s "set it only where the field exists" branch a real case.
 }
+
+#: Doctypes whose docname is built from one of their own fields, as ERPNext
+#: names them. Only the ones this app's behaviour depends on: `create_asset`
+#: creates an Item and then links the Asset to whatever the Item ended up
+#: called, and a double that named it `I-00001` would make the link untestable.
+ERPNEXT_AUTONAME = {"Item": "field:item_code"}
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
 #: assert against the real defaults rather than a copy that can drift.
 APP_DOCTYPES = {
 	"ERPNext MCP Settings": "erpnext_mcp_settings",
 	"MCP Action Log": "mcp_action_log",
+	"Cap Table Entry": "cap_table_entry",
+	"Member Event": "member_event",
+	"Governance Document": "governance_document",
+	"Asset Cost Profile": "asset_cost_profile",
+	"Asset Cost Center Allocation": "asset_cost_center_allocation",
+	"Asset Depreciation Posting": "asset_depreciation_posting",
 }
+
+#: The app's own doctypes that have no controller file — the child tables. Their
+#: rows only ever exist inside a parent, so nothing calls `frappe.get_doc` on
+#: one, and `_controller` must not try to import a module that is not there.
+APP_CHILD_DOCTYPES = {"Asset Cost Center Allocation", "Asset Depreciation Posting"}
 
 
 def _load_app_doctype(folder: str) -> dict:
@@ -598,6 +658,7 @@ def _build_meta() -> dict:
 				)
 				for name in fields
 			],
+			autoname=ERPNEXT_AUTONAME.get(doctype, ""),
 		)
 	for doctype, folder in APP_DOCTYPES.items():
 		payload = _load_app_doctype(folder)
@@ -605,6 +666,7 @@ def _build_meta() -> dict:
 			doctype,
 			[Field(**field) for field in payload["fields"]],
 			issingle=bool(payload.get("issingle")),
+			autoname=str(payload.get("autoname") or ""),
 		)
 	return metas
 
@@ -731,7 +793,21 @@ CHILD_TABLES = {
 	("Fiscal Year", "companies"): "Fiscal Year Company",
 	("Workflow", "states"): "Workflow Document State",
 	("Workflow", "transitions"): "Workflow Transition",
+	("Asset Category", "accounts"): "Asset Category Account",
+	("Asset Cost Profile", "cost_center_allocation"): "Asset Cost Center Allocation",
+	("Asset Cost Profile", "depreciation_postings"): "Asset Depreciation Posting",
 }
+
+#: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
+#: plain dicts. A row this app appends to and re-reads has to behave the same on
+#: the second read as on the first.
+REHYDRATED_CHILD_FIELDS = (
+	"accounts",
+	"payment_entries",
+	"companies",
+	"cost_center_allocation",
+	"depreciation_postings",
+)
 
 
 class Document(FrappeDict):
@@ -865,12 +941,37 @@ class FileDocument(Document):
 
 	Putting it on the base Document would make every doctype quack like a file
 	and hide a real bug where the app reads content off the wrong thing.
+
+	`content` is faithful to Frappe in the part that matters: a File inserted with
+	content has its bytes written to storage and its `file_url`, `file_name` and
+	`file_size` filled in from them, and the content itself is NOT a column on the
+	row afterwards. An app that read the field back would be reading something a
+	real site does not keep.
 	"""
 
 	def get_content(self):
 		if self.name not in STORE.file_contents:
 			raise OSError(f"no stored content for File {self.name}")
 		return STORE.file_contents[self.name]
+
+	def validate(self):
+		if self.get("content") is None:
+			return
+		data = _as_bytes(self["content"])
+		self["file_name"] = self.get("file_name") or "attachment"
+		self["file_size"] = len(data)
+		folder = "/private/files/" if int(self.get("is_private") or 0) else "/files/"
+		self["file_url"] = folder + self["file_name"]
+
+	def on_update(self):
+		if self.get("content") is None:
+			return
+		STORE.file_contents[self.name] = _as_bytes(self.pop("content"))
+		STORE.put(self)
+
+
+def _as_bytes(value) -> bytes:
+	return value.encode("utf-8") if isinstance(value, str) else bytes(value or b"")
 
 
 def account_autoname(account_number, account_name, abbr: str) -> str:
@@ -1093,7 +1194,7 @@ class Store:
 				"name": doctype,
 				"module": payload.get("module") or "ERPNext MCP",
 				"issingle": int(payload.get("issingle") or 0),
-				"istable": 0,
+				"istable": int(payload.get("istable") or 0),
 			}
 		self.tables["DocType"] = rows
 
@@ -1475,7 +1576,7 @@ def _build_utils() -> types.ModuleType:
 def _controller(doctype: str):
 	"""Resolve a doctype to this app's controller class, as Frappe does."""
 	folder = APP_DOCTYPES.get(doctype)
-	if not folder:
+	if not folder or doctype in APP_CHILD_DOCTYPES:
 		return STUB_CONTROLLERS.get(doctype, Document)
 	module = __import__(f"erpnext_mcp.erpnext_mcp.doctype.{folder}.{folder}", fromlist=["x"])
 	return getattr(module, doctype.replace(" ", ""), Document)
@@ -1531,7 +1632,7 @@ def _build_frappe() -> types.ModuleType:
 		data = copy.deepcopy(row)
 		data["doctype"] = doctype
 		doc = _controller(doctype)(data)
-		for fieldname in ("accounts", "payment_entries", "companies"):
+		for fieldname in REHYDRATED_CHILD_FIELDS:
 			if isinstance(doc.get(fieldname), list):
 				doc[fieldname] = [Document(item) for item in doc[fieldname]]
 		return doc

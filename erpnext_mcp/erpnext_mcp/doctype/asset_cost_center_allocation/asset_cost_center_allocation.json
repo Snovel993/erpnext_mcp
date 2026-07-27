@@ -1,0 +1,60 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-27 09:00:00.000000",
+ "description": "One slice of an asset's usage: which cost center it works for, and what share of it. The rows of one Asset Cost Profile sum to 100.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "cost_center",
+  "percentage",
+  "bbch_stage",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "reqd": 1
+  },
+  {
+   "description": "Share of this asset's use, 0-100. The rows of one profile must total 100.",
+   "fieldname": "percentage",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Percentage",
+   "reqd": 1
+  },
+  {
+   "description": "Optional value of this site's BBCH Stage accounting dimension, applied to the depreciation line this row produces.",
+   "fieldname": "bbch_stage",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "BBCH Stage"
+  },
+  {
+   "description": "Why this share is what it is — the usage evidence behind the number.",
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Note"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-27 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Asset Cost Center Allocation",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 49 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 64 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -2363,13 +2363,509 @@ default_receivable_account has to point at an account whose account_type is Rece
 
 ---
 
+# Cap table, member events and governance
+
+Ten tools for the things a family business holds for a generation: who owns it,
+what happened to their interest, and which paper says so.
+
+**The idea everything here rests on.** A chart of accounts and a cost center tree
+are read by everyone who touches the books — a bookkeeper, a lender, an auditor,
+a model summarising the year. A family name in either one leaks into every export
+and cannot be taken out of a statement that has already been sent.
+
+So a posting is tagged with an anonymous **Member accounting dimension** value,
+and exactly one doctype says who that is:
+
+```
+Journal Entry line   →  3100 Member Capital, member = Member-01
+Cap Table Entry      →  Member-01 = The Example Family Trust, admitted 2020-06-15, 60%
+```
+
+Read access to the ledger and read access to the mapping are then two different
+grants. `list_cap_table` is the tool that joins them, which is why it has its own
+switch.
+
+**Members are a dimension, not a cost center.** Cost centers answer "which part
+of the operation did this belong to", and a member is not a part of the
+operation. `Cap Table Entry` keeps an optional `member_cost_center` for sites
+whose convention already gives each member one, but every tool here files by the
+dimension and carries the cost center along.
+
+**Order of operations on a fresh site:**
+
+```
+create_accounting_dimension(dimension_name="Member", create_master_if_missing=true)
+create_dimension_value(dimension_name="Member", value_name="Member-01")
+create_cap_table_entry(member_id="Member-01", legal_entity_name="…", …)
+record_member_event(event_type="Contribution", member="Member-01", …)
+submit_member_event(name=…)          ← needs allow_submit_journal_entry too
+```
+
+`create_cap_table_entry` refuses a member id that is not already a dimension
+value, so the first two steps cannot be skipped by accident. A site with no
+Member dimension at all is allowed to build the register first, and is told so.
+
+---
+
+## 50. `list_cap_table`
+
+Read-only, on by default. Requires the Cap Table Entry doctype (ships with this
+app; run `bench migrate`).
+
+**Arguments:** `company` (required), `include_retired` (default **true**).
+
+Retired members are included by default because the postings they are tagged on
+do not disappear when they leave.
+
+```json
+{
+  "company": "Example Trading Co",
+  "members": [
+    {
+      "name": "Member-01 - ETC",
+      "member_id": "Member-01",
+      "legal_entity_name": "The Example Family Trust",
+      "entity_type": "Trust",
+      "admission_date": "2020-06-15",
+      "withdrawal_date": null,
+      "ownership_percentage": 60.0,
+      "retired": false,
+      "member_cost_center": null
+    }
+  ],
+  "count": 2, "active_count": 2, "retired_count": 0,
+  "active_ownership_total": 100.0,
+  "ownership_balances": true,
+  "member_dimension": "Member"
+}
+```
+
+`ownership_balances` false adds a `warning` naming the total. It is a warning
+rather than a refusal: mid-transition is a real state.
+
+---
+
+## 51. `list_member_events`
+
+Read-only, on by default.
+
+**Arguments:** `company` (required), `member`, `event_type`, `from_date`,
+`to_date`, `include_superseded` (default true), `limit`.
+
+`member` takes a Cap Table Entry docname or a bare `member_id`. Legal names are
+resolved from the register; the events themselves hold only the anonymous id.
+`totals_by_event_type` sums what was returned — an event with `superseded_by`
+set has been corrected by a later one and must not be counted twice.
+
+---
+
+## 52. `list_governance_documents`
+
+Read-only, on by default.
+
+**Arguments:** `company` (required), `category`, `include_superseded` (default
+true), `limit`.
+
+`operative` is true for a document nothing has superseded. Those are the ones in
+force; the rest are history, and the archive keeps both.
+
+---
+
+## 53. `get_governance_document_content`
+
+Read-only, on by default.
+
+**Arguments:** `name` (required), `file`, `max_bytes`.
+
+Returns the document's metadata, its place in the amendment chain, and the
+attachment's bytes under `content`, in the same shape `get_attachment_content`
+returns. Read permission on the Governance Document is enforced before anything
+comes back, and the same 2 MB default / 8 MB hard cap applies. An entry with
+several attachments returns the first and says so; an entry with none returns
+its metadata with `content: null`.
+
+---
+
+## 54. `create_cap_table_entry`
+
+**MUTATING.** Off by default.
+
+**Arguments:** `company`, `member_id`, `legal_entity_name`, `entity_type`,
+`admission_date` (all required), `ownership_percentage`, `member_cost_center`,
+`member_dimension`, `notes`.
+
+`entity_type` is checked against the doctype's own option list: Individual,
+Trust, LLC, Corporation, Partnership, Other.
+
+**Refuses**, writing nothing:
+
+- a member id already registered for that company, naming the existing entry;
+- a percentage outside 0–100;
+- a member id that is not a value of the site's Member dimension, naming
+  `create_dimension_value` as the remedy;
+- `retired` or `withdrawal_date` — a member cannot be created already gone.
+
+The docname is `"<member id> - <company abbr>"`, which is the key
+`record_member_event` and everything else resolves.
+
+---
+
+## 55. `update_cap_table_entry`
+
+**MUTATING.** Off by default. Idempotent in the sense that a call which would
+change nothing is refused rather than reported as a success.
+
+**Arguments:** `member` (required), `company`, `legal_entity_name`,
+`entity_type`, `admission_date`, `ownership_percentage`, `member_cost_center`,
+`notes`.
+
+**Deliberately cannot do two things.** It cannot retire a member — that is tool
+56, so an exit reaches the event trail rather than appearing only as a changed
+checkbox. And it cannot change the `member_id`: that is the key every posting is
+tagged with, so changing it would leave journal entry lines pointing at a member
+that no longer exists.
+
+---
+
+## 56. `close_cap_table_entry`
+
+**MUTATING.** Off by default.
+
+**Arguments:** `member`, `withdrawal_date`, `notes` (all required), `company`.
+
+Sets the withdrawal date, marks the entry retired, appends the reason to its
+notes, and writes a `Withdrawal` Member Event carrying `notes` as the narrative.
+
+**Moves no money.** A member leaving usually involves a final distribution, and
+that is a separate `record_member_event` call with its own amount, accounts and
+narrative. Bundling them would make the tool that closes a member also a tool
+that can pay one.
+
+Refuses a member already retired, a withdrawal date before the admission date,
+and a placeholder reason.
+
+---
+
+## 57. `record_member_event`
+
+**MUTATING.** Off by default.
+
+**Arguments:** `company`, `event_type`, `effective_date`, `member`, `narrative`
+(all required), `amount`, `counterparty_member`, `offset_je`, `capital_account`,
+`counter_account`, `member_dimension`.
+
+Always writes a Member Event. For the five types that book money it also writes
+a **DRAFT** Journal Entry, unless `offset_je` names one that already does:
+
+| `event_type` | Debit | Credit |
+| --- | --- | --- |
+| `Contribution` | the cash side | member capital |
+| `Distribution` | member distributions | the cash side |
+| `Withdrawal` | member distributions | the cash side |
+| `Transfer` | capital of `member` | capital of `counterparty_member` |
+| `Reallocation` | capital of `member` | capital of `counterparty_member` |
+| `Admission` | — nothing is posted — | |
+
+**Every line carries the member dimension, including the cash side.** Tagging
+only the equity line makes a balance sheet filtered by member fail to balance,
+and the first person to notice is usually an auditor. A transfer tags its two
+lines with the two different members: same account, money never leaving the
+company.
+
+**Accounts are shortlisted, never guessed.** With no `capital_account`, the
+company's leaf Equity accounts are matched by name — `member capital`,
+`partner capital`, `capital contribution` for the capital side; `distribution`,
+`draw` for a distribution. Zero matches or more than one is refused with the
+candidates listed. The cash side falls back to the company's
+`default_bank_account`, then `default_cash_account`.
+
+```json
+{
+  "name": "8f3c…", "event_type": "Contribution", "amount": 25000.0,
+  "member": "Member-01 - ETC", "member_id": "Member-01",
+  "offset_je": "ACC-JV-2026-00042",
+  "journal_entry_created": true,
+  "journal_entry_lines": [
+    {"account": "1110 - Bank Checking - ETC", "debit": 25000.0, "credit": 0, "member": "Member-01"},
+    {"account": "3100 - Member Capital - ETC", "debit": 0, "credit": 25000.0, "member": "Member-01"}
+  ],
+  "accounts_used": {
+    "capital_account": "3100 - Member Capital - ETC",
+    "resolved_by": "name match",
+    "counter_account": "1110 - Bank Checking - ETC"
+  },
+  "next_step": "The Journal Entry ACC-JV-2026-00042 is a DRAFT and has moved no balance. …"
+}
+```
+
+**Refuses** a narrative too short to be an explanation, a negative amount (a
+distribution is its own event type, not a contribution with a minus sign), a
+posting event with no amount, a transfer with no counterparty, an `offset_je`
+from another company, and a site with no Member dimension on `Journal Entry
+Account`.
+
+---
+
+## 58. `submit_member_event`
+
+**MUTATING.** Off by default. **This moves balances.**
+
+**Arguments:** `name` (required).
+
+**Checks two switches.** Its own, and `allow_submit_journal_entry`. That second
+switch is where an operator decided whether an AI client may post at all, and a
+second door into the same room with a different lock would make the decision
+meaningless. With it off:
+
+```
+posting this event means submitting Journal Entry ACC-JV-2026-00042, and the submit_journal_entry tool is switched off on this site. That switch is where an operator decides whether an AI client may move a balance, so this tool honours it too. An operator must tick 'allow_submit_journal_entry' in ERPNext MCP Settings. Nothing was changed.
+```
+
+An event that books no money — an admission, a reallocation of percentages — has
+nothing to post and is refused with that said.
+
+---
+
+## 59. `attach_governance_document`
+
+**MUTATING.** Off by default.
+
+**Arguments:** `company`, `category`, `title` (required), `effective_date`,
+`execution_date`, `supersedes`, `file_content`, `file_name`, `file_url`,
+`parties`, `notes`.
+
+`category` is one of Operating Agreement, Trust Document, Advisory Agreement,
+Board Resolution, Prior Statement, Amendment, Other.
+
+**Content.** `file_content` is base64 of the document's bytes (no `data:`
+prefix) and needs `file_name`; it is stored as a **private** File attached to
+the record, readable back through tool 53. `file_url` instead records where an
+externally hosted document lives without copying it. The two together are
+refused. There is an 8 MB ceiling on content moved through a tool call.
+
+**The chain.** `supersedes` writes the link in both directions — the older
+document's `superseded_by` is filled in — so a reader can follow the chain
+forward to whatever is current. Superseding a document that has already been
+superseded is refused: an amendment goes on the end of the chain, not into the
+middle. The doctype's controller separately refuses a cycle, walking the whole
+chain rather than checking one hop.
+
+A second document with the same company, category and title is refused, because
+two entries claiming to be the same operating agreement is worse than none.
+
+---
+
+# Assets and depreciation
+
+Five tools for assets that serve more than one part of the business, and assets
+that are financed. They **layer on** ERPNext's Asset doctype rather than
+replacing it.
+
+**What ERPNext does not have.** A cost split — a tractor is not a Harvest asset
+or a Perennial Care asset, it is 40% one and 60% the other. And note-tenor
+discipline — when an asset is financed, the month the note is paid off and the
+month it is fully depreciated should be the same month, and nothing enforces
+that.
+
+**Where this app keeps it.** In an `Asset Cost Profile`, one per Asset, not in
+custom fields on ERPNext's Asset. Installing this app must change the behaviour
+of nothing already on the site, and uninstalling it must give the site back;
+grafting fields onto ERPNext's own doctype breaks both. An asset created here is
+an ordinary ERPNext Asset an operator can open, edit and delete without knowing
+this app exists.
+
+**The most important line in the feature.** `create_asset` sets
+`calculate_depreciation = 0` on the Asset. ERPNext runs a daily scheduled job
+that posts depreciation for every asset with that flag set, using its own
+schedule and its own single cost center. If it also ran, the asset would
+depreciate twice — silently, monthly. This app owns the schedule for the assets
+it creates; `run_depreciation_cycle` is the only thing that writes for them.
+
+An asset you created in the Desk is untouched by any of this: it has no profile,
+so these tools refuse it and ERPNext keeps depreciating it exactly as before.
+
+---
+
+## 60. `depreciation_note_alignment_check`
+
+Read-only, on by default. Requires ERPNext's Asset doctype.
+
+**Arguments:** `company` (required), `as_of` (default today).
+
+```json
+{
+  "company": "Example Trading Co", "as_of": "2026-07-01",
+  "assets": [
+    {
+      "asset": "ACC-ASS-2026-00003",
+      "linked_note": "NOTE-0007", "linked_note_doctype": "Notes Payable",
+      "useful_life_months": 84, "note_tenor_months": 60,
+      "months_elapsed": 6,
+      "remaining_depreciation_months": 78, "remaining_note_months": 54,
+      "delta_months": 24, "aligned": false,
+      "reading": "The asset still has 24 month(s) of depreciation left after the note is paid off — book value outlives the financing."
+    }
+  ],
+  "checked": 1, "diverged_count": 1, "assets_without_a_note": ["ACC-ASS-2026-00001"]
+}
+```
+
+Reports every financed asset, not only the broken ones, because "nothing is
+wrong" is an answer somebody has to be able to see. A divergence is not
+automatically an error — it is something that needs an explanation, and an
+explanation nobody wrote down is what this surfaces.
+
+---
+
+## 61. `create_asset`
+
+**MUTATING.** Off by default. Requires ERPNext's Asset doctype.
+
+**Arguments:** `asset_name`, `item_code`, `asset_category`, `purchase_date`,
+`purchase_amount`, `useful_life_months` (required), `company`, `salvage_value`,
+`depreciation_frequency_months` (default 1), `depreciation_method` (default
+Straight Line), `depreciation_start_date`, `cost_center_allocation`,
+`linked_note`, `note_doctype`, `note_tenor_months`, `note_maturity_date`,
+`depreciation_expense_account`, `accumulated_depreciation_account`, `location`,
+`create_item_if_missing` (default true), `notes`.
+
+```json
+{
+  "company": "Example Trading Co",
+  "asset_name": "Tractor A",
+  "item_code": "TRACTOR-A",
+  "asset_category": "Farm Equipment",
+  "purchase_date": "2026-01-01",
+  "purchase_amount": 84000,
+  "salvage_value": 12000,
+  "useful_life_months": 84,
+  "cost_center_allocation": [
+    {"cost_center": "Harvest", "percentage": 40, "note": "hour meter, 2025 season"},
+    {"cost_center": "Perennial Care", "percentage": 60}
+  ],
+  "linked_note": "NOTE-0007",
+  "note_tenor_months": 84
+}
+```
+
+**Writes** an ERPNext Asset (a **draft** — submit it in ERPNext when the purchase
+is real), an Asset Cost Profile, and a fixed-asset Item when `item_code` does not
+exist yet. The Asset's own `cost_center` is set to the largest share, so anything
+ERPNext files against it lands somewhere sane.
+
+**Refuses**, writing nothing: an allocation that does not total 100 (a 99% asset
+under-depreciates the business for the rest of its life); a group or disabled
+cost center; the same cost center twice; a frequency that does not divide the
+useful life exactly; a salvage value at or above the cost; an asset category the
+site does not have; an existing Item not flagged `is_fixed_asset` (flipping that
+on an item with stock movements is an inventory decision, not an asset one); a
+`bbch_stage` the site has no dimension for; and a `linked_note` whose tenor
+differs from `useful_life_months`.
+
+**Depreciation methods.** Straight Line, Written Down Value, Double Declining
+Balance, Manual. The last period absorbs the rounding so the asset lands exactly
+on its salvage value. Written Down Value with a salvage value of 0 is refused
+rather than fudged — the rate `1 - (salvage/cost)^(1/n)` is undefined, because a
+declining balance never reaches nought. `Manual` means this app computes nothing
+for the asset.
+
+---
+
+## 62. `update_asset_allocation`
+
+**MUTATING.** Off by default.
+
+**Arguments:** `asset`, `new_cost_center_allocation` (required), `company`.
+
+Replaces the split. **Not retroactive**, and that is correct: depreciation
+already written keeps the split it was written with, because that is the
+history, and rewriting it would change periods already reported. The response
+carries `previous_allocation` and how many periods have already been written.
+
+Refuses a total that is not 100, and refuses a change that would leave the
+allocation exactly as it is.
+
+---
+
+## 63. `link_asset_to_note`
+
+**MUTATING.** Off by default.
+
+**Arguments:** `asset`, `note_doc_ref` (required), `note_doctype`,
+`note_tenor_months`, `note_maturity_date`, `enforce_tenor` (default **true**),
+`company`.
+
+The tenor is taken from `note_tenor_months`, from `note_maturity_date`, or from
+the note document's own maturity or term field where its doctype has one — and
+`tenor_source` says which. `note_doctype` is worked out from the name where the
+note is a Notes Payable, a Loan or a Journal Entry.
+
+With `enforce_tenor` true, a mismatch is refused:
+
+```
+Asset ACC-ASS-2026-00003 depreciates over 84 month(s) but the note runs 60 — a 24-month divergence. Held apart, the asset is either fully depreciated while payments continue, or still on the books after the note is paid; either way the matching principle is broken and the mismatch is invisible until the final year. …
+```
+
+`enforce_tenor=false` links anyway and records the divergence, which tool 60
+will keep reporting.
+
+---
+
+## 64. `run_depreciation_cycle`
+
+**MUTATING.** Off by default. **`dry_run` defaults to TRUE.**
+
+**Arguments:** `company` (required), `period_end` (default today), `asset`,
+`dry_run`.
+
+One **DRAFT** Journal Entry per asset per period: debit depreciation expense
+split across the asset's cost centers, credit accumulated depreciation in one
+line, posted on the period's end date. Accounts come from the profile if set,
+otherwise from the Asset Category's row for that company.
+
+```json
+{
+  "company": "Example Trading Co", "period_end": "2026-03-31", "dry_run": true,
+  "periods": [
+    {
+      "asset": "ACC-ASS-2026-00003", "period_index": 1,
+      "period_start": "2026-01-01", "period_end": "2026-01-31", "amount": 857.14,
+      "lines": [
+        {"account": "5200 - Depreciation - ETC", "debit": 342.86, "cost_center": "Harvest - ETC"},
+        {"account": "5200 - Depreciation - ETC", "debit": 514.28, "cost_center": "Perennial Care - ETC"},
+        {"account": "1810 - Accumulated Depreciation - ETC", "credit": 857.14, "cost_center": "Harvest - ETC"}
+      ]
+    }
+  ],
+  "period_count": 3, "total_depreciation": 2571.42,
+  "journal_entries": [], "assets_skipped": [],
+  "note": "DRY RUN — nothing was written. …"
+}
+```
+
+- **Idempotent by record.** Every period written is stored on the profile with
+  the entry that carries it, so a second run cannot repeat one. Amounts are
+  computed from the profile each time rather than read back from saved rows, so
+  a catch-up over eleven missed months produces exactly what month-by-month
+  running would have.
+- **The split adds up.** The last debit absorbs the rounding: 33.33 / 33.33 /
+  33.34 of 1000 is three debits totalling exactly 1000. An entry that does not
+  balance is not a rounding problem, it is a refused save.
+- **Nothing is posted.** The entries are drafts; `submit_journal_entry` posts
+  them.
+- One misconfigured asset does not take the run down. Assets on the Manual
+  method, assets with nothing due, and assets whose depreciation accounts are
+  not configured are listed in `assets_skipped` with the reason.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
 
 1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
-   `workflow`, `accounts`, `dimensions`, `reports`, `files`, `collab`, `hr`,
-   `trade`, `meta` or `packets` —
+   `workflow`, `accounts`, `dimensions`, `governance`, `assets`, `reports`,
+   `files`, `collab`, `hr`, `trade`, `meta` or `packets` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

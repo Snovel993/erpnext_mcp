@@ -87,32 +87,19 @@ def create_journal_entry(args: dict) -> ToolResult:
 	company = resolve_company(as_str(args, "company"), required=True)
 	posting_date = as_date(args, "posting_date", required=True)
 	user_remark = as_str(args, "user_remark", required=True)
-	lines = _validated_lines(args.get("accounts"), company)
-	total_debit, total_credit = _assert_balanced(lines)
+	lines = validated_journal_lines(args.get("accounts"), company)
+	total_debit, total_credit = assert_balanced(lines)
 	dimension_fields = sorted({key for line in lines for key in line if key not in _LINE_FIELDS})
 
-	doc = frappe.new_doc("Journal Entry")
-	doc.company = company
-	doc.posting_date = posting_date
-	doc.user_remark = user_remark
+	extras = {}
 	if as_str(args, "voucher_type"):
-		doc.voucher_type = as_str(args, "voucher_type")
+		extras["voucher_type"] = as_str(args, "voucher_type")
 	for field in ("cheque_no", "cheque_date", "bill_no"):
 		value = as_str(args, field)
 		if value:
-			doc.set(field, as_date(args, field) if field.endswith("_date") else value)
-	for line in lines:
-		doc.append("accounts", line)
+			extras[field] = as_date(args, field) if field.endswith("_date") else value
 
-	doc.insert()
-	# Belt to the "never submits" braces: if a future ERPNext hook ever
-	# submitted on insert, this turns a silent posting into a loud failure.
-	if int(doc.docstatus or 0) != 0:
-		raise ToolError(
-			f"Journal Entry {doc.name} was created with docstatus {doc.docstatus}, "
-			"but create_journal_entry only ever produces drafts. Refusing to "
-			"report success — inspect the site's Journal Entry hooks."
-		)
+	doc = insert_draft_journal_entry(company, posting_date, lines, user_remark, extras)
 
 	data = {
 		"name": doc.name,
@@ -139,8 +126,53 @@ def create_journal_entry(args: dict) -> ToolResult:
 	)
 
 
-def _validated_lines(raw, company: str) -> list[dict]:
-	"""Coerce and check the `accounts` argument into Journal Entry Account rows."""
+def insert_draft_journal_entry(
+	company: str,
+	posting_date: str,
+	lines: list[dict],
+	user_remark: str,
+	extras: dict | None = None,
+):
+	"""Insert one balanced DRAFT Journal Entry. The only place this app writes one.
+
+	Public, and used by `tools/governance.py` and `tools/assets.py` as well as by
+	`create_journal_entry`, so that every Journal Entry this app produces —
+	whatever asked for it — goes through the same insert and the same
+	never-submitted assertion below. A second implementation elsewhere would be a
+	second chance to ship one that posts.
+
+	`lines` must already have been through `validated_journal_lines`.
+	"""
+	assert_balanced(lines)
+	doc = frappe.new_doc("Journal Entry")
+	doc.company = company
+	doc.posting_date = posting_date
+	doc.user_remark = user_remark
+	for field, value in (extras or {}).items():
+		doc.set(field, value)
+	for line in lines:
+		doc.append("accounts", line)
+
+	doc.insert()
+	# Belt to the "never submits" braces: if a future ERPNext hook ever
+	# submitted on insert, this turns a silent posting into a loud failure.
+	if int(doc.docstatus or 0) != 0:
+		raise ToolError(
+			f"Journal Entry {doc.name} was created with docstatus {doc.docstatus}, "
+			"but this app only ever produces draft journal entries. Refusing to "
+			"report success — inspect the site's Journal Entry hooks."
+		)
+	return doc
+
+
+def validated_journal_lines(raw, company: str) -> list[dict]:
+	"""Coerce and check the `accounts` argument into Journal Entry Account rows.
+
+	Public for the same reason `insert_draft_journal_entry` is: the member-event
+	and depreciation tools build their own lines and must have them checked by
+	exactly the code that checks a hand-written entry's — group accounts refused,
+	dimensions verified against this site's meta, one side per line.
+	"""
 	if not isinstance(raw, list) or not raw:
 		raise ToolError(
 			"accounts must be a non-empty list of objects, each with an account "
@@ -237,7 +269,7 @@ def _validated_dimensions(raw, index: int) -> dict:
 	return out
 
 
-def _assert_balanced(lines: list[dict]) -> tuple[float, float]:
+def assert_balanced(lines: list[dict]) -> tuple[float, float]:
 	total_debit = sum(float(line["debit"]) for line in lines)
 	total_credit = sum(float(line["credit"]) for line in lines)
 	if abs(total_debit - total_credit) > BALANCE_TOLERANCE:

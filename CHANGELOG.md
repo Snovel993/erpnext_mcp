@@ -3,6 +3,258 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.7.0 — 2026-07-27
+
+Family-office governance and asset accounting. Fifteen tools and six doctypes,
+so the things a farm holds for a generation — who owns it, what happened to their
+interest, which paper says so, and what the equipment is worth — live in the
+ledger rather than in somebody's filing cabinet.
+
+v0.6.0 made the axes a posting is filed under reachable. This release builds on
+top of them: members are an anonymous accounting dimension, cost centers are
+value-chain segments, and the register that maps one to a legal name is a
+doctype of its own.
+
+### The idea the whole release rests on
+
+**The ledger stays anonymous and the register carries the names.** A chart of
+accounts and a cost center tree are read by everyone who touches the books — a
+bookkeeper, a lender, an auditor, a model summarising the year. A family name in
+either one leaks into every export, and cannot be taken out of a statement that
+has already been sent. So a posting is tagged with a Member accounting dimension
+value (`Member-01`), and exactly one doctype says who that is.
+
+Anyone who needs the mapping can be given read access to one doctype. Nobody
+needs it to read the ledger. `list_cap_table` is the tool that de-anonymises the
+site, and it has its own switch for that reason.
+
+### Added — the member register
+
+**`Cap Table Entry`** (new doctype). One row per member per company: the
+anonymous id, the legal entity name, entity type, admission date, withdrawal
+date, ownership percentage, an optional member cost center for sites whose
+convention uses one, and notes. The docname is `"<member id> - <company abbr>"`,
+the same shape ERPNext gives an Account, so the register can be found by the
+identifier every posting already carries.
+
+**`create_cap_table_entry`** (mutating, default OFF). Refuses a second entry for
+the same member in the same company; refuses a percentage outside 0–100; and —
+the check worth knowing about — refuses a member id that is not already a value
+of the site's Member accounting dimension, naming `create_dimension_value` as
+the remedy. The cap table names a member the ledger can already refer to, so the
+dimension value comes first. A site with no Member dimension yet is allowed and
+told so.
+
+Cannot create a member already retired. Ownership that does not total 100% is a
+warning, not a refusal: mid-transition is a real state, and a tool that refused
+it would be refusing the truth.
+
+**`update_cap_table_entry`** (mutating, default OFF). Cannot retire a member —
+that is `close_cap_table_entry`, so an exit reaches the event trail rather than
+appearing only as a changed checkbox. Cannot change the `member_id`: it is the
+key every posting is tagged with, and changing it here would leave journal entry
+lines pointing at a member that no longer exists.
+
+**`list_cap_table`** (read-only, on by default). Retired members are **included**
+by default. The postings they are tagged on do not disappear when they leave, so
+neither should the row that explains them. The response totals active ownership
+and says whether it comes to 100%.
+
+**`close_cap_table_entry`** (mutating, default OFF). Sets the withdrawal date,
+marks the entry retired, and writes a Withdrawal event carrying the narrative.
+
+Deliberately **moves no money**. A member leaving usually involves a final
+distribution, and that is a separate `record_member_event` call with its own
+amount, accounts and narrative — bundling them would make the tool that closes a
+member also a tool that can pay one.
+
+### Added — the event trail
+
+**`Member Event`** (new doctype). Contribution, Distribution, Admission,
+Withdrawal, Transfer or Reallocation, with an effective date, an amount, the
+member (and counterparty, for a transfer), the Journal Entry that books it where
+there is one, a `superseded_by` link for corrections, and a **mandatory
+narrative**.
+
+The narrative is mandatory for the same reason `cancel_journal_entry` demands a
+reason. A Journal Entry survives on its own; the reason for it does not. "Why
+did Member-02 take 40,000 in March 2031" is the question that gets asked once
+the people who knew have gone.
+
+**`record_member_event`** (mutating, default OFF). Writes the event, and — for
+the five types that book money — a **DRAFT** Journal Entry:
+
+- Contribution: debit the cash side, credit member capital.
+- Distribution / Withdrawal: debit member distributions, credit the cash side.
+- Transfer / Reallocation: debit the capital of `member`, credit the capital of
+  `counterparty_member`. Money never leaves the company.
+
+**Every line carries the member dimension, including the cash side.** Tagging
+only the equity line makes a balance sheet filtered by member fail to balance,
+and the first person to notice that is usually an auditor.
+
+**Accounts are shortlisted, never guessed.** With no `capital_account` given,
+the company's leaf Equity accounts are matched by name; zero matches or more
+than one is refused with the candidates listed. Picking the first would post a
+member's capital to whichever account happened to sort first, and nobody would
+find out until they read an equity statement.
+
+Refuses without a Member dimension on `Journal Entry Account`, because an
+untagged equity entry is one nobody can attribute later.
+
+**`submit_member_event`** (mutating, default OFF). Posts the draft the event is
+waiting on — and **checks two switches**. Its own, and `submit_journal_entry`'s.
+That second switch is where an operator decided whether an AI client may move a
+balance at all; a second door into the same room with a different lock would
+make the decision meaningless.
+
+**`list_member_events`** (read-only, on by default). Filter by member, type and
+date range. Legal names are resolved from the register; the events themselves
+hold only the anonymous id.
+
+### Added — the governance archive
+
+**`Governance Document`** (new doctype). Operating agreements, trust documents,
+advisory agreements, board resolutions, prior statements and amendments, with
+effective and execution dates, parties, notes, and an amendment chain.
+
+**The chain is the point.** An operating agreement amended three times is four
+documents, and the question asked in 2050 is "which one was in force in 2031".
+Naming `supersedes` writes the link in both directions, so a reader can follow
+the chain forward to whatever is current. The controller refuses a cycle by
+walking the whole chain rather than checking one hop, and
+`attach_governance_document` refuses superseding a document that has already
+been superseded — an amendment goes on the end of the chain, not into the
+middle.
+
+**`attach_governance_document`** (mutating, default OFF). `file_content` is
+base64 of the document's bytes, stored as a **private** File on the record;
+`file_url` records where an externally hosted document lives instead. Refuses a
+second document with the same company, category and title, because two entries
+claiming to be the same operating agreement is worse than none.
+
+**`list_governance_documents`** and **`get_governance_document_content`**
+(read-only, on by default). Content goes through the same path
+`get_attachment_content` uses, so the same read-permission check on the parent
+document and the same size cap apply. A governing document is exactly the kind
+of file those checks exist for.
+
+### Added — assets, cost splits and note-tenor discipline
+
+ERPNext already has an Asset doctype, an Asset Category and a depreciation
+schedule. It does not have the two things an orchard needs.
+
+**A cost split.** A tractor is not a Harvest asset or a Perennial Care asset; it
+is 40% one and 60% the other, and its depreciation should land that way every
+period without anyone re-deciding it. ERPNext files an asset under one cost
+center.
+
+**Note-tenor discipline.** When an asset is financed, the month the note is paid
+off and the month the asset is fully depreciated should be the same month.
+Nothing in ERPNext enforces that, and the divergence is invisible until the last
+year of the loan, when interest is still being paid on something with no book
+value left.
+
+**`Asset Cost Profile`** (new doctype, with the child tables `Asset Cost Center
+Allocation` and `Asset Depreciation Posting`). One profile per Asset, holding
+the allocation, the schedule, the linked note and every period already written.
+
+*A sidecar rather than custom fields, deliberately.* All of this could have been
+ten custom fields and two child tables bolted onto ERPNext's Asset. The app
+manifest promises that installing this app changes the behaviour of nothing
+already on the site and that uninstalling it gives the site back; grafting
+fields onto ERPNext's own Asset would break both halves. An asset created here
+is an ordinary ERPNext Asset an operator can open, edit and delete without ever
+knowing this app exists.
+
+**`create_asset`** (mutating, default OFF). Writes the Asset (a draft), the
+profile, and a fixed-asset Item when the `item_code` does not exist yet.
+
+**`calculate_depreciation` is set to 0 on the asset, and that is the most
+important line in the feature.** ERPNext runs a daily scheduled job that posts
+depreciation for every asset with that flag set, using its own schedule and its
+own single cost center. If it also ran here, the asset would depreciate twice —
+silently, monthly, in the background. So this app owns the schedule outright,
+and there is a test that reads the flag off the stored Asset for the day
+somebody removes the line.
+
+The note tenor is enforced **before anything is written**: an asset whose life
+disagrees with its note is refused with both numbers, rather than created and
+then found to be wrong.
+
+Also refuses an allocation that does not total 100 (a 99% asset
+under-depreciates the business for the rest of its life), a group or disabled
+cost center, a frequency that does not divide the useful life exactly, a salvage
+value at or above the cost, and an existing Item that is not flagged as a fixed
+asset — flipping that flag on an item with stock movements is an inventory
+decision, not an asset one.
+
+**`update_asset_allocation`** (mutating, default OFF). Replaces the split. **Not
+retroactive**, and that is correct: depreciation already written keeps the split
+it was written with, because that is the history, and rewriting it would change
+periods already reported.
+
+**`link_asset_to_note`** (mutating, default OFF). Ties an asset to its note and,
+by default, refuses the link unless life and remaining tenor agree. The tenor
+comes from `note_tenor_months`, from `note_maturity_date`, or from the note
+document's own maturity or term field where its doctype has one — and the
+response says which. `enforce_tenor=false` links anyway and records the
+divergence.
+
+**`run_depreciation_cycle`** (mutating, default OFF). One DRAFT Journal Entry
+per asset per period: debit depreciation expense split across the cost centers,
+credit accumulated depreciation in one line, each debit optionally carrying a
+BBCH Stage dimension value.
+
+- **`dry_run` defaults to TRUE**, like `import_chart_of_accounts`. This is the
+  one tool here that writes to many documents at once, and a catch-up over a
+  year of missed periods is a page of journal entries somebody should read
+  first.
+- **Idempotent by record.** Every period written is stored on the profile with
+  the entry that carries it, so a second run cannot repeat one. Amounts are
+  computed from the profile each time rather than read back from saved rows, so
+  a catch-up produces exactly what month-by-month running would have.
+- **The split adds up.** The last debit absorbs the rounding, so 33.33 / 33.33 /
+  33.34 of 1000 is three debits totalling exactly 1000. A journal entry that does
+  not balance is not a rounding problem, it is a refused save.
+- **The last period lands on the salvage value to the cent**, for declining
+  balance as well as straight line. Written Down Value with a salvage value of 0
+  is refused rather than fudged: the rate `1 - (salvage/cost)^(1/n)` is
+  undefined, because a declining balance never reaches nought.
+- One misconfigured asset does not take the run down. Assets on the Manual
+  method, assets with nothing due, and assets whose depreciation accounts are
+  not configured are skipped and listed with the reason.
+
+**`depreciation_note_alignment_check`** (read-only, on by default). For every
+financed asset: months elapsed, months of depreciation left, months of note
+left, the delta, and a sentence saying which way it reads. Reports on every
+financed asset rather than only the broken ones, because "nothing is wrong" is
+an answer somebody has to be able to see.
+
+### Changed
+
+- `mutate.py` grew two public functions, `insert_draft_journal_entry` and
+  `validated_journal_lines` (previously private). Every Journal Entry this app
+  writes — from `create_journal_entry`, from a member event, from a depreciation
+  run — now goes through the same insert and the same never-submitted
+  assertion. A second implementation elsewhere would have been a second chance
+  to ship one that posts.
+- `before_uninstall` now lists every doctype whose contents go with the app, with
+  a row count and an export command for each. The governance three are there for
+  a reason the audit log is not: they are the **only** copy. An MCP Action Log
+  row records something that also happened somewhere else; a Cap Table Entry is
+  the only mapping from a member id to a legal name.
+
+### Notes
+
+- Fifteen new kill switches, ten of them default OFF. The five read tools ship
+  on, `list_cap_table` included — an operator who wants the register unreadable
+  through MCP should untick that one deliberately.
+- 118 new standalone tests (894 in total), plus 13 in-bench tests covering what
+  only a real site can show: that the six doctypes migrate, that the controllers'
+  refusals fire from the Desk path, that a real File round-trips through Frappe's
+  storage, and that ERPNext accepts both the Asset and the depreciation entry.
+
 ## 0.6.0 — 2026-07-27
 
 Cost centers and accounting dimensions. Six tools, so the *other* axes a posting

@@ -1,0 +1,164 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-27 09:00:00.000000",
+ "description": "The authoritative member register: the one place an anonymous member id (Member-01) is mapped to a legal entity name, an admission date and an ownership percentage. Names live here and nowhere else — not in the chart of accounts, not in cost centers.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "member_id",
+  "company",
+  "legal_entity_name",
+  "entity_type",
+  "identity_col",
+  "admission_date",
+  "withdrawal_date",
+  "ownership_percentage",
+  "retired",
+  "linkage_section",
+  "member_cost_center",
+  "member_dimension_doctype",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The anonymous identifier this member is known by everywhere else on the site — in the Member accounting dimension, on journal entry lines, in reports. Unique per company.",
+   "fieldname": "member_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Member ID",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The legal name of the member: an individual, a trust, an LLC. This is the only field on the site that carries it.",
+   "fieldname": "legal_entity_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Legal Entity Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "entity_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Entity Type",
+   "options": "Individual\nTrust\nLLC\nCorporation\nPartnership\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When this member was admitted.",
+   "fieldname": "admission_date",
+   "fieldtype": "Date",
+   "label": "Admission Date",
+   "reqd": 1
+  },
+  {
+   "description": "When this member exited. Set by close_cap_table_entry, together with Retired.",
+   "fieldname": "withdrawal_date",
+   "fieldtype": "Date",
+   "label": "Withdrawal Date"
+  },
+  {
+   "description": "Ownership percentage as of the last change. Historical percentages live in the Member Event trail, not here.",
+   "fieldname": "ownership_percentage",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Ownership Percentage"
+  },
+  {
+   "default": "0",
+   "description": "A retired member stays in the register for historical continuity — the postings they are tagged on do not disappear when they leave.",
+   "fieldname": "retired",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Retired"
+  },
+  {
+   "fieldname": "linkage_section",
+   "fieldtype": "Section Break",
+   "label": "Accounting Linkage"
+  },
+  {
+   "description": "Optional. Only for sites whose convention gives each member a cost center as well as a dimension value. Left empty, member postings are tagged by the Member accounting dimension alone.",
+   "fieldname": "member_cost_center",
+   "fieldtype": "Link",
+   "label": "Member Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "description": "The DocType whose records are the Member accounting dimension's values, recorded when the member id was matched against one at creation. Informational.",
+   "fieldname": "member_dimension_doctype",
+   "fieldtype": "Data",
+   "label": "Member Dimension DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Why this member exists, what documents evidence the membership, anything a successor trustee would need. Supporting paperwork goes in the attachments.",
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-27 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Cap Table Entry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "member_id,legal_entity_name,company",
+ "sort_field": "member_id",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

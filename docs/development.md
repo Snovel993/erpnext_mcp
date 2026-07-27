@@ -111,8 +111,10 @@ that bypasses the base class does.
 tests_standalone/
   harness.py              the frappe double + MCPTestCase
   fixtures.py             an invented two-company ERPNext site; SeededTestCase,
-                          V2TestCase (adds workflow/report/file/HR data) and
-                          HRTestCase (adds the hrms app)
+                          V2TestCase (adds workflow/report/file/HR data),
+                          V7TestCase (adds equity accounts, the Member
+                          dimension and asset masters) and HRTestCase
+                          (adds the hrms app)
   test_transport.py       the three gates, HTTP shape, SSE, user context
   test_protocol.py        JSON-RPC, handshake, version negotiation, catalogue
   test_read_tools.py      the ten accounting read tools
@@ -128,6 +130,8 @@ tests_standalone/
   test_audit.py           what gets logged, rollback survival, immutability
   test_settings.py        shipped defaults, form validation, token generation,
                           and that the settings JS keeps no copy of the catalogue
+  test_governance.py      the cap table, the event trail and the archive
+  test_assets.py          cost splits, the schedule, and the tenor check
 
 erpnext_mcp/
   tests/test_integration.py                       in-bench, v0.1.0 surface
@@ -136,6 +140,14 @@ erpnext_mcp/
                                                   synthetic DocType
   tests/test_packets.py                           in-bench, packet shape and
                                                   integrity against real data
+  tests/test_accounts.py                          in-bench, the chart tools
+  tests/test_dimensions.py                        in-bench, cost centers and
+                                                  accounting dimensions
+  tests/test_governance.py                        in-bench, the six v0.7.0
+                                                  doctypes, a real File
+                                                  round-trip, and whether
+                                                  ERPNext accepts the Asset and
+                                                  the depreciation entry
   erpnext_mcp/doctype/erpnext_mcp_settings/test_erpnext_mcp_settings.py
   erpnext_mcp/doctype/mcp_action_log/test_mcp_action_log.py
 ```
@@ -219,6 +231,8 @@ erpnext_mcp/                     repo root
     tools/mutate.py              the five accounting write tools
     tools/accounts.py            chart of accounts: create/update/move/disable/import
     tools/dimensions.py          cost centers, accounting dimensions, company defaults
+    tools/governance.py          cap table, member events, governance archive
+    tools/assets.py              asset cost splits, note tenor, depreciation runs
     tools/workflow.py            workflow states, worklist, advance_workflow
     tools/reports.py             report discovery and execution
     tools/files.py               attachments (checks Frappe permissions)
@@ -232,7 +246,10 @@ erpnext_mcp/                     repo root
     packets/fiscal_year_audit.py one company, one fiscal year
     charts/base.py               ChartTemplate, tree validation, account-type rules
     charts/us_llc_farm.py        the one shipped chart template — pure data
-    erpnext_mcp/doctype/         ERPNext MCP Settings, MCP Action Log
+    erpnext_mcp/doctype/         ERPNext MCP Settings, MCP Action Log,
+                                 Cap Table Entry, Member Event,
+                                 Governance Document, Asset Cost Profile
+                                 (+ its two child tables)
 ```
 
 **Read `registry.py` first.** It is the only file you edit to add a tool, and it is

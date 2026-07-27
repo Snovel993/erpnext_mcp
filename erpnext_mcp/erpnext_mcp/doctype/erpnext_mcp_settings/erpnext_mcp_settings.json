@@ -90,7 +90,28 @@
   "allow_generate_compliance_packet",
   "reconciliation_packet_col",
   "allow_reconciliation_packet",
-  "allow_fiscal_year_audit_packet"
+  "allow_fiscal_year_audit_packet",
+  "governance_tools_section",
+  "allow_list_cap_table",
+  "allow_create_cap_table_entry",
+  "allow_update_cap_table_entry",
+  "allow_close_cap_table_entry",
+  "governance_tools_col",
+  "allow_list_member_events",
+  "allow_record_member_event",
+  "allow_submit_member_event",
+  "archive_tools_section",
+  "allow_list_governance_documents",
+  "allow_get_governance_document_content",
+  "archive_tools_col",
+  "allow_attach_governance_document",
+  "asset_tools_section",
+  "allow_depreciation_note_alignment_check",
+  "allow_create_asset",
+  "allow_update_asset_allocation",
+  "asset_tools_col",
+  "allow_link_asset_to_note",
+  "allow_run_depreciation_cycle"
  ],
  "fields": [
   {
@@ -642,6 +663,144 @@
    "fieldname": "allow_set_company_defaults",
    "fieldtype": "Check",
    "label": "Set Company Defaults"
+  },
+  {
+   "description": "The member register and its event trail. The cap table is the only place on this site that maps an anonymous member id to a legal name — gate it accordingly.",
+   "fieldname": "governance_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Cap Table and Member Events"
+  },
+  {
+   "default": "1",
+   "description": "READ. One company's member register: anonymous id, legal entity name, entity type, admission and withdrawal dates, ownership percentage. This is the tool that de-anonymises the ledger, so turning it off is a real choice.",
+   "fieldname": "allow_list_cap_table",
+   "fieldtype": "Check",
+   "label": "List Cap Table"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register one member: the anonymous id the ledger is tagged with, and the legal entity behind it. Refuses a duplicate member id, and an id that is not already a value of the Member accounting dimension.",
+   "fieldname": "allow_create_cap_table_entry",
+   "fieldtype": "Check",
+   "label": "Create Cap Table Entry"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a member's legal name, entity type, admission date, percentage, cost center or notes. Cannot retire a member and cannot change the member id.",
+   "fieldname": "allow_update_cap_table_entry",
+   "fieldtype": "Check",
+   "label": "Update Cap Table Entry"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Retire a member: withdrawal date, retired flag, and a Withdrawal event in the trail. Moves no money — a final distribution is a separate Record Member Event call.",
+   "fieldname": "allow_close_cap_table_entry",
+   "fieldtype": "Check",
+   "label": "Close Cap Table Entry"
+  },
+  {
+   "fieldname": "governance_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "1",
+   "description": "READ. Contributions, distributions, admissions, withdrawals, transfers and reallocations, with the narrative for each and the journal entry that books it.",
+   "fieldname": "allow_list_member_events",
+   "fieldtype": "Check",
+   "label": "List Member Events"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record one member event and, where it books money, the DRAFT journal entry for it — tagged with the member dimension on every line. Enabling this grants creating that draft; it does not grant posting it.",
+   "fieldname": "allow_record_member_event",
+   "fieldtype": "Check",
+   "label": "Record Member Event"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Post the draft journal entry a member event is waiting on. Also requires Submit Journal Entry to be on — that switch is where moving a balance is decided, whatever route reaches it.",
+   "fieldname": "allow_submit_member_event",
+   "fieldtype": "Check",
+   "label": "Submit Member Event"
+  },
+  {
+   "description": "The durable archive: operating agreements, trust documents, resolutions, prior statements, and the amendment chain between them.",
+   "fieldname": "archive_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Governance Documents"
+  },
+  {
+   "default": "1",
+   "description": "READ. What is in the archive, with the amendment chain and which entries are still operative.",
+   "fieldname": "allow_list_governance_documents",
+   "fieldtype": "Check",
+   "label": "List Governance Documents"
+  },
+  {
+   "default": "1",
+   "description": "READ. One archived document's metadata and the bytes of its attachment, base64. Enforces read permission on the document, like the other attachment tools.",
+   "fieldname": "allow_get_governance_document_content",
+   "fieldtype": "Check",
+   "label": "Read Governance Document"
+  },
+  {
+   "fieldname": "archive_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. File a governing document, attach its content as a private file, and chain it onto whatever it supersedes. Refuses a duplicate title and a circular chain.",
+   "fieldname": "allow_attach_governance_document",
+   "fieldtype": "Check",
+   "label": "Attach Governance Document"
+  },
+  {
+   "description": "Assets that serve more than one part of the business, and assets that are financed. Depreciation written here is split by usage and is always a draft.",
+   "fieldname": "asset_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Assets and Depreciation"
+  },
+  {
+   "default": "1",
+   "description": "READ. For every financed asset, whether its remaining depreciation and its note's remaining term still agree, and by how many months they do not.",
+   "fieldname": "allow_depreciation_note_alignment_check",
+   "fieldtype": "Check",
+   "label": "Depreciation / Note Alignment Check"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Create an ERPNext Asset plus the cost profile holding its usage split and schedule. Switches ERPNext's own depreciation OFF on that asset, because this app then owns the schedule and both running would depreciate it twice.",
+   "fieldname": "allow_create_asset",
+   "fieldtype": "Check",
+   "label": "Create Asset"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Replace an asset's cost center split. Not retroactive: periods already written keep the split they were written with.",
+   "fieldname": "allow_update_asset_allocation",
+   "fieldtype": "Check",
+   "label": "Update Asset Allocation"
+  },
+  {
+   "fieldname": "asset_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Tie an asset to the note that financed it, refusing by default unless its useful life equals the note's tenor so paid-off and fully-depreciated fall in the same month.",
+   "fieldname": "allow_link_asset_to_note",
+   "fieldtype": "Check",
+   "label": "Link Asset to Note"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Write the depreciation due up to a date as draft journal entries, split across each asset's cost centers. Dry run by default; every period written is recorded so it cannot be written twice.",
+   "fieldname": "allow_run_depreciation_cycle",
+   "fieldtype": "Check",
+   "label": "Run Depreciation Cycle"
   }
  ],
  "index_web_pages_for_search": 0,

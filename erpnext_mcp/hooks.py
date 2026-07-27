@@ -1,11 +1,16 @@
 # SPDX-License-Identifier: MIT
 """Frappe app manifest.
 
-Deliberately almost empty. This app adds two doctypes and one whitelisted
+Deliberately almost empty. This app adds its own doctypes and one whitelisted
 method; it installs no `doc_events`, no scheduler jobs, no overrides and no
-fixtures, so installing it cannot change the behaviour of anything already on
-the site. An operator who removes it gets their site back exactly as it was,
-minus the audit history.
+fixtures, and it adds no field to any doctype it did not create. Installing it
+cannot change the behaviour of anything already on the site, and an operator who
+removes it gets their site back exactly as it was, minus this app's own records.
+
+That last promise is why v0.7.0's asset tooling keeps its cost split and its
+depreciation history in an `Asset Cost Profile` beside ERPNext's Asset rather
+than in custom fields grafted onto it: a doctype of ours goes with the app, a
+field on theirs does not.
 """
 
 app_name = "erpnext_mcp"

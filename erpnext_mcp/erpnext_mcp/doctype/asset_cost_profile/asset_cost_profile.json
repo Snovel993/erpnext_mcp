@@ -1,0 +1,247 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:asset",
+ "creation": "2026-07-27 09:00:00.000000",
+ "description": "Everything this app knows about one ERPNext Asset that ERPNext's own Asset doctype does not hold: which cost centers use it and in what proportion, which note financed it, and which periods have already been depreciated. One profile per Asset; the Asset itself is left exactly as ERPNext made it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "asset",
+  "company",
+  "profile_col",
+  "gross_purchase_amount",
+  "salvage_value",
+  "schedule_section",
+  "depreciation_method",
+  "useful_life_months",
+  "depreciation_frequency_months",
+  "schedule_col",
+  "depreciation_start_date",
+  "depreciation_expense_account",
+  "accumulated_depreciation_account",
+  "note_section",
+  "linked_note_doctype",
+  "linked_note",
+  "note_col",
+  "note_tenor_months",
+  "note_maturity_date",
+  "tenor_enforced",
+  "allocation_section",
+  "cost_center_allocation",
+  "postings_section",
+  "depreciation_postings",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Asset",
+   "options": "Asset",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "profile_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What the asset cost, copied from the Asset when the profile was created. The depreciable base is this minus the salvage value.",
+   "fieldname": "gross_purchase_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Gross Purchase Amount"
+  },
+  {
+   "description": "What the asset is expected to be worth at the end of its useful life. Depreciation never takes the book value below it.",
+   "fieldname": "salvage_value",
+   "fieldtype": "Currency",
+   "label": "Salvage Value"
+  },
+  {
+   "fieldname": "schedule_section",
+   "fieldtype": "Section Break",
+   "label": "Depreciation Schedule"
+  },
+  {
+   "description": "Manual means this app never computes a period for this asset; the entries are written by hand.",
+   "fieldname": "depreciation_method",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Depreciation Method",
+   "options": "Straight Line\nWritten Down Value\nDouble Declining Balance\nManual",
+   "reqd": 1
+  },
+  {
+   "description": "Total life in months. Where the asset is financed, this is held equal to the note's tenor so paid-off and fully-depreciated fall on the same month.",
+   "fieldname": "useful_life_months",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Useful Life (Months)",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "How many months one depreciation period covers. 1 for monthly, 3 quarterly, 12 annually. Must divide the useful life exactly.",
+   "fieldname": "depreciation_frequency_months",
+   "fieldtype": "Int",
+   "label": "Frequency (Months)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "schedule_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The first day of the first depreciation period.",
+   "fieldname": "depreciation_start_date",
+   "fieldtype": "Date",
+   "label": "Depreciation Start Date",
+   "reqd": 1
+  },
+  {
+   "description": "Debited by a depreciation run, split across the allocation rows. Taken from the Asset Category when it is not set here.",
+   "fieldname": "depreciation_expense_account",
+   "fieldtype": "Link",
+   "label": "Depreciation Expense Account",
+   "options": "Account"
+  },
+  {
+   "description": "Credited by a depreciation run, in one line.",
+   "fieldname": "accumulated_depreciation_account",
+   "fieldtype": "Link",
+   "label": "Accumulated Depreciation Account",
+   "options": "Account"
+  },
+  {
+   "fieldname": "note_section",
+   "fieldtype": "Section Break",
+   "label": "Financing Note"
+  },
+  {
+   "description": "DocType of the note that financed this asset, e.g. 'Journal Entry' or a site's own Notes Payable doctype.",
+   "fieldname": "linked_note_doctype",
+   "fieldtype": "Data",
+   "label": "Note DocType"
+  },
+  {
+   "fieldname": "linked_note",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Note"
+  },
+  {
+   "fieldname": "note_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The note's full tenor in months, counted from the depreciation start date.",
+   "fieldname": "note_tenor_months",
+   "fieldtype": "Int",
+   "label": "Note Tenor (Months)"
+  },
+  {
+   "fieldname": "note_maturity_date",
+   "fieldtype": "Date",
+   "label": "Note Maturity Date"
+  },
+  {
+   "default": "0",
+   "description": "When set, the useful life was checked against the note tenor and matched. Clearing it does not un-check anything already written.",
+   "fieldname": "tenor_enforced",
+   "fieldtype": "Check",
+   "label": "Tenor Enforced"
+  },
+  {
+   "fieldname": "allocation_section",
+   "fieldtype": "Section Break",
+   "label": "Cost Center Allocation"
+  },
+  {
+   "description": "How this asset's cost is shared out. Percentages total 100; every depreciation line follows them.",
+   "fieldname": "cost_center_allocation",
+   "fieldtype": "Table",
+   "label": "Cost Center Allocation",
+   "options": "Asset Cost Center Allocation",
+   "reqd": 1
+  },
+  {
+   "fieldname": "postings_section",
+   "fieldtype": "Section Break",
+   "label": "Depreciation Written"
+  },
+  {
+   "description": "Every period already written, with the Journal Entry that carries it. A period listed here is never written a second time.",
+   "fieldname": "depreciation_postings",
+   "fieldtype": "Table",
+   "label": "Depreciation Postings",
+   "options": "Asset Depreciation Posting",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-27 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Asset Cost Profile",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "asset,company",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

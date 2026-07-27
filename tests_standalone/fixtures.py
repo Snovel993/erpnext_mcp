@@ -16,7 +16,7 @@ import json
 import sys
 import types
 
-from .harness import STORE, MCPTestCase, set_roles
+from .harness import STORE, MCPTestCase, add_field, register_doctype, set_roles
 
 MAIN = "Example Trading Co"
 OTHER = "Second Example Ltd"
@@ -1062,6 +1062,215 @@ class V2TestCase(SeededTestCase):
 	def setUp(self):
 		super().setUp()
 		seed_v2()
+
+
+# ── v0.7.0 fixtures: equity, members, and something to depreciate ───────────
+#: The Member accounting dimension as this app's own docs describe building it:
+#: a generated master DocType named by its own value field, so `Member-01` is
+#: both the record and the value.
+MEMBER_MASTER = "Member"
+MEMBER_ONE = "Member-01"
+MEMBER_TWO = "Member-02"
+MEMBER_THREE = "Member-03"
+
+ASSET_CATEGORY = "Farm Equipment"
+ITEM_GROUP = "All Item Groups"
+
+EQUITY_ROOT = f"Equity - {MAIN_ABBR}"
+MEMBER_CAPITAL = f"3100 - Member Capital - {MAIN_ABBR}"
+MEMBER_DISTRIBUTIONS = f"3200 - Member Distributions - {MAIN_ABBR}"
+ACCUMULATED_DEPRECIATION = f"1810 - Accumulated Depreciation - {MAIN_ABBR}"
+DEPRECIATION_EXPENSE = f"5200 - Depreciation - {MAIN_ABBR}"
+BANK = f"1110 - Bank Checking - {MAIN_ABBR}"
+
+
+#: A third enabled leaf cost center, so a split can be three ways. Two is enough
+#: to test a split and not enough to test the rounding: 40/60 divides cleanly,
+#: 33.33/33.33/33.34 does not, and the second is where a depreciation entry stops
+#: balancing.
+HARVEST = f"120 - Harvest - {MAIN_ABBR}"
+
+
+def seed_v7() -> None:
+	"""Everything the governance and asset tools need. Additive to `seed_site`."""
+	_equity_chart()
+	_member_dimension()
+	_third_cost_center()
+	_asset_masters()
+
+
+def _third_cost_center() -> None:
+	STORE.seed(
+		"Cost Center",
+		[
+			{
+				"name": HARVEST,
+				"cost_center_name": "Harvest",
+				"cost_center_number": "120",
+				"parent_cost_center": cost_center("Operations"),
+				"is_group": 0,
+				"disabled": 0,
+				"company": MAIN,
+				"lft": 200,
+				"rgt": 201,
+			}
+		],
+	)
+
+
+def _equity_chart() -> None:
+	"""An Equity root with a capital and a distributions account, plus the two
+	accounts depreciation moves between.
+
+	The fixture's base chart has no Equity root at all — a textbook chart that
+	predates anybody caring about members — so this adds one rather than editing
+	the base, which keeps every earlier test looking at the site it was written
+	against.
+	"""
+	STORE.seed(
+		"Account",
+		[
+			_account(EQUITY_ROOT, "Equity", "", "Equity", "", is_group=1, parent=""),
+			_account(MEMBER_CAPITAL, "Member Capital", "3100", "Equity", "", parent=EQUITY_ROOT),
+			_account(
+				MEMBER_DISTRIBUTIONS, "Member Distributions", "3200", "Equity", "", parent=EQUITY_ROOT
+			),
+			_account(
+				ACCUMULATED_DEPRECIATION,
+				"Accumulated Depreciation",
+				"1810",
+				"Asset",
+				"Accumulated Depreciation",
+				parent=f"Application of Funds (Assets) - {MAIN_ABBR}",
+			),
+			_account(
+				DEPRECIATION_EXPENSE,
+				"Depreciation",
+				"5200",
+				"Expense",
+				"Depreciation",
+				parent=f"Expenses - {MAIN_ABBR}",
+			),
+		],
+	)
+	# The cash side of a member contribution. Set here rather than in the base
+	# company row so the "this company has no default bank account" refusal stays
+	# testable by clearing it.
+	STORE.tables["Company"][MAIN]["default_bank_account"] = BANK
+
+
+def _account(name, account_name, number, root_type, account_type, is_group=0, parent=""):
+	return {
+		"name": name,
+		"account_name": account_name,
+		"account_number": number,
+		"parent_account": parent,
+		"is_group": is_group,
+		"root_type": root_type,
+		"account_type": account_type,
+		"account_currency": "USD",
+		"disabled": 0,
+		"company": MAIN,
+	}
+
+
+def _member_dimension() -> None:
+	"""The Member dimension, wired the way `create_accounting_dimension` wires it.
+
+	Built by hand rather than by calling the tool: a governance test that failed
+	because the dimension tool's switch was off would be pointing at the wrong
+	thing entirely.
+	"""
+	register_doctype(
+		MEMBER_MASTER,
+		[
+			{"fieldname": "dimension_value", "fieldtype": "Data", "label": "Member", "reqd": 1},
+			{"fieldname": "description", "fieldtype": "Small Text", "label": "Description"},
+			{"fieldname": "disabled", "fieldtype": "Check", "label": "Disabled", "default": "0"},
+		],
+		autoname="field:dimension_value",
+	)
+	STORE.seed(
+		MEMBER_MASTER,
+		[
+			{"name": MEMBER_ONE, "dimension_value": MEMBER_ONE},
+			{"name": MEMBER_TWO, "dimension_value": MEMBER_TWO},
+			{"name": MEMBER_THREE, "dimension_value": MEMBER_THREE},
+		],
+	)
+	STORE.seed(
+		"Accounting Dimension",
+		[
+			{
+				"name": MEMBER_MASTER,
+				"label": MEMBER_MASTER,
+				"fieldname": "member",
+				"document_type": MEMBER_MASTER,
+				"disabled": 0,
+			}
+		],
+	)
+	add_field("Journal Entry Account", "member", fieldtype="Link", options=MEMBER_MASTER, label="Member")
+
+
+def install_bbch_dimension() -> None:
+	"""The second dimension, for the asset tests that tag a depreciation line."""
+	register_doctype(
+		"BBCH Stage",
+		[{"fieldname": "dimension_value", "fieldtype": "Data", "label": "BBCH Stage", "reqd": 1}],
+		autoname="field:dimension_value",
+	)
+	STORE.seed("BBCH Stage", [{"name": "BBCH-8", "dimension_value": "BBCH-8"}])
+	STORE.seed(
+		"Accounting Dimension",
+		[
+			{
+				"name": "BBCH Stage",
+				"label": "BBCH Stage",
+				"fieldname": "bbch_stage",
+				"document_type": "BBCH Stage",
+				"disabled": 0,
+			}
+		],
+	)
+	add_field(
+		"Journal Entry Account", "bbch_stage", fieldtype="Link", options="BBCH Stage", label="BBCH Stage"
+	)
+
+
+def _asset_masters() -> None:
+	"""An Asset Category carrying its accounts, and the Item scaffolding ERPNext
+	insists an Asset hangs off."""
+	STORE.seed("Item Group", [{"name": ITEM_GROUP, "is_group": 1}])
+	STORE.seed("UOM", [{"name": "Nos", "enabled": 1}])
+	STORE.seed(
+		"Asset Category",
+		[
+			{
+				"name": ASSET_CATEGORY,
+				"asset_category_name": ASSET_CATEGORY,
+				"accounts": [
+					{
+						"company": MAIN,
+						"fixed_asset_account": f"1000 - Current Assets - {MAIN_ABBR}",
+						"accumulated_depreciation_account": ACCUMULATED_DEPRECIATION,
+						"depreciation_expense_account": DEPRECIATION_EXPENSE,
+					}
+				],
+			},
+			# A category with no accounts at all: what a half-configured site looks
+			# like, and what run_depreciation_cycle has to skip rather than crash on.
+			{"name": "Unconfigured", "asset_category_name": "Unconfigured", "accounts": []},
+		],
+	)
+
+
+class V7TestCase(SeededTestCase):
+	"""The fixture site plus equity accounts, the Member dimension and asset masters."""
+
+	def setUp(self):
+		super().setUp()
+		seed_v7()
 
 
 class HRTestCase(V2TestCase):

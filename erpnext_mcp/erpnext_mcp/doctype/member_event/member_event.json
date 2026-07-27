@@ -1,0 +1,154 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-07-27 09:00:00.000000",
+ "description": "One thing that happened to a member's interest: a contribution, a distribution, an admission, a withdrawal, a transfer or a reallocation. Every event carries a narrative, so a successor reading it in twenty years knows why it happened and not only that it did.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "event_type",
+  "effective_date",
+  "amount",
+  "event_col",
+  "member",
+  "counterparty_member",
+  "company",
+  "posting_section",
+  "offset_je",
+  "superseded_by",
+  "narrative_section",
+  "narrative"
+ ],
+ "fields": [
+  {
+   "fieldname": "event_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Event Type",
+   "options": "Contribution\nDistribution\nAdmission\nWithdrawal\nTransfer\nReallocation",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The date the event took effect, which is not necessarily the date it was recorded.",
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Zero is legitimate: an admission or a reallocation may move no money at all.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount"
+  },
+  {
+   "fieldname": "event_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The member this event is about. For a transfer, the member the interest moves FROM.",
+   "fieldname": "member",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Member",
+   "options": "Cap Table Entry",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "For a transfer or a reallocation: the member the interest moves TO.",
+   "fieldname": "counterparty_member",
+   "fieldtype": "Link",
+   "label": "Counterparty Member",
+   "options": "Cap Table Entry"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "posting_section",
+   "fieldtype": "Section Break",
+   "label": "Posting"
+  },
+  {
+   "description": "The Journal Entry that books this event, where there is one. Events that move no money — an admission, say — have none, and that is not a gap.",
+   "fieldname": "offset_je",
+   "fieldtype": "Link",
+   "label": "Offset Journal Entry",
+   "options": "Journal Entry"
+  },
+  {
+   "description": "Set when a later event corrects this one. Nothing is ever deleted from this trail; a mistake is superseded, not erased.",
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "Member Event"
+  },
+  {
+   "fieldname": "narrative_section",
+   "fieldtype": "Section Break",
+   "label": "Narrative"
+  },
+  {
+   "description": "Why this happened, in plain language, including which document authorises it. Mandatory: the numbers survive on their own, the reasons do not.",
+   "fieldname": "narrative",
+   "fieldtype": "Text Editor",
+   "label": "Narrative",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-27 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Member Event",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "event_type,member,effective_date",
+ "sort_field": "effective_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "event_type",
+ "track_changes": 1
+}

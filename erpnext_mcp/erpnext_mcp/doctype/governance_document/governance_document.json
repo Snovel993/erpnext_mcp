@@ -1,0 +1,161 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-07-27 09:00:00.000000",
+ "description": "A durable archive entry for a governing document: an operating agreement, a trust instrument, an advisory agreement, a board resolution, a prior statement. Amendments chain through Supersedes, so the current version of anything can be found by following the chain forward.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "category",
+  "company",
+  "document_col",
+  "effective_date",
+  "execution_date",
+  "chain_section",
+  "supersedes",
+  "superseded_by",
+  "file_section",
+  "attached_file",
+  "parties_section",
+  "parties",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "How this document is referred to, including the date it belongs to: 'OML Operating Agreement 2020-06-15'.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Operating Agreement\nTrust Document\nAdvisory Agreement\nBoard Resolution\nPrior Statement\nAmendment\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "document_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When the document takes effect, which is not always when it was signed.",
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective Date"
+  },
+  {
+   "description": "When it was signed.",
+   "fieldname": "execution_date",
+   "fieldtype": "Date",
+   "label": "Execution Date"
+  },
+  {
+   "fieldname": "chain_section",
+   "fieldtype": "Section Break",
+   "label": "Amendment Chain"
+  },
+  {
+   "description": "The document this one replaces or amends.",
+   "fieldname": "supersedes",
+   "fieldtype": "Link",
+   "label": "Supersedes",
+   "options": "Governance Document"
+  },
+  {
+   "description": "Filled in automatically when a later document names this one in Supersedes. An entry with this set is history, not the operative document.",
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "Governance Document",
+   "read_only": 1
+  },
+  {
+   "fieldname": "file_section",
+   "fieldtype": "Section Break",
+   "label": "File"
+  },
+  {
+   "description": "The document itself. Uploaded content is stored as a private File attached to this record; an externally hosted document can be recorded here as a URL instead.",
+   "fieldname": "attached_file",
+   "fieldtype": "Attach",
+   "label": "Attached File"
+  },
+  {
+   "fieldname": "parties_section",
+   "fieldtype": "Section Break",
+   "label": "Parties and Notes"
+  },
+  {
+   "description": "Who signed, in plain language. May name Cap Table Entries; this is the archive, so legal names belong here.",
+   "fieldname": "parties",
+   "fieldtype": "Text Editor",
+   "label": "Parties"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-27 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Governance Document",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "title,category,company",
+ "sort_field": "effective_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

@@ -41,9 +41,11 @@ from .errors import ToolError
 from .result import ToolResult
 from .tools import (
 	accounts,
+	assets,
 	collab,
 	dimensions,
 	files,
+	governance,
 	hr,
 	meta,
 	mutate,
@@ -1297,6 +1299,636 @@ TOOLS = {
 		},
 		required=("packet_type",),
 		title="Generate a compliance packet",
+	),
+	# ── the member register, its event trail and the governance archive ─────
+	"list_cap_table": _tool(
+		governance.list_cap_table,
+		"One company's member register: for every member, the anonymous id the ledger "
+		"is tagged with (Member-01), the legal entity behind it, entity type, "
+		"admission and withdrawal dates and ownership percentage. Retired members are "
+		"INCLUDED by default — the postings they are tagged on do not disappear when "
+		"they leave, so neither should the row that explains them.\n\n"
+		"This is the only place on the site that maps an anonymous member id to a "
+		"legal name; the chart of accounts, the cost center tree and every journal "
+		"entry stay anonymous. The response also totals active ownership and says "
+		"whether it comes to 100%. Read-only.",
+		{
+			"company": _COMPANY,
+			"include_retired": _field(
+				_BOOLEAN,
+				"false to list only current members. Default TRUE, because a cap table "
+				"that hides its history cannot explain an old posting.",
+			),
+		},
+		required=("company",),
+		title="List the cap table",
+		available=_needs_doctype("Cap Table Entry"),
+		requires="the Cap Table Entry DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"list_member_events": _tool(
+		governance.list_member_events,
+		"The equity trail: contributions, distributions, admissions, withdrawals, "
+		"transfers and reallocations, newest first, each with its amount, the "
+		"Journal Entry that books it (where there is one) and the narrative saying "
+		"why it happened. Filter by member, event type and date range.\n\n"
+		"Legal names are resolved from the Cap Table Entry each event links to; the "
+		"events themselves hold only the anonymous member id. An event with "
+		"`superseded_by` set has been corrected by a later one and must not be "
+		"totalled twice. Read-only.",
+		{
+			"company": _COMPANY,
+			"member": _field(
+				_STRING,
+				"One member: a Cap Table Entry docname or a member_id such as 'Member-01'. Omit for all.",
+			),
+			"event_type": _field(
+				_STRING,
+				"Contribution, Distribution, Admission, Withdrawal, Transfer or Reallocation.",
+			),
+			"from_date": _field(_STRING, "Earliest effective_date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest effective_date, YYYY-MM-DD."),
+			"include_superseded": _field(
+				_BOOLEAN, "false to hide events a later correction has superseded. Default true."
+			),
+			"limit": _LIMIT,
+		},
+		required=("company",),
+		title="List member events",
+		available=_needs_doctype("Member Event"),
+		requires="the Member Event DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"list_governance_documents": _tool(
+		governance.list_governance_documents,
+		"What is in the governance archive for one company: operating agreements, "
+		"trust documents, advisory agreements, board resolutions, prior statements "
+		"and amendments, with effective and execution dates, the amendment chain "
+		"(`supersedes` / `superseded_by`) and how many files are attached to each.\n\n"
+		"`operative` is true for a document nothing has superseded — those are the "
+		"ones in force. Read the content of one with "
+		"get_governance_document_content. Read-only.",
+		{
+			"company": _COMPANY,
+			"category": _field(
+				_STRING,
+				"Operating Agreement, Trust Document, Advisory Agreement, Board "
+				"Resolution, Prior Statement, Amendment or Other. Omit for all.",
+			),
+			"include_superseded": _field(
+				_BOOLEAN,
+				"false to list only the documents currently in force. Default true — an "
+				"archive that drops what it replaced cannot answer 'what applied in 2031'.",
+			),
+			"limit": _LIMIT,
+		},
+		required=("company",),
+		title="List governance documents",
+		available=_needs_doctype("Governance Document"),
+		requires="the Governance Document DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"get_governance_document_content": _tool(
+		governance.get_governance_document_content,
+		"One archived governing document: its metadata, its place in the amendment "
+		"chain, and the bytes of its attachment, base64-encoded. The content goes "
+		"through the same path get_attachment_content uses, so the same read "
+		"permission on the parent document and the same size cap apply — a "
+		"governing document is exactly the kind of file those checks exist for.\n\n"
+		"An entry with several attachments returns the first unless `file` names "
+		"one, and says so. An entry with none returns its metadata and reports that. "
+		"Read-only.",
+		{
+			"name": _field(_STRING, "Governance Document docname — list_governance_documents gives it."),
+			"file": _field(
+				_STRING,
+				"Which attachment to read, by File docname or file name. Omit for the first.",
+			),
+			"max_bytes": _field(
+				_INTEGER,
+				"Raise or lower the size cap. Default 2097152 (2 MB), hard ceiling 8388608 (8 MB).",
+			),
+		},
+		required=("name",),
+		title="Read a governance document",
+		available=_needs_doctype("Governance Document"),
+		requires="the Governance Document DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"create_cap_table_entry": _tool(
+		governance.create_cap_table_entry,
+		"MUTATING (default OFF). Register one member: the anonymous id the ledger is "
+		"tagged with, and the legal entity behind it.\n\n"
+		"THE DESIGN THIS BELONGS TO. Family names never go into the chart of "
+		"accounts or the cost center tree — those are read by lenders, auditors and "
+		"anyone handed an export, and a name once in a statement cannot be taken "
+		"out. Postings are tagged with a Member accounting dimension value "
+		"('Member-01'); this doctype is the one place that says who that is.\n\n"
+		"Refuses before writing anything if the member id is already registered for "
+		"that company (one entry per member per company), if the percentage is "
+		"outside 0-100, or if the site has a Member accounting dimension and the id "
+		"is not one of its values — the cap table names a member the ledger can "
+		"already refer to, so the dimension value comes first. A site with no such "
+		"dimension yet is allowed and told so.\n\n"
+		"Cannot create a member already retired: retiring is close_cap_table_entry, "
+		"which records the exit in the event trail instead of flipping a flag. "
+		"Reversible in the sense that nothing else is touched — no posting, no "
+		"dimension value, no account.",
+		{
+			"company": _COMPANY,
+			"member_id": _field(
+				_STRING,
+				"The anonymous identifier, e.g. 'Member-01'. This is what journal entry "
+				"lines are tagged with, and it is part of the docname; it cannot be "
+				"changed afterwards.",
+			),
+			"legal_entity_name": _field(
+				_STRING,
+				"The real legal name — an individual, a trust, an LLC. Stored here and "
+				"nowhere else on the site.",
+			),
+			"entity_type": _field(
+				_STRING,
+				"Individual, Trust, LLC, Corporation, Partnership or Other. Checked "
+				"against the doctype's own option list.",
+			),
+			"admission_date": _field(_STRING, "When this member was admitted, YYYY-MM-DD."),
+			"ownership_percentage": _field(_NUMBER, "0-100. The response says whether active members now total 100."),
+			"member_cost_center": _field(
+				_STRING,
+				"Optional, and only for sites whose convention also gives each member a "
+				"cost center. Members are a DIMENSION, not a segment of the business, so "
+				"every tool here files by the dimension and carries this along.",
+			),
+			"member_dimension": _field(
+				_STRING,
+				"The accounting dimension holding member values, if it is not called 'Member'.",
+			),
+			"notes": _field(_STRING, "Why this member exists, and what paperwork evidences it."),
+		},
+		required=("company", "member_id", "legal_entity_name", "entity_type", "admission_date"),
+		mutating=True,
+		title="Register a cap table member",
+		available=_needs_doctype("Cap Table Entry"),
+		requires="the Cap Table Entry DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"update_cap_table_entry": _tool(
+		governance.update_cap_table_entry,
+		"MUTATING (default OFF). Change a registered member's legal name, entity "
+		"type, admission date, ownership percentage, cost center or notes.\n\n"
+		"Deliberately CANNOT do two things. It cannot retire a member — that is "
+		"close_cap_table_entry, which takes a withdrawal date and a narrative and "
+		"writes a Member Event, so an exit appears in the trail rather than only as "
+		"a changed checkbox. And it cannot change the member_id: that is the key "
+		"every posting on the site is tagged with, so changing it would leave "
+		"journal entry lines pointing at a member that no longer exists.\n\n"
+		"Refuses if nothing would change. Historical postings are never touched.",
+		{
+			"member": _field(_STRING, "The member: a Cap Table Entry docname, or a member_id."),
+			"company": _COMPANY,
+			"legal_entity_name": _field(_STRING, "New legal name."),
+			"entity_type": _field(_STRING, "New entity type."),
+			"admission_date": _field(_STRING, "Corrected admission date, YYYY-MM-DD."),
+			"ownership_percentage": _field(_NUMBER, "New percentage, 0-100."),
+			"member_cost_center": _field(_STRING, "Cost center to carry, or an empty string to clear it."),
+			"notes": _field(_STRING, "Replacement notes."),
+		},
+		required=("member",),
+		mutating=True,
+		idempotent=True,
+		title="Update a cap table member",
+		available=_needs_doctype("Cap Table Entry"),
+		requires="the Cap Table Entry DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"close_cap_table_entry": _tool(
+		governance.close_cap_table_entry,
+		"MUTATING (default OFF). Retire a member: set the withdrawal date, mark the "
+		"entry retired, and write a Withdrawal event into the trail with the "
+		"narrative explaining it.\n\n"
+		"MOVES NO MONEY, deliberately. A member leaving usually involves a final "
+		"distribution, and that is a separate record_member_event call with its own "
+		"amount, accounts and narrative — bundling them would make the tool that "
+		"closes a member also a tool that can pay one.\n\n"
+		"Nothing is deleted: the entry stays in the register, every posting tagged "
+		"with the member id stays exactly as it was, and list_cap_table keeps "
+		"showing them. Refuses a member already retired, and a withdrawal date "
+		"before the admission date.",
+		{
+			"member": _field(_STRING, "The member: a Cap Table Entry docname, or a member_id."),
+			"withdrawal_date": _field(_STRING, "The exit date, YYYY-MM-DD."),
+			"notes": _field(
+				_STRING,
+				"Why they left and what authorises it. Mandatory, appended to the entry's "
+				"notes and used as the Member Event's narrative.",
+			),
+			"company": _COMPANY,
+		},
+		required=("member", "withdrawal_date", "notes"),
+		mutating=True,
+		destructive=True,
+		title="Retire a cap table member",
+		available=_needs_doctype("Cap Table Entry"),
+		requires="the Cap Table Entry DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"record_member_event": _tool(
+		governance.record_member_event,
+		"MUTATING (default OFF). Record one thing that happened to a member's "
+		"interest — and, where it books money, the DRAFT Journal Entry for it.\n\n"
+		"WHAT IT WRITES. Always a Member Event, carrying the mandatory narrative: "
+		"the numbers survive on their own, the reasons do not, and 'why did "
+		"Member-02 take 40,000 in March' is the question asked once the people who "
+		"knew have gone. For a Contribution, Distribution, Withdrawal, Transfer or "
+		"Reallocation it also creates a draft Journal Entry, unless `offset_je` "
+		"names one that already books it. An Admission needs no entry at all.\n\n"
+		"THE ENTRY IT BUILDS. Contribution: debit the cash side, credit member "
+		"capital. Distribution and Withdrawal: debit member distributions, credit "
+		"the cash side. Transfer and Reallocation: debit the capital of `member` "
+		"and credit the capital of `counterparty_member` — money never leaves the "
+		"company. EVERY line is tagged with the member accounting dimension, "
+		"including the cash side, because a balance sheet filtered by member has to "
+		"balance.\n\n"
+		"ACCOUNTS ARE SHORTLISTED, NEVER GUESSED. With no `capital_account` given, "
+		"the company's leaf Equity accounts are matched by name ('Member Capital', "
+		"'Distributions'); zero matches or more than one is refused with the "
+		"candidates listed. The cash side falls back to the company's default bank "
+		"or cash account.\n\n"
+		"IT CANNOT POST. The Journal Entry is a draft and has moved no balance. "
+		"Posting is submit_member_event, which additionally requires the "
+		"submit_journal_entry switch. Refuses without a Member accounting dimension "
+		"on Journal Entry Account, since an untagged equity entry is one nobody can "
+		"attribute later.",
+		{
+			"company": _COMPANY,
+			"event_type": _field(
+				_STRING,
+				"Contribution, Distribution, Admission, Withdrawal, Transfer or Reallocation.",
+			),
+			"effective_date": _field(_STRING, "When it took effect, YYYY-MM-DD. Also the entry's posting date."),
+			"amount": _field(
+				_NUMBER,
+				"Positive. A distribution is its own event type, not a negative "
+				"contribution. Zero is only allowed for an Admission.",
+			),
+			"member": _field(
+				_STRING,
+				"The member this is about: a Cap Table Entry docname or a member_id. For a "
+				"transfer, the member the interest moves FROM.",
+			),
+			"counterparty_member": _field(
+				_STRING, "For a Transfer or Reallocation: the member the interest moves TO. Required for those."
+			),
+			"narrative": _field(
+				_STRING,
+				"Why this happened and what authorises it — the resolution, the agreement "
+				"clause, the conversation. Mandatory and checked for length.",
+			),
+			"offset_je": _field(
+				_STRING,
+				"An existing Journal Entry that already books this event. Given, no entry "
+				"is created and the event simply links to it.",
+			),
+			"capital_account": _field(
+				_STRING,
+				"The equity account to use, instead of matching one by name. Docname, "
+				"number or account name.",
+			),
+			"counter_account": _field(
+				_STRING,
+				"The cash/bank side, instead of the company default. Not used by a "
+				"Transfer or Reallocation, which have two equity sides.",
+			),
+			"member_dimension": _field(
+				_STRING, "The accounting dimension holding member values, if it is not called 'Member'."
+			),
+		},
+		required=("company", "event_type", "effective_date", "member", "narrative"),
+		mutating=True,
+		title="Record a member event",
+		available=_needs_doctype("Member Event"),
+		requires="the Member Event DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"submit_member_event": _tool(
+		governance.submit_member_event,
+		"MUTATING (default OFF). Post the draft Journal Entry a member event is "
+		"waiting on — docstatus 0 → 1, which writes GL Entries and moves balances.\n\n"
+		"CHECKS TWO SWITCHES. Its own, and submit_journal_entry's. That second "
+		"switch is where an operator decided whether an AI client may move a balance "
+		"at all, and a second door into the same room with a different lock would "
+		"make the decision meaningless — so this refuses, naming the switch, when "
+		"submit_journal_entry is off.\n\n"
+		"Takes only an event name: it cannot create the event or the entry it posts. "
+		"An event that books no money (an admission, a reallocation of percentages) "
+		"has nothing to post and is refused with that said.",
+		{"name": _field(_STRING, "Member Event docname — list_member_events gives it.")},
+		required=("name",),
+		mutating=True,
+		title="Post a member event",
+		available=_needs_doctype("Member Event"),
+		requires="the Member Event DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"attach_governance_document": _tool(
+		governance.attach_governance_document,
+		"MUTATING (default OFF). File a governing document in the archive: an "
+		"operating agreement, a trust instrument, an advisory agreement, a board "
+		"resolution, a prior statement or an amendment — with the document itself "
+		"attached.\n\n"
+		"THE CHAIN IS THE POINT. An operating agreement amended three times is four "
+		"documents, and the question asked in 2050 is 'which one was in force in "
+		"2031'. Naming `supersedes` writes the link in both directions, so a reader "
+		"can follow the chain forward to whatever is current. Cycles are refused, "
+		"and so is superseding a document that has already been superseded — an "
+		"amendment goes on the end of the chain, not into the middle.\n\n"
+		"CONTENT IS STORED PRIVATE. `file_content` is base64 of the document's "
+		"bytes and is attached as a private File on the record; reading it back "
+		"goes through get_governance_document_content, which enforces read "
+		"permission. Alternatively `file_url` records where an externally hosted "
+		"document lives without copying it. There is an 8 MB ceiling on content "
+		"moved through a tool call.\n\n"
+		"Refuses a second document with the same company, category and title, "
+		"because two entries claiming to be the same document is worse than none.",
+		{
+			"company": _COMPANY,
+			"category": _field(
+				_STRING,
+				"Operating Agreement, Trust Document, Advisory Agreement, Board "
+				"Resolution, Prior Statement, Amendment or Other.",
+			),
+			"title": _field(
+				_STRING,
+				"How this document is referred to, including its date or version: "
+				"'OML Operating Agreement 2020-06-15'.",
+			),
+			"effective_date": _field(_STRING, "When it takes effect, YYYY-MM-DD."),
+			"execution_date": _field(_STRING, "When it was signed, YYYY-MM-DD."),
+			"supersedes": _field(_STRING, "The Governance Document this one replaces or amends."),
+			"file_content": _field(
+				_STRING, "The document's bytes, base64-encoded, with no data: prefix. Needs file_name."
+			),
+			"file_name": _field(_STRING, "Filename for the uploaded content, e.g. 'operating-agreement-2020.pdf'."),
+			"file_url": _field(
+				_STRING, "Where the document already lives, instead of uploading it. Not with file_content."
+			),
+			"parties": _field(_STRING, "Who signed, in plain language. Legal names belong here."),
+			"notes": _field(_STRING, "Anything a successor would need to know about this document."),
+		},
+		required=("company", "category", "title"),
+		mutating=True,
+		title="File a governance document",
+		available=_needs_doctype("Governance Document"),
+		requires="the Governance Document DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	# ── assets: usage-based cost splits and note-tenor discipline ───────────
+	"depreciation_note_alignment_check": _tool(
+		assets.depreciation_note_alignment_check,
+		"Where a financed asset's remaining depreciation and its note's remaining "
+		"term have parted company. For every asset with a linked note: months "
+		"elapsed, months of depreciation left, months of note left, and the delta "
+		"between them, with a sentence saying which way it reads — book value "
+		"outliving the financing, or interest still being paid on something with no "
+		"book value left.\n\n"
+		"Reports on every financed asset, not only the broken ones, because "
+		"'nothing is wrong' is an answer somebody has to be able to see. A "
+		"divergence is not automatically an error; it is something that needs an "
+		"explanation, and an explanation nobody wrote down is what this surfaces. "
+		"Read-only.",
+		{
+			"company": _COMPANY,
+			"as_of": _field(_STRING, "Date to measure from, YYYY-MM-DD. Defaults to today."),
+		},
+		required=("company",),
+		title="Depreciation / note alignment",
+		available=_needs_doctype("Asset"),
+		requires="ERPNext's Asset DocType",
+	),
+	"create_asset": _tool(
+		assets.create_asset,
+		"MUTATING (default OFF). Create an ERPNext Asset together with the cost "
+		"profile that says how it is actually used: a tractor is not a Harvest asset "
+		"or a Perennial Care asset, it is 40% one and 60% the other, and its "
+		"depreciation should land that way every period without anyone "
+		"re-deciding it.\n\n"
+		"WHAT IT WRITES. An ordinary ERPNext Asset (a DRAFT — submit it in ERPNext "
+		"when the purchase is real), an Asset Cost Profile holding the allocation "
+		"and the schedule, and, when the item_code does not exist yet, a "
+		"fixed-asset Item. Nothing is grafted onto ERPNext's Asset doctype: no "
+		"custom fields, no child tables, so uninstalling this app gives the site "
+		"back as it was.\n\n"
+		"ERPNEXT'S OWN DEPRECIATION IS SWITCHED OFF on the asset "
+		"(calculate_depreciation = 0), and this is the most important thing to "
+		"understand about the tool. ERPNext runs a daily job that posts "
+		"depreciation for every asset with that flag set, using its own schedule and "
+		"its own single cost center. If it also ran here, the asset would depreciate "
+		"twice, silently, every month. So this app owns the schedule outright and "
+		"run_depreciation_cycle is the only thing that writes for it.\n\n"
+		"NOTE TENOR IS ENFORCED BEFORE ANYTHING IS WRITTEN. Name a `linked_note` "
+		"and the asset's useful life must equal the note's tenor, so paid-off and "
+		"fully-depreciated fall in the same month. A divergence is refused with the "
+		"numbers, not silently accepted.\n\n"
+		"Refuses an allocation that does not total 100, a group or disabled cost "
+		"center, a frequency that does not divide the useful life exactly, a "
+		"salvage value at or above the cost, an asset category the site does not "
+		"have, and an existing Item that is not flagged as a fixed asset.",
+		{
+			"company": _COMPANY,
+			"asset_name": _field(_STRING, "What the asset is called, e.g. 'Tractor A'."),
+			"item_code": _field(
+				_STRING,
+				"The fixed-asset Item this hangs off. ERPNext requires one; it is created "
+				"if missing unless create_item_if_missing is false.",
+			),
+			"asset_category": _field(
+				_STRING,
+				"An existing Asset Category. This is where ERPNext keeps the fixed-asset, "
+				"accumulated-depreciation and depreciation-expense accounts, per company.",
+			),
+			"purchase_date": _field(_STRING, "YYYY-MM-DD."),
+			"purchase_amount": _field(_NUMBER, "What it cost. Positive."),
+			"salvage_value": _field(
+				_NUMBER,
+				"What it will be worth at the end of its life. Default 0. Depreciation "
+				"never takes the book value below it.",
+			),
+			"useful_life_months": _field(
+				_INTEGER,
+				"Total life in months. Must be divisible by the frequency, and must equal "
+				"the note tenor when a note is linked.",
+			),
+			"depreciation_frequency_months": _field(
+				_INTEGER, "Months per depreciation period: 1 monthly (the default), 3 quarterly, 12 annually."
+			),
+			"depreciation_method": _field(
+				_STRING,
+				"Straight Line (default), Written Down Value, Double Declining Balance, or "
+				"Manual. Manual means this app computes nothing for the asset.",
+			),
+			"depreciation_start_date": _field(
+				_STRING, "First day of the first period, YYYY-MM-DD. Defaults to the purchase date."
+			),
+			"cost_center_allocation": {
+				"type": "array",
+				"description": (
+					"How the asset's use is shared out. Objects of {cost_center, "
+					"percentage, and optionally bbch_stage and note}, totalling 100. "
+					"Omitted, the company's default cost center takes 100%."
+				),
+				"items": {
+					"type": "object",
+					"properties": {
+						"cost_center": _field(_STRING, "A leaf Cost Center: docname, number or name."),
+						"percentage": _field(_NUMBER, "Share of use, above 0 and at most 100."),
+						"bbch_stage": _field(
+							_STRING,
+							"Optional value of this site's BBCH Stage dimension, applied to "
+							"the depreciation line this row produces.",
+						),
+						"note": _field(_STRING, "The usage evidence behind the number."),
+					},
+					"required": ["cost_center", "percentage"],
+					"additionalProperties": False,
+				},
+			},
+			"linked_note": _field(_STRING, "The note financing this asset — a docname."),
+			"note_doctype": _field(
+				_STRING,
+				"Which DocType the note lives in. Worked out from the name where it is a "
+				"Notes Payable, a Loan or a Journal Entry.",
+			),
+			"note_tenor_months": _field(_INTEGER, "The note's term in months, if the note document does not record it."),
+			"note_maturity_date": _field(_STRING, "The note's maturity, YYYY-MM-DD, as an alternative to the tenor."),
+			"depreciation_expense_account": _field(
+				_STRING, "Override the Asset Category's depreciation expense account for this asset."
+			),
+			"accumulated_depreciation_account": _field(
+				_STRING, "Override the Asset Category's accumulated depreciation account for this asset."
+			),
+			"location": _field(_STRING, "ERPNext Location, where this site's version requires one."),
+			"create_item_if_missing": _field(
+				_BOOLEAN, "false to refuse rather than create a fixed-asset Item. Default true."
+			),
+			"notes": _field(_STRING, "Anything about this asset worth keeping with its profile."),
+		},
+		required=(
+			"asset_name",
+			"item_code",
+			"asset_category",
+			"purchase_date",
+			"purchase_amount",
+			"useful_life_months",
+		),
+		mutating=True,
+		title="Create an asset",
+		available=_needs_doctype("Asset"),
+		requires="ERPNext's Asset DocType",
+	),
+	"update_asset_allocation": _tool(
+		assets.update_asset_allocation,
+		"MUTATING (default OFF). Replace how an asset's cost is shared out across "
+		"cost centers. Refuses a set of percentages that does not total 100, a "
+		"group or disabled cost center, and a change that would leave the "
+		"allocation exactly as it is.\n\n"
+		"NOT RETROACTIVE, and that is correct. Depreciation already written keeps "
+		"the split it was written with — that is the history, and rewriting it would "
+		"change periods that have already been reported. Only future periods follow "
+		"the new split, and the response says how many have already been written.",
+		{
+			"asset": _field(_STRING, "The asset: an Asset docname, or the asset_name it was created with."),
+			"new_cost_center_allocation": {
+				"type": "array",
+				"description": "The replacement split: {cost_center, percentage} objects totalling 100.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"cost_center": _field(_STRING, "A leaf Cost Center: docname, number or name."),
+						"percentage": _field(_NUMBER, "Share of use, above 0 and at most 100."),
+						"bbch_stage": _field(_STRING, "Optional BBCH Stage dimension value for this row's line."),
+						"note": _field(_STRING, "The usage evidence behind the number."),
+					},
+					"required": ["cost_center", "percentage"],
+					"additionalProperties": False,
+				},
+			},
+			"company": _COMPANY,
+		},
+		required=("asset", "new_cost_center_allocation"),
+		mutating=True,
+		idempotent=True,
+		title="Reallocate an asset",
+		available=_needs_doctype("Asset"),
+		requires="ERPNext's Asset DocType",
+	),
+	"link_asset_to_note": _tool(
+		assets.link_asset_to_note,
+		"MUTATING (default OFF). Tie an asset to the note that financed it, and — "
+		"by default — refuse the link unless the asset's remaining life equals the "
+		"note's remaining term.\n\n"
+		"WHY THE REFUSAL IS THE FEATURE. Held apart, the asset is either fully "
+		"depreciated while payments continue, or still on the books after the note "
+		"is paid off. Either way the matching principle is broken and nobody sees it "
+		"until the final year of the loan. Enforcing the match at the moment of "
+		"linking is the only cheap place to catch it.\n\n"
+		"The tenor is taken from `note_tenor_months`, or from `note_maturity_date`, "
+		"or from the note document's own maturity/term field where its doctype has "
+		"one — and the response says which. `enforce_tenor=false` links anyway and "
+		"records the divergence, which depreciation_note_alignment_check will keep "
+		"reporting. Changes no schedule and writes no posting.",
+		{
+			"asset": _field(_STRING, "The asset: an Asset docname, or its asset_name."),
+			"note_doc_ref": _field(
+				_STRING, "The note: a Journal Entry docname, or a record of the site's own notes doctype."
+			),
+			"note_doctype": _field(
+				_STRING,
+				"Which DocType the note lives in. Worked out from the name where it is a "
+				"Notes Payable, a Loan or a Journal Entry.",
+			),
+			"note_tenor_months": _field(_INTEGER, "The note's term in months."),
+			"note_maturity_date": _field(_STRING, "The note's maturity, YYYY-MM-DD."),
+			"enforce_tenor": _field(
+				_BOOLEAN,
+				"true (THE DEFAULT) refuses a life that does not match the tenor. false "
+				"links anyway and records the divergence.",
+			),
+			"company": _COMPANY,
+		},
+		required=("asset", "note_doc_ref"),
+		mutating=True,
+		title="Link an asset to its note",
+		available=_needs_doctype("Asset"),
+		requires="ERPNext's Asset DocType",
+	),
+	"run_depreciation_cycle": _tool(
+		assets.run_depreciation_cycle,
+		"MUTATING (default OFF). Write the depreciation due up to a date for every "
+		"asset with a cost profile: one DRAFT Journal Entry per asset per period, "
+		"debiting depreciation expense split across the asset's cost centers and "
+		"crediting accumulated depreciation in one line.\n\n"
+		"dry_run DEFAULTS TO TRUE. A dry run writes nothing and returns every period "
+		"it would post, with the exact split per cost center. Read it, then call "
+		"again with dry_run=false. This is the one tool here that writes to many "
+		"documents at once, and a catch-up over a year of missed periods is a page "
+		"of journal entries somebody should see first.\n\n"
+		"IDEMPOTENT BY RECORD. Every period written is recorded on the asset's cost "
+		"profile with the entry that carries it, so running twice cannot post a "
+		"period twice. The amounts are computed from the profile each time rather "
+		"than read from saved rows, so a catch-up produces exactly what month-by-"
+		"month running would have.\n\n"
+		"The entries are DRAFTS and have moved no balance — post them with "
+		"submit_journal_entry. Assets on the Manual method, assets with nothing due, "
+		"and assets whose depreciation accounts are not configured are skipped and "
+		"listed with the reason, rather than taking the whole run down.",
+		{
+			"company": _COMPANY,
+			"period_end": _field(
+				_STRING, "Depreciate everything whose period ends on or before this date. Defaults to today."
+			),
+			"asset": _field(_STRING, "Restrict the run to one asset. Omit for every asset in the company."),
+			"dry_run": _field(
+				_BOOLEAN,
+				"true (THE DEFAULT) = report every period that would be written and change "
+				"nothing. Set false only after a human has read the plan.",
+			),
+		},
+		required=("company",),
+		mutating=True,
+		title="Run a depreciation cycle",
+		available=_needs_doctype("Asset"),
+		requires="ERPNext's Asset DocType",
 	),
 }
 

@@ -14,13 +14,14 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **49 tools** — 32 read-only, 17 mutating.
+- **64 tools** — 37 read-only, 27 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
 - **LAN-only by default.** Token *and* a CIDR allowlist.
-- **Two doctypes, one endpoint, no hooks.** Installing it cannot change how
-  anything already on your site behaves.
+- **Its own doctypes, one endpoint, no hooks.** It adds no field to any doctype
+  it did not create, so installing it cannot change how anything already on your
+  site behaves.
 - MIT. No runtime dependencies beyond Frappe/ERPNext.
 
 <!-- Screenshots: replace these placeholders with real captures. -->
@@ -45,7 +46,7 @@ you reason about it you end up pasting screenshots.
 An LLM is perfectly capable of reasoning about a general ledger. It cannot see
 one. This closes that gap without handing anything away:
 
-- **It cannot write by default.** All seven mutating tools are off on install.
+- **It cannot write by default.** All 27 mutating tools are off on install.
   Turning one on is a checkbox on a form only System Manager can open.
 - **The dangerous verb gets its own switch.** `create_journal_entry` only ever
   produces a draft — `docstatus=0`, affecting no balance. Posting is
@@ -69,7 +70,8 @@ one. This closes that gap without handing anything away:
   no process to supervise. Your existing nginx, TLS and access logs already
   cover it, and the server is up whenever the site is.
 - **Uninstalling leaves no trace.** No `doc_events`, no scheduler jobs, no
-  overrides, no fixtures. Two doctypes and an endpoint, and then they are gone.
+  overrides, no fixtures, and no field added to a doctype it did not create.
+  Its own doctypes and an endpoint, and then they are gone.
 
 If you maintain a Frappe site for somebody else, the honest pitch is narrower:
 this is a way to let them ask questions without giving them Desk access or
@@ -95,7 +97,7 @@ bench --site yoursite.localhost migrate
 bench restart          # in development, `bench start` picks it up on its own
 ```
 
-`install-app` syncs the two doctypes and seeds their defaults, so after step 3
+`install-app` syncs this app's doctypes and seeds their defaults, so after step 3
 the read tools are already switched on — but the server itself is **off**,
 because no token exists and `enabled` is unticked. It stays inert until you do
 the next part.
@@ -240,7 +242,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 49 tools
+## The 64 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -249,7 +251,7 @@ Tools whose site prerequisite is missing are not advertised at all — on a site
 without Frappe HR, the three HR tools simply do not exist as far as a client is
 concerned.
 
-### Read-only — 32, all ON by default, each individually switchable
+### Read-only — 37, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -328,7 +330,17 @@ concerned.
 | `list_compliance_packets` | Which packet types this site can produce, and the filters each takes. |
 | `generate_compliance_packet` | Builds one. See [Compliance packets](#compliance-packets) below. |
 
-### Mutating — 17, all OFF by default
+**Governance and assets**
+
+| Tool | What it answers |
+| --- | --- |
+| `list_cap_table` | Who the members are: anonymous id, legal entity, admission, percentage. Retired members included. **This is the tool that de-anonymises the ledger** — see [Members are anonymous](#members-are-anonymous-on-purpose). |
+| `list_member_events` | The equity trail: contributions, distributions, transfers, and the narrative for each. |
+| `list_governance_documents` | What is in the archive, with the amendment chain and which entries are still in force. |
+| `get_governance_document_content` | One archived document's metadata and its attachment, base64. |
+| `depreciation_note_alignment_check` | For every financed asset, whether its remaining life and its note's remaining term still agree. |
+
+### Mutating — 27, all OFF by default
 
 **Postings into the ledger**
 
@@ -361,6 +373,59 @@ concerned.
 | `create_accounting_dimension` | Creates the dimension, adds its Link field to the documents that carry it, and — only when asked — generates the custom DocType whose records are its values. | Point at a Single, a child table or a core doctype; reuse a fieldname another field already holds. |
 | `create_dimension_value` | One record in the DocType a dimension points at. | Touch a ledger, or add a field. |
 | `set_company_defaults` | Points the company's default account and cost center fields at real accounts, **type-checked**. Idempotent. | Write any of them if one value in the batch fails validation. |
+
+**Who owns it, and what happened to their interest**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_cap_table_entry` | Registers one member: anonymous id, legal entity, admission date, percentage. | Register a member the ledger cannot already refer to, or one already retired. |
+| `update_cap_table_entry` | Changes a member's details. | Retire a member, or change the `member_id` every posting is tagged with. |
+| `close_cap_table_entry` | Retires a member and writes the exit into the event trail. | Move any money — a final distribution is a separate call. |
+| `record_member_event` | Records the event and, where it books money, a **draft** JE with the right accounts and the member tag on every line. | Post it. Guess an equity account when two could match. |
+| `submit_member_event` | Posts the draft the event is waiting on. | Run at all unless `submit_journal_entry` is also switched on. |
+| `attach_governance_document` | Files a governing document, attaches its content privately, and chains it onto what it supersedes. | File the same document twice, or make the amendment chain loop. |
+
+**Assets that serve more than one segment**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_asset` | Creates an ERPNext Asset plus the cost profile holding its usage split, its schedule and its note. **Switches ERPNext's own depreciation off on that asset.** | Accept a split that does not total 100, or a useful life that disagrees with the note's tenor. |
+| `update_asset_allocation` | Replaces the split, from the next period onwards. | Rewrite periods already written — that is the history. |
+| `link_asset_to_note` | Ties an asset to its financing and holds their terms together. | Link a diverging pair unless you pass `enforce_tenor=false`. |
+| `run_depreciation_cycle` | Writes the depreciation due as **draft** JEs, split across each asset's cost centers. **`dry_run` defaults to true.** | Post a period twice, or post anything at all. |
+
+#### Members are anonymous on purpose
+
+Family names never go into the chart of accounts or the cost center tree. Those
+are read by lenders, auditors and anyone handed an export, and a name that has
+reached a statement cannot be taken out of it again.
+
+So a posting is tagged with a **Member accounting dimension** value —
+`Member-01` — and exactly one doctype, `Cap Table Entry`, says who that is. The
+mapping can be granted to the people who need it without granting the ledger,
+and the ledger can be read by everyone else without granting the mapping.
+
+Cost centers stay what they are: segments of the *business*, not of the family.
+A `Cap Table Entry` keeps an optional `member_cost_center` for sites whose
+convention already gives each member one, but every tool files by the dimension.
+
+```
+Journal Entry line   →  account 3100 Member Capital, member = Member-01
+Cap Table Entry      →  Member-01 = The Example Family Trust, admitted 2020-06-15, 60%
+```
+
+#### Depreciation is written here, not by ERPNext
+
+An asset created by `create_asset` has ERPNext's `calculate_depreciation` set to
+**0**, and that is deliberate. ERPNext runs a daily job that posts depreciation
+for every asset with the flag set, through its own schedule and its own single
+cost center. If it also ran, an asset would depreciate twice — silently, every
+month. This app owns the schedule for the assets it creates, and
+`run_depreciation_cycle` is the only thing that writes for them.
+
+An asset you created in the Desk yourself is untouched by any of this: it has no
+Asset Cost Profile, so these tools refuse it and ERPNext keeps depreciating it
+exactly as before.
 
 #### Building a chart from scratch
 
@@ -624,7 +689,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-776 standalone tests and 214 in-bench tests. The standalone suite installs an
+894 standalone tests and 245 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.
@@ -667,7 +732,7 @@ Candidates for the next release, roughly in order of how often they come up:
   siblings (assign, close) rather than posting invoices.
 - **Prepared-report support** in `run_report`, for reports too slow to run
   inline.
-- **A Workspace**, so the two doctypes appear in the app switcher instead of
+- **A Workspace**, so this app's doctypes appear in the app switcher instead of
   only via search.
 
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -680,8 +745,17 @@ Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 bench --site yoursite.localhost uninstall-app erpnext_mcp
 ```
 
-Drops **ERPNext MCP Settings** and **MCP Action Log**, including the audit
-history. Nothing else on the site is touched.
+Drops this app's own doctypes and everything in them: **ERPNext MCP Settings**,
+**MCP Action Log** (the audit history), **Cap Table Entry**, **Member Event**,
+**Governance Document** and **Asset Cost Profile**. Nothing else on the site is
+touched — the accounts, cost centers, dimensions, journal entries and Assets
+these tools created are ordinary ERPNext records and stay exactly as they are.
+
+`before_uninstall` prints a row count and an export command for each doctype
+that has anything in it, because three of them are the **only** copy: the cap
+table is the only mapping from a member id to a legal name, the event trail the
+only record of why an equity entry exists, and a governance document may hold the
+only digital copy of an agreement. Export before you uninstall.
 
 ---
 
