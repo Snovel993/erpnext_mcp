@@ -218,6 +218,7 @@ erpnext_mcp/                     repo root
     tools/read.py                the ten accounting read tools
     tools/mutate.py              the five accounting write tools
     tools/accounts.py            chart of accounts: create/update/move/disable/import
+    tools/dimensions.py          cost centers, accounting dimensions, company defaults
     tools/workflow.py            workflow states, worklist, advance_workflow
     tools/reports.py             report discovery and execution
     tools/files.py               attachments (checks Frappe permissions)

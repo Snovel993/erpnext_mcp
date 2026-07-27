@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **43 tools** — 31 read-only, 12 mutating.
+- **49 tools** — 32 read-only, 17 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -240,7 +240,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 43 tools
+## The 49 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -249,7 +249,7 @@ Tools whose site prerequisite is missing are not advertised at all — on a site
 without Frappe HR, the three HR tools simply do not exist as far as a client is
 concerned.
 
-### Read-only — 31, all ON by default, each individually switchable
+### Read-only — 32, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -266,6 +266,7 @@ concerned.
 | `list_unreconciled_bank_transactions` | The reconciliation worklist. |
 | `search_accounts` | Turn "cash clearing" into a docname. Ranked best-first. |
 | `propose_clean_chart` | A complete numbered chart of accounts for a company, from a static template, in the shape `import_chart_of_accounts` takes. Reports what it would collide with. Creates nothing. |
+| `list_cost_centers` | The company's cost centers as a nested tree. Disabled ones excluded and counted unless asked for. |
 
 **Workflow**
 
@@ -327,7 +328,7 @@ concerned.
 | `list_compliance_packets` | Which packet types this site can produce, and the filters each takes. |
 | `generate_compliance_packet` | Builds one. See [Compliance packets](#compliance-packets) below. |
 
-### Mutating — 12, all OFF by default
+### Mutating — 17, all OFF by default
 
 **Postings into the ledger**
 
@@ -350,6 +351,16 @@ concerned.
 | `import_chart_of_accounts` | Builds a whole tree in one transaction, rolling back entirely on any failure. **`dry_run` defaults to true.** | Silently reparent or rename an account that already exists. |
 | `advance_workflow` | Takes a workflow action via `apply_workflow`. **Can submit or cancel the document** if the target state says so. Supports `dry_run`. | Take an action the acting user is not allowed. |
 | `create_todo` | Assigns a ToDo. | Touch any ledger. |
+
+**How a posting is classified**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_cost_center` | One cost center under an existing group. Checks the parent and the number's uniqueness before writing. | Add a second root — ERPNext gives every company exactly one, named after the company. |
+| `update_cost_center` | Rename, renumber, disable/enable. The docname moves with the fields. | Reparent, or rename the company's root. |
+| `create_accounting_dimension` | Creates the dimension, adds its Link field to the documents that carry it, and — only when asked — generates the custom DocType whose records are its values. | Point at a Single, a child table or a core doctype; reuse a fieldname another field already holds. |
+| `create_dimension_value` | One record in the DocType a dimension points at. | Touch a ledger, or add a field. |
+| `set_company_defaults` | Points the company's default account and cost center fields at real accounts, **type-checked**. Idempotent. | Write any of them if one value in the batch fails validation. |
 
 #### Building a chart from scratch
 
@@ -394,6 +405,36 @@ things it does that a generic chart does not:
   accrual: updated continuously as work lands, flushed to zero at payroll. Its
   description says so, because the account only keeps that meaning if nobody
   books a month-end adjustment into it.
+
+#### Adding an accounting dimension
+
+An ERPNext accounting dimension does not hold its own values. It **points at a
+DocType**, and every record of that DocType is a value — which is why setting one
+up is three calls rather than one:
+
+```
+create_accounting_dimension(dimension_name="Member",
+                            create_master_if_missing=true)   → the DocType, the
+                                                               dimension, and a
+                                                               Link field on each
+                                                               target doctype
+  ↓
+create_dimension_value(dimension_name="Member",
+                       value_name="Member-01")               → one value
+  ↓
+create_journal_entry(accounts=[
+  {"account": "3100", "debit": 5000, "dimensions": {"member": "Member-01"}},
+  ...
+])
+```
+
+Two things worth knowing before the first call. **"Journal Entry" means the
+line**: ERPNext carries dimensions on `Journal Entry Account`, never on the
+header, because one entry books to several — the tool redirects and says so in
+its response. And the dimension's **fieldname is the scrubbed label**, so
+`Member` becomes `member` and `BBCH Stage` becomes `bbch_stage`; that is the key
+you use in a line's `dimensions` object, and an unknown one is refused by name
+rather than dropped.
 
 ---
 
@@ -583,7 +624,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-693 standalone tests and 195 in-bench tests. The standalone suite installs an
+776 standalone tests and 214 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.

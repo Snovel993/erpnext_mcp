@@ -62,6 +62,24 @@ _LINE_FIELDS = (
 	"bank_account",
 )
 
+#: The per-line escape hatch for accounting dimensions. Kept out of
+#: `_LINE_FIELDS` on purpose: `dimensions` is not itself a field on Journal Entry
+#: Account, it is an object whose *keys* are, and every key is checked against
+#: this site's own meta before it is written.
+#:
+#: Why an object rather than more allowlisted keys: a dimension's fieldname is
+#: invented by whoever created it (`member`, `bbch_stage`, `block`), so there is
+#: no list this app could ship. Why not simply stop rejecting unknown keys:
+#: because then `amount` — which a model will send, meaning `debit` — would be
+#: silently dropped instead of corrected. Unknown keys stay refused; dimensions
+#: get their own door, and going through it is an assertion that the caller meant
+#: a dimension rather than mistyped a field.
+_DIMENSIONS_KEY = "dimensions"
+
+#: Journal Entry lines are `Journal Entry Account` rows, and that is the doctype
+#: ERPNext puts accounting dimension fields on. See `tools/dimensions.py`.
+_LINE_DOCTYPE = "Journal Entry Account"
+
 
 # ── 11. create_journal_entry ────────────────────────────────────────────────
 def create_journal_entry(args: dict) -> ToolResult:
@@ -71,6 +89,7 @@ def create_journal_entry(args: dict) -> ToolResult:
 	user_remark = as_str(args, "user_remark", required=True)
 	lines = _validated_lines(args.get("accounts"), company)
 	total_debit, total_credit = _assert_balanced(lines)
+	dimension_fields = sorted({key for line in lines for key in line if key not in _LINE_FIELDS})
 
 	doc = frappe.new_doc("Journal Entry")
 	doc.company = company
@@ -105,6 +124,7 @@ def create_journal_entry(args: dict) -> ToolResult:
 		"total_credit": round(total_credit, 2),
 		"line_count": len(lines),
 		"user_remark": user_remark,
+		"dimension_fields_set": dimension_fields,
 		"next_step": (
 			"This is a draft and affects no balance. Submit it in ERPNext, or via "
 			"submit_journal_entry if that tool is enabled."
@@ -137,11 +157,12 @@ def _validated_lines(raw, company: str) -> list[dict]:
 	for index, entry in enumerate(raw, start=1):
 		if not isinstance(entry, dict):
 			raise ToolError(f"accounts[{index}] must be an object, got {type(entry).__name__}")
-		unknown = sorted(set(entry) - set(_LINE_FIELDS))
+		unknown = sorted(set(entry) - set(_LINE_FIELDS) - {_DIMENSIONS_KEY})
 		if unknown:
 			raise ToolError(
 				f"accounts[{index}] has unsupported field(s): {', '.join(unknown)}. "
-				f"Supported: {', '.join(_LINE_FIELDS)}"
+				f"Supported: {', '.join(_LINE_FIELDS)}. A custom accounting dimension "
+				f"goes in the per-line `{_DIMENSIONS_KEY}` object, not alongside these."
 			)
 		account = resolve_account(str(entry.get("account") or ""), company)
 		debit = as_float(entry.get("debit"), f"accounts[{index}].debit")
@@ -166,8 +187,54 @@ def _validated_lines(raw, company: str) -> list[dict]:
 		line["account"] = account
 		line["debit"] = debit
 		line["credit"] = credit
+		line.update(_validated_dimensions(entry.get(_DIMENSIONS_KEY), index))
 		lines.append(line)
 	return lines
+
+
+def _validated_dimensions(raw, index: int) -> dict:
+	"""Check a line's `dimensions` object against this site's own meta.
+
+	Two checks, both of which exist because the failure they prevent is silent.
+	The field has to exist on Journal Entry Account — a dimension the operator has
+	not created yet would otherwise be written to a Document attribute that never
+	reaches a column, and the entry would look filed and not be. And where the
+	field is a Link, the value has to be a record of what it links to, because
+	ERPNext's own link validation runs on *submit*, so a bad value here produces a
+	draft that cannot be posted rather than a call that failed.
+	"""
+	if raw in (None, ""):
+		return {}
+	if not isinstance(raw, dict):
+		raise ToolError(
+			f"accounts[{index}].{_DIMENSIONS_KEY} must be an object of fieldname → "
+			f'value, e.g. {{"member": "Member-01", "bbch_stage": "BBCH-8"}}; got '
+			f"{type(raw).__name__}"
+		)
+
+	out = {}
+	for key in sorted(raw):
+		fieldname = str(key or "").strip()
+		field = compat.field_meta(_LINE_DOCTYPE, fieldname)
+		if field is None:
+			raise ToolError(
+				f"accounts[{index}].{_DIMENSIONS_KEY} has no field {fieldname!r} on "
+				f"{_LINE_DOCTYPE}. An accounting dimension only becomes a field once it "
+				"exists — create it with create_accounting_dimension, which adds the "
+				"Link field to this doctype. Nothing was created."
+			)
+		value = raw[key]
+		text = "" if value is None else str(value).strip()
+		options = str(field.get("options") or "")
+		if text and str(field.get("fieldtype") or "") == "Link" and options:
+			if not frappe.db.exists(options, text):
+				raise ToolError(
+					f"accounts[{index}].{_DIMENSIONS_KEY}.{fieldname} is {text!r}, which "
+					f"is not a {options} on this site. Dimension values are {options} "
+					"records — create one with create_dimension_value. Nothing was created."
+				)
+		out[fieldname] = text or None
+	return out
 
 
 def _assert_balanced(lines: list[dict]) -> tuple[float, float]:

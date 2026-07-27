@@ -92,6 +92,25 @@ ERPNEXT_SCHEMA = {
 		"is_group",
 		"tax_id",
 		"cost_center",
+		# The default-account fields `set_company_defaults` writes. Listed here
+		# rather than invented per test, because the tool asks the site whether
+		# each one exists and a fixture that answered "yes" to everything would
+		# make the version-tolerance path untestable.
+		"default_receivable_account",
+		"default_payable_account",
+		"default_cash_account",
+		"default_bank_account",
+		"default_income_account",
+		"default_expense_account",
+		"cost_of_goods_sold_account",
+		"round_off_account",
+		"round_off_cost_center",
+		"exchange_gain_loss_account",
+		"write_off_account",
+		"default_deferred_revenue_account",
+		# No `default_deferred_expense_account`: one supported default this
+		# fixture's ERPNext does not have, so the "your version has no such
+		# field" refusal is exercised by a real absence rather than a mock.
 	],
 	"Account": [
 		"name",
@@ -126,7 +145,21 @@ ERPNEXT_SCHEMA = {
 		"voucher_no",
 		"party",
 		"party_type",
+		"cost_center",
 	],
+	"Cost Center": [
+		"name",
+		"cost_center_name",
+		"cost_center_number",
+		"parent_cost_center",
+		"is_group",
+		"disabled",
+		"company",
+		"lft",
+		"rgt",
+	],
+	"Accounting Dimension": ["name", "label", "fieldname", "document_type", "disabled"],
+	"Module Def": ["name", "app_name"],
 	"Journal Entry": [
 		"name",
 		"posting_date",
@@ -218,7 +251,18 @@ ERPNEXT_SCHEMA = {
 	],
 	"Payment Entry": ["name", "posting_date", "paid_amount", "docstatus", "company"],
 	"User": ["name", "enabled", "full_name"],
-	"DocType": ["name", "module", "issingle"],
+	"DocType": [
+		"name",
+		"module",
+		"issingle",
+		"istable",
+		"custom",
+		"autoname",
+		"naming_rule",
+		"track_changes",
+		"fields",
+		"permissions",
+	],
 	"Singles": ["doctype", "field", "value"],
 	# ── v0.2.0 ──────────────────────────────────────────────────────────────
 	"Workflow": [
@@ -390,6 +434,10 @@ ERPNEXT_SCHEMA = {
 		"is_return",
 		"docstatus",
 	],
+	# No "Purchase Invoice", deliberately: this fixture is a site that does not
+	# have one, which is what makes the "that DocType is not installed"
+	# degradation in the fiscal-year packet and in create_accounting_dimension
+	# testable against a real absence. A test that needs it registers it.
 	"Custom Field": [
 		"name",
 		"dt",
@@ -434,8 +482,19 @@ APP_DOCTYPES = {
 
 
 def _load_app_doctype(folder: str) -> dict:
-	with open(os.path.join(DOCTYPE_DIR, folder, f"{folder}.json")) as handle:
-		return json.load(handle)
+	payload = _APP_DOCTYPE_CACHE.get(folder)
+	if payload is None:
+		with open(os.path.join(DOCTYPE_DIR, folder, f"{folder}.json")) as handle:
+			payload = json.load(handle)
+		_APP_DOCTYPE_CACHE[folder] = payload
+	return payload
+
+
+#: The shipped DocType JSON, read once. `reset_meta` rebuilds the meta objects
+#: between tests — a test that adds a Custom Field or a whole DocType must not
+#: leak it into the next one — and rereading two files per test would be a file
+#: system call in every setUp for no benefit.
+_APP_DOCTYPE_CACHE: dict = {}
 
 
 class Field(FrappeDict):
@@ -443,12 +502,20 @@ class Field(FrappeDict):
 
 
 class Meta:
-	"""Just enough of frappe.model.meta.Meta for `compat` to interrogate."""
+	"""Just enough of frappe.model.meta.Meta for `compat` to interrogate.
 
-	def __init__(self, doctype: str, fields: list[Field], issingle: bool = False):
+	`autoname` is here because the app reads it: `dimensions._naming_field` asks a
+	master DocType how it names itself before deciding whether to set a field or
+	pass a name. A double that always answered "" would make every dimension value
+	take the fallback path, which is the one that does *not* produce the readable
+	docname the tool exists to produce.
+	"""
+
+	def __init__(self, doctype: str, fields: list[Field], issingle: bool = False, autoname: str = ""):
 		self.doctype = doctype
 		self.fields = fields
 		self.issingle = issingle
+		self.autoname = autoname
 		self._by_name = {f.fieldname: f for f in fields}
 
 	def has_field(self, fieldname: str) -> bool:
@@ -456,6 +523,13 @@ class Meta:
 
 	def get_field(self, fieldname: str):
 		return self._by_name.get(fieldname)
+
+	def add(self, field: Field) -> None:
+		"""Register a field added at runtime, as inserting a Custom Field does."""
+		if field.fieldname in self._by_name:
+			return
+		self.fields.append(field)
+		self._by_name[field.fieldname] = field
 
 
 #: Select options this double reproduces verbatim, because the app reads them
@@ -536,6 +610,37 @@ def _build_meta() -> dict:
 
 
 META = _build_meta()
+
+
+def reset_meta() -> None:
+	"""Put the schema back to what this fixture ships, discarding runtime additions.
+
+	The same object is kept rather than rebound, because tests import `META` by
+	name. Called from `MCPTestCase.setUp`: a test that creates an accounting
+	dimension really does add a DocType and a Custom Field to the site, and the
+	next test has to start from a site where neither exists.
+	"""
+	META.clear()
+	META.update(_build_meta())
+
+
+def register_doctype(doctype: str, fields, issingle: bool = False, autoname: str = "") -> None:
+	"""Make a DocType exist on the fake site, as inserting a DocType does."""
+	META[doctype] = Meta(
+		doctype,
+		[Field(**field) if isinstance(field, dict) else field for field in fields or ()],
+		issingle=issingle,
+		autoname=autoname,
+	)
+	INSTALLED_DOCTYPES.add(doctype)
+
+
+def add_field(doctype: str, fieldname: str, fieldtype: str = "Data", options=None, label=None) -> None:
+	"""Make a field exist on a DocType, as inserting a Custom Field does."""
+	meta = META.get(doctype)
+	if meta is None:
+		raise ValidationError(f"stub has no meta for {doctype!r}, so it cannot take a custom field")
+	meta.add(Field(fieldname=fieldname, fieldtype=fieldtype, options=options, label=label))
 
 
 # ── filters ─────────────────────────────────────────────────────────────────
@@ -652,7 +757,7 @@ class Document(FrappeDict):
 		# make every docname in a chart-of-accounts import a fiction.
 		self._run("autoname")
 		if not self.get("name"):
-			self.name = STORE.next_name(self.doctype)
+			self.name = _autoname_from_meta(self) or STORE.next_name(self.doctype)
 		self.creation = _now()
 		self.modified = self.creation
 		self.owner = self.get("owner") or frappe.session.user
@@ -834,6 +939,86 @@ class AccountDocument(Document):
 		)
 
 
+class CostCenterDocument(Document):
+	"""Cost Center, with the parts of ERPNext's controller this app leans on.
+
+	Reproduced from `CostCenter.autoname`, `validate_mandatory` and
+	`validate_parent_cost_center`. The two rules that matter to the app are the
+	docname — `"<number> - <name> - <abbr>"`, the same shape Account uses and the
+	one `dimensions.cost_center_docname` predicts — and the root rule, which is
+	that a cost center with no parent must be named exactly after its company.
+	The app cites that rule in two refusals, so a double that let anything be a
+	root would make both of them look like this app being obstructive.
+	"""
+
+	def autoname(self):
+		abbr = frappe.db.get_value("Company", self.get("company"), "abbr") or ""
+		self.name = account_autoname(self.get("cost_center_number"), self.get("cost_center_name"), abbr)
+
+	def validate(self):
+		parent = str(self.get("parent_cost_center") or "").strip()
+		if not parent:
+			if self.get("cost_center_name") != self.get("company"):
+				raise ValidationError("Please enter parent cost center")
+			return
+		if self.get("cost_center_name") == self.get("company"):
+			raise ValidationError("Root cannot have a parent cost center")
+		row = STORE.get_raw("Cost Center", parent)
+		if row is None:
+			raise DoesNotExistError(f"Could not find Parent Cost Center: {parent}")
+		if not int(row.get("is_group") or 0):
+			raise ValidationError(
+				f"{parent} is not a group node. Please select a group node as parent cost center"
+			)
+		if row.get("company") != self.get("company"):
+			raise ValidationError("Cost Center and parent cost center must belong to the same company")
+
+
+class DocTypeDocument(Document):
+	"""Inserting a DocType makes it exist, which is the whole point of the test.
+
+	`create_accounting_dimension` can generate the master DocType a dimension's
+	values live in. A double where that insert wrote a row nobody could then
+	create records in would let the tool "succeed" and prove nothing.
+	"""
+
+	def on_update(self):
+		register_doctype(
+			self.name,
+			self.get("fields") or [],
+			issingle=bool(int(self.get("issingle") or 0)),
+			autoname=str(self.get("autoname") or ""),
+		)
+
+
+class CustomFieldDocument(Document):
+	"""Inserting a Custom Field makes `frappe.get_meta` report the field.
+
+	Faithful, and load-bearing twice over: it is what lets a test create a
+	dimension and then use it on a journal entry line, and it is what makes
+	`create_accounting_dimension`'s idempotency — "this doctype already has the
+	field, skip it" — reachable at all.
+	"""
+
+	def on_update(self):
+		add_field(
+			self.get("dt"),
+			self.get("fieldname"),
+			fieldtype=str(self.get("fieldtype") or "Data"),
+			options=self.get("options"),
+			label=self.get("label"),
+		)
+
+
+def _autoname_from_meta(doc) -> str:
+	"""Frappe's `field:<fieldname>` naming rule, which the dimension masters use."""
+	meta = META.get(doc.doctype)
+	autoname = str(getattr(meta, "autoname", "") or "") if meta else ""
+	if not autoname.startswith("field:"):
+		return ""
+	return str(doc.get(autoname.split(":", 1)[1]) or "").strip()
+
+
 #: Link fields `rename_doc` repoints, per renamed doctype. See `rename_doc`.
 RENAME_LINK_FIELDS = {
 	"Account": (
@@ -841,11 +1026,23 @@ RENAME_LINK_FIELDS = {
 		("GL Entry", "account"),
 		("Bank Account", "account"),
 	),
+	"Cost Center": (
+		("Cost Center", "parent_cost_center"),
+		("GL Entry", "cost_center"),
+		("Company", "cost_center"),
+		("Company", "round_off_cost_center"),
+	),
 }
 
 
 #: Doctypes whose stub behaviour differs from a plain Document.
-STUB_CONTROLLERS = {"File": FileDocument, "Account": AccountDocument}
+STUB_CONTROLLERS = {
+	"File": FileDocument,
+	"Account": AccountDocument,
+	"Cost Center": CostCenterDocument,
+	"DocType": DocTypeDocument,
+	"Custom Field": CustomFieldDocument,
+}
 
 
 class Store:
@@ -867,9 +1064,38 @@ class Store:
 		self.counters: dict[str, int] = {}
 		self.committed = 0
 		self.rolled_back = 0
+		self._seed_doctypes()
 		# Rows written since the last commit, so a rollback can discard exactly
 		# those — which is what the audit-survives-rollback tests need to see.
 		self.pending: list[tuple[str, str]] = []
+
+	def _seed_doctypes(self):
+		"""A row per DocType, because `tabDocType` really is a table.
+
+		`frappe.db.exists("DocType", …)` is answered from `INSTALLED_DOCTYPES`
+		(tests flip entries there to simulate a site missing an optional doctype),
+		but `issingle` and `istable` are read as ordinary columns — which is how
+		`create_accounting_dimension` refuses a Single or a child table as a
+		dimension master. Those refusals need real rows to read.
+		"""
+		rows = {}
+		child_tables = set(CHILD_TABLES.values())
+		for doctype in ERPNEXT_SCHEMA:
+			rows[doctype] = {
+				"name": doctype,
+				"module": "Core",
+				"issingle": 0,
+				"istable": 1 if doctype in child_tables else 0,
+			}
+		for doctype, folder in APP_DOCTYPES.items():
+			payload = _load_app_doctype(folder)
+			rows[doctype] = {
+				"name": doctype,
+				"module": payload.get("module") or "ERPNext MCP",
+				"issingle": int(payload.get("issingle") or 0),
+				"istable": 0,
+			}
+		self.tables["DocType"] = rows
 
 	def next_name(self, doctype: str) -> str:
 		self.counters[doctype] = self.counters.get(doctype, 0) + 1
@@ -1399,6 +1625,14 @@ def _build_frappe() -> types.ModuleType:
 	def scrub(text):
 		return str(text or "").replace(" ", "_").replace("-", "_").lower()
 
+	def clear_cache(user=None, doctype=None, *args, **kwargs):
+		"""A no-op: this double has no meta cache to invalidate.
+
+		Present so the app can call it — adding a Custom Field without clearing
+		the cache is a real bug on a real site, and a double that raised
+		AttributeError here would push the app into not doing it.
+		"""
+
 	def delete_doc(doctype, name, force=False, ignore_permissions=False, **kwargs):
 		STORE.tables.get(doctype, {}).pop(name, None)
 
@@ -1429,6 +1663,7 @@ def _build_frappe() -> types.ModuleType:
 					other[fieldname] = new
 		return new
 
+	module.clear_cache = clear_cache
 	module.get_installed_apps = get_installed_apps
 	module.has_permission = has_permission
 	module.get_list = get_list
@@ -1682,6 +1917,9 @@ class MCPTestCase(unittest.TestCase):
 	TOKEN = "t" * 48
 
 	def setUp(self):
+		# Meta first: a test that created a DocType or a Custom Field changed the
+		# schema, and `STORE.reset` builds its tabDocType rows from it.
+		reset_meta()
 		STORE.reset()
 		frappe.conf.clear()
 		INSTALLED_DOCTYPES.clear()

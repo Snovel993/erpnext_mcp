@@ -17,6 +17,7 @@ one of them is the primary key.
 
 import frappe
 
+from . import compat
 from .errors import ToolError
 
 #: Hard ceiling on any `limit`, whatever the caller asks for. A model that says
@@ -225,6 +226,60 @@ def resolve_account(account: str, company: str = "") -> str:
 
 	scope = f" in company {company!r}" if company else ""
 	raise ToolError(f"no Account matching {account!r}{scope}. Try search_accounts to find the right name.")
+
+
+def resolve_cost_center(cost_center: str, company: str = "") -> str:
+	"""A Cost Center docname from a docname, a cost center number, or a name.
+
+	The same three-ways-to-say-it problem `resolve_account` solves, for the other
+	tree ERPNext files a posting under. Resolution order is most-specific first:
+
+	  1. exact docname
+	  2. exact `cost_center_number` (unique per company, when the site numbers them)
+	  3. exact `cost_center_name`
+	  4. case-insensitive `cost_center_name`
+
+	Unlike `resolve_account` this checks that `cost_center_number` exists on the
+	site before filtering on it. Account numbers predate every ERPNext this app
+	supports; cost center numbers do not, and selecting a column a site does not
+	have is a SQL error rather than an empty result.
+	"""
+	cost_center = (cost_center or "").strip()
+	if not cost_center:
+		raise ToolError("cost_center is required")
+	base = {"company": company} if company else {}
+
+	if frappe.db.exists("Cost Center", cost_center):
+		found = frappe.db.get_value("Cost Center", cost_center, ["name", "company"], as_dict=True)
+		if company and found and found["company"] != company:
+			raise ToolError(
+				f"cost center {cost_center!r} belongs to company {found['company']!r}, not {company!r}"
+			)
+		return cost_center
+
+	attempts = [
+		{**base, "cost_center_name": cost_center},
+		{**base, "cost_center_name": ("like", cost_center)},
+	]
+	if compat.has_field("Cost Center", "cost_center_number"):
+		attempts.insert(0, {**base, "cost_center_number": cost_center})
+
+	for filters in attempts:
+		matches = frappe.db.get_all("Cost Center", filters=filters, pluck="name", limit=25)
+		if len(matches) == 1:
+			return matches[0]
+		if len(matches) > 1:
+			raise ToolError(
+				f"{cost_center!r} matches {len(matches)} cost centers: "
+				f"{', '.join(sorted(matches)[:10])}. "
+				"Pass the full docname, or set company to narrow it."
+			)
+
+	scope = f" in company {company!r}" if company else ""
+	raise ToolError(
+		f"no Cost Center matching {cost_center!r}{scope}. "
+		"Try list_cost_centers to see the tree this company actually has."
+	)
 
 
 def _company_names() -> list[str]:

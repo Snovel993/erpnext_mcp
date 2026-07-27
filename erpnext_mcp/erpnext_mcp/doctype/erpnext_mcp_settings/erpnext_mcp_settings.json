@@ -35,6 +35,7 @@
   "allow_list_unreconciled_bank_transactions",
   "allow_search_accounts",
   "allow_propose_clean_chart",
+  "allow_list_cost_centers",
   "mutating_tools_section",
   "allow_create_journal_entry",
   "allow_submit_journal_entry",
@@ -49,6 +50,13 @@
   "disable_account_col",
   "allow_disable_account",
   "allow_import_chart_of_accounts",
+  "dimension_tools_section",
+  "allow_create_cost_center",
+  "allow_update_cost_center",
+  "dimension_tools_col",
+  "allow_create_accounting_dimension",
+  "allow_create_dimension_value",
+  "allow_set_company_defaults",
   "workflow_tools_section",
   "allow_list_workflows",
   "allow_get_workflow_state",
@@ -581,6 +589,59 @@
    "fieldname": "allow_fiscal_year_audit_packet",
    "fieldtype": "Check",
    "label": "Fiscal Year Audit Packet"
+  },
+  {
+   "default": "1",
+   "description": "Read-only. The company's cost centers as a nested tree, with numbers, group flags and disabled flags. Cost centers are the axis a posting is filed under alongside the account.",
+   "fieldname": "allow_list_cost_centers",
+   "fieldtype": "Check",
+   "label": "List Cost Centers"
+  },
+  {
+   "description": "How a posting is classified once it reaches an account: which segment of the business it belongs to (cost centers), what other axes it is filed under (accounting dimensions), and which accounts a document reaches for when nothing says (company defaults).<br><br>The read-only tree, <b>List Cost Centers</b>, is in the Accounting Read Tools section above. <b>Create Accounting Dimension</b> is the only switch in this app that can add a DocType to your site \u2014 and only when a call asks for it explicitly.",
+   "fieldname": "dimension_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Cost Centers & Dimensions"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Create one cost center under an existing group. Validates the parent and the number's uniqueness before writing anything. Cannot create a root: ERPNext gives every company exactly one, named after the company.",
+   "fieldname": "allow_create_cost_center",
+   "fieldtype": "Check",
+   "label": "Create Cost Center"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Rename, renumber or disable/enable one cost center. Moves the docname with the fields. Cannot reparent \u2014 this app ships no tool that can.",
+   "fieldname": "allow_update_cost_center",
+   "fieldtype": "Check",
+   "label": "Update Cost Center"
+  },
+  {
+   "fieldname": "dimension_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE, AND A SCHEMA CHANGE. Creates an Accounting Dimension and adds a Link custom field to the documents that carry it \u2014 and, when the call asks for it, generates the custom DocType whose records become the dimension's values. Those fields are permanent until somebody removes them in the Desk. The narrowest switch in this section to leave off.",
+   "fieldname": "allow_create_accounting_dimension",
+   "fieldtype": "Check",
+   "label": "Create Accounting Dimension"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Add one value to an existing accounting dimension \u2014 one record in the DocType that dimension points at. Touches no ledger and creates no fields.",
+   "fieldname": "allow_create_dimension_value",
+   "fieldtype": "Check",
+   "label": "Create Dimension Value"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Point the company's default account and cost center fields at real accounts, type-checked (a Receivable field has to name a Receivable account). Changes no existing posting, only what the next document picks by default. Idempotent.",
+   "fieldname": "allow_set_company_defaults",
+   "fieldtype": "Check",
+   "label": "Set Company Defaults"
   }
  ],
  "index_web_pages_for_search": 0,

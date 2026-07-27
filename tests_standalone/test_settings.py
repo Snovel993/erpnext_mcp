@@ -445,10 +445,10 @@ class SelfTest(SeededTestCase):
 		self.configure(enabled=1, allow_create_journal_entry=1)
 		report = mcp.selftest()
 		self.assertEqual(report["mutating_tools_enabled"], ["create_journal_entry"])
-		self.assertEqual(report["tools_total"], 43)
-		# 31 read tools minus the three HR ones this site cannot run, plus the
+		self.assertEqual(report["tools_total"], 49)
+		# 32 read tools minus the three HR ones this site cannot run, plus the
 		# one write tool just enabled.
-		self.assertEqual(len(report["tools_enabled"]), 29)
+		self.assertEqual(len(report["tools_enabled"]), 30)
 		self.assertEqual(sorted(report["tools_unavailable"]), sorted(HR_TOOLS))
 
 	def test_it_reports_not_ready_when_disabled(self):

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 43 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 49 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -1114,6 +1114,16 @@ Each `accounts[]` entry takes `account` plus **exactly one** of `debit` or
 `is_advance`, `bank_account`. Any other key is rejected **by name** rather than
 silently dropped.
 
+Custom accounting dimensions go in a per-line **`dimensions`** object —
+`{"member": "Member-01", "bbch_stage": "BBCH-8"}` — not alongside the fields
+above. They get their own door because a dimension's fieldname is invented by
+whoever created it, so there is no list this app could ship; and because simply
+accepting unknown keys would turn `amount` (which a model will send, meaning
+`debit`) from a corrected mistake into a silently dropped one. Every key is
+checked against `Journal Entry Account`'s own fields and every Link value
+against the records it can point at, so a dimension that does not exist yet is
+refused rather than written to nothing. See tools 47 and 48.
+
 **Refused before anything is written:** debits ≠ credits (tolerance half a cent),
 fewer than two lines, a line with both debit and credit, a line with neither, a
 negative amount, a group account, an account belonging to another company.
@@ -1148,6 +1158,7 @@ negative amount, a group account, an account belonging to another company.
   "total_credit": 1450.0,
   "line_count": 2,
   "user_remark": "Reclassify June clearing balance",
+  "dimension_fields_set": [],
   "next_step": "This is a draft and affects no balance. Submit it in ERPNext, or via submit_journal_entry if that tool is enabled."
 }
 ```
@@ -2029,13 +2040,336 @@ somebody's return. It is a starting point, not tax advice.
 
 ---
 
+# Cost centers and accounting dimensions
+
+Six tools for the *other* axes a posting is filed under. The chart of accounts
+says what kind of money a transaction is; these say which part of the business it
+belongs to, and whatever else the operator needs to slice by.
+
+**The thing to understand before tool 47.** An ERPNext Accounting Dimension does
+not hold its own values. It **points at a DocType**, and every record of that
+DocType is a value. So "a Member dimension with three members" is three ideas: a
+DocType to hold members, the dimension record plus the Link field it puts on each
+accounting document, and one record per member.
+
+```
+create_accounting_dimension(dimension_name="Member", create_master_if_missing=true)
+  ↓                                   the DocType, the dimension, the fields
+create_dimension_value(dimension_name="Member", value_name="Member-01")
+  ↓                                   one value
+create_journal_entry(accounts=[{..., "dimensions": {"member": "Member-01"}}])
+```
+
+**"Journal Entry" means the line.** ERPNext carries dimensions on `Journal Entry
+Account`, never on the Journal Entry header, because one entry books to several.
+Ask for `"Journal Entry"` and tool 47 wires the child table and reports the
+redirection in `redirected`.
+
+---
+
+## 44. `create_cost_center`
+
+**MUTATING.** Off by default. Requires the Cost Center doctype.
+
+**Arguments:** `cost_center_name` (required), `cost_center_number`,
+`parent_cost_center`, `company`, `is_group` (default false).
+
+Docnames follow the same rule accounts do — `"<number> - <name> - <abbr>"`, or
+`"<name> - <abbr>"` when unnumbered. Unlike an account number, the cost center
+number really is optional.
+
+**Refused before anything is written:** a parent that does not exist, is a leaf
+rather than a group, or belongs to another company; a number already used in that
+company; a docname already taken.
+
+**Roots.** ERPNext gives every company exactly one root cost center, named
+exactly after the company (`CostCenter.validate_mandatory`). Omitting
+`parent_cost_center` on a company that already has one is refused and the message
+names the existing root. On a company with none — a half-built site — a root can
+be created, and `cost_center_name` has to equal the company.
+
+**Example**
+
+```json
+{"name": "create_cost_center",
+ "arguments": {"company": "Example Trading Co", "cost_center_number": "3200",
+               "cost_center_name": "Harvest",
+               "parent_cost_center": "3000 - Farm Value Chain - ETC"}}
+```
+
+```json
+{
+  "name": "3200 - Harvest - ETC",
+  "cost_center_number": "3200",
+  "cost_center_name": "Harvest",
+  "parent_cost_center": "3000 - Farm Value Chain - ETC",
+  "is_group": false,
+  "disabled": false,
+  "company": "Example Trading Co",
+  "next_step": "Leaf cost center, ready to be filed against on a posting."
+}
+```
+
+---
+
+## 45. `update_cost_center`
+
+**MUTATING.** Off by default. Requires the Cost Center doctype.
+
+**Arguments:** `name` (required — docname, number or name), `company`,
+`new_cost_center_name`, `new_cost_center_number`, `disabled`.
+
+Renaming writes the fields and *then* moves the docname, in that order, for the
+reason set out under [The docname](#the-docname-which-explains-most-of-the-design):
+a Cost Center's key encodes two of its own fields and is built once, so changing
+one without the other leaves the tree showing one thing and reporting another.
+
+Unlike `update_account`, this is hand-rolled rather than delegated to ERPNext.
+ERPNext's own helper handles only the *number*, and the compensating behaviour
+that makes delegation matter for Account — syncing a rename down into child
+companies — has no cost-center equivalent. The docname rule itself is identical,
+and an in-bench test asserts a real insert produces what this app predicts.
+
+**Refused:** a value identical to the current one (nothing to change); a number
+already in use; renaming the company's root, which ERPNext requires to be named
+after the company; and any attempt to reparent — this app ships no
+`move_cost_center`, because reparenting moves no posting but changes which
+subtotal every existing one rolls up into, for periods already reported.
+
+**Disabling deletes nothing.** The cost center, its history and its GL entries
+all remain and still appear in reports covering them; it drops out of pickers.
+The response carries `gl_entries_on_this_cost_center` and a `warning` that says
+so — and, for a group, that its children were **not** disabled.
+
+---
+
+## 46. `list_cost_centers`
+
+**Read-only.** On by default. Requires the Cost Center doctype.
+
+**Arguments:** `company` (required), `include_disabled` (default false).
+
+The same nested shape `get_chart_of_accounts` returns: `children[]` is the tree,
+`flat_count` is every node in the response. Disabled cost centers are left out
+and counted in `disabled_count_excluded`, so "the tree looks short" always has an
+answer. `default_cost_center` is the company's, under whichever fieldname this
+ERPNext uses.
+
+```json
+{
+  "company": "Example Trading Co",
+  "cost_centers": [
+    {"name": "Example Trading Co - ETC", "cost_center_name": "Example Trading Co",
+     "is_group": 1, "children": [
+       {"name": "Main - ETC", "cost_center_number": null, "is_group": 0, "children": []},
+       {"name": "3000 - Farm Value Chain - ETC", "is_group": 1, "children": [
+         {"name": "3200 - Harvest - ETC", "is_group": 0, "children": []}]}]}],
+  "flat_count": 4,
+  "disabled_count_excluded": 1,
+  "include_disabled": false,
+  "default_cost_center": "Main - ETC"
+}
+```
+
+---
+
+## 47. `create_accounting_dimension`
+
+**MUTATING, and a schema change.** Off by default. Requires the Accounting
+Dimension doctype (ERPNext v12+).
+
+**Arguments**
+
+| Name | Required | Notes |
+| --- | --- | --- |
+| `dimension_name` | yes | The label. Its scrubbed form is the fieldname: `Member` → `member`, `BBCH Stage` → `bbch_stage` |
+| `master_doctype` | no | The DocType whose records are the values. Defaults to `dimension_name` |
+| `create_master_if_missing` | no | **Default false.** True generates a simple custom DocType |
+| `document_types` | no | Default `["Journal Entry", "Sales Invoice", "Purchase Invoice", "Payment Entry"]` |
+| `disabled` | no | Create it disabled — field added, dimension ignored |
+
+**What it writes**, in one transaction, so a failure leaves none of it:
+
+1. the master DocType, only when generated — `custom: 1`, so it lives entirely in
+   the database, writes no files into an app and needs no developer mode. Named
+   `field:dimension_value`, so the record's own name **is** the value and
+   `Member-01` reads as `Member-01` everywhere it is linked. Three fields: the
+   value, a description, a disabled flag.
+2. the Accounting Dimension record;
+3. one Link Custom Field per target doctype.
+
+**Why the fields are written here rather than left to ERPNext.** Inserting an
+Accounting Dimension makes ERPNext enqueue its own field-creation routine as a
+*background job* over its own fixed list. Both halves are wrong for an MCP
+caller: the next call is usually a Journal Entry that needs the field to exist
+now, and the caller asked for a specific set of doctypes. ERPNext's job still
+runs and still creates the rest of its list; both paths check for an existing
+field first, so they do not collide.
+
+**Refused before anything is written:** a dimension that already exists for that
+label or that DocType (ERPNext allows one per DocType — its values *are* that
+DocType's records, so a second would be the same dimension twice); a master that
+is a Single, a child table or a core doctype; a target doctype this site does not
+have; and any target that already has a field of that name which is not a Link to
+this master.
+
+**Not reversible through this app.** Removing a dimension means deleting the
+record and its custom fields in the Desk.
+
+**Example**
+
+```json
+{"name": "create_accounting_dimension",
+ "arguments": {"dimension_name": "Member", "create_master_if_missing": true,
+               "document_types": ["Journal Entry"]}}
+```
+
+```json
+{
+  "name": "Member",
+  "label": "Member",
+  "fieldname": "member",
+  "master_doctype": "Member",
+  "master_doctype_created": true,
+  "disabled": false,
+  "document_types_requested": ["Journal Entry"],
+  "document_types_applied": ["Journal Entry Account"],
+  "custom_fields_created": ["Journal Entry Account"],
+  "custom_fields_already_present": [],
+  "redirected": {"Journal Entry": ["Journal Entry Account"]},
+  "next_step": "Add values with create_dimension_value(dimension_name='Member', value_name=…) — each one is a Member record. Then set 'member' in a journal entry line's `dimensions` object."
+}
+```
+
+---
+
+## 48. `create_dimension_value`
+
+**MUTATING.** Off by default. Requires the Accounting Dimension doctype.
+
+**Arguments:** `dimension_name` (required — the label, the DocType, or the
+dimension's docname), `value_name` (required), `extra_fields`.
+
+Creates one record in the DocType the dimension points at. Where that DocType
+names itself from a field — which is how the masters tool 47 generates work, and
+how ERPNext's own dimension masters work — `value_name` becomes both the field
+and the docname. Where it names itself some other way, the value is created
+anyway and the response reports the name it actually got, with a note.
+
+Three ways to name the dimension because the Accounting Dimension record's own
+docname is a version detail, and a caller who created it through this app knows
+it by the label it asked for.
+
+**Refused:** an unknown dimension (the message lists the ones this site has); a
+dimension whose DocType is missing; a record of that name already present; an
+`extra_fields` key the master does not have — a typo, not something to ignore.
+
+```json
+{"name": "create_dimension_value",
+ "arguments": {"dimension_name": "Member", "value_name": "Member-01",
+               "extra_fields": {"description": "Active since 2026-01-01"}}}
+```
+
+```json
+{
+  "name": "Member-01",
+  "requested_name": "Member-01",
+  "dimension": "Member",
+  "dimension_record": "Member",
+  "master_doctype": "Member",
+  "named_by": "field:dimension_value",
+  "extra_fields": {"description": "Active since 2026-01-01"},
+  "note": "Ready to use: set it on a journal entry line's `dimensions` object."
+}
+```
+
+---
+
+## 49. `set_company_defaults`
+
+**MUTATING.** Off by default.
+
+**Arguments:** `company` (required), `defaults` (required) — an object of company
+field → account. Accounts resolve three ways, as everywhere else. An empty string
+clears a field.
+
+**Supported keys**
+
+| Key | Has to be | Because |
+| --- | --- | --- |
+| `default_receivable_account` | Receivable, Asset | ERPNext keys customer balances off `account_type` |
+| `default_payable_account` | Payable, Liability | Same, for suppliers |
+| `default_cash_account` | Cash, Asset | |
+| `default_bank_account` | Bank, Asset | |
+| `default_income_account` | Income | Sales lines with no account of their own |
+| `default_expense_account` | Expense | Purchase lines with no account of their own |
+| `cost_of_goods_sold_account` | Expense | Stock consumed against a sale |
+| `round_off_account` | Expense or Income | The cent a rounded total leaves behind |
+| `exchange_gain_loss_account` | Expense or Income | |
+| `write_off_account` | Expense or Income | |
+| `default_deferred_revenue_account` | Liability or Income | |
+| `default_deferred_expense_account` | Asset or Expense | |
+| `round_off_cost_center` | a **leaf Cost Center** | Where the rounding difference is filed |
+
+**Type-checked, not merely existence-checked.** ERPNext would accept a
+`default_receivable_account` pointed at a plain Asset account and then produce
+invoices that post but never age — and the symptom appears a quarter later with
+nothing to point at. The check is cheap; the failure it prevents is not.
+
+**Also refused:** a group account, a disabled account, an account belonging to
+another company, a group cost center, an unsupported key (by name), and a key
+this ERPNext version's Company does not have.
+
+**Nothing is written unless every value validates**, so a partially-correct call
+leaves the company exactly as it was.
+
+**Idempotent.** Every field is compared before it is written; the response
+separates `changed` from `unchanged`. That matters more than usual here, because
+`Company.save` is not a cheap write — ERPNext's `on_update` walks the company
+tree — and these are the fields a caller is most likely to set twice while
+working out a chart.
+
+```json
+{"name": "set_company_defaults",
+ "arguments": {"company": "Example Trading Co",
+               "defaults": {"default_receivable_account": "1200",
+                            "default_payable_account": "2100",
+                            "round_off_cost_center": "Main"}}}
+```
+
+```json
+{
+  "company": "Example Trading Co",
+  "changed": {
+    "default_receivable_account": ["", "1200 - Accounts Receivable - ETC"],
+    "round_off_cost_center": ["", "Main - ETC"]
+  },
+  "unchanged": ["default_payable_account"],
+  "defaults_now": {
+    "default_receivable_account": "1200 - Accounts Receivable - ETC",
+    "default_payable_account": "2100 - Accounts Payable - ETC",
+    "round_off_cost_center": "Main - ETC"
+  },
+  "idempotent": true,
+  "note": "Company defaults decide which account a document reaches for when nothing on the document says. They do not touch a single existing posting — every document already written keeps the accounts it was written with."
+}
+```
+
+A mismatch reads like this, and writes nothing:
+
+```
+default_receivable_account has to point at an account whose account_type is Receivable; '1100 - Cash - ETC' is Cash. ERPNext keys customer balances off that flag, not off the account's name or number, so this would post and then fail to reconcile. Fix it with update_account(new_account_type=…) first. Nothing was changed.
+```
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
 
 1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
-   `workflow`, `accounts`, `reports`, `files`, `collab`, `hr`, `trade`, `meta` or
-   `packets` —
+   `workflow`, `accounts`, `dimensions`, `reports`, `files`, `collab`, `hr`,
+   `trade`, `meta` or `packets` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

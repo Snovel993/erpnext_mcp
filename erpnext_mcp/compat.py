@@ -54,6 +54,21 @@ def has_field(doctype: str, fieldname: str) -> bool:
 	return bool(meta.has_field(fieldname))
 
 
+def field_meta(doctype: str, fieldname: str):
+	"""One field's definition off this site's meta, or None.
+
+	`has_field` answers "is it there"; this answers "what is it", which is what a
+	tool needs before writing a value into a field it did not declare. The
+	accounting-dimension path uses it to check that a per-line dimension value is
+	a real record of the doctype the dimension links to, rather than a string that
+	will fail ERPNext's own link validation several layers down.
+	"""
+	try:
+		return frappe.get_meta(doctype).get_field(fieldname)
+	except Exception:
+		return None
+
+
 def first_field(doctype: str, *candidates: str) -> str | None:
 	"""The first of `candidates` that exists on `doctype`, else None.
 

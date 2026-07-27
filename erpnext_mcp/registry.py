@@ -39,13 +39,27 @@ from . import audit, settings
 from .compat import doctype_exists, traceback_text
 from .errors import ToolError
 from .result import ToolResult
-from .tools import accounts, collab, files, hr, meta, mutate, packets, read, reports, trade, workflow
+from .tools import (
+	accounts,
+	collab,
+	dimensions,
+	files,
+	hr,
+	meta,
+	mutate,
+	packets,
+	read,
+	reports,
+	trade,
+	workflow,
+)
 
 _STRING = {"type": "string"}
 _NUMBER = {"type": "number"}
 _INTEGER = {"type": "integer"}
 _BOOLEAN = {"type": "boolean"}
 _OBJECT = {"type": "object"}
+_STRING_ARRAY = {"type": "array", "items": {"type": "string"}}
 
 
 def _field(kind: dict, description: str) -> dict:
@@ -313,6 +327,26 @@ TOOLS = {
 		required=("company",),
 		title="Propose a clean chart of accounts",
 	),
+	"list_cost_centers": _tool(
+		dimensions.list_cost_centers,
+		"A company's cost centers as a nested tree, each node carrying its number, "
+		"whether it is a group and whether it is disabled. Cost centers are the "
+		"axis a posting is filed under alongside the account — the segment, "
+		"department or activity the money belongs to — and only leaf cost centers "
+		"can be posted to. Disabled ones are left out unless asked for, and the "
+		"response says how many that was. Read-only.",
+		{
+			"company": _COMPANY,
+			"include_disabled": _field(
+				_BOOLEAN,
+				"true to include disabled cost centers. Default false.",
+			),
+		},
+		required=("company",),
+		title="List cost centers",
+		available=_needs_doctype("Cost Center"),
+		requires="the Cost Center DocType, which ships with ERPNext's Accounts module",
+	),
 	# ── mutating: every one default OFF ─────────────────────────────────────
 	"create_journal_entry": _tool(
 		mutate.create_journal_entry,
@@ -331,7 +365,8 @@ TOOLS = {
 					"The entry's lines. Each object needs an account and exactly "
 					"one of debit or credit, both positive. Optional per line: "
 					"party_type, party, cost_center, project, reference_type, "
-					"reference_name, user_remark, exchange_rate."
+					"reference_name, user_remark, exchange_rate, and a "
+					"`dimensions` object for any custom accounting dimension."
 				),
 				"items": {
 					"type": "object",
@@ -347,6 +382,17 @@ TOOLS = {
 						"reference_name": _field(_STRING, "That document's name."),
 						"user_remark": _field(_STRING, "Per-line remark."),
 						"exchange_rate": _field(_NUMBER, "Required for a foreign-currency account."),
+						"dimensions": _field(
+							_OBJECT,
+							"Custom accounting dimensions for THIS line, as fieldname "
+							'→ value, e.g. {"member": "Member-01", "bbch_stage": '
+							'"BBCH-8"}. Every key is checked against Journal Entry '
+							"Account's own fields, and a Link value against the "
+							"records it can point at, so a dimension that has not "
+							"been created yet is refused by name rather than silently "
+							"dropped. Cost centre and project are ordinary line "
+							"fields above, not dimensions.",
+						),
 					},
 					"required": ["account"],
 					"additionalProperties": False,
@@ -614,6 +660,230 @@ TOOLS = {
 		mutating=True,
 		idempotent=True,
 		title="Import a chart of accounts",
+	),
+	# ── dimensions: how a posting is classified, every one default OFF ──────
+	"create_cost_center": _tool(
+		dimensions.create_cost_center,
+		"MUTATING (default OFF). Create one Cost Center under an existing group. "
+		"A cost center is the second axis a posting is filed under: the account "
+		"says what kind of money it is, the cost center says which part of the "
+		"business it belongs to.\n\n"
+		"Refuses before writing anything if the parent does not exist, is a leaf "
+		"rather than a group, or belongs to another company; if the cost center "
+		"number is already used in that company; or if the resulting docname is "
+		"taken. Reversible in the sense that nothing else is touched — a cost "
+		"center with no postings against it can be disabled with "
+		"update_cost_center.\n\n"
+		"Cannot normally create a root: ERPNext gives every company exactly one, "
+		"named after the company, when its chart of accounts is built. Omitting "
+		"parent_cost_center on a company that already has one is refused with the "
+		"root's name.",
+		{
+			"company": _COMPANY,
+			"cost_center_name": _field(
+				_STRING,
+				"Cost center name as it should read, e.g. 'Harvest'. Becomes part of "
+				"the docname: '<number> - <name> - <company abbr>'.",
+			),
+			"cost_center_number": _field(
+				_STRING,
+				"Optional number, unique within the company, e.g. '3200'. Unlike an "
+				"account number this is genuinely optional — ERPNext names an "
+				"unnumbered cost center '<name> - <abbr>'.",
+			),
+			"parent_cost_center": _field(
+				_STRING,
+				"The group this hangs under. Docname, number or name. Must already "
+				"exist and be a group. Required unless the company has no root cost "
+				"center at all.",
+			),
+			"is_group": _field(
+				_BOOLEAN,
+				"true to create a group (a heading that cannot be posted to). Default "
+				"false, a leaf cost center.",
+			),
+		},
+		required=("cost_center_name",),
+		mutating=True,
+		title="Create a cost center",
+		available=_needs_doctype("Cost Center"),
+		requires="the Cost Center DocType, which ships with ERPNext's Accounts module",
+	),
+	"update_cost_center": _tool(
+		dimensions.update_cost_center,
+		"MUTATING (default OFF). Rename, renumber or disable/enable one Cost "
+		"Center. The rename writes the fields and then moves the docname, in that "
+		"order — a Cost Center's docname encodes its own number and name and is "
+		"built once, so changing one without the other leaves the tree showing "
+		"one thing and reporting another.\n\n"
+		"Deliberately CANNOT change the parent, and this app ships no tool that "
+		"can: reparenting moves no posting but changes which subtotal every "
+		"existing one rolls up into, retroactively, for periods already reported.\n\n"
+		"Refuses to rename the company's root cost center, which ERPNext requires "
+		"to be named exactly after the company. Disabling deletes nothing — the "
+		"cost center, its history and its GL entries all remain and still appear "
+		"in reports covering them; it drops out of pickers, and the response says "
+		"how many postings are affected and whether any children were left "
+		"enabled.",
+		{
+			"name": _field(_STRING, "The cost center: docname, number or name."),
+			"company": _COMPANY,
+			"new_cost_center_name": _field(
+				_STRING,
+				"New cost center name. The docname is rebuilt to match.",
+			),
+			"new_cost_center_number": _field(
+				_STRING,
+				"New number. Must be free in this company. The docname is rebuilt.",
+			),
+			"disabled": _field(_BOOLEAN, "true to disable, false to re-enable."),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Update a cost center",
+		available=_needs_doctype("Cost Center"),
+		requires="the Cost Center DocType, which ships with ERPNext's Accounts module",
+	),
+	"create_accounting_dimension": _tool(
+		dimensions.create_accounting_dimension,
+		"MUTATING (default OFF). Create an Accounting Dimension — a third, fourth "
+		"or fifth axis to file postings under, beyond account and cost center — "
+		"and add its Link field to the documents that should carry it.\n\n"
+		"THE THING TO UNDERSTAND FIRST: an Accounting Dimension does not hold its "
+		"own values. It points at a DocType, and every record of that DocType is a "
+		"value. So a 'Member' dimension needs a Member DocType. Pass an existing "
+		"one as master_doctype, or set create_master_if_missing=true to have a "
+		"simple one generated (a value field, a description and a disabled flag), "
+		"named so that the record's own name IS the value.\n\n"
+		"SIDE EFFECTS. Writes up to three kinds of document: the master DocType "
+		"(only when generated — a custom DocType, stored in the database, no files "
+		"and no developer mode), the Accounting Dimension record, and one Link "
+		"Custom Field per target doctype. All in one transaction, so a failure "
+		"leaves none of it. ERPNext will separately, in a background job, add the "
+		"same field to every doctype in its own list; that is additive and does "
+		"not disturb these.\n\n"
+		"JOURNAL ENTRY MEANS THE LINE. ERPNext carries dimensions on Journal Entry "
+		"Account, never on the Journal Entry header, because one entry books to "
+		"several. Asking for 'Journal Entry' wires up the child table and the "
+		"response reports the redirection.\n\n"
+		"Refuses if a dimension already exists for that label or that DocType "
+		"(ERPNext allows one per DocType), if the master is a Single, a child "
+		"table or a core doctype, or if any target doctype already has a field of "
+		"that name that is not a Link to this master. Not reversible through this "
+		"app: removing a dimension means deleting the record and its custom fields "
+		"in the Desk.",
+		{
+			"dimension_name": _field(
+				_STRING,
+				"The dimension's label, e.g. 'Member' or 'BBCH Stage'. Its scrubbed "
+				"form becomes the fieldname ('member', 'bbch_stage'), which is the key "
+				"you then use in a journal entry line's `dimensions` object.",
+			),
+			"master_doctype": _field(
+				_STRING,
+				"The DocType whose records are this dimension's values. Defaults to "
+				"dimension_name. Pass an existing DocType to reuse it.",
+			),
+			"create_master_if_missing": _field(
+				_BOOLEAN,
+				"true to generate the master DocType when it does not exist. Default "
+				"FALSE — creating a DocType is a schema change, so it has to be asked "
+				"for.",
+			),
+			"document_types": {
+				**_STRING_ARRAY,
+				"description": (
+					"Which documents should carry this dimension. Default: Journal "
+					"Entry, Sales Invoice, Purchase Invoice, Payment Entry. Naming a "
+					"child table directly works too."
+				),
+			},
+			"disabled": _field(
+				_BOOLEAN,
+				"true to create it disabled — the field is added but ERPNext ignores "
+				"the dimension. Default false.",
+			),
+		},
+		required=("dimension_name",),
+		mutating=True,
+		title="Create an accounting dimension",
+		available=_needs_doctype("Accounting Dimension"),
+		requires="the Accounting Dimension DocType, which ERPNext added in v12",
+	),
+	"create_dimension_value": _tool(
+		dimensions.create_dimension_value,
+		"MUTATING (default OFF). Add one value to an Accounting Dimension — which "
+		"in ERPNext means creating one record in the DocType that dimension points "
+		"at. Find the dimension by its label ('Member'), by its DocType, or by its "
+		"docname; the response says which master was written to.\n\n"
+		"Where the master names itself from a field (which is how the masters this "
+		"app generates work), value_name becomes both the field and the docname, so "
+		"'Member-01' reads as 'Member-01' everywhere it is linked. Where the master "
+		"names itself some other way — a naming series, say — the value is created "
+		"anyway and the response reports the name it actually got.\n\n"
+		"Refuses if the dimension does not exist, if its DocType is missing, if a "
+		"record of that name is already there, or if extra_fields names a field the "
+		"master does not have. Creates exactly one record and touches no ledger.",
+		{
+			"dimension_name": _field(
+				_STRING,
+				"The dimension's label, DocType or docname, e.g. 'Member'.",
+			),
+			"value_name": _field(
+				_STRING,
+				"The value, e.g. 'Member-01' or 'BBCH-8'. Becomes the record's name "
+				"where the master allows it.",
+			),
+			"extra_fields": _field(
+				_OBJECT,
+				"Further fields to set on the master record, verbatim, e.g. "
+				'{"description": "Retired 2026-01-01", "disabled": 1}. Every key is '
+				"checked against the master's own fields; an unknown one is refused by "
+				"name rather than dropped.",
+			),
+		},
+		required=("dimension_name", "value_name"),
+		mutating=True,
+		title="Create a dimension value",
+		available=_needs_doctype("Accounting Dimension"),
+		requires="the Accounting Dimension DocType, which ERPNext added in v12",
+	),
+	"set_company_defaults": _tool(
+		dimensions.set_company_defaults,
+		"MUTATING (default OFF). Point a Company's default account and cost centre "
+		"fields at real accounts, in one call. These are what a document reaches "
+		"for when nothing on the document says — they change no existing posting, "
+		"only what the next one picks by default.\n\n"
+		"TYPE-CHECKED, not merely existence-checked. default_receivable_account "
+		"must point at a Receivable-type account, default_payable_account at a "
+		"Payable, default_bank_account at a Bank, and so on; every field also has "
+		"to match the right root type. ERPNext keys party ledgers and ageing "
+		"reports off account_type rather than off an account's name or number, so "
+		"a mismatched default posts fine and stops reconciling a quarter later. "
+		"Also refuses group accounts, disabled accounts, accounts belonging to "
+		"another company, and a group cost center.\n\n"
+		"IDEMPOTENT. Every field is compared before it is written; a re-run of the "
+		"same call changes nothing and says so. The response separates `changed` "
+		"from `unchanged`. Nothing is written at all unless every value in the "
+		"request validates, so a partially-correct call leaves the company exactly "
+		"as it was. Pass an empty string for a field to clear it.",
+		{
+			"company": _COMPANY,
+			"defaults": _field(
+				_OBJECT,
+				"Company field → account (docname, number or name), e.g. "
+				'{"default_receivable_account": "1200", "default_bank_account": '
+				'"1110", "round_off_cost_center": "Main"}. Supported keys: '
+				+ ", ".join(dimensions.SUPPORTED_COMPANY_DEFAULTS)
+				+ ". round_off_cost_center takes a Cost Center; every other key takes "
+				"an Account. An unsupported key is refused by name.",
+			),
+		},
+		required=("company", "defaults"),
+		mutating=True,
+		idempotent=True,
+		title="Set company defaults",
 	),
 	# ── workflow ────────────────────────────────────────────────────────────
 	"list_workflows": _tool(

@@ -3,6 +3,163 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.6.0 — 2026-07-27
+
+Cost centers and accounting dimensions. Six tools, so the *other* axes a posting
+is filed under can be built through the MCP rather than by hand in the Desk.
+v0.5.0 made the chart of accounts reachable — what kind of money a transaction
+is. This release makes the rest of the classification reachable: which part of
+the business it belongs to, whatever else the operator needs to slice by, and
+which accounts a document reaches for when nothing on it says.
+
+### Added
+
+**`list_cost_centers`** (read-only, on by default). One company's cost centers as
+a nested tree, in the same shape `get_chart_of_accounts` returns. Disabled cost
+centers are left out and *counted*, in `disabled_count_excluded`, so "the tree
+looks short" always has an answer rather than being a silent omission.
+
+**`create_cost_center`** (mutating, default OFF). One cost center under an
+existing group. Refuses before writing if the parent is missing, is a leaf, or
+belongs to another company, or if the number is taken in that company.
+
+Cannot casually add a root. ERPNext gives every company exactly one root cost
+center and requires it to be named exactly after the company
+(`CostCenter.validate_mandatory`), so omitting `parent_cost_center` on a company
+that already has one is refused with the existing root named — which is nearly
+always what a caller who forgot the parent needs to see. A company with no cost
+centers at all can still be given its root.
+
+**`update_cost_center`** (mutating, default OFF). Rename, renumber,
+disable/enable. The docname moves with the fields, in that order, for the reason
+set out at the top of `tools/accounts.py`: a Cost Center's key encodes two of its
+own fields and is built once by `autoname`, so changing one without the other
+leaves the tree showing one thing and reporting another, permanently.
+
+Hand-rolled rather than delegated, unlike `update_account`, and that is a
+decision rather than an omission. ERPNext's own helper
+(`accounts.utils.update_number_field`) handles only the *number*, and the
+compensating behaviour that makes delegation matter for Account — syncing a
+rename down into child companies — has no cost-center equivalent to reproduce.
+The naming rule is identical to Account's, and an in-bench test asserts that a
+real insert produces exactly what this app predicts.
+
+Deliberately cannot reparent, and this release ships no `move_cost_center`:
+reparenting moves no posting but changes which subtotal every existing one rolls
+up into, retroactively, for periods already reported. Also refuses to rename the
+company's root. Disabling deletes nothing and says so — the response carries the
+GL entry count, and, for a group, that its children were **not** disabled.
+
+**`create_accounting_dimension`** (mutating, default OFF). The one to read the
+description of before enabling.
+
+An ERPNext Accounting Dimension does not hold its own values: it **points at a
+DocType**, and every record of that DocType is a value. So this tool writes up to
+three things, in one transaction so a failure leaves none of them — the master
+DocType (only when asked for, via `create_master_if_missing`), the Accounting
+Dimension record, and one Link Custom Field per target doctype.
+
+- **A generated master is a custom DocType** (`custom: 1`): it lives entirely in
+  the database, writes no files into an app and needs no developer mode, and an
+  operator can delete it from the Desk. It is named `field:dimension_value`, so
+  the record's own name *is* the value and `Member-01` reads as `Member-01`
+  everywhere it is linked rather than as `MEM-00001`.
+- **The custom fields are written here rather than left to ERPNext.** Inserting
+  an Accounting Dimension makes ERPNext enqueue its own field-creation routine as
+  a *background job* over its own fixed hook list. Both halves are wrong for an
+  MCP caller: the next call is usually a Journal Entry that needs the field to
+  exist now, and the caller asked for a specific set of doctypes. ERPNext's job
+  still runs and still creates the rest of its list; both paths check for an
+  existing field first, so they do not collide.
+- **"Journal Entry" means the line.** ERPNext carries dimensions on `Journal
+  Entry Account`, never on the header, because one entry books to several. Asking
+  for `"Journal Entry"` wires up the child table and the response reports the
+  redirection in `redirected`, rather than putting a field on a header that
+  nothing would ever read.
+
+Refuses a dimension that already exists for that label or that DocType (ERPNext
+allows one per DocType — its values *are* that DocType's records), a master that
+is a Single, a child table or a core doctype, a target doctype this site does not
+have, and any target that already has a field of that name which is not a Link to
+this master. Every one of those is checked before anything is written: a
+half-wired dimension is worse than none, because it looks configured.
+
+**`create_dimension_value`** (mutating, default OFF). One record in the DocType a
+dimension points at. Finds the dimension by its label, by its DocType or by its
+docname — three ways because the Accounting Dimension record's own docname is a
+version detail, and a caller who created it through this app knows it by the
+label it asked for. `extra_fields` is applied verbatim, with every key checked
+against the master's own fields; an unknown one is a typo and is refused by name.
+
+**`set_company_defaults`** (mutating, default OFF, idempotent). Points a
+Company's default account and cost center fields at real accounts, in one call:
+receivable, payable, cash, bank, income, expense, COGS, round-off (account and
+cost center), exchange gain/loss, write-off, and deferred revenue/expense.
+
+**Type-checked, not merely existence-checked**, and that is the whole point.
+ERPNext keys party ledgers and every ageing report off `account_type` rather than
+off an account's name or number, so a `default_receivable_account` pointed at a
+plain Asset account produces invoices that post but never age — and the symptom
+appears a quarter later with nothing to point at. Each field also has to match
+the right root type. Group accounts, disabled accounts, accounts belonging to
+another company and group cost centers are all refused, as is a key this ERPNext
+version's Company does not have.
+
+Nothing is written unless *every* value in the request validates, so a
+partially-correct call leaves the company exactly as it was. And every field is
+compared before it is written, so a re-run changes nothing and says so — which
+matters more than usual because `Company.save` is not a cheap write.
+
+### Changed
+
+**`create_journal_entry` accepts a per-line `dimensions` object.** Custom
+accounting dimensions go in `{"member": "Member-01", "bbch_stage": "BBCH-8"}` on
+the line, not alongside `debit` and `cost_center`.
+
+The separate door is deliberate. A dimension's fieldname is invented by whoever
+created it, so there is no list this app could ship; but simply accepting unknown
+per-line keys would turn `amount` — which a model will send, meaning `debit` —
+from a corrected mistake into a silently dropped one. Unknown top-level keys stay
+refused by name; passing a key through `dimensions` is an assertion that the
+caller meant a dimension.
+
+Both halves are then checked against the site itself: the field has to exist on
+`Journal Entry Account`, and a Link value has to be a record of what it links to.
+Without the first, a dimension nobody created yet would be written to an
+attribute that never reaches a column and the entry would look filed and not be.
+Without the second, ERPNext's own link validation runs on *submit*, so a bad
+value would produce a draft that cannot be posted rather than a call that failed.
+The response reports `dimension_fields_set`.
+
+**`args.resolve_cost_center`** joins `resolve_account`: a cost center can be
+named by its docname, its number or its name, anywhere one is taken. Unlike the
+account resolver it checks that `cost_center_number` exists on the site before
+filtering on it — account numbers predate every ERPNext this app supports, cost
+center numbers do not, and selecting a missing column is a hard SQL error rather
+than an empty result.
+
+**`compat.field_meta`** returns a field's definition rather than only whether it
+exists, which is what lets the dimension paths check a value against the DocType
+a Link actually points at.
+
+### Notes
+
+Six new switches on the settings form — `list_cost_centers` on by default,
+`create_cost_center`, `update_cost_center`, `create_accounting_dimension`,
+`create_dimension_value` and `set_company_defaults` off — seeded by the existing
+`after_migrate` hook, so no bespoke patch. `create_accounting_dimension` is the
+only switch in this app that can add a DocType to a site, and only when a call
+asks for it explicitly; it is the narrowest one to leave off.
+
+The catalogue is now 49 tools: 32 read-only, 17 mutating.
+
+The standalone test double gained real schema mutation to cover this: inserting
+a DocType makes it creatable, and inserting a Custom Field makes
+`frappe.get_meta` report the field, with the schema reset between tests. Without
+that, the case the whole feature exists for — create a dimension, create a value,
+put it on a journal entry line, read it back off the stored document — could not
+have been written at all.
+
 ## 0.5.0 — 2026-07-27
 
 Chart-of-accounts management. Six tools, so a complete ERPNext chart can be

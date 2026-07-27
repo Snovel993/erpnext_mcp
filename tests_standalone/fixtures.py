@@ -26,13 +26,31 @@ OTHER_ABBR = "SEL"
 
 def seed_site() -> None:
 	"""Load the whole fixture. Call after `STORE.reset()`."""
+	_modules()
 	_currencies()
 	_companies()
 	_fiscal_years()
 	_accounts()
+	_cost_centers()
 	_gl_entries()
 	_journal_entries()
 	_banking()
+
+
+def _modules() -> None:
+	"""Module Defs, because a generated DocType has to belong to one.
+
+	`Accounts` and `Custom` are the two `create_accounting_dimension` looks for,
+	in that order. Both are here so the preferred branch is the one the tests
+	exercise; a test that wants the fallback removes the Accounts row.
+	"""
+	STORE.seed(
+		"Module Def",
+		[
+			{"name": "Accounts", "app_name": "erpnext"},
+			{"name": "Custom", "app_name": "frappe"},
+		],
+	)
 
 
 def _currencies() -> None:
@@ -155,6 +173,62 @@ def sales(company_abbr: str = MAIN_ABBR) -> str:
 
 def supplies(company_abbr: str = MAIN_ABBR) -> str:
 	return f"5100 - Office Supplies - {company_abbr}"
+
+
+#: (cost_center_name, number, is_group, parent_name, disabled)
+#:
+#: Shaped like a real one: the root is named after the company (ERPNext's own
+#: rule, and what makes `create_cost_center` refuse a second root), `Main` is the
+#: unnumbered default every company gets, and `Operations` is a numbered group
+#: with a numbered child — which is what the renumber and rename paths need.
+_COST_CENTERS = [
+	("__company__", "", 1, None, 0),
+	("Main", "", 0, "__company__", 0),
+	("Operations", "100", 1, "__company__", 0),
+	("Field Work", "110", 0, "Operations", 0),
+	("Retired Depot", "190", 0, "Operations", 1),
+]
+
+
+def _cost_center_docname(cost_center_name: str, number: str, abbr: str) -> str:
+	parts = [cost_center_name, abbr]
+	if number:
+		parts.insert(0, number)
+	return " - ".join(parts)
+
+
+def cost_center(name: str, company_abbr: str = MAIN_ABBR) -> str:
+	"""A fixture cost center's docname, from its plain name."""
+	company = MAIN if company_abbr == MAIN_ABBR else OTHER
+	for cost_center_name, number, *_rest in _COST_CENTERS:
+		plain = company if cost_center_name == "__company__" else cost_center_name
+		if plain == name or cost_center_name == name:
+			return _cost_center_docname(plain, number, company_abbr)
+	raise KeyError(name)
+
+
+def _cost_centers() -> None:
+	rows = []
+	counter = 0
+	for company, abbr in ((MAIN, MAIN_ABBR), (OTHER, OTHER_ABBR)):
+		for cost_center_name, number, is_group, parent, disabled in _COST_CENTERS:
+			counter += 1
+			plain = company if cost_center_name == "__company__" else cost_center_name
+			parent_plain = company if parent == "__company__" else parent
+			rows.append(
+				{
+					"name": _cost_center_docname(plain, number, abbr),
+					"cost_center_name": plain,
+					"cost_center_number": number,
+					"parent_cost_center": (cost_center(parent_plain, abbr) if parent else ""),
+					"is_group": is_group,
+					"disabled": disabled,
+					"company": company,
+					"lft": counter * 2,
+					"rgt": counter * 2 + 1,
+				}
+			)
+	STORE.seed("Cost Center", rows)
 
 
 def _gl_entries() -> None:
