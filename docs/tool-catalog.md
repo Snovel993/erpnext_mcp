@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 37 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 43 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -1688,12 +1688,282 @@ earnings, the two sides legitimately differ. The flag says so.
 
 ---
 
+# Chart of accounts
+
+Five write tools and one planner, over the chart itself rather than postings
+into it. They are grouped separately here for the same reason they have their
+own settings section: a bad journal entry is one wrong number that a reversing
+entry fixes, while a bad reparent changes what every balance-sheet subtotal has
+meant, retroactively, for every period already reported.
+
+## The docname, which explains most of the design
+
+An Account's primary key is `"<number> - <name> - <abbr>"`, built by ERPNext's
+`autoname` at insert and **never rebuilt afterwards**. Two consequences run
+through everything below:
+
+- Renaming an account means changing two fields *and* moving the document. Doing
+  either half alone leaves an account that is called one thing and reports
+  another, permanently. `update_account` delegates both halves to ERPNext's own
+  `update_account_number`.
+- A dry run has to *predict* the docname, since nothing has been inserted yet.
+  `charts.account_docname` reproduces the rule; an in-bench test asserts the
+  prediction matches what a real insert produces.
+
+And one rule that is ERPNext's, not this app's: **a root account cannot be
+saved at all.** `Account.validate_root_details` throws "Root cannot be edited"
+on any save of an account with no parent. So roots cannot be re-typed, disabled,
+moved, or created by `create_account` — only renamed, which goes down a
+different path, and created by `import_chart_of_accounts` as part of a tree.
+
+---
+
+## 38. `create_account`
+
+**MUTATING. Default OFF.**
+
+**Arguments:** `company`, `account_number`, `account_name`, `root_type`,
+`parent_account` (all required), `is_group`, `account_type`, `account_currency`,
+`tax_rate`.
+
+Checks, all before anything is written:
+
+| Check | Refusal |
+| --- | --- |
+| Parent exists, in this company, and is a group | `is a ledger account, not a group` |
+| `root_type` matches the parent's | `does not match parent_account …, whose root_type is …` |
+| `account_number` free in this company | `already used by '1100 - Cash - ETC'` |
+| The computed docname is free | `an Account named … already exists` |
+| `account_type` is one this site offers | lists the site's own options |
+| `account_type` can sit under this `root_type` | `belongs under root_type Liability, not 'Asset'` |
+| `account_currency` exists | `no Currency named 'ZZZ'` |
+
+`root_type` is required even though it is derivable from the parent. That is
+deliberate: it makes the caller state its intent, so this tool can check it
+rather than infer it.
+
+```json
+{"name": "tools/call", "arguments": {
+  "company": "Example Trading Co", "account_number": "1150",
+  "account_name": "Money Market", "root_type": "Asset",
+  "parent_account": "1100", "account_type": "Bank"}}
+```
+
+```json
+{
+  "name": "1150 - Money Market - ETC",
+  "account_number": "1150",
+  "parent_account": "1100 - Current Assets - ETC",
+  "root_type": "Asset",
+  "report_type": "Balance Sheet",
+  "account_type": "Bank",
+  "is_group": false,
+  "disabled": false,
+  "company": "Example Trading Co",
+  "next_step": "Ledger account, ready to post to."
+}
+```
+
+---
+
+## 39. `update_account`
+
+**MUTATING. Default OFF.**
+
+**Arguments:** `name` (required), `company`, `new_account_name`,
+`new_account_number`, `new_account_type`, `disabled`. At least one `new_*` or
+`disabled` is required.
+
+Returns the account's new shape plus `previous_name`, `renamed`, `changes` (a
+map of `field → [before, after]`) and `rename_method` — which will read
+`erpnext update_account_number` on any current ERPNext, and names the legacy
+fallback otherwise.
+
+**It cannot reparent.** `new_parent_account` is not in the schema. Renaming is
+routine and reversible; moving is neither, and keeping them apart means an
+operator can enable one without the other.
+
+Two refusals worth knowing about:
+
+- **Root accounts** cannot have their type or disabled flag changed, because
+  ERPNext will not save a root. Renaming and renumbering still work.
+- **Crossing the Receivable/Payable boundary** on an account that already has GL
+  entries is refused. ERPNext keys party balances off that flag; flipping it on
+  an account with history leaves the ledger silently unreconciled.
+
+---
+
+## 40. `move_account`
+
+**MUTATING. Default OFF. Destructive hint.**
+
+**Arguments:** `name`, `new_parent_account` (both required), `company`.
+
+Validates that the new parent is a group, in the same company, with the same
+`root_type`, and that the move would not create a cycle — the cycle check walks
+the `parent_account` chain rather than comparing `lft`/`rgt`, because a stale
+nested set would turn a wrong answer into an infinite loop inside a tree rebuild.
+
+The response carries `gl_entries_on_this_account` and this note, which is the
+whole reason the tool is separate:
+
+> Reparenting does not move a single GL Entry — every posting stays exactly
+> where it was. What changes is which subtotal on the balance sheet and P&L those
+> postings roll up into, for every period, including ones already reported.
+
+---
+
+## 41. `disable_account`
+
+**MUTATING. Default OFF. Destructive hint.**
+
+**Arguments:** `name`, `reason` (both required), `company`.
+
+ERPNext's soft delete. Nothing is removed — the account, its history and its GL
+entries all remain, and `update_account(disabled=false)` puts it back.
+
+**Refuses any account with GL entries in the current fiscal year.** That is the
+line between tidying the chart and breaking this year's reports: a disabled
+account drops out of pickers and out of some period comparisons, and doing that
+to an account the year is still posting through produces figures nobody can
+reconcile. The current fiscal year is resolved the way ERPNext resolves it —
+company-restricted years beat global ones. On a site where no fiscal year covers
+today, the window falls back to the trailing 365 days, which is wider and
+therefore errs towards refusing; the response says which window was used.
+
+Also refuses a root account, and reports `child_accounts` when disabling a
+group, because its children are **not** disabled by this call and stay postable.
+
+`reason` goes onto the account's comment thread and into the audit log.
+
+---
+
+## 42. `import_chart_of_accounts`
+
+**MUTATING. Default OFF.**
+
+**Arguments:** `company`, `accounts_json` (both required), `dry_run`.
+
+**`dry_run` defaults to `true`,** and that default is load-bearing: an
+accidental call — a model retrying, a client replaying a message — must not be
+able to rearrange a live chart of accounts, and the only way to guarantee that
+is for the dangerous behaviour to be the one you ask for. An unparseable
+`dry_run` is an error, not a vote for false.
+
+`accounts_json` accepts a list of root accounts, a JSON string of the same, or
+the whole `propose_clean_chart` response (its `accounts` key is used). Per node:
+`account_number`, `account_name`, `root_type` (required on roots, inherited
+below), `account_type`, `account_currency`, `tax_rate`, `is_group`,
+`description`, `children`, and on a root node `parent_account` to graft the
+subtree onto an existing group instead of adding a new root. Unknown keys are
+rejected by name.
+
+**The plan.** Every call returns `accounts[]` in dependency order — parents
+before children — each row carrying `action`, the predicted `docname`, its
+`parent_account`, `root_type`, `account_type` and `depth`:
+
+| `action` | Meaning |
+| --- | --- |
+| `create` | Would be created. |
+| `created` | Was created (real runs only). |
+| `skip` | Already present with the same number *and* the same name. Left exactly as it is — this is what makes re-running an import safe. |
+| `error` | Something has to be fixed first. `note` says what. |
+
+Matching an existing account on the number alone would be how a reviewed chart
+silently comes to mean something else, so anything beyond a name match — a
+group/ledger mismatch, a different root type, a different parent — is an `error`
+rather than a `skip`. An import will never reparent or rename an account that
+already exists.
+
+**`blocking_problems`** (dry runs only) is the list worth reading. One bad group
+takes its whole subtree with it, so five real problems can produce seventy error
+rows; `blocking_problems` holds only the causes, and every other error row is a
+child of something that cannot be created.
+
+**On a company built from a bundled ERPNext chart, expect collisions.** ERPNext's
+"Standard with Numbers" numbers its own roots 1000/2000/3000/4000/5000 and its
+groups 1100, 1200, 1700 and so on — the same convention this template uses,
+because it is the convention. A company created that way will report thirty-odd
+numbers already in use, and the import refuses until they are freed. Renumbering
+the bundled accounts out of the way first with `update_account` (prefixing each
+with a 9, say) is the straightforward fix, and `propose_clean_chart` lists
+exactly which ones. Disabling one does not free its number, and this app has no
+delete tool.
+
+**Atomicity.** A real run is one transaction. The first failure rolls the whole
+import back; there is no half-built tree to unpick, which matters more here than
+anywhere else in this app because a partial tree has orphaned groups in it.
+
+Capped at 400 accounts per call — ERPNext rebuilds the account nested set on
+every insert, and refusing with a number beats timing out half way.
+
+---
+
+## 43. `propose_clean_chart`
+
+**Read-only.** On by default.
+
+**Arguments:** `company` (required), `template` (default `us_llc_farm`).
+
+Returns a complete chart in exactly the shape tool 42 takes, plus what a
+reviewer needs to judge it:
+
+| Key | What it is |
+| --- | --- |
+| `accounts` | The tree, ready to pass to `import_chart_of_accounts`. |
+| `optional_accounts` | Accounts a small operation will not need, so they can be struck first. |
+| `account_type_adjustments` | Every `account_type` swapped for one this ERPNext actually offers, with the reason. |
+| `existing_root_accounts` | What the company already has at the top of its chart. |
+| `account_numbers_already_in_use` | Template numbers that would collide. |
+| `notes` | Caveats from the template author. |
+| `warning` | Set when the company already has roots — see below. |
+
+**Importing adds roots, it does not replace them.** ERPNext will not let a root
+be edited or moved once created, so a company that already has a chart ends up
+with two sets of roots and the old ones have to be retired with
+`disable_account`. The warning says so, and `existing_root_accounts` is how you
+see what you are in for before running anything.
+
+**Templates are static data.** They live in `erpnext_mcp/charts/` as plain
+Python literals and never touch the database, which is what makes a proposal
+reviewable, diffable and version-controllable before it runs. The package
+auto-discovers them, so a new one is a single file drop.
+
+### `us_llc_farm`
+
+128 accounts — 30 groups, 98 ledgers — for a US farming LLC, written with tree
+fruit in mind. Numbering is the convention a US bookkeeper expects: 1000s
+assets, 2000s liabilities, 3000s equity, 4000s income, 5000s COGS, 6000s
+operating expenses, 7000s non-operating. Gaps are deliberate.
+
+Three things it does that a generic chart does not:
+
+- **Crop labour is separated from administrative wages** — `5150 Direct Farm
+  Labor` under COGS, `6110 Wages - Administrative` under operating expenses. A
+  cost per bin means nothing if the two are mixed.
+- **Orchard-specific capital is broken out** under `1730 Machinery & Equipment`:
+  trellis, netting, wind machines, frost fans, platforms.
+- **`2120 Current Pay Period - Due to Employees`** is a live balance, not an
+  accrual. It is meant to be updated continuously as work lands — bucket picks
+  as they are recorded, hours as they accumulate — so it reads at any moment as
+  real-time wage exposure, and flushes to zero when payroll is processed. Its
+  description says exactly that, because a month-end adjusting entry dropped in
+  on top double-counts against the continuous postings and destroys the one
+  property the account exists for.
+
+Equity is the part that is entity-specific, which is why the entity type is in
+the template key rather than a flag: `us_c_corp`, `us_s_corp` and
+`us_partnership` will differ from this almost entirely in the 3000s, and
+pretending one chart covers all four would put the wrong equity structure on
+somebody's return. It is a starting point, not tax advice.
+
 # Adding a tool
 
 Everything a tool needs is in two places:
 
 1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
-   `workflow`, `reports`, `files`, `collab`, `hr`, `trade`, `meta` or `packets` —
+   `workflow`, `accounts`, `reports`, `files`, `collab`, `hr`, `trade`, `meta` or
+   `packets` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

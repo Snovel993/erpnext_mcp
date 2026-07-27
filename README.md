@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **37 tools** — 30 read-only, 7 mutating.
+- **43 tools** — 31 read-only, 12 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -240,7 +240,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 37 tools
+## The 43 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -249,7 +249,7 @@ Tools whose site prerequisite is missing are not advertised at all — on a site
 without Frappe HR, the three HR tools simply do not exist as far as a client is
 concerned.
 
-### Read-only — 30, all ON by default, each individually switchable
+### Read-only — 31, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -265,6 +265,7 @@ concerned.
 | `get_chart_of_accounts` | The chart as a nested tree, optionally one root type. |
 | `list_unreconciled_bank_transactions` | The reconciliation worklist. |
 | `search_accounts` | Turn "cash clearing" into a docname. Ranked best-first. |
+| `propose_clean_chart` | A complete numbered chart of accounts for a company, from a static template, in the shape `import_chart_of_accounts` takes. Reports what it would collide with. Creates nothing. |
 
 **Workflow**
 
@@ -326,7 +327,9 @@ concerned.
 | `list_compliance_packets` | Which packet types this site can produce, and the filters each takes. |
 | `generate_compliance_packet` | Builds one. See [Compliance packets](#compliance-packets) below. |
 
-### Mutating — 7, all OFF by default
+### Mutating — 12, all OFF by default
+
+**Postings into the ledger**
 
 | Tool | What it does | What it cannot do |
 | --- | --- | --- |
@@ -335,8 +338,45 @@ concerned.
 | `cancel_journal_entry` | Cancels a submitted JE, `1 → 2`, writing reversing entries. `reason` mandatory. | Delete anything. |
 | `create_bank_transaction` | Inserts a **draft** Bank Transaction. | Submit it. |
 | `reconcile_bank_transaction` | Attaches payment vouchers, refusing to over-allocate. | Allocate past the remaining amount. |
+
+**Structural changes to the chart itself**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_account` | One account under an existing group. Checks the parent, the root type, the number's uniqueness and the account type before writing. | Create a root — ERPNext treats roots as uneditable once made. |
+| `update_account` | Rename, renumber, re-type, enable/disable. The docname moves with the fields, via ERPNext's own `update_account_number`. | Reparent. That is `move_account`, on purpose. |
+| `move_account` | Reparent, and nothing else. Refuses a cross-root or cyclic move. | Rename anything. |
+| `disable_account` | ERPNext's soft delete, `reason` mandatory. | Touch an account with GL entries in the current fiscal year, or delete anything ever. |
+| `import_chart_of_accounts` | Builds a whole tree in one transaction, rolling back entirely on any failure. **`dry_run` defaults to true.** | Silently reparent or rename an account that already exists. |
 | `advance_workflow` | Takes a workflow action via `apply_workflow`. **Can submit or cancel the document** if the target state says so. Supports `dry_run`. | Take an action the acting user is not allowed. |
 | `create_todo` | Assigns a ToDo. | Touch any ledger. |
+
+#### Building a chart from scratch
+
+The four-step loop the chart tools are designed around, each step reviewable:
+
+```
+propose_clean_chart(company)                          → a proposal, nothing written
+  ↓ delete what you do not want
+import_chart_of_accounts(company, accounts)           → the full plan, nothing written
+  ↓ read the plan
+import_chart_of_accounts(company, accounts, dry_run=false)
+  ↓
+disable_account(...)                                  → retire the bundled defaults
+```
+
+Importing **adds** roots alongside whatever the company already has rather than
+replacing them, because ERPNext will not let a root be edited or moved once it
+exists. `propose_clean_chart` tells you which roots are already there and which
+of the template's numbers are already taken, so you know before you run it.
+
+Templates live in `erpnext_mcp/charts/` as plain Python literals with no
+database dependency — which is what makes a proposal reviewable, diffable and
+version-controllable before anything happens. The package auto-discovers them,
+so adding `us_c_corp` is one file. The one that ships is `us_llc_farm`: 128
+accounts for a US farming LLC, crop labour kept separate from administrative
+wages, orchard-specific capital broken out, and a live current-pay-period wage
+liability rather than a period-end accrual.
 
 ---
 
@@ -526,7 +566,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-572 standalone tests and 179 in-bench tests. The standalone suite installs an
+681 standalone tests and 195 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.
@@ -536,7 +576,16 @@ Details in **[docs/development.md](docs/development.md)**.
 
 ## Roadmap
 
-Candidates for v0.3, roughly in order of how often they come up:
+Candidates for the next release, roughly in order of how often they come up:
+
+- **More chart templates.** `us_c_corp`, `us_s_corp` and `us_partnership`, each
+  a file drop against the framework `us_llc_farm` established. They differ from
+  it almost entirely in the 3000s — which is exactly why entity type is in the
+  template key rather than a flag on one chart.
+- **Chart diffing.** "Show me how this company's chart differs from the
+  template" is the question `propose_clean_chart` almost answers; the missing
+  half is matching existing accounts to template ones by name and reporting the
+  moves and renames that would reconcile them.
 
 - **Auth.** Per-token scopes, so one client can be given the reconciliation
   tools and another the reporting tools without two sites. Token expiry and

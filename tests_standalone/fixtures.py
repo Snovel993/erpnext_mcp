@@ -26,12 +26,18 @@ OTHER_ABBR = "SEL"
 
 def seed_site() -> None:
 	"""Load the whole fixture. Call after `STORE.reset()`."""
+	_currencies()
 	_companies()
 	_fiscal_years()
 	_accounts()
 	_gl_entries()
 	_journal_entries()
 	_banking()
+
+
+def _currencies() -> None:
+	"""Two, so `create_account`'s currency check has something to reject."""
+	STORE.seed("Currency", [{"name": "USD", "enabled": 1}, {"name": "CAD", "enabled": 1}])
 
 
 def _companies() -> None:

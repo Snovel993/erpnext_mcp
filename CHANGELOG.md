@@ -3,6 +3,104 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.5.0 — 2026-07-27
+
+Chart-of-accounts management. Six tools, so a complete ERPNext chart can be
+built, corrected and retired entirely through the MCP instead of by hand in the
+Desk.
+
+### Added
+
+**`propose_clean_chart`** (read-only, on by default). Returns a complete
+numbered chart for a company from a static template, in the exact JSON shape
+`import_chart_of_accounts` takes — so the review step is "read this, delete what
+you do not want, pass it back". It also reports what the import would collide
+with: the company's existing root accounts, and every template number already in
+use. Templates live in `erpnext_mcp/charts/` and are pure Python literals with
+no database dependency, which is what makes the proposal reviewable before
+anything runs.
+
+The one shipped template is **`us_llc_farm`** — 128 accounts (30 groups, 98
+ledgers) for a US farming LLC, written with tree fruit in mind. Crop labour is
+separated from administrative wages so a cost per bin means something,
+orchard-specific capital is broken out under machinery, and account 2120 is
+**Current Pay Period - Due to Employees**: a live, continuously-updated balance
+of what is owed to employees for work already performed this period, not a
+period-end accrual. Its description says so explicitly, because the account only
+keeps that meaning if nobody drops a month-end adjusting entry into it. The
+package auto-discovers templates the way `packets/` does, so `us_c_corp`,
+`us_s_corp` and `us_partnership` are a file drop each.
+
+**`create_account`** (mutating, default OFF). One account under an existing
+group. Refuses before writing if the parent is missing or is a ledger, if
+`root_type` disagrees with the parent's, if the number is taken in that company,
+or if the `account_type` cannot sit under that `root_type`.
+
+**`update_account`** (mutating, default OFF). Rename, renumber, re-type,
+enable/disable. Deliberately cannot reparent.
+
+**`move_account`** (mutating, default OFF). Reparent, and nothing else. Separate
+from `update_account` so a bad move cannot happen as a side effect of a rename —
+reparenting moves no GL entry but changes which subtotal every existing posting
+rolls up into, retroactively, for periods already reported.
+
+**`disable_account`** (mutating, default OFF). ERPNext's soft delete, with a
+mandatory reason written to the document and the audit log. **Refuses any
+account carrying GL entries in the current fiscal year**, which is the line
+between tidying the chart and breaking this year's reports.
+
+**`import_chart_of_accounts`** (mutating, default OFF). Builds a whole tree in
+one transaction, parents before children, rolling back entirely on any failure —
+a half-imported chart has orphaned groups in it. **`dry_run` defaults to true**
+and that default is load-bearing: an accidental call must not be able to
+rearrange a live chart. A dry run returns the full ordered plan with the docname
+each account would get, and marks every existing account as either a safe skip
+(same number, same name, so re-running an import is idempotent) or a conflict to
+fix first. Because one bad group takes its whole subtree with it, a dry run also
+returns `blocking_problems` — the causes alone, separated from the fallout.
+
+Expect collisions on a company created from a bundled ERPNext chart: "Standard
+with Numbers" numbers its own roots 1000/2000/3000/4000/5000, which is the same
+convention `us_llc_farm` uses. `propose_clean_chart` names every number already
+taken and says what to do about it.
+
+### Fixed
+
+**`advance_workflow` read an unparseable `dry_run` as false.** The old private
+coercion mapped anything it did not recognise to False, so `dry_run="sure"`
+executed a live workflow transition — which can submit or cancel a document.
+Boolean arguments now go through `args.as_bool`, which returns the caller's
+default when the argument is absent and raises otherwise. `bool("false")` and
+`bool("0")` are both True in Python, and any coercion that goes through
+truthiness gets them backwards; this one does not.
+
+### Notes for operators
+
+Six new switches in a **Chart of Accounts** section on ERPNext MCP Settings.
+Five are write tools and ship off; `propose_clean_chart` sits with the read
+tools and ships on. Run `bench --site <site> migrate` after updating.
+
+Importing a chart **adds** roots alongside whatever the company already has
+rather than replacing them — ERPNext treats a root account as uneditable once
+created. Plan to disable the bundled defaults afterwards, which is what
+`disable_account` is for.
+
+### Under the hood
+
+`frappe.rename_doc` on an Account is not sufficient on its own. The docname
+encodes `account_number` and `account_name` and is never rebuilt after insert,
+so renaming the document leaves the fields stale and setting the fields leaves
+the docname stale — permanently, in both directions. `update_account` therefore
+delegates to ERPNext's own `update_account_number`, which does both halves in
+the right order and also syncs the change into child companies in a group
+structure; the hand-rolled two-step is a fallback for versions that predate it.
+Documented in `docs/development.md` and at the top of `erpnext_mcp/tools/accounts.py`.
+
+The standalone double now models `Account` faithfully — ERPNext's autoname, the
+"Root cannot be edited" refusal, and the parent-must-be-a-group check — for the
+reason this project has learned three times: where the double is more permissive
+than the framework, tests pass and sites break.
+
 ## 0.4.1 — 2026-07-26
 
 Two bugs in the v0.4.0 connection panel, both found by adding a second Umbrel

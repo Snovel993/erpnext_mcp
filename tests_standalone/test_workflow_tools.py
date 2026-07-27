@@ -6,7 +6,7 @@ import sys
 from erpnext_mcp import registry
 
 from .fixtures import APPROVER, BUYER, WORKFLOW_NAME, V2TestCase
-from .harness import STORE
+from .harness import STORE, frappe
 
 PO_PENDING = "PUR-ORD-2026-00001"
 PO_APPROVED = "PUR-ORD-2026-00002"
@@ -422,6 +422,18 @@ class DryRun(V2TestCase):
 			{"doctype": "Purchase Order", "name": PO_PENDING, "action": "Approve", "dry_run": "true"},
 		)
 		self.assertTrue(data["dry_run"])
+
+	def test_an_unreadable_dry_run_is_refused_rather_than_executed(self):
+		"""v0.5.0. This used to map everything it did not recognise to False,
+		which turned a mistyped dry_run into a live workflow transition — and a
+		transition can submit or cancel the document."""
+		before = frappe.db.get_value("Purchase Order", PO_PENDING, "workflow_state")
+		message = self.tool_error(
+			"advance_workflow",
+			{"doctype": "Purchase Order", "name": PO_PENDING, "action": "Approve", "dry_run": "sure"},
+		)
+		self.assertIn("must be true or false", message)
+		self.assertEqual(frappe.db.get_value("Purchase Order", PO_PENDING, "workflow_state"), before)
 
 	def test_omitting_dry_run_executes(self):
 		data = self.tool_data(

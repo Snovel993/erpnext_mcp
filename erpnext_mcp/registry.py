@@ -39,7 +39,7 @@ from . import audit, settings
 from .compat import doctype_exists, traceback_text
 from .errors import ToolError
 from .result import ToolResult
-from .tools import collab, files, hr, meta, mutate, packets, read, reports, trade, workflow
+from .tools import accounts, collab, files, hr, meta, mutate, packets, read, reports, trade, workflow
 
 _STRING = {"type": "string"}
 _NUMBER = {"type": "number"}
@@ -291,6 +291,28 @@ TOOLS = {
 		required=("query",),
 		title="Search accounts",
 	),
+	"propose_clean_chart": _tool(
+		accounts.propose_clean_chart,
+		"A complete, numbered chart of accounts proposed for one company, ready to "
+		"review. Returns the exact JSON shape import_chart_of_accounts takes, so "
+		"the workflow is: propose, delete what you do not want, import as a dry "
+		"run, then import for real.\n\n"
+		"Also reports what is already on the site — the company's existing root "
+		"accounts, and any template account number already in use — so a reviewer "
+		"can see what the import would collide with before running it. Templates "
+		"are static data in this app; the default is 'us_llc_farm'.\n\n"
+		"Read-only: it changes nothing and creates nothing.",
+		{
+			"company": _COMPANY,
+			"template": _field(
+				_STRING,
+				"Template key. Default 'us_llc_farm' (a US farming LLC, written with "
+				"tree fruit in mind). An unknown key is refused with the list.",
+			),
+		},
+		required=("company",),
+		title="Propose a clean chart of accounts",
+	),
 	# ── mutating: every one default OFF ─────────────────────────────────────
 	"create_journal_entry": _tool(
 		mutate.create_journal_entry,
@@ -425,6 +447,173 @@ TOOLS = {
 		required=("name", "payment_entries"),
 		mutating=True,
 		title="Reconcile bank transaction",
+	),
+	# ── chart of accounts: structural writes, every one default OFF ─────────
+	"create_account": _tool(
+		accounts.create_account,
+		"MUTATING (default OFF). Create one Account under an existing group. "
+		"Refuses before writing anything if the parent does not exist or is a "
+		"ledger rather than a group, if root_type disagrees with the parent's, if "
+		"the account number is already used in that company, or if the "
+		"account_type cannot sit under that root_type (a Payable under Income, "
+		"say).\n\n"
+		"Cannot create a root account — ERPNext treats roots as uneditable once "
+		"made, so those come from import_chart_of_accounts, which builds the whole "
+		"tree in one reviewable transaction.",
+		{
+			"company": _COMPANY,
+			"account_number": _field(
+				_STRING,
+				"Account number, unique within the company, e.g. '1120'. Becomes part "
+				"of the docname: '<number> - <name> - <company abbr>'.",
+			),
+			"account_name": _field(_STRING, "Account name as it should read, e.g. 'Checking - Primary'."),
+			"root_type": _field(
+				_STRING,
+				"One of Asset, Liability, Income, Expense, Equity. Must match the "
+				"parent's — it is required so the caller states its intent and this "
+				"tool can check it, not so it can differ.",
+			),
+			"parent_account": _field(
+				_STRING,
+				"The group account this hangs under. Docname, number or name. Must "
+				"already exist and be a group.",
+			),
+			"is_group": _field(
+				_BOOLEAN,
+				"true to create a group (a heading that cannot be posted to). Default "
+				"false, a ledger account.",
+			),
+			"account_type": _field(
+				_STRING,
+				"ERPNext account type, e.g. 'Bank', 'Cash', 'Receivable', 'Payable', "
+				"'Fixed Asset', 'Expense Account'. Validated against this site's own "
+				"option list. Omit if none applies.",
+			),
+			"account_currency": _field(_STRING, "Currency code, e.g. 'USD'. Defaults to the company's."),
+			"tax_rate": _field(_NUMBER, "Percentage, for a tax account."),
+		},
+		required=("company", "account_number", "account_name", "root_type", "parent_account"),
+		mutating=True,
+		title="Create an account",
+	),
+	"update_account": _tool(
+		accounts.update_account,
+		"MUTATING (default OFF). Rename, renumber, re-type or disable/enable one "
+		"Account. Renaming goes through ERPNext's own update_account_number, so "
+		"the docname moves with the fields and every link and report label follows "
+		"— a rename that changed only the field would leave the chart showing one "
+		"thing and reporting another.\n\n"
+		"Deliberately CANNOT change the parent: reparenting is move_account, "
+		"behind its own switch, so a bad move cannot happen inside a rename.\n\n"
+		"Refuses to change the account_type across ERPNext's Receivable/Payable "
+		"boundary on an account that already has GL entries, and refuses type and "
+		"disabled changes on a root account, which ERPNext will not save at all.",
+		{
+			"name": _field(_STRING, "The account: docname, number or name."),
+			"company": _COMPANY,
+			"new_account_name": _field(_STRING, "New account name. The docname is rebuilt to match."),
+			"new_account_number": _field(_STRING, "New account number. Must be free in this company."),
+			"new_account_type": _field(
+				_STRING,
+				"New ERPNext account type. Pass an empty string to clear it.",
+			),
+			"disabled": _field(
+				_BOOLEAN,
+				"true to disable, false to re-enable. For disabling, prefer "
+				"disable_account — it requires a reason and refuses an account the "
+				"current fiscal year is still posting through.",
+			),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Update an account",
+	),
+	"move_account": _tool(
+		accounts.move_account,
+		"MUTATING (default OFF). Move one Account under a different parent, "
+		"changing nothing else about it. Validates that the new parent is a group "
+		"in the same company with the same root_type, and that the move would not "
+		"create a cycle.\n\n"
+		"RISK, and the reason this is separate from update_account: reparenting "
+		"moves no GL entry at all, but it changes which subtotal every existing "
+		"posting rolls up into — retroactively, for every period, including ones "
+		"already reported to a bank or a CPA. A balance sheet run before and after "
+		"will not agree. Take it seriously in a way a rename does not deserve.",
+		{
+			"name": _field(_STRING, "The account to move: docname, number or name."),
+			"new_parent_account": _field(
+				_STRING,
+				"The group it should hang under instead. Must be a group in the same "
+				"company with the same root_type.",
+			),
+			"company": _COMPANY,
+		},
+		required=("name", "new_parent_account"),
+		mutating=True,
+		destructive=True,
+		title="Move an account",
+	),
+	"disable_account": _tool(
+		accounts.disable_account,
+		"MUTATING (default OFF). Disable an Account — ERPNext's soft delete. "
+		"Nothing is removed: the account, its history and its GL entries all "
+		"remain, and it can be re-enabled with update_account.\n\n"
+		"REFUSES if the account carries any GL entry inside the current fiscal "
+		"year, because disabling an account this year is still posting through "
+		"breaks period comparisons and hides it from the pickers a correction "
+		"would need. Also refuses a root account, which ERPNext will not save.\n\n"
+		"`reason` is mandatory and is written to the account's comment thread and "
+		"to the audit log.",
+		{
+			"name": _field(_STRING, "The account: docname, number or name."),
+			"reason": _field(_STRING, "Why it is being retired. Recorded permanently."),
+			"company": _COMPANY,
+		},
+		required=("name", "reason"),
+		mutating=True,
+		destructive=True,
+		title="Disable an account",
+	),
+	"import_chart_of_accounts": _tool(
+		accounts.import_chart_of_accounts,
+		"MUTATING (default OFF). Create a whole tree of accounts from nested JSON, "
+		"parents before children, in ONE transaction — any failure rolls the "
+		"entire import back rather than leaving a half-built tree.\n\n"
+		"dry_run DEFAULTS TO TRUE. A dry run creates nothing and returns the full "
+		"ordered plan: the docname each account would get, its parent, and for "
+		"every account already on the site whether it would be skipped (same "
+		"number, same name — so re-running an import is safe) or is a conflict "
+		"that has to be fixed first. Read the plan, then call again with "
+		"dry_run=false.\n\n"
+		"Get the JSON from propose_clean_chart, or write it yourself: a list of "
+		"root accounts, each with account_number, account_name, root_type, "
+		"is_group and children. root_type is required on roots and inherited "
+		"below. A root node may name an existing parent_account to graft the "
+		"subtree onto the company's current chart instead of adding a new root.",
+		{
+			"company": _COMPANY,
+			"accounts_json": {
+				"description": (
+					"The chart, as a list of root accounts — or the whole "
+					"propose_clean_chart response, whose `accounts` key is used. A JSON "
+					"string is accepted too. Per node: account_number, account_name, "
+					"root_type (roots), account_type, account_currency, tax_rate, "
+					"is_group, description, children. Unknown keys are rejected by name."
+				),
+				"anyOf": [{"type": "array"}, {"type": "object"}, {"type": "string"}],
+			},
+			"dry_run": _field(
+				_BOOLEAN,
+				"true (THE DEFAULT) = report the full plan and change nothing. Set "
+				"false only after a human has read the plan.",
+			),
+		},
+		required=("company", "accounts_json"),
+		mutating=True,
+		idempotent=True,
+		title="Import a chart of accounts",
 	),
 	# ── workflow ────────────────────────────────────────────────────────────
 	"list_workflows": _tool(

@@ -34,6 +34,7 @@
   "allow_get_chart_of_accounts",
   "allow_list_unreconciled_bank_transactions",
   "allow_search_accounts",
+  "allow_propose_clean_chart",
   "mutating_tools_section",
   "allow_create_journal_entry",
   "allow_submit_journal_entry",
@@ -41,6 +42,13 @@
   "mutating_tools_col",
   "allow_create_bank_transaction",
   "allow_reconcile_bank_transaction",
+  "chart_tools_section",
+  "allow_create_account",
+  "allow_update_account",
+  "allow_move_account",
+  "disable_account_col",
+  "allow_disable_account",
+  "allow_import_chart_of_accounts",
   "workflow_tools_section",
   "allow_list_workflows",
   "allow_get_workflow_state",
@@ -250,6 +258,13 @@
    "label": "Search Accounts"
   },
   {
+   "default": "1",
+   "description": "Propose a complete numbered chart of accounts for a company from a static template, in the shape import_chart_of_accounts takes. Read-only: it reads the company's existing roots and account numbers so the proposal can flag collisions, and creates nothing.",
+   "fieldname": "allow_propose_clean_chart",
+   "fieldtype": "Check",
+   "label": "Propose Clean Chart"
+  },
+  {
    "description": "<b>Every one of these is off on a fresh install and stays off until you tick it.</b> Each call is recorded in MCP Action Log with its arguments and its docstatus change. Enable the narrowest set that does the job: create_journal_entry alone gives an AI a scratchpad in the ledger, because a draft affects no balance until submit_journal_entry \u2014 a separate switch \u2014 posts it. <br><br>Two more write tools live in the sections below: <b>Advance Workflow</b> (Workflow) and <b>Create Todo</b> (Comments &amp; Tasks). The banner at the top of this form always lists every write tool that is currently live, wherever its switch is.",
    "fieldname": "mutating_tools_section",
    "fieldtype": "Section Break",
@@ -294,6 +309,52 @@
    "fieldname": "allow_reconcile_bank_transaction",
    "fieldtype": "Check",
    "label": "Reconcile Bank Transaction"
+  },
+  {
+   "description": "Structural changes to the chart itself, as opposed to postings into it. A bad journal entry is one wrong number a reversing entry fixes; a bad reparent silently changes what every balance-sheet subtotal has meant, retroactively, for every period already reported. Enable the narrowest set that does the job.<br><br>The read-only planner that produces a chart to review, <b>Propose Clean Chart</b>, is in the Accounting Read Tools section above. <b>Import Chart Of Accounts</b> defaults to a dry run even when it is switched on.",
+   "fieldname": "chart_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Chart of Accounts"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Create one account under an existing group. Validates the parent, the root type, the number's uniqueness and whether the account type can sit under that root before writing anything.",
+   "fieldname": "allow_create_account",
+   "fieldtype": "Check",
+   "label": "Create Account"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Rename, renumber, re-type or re-enable one account. Goes through ERPNext's own update_account_number so the docname moves with the fields. Cannot reparent.",
+   "fieldname": "allow_update_account",
+   "fieldtype": "Check",
+   "label": "Update Account"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Reparent one account. Moves no GL entry, but changes which subtotal every existing posting rolls up into, for every period already reported. The most consequential switch in this section.",
+   "fieldname": "allow_move_account",
+   "fieldtype": "Check",
+   "label": "Move Account"
+  },
+  {
+   "fieldname": "disable_account_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Soft-delete an account. Requires a reason and refuses any account with GL entries in the current fiscal year. Nothing is deleted and it can be re-enabled.",
+   "fieldname": "allow_disable_account",
+   "fieldtype": "Check",
+   "label": "Disable Account"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Build a whole tree of accounts from JSON in one transaction, rolling back entirely on any failure. Defaults to a dry run that creates nothing; a caller has to ask for the real one.",
+   "fieldname": "allow_import_chart_of_accounts",
+   "fieldtype": "Check",
+   "label": "Import Chart Of Accounts"
   },
   {
    "description": "Reading a site's approval structure, and \u2014 behind its own switch \u2014 acting on it. Workflow actions run through Frappe's own apply_workflow, so they respect the acting user's roles and the transition's conditions.",

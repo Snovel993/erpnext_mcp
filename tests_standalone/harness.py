@@ -100,14 +100,20 @@ ERPNEXT_SCHEMA = {
 		"parent_account",
 		"is_group",
 		"root_type",
+		"report_type",
 		"account_type",
 		"account_currency",
+		"tax_rate",
 		"disabled",
 		"freeze_account",
 		"lft",
 		"rgt",
 		"company",
 	],
+	# No `description`: stock ERPNext's Account has none, which is why
+	# `tools.accounts` falls back to a comment. A site that added the custom
+	# field is a separate case, and its test adds the field deliberately.
+	"Currency": ["name", "enabled"],
 	"GL Entry": [
 		"name",
 		"account",
@@ -452,10 +458,73 @@ class Meta:
 		return self._by_name.get(fieldname)
 
 
+#: Select options this double reproduces verbatim, because the app reads them
+#: off `frappe.get_meta` and branches on what it finds. `Account.account_type`
+#: is the whole reason: `charts.site_account_types()` asks the site which types
+#: it supports and substitutes a fallback for one it does not, and a double that
+#: answered "no options at all" would make that path — the one that decides what
+#: a hundred-account import writes — silently untested.
+#:
+#: This is ERPNext v15's list. Note what is NOT in it: "Credit Card", which the
+#: shipped `us_llc_farm` template asks for on 2160.
+ERPNEXT_FIELD_OPTIONS = {
+	("Account", "account_type"): "\n".join(
+		[
+			"",
+			"Accumulated Depreciation",
+			"Asset Received But Not Billed",
+			"Bank",
+			"Cash",
+			"Chargeable",
+			"Capital Work in Progress",
+			"Cost of Goods Sold",
+			"Current Asset",
+			"Current Liability",
+			"Depreciation",
+			"Direct Expense",
+			"Direct Income",
+			"Equity",
+			"Expense Account",
+			"Expenses Included In Asset Valuation",
+			"Expenses Included In Valuation",
+			"Fixed Asset",
+			"Income Account",
+			"Indirect Expense",
+			"Indirect Income",
+			"Liability",
+			"Payable",
+			"Payment",
+			"Payroll Payable",
+			"Provision",
+			"Receivable",
+			"Round Off",
+			"Round Off for Opening",
+			"Service Received But Not Billed",
+			"Stock",
+			"Stock Adjustment",
+			"Stock Received But Not Billed",
+			"Tax",
+			"Temporary",
+		]
+	),
+	("Account", "root_type"): "Asset\nLiability\nIncome\nExpense\nEquity",
+}
+
+
 def _build_meta() -> dict:
 	metas = {}
 	for doctype, fields in ERPNEXT_SCHEMA.items():
-		metas[doctype] = Meta(doctype, [Field(fieldname=name, fieldtype="Data") for name in fields])
+		metas[doctype] = Meta(
+			doctype,
+			[
+				Field(
+					fieldname=name,
+					fieldtype="Select" if (doctype, name) in ERPNEXT_FIELD_OPTIONS else "Data",
+					options=ERPNEXT_FIELD_OPTIONS.get((doctype, name)),
+				)
+				for name in fields
+			],
+		)
 	for doctype, folder in APP_DOCTYPES.items():
 		payload = _load_app_doctype(folder)
 		metas[doctype] = Meta(
@@ -577,6 +646,11 @@ class Document(FrappeDict):
 	# -- lifecycle ------------------------------------------------------------
 	def insert(self, ignore_permissions=False, ignore_if_duplicate=False):
 		self.flags.in_insert = True
+		# Frappe runs `autoname` before validation, and a doctype whose docname
+		# is built from its own fields (Account is the one this app writes)
+		# depends on that order. Falling straight through to a serial name would
+		# make every docname in a chart-of-accounts import a fiction.
+		self._run("autoname")
 		if not self.get("name"):
 			self.name = STORE.next_name(self.doctype)
 		self.creation = _now()
@@ -694,8 +768,84 @@ class FileDocument(Document):
 		return STORE.file_contents[self.name]
 
 
+def account_autoname(account_number, account_name, abbr: str) -> str:
+	"""ERPNext's `get_account_autoname`, reproduced.
+
+	Deliberately a second implementation rather than an import of
+	`erpnext_mcp.charts.account_docname`. The app duplicates this rule too (it
+	has to, to predict a docname during a dry run), and two independent copies of
+	a rule that must match ERPNext is how a test notices one of them drifting. A
+	shared helper would agree with itself and prove nothing.
+	"""
+	parts = [str(account_name or "").strip()]
+	if str(abbr or "").strip():
+		parts.append(str(abbr).strip())
+	number = str(account_number or "").strip()
+	if number:
+		parts.insert(0, number)
+	return " - ".join(part for part in parts if part)
+
+
+class AccountDocument(Document):
+	"""Account, with the parts of ERPNext's controller this app leans on.
+
+	Being faithful here is not decoration. Three of this project's shipped bugs
+	came from the double being more permissive than the framework, and Account is
+	where that would bite hardest: its docname *encodes* two of its own fields,
+	and ERPNext refuses to save a root account at all. A double that named
+	accounts `A-00001` and happily saved roots would make every rename, every
+	root refusal and every parent link in `tools/accounts.py` untestable — and
+	those are the whole of what the module does.
+
+	Reproduced from `Account.autoname`, `validate_parent`, `validate_root_details`
+	and `set_root_and_report_type`. Everything else ERPNext's controller does
+	(nested-set maintenance, child-company sync, currency checks) is left out;
+	the app does not depend on it.
+	"""
+
+	def autoname(self):
+		abbr = frappe.db.get_value("Company", self.get("company"), "abbr") or ""
+		self.name = account_autoname(self.get("account_number"), self.get("account_name"), abbr)
+
+	def validate(self):
+		parent = str(self.get("parent_account") or "").strip()
+		if not parent:
+			# validate_root_details: an account with no parent is a root, and a
+			# root that already exists cannot be saved at all.
+			if not self.flags.in_insert:
+				raise ValidationError("Root cannot be edited.")
+			if not int(self.get("is_group") or 0):
+				raise ValidationError(f"The root account {self.get('account_name')} must be a group")
+		else:
+			row = STORE.get_raw("Account", parent)
+			if row is None:
+				raise DoesNotExistError(f"Could not find Parent Account: {parent}")
+			if not int(row.get("is_group") or 0):
+				raise ValidationError(f"Account {parent} cannot be a parent account: it is a ledger")
+			if row.get("company") != self.get("company"):
+				raise ValidationError("Account and parent account must belong to the same company")
+			if not self.get("root_type"):
+				self.root_type = row.get("root_type")
+		# set_root_and_report_type
+		self.report_type = (
+			"Balance Sheet"
+			if self.get("root_type") in ("Asset", "Liability", "Equity")
+			else "Profit and Loss"
+		)
+
+
+#: Link fields `rename_doc` repoints, per renamed doctype. See `rename_doc`.
+RENAME_LINK_FIELDS = {
+	"Account": (
+		("Account", "parent_account"),
+		("GL Entry", "account"),
+		("Bank Account", "account"),
+	),
+}
+
+
 #: Doctypes whose stub behaviour differs from a plain Document.
-STUB_CONTROLLERS = {"File": FileDocument}
+STUB_CONTROLLERS = {"File": FileDocument, "Account": AccountDocument}
 
 
 class Store:
@@ -1252,11 +1402,39 @@ def _build_frappe() -> types.ModuleType:
 	def delete_doc(doctype, name, force=False, ignore_permissions=False, **kwargs):
 		STORE.tables.get(doctype, {}).pop(name, None)
 
+	def rename_doc(doctype, old, new, force=False, merge=False, **kwargs):
+		"""Move a docname and repoint the links this app can observe.
+
+		Real Frappe rewrites every Link field on the site that pointed at the old
+		name. Reproducing that generically would mean a link graph this double
+		does not have, so `RENAME_LINK_FIELDS` names the ones the account tools
+		actually depend on — the child's `parent_account` above all, since an
+		import that renamed a group and orphaned its children is exactly the
+		failure a test here should catch.
+		"""
+		table = STORE.tables.setdefault(doctype, {})
+		if old not in table:
+			raise DoesNotExistError(f"{doctype} {old} not found")
+		if new == old:
+			return old
+		if new in table:
+			raise ValidationError(f"{doctype} {new} already exists")
+		row = table.pop(old)
+		row["name"] = new
+		table[new] = row
+		STORE.pending = [(dt, new if (dt == doctype and dn == old) else dn) for dt, dn in STORE.pending]
+		for link_doctype, fieldname in RENAME_LINK_FIELDS.get(doctype, ()):
+			for other in STORE.rows(link_doctype):
+				if other.get(fieldname) == old:
+					other[fieldname] = new
+		return new
+
 	module.get_installed_apps = get_installed_apps
 	module.has_permission = has_permission
 	module.get_list = get_list
 	module.scrub = scrub
 	module.delete_doc = delete_doc
+	module.rename_doc = rename_doc
 	module.get_meta = get_meta
 	module.get_doc = get_doc
 	module.new_doc = new_doc
@@ -1396,6 +1574,45 @@ def _stub_reportview_get(doctype, *args, **kwargs):
 	return {"keys": fields, "values": [[row.get(field) for field in fields] for row in rows]}
 
 
+# ── erpnext.accounts.doctype.account.account ────────────────────────────────
+def _stub_update_account_number(name, account_name, account_number=None, from_descendant=False):
+	"""ERPNext's own rename helper, reproduced closely enough to test against.
+
+	The shape that matters to the app is the awkward one: it writes the two
+	*fields* with `db.set_value` and then, only if the resulting autoname differs,
+	renames the *document*. Two writes, in that order — which is precisely why
+	`tools.accounts` delegates here instead of calling `rename_doc` and leaving a
+	document whose name and fields disagree forever.
+
+	Also faithful in its return value: the new docname when the name moved, and
+	`None` when it did not. A double that always returned a name would hide the
+	`returned or name` the caller needs.
+	"""
+	company = frappe.db.get_value("Account", name, "company")
+	if not company:
+		return None
+	frappe.db.set_value("Account", name, "account_name", str(account_name).strip())
+	frappe.db.set_value("Account", name, "account_number", account_number)
+	abbr = frappe.db.get_value("Company", company, "abbr") or ""
+	new_name = account_autoname(account_number, account_name, abbr)
+	if name != new_name:
+		frappe.rename_doc("Account", name, new_name, force=1)
+		return new_name
+	return None
+
+
+def _install_erpnext_account_api() -> None:
+	path = "erpnext.accounts.doctype.account.account"
+	leaf = types.ModuleType(path)
+	leaf.update_account_number = _stub_update_account_number
+	leaf.get_account_autoname = account_autoname
+	parts = path.split(".")
+	for index in range(1, len(parts)):
+		branch = ".".join(parts[:index])
+		sys.modules.setdefault(branch, types.ModuleType(branch))
+	sys.modules[path] = leaf
+
+
 def install() -> types.ModuleType:
 	"""Put the stub into sys.modules. Idempotent."""
 	if "frappe" in sys.modules and getattr(sys.modules["frappe"], "__is_stub__", False):
@@ -1429,6 +1646,7 @@ def install() -> types.ModuleType:
 	sys.modules["frappe.desk.query_report"] = query_report
 	sys.modules["frappe.desk.reportview"] = reportview
 	module.desk = desk
+	_install_erpnext_account_api()
 	return module
 
 
@@ -1526,6 +1744,12 @@ class MCPTestCase(unittest.TestCase):
 			message["params"] = params
 		self.request(message, **kwargs)
 		response = mcp.handle()
+		# Frappe commits at the end of a served request. Without this the double
+		# accumulates uncommitted rows across calls, so a rollback inside call N
+		# would discard everything calls 1..N-1 wrote — which is not a thing that
+		# can happen on a real site, and made "re-running an import is safe" look
+		# like a bug in the app rather than in the double.
+		STORE.commit()
 		body = response.get_data(as_text=True)
 		parsed = json.loads(body) if body.strip() else None
 		return parsed, response.status_code

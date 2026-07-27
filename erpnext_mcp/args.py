@@ -86,6 +86,44 @@ def as_float(value, key: str) -> float:
 		raise ToolError(f"{key} must be a number, got {value!r}") from None
 
 
+#: What a model actually sends when it means yes or no. JSON booleans are the
+#: common case; the strings turn up whenever a client stringifies its arguments.
+_TRUE_WORDS = ("1", "true", "yes", "y", "on")
+_FALSE_WORDS = ("0", "false", "no", "n", "off")
+
+
+def as_bool(args: dict, key: str, default=None):
+	"""A boolean argument, with anything unrecognisable refused rather than false.
+
+	Two failure modes this exists to avoid, both of which have shipped in real
+	MCP servers:
+
+	  * `bool("false")` is True, and `bool("0")` is True. Any coercion that goes
+	    through Python's truthiness gets both backwards.
+	  * A tolerant reading that maps everything it does not recognise to False
+	    turns `dry_run="please"` into a live run. When the default is True
+	    *because the operation is dangerous*, silently falling to False is the
+	    one outcome the default was chosen to prevent — so an unparseable value
+	    is an error, not a vote.
+
+	Absent or empty gives `default`, which is how a caller distinguishes "not
+	specified" from "specified as false".
+	"""
+	raw = args.get(key)
+	if raw is None or raw == "":
+		return default
+	if isinstance(raw, bool):
+		return raw
+	if isinstance(raw, (int, float)):
+		return bool(raw)
+	text = str(raw).strip().lower()
+	if text in _TRUE_WORDS:
+		return True
+	if text in _FALSE_WORDS:
+		return False
+	raise ToolError(f"{key} must be true or false, got {raw!r}")
+
+
 def as_limit(args: dict, key: str = "limit") -> int:
 	"""A row limit, clamped to [1, MAX_LIMIT].
 

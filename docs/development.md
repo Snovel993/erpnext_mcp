@@ -46,7 +46,18 @@ real bugs:
   that reached production in v0.2.0: it had answered the query happily, which is
   why three `seed_defaults` tests passed against code that could not migrate.
 
-The pattern in all three: when the double is *more permissive* than the
+- **Account names itself, and refuses to save a root.** `harness.AccountDocument`
+  reproduces ERPNext's `autoname` (`"<number> - <name> - <abbr>"`), the "Root
+  cannot be edited" throw, and the parent-must-be-a-group check. Without those
+  the double would name accounts `A-00001` and happily save roots, which would
+  make every rename, every root refusal and every parent link in
+  `tools/accounts.py` untestable — and those are the whole of what the module
+  does. `account_autoname` in the harness is deliberately a *second*
+  implementation of the naming rule rather than an import of the app's
+  `charts.account_docname`: two independent copies of a rule that must match
+  ERPNext is how a test notices one of them drifting.
+
+The pattern in all of them: when the double is *more permissive* than the
 framework, tests pass and sites break. Where a real constraint is cheap to
 model, model it.
 
@@ -206,6 +217,7 @@ erpnext_mcp/                     repo root
     result.py                    ToolResult
     tools/read.py                the ten accounting read tools
     tools/mutate.py              the five accounting write tools
+    tools/accounts.py            chart of accounts: create/update/move/disable/import
     tools/workflow.py            workflow states, worklist, advance_workflow
     tools/reports.py             report discovery and execution
     tools/files.py               attachments (checks Frappe permissions)
@@ -217,6 +229,8 @@ erpnext_mcp/                     repo root
     packets/base.py              PacketSpec, Flag, provenance envelope
     packets/reconciliation.py    one account, one period
     packets/fiscal_year_audit.py one company, one fiscal year
+    charts/base.py               ChartTemplate, tree validation, account-type rules
+    charts/us_llc_farm.py        the one shipped chart template — pure data
     erpnext_mcp/doctype/         ERPNext MCP Settings, MCP Action Log
 ```
 
@@ -293,6 +307,99 @@ Writing the builder, three rules:
   independent aggregates; the most valuable in `fiscal_year_audit.py` is the
   accounting identity. Find the redundancy in your data and check it.
 - **Never truncate silently.** Use `cap(rows, flags, "collection_name")`.
+
+## Adding a chart-of-accounts template
+
+One file in `erpnext_mcp/charts/`, ending in `register(ChartTemplate(...))`. The
+package auto-discovers every module there at import time — the same arrangement
+as `packets/`, and for the same reason. There is no list to edit and no tool to
+touch; `propose_clean_chart` picks it up by key.
+
+```python
+# erpnext_mcp/charts/us_s_corp.py
+from .base import ChartTemplate, register
+
+register(
+	ChartTemplate(
+		key="us_s_corp",
+		title="US S corporation",
+		entity_type="S Corporation",
+		jurisdiction="US",
+		summary="...",  # one paragraph, shown to the reviewer
+		tree=[...],  # list of root nodes
+		notes=("...",),  # caveats the author wants read first
+	)
+)
+```
+
+Four rules for the tree:
+
+- **It is data, not a query.** Nothing in `charts/` may touch the database.
+  That is what makes `propose_clean_chart` genuinely read-only and lets a
+  template be reviewed and diffed like any other source file.
+- **`root_type` on roots only.** It is inherited by every descendant, and
+  `validate_tree` refuses a subtree that switches root type mid-way, because
+  ERPNext would not accept one.
+- **Roots must be groups**, and a node with `children` must be a group. ERPNext
+  refuses a postable root and refuses children under a ledger.
+- **Say what an account is for, in `description`,** wherever the name alone
+  would let somebody use it wrongly. Stock ERPNext's Account has no description
+  field, so `import_chart_of_accounts` writes the text as a comment on the
+  created account (or into a `description` custom field where a site has one).
+  The clearest example is `us_llc_farm`'s 2120, which only keeps its meaning as
+  a live wage balance if nobody books a period-end accrual into it.
+
+Run `tests_standalone/test_accounts.py::TemplateData` — it asserts every
+template passes the importer's own validation, has unique numbers, and types
+every leaf. The in-bench `test_accounts` additionally checks that every
+`account_type` the template asks for resolves to one the operator's ERPNext
+actually offers.
+
+## Working on the Account doctype
+
+Read this before touching `tools/accounts.py`.
+
+**The docname encodes two fields and is never rebuilt.** ERPNext's
+`Account.autoname` builds `"<number> - <name> - <abbr>"` at insert. Nothing
+recomputes it on a later save. So:
+
+| What you do | What you get |
+| --- | --- |
+| `frappe.rename_doc("Account", old, new)` | The key moves; `account_name` and `account_number` keep their old values. The chart shows one thing and reports another, permanently. |
+| `frappe.db.set_value("Account", name, "account_name", ...)` | The fields move; the docname — and every link, report label and GL Entry reference — keeps the old text. |
+
+Both halves are needed, in that order. ERPNext ships exactly that as
+`erpnext.accounts.doctype.account.account.update_account_number`, which **also**
+propagates the change into child companies in a group structure and returns the
+new docname (or `None` when the name did not move). `update_account` delegates
+to it; the hand-rolled two-step in `_rename_account` is a fallback for versions
+that predate the helper and is not the path anyone should be extending.
+Reimplementing the child-company sync here would mean getting it wrong on a
+consolidated group, which is not a failure anybody notices quickly.
+
+**A root account cannot be saved at all.** `Account.validate_root_details`
+throws "Root cannot be edited" on any save of an account with no parent. This is
+ERPNext's rule, not the app's, and it is why `update_account` refuses type and
+disabled changes on a root, `move_account` and `disable_account` refuse roots
+outright, and `create_account` cannot make one. Renaming a root still works,
+because `update_account_number` goes through `db.set_value` and `rename_doc`
+rather than `doc.save()`.
+
+**`account_type` is version-dependent; `root_type` is not.** Never hardcode the
+valid `account_type` list — `charts.site_account_types()` reads it off
+`frappe.get_meta`. `ACCOUNT_TYPES_BY_ROOT` exists only to refuse a pairing that
+is positively wrong (a Payable under Income); a type it has never heard of but
+the site accepts is allowed through with a note. A validation table baked into
+an app is a snapshot of one ERPNext version, and the failure mode of a stale
+snapshot should be a note, not a locked door.
+
+**Reparenting relies on NestedSet.** `Account` is a `NestedSet` with
+`nsm_parent_field = "parent_account"`, so setting `parent_account` and calling
+`doc.save()` is what fixes `lft`/`rgt`. Do not write those columns. The cycle
+check in `move_account` deliberately walks the parent chain instead of comparing
+them: the nested set is a cached traversal of the tree, and "almost always
+correct" is not the standard for a check whose failure mode is an infinite loop
+inside a rebuild.
 
 ## Adding a tool
 

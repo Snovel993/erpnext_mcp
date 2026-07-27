@@ -179,10 +179,10 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_thirty_seven_tools_thirty_read_seven_write(self):
-		self.assertEqual(len(registry.TOOLS), 37)
-		self.assertEqual(len(registry.READ_TOOLS), 30)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 7)
+	def test_catalogue_is_forty_three_tools_thirty_one_read_twelve_write(self):
+		self.assertEqual(len(registry.TOOLS), 43)
+		self.assertEqual(len(registry.READ_TOOLS), 31)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 12)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

@@ -25,7 +25,7 @@ document.
 import frappe
 
 from .. import compat
-from ..args import as_limit, as_str
+from ..args import as_bool, as_limit, as_str
 from ..errors import ToolError
 from ..result import ToolResult
 
@@ -274,7 +274,7 @@ def advance_workflow(args: dict) -> ToolResult:
 	doctype = as_str(args, "doctype", required=True)
 	name = as_str(args, "name", required=True)
 	action = as_str(args, "action", required=True)
-	dry_run = _as_bool(args.get("dry_run"))
+	dry_run = bool(as_bool(args, "dry_run", False))
 	doc, workflow = _document_and_workflow(doctype, name)
 	state_field = _state_field(workflow)
 	before_state = doc.get(state_field)
@@ -429,15 +429,6 @@ def _dry_run_result(
 
 
 # ── shared ──────────────────────────────────────────────────────────────────
-def _as_bool(value) -> bool:
-	"""Tolerant boolean for an argument a model may send as a string."""
-	if isinstance(value, bool):
-		return value
-	if value is None:
-		return False
-	return str(value).strip().lower() in ("1", "true", "yes", "on")
-
-
 def _document_and_workflow(doctype: str, name: str):
 	"""The document and the active Workflow governing it, or a clear ToolError."""
 	if not compat.doctype_exists(doctype):
