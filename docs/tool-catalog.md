@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 64 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 71 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -2310,6 +2310,19 @@ clears a field.
 | `default_deferred_revenue_account` | Liability or Income | |
 | `default_deferred_expense_account` | Asset or Expense | |
 | `round_off_cost_center` | a **leaf Cost Center** | Where the rounding difference is filed |
+| `disposal_account` | Income or Expense | ERPNext refuses to scrap or sell an Asset without it — and says so *from the Asset* |
+| `capital_work_in_progress_account` | Capital Work in Progress, Asset | An asset being built, before it is in service |
+| `expenses_included_in_asset_valuation` | Expense | Freight and duty that belong in an asset's cost, not the period |
+| `asset_received_but_not_billed` | Asset Received But Not Billed, Liability | An asset delivered before its invoice |
+| `stock_adjustment_account` | Expense | The difference a stock count found |
+| `stock_received_but_not_billed` | Stock Received But Not Billed, Liability | Stock delivered before its invoice |
+| `unrealized_exchange_gain_loss_account` | Income or Expense | Movement on an unsettled foreign-currency balance |
+| `unrealized_profit_loss_account` | Income or Expense | Intra-group profit eliminated on consolidation |
+| `default_advance_received_account` | Receivable, **Liability** | Money held for a customer is a liability, keyed so the party ledger picks it up |
+| `default_advance_paid_account` | Payable, **Asset** | The mirror image, for money paid out early |
+| `default_operating_cost_account` | Expense | What a production order adds to what it makes |
+| `default_selling_cost_center` | a **leaf Cost Center** | Where a sale is filed when the document does not say |
+| `default_buying_cost_center` | a **leaf Cost Center** | Same, for a purchase |
 
 **Type-checked, not merely existence-checked.** ERPNext would accept a
 `default_receivable_account` pointed at a plain Asset account and then produce
@@ -2859,13 +2872,343 @@ otherwise from the Asset Category's row for that company.
 
 ---
 
+## 65. `list_notes_payable`
+
+**Read-only.** On by default. Needs the `Note Payable` DocType, which ships with
+this app — run `bench migrate` after upgrading.
+
+**Arguments:** `company` (or `borrower`, same thing), `status`, `include_closed`
+(default true), `limit`.
+
+```json
+{
+  "company": "Example Trading Co",
+  "notes": [
+    {
+      "name": "Example Bank - Defect Sorter - ETC",
+      "note_name": "Example Bank - Defect Sorter",
+      "borrower": "Example Trading Co", "lender": "Example Bank",
+      "status": "Active",
+      "principal_original": 120000.0, "principal_outstanding": 110000.0,
+      "interest_rate": 6.5, "interest_type": "Fixed",
+      "origination_date": "2026-01-01", "maturity_date": "2027-01-01",
+      "payment_frequency": "Monthly", "payment_amount": 10650.0,
+      "linked_gl_account": "2310 - Notes Payable - ETC",
+      "interest_expense_account": "5300 - Interest Expense - ETC",
+      "related_asset": "ACC-ASS-2026-00003",
+      "payment_count": 1, "last_payment_date": "2026-02-01",
+      "next_payment_date": "2026-03-01", "closed": false
+    }
+  ],
+  "count": 1, "active_count": 1,
+  "total_original_principal_active": 120000.0,
+  "total_outstanding_active": 110000.0,
+  "note": "Outstanding balances are the figure maintained by record_loan_payment, not the balance of the linked GL account. …"
+}
+```
+
+- **`principal_outstanding` is not the ledger.** It is maintained by
+  `record_loan_payment`, and diverges from the account by every payment recorded
+  as a draft nobody has posted — which in this app is the normal state.
+  `get_account_balance` on `linked_gl_account` is the ledger's answer.
+- **`next_payment_date` is a projection**, not a schedule the lender agreed to:
+  it is the frequency applied to the last payment recorded, clamped to the
+  maturity date. A `Balloon` note projects its maturity and nothing else; a
+  `Custom` one projects nothing.
+- Closed notes are listed by default. A note that has been paid off is part of
+  the history.
+
+---
+
+## 66. `create_note_payable`
+
+**MUTATING.** Off by default. Needs the `Note Payable` DocType.
+
+**Arguments:** `note_name` (required), `lender` (required), `principal_original`
+(required), `origination_date` (required), `borrower`/`company`,
+`principal_outstanding` (defaults to the original), `interest_rate`,
+`interest_type`, `maturity_date`, `payment_frequency`, `payment_amount`,
+`linked_gl_account`, `interest_expense_account`, `related_asset`,
+`enforce_asset_tenor` (default true), `document_reference`, `notes`.
+
+The docname is `"<note_name> - <company abbr>"`, and `note_name` is unique per
+borrower.
+
+```json
+{"name": "create_note_payable",
+ "arguments": {"borrower": "Example Trading Co",
+               "note_name": "Example Bank - Defect Sorter",
+               "lender": "Example Bank",
+               "principal_original": 120000,
+               "origination_date": "2026-01-01",
+               "maturity_date": "2027-01-01",
+               "interest_rate": 6.5,
+               "linked_gl_account": "2310",
+               "interest_expense_account": "5300",
+               "related_asset": "ACC-ASS-2026-00003"}}
+```
+
+- **Not ERPNext's Loan module.** That models the company as the *lender*, with an
+  application, a disbursement and half a dozen doctypes. This is the other side.
+- **`related_asset` runs the tenor check.** It delegates to `link_asset_to_note`,
+  so an asset whose useful life does not equal the note's term is refused by the
+  same code that refuses it from the other direction. Pass
+  `enforce_asset_tenor=false` when the divergence is deliberate. The note and the
+  link are one transaction — a refused link leaves no note behind.
+- **Refuses:** a duplicate name for the same borrower, a non-positive principal, a
+  negative outstanding balance, a maturity before origination,
+  `interest_type: "Zero"` with a non-zero rate, a `linked_gl_account` that is not
+  a plain Liability (a Payable- or Receivable-typed one would show the note's
+  principal as a party balance that never ages out), an
+  `interest_expense_account` that is not an Expense, and any attempt to create a
+  note already closed.
+
+---
+
+## 67. `record_loan_payment`
+
+**MUTATING.** Off by default. Needs the `Note Payable` DocType.
+
+**Arguments:** `note` (required), `payment_date` (required), `total_amount`
+(required), `offset_bank_account` (required), `principal_split`,
+`interest_split`, `company`, `notes_payable_account`,
+`interest_expense_account`, `narrative`.
+
+Pass `principal_split`, `interest_split`, or one and let the other be derived.
+They have to add up to `total_amount` or nothing is written.
+
+```json
+{
+  "note": "Example Bank - Defect Sorter - ETC", "payment_date": "2026-02-01",
+  "total_amount": 10650.0, "principal_split": 10000.0, "interest_split": 650.0,
+  "principal_outstanding_before": 120000.0, "principal_outstanding_after": 110000.0,
+  "journal_entry": "ACC-JV-2026-00051",
+  "accounts_used": {
+    "notes_payable_account": "2310 - Notes Payable - ETC",
+    "interest_expense_account": "5300 - Interest Expense - ETC",
+    "offset_account": "1110 - Bank Checking - ETC",
+    "offset_bank_account": "Operating - Example Bank"
+  },
+  "lines": [
+    {"account": "2310 - Notes Payable - ETC", "debit": 10000.0, "credit": 0},
+    {"account": "5300 - Interest Expense - ETC", "debit": 650.0, "credit": 0},
+    {"account": "1110 - Bank Checking - ETC", "debit": 0, "credit": 10650.0}
+  ],
+  "note_text": "Journal Entry ACC-JV-2026-00051 is a DRAFT and has moved no balance. …"
+}
+```
+
+- **The split is the whole job.** A payment leaving a bank account is one number
+  whose halves land in completely different places. Booked as a single line
+  against the liability, the year's interest expense reads as nil and the balance
+  sheet says the note was paid down by more than it was.
+- **`offset_bank_account` takes either** a Bank Account record — preferred, since
+  the journal line then carries it, which is what lets a bank reconciliation
+  match this entry — or the GL account directly.
+- **The entry is a DRAFT.** The note's outstanding figure is decremented
+  immediately, so until it is submitted the record and the liability account
+  disagree by the principal. The response says so every time.
+- **Refuses:** a closed note, a payment dated before origination, a principal
+  component larger than the balance outstanding, a negative component, a split
+  that does not add up, and an interest component with no expense account to put
+  it in.
+
+---
+
+## 68. `close_note_payable`
+
+**MUTATING.** Off by default. Needs the `Note Payable` DocType.
+
+**Arguments:** `note` (required), `disposition` (required — `Paid Off`,
+`Refinanced` or `Written Off`), `disposition_date` (required), `narrative`
+(required), `company`, `superseded_by`, `zero_remaining_balance`.
+
+```json
+{"name": "close_note_payable",
+ "arguments": {"note": "Example Bank - Defect Sorter - ETC",
+               "disposition": "Written Off",
+               "disposition_date": "2026-06-30",
+               "narrative": "Forgiven under the 2026 family settlement deed."}}
+```
+
+- **Writes NO journal entry, deliberately.** Relieving a written-off balance is a
+  posting with real tax consequences — forgiven debt is usually income — and a
+  refinance moves a balance between two liability accounts. Both belong to
+  somebody who meant them. The response names the account still carrying the
+  balance and the entry that is owed, so the omission cannot pass unnoticed.
+- **`Paid Off` with a balance still showing is refused.** That means either a
+  final payment was never recorded (`record_loan_payment` writes the entry that
+  books it) or the balance carried here is stale. If it is stale,
+  `zero_remaining_balance=true` writes it down and records an `Adjustment` row in
+  the note's history saying exactly that.
+- **`superseded_by`** names the note that replaced this one, for a refinance, so a
+  reader following the chain forward lands on what is still owed. It is only
+  accepted on a `Refinanced` disposition.
+- Also refuses a note already closed, a disposition date before origination, and
+  a narrative too short to be an explanation.
+
+---
+
+## 69. `set_opening_balance`
+
+**MUTATING.** Off by default.
+
+**Arguments:** `posting_date` (required), `entries` (required), `user_remark`
+(required), `company`, `opening_equity_account`.
+
+Each entry is `{account, dr_or_cr, amount, cost_center, dimensions, narrative}`.
+`amount` is always positive — the direction lives in `dr_or_cr` (`dr`/`debit`/`d`
+or `cr`/`credit`/`c`). **Do not include the equity line; it is computed.**
+
+```json
+{"name": "set_opening_balance",
+ "arguments": {"company": "Example Trading Co",
+               "posting_date": "2026-01-01",
+               "user_remark": "Equipment transferred in on dissolution, per the bill of sale",
+               "entries": [
+                 {"account": "1710", "dr_or_cr": "dr", "amount": 52650,
+                  "narrative": "Two forklifts and a sprayer"}]}}
+```
+
+```json
+{
+  "name": "ACC-JV-2026-00060", "docstatus": 0, "docstatus_label": "draft",
+  "company": "Example Trading Co", "posting_date": "2026-01-01",
+  "opening_equity_account": "3300 - Opening Balance Equity - ETC",
+  "opening_equity_resolved_by": "account_number 3300",
+  "opening_equity_side": "credit", "opening_equity_amount": 52650.0,
+  "entered_debit": 52650.0, "entered_credit": 0.0, "balancing_difference": 52650.0,
+  "line_count": 2, "total_debit": 52650.0, "total_credit": 52650.0,
+  "flags_set": {"is_opening": "Yes", "voucher_type": "Opening Entry"},
+  "note": "The 52650.0 offsetting line against 3300 - Opening Balance Equity - ETC was computed, not supplied …"
+}
+```
+
+- **The plug is computed, not supplied.** Every historical fact brought onto a set
+  of books balances against opening equity; a caller who works that out for
+  itself gets it wrong by a few cents on the third event, after which the ledger
+  never balances again.
+- **The flags matter.** `is_opening` — and `Opening Entry` where the site's
+  Journal Entry offers that voucher type — are what keep these amounts out of the
+  period's activity in every report that separates the two. Nothing warns you
+  when they are missing; the P&L simply reads as though the company earned its
+  opening equity in January. Both are set only where this site's own meta has
+  them, and `flags_set` reports what was actually written.
+- **The equity account is found, not guessed:** account number `3300` first, then
+  a leaf Equity account named after opening balances. Zero matches and more than
+  one are both refusals, with the company's leaf equity accounts listed.
+  `opening_equity_account` overrides it.
+- **Entries that already balance get no plug at all**, and the response says the
+  equity account was not touched.
+- **Refuses** a group, disabled or wrong-company account on any line; a group or
+  disabled cost center; a dimension value that does not exist; a non-positive
+  amount; an unsupported entry field, by name; and an
+  `opening_equity_account` that is not Equity. Nothing is written unless every
+  line validates.
+- **It is a DRAFT.** `submit_journal_entry` posts it — and an opening balance is
+  the entry most worth reading first, because it is the one nobody will ever
+  re-derive.
+
+---
+
+## 70. `create_bank_account`
+
+**MUTATING.** Off by default. Needs the `Bank Account` DocType, which ships with
+ERPNext's Accounts module.
+
+**Arguments:** `account_name` (required), `bank_name` (required), `account`
+(required for a company account), `company`, `account_no` /`bank_account_no`,
+`iban`, `is_company_account` (default true), `party_type`, `party`, `disabled`.
+
+ERPNext names the record `"<account_name> - <bank>"`. That string is what goes
+into a bank feed's configuration, so it is worth choosing `account_name`
+deliberately — the account mask is the usual way to tell two accounts at one bank
+apart.
+
+```json
+{"name": "create_bank_account",
+ "arguments": {"company": "Example Trading Co",
+               "account_name": "Advisors Cash - ••3158",
+               "bank_name": "Example Bank Advisors",
+               "account": "1151",
+               "account_no": "••3158"}}
+```
+
+- **A Bank Account holds no balance.** It is a mapping: this institution, this
+  account number, posts to that GL account. Bank Transactions hang off it,
+  reconciliation reads it, a feed writes into it. The money lives in the Account
+  it points at.
+- **Pre-create it before the first sync.** A feed that runs first makes its own,
+  named whatever the feed calls the account and pointed at a GL account the feed
+  picked. Renaming that afterwards is fine; *repointing* it is not — once
+  transactions have been imported, the GL account named here is where they
+  reconcile to.
+- **Two doctypes, one transaction.** The `Bank` is created when the institution is
+  new, and a failure anywhere after that leaves neither.
+- **Refuses:** an unknown company; a GL account that does not exist, belongs to
+  another company, is a group or is disabled; a GL account whose `root_type` is
+  neither Asset (a bank account) nor Liability (a credit card); an **Asset**
+  account whose `account_type` is not `Bank` or `Cash`, because ERPNext's own
+  account picker and its reconciliation tool both filter on that flag and an
+  untyped account saves here and then cannot be reconciled; an `account_name`
+  already used in this company; `party`/`party_type` together with
+  `is_company_account`; and a `bank_name` Frappe would refuse as a docname.
+- **Warns**, rather than refuses, when the GL account is already another Bank
+  Account's — legitimate for a sweep arrangement, a mistake everywhere else.
+
+---
+
+## 71. `delete_account`
+
+**MUTATING, DESTRUCTIVE, IRREVERSIBLE.** Off by default. There is no undo, no
+draft and no cancelled state; the record is gone.
+
+**Arguments:** `name` (required), `company`, `force_check_gl_entries`,
+`force_check_children`, `force_check_company_defaults`,
+`force_check_bank_accounts` — all four checks default to **true**.
+
+```json
+{
+  "deleted": "1190 - Cash Clearing - ETC",
+  "account": {"name": "1190 - Cash Clearing - ETC", "account_number": "1190", "…": "…"},
+  "checks_passed": {
+    "gl_entries": "no GL entries, ever, and no journal entry line references it",
+    "children": "no child accounts, enabled or disabled",
+    "company_defaults": "no Company field points at it",
+    "bank_accounts": "no Bank Account record posts to it"
+  },
+  "checks_skipped": [], "was_root": false,
+  "note": "Gone. Unlike disable_account there is nothing left: no record, no history, and the account number 1190 is free …"
+}
+```
+
+- **Prefer `disable_account`.** Almost always. Disabling keeps the postings, the
+  reports still balance, and the account drops out of pickers.
+- **The one thing disabling cannot do is free the number.** A disabled account
+  still holds it, and on a company being renumbered onto a real chart — fifty
+  accounts a bundled chart created that nobody ever posted to — that is the
+  entire problem. That is what this tool is for.
+- **Every check is a refusal, and they are all reported at once.** Four calls each
+  naming one reason is how somebody deletes the wrong account trying to satisfy
+  the last one.
+- **Draft journal entry lines count.** A draft writes no GL row, so an account
+  referenced by one reads as untouched; deleting it leaves a draft nobody can
+  submit and nobody can fix.
+- **Turning a check off does not make a referenced account deletable.** Frappe's
+  own link-integrity check still runs on the delete. The flag changes which error
+  you get, not the outcome.
+
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
 
 1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
-   `workflow`, `accounts`, `dimensions`, `governance`, `assets`, `reports`,
-   `files`, `collab`, `hr`, `trade`, `meta` or `packets` —
+   `workflow`, `accounts`, `banking`, `dimensions`, `governance`, `assets`,
+   `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`, `meta` or
+   `packets` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

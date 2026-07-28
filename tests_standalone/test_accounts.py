@@ -28,11 +28,15 @@ CASH = f"1100 - Cash - {MAIN_ABBR}"
 PAYABLES = f"2100 - Accounts Payable - {MAIN_ABBR}"
 ASSET_ROOT = f"Application of Funds (Assets) - {MAIN_ABBR}"
 
+BANK_CHECKING = f"1110 - Bank Checking - {MAIN_ABBR}"
+CASH_CLEARING = f"1190 - Cash Clearing - {MAIN_ABBR}"
+
 ALL_ON = {
 	"allow_create_account": 1,
 	"allow_update_account": 1,
 	"allow_move_account": 1,
 	"allow_disable_account": 1,
+	"allow_delete_account": 1,
 	"allow_import_chart_of_accounts": 1,
 }
 
@@ -428,6 +432,126 @@ class DisableAccount(ChartToolsTestCase):
 		self.configure(enabled=1)
 		message = self.tool_error("disable_account", {"name": PAYABLES, "reason": "unused"})
 		self.assertIn("allow_disable_account", message)
+
+
+# ── delete_account ──────────────────────────────────────────────────────────
+class DeleteAccount(ChartToolsTestCase):
+	"""The only irreversible tool in the app, so the tests are almost all refusals.
+
+	The one thing it can do that `disable_account` cannot is free an account
+	NUMBER, which is the whole reason it exists: a company being renumbered onto a
+	real chart is blocked by fifty bundled accounts nobody ever posted to, and
+	disabling one does not release its number.
+	"""
+
+	def test_an_untouched_leaf_is_deleted_outright(self):
+		data = self.tool_data("delete_account", {"name": CASH_CLEARING, "company": MAIN})
+		self.assertEqual(data["deleted"], CASH_CLEARING)
+		self.assertFalse(frappe.db.exists("Account", CASH_CLEARING))
+		self.assertEqual(sorted(data["checks_passed"]), ["bank_accounts", "children", "company_defaults", "gl_entries"])
+		self.assertEqual(data["checks_skipped"], [])
+
+	def test_the_number_is_free_afterwards(self):
+		"""The point of the tool. A disabled account still holds its number."""
+		self.tool_data("delete_account", {"name": CASH_CLEARING, "company": MAIN})
+		data = self.tool_data(
+			"create_account",
+			{
+				"company": MAIN,
+				"account_number": "1190",
+				"account_name": "Undeposited Funds",
+				"root_type": "Asset",
+				"parent_account": CURRENT_ASSETS,
+			},
+		)
+		self.assertEqual(data["account_number"], "1190")
+
+	def test_an_account_with_gl_entries_is_refused_and_points_at_disable(self):
+		message = self.tool_error("delete_account", {"name": CASH, "company": MAIN})
+		self.assertIn("GL Entry row(s)", message)
+		self.assertIn("disable_account", message)
+		self.assertTrue(frappe.db.exists("Account", CASH))
+
+	def test_a_draft_journal_entry_line_blocks_it_too(self):
+		"""A draft writes no GL row, so the account reads as untouched. Deleting it
+		leaves a draft nobody can submit and nobody can fix."""
+		STORE.seed(
+			"Journal Entry",
+			[
+				{
+					"name": "ACC-JV-2026-DRAFT",
+					"posting_date": "2026-03-01",
+					"company": MAIN,
+					"docstatus": 0,
+					"accounts": [
+						{"account": CASH_CLEARING, "debit": 10, "credit": 0, "idx": 1},
+						{"account": CASH, "debit": 0, "credit": 10, "idx": 2},
+					],
+				}
+			],
+		)
+		message = self.tool_error("delete_account", {"name": CASH_CLEARING, "company": MAIN})
+		self.assertIn("journal entry line(s)", message)
+		self.assertTrue(frappe.db.exists("Account", CASH_CLEARING))
+
+	def test_a_group_with_children_is_refused_naming_them(self):
+		message = self.tool_error("delete_account", {"name": CURRENT_ASSETS, "company": MAIN})
+		self.assertIn("child account(s)", message)
+		self.assertIn(CASH, message)
+
+	def test_a_disabled_child_still_counts_as_a_child(self):
+		frappe.db.set_value("Account", CASH_CLEARING, "disabled", 1)
+		message = self.tool_error("delete_account", {"name": CURRENT_ASSETS, "company": MAIN})
+		self.assertIn("disabled children count", message)
+
+	def test_a_company_default_pointing_at_it_is_refused(self):
+		frappe.db.set_value("Company", MAIN, "default_cash_account", CASH_CLEARING)
+		message = self.tool_error("delete_account", {"name": CASH_CLEARING, "company": MAIN})
+		self.assertIn("default_cash_account", message)
+		self.assertIn("set_company_defaults", message)
+
+	def test_a_bank_account_posting_to_it_is_refused(self):
+		message = self.tool_error("delete_account", {"name": BANK_CHECKING, "company": MAIN})
+		self.assertIn("Bank Account record(s) post to it", message)
+		self.assertIn("Operating - Example Bank", message)
+
+	def test_every_reason_is_reported_at_once(self):
+		"""One call, every blocker. Four calls each naming one reason is how a
+		person deletes the wrong account trying to satisfy the last one."""
+		frappe.db.set_value("Company", MAIN, "default_bank_account", BANK_CHECKING)
+		message = self.tool_error("delete_account", {"name": BANK_CHECKING, "company": MAIN})
+		self.assertIn("(1)", message)
+		self.assertIn("(2)", message)
+		self.assertIn("default_bank_account", message)
+		self.assertIn("Bank Account record(s)", message)
+
+	def test_a_check_can_be_turned_off_and_the_response_says_so(self):
+		frappe.db.set_value("Company", MAIN, "default_cash_account", CASH_CLEARING)
+		data = self.tool_data(
+			"delete_account",
+			{"name": CASH_CLEARING, "company": MAIN, "force_check_company_defaults": False},
+		)
+		self.assertEqual(data["checks_skipped"], ["company_defaults"])
+		self.assertNotIn("company_defaults", data["checks_passed"])
+		self.assertIn("force_check_company_defaults", data["note"])
+
+	def test_it_resolves_an_account_by_number(self):
+		data = self.tool_data("delete_account", {"name": "1190", "company": MAIN})
+		self.assertEqual(data["deleted"], CASH_CLEARING)
+
+	def test_it_is_off_by_default(self):
+		self.configure(enabled=1)
+		message = self.tool_error("delete_account", {"name": CASH_CLEARING, "company": MAIN})
+		self.assertIn("allow_delete_account", message)
+		self.assertTrue(frappe.db.exists("Account", CASH_CLEARING))
+
+	def test_it_is_advertised_as_destructive(self):
+		from erpnext_mcp import registry
+
+		annotations = registry.TOOLS["delete_account"]["annotations"]
+		self.assertTrue(annotations["destructiveHint"])
+		self.assertFalse(annotations["readOnlyHint"])
+		self.assertIn("IRREVERSIBLE", registry.TOOLS["delete_account"]["description"])
 
 
 # ── propose_clean_chart ─────────────────────────────────────────────────────
@@ -994,6 +1118,119 @@ class ImportConflicts(ChartToolsTestCase):
 		)
 		self.assertIn("block 1 account(s) from being created", message)
 		self.assertIn("Nothing was created", message)
+
+
+class ImportCreatesNewRoots(ChartToolsTestCase):
+	"""THE v0.8.0 REGRESSION. ERPNext marks `parent_account` required, so creating
+	a top-level account — which by definition has none — died with
+
+	    MandatoryError: [Account, 9000 - Test Root - ETC]: parent_account
+
+	on the first root of the first live import against a real site. The workaround
+	was to renumber the company's existing roots out of the way and graft the new
+	tree under a renamed one, which works and is a lot of moving parts for
+	something the import is supposed to do.
+
+	The fix is one flag on one insert, and it is the same flag ERPNext's own chart
+	importer sets for its own roots. These tests are here because the standalone
+	suite could not have caught it: the double inserted roots quite happily until
+	`harness.AccountDocument` was taught to refuse them, which it now does.
+	"""
+
+	def run_import(self, tree=None, company=MAIN):
+		return self.tool_data(
+			"import_chart_of_accounts",
+			{"company": company, "accounts_json": tree or SMALL, "dry_run": False},
+		)
+
+	def test_a_new_root_is_created_rather_than_raising_mandatoryerror(self):
+		data = self.run_import()
+		self.assertEqual(data["counts"]["created"], 4)
+		self.assertTrue(frappe.db.exists("Account", f"9000 - Test Root - {MAIN_ABBR}"))
+
+	def test_the_flag_is_set_on_the_root_and_only_on_the_root(self):
+		"""A child that skipped mandatory validation would be this app quietly
+		disabling a check ERPNext meant to run, so the flag is per document."""
+		from .harness import AccountDocument
+
+		seen = {}
+		real_insert = AccountDocument.insert
+
+		def watching_insert(self, *args, **kwargs):
+			seen[self.get("account_name")] = bool(self.flags.ignore_mandatory)
+			return real_insert(self, *args, **kwargs)
+
+		AccountDocument.insert = watching_insert
+		try:
+			self.run_import()
+		finally:
+			AccountDocument.insert = real_insert
+		self.assertEqual(
+			seen,
+			{"Test Root": True, "Test Group": False, "Test Leaf": False, "Second Leaf": False},
+		)
+
+	def test_the_dry_run_says_which_accounts_would_be_new_roots(self):
+		"""Dry-run and live-run parity: the plan has to describe what the live run
+		does, and creating a second set of roots is the part somebody needs to
+		agree to before it happens."""
+		data = self.tool_data("import_chart_of_accounts", {"company": MAIN, "accounts_json": SMALL})
+		self.assertEqual(data["new_root_accounts"], [f"9000 - Test Root - {MAIN_ABBR}"])
+		self.assertIn("ignore_mandatory", data["new_root_note"])
+		root = next(row for row in data["accounts"] if row["account_number"] == "9000")
+		self.assertTrue(root["new_root"])
+		self.assertNotIn("new_root", next(row for row in data["accounts"] if row["account_number"] == "9100"))
+
+	def test_a_grafted_subtree_is_not_reported_as_a_new_root(self):
+		tree = [
+			{
+				"account_number": "1600",
+				"account_name": "Deposits",
+				"root_type": "Asset",
+				"is_group": True,
+				"parent_account": CURRENT_ASSETS,
+				"children": [{"account_number": "1610", "account_name": "Utility Deposits"}],
+			}
+		]
+		data = self.tool_data("import_chart_of_accounts", {"company": MAIN, "accounts_json": tree})
+		self.assertEqual(data["new_root_accounts"], [])
+		self.assertNotIn("new_root_note", data)
+
+	def test_the_workaround_still_works_unchanged(self):
+		"""Renumber-and-graft was the way past this before the fix, and a live
+		site is already set up that way. It must not have become a second path."""
+		self.tool_data(
+			"update_account",
+			{"name": ASSET_ROOT, "company": MAIN, "new_account_number": "91000"},
+		)
+		renumbered = f"91000 - Application of Funds (Assets) - {MAIN_ABBR}"
+		self.assertTrue(frappe.db.exists("Account", renumbered))
+		tree = [
+			{
+				"account_number": "1600",
+				"account_name": "Deposits",
+				"root_type": "Asset",
+				"is_group": True,
+				"parent_account": renumbered,
+				"children": [{"account_number": "1610", "account_name": "Utility Deposits"}],
+			}
+		]
+		data = self.run_import(tree)
+		self.assertEqual(data["counts"]["created"], 2)
+		self.assertEqual(data["new_root_accounts"], [])
+
+	def test_a_root_the_double_would_have_refused_is_the_thing_being_tested(self):
+		"""Guards the guard: if `AccountDocument` ever stops modelling the
+		mandatory parent, every test above passes for the wrong reason."""
+		from .harness import MandatoryError
+
+		doc = frappe.new_doc("Account")
+		doc.company = MAIN
+		doc.account_name = "Bare Root"
+		doc.root_type = "Asset"
+		doc.is_group = 1
+		with self.assertRaises(MandatoryError):
+			doc.insert()
 
 
 class ImportExecute(ChartToolsTestCase):

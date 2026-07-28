@@ -84,11 +84,18 @@ _PROFILE_FIELDS = (
 )
 
 #: Fields a note document might carry its tenor in, in the order they are tried.
-#: A site's own Notes Payable doctype is a custom doctype whose author picked one
-#: of these names; asking for all of them costs nothing and saves the caller
-#: having to know which.
+#: Since v0.8.0 this app ships a `Note Payable` doctype, which records a
+#: `maturity_date` and no tenor — but a site may equally have its own custom notes
+#: doctype whose author picked one of these names, and asking for all of them
+#: costs nothing and saves the caller having to know which.
 _NOTE_TENOR_FIELDS = ("tenor_months", "term_months", "number_of_months", "no_of_months")
 _NOTE_MATURITY_FIELDS = ("maturity_date", "note_maturity_date", "end_date", "repayment_end_date", "due_date")
+
+#: Doctypes a note reference is looked for in when the caller does not say, most
+#: specific first. `Note Payable` is this app's own, so it is tried before a
+#: site's custom `Notes Payable` and long before Journal Entry, which is the last
+#: resort for a note that was never given a document of its own.
+_NOTE_DOCTYPES = ("Note Payable", "Notes Payable", "Loan", "Journal Entry")
 
 
 # ── dates ───────────────────────────────────────────────────────────────────
@@ -699,12 +706,13 @@ def _note_doctype(doctype: str, note: str) -> str:
 		if not frappe.db.exists(doctype, note):
 			raise ToolError(f"no {doctype} named {note!r} on this site. Nothing was changed.")
 		return doctype
-	for candidate in ("Notes Payable", "Note Payable", "Loan", "Journal Entry"):
+	for candidate in _NOTE_DOCTYPES:
 		if compat.doctype_exists(candidate) and frappe.db.exists(candidate, note):
 			return candidate
 	raise ToolError(
-		f"could not tell which DocType {note!r} is — it is not a Notes Payable, a Loan or a "
-		"Journal Entry on this site. Pass note_doctype. Nothing was changed."
+		f"could not tell which DocType {note!r} is — it is not a "
+		f"{', a '.join(_NOTE_DOCTYPES[:-1])} or a {_NOTE_DOCTYPES[-1]} on this site. Register it "
+		"with create_note_payable, or pass note_doctype. Nothing was changed."
 	)
 
 

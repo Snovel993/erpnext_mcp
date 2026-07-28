@@ -189,14 +189,90 @@ _ACCOUNT_DEFAULTS = {
 		"root_type": ("Asset", "Expense"),
 		"what": "cost paid but not yet incurred",
 	},
+	# ── v0.8.0 ──────────────────────────────────────────────────────────────
+	# The fields a Company needs before the Assets and Stock modules will save a
+	# document at all. `disposal_account` is first because it is the one that
+	# actually bit: ERPNext requires it on the Company before an Asset can be
+	# scrapped or sold, and the refusal arrives from the Asset, not the Company,
+	# which is not where anybody looks.
+	"disposal_account": {
+		"account_type": (),
+		"root_type": ("Income", "Expense"),
+		"what": "the gain or loss when an asset is sold or scrapped",
+	},
+	"capital_work_in_progress_account": {
+		"account_type": ("Capital Work in Progress", ""),
+		"root_type": ("Asset",),
+		"what": "an asset being built, before it is in service",
+	},
+	"expenses_included_in_asset_valuation": {
+		"account_type": (
+			"Expenses Included In Asset Valuation",
+			"Expenses Included In Valuation",
+			"",
+		),
+		"root_type": ("Expense",),
+		"what": "freight and duty that belong in an asset's cost rather than in the period",
+	},
+	"asset_received_but_not_billed": {
+		"account_type": ("Asset Received But Not Billed", ""),
+		"root_type": ("Liability",),
+		"what": "an asset delivered before its invoice arrived",
+	},
+	"stock_adjustment_account": {
+		"account_type": ("Stock Adjustment", "Expense Account", ""),
+		"root_type": ("Expense",),
+		"what": "the difference a stock count found",
+	},
+	"stock_received_but_not_billed": {
+		"account_type": ("Stock Received But Not Billed", ""),
+		"root_type": ("Liability",),
+		"what": "stock delivered before its invoice arrived",
+	},
+	"unrealized_exchange_gain_loss_account": {
+		"account_type": (),
+		"root_type": ("Income", "Expense"),
+		"what": "the movement on a foreign-currency balance nobody has settled yet",
+	},
+	"unrealized_profit_loss_account": {
+		"account_type": (),
+		"root_type": ("Income", "Expense"),
+		"what": "profit on a transfer between companies in the same group, eliminated on consolidation",
+	},
+	"default_advance_received_account": {
+		# ERPNext's own filter on this field, and the reason it looks wrong: an
+		# advance received is money held for a customer, so the account is a
+		# LIABILITY that ERPNext keys as Receivable so the party ledger picks it up.
+		"account_type": ("Receivable",),
+		"root_type": ("Liability",),
+		"what": "money taken before the work was done",
+	},
+	"default_advance_paid_account": {
+		"account_type": ("Payable",),
+		"root_type": ("Asset",),
+		"what": "money paid before the goods arrived",
+	},
+	"default_operating_cost_account": {
+		"account_type": (),
+		"root_type": ("Expense",),
+		"what": "the operating cost a production order adds to what it makes",
+	},
 }
 
 #: Company defaults that are a Cost Center rather than an Account.
 _COST_CENTER_DEFAULTS = {
 	"round_off_cost_center": "where the rounding difference is filed",
+	"default_selling_cost_center": "where a sale is filed when the document does not say",
+	"default_buying_cost_center": "where a purchase is filed when the document does not say",
 }
 
-SUPPORTED_COMPANY_DEFAULTS = tuple(_ACCOUNT_DEFAULTS) + tuple(_COST_CENTER_DEFAULTS)
+#: Just the ones that take an Account. Public because `accounts.delete_account`
+#: needs to know which Company fields could be pointing at an account it is about
+#: to remove, and a site whose Company meta does not describe its Link options is
+#: one where asking the meta answers nothing.
+ACCOUNT_COMPANY_DEFAULTS = tuple(_ACCOUNT_DEFAULTS)
+
+SUPPORTED_COMPANY_DEFAULTS = ACCOUNT_COMPANY_DEFAULTS + tuple(_COST_CENTER_DEFAULTS)
 
 
 # ── shared lookups ──────────────────────────────────────────────────────────

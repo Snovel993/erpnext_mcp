@@ -77,6 +77,19 @@ class PermissionError_(ValidationError):
 	pass
 
 
+class MandatoryError(ValidationError):
+	"""What Frappe raises for an empty `reqd` field, and what the app has to dodge.
+
+	Modelled because it is the exact failure a live site hit: ERPNext's Account
+	marks `parent_account` required, so creating a new *root* account — which by
+	definition has no parent — dies with
+	`MandatoryError: [Account, 1000 - Assets - ABC]: parent_account` before any of
+	this app's own logic runs. The double used to insert roots quite happily,
+	which is precisely why the standalone suite passed against code that could not
+	create one. See `AccountDocument.validate`.
+	"""
+
+
 # ── schema ──────────────────────────────────────────────────────────────────
 #: Field lists for the ERPNext doctypes this app reads. Only the fields the app
 #: actually selects need to be here; `compat.existing_fields` filters against
@@ -108,9 +121,22 @@ ERPNEXT_SCHEMA = {
 		"exchange_gain_loss_account",
 		"write_off_account",
 		"default_deferred_revenue_account",
-		# No `default_deferred_expense_account`: one supported default this
-		# fixture's ERPNext does not have, so the "your version has no such
-		# field" refusal is exercised by a real absence rather than a mock.
+		# v0.8.0 added thirteen more supported defaults. Six are here — enough to
+		# exercise every new shape of rule: a P&L account with no type constraint
+		# (disposal_account), an Asset with a required type
+		# (capital_work_in_progress_account), an Expense, two Liabilities of which
+		# one is the counter-intuitive Receivable-typed advance account, and a cost
+		# center.
+		"disposal_account",
+		"capital_work_in_progress_account",
+		"stock_adjustment_account",
+		"stock_received_but_not_billed",
+		"default_advance_received_account",
+		"default_selling_cost_center",
+		# No `default_deferred_expense_account`, and none of the other seven
+		# v0.8.0 keys: supported defaults this fixture's ERPNext does not have, so
+		# the "your version has no such field" refusal is exercised by a real
+		# absence rather than a mock.
 	],
 	"Account": [
 		"name",
@@ -213,7 +239,25 @@ ERPNEXT_SCHEMA = {
 	],
 	"Fiscal Year": ["name", "year_start_date", "year_end_date", "disabled", "companies"],
 	"Fiscal Year Company": ["parent", "parenttype", "company"],
-	"Bank Account": ["name", "account_name", "bank", "company", "account", "iban"],
+	# ERPNext splits the institution from the account at it. Both are here because
+	# `create_bank_account` writes both, and a double with only the second would
+	# let the tool "succeed" while the Bank it claims to have created went nowhere.
+	"Bank": ["name", "bank_name", "swift_number", "website"],
+	"Bank Account": [
+		"name",
+		"account_name",
+		"bank",
+		"company",
+		"account",
+		"iban",
+		"bank_account_no",
+		"branch_code",
+		"is_company_account",
+		"is_default",
+		"party_type",
+		"party",
+		"disabled",
+	],
 	"Bank Transaction": [
 		"name",
 		"date",
@@ -520,7 +564,7 @@ ERPNEXT_SCHEMA = {
 #: names them. Only the ones this app's behaviour depends on: `create_asset`
 #: creates an Item and then links the Asset to whatever the Item ended up
 #: called, and a double that named it `I-00001` would make the link untestable.
-ERPNEXT_AUTONAME = {"Item": "field:item_code"}
+ERPNEXT_AUTONAME = {"Item": "field:item_code", "Bank": "field:bank_name"}
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
 #: assert against the real defaults rather than a copy that can drift.
@@ -533,6 +577,8 @@ APP_DOCTYPES = {
 	"Asset Cost Profile": "asset_cost_profile",
 	"Asset Cost Center Allocation": "asset_cost_center_allocation",
 	"Asset Depreciation Posting": "asset_depreciation_posting",
+	"Note Payable": "note_payable",
+	"Note Payable Event": "note_payable_event",
 }
 
 
@@ -637,6 +683,28 @@ ERPNEXT_FIELD_OPTIONS = {
 		]
 	),
 	("Account", "root_type"): "Asset\nLiability\nIncome\nExpense\nEquity",
+	# v15's Journal Entry voucher types. `set_opening_balance` sets "Opening
+	# Entry" only when the site's own meta offers it, so a double with no options
+	# would leave that branch — the one that keeps opening balances out of the
+	# period's activity in every report that separates them — untested.
+	("Journal Entry", "voucher_type"): "\n".join(
+		[
+			"Journal Entry",
+			"Inter Company Journal Entry",
+			"Bank Entry",
+			"Cash Entry",
+			"Credit Card Entry",
+			"Debit Note",
+			"Credit Note",
+			"Contra Entry",
+			"Excise Entry",
+			"Write Off Entry",
+			"Opening Entry",
+			"Depreciation Entry",
+			"Exchange Rate Revaluation",
+			"Exchange Gain Or Loss",
+		]
+	),
 }
 
 
@@ -791,6 +859,7 @@ CHILD_TABLES = {
 	("Asset Category", "accounts"): "Asset Category Account",
 	("Asset Cost Profile", "cost_center_allocation"): "Asset Cost Center Allocation",
 	("Asset Cost Profile", "depreciation_postings"): "Asset Depreciation Posting",
+	("Note Payable", "payment_events"): "Note Payable Event",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -802,6 +871,7 @@ REHYDRATED_CHILD_FIELDS = (
 	"companies",
 	"cost_center_allocation",
 	"depreciation_postings",
+	"payment_events",
 )
 
 
@@ -1017,6 +1087,14 @@ class AccountDocument(Document):
 				raise ValidationError("Root cannot be edited.")
 			if not int(self.get("is_group") or 0):
 				raise ValidationError(f"The root account {self.get('account_name')} must be a group")
+			# ...and then Frappe's own mandatory pass, which runs after the
+			# controller hook and refuses the insert because ERPNext's Account
+			# marks parent_account `reqd`. ERPNext's chart importer gets past it
+			# with `flags.ignore_mandatory` for root nodes only, and so does this
+			# app. Without this branch the double would create roots the framework
+			# refuses, which is how the bug shipped.
+			if not self.flags.ignore_mandatory:
+				raise MandatoryError(f"[Account, {self.get('name')}]: parent_account")
 		else:
 			row = STORE.get_raw("Account", parent)
 			if row is None:
@@ -1068,6 +1146,22 @@ class CostCenterDocument(Document):
 			)
 		if row.get("company") != self.get("company"):
 			raise ValidationError("Cost Center and parent cost center must belong to the same company")
+
+
+class BankAccountDocument(Document):
+	"""Bank Account, which names itself after the account and the institution.
+
+	ERPNext's `BankAccount.autoname` is `" - ".join(filter(None, [account_name,
+	bank]))`, which is why the fixture's one account is called
+	`Operating - Example Bank`. Reproduced because `create_bank_account` reports
+	the docname it produced and a caller wires a bank feed to that string; a double
+	that named it `BA-00001` would make the one field anybody copies out of the
+	response a fiction.
+	"""
+
+	def autoname(self):
+		parts = [str(self.get("account_name") or "").strip(), str(self.get("bank") or "").strip()]
+		self.name = " - ".join(part for part in parts if part)
 
 
 class DocTypeDocument(Document):
@@ -1135,6 +1229,7 @@ RENAME_LINK_FIELDS = {
 STUB_CONTROLLERS = {
 	"File": FileDocument,
 	"Account": AccountDocument,
+	"Bank Account": BankAccountDocument,
 	"Cost Center": CostCenterDocument,
 	"DocType": DocTypeDocument,
 	"Custom Field": CustomFieldDocument,
@@ -1591,6 +1686,7 @@ def _build_frappe() -> types.ModuleType:
 	module.ValidationError = ValidationError
 	module.DoesNotExistError = DoesNotExistError
 	module.PermissionError = PermissionError_
+	module.MandatoryError = MandatoryError
 	module.db = FakeDB()
 	module.local = FrappeDict(
 		site="test.localhost",

@@ -45,6 +45,11 @@ _PRECIOUS_DOCTYPES = (
 	("Member Event", "the equity trail: contributions, distributions, transfers and their narratives"),
 	("Governance Document", "the governance archive, including any attached agreements"),
 	("Asset Cost Profile", "asset cost splits, note links and depreciation history"),
+	(
+		"Note Payable",
+		"the notes and loans register — terms, provenance and payment history for "
+		"debts whose only other record is a balance on a liability account",
+	),
 )
 
 

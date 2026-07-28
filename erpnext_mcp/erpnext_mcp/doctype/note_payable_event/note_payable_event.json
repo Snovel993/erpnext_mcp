@@ -1,0 +1,93 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-27 16:00:00.000000",
+ "description": "One thing that happened to a note: a payment, or the disposition that closed it. Rows are written by record_loan_payment and close_note_payable and are read-only on the form — the balance a row records is a fact about a Journal Entry, not a number to retype.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "event_type",
+  "event_date",
+  "amount",
+  "principal_component",
+  "interest_component",
+  "principal_outstanding_after",
+  "journal_entry",
+  "narrative",
+  "recorded_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "event_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Event Type",
+   "options": "Payment\nPaid Off\nRefinanced\nWritten Off\nAdjustment\nNote",
+   "reqd": 1
+  },
+  {
+   "fieldname": "event_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date",
+   "reqd": 1
+  },
+  {
+   "description": "The whole movement: principal and interest together for a payment.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount"
+  },
+  {
+   "fieldname": "principal_component",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Principal"
+  },
+  {
+   "fieldname": "interest_component",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Interest"
+  },
+  {
+   "description": "What was still owed after this event. Kept on the row so the history reconstructs the balance without replaying every payment.",
+   "fieldname": "principal_outstanding_after",
+   "fieldtype": "Currency",
+   "label": "Principal Outstanding After"
+  },
+  {
+   "description": "The DRAFT Journal Entry this event produced, where it produced one. Nothing here has moved a balance until that entry is submitted.",
+   "fieldname": "journal_entry",
+   "fieldtype": "Link",
+   "label": "Journal Entry",
+   "options": "Journal Entry"
+  },
+  {
+   "fieldname": "narrative",
+   "fieldtype": "Small Text",
+   "label": "Narrative"
+  },
+  {
+   "fieldname": "recorded_on",
+   "fieldtype": "Datetime",
+   "label": "Recorded On",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-27 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Note Payable Event",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": []
+}

@@ -707,6 +707,157 @@ class SetCompanyDefaults(DimensionToolsTestCase):
 		self.assertIn("allow_set_company_defaults", message)
 
 
+# ── v0.8.0: the defaults the Assets and Stock modules insist on ─────────────
+class SetCompanyDefaultsV8(DimensionToolsTestCase):
+	"""The thirteen keys added in v0.8.0.
+
+	`disposal_account` is the one that actually bit on a live site: ERPNext
+	requires it on the Company before an Asset can be scrapped or sold, and the
+	refusal arrives from the Asset rather than from the Company, which is not
+	where anybody looks. The rest are the same shape — a field some module will
+	not save a document without — so they are worth having before the module is
+	needed rather than after.
+
+	Six of them exist on this fixture's Company and seven deliberately do not, so
+	the "your ERPNext has no such field" refusal is exercised against a real
+	absence.
+	"""
+
+	#: (docname, name, number, root_type, account_type)
+	EXTRA_ACCOUNTS = (
+		("1900 - Construction in Progress", "Construction in Progress", "1900", "Asset", "Capital Work in Progress"),
+		("1910 - Barn Extension", "Barn Extension", "1910", "Asset", "Fixed Asset"),
+		("2200 - Stock Received Not Billed", "Stock Received Not Billed", "2200", "Liability", "Stock Received But Not Billed"),
+		("2400 - Advances From Customers", "Advances From Customers", "2400", "Liability", "Receivable"),
+		("5900 - Gain Loss on Disposal", "Gain Loss on Disposal", "5900", "Expense", ""),
+		("5910 - Stock Adjustment", "Stock Adjustment", "5910", "Expense", "Stock Adjustment"),
+	)
+
+	def setUp(self):
+		super().setUp()
+		STORE.seed(
+			"Account",
+			[
+				{
+					"name": f"{stem} - {MAIN_ABBR}",
+					"account_name": account_name,
+					"account_number": number,
+					"parent_account": CURRENT_ASSETS if root_type == "Asset" else "",
+					"is_group": 0,
+					"root_type": root_type,
+					"account_type": account_type,
+					"account_currency": "USD",
+					"disabled": 0,
+					"company": MAIN,
+				}
+				for stem, account_name, number, root_type, account_type in self.EXTRA_ACCOUNTS
+			],
+		)
+
+	def account(self, number: str) -> str:
+		for stem, _name, stem_number, *_rest in self.EXTRA_ACCOUNTS:
+			if stem_number == number:
+				return f"{stem} - {MAIN_ABBR}"
+		raise KeyError(number)
+
+	def set(self, **defaults):
+		return self.tool_data("set_company_defaults", {"company": MAIN, "defaults": defaults})
+
+	def refuse(self, **defaults):
+		return self.tool_error("set_company_defaults", {"company": MAIN, "defaults": defaults})
+
+	def test_all_thirteen_keys_are_supported(self):
+		from erpnext_mcp.tools import dimensions
+
+		added = (
+			"disposal_account",
+			"stock_adjustment_account",
+			"stock_received_but_not_billed",
+			"asset_received_but_not_billed",
+			"expenses_included_in_asset_valuation",
+			"capital_work_in_progress_account",
+			"unrealized_exchange_gain_loss_account",
+			"unrealized_profit_loss_account",
+			"default_advance_received_account",
+			"default_advance_paid_account",
+			"default_operating_cost_account",
+			"default_selling_cost_center",
+			"default_buying_cost_center",
+		)
+		for key in added:
+			with self.subTest(key=key):
+				self.assertIn(key, dimensions.SUPPORTED_COMPANY_DEFAULTS)
+
+	def test_the_disposal_account_is_the_one_that_bit(self):
+		"""No account_type constraint — a gain/loss on disposal is whatever the
+		chart calls it — but it has to be a profit-and-loss account."""
+		data = self.set(disposal_account=self.account("5900"))
+		self.assertEqual(data["changed"]["disposal_account"][1], self.account("5900"))
+
+	def test_a_disposal_account_under_assets_is_refused(self):
+		message = self.refuse(disposal_account=CASH)
+		self.assertIn("gain or loss when an asset is sold", message)
+		self.assertIn("Income or Expense", message)
+
+	def test_capital_work_in_progress_needs_its_own_account_type(self):
+		self.set(capital_work_in_progress_account=self.account("1900"))
+		message = self.refuse(capital_work_in_progress_account=self.account("1910"))
+		self.assertIn("Capital Work in Progress", message)
+		self.assertIn("Fixed Asset", message)
+
+	def test_stock_received_but_not_billed_is_a_liability(self):
+		data = self.set(stock_received_but_not_billed=self.account("2200"))
+		self.assertEqual(data["changed"]["stock_received_but_not_billed"][1], self.account("2200"))
+
+	def test_the_advance_received_account_is_a_receivable_typed_liability(self):
+		"""ERPNext's own filter, and it looks wrong until you see why: money held
+		for a customer is a LIABILITY, keyed Receivable so the party ledger picks
+		it up."""
+		data = self.set(default_advance_received_account=self.account("2400"))
+		self.assertEqual(data["changed"]["default_advance_received_account"][1], self.account("2400"))
+
+	def test_a_receivable_asset_account_is_not_an_advance_received_account(self):
+		receivable = self.a_receivable_account()
+		message = self.refuse(default_advance_received_account=receivable)
+		self.assertIn("money taken before the work was done", message)
+		self.assertIn("Liability", message)
+
+	def test_a_stock_adjustment_account_is_type_checked_too(self):
+		self.set(stock_adjustment_account=self.account("5910"))
+		message = self.refuse(stock_adjustment_account=SALES)
+		self.assertIn("Expense", message)
+
+	def test_the_selling_cost_center_takes_a_cost_center(self):
+		data = self.set(default_selling_cost_center="Main")
+		self.assertEqual(data["changed"]["default_selling_cost_center"][1], MAIN_CC)
+
+	def test_a_group_selling_cost_center_is_refused(self):
+		message = self.refuse(default_selling_cost_center=OPERATIONS)
+		self.assertIn("group cost center", message)
+
+	def test_a_key_this_erpnext_does_not_have_is_still_refused_by_name(self):
+		message = self.refuse(default_buying_cost_center="Main")
+		self.assertIn("default_buying_cost_center", message)
+		self.assertIn("has no field", message)
+
+	def test_several_of_them_go_in_one_call_or_none_do(self):
+		message = self.refuse(
+			disposal_account=self.account("5900"),
+			capital_work_in_progress_account=self.account("1910"),
+		)
+		self.assertIn("Nothing was changed", message)
+		self.assertIsNone(frappe.db.get_value("Company", MAIN, "disposal_account"))
+
+	def test_they_are_advertised_in_the_tool_description(self):
+		from erpnext_mcp import registry
+
+		spec = registry.TOOLS["set_company_defaults"]
+		keys = spec["inputSchema"]["properties"]["defaults"]["description"]
+		self.assertIn("disposal_account", keys)
+		self.assertIn("default_buying_cost_center", keys)
+		self.assertIn("disposal_account", spec["description"])
+
+
 # ── the point of all of it: a dimension on a journal entry line ─────────────
 class DimensionsOnAJournalEntry(DimensionToolsTestCase):
 	def setUp(self):

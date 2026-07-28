@@ -3,6 +3,193 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.8.0 — 2026-07-27
+
+The tooling a company needs on the day it goes live: the bank accounts money
+actually arrives in, the balances that were true before day one, the notes it
+owes, and a way to get rid of the accounts a bundled chart left behind.
+
+v0.6.0 made the axes a posting is filed under reachable. v0.7.0 added who owns
+the company and what the equipment is worth. This is the layer between those and
+a first bank sync — six new tools, one read tool, one new doctype, thirteen more
+company defaults, and the fix for a bug that made setting up a real chart of
+accounts harder than it should have been.
+
+### The bug fix, first, because it is the one that cost time
+
+**`import_chart_of_accounts` could not create a new root account.** Every live
+import that included a top-level account died on the first one with:
+
+```
+MandatoryError: [Account, 1000 - Assets - OML]: parent_account
+```
+
+ERPNext's Account marks `parent_account` as required. A root account by
+definition has none, so the insert never reached any of this app's own logic.
+The workaround — renumber the company's existing roots to 91xxx and graft the new
+tree under a renamed one — works, and is a lot of moving parts for something the
+importer is supposed to do.
+
+**The fix is one flag on one insert**, and it is the same flag ERPNext's own
+chart-of-accounts importer sets for its own roots
+(`erpnext/accounts/doctype/account/chart_of_accounts/__init__.py`):
+`doc.flags.ignore_mandatory = True`, set **per document and only when the account
+has no parent**. A child that skipped mandatory validation would be this app
+quietly disabling a check the framework meant to run.
+
+The plan reports it too, so dry run and live run still describe the same thing:
+`new_root_accounts` lists the accounts that would become new roots, with a note
+saying they are added *alongside* the company's existing ones — ERPNext will not
+let a root be moved or renamed into an existing tree afterwards.
+
+**Why the standalone suite did not catch it.** The double inserted root accounts
+quite happily. `harness.AccountDocument` now models Frappe's mandatory pass and
+raises the real `MandatoryError`, which turns eleven previously-green tests red
+against the unfixed code. That is the recurring lesson from this project's own
+history, third time now: *when the double is more permissive than the framework,
+tests pass and sites break.*
+
+Renumber-and-graft is unchanged and has its own test, because a live site is
+already set up that way.
+
+### Added — tools
+
+- **`set_opening_balance`** (mutating, default off). Books one historical event —
+  equipment transferred in, proceeds of a sale that predates this ledger, a
+  portfolio's starting value — as a DRAFT journal entry, **computing** the
+  offsetting line against Opening Balance Equity rather than trusting the caller
+  to work it out. Also flags the entry `is_opening` and, where the site offers
+  the voucher type, `Opening Entry`; those are what keep opening amounts out of
+  the period's activity in every report that separates the two, and nothing warns
+  you when they are missing. The equity account is *found* — account number 3300
+  first, then a leaf Equity account named after opening balances — and anything
+  other than exactly one match is refused with the candidates listed.
+- **`create_bank_account`** (mutating, default off). Creates the `Bank Account`
+  record a bank feed writes into, and the `Bank` institution behind it, in one
+  transaction. Refuses a GL account that is neither an Asset (a bank account) nor
+  a Liability (a credit card), and refuses an Asset account whose `account_type`
+  is not Bank or Cash — ERPNext's own account picker and its reconciliation tool
+  both filter on that flag, so an untyped account saves fine and then cannot be
+  reconciled at all. Warns, rather than refuses, when a second Bank Account would
+  post to the same GL account.
+- **`delete_account`** (mutating, default off, **irreversible**). Hard-deletes an
+  account with no history. The complement to `disable_account`, and almost never
+  the right tool — but a disabled account **still holds its account number**, and
+  on a company being renumbered onto a real chart that is the entire problem.
+  Four checks, all on by default, all refusals, all run before anything is
+  deleted so one call reports every reason: GL entries (including journal entry
+  lines on unsubmitted drafts, which write no GL row and would otherwise read as
+  untouched), child accounts (disabled ones count), Company default fields, and
+  Bank Account records.
+- **`create_note_payable`**, **`record_loan_payment`**, **`close_note_payable`**
+  (mutating, default off) and **`list_notes_payable`** (read-only, default on).
+  See below.
+
+### Added — the `Note Payable` doctype
+
+Two doctypes: `Note Payable` and its `Note Payable Event` child table.
+
+**Why not ERPNext's Loan module.** ERPNext's Loan models the company as the
+*lender* — an application, a disbursement, a repayment schedule, its own
+accounting, half a dozen doctypes. A holding company with four notes outstanding
+is on the other side of every one of those.
+
+**What it adds to the liability account that already exists.** Three things a
+balance on account 2310 cannot tell you: the terms (rate, maturity, frequency),
+the provenance (what was agreed, by whom, where the original is — for a family
+note traced back to 2003, that sentence is the whole record), and what it
+secures.
+
+`record_loan_payment` is mostly about the split. A payment leaving a bank account
+is one number whose two halves land in completely different places: one reduces a
+liability, one is an expense of the period. Booked as a single line against the
+liability, the year's interest expense reads as nil and the balance sheet says
+the note was paid down by more than it was. Pass `principal_split`,
+`interest_split`, or one and let the other be derived — they have to add up or
+nothing is written.
+
+`close_note_payable` **writes no journal entry, deliberately.** Relieving a
+written-off balance is a posting with real tax consequences (forgiven debt is
+usually income), and a refinance moves a balance between two liability accounts.
+Both belong to somebody who meant them. The response spells out exactly which
+entry is still owed and against which account, so the omission is impossible to
+miss.
+
+`principal_outstanding` on a note is a **convenience figure**. The authoritative
+balance is the linked GL account, and the two diverge by every payment recorded
+as a draft nobody has posted — which, in an app where nothing submits, is the
+normal state. Every response that reports the field says so.
+
+`link_asset_to_note` now recognises `Note Payable` as a link target, and
+`create_note_payable(related_asset=…)` delegates to it: the same tenor check,
+from the other direction, refusing by default when an asset's useful life and its
+note's term disagree. The note and the link are one transaction — a refused link
+leaves no note behind.
+
+### Added — thirteen more company defaults
+
+`set_company_defaults` supported thirteen keys and now supports twenty-six. The
+new ones are the fields a module will not save a document without:
+
+`disposal_account`, `capital_work_in_progress_account`,
+`expenses_included_in_asset_valuation`, `asset_received_but_not_billed`,
+`stock_adjustment_account`, `stock_received_but_not_billed`,
+`unrealized_exchange_gain_loss_account`, `unrealized_profit_loss_account`,
+`default_advance_received_account`, `default_advance_paid_account`,
+`default_operating_cost_account`, `default_selling_cost_center`,
+`default_buying_cost_center`.
+
+`disposal_account` is the one that actually bit: ERPNext refuses to scrap or sell
+an Asset without it, and reports the refusal *from the Asset*, which is not where
+anybody looks. All thirteen are type-checked the same way the original thirteen
+are — including `default_advance_received_account`, which looks wrong until you
+see why ERPNext filters it to a **Liability** with `account_type = Receivable`:
+money held for a customer is a liability, keyed so the party ledger picks it up.
+
+No new tool, no behaviour change to the existing keys, still all-or-nothing and
+still idempotent.
+
+### Changed
+
+- `link_asset_to_note` tries `Note Payable` first when guessing which doctype a
+  note reference lives in, and its refusal now names `create_note_payable`.
+- `import_chart_of_accounts` returns `new_root_accounts` (and `new_root_note`
+  when it is non-empty) in both dry and live runs, and each planned root row
+  carries `new_root: true`.
+- `before_uninstall` warns about `Note Payable` records alongside the other
+  doctypes whose contents are the only copy.
+
+### Tests
+
+**1068 standalone tests, all passing** (was 902).
+
+- **`tests_standalone/test_banking.py`** — 29 tests. Every refusal in
+  `create_bank_account`, the shared-GL-account warning, and that a failure leaves
+  no orphan `Bank` behind.
+- **`tests_standalone/test_opening.py`** — 35 tests. The plug arithmetic in both
+  directions, the already-balanced case, the flags, finding the equity account by
+  number and by name, and both ways of failing to find it.
+- **`tests_standalone/test_notes.py`** — 70 tests. The split, the balance, the
+  history, the asset tenor check from the note's side, and every disposition.
+- **`test_accounts.ImportCreatesNewRoots`** — the regression above, including a
+  test that the flag is set on the root **and only on the root**, and a
+  guards-the-guard test asserting the double still refuses a bare root (so the
+  others cannot pass for the wrong reason).
+- **`test_accounts.DeleteAccount`** — every check, the "report every reason at
+  once" behaviour, and that the account number is actually free afterwards.
+- **`test_dimensions.SetCompanyDefaultsV8`** — one test per new shape of rule.
+- **`erpnext_mcp/tests/test_notes.py`** (in-bench) — that the two doctypes
+  migrate and their modules import, that the controller's throws fire on the Desk
+  path, that ERPNext accepts an `is_opening` journal entry and a Bank Account
+  built here, and that a new root account can be created against a real Account
+  doctype.
+
+Harness additions: `MandatoryError` and Frappe's mandatory pass on root accounts;
+the `Bank` doctype and ERPNext's `BankAccount.autoname`; the `Note Payable`
+doctypes; Journal Entry's real `voucher_type` option list; and six of the
+thirteen new Company default fields — the other seven deliberately absent, so the
+"your ERPNext has no such field" refusal is exercised against a real absence.
+
 ## 0.7.1 — 2026-07-27
 
 **fix: missing Python controllers for child doctypes broke `bench migrate`.**

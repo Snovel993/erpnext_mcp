@@ -121,7 +121,11 @@ class ChildTablesDeclareThemselves(unittest.TestCase):
 	list view and permissions, and its parent's Table field then points at
 	something Frappe will not embed."""
 
-	CHILD_TABLES = ("asset_cost_center_allocation", "asset_depreciation_posting")
+	CHILD_TABLES = (
+		"asset_cost_center_allocation",
+		"asset_depreciation_posting",
+		"note_payable_event",
+	)
 
 	def test_the_child_tables_are_marked_as_tables(self):
 		for entry in self.CHILD_TABLES:

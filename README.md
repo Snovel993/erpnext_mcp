@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **64 tools** — 37 read-only, 27 mutating.
+- **71 tools** — 38 read-only, 33 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -46,7 +46,7 @@ you reason about it you end up pasting screenshots.
 An LLM is perfectly capable of reasoning about a general ledger. It cannot see
 one. This closes that gap without handing anything away:
 
-- **It cannot write by default.** All 27 mutating tools are off on install.
+- **It cannot write by default.** All 33 mutating tools are off on install.
   Turning one on is a checkbox on a form only System Manager can open.
 - **The dangerous verb gets its own switch.** `create_journal_entry` only ever
   produces a draft — `docstatus=0`, affecting no balance. Posting is
@@ -242,7 +242,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 64 tools
+## The 71 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -251,7 +251,7 @@ Tools whose site prerequisite is missing are not advertised at all — on a site
 without Frappe HR, the three HR tools simply do not exist as far as a client is
 concerned.
 
-### Read-only — 37, all ON by default, each individually switchable
+### Read-only — 38, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -339,8 +339,9 @@ concerned.
 | `list_governance_documents` | What is in the archive, with the amendment chain and which entries are still in force. |
 | `get_governance_document_content` | One archived document's metadata and its attachment, base64. |
 | `depreciation_note_alignment_check` | For every financed asset, whether its remaining life and its note's remaining term still agree. |
+| `list_notes_payable` | Every note or loan a company owes: lender, original and outstanding principal, rate, term, and when the next payment falls due. |
 
-### Mutating — 27, all OFF by default
+### Mutating — 33, all OFF by default
 
 **Postings into the ledger**
 
@@ -351,6 +352,8 @@ concerned.
 | `cancel_journal_entry` | Cancels a submitted JE, `1 → 2`, writing reversing entries. `reason` mandatory. | Delete anything. |
 | `create_bank_transaction` | Inserts a **draft** Bank Transaction. | Submit it. |
 | `reconcile_bank_transaction` | Attaches payment vouchers, refusing to over-allocate. | Allocate past the remaining amount. |
+| `set_opening_balance` | Books one historical event as a **draft** opening-balance JE, **computing** the offsetting line against Opening Balance Equity and flagging the entry as opening. | Submit it, or guess an equity account when two could match. |
+| `create_bank_account` | Creates the Bank Account a feed writes into, and the Bank behind it, in one transaction. | Point at anything but an Asset (bank) or a Liability (credit card) — or at an Asset whose `account_type` is not Bank or Cash. |
 
 **Structural changes to the chart itself**
 
@@ -360,7 +363,8 @@ concerned.
 | `update_account` | Rename, renumber, re-type, enable/disable. The docname moves with the fields, via ERPNext's own `update_account_number`. | Reparent. That is `move_account`, on purpose. |
 | `move_account` | Reparent, and nothing else. Refuses a cross-root or cyclic move. | Rename anything. |
 | `disable_account` | ERPNext's soft delete, `reason` mandatory. | Touch an account with GL entries in the current fiscal year, or delete anything ever. |
-| `import_chart_of_accounts` | Builds a whole tree in one transaction, rolling back entirely on any failure. **`dry_run` defaults to true.** | Silently reparent or rename an account that already exists. |
+| `delete_account` | **Irreversible.** Hard-deletes an account with no history, freeing its number — which disabling does not. Four checks, all refusals, all reported at once. | Remove an account with GL entries, journal entry lines (drafts included), children, a company default or a Bank Account pointing at it. |
+| `import_chart_of_accounts` | Builds a whole tree in one transaction, rolling back entirely on any failure. New top-level accounts included. **`dry_run` defaults to true.** | Silently reparent or rename an account that already exists. |
 | `advance_workflow` | Takes a workflow action via `apply_workflow`. **Can submit or cancel the document** if the target state says so. Supports `dry_run`. | Take an action the acting user is not allowed. |
 | `create_todo` | Assigns a ToDo. | Touch any ledger. |
 
@@ -393,6 +397,33 @@ concerned.
 | `update_asset_allocation` | Replaces the split, from the next period onwards. | Rewrite periods already written — that is the history. |
 | `link_asset_to_note` | Ties an asset to its financing and holds their terms together. | Link a diverging pair unless you pass `enforce_tenor=false`. |
 | `run_depreciation_cycle` | Writes the depreciation due as **draft** JEs, split across each asset's cost centers. **`dry_run` defaults to true.** | Post a period twice, or post anything at all. |
+
+**What the company owes**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_note_payable` | Registers one note or loan: terms, provenance, the liability account it posts to, and the asset it financed. | Link an asset whose useful life disagrees with the note's term, unless you pass `enforce_asset_tenor=false`. |
+| `record_loan_payment` | Splits a payment into principal and interest and drafts the JE that books it, decrementing the balance. | Book a split that does not add up, clear more principal than is owed, or post anything. |
+| `close_note_payable` | Closes a note as Paid Off, Refinanced or Written Off, recording the disposition in its own history. | Write a journal entry — relieving the balance is a posting somebody should make on purpose, and the response says which. |
+
+#### A note payable is not ERPNext's Loan
+
+ERPNext's Loan module models the company as the **lender**: an application, a
+disbursement, a repayment schedule, its own accounting. A holding company with
+four notes outstanding is on the other side of all of it.
+
+What a `Note Payable` record adds to the liability account that already exists is
+three things the balance cannot tell you — the **terms** (rate, maturity,
+frequency), the **provenance** (what was agreed, by whom, where the original is),
+and **what it secures**. That last one is what lets
+`depreciation_note_alignment_check` see whether a financed asset and its
+financing still end in the same month.
+
+`principal_outstanding` on a note is a **convenience figure** maintained by
+`record_loan_payment`. The ledger's answer is the balance of the linked GL
+account, and the two diverge by every payment recorded as a draft nobody has
+posted — which, in an app where nothing submits, is the normal state. Every
+response that reports the field says so.
 
 #### Members are anonymous on purpose
 
@@ -747,15 +778,18 @@ bench --site yoursite.localhost uninstall-app erpnext_mcp
 
 Drops this app's own doctypes and everything in them: **ERPNext MCP Settings**,
 **MCP Action Log** (the audit history), **Cap Table Entry**, **Member Event**,
-**Governance Document** and **Asset Cost Profile**. Nothing else on the site is
-touched — the accounts, cost centers, dimensions, journal entries and Assets
-these tools created are ordinary ERPNext records and stay exactly as they are.
+**Governance Document**, **Asset Cost Profile** and **Note Payable**. Nothing
+else on the site is touched — the accounts, cost centers, dimensions, journal
+entries, bank accounts and Assets these tools created are ordinary ERPNext
+records and stay exactly as they are.
 
 `before_uninstall` prints a row count and an export command for each doctype
-that has anything in it, because three of them are the **only** copy: the cap
+that has anything in it, because four of them are the **only** copy: the cap
 table is the only mapping from a member id to a legal name, the event trail the
-only record of why an equity entry exists, and a governance document may hold the
-only digital copy of an agreement. Export before you uninstall.
+only record of why an equity entry exists, a governance document may hold the
+only digital copy of an agreement, and a note payable is the only place a debt's
+terms and provenance are written down — the ledger has the balance and nothing
+else. Export before you uninstall.
 
 ---
 

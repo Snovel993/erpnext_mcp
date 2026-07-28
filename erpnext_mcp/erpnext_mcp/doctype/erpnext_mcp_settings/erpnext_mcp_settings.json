@@ -43,6 +43,8 @@
   "mutating_tools_col",
   "allow_create_bank_transaction",
   "allow_reconcile_bank_transaction",
+  "allow_create_bank_account",
+  "allow_set_opening_balance",
   "chart_tools_section",
   "allow_create_account",
   "allow_update_account",
@@ -50,6 +52,7 @@
   "disable_account_col",
   "allow_disable_account",
   "allow_import_chart_of_accounts",
+  "allow_delete_account",
   "dimension_tools_section",
   "allow_create_cost_center",
   "allow_update_cost_center",
@@ -111,7 +114,13 @@
   "allow_update_asset_allocation",
   "asset_tools_col",
   "allow_link_asset_to_note",
-  "allow_run_depreciation_cycle"
+  "allow_run_depreciation_cycle",
+  "notes_tools_section",
+  "allow_list_notes_payable",
+  "allow_create_note_payable",
+  "notes_tools_col",
+  "allow_record_loan_payment",
+  "allow_close_note_payable"
  ],
  "fields": [
   {
@@ -294,6 +303,13 @@
    "label": "Propose Clean Chart"
   },
   {
+   "default": "1",
+   "description": "Read-only. The company's cost centers as a nested tree, with numbers, group flags and disabled flags. Cost centers are the axis a posting is filed under alongside the account.",
+   "fieldname": "allow_list_cost_centers",
+   "fieldtype": "Check",
+   "label": "List Cost Centers"
+  },
+  {
    "description": "<b>Every one of these is off on a fresh install and stays off until you tick it.</b> Each call is recorded in MCP Action Log with its arguments and its docstatus change. Enable the narrowest set that does the job: create_journal_entry alone gives an AI a scratchpad in the ledger, because a draft affects no balance until submit_journal_entry \u2014 a separate switch \u2014 posts it. <br><br>Two more write tools live in the sections below: <b>Advance Workflow</b> (Workflow) and <b>Create Todo</b> (Comments &amp; Tasks). The banner at the top of this form always lists every write tool that is currently live, wherever its switch is.",
    "fieldname": "mutating_tools_section",
    "fieldtype": "Section Break",
@@ -340,6 +356,20 @@
    "label": "Reconcile Bank Transaction"
   },
   {
+   "default": "0",
+   "description": "WRITE. Create the Bank Account record a bank feed writes into, and the Bank institution behind it. Refuses a GL account that is not an Asset (a bank account) or a Liability (a credit card), and an Asset account whose account_type is not Bank or Cash \u2014 ERPNext's own reconciliation filters on that flag.",
+   "fieldname": "allow_create_bank_account",
+   "fieldtype": "Check",
+   "label": "Create Bank Account"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Book a historical event as a DRAFT opening-balance journal entry, computing the offsetting line against Opening Balance Equity and flagging the entry as opening. Never submits.",
+   "fieldname": "allow_set_opening_balance",
+   "fieldtype": "Check",
+   "label": "Set Opening Balance"
+  },
+  {
    "description": "Structural changes to the chart itself, as opposed to postings into it. A bad journal entry is one wrong number a reversing entry fixes; a bad reparent silently changes what every balance-sheet subtotal has meant, retroactively, for every period already reported. Enable the narrowest set that does the job.<br><br>The read-only planner that produces a chart to review, <b>Propose Clean Chart</b>, is in the Accounting Read Tools section above. <b>Import Chart Of Accounts</b> defaults to a dry run even when it is switched on.",
    "fieldname": "chart_tools_section",
    "fieldtype": "Section Break",
@@ -384,6 +414,59 @@
    "fieldname": "allow_import_chart_of_accounts",
    "fieldtype": "Check",
    "label": "Import Chart Of Accounts"
+  },
+  {
+   "default": "0",
+   "description": "WRITE, AND IRREVERSIBLE \u2014 the only tool here with no undo, no draft and no cancelled state. Hard-deletes an account with no GL entries, no journal entry lines, no children, no company default and no bank account pointing at it. Prefer Disable Account for anything with history; this exists to free an account NUMBER, which disabling does not.",
+   "fieldname": "allow_delete_account",
+   "fieldtype": "Check",
+   "label": "Delete Account"
+  },
+  {
+   "description": "How a posting is classified once it reaches an account: which segment of the business it belongs to (cost centers), what other axes it is filed under (accounting dimensions), and which accounts a document reaches for when nothing says (company defaults).<br><br>The read-only tree, <b>List Cost Centers</b>, is in the Accounting Read Tools section above. <b>Create Accounting Dimension</b> is the only switch in this app that can add a DocType to your site \u2014 and only when a call asks for it explicitly.",
+   "fieldname": "dimension_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Cost Centers & Dimensions"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Create one cost center under an existing group. Validates the parent and the number's uniqueness before writing anything. Cannot create a root: ERPNext gives every company exactly one, named after the company.",
+   "fieldname": "allow_create_cost_center",
+   "fieldtype": "Check",
+   "label": "Create Cost Center"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Rename, renumber or disable/enable one cost center. Moves the docname with the fields. Cannot reparent \u2014 this app ships no tool that can.",
+   "fieldname": "allow_update_cost_center",
+   "fieldtype": "Check",
+   "label": "Update Cost Center"
+  },
+  {
+   "fieldname": "dimension_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE, AND A SCHEMA CHANGE. Creates an Accounting Dimension and adds a Link custom field to the documents that carry it \u2014 and, when the call asks for it, generates the custom DocType whose records become the dimension's values. Those fields are permanent until somebody removes them in the Desk. The narrowest switch in this section to leave off.",
+   "fieldname": "allow_create_accounting_dimension",
+   "fieldtype": "Check",
+   "label": "Create Accounting Dimension"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Add one value to an existing accounting dimension \u2014 one record in the DocType that dimension points at. Touches no ledger and creates no fields.",
+   "fieldname": "allow_create_dimension_value",
+   "fieldtype": "Check",
+   "label": "Create Dimension Value"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Point the company's default account and cost center fields at real accounts, type-checked (a Receivable field has to name a Receivable account). Changes no existing posting, only what the next document picks by default. Idempotent.",
+   "fieldname": "allow_set_company_defaults",
+   "fieldtype": "Check",
+   "label": "Set Company Defaults"
   },
   {
    "description": "Reading a site's approval structure, and \u2014 behind its own switch \u2014 acting on it. Workflow actions run through Frappe's own apply_workflow, so they respect the acting user's roles and the transition's conditions.",
@@ -612,60 +695,7 @@
    "label": "Fiscal Year Audit Packet"
   },
   {
-   "default": "1",
-   "description": "Read-only. The company's cost centers as a nested tree, with numbers, group flags and disabled flags. Cost centers are the axis a posting is filed under alongside the account.",
-   "fieldname": "allow_list_cost_centers",
-   "fieldtype": "Check",
-   "label": "List Cost Centers"
-  },
-  {
-   "description": "How a posting is classified once it reaches an account: which segment of the business it belongs to (cost centers), what other axes it is filed under (accounting dimensions), and which accounts a document reaches for when nothing says (company defaults).<br><br>The read-only tree, <b>List Cost Centers</b>, is in the Accounting Read Tools section above. <b>Create Accounting Dimension</b> is the only switch in this app that can add a DocType to your site \u2014 and only when a call asks for it explicitly.",
-   "fieldname": "dimension_tools_section",
-   "fieldtype": "Section Break",
-   "label": "Cost Centers & Dimensions"
-  },
-  {
-   "default": "0",
-   "description": "WRITE. Create one cost center under an existing group. Validates the parent and the number's uniqueness before writing anything. Cannot create a root: ERPNext gives every company exactly one, named after the company.",
-   "fieldname": "allow_create_cost_center",
-   "fieldtype": "Check",
-   "label": "Create Cost Center"
-  },
-  {
-   "default": "0",
-   "description": "WRITE. Rename, renumber or disable/enable one cost center. Moves the docname with the fields. Cannot reparent \u2014 this app ships no tool that can.",
-   "fieldname": "allow_update_cost_center",
-   "fieldtype": "Check",
-   "label": "Update Cost Center"
-  },
-  {
-   "fieldname": "dimension_tools_col",
-   "fieldtype": "Column Break",
-   "label": ""
-  },
-  {
-   "default": "0",
-   "description": "WRITE, AND A SCHEMA CHANGE. Creates an Accounting Dimension and adds a Link custom field to the documents that carry it \u2014 and, when the call asks for it, generates the custom DocType whose records become the dimension's values. Those fields are permanent until somebody removes them in the Desk. The narrowest switch in this section to leave off.",
-   "fieldname": "allow_create_accounting_dimension",
-   "fieldtype": "Check",
-   "label": "Create Accounting Dimension"
-  },
-  {
-   "default": "0",
-   "description": "WRITE. Add one value to an existing accounting dimension \u2014 one record in the DocType that dimension points at. Touches no ledger and creates no fields.",
-   "fieldname": "allow_create_dimension_value",
-   "fieldtype": "Check",
-   "label": "Create Dimension Value"
-  },
-  {
-   "default": "0",
-   "description": "WRITE. Point the company's default account and cost center fields at real accounts, type-checked (a Receivable field has to name a Receivable account). Changes no existing posting, only what the next document picks by default. Idempotent.",
-   "fieldname": "allow_set_company_defaults",
-   "fieldtype": "Check",
-   "label": "Set Company Defaults"
-  },
-  {
-   "description": "The member register and its event trail. The cap table is the only place on this site that maps an anonymous member id to a legal name — gate it accordingly.",
+   "description": "The member register and its event trail. The cap table is the only place on this site that maps an anonymous member id to a legal name \u2014 gate it accordingly.",
    "fieldname": "governance_tools_section",
    "fieldtype": "Section Break",
    "label": "Cap Table and Member Events"
@@ -693,7 +723,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Retire a member: withdrawal date, retired flag, and a Withdrawal event in the trail. Moves no money — a final distribution is a separate Record Member Event call.",
+   "description": "WRITE. Retire a member: withdrawal date, retired flag, and a Withdrawal event in the trail. Moves no money \u2014 a final distribution is a separate Record Member Event call.",
    "fieldname": "allow_close_cap_table_entry",
    "fieldtype": "Check",
    "label": "Close Cap Table Entry"
@@ -712,14 +742,14 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Record one member event and, where it books money, the DRAFT journal entry for it — tagged with the member dimension on every line. Enabling this grants creating that draft; it does not grant posting it.",
+   "description": "WRITE. Record one member event and, where it books money, the DRAFT journal entry for it \u2014 tagged with the member dimension on every line. Enabling this grants creating that draft; it does not grant posting it.",
    "fieldname": "allow_record_member_event",
    "fieldtype": "Check",
    "label": "Record Member Event"
   },
   {
    "default": "0",
-   "description": "WRITE. Post the draft journal entry a member event is waiting on. Also requires Submit Journal Entry to be on — that switch is where moving a balance is decided, whatever route reaches it.",
+   "description": "WRITE. Post the draft journal entry a member event is waiting on. Also requires Submit Journal Entry to be on \u2014 that switch is where moving a balance is decided, whatever route reaches it.",
    "fieldname": "allow_submit_member_event",
    "fieldtype": "Check",
    "label": "Submit Member Event"
@@ -801,6 +831,45 @@
    "fieldname": "allow_run_depreciation_cycle",
    "fieldtype": "Check",
    "label": "Run Depreciation Cycle"
+  },
+  {
+   "description": "What the company owes and on what terms. A payment produces a draft journal entry; closing a note posts nothing at all.",
+   "fieldname": "notes_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Notes Payable"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every note or loan a company owes: lender, original and outstanding principal, rate, term, and when the next payment falls due.",
+   "fieldname": "allow_list_notes_payable",
+   "fieldtype": "Check",
+   "label": "List Notes Payable"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register an outstanding note: its terms, its provenance, the liability account it posts to, and the asset it financed. Refuses by default when a linked asset's useful life and the note's term disagree.",
+   "fieldname": "allow_create_note_payable",
+   "fieldtype": "Check",
+   "label": "Create Note Payable"
+  },
+  {
+   "fieldname": "notes_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Split a payment into principal and interest and draft the journal entry that books it, decrementing the note's outstanding balance. Never submits.",
+   "fieldname": "allow_record_loan_payment",
+   "fieldtype": "Check",
+   "label": "Record Loan Payment"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Close a note as Paid Off, Refinanced or Written Off, recording the disposition in its own history. Writes no journal entry \u2014 relieving a written-off balance is a posting with tax consequences that somebody should make on purpose.",
+   "fieldname": "allow_close_note_payable",
+   "fieldtype": "Check",
+   "label": "Close Note Payable"
   }
  ],
  "index_web_pages_for_search": 0,

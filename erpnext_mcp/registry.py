@@ -42,6 +42,7 @@ from .result import ToolResult
 from .tools import (
 	accounts,
 	assets,
+	banking,
 	collab,
 	dimensions,
 	files,
@@ -49,6 +50,8 @@ from .tools import (
 	hr,
 	meta,
 	mutate,
+	notes,
+	opening,
 	packets,
 	read,
 	reports,
@@ -441,6 +444,148 @@ TOOLS = {
 		destructive=True,
 		title="Cancel journal entry",
 	),
+	"set_opening_balance": _tool(
+		opening.set_opening_balance,
+		"MUTATING (default OFF). Book one historical event onto a set of books as a "
+		"DRAFT opening-balance Journal Entry, balancing automatically against "
+		"Opening Balance Equity.\n\n"
+		"USE THIS RATHER THAN create_journal_entry for equipment transferred in, "
+		"proceeds of a sale that predates this ledger, the starting value of a "
+		"portfolio, or any other balance that was true before day one. It does "
+		"three things a hand-built entry keeps losing: it COMPUTES the offsetting "
+		"equity line instead of trusting the caller's arithmetic; it flags the "
+		"entry `is_opening` (and `Opening Entry` where the site has that voucher "
+		"type), which is what keeps the amounts out of the period's activity in "
+		"reports that separate the two; and it takes one remark for the whole "
+		"event rather than one per line.\n\n"
+		"THE EQUITY ACCOUNT IS FOUND, NOT GUESSED: account_number 3300 first, then "
+		"a leaf Equity account named after opening balances. Anything other than "
+		"exactly one match is refused with the candidates listed. Override it with "
+		"opening_equity_account.\n\n"
+		"Refuses a group, disabled or wrong-company account on any line; a group "
+		"or disabled cost center; a dimension value that does not exist; a "
+		"non-positive amount (direction is dr_or_cr, never a minus sign); and an "
+		"opening_equity_account that is not Equity. Nothing is written unless "
+		"every line validates.\n\n"
+		"Creates a DRAFT. It moves no balance until submit_journal_entry posts it, "
+		"and an opening balance is the entry most worth reading first — it is the "
+		"one nobody will ever re-derive.",
+		{
+			"company": _COMPANY,
+			"posting_date": _field(
+				_STRING,
+				"YYYY-MM-DD. Usually the day before the first trading day, or the "
+				"fiscal year's opening date. Must fall inside a Fiscal Year this site has.",
+			),
+			"entries": {
+				"type": "array",
+				"minItems": 1,
+				"description": (
+					"The real side of the event, one object per account. The offsetting "
+					"line against opening equity is computed — do not include it."
+				),
+				"items": {
+					"type": "object",
+					"properties": {
+						"account": _field(_STRING, "Account docname, number or name. Must be a leaf."),
+						"dr_or_cr": _field(
+							_STRING,
+							"'dr'/'debit' or 'cr'/'credit'. The direction lives here, never in the sign of the amount.",
+						),
+						"amount": _field(_NUMBER, "Positive. Always."),
+						"cost_center": _field(_STRING, "Optional leaf cost center to file this line under."),
+						"dimensions": _field(
+							_OBJECT,
+							'Optional accounting dimensions for this line, e.g. {"member": "Member-01"}. '
+							"Each key must be a field on Journal Entry Account and each value must exist.",
+						),
+						"narrative": _field(_STRING, "Optional per-line remark. The event's own explanation is user_remark."),
+					},
+					"required": ["account", "dr_or_cr", "amount"],
+					"additionalProperties": False,
+				},
+			},
+			"opening_equity_account": _field(
+				_STRING,
+				"Override the Opening Balance Equity account the offsetting line lands "
+				"in. Must be a leaf Equity account in this company.",
+			),
+			"user_remark": _field(
+				_STRING,
+				"MANDATORY. What event these balances came from, e.g. 'Equipment "
+				"transferred from PFI on dissolution, per the 2026-01-02 bill of sale'. "
+				"The only part of an opening balance nobody can reconstruct later.",
+			),
+		},
+		required=("posting_date", "entries", "user_remark"),
+		mutating=True,
+		title="Set an opening balance",
+	),
+	"create_bank_account": _tool(
+		banking.create_bank_account,
+		"MUTATING (default OFF). Create the Bank Account record that maps a real "
+		"account at a real institution onto an account on the chart — and the Bank "
+		"(the institution) too, when this site has never seen it. Both in one "
+		"transaction: a failure leaves neither.\n\n"
+		"A Bank Account holds no balance. It is the mapping a bank feed writes "
+		"into and a reconciliation reads. WHY PRE-CREATE ONE, when a feed makes it "
+		"on first sync: the one a feed makes is named whatever the feed calls it "
+		"and points at a GL account the feed picked. Renaming it later is fine; "
+		"REPOINTING it is not — once transactions have been imported, the GL "
+		"account named here is where they reconcile to, and moving that is a "
+		"manual re-reconciliation.\n\n"
+		"REFUSES: an unknown company; a GL account that does not exist, belongs to "
+		"another company, is a group or is disabled; a GL account whose root_type "
+		"is neither Asset (a bank account) nor Liability (a credit card); an Asset "
+		"account whose account_type is not Bank or Cash, because ERPNext's own "
+		"account picker and its bank reconciliation tool both filter on that flag "
+		"and an untyped account saves here and then cannot be reconciled; an "
+		"account_name already used by another Bank Account in this company; "
+		"party/party_type together with is_company_account; and a bank_name Frappe "
+		"would refuse as a docname.\n\n"
+		"WARNS (does not refuse) when the GL account is already the account of "
+		"another Bank Account — legitimate for a sweep arrangement, a mistake "
+		"everywhere else.",
+		{
+			"account_name": _field(
+				_STRING,
+				"How this account should read in every picker, e.g. "
+				"'WF Advisors Cash - ••3158'. Unique per company; the mask is the usual "
+				"distinguisher between two accounts at the same bank.",
+			),
+			"bank_name": _field(
+				_STRING,
+				"The institution, e.g. 'Wells Fargo'. The Bank record is created if this "
+				"site has none by that name, and reused if it has.",
+			),
+			"account": _field(
+				_STRING,
+				"The chart-of-accounts account this posts to: docname, number or name. "
+				"Required for a company account — it is the whole point of the record.",
+			),
+			"company": _COMPANY,
+			"account_no": _field(
+				_STRING,
+				"The account number the feed will report — last four, or the whole thing. "
+				"Same field as bank_account_no; pass one.",
+			),
+			"bank_account_no": _field(_STRING, "ERPNext's own name for account_no. Pass one or the other."),
+			"iban": _field(_STRING, "IBAN, where the account has one."),
+			"is_company_account": _field(
+				_BOOLEAN,
+				"true (the default) = an account this company owns. false = somebody "
+				"else's, recorded for reference, in which case party_type/party say whose.",
+			),
+			"party_type": _field(_STRING, "For a third-party account: the DocType, e.g. 'Supplier'."),
+			"party": _field(_STRING, "For a third-party account: that record's name."),
+			"disabled": _field(_BOOLEAN, "true to create it already disabled. Default false."),
+		},
+		required=("account_name", "bank_name"),
+		mutating=True,
+		title="Create a bank account",
+		available=_needs_doctype("Bank Account"),
+		requires="the Bank Account DocType, which ships with ERPNext's Accounts module",
+	),
 	"create_bank_transaction": _tool(
 		mutate.create_bank_transaction,
 		"MUTATING (default OFF). Insert a DRAFT Bank Transaction. `amount` is "
@@ -624,6 +769,55 @@ TOOLS = {
 		destructive=True,
 		title="Disable an account",
 	),
+	"delete_account": _tool(
+		accounts.delete_account,
+		"MUTATING (default OFF). IRREVERSIBLE. Hard-delete an Account that nothing "
+		"has ever touched — no GL entries, no journal entry lines, no children, no "
+		"company default pointing at it, no Bank Account posting to it. There is no "
+		"undo, no draft and no cancelled state; the record is gone.\n\n"
+		"WHEN THIS AND NOT disable_account. Almost never. Disabling is right for "
+		"any account with history: the postings stay, the reports still balance, "
+		"and it drops out of pickers. This exists for the other case — the accounts "
+		"a bundled chart of accounts created on day one that nobody ever posted "
+		"to. Those cannot be disabled out of the way, because A DISABLED ACCOUNT "
+		"STILL HOLDS ITS ACCOUNT NUMBER, and on a company being renumbered onto a "
+		"real chart that is the entire problem.\n\n"
+		"FOUR CHECKS, all on by default, all refusals rather than warnings, all run "
+		"before anything is deleted so one call reports every reason at once: GL "
+		"entries (including journal entry lines on unsubmitted drafts, which write "
+		"no GL row and would otherwise read as untouched), child accounts (disabled "
+		"ones count — they are still children), Company default fields, and Bank "
+		"Account records.\n\n"
+		"Each check has a force_check_… flag that turns it off. Turning one off "
+		"does NOT make a referenced account deletable: Frappe's own link-integrity "
+		"check still runs on the delete and will refuse. The flag changes which "
+		"error you get, not the outcome.",
+		{
+			"name": _field(_STRING, "The account: docname, number or name."),
+			"company": _COMPANY,
+			"force_check_gl_entries": _field(
+				_BOOLEAN,
+				"true (the default) = refuse if the account has ever carried a GL entry "
+				"or appears on any journal entry line, draft included.",
+			),
+			"force_check_children": _field(
+				_BOOLEAN,
+				"true (the default) = refuse if it is a group with any child, enabled or disabled.",
+			),
+			"force_check_company_defaults": _field(
+				_BOOLEAN,
+				"true (the default) = refuse if any Company field points at it.",
+			),
+			"force_check_bank_accounts": _field(
+				_BOOLEAN,
+				"true (the default) = refuse if any Bank Account record posts to it.",
+			),
+		},
+		required=("name",),
+		mutating=True,
+		destructive=True,
+		title="Delete an account",
+	),
 	"import_chart_of_accounts": _tool(
 		accounts.import_chart_of_accounts,
 		"MUTATING (default OFF). Create a whole tree of accounts from nested JSON, "
@@ -639,7 +833,13 @@ TOOLS = {
 		"root accounts, each with account_number, account_name, root_type, "
 		"is_group and children. root_type is required on roots and inherited "
 		"below. A root node may name an existing parent_account to graft the "
-		"subtree onto the company's current chart instead of adding a new root.",
+		"subtree onto the company's current chart instead of adding a new root.\n\n"
+		"A root node with NO parent_account becomes a new top-level account, which "
+		"works and is reported as such in the plan (`new_root_accounts`). It must "
+		"be a group — ERPNext refuses to save a top-level ledger account — and it "
+		"is added alongside the company's existing roots rather than replacing "
+		"them, because ERPNext will not let a root be moved or renamed into an "
+		"existing tree afterwards.",
 		{
 			"company": _COMPANY,
 			"accounts_json": {
@@ -869,7 +1069,14 @@ TOOLS = {
 		"same call changes nothing and says so. The response separates `changed` "
 		"from `unchanged`. Nothing is written at all unless every value in the "
 		"request validates, so a partially-correct call leaves the company exactly "
-		"as it was. Pass an empty string for a field to clear it.",
+		"as it was. Pass an empty string for a field to clear it.\n\n"
+		"COVERS THE FIELDS A MODULE WILL NOT SAVE A DOCUMENT WITHOUT, not just the "
+		"obvious ones: disposal_account (ERPNext refuses to scrap or sell an Asset "
+		"without it, and says so from the Asset rather than from the Company), the "
+		"stock and asset received-but-not-billed accounts, capital work in "
+		"progress, the advance received/paid accounts, and the selling and buying "
+		"cost centers. A field this site's ERPNext does not have is refused by "
+		"name rather than silently skipped.",
 		{
 			"company": _COMPANY,
 			"defaults": _field(
@@ -1929,6 +2136,237 @@ TOOLS = {
 		title="Run a depreciation cycle",
 		available=_needs_doctype("Asset"),
 		requires="ERPNext's Asset DocType",
+	),
+	# ── notes payable: what the company owes, and on what terms ─────────────
+	"list_notes_payable": _tool(
+		notes.list_notes_payable,
+		"Every note or loan one company owes: the lender, the original principal, "
+		"what is still outstanding, the rate and term, the liability account it "
+		"posts to, how many payments have been recorded and when the next one "
+		"falls due. Closed notes are included by default — a note that has been "
+		"paid off is part of the history.\n\n"
+		"OUTSTANDING BALANCES HERE ARE A CONVENIENCE FIGURE, maintained by "
+		"record_loan_payment. They diverge from the ledger by any payment recorded "
+		"as a draft nobody has posted, which in this app is the normal state. "
+		"get_account_balance on the note's linked_gl_account is the ledger's "
+		"answer. `next_payment_date` is projected from the payment frequency and "
+		"the last payment recorded; it is not a schedule the lender agreed to. "
+		"Read-only.",
+		{
+			"company": _COMPANY,
+			"borrower": _field(_STRING, "Same as company — the entity that owes. Either name works."),
+			"status": _field(
+				_STRING,
+				"Restrict to one status: Active, Paid Off, Refinanced, Written Off or Superseded.",
+			),
+			"include_closed": _field(
+				_BOOLEAN,
+				"false to list only notes that are still Active. Default true.",
+			),
+			"limit": _LIMIT,
+		},
+		title="List notes payable",
+		available=_needs_doctype("Note Payable"),
+		requires="the Note Payable DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_note_payable": _tool(
+		notes.create_note_payable,
+		"MUTATING (default OFF). Register one outstanding note or loan: who is "
+		"owed, what was borrowed, what is left, the rate and term, the liability "
+		"account it posts to, and which paper says so.\n\n"
+		"WHY THIS AND NOT ERPNEXT'S LOAN MODULE: ERPNext's Loan models the company "
+		"as the LENDER, with an application, a disbursement and half a dozen "
+		"doctypes. A holding company with four notes outstanding is on the other "
+		"side of all of it.\n\n"
+		"WHAT IT ADDS TO THE LIABILITY ACCOUNT THAT ALREADY EXISTS: terms (a "
+		"balance on 2310 does not say when it is due), provenance (what was agreed, "
+		"by whom, where the original is), and what it secures.\n\n"
+		"related_asset TIES IT TO link_asset_to_note. Setting it points the asset's "
+		"cost profile back at this note and runs the same tenor check: by default "
+		"it REFUSES if the asset's useful life does not equal the note's term, "
+		"because an asset fully depreciated while payments continue — or still on "
+		"the books after the note is paid — is invisible until the last year of the "
+		"loan. Pass enforce_asset_tenor=false when the divergence is deliberate. "
+		"The note and the link are one transaction: a refused link leaves no note.\n\n"
+		"Also refuses a duplicate note name for the same borrower, a non-positive "
+		"principal, a negative outstanding balance, a maturity before origination, "
+		"interest_type='Zero' with a non-zero rate, a linked_gl_account that is not "
+		"a plain Liability (a Payable- or Receivable-typed account would show up as "
+		"a supplier balance that never ages out), and an interest_expense_account "
+		"that is not an Expense.\n\n"
+		"principal_outstanding here is a CONVENIENCE figure. The ledger's answer is "
+		"the balance of linked_gl_account.",
+		{
+			"note_name": _field(
+				_STRING,
+				"What this note is called, e.g. 'Umpqua Bank - GP Graders Automatic "
+				"Defect Sorter'. Unique per borrower; the docname is built from it.",
+			),
+			"lender": _field(
+				_STRING,
+				"Who is owed: a bank, an estate, an individual. Free text — the lender on "
+				"a family note is usually not a Supplier on this site.",
+			),
+			"borrower": _field(_STRING, "The company that owes. Same as company; either works."),
+			"company": _COMPANY,
+			"principal_original": _field(_NUMBER, "What was originally borrowed. Positive."),
+			"principal_outstanding": _field(
+				_NUMBER,
+				"What is still owed on principal today. Defaults to principal_original — "
+				"set it when bringing an existing note onto the books mid-term.",
+			),
+			"interest_rate": _field(_NUMBER, "Annual rate as a percentage, 0-100."),
+			"interest_type": _field(_STRING, "Fixed (the default), Variable or Zero."),
+			"origination_date": _field(_STRING, "When the note was made, YYYY-MM-DD."),
+			"maturity_date": _field(
+				_STRING,
+				"When the last payment is due, YYYY-MM-DD. Optional, but link_asset_to_note "
+				"reads it to work out the term — without it there is no tenor to check.",
+			),
+			"payment_frequency": _field(
+				_STRING,
+				"Monthly (the default), Quarterly, Annual, Balloon or Custom. Drives the "
+				"next-payment estimate in list_notes_payable.",
+			),
+			"payment_amount": _field(_NUMBER, "The scheduled payment, principal and interest together."),
+			"linked_gl_account": _field(
+				_STRING,
+				"The Notes Payable liability account on the borrower's chart. Debited for "
+				"the principal half of every payment recorded against this note.",
+			),
+			"interest_expense_account": _field(
+				_STRING,
+				"Debited for the interest half. record_loan_payment takes an override and "
+				"refuses rather than guessing when neither is set.",
+			),
+			"related_asset": _field(
+				_STRING,
+				"The Asset this note financed. Also links the asset's cost profile back at "
+				"this note — see enforce_asset_tenor.",
+			),
+			"enforce_asset_tenor": _field(
+				_BOOLEAN,
+				"true (the default) = refuse if the related asset's useful life does not "
+				"equal this note's term. false = link anyway; "
+				"depreciation_note_alignment_check keeps reporting the divergence.",
+			),
+			"document_reference": _field(
+				_STRING,
+				"Where the paper lives: a Governance Document docname, or a plain "
+				"description of the physical original.",
+			),
+			"notes": _field(_STRING, "What a successor trustee would need to know."),
+		},
+		required=("note_name", "lender", "principal_original", "origination_date"),
+		mutating=True,
+		title="Create a note payable",
+		available=_needs_doctype("Note Payable"),
+		requires="the Note Payable DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"record_loan_payment": _tool(
+		notes.record_loan_payment,
+		"MUTATING (default OFF). Record one payment against a note: a DRAFT Journal "
+		"Entry debiting the liability for the principal, the expense account for "
+		"the interest, and crediting the bank for the whole thing — plus a row in "
+		"the note's history and a decrement of its outstanding balance.\n\n"
+		"THE SPLIT IS THE WHOLE JOB. A payment leaving a bank account is one "
+		"number, and its two halves land in completely different places: one "
+		"reduces a liability, one is an expense of the period. Booked as a single "
+		"line against the liability, the year's interest expense reads as nil and "
+		"the balance sheet says the note was paid down by more than it was. Pass "
+		"principal_split, interest_split, or one and let the other be derived; the "
+		"two must add up to total_amount or nothing is written.\n\n"
+		"REFUSES a note that is already closed, a payment dated before the note was "
+		"originated, a principal component larger than the balance outstanding (a "
+		"payment clearing more principal than is owed is either the wrong split or "
+		"a stale balance — neither is fixed by writing a negative one), a negative "
+		"component, and an interest component with no expense account to put it in.\n\n"
+		"THE DRAFT IS THE POINT. Nothing is posted. The note's outstanding figure "
+		"IS decremented immediately, so until the entry is submitted this record "
+		"and the liability account disagree by the principal — the response says so "
+		"every time.",
+		{
+			"note": _field(_STRING, "Note Payable docname, or the note_name it was created with."),
+			"company": _COMPANY,
+			"payment_date": _field(_STRING, "YYYY-MM-DD. The Journal Entry's posting date."),
+			"total_amount": _field(_NUMBER, "The whole payment that left the bank. Positive."),
+			"principal_split": _field(_NUMBER, "How much of it reduces the note. Derived if only interest is given."),
+			"interest_split": _field(_NUMBER, "How much of it is interest. Derived if only principal is given."),
+			"offset_bank_account": _field(
+				_STRING,
+				"Where the money came from: a Bank Account record (preferred — the journal "
+				"line then carries it, which is what lets a bank reconciliation match this "
+				"entry) or the GL account itself.",
+			),
+			"notes_payable_account": _field(
+				_STRING,
+				"Override the liability account debited for the principal. Defaults to the "
+				"note's linked_gl_account.",
+			),
+			"interest_expense_account": _field(
+				_STRING,
+				"Override the expense account debited for the interest. Defaults to the note's own.",
+			),
+			"narrative": _field(_STRING, "Anything about this payment worth keeping. Optional."),
+		},
+		required=("note", "payment_date", "total_amount", "offset_bank_account"),
+		mutating=True,
+		title="Record a loan payment",
+		available=_needs_doctype("Note Payable"),
+		requires="the Note Payable DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"close_note_payable": _tool(
+		notes.close_note_payable,
+		"MUTATING (default OFF). Close a note — Paid Off, Refinanced or Written Off "
+		"— recording the disposition and its narrative in the note's own event "
+		"history rather than as a silently changed field.\n\n"
+		"WRITES NO JOURNAL ENTRY, DELIBERATELY. Relieving a written-off balance is a "
+		"posting with real tax consequences (forgiven debt is usually income), and "
+		"a refinance moves a balance between two liability accounts. Both should be "
+		"entries somebody wrote on purpose with a narrative of their own. The "
+		"response spells out exactly which entry is still owed and against which "
+		"account, so the omission is impossible to miss.\n\n"
+		"REFUSES a note already closed, a disposition date before origination, a "
+		"narrative too short to be an explanation, and — for 'Paid Off' — a note "
+		"that still shows a balance outstanding. That last one is the useful "
+		"refusal: it means either a final payment was never recorded (use "
+		"record_loan_payment, which writes the entry that books it) or the balance "
+		"carried here is stale. If it is stale, zero_remaining_balance=true writes "
+		"it down and records the write-down as an Adjustment in the history.\n\n"
+		"For a refinance, superseded_by names the note that replaced this one, so a "
+		"reader following the chain forward lands on what is still owed.",
+		{
+			"note": _field(_STRING, "Note Payable docname, or the note_name it was created with."),
+			"company": _COMPANY,
+			"disposition": _field(
+				_STRING,
+				"How it ended: 'Paid Off', 'Refinanced' or 'Written Off'. ('Superseded' is "
+				"set by this tool on the note a refinance replaced; it is not asked for.)",
+			),
+			"disposition_date": _field(_STRING, "When it ended, YYYY-MM-DD."),
+			"narrative": _field(
+				_STRING,
+				"MANDATORY. What was paid, forgiven or rolled over, and what authorises it. "
+				"The part of this record nobody can reconstruct later.",
+			),
+			"superseded_by": _field(
+				_STRING,
+				"For a Refinanced note: the Note Payable that replaced it. Create it first "
+				"with create_note_payable.",
+			),
+			"zero_remaining_balance": _field(
+				_BOOLEAN,
+				"For 'Paid Off' only: write a stale outstanding balance down to zero without "
+				"a payment, recording an Adjustment in the history. Default false, which "
+				"refuses instead.",
+			),
+		},
+		required=("note", "disposition", "disposition_date", "narrative"),
+		mutating=True,
+		destructive=True,
+		title="Close a note payable",
+		available=_needs_doctype("Note Payable"),
+		requires="the Note Payable DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 

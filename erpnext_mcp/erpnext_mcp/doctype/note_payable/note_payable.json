@@ -1,0 +1,253 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-27 16:00:00.000000",
+ "description": "One outstanding note or loan: who lent it, what is still owed, what it is secured on, and which account on the borrower's chart carries the liability. ERPNext's own Loan module is a lending product; this is the other side — a handful of notes a holding company owes, tracked well enough that nobody has to open a filing cabinet to answer 'what do we still owe on the sorter'.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "note_name",
+  "borrower",
+  "lender",
+  "identity_col",
+  "status",
+  "superseded_by",
+  "document_reference",
+  "terms_section",
+  "principal_original",
+  "principal_outstanding",
+  "interest_rate",
+  "interest_type",
+  "terms_col",
+  "origination_date",
+  "maturity_date",
+  "payment_frequency",
+  "payment_amount",
+  "accounting_section",
+  "linked_gl_account",
+  "interest_expense_account",
+  "accounting_col",
+  "related_asset",
+  "history_section",
+  "payment_events",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this note is called in conversation, e.g. 'Umpqua Bank - GP Graders Automatic Defect Sorter'. Unique per borrower; the docname is built from it and the company abbreviation.",
+   "fieldname": "note_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Note Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The entity that owes the money.",
+   "fieldname": "borrower",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Borrower",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Who is owed: a bank, an estate, an individual. Free text rather than a Link, because the lender on a family note is usually not a Supplier on this site and creating one to record a loan would put a name into the buying module that has no business being there.",
+   "fieldname": "lender",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Lender",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "Active",
+   "description": "Active until it is closed. Paid Off, Refinanced and Written Off are set by close_note_payable, which records the disposition in the event history rather than only flipping this field.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nPaid Off\nRefinanced\nWritten Off\nSuperseded",
+   "reqd": 1
+  },
+  {
+   "description": "The note that replaced this one, when a refinance rolled it into a new instrument. Following the chain forward lands on the note that is still owed.",
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "Note Payable"
+  },
+  {
+   "description": "Where the paper lives: a Governance Document docname, a file reference, or a plain description of the physical original. Free text on purpose — the promissory note for a 2003 family loan is often not a document this site holds.",
+   "fieldname": "document_reference",
+   "fieldtype": "Data",
+   "label": "Document Reference"
+  },
+  {
+   "fieldname": "terms_section",
+   "fieldtype": "Section Break",
+   "label": "Terms"
+  },
+  {
+   "description": "What was originally borrowed. Never changed by a payment — the running balance is Principal Outstanding.",
+   "fieldname": "principal_original",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Original Principal",
+   "reqd": 1
+  },
+  {
+   "description": "What is still owed on principal. Maintained by record_loan_payment; it is a convenience figure, and the account named in Notes Payable Account remains the authoritative balance.",
+   "fieldname": "principal_outstanding",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Principal Outstanding"
+  },
+  {
+   "description": "Annual rate, as a percentage. 0 with an interest type of Zero is a genuine family note rather than a missing value.",
+   "fieldname": "interest_rate",
+   "fieldtype": "Percent",
+   "label": "Interest Rate"
+  },
+  {
+   "default": "Fixed",
+   "fieldname": "interest_type",
+   "fieldtype": "Select",
+   "label": "Interest Type",
+   "options": "Fixed\nVariable\nZero"
+  },
+  {
+   "fieldname": "terms_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When the note was made.",
+   "fieldname": "origination_date",
+   "fieldtype": "Date",
+   "label": "Origination Date",
+   "reqd": 1
+  },
+  {
+   "description": "When the last payment is due. Read by link_asset_to_note to work out the note's tenor, so an asset financed by it can be held to the same term.",
+   "fieldname": "maturity_date",
+   "fieldtype": "Date",
+   "label": "Maturity Date"
+  },
+  {
+   "default": "Monthly",
+   "fieldname": "payment_frequency",
+   "fieldtype": "Select",
+   "label": "Payment Frequency",
+   "options": "Monthly\nQuarterly\nAnnual\nBalloon\nCustom"
+  },
+  {
+   "description": "The scheduled payment, principal and interest together, where there is one.",
+   "fieldname": "payment_amount",
+   "fieldtype": "Currency",
+   "label": "Payment Amount"
+  },
+  {
+   "fieldname": "accounting_section",
+   "fieldtype": "Section Break",
+   "label": "Accounting"
+  },
+  {
+   "description": "The Notes Payable liability account on the borrower's chart. Debited for the principal half of every payment recorded against this note.",
+   "fieldname": "linked_gl_account",
+   "fieldtype": "Link",
+   "label": "Notes Payable Account",
+   "options": "Account"
+  },
+  {
+   "description": "Debited for the interest half of a payment. Optional here; record_loan_payment takes an override, and refuses rather than guessing when neither is set.",
+   "fieldname": "interest_expense_account",
+   "fieldtype": "Link",
+   "label": "Interest Expense Account",
+   "options": "Account"
+  },
+  {
+   "fieldname": "accounting_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The asset this note financed, for a secured note. Setting it also points the asset's cost profile back at this note, so depreciation_note_alignment_check can see whether the two terms have parted company.",
+   "fieldname": "related_asset",
+   "fieldtype": "Link",
+   "label": "Related Asset",
+   "options": "Asset"
+  },
+  {
+   "fieldname": "history_section",
+   "fieldtype": "Section Break",
+   "label": "History"
+  },
+  {
+   "description": "Every payment and every disposition, with the Journal Entry that carries it and the balance it left behind. Written by the tools; editing it by hand does not move a balance.",
+   "fieldname": "payment_events",
+   "fieldtype": "Table",
+   "label": "Events",
+   "options": "Note Payable Event",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "What a successor trustee would need: how the note arose, what secures it, what was agreed verbally, where the original is.",
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-27 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Note Payable",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "note_name,lender,borrower,status",
+ "sort_field": "note_name",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

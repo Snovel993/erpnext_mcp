@@ -318,6 +318,7 @@ BANK_ACCOUNT = "Operating - Example Bank"
 
 
 def _banking() -> None:
+	STORE.seed("Bank", [{"name": "Example Bank", "bank_name": "Example Bank"}])
 	STORE.seed(
 		"Bank Account",
 		[
@@ -327,6 +328,7 @@ def _banking() -> None:
 				"bank": "Example Bank",
 				"company": MAIN,
 				"account": f"1110 - Bank Checking - {MAIN_ABBR}",
+				"is_company_account": 1,
 			}
 		],
 	)
@@ -1271,6 +1273,61 @@ class V7TestCase(SeededTestCase):
 	def setUp(self):
 		super().setUp()
 		seed_v7()
+
+
+# ── v0.8.0 fixtures: opening balances, bank accounts and notes payable ──────
+#: Where the offsetting side of an opening balance lands, numbered as this app's
+#: own chart template numbers it — which is what makes `set_opening_balance`'s
+#: "find it by account_number 3300" path the one the tests exercise.
+OPENING_EQUITY = f"3300 - Opening Balance Equity - {MAIN_ABBR}"
+
+#: The two sides of a loan payment.
+NOTES_PAYABLE = f"2310 - Notes Payable - {MAIN_ABBR}"
+INTEREST_EXPENSE = f"5300 - Interest Expense - {MAIN_ABBR}"
+
+#: Something to bring onto the books with an opening balance, and a liability a
+#: credit-card Bank Account can point at.
+EQUIPMENT = f"1710 - Equipment - {MAIN_ABBR}"
+CREDIT_CARD = f"2150 - Credit Card - {MAIN_ABBR}"
+
+#: A second Bank-typed asset account, so `create_bank_account` has one to claim
+#: that the fixture's existing Bank Account has not already taken.
+BANK_SAVINGS = f"1120 - Bank Savings - {MAIN_ABBR}"
+
+#: A leaf account with no GL entries, no journal entry lines, no children and
+#: nothing pointing at it — the only shape `delete_account` will remove. It is in
+#: the base fixture chart; named here because the delete tests are entirely about
+#: which accounts are and are not this one.
+UNUSED_ACCOUNT = f"1190 - Cash Clearing - {MAIN_ABBR}"
+
+ASSETS_ROOT = f"Application of Funds (Assets) - {MAIN_ABBR}"
+LIABILITIES_ROOT = f"Source of Funds (Liabilities) - {MAIN_ABBR}"
+EXPENSES_ROOT = f"Expenses - {MAIN_ABBR}"
+
+
+def seed_v8() -> None:
+	"""Accounts the v0.8.0 tools post to. Additive to `seed_v7`."""
+	STORE.seed(
+		"Account",
+		[
+			_account(
+				OPENING_EQUITY, "Opening Balance Equity", "3300", "Equity", "", parent=EQUITY_ROOT
+			),
+			_account(NOTES_PAYABLE, "Notes Payable", "2310", "Liability", "", parent=LIABILITIES_ROOT),
+			_account(CREDIT_CARD, "Credit Card", "2150", "Liability", "", parent=LIABILITIES_ROOT),
+			_account(INTEREST_EXPENSE, "Interest Expense", "5300", "Expense", "", parent=EXPENSES_ROOT),
+			_account(EQUIPMENT, "Equipment", "1710", "Asset", "Fixed Asset", parent=ASSETS_ROOT),
+			_account(BANK_SAVINGS, "Bank Savings", "1120", "Asset", "Bank", parent=ASSETS_ROOT),
+		],
+	)
+
+
+class V8TestCase(V7TestCase):
+	"""...and the accounts opening balances, bank accounts and notes payable use."""
+
+	def setUp(self):
+		super().setUp()
+		seed_v8()
 
 
 class HRTestCase(V2TestCase):

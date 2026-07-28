@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Chart-of-accounts management. Five write tools and one planner.
+"""Chart-of-accounts management. Six write tools and one planner.
 
 WHY THE CHART GETS ITS OWN MODULE. Everything in `mutate.py` writes documents
 *into* a chart of accounts. These tools change the chart itself, which is a
@@ -38,6 +38,17 @@ account (one with no parent) fails `validate_root_details` on any save, so
 `update_account`'s type and disabled paths and all of `move_account` and
 `disable_account` refuse them up front with that reason, rather than letting the
 caller discover it as a framework traceback.
+
+CREATING A ROOT NEEDS `ignore_mandatory`, WHICH IS NOT AN OPINION. ERPNext's
+Account marks `parent_account` as required, so inserting a top-level account —
+which by definition has none — dies with
+`MandatoryError: [Account, 1000 - Assets - ABC]: parent_account` before any of
+this app's own checks are reached. ERPNext's own chart-of-accounts importer sets
+`flags.ignore_mandatory = True` for exactly and only its root nodes
+(`erpnext/accounts/doctype/account/chart_of_accounts/__init__.py`), and
+`import_chart_of_accounts` does the same, on the same condition. The flag is set
+per document rather than per import: a *child* insert that skipped mandatory
+validation would be this app quietly disabling a check ERPNext meant to run.
 """
 
 import frappe
@@ -628,6 +639,193 @@ def disable_account(args: dict) -> ToolResult:
 	)
 
 
+# ── 71. delete_account ──────────────────────────────────────────────────────
+#: The safety checks `delete_account` runs, in the order they are reported. Each
+#: is a `force_check_<key>` argument that defaults to true; turning one off skips
+#: this app's check and leaves whatever the framework does in its place.
+_DELETE_CHECKS = ("gl_entries", "children", "company_defaults", "bank_accounts")
+
+
+def delete_account(args: dict) -> ToolResult:
+	"""Hard-delete an Account that nothing has ever touched. The complement to disable.
+
+	WHEN THIS IS THE RIGHT TOOL AND `disable_account` IS NOT. Disabling is for an
+	account with history: the postings stay, the reports that cover them still
+	balance, and the account drops out of pickers. It is right almost always. This
+	is for the other case — the fifty accounts a bundled chart of accounts created
+	on day one that nobody ever posted to, which clutter every picker and every
+	tree and cannot be disabled out of existence because *a disabled account still
+	holds its account number*. On a company being renumbered onto a real chart,
+	that is the whole problem.
+
+	EVERY CHECK IS A REFUSAL, NOT A WARNING. All four run before anything is
+	deleted and every failure is collected, so one call reports every reason
+	rather than one reason four times. A deletion is the only genuinely
+	irreversible thing in this app; there is no undo and no draft.
+	"""
+	name = as_str(args, "name", required=True)
+	company = as_str(args, "company")
+	row = _account(name, company)
+	company = row["company"]
+
+	wanted = {key: bool(as_bool(args, f"force_check_{key}", True)) for key in _DELETE_CHECKS}
+	skipped = sorted(key for key, on in wanted.items() if not on)
+
+	passed: dict = {}
+	blockers: list = []
+
+	if wanted["gl_entries"]:
+		entries = _gl_count(row["name"])
+		lines = _draft_journal_lines(row["name"])
+		if entries or lines:
+			blockers.append(
+				f"it has {entries} GL Entry row(s) and appears on {lines} journal entry line(s). "
+				"An account with history cannot be deleted — the postings would have nowhere to "
+				"point. Use disable_account, which keeps all of it and hides the account from "
+				"pickers."
+			)
+		else:
+			passed["gl_entries"] = "no GL entries, ever, and no journal entry line references it"
+
+	if wanted["children"]:
+		children = frappe.db.get_all(
+			"Account",
+			filters={"parent_account": row["name"]},
+			fields=compat.existing_fields("Account", ("name", "disabled")),
+			limit=50,
+		)
+		if children:
+			listing = ", ".join(str(child["name"]) for child in children[:8])
+			blockers.append(
+				f"it is a group with {len(children)} child account(s) ({listing}"
+				+ (", …" if len(children) > 8 else "")
+				+ "). Deleting it would orphan them. Delete or move the children first — "
+				"disabled children count, because a disabled account is still a child."
+			)
+		else:
+			passed["children"] = "no child accounts, enabled or disabled"
+
+	if wanted["company_defaults"]:
+		references = _company_default_references(row["name"])
+		if references:
+			listing = ", ".join(f"{holder}.{field}" for holder, field in references)
+			blockers.append(
+				f"it is a company default: {listing}. Deleting it would leave the field pointing "
+				"at nothing, and the next document that reaches for that default fails on save. "
+				"Repoint it with set_company_defaults first."
+			)
+		else:
+			passed["company_defaults"] = "no Company field points at it"
+
+	if wanted["bank_accounts"]:
+		linked = _bank_accounts_for(row["name"])
+		if linked:
+			blockers.append(
+				f"{len(linked)} Bank Account record(s) post to it ({', '.join(linked)}). A bank "
+				"feed writing into one of those would have nowhere to reconcile to. Repoint or "
+				"delete the Bank Account first."
+			)
+		else:
+			passed["bank_accounts"] = "no Bank Account record posts to it"
+
+	if blockers:
+		raise ToolError(
+			f"{row['name']} cannot be deleted: "
+			+ "; ".join(f"({index}) {reason}" for index, reason in enumerate(blockers, start=1))
+			+ ". Nothing was deleted."
+		)
+
+	before = _describe(row)
+	is_root = _is_root(row)
+	frappe.delete_doc("Account", row["name"])
+
+	data = {
+		"deleted": row["name"],
+		"account": before,
+		"checks_passed": passed,
+		"checks_skipped": skipped,
+		"was_root": is_root,
+		"note": (
+			"Gone. Unlike disable_account there is nothing left: no record, no history, and the "
+			f"account number {before['account_number'] or '<none>'} is free for another account "
+			"to take — which is usually the reason for doing this at all."
+		)
+		+ (
+			f" force_check_{', force_check_'.join(skipped)} was turned off, so this app did not "
+			"run that check. Frappe's own link-integrity check still ran on the delete, so a "
+			"reference it can see would have refused anyway — the flag changes which error you "
+			"get, not whether a referenced account can be removed."
+			if skipped
+			else ""
+		),
+	}
+	if is_root:
+		data["warning"] = (
+			"That was a root account. It had no children, so nothing was orphaned, but a company "
+			"whose chart is missing a root type has no home for the next account of that type — "
+			"import_chart_of_accounts can create one."
+		)
+	return ToolResult(
+		data,
+		f"deleted Account {row['name']} ({len(passed)} safety check(s) passed"
+		+ (f", {len(skipped)} skipped" if skipped else "")
+		+ ")",
+		docstatus_delta="existed → deleted",
+	)
+
+
+def _draft_journal_lines(account: str) -> int:
+	"""Journal entry lines naming this account, including on drafts.
+
+	A draft Journal Entry writes no GL Entry, so an account can be referenced by
+	one and read as untouched. Deleting it leaves a draft nobody can submit and
+	nobody can fix, because the account it names no longer exists.
+	"""
+	if not compat.doctype_exists("Journal Entry Account"):  # pragma: no cover - core doctype
+		return 0
+	return frappe.db.count("Journal Entry Account", {"account": account})
+
+
+def _company_default_references(account: str) -> list:
+	"""Every (company, fieldname) whose Account link points at this account."""
+	try:
+		fields = [
+			field.get("fieldname")
+			for field in frappe.get_meta("Company").fields
+			if str(field.get("fieldtype") or "") == "Link" and str(field.get("options") or "") == "Account"
+		]
+	except Exception:  # pragma: no cover - a site mid-migrate
+		fields = []
+	# A site whose Company meta does not describe its Link options (an older
+	# Frappe, or a meta this app can only read through `compat`) still has the
+	# columns; fall back to the account fields this app knows how to set. The
+	# cost-center defaults are deliberately not in that list — comparing a Cost
+	# Center column against an account docname can only ever be a no-op.
+	if not fields:
+		from .dimensions import ACCOUNT_COMPANY_DEFAULTS
+
+		fields = list(ACCOUNT_COMPANY_DEFAULTS)
+	fields = sorted({field for field in fields if field and compat.has_field("Company", field)})
+	if not fields:  # pragma: no cover - a Company with no account fields at all
+		return []
+
+	out = []
+	for row in frappe.db.get_all("Company", fields=["name", *fields], limit=500):
+		for field in fields:
+			if str(row.get(field) or "") == account:
+				out.append((row["name"], field))
+	return out
+
+
+def _bank_accounts_for(account: str) -> list:
+	if not compat.doctype_exists("Bank Account"):
+		return []
+	return sorted(
+		str(name)
+		for name in frappe.db.get_all("Bank Account", filters={"account": account}, pluck="name", limit=25)
+	)
+
+
 # ── 42. import_chart_of_accounts ────────────────────────────────────────────
 def import_chart_of_accounts(args: dict) -> ToolResult:
 	"""Create a whole tree of accounts, or report what doing so would do.
@@ -721,6 +919,13 @@ def import_chart_of_accounts(args: dict) -> ToolResult:
 		doc.parent_account = parent_name or None
 		doc.is_group = 1 if row["is_group"] else 0
 		doc.root_type = row["root_type"]
+		if not parent_name:
+			# A new top-level account. ERPNext marks parent_account required, so
+			# this insert would otherwise die with `MandatoryError: [Account, …]:
+			# parent_account` — see the module docstring. Set per document and only
+			# for a root: a child that skipped mandatory validation would be this
+			# app disabling a check ERPNext meant to run.
+			doc.flags.ignore_mandatory = True
 		if row["account_number"] and compat.has_field("Account", "account_number"):
 			doc.account_number = row["account_number"]
 		if row["account_type"]:
@@ -797,6 +1002,7 @@ def _plan_one(node, parent_row, parent_root_type, parent_docname, ctx) -> dict:
 	# Where this node hangs. A root node may name an existing parent explicitly;
 	# without one it becomes a new root account of its own.
 	parent_account = parent_docname or ""
+	new_root = False
 	if parent_row is None:
 		declared = str(node.get("parent_account") or "").strip()
 		if declared:
@@ -804,6 +1010,13 @@ def _plan_one(node, parent_row, parent_root_type, parent_docname, ctx) -> dict:
 				parent_account = _validate_parent(declared, company, root_type)["name"]
 			except ToolError as exc:
 				return _row(node, "error", "", "", root_type, account_type, is_group, depth, str(exc))
+		else:
+			# A top-level account of its own. Planned explicitly rather than falling
+			# out of an empty parent, because the live run has to know: a root is
+			# the one insert that needs `ignore_mandatory`, and a dry run that did
+			# not say "this would be a new root" would not be describing what the
+			# live run does.
+			new_root = True
 
 	row = _row(
 		node,
@@ -817,6 +1030,11 @@ def _plan_one(node, parent_row, parent_root_type, parent_docname, ctx) -> dict:
 		"; ".join(notes),
 	)
 	row["_parent_row"] = parent_row
+	if new_root:
+		# ERPNext's other rule about roots — that one must be a group — is already
+		# enforced structurally by `charts.validate_tree` before this function is
+		# reached, so it is not repeated here.
+		row["new_root"] = True
 
 	if parent_row is not None and parent_row["action"] == "error":
 		row["action"] = "error"
@@ -933,14 +1151,28 @@ def _plan_payload(company: str, abbr: str, rows: list, dry_run: bool) -> dict:
 	counts: dict = {}
 	for row in rows:
 		counts[row["action"]] = counts.get(row["action"], 0) + 1
-	return {
+	new_roots = [
+		row["docname"] for row in rows if row.get("new_root") and row["action"] in ("create", "created")
+	]
+	payload = {
 		"company": company,
 		"company_abbr": abbr,
 		"dry_run": bool(dry_run),
 		"total_accounts": len(rows),
 		"counts": counts,
 		"accounts": public,
+		"new_root_accounts": new_roots,
 	}
+	if new_roots:
+		payload["new_root_note"] = (
+			f"{len(new_roots)} account(s) in this chart have no parent and would become new root "
+			"accounts alongside the company's existing ones — ERPNext will not let a root be "
+			"moved or renamed into an existing tree afterwards, so this adds a second set of "
+			"roots rather than replacing anything. They are inserted with ignore_mandatory, "
+			"which is what ERPNext's own chart importer does for a root and the only way past "
+			"the required parent_account field."
+		)
+	return payload
 
 
 # ── 43. propose_clean_chart ─────────────────────────────────────────────────
