@@ -146,6 +146,8 @@ tests_standalone/
                           ways of failing to find the equity account
   test_notes.py           notes payable: the principal/interest split, the
                           running balance, the history, every disposition
+  test_fiscal.py          fiscal years: the company-aware overlap check, the
+                          one-year rule, and the orphaned-postings refusal
   test_packaging.py       that every shipped doctype folder is one Frappe can
                           import — the v0.7.0 bench-migrate regression
 
@@ -167,9 +169,12 @@ erpnext_mcp/
   tests/test_notes.py                             in-bench, the two v0.8.0
                                                   doctypes, whether ERPNext
                                                   accepts an is_opening entry
-                                                  and a Bank Account, and
-                                                  whether a new ROOT account can
-                                                  be created at all
+                                                  and a Bank Account, whether a
+                                                  new ROOT account can be
+                                                  created at all, and that
+                                                  ERPNext really does refuse a
+                                                  posting outside every fiscal
+                                                  year
   erpnext_mcp/doctype/erpnext_mcp_settings/test_erpnext_mcp_settings.py
   erpnext_mcp/doctype/mcp_action_log/test_mcp_action_log.py
 ```
@@ -253,6 +258,7 @@ erpnext_mcp/                     repo root
     tools/mutate.py              the five accounting write tools
     tools/accounts.py            chart of accounts: create/update/move/disable/delete/import
     tools/banking.py             the Bank + Bank Account records a feed writes into
+    tools/fiscal.py              fiscal years — the calendar the ledger may post into
     tools/opening.py             opening balances, plugged to Opening Balance Equity
     tools/dimensions.py          cost centers, accounting dimensions, company defaults
     tools/governance.py          cap table, member events, governance archive

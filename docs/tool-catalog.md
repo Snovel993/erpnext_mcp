@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 71 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 73 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -3201,14 +3201,110 @@ draft and no cancelled state; the record is gone.
 
 ---
 
+## 72. `create_fiscal_year`
+
+**MUTATING.** Off by default. Needs the `Fiscal Year` DocType, which ships with
+ERPNext's Accounts module.
+
+**Arguments:** `year_name` (required), `year_start_date` (required),
+`year_end_date` (required), `companies`, `is_short_year`, `disabled`,
+`auto_created`.
+
+**This is the prerequisite for booking anything historical.** ERPNext refuses a
+posting whose date falls outside a fiscal year, and it refuses it from inside the
+document being saved — so on a site whose only year is 2026, a March 2025
+equipment transfer fails with an error about a *date* rather than about a missing
+*year*. `set_opening_balance` and `create_journal_entry` cannot reach that period
+until this has run.
+
+```json
+{"name": "create_fiscal_year",
+ "arguments": {"year_name": "2025",
+               "year_start_date": "2025-01-01",
+               "year_end_date": "2025-12-31"}}
+```
+
+```json
+{
+  "name": "2025", "year": "2025",
+  "year_start_date": "2025-01-01", "year_end_date": "2025-12-31",
+  "disabled": false, "is_short_year": false, "auto_created": false,
+  "companies": [], "scope": "every company on this site",
+  "expected_end_date_for_a_full_year": "2025-12-31",
+  "note": "A Fiscal Year is a permission for a date, not a posting. Nothing was booked and no balance moved …",
+  "next_step": "Historical events for this period can now be booked. …"
+}
+```
+
+- **`companies` is optional, and omitting it is not an omission.** ERPNext models
+  a global fiscal year as one with no company restrictions — the `companies`
+  child table is a *restriction* — and that is what almost every site wants.
+- **The overlap check is company-aware.** A global year collides with everything;
+  two restricted years collide only if they share a company. Two years covering
+  the same day for the same company make ERPNext's own `get_fiscal_year`
+  ambiguous, and which year a posting lands in stops being a fact about the
+  posting. **Disabling a year does not free its range.**
+- **The one-year rule.** ERPNext's `FiscalYear.validate_dates` requires the end
+  date to be exactly one year after the start, less a day, unless
+  `is_short_year` is set — and its own message does not say which date it wanted.
+  This computes it and names it. Leap days are clamped the way the calendar
+  does: a year starting 29 February ends on the 27th.
+- **ERPNext's own overlap check is company-blind on some versions** and refuses
+  any date collision at all. Where the framework is stricter than this tool, its
+  refusal is what a caller gets, unchanged — this never loosens a rule the
+  framework enforces.
+- **Also refuses** a `year_name` already on the site (a Fiscal Year names itself,
+  so the name is the docname), an end date before the start, a one-day year, and
+  a company this site does not have.
+- Creating one **disabled** is accepted and warned about: ERPNext still refuses
+  postings dated inside a disabled year.
+
+---
+
+## 73. `update_fiscal_year`
+
+**MUTATING.** Off by default. Needs the `Fiscal Year` DocType.
+
+**Arguments:** `year_name` (required), `new_year_start_date`,
+`new_year_end_date`, `is_short_year`, `disabled`.
+
+```json
+{"name": "update_fiscal_year",
+ "arguments": {"year_name": "2025", "disabled": true}}
+```
+
+- **RISK: moving the dates moves no posting.** It changes which year — or no year
+  at all — every posting already written falls into, retroactively, including
+  periods already reported. So the GL entries that would fall *out* of the new
+  range are counted first, and any at all is a refusal naming the count. A
+  posting in no fiscal year drops out of period comparisons and cannot be
+  corrected without reopening a year that no longer covers it. Widening a range
+  is fine; shrinking one with history in it is not.
+- **Cannot rename.** ERPNext names a Fiscal Year after itself, so the name is the
+  docname and is the string every Journal Entry, Budget and Period Closing
+  Voucher that names a year holds. Passing `year` or `new_year_name` is refused
+  by name.
+- **Cannot change `companies`.** Narrowing the scope of a year with postings in it
+  takes those postings out of any fiscal year for the companies it drops;
+  widening it can create an overlap this tool would have refused at creation.
+  Both are Desk decisions.
+- Same company-aware overlap check as `create_fiscal_year`, against every other
+  year.
+- **Disabling deletes nothing.** The entries already in the range remain and still
+  appear in reports covering them; ERPNext simply refuses *new* postings dated
+  inside a disabled year. It is reversible with `disabled=false`.
+
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
 
 1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
-   `workflow`, `accounts`, `banking`, `dimensions`, `governance`, `assets`,
-   `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`, `meta` or
-   `packets` —
+   `workflow`, `accounts`, `banking`, `dimensions`, `fiscal`, `governance`,
+   `assets`, `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`,
+   `meta` or `packets` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

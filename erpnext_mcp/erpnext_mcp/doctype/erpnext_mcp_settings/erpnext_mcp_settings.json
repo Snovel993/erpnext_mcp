@@ -53,6 +53,10 @@
   "allow_disable_account",
   "allow_import_chart_of_accounts",
   "allow_delete_account",
+  "fiscal_tools_section",
+  "allow_create_fiscal_year",
+  "fiscal_tools_col",
+  "allow_update_fiscal_year",
   "dimension_tools_section",
   "allow_create_cost_center",
   "allow_update_cost_center",
@@ -421,6 +425,31 @@
    "fieldname": "allow_delete_account",
    "fieldtype": "Check",
    "label": "Delete Account"
+  },
+  {
+   "description": "The calendar the ledger is allowed to post into. ERPNext refuses any posting whose date falls outside a fiscal year, and it refuses it from inside the document being saved &mdash; so booking anything historical needs the year to exist first. Creating one books nothing and moves no balance.",
+   "fieldname": "fiscal_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Fiscal Years"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Create a Fiscal Year so ERPNext will accept postings dated inside it \u2014 the prerequisite for booking anything historical. Refuses a name already in use and a date range overlapping another year for the same company.",
+   "fieldname": "allow_create_fiscal_year",
+   "fieldtype": "Check",
+   "label": "Create Fiscal Year"
+  },
+  {
+   "fieldname": "fiscal_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Move a fiscal year's dates or enable/disable it. Refuses a move that would leave existing GL entries outside any fiscal year, and cannot rename the year or change which companies it applies to.",
+   "fieldname": "allow_update_fiscal_year",
+   "fieldtype": "Check",
+   "label": "Update Fiscal Year"
   },
   {
    "description": "How a posting is classified once it reaches an account: which segment of the business it belongs to (cost centers), what other axes it is filed under (accounting dimensions), and which accounts a document reaches for when nothing says (company defaults).<br><br>The read-only tree, <b>List Cost Centers</b>, is in the Accounting Read Tools section above. <b>Create Accounting Dimension</b> is the only switch in this app that can add a DocType to your site \u2014 and only when a call asks for it explicitly.",

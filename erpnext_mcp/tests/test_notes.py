@@ -43,6 +43,9 @@ V8_TOOLS = (
 	"close_note_payable",
 	"create_account",
 	"import_chart_of_accounts",
+	"create_fiscal_year",
+	"update_fiscal_year",
+	"create_journal_entry",
 )
 
 #: Prefixed so nothing here can collide with a real note, bank or account on the
@@ -254,6 +257,139 @@ class OpeningBalanceContract(V8IntegrationTestCase):
 			"this ERPNext has no 'Opening Entry' voucher type; set_opening_balance "
 			"falls back to an ordinary one, which is handled but worth knowing",
 		)
+
+
+class FiscalYearContract(V8IntegrationTestCase):
+	"""Why `create_fiscal_year` exists, proved against the rule that motivates it.
+
+	ERPNext refuses a posting whose date falls outside a fiscal year, and it
+	refuses it from inside the document being saved. A double cannot show that —
+	it is a framework fact — so the end-to-end case lives here: create the year,
+	then post into it, and watch the same posting fail before the year exists.
+	"""
+
+	def free_year(self):
+		"""A four-digit year no existing Fiscal Year overlaps, or skip.
+
+		Historic on purpose. The operator's site has real fiscal years covering
+		the periods it trades in, and this must not collide with one of them.
+		"""
+		existing = frappe.db.get_all(
+			"Fiscal Year", fields=["name", "year_start_date", "year_end_date"], limit=500
+		)
+		for candidate in range(1970, 2000):
+			start = f"{candidate}-01-01"
+			end = f"{candidate}-12-31"
+			if frappe.db.exists("Fiscal Year", str(candidate)):
+				continue
+			clash = any(
+				str(row.year_start_date) <= end and start <= str(row.year_end_date)
+				for row in existing
+			)
+			if not clash:
+				return str(candidate)
+		self.skipTest("no free four-digit year between 1970 and 1999 on this site")
+
+	def test_erpnext_accepts_a_year_this_tool_created(self):
+		year = self.free_year()
+		data = self.tool_data(
+			"create_fiscal_year",
+			{
+				"year_name": year,
+				"year_start_date": f"{year}-01-01",
+				"year_end_date": f"{year}-12-31",
+			},
+		)
+		self.assertEqual(data["name"], year)
+		row = frappe.db.get_value(
+			"Fiscal Year", year, ["year", "year_start_date", "year_end_date"], as_dict=True
+		)
+		self.assertIsNotNone(row, "the fiscal year was not created")
+		self.assertEqual(row.year, year, "ERPNext named it from something other than `year`")
+		self.assertEqual(str(row.year_start_date), f"{year}-01-01")
+
+	def test_erpnexts_own_one_year_rule_agrees_with_this_apps_arithmetic(self):
+		"""`FiscalYear.validate_dates` insists the end is one year after the start
+		less a day. This app computes that date so it can say which one it wanted;
+		if the two ever disagree, the refusal names a date ERPNext would reject."""
+		from erpnext_mcp.tools.fiscal import one_year_end
+
+		year = self.free_year()
+		self.assertEqual(one_year_end(f"{year}-01-01"), f"{year}-12-31")
+		result = self.tool(
+			"create_fiscal_year",
+			{
+				"year_name": year,
+				"year_start_date": f"{year}-01-01",
+				"year_end_date": f"{year}-06-30",
+			},
+		)
+		self.assertTrue(result["isError"])
+		self.assertIn(f"{year}-12-31", result["content"][0]["text"])
+
+	def test_a_posting_outside_every_fiscal_year_is_refused_by_erpnext(self):
+		"""The rule the tool exists for. If this ever stops failing, ERPNext has
+		changed and `create_fiscal_year` is no longer a prerequisite for anything."""
+		year = self.free_year()
+		debit, credit = self.leaf_accounts(self.company, 2)
+		result = self.tool(
+			"create_journal_entry",
+			{
+				"company": self.company,
+				"posting_date": f"{year}-06-15",
+				"user_remark": f"{PREFIX} posting into a year that does not exist",
+				"accounts": [
+					{"account": debit, "debit": 10},
+					{"account": credit, "credit": 10},
+				],
+			},
+		)
+		self.assertTrue(
+			result["isError"],
+			"ERPNext accepted a posting outside every fiscal year — create_fiscal_year "
+			"is no longer the prerequisite this app documents it as",
+		)
+
+	def test_and_is_accepted_once_the_year_exists(self):
+		year = self.free_year()
+		debit, credit = self.leaf_accounts(self.company, 2)
+		self.tool_data(
+			"create_fiscal_year",
+			{
+				"year_name": year,
+				"year_start_date": f"{year}-01-01",
+				"year_end_date": f"{year}-12-31",
+			},
+		)
+		data = self.tool_data(
+			"create_journal_entry",
+			{
+				"company": self.company,
+				"posting_date": f"{year}-06-15",
+				"user_remark": f"{PREFIX} posting into a year created a moment ago",
+				"accounts": [
+					{"account": debit, "debit": 10},
+					{"account": credit, "credit": 10},
+				],
+			},
+		)
+		self.assertEqual(data["docstatus"], 0)
+		self.assertEqual(str(frappe.db.get_value("Journal Entry", data["name"], "posting_date")), f"{year}-06-15")
+
+	def test_disabling_and_re_enabling_round_trips(self):
+		year = self.free_year()
+		self.tool_data(
+			"create_fiscal_year",
+			{
+				"year_name": year,
+				"year_start_date": f"{year}-01-01",
+				"year_end_date": f"{year}-12-31",
+			},
+		)
+		self.tool_data("update_fiscal_year", {"year_name": year, "disabled": True})
+		self.assertTrue(frappe.db.get_value("Fiscal Year", year, "disabled"))
+		self.tool_data("update_fiscal_year", {"year_name": year, "disabled": False})
+		self.assertFalse(frappe.db.get_value("Fiscal Year", year, "disabled"))
 
 
 class BankAccountContract(V8IntegrationTestCase):

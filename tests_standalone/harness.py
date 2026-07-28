@@ -237,7 +237,19 @@ ERPNEXT_SCHEMA = {
 		"parenttype",
 		"bank_account",
 	],
-	"Fiscal Year": ["name", "year_start_date", "year_end_date", "disabled", "companies"],
+	# `year` is the field a Fiscal Year names itself from, so it is the one
+	# `create_fiscal_year` sets — a double without it would let the tool name a
+	# year by writing `name` directly, which is not what a real insert does.
+	"Fiscal Year": [
+		"name",
+		"year",
+		"year_start_date",
+		"year_end_date",
+		"disabled",
+		"is_short_year",
+		"auto_created",
+		"companies",
+	],
 	"Fiscal Year Company": ["parent", "parenttype", "company"],
 	# ERPNext splits the institution from the account at it. Both are here because
 	# `create_bank_account` writes both, and a double with only the second would
@@ -564,7 +576,11 @@ ERPNEXT_SCHEMA = {
 #: names them. Only the ones this app's behaviour depends on: `create_asset`
 #: creates an Item and then links the Asset to whatever the Item ended up
 #: called, and a double that named it `I-00001` would make the link untestable.
-ERPNEXT_AUTONAME = {"Item": "field:item_code", "Bank": "field:bank_name"}
+ERPNEXT_AUTONAME = {
+	"Item": "field:item_code",
+	"Bank": "field:bank_name",
+	"Fiscal Year": "field:year",
+}
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
 #: assert against the real defaults rather than a copy that can drift.

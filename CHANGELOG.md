@@ -11,8 +11,8 @@ owes, and a way to get rid of the accounts a bundled chart left behind.
 
 v0.6.0 made the axes a posting is filed under reachable. v0.7.0 added who owns
 the company and what the equipment is worth. This is the layer between those and
-a first bank sync — six new tools, one read tool, one new doctype, thirteen more
-company defaults, and the fix for a bug that made setting up a real chart of
+a first bank sync — eight new tools, one read tool, one new doctype, thirteen
+more company defaults, and the fix for a bug that made setting up a real chart of
 accounts harder than it should have been.
 
 ### The bug fix, first, because it is the one that cost time
@@ -54,6 +54,36 @@ already set up that way.
 
 ### Added — tools
 
+- **`create_fiscal_year`** and **`update_fiscal_year`** (mutating, default off).
+  The prerequisite for everything else in this release that touches history.
+  ERPNext refuses a posting whose date falls outside a fiscal year, and it
+  refuses it *from inside the document being saved* — so on a site whose only
+  year is 2026, booking a March 2025 equipment transfer fails with an error about
+  a date rather than about a missing year. `set_opening_balance` cannot reach a
+  period until the year exists.
+
+  **The overlap check is company-aware**, which is the part worth getting right:
+  a fiscal year with no `companies` is global and collides with everything, two
+  restricted years collide only where they share a company. Two years covering
+  the same day for the same company make ERPNext's own `get_fiscal_year`
+  ambiguous, and which year a posting lands in stops being a fact about the
+  posting. Disabling a year does not free its range. ERPNext's own
+  `validate_overlap` is company-blind on several versions and is stricter; where
+  it is, its refusal is passed through unchanged — this never loosens a rule the
+  framework enforces.
+
+  **`update_fiscal_year` guards the dangerous half.** Moving a year's dates moves
+  no posting; it changes which year — or no year at all — every posting already
+  written falls into, retroactively. So the GL entries that would fall *out* of
+  the new range are counted before anything is written and any at all is a
+  refusal with the count. It cannot rename the year (the name is the docname, and
+  is the string every Journal Entry and Budget that names a year holds) and
+  cannot change `companies`; both are refused by name.
+
+  Also: ERPNext requires a year to end exactly one year after it starts, less a
+  day, unless `is_short_year` is set — and its own message does not say which
+  date it wanted. This computes it, clamping leap days the way the calendar does
+  (a year starting 29 February ends on the 27th).
 - **`set_opening_balance`** (mutating, default off). Books one historical event —
   equipment transferred in, proceeds of a sale that predates this ledger, a
   portfolio's starting value — as a DRAFT journal entry, **computing** the
@@ -161,7 +191,7 @@ still idempotent.
 
 ### Tests
 
-**1068 standalone tests, all passing** (was 902).
+**1112 standalone tests, all passing** (was 902).
 
 - **`tests_standalone/test_banking.py`** — 29 tests. Every refusal in
   `create_bank_account`, the shared-GL-account warning, and that a failure leaves
@@ -171,6 +201,12 @@ still idempotent.
   number and by name, and both ways of failing to find it.
 - **`tests_standalone/test_notes.py`** — 70 tests. The split, the balance, the
   history, the asset tenor check from the note's side, and every disposition.
+- **`tests_standalone/test_fiscal.py`** — 44 tests. Every branch of the
+  company-aware overlap rule (a date-only check would wrongly refuse the
+  per-company years a group structure needs; a company-only one would let a
+  global year sit on top of a restricted one), the leap-day clamp, the
+  orphaned-postings refusal against real GL rows, and the end-to-end case the
+  tool exists for: create the year, then book into it.
 - **`test_accounts.ImportCreatesNewRoots`** — the regression above, including a
   test that the flag is set on the root **and only on the root**, and a
   guards-the-guard test asserting the double still refuses a bare root (so the
@@ -181,14 +217,18 @@ still idempotent.
 - **`erpnext_mcp/tests/test_notes.py`** (in-bench) — that the two doctypes
   migrate and their modules import, that the controller's throws fire on the Desk
   path, that ERPNext accepts an `is_opening` journal entry and a Bank Account
-  built here, and that a new root account can be created against a real Account
-  doctype.
+  built here, that a new root account can be created against a real Account
+  doctype, and — the one a double cannot show — that ERPNext really does refuse a
+  posting outside every fiscal year, and accepts the same one once the year has
+  been created.
 
 Harness additions: `MandatoryError` and Frappe's mandatory pass on root accounts;
 the `Bank` doctype and ERPNext's `BankAccount.autoname`; the `Note Payable`
-doctypes; Journal Entry's real `voucher_type` option list; and six of the
-thirteen new Company default fields — the other seven deliberately absent, so the
-"your ERPNext has no such field" refusal is exercised against a real absence.
+doctypes; Fiscal Year's `year` field and its `field:year` naming rule, so a year
+is named the way a real insert names it rather than by writing `name` directly;
+Journal Entry's real `voucher_type` option list; and six of the thirteen new
+Company default fields — the other seven deliberately absent, so the "your
+ERPNext has no such field" refusal is exercised against a real absence.
 
 ## 0.7.1 — 2026-07-27
 

@@ -91,6 +91,7 @@ def _fiscal_years() -> None:
 		[
 			{
 				"name": "2026",
+				"year": "2026",
 				"year_start_date": "2026-01-01",
 				"year_end_date": "2026-12-31",
 				"disabled": 0,
@@ -98,6 +99,7 @@ def _fiscal_years() -> None:
 			},
 			{
 				"name": "2025",
+				"year": "2025",
 				"year_start_date": "2025-01-01",
 				"year_end_date": "2025-12-31",
 				"disabled": 0,

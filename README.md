@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **71 tools** — 38 read-only, 33 mutating.
+- **73 tools** — 38 read-only, 35 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -46,7 +46,7 @@ you reason about it you end up pasting screenshots.
 An LLM is perfectly capable of reasoning about a general ledger. It cannot see
 one. This closes that gap without handing anything away:
 
-- **It cannot write by default.** All 33 mutating tools are off on install.
+- **It cannot write by default.** All 35 mutating tools are off on install.
   Turning one on is a checkbox on a form only System Manager can open.
 - **The dangerous verb gets its own switch.** `create_journal_entry` only ever
   produces a draft — `docstatus=0`, affecting no balance. Posting is
@@ -242,7 +242,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 71 tools
+## The 73 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -341,7 +341,7 @@ concerned.
 | `depreciation_note_alignment_check` | For every financed asset, whether its remaining life and its note's remaining term still agree. |
 | `list_notes_payable` | Every note or loan a company owes: lender, original and outstanding principal, rate, term, and when the next payment falls due. |
 
-### Mutating — 33, all OFF by default
+### Mutating — 35, all OFF by default
 
 **Postings into the ledger**
 
@@ -365,6 +365,8 @@ concerned.
 | `disable_account` | ERPNext's soft delete, `reason` mandatory. | Touch an account with GL entries in the current fiscal year, or delete anything ever. |
 | `delete_account` | **Irreversible.** Hard-deletes an account with no history, freeing its number — which disabling does not. Four checks, all refusals, all reported at once. | Remove an account with GL entries, journal entry lines (drafts included), children, a company default or a Bank Account pointing at it. |
 | `import_chart_of_accounts` | Builds a whole tree in one transaction, rolling back entirely on any failure. New top-level accounts included. **`dry_run` defaults to true.** | Silently reparent or rename an account that already exists. |
+| `create_fiscal_year` | Creates a Fiscal Year, so ERPNext will accept postings dated inside it. Company-aware overlap check. | Overlap a year that shares a company, or take an end date that is not one year after the start unless `is_short_year`. |
+| `update_fiscal_year` | Moves a year's dates, or enables/disables it. | Move dates in a way that leaves existing GL entries in no fiscal year, rename the year, or change which companies it applies to. |
 | `advance_workflow` | Takes a workflow action via `apply_workflow`. **Can submit or cancel the document** if the target state says so. Supports `dry_run`. | Take an action the acting user is not allowed. |
 | `create_todo` | Assigns a ToDo. | Touch any ledger. |
 
@@ -405,6 +407,24 @@ concerned.
 | `create_note_payable` | Registers one note or loan: terms, provenance, the liability account it posts to, and the asset it financed. | Link an asset whose useful life disagrees with the note's term, unless you pass `enforce_asset_tenor=false`. |
 | `record_loan_payment` | Splits a payment into principal and interest and drafts the JE that books it, decrementing the balance. | Book a split that does not add up, clear more principal than is owed, or post anything. |
 | `close_note_payable` | Closes a note as Paid Off, Refinanced or Written Off, recording the disposition in its own history. | Write a journal entry — relieving the balance is a posting somebody should make on purpose, and the response says which. |
+
+#### A fiscal year is a permission for a date
+
+ERPNext refuses any posting whose date falls outside a Fiscal Year, and it
+refuses it from *inside the document being saved* — so on a site whose only year
+is 2026, booking a March 2025 equipment transfer fails with an error about a
+date rather than about a missing year.
+
+That makes `create_fiscal_year` the prerequisite for everything historical:
+`set_opening_balance` and `create_journal_entry` cannot reach a period until the
+year exists. Creating one books nothing and moves no balance; what changes is
+which dates the ledger will accept.
+
+A year with **no** `companies` applies to every company — that is how ERPNext
+models a global fiscal year, and it is the default here. The overlap check
+follows the same model: a global year collides with everything, two restricted
+years collide only where they share a company. Disabling a year does not free its
+range.
 
 #### A note payable is not ERPNext's Loan
 
