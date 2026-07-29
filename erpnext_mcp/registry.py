@@ -634,6 +634,171 @@ TOOLS = {
 		mutating=True,
 		title="Set an opening balance",
 	),
+	"post_opening_balance_journal_entry": _tool(
+		opening.post_opening_balance_journal_entry,
+		"MUTATING (default OFF). Book a whole opening balance sheet as ONE Journal "
+		"Entry — every line explicit, the balancing line going to an account you "
+		"name — and post it in the same call if you ask it to.\n\n"
+		"THIS OR set_opening_balance? Use `set_opening_balance` when you know one "
+		"side of one historical event ('the equipment came over from PFI') and want "
+		"the equity plug computed for you. Use THIS when you are transcribing a "
+		"trial balance off the previous system: you already have both sides, they "
+		"already balance, and putting them through a one-event-at-a-time tool means "
+		"one call and one stray equity line per account.\n\n"
+		"THE OFFSET IS NAMED, NOT FOUND. `offset_account` is required exactly when "
+		"the lines do not balance, and the difference is written to it as a single "
+		"line — normally Opening Balance Equity (account 3300), though retained "
+		"earnings or a suspense account are legitimate and are not second-guessed. "
+		"Naming one when the lines already balance writes no line and the response "
+		"says so.\n\n"
+		"SUBMITTING CHECKS TWO SWITCHES. `submit: true` posts the entry through "
+		"submit_journal_entry, so THAT switch must be on as well as this tool's — "
+		"and it is checked before anything is written, so a site with posting "
+		"disabled gets a refusal rather than a draft nobody asked for. The default "
+		"is false: a draft, moving no balance.\n\n"
+		"Flags the entry `is_opening` and gives it the `Opening Entry` voucher type "
+		"where the site has them. Refuses a group, disabled or wrong-company "
+		"account on any line or on the offset; a group or disabled cost center; a "
+		"dimension value that does not exist; a non-positive amount (direction is "
+		"`side`, never a minus sign); and a voucher_type this site does not offer. "
+		"Nothing is written unless every line validates.",
+		{
+			"company": _COMPANY,
+			"posting_date": _field(
+				_STRING,
+				"YYYY-MM-DD. Usually the day before the first trading day, or the fiscal "
+				"year's opening date. Must fall inside a Fiscal Year this site has.",
+			),
+			"lines": {
+				"type": "array",
+				"minItems": 1,
+				"description": (
+					"Every line of the entry, one object per account. Unlike "
+					"set_opening_balance these are taken as given — the only line this "
+					"tool adds is the balancing one against offset_account."
+				),
+				"items": {
+					"type": "object",
+					"properties": {
+						"account": _field(_STRING, "Account docname, number or name. Must be a leaf."),
+						"side": _field(
+							_STRING,
+							"'debit' or 'credit' ('dr'/'cr' accepted). The direction lives "
+							"here, never in the sign of the amount.",
+						),
+						"amount": _field(_NUMBER, "Positive. Always."),
+						"cost_center": _field(_STRING, "Optional leaf cost center to file this line under."),
+						"dimensions": _field(
+							_OBJECT,
+							'Optional accounting dimensions for this line, e.g. {"member": '
+							'"Member-01"}. Each key must be a field on Journal Entry Account '
+							"and each value must exist.",
+						),
+						"narrative": _field(
+							_STRING,
+							"Optional per-line remark. The entry's own explanation is user_remark.",
+						),
+					},
+					"required": ["account", "side", "amount"],
+					"additionalProperties": False,
+				},
+			},
+			"offset_account": _field(
+				_STRING,
+				"Where the difference goes when the lines do not balance — normally "
+				"Opening Balance Equity, account 3300. Required in that case and "
+				"refused as unnecessary only in the sense that no line is written when "
+				"the lines already balance. Must be a leaf account in this company.",
+			),
+			"user_remark": _field(
+				_STRING,
+				"MANDATORY. Where these balances came from, e.g. 'trial balance at "
+				"2025-12-31 per the prior system, reviewed by TP'. The only part of an "
+				"opening balance nobody can reconstruct later.",
+			),
+			"voucher_type": _field(
+				_STRING,
+				"Journal Entry voucher type. Defaults to 'Opening Entry' where this site "
+				"offers it. A type this site does not have is refused rather than "
+				"silently swapped.",
+			),
+			"submit": _field(
+				_BOOLEAN,
+				"Post the entry after creating it, docstatus 0 → 1, writing GL Entries "
+				"and moving balances. Default false. Requires allow_submit_journal_entry "
+				"as well as this tool's own switch.",
+			),
+		},
+		required=("posting_date", "lines", "user_remark"),
+		mutating=True,
+		title="Post an opening balance journal entry",
+	),
+	"bulk_submit_journal_entries": _tool(
+		mutate.bulk_submit_journal_entries,
+		"MUTATING (default OFF). Submit many DRAFT Journal Entries in one call, "
+		"docstatus 0 → 1 each. This writes GL Entries and moves balances.\n\n"
+		"FOR THE MIGRATION WEEKEND. A chart imported, a year of history keyed in, "
+		"an opening balance per account: hundreds of drafts, and posting them one "
+		"MCP round trip at a time is not the same job at a different speed — it is "
+		"the job where somebody loses track at number four hundred and stops "
+		"without knowing which ones went.\n\n"
+		"CHECKS submit_journal_entry's SWITCH TOO, and fails before touching "
+		"anything if it is off. That switch is where an operator decided whether an "
+		"AI client may move a balance at all.\n\n"
+		"ONE FAILURE IS NOT THE BATCH'S. Each entry is submitted in its own "
+		"transaction — committed on success, rolled back on failure — and the loop "
+		"carries on. Returns a row per document with `ok` and the exact error, plus "
+		"aggregate counts. An entry that is already submitted comes back `ok` and "
+		"`skipped: already_submitted`, never an error, so a half-finished batch is "
+		"safe to retry whole. A cancelled entry is a failure: it cannot be posted "
+		"again.",
+		{
+			"names": {
+				"type": "array",
+				"minItems": 1,
+				"description": (
+					"Journal Entry docnames to submit, e.g. ['ACC-JV-2026-00042', "
+					"'ACC-JV-2026-00043']. Maximum 500 per call. get_journal_entries "
+					"with docstatus='draft' lists the ones waiting."
+				),
+				"items": _STRING,
+			}
+		},
+		required=("names",),
+		mutating=True,
+		title="Submit journal entries in bulk",
+	),
+	"delete_draft_journal_entry": _tool(
+		mutate.delete_draft_journal_entry,
+		"MUTATING (default OFF). Delete a DRAFT Journal Entry outright — docstatus "
+		"0 only, a real delete, nothing left in the table.\n\n"
+		"THE GAP IT FILLS. cancel_journal_entry refuses a draft, correctly: there "
+		"is nothing to reverse, because a draft has moved no balance. That left an "
+		"unwanted draft with no MCP path at all and a human opening ERPNext to "
+		"tidy up after a tool.\n\n"
+		"DRAFTS ONLY, WHATEVER IS ASKED. A SUBMITTED entry has written GL Entries; "
+		"deleting it would take those balances with it and leave nothing saying "
+		"why, so it is refused and pointed at cancel_journal_entry. A CANCELLED "
+		"entry and its reversing rows are the evidence that a posting was made and "
+		"undone — deleting one leaves an audit trail with a hole in it — so that is "
+		"refused too.\n\n"
+		"`reason` is mandatory, and the response carries the deleted entry's "
+		"company, date, totals and every line, because once this returns the MCP "
+		"Action Log row is the only record that the document ever existed.",
+		{
+			"name": _field(_STRING, "Docname of a DRAFT Journal Entry."),
+			"reason": _field(
+				_STRING,
+				"Why it is being deleted, e.g. 'duplicate of ACC-JV-2026-00311, keyed "
+				"twice during the opening-balance load'. Recorded permanently in the "
+				"audit log, which is all that survives the delete.",
+			),
+		},
+		required=("name", "reason"),
+		mutating=True,
+		destructive=True,
+		title="Delete a draft journal entry",
+	),
 	"create_bank_account": _tool(
 		banking.create_bank_account,
 		"MUTATING (default OFF). Create the Bank Account record that maps a real "

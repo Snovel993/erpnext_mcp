@@ -22,11 +22,25 @@ DOUBLE ENTRY IS CHECKED HERE ANYWAY. ERPNext validates that debits equal credits
 on submit, but `create_journal_entry` checks before insert so an unbalanced
 proposal fails with an arithmetic message the model can act on, instead of
 leaving a broken draft behind for a human to find.
+
+EVERY LINE CARRIES BOTH AMOUNT COLUMNS. A Journal Entry Account row stores each
+amount twice — `debit` in the company's currency and `debit_in_account_currency`
+in the account's — and ERPNext's `set_amounts_in_account_currency` derives the
+first FROM the second on every validate, multiplying by the line's exchange rate.
+A line built with `debit` alone therefore inserts looking correct and is written
+to the database with its debit silently zeroed, and the entry is refused on
+submit with *"Row N: Both Debit and Credit values cannot be zero"* — a draft that
+cannot be posted and does not say why. That shipped in v0.8.0 and cost a day of
+somebody's life posting opening balances by hand. `validated_journal_lines` now
+fills both columns for every line it returns, which is why the fix lives here
+rather than in the tool that surfaced it: every Journal Entry this app writes —
+opening balances, member events, depreciation, loan payments — comes through this
+one function, and one of them getting it right would have left the rest wrong.
 """
 
 import frappe
 
-from .. import compat
+from .. import compat, settings
 from ..args import as_date, as_float, as_str, resolve_account, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
@@ -79,6 +93,13 @@ _DIMENSIONS_KEY = "dimensions"
 #: Journal Entry lines are `Journal Entry Account` rows, and that is the doctype
 #: ERPNext puts accounting dimension fields on. See `tools/dimensions.py`.
 _LINE_DOCTYPE = "Journal Entry Account"
+
+#: How many entries `bulk_submit_journal_entries` will take in one call. Not a
+#: performance limit — each submit is its own transaction and the loop would run
+#: all day. It is a legibility limit: a batch whose failures a human has to read
+#: through should fit on a screen, and a caller with two thousand drafts is
+#: better served by four calls it can check between than by one it cannot.
+_MAX_BULK = 500
 
 
 # ── 11. create_journal_entry ────────────────────────────────────────────────
@@ -199,6 +220,31 @@ def validated_journal_lines(raw, company: str) -> list[dict]:
 		account = resolve_account(str(entry.get("account") or ""), company)
 		debit = as_float(entry.get("debit"), f"accounts[{index}].debit")
 		credit = as_float(entry.get("credit"), f"accounts[{index}].credit")
+		rate = as_float(entry.get("exchange_rate"), f"accounts[{index}].exchange_rate") or 1.0
+		if rate <= 0:
+			raise ToolError(
+				f"accounts[{index}] ({account}) has exchange_rate {rate}; a rate must be "
+				"positive. Nothing was created."
+			)
+		debit_in_account_currency = as_float(
+			entry.get("debit_in_account_currency"), f"accounts[{index}].debit_in_account_currency"
+		)
+		credit_in_account_currency = as_float(
+			entry.get("credit_in_account_currency"), f"accounts[{index}].credit_in_account_currency"
+		)
+		# A caller who gave only the account-currency side means the same line as
+		# one who gave only the company-currency side. Filling the other in here
+		# rather than refusing keeps `debit`/`credit` the field pair every message
+		# in this module talks about, while accepting the pair ERPNext actually
+		# reads.
+		#
+		# And where both were given, the account-currency one wins the arithmetic,
+		# because it is the one ERPNext multiplies out on validate. Letting the
+		# two disagree would mean this module's double-entry check ran on one set
+		# of numbers and the posting on another — an entry that balances here and
+		# does not on the site.
+		debit = _reconciled_amount(debit, debit_in_account_currency, rate, account, index, "debit")
+		credit = _reconciled_amount(credit, credit_in_account_currency, rate, account, index, "credit")
 		if debit and credit:
 			raise ToolError(
 				f"accounts[{index}] ({account}) sets both debit and credit; a "
@@ -215,13 +261,104 @@ def validated_journal_lines(raw, company: str) -> list[dict]:
 			raise ToolError(
 				f"accounts[{index}] ({account}) is a group account; ERPNext posts only to leaf accounts"
 			)
+		if not entry.get("exchange_rate"):
+			_assert_company_currency(account, company, index)
 		line = {key: value for key, value in entry.items() if key in _LINE_FIELDS}
 		line["account"] = account
 		line["debit"] = debit
 		line["credit"] = credit
+		line.update(
+			_account_currency_amounts(
+				debit, credit, rate, debit_in_account_currency, credit_in_account_currency
+			)
+		)
 		line.update(_validated_dimensions(entry.get(_DIMENSIONS_KEY), index))
 		lines.append(line)
 	return lines
+
+
+def _reconciled_amount(
+	amount: float, in_account_currency: float, rate: float, account: str, index: int, side: str
+) -> float:
+	"""One side's company-currency figure, agreed with its account-currency twin.
+
+	Absent either way it stays absent — a line has one side, and the other's zero
+	is not a disagreement. Given only in the account's currency it is multiplied
+	out. Given both ways and they differ, it is a refusal rather than a choice:
+	the caller sent two numbers that cannot both be true, and the one this module
+	would have to discard is the one the ledger would actually have posted.
+	"""
+	if not in_account_currency:
+		return amount
+	converted = round(in_account_currency * rate, 2)
+	if amount and round(amount, 2) != converted:
+		raise ToolError(
+			f"accounts[{index}] ({account}) says {side} {amount} and "
+			f"{side}_in_account_currency {in_account_currency} at exchange_rate {rate}, which "
+			f"comes to {converted}. ERPNext posts the account-currency figure times the rate, so "
+			f"these two cannot both be right. Send one of them, or send a pair that agrees. "
+			"Nothing was created."
+		)
+	return converted
+
+
+def _assert_company_currency(account: str, company: str, index: int) -> None:
+	"""Refuse a foreign-currency line that came without an exchange rate.
+
+	The `*_in_account_currency` columns this module now fills in are only equal to
+	`debit`/`credit` when the account is in the company's own currency. On a
+	foreign account with no rate to divide by, the honest answer is that this app
+	does not know what the amount is in that currency — and ERPNext, which looks a
+	rate up for itself when it sees `exchange_rate` of 1, would multiply that
+	guess back out and post a converted figure nobody chose. Refusing costs a
+	round trip; the alternative is a posting that is wrong in a currency the
+	caller never mentioned.
+
+	Silent where the site does not have the fields to answer with, because a
+	check that cannot be made must not become a check that always fails.
+	"""
+	if not compat.has_field("Account", "account_currency"):
+		return
+	account_currency = str(frappe.db.get_value("Account", account, "account_currency") or "").strip()
+	if not account_currency:
+		return
+	company_currency = str(frappe.db.get_value("Company", company, "default_currency") or "").strip()
+	if not company_currency or account_currency == company_currency:
+		return
+	raise ToolError(
+		f"accounts[{index}] ({account}) is held in {account_currency} and {company} keeps its "
+		f"books in {company_currency}, so this line needs an exchange_rate — the rate that "
+		f"turns {account_currency} into {company_currency} on the posting date. Pass it, "
+		"together with the amount in the account's own currency as "
+		"debit_in_account_currency or credit_in_account_currency. Nothing was created."
+	)
+
+
+def _account_currency_amounts(
+	debit: float,
+	credit: float,
+	rate: float,
+	debit_in_account_currency: float,
+	credit_in_account_currency: float,
+) -> dict:
+	"""The `*_in_account_currency` pair for one line. Never omitted. See the module docstring.
+
+	At rate 1 — every line on a single-currency site, which is almost every line —
+	the account-currency amount IS the company-currency amount, and it is copied
+	rather than computed so no rounding can put a cent between the two columns of
+	the same number. Only a genuine foreign-currency line divides, and a caller
+	who supplied the account-currency figure themselves keeps it: they know what
+	the invoice said, and this does not.
+	"""
+	if not debit_in_account_currency:
+		debit_in_account_currency = debit if rate == 1 else round(debit / rate, 2) if debit else 0.0
+	if not credit_in_account_currency:
+		credit_in_account_currency = credit if rate == 1 else round(credit / rate, 2) if credit else 0.0
+	return {
+		"debit_in_account_currency": debit_in_account_currency,
+		"credit_in_account_currency": credit_in_account_currency,
+		"exchange_rate": rate,
+	}
 
 
 def _validated_dimensions(raw, index: int) -> dict:
@@ -314,6 +451,212 @@ def submit_journal_entry(args: dict) -> ToolResult:
 		data,
 		f"submitted Journal Entry {doc.name} ({doc.company}, {doc.posting_date}, {doc.total_debit})",
 		docstatus_delta="0 → 1 (submitted)",
+	)
+
+
+# ── 75. bulk_submit_journal_entries ─────────────────────────────────────────
+def bulk_submit_journal_entries(args: dict) -> ToolResult:
+	"""Submit many draft Journal Entries in one call, one document at a time.
+
+	WHY THIS EXISTS AND `submit_journal_entry` IS NOT ENOUGH. A migration weekend
+	produces drafts in the hundreds — a chart imported, a year of history keyed in,
+	an opening balance per account. Posting them one MCP round trip at a time is
+	not a different amount of work, it is a different *kind* of work, and the thing
+	that actually goes wrong is a human losing track at entry four hundred and
+	stopping without knowing which ones went.
+
+	IT CHECKS `submit_journal_entry`'s SWITCH TOO, and fails before touching
+	anything if that one is off. That switch is where an operator decided whether
+	an AI client may move a balance at all; a second door into the same room with
+	its own lock would make the decision meaningless. Same reasoning as
+	`submit_member_event`.
+
+	ONE DOCUMENT'S FAILURE IS NOT THE BATCH'S. Each submit runs in its own
+	transaction: committed on success, rolled back on failure, then the loop moves
+	on. This is the one place in this app that commits mid-call, and it is
+	deliberate — the alternative is a batch of five hundred where number four
+	hundred fails and the request rolls back the three hundred and ninety-nine
+	postings that were fine, which is both surprising and much harder to recover
+	from than a report saying which one to look at. It is also what Frappe's own
+	bulk submit does.
+
+	NOTHING IS RE-SUBMITTED. An already-submitted entry is reported `ok` and
+	`skipped`, not an error: a caller retrying a batch that half-succeeded wants
+	the rest posted, not four hundred error messages about work that is already
+	done.
+	"""
+	if not settings.tool_enabled("submit_journal_entry"):
+		raise ToolError(
+			"this posts Journal Entries, and the submit_journal_entry tool is switched off on "
+			"this site. That switch is where an operator decides whether an AI client may move "
+			"a balance, so this tool honours it too. An operator must tick "
+			"'allow_submit_journal_entry' in ERPNext MCP Settings. Nothing was submitted."
+		)
+	names = _validated_docnames(args.get("names"))
+
+	results = []
+	for name in names:
+		results.append(_submit_one(name))
+
+	submitted = [row for row in results if row["ok"] and not row["skipped"]]
+	skipped = [row for row in results if row["skipped"]]
+	failed = [row for row in results if not row["ok"]]
+	data = {
+		"total": len(results),
+		"submitted": len(submitted),
+		"skipped": len(skipped),
+		"failed": len(failed),
+		"results": results,
+		"submitted_names": [row["name"] for row in submitted],
+		"failed_names": [row["name"] for row in failed],
+		"note": (
+			"Each entry was submitted in its own transaction, so the ones that posted have "
+			"posted whatever happened to the rest. Nothing here was rolled back by a later "
+			"failure, and nothing that failed left a partial posting behind."
+		),
+		"next_step": (
+			f"{len(failed)} entr{'y' if len(failed) == 1 else 'ies'} failed — read `results` for "
+			"the reason each gave, fix them, and call this again with just those names. Names "
+			"that already posted are safe to include; they come back skipped."
+			if failed
+			else "Every entry in the batch is posted or was already posted. Nothing is outstanding."
+		),
+	}
+	return ToolResult(
+		data,
+		f"bulk submit: {len(submitted)} posted, {len(skipped)} already submitted, "
+		f"{len(failed)} failed, of {len(results)} asked for",
+		docstatus_delta=f"0 → 1 (submitted) × {len(submitted)}",
+	)
+
+
+def _validated_docnames(raw) -> list[str]:
+	"""The `names` argument: a non-empty list of docnames, de-duplicated in order."""
+	if not isinstance(raw, list) or not raw:
+		raise ToolError(
+			"names must be a non-empty list of Journal Entry docnames, e.g. "
+			'["ACC-JV-2026-00042", "ACC-JV-2026-00043"]. get_journal_entries with '
+			"docstatus='draft' lists the ones waiting to be posted."
+		)
+	if len(raw) > _MAX_BULK:
+		raise ToolError(
+			f"names has {len(raw)} entries and the limit is {_MAX_BULK} per call. A batch this "
+			"size is worth splitting anyway: one failure in the middle is easier to find in "
+			f"{_MAX_BULK} results than in {len(raw)}. Nothing was submitted."
+		)
+	out = []
+	for index, value in enumerate(raw, start=1):
+		name = str(value or "").strip()
+		if not name:
+			raise ToolError(f"names[{index}] is empty. Nothing was submitted.")
+		if name not in out:
+			out.append(name)
+	return out
+
+
+def _submit_one(name: str) -> dict:
+	"""Submit one entry, returning a row rather than raising. See `bulk_submit_journal_entries`."""
+	row = {"name": name, "ok": False, "skipped": "", "error": None, "docstatus": None}
+	try:
+		if not frappe.db.exists("Journal Entry", name):
+			row["error"] = f"no Journal Entry named {name!r}"
+			return row
+		doc = frappe.get_doc("Journal Entry", name)
+		docstatus = int(doc.docstatus or 0)
+		if docstatus == 1:
+			row.update(ok=True, skipped="already_submitted", docstatus=1)
+			return row
+		if docstatus == 2:
+			row.update(docstatus=2, error=f"Journal Entry {name} is cancelled and cannot be submitted")
+			return row
+
+		doc.submit()
+		frappe.db.commit()
+		row.update(ok=True, docstatus=1)
+		return row
+	except Exception as exc:
+		# Rolling back here is what makes the next document's submit run against a
+		# clean transaction rather than one poisoned by this one's half-write.
+		frappe.db.rollback()
+		row["error"] = f"{type(exc).__name__}: {exc}"
+		return row
+
+
+# ── 76. delete_draft_journal_entry ──────────────────────────────────────────
+def delete_draft_journal_entry(args: dict) -> ToolResult:
+	"""Delete a DRAFT Journal Entry outright. Drafts only, and it says what it deleted.
+
+	THE GAP THIS FILLS. `cancel_journal_entry` refuses a draft, correctly — there
+	is nothing to reverse, because a draft has moved no balance. But that left an
+	unwanted draft with no MCP path at all, and a tool that produced four hundred
+	drafts and no way to withdraw them is a tool that makes work rather than doing
+	it. So: drafts, and only drafts. A submitted entry is a posting and gets
+	cancelled, never deleted, whatever a caller asks for.
+
+	IT IS A REAL DELETE. `frappe.delete_doc`, no soft-delete flag, nothing left in
+	the table. What survives is the audit row, which is why `reason` is mandatory
+	and why the response — and therefore the log's summary — carries the entry's
+	company, date, totals and line count. Once this returns, that row is the only
+	description of the document that ever existed, so it has to be one somebody
+	can read a year later.
+	"""
+	name = as_str(args, "name", required=True)
+	reason = as_str(args, "reason", required=True)
+	if len(reason) < 4:
+		raise ToolError("reason must be a real explanation, not a placeholder. Nothing was deleted.")
+	doc = _journal_entry(name)
+	docstatus = int(doc.docstatus or 0)
+	if docstatus == 1:
+		raise ToolError(
+			f"Journal Entry {name} is submitted: it has written GL Entries and moved balances, "
+			"and deleting it would take those balances with it and leave nothing saying why. "
+			"Reverse it with cancel_journal_entry, which writes the reversing entries and keeps "
+			"the record. Nothing was deleted."
+		)
+	if docstatus == 2:
+		raise ToolError(
+			f"Journal Entry {name} is cancelled. ERPNext keeps cancelled entries and their "
+			"reversing GL rows on purpose — the pair is the evidence that a posting was made "
+			"and undone. Deleting one leaves an audit trail with a hole in it. Nothing was "
+			"deleted."
+		)
+
+	# Read everything worth keeping BEFORE the document stops existing.
+	deleted = {
+		"name": doc.name,
+		"company": doc.company,
+		"posting_date": str(doc.posting_date or ""),
+		"voucher_type": doc.get("voucher_type"),
+		"user_remark": doc.get("user_remark"),
+		"total_debit": float(doc.get("total_debit") or 0),
+		"total_credit": float(doc.get("total_credit") or 0),
+		"line_count": len(doc.get("accounts") or []),
+		"accounts": [
+			{
+				"account": row.get("account"),
+				"debit": float(row.get("debit") or 0),
+				"credit": float(row.get("credit") or 0),
+			}
+			for row in (doc.get("accounts") or [])
+		],
+	}
+	frappe.delete_doc("Journal Entry", name, ignore_permissions=False)
+
+	data = {
+		"deleted": deleted,
+		"reason": reason,
+		"gl_entries_removed": 0,
+		"note": (
+			"A draft writes no GL Entries, so no balance changed when this was created and none "
+			"changed when it was deleted. The MCP Action Log row for this call is now the only "
+			"record that the entry existed; it carries the lines above and this reason."
+		),
+	}
+	return ToolResult(
+		data,
+		f"deleted draft Journal Entry {name} ({deleted['company']}, {deleted['posting_date']}, "
+		f"{deleted['line_count']} line(s), {deleted['total_debit']} debit) — {reason}",
+		docstatus_delta="0 (draft) → deleted",
 	)
 
 
@@ -531,6 +874,18 @@ def _validated_vouchers(raw) -> list[dict]:
 			raise ToolError(f"payment_entries[{index}] must be an object, got {type(entry).__name__}")
 		doctype = str(entry.get("payment_document") or "").strip()
 		docname = str(entry.get("payment_entry") or "").strip()
+		if not doctype and entry.get("payment_doctype"):
+			# `payment_doctype` is the name the field has almost everywhere else in
+			# Frappe, so it is the one a model reaches for first. Naming the right
+			# field costs one round trip; the alternative — accepting both — would
+			# make this the only tool in the app where a misspelt key is guessed at
+			# rather than reported, and the guess would eventually be wrong.
+			raise ToolError(
+				f"payment_entries[{index}] uses payment_doctype; on ERPNext's Bank Transaction "
+				"Payments table the field is called payment_document. Resend it under that name, "
+				f"e.g. {{\"payment_document\": {str(entry['payment_doctype'])!r}, \"payment_entry\": "
+				'"PE-0001", "allocated_amount": 250.00}. Nothing was changed.'
+			)
 		if not doctype or not docname:
 			raise ToolError(
 				f"payment_entries[{index}] needs both payment_document (the voucher "

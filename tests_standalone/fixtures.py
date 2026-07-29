@@ -266,6 +266,26 @@ def _gl(account, posting_date, debit=0, credit=0, is_cancelled=0):
 	}
 
 
+def _je_line(account, idx, debit=0, credit=0):
+	"""One Journal Entry Account row, with both amount columns ERPNext stores.
+
+	A real row always carries `debit_in_account_currency` as well as `debit` —
+	ERPNext derives the second from the first on every validate, and a fixture
+	giving only `debit` is a row no site has ever had. It is also a row that
+	cannot be submitted, now that `harness.JournalEntryDocument` models that
+	derivation, which is exactly the failure v0.8.0 shipped.
+	"""
+	return {
+		"account": account,
+		"idx": idx,
+		"debit": debit,
+		"credit": credit,
+		"debit_in_account_currency": debit,
+		"credit_in_account_currency": credit,
+		"exchange_rate": 1,
+	}
+
+
 def _journal_entries() -> None:
 	STORE.seed(
 		"Journal Entry",
@@ -280,8 +300,8 @@ def _journal_entries() -> None:
 				"user_remark": "Opening sale",
 				"docstatus": 1,
 				"accounts": [
-					{"account": cash(), "debit": 1000, "credit": 0, "idx": 1},
-					{"account": sales(), "debit": 0, "credit": 1000, "idx": 2},
+					_je_line(cash(), 1, debit=1000),
+					_je_line(sales(), 2, credit=1000),
 				],
 			},
 			{
@@ -294,8 +314,8 @@ def _journal_entries() -> None:
 				"user_remark": "Stationery",
 				"docstatus": 0,
 				"accounts": [
-					{"account": supplies(), "debit": 250, "credit": 0, "idx": 1},
-					{"account": cash(), "debit": 0, "credit": 250, "idx": 2},
+					_je_line(supplies(), 1, debit=250),
+					_je_line(cash(), 2, credit=250),
 				],
 			},
 			{
@@ -308,8 +328,8 @@ def _journal_entries() -> None:
 				"user_remark": "Prior year",
 				"docstatus": 1,
 				"accounts": [
-					{"account": supplies(), "debit": 40, "credit": 0, "idx": 1},
-					{"account": cash(), "debit": 0, "credit": 40, "idx": 2},
+					_je_line(supplies(), 1, debit=40),
+					_je_line(cash(), 2, credit=40),
 				],
 			},
 		],

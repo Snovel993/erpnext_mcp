@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 73 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 76 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -3294,6 +3294,156 @@ until this has run.
   appear in reports covering them; ERPNext simply refuses *new* postings dated
   inside a disabled year. It is reversible with `disabled=false`.
 
+---
+
+## 74. `post_opening_balance_journal_entry`
+
+**MUTATING.** Off by default. `submit: true` additionally requires
+`allow_submit_journal_entry`.
+
+**Arguments:** `posting_date` (required), `lines` (required), `user_remark`
+(required), `company`, `offset_account`, `voucher_type`, `submit`.
+
+Each line is `{account, side, amount, cost_center, dimensions, narrative}`.
+`amount` is always positive — the direction lives in `side` (`debit`/`dr` or
+`credit`/`cr`). Unlike `set_opening_balance`, **these lines are taken as given**;
+the only line this tool adds is the balancing one.
+
+```json
+{"name": "post_opening_balance_journal_entry",
+ "arguments": {"company": "Example Trading Co",
+               "posting_date": "2026-01-01",
+               "user_remark": "Trial balance at 2025-12-31 per the prior system, reviewed by TP",
+               "offset_account": "3300",
+               "submit": false,
+               "lines": [
+                 {"account": "1100", "side": "debit", "amount": 1700000},
+                 {"account": "1710", "side": "debit", "amount": 52650},
+                 {"account": "2310", "side": "credit", "amount": 200000}]}}
+```
+
+```json
+{
+  "name": "ACC-JV-2026-00061", "docstatus": 0, "docstatus_label": "draft",
+  "company": "Example Trading Co", "posting_date": "2026-01-01",
+  "offset_account": "3300 - Opening Balance Equity - ETC",
+  "offset_side": "credit", "offset_amount": 1552650.0,
+  "entered_debit": 1752650.0, "entered_credit": 200000.0,
+  "balancing_difference": 1552650.0,
+  "line_count": 4, "total_debit": 1752650.0, "total_credit": 1752650.0,
+  "flags_set": {"is_opening": "Yes", "voucher_type": "Opening Entry"},
+  "submitted": false, "gl_entries_created": 0,
+  "note": "The 1552650.0 balancing line against 3300 - Opening Balance Equity - ETC was written because the 3 line(s) given were out by that much. …"
+}
+```
+
+- **This or `set_opening_balance`?** Use that one when you know one side of one
+  historical event and want the equity plug computed. Use this when you are
+  transcribing a whole trial balance off the previous system: both sides are
+  already in hand, and a one-event-at-a-time tool means one call and one stray
+  equity line per account.
+- **The offset is named, not found.** `offset_account` is required exactly when
+  the lines do not balance, and the difference is written to it as a single line.
+  Normally Opening Balance Equity (`3300`) — but retained earnings or a suspense
+  account are legitimate and are not second-guessed, which is the one place this
+  is more permissive than `set_opening_balance`. Naming an offset when the lines
+  already balance writes no line, and the response says so.
+- **`submit: true` posts it**, `0 → 1`, writing GL Entries. That path checks
+  `allow_submit_journal_entry` **before anything is written**, so a site with
+  posting switched off gets a refusal rather than a draft nobody asked for. The
+  default is `false`.
+- **`voucher_type` defaults to `Opening Entry`** where the site offers it, and is
+  dropped with a note where it does not. A voucher type the caller names and the
+  site does not have is a refusal — silently posting it as something else would
+  mislabel an entry nobody re-reads.
+- **Refuses** a group, disabled or wrong-company account on any line or on the
+  offset; a group or disabled cost center; a dimension value that does not exist;
+  a non-positive amount; and an unsupported line field, by name — including
+  `dr_or_cr`, which is the *other* tool's spelling of `side`.
+
+---
+
+## 75. `bulk_submit_journal_entries`
+
+**MUTATING.** Off by default. Additionally requires
+`allow_submit_journal_entry`, checked before anything is touched.
+
+**Arguments:** `names` (required) — up to 500 Journal Entry docnames.
+
+```json
+{"name": "bulk_submit_journal_entries",
+ "arguments": {"names": ["ACC-JV-2026-00060", "ACC-JV-2026-00061", "ACC-JV-2026-00062"]}}
+```
+
+```json
+{
+  "total": 3, "submitted": 2, "skipped": 1, "failed": 0,
+  "submitted_names": ["ACC-JV-2026-00061", "ACC-JV-2026-00062"],
+  "failed_names": [],
+  "results": [
+    {"name": "ACC-JV-2026-00060", "ok": true, "skipped": "already_submitted", "error": null, "docstatus": 1},
+    {"name": "ACC-JV-2026-00061", "ok": true, "skipped": "", "error": null, "docstatus": 1},
+    {"name": "ACC-JV-2026-00062", "ok": true, "skipped": "", "error": null, "docstatus": 1}],
+  "note": "Each entry was submitted in its own transaction …",
+  "next_step": "Every entry in the batch is posted or was already posted. Nothing is outstanding."
+}
+```
+
+- **One document's failure is not the batch's.** Each submit runs in its own
+  transaction — committed on success, rolled back on failure — and the loop
+  carries on. This is the only place in this app that commits mid-call, and it is
+  deliberate: the alternative is a batch of five hundred where number four
+  hundred fails and the request rolls back the three hundred and ninety-nine
+  postings that were fine. It is what Frappe's own bulk submit does.
+- **Already submitted is `ok`, not an error** — `skipped: "already_submitted"` —
+  so a half-finished batch is safe to retry whole. **Cancelled is a failure:** it
+  cannot be posted again.
+- **It does not go round `submit_journal_entry`'s switch.** That switch is where
+  an operator decided whether an AI client may move a balance at all, and this
+  fails before touching anything if it is off.
+- Duplicate names in one call are submitted once. More than 500 is refused before
+  anything posts.
+
+---
+
+## 76. `delete_draft_journal_entry`
+
+**MUTATING, destructive.** Off by default.
+
+**Arguments:** `name` (required), `reason` (required).
+
+```json
+{"name": "delete_draft_journal_entry",
+ "arguments": {"name": "ACC-JV-2026-00062",
+               "reason": "duplicate of ACC-JV-2026-00061, keyed twice during the opening-balance load"}}
+```
+
+```json
+{
+  "deleted": {
+    "name": "ACC-JV-2026-00062", "company": "Example Trading Co",
+    "posting_date": "2026-01-01", "voucher_type": "Opening Entry",
+    "user_remark": "Trial balance at 2025-12-31 per the prior system",
+    "total_debit": 1752650.0, "total_credit": 1752650.0, "line_count": 4,
+    "accounts": [{"account": "1100 - Cash - ETC", "debit": 1700000.0, "credit": 0.0}]},
+  "reason": "duplicate of ACC-JV-2026-00061, keyed twice during the opening-balance load",
+  "gl_entries_removed": 0,
+  "note": "A draft writes no GL Entries … The MCP Action Log row for this call is now the only record that the entry existed."
+}
+```
+
+- **The gap it fills.** `cancel_journal_entry` refuses a draft, correctly: there
+  is nothing to reverse, because a draft has moved no balance. That left an
+  unwanted draft with no MCP path at all.
+- **Drafts only, whatever is asked.** A **submitted** entry has written GL
+  Entries; deleting it would take those balances with it and leave nothing saying
+  why — refused, and pointed at `cancel_journal_entry`. A **cancelled** entry and
+  its reversing rows are the evidence that a posting was made and undone —
+  deleting one leaves an audit trail with a hole in it, so that is refused too.
+- **It is a real delete**, `frappe.delete_doc`, nothing left in the table. Which
+  is why the response carries the entry's company, date, totals and every line:
+  once the call returns, the MCP Action Log row is the only record that the
+  document ever existed.
 
 ---
 

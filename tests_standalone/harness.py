@@ -1241,6 +1241,65 @@ RENAME_LINK_FIELDS = {
 }
 
 
+class JournalEntryDocument(Document):
+	"""ERPNext's Journal Entry, in the one respect that broke a real ledger.
+
+	`JournalEntry.set_amounts_in_account_currency` does not fill the
+	`*_in_account_currency` columns in from `debit`/`credit`. It runs the other
+	way: `debit = debit_in_account_currency * exchange_rate`, on every validate.
+	So a line built with `debit` alone inserts looking correct — the zero check
+	has already run against the values as given — and is written to the database
+	with its debit zeroed. The draft then exists, reads as 0.00, and is refused
+	the moment anything validates it again:
+
+	    Row 1: Both Debit and Credit values cannot be zero
+
+	which is what four auto-generated opening-balance entries did on a live site
+	under v0.8.0, and why `tools/mutate.py` now fills both columns for every line.
+
+	Modelling it here in that order — check, then derive — is the point. A double
+	that derived first would fail the *insert*, which is not what the site did,
+	and a double that filled the columns in from `debit` (the intuitive
+	direction) would make the broken code pass. This is the fourth time in this
+	project's history that a permissive double let a real site break; see the
+	0.8.0 changelog on `AccountDocument` and mandatory fields.
+
+	`before_submit` re-runs it because real Frappe's `submit()` goes through
+	`save()`, and validating only on insert would let a draft full of zeros post.
+	"""
+
+	def validate(self):
+		total_debit = 0.0
+		total_credit = 0.0
+		for row in self.get("accounts") or []:
+			debit = float(row.get("debit") or 0)
+			credit = float(row.get("credit") or 0)
+			if not debit and not credit:
+				raise ValidationError(
+					f"Row {row.get('idx')}: Both Debit and Credit values cannot be zero"
+				)
+			rate = float(row.get("exchange_rate") or 0) or 1.0
+			row["debit_in_account_currency"] = round(float(row.get("debit_in_account_currency") or 0), 2)
+			row["credit_in_account_currency"] = round(
+				float(row.get("credit_in_account_currency") or 0), 2
+			)
+			row["exchange_rate"] = rate
+			row["debit"] = round(row["debit_in_account_currency"] * rate, 2)
+			row["credit"] = round(row["credit_in_account_currency"] * rate, 2)
+			total_debit += row["debit"]
+			total_credit += row["credit"]
+		self.total_debit = round(total_debit, 2)
+		self.total_credit = round(total_credit, 2)
+		self.difference = round(total_debit - total_credit, 2)
+		if abs(self.difference) > 0.005:
+			raise ValidationError(
+				f"Total Debit must be equal to Total Credit. The difference is {self.difference}"
+			)
+
+	def before_submit(self):
+		self.validate()
+
+
 #: Doctypes whose stub behaviour differs from a plain Document.
 STUB_CONTROLLERS = {
 	"File": FileDocument,
@@ -1249,6 +1308,7 @@ STUB_CONTROLLERS = {
 	"Cost Center": CostCenterDocument,
 	"DocType": DocTypeDocument,
 	"Custom Field": CustomFieldDocument,
+	"Journal Entry": JournalEntryDocument,
 }
 
 

@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **73 tools** — 38 read-only, 35 mutating.
+- **76 tools** — 38 read-only, 38 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -46,7 +46,7 @@ you reason about it you end up pasting screenshots.
 An LLM is perfectly capable of reasoning about a general ledger. It cannot see
 one. This closes that gap without handing anything away:
 
-- **It cannot write by default.** All 35 mutating tools are off on install.
+- **It cannot write by default.** All 38 mutating tools are off on install.
   Turning one on is a checkbox on a form only System Manager can open.
 - **The dangerous verb gets its own switch.** `create_journal_entry` only ever
   produces a draft — `docstatus=0`, affecting no balance. Posting is
@@ -242,7 +242,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 73 tools
+## The 76 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -341,7 +341,7 @@ concerned.
 | `depreciation_note_alignment_check` | For every financed asset, whether its remaining life and its note's remaining term still agree. |
 | `list_notes_payable` | Every note or loan a company owes: lender, original and outstanding principal, rate, term, and when the next payment falls due. |
 
-### Mutating — 35, all OFF by default
+### Mutating — 38, all OFF by default
 
 **Postings into the ledger**
 
@@ -349,10 +349,13 @@ concerned.
 | --- | --- | --- |
 | `create_journal_entry` | Creates a **draft** JE. Refuses unbalanced entries, negative amounts, group accounts, single-line entries. | Submit. There is no argument for it. |
 | `submit_journal_entry` | Submits an existing draft, `0 → 1`. Writes GL Entries. **This moves balances.** | Create anything — it takes a name. |
+| `bulk_submit_journal_entries` | Submits up to 500 drafts, each in its own transaction, and reports per document. One failure does not undo the rest. | Run at all unless `submit_journal_entry` is also switched on. |
 | `cancel_journal_entry` | Cancels a submitted JE, `1 → 2`, writing reversing entries. `reason` mandatory. | Delete anything. |
+| `delete_draft_journal_entry` | Deletes a **draft** outright, recording what it was and why in the audit log. | Touch a submitted entry (cancel it) or a cancelled one (its reversing rows are the trail). |
 | `create_bank_transaction` | Inserts a **draft** Bank Transaction. | Submit it. |
 | `reconcile_bank_transaction` | Attaches payment vouchers, refusing to over-allocate. | Allocate past the remaining amount. |
 | `set_opening_balance` | Books one historical event as a **draft** opening-balance JE, **computing** the offsetting line against Opening Balance Equity and flagging the entry as opening. | Submit it, or guess an equity account when two could match. |
+| `post_opening_balance_journal_entry` | Books a whole opening balance sheet as one JE, every line given, the difference going to an `offset_account` you name. Posts it too, with `submit: true`. | Submit unless `submit_journal_entry` is also switched on — checked before anything is written. |
 | `create_bank_account` | Creates the Bank Account a feed writes into, and the Bank behind it, in one transaction. | Point at anything but an Asset (bank) or a Liability (credit card) — or at an Asset whose `account_type` is not Bank or Cash. |
 
 **Structural changes to the chart itself**

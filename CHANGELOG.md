@@ -3,6 +3,157 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.9.0 — 2026-07-28
+
+Three tools for the day you post a year of history, and the fix for the bug that
+made that day take twice as long as it should have.
+
+### The bug fix, first, because it is the one that cost a day
+
+**Every Journal Entry this app wrote was missing half of every amount.** A
+`Journal Entry Account` row stores each figure twice — `debit` in the company's
+currency and `debit_in_account_currency` in the account's — and ERPNext's
+`set_amounts_in_account_currency` derives the first FROM the second on every
+validate:
+
+```python
+d.debit = flt(d.debit_in_account_currency * d.exchange_rate, d.precision("debit"))
+```
+
+This app set `debit` and left `debit_in_account_currency` at zero. So the insert
+succeeded, the draft was written to the database with its amounts silently
+zeroed, and the entry was refused the moment anything validated it again:
+
+```
+Row 1: Both Debit and Credit values cannot be zero
+```
+
+Four auto-generated opening-balance entries did exactly that on a live site. The
+workaround — rekeying every line through `create_journal_entry` with the
+`_in_account_currency` fields set by hand — works, and is hours of typing to get
+back to what the tool was supposed to have produced.
+
+**The fix is in `validated_journal_lines`, not in the tool that surfaced it.**
+`set_opening_balance` was where it was noticed, but every Journal Entry this app
+writes — opening balances, member events, depreciation runs, loan payments,
+hand-built entries — comes through that one function, and fixing only the tool
+that showed the symptom would have left the other five wrong. Every line it
+returns now carries both columns. At exchange rate 1 the account-currency figure
+is *copied* rather than computed, so no rounding can put a fraction of a cent
+between two columns of the same number.
+
+Two things fell out of doing it there:
+
+- **A line given only in the account's currency is now understood.**
+  `{"account": "1100", "debit_in_account_currency": 100}` means the same as
+  `{"account": "1100", "debit": 100}` and is no longer refused as a line with
+  neither a debit nor a credit.
+- **A foreign-currency line with no `exchange_rate` is now refused**, naming both
+  currencies. Previously it would have been posted at the company-currency figure
+  and then converted again by ERPNext. And a line whose `debit` and
+  `debit_in_account_currency` disagree is refused rather than one of them being
+  chosen: this app's double-entry check would have run on one set of numbers and
+  the posting on another.
+
+**Why the standalone suite did not catch it.** The double stored whatever it was
+given. `harness.JournalEntryDocument` now models ERPNext's derivation *in the
+order ERPNext does it* — zero-check against the values as given, then derive —
+which is what reproduces the real failure: a draft that inserts cleanly, reads
+0.00, and cannot be submitted. A double that derived first would have failed the
+insert instead, and a double that filled the columns in from `debit` (the
+intuitive direction) would have let the broken code pass. Fourth time now:
+*when the double is more permissive than the framework, tests pass and sites
+break.*
+
+### Added — tools
+
+- **`post_opening_balance_journal_entry`** (mutating, default off). A whole
+  opening balance sheet as one Journal Entry, every line explicit.
+
+  `set_opening_balance` is the right tool when you know one side of one
+  historical event and want the equity plug computed. It is the wrong shape for
+  transcribing a trial balance off the previous system, where both sides are
+  already in hand: that means one call and one stray equity line per account.
+  This takes the lines as given, adds a single balancing line to an
+  `offset_account` you name — required exactly when the lines do not balance —
+  and flags the entry `is_opening` with the `Opening Entry` voucher type.
+
+  **It can post.** `submit: true` submits the entry after creating it, which is
+  why it checks `allow_submit_journal_entry` as well as its own switch, and
+  checks it *before* writing anything so a site with posting disabled gets a
+  refusal rather than a draft nobody asked for.
+
+  The offset account is not required to be equity, unlike `set_opening_balance`'s
+  computed plug. A transcribed trial balance that is out by the retained earnings
+  figure belongs against retained earnings, and the caller naming the account is
+  making that call on purpose.
+
+- **`bulk_submit_journal_entries`** (mutating, default off). Submit up to 500
+  drafts in one call.
+
+  Five hundred drafts posted one MCP round trip at a time is not the same job at
+  a different speed. It is the job where somebody loses track at number four
+  hundred and stops without knowing which ones went.
+
+  **Each entry is submitted in its own transaction** — committed on success,
+  rolled back on failure — and the loop carries on. This is the only place in
+  this app that commits mid-call, and it is deliberate: the alternative is a
+  batch where number four hundred fails and the request rolls back the three
+  hundred and ninety-nine postings that were fine. It is also what Frappe's own
+  bulk submit does. Returns a row per document with `ok` and the exact error,
+  plus aggregate counts.
+
+  An already-submitted entry comes back `ok` with `skipped: already_submitted`,
+  never an error, so a half-finished batch is safe to retry whole. A cancelled
+  one is a failure — it cannot be posted again. Checks
+  `allow_submit_journal_entry` too, and fails before touching anything.
+
+- **`delete_draft_journal_entry`** (mutating, default off, destructive). Delete a
+  draft outright.
+
+  `cancel_journal_entry` refuses a draft, correctly: there is nothing to reverse,
+  because a draft has moved no balance. That left an unwanted draft with no MCP
+  path at all, and a tool that can produce four hundred drafts and not withdraw
+  one makes work rather than doing it.
+
+  **Drafts only, whatever is asked.** A submitted entry has written GL Entries;
+  deleting it would take those balances with it and leave nothing saying why, so
+  it is refused and pointed at `cancel_journal_entry`. A cancelled entry and its
+  reversing rows are the evidence that a posting was made and undone, so that is
+  refused too.
+
+  `reason` is mandatory, and the response carries the deleted entry's company,
+  date, totals and every line — because once the call returns, the MCP Action Log
+  row is the only record that the document ever existed.
+
+### Changed
+
+- `reconcile_bank_transaction` now names `payment_document` when a caller sends
+  `payment_doctype`. The field is `payment_document` on ERPNext's Bank
+  Transaction Payments table and always has been, in both this app's schema and
+  its handler — but `payment_doctype` is what the field is called almost
+  everywhere else in Frappe, so it is what a model reaches for first, and
+  "payment_entries[1] needs both payment_document and payment_entry" did not say
+  which of the two keys was the problem. It does now, quoting the value back in
+  the right shape. Accepting both names was the other option and was not taken:
+  this would have become the only tool in the app that reads a key it was not
+  given.
+
+### Tests
+
+1180 standalone tests, up from 1112. The new ones worth naming:
+
+- `AccountCurrencyAmounts` in `test_mutate_tools.py` — the regression suite for
+  the bug above, including *the entry can actually be submitted*, which is the
+  assertion whose absence let v0.8.0 ship.
+- `TheOpeningEntryCanActuallyBePosted` in `test_opening.py` — the same thing
+  through `set_opening_balance`, single-line and multi-line, including the
+  computed equity plug, which is the line most likely to be the one nobody filled
+  in because this app builds it rather than the caller.
+- A round trip in `test_mutate_tools.py` from `create_journal_entry` through
+  `submit_journal_entry` to `reconcile_bank_transaction`, and a test of what
+  ERPNext's own `add_payment_entries` is handed and what is read back from it.
+
 ## 0.8.0 — 2026-07-27
 
 The tooling a company needs on the day it goes live: the bank accounts money

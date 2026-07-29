@@ -45,6 +45,9 @@
   "allow_reconcile_bank_transaction",
   "allow_create_bank_account",
   "allow_set_opening_balance",
+  "allow_post_opening_balance_journal_entry",
+  "allow_bulk_submit_journal_entries",
+  "allow_delete_draft_journal_entry",
   "chart_tools_section",
   "allow_create_account",
   "allow_update_account",
@@ -372,6 +375,27 @@
    "fieldname": "allow_set_opening_balance",
    "fieldtype": "Check",
    "label": "Set Opening Balance"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Book a whole opening balance sheet as one journal entry \u2014 every line explicit, the balancing difference going to an offset account you name. Posts the entry too when asked, which also requires <b>Submit Journal Entry</b> above.",
+   "fieldname": "allow_post_opening_balance_journal_entry",
+   "fieldtype": "Check",
+   "label": "Post Opening Balance Journal Entry"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Submit many draft journal entries in one call, each in its own transaction so one failure does not undo the rest. Also requires <b>Submit Journal Entry</b>: that switch is where posting is allowed or not, and this one does not go round it.",
+   "fieldname": "allow_bulk_submit_journal_entries",
+   "fieldtype": "Check",
+   "label": "Bulk Submit Journal Entries"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Delete a DRAFT journal entry outright, recording what it was and why in the audit log. Refuses submitted entries (cancel those instead) and cancelled ones \u2014 a cancelled entry and its reversing rows are the audit trail.",
+   "fieldname": "allow_delete_draft_journal_entry",
+   "fieldtype": "Check",
+   "label": "Delete Draft Journal Entry"
   },
   {
    "description": "Structural changes to the chart itself, as opposed to postings into it. A bad journal entry is one wrong number a reversing entry fixes; a bad reparent silently changes what every balance-sheet subtotal has meant, retroactively, for every period already reported. Enable the narrowest set that does the job.<br><br>The read-only planner that produces a chart to review, <b>Propose Clean Chart</b>, is in the Accounting Read Tools section above. <b>Import Chart Of Accounts</b> defaults to a dry run even when it is switched on.",

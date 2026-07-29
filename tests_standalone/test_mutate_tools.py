@@ -511,3 +511,428 @@ class ReconcileBankTransaction(SeededTestCase):
 	def test_the_fallback_path_is_labelled(self):
 		data = self.tool_data("reconcile_bank_transaction", self.voucher())
 		self.assertIn("legacy ERPNext", data["applied_via"])
+
+	def test_payment_doctype_is_named_as_the_wrong_field(self):
+		"""`payment_doctype` is the name the field has almost everywhere else in
+		Frappe, so it is the one a model reaches for first; on Bank Transaction
+		Payments it is `payment_document`. Being told which costs one round trip.
+		Guessing would make this the only tool in the app that reads a key it was
+		not given."""
+		message = self.tool_error(
+			"reconcile_bank_transaction",
+			{
+				"name": "BT-2026-0001",
+				"payment_entries": [
+					{
+						"payment_doctype": "Payment Entry",
+						"payment_entry": "PE-0002",
+						"allocated_amount": 400,
+					}
+				],
+			},
+		)
+		self.assertIn("the field is called payment_document", message)
+		self.assertIn("'Payment Entry'", message)
+		self.assertIn("Nothing was changed", message)
+		self.assertEqual(STORE.get_raw("Bank Transaction", "BT-2026-0001")["payment_entries"], [])
+
+	def test_a_journal_entry_round_trips_from_creation_to_allocation(self):
+		"""The whole path an operator takes off a bank statement: draft the entry,
+		post it, allocate it against the transaction that paid for it."""
+		self.configure(enabled=1, **ALL_ON)
+		created = self.tool_data(
+			"create_journal_entry",
+			{
+				"company": MAIN,
+				"posting_date": "2026-01-15",
+				"user_remark": "Customer deposit per bank statement",
+				"accounts": [
+					{"account": cash(), "debit": 600},
+					{"account": sales(), "credit": 600},
+				],
+			},
+		)
+		self.tool_data("submit_journal_entry", {"name": created["name"]})
+		data = self.tool_data(
+			"reconcile_bank_transaction",
+			{
+				"name": "BT-2026-0001",
+				"payment_entries": [
+					{
+						"payment_document": "Journal Entry",
+						"payment_entry": created["name"],
+						"allocated_amount": 600,
+					}
+				],
+			},
+		)
+		self.assertEqual(data["allocated_now"], 600)
+		row = STORE.get_raw("Bank Transaction", "BT-2026-0001")["payment_entries"][0]
+		self.assertEqual(row["payment_document"], "Journal Entry")
+		self.assertEqual(row["payment_entry"], created["name"])
+		self.assertEqual(row["allocated_amount"], 600)
+
+	def test_erpnexts_own_method_gets_the_allocation_and_sets_the_clearance_date(self):
+		"""Clearance dates and the allocated/unallocated split are ERPNext's to
+		write; this asserts what it is handed and that the result is read back."""
+		from erpnext_mcp.tools import mutate
+
+		original = mutate.frappe.get_doc
+
+		def patched(*args, **kwargs):
+			doc = original(*args, **kwargs)
+			if args and args[0] == "Bank Transaction":
+
+				def add_payment_entries(vouchers):
+					allocated = sum(v["allocated_amount"] for v in vouchers)
+					for voucher in vouchers:
+						doc.append("payment_entries", voucher)
+					doc.allocated_amount = allocated
+					doc.unallocated_amount = 1000 - allocated
+					doc.clearance_date = "2026-01-15"
+					doc.status = "Reconciled"
+					doc.save()
+
+				doc.add_payment_entries = add_payment_entries
+			return doc
+
+		mutate.frappe.get_doc = patched
+		try:
+			data = self.tool_data("reconcile_bank_transaction", self.voucher(amount=400))
+		finally:
+			mutate.frappe.get_doc = original
+		self.assertEqual(data["allocated_total"], 400)
+		self.assertEqual(data["unallocated_amount"], 600)
+		self.assertEqual(data["status"], "Reconciled")
+		self.assertEqual(STORE.get_raw("Bank Transaction", "BT-2026-0001")["clearance_date"], "2026-01-15")
+
+
+class AccountCurrencyAmounts(SeededTestCase):
+	"""The v0.8.0 bug: a line with only `debit` posts as zero.
+
+	ERPNext derives `debit` FROM `debit_in_account_currency` on every validate,
+	so a Journal Entry built with `debit` alone is written to the database with
+	its amounts zeroed and is refused on submit — a draft that cannot be posted
+	and does not say why. Four auto-generated opening-balance entries did exactly
+	that on a live site. `harness.JournalEntryDocument` models the derivation, so
+	these tests fail against the unfixed code rather than passing against it.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, **ALL_ON)
+
+	def entry(self, **overrides):
+		payload = {
+			"company": MAIN,
+			"posting_date": "2026-03-01",
+			"user_remark": "Cash sale",
+			"accounts": [
+				{"account": cash(), "debit": 100},
+				{"account": sales(), "credit": 100},
+			],
+		}
+		payload.update(overrides)
+		return self.tool_data("create_journal_entry", payload)
+
+	def lines(self, name):
+		return STORE.get_raw("Journal Entry", name)["accounts"]
+
+	def test_every_line_carries_both_amount_columns(self):
+		lines = self.lines(self.entry()["name"])
+		self.assertEqual(lines[0]["debit_in_account_currency"], 100)
+		self.assertEqual(lines[0]["credit_in_account_currency"], 0)
+		self.assertEqual(lines[1]["credit_in_account_currency"], 100)
+		self.assertEqual(lines[1]["debit_in_account_currency"], 0)
+
+	def test_the_amounts_survive_the_insert(self):
+		"""The bug's first symptom: a draft that reads 0.00 the moment it is saved."""
+		lines = self.lines(self.entry()["name"])
+		self.assertEqual([line["debit"] for line in lines], [100, 0])
+		self.assertEqual([line["credit"] for line in lines], [0, 100])
+
+	def test_the_entry_can_actually_be_submitted(self):
+		"""The bug's second symptom, and the one that cost a day."""
+		name = self.entry()["name"]
+		data = self.tool_data("submit_journal_entry", {"name": name})
+		self.assertEqual(data["docstatus"], 1)
+		self.assertEqual(data["total_debit"], 100)
+		self.assertEqual(data["total_credit"], 100)
+
+	def test_an_amount_given_only_in_account_currency_is_understood(self):
+		data = self.entry(
+			accounts=[
+				{"account": cash(), "debit_in_account_currency": 100},
+				{"account": sales(), "credit_in_account_currency": 100},
+			]
+		)
+		self.assertEqual(data["total_debit"], 100)
+		self.assertEqual([line["debit"] for line in self.lines(data["name"])], [100, 0])
+
+	def test_a_rate_of_one_copies_rather_than_divides(self):
+		"""No arithmetic may put a fraction of a cent between two columns of the
+		same number, so the common case copies. Asserted on the line this app
+		builds rather than the stored row, because ERPNext rounds to the field's
+		precision afterwards and would hide the difference."""
+		from erpnext_mcp.tools import mutate
+
+		lines = mutate.validated_journal_lines(
+			[{"account": cash(), "debit": 33.335}, {"account": sales(), "credit": 33.335}], MAIN
+		)
+		self.assertEqual(lines[0]["debit_in_account_currency"], 33.335)
+		self.assertEqual(lines[1]["credit_in_account_currency"], 33.335)
+
+	def test_an_explicit_exchange_rate_divides_into_the_account_currency(self):
+		STORE.tables["Account"][cash()]["account_currency"] = "CAD"
+		data = self.entry(
+			accounts=[
+				{"account": cash(), "debit": 200, "exchange_rate": 2},
+				{"account": sales(), "credit": 200},
+			]
+		)
+		self.assertEqual(self.lines(data["name"])[0]["debit_in_account_currency"], 100)
+
+	def test_a_supplied_account_currency_amount_is_not_recomputed(self):
+		"""The caller knows what the invoice said and this does not."""
+		STORE.tables["Account"][cash()]["account_currency"] = "CAD"
+		data = self.entry(
+			accounts=[
+				{
+					"account": cash(),
+					"debit": 275,
+					"debit_in_account_currency": 137.5,
+					"exchange_rate": 2,
+				},
+				{"account": sales(), "credit": 275},
+			]
+		)
+		line = self.lines(data["name"])[0]
+		self.assertEqual(line["debit_in_account_currency"], 137.5)
+		self.assertEqual(line["debit"], 275)
+
+	def test_two_amounts_that_disagree_are_refused_rather_than_one_chosen(self):
+		"""ERPNext posts the account-currency figure times the rate. An entry that
+		balances on `debit` and not on that is one that balances here and not on
+		the site."""
+		STORE.tables["Account"][cash()]["account_currency"] = "CAD"
+		message = self.tool_error(
+			"create_journal_entry",
+			{
+				"company": MAIN,
+				"posting_date": "2026-03-01",
+				"user_remark": "Cash sale",
+				"accounts": [
+					{
+						"account": cash(),
+						"debit": 200,
+						"debit_in_account_currency": 137.5,
+						"exchange_rate": 2,
+					},
+					{"account": sales(), "credit": 200},
+				],
+			},
+		)
+		self.assertIn("comes to 275.0", message)
+		self.assertIn("cannot both be right", message)
+
+	def test_a_foreign_account_with_no_rate_is_refused(self):
+		STORE.tables["Account"][cash()]["account_currency"] = "CAD"
+		message = self.tool_error(
+			"create_journal_entry",
+			{
+				"company": MAIN,
+				"posting_date": "2026-03-01",
+				"user_remark": "Cash sale",
+				"accounts": [
+					{"account": cash(), "debit": 100},
+					{"account": sales(), "credit": 100},
+				],
+			},
+		)
+		self.assertIn("held in CAD", message)
+		self.assertIn("exchange_rate", message)
+		self.assertIn("Nothing was created", message)
+
+	def test_a_zero_or_negative_rate_is_refused(self):
+		message = self.tool_error(
+			"create_journal_entry",
+			{
+				"company": MAIN,
+				"posting_date": "2026-03-01",
+				"user_remark": "Cash sale",
+				"accounts": [
+					{"account": cash(), "debit": 100, "exchange_rate": -1},
+					{"account": sales(), "credit": 100},
+				],
+			},
+		)
+		self.assertIn("must be positive", message)
+
+
+class BulkSubmitJournalEntries(SeededTestCase):
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, **ALL_ON)
+
+	def draft(self, amount=10):
+		return self.tool_data(
+			"create_journal_entry",
+			{
+				"company": MAIN,
+				"posting_date": "2026-03-01",
+				"user_remark": f"Batch entry {amount}",
+				"accounts": [
+					{"account": cash(), "debit": amount},
+					{"account": sales(), "credit": amount},
+				],
+			},
+		)["name"]
+
+	def test_it_posts_every_draft_in_the_batch(self):
+		names = [self.draft(10), self.draft(20), self.draft(30)]
+		data = self.tool_data("bulk_submit_journal_entries", {"names": names})
+		self.assertEqual(data["total"], 3)
+		self.assertEqual(data["submitted"], 3)
+		self.assertEqual(data["failed"], 0)
+		self.assertEqual(data["submitted_names"], names)
+		for name in names:
+			self.assertEqual(STORE.get_raw("Journal Entry", name)["docstatus"], 1)
+
+	def test_an_already_submitted_entry_is_skipped_not_failed(self):
+		"""A half-finished batch has to be safe to retry whole."""
+		names = [self.draft(10), self.draft(20)]
+		self.tool_data("submit_journal_entry", {"name": names[0]})
+		data = self.tool_data("bulk_submit_journal_entries", {"names": names})
+		self.assertEqual(data["submitted"], 1)
+		self.assertEqual(data["skipped"], 1)
+		self.assertEqual(data["failed"], 0)
+		skipped = next(row for row in data["results"] if row["name"] == names[0])
+		self.assertTrue(skipped["ok"])
+		self.assertEqual(skipped["skipped"], "already_submitted")
+
+	def test_one_bad_entry_does_not_abort_the_batch(self):
+		names = [self.draft(10), "ACC-JV-NOPE", self.draft(20)]
+		data = self.tool_data("bulk_submit_journal_entries", {"names": names})
+		self.assertEqual(data["submitted"], 2)
+		self.assertEqual(data["failed"], 1)
+		self.assertEqual(data["failed_names"], ["ACC-JV-NOPE"])
+		self.assertIn("no Journal Entry named", data["results"][1]["error"])
+		self.assertEqual(STORE.get_raw("Journal Entry", names[2])["docstatus"], 1)
+
+	def test_the_entries_that_posted_stay_posted(self):
+		"""The whole point of a transaction per document."""
+		good = self.draft(10)
+		data = self.tool_data("bulk_submit_journal_entries", {"names": [good, "ACC-JV-NOPE"]})
+		self.assertEqual(data["failed"], 1)
+		self.assertEqual(STORE.get_raw("Journal Entry", good)["docstatus"], 1)
+
+	def test_a_cancelled_entry_is_a_failure_not_a_skip(self):
+		name = self.draft(10)
+		self.tool_data("submit_journal_entry", {"name": name})
+		self.tool_data("cancel_journal_entry", {"name": name, "reason": "keyed twice"})
+		data = self.tool_data("bulk_submit_journal_entries", {"names": [name]})
+		self.assertEqual(data["failed"], 1)
+		self.assertIn("cancelled", data["results"][0]["error"])
+
+	def test_it_refuses_when_submit_journal_entry_is_off(self):
+		"""That switch is where posting is allowed or not; this does not go round it."""
+		name = self.draft(10)
+		self.configure(enabled=1, allow_bulk_submit_journal_entries=1)
+		message = self.tool_error("bulk_submit_journal_entries", {"names": [name]})
+		self.assertIn("allow_submit_journal_entry", message)
+		self.assertIn("Nothing was submitted", message)
+		self.assertEqual(STORE.get_raw("Journal Entry", name)["docstatus"], 0)
+
+	def test_it_refuses_when_its_own_switch_is_off(self):
+		name = self.draft(10)
+		self.configure(enabled=1, allow_create_journal_entry=1, allow_submit_journal_entry=1)
+		message = self.tool_error("bulk_submit_journal_entries", {"names": [name]})
+		self.assertIn("allow_bulk_submit_journal_entries", message)
+
+	def test_an_empty_list_is_refused(self):
+		message = self.tool_error("bulk_submit_journal_entries", {"names": []})
+		self.assertIn("non-empty list", message)
+
+	def test_a_repeated_name_is_submitted_once(self):
+		name = self.draft(10)
+		data = self.tool_data("bulk_submit_journal_entries", {"names": [name, name]})
+		self.assertEqual(data["total"], 1)
+		self.assertEqual(data["submitted"], 1)
+
+	def test_a_batch_larger_than_the_limit_is_refused_before_anything_posts(self):
+		message = self.tool_error(
+			"bulk_submit_journal_entries", {"names": [f"JE-{n}" for n in range(501)]}
+		)
+		self.assertIn("the limit is 500", message)
+		self.assertIn("Nothing was submitted", message)
+
+	def test_the_next_step_names_what_to_do_about_failures(self):
+		data = self.tool_data("bulk_submit_journal_entries", {"names": [self.draft(10), "JE-NOPE"]})
+		self.assertIn("call this again with just those names", data["next_step"])
+
+	def test_a_clean_batch_says_nothing_is_outstanding(self):
+		data = self.tool_data("bulk_submit_journal_entries", {"names": [self.draft(10)]})
+		self.assertIn("Nothing is outstanding", data["next_step"])
+
+
+class DeleteDraftJournalEntry(SeededTestCase):
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, **ALL_ON)
+
+	def payload(self, name="ACC-JV-2026-00002", **overrides):
+		values = {"name": name, "reason": "duplicate of ACC-JV-2026-00001, keyed twice"}
+		values.update(overrides)
+		return values
+
+	def test_it_deletes_the_draft(self):
+		data = self.tool_data("delete_draft_journal_entry", self.payload())
+		self.assertEqual(data["deleted"]["name"], "ACC-JV-2026-00002")
+		self.assertIsNone(STORE.get_raw("Journal Entry", "ACC-JV-2026-00002"))
+
+	def test_it_reports_what_it_deleted_because_nothing_else_will(self):
+		data = self.tool_data("delete_draft_journal_entry", self.payload())
+		deleted = data["deleted"]
+		self.assertEqual(deleted["company"], MAIN)
+		self.assertEqual(deleted["posting_date"], "2026-02-10")
+		self.assertEqual(deleted["line_count"], 2)
+		self.assertEqual(deleted["total_debit"], 250)
+		self.assertEqual([row["account"] for row in deleted["accounts"]], [supplies(), cash()])
+
+	def test_the_audit_row_carries_the_reason_and_the_entry(self):
+		self.tool_data("delete_draft_journal_entry", self.payload())
+		row = self.assertAudited("delete_draft_journal_entry", status="Success")
+		self.assertIn("deleted draft Journal Entry ACC-JV-2026-00002", row["result_summary"])
+		self.assertIn("keyed twice", row["result_summary"])
+		self.assertEqual(row["docstatus_delta"], "0 (draft) → deleted")
+
+	def test_a_submitted_entry_is_refused_and_pointed_at_cancel(self):
+		message = self.tool_error("delete_draft_journal_entry", self.payload("ACC-JV-2026-00001"))
+		self.assertIn("cancel_journal_entry", message)
+		self.assertIn("Nothing was deleted", message)
+		self.assertIsNotNone(STORE.get_raw("Journal Entry", "ACC-JV-2026-00001"))
+
+	def test_a_cancelled_entry_is_refused(self):
+		STORE.tables["Journal Entry"]["ACC-JV-2026-00002"]["docstatus"] = 2
+		message = self.tool_error("delete_draft_journal_entry", self.payload())
+		self.assertIn("audit trail with a hole in it", message)
+		self.assertIsNotNone(STORE.get_raw("Journal Entry", "ACC-JV-2026-00002"))
+
+	def test_an_entry_that_does_not_exist_is_refused(self):
+		message = self.tool_error("delete_draft_journal_entry", self.payload("ACC-JV-NOPE"))
+		self.assertIn("no Journal Entry named", message)
+
+	def test_a_placeholder_reason_is_refused(self):
+		message = self.tool_error("delete_draft_journal_entry", self.payload(reason="x"))
+		self.assertIn("real explanation", message)
+		self.assertIsNotNone(STORE.get_raw("Journal Entry", "ACC-JV-2026-00002"))
+
+	def test_a_missing_reason_is_refused(self):
+		message = self.tool_error("delete_draft_journal_entry", {"name": "ACC-JV-2026-00002"})
+		self.assertIn("reason is required", message)
+
+	def test_the_switch_keeps_it_shut(self):
+		self.configure(enabled=1)
+		message = self.tool_error("delete_draft_journal_entry", self.payload())
+		self.assertIn("allow_delete_draft_journal_entry", message)
+		self.assertIsNotNone(STORE.get_raw("Journal Entry", "ACC-JV-2026-00002"))
