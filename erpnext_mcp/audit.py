@@ -23,6 +23,16 @@ go to the site's Error Log and are otherwise ignored.
 REDACTION. Arguments are logged verbatim except for keys that name a secret —
 no current tool takes one, but a future tool might, and a log that is read-only
 forever is the wrong place to discover that.
+
+ELISION IS NOT TRUNCATION. A single huge value is elided down to a note of its
+length *before* the whole payload is serialised, because truncating afterwards
+throws away whatever sorts after it. `attach_file_to_document` is where that
+stopped being theoretical: its `file_content` is megabytes of base64 and sorts
+ahead of `file_name`, `is_private` and `name`, so a whole-payload truncation
+would leave a row recording that a file was attached and nothing about which
+file or to what. The elided note keeps the length, which is the only part of
+eight megabytes of base64 anybody reads a log for; the sha256 that identifies
+the bytes is in `result_summary`.
 """
 
 import json
@@ -42,6 +52,10 @@ STATUS_UNAUTHORIZED = "Unauthorized"
 #: do it means the log says it truncated.
 _MAX_ARGS = 8000
 _MAX_SUMMARY = 2000
+
+#: Longest single argument value kept verbatim. Comfortably past any narrative,
+#: remark or account name a tool takes, and far short of a base64 payload.
+_MAX_VALUE = 512
 
 _SECRET_HINTS = ("token", "password", "secret", "api_key", "apikey", "credential")
 
@@ -92,12 +106,14 @@ def record(
 
 
 def _arguments_json(arguments: dict | None) -> str:
-	"""Arguments as JSON, secrets masked, truncated to fit the column."""
+	"""Arguments as JSON, secrets masked, oversized values elided, then truncated."""
 	safe = {}
 	for key, value in (arguments or {}).items():
 		lowered = str(key).lower()
 		if any(hint in lowered for hint in _SECRET_HINTS):
 			safe[key] = "***redacted***"
+		elif isinstance(value, str) and len(value) > _MAX_VALUE:
+			safe[key] = f"<{len(value)} characters elided>"
 		else:
 			safe[key] = value
 	try:

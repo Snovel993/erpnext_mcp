@@ -35,8 +35,6 @@ switch as well as its own, because posting to the general ledger is a permission
 an operator grants once, in one place, whatever route reaches it.
 """
 
-import base64
-
 import frappe
 
 from .. import compat, settings
@@ -1225,27 +1223,13 @@ def attach_governance_document(args: dict) -> ToolResult:
 
 
 def _decoded_file_content(file_content: str) -> bytes:
-	"""Base64 in, bytes out, refusing anything too large to be sane in a JSON call."""
-	# Whitespace first: MIME-style base64 arrives wrapped at 76 columns, and
-	# `validate=True` — which is what makes "not base64 at all" an error rather
-	# than silently-truncated bytes — counts a newline as an invalid character.
-	cleaned = "".join(str(file_content).split())
-	try:
-		content = base64.b64decode(cleaned, validate=True)
-	except Exception as exc:
-		raise ToolError(
-			f"file_content is not valid base64 ({type(exc).__name__}). Encode the document's "
-			"bytes as base64 without a data: prefix. Nothing was created."
-		) from None
-	if not content:
-		raise ToolError("file_content decoded to zero bytes. Nothing was created.")
-	if len(content) > files.ABSOLUTE_MAX_BYTES:
-		raise ToolError(
-			f"the decoded document is {len(content)} bytes, over this app's "
-			f"{files.ABSOLUTE_MAX_BYTES}-byte ceiling for content moved through a tool call. "
-			"Upload it in the Desk and record it here with file_url instead. Nothing was created."
-		)
-	return content
+	"""Base64 in, bytes out, refusing anything too large to be sane in a JSON call.
+
+	The rule lives in `files.decode_base64_content` because `attach_file_to_document`
+	has to apply exactly the same one, and a second copy would be a second ceiling
+	to forget to raise.
+	"""
+	return files.decode_base64_content(file_content, tail="Nothing was created.")
 
 
 # ── 58. list_governance_documents ───────────────────────────────────────────

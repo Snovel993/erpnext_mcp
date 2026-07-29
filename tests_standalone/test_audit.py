@@ -145,8 +145,19 @@ class Redaction(SeededTestCase):
 		self.assertEqual(stored["api_key"], "***redacted***")
 		self.assertEqual(stored["password"], "***redacted***")
 
-	def test_oversized_arguments_are_truncated_and_say_so(self):
-		row = audit.record("hypothetical", {"blob": "x" * 20000}, audit.STATUS_SUCCESS)
+	def test_one_oversized_value_is_elided_rather_than_crowding_the_row(self):
+		"""Truncating the serialised payload would throw away every key that sorts
+		after the big one — which for attach_file_to_document is the parent
+		document itself. Eliding the value keeps its length and keeps the rest."""
+		row = audit.record(
+			"hypothetical", {"blob": "x" * 20000, "name": "ACC-JV-2026-02329"}, audit.STATUS_SUCCESS
+		)
+		stored = json.loads(STORE.get_raw(audit.LOG_DOCTYPE, row)["arguments_json"])
+		self.assertEqual(stored["blob"], "<20000 characters elided>")
+		self.assertEqual(stored["name"], "ACC-JV-2026-02329")
+
+	def test_a_payload_of_many_values_is_still_truncated_and_says_so(self):
+		row = audit.record("hypothetical", {f"k{i}": "x" * 400 for i in range(50)}, audit.STATUS_SUCCESS)
 		stored = STORE.get_raw(audit.LOG_DOCTYPE, row)["arguments_json"]
 		self.assertLessEqual(len(stored), 8000)
 		self.assertTrue(stored.endswith("…[truncated]"))

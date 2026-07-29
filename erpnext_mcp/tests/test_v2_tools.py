@@ -24,6 +24,10 @@ import frappe
 
 from .test_integration import MCPIntegrationTestCase
 
+#: Prefixed so a file this suite attaches cannot be mistaken for a real one on
+#: the operator's site.
+PREFIX = "MCPTEST"
+
 
 class WorkflowTools(MCPIntegrationTestCase):
 	def any_active_workflow(self):
@@ -225,6 +229,107 @@ class AttachmentTools(MCPIntegrationTestCase):
 		result = self.tool("get_attachment_content", {"name": row})
 		self.assertTrue(result["isError"])
 		self.assertIn("cap", result["content"][0]["text"])
+
+
+class AttachFileToDocumentContract(MCPIntegrationTestCase):
+	"""What only a bench can show about `attach_file_to_document`.
+
+	The standalone suite proves every refusal against a double. Three things it
+	cannot prove, and they are the three that decide whether this works on the
+	operator's site:
+
+	  * **Frappe's own File controller accepts the payload** for an arbitrary
+	    parent doctype. `attach_governance_document` attaches to a doctype this
+	    app ships and controls; this one attaches to Journal Entry, whose
+	    attachment behaviour belongs to ERPNext.
+	  * **The bytes survive real storage.** Written to disk as a private file and
+	    read back through `get_attachment_content` — a dict cannot prove that.
+	  * **`max_attachments` is where this app thinks it is** on this Frappe's
+	    Meta object. The double has the attribute because the app reads it; only
+	    a bench says the real one does too.
+	"""
+
+	CONTENT = b"%PDF-1.4 " + (b"statement line " * 128)
+
+	def setUp(self):
+		super().setUp()
+		self.enable(
+			"attach_file_to_document",
+			"create_journal_entry",
+			"list_attachments",
+			"get_attachment_content",
+		)
+		self.company = self.any_company()
+
+	def a_draft_entry(self):
+		debit, credit = self.leaf_accounts(self.company, 2)
+		return self.tool_data(
+			"create_journal_entry",
+			{
+				"company": self.company,
+				"posting_date": self.open_posting_date(self.company),
+				"user_remark": "erpnext_mcp attach integration test",
+				"accounts": [{"account": debit, "debit": 1}, {"account": credit, "credit": 1}],
+			},
+		)["name"]
+
+	def test_a_real_file_lands_on_a_real_journal_entry_and_reads_back(self):
+		entry = self.a_draft_entry()
+		data = self.tool_data(
+			"attach_file_to_document",
+			{
+				"doctype": "Journal Entry",
+				"name": entry,
+				"file_name": f"{PREFIX}-statement.pdf",
+				"file_content": base64.b64encode(self.CONTENT).decode("ascii"),
+			},
+		)
+		self.assertTrue(data["is_private"])
+		self.assertEqual(data["file_size"], len(self.CONTENT))
+		self.assertEqual(
+			frappe.db.get_value("File", data["file"], "attached_to_name"),
+			entry,
+			"Frappe did not record the parent this app asked for",
+		)
+		read = self.tool_data("get_attachment_content", {"name": data["file"]})
+		self.assertEqual(base64.b64decode(read["content_base64"]), self.CONTENT)
+
+	def test_it_shows_up_in_list_attachments_on_the_parent(self):
+		entry = self.a_draft_entry()
+		self.tool_data(
+			"attach_file_to_document",
+			{
+				"doctype": "Journal Entry",
+				"name": entry,
+				"file_name": f"{PREFIX}-listed.pdf",
+				"file_content": base64.b64encode(self.CONTENT).decode("ascii"),
+			},
+		)
+		listed = self.tool_data("list_attachments", {"doctype": "Journal Entry", "name": entry})
+		self.assertEqual([row["file_name"] for row in listed["attachments"]], [f"{PREFIX}-listed.pdf"])
+
+	def test_a_dry_run_leaves_the_entry_with_nothing_attached(self):
+		entry = self.a_draft_entry()
+		data = self.tool_data(
+			"attach_file_to_document",
+			{
+				"doctype": "Journal Entry",
+				"name": entry,
+				"file_name": f"{PREFIX}-not-written.pdf",
+				"file_content": base64.b64encode(self.CONTENT).decode("ascii"),
+				"dry_run": True,
+			},
+		)
+		self.assertTrue(data["dry_run"])
+		self.assertEqual(
+			frappe.db.count("File", {"attached_to_doctype": "Journal Entry", "attached_to_name": entry}),
+			0,
+		)
+
+	def test_this_frappes_meta_really_carries_max_attachments(self):
+		"""The limit check reads it off Meta. If this Frappe does not have the
+		attribute, the check is silently doing nothing on the operator's site."""
+		self.assertIsNotNone(getattr(frappe.get_meta("Journal Entry"), "max_attachments", None))
 
 
 class CollaborationTools(MCPIntegrationTestCase):

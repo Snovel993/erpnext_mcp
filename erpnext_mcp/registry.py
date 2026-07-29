@@ -1547,6 +1547,73 @@ TOOLS = {
 		required=("name",),
 		title="Read an attachment",
 	),
+	"attach_file_to_document": _tool(
+		files.attach_file_to_document,
+		"MUTATING (default OFF). Attach one file to ANY document on this site — a "
+		"brokerage statement onto the Journal Entry that books it, a receipt onto "
+		"a Bank Transaction, a purchase contract onto an Asset. Creates a File "
+		"linked to that record and nothing else: no balance moves, no docstatus "
+		"changes, no existing row is touched.\n\n"
+		"NOT attach_governance_document. That one files a NEW Governance Document "
+		"and attaches to it, which is right for a trust instrument and useless for "
+		"putting December's statement on December's entry. This attaches to the "
+		"record you name.\n\n"
+		"WHAT IT REFUSES, ALL OF IT READ OFF THE SITE. A doctype or docname that "
+		"does not exist. A parent the acting user cannot WRITE (the same "
+		"permission the Desk's attach control needs). A CANCELLED parent, unless "
+		"allow_cancelled=true — growing the evidence file of an undone document is "
+		"rarely meant. A second attachment with a filename the document already "
+		"has, naming the existing File so a re-run of a batch attach can skip it. "
+		"The parent doctype's own max_attachments. Whatever extension allowlist "
+		"System Settings declares — this app carries no list of its own. And "
+		"`company`, when given, must match the parent's; a company argument on a "
+		"doctype with no company field is an error rather than a guard that "
+		"silently did nothing.\n\n"
+		"`file_content` is base64 of the bytes, ceiling 8 MB — base64 in a JSON "
+		"call is expensive, so a large statement is better uploaded in the Desk "
+		"and recorded here with `file_url`. Files are PRIVATE by default: reading "
+		"one back through get_attachment_content then requires read permission on "
+		"the parent. The result and the audit log both carry the sha256 of what "
+		"was stored.\n\n"
+		"`dry_run` defaults to FALSE — one File is not worth two round trips. Pass "
+		"dry_run=true to validate a parent and see the proposed action without "
+		"writing, which is what a batch script should do over its target list once "
+		"before running live.",
+		{
+			"doctype": _field(
+				_STRING,
+				"The parent DocType to attach to: 'Journal Entry', 'Bank Transaction', 'Asset'.",
+			),
+			"name": _field(_STRING, "That document's docname, e.g. 'ACC-JV-2026-02329'."),
+			"file_name": _field(
+				_STRING,
+				"Filename to store it as, e.g. 'wfa-statement-2025-12-31.pdf'. Required — an "
+				"attachment nobody can identify later is not evidence of anything.",
+			),
+			"file_content": _field(
+				_STRING, "The bytes, base64-encoded, with no data: prefix. Not with file_url."
+			),
+			"file_url": _field(
+				_STRING, "Where the file already lives, instead of uploading it. Not with file_content."
+			),
+			"is_private": _field(_BOOLEAN, "Store as a private File. Default TRUE. Leave it true."),
+			"company": _field(
+				_STRING,
+				"Optional guard: refuse unless the parent belongs to this company.",
+			),
+			"allow_cancelled": _field(
+				_BOOLEAN,
+				"Attach to a cancelled (docstatus 2) parent anyway. Default false.",
+			),
+			"dry_run": _field(
+				_BOOLEAN,
+				"Validate the parent and report the proposed attach without writing. Default false.",
+			),
+		},
+		required=("doctype", "name", "file_name"),
+		mutating=True,
+		title="Attach a file to a document",
+	),
 	# ── comments and tasks ──────────────────────────────────────────────────
 	"list_comments": _tool(
 		collab.list_comments,

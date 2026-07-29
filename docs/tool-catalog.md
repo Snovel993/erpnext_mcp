@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 76 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 77 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -802,9 +802,10 @@ width}` so a model does not have to.
 
 # Attachment tools
 
-The two tools in this app that check Frappe permissions on the way in. A File is
-whatever somebody uploaded — a signed contract, a passport scan, a payroll export
-— and `is_private` is a promise the framework makes about who can see it.
+The three tools in this app that check Frappe permissions on the way in. A File
+is whatever somebody uploaded — a signed contract, a passport scan, a payroll
+export — and `is_private` is a promise the framework makes about who can see it.
+The two read tools are here; `attach_file_to_document`, which writes, is **77**.
 
 ---
 
@@ -3444,6 +3445,66 @@ the only line this tool adds is the balancing one.
   is why the response carries the entry's company, date, totals and every line:
   once the call returns, the MCP Action Log row is the only record that the
   document ever existed.
+
+---
+
+# Attaching evidence
+
+## 77. `attach_file_to_document`
+
+**MUTATING**, default OFF (`allow_attach_file_to_document`).
+
+**Arguments:** `doctype` (required), `name` (required), `file_name` (required),
+`file_content` (base64) **or** `file_url`, `is_private` (default `true`),
+`company` (optional guard), `allow_cancelled` (default `false`), `dry_run`
+(default `false`).
+
+**Returns** `file` (the File docname), `file_url`, `file_size`, `size_human`,
+`mime_type`, `sha256`, `is_private`, `attached_to_doctype`, `attached_to_name`,
+`parent_docstatus`, `parent_company`, `attachments_before` and
+`attachments_after`.
+
+**What it is for.** A year of brokerage statements belongs on the Journal
+Entries that book them; a receipt belongs on the Bank Transaction it explains; a
+purchase contract belongs on the Asset. `attach_governance_document` (**59**)
+files a *new* Governance Document and attaches to that, which is right for a
+trust instrument and useless for putting December's statement on December's
+entry. This one attaches to the record you name, and creates nothing else — no
+balance moves, no docstatus changes, no existing row is touched.
+
+**What it refuses, all of it read off the site rather than compiled into the
+app:**
+
+| Refusal | Where the rule comes from |
+| --- | --- |
+| Unknown `doctype` or `name` | the site's own schema and tables |
+| Acting user cannot `write` the parent | Frappe's permission model — the same permission the Desk's attach control needs |
+| Parent is **cancelled** (docstatus 2) | the parent's own state; `allow_cancelled=true` overrides |
+| `file_name` the document already has | that document's existing attachments, with the clashing File named |
+| Too many attachments | the parent DocType's `max_attachments` |
+| Disallowed extension | whatever allowlist System Settings declares — nothing on a site that declares none, which is Frappe's own answer |
+| `company` does not match the parent's | the parent's `company` field. A `company` passed for a doctype with **no** company field is an error, not a shrug: a guard the caller believes ran and did not is worse than no guard |
+
+**Size.** `file_content` is base64 and capped at 8 MB, the same ceiling
+`attach_governance_document` uses. Base64 in a JSON call is expensive — a large
+statement is better uploaded in the Desk and recorded here with `file_url`.
+
+**`dry_run` defaults to FALSE**, unlike `import_chart_of_accounts` and
+`run_depreciation_cycle`. Those write many documents and are hard to unpick;
+this adds a single File and changes no balance. Making the common case cost two
+round trips would be safety theatre. A batch script should dry-run its target
+list once, then run live.
+
+**Audit.** The MCP Action Log row names the parent doctype and docname, the
+filename, the size and the sha256 of the stored bytes. The base64 payload itself
+is elided to a note of its length — it is logged as
+`<11184812 characters elided>` rather than crowding every other argument out of
+the row.
+
+```
+attached wfa-statement-2025-12-31.pdf (412.0 KB, sha256 9f2c1ab77e04) to
+Journal Entry ACC-JV-2026-03369 as File a7f3c9e21b (private)
+```
 
 ---
 

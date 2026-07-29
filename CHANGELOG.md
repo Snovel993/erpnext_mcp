@@ -3,6 +3,101 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.10.0 — 2026-07-29
+
+One tool, for the gap found the day somebody tried to put a year of brokerage
+statements onto the entries that book them and discovered there was no way to.
+
+### `attach_file_to_document` (mutating, default OFF)
+
+Attaches one file to **any** document on the site. A WFA statement onto the
+Journal Entry that books it. A receipt onto the Bank Transaction it explains. A
+purchase contract onto the Asset.
+
+**Why this was missing and why it was not obvious.** The app already had
+`attach_governance_document`, and from the outside it looks like the tool for
+this — it takes base64, it makes a private File, it says "attach" in the name.
+It is not. It files a *new* Governance Document and attaches the file to
+**that**. Correct for a trust instrument or an operating agreement, which are
+documents in their own right. Useless for December's statement, which is not a
+document in its own right — it is evidence for a posting, and an auditor asking
+"what supports this entry" wants the answer *on the entry*. Thirteen statements
+and three anchor Journal Entries later, there was no MCP path from one to the
+other at all, and the only route left was clicking through the Desk.
+
+**It creates a File and nothing else.** No balance moves, no docstatus changes,
+no existing row is touched. That is the whole shape of the tool.
+
+**Every constraint is read off the site, not compiled into the app.** There is
+no list of blessed file extensions here and no list of doctypes that may be
+attached to. Both would be a snapshot of one ERPNext install frozen into an app
+that gets installed on others, and both would refuse things the site itself
+permits. So:
+
+| Refusal | Read from |
+| --- | --- |
+| Unknown `doctype` or `name` | the site's schema and tables |
+| Acting user cannot `write` the parent | Frappe's permission model — the permission the Desk's own attach control needs |
+| Parent is **cancelled** | the parent's `docstatus`; `allow_cancelled=true` overrides |
+| A filename the document already has | that document's existing attachments, with the clashing File named |
+| Too many attachments | the parent DocType's `max_attachments` |
+| Disallowed extension | whatever allowlist System Settings declares — **nothing**, on a site that declares none, which is Frappe's own answer |
+| `company` mismatch | the parent's `company` field |
+
+**A guard that cannot be applied is an error, not a shrug.** Passing `company`
+for a doctype that has no company field is refused rather than ignored. A caller
+who believes a guard ran when it did not is worse off than one who never asked
+for it.
+
+**Cancelled parents are refused by default** because a cancelled document is
+history, and quietly growing its evidence file afterwards is how a record stops
+meaning what it says. `allow_cancelled=true` says the caller knows — which is a
+different thing from not having noticed.
+
+**A second file under the same name is refused, naming the first.** The
+anticipated caller is a script walking a year of statements onto their entries;
+half of it failing and being re-run is the normal case. "That one is already
+done, here is its File docname" is the useful answer. Two files with one name on
+one document is a question nobody can answer in 2031.
+
+**`dry_run` defaults to FALSE**, unlike `import_chart_of_accounts` and
+`run_depreciation_cycle`. Those write many documents and are hard to unpick;
+this writes one File and moves no money. Making the ordinary case cost two round
+trips would be safety theatre. `dry_run=true` validates the parent and returns
+the proposed action — including the size and sha256 — without writing, which is
+what a batch script should do over its target list once before running live.
+
+Files are **private by default**, so reading one back through
+`get_attachment_content` requires read permission on the parent. `file_content`
+is base64 with the same 8 MB ceiling `attach_governance_document` uses;
+`file_url` records an externally hosted file without copying it. The result and
+the audit row both carry the sha256 of the stored bytes.
+
+### The audit log stopped losing the interesting half of a row
+
+`MCP Action Log.arguments_json` was truncated at 8000 characters *after*
+serialisation, and `json.dumps(..., sort_keys=True)` puts `file_content` ahead
+of `file_name`, `is_private` and `name`. A megabyte of base64 would therefore
+have produced a row recording that a file was attached and nothing whatever
+about which file, or to what.
+
+Oversized *values* are now elided before serialisation —
+`"<11184812 characters elided>"` — so the length survives and every other
+argument stays in the row. Whole-payload truncation still applies on top, for a
+payload that is large because it has many arguments rather than one big one. The
+sha256 that identifies the bytes is in `result_summary` either way.
+
+### Also
+
+- `attach_governance_document` and `attach_file_to_document` share one base64
+  decoder (`files.decode_base64_content`), so there is one 8 MB ceiling to raise
+  rather than two to forget. The refusal wording either tool produces is
+  unchanged.
+- The standalone harness's `Meta` now carries `max_attachments`, Frappe's
+  0-means-unlimited default, so the limit check is testable without a bench.
+
+**77 tools** — 38 read-only, 39 mutating.
+
 ## 0.9.0 — 2026-07-28
 
 Three tools for the day you post a year of history, and the fix for the bug that

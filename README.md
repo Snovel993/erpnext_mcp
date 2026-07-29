@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **76 tools** — 38 read-only, 38 mutating.
+- **77 tools** — 38 read-only, 39 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -242,7 +242,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 76 tools
+## The 77 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -292,6 +292,9 @@ concerned.
 | --- | --- |
 | `list_attachments` | Files on a document: name, size, private flag, who uploaded it. |
 | `get_attachment_content` | One file's bytes, base64, size-capped. |
+
+(`attach_file_to_document` puts one *there* — it writes, so it lives with the
+write tools below.)
 
 **Comments and tasks**
 
@@ -393,6 +396,12 @@ concerned.
 | `record_member_event` | Records the event and, where it books money, a **draft** JE with the right accounts and the member tag on every line. | Post it. Guess an equity account when two could match. |
 | `submit_member_event` | Posts the draft the event is waiting on. | Run at all unless `submit_journal_entry` is also switched on. |
 | `attach_governance_document` | Files a governing document, attaches its content privately, and chains it onto what it supersedes. | File the same document twice, or make the amendment chain loop. |
+
+**Evidence, onto the document it belongs to**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `attach_file_to_document` | Attaches one file to **any** document — a statement onto the Journal Entry that books it, a receipt onto a Bank Transaction, a contract onto an Asset. Private by default, sha256 in the result and the audit row. | Attach to a document the acting user cannot write, to a cancelled one without being told to, or twice under the same filename. Move a balance, or change any existing row. |
 
 **Assets that serve more than one segment**
 

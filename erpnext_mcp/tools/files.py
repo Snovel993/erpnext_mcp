@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Attachment tools — the two tools in this app that check Frappe permissions.
+"""Attachment tools — the three tools in this app that check Frappe permissions.
 
 WHY THESE ARE DIFFERENT. Every other read tool in this app uses
 `frappe.db.get_all`, which does not consult role permissions: the bearer token is
@@ -9,10 +9,11 @@ uploaded — a signed contract, a passport scan, a payroll export — and `is_pr
 is a promise the framework makes about who can see it. Handing that promise to
 anyone holding an API token would be a different product.
 
-So both tools here check `read` permission on the *parent* document before
+So the read tools here check `read` permission on the *parent* document before
 returning anything, and `get_attachment_content` additionally asks the File
 doctype's own controller. An attachment with no parent is treated as private to
-its owner.
+its owner. `attach_file_to_document` asks for `write` on the parent, which is
+the permission the Desk's own attach control requires.
 
 Note that this means the answer depends on the MCP System User's roles. That is
 the point. Give it the roles it needs and no more.
@@ -21,15 +22,28 @@ SIZE. Base64 inflates by a third and a token is roughly four characters, so a
 2 MiB file is on the order of 700k tokens — far past what any client will accept.
 The cap here is a guard against a hung request, not a suggestion: prefer files
 measured in kilobytes, and use `file_url` for anything larger.
+
+WHAT IS NOT HARDCODED HERE. There is no list of blessed file extensions and no
+list of doctypes that may be attached to. Both would be a snapshot of one site
+frozen into an app installed on others, and both would refuse things the site
+itself allows. Every constraint `attach_file_to_document` enforces is read off
+the site at call time: the parent doctype's existence and its `max_attachments`
+from `frappe.get_meta`, whatever extension allowlist System Settings declares
+(nothing, on a site that declares none — which is Frappe's own answer), the
+parent's `docstatus`, and Frappe's permission model. The only number this
+module chooses for itself is the byte ceiling, and that is a property of a JSON
+tool call rather than of the site.
 """
 
 import base64
+import hashlib
 import mimetypes
+import os
 
 import frappe
 
 from .. import compat
-from ..args import as_int, as_str
+from ..args import as_bool, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 
@@ -164,6 +178,325 @@ def get_attachment_content(args: dict) -> ToolResult:
 		f"from {doc.get('attached_to_doctype') or '<unattached>'} "
 		f"{doc.get('attached_to_name') or ''}".strip(),
 	)
+
+
+# ── 77. attach_file_to_document ─────────────────────────────────────────────
+def attach_file_to_document(args: dict) -> ToolResult:
+	"""Attach one file to any document on this site.
+
+	THE WORKFLOW THIS EXISTS FOR. A year of brokerage statements belongs on the
+	Journal Entries that book them, a receipt belongs on the Bank Transaction it
+	explains, a purchase contract belongs on the Asset. Before this tool the only
+	MCP path that moved bytes onto a site was `attach_governance_document`, which
+	files a *new* Governance Document and attaches the file to that — useful for a
+	trust instrument, useless for putting the December statement on the December
+	entry. An auditor asking "what supports this posting" wants the answer on the
+	posting.
+
+	`dry_run` DEFAULTS TO FALSE, unlike `import_chart_of_accounts` and
+	`run_depreciation_cycle`. Those write many documents and are hard to unpick;
+	this one adds a single File and changes no balance, no docstatus and no
+	existing row. Making the common case cost two round trips would be safety
+	theatre. `dry_run=true` is there for the caller who wants the parent validated
+	before spending the upload — a batch script should use it once to check its
+	target list, then run live.
+
+	CANCELLED PARENTS ARE REFUSED BY DEFAULT. A cancelled document is history;
+	quietly growing its evidence file afterwards is how a record stops meaning
+	what it says. `allow_cancelled=true` says the caller knows and meant it, which
+	is a different thing from not having noticed.
+	"""
+	doctype = as_str(args, "doctype", required=True)
+	name = as_str(args, "name", required=True)
+	file_name = as_str(args, "file_name", required=True)
+	file_content = as_str(args, "file_content")
+	file_url = as_str(args, "file_url")
+	is_private = bool(as_bool(args, "is_private", True))
+	dry_run = bool(as_bool(args, "dry_run", False))
+	allow_cancelled = bool(as_bool(args, "allow_cancelled", False))
+	company = as_str(args, "company")
+
+	if file_content and file_url:
+		raise ToolError(
+			"pass file_content (the bytes, base64) or file_url (where the file already "
+			"lives), not both. Nothing was attached."
+		)
+	if not file_content and not file_url:
+		raise ToolError(
+			"one of file_content (the bytes, base64) or file_url (where the file already "
+			"lives) is required — there is nothing to attach otherwise. Nothing was attached."
+		)
+
+	parent = _require_parent_write(doctype, name)
+	_check_docstatus(doctype, name, parent, allow_cancelled)
+	company_field, parent_company = _check_company(doctype, name, parent, company)
+	_check_extension(file_name)
+	existing = _existing_attachments(doctype, name)
+	_check_duplicate(doctype, name, file_name, existing)
+	_check_attachment_limit(doctype, name, len(existing))
+
+	content = decode_base64_content(file_content, tail="Nothing was attached.") if file_content else b""
+	digest = hashlib.sha256(content).hexdigest() if content else ""
+
+	proposed = {
+		"doctype": doctype,
+		"name": name,
+		"parent_docstatus": _docstatus(parent),
+		"parent_company": parent_company,
+		"company_field": company_field,
+		"file_name": file_name,
+		"file_size": len(content) if content else None,
+		"size_human": _human_size(len(content)) if content else None,
+		"mime_type": _mime_type(file_name),
+		"sha256": digest or None,
+		"is_private": is_private,
+		"source": "file_content" if content else "file_url",
+		"file_url": file_url or None,
+		"attachments_before": len(existing),
+	}
+
+	if dry_run:
+		data = {
+			**proposed,
+			"dry_run": True,
+			"would_attach": True,
+			"note": (
+				f"Nothing was written. {doctype} {name} exists, is writable, and accepts this "
+				"attachment. Call again with dry_run=false to attach it."
+			),
+		}
+		return ToolResult(
+			data,
+			f"dry run: would attach {file_name}"
+			+ (f" ({_human_size(len(content))}, sha256 {digest[:12]})" if content else f" from {file_url}")
+			+ f" to {doctype} {name}",
+		)
+
+	payload = {
+		"doctype": "File",
+		"file_name": file_name,
+		"is_private": 1 if is_private else 0,
+		"attached_to_doctype": doctype,
+		"attached_to_name": name,
+	}
+	if content:
+		payload["content"] = content
+	else:
+		payload["file_url"] = file_url
+	attachment = frappe.get_doc(payload).insert()
+
+	stored_size = int(attachment.get("file_size") or len(content) or 0)
+	data = {
+		**proposed,
+		"dry_run": False,
+		"file": attachment.name,
+		"file_url": attachment.get("file_url") or file_url,
+		"file_size": stored_size or None,
+		"size_human": _human_size(stored_size) if stored_size else None,
+		"attachments_after": len(existing) + 1,
+		"attached_to_doctype": doctype,
+		"attached_to_name": name,
+		"note": (
+			f"File {attachment.name} is linked to {doctype} {name} and will appear in "
+			"list_attachments"
+			+ (
+				". It is PRIVATE: reading it back through get_attachment_content requires read "
+				"permission on the parent document."
+				if is_private
+				else ". It is PUBLIC: anyone who can guess the URL can read it. Pass "
+				"is_private=true unless the file is genuinely publishable."
+			)
+		),
+		"next_step": (
+			f"list_attachments on {doctype} {name} now shows {len(existing) + 1} file(s). "
+			"The sha256 in this result and in the audit log is what proves the bytes on the "
+			"site are the bytes that were sent."
+		),
+	}
+	return ToolResult(
+		data,
+		f"attached {file_name}"
+		+ (f" ({_human_size(stored_size)}, sha256 {digest[:12]})" if content else f" from {file_url}")
+		+ f" to {doctype} {name} as File {attachment.name}"
+		+ (" (private)" if is_private else " (PUBLIC)"),
+		docstatus_delta="none → 0 (File created)",
+	)
+
+
+def decode_base64_content(file_content: str, tail: str = "Nothing was created.") -> bytes:
+	"""Base64 in, bytes out, refusing anything too large to be sane in a JSON call.
+
+	`tail` is the sentence that says what did not happen, because "Nothing was
+	created" and "Nothing was attached" are different promises and a caller
+	deciding whether to retry needs the right one.
+	"""
+	# Whitespace first: MIME-style base64 arrives wrapped at 76 columns, and
+	# `validate=True` — which is what makes "not base64 at all" an error rather
+	# than silently-truncated bytes — counts a newline as an invalid character.
+	cleaned = "".join(str(file_content).split())
+	try:
+		content = base64.b64decode(cleaned, validate=True)
+	except Exception as exc:
+		raise ToolError(
+			f"file_content is not valid base64 ({type(exc).__name__}). Encode the document's "
+			f"bytes as base64 without a data: prefix. {tail}"
+		) from None
+	if not content:
+		raise ToolError(f"file_content decoded to zero bytes. {tail}")
+	if len(content) > ABSOLUTE_MAX_BYTES:
+		raise ToolError(
+			f"the decoded document is {len(content)} bytes, over this app's "
+			f"{ABSOLUTE_MAX_BYTES}-byte ceiling for content moved through a tool call. "
+			f"Upload it in the Desk and record it here with file_url instead. {tail}"
+		)
+	return content
+
+
+# ── attach-side validation, all of it read off the site ─────────────────────
+def _require_parent_write(doctype: str, name: str) -> dict:
+	"""Refuse unless the acting user may modify the document being attached to.
+
+	`write`, not `read`: the Desk's attach control is disabled without write
+	permission, and an attachment changes what a document says about itself.
+	Returns the parent's row so the callers below do not each re-fetch it.
+	"""
+	if not compat.doctype_exists(doctype):
+		raise ToolError(
+			f"no DocType named {doctype!r} on this site. Nothing was attached. "
+			"get_company_topology lists what this install actually has."
+		)
+	if not frappe.db.exists(doctype, name):
+		raise ToolError(f"no {doctype} named {name!r} on this site. Nothing was attached.")
+	if not frappe.has_permission(doctype, "write", doc=name):
+		raise ToolError(
+			f"{frappe.session.user} is not permitted to write {doctype} {name}, so nothing "
+			"may be attached to it. Attachment tools honour Frappe permissions even though "
+			"the ledger read tools do not — see docs/security.md. Nothing was attached."
+		)
+
+	fields = compat.existing_fields(doctype, ("name", "docstatus", "company"))
+	return frappe.db.get_value(doctype, name, fields, as_dict=True) or {"name": name}
+
+
+def _docstatus(parent: dict):
+	raw = parent.get("docstatus")
+	return int(raw) if raw is not None else None
+
+
+def _check_docstatus(doctype: str, name: str, parent: dict, allow_cancelled: bool) -> None:
+	"""Kairos, not chronos: attach when the document is in a state that means it.
+
+	A draft and a submitted document are both live records that evidence belongs
+	on. A cancelled one is not — it is the record of something that was undone,
+	and adding to it after the fact makes the archive say something nobody
+	decided.
+	"""
+	if _docstatus(parent) == 2 and not allow_cancelled:
+		raise ToolError(
+			f"{doctype} {name} is CANCELLED (docstatus 2). Attaching to it now would grow "
+			"the evidence file of a document that was undone, which is rarely what a caller "
+			"means. If it is — a cancellation memo belongs on the thing cancelled — pass "
+			"allow_cancelled=true. Nothing was attached."
+		)
+
+
+def _check_company(doctype: str, name: str, parent: dict, company: str):
+	"""Refuse a cross-company attach, and refuse to pretend to check one.
+
+	A `company` argument this cannot evaluate is worse than no argument: the
+	caller believes a guard ran. So a company passed for a doctype with no
+	company field is an error, not a shrug.
+	"""
+	company_field = "company" if compat.has_field(doctype, "company") else None
+	parent_company = parent.get("company") if company_field else None
+
+	if not company:
+		return company_field, parent_company
+	if not company_field:
+		raise ToolError(
+			f"{doctype} has no company field on this site, so the company guard you asked "
+			f"for cannot be applied to {name}. Drop the company argument if you meant to "
+			"attach anyway. Nothing was attached."
+		)
+	resolved = resolve_company(company, required=True)
+	if resolved != parent_company:
+		raise ToolError(
+			f"{doctype} {name} belongs to company {parent_company!r}, not {resolved!r}. "
+			"Attaching a document from one company's books onto another's is how two sets "
+			"of records stop reconciling. Nothing was attached."
+		)
+	return company_field, parent_company
+
+
+def _check_extension(file_name: str) -> None:
+	"""Honour whatever extension allowlist this site declares, and no other.
+
+	Frappe grew a System Settings allowlist at different points in different
+	versions, and a site that declares none permits everything — so this reads
+	the field if the site has it and is silent if it does not. A list compiled
+	into this app would refuse uploads the site itself accepts, which is a
+	false refusal wearing a safety badge.
+	"""
+	if not compat.has_field("System Settings", "allowed_file_extensions"):
+		return
+	try:
+		raw = frappe.db.get_single_value("System Settings", "allowed_file_extensions")
+	except Exception:
+		return
+	allowed = [chunk.strip().lstrip(".").lower() for chunk in str(raw or "").replace(",", "\n").split("\n")]
+	allowed = [chunk for chunk in allowed if chunk]
+	if not allowed:
+		return
+	extension = os.path.splitext(file_name)[1].lstrip(".").lower()
+	if extension not in allowed:
+		raise ToolError(
+			f"this site's System Settings allow only these file extensions: "
+			f"{', '.join(sorted(allowed))} — and {file_name!r} is "
+			f"{'.' + extension if extension else 'extensionless'}. That list is the site's "
+			"own, not this app's. Nothing was attached."
+		)
+
+
+def _existing_attachments(doctype: str, name: str) -> list:
+	return frappe.db.get_all(
+		"File",
+		filters={"attached_to_doctype": doctype, "attached_to_name": name},
+		fields=compat.existing_fields("File", ("name", "file_name", "file_size")),
+		limit=1000,
+	)
+
+
+def _check_duplicate(doctype: str, name: str, file_name: str, existing: list) -> None:
+	"""One filename per document. A re-run of a batch attach says so and stops.
+
+	The anticipated caller is a script walking a year of statements onto their
+	entries. Half of it failing and being re-run is the normal case, and the
+	useful answer to "attach 2025-12.pdf" when 2025-12.pdf is already there is
+	"that one is done", named precisely enough to skip — not a second copy that
+	makes somebody later ask which is authoritative.
+	"""
+	clash = next((row for row in existing if str(row.get("file_name") or "") == file_name), None)
+	if clash:
+		raise ToolError(
+			f"{doctype} {name} already has an attachment named {file_name!r} "
+			f"(File {clash['name']}). Two files with one name on one document is a question "
+			"nobody can answer later. If this is a re-run, that one is already done; if the "
+			"contents differ, give this one a name that says how. Nothing was attached."
+		)
+
+
+def _check_attachment_limit(doctype: str, name: str, current: int) -> None:
+	"""The parent doctype's own `max_attachments`, whatever this site set it to."""
+	try:
+		limit = int(getattr(frappe.get_meta(doctype), "max_attachments", 0) or 0)
+	except Exception:
+		return
+	if limit and current >= limit:
+		raise ToolError(
+			f"{doctype} allows at most {limit} attachment(s) on this site and {name} already "
+			f"has {current}. That limit is set on the DocType, not by this app — raise it in "
+			"the Desk or remove an attachment first. Nothing was attached."
+		)
 
 
 # ── permission ──────────────────────────────────────────────────────────────

@@ -445,7 +445,7 @@ class SelfTest(SeededTestCase):
 		self.configure(enabled=1, allow_create_journal_entry=1)
 		report = mcp.selftest()
 		self.assertEqual(report["mutating_tools_enabled"], ["create_journal_entry"])
-		self.assertEqual(report["tools_total"], 76)
+		self.assertEqual(report["tools_total"], 77)
 		# 38 read tools minus the three HR ones this site cannot run, plus the
 		# one write tool just enabled.
 		self.assertEqual(len(report["tools_enabled"]), 36)

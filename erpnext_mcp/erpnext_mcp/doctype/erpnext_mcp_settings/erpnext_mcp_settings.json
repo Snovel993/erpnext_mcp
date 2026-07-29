@@ -80,6 +80,8 @@
   "attachment_tools_section",
   "allow_list_attachments",
   "allow_get_attachment_content",
+  "attachment_tools_col",
+  "allow_attach_file_to_document",
   "collab_tools_section",
   "allow_list_comments",
   "allow_list_assigned_todos",
@@ -588,7 +590,7 @@
    "label": "Run Report"
   },
   {
-   "description": "Both tools check read permission on the parent document before returning anything, and treat an unattached private file as its owner's. Turn Get Attachment Content off if files on this site hold anything an AI client should never read.",
+   "description": "The read tools check read permission on the parent document before returning anything, and treat an unattached private file as its owner's. Turn Get Attachment Content off if files on this site hold anything an AI client should never read. Attach File To Document writes, needs write permission on the parent, and is off by default.",
    "fieldname": "attachment_tools_section",
    "fieldtype": "Section Break",
    "label": "Attachments"
@@ -606,6 +608,17 @@
    "fieldname": "allow_get_attachment_content",
    "fieldtype": "Check",
    "label": "Get Attachment Content"
+  },
+  {
+   "fieldname": "attachment_tools_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Attach a file to ANY document \u2014 a statement onto the Journal Entry that books it, a receipt onto a Bank Transaction, a contract onto an Asset. Creates one File and changes nothing else. Needs write permission on the parent document, refuses a cancelled parent unless told otherwise, and refuses a filename the document already has.",
+   "fieldname": "allow_attach_file_to_document",
+   "fieldtype": "Check",
+   "label": "Attach File To Document"
   },
   {
    "description": "The human layer: what people said about a document, and what is on somebody's list. List Comments checks read permission on the document. Create Todo writes.",

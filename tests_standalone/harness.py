@@ -626,7 +626,16 @@ class Meta:
 	pass a name. A double that always answered "" would make every dimension value
 	take the fallback path, which is the one that does *not* produce the readable
 	docname the tool exists to produce.
+
+	`max_attachments` is a class attribute rather than a constructor argument
+	because Frappe's own default is 0-meaning-unlimited on every DocType, and
+	`attach_file_to_document` reads it on every call. A test that wants the limit
+	to bite sets it on the one meta it cares about; `reset_meta` rebuilds the
+	objects between tests, so it cannot leak.
 	"""
+
+	#: 0 is Frappe's "no limit", and is what every DocType has unless somebody set one.
+	max_attachments = 0
 
 	def __init__(self, doctype: str, fields: list[Field], issingle: bool = False, autoname: str = ""):
 		self.doctype = doctype
