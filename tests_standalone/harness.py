@@ -101,6 +101,23 @@ class PermissionError_(ValidationError):
 	pass
 
 
+class LinkValidationError(ValidationError):
+	"""What Frappe raises for a Link pointing at something that is not there.
+
+	Modelled because v0.12.0 shipped a `bench migrate` that died on it and this
+	suite passed the whole way. `Party Type` names itself after its `party_type`
+	field, and that field is a **Link to DocType** — so registering a party type
+	called "Family" requires a DocType called "Family" to exist. There was none,
+	`_validate_links()` refused the insert, and the patch took the migration down
+	with it.
+
+	The double had no link validation at all, so it inserted the row happily.
+	That is the same shape of failure as the Account `MandatoryError` below: a
+	test double that answers a question the real framework refuses is a double
+	that certifies code which cannot run. See `Document._validate_links`.
+	"""
+
+
 class MandatoryError(ValidationError):
 	"""What Frappe raises for an empty `reqd` field, and what the app has to dodge.
 
@@ -188,6 +205,12 @@ ERPNEXT_SCHEMA = {
 	# something real to refuse against rather than a mock that always agrees.
 	"Party Type": ["name", "party_type", "account_type"],
 	"Country": ["name", "code"],
+	# `Contact` is CORE FRAPPE, and it is here because v0.12.1 needs the fixture
+	# to know that. A Party Type's name has to be a DocType — so `Contact`
+	# registers on a real site precisely because Frappe ships this, and `Family`
+	# did not until this app started shipping one. A fixture that omitted Contact
+	# would make the two look alike and hide the whole distinction.
+	"Contact": ["name", "first_name", "last_name", "email_id", "company_name"],
 	"GL Entry": [
 		"name",
 		"account",
@@ -660,6 +683,7 @@ APP_DOCTYPES = {
 	"Irrigation Zone": "irrigation_zone",
 	"Housing Unit": "housing_unit",
 	"Housing Assignment": "housing_assignment",
+	"Family": "family",
 }
 
 
@@ -732,6 +756,28 @@ class Meta:
 #:
 #: This is ERPNext v15's list. Note what is NOT in it: "Credit Card", which the
 #: shipped `us_llc_farm` template asks for on 2160.
+#: ERPNext fields that are Links or Dynamic Links rather than plain Data, as
+#: `(doctype, fieldname) -> (fieldtype, options)`.
+#:
+#: THIS TABLE IS WHY v0.12.1 EXISTS. Everything in `ERPNEXT_SCHEMA` used to be
+#: modelled as Data, so `Party Type.party_type` — which is really a **Link to
+#: DocType** — accepted any string the app handed it. v0.12.0 registered a party
+#: type called "Family" against a site with no Family DocType, this suite said
+#: fine, and `bench migrate` on a real bench raised `LinkValidationError` and
+#: aborted.
+#:
+#: The party trio is modelled in full because it is one mechanism: `party_type`
+#: names a DocType, and `party` is a **Dynamic Link** resolved through it. That
+#: is what makes a Party Type's name load-bearing rather than a label, and it is
+#: the fact the release was missing.
+ERPNEXT_FIELD_LINKS = {
+	("Party Type", "party_type"): ("Link", "DocType"),
+	("GL Entry", "party_type"): ("Link", "DocType"),
+	("GL Entry", "party"): ("Dynamic Link", "party_type"),
+	("Journal Entry Account", "party_type"): ("Link", "DocType"),
+	("Journal Entry Account", "party"): ("Dynamic Link", "party_type"),
+}
+
 ERPNEXT_FIELD_OPTIONS = {
 	("Account", "account_type"): "\n".join(
 		[
@@ -798,19 +844,25 @@ ERPNEXT_FIELD_OPTIONS = {
 }
 
 
+def _erpnext_field(doctype: str, name: str):
+	"""One ERPNext field, as a Link, a Dynamic Link, a Select or plain Data."""
+	link = ERPNEXT_FIELD_LINKS.get((doctype, name))
+	if link:
+		return Field(fieldname=name, fieldtype=link[0], options=link[1], label=name)
+	return Field(
+		fieldname=name,
+		fieldtype="Select" if (doctype, name) in ERPNEXT_FIELD_OPTIONS else "Data",
+		options=ERPNEXT_FIELD_OPTIONS.get((doctype, name)),
+		label=name,
+	)
+
+
 def _build_meta() -> dict:
 	metas = {}
 	for doctype, fields in ERPNEXT_SCHEMA.items():
 		metas[doctype] = Meta(
 			doctype,
-			[
-				Field(
-					fieldname=name,
-					fieldtype="Select" if (doctype, name) in ERPNEXT_FIELD_OPTIONS else "Data",
-					options=ERPNEXT_FIELD_OPTIONS.get((doctype, name)),
-				)
-				for name in fields
-			],
+			[_erpnext_field(doctype, name) for name in fields],
 			autoname=ERPNEXT_AUTONAME.get(doctype, ""),
 		)
 	for doctype, folder in APP_DOCTYPES.items():
@@ -996,6 +1048,7 @@ class Document(FrappeDict):
 		self._run("before_validate")
 		self._run("validate")
 		self._run("before_save")
+		self._validate_links()
 		STORE.put(self)
 		self._run("after_insert")
 		self._run("on_update")
@@ -1010,6 +1063,7 @@ class Document(FrappeDict):
 		self._run("before_validate")
 		self._run("validate")
 		self._run("before_save")
+		self._validate_links()
 		STORE.put(self)
 		self._run("on_update")
 		return self
@@ -1033,6 +1087,78 @@ class Document(FrappeDict):
 		if fresh:
 			self.update(copy.deepcopy(fresh))
 		return self
+
+	def _validate_links(self):
+		"""Refuse a Link or Dynamic Link that points at nothing, as Frappe does.
+
+		WHY THIS IS WORTH THE FIDELITY. Frappe runs this on every insert and save,
+		and it is the check that stopped v0.12.0 migrating: a Party Type whose
+		`party_type` field is a Link to DocType cannot name a DocType that does
+		not exist. Without this here, the suite certified a patch that took a real
+		bench down.
+
+		Three cases, and the third is the one that matters:
+
+		  * a Link whose `options` is an ordinary doctype — the value has to be a
+		    row in it.
+		  * a **Dynamic Link** — the target doctype comes from the field named in
+		    `options`, which is how a Journal Entry line's `party` is resolved
+		    through its `party_type`.
+		  * a Link whose `options` is the literal `"DocType"` — the value has to
+		    be a doctype this site HAS. That is the Party Type case.
+
+		Scoped to doctypes whose meta the fixture actually knows, and skipped
+		entirely when `flags.ignore_links` is set, both of which Frappe also does.
+		A link to a doctype the fixture has never heard of is not validated, since
+		the double cannot tell "absent record" from "absent schema" and guessing
+		wrong would refuse perfectly good fixtures.
+		"""
+		if self.flags.get("ignore_links"):
+			return
+		self._validate_links_on(self.doctype, self)
+		# Child rows carry links of their own, and on a Journal Entry they carry
+		# the ones that matter: `party_type` and `party` are on the LINE, not on
+		# the header. Validating only the parent would have left the whole party
+		# mechanism unchecked, which is the gap this release closed.
+		for (parent, fieldname), child_doctype in CHILD_TABLES.items():
+			if parent != self.doctype:
+				continue
+			for row in self.get(fieldname) or []:
+				self._validate_links_on(child_doctype, row)
+
+	def _validate_links_on(self, doctype: str, doc):
+		meta = META.get(doctype)
+		if meta is None:
+			return
+		for field in meta.fields:
+			fieldtype = field.get("fieldtype")
+			if fieldtype not in ("Link", "Dynamic Link"):
+				continue
+			value = doc.get(field.get("fieldname"))
+			if value in (None, "", 0):
+				continue
+
+			if fieldtype == "Dynamic Link":
+				target = doc.get(str(field.get("options") or ""))
+				if not target:
+					continue
+			else:
+				target = str(field.get("options") or "")
+			if not target:
+				continue
+
+			if target == "DocType":
+				if str(value) not in INSTALLED_DOCTYPES:
+					raise LinkValidationError(
+						f"Could not find {field.get('label') or field.get('fieldname')}: {value}"
+					)
+				continue
+			if target not in INSTALLED_DOCTYPES:
+				continue
+			if not STORE.get_raw(target, str(value)):
+				raise LinkValidationError(
+					f"Could not find {field.get('label') or field.get('fieldname')}: {value}"
+				)
 
 	def _run(self, hook: str):
 		method = getattr(self, hook, None)
@@ -1837,6 +1963,7 @@ def _build_frappe() -> types.ModuleType:
 	module.DoesNotExistError = DoesNotExistError
 	module.PermissionError = PermissionError_
 	module.MandatoryError = MandatoryError
+	module.LinkValidationError = LinkValidationError
 	module.db = FakeDB()
 	module.local = FrappeDict(
 		site="test.localhost",

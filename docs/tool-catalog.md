@@ -3992,6 +3992,17 @@ and a family operation pays two kinds of people that fit none of them:
   paid for services. **92** reads those and classifies them **borderline**,
   naming the W-9, rather than dropping them.
 
+**A PARTY TYPE'S NAME HAS TO BE A DOCTYPE.** `Party Type` names itself
+`field:party_type`, and that field is a `Link` to `DocType`. A Journal Entry line
+then carries `party`, a **`Dynamic Link`** resolved through `party_type`. So
+`party_type = "Family"` needs a DocType called `Family`, and the party has to be
+a record in it. `Contact` resolves to Frappe's own Contact DocType; `Family`
+resolves to the register this app ships.
+
+`resolves_to_doctype` in the result says which, and a party type whose DocType is
+missing comes back under `skipped` with the reason rather than taking the call
+down — the same behaviour the migrate patch has, and for the same reason.
+
 They are also seeded on install and on every `bench migrate`; this tool is for a
 site that cannot be migrated right now. **It changes nothing that already
 exists** — every rule and Journal Entry using Shareholder, Employee or Supplier

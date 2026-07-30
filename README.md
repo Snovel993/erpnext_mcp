@@ -552,6 +552,25 @@ Both are seeded on install and on every `bench migrate`, and neither touches
 anything already recorded: an existing rule or Journal Entry using Shareholder,
 Employee or Supplier keeps working exactly as it did.
 
+**A party type's name has to be the name of a DocType**, and that is not a
+convention — it is how ERPNext resolves a posting. `Party Type` names itself
+`field:party_type`, and that field is a `Link` to `DocType`; a Journal Entry line
+then carries `party`, a **`Dynamic Link`** resolved through `party_type`. So
+`party_type = "Family"` requires a DocType called `Family`, and
+`party = "Alex Bramwell"` requires Alex to be a record in it.
+
+`Contact` already has one — Frappe ships it — which is why it registered
+successfully in v0.12.0 while `Family` did not. **v0.12.1 ships a `Family`
+DocType**: a small register of name, relationship, an optional link to the
+related-party entry, and an active flag. It holds no tax id on purpose. A
+relative who is genuinely paid for work is a Contact or a Supplier, and the
+posting should be reclassified rather than the exclusion widened.
+
+If a party type ever cannot be registered — its DocType is missing — the seeder
+**skips it with the reason and carries on**. It does not raise: an exception
+inside a patch aborts `bench migrate` for every app on the bench, not just this
+one.
+
 #### The polygon is the evidence, and the index has to be a superset
 
 A boundary is not decoration on a Field. "Which block was sprayed" is a Worker
@@ -1149,8 +1168,8 @@ bench --site yoursite.localhost uninstall-app erpnext_mcp
 Drops this app's own doctypes and everything in them: **ERPNext MCP Settings**,
 **MCP Action Log** (the audit history), **Cap Table Entry**, **Member Event**,
 **Governance Document**, **Asset Cost Profile**, **Note Payable**, **Parcel**,
-**Lease**, **Related Party**, **Field**, **Irrigation Zone**, **Housing Unit**
-and **Housing Assignment**. The last two are worth a pause: a camp roster is the
+**Lease**, **Related Party**, **Family**, **Field**, **Irrigation Zone**,
+**Housing Unit** and **Housing Assignment**. The last two are worth a pause: a camp roster is the
 only record of who slept where, and it is what an IRS Section 119 exclusion and
 an ORS 653 wage claim are both answered with. Nothing else on the site is
 touched — the

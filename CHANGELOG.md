@@ -3,6 +3,110 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.12.1 — 2026-07-30
+
+A hotfix. `bench migrate` on v0.12.0 aborted in
+`erpnext_mcp.patches.register_custom_party_types` with a
+`LinkValidationError`, and the standalone suite passed the whole way — which is
+the more important half of this release.
+
+### What actually broke, which is not what the traceback looks like
+
+The error reads `Could not find Party Type: Family` and looks like a
+self-referential link. It is not. ERPNext's `Party Type` names itself
+`field:party_type`, and **that field is a `Link` to `DocType`** — so a Party
+Type's name has to be the name of a real DocType on the site. There was no
+DocType called `Family`, so the insert was refused.
+
+The loop registers party types in sorted order, so `Contact` went in first and
+**succeeded** — because Frappe ships a core `Contact` DocType — and `Family`
+failed immediately after. That asymmetry is the whole diagnosis: the two party
+types were not equivalent, and nothing in the release knew it.
+
+It goes deeper than the patch. A Journal Entry line carries `party_type` (a
+`Link` to `DocType`) and `party` (a **`Dynamic Link`** resolved through it). So
+bypassing the validation with `db_insert()` or `flags.ignore_links` — the
+obvious fixes — would have registered a party type that the first posting using
+it would then reject. That is worse than the crash: a crash at migrate time is
+found by the person running the migrate, and a party type that silently cannot
+be posted to is found by whoever is closing the books.
+
+### The fix
+
+**This app now ships a `Family` DocType.** A small register — name,
+relationship, an optional link to the related-party entry, an active flag. It
+holds no tax id on purpose: a transfer below the IRS annual gift exclusion is not
+compensation for services, which is the whole reason the party type is separate
+from Supplier. A relative genuinely paid for work is a Contact or a Supplier, and
+the posting should be reclassified rather than the exclusion widened.
+
+`Contact` needs nothing: Frappe's own Contact DocType is the register, which is
+the correct answer and was already working.
+
+**`ensure_party_types()` checks the target DocType before inserting, and never
+raises.** It returns `{"created": [...], "existing": [...], "skipped": {name:
+why}}`, and the patch prints the skips. A party type that cannot be registered is
+worth saying out loud on the console; it is not worth aborting a migration over —
+in v0.12.0 it took down the whole bench's migrate, and because `after_migrate`
+never ran, that release's new tool switches were never seeded either. The
+operator got a traceback *and* a half-configured app.
+
+The two skip reasons are deliberately different sentences. "Ours, not migrated
+yet" is a retry; "nothing on this site ships that DocType" is a dead end.
+
+### The test double had no link validation, and that is why this shipped
+
+The same shape as v0.12.0's `bool("0")` bug: a double that answers a question the
+real framework refuses is a double that certifies code which cannot run.
+
+`harness.py` now implements `Document._validate_links` on insert and save, for
+`Link`, `Dynamic Link`, and the `Link`-to-`"DocType"` case that caused this. It
+walks child rows too, because on a Journal Entry the party fields are on the
+**line**, not the header — validating only the header would have left the entire
+party mechanism unchecked. The ERPNext fields the app depends on are now modelled
+with their real fieldtypes rather than as Data (`ERPNEXT_FIELD_LINKS`), and the
+fixture seeds the Family and Contact records its GL rows point at, because a
+fixture with postings and no people describes a site that cannot exist.
+
+`test_patches.py` asserts the double genuinely reproduces the production failure
+before asserting anything else — otherwise every test under it is theatre.
+
+### Added
+
+- **`Family` DocType.** Required for the `Family` party type to resolve. Named
+  `field:family_member_name`, so a posting reads `party = "Alex Bramwell"`.
+- **`tests_standalone/test_patches.py`.** Every patch run against an empty store:
+  survives, is a no-op the second time, and survives with its target DocType
+  missing. Plus a schema audit that every `Link` this app declares points at a
+  DocType something ships, every `Dynamic Link` resolves through a field on its
+  own doctype, and every party type resolves to a real DocType.
+- End-to-end coverage that a Family posting and a Contact posting go through, and
+  that a party who is not on the register is refused — which v0.12.0 claimed and
+  could not do.
+
+### Fixed
+
+- `register_custom_party_types` no longer aborts `bench migrate`.
+- `ensure_party_types()` returns a report instead of a list, and skips rather
+  than raising. `install.after_install` / `after_migrate` and the patch all use
+  the same path.
+- `register_party_types` (the MCP tool) reports `skipped` with the reason and
+  `resolves_to_doctype` for each party type, so a client can see the rule rather
+  than infer it.
+- `list_companies` reports `party_types.resolves_to_doctype`.
+- The uninstall warning names the Family register — deleting it orphans every
+  journal entry that named those people.
+
+### Notes
+
+- No new tools. The catalogue is unchanged at 121.
+- `Family` is a generic DocType name to take, the same caveat as `Field` in
+  v0.12.0. It is not optional: the party type cannot resolve without it.
+- **Nothing needs re-running by hand.** The next `bench migrate` finds the Family
+  DocType synced in `post_model_sync` before the patch executes, registers both
+  party types, and `after_migrate` seeds the switches v0.12.0's abort skipped.
+- Full suite: 1982 tests, 0 failures. 73 skip without shapely and h3.
+
 ## 0.12.0 — 2026-07-30
 
 Three features in one release, because they share a backbone. A field sits on a

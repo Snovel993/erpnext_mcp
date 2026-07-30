@@ -1583,6 +1583,7 @@ def seed_v12() -> None:
 	"""The custom party types, a country list, and a year of Family/Contact pay."""
 	_party_types()
 	_countries()
+	_party_registers()
 	_family_and_contact_payments()
 
 
@@ -1602,6 +1603,22 @@ def _party_types() -> None:
 			{"name": "Employee", "party_type": "Employee", "account_type": "Payable"},
 			{"name": "Shareholder", "party_type": "Shareholder", "account_type": "Payable"},
 		],
+	)
+
+
+def _party_registers() -> None:
+	"""The records a Family and a Contact posting actually point AT.
+
+	Not decoration. A posting's `party` is a Dynamic Link resolved through its
+	`party_type`, so a GL Entry saying `party_type="Family", party="Alex
+	Bramwell"` is only valid if Alex is a row on the Family register. A fixture
+	that seeded the postings without the people would be a fixture describing a
+	site that cannot exist — which is exactly the gap that let v0.12.0 ship.
+	"""
+	STORE.seed("Family", [{"name": ALEX, "family_member_name": ALEX, "relationship": "Sibling", "active": 1}])
+	STORE.seed(
+		"Contact",
+		[{"name": ANTONY, "first_name": "Antony", "last_name": "Sedge", "company_name": ""}],
 	)
 
 

@@ -1,0 +1,108 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:family_member_name",
+ "creation": "2026-07-30 18:00:00.000000",
+ "description": "A family member who receives money that is neither payroll nor a purchase. This register exists because ERPNext resolves a posting's `party` as a Dynamic Link THROUGH its `party_type`: a Party Type's name has to be the name of a real DocType, and there is no DocType for a relative. Customer, Supplier, Employee and Shareholder each have one; this is Family's.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "family_member_name",
+  "relationship",
+  "identity_col",
+  "related_party",
+  "active",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The person's name as a posting should read it. This IS the docname, and it is what appears in the `party` column of a Journal Entry line.",
+   "fieldname": "family_member_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "How they are related. Recorded because 'why did money go to this person' is the first question anybody asks of these postings, and a name alone does not answer it.",
+   "fieldname": "relationship",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Relationship",
+   "options": "\nSpouse\nChild\nParent\nSibling\nGrandchild\nGrandparent\nIn-Law\nOther"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The related-party register entry for this person, when there is one. THE TAX IDENTITY LIVES THERE AND ONLY THERE — this doctype deliberately holds no tax id, because a transfer below the IRS annual gift exclusion is not compensation for services and needs no W-9. A relative who IS paid for work should be recorded as a Contact or a Supplier instead, and the posting reclassified.",
+   "fieldname": "related_party",
+   "fieldtype": "Link",
+   "label": "Related Party",
+   "options": "Related Party"
+  },
+  {
+   "default": "1",
+   "description": "Untick rather than delete. A person who no longer receives transfers still appears on every posting that already named them, and deleting the record would orphan those.",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-30 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Family",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 1,
+ "search_fields": "family_member_name,relationship",
+ "sort_field": "family_member_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "family_member_name",
+ "track_changes": 1
+}

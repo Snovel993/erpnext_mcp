@@ -83,6 +83,12 @@ _PRECIOUS_DOCTYPES = (
 		"related-party disclosure on a return",
 	),
 	(
+		"Family",
+		"the family register — the people a Family-party posting points at. Deleting "
+		"it orphans every journal entry that named them, and those postings are the "
+		"record of money that moved",
+	),
+	(
 		"Field",
 		"the block register — acreage, variety, rootstock, planting year and the "
 		"food-safety facts about each piece of planted ground, including the last "

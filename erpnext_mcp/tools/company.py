@@ -48,9 +48,23 @@ from ..result import ToolResult
 
 PARTY_TYPE = "Party Type"
 
-#: The party types this app registers, and the account type each one settles
-#: against. Both are payees: a Family transfer and a Contact invoice are money
-#: going out, which makes them Payable in ERPNext's terms.
+#: The party types this app registers: the account type each settles against, and
+#: — the part that is not obvious and that v0.12.1 exists because of — the DocType
+#: each one RESOLVES TO.
+#:
+#: ERPNext does not store a posting's counterparty as free text. `Party Type` names
+#: itself `field:party_type`, and that field is a Link to **DocType**. A Journal
+#: Entry line then carries `party`, a **Dynamic Link** resolved through
+#: `party_type`. So a party type called X is only registrable if there is a DocType
+#: called X, and a posting to it is only valid if the party is a record in that
+#: DocType. Customer, Supplier, Employee and Shareholder each have one.
+#:
+#: `Contact` already has one: it is core Frappe, which is why v0.12.0 registered it
+#: successfully and then died on `Family` in the same loop. `Family` had none, so
+#: this app now ships it.
+#:
+#: Both are payees: a Family transfer and a Contact invoice are money going out,
+#: which makes them Payable in ERPNext's terms.
 #:
 #: `Family` exists because the alternative — recording a transfer to a brother
 #: as a Supplier payment — puts it in vendor spend and in the 1099 pre-fill,
@@ -64,6 +78,8 @@ PARTY_TYPE = "Party Type"
 CUSTOM_PARTY_TYPES = {
 	"Family": {
 		"account_type": "Payable",
+		"doctype": "Family",
+		"ships_with_this_app": True,
 		"why": (
 			"Family members receiving money who are not Employees, Suppliers, Shareholders or "
 			"Customers. Excluded from the 1099 pre-fill: a family transfer below the IRS gift "
@@ -72,6 +88,8 @@ CUSTOM_PARTY_TYPES = {
 	},
 	"Contact": {
 		"account_type": "Payable",
+		"doctype": "Contact",
+		"ships_with_this_app": False,
 		"why": (
 			"Professionals and one-off consultants paid occasionally who are not formal "
 			"Suppliers. Surfaced by the 1099 pre-fill as BORDERLINE — a payment for services "
@@ -314,7 +332,14 @@ def _party_type_status() -> dict:
 	registered, missing = [], []
 	for name in sorted(CUSTOM_PARTY_TYPES):
 		(registered if frappe.db.exists(PARTY_TYPE, name) else missing).append(name)
-	out = {"available": True, "registered": registered, "missing": missing}
+	out = {
+		"available": True,
+		"registered": registered,
+		"missing": missing,
+		"resolves_to_doctype": {
+			name: spec.get("doctype") or name for name, spec in sorted(CUSTOM_PARTY_TYPES.items())
+		},
+	}
 	if missing:
 		out["hint"] = (
 			f"{', '.join(missing)} not registered. They are seeded on install and on every "
@@ -601,10 +626,14 @@ def register_party_types(args: dict) -> ToolResult:
 	)
 	dry_run = as_bool(args, "dry_run", False)
 
-	created, existing = [], []
+	created, existing, skipped = [], [], {}
 	for name, spec in sorted(CUSTOM_PARTY_TYPES.items()):
 		if frappe.db.exists(PARTY_TYPE, name):
 			existing.append(name)
+			continue
+		blocker = party_type_blocker(name, spec)
+		if blocker:
+			skipped[name] = blocker
 			continue
 		if dry_run:
 			created.append(name)
@@ -616,45 +645,103 @@ def register_party_types(args: dict) -> ToolResult:
 		doc.insert(ignore_permissions=True)
 		created.append(name)
 
-	return ToolResult(
-		data={
-			"created": created,
-			"already_registered": existing,
-			"dry_run": bool(dry_run),
-			"party_types": {
-				name: {"account_type": spec["account_type"], "why": spec["why"]}
-				for name, spec in sorted(CUSTOM_PARTY_TYPES.items())
-			},
-			"note": (
-				"Existing rules and Journal Entries using Shareholder, Employee or Supplier are "
-				"untouched — this adds party types, it does not reclassify anything."
-			),
+	data = {
+		"created": created,
+		"already_registered": existing,
+		"skipped": skipped,
+		"dry_run": bool(dry_run),
+		"party_types": {
+			name: {
+				"account_type": spec["account_type"],
+				"resolves_to_doctype": spec.get("doctype") or name,
+				"why": spec["why"],
+			}
+			for name, spec in sorted(CUSTOM_PARTY_TYPES.items())
 		},
+		"note": (
+			"Existing rules and Journal Entries using Shareholder, Employee or Supplier are "
+			"untouched — this adds party types, it does not reclassify anything. A party type "
+			"resolves to a DocType of the same name: a posting's `party` is a Dynamic Link "
+			"through its `party_type`, so `party_type='Family'` needs `party` to be a record "
+			"on the Family register."
+		),
+	}
+	if skipped:
+		data["warning"] = (
+			f"{len(skipped)} party type(s) could not be registered: "
+			+ "; ".join(f"{name} — {why}" for name, why in sorted(skipped.items()))
+			+ ". Nothing else was affected."
+		)
+	return ToolResult(
+		data=data,
 		summary=(
 			f"party types: {len(created)} {'would be ' if dry_run else ''}registered, "
 			f"{len(existing)} already there"
+			+ (f", {len(skipped)} skipped" if skipped else "")
 		),
 		docstatus_delta="none → 0 (created)" if created and not dry_run else "",
 	)
 
 
-def ensure_party_types() -> list:
+def party_type_blocker(name: str, spec: dict) -> str:
+	"""Why this party type cannot be registered on this site, or "".
+
+	The whole reason v0.12.1 exists. `Party Type.party_type` is a Link to DocType,
+	so registering one whose DocType is absent is not a warning Frappe issues —
+	it is a `LinkValidationError` raised from `_validate_links()`, and raised
+	inside a patch it aborts the entire `bench migrate`.
+
+	Checked BEFORE the insert rather than caught after it, because an exception
+	inside a patch leaves the transaction in a state the next statement cannot
+	rely on, and because "we did not try, and here is why" is a better thing for
+	a migrate to print than a traceback.
+	"""
+	target = spec.get("doctype") or name
+	if compat.doctype_exists(target):
+		return ""
+	if spec.get("ships_with_this_app"):
+		return (
+			f"the {target} DocType ships with erpnext_mcp but is not on this site yet — it is "
+			"created by the same `bench migrate` that runs this, so a second run will find it"
+		)
+	return (
+		f"there is no DocType called {target!r} on this site. A Party Type's name has to be a "
+		"DocType, because a posting's `party` is a Dynamic Link resolved through its "
+		"`party_type`"
+	)
+
+
+def ensure_party_types() -> dict:
 	"""Seed the custom party types. Called on install and after every migrate.
 
-	Returns the names it created, so the caller can say so. Swallows nothing: a
-	site where this fails is a site where a Journal Entry to a family member
-	cannot be booked, and that should be loud rather than discovered later.
+	NEVER RAISES, and that is a deliberate change from v0.12.0. This runs from a
+	patch and from `after_migrate`; an exception in either aborts `bench migrate`
+	for the whole bench, which in v0.12.0 meant a single unregistrable party type
+	stopped the settings defaults being seeded and left the operator with a
+	traceback instead of an app. A party type that cannot be registered is worth
+	reporting; it is not worth taking the migration down over.
+
+	Returns `{"created": [...], "existing": [...], "skipped": {name: why}}`.
 	"""
+	out = {"created": [], "existing": [], "skipped": {}}
 	if not compat.doctype_exists(PARTY_TYPE):
-		return []
-	created = []
+		out["skipped"] = {
+			name: "this site has no Party Type DocType at all" for name in CUSTOM_PARTY_TYPES
+		}
+		return out
+
 	for name, spec in sorted(CUSTOM_PARTY_TYPES.items()):
 		if frappe.db.exists(PARTY_TYPE, name):
+			out["existing"].append(name)
+			continue
+		blocker = party_type_blocker(name, spec)
+		if blocker:
+			out["skipped"][name] = blocker
 			continue
 		doc = frappe.new_doc(PARTY_TYPE)
 		doc.party_type = name
 		if compat.has_field(PARTY_TYPE, "account_type"):
 			doc.account_type = spec["account_type"]
 		doc.insert(ignore_permissions=True)
-		created.append(name)
-	return created
+		out["created"].append(name)
+	return out

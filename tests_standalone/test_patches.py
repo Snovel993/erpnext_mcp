@@ -1,0 +1,432 @@
+# SPDX-License-Identifier: MIT
+"""Every patch, against a site that has never seen this app.
+
+WHY THIS MODULE EXISTS. v0.12.0's `register_custom_party_types` patch raised a
+`LinkValidationError` on a real bench and took the whole `bench migrate` down
+with it — and this suite passed, because the test double had no link validation
+and inserted the impossible row happily. Two things came out of that, and both
+live here:
+
+  1. A patch is not "code that happens to run once". It runs inside somebody's
+     upgrade, on a site whose state this app does not control, and an exception
+     it lets out stops every other app's migration too. So every patch gets a
+     test that runs it against an empty store and asserts it survives.
+  2. The failure was a **link** failure, and the double now models links. See
+     `Document._validate_links` in `harness.py` — the tests below would pass
+     vacuously without it, which is what happened last time.
+
+WHAT A "FRESH SITE" MEANS HERE. `STORE.reset()` plus the DocType rows the app
+ships, and nothing else: no companies, no accounts, no party types, no Family
+register. That is a harsher site than a real one — a real `bench migrate` has
+already synced the DocTypes and run ERPNext's own fixtures — and a patch that
+survives it survives anything.
+"""
+
+import re
+import unittest
+
+from erpnext_mcp import install, settings
+from erpnext_mcp.patches import register_custom_party_types, set_default_tool_switches
+from erpnext_mcp.tools import company
+
+from .harness import APP_DOCTYPES, INSTALLED_DOCTYPES, META, STORE, MCPTestCase, frappe
+
+#: Every patch this app ships, as `(dotted name, module)`. The test that reads
+#: `patches.txt` keeps this list honest, so a patch added without a test here
+#: fails the build rather than shipping unexercised.
+PATCHES = (
+	("erpnext_mcp.patches.set_default_tool_switches", set_default_tool_switches),
+	("erpnext_mcp.patches.register_custom_party_types", register_custom_party_types),
+)
+
+
+def patches_txt() -> dict:
+	"""`patches.txt` as `{section: [dotted names]}`."""
+	import os
+
+	path = os.path.join(
+		os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "erpnext_mcp", "patches.txt"
+	)
+	with open(path) as handle:
+		body = handle.read()
+	sections, current = {}, None
+	for line in body.splitlines():
+		line = line.strip()
+		if not line or line.startswith("#"):
+			continue
+		match = re.fullmatch(r"\[(\w+)\]", line)
+		if match:
+			current = match.group(1)
+			sections[current] = []
+		elif current:
+			sections[current].append(line)
+	return sections
+
+
+class FreshSite(MCPTestCase):
+	"""A site with the app's DocTypes and nothing in them."""
+
+	def setUp(self):
+		super().setUp()
+		STORE.reset()
+
+
+class PatchesTxt(unittest.TestCase):
+	def test_every_patch_in_patches_txt_has_a_test_in_this_module(self):
+		"""The list above is the thing keeping this honest."""
+		listed = {name for names in patches_txt().values() for name in names}
+		self.assertEqual(listed, {name for name, _module in PATCHES})
+
+	def test_every_patch_module_has_an_execute(self):
+		for name, module in PATCHES:
+			with self.subTest(patch=name):
+				self.assertTrue(callable(getattr(module, "execute", None)))
+
+	def test_the_party_type_patch_runs_after_doctypes_are_synced(self):
+		"""Load-bearing, not stylistic. A Party Type's name has to be a real
+		DocType, and `Family` is one this app ships — so the patch has to run
+		after `bench migrate` has created it. In `pre_model_sync` this patch
+		would fail exactly the way v0.12.0 did."""
+		sections = patches_txt()
+		self.assertIn(
+			"erpnext_mcp.patches.register_custom_party_types", sections.get("post_model_sync", [])
+		)
+		self.assertNotIn(
+			"erpnext_mcp.patches.register_custom_party_types", sections.get("pre_model_sync", [])
+		)
+
+
+class PatchesOnAFreshSite(FreshSite):
+	def test_every_patch_runs_without_raising(self):
+		"""The whole point. An exception here is a `bench migrate` that aborts
+		for every app on the bench, not just this one."""
+		for name, module in PATCHES:
+			with self.subTest(patch=name):
+				module.execute()
+
+	def test_every_patch_is_a_no_op_the_second_time(self):
+		for name, module in PATCHES:
+			with self.subTest(patch=name):
+				module.execute()
+				module.execute()
+
+	def test_running_them_in_patches_txt_order_works(self):
+		for _name, module in PATCHES:
+			module.execute()
+		self.assertTrue(frappe.db.exists("Party Type", "Family"))
+		self.assertTrue(settings.tool_enabled("get_company_topology"))
+
+	def test_the_tool_switches_are_seeded(self):
+		set_default_tool_switches.execute()
+		stored = STORE.singles.get(settings.SETTINGS_DOCTYPE) or {}
+		self.assertEqual(stored.get("allow_list_companies"), "1")
+		self.assertEqual(stored.get("allow_create_company"), "0")
+
+	def test_the_party_types_are_registered(self):
+		register_custom_party_types.execute()
+		self.assertTrue(frappe.db.exists("Party Type", "Family"))
+		self.assertTrue(frappe.db.exists("Party Type", "Contact"))
+
+	def test_after_install_runs_clean(self):
+		install.after_install()
+		self.assertTrue(frappe.db.exists("Party Type", "Family"))
+
+	def test_after_migrate_runs_clean(self):
+		install.after_migrate()
+		self.assertTrue(frappe.db.exists("Party Type", "Family"))
+
+	def test_after_migrate_twice_runs_clean(self):
+		install.after_migrate()
+		install.after_migrate()
+		self.assertEqual(len(STORE.rows("Party Type")), 2)
+
+
+class TheRegressionItself(FreshSite):
+	"""v0.12.0's exact failure, from both directions.
+
+	`Party Type` names itself `field:party_type`, and that field is a **Link to
+	DocType**. So a party type called "Family" needs a DocType called "Family",
+	and there was none — `_validate_links()` refused the insert and the patch
+	took the migration with it. `Contact` registered fine in the same loop,
+	because Frappe ships a Contact DocType; that asymmetry is why the failure
+	looked like a self-link and was not one.
+	"""
+
+	def without_the_family_doctype(self):
+		INSTALLED_DOCTYPES.discard("Family")
+
+	def test_inserting_a_party_type_with_no_matching_doctype_really_does_raise(self):
+		"""The double has to reproduce the production failure, or every test
+		below it is theatre. This is that assertion."""
+		self.without_the_family_doctype()
+		doc = frappe.new_doc("Party Type")
+		doc.party_type = "Family"
+		doc.account_type = "Payable"
+		with self.assertRaises(frappe.LinkValidationError) as caught:
+			doc.insert(ignore_permissions=True)
+		self.assertIn("Family", str(caught.exception))
+
+	def test_the_seeder_skips_it_instead_of_raising(self):
+		self.without_the_family_doctype()
+		result = company.ensure_party_types()
+		self.assertIn("Family", result["skipped"])
+		self.assertNotIn("Family", result["created"])
+
+	def test_contact_still_registers_when_family_cannot(self):
+		"""One unregistrable party type must not cost the other one. That is the
+		difference between a skip and an abort."""
+		self.without_the_family_doctype()
+		result = company.ensure_party_types()
+		self.assertEqual(result["created"], ["Contact"])
+		self.assertTrue(frappe.db.exists("Party Type", "Contact"))
+
+	def test_the_patch_survives_it_and_says_why(self):
+		self.without_the_family_doctype()
+		register_custom_party_types.execute()  # must not raise
+		self.assertFalse(frappe.db.exists("Party Type", "Family"))
+
+	def test_the_skip_reason_names_the_doctype_rule(self):
+		self.without_the_family_doctype()
+		reason = company.ensure_party_types()["skipped"]["Family"]
+		self.assertIn("ships with erpnext_mcp", reason)
+
+	def test_a_party_type_pointing_at_a_doctype_nobody_ships_says_so_differently(self):
+		"""Two different situations and two different sentences: 'ours, not
+		migrated yet' is a retry, 'nobody has this' is a dead end."""
+		reason = company.party_type_blocker("Wombat", {"doctype": "Wombat"})
+		self.assertIn("no DocType called", reason)
+		self.assertIn("Dynamic Link", reason)
+
+	def test_after_migrate_survives_it_too(self):
+		self.without_the_family_doctype()
+		install.after_migrate()
+		self.assertTrue(settings.tool_enabled("get_company_topology"))
+
+	def test_a_migrate_that_cannot_register_a_party_type_still_seeds_the_switches(self):
+		"""The consequential half of the v0.12.0 failure. The abort meant
+		`after_migrate` never ran, so the release's new tool switches were never
+		written — an operator got a traceback AND a half-configured app."""
+		self.without_the_family_doctype()
+		for _name, module in PATCHES:
+			module.execute()
+		install.after_migrate()
+		stored = STORE.singles.get(settings.SETTINGS_DOCTYPE) or {}
+		self.assertEqual(stored.get("allow_list_fields"), "1")
+		self.assertEqual(stored.get("allow_set_field_boundary"), "0")
+
+
+class EveryLinkTargetExists(unittest.TestCase):
+	"""Every Link and Dynamic Link this app declares points somewhere real.
+
+	The schema-level version of the same check. A DocType JSON whose Link names a
+	doctype nothing ships is a field that cannot be filled in on any site, and it
+	fails at `bench migrate` or at first use rather than here — which is the
+	expensive order to find out.
+	"""
+
+	def test_every_link_option_names_a_doctype_that_exists(self):
+		for doctype, folder in sorted(APP_DOCTYPES.items()):
+			meta = META.get(doctype)
+			for field in (meta.fields if meta else []):
+				if field.get("fieldtype") != "Link":
+					continue
+				target = str(field.get("options") or "")
+				with self.subTest(doctype=doctype, field=field.get("fieldname")):
+					self.assertTrue(target, f"{folder}: Link with no options")
+					self.assertIn(
+						target,
+						INSTALLED_DOCTYPES,
+						f"{doctype}.{field.get('fieldname')} links to {target!r}, which nothing ships",
+					)
+
+	def test_every_dynamic_link_resolves_through_a_field_on_the_same_doctype(self):
+		for doctype in sorted(APP_DOCTYPES):
+			meta = META.get(doctype)
+			fieldnames = {field.get("fieldname") for field in (meta.fields if meta else [])}
+			for field in (meta.fields if meta else []):
+				if field.get("fieldtype") != "Dynamic Link":
+					continue
+				with self.subTest(doctype=doctype, field=field.get("fieldname")):
+					self.assertIn(str(field.get("options") or ""), fieldnames)
+
+	def test_every_party_type_this_app_registers_resolves_to_a_real_doctype(self):
+		"""The rule the release broke, asserted directly against the catalogue."""
+		for name, spec in sorted(company.CUSTOM_PARTY_TYPES.items()):
+			with self.subTest(party_type=name):
+				target = spec.get("doctype") or name
+				self.assertIn(
+					target,
+					INSTALLED_DOCTYPES,
+					f"party type {name!r} resolves to {target!r}, which is not a DocType",
+				)
+
+	def test_the_ones_this_app_ships_are_flagged_as_such(self):
+		"""`Family` is ours and `Contact` is Frappe's, and the difference decides
+		which skip message an operator gets."""
+		self.assertTrue(company.CUSTOM_PARTY_TYPES["Family"]["ships_with_this_app"])
+		self.assertFalse(company.CUSTOM_PARTY_TYPES["Contact"]["ships_with_this_app"])
+		self.assertIn("Family", APP_DOCTYPES)
+		self.assertNotIn("Contact", APP_DOCTYPES)
+
+
+class DoctypesThisReleaseAdded(unittest.TestCase):
+	"""All six new DocTypes are loadable, named, and in this app's module.
+
+	Tim's migrate aborted in `post_model_sync`, which runs after the DocType sync
+	— so the tables were already created. This asserts the schema they were
+	created from is well-formed, which is the part a failed patch could not have
+	affected but which is cheap to be sure of.
+	"""
+
+	NEW = ("Field", "Irrigation Zone", "Housing Unit", "Housing Assignment", "Family")
+
+	def test_each_one_is_registered_and_has_fields(self):
+		for doctype in self.NEW:
+			with self.subTest(doctype=doctype):
+				self.assertIn(doctype, APP_DOCTYPES)
+				self.assertIn(doctype, INSTALLED_DOCTYPES)
+				self.assertTrue(META[doctype].fields)
+
+	def test_each_one_can_be_instantiated(self):
+		"""Which means its controller module imports — the failure v0.7.1 shipped,
+		where a DocType JSON had no Python module beside it and `bench migrate`
+		died with ModuleNotFoundError."""
+		for doctype in self.NEW:
+			with self.subTest(doctype=doctype):
+				self.assertIsNotNone(frappe.new_doc(doctype))
+
+	def test_none_of_them_is_a_single_or_a_child_table(self):
+		for doctype in self.NEW:
+			with self.subTest(doctype=doctype):
+				row = STORE.get_raw("DocType", doctype)
+				self.assertEqual(int(row["issingle"]), 0)
+				self.assertEqual(int(row["istable"]), 0)
+
+	def test_the_new_registers_are_named_by_a_field_not_by_a_hash(self):
+		"""A docname somebody can read is the difference between a register and a
+		table of serial numbers. Housing Assignment is the exception on purpose —
+		it is a dated event, and `HA-2026-06-00001` is its own sort order."""
+		self.assertEqual(META["Family"].autoname, "field:family_member_name")
+
+
+class TheDoubleActuallyValidates(MCPTestCase):
+	"""Guard on the guard.
+
+	If `_validate_links` is ever removed or short-circuited, every link test in
+	the suite starts passing for the wrong reason and nothing says so. These fail
+	loudly if the validation stops happening.
+	"""
+
+	def test_a_link_to_a_missing_record_is_refused(self):
+		doc = frappe.new_doc("Family")
+		doc.family_member_name = "Nobody's Cousin"
+		doc.related_party = "RP-does-not-exist"
+		with self.assertRaises(frappe.LinkValidationError):
+			doc.insert(ignore_permissions=True)
+
+	def test_a_link_to_a_record_that_exists_is_accepted(self):
+		STORE.seed(
+			"Related Party",
+			[{"name": "RP-0001", "party_name": "Alex Bramwell", "company": "Example Trading Co"}],
+		)
+		doc = frappe.new_doc("Family")
+		doc.family_member_name = "Alex Bramwell"
+		doc.related_party = "RP-0001"
+		doc.insert(ignore_permissions=True)
+		self.assertTrue(STORE.get_raw("Family", "Alex Bramwell"))
+
+	def test_ignore_links_bypasses_it_the_way_frappe_does(self):
+		doc = frappe.new_doc("Family")
+		doc.family_member_name = "Bypassed"
+		doc.related_party = "RP-does-not-exist"
+		doc.flags.ignore_links = True
+		doc.insert(ignore_permissions=True)
+		self.assertTrue(STORE.get_raw("Family", "Bypassed"))
+
+	def test_an_empty_link_is_not_validated(self):
+		doc = frappe.new_doc("Family")
+		doc.family_member_name = "No Related Party"
+		doc.insert(ignore_permissions=True)
+		self.assertTrue(STORE.get_raw("Family", "No Related Party"))
+
+
+class AFamilyPostingActuallyWorks(MCPTestCase):
+	"""End to end, which is what v0.12.0 claimed and could not do.
+
+	The release registered a `Family` party type and had tests asserting a
+	Family-party posting "posts cleanly" — against a double that modelled
+	`party` as free text. On a real site `party` is a Dynamic Link resolved
+	through `party_type`, so the posting would have been refused even if the
+	party type had registered. Both halves are checked here: the good posting
+	goes through, and a party that is not on the register is refused the way
+	Frappe refuses it.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		from .fixtures import MAIN, cash, seed_site, seed_v12, supplies
+
+		seed_site()
+		seed_v12()
+		self.MAIN, self.cash, self.supplies = MAIN, cash, supplies
+		self.configure(enabled=1, allow_create_journal_entry=1)
+		company.ensure_party_types()
+
+	def a_journal_entry(self, party_type, party):
+		return self.tool(
+			"create_journal_entry",
+			{
+				"company": self.MAIN,
+				"posting_date": "2026-03-01",
+				"user_remark": f"transfer to {party}",
+				"accounts": [
+					{
+						"account": self.supplies(),
+						"debit": 500,
+						"party_type": party_type,
+						"party": party,
+					},
+					{"account": self.cash(), "credit": 500},
+				],
+			},
+		)
+
+	def test_a_family_party_posts_cleanly(self):
+		from .fixtures import ALEX
+
+		result = self.a_journal_entry("Family", ALEX)
+		self.assertFalse(result.get("isError"), result["content"][0]["text"])
+
+	def test_a_contact_party_posts_cleanly(self):
+		from .fixtures import ANTONY
+
+		result = self.a_journal_entry("Contact", ANTONY)
+		self.assertFalse(result.get("isError"), result["content"][0]["text"])
+
+	def test_a_family_party_who_is_not_on_the_register_is_refused(self):
+		"""The Dynamic Link doing its job. Without the register entry there is
+		nothing for the posting to point at, and a ledger that accepted it would
+		be naming somebody who does not exist."""
+		result = self.a_journal_entry("Family", "Somebody Nobody Added")
+		self.assertTrue(result.get("isError"))
+		self.assertIn("Somebody Nobody Added", result["content"][0]["text"])
+
+	def test_a_party_type_that_is_not_a_doctype_is_refused(self):
+		"""The same rule one level up: `party_type` is a Link to DocType, so a
+		posting cannot invent a party type any more than it can invent a party."""
+		result = self.a_journal_entry("Cousin", "Alex Bramwell")
+		self.assertTrue(result.get("isError"))
+
+	def test_the_family_register_is_what_makes_the_difference(self):
+		"""Add the person, and the identical posting that was refused goes
+		through — which is the whole reason this release ships a Family DocType."""
+		refused = self.a_journal_entry("Family", "Marguerite Bramwell")
+		self.assertTrue(refused.get("isError"))
+
+		doc = frappe.new_doc("Family")
+		doc.family_member_name = "Marguerite Bramwell"
+		doc.relationship = "Parent"
+		doc.insert(ignore_permissions=True)
+
+		accepted = self.a_journal_entry("Family", "Marguerite Bramwell")
+		self.assertFalse(accepted.get("isError"), accepted["content"][0]["text"])
