@@ -50,6 +50,22 @@ _PRECIOUS_DOCTYPES = (
 		"the notes and loans register — terms, provenance and payment history for "
 		"debts whose only other record is a balance on a liability account",
 	),
+	(
+		"Parcel",
+		"the land register — assessor parcel ids, acreage, appraised values and the "
+		"dates they were appraised as of, none of which is anywhere else on the site",
+	),
+	(
+		"Lease",
+		"the lease register, in both directions, including rent terms that exist in "
+		"no other digital form",
+	),
+	(
+		"Related Party",
+		"the related-party register — who is related to the company, in what "
+		"capacity, from when, and which document says so. The source for a "
+		"related-party disclosure on a return",
+	),
 )
 
 

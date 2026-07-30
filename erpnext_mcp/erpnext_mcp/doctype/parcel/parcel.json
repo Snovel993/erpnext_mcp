@@ -1,0 +1,207 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-30 09:00:00.000000",
+ "description": "One real estate parcel: where it is, how big it is, who holds title, what it was last appraised at, and — when it is on the balance sheet — which Fixed Asset carries it. The unit is the parcel as the county assessor knows it, because that is the unit an appraisal, a tax bill and a deed all agree on.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "parcel_name",
+  "owning_entity",
+  "parcel_id",
+  "use_type",
+  "identity_col",
+  "county",
+  "state",
+  "acreage",
+  "address",
+  "title_section",
+  "title_holder",
+  "valuation_section",
+  "appraised_value",
+  "appraised_as_of",
+  "valuation_col",
+  "appraiser",
+  "appraisal_document",
+  "linkage_section",
+  "related_asset",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this parcel is called in conversation: 'Red Camp', 'Mill Creek', 'Packing House'. The docname is built from this and the owning entity's abbreviation, so two entities may each have a 'Home Place'.",
+   "fieldname": "parcel_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Parcel Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The company whose books track this parcel. Where title is held by an entity that is not a company on this site — a trust, a sibling LLC — record that in Title Holder and leave this as the company doing the tracking.",
+   "fieldname": "owning_entity",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Owning Entity",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The county assessor's parcel number, exactly as printed on the tax statement. This is the only identifier a third party will recognise.",
+   "fieldname": "parcel_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Assessor Parcel ID",
+   "search_index": 1
+  },
+  {
+   "fieldname": "use_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Use Type",
+   "options": "\nOrchard\nFarmstead\nPacking and Storage\nResidential\nLabor Housing\nBare Land\nMixed\nOther"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "county",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "County"
+  },
+  {
+   "description": "Two-letter state or province code. A county with no state is not an address.",
+   "fieldname": "state",
+   "fieldtype": "Data",
+   "label": "State"
+  },
+  {
+   "description": "Deeded or GIS acreage. Say which in Notes when the two disagree, because they usually do.",
+   "fieldname": "acreage",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Acreage",
+   "precision": "2"
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Small Text",
+   "label": "Address"
+  },
+  {
+   "fieldname": "title_section",
+   "fieldtype": "Section Break",
+   "label": "Title"
+  },
+  {
+   "description": "Who actually holds title, when that is not the owning entity itself. Points at the Related Party register so the legal name lives in one place.",
+   "fieldname": "title_holder",
+   "fieldtype": "Link",
+   "label": "Title Holder",
+   "options": "Related Party"
+  },
+  {
+   "fieldname": "valuation_section",
+   "fieldtype": "Section Break",
+   "label": "Valuation"
+  },
+  {
+   "description": "Fee simple market value from the most recent appraisal. Not a book value: what the asset cost is on the Fixed Asset record, and the two are meant to differ.",
+   "fieldname": "appraised_value",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Appraised Value"
+  },
+  {
+   "description": "The effective date of the appraisal, which is not the date the report was delivered.",
+   "fieldname": "appraised_as_of",
+   "fieldtype": "Date",
+   "label": "Appraised As Of"
+  },
+  {
+   "fieldname": "valuation_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Who signed the appraisal, and their designation.",
+   "fieldname": "appraiser",
+   "fieldtype": "Data",
+   "label": "Appraiser"
+  },
+  {
+   "description": "The archived appraisal report. A value with no document behind it is a number somebody remembered.",
+   "fieldname": "appraisal_document",
+   "fieldtype": "Link",
+   "label": "Appraisal Document",
+   "options": "Governance Document"
+  },
+  {
+   "fieldname": "linkage_section",
+   "fieldtype": "Section Break",
+   "label": "Accounting"
+  },
+  {
+   "description": "The Fixed Asset that carries this parcel on the balance sheet, when there is one. Land is not depreciated; improvements on it usually are, and those are separate Assets.",
+   "fieldname": "related_asset",
+   "fieldtype": "Link",
+   "label": "Related Asset",
+   "options": "Asset"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-30 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Parcel",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "parcel_name,parcel_id,county,owning_entity",
+ "sort_field": "parcel_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "parcel_name",
+ "track_changes": 1
+}

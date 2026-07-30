@@ -49,13 +49,17 @@ from .tools import (
 	fiscal,
 	governance,
 	hr,
+	investment_report,
 	meta,
 	mutate,
 	notes,
 	opening,
 	packets,
+	parties,
 	read,
+	realestate,
 	reports,
+	tax,
 	trade,
 	workflow,
 )
@@ -2712,6 +2716,619 @@ TOOLS = {
 		title="Close a note payable",
 		available=_needs_doctype("Note Payable"),
 		requires="the Note Payable DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── real estate: parcels ────────────────────────────────────────────────
+	"list_parcels": _tool(
+		realestate.list_parcels,
+		"One entity's land register: every parcel with its acreage, county, assessor "
+		"parcel id, use type, appraised value and the Fixed Asset carrying it, plus "
+		"totals for acreage and appraised value and an average per acre. Reports the "
+		"oldest and newest appraisal dates, which is how you find out the valuation "
+		"is four years stale. Read-only.\n\n"
+		"APPRAISED VALUE IS NOT BOOK VALUE. What the balance sheet carries is the "
+		"Asset's cost; this is market. They are meant to differ and nothing here "
+		"reconciles them — link_parcel_to_asset reports the gap instead.",
+		{
+			"owning_entity": _field(
+				_STRING,
+				"The company whose register to read. `company` works as an alias. "
+				"Omit on a single-company site.",
+			),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"county": _field(_STRING, "Only parcels in this county."),
+			"use_type": _field(
+				_STRING,
+				"Only this use: Orchard, Farmstead, Packing and Storage, Residential, "
+				"Labor Housing, Bare Land, Mixed or Other.",
+			),
+			"title_holder": _field(_STRING, "Only parcels whose title is held by this Related Party."),
+			"linked_to_asset": _field(
+				_BOOLEAN,
+				"true for only parcels linked to a Fixed Asset, false for only those not.",
+			),
+			"limit": _field(_INTEGER, "Maximum parcels returned. Default 100, hard maximum 500."),
+		},
+		title="List parcels",
+		available=_needs_doctype("Parcel"),
+		requires="the Parcel DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_parcel": _tool(
+		realestate.get_parcel,
+		"One parcel in full: its identity, acreage, appraisal, title holder, the "
+		"Fixed Asset carrying it with the gap between cost and market spelled out, "
+		"and every lease recorded over it in either direction. Read-only.",
+		{
+			"parcel": _field(
+				_STRING,
+				"The Parcel docname ('Red Camp - HLD') or just the parcel name ('Red Camp'). "
+				"A name matching parcels in two entities is refused with both named.",
+			),
+			"owning_entity": _field(_STRING, "Narrow a bare parcel name to one entity."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+		},
+		required=("parcel",),
+		title="Get a parcel",
+		available=_needs_doctype("Parcel"),
+		requires="the Parcel DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_parcel": _tool(
+		realestate.create_parcel,
+		"MUTATING (default OFF). Register one real estate parcel: name, county, "
+		"assessor parcel id, acreage, address, use type, appraised value and the date "
+		"it was appraised as of. Creates one Parcel and nothing else — no asset, no "
+		"posting, no balance moves.\n\n"
+		"THE DOCNAME IS '<parcel_name> - <entity abbr>', so two entities in one "
+		"family may each have a 'Home Place'. WHAT IT REFUSES: a second parcel with "
+		"the same name for the same entity; a second parcel claiming the same "
+		"assessor parcel id (that number is the county's key, so two of them means a "
+		"typo); negative acreage or value; a title_holder, appraisal_document or "
+		"related_asset belonging to another company.\n\n"
+		"WARNS, DOES NOT REFUSE, when a value arrives with no as-of date or no "
+		"appraisal document behind it — a figure somebody remembered is still worth "
+		"recording, it just should not be mistaken for a valuation.",
+		{
+			"owning_entity": _field(
+				_STRING,
+				"The company whose books track it. `company` is an alias. Where title sits "
+				"with a trust or another LLC that is not a company here, put that in "
+				"title_holder and leave this as the entity doing the tracking.",
+			),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"parcel_name": _field(_STRING, "What it is called: 'Red Camp', 'Mill Creek'."),
+			"parcel_id": _field(_STRING, "The county assessor's parcel number, exactly as printed."),
+			"county": _field(_STRING, "County."),
+			"state": _field(_STRING, "Two-letter state code. A county with no state is not an address."),
+			"address": _field(_STRING, "Street address."),
+			"acreage": _field(_NUMBER, "Deeded or GIS acreage. Say which in notes when they disagree."),
+			"use_type": _field(
+				_STRING,
+				"Orchard, Farmstead, Packing and Storage, Residential, Labor Housing, "
+				"Bare Land, Mixed or Other.",
+			),
+			"title_holder": _field(_STRING, "The Related Party holding title, when it is not the entity."),
+			"appraised_value": _field(_NUMBER, "Fee simple market value from the latest appraisal."),
+			"appraised_as_of": _field(_STRING, "The appraisal's effective date, YYYY-MM-DD."),
+			"appraiser": _field(_STRING, "Who signed it, and their designation."),
+			"appraisal_document": _field(
+				_STRING, "The Governance Document holding the appraisal report."
+			),
+			"related_asset": _field(
+				_STRING, "The Fixed Asset carrying it, if it is already on the balance sheet."
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("parcel_name",),
+		mutating=True,
+		title="Create a parcel",
+		available=_needs_doctype("Parcel"),
+		requires="the Parcel DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_parcel": _tool(
+		realestate.update_parcel,
+		"MUTATING (default OFF). Change a registered parcel: county, state, address, "
+		"acreage, use type, assessor id, appraised value and date, appraiser, title "
+		"holder, appraisal document, notes. Every change is echoed back as "
+		"before → after.\n\n"
+		"CANNOT re-key: parcel_name is refused because the docname is built from it "
+		"and every lease and asset link points at that docname. CANNOT move a parcel "
+		"between entities — a parcel changing hands is a conveyance, not an edit. "
+		"CANNOT set related_asset; that is link_parcel_to_asset, which checks the "
+		"asset is on the same books and that no other parcel claims it.",
+		{
+			"parcel": _field(_STRING, "The Parcel docname, or its parcel name."),
+			"owning_entity": _field(_STRING, "Narrow a bare parcel name to one entity."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"parcel_id": _field(_STRING, "New assessor parcel number. Empty string clears it."),
+			"county": _field(_STRING, "New county."),
+			"state": _field(_STRING, "New state code."),
+			"address": _field(_STRING, "New address."),
+			"acreage": _field(_NUMBER, "New acreage."),
+			"use_type": _field(_STRING, "New use type. Empty string clears it."),
+			"appraised_value": _field(_NUMBER, "New appraised value."),
+			"appraised_as_of": _field(_STRING, "New appraisal date, YYYY-MM-DD."),
+			"appraiser": _field(_STRING, "New appraiser."),
+			"title_holder": _field(_STRING, "New Related Party holding title. Empty string clears it."),
+			"appraisal_document": _field(_STRING, "New Governance Document. Empty string clears it."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		required=("parcel",),
+		mutating=True,
+		title="Update a parcel",
+		available=_needs_doctype("Parcel"),
+		requires="the Parcel DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"link_parcel_to_asset": _tool(
+		realestate.link_parcel_to_asset,
+		"MUTATING (default OFF). Point a Parcel at the Fixed Asset that carries it on "
+		"the balance sheet, and report the gap between what was paid and what it is "
+		"worth. That gap is the point: unrealised appreciation is the number an "
+		"estate conversation turns on and neither record shows it alone.\n\n"
+		"Sets one field. No balance moves, no depreciation schedule changes, nothing "
+		"is posted — land is not depreciated and this does not pretend otherwise.\n\n"
+		"REFUSES: an asset that does not exist; an asset on another company's books; "
+		"an asset already linked to a different parcel; a parcel already linked to "
+		"something else, unless replace=true. `dry_run` validates and reports without "
+		"writing.",
+		{
+			"parcel": _field(_STRING, "The Parcel docname, or its parcel name."),
+			"asset": _field(_STRING, "The Asset docname."),
+			"owning_entity": _field(_STRING, "Narrow a bare parcel name to one entity."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"replace": _field(
+				_BOOLEAN,
+				"Repoint a parcel that is already linked. Default false. Right after a "
+				"re-capitalisation, wrong when the two assets are two parts of the parcel.",
+			),
+			"dry_run": _field(_BOOLEAN, "Validate and report without writing. Default false."),
+		},
+		required=("parcel", "asset"),
+		mutating=True,
+		idempotent=True,
+		title="Link a parcel to an asset",
+		available=_needs_doctype("Parcel"),
+		requires="the Parcel DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── real estate: leases ─────────────────────────────────────────────────
+	"list_leases": _tool(
+		realestate.list_leases,
+		"One entity's leases in BOTH directions, with the rent roll: annual rent "
+		"receivable (leases where we are the lessor), annual rent payable (where we "
+		"are the lessee), the net, and which leases run out inside the next 90 days. "
+		"Read-only.\n\n"
+		"RENT IS ANNUALISED FOR ACTIVE LEASES ONLY, from amount and frequency. A "
+		"crop share and a one-time payment have no annual rate: they are listed "
+		"under rent_not_annualisable rather than counted as zero, because a rent roll "
+		"that treats an unknown as nothing understates the whole portfolio.\n\n"
+		"NOTHING HERE EXPIRES A LEASE. A lease marked Active whose expiration date "
+		"has passed is reported as such and left exactly as it was — farm ground "
+		"routinely runs on month to month past its stated term, and a status that "
+		"flipped itself on a calendar would erase the difference between 'still "
+		"running' and 'nobody has looked at this in years'.",
+		{
+			"owning_entity": _field(_STRING, "Whose leases. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"status": _field(_STRING, "Active, Expired or Terminated."),
+			"direction": _field(
+				_STRING,
+				"Outbound (we are the lessor, collecting rent) or Inbound (we are the "
+				"lessee, paying it).",
+			),
+			"parcel": _field(_STRING, "Only leases over this parcel."),
+			"counterparty": _field(_STRING, "Only leases with this Related Party on the other side."),
+			"active_on": _field(
+				_STRING,
+				"Only leases in force on this date, by the dates on the record. YYYY-MM-DD.",
+			),
+			"expiring_within_days": _field(
+				_INTEGER, "Window for expiring_soon. Default 90."
+			),
+			"limit": _field(_INTEGER, "Maximum leases returned. Default 100, hard maximum 500."),
+		},
+		title="List leases",
+		available=_needs_doctype("Lease"),
+		requires="the Lease DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_lease": _tool(
+		realestate.get_lease,
+		"One lease in full, with the parcel it covers, its attachments and whether it "
+		"is in force today by the dates on the record. Read `direction` before "
+		"reading `rent_amount`: Outbound means the owning entity collects it, Inbound "
+		"means it pays it. Read-only.",
+		{
+			"lease": _field(_STRING, "The Lease docname, or just the lease name."),
+			"owning_entity": _field(_STRING, "Narrow a bare lease name to one entity."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+		},
+		required=("lease",),
+		title="Get a lease",
+		available=_needs_doctype("Lease"),
+		requires="the Lease DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_lease": _tool(
+		realestate.create_lease,
+		"MUTATING (default OFF). Record one lease, in whichever direction it runs — "
+		"ground let out to an operator, or ground taken in from another party. "
+		"Creates one Lease and BOOKS NOTHING: no journal entry, no receivable, no "
+		"schedule. Recording an agreement and booking its consequences are separate "
+		"acts and this is the first one.\n\n"
+		"DIRECTION IS STATED, NOT GUESSED. Outbound means the owning entity is the "
+		"lessor. The result carries a direction_check saying whether the party names "
+		"agree with that claim — reported, never enforced, because a legal name "
+		"('Highland Ltd Liability Co.') and a Company docname ('Highland LLC') "
+		"routinely differ and a refusal built on string matching is one nobody could "
+		"get past.\n\n"
+		"REFUSES: a duplicate lease name for the same entity; the same party as both "
+		"lessor and lessee; an expiration or termination date before the effective "
+		"date; Terminated status with no termination date; negative rent; a parcel, "
+		"counterparty or governance document belonging to another company.\n\n"
+		"`file_content` is base64 of the executed lease, ceiling 8 MB — base64 in a "
+		"JSON call is expensive, so a large scan is better uploaded in the Desk and "
+		"recorded with `lease_document_url` instead. Uploaded files are stored "
+		"PRIVATE.",
+		{
+			"owning_entity": _field(_STRING, "The company on our side of it. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"lease_name": _field(
+				_STRING, "What it is called: 'Mill Creek Ground Lease 2025'. Name renewals for their term."
+			),
+			"direction": _field(_STRING, "Outbound (we are the lessor) or Inbound (we are the lessee)."),
+			"lessor": _field(_STRING, "The party letting the ground out, by legal name."),
+			"lessee": _field(_STRING, "The party taking it in, by legal name."),
+			"effective_date": _field(_STRING, "When it starts, YYYY-MM-DD."),
+			"expiration_date": _field(_STRING, "When the stated term ends. Omit for no fixed end."),
+			"status": _field(_STRING, "Active (default), Expired or Terminated."),
+			"termination_date": _field(_STRING, "When it was actually ended early. Required for Terminated."),
+			"termination_reason": _field(_STRING, "Why."),
+			"parcel": _field(_STRING, "The Parcel it covers, when it is one recorded parcel."),
+			"counterparty": _field(_STRING, "The other side, as a Related Party, when they are one."),
+			"rent_amount": _field(_NUMBER, "Rent per period. Omit for a crop share."),
+			"rent_frequency": _field(
+				_STRING,
+				"Monthly, Quarterly, Semi-Annual, Annual (default), One-Time, Crop Share or Other.",
+			),
+			"rent_terms": _field(
+				_STRING,
+				"Escalators, crop-share percentages, who pays the water assessment — the part "
+				"of a farm lease that is never a number.",
+			),
+			"governance_document": _field(_STRING, "The archive entry for the executed lease."),
+			"lease_document_url": _field(
+				_STRING, "Where the executed lease already lives. Not with file_content."
+			),
+			"file_content": _field(
+				_STRING, "The executed lease, base64, no data: prefix. Ceiling 8 MB. Not with lease_document_url."
+			),
+			"file_name": _field(_STRING, "Filename to store it as. Required with file_content."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("lease_name", "direction", "lessor", "lessee", "effective_date"),
+		mutating=True,
+		title="Create a lease",
+		available=_needs_doctype("Lease"),
+		requires="the Lease DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_lease": _tool(
+		realestate.update_lease,
+		"MUTATING (default OFF). Change a recorded lease: status, expiration, "
+		"termination date and reason, rent amount and frequency, terms, parties, "
+		"parcel, counterparty, governance document, notes. Every change is echoed "
+		"back as before → after. Books nothing.\n\n"
+		"CANNOT re-key: lease_name is refused because the docname is built from it, "
+		"and a renewed lease is a NEW lease with its own term. CANNOT move a lease "
+		"between entities. REFUSES marking a lease Terminated without a "
+		"termination_date in the same call, and refuses making one party both lessor "
+		"and lessee.",
+		{
+			"lease": _field(_STRING, "The Lease docname, or its lease name."),
+			"owning_entity": _field(_STRING, "Narrow a bare lease name to one entity."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"status": _field(_STRING, "Active, Expired or Terminated."),
+			"expiration_date": _field(_STRING, "New end of the stated term, YYYY-MM-DD."),
+			"termination_date": _field(_STRING, "When it was ended early. Required to mark it Terminated."),
+			"termination_reason": _field(_STRING, "Why."),
+			"rent_amount": _field(_NUMBER, "New rent per period."),
+			"rent_frequency": _field(_STRING, "New frequency."),
+			"rent_terms": _field(_STRING, "New terms."),
+			"lessor": _field(_STRING, "New lessor."),
+			"lessee": _field(_STRING, "New lessee."),
+			"parcel": _field(_STRING, "New parcel. Empty string clears it."),
+			"counterparty": _field(_STRING, "New Related Party counterparty. Empty string clears it."),
+			"governance_document": _field(_STRING, "New archive entry. Empty string clears it."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		required=("lease",),
+		mutating=True,
+		title="Update a lease",
+		available=_needs_doctype("Lease"),
+		requires="the Lease DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── related parties ─────────────────────────────────────────────────────
+	"list_related_parties": _tool(
+		parties.list_related_parties,
+		"One company's related-party register: who is related to it, in what "
+		"capacity, from when, under which document, and which of them are linked to a "
+		"Supplier or a Cap Table Entry. Reports the relationships with no governing "
+		"document behind them, which is the first thing an examiner asks for. "
+		"Read-only.\n\n"
+		"ONE PERSON MAY APPEAR MORE THAN ONCE. A Manager who is also a Member is two "
+		"entries, under two instruments, from two dates — `count` counts "
+		"relationships and `distinct_people` counts names. Ended relationships are "
+		"listed by default: the transactions they explain are still in the ledger.\n\n"
+		"This is GOVERNANCE, not accounting. It does not replace or shadow the Party "
+		"field on a Journal Entry, which stays Supplier / Customer / Employee.",
+		{
+			"company": _field(_STRING, "Whose register. Omit on a single-company site."),
+			"party_type": _field(
+				_STRING,
+				"Individual, Trust, LLC, Corporation, Partnership, Family Member or Other.",
+			),
+			"relationship_to_company": _field(
+				_STRING,
+				"Member, Manager, Trustee, Beneficiary, Family, Vendor, Officer, Director or Other.",
+			),
+			"supplier": _field(_STRING, "Only the entry linked to this Supplier."),
+			"current_only": _field(
+				_BOOLEAN, "Only relationships that have not ended. Default false — ended ones are shown."
+			),
+			"limit": _field(_INTEGER, "Maximum entries returned. Default 100, hard maximum 500."),
+		},
+		title="List related parties",
+		available=_needs_doctype("Related Party"),
+		requires="the Related Party DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_related_party": _tool(
+		parties.get_related_party,
+		"One relationship in full, with everything on this site pointing at it: the "
+		"person's other roles at the same company, their Cap Table Entry, their "
+		"Supplier record, the parcels they hold title to and the leases they are "
+		"counterparty on. Read-only.\n\n"
+		"NEVER RETURNS MORE THAN FOUR DIGITS of a taxpayer id, including from a "
+		"linked Supplier — `supplier_detail.tax_id` says only whether one is on file.",
+		{
+			"party": _field(
+				_STRING,
+				"The Related Party docname ('Tim Polehn - Manager - OML') or just the name. "
+				"A bare name held in two capacities is refused with both docnames listed.",
+			),
+			"company": _field(_STRING, "Narrow a bare name to one company."),
+		},
+		required=("party",),
+		title="Get a related party",
+		available=_needs_doctype("Related Party"),
+		requires="the Related Party DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_related_party": _tool(
+		parties.create_related_party,
+		"MUTATING (default OFF). Register one relationship: who, what kind of entity "
+		"they are, in what capacity, from when, and which document establishes it. "
+		"Creates one Related Party and nothing else.\n\n"
+		"THE DOCNAME IS '<name> - <relationship> - <company abbr>', because somebody "
+		"who is both Manager and Member of an LLC is two entries under two "
+		"instruments. Registering the same name and role twice is refused; "
+		"registering a second role is expected.\n\n"
+		"FOUR DIGITS, NEVER NINE. `tax_id_last4` takes exactly four digits and "
+		"refuses nine, naming what it thinks it was sent. The full SSN or EIN belongs "
+		"on the signed W-9, on paper — the difference between a site holding four "
+		"digits and a site holding nine is the difference between an inconvenience "
+		"and a notifiable breach.\n\n"
+		"ALSO REFUSES: an end_date before the effective_date; a tax id with no type "
+		"or a type with no digits; a cap_table_entry or governing_document belonging "
+		"to another company.",
+		{
+			"company": _field(_STRING, "Which company they are related to."),
+			"party_name": _field(
+				_STRING, "Their legal name, as it appears on the document establishing the relationship."
+			),
+			"party_type": _field(
+				_STRING,
+				"What they ARE: Individual, Trust, LLC, Corporation, Partnership, Family "
+				"Member or Other.",
+			),
+			"relationship_to_company": _field(
+				_STRING,
+				"What they DO here: Member, Manager, Trustee, Beneficiary, Family, Vendor, "
+				"Officer, Director or Other.",
+			),
+			"effective_date": _field(_STRING, "When the relationship started, YYYY-MM-DD."),
+			"end_date": _field(_STRING, "When it ended. Omit for current."),
+			"tax_id_type": _field(_STRING, "None (default), SSN or EIN."),
+			"tax_id_last4": _field(
+				_STRING, "The LAST FOUR DIGITS ONLY. Nine digits is refused, not truncated."
+			),
+			"address": _field(_STRING, "Mailing address, as it should print on a 1099."),
+			"cap_table_entry": _field(_STRING, "Their row in the member register, if they hold an interest."),
+			"supplier": _field(
+				_STRING,
+				"Their Supplier record, if they are also paid. This is what makes "
+				"generate_1099_prefill flag the payment as a related-party transaction.",
+			),
+			"governing_document": _field(
+				_STRING, "The operating agreement, trust instrument or resolution that establishes it."
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("party_name", "party_type", "relationship_to_company", "effective_date"),
+		mutating=True,
+		title="Create a related party",
+		available=_needs_doctype("Related Party"),
+		requires="the Related Party DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_related_party": _tool(
+		parties.update_related_party,
+		"MUTATING (default OFF). Change a registered relationship: party type, "
+		"effective and end dates, tax id type and last four, address, and the links "
+		"to a Cap Table Entry, a Supplier and a governing document.\n\n"
+		"CANNOT re-key. party_name, relationship_to_company and company are the key "
+		"and the docname is built from them — a change of role is a NEW relationship, "
+		"so register it and set an end_date on this one. An entry is never deleted "
+		"when a relationship ends: the transactions it explains are still in the "
+		"ledger, and a prior year's disclosure schedule still needs to know who was "
+		"who at the time.",
+		{
+			"party": _field(_STRING, "The Related Party docname, or the name if it is unambiguous."),
+			"company": _field(_STRING, "Narrow a bare name to one company."),
+			"party_type": _field(_STRING, "New party type."),
+			"effective_date": _field(_STRING, "New start date, YYYY-MM-DD."),
+			"end_date": _field(_STRING, "When it ended. Empty string clears it."),
+			"tax_id_type": _field(_STRING, "None, SSN or EIN."),
+			"tax_id_last4": _field(_STRING, "The last four digits only."),
+			"address": _field(_STRING, "New address."),
+			"cap_table_entry": _field(_STRING, "New Cap Table Entry. Empty string clears it."),
+			"supplier": _field(_STRING, "New Supplier. Empty string clears it."),
+			"governing_document": _field(_STRING, "New governing document. Empty string clears it."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		required=("party",),
+		mutating=True,
+		title="Update a related party",
+		available=_needs_doctype("Related Party"),
+		requires="the Related Party DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── generated documents ─────────────────────────────────────────────────
+	"generate_quarterly_investment_report": _tool(
+		investment_report.generate_quarterly_investment_report,
+		"MUTATING (default OFF). Build the quarter's investment report as a PDF and "
+		"file it in the governance archive as a Prior Statement with the PDF "
+		"attached. Covers assets under management, ledger activity, the manager and "
+		"custody fee accrual, performance against a benchmark with a high-water mark, "
+		"the cash clearing balance, and the reconciliation state it was produced "
+		"under.\n\n"
+		"IT REFUSES A QUARTER THAT IS NOT CLOSED, and names everything that is "
+		"missing in one reply rather than one per call. Four things must be true: the "
+		"quarter has ended; the custodian's statement is filed as a Prior Statement "
+		"governance document with an effective date inside it; no journal entry "
+		"touching the investment accounts is still a draft; no bank transaction in "
+		"the period is unreconciled. A report generated on a calendar date regardless "
+		"of state is a report whose numbers may be wrong, signed by somebody who "
+		"assumed the schedule meant something.\n\n"
+		"IT INVENTS NOTHING. Without benchmark_rate_percent the return-over-benchmark "
+		"and the performance fee are NOT computed and say so — they are not zero and "
+		"not estimated, because a performance fee against an assumed benchmark of "
+		"nothing overstates what the manager is owed. Same for the high-water mark and "
+		"net contributions.\n\n"
+		"HOLDINGS COME FROM THE CALLER. This app reads one ERPNext site; the "
+		"custodian's positions are not on it. Pass `holdings` and the report "
+		"reconciles the snapshot against the ledger and reports the variance; omit it "
+		"and assets under management are the ledger balance, stated as such.\n\n"
+		"PDF IS THE DEFAULT AND THE RIGHT ANSWER. `output_format='docx'` exists for a "
+		"report that has to be edited before signing; a .docx is a file the recipient "
+		"may not be able to open. `dry_run=true` runs every precondition and computes "
+		"every figure without writing anything.",
+		{
+			"company": _field(_STRING, "The client company. Omit on a single-company site."),
+			"quarter": _field(_STRING, "The quarter, as '2026-Q2'."),
+			"output_format": _field(_STRING, "'pdf' (default) or 'docx'."),
+			"output_path": _field(
+				_STRING,
+				"Also write the document here. Relative paths land under the site's "
+				"private/files; anything resolving outside the site's file storage is refused. "
+				"Omit it — the attachment is the durable copy.",
+			),
+			"overwrite": _field(_BOOLEAN, "Replace an existing file at output_path. Default false."),
+			"investment_accounts": _field(
+				_STRING_ARRAY,
+				"The accounts holding the portfolio. Omit to match them by name on this "
+				"company's chart — the result lists exactly which were included.",
+			),
+			"cash_clearing_account": _field(
+				_STRING, "The clearing account. Omit to match it by name."
+			),
+			"holdings": _field(
+				{"type": "array", "items": _OBJECT},
+				"The custodian's positions at quarter end: objects with symbol, description, "
+				"quantity, price, market_value and cost_basis. Omit and the ledger is the only "
+				"source.",
+			),
+			"benchmark_rate_percent": _field(
+				_NUMBER,
+				"The benchmark's ANNUAL rate, e.g. 4.25 for a 10-year Treasury at 4.25%. "
+				"Without it, no performance figure against benchmark is produced.",
+			),
+			"manager_fee_percent": _field(_NUMBER, "The manager's annual rate. Default 1.00."),
+			"custody_fee_percent": _field(_NUMBER, "The custodian's annual rate. Default 1.00."),
+			"performance_fee_percent": _field(
+				_NUMBER, "Share of the gain over benchmark. Default 20."
+			),
+			"high_water_mark": _field(
+				_NUMBER,
+				"The high-water mark. Closing assets at or below it earn no performance fee "
+				"however the quarter went.",
+			),
+			"net_contributions": _field(
+				_NUMBER,
+				"Money in minus money out during the quarter. Without it the return is "
+				"computed as if none, which is right only if none moved.",
+			),
+			"title": _field(_STRING, "Override the archive entry's title. Use it to re-run a quarter."),
+			"dry_run": _field(
+				_BOOLEAN, "Check every precondition and compute every figure without writing. Default false."
+			),
+		},
+		required=("quarter",),
+		mutating=True,
+		title="Generate the quarterly investment report",
+		available=_needs_doctype("Governance Document"),
+		requires="the Governance Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"generate_1099_prefill": _tool(
+		tax.generate_1099_prefill,
+		"MUTATING (default OFF). Aggregate a calendar year of supplier payments into "
+		"a 1099-NEC worksheet (xlsx) and a per-recipient form (PDF, Copies A, B and "
+		"C), filed together in the governance archive as a Tax Filing.\n\n"
+		"IT IS CALLED A PRE-FILL AND IT MEANS IT. Recipient taxpayer ids print as "
+		"XXX-XX-nnnn because this site holds four digits on purpose — complete them "
+		"from the signed W-9 before filing. Copy A must be the official scannable "
+		"red-ink form or an electronic filing; the Copy A page here is stamped as an "
+		"information copy. Copies B and C print on plain paper and are the ones that "
+		"go out.\n\n"
+		"CLASSIFICATION IS NEVER SILENT. Every recipient comes back reportable, "
+		"exempt or BORDERLINE with the reason in a sentence. An LLC is borderline "
+		"because a disregarded entity is reportable and one taxed as a corporation is "
+		"not, and only the W-9 says which. A law firm is borderline because attorneys "
+		"are reportable EVEN WHEN INCORPORATED — which is why 'ends in PC, skip it' "
+		"is the wrong rule.\n\n"
+		"WHERE THE MONEY COMES FROM: GL Entry rows carrying a Supplier party — so "
+		"every voucher type, and only submitted ones. Debits only on Payable-type "
+		"accounts (a debit to payables is a bill being paid, a credit is one being "
+		"raised); debits minus credits everywhere else (the party sits on the expense "
+		"line, so a credit is a refund). `by_account` shows both sides so the "
+		"arithmetic can be checked rather than believed.\n\n"
+		"EXCLUDED AND SAID SO: employees, because that is W-2 territory — the count "
+		"and total of employee-party postings is reported anyway, so 'nobody looked' "
+		"and 'somebody looked and excluded them' are different-looking answers. "
+		"Opening entries. Anything under the threshold, listed with its total so a "
+		"case near the line is visible rather than absent.\n\n"
+		"REFUSES a tax year that has not ended. `dry_run=true` produces every figure "
+		"and classification without writing anything, which is the right first call.",
+		{
+			"company": _field(_STRING, "The payer. Omit on a single-company site."),
+			"tax_year": _field(_INTEGER, "The calendar year, e.g. 2025. Must have ended."),
+			"threshold": _field(
+				_NUMBER, "Reporting floor. Default 600 — pass the floor for the year being prepared."
+			),
+			"output_path": _field(
+				_STRING,
+				"A DIRECTORY to also write the workbook and forms into. Relative paths land "
+				"under the site's private/files; anything resolving outside the site's file "
+				"storage is refused. Omit it — the attachments are the durable copies.",
+			),
+			"overwrite": _field(_BOOLEAN, "Replace existing files at output_path. Default false."),
+			"payer_address": _field(
+				_STRING, "The payer's address as it should print on the forms."
+			),
+			"include_forms": _field(
+				_BOOLEAN, "Produce the per-recipient PDFs. Default true; false gives the workbook alone."
+			),
+			"title": _field(_STRING, "Override the archive entry's title. Use it to re-run a year."),
+			"dry_run": _field(
+				_BOOLEAN, "Compute every figure and classification without writing. Default false."
+			),
+		},
+		required=("tax_year",),
+		mutating=True,
+		title="Generate a 1099-NEC pre-fill",
+		available=_needs_doctype("Governance Document"),
+		requires="the Governance Document DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 

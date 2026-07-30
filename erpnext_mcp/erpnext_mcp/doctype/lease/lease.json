@@ -1,0 +1,242 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-30 09:00:00.000000",
+ "description": "One lease, in either direction: ground let out to an operator, or ground taken in from another party. Direction is recorded rather than inferred, because 'who is the lessor' is the question every downstream reading of the record depends on and a guess from a name string is not an answer.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "lease_name",
+  "owning_entity",
+  "parcel",
+  "direction",
+  "identity_col",
+  "status",
+  "lessor",
+  "lessee",
+  "counterparty",
+  "term_section",
+  "effective_date",
+  "expiration_date",
+  "term_col",
+  "termination_date",
+  "termination_reason",
+  "rent_section",
+  "rent_amount",
+  "rent_frequency",
+  "rent_col",
+  "rent_terms",
+  "document_section",
+  "lease_document",
+  "governance_document",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this lease is called in conversation: 'Mill Creek Ground Lease 2025'. The docname is built from this and the owning entity's abbreviation.",
+   "fieldname": "lease_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Lease Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The company whose books this lease belongs to — the party on our side of it, whichever side that is.",
+   "fieldname": "owning_entity",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Owning Entity",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The ground this lease covers, when it is one recorded parcel. Left empty for a lease over land that is not on this site's Parcel register, or over several parcels.",
+   "fieldname": "parcel",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Parcel",
+   "options": "Parcel"
+  },
+  {
+   "description": "Outbound: the owning entity is the LESSOR, letting ground out and collecting rent. Inbound: the owning entity is the LESSEE, taking ground in and paying rent.",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Direction",
+   "options": "Outbound\nInbound",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Active until somebody says otherwise. An expiration date in the past does not flip this by itself — a lease running month to month past its stated term is the normal case in farming, and a status that changed on a calendar rather than on a fact would hide it.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nExpired\nTerminated",
+   "default": "Active",
+   "reqd": 1
+  },
+  {
+   "description": "The party letting the ground out, by legal name.",
+   "fieldname": "lessor",
+   "fieldtype": "Data",
+   "label": "Lessor",
+   "reqd": 1
+  },
+  {
+   "description": "The party taking the ground in, by legal name.",
+   "fieldname": "lessee",
+   "fieldtype": "Data",
+   "label": "Lessee",
+   "reqd": 1
+  },
+  {
+   "description": "The other side of this lease in the Related Party register, when they are one. A lease between two entities the same family controls is a related-party transaction and has to be disclosable as one.",
+   "fieldname": "counterparty",
+   "fieldtype": "Link",
+   "label": "Counterparty",
+   "options": "Related Party"
+  },
+  {
+   "fieldname": "term_section",
+   "fieldtype": "Section Break",
+   "label": "Term"
+  },
+  {
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective Date",
+   "reqd": 1
+  },
+  {
+   "description": "When the stated term ends. Empty for a lease with no fixed end.",
+   "fieldname": "expiration_date",
+   "fieldtype": "Date",
+   "label": "Expiration Date"
+  },
+  {
+   "fieldname": "term_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When it was actually ended early, which is a different fact from when the term was going to run out.",
+   "fieldname": "termination_date",
+   "fieldtype": "Date",
+   "label": "Termination Date"
+  },
+  {
+   "fieldname": "termination_reason",
+   "fieldtype": "Small Text",
+   "label": "Termination Reason"
+  },
+  {
+   "fieldname": "rent_section",
+   "fieldtype": "Section Break",
+   "label": "Rent"
+  },
+  {
+   "description": "Rent per period, at the frequency beside it. A crop-share lease has no fixed amount; leave it empty and put the share in Rent Terms.",
+   "fieldname": "rent_amount",
+   "fieldtype": "Currency",
+   "label": "Rent Amount"
+  },
+  {
+   "fieldname": "rent_frequency",
+   "fieldtype": "Select",
+   "label": "Rent Frequency",
+   "options": "Monthly\nQuarterly\nSemi-Annual\nAnnual\nOne-Time\nCrop Share\nOther",
+   "default": "Annual"
+  },
+  {
+   "fieldname": "rent_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Escalators, crop-share percentages, who pays the water assessment, what happens to the trees at the end. The part of a farm lease that is never a number.",
+   "fieldname": "rent_terms",
+   "fieldtype": "Text Editor",
+   "label": "Rent Terms"
+  },
+  {
+   "fieldname": "document_section",
+   "fieldtype": "Section Break",
+   "label": "Document"
+  },
+  {
+   "description": "The executed lease itself. Uploaded content is stored as a private File attached to this record.",
+   "fieldname": "lease_document",
+   "fieldtype": "Attach",
+   "label": "Lease Document"
+  },
+  {
+   "description": "The archive entry for this lease, when it has been filed as a Governance Document. Amendments chain there rather than here.",
+   "fieldname": "governance_document",
+   "fieldtype": "Link",
+   "label": "Governance Document",
+   "options": "Governance Document"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-30 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Lease",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "lease_name,lessor,lessee,status",
+ "sort_field": "effective_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "lease_name",
+ "track_changes": 1
+}

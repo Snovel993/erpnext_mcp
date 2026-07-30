@@ -37,13 +37,37 @@ import datetime
 import json
 import os
 import secrets
+import shutil
 import sys
+import tempfile
 import traceback
 import types
 import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCTYPE_DIR = os.path.join(REPO_ROOT, "erpnext_mcp", "erpnext_mcp", "doctype")
+
+#: A real directory standing in for the site folder, so `frappe.get_site_path`
+#: answers with somewhere a tool can genuinely write. The report generators take
+#: an `output_path` and confine it to the site's own files directories; a double
+#: that returned a fictional path would let the confinement logic be tested and
+#: the writing not be, which is the half that corrupts something.
+SITE_ROOT = tempfile.mkdtemp(prefix="erpnext-mcp-site-")
+
+#: Subdirectories of the site folder the app is allowed to write into.
+SITE_FILE_DIRS = (("private", "files"), ("public", "files"))
+
+
+def get_site_path(*parts) -> str:
+	return os.path.join(SITE_ROOT, *[str(part) for part in parts])
+
+
+def reset_site_files() -> None:
+	"""Empty the fake site's file directories between tests, and recreate them."""
+	for parts in SITE_FILE_DIRS:
+		path = get_site_path(*parts)
+		shutil.rmtree(path, ignore_errors=True)
+		os.makedirs(path, exist_ok=True)
 
 if REPO_ROOT not in sys.path:
 	sys.path.insert(0, REPO_ROOT)
@@ -172,6 +196,10 @@ ERPNEXT_SCHEMA = {
 		"party",
 		"party_type",
 		"cost_center",
+		# `is_opening` is "Yes"/"No" on a GL Entry, not a Check. The 1099
+		# pre-fill excludes opening entries from payments, and a fixture without
+		# the column would make that exclusion untestable.
+		"is_opening",
 	],
 	"Cost Center": [
 		"name",
@@ -459,6 +487,23 @@ ERPNEXT_SCHEMA = {
 		"company",
 		"owner",
 	],
+	# `supplier_type` is ERPNext's Company/Individual Select, and it is the field
+	# the 1099 pre-fill classifies on. `tax_withholding_category` and `tax_id`
+	# are here because the tool reads them off the site when they exist and says
+	# so when they do not — a fixture that always had them would leave the
+	# degraded path untested.
+	"Supplier": [
+		"name",
+		"supplier_name",
+		"supplier_type",
+		"supplier_group",
+		"tax_id",
+		"tax_category",
+		"tax_withholding_category",
+		"country",
+		"disabled",
+		"is_transporter",
+	],
 	"Purchase Order": [
 		"name",
 		"supplier",
@@ -580,6 +625,7 @@ ERPNEXT_AUTONAME = {
 	"Item": "field:item_code",
 	"Bank": "field:bank_name",
 	"Fiscal Year": "field:year",
+	"Supplier": "field:supplier_name",
 }
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
@@ -595,6 +641,9 @@ APP_DOCTYPES = {
 	"Asset Depreciation Posting": "asset_depreciation_posting",
 	"Note Payable": "note_payable",
 	"Note Payable Event": "note_payable_event",
+	"Parcel": "parcel",
+	"Lease": "lease",
+	"Related Party": "related_party",
 }
 
 
@@ -1970,6 +2019,7 @@ def _build_frappe() -> types.ModuleType:
 	module.generate_hash = generate_hash
 	module.msgprint = msgprint
 	module.get_attr = get_attr
+	module.get_site_path = get_site_path
 	module.utils = _build_utils()
 
 	# `frappe.session` and `frappe.request` are properties on the real module;
@@ -2205,6 +2255,7 @@ class MCPTestCase(unittest.TestCase):
 		# schema, and `STORE.reset` builds its tabDocType rows from it.
 		reset_meta()
 		STORE.reset()
+		reset_site_files()
 		frappe.conf.clear()
 		INSTALLED_DOCTYPES.clear()
 		INSTALLED_DOCTYPES.update(set(ERPNEXT_SCHEMA) | set(APP_DOCTYPES))

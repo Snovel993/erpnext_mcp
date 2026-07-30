@@ -129,7 +129,28 @@
   "allow_create_note_payable",
   "notes_tools_col",
   "allow_record_loan_payment",
-  "allow_close_note_payable"
+  "allow_close_note_payable",
+  "realestate_tools_section",
+  "allow_list_parcels",
+  "allow_get_parcel",
+  "allow_create_parcel",
+  "allow_update_parcel",
+  "realestate_tools_col",
+  "allow_link_parcel_to_asset",
+  "allow_list_leases",
+  "allow_get_lease",
+  "allow_create_lease",
+  "allow_update_lease",
+  "party_tools_section",
+  "allow_list_related_parties",
+  "allow_get_related_party",
+  "party_tools_col",
+  "allow_create_related_party",
+  "allow_update_related_party",
+  "document_tools_section",
+  "allow_generate_quarterly_investment_report",
+  "document_tools_col",
+  "allow_generate_1099_prefill"
  ],
  "fields": [
   {
@@ -139,7 +160,7 @@
   },
   {
    "default": "0",
-   "description": "Master switch. While this is off the MCP endpoint answers 404 for everyone, whatever else is configured here. This is the fastest way to cut off an AI client: untick, save, done \u2014 no restart, no token change.",
+   "description": "Master switch. While this is off the MCP endpoint answers 404 for everyone, whatever else is configured here. This is the fastest way to cut off an AI client: untick, save, done — no restart, no token change.",
    "fieldname": "enabled",
    "fieldtype": "Check",
    "label": "Enabled"
@@ -171,7 +192,7 @@
    "fieldname": "endpoint_info",
    "fieldtype": "HTML",
    "label": "Endpoint",
-   "options": "<div class='form-message blue'><p><b>Endpoint</b><br><code>POST https://&lt;your-site&gt;/api/method/erpnext_mcp.mcp.handle</code></p><p><b>Header</b><br><code>X-MCP-Token: &lt;token&gt;</code></p><p>JSON-RPC 2.0 (MCP Streamable HTTP). POST only \u2014 this server sends no unsolicited messages, so there is no stream to open.</p><p>Every call, allowed or refused, is recorded in <a href='/app/mcp-action-log'>MCP Action Log</a>.</p></div>"
+   "options": "<div class='form-message blue'><p><b>Endpoint</b><br><code>POST https://&lt;your-site&gt;/api/method/erpnext_mcp.mcp.handle</code></p><p><b>Header</b><br><code>X-MCP-Token: &lt;token&gt;</code></p><p>JSON-RPC 2.0 (MCP Streamable HTTP). POST only — this server sends no unsolicited messages, so there is no stream to open.</p><p>Every call, allowed or refused, is recorded in <a href='/app/mcp-action-log'>MCP Action Log</a>.</p></div>"
   },
   {
    "depends_on": "eval:doc.enabled",
@@ -192,13 +213,13 @@
   },
   {
    "default": "127.0.0.1/32,::1/128,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12",
-   "description": "Comma- or newline-separated CIDR blocks allowed to reach the endpoint, checked after the token. Defaults to loopback plus private LAN ranges. An empty list denies everyone \u2014 a blank field is far more often a mistake than an intent to publish an accounting API. Add 0.0.0.0/0 only if you genuinely mean the whole internet.",
+   "description": "Comma- or newline-separated CIDR blocks allowed to reach the endpoint, checked after the token. Defaults to loopback plus private LAN ranges. An empty list denies everyone — a blank field is far more often a mistake than an intent to publish an accounting API. Add 0.0.0.0/0 only if you genuinely mean the whole internet.",
    "fieldname": "allowed_cidrs",
    "fieldtype": "Small Text",
    "label": "Allowed CIDRs"
   },
   {
-   "description": "Base URL a client should use, if it differs from the one this site sees. Leave empty and the connection panel uses frappe.utils.get_url(). Set it for a site behind a Tailscale Funnel, a tunnel or a reverse proxy on another hostname \u2014 there is no way for the server to guess its own public name. Example: https://erp.tail1234.ts.net",
+   "description": "Base URL a client should use, if it differs from the one this site sees. Leave empty and the connection panel uses frappe.utils.get_url(). Set it for a site behind a Tailscale Funnel, a tunnel or a reverse proxy on another hostname — there is no way for the server to guess its own public name. Example: https://erp.tail1234.ts.net",
    "fieldname": "public_url",
    "fieldtype": "Data",
    "label": "Public URL"
@@ -217,7 +238,7 @@
   },
   {
    "depends_on": "eval:doc.require_user_context",
-   "description": "The user tools run as, and that mutations are attributed to. Create a dedicated one (for example mcp@yourcompany.example) with only the roles the tools you enabled actually need \u2014 Accounts User is normally enough for the ledger tools; reports, attachments and workflow actions need whatever their own DocTypes require. Falls back to Administrator if left empty.",
+   "description": "The user tools run as, and that mutations are attributed to. Create a dedicated one (for example mcp@yourcompany.example) with only the roles the tools you enabled actually need — Accounts User is normally enough for the ledger tools; reports, attachments and workflow actions need whatever their own DocTypes require. Falls back to Administrator if left empty.",
    "fieldname": "mcp_system_user",
    "fieldtype": "Link",
    "label": "MCP System User",
@@ -319,7 +340,7 @@
    "label": "List Cost Centers"
   },
   {
-   "description": "<b>Every one of these is off on a fresh install and stays off until you tick it.</b> Each call is recorded in MCP Action Log with its arguments and its docstatus change. Enable the narrowest set that does the job: create_journal_entry alone gives an AI a scratchpad in the ledger, because a draft affects no balance until submit_journal_entry \u2014 a separate switch \u2014 posts it. <br><br>Two more write tools live in the sections below: <b>Advance Workflow</b> (Workflow) and <b>Create Todo</b> (Comments &amp; Tasks). The banner at the top of this form always lists every write tool that is currently live, wherever its switch is.",
+   "description": "<b>Every one of these is off on a fresh install and stays off until you tick it.</b> Each call is recorded in MCP Action Log with its arguments and its docstatus change. Enable the narrowest set that does the job: create_journal_entry alone gives an AI a scratchpad in the ledger, because a draft affects no balance until submit_journal_entry — a separate switch — posts it. <br><br>Two more write tools live in the sections below: <b>Advance Workflow</b> (Workflow) and <b>Create Todo</b> (Comments &amp; Tasks). The banner at the top of this form always lists every write tool that is currently live, wherever its switch is.",
    "fieldname": "mutating_tools_section",
    "fieldtype": "Section Break",
    "label": "Accounting Write Tools"
@@ -366,7 +387,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Create the Bank Account record a bank feed writes into, and the Bank institution behind it. Refuses a GL account that is not an Asset (a bank account) or a Liability (a credit card), and an Asset account whose account_type is not Bank or Cash \u2014 ERPNext's own reconciliation filters on that flag.",
+   "description": "WRITE. Create the Bank Account record a bank feed writes into, and the Bank institution behind it. Refuses a GL account that is not an Asset (a bank account) or a Liability (a credit card), and an Asset account whose account_type is not Bank or Cash — ERPNext's own reconciliation filters on that flag.",
    "fieldname": "allow_create_bank_account",
    "fieldtype": "Check",
    "label": "Create Bank Account"
@@ -380,7 +401,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Book a whole opening balance sheet as one journal entry \u2014 every line explicit, the balancing difference going to an offset account you name. Posts the entry too when asked, which also requires <b>Submit Journal Entry</b> above.",
+   "description": "WRITE. Book a whole opening balance sheet as one journal entry — every line explicit, the balancing difference going to an offset account you name. Posts the entry too when asked, which also requires <b>Submit Journal Entry</b> above.",
    "fieldname": "allow_post_opening_balance_journal_entry",
    "fieldtype": "Check",
    "label": "Post Opening Balance Journal Entry"
@@ -394,7 +415,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Delete a DRAFT journal entry outright, recording what it was and why in the audit log. Refuses submitted entries (cancel those instead) and cancelled ones \u2014 a cancelled entry and its reversing rows are the audit trail.",
+   "description": "WRITE. Delete a DRAFT journal entry outright, recording what it was and why in the audit log. Refuses submitted entries (cancel those instead) and cancelled ones — a cancelled entry and its reversing rows are the audit trail.",
    "fieldname": "allow_delete_draft_journal_entry",
    "fieldtype": "Check",
    "label": "Delete Draft Journal Entry"
@@ -447,7 +468,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE, AND IRREVERSIBLE \u2014 the only tool here with no undo, no draft and no cancelled state. Hard-deletes an account with no GL entries, no journal entry lines, no children, no company default and no bank account pointing at it. Prefer Disable Account for anything with history; this exists to free an account NUMBER, which disabling does not.",
+   "description": "WRITE, AND IRREVERSIBLE — the only tool here with no undo, no draft and no cancelled state. Hard-deletes an account with no GL entries, no journal entry lines, no children, no company default and no bank account pointing at it. Prefer Disable Account for anything with history; this exists to free an account NUMBER, which disabling does not.",
    "fieldname": "allow_delete_account",
    "fieldtype": "Check",
    "label": "Delete Account"
@@ -460,7 +481,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Create a Fiscal Year so ERPNext will accept postings dated inside it \u2014 the prerequisite for booking anything historical. Refuses a name already in use and a date range overlapping another year for the same company.",
+   "description": "WRITE. Create a Fiscal Year so ERPNext will accept postings dated inside it — the prerequisite for booking anything historical. Refuses a name already in use and a date range overlapping another year for the same company.",
    "fieldname": "allow_create_fiscal_year",
    "fieldtype": "Check",
    "label": "Create Fiscal Year"
@@ -478,7 +499,7 @@
    "label": "Update Fiscal Year"
   },
   {
-   "description": "How a posting is classified once it reaches an account: which segment of the business it belongs to (cost centers), what other axes it is filed under (accounting dimensions), and which accounts a document reaches for when nothing says (company defaults).<br><br>The read-only tree, <b>List Cost Centers</b>, is in the Accounting Read Tools section above. <b>Create Accounting Dimension</b> is the only switch in this app that can add a DocType to your site \u2014 and only when a call asks for it explicitly.",
+   "description": "How a posting is classified once it reaches an account: which segment of the business it belongs to (cost centers), what other axes it is filed under (accounting dimensions), and which accounts a document reaches for when nothing says (company defaults).<br><br>The read-only tree, <b>List Cost Centers</b>, is in the Accounting Read Tools section above. <b>Create Accounting Dimension</b> is the only switch in this app that can add a DocType to your site — and only when a call asks for it explicitly.",
    "fieldname": "dimension_tools_section",
    "fieldtype": "Section Break",
    "label": "Cost Centers & Dimensions"
@@ -492,7 +513,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Rename, renumber or disable/enable one cost center. Moves the docname with the fields. Cannot reparent \u2014 this app ships no tool that can.",
+   "description": "WRITE. Rename, renumber or disable/enable one cost center. Moves the docname with the fields. Cannot reparent — this app ships no tool that can.",
    "fieldname": "allow_update_cost_center",
    "fieldtype": "Check",
    "label": "Update Cost Center"
@@ -504,14 +525,14 @@
   },
   {
    "default": "0",
-   "description": "WRITE, AND A SCHEMA CHANGE. Creates an Accounting Dimension and adds a Link custom field to the documents that carry it \u2014 and, when the call asks for it, generates the custom DocType whose records become the dimension's values. Those fields are permanent until somebody removes them in the Desk. The narrowest switch in this section to leave off.",
+   "description": "WRITE, AND A SCHEMA CHANGE. Creates an Accounting Dimension and adds a Link custom field to the documents that carry it — and, when the call asks for it, generates the custom DocType whose records become the dimension's values. Those fields are permanent until somebody removes them in the Desk. The narrowest switch in this section to leave off.",
    "fieldname": "allow_create_accounting_dimension",
    "fieldtype": "Check",
    "label": "Create Accounting Dimension"
   },
   {
    "default": "0",
-   "description": "WRITE. Add one value to an existing accounting dimension \u2014 one record in the DocType that dimension points at. Touches no ledger and creates no fields.",
+   "description": "WRITE. Add one value to an existing accounting dimension — one record in the DocType that dimension points at. Touches no ledger and creates no fields.",
    "fieldname": "allow_create_dimension_value",
    "fieldtype": "Check",
    "label": "Create Dimension Value"
@@ -524,7 +545,7 @@
    "label": "Set Company Defaults"
   },
   {
-   "description": "Reading a site's approval structure, and \u2014 behind its own switch \u2014 acting on it. Workflow actions run through Frappe's own apply_workflow, so they respect the acting user's roles and the transition's conditions.",
+   "description": "Reading a site's approval structure, and — behind its own switch — acting on it. Workflow actions run through Frappe's own apply_workflow, so they respect the acting user's roles and the transition's conditions.",
    "fieldname": "workflow_tools_section",
    "fieldtype": "Section Break",
    "label": "Workflow"
@@ -570,7 +591,7 @@
    "label": "Advance Workflow"
   },
   {
-   "description": "A site's saved reports are usually the most trustworthy answer to an accounting question, because somebody who knew the schema already wrote them. run_report enforces the acting user's permission on the report's DocType, so it can reach figures the raw read tools cannot \u2014 and is bounded by the roles you gave the MCP System User.",
+   "description": "A site's saved reports are usually the most trustworthy answer to an accounting question, because somebody who knew the schema already wrote them. run_report enforces the acting user's permission on the report's DocType, so it can reach figures the raw read tools cannot — and is bounded by the roles you gave the MCP System User.",
    "fieldname": "report_tools_section",
    "fieldtype": "Section Break",
    "label": "Reports"
@@ -615,7 +636,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Attach a file to ANY document \u2014 a statement onto the Journal Entry that books it, a receipt onto a Bank Transaction, a contract onto an Asset. Creates one File and changes nothing else. Needs write permission on the parent document, refuses a cancelled parent unless told otherwise, and refuses a filename the document already has.",
+   "description": "WRITE. Attach a file to ANY document — a statement onto the Journal Entry that books it, a receipt onto a Bank Transaction, a contract onto an Asset. Creates one File and changes nothing else. Needs write permission on the parent document, refuses a cancelled parent unless told otherwise, and refuses a filename the document already has.",
    "fieldname": "allow_attach_file_to_document",
    "fieldtype": "Check",
    "label": "Attach File To Document"
@@ -648,7 +669,7 @@
    "label": "Create Todo"
   },
   {
-   "description": "Only usable where the Frappe HR (hrms) app is installed \u2014 on a site without it these tools are not advertised at all, whatever these switches say. Employee, attendance and leave data is personal information; enable deliberately.",
+   "description": "Only usable where the Frappe HR (hrms) app is installed — on a site without it these tools are not advertised at all, whatever these switches say. Employee, attendance and leave data is personal information; enable deliberately.",
    "fieldname": "hr_tools_section",
    "fieldtype": "Section Break",
    "label": "HR"
@@ -722,7 +743,7 @@
    "label": "List Client Scripts"
   },
   {
-   "description": "Structured artefacts for somebody who has to sign something off \u2014 each carries its own provenance and its own anomaly flags, and an ERROR flag means the numbers do not internally agree. All read-only: nothing is stored, emailed or filed.<br><br>The first two switches are the MCP tools; the rest are the individual packet types, each gated separately so you can expose a reconciliation packet without exposing a payroll one.",
+   "description": "Structured artefacts for somebody who has to sign something off — each carries its own provenance and its own anomaly flags, and an ERROR flag means the numbers do not internally agree. All read-only: nothing is stored, emailed or filed.<br><br>The first two switches are the MCP tools; the rest are the individual packet types, each gated separately so you can expose a reconciliation packet without exposing a payroll one.",
    "fieldname": "packet_tools_section",
    "fieldtype": "Section Break",
    "label": "Compliance Packets"
@@ -761,7 +782,7 @@
    "label": "Fiscal Year Audit Packet"
   },
   {
-   "description": "The member register and its event trail. The cap table is the only place on this site that maps an anonymous member id to a legal name \u2014 gate it accordingly.",
+   "description": "The member register and its event trail. The cap table is the only place on this site that maps an anonymous member id to a legal name — gate it accordingly.",
    "fieldname": "governance_tools_section",
    "fieldtype": "Section Break",
    "label": "Cap Table and Member Events"
@@ -789,7 +810,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Retire a member: withdrawal date, retired flag, and a Withdrawal event in the trail. Moves no money \u2014 a final distribution is a separate Record Member Event call.",
+   "description": "WRITE. Retire a member: withdrawal date, retired flag, and a Withdrawal event in the trail. Moves no money — a final distribution is a separate Record Member Event call.",
    "fieldname": "allow_close_cap_table_entry",
    "fieldtype": "Check",
    "label": "Close Cap Table Entry"
@@ -808,14 +829,14 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Record one member event and, where it books money, the DRAFT journal entry for it \u2014 tagged with the member dimension on every line. Enabling this grants creating that draft; it does not grant posting it.",
+   "description": "WRITE. Record one member event and, where it books money, the DRAFT journal entry for it — tagged with the member dimension on every line. Enabling this grants creating that draft; it does not grant posting it.",
    "fieldname": "allow_record_member_event",
    "fieldtype": "Check",
    "label": "Record Member Event"
   },
   {
    "default": "0",
-   "description": "WRITE. Post the draft journal entry a member event is waiting on. Also requires Submit Journal Entry to be on \u2014 that switch is where moving a balance is decided, whatever route reaches it.",
+   "description": "WRITE. Post the draft journal entry a member event is waiting on. Also requires Submit Journal Entry to be on — that switch is where moving a balance is decided, whatever route reaches it.",
    "fieldname": "allow_submit_member_event",
    "fieldtype": "Check",
    "label": "Submit Member Event"
@@ -932,10 +953,148 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Close a note as Paid Off, Refinanced or Written Off, recording the disposition in its own history. Writes no journal entry \u2014 relieving a written-off balance is a posting with tax consequences that somebody should make on purpose.",
+   "description": "WRITE. Close a note as Paid Off, Refinanced or Written Off, recording the disposition in its own history. Writes no journal entry — relieving a written-off balance is a posting with tax consequences that somebody should make on purpose.",
    "fieldname": "allow_close_note_payable",
    "fieldtype": "Check",
    "label": "Close Note Payable"
+  },
+  {
+   "description": "The land register and the leases over it. Nothing in this group posts: a lease with rent on it produces no journal entry, and linking a parcel to a Fixed Asset moves no balance.",
+   "fieldname": "realestate_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Real Estate"
+  },
+  {
+   "default": "1",
+   "description": "READ. One entity's land register with acreage and appraised value totalled, and the oldest and newest appraisal dates.",
+   "fieldname": "allow_list_parcels",
+   "fieldtype": "Check",
+   "label": "List Parcels"
+  },
+  {
+   "default": "1",
+   "description": "READ. One parcel in full, with the leases over it and the Fixed Asset carrying it.",
+   "fieldname": "allow_get_parcel",
+   "fieldtype": "Check",
+   "label": "Get Parcel"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register a parcel: county, assessor parcel id, acreage, use type, appraised value and the date it was appraised as of. Refuses a duplicate name or a duplicate assessor id inside one entity.",
+   "fieldname": "allow_create_parcel",
+   "fieldtype": "Check",
+   "label": "Create Parcel"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a registered parcel. Cannot re-key it, cannot move it between entities, and cannot set the asset link — that is its own tool.",
+   "fieldname": "allow_update_parcel",
+   "fieldtype": "Check",
+   "label": "Update Parcel"
+  },
+  {
+   "fieldname": "realestate_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Point a parcel at the Fixed Asset carrying it and report the gap between cost and appraised value. Sets one field; posts nothing.",
+   "fieldname": "allow_link_parcel_to_asset",
+   "fieldtype": "Check",
+   "label": "Link Parcel to Asset"
+  },
+  {
+   "default": "1",
+   "description": "READ. Leases in both directions with the annual rent roll, and which ones run out soon. Never expires a lease itself.",
+   "fieldname": "allow_list_leases",
+   "fieldtype": "Check",
+   "label": "List Leases"
+  },
+  {
+   "default": "1",
+   "description": "READ. One lease in full, with the parcel it covers and its attachments.",
+   "fieldname": "allow_get_lease",
+   "fieldtype": "Check",
+   "label": "Get Lease"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record a lease in either direction, with the executed document attached. Books nothing — recording the agreement and booking its consequences are separate acts.",
+   "fieldname": "allow_create_lease",
+   "fieldtype": "Check",
+   "label": "Create Lease"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a recorded lease's status, term, rent or parties. Refuses to mark one Terminated without a termination date.",
+   "fieldname": "allow_update_lease",
+   "fieldtype": "Check",
+   "label": "Update Lease"
+  },
+  {
+   "description": "The governance register of who is related to the company and how. Separate from the Party field on a Journal Entry, which is unaffected by anything here.",
+   "fieldname": "party_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Related Parties"
+  },
+  {
+   "default": "1",
+   "description": "READ. The related-party register, current and ended, and which relationships have no governing document behind them.",
+   "fieldname": "allow_list_related_parties",
+   "fieldtype": "Check",
+   "label": "List Related Parties"
+  },
+  {
+   "default": "1",
+   "description": "READ. One relationship with everything pointing at it. Never returns more than four digits of a taxpayer id, including from a linked Supplier.",
+   "fieldname": "allow_get_related_party",
+   "fieldtype": "Check",
+   "label": "Get Related Party"
+  },
+  {
+   "fieldname": "party_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register a relationship. Stores the last four digits of a taxpayer id and refuses nine — the full number belongs on the signed W-9, not on this site.",
+   "fieldname": "allow_create_related_party",
+   "fieldtype": "Check",
+   "label": "Create Related Party"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a registered relationship. Cannot re-key it: a change of role is a new relationship, and the old entry gets an end date rather than being deleted.",
+   "fieldname": "allow_update_related_party",
+   "fieldtype": "Check",
+   "label": "Update Related Party"
+  },
+  {
+   "description": "Tools that build a document — a PDF report, a tax workbook — and file it in the governance archive with the file attached. They create a Governance Document and Files; they post nothing to the ledger.",
+   "fieldname": "document_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Generated Documents"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Build the quarter's investment report as a PDF and file it as a Prior Statement. Refuses a quarter that is not genuinely closed — the statement filed, every investment entry submitted, every bank transaction reconciled — and names everything missing in one reply.",
+   "fieldname": "allow_generate_quarterly_investment_report",
+   "fieldtype": "Check",
+   "label": "Generate Quarterly Investment Report"
+  },
+  {
+   "fieldname": "document_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Aggregate a year of supplier payments into a 1099-NEC workbook and per-recipient forms. A PRE-FILL: taxpayer ids print as the last four digits only, and Copy A is stamped as an information copy rather than a filing.",
+   "fieldname": "allow_generate_1099_prefill",
+   "fieldtype": "Check",
+   "label": "Generate 1099-NEC Pre-Fill"
   }
  ],
  "index_web_pages_for_search": 0,

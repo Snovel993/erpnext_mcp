@@ -156,6 +156,38 @@ def as_docstatus(args: dict, key: str = "docstatus") -> int | None:
 	return value
 
 
+def select_options(doctype: str, fieldname: str) -> list[str]:
+	"""A Select field's options, read off this site's meta rather than hardcoded.
+
+	A tool carrying its own copy of the list would accept a value the doctype
+	rejects the moment somebody customises it, and the failure would arrive from
+	`doc.insert()` as a framework error instead of as a sentence naming the
+	choices. Blank options — the leading empty line a Select uses to mean "not
+	set" — are dropped, because a caller who wants no value omits the argument.
+	"""
+	field = compat.field_meta(doctype, fieldname)
+	raw = str((field or {}).get("options") or "")
+	return [line.strip() for line in raw.split("\n") if line.strip()]
+
+
+def as_choice(doctype: str, fieldname: str, value: str, label: str) -> str:
+	"""Match `value` against a Select's options case-insensitively, or refuse.
+
+	Returns the option in the doctype's own casing, so what is stored matches
+	what a filter on the list view will look for. A site whose meta offers no
+	options at all gets the value through unchanged — that is a customised or
+	half-migrated field, and refusing everything would be worse than trusting the
+	caller.
+	"""
+	options = select_options(doctype, fieldname)
+	if not options:  # pragma: no cover - a site whose meta has no options at all
+		return value
+	for option in options:
+		if option.lower() == value.lower():
+			return option
+	raise ToolError(f"{label} must be one of: {', '.join(options)}. Got {value!r}. Nothing was created.")
+
+
 def resolve_company(company: str = "", required: bool = False) -> str | None:
 	"""A Company docname, inferred when the site leaves no ambiguity.
 

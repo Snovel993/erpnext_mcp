@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **77 tools** — 38 read-only, 39 mutating.
+- **92 tools** — 44 read-only, 48 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -242,7 +242,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 77 tools
+## The 92 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -251,7 +251,7 @@ Tools whose site prerequisite is missing are not advertised at all — on a site
 without Frappe HR, the three HR tools simply do not exist as far as a client is
 concerned.
 
-### Read-only — 38, all ON by default, each individually switchable
+### Read-only — 44, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -344,7 +344,18 @@ write tools below.)
 | `depreciation_note_alignment_check` | For every financed asset, whether its remaining life and its note's remaining term still agree. |
 | `list_notes_payable` | Every note or loan a company owes: lender, original and outstanding principal, rate, term, and when the next payment falls due. |
 
-### Mutating — 38, all OFF by default
+**Land, leases and related parties** — the v0.11.0 surface
+
+| Tool | What it answers |
+| --- | --- |
+| `list_parcels` | The land register: acreage, county, assessor parcel id, use type, appraised value, and which parcels are on the balance sheet. Totals acreage and value, and reports the oldest appraisal — which is how you find out the valuation is four years stale. |
+| `get_parcel` | One parcel in full, with every lease over it in either direction and the gap between what the Asset cost and what the appraisal says. |
+| `list_leases` | Leases **both ways** with the rent roll: annual rent receivable, annual rent payable, the net, and what runs out inside 90 days. A crop share has no annual rate and is listed rather than counted as zero. |
+| `get_lease` | One lease in full, with the parcel it covers, its attachments, and whether it is in force today by the dates on the record. |
+| `list_related_parties` | Who is related to this company, in what capacity, since when, and which relationships have **no governing document behind them** — the first thing an examiner asks for. |
+| `get_related_party` | One relationship with everything pointing at it: the person's other roles, their cap table entry, their Supplier, the parcels they hold title to. Never returns more than four digits of a taxpayer id. |
+
+### Mutating — 48, all OFF by default
 
 **Postings into the ledger**
 
@@ -419,6 +430,87 @@ write tools below.)
 | `create_note_payable` | Registers one note or loan: terms, provenance, the liability account it posts to, and the asset it financed. | Link an asset whose useful life disagrees with the note's term, unless you pass `enforce_asset_tenor=false`. |
 | `record_loan_payment` | Splits a payment into principal and interest and drafts the JE that books it, decrementing the balance. | Book a split that does not add up, clear more principal than is owed, or post anything. |
 | `close_note_payable` | Closes a note as Paid Off, Refinanced or Written Off, recording the disposition in its own history. | Write a journal entry — relieving the balance is a posting somebody should make on purpose, and the response says which. |
+
+**Land and the agreements over it**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_parcel` | Registers one parcel: county, assessor parcel id, acreage, use type, appraised value and the date it was appraised as of. | Register a second parcel with the same name, or the same assessor id, for one entity — that number is the county's key and two of them means a typo. |
+| `update_parcel` | Changes a registered parcel, echoing every change as before → after. | Re-key it, move it between entities (a conveyance is not an edit), or set the asset link — that is its own tool. |
+| `link_parcel_to_asset` | Points a parcel at the Fixed Asset carrying it and **reports the gap between cost and appraised value**. | Post anything. Land is not depreciated and this does not pretend otherwise. |
+| `create_lease` | Records one lease in either direction, with the executed document attached. Reports whether the stated direction agrees with the party names. | Book anything. Recording the agreement and booking its consequences are separate acts. |
+| `update_lease` | Changes status, term, rent, parties, parcel or counterparty. | Mark a lease Terminated without a termination date, or rename it — a renewal is a new lease with its own term. |
+
+**Who is related to whom**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_related_party` | Registers one relationship: who, what kind of entity, in what capacity, from when, under what document. | Store more than four digits of a taxpayer id. Nine is **refused**, naming the four to send — see [Four digits, never nine](#four-digits-never-nine). |
+| `update_related_party` | Changes party type, dates, tax identity, address and the links to a cap table entry, a Supplier and a governing document. | Re-key it. A change of role is a new relationship; the old entry gets an end date rather than being deleted. |
+
+**Documents that get produced and filed**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `generate_quarterly_investment_report` | Builds the quarter's report as a **PDF** and files it as a Prior Statement with the PDF attached: assets under management, activity, fee accrual, performance against a benchmark with a high-water mark, cash clearing, reconciliation state. | Run on a quarter that is not genuinely closed — see [A quarter closes when it closes](#a-quarter-closes-when-it-closes). Or invent a benchmark rate. |
+| `generate_1099_prefill` | Aggregates a calendar year of supplier payments into an xlsx worksheet and a per-recipient 1099-NEC (Copies A, B and C), filed as a Tax Filing. | Finish the job: taxpayer ids print as the last four digits, and Copy A is stamped as an information copy rather than a filing. |
+
+#### Four digits, never nine
+
+`Related Party.tax_id_last4` takes exactly four digits and refuses nine — not
+truncated, not masked, not accepted with a warning. The refusal names the four
+digits to send instead, because a validator that says "invalid format" to
+somebody who has just pasted a real SSN has told them nothing about why it
+matters.
+
+The controller enforces the same rule, because the Desk form is a second door
+into the same field, and the field is declared four characters long as the belt
+to that brace. `get_related_party` never returns more than four digits **even
+from a linked Supplier** — `supplier_detail.tax_id` says only whether one is on
+file.
+
+The difference between a site holding four digits and a site holding nine is the
+difference between an inconvenience and a notifiable breach. The full number
+belongs on the signed W-9, on paper, in a drawer.
+
+#### A quarter closes when it closes
+
+`generate_quarterly_investment_report` refuses a quarter that is not ready, and
+names everything that is missing in **one reply** rather than one per call. Four
+things must be true:
+
+1. the quarter has ended;
+2. the custodian's statement is filed as a **Prior Statement** governance
+   document with an effective date inside it;
+3. no journal entry touching the investment accounts is still a draft;
+4. no bank transaction in the period is unreconciled.
+
+A report generated on a calendar date regardless of state is a report whose
+numbers may be wrong, signed by somebody who assumed the schedule meant
+something. `dry_run=true` runs every precondition and computes every figure
+without writing.
+
+It also invents nothing. Without `benchmark_rate_percent` the return over
+benchmark and the performance fee are **not computed** and say so — they are not
+zero and not estimated, because a performance fee against an assumed benchmark of
+nothing overstates what the manager is owed. Holdings are the same: this app
+reads one ERPNext site and the custodian's positions are not on it, so pass
+`holdings` and the report reconciles the snapshot against the ledger, or omit it
+and assets under management are the ledger balance, stated as such.
+
+#### Where a generated document goes
+
+Both generators file their output as a private File attached to a Governance
+Document. That is the deliverable: permissioned, version-tracked, backed up with
+the site, readable through `get_attachment_content`.
+
+`output_path` is the second destination, for a batch of forms somebody has to
+print. It is confined to the site's own `private/files` and `public/files` — a
+relative path lands under the first — and everything else is refused, naming the
+roots. The check is on the **resolved** real path, so a symlink cannot be used to
+step outside, and an existing file is never overwritten unless `overwrite=true`.
+A bad path refuses the whole run before the first write rather than leaving an
+archive entry behind.
 
 #### A fiscal year is a permission for a date
 
@@ -740,6 +832,58 @@ This app asks the site what it has rather than pinning a version — see
 
 ---
 
+## Seeding the related-party register
+
+`Related Party` is the one doctype in this app whose useful content is a list of
+people's names, so nothing is seeded for you and no names ship in this
+repository. `scripts/seed_related_parties.py` reads a JSON file you keep outside
+it:
+
+```bash
+python3 scripts/seed_related_parties.py --input parties.json --site yoursite.localhost
+# read the plan, then:
+python3 scripts/seed_related_parties.py --input parties.json --site yoursite.localhost --apply
+```
+
+It runs **outside** `bench execute`, so it configures Frappe itself: it finds the
+bench's `sites` directory by looking for `common_site_config.json`, takes the
+site from `--site` or `currentsite.txt`, and **creates the log directories before
+`frappe.connect()`** rather than assuming they exist. Without `--apply` it writes
+nothing. The whole plan is validated before the first insert — including the
+four-digits-never-nine rule, refused before Frappe is even started — so a plan of
+forty records is refused whole rather than half-applied.
+
+Each record takes the same fields `create_related_party` does:
+
+```json
+[
+  {"party_name": "A Person", "party_type": "Individual",
+   "company": "Your Company", "relationship_to_company": "Manager",
+   "effective_date": "2020-06-15", "tax_id_type": "SSN", "tax_id_last4": "6789"}
+]
+```
+
+### Into a container
+
+Both the script and the plan have to be copied in, in this order:
+
+```bash
+docker cp parties.json <container>:/home/frappe/frappe-bench/parties.json
+docker cp scripts/seed_related_parties.py <container>:/home/frappe/frappe-bench/
+
+docker exec -w /home/frappe/frappe-bench <container> \
+    python3 seed_related_parties.py --input parties.json --site <site>
+
+# read the plan, then re-run with --apply
+docker exec -w /home/frappe/frappe-bench <container> \
+    python3 seed_related_parties.py --input parties.json --site <site> --apply
+
+# and take the names back out again
+docker exec <container> rm -f /home/frappe/frappe-bench/parties.json
+```
+
+---
+
 ## Tests
 
 ```bash
@@ -752,11 +896,17 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-902 standalone tests and 246 in-bench tests. The standalone suite installs an
+1536 standalone tests and 284 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.
 Details in **[docs/development.md](docs/development.md)**.
+
+The document writers are tested against their own bytes rather than against a
+mock of a library: the PDF tests open the file and check that every offset in the
+cross-reference table points at the object it claims, which is the one failure
+that would otherwise produce a report that is generated, attached, archived and
+unopenable.
 
 ---
 
@@ -798,6 +948,14 @@ Candidates for the next release, roughly in order of how often they come up:
 - **A Workspace**, so this app's doctypes appear in the app switcher instead of
   only via search.
 
+- **Check printing**, and re-generating the PDF of a document that was
+  archived as a `.docx`.
+- **Deeper 1099 filing.** State 1099 filings and electronic filing to the IRS.
+  What ships today stops at a pre-fill on purpose — the taxpayer id has to come
+  off a signed W-9, and Copy A has to be the official scannable form.
+- **Real estate for the operating company.** The land register is per-entity by
+  construction; standing up a second company's parcels is data entry, not code.
+
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
@@ -810,17 +968,20 @@ bench --site yoursite.localhost uninstall-app erpnext_mcp
 
 Drops this app's own doctypes and everything in them: **ERPNext MCP Settings**,
 **MCP Action Log** (the audit history), **Cap Table Entry**, **Member Event**,
-**Governance Document**, **Asset Cost Profile** and **Note Payable**. Nothing
-else on the site is touched — the accounts, cost centers, dimensions, journal
-entries, bank accounts and Assets these tools created are ordinary ERPNext
-records and stay exactly as they are.
+**Governance Document**, **Asset Cost Profile**, **Note Payable**, **Parcel**,
+**Lease** and **Related Party**. Nothing else on the site is touched — the
+accounts, cost centers, dimensions, journal entries, bank accounts and Assets
+these tools created are ordinary ERPNext records and stay exactly as they are.
 
 `before_uninstall` prints a row count and an export command for each doctype
-that has anything in it, because four of them are the **only** copy: the cap
+that has anything in it, because most of them are the **only** copy: the cap
 table is the only mapping from a member id to a legal name, the event trail the
 only record of why an equity entry exists, a governance document may hold the
-only digital copy of an agreement, and a note payable is the only place a debt's
-terms and provenance are written down — the ledger has the balance and nothing
+only digital copy of an agreement, a note payable is the only place a debt's
+terms and provenance are written down, the parcel register holds appraised
+values and the dates they were appraised as of, a lease holds rent terms that
+exist in no other digital form, and the related-party register is the source for
+a related-party disclosure on a return. The ledger has the balances and nothing
 else. Export before you uninstall.
 
 ---

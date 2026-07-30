@@ -3,6 +3,274 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.11.0 — 2026-07-30
+
+Four features in one release, because they are one feature. A parcel is held by
+an entity, an entity is a related party, a related party is a 1099 recipient, and
+a quarterly report is the document all of it ends up inside. Shipping them
+separately would have meant three releases that each pointed at a doctype the
+next one adds.
+
+Fifteen tools, three DocTypes, no child tables, and no new runtime dependency.
+
+### Real Estate — `Parcel` and `Lease`
+
+**The unit is the parcel as the county assessor knows it.** A family's land is
+described four different ways by four different documents: an appraisal talks
+about "Red Camp", a tax statement about parcel 1N-13E-8-1200, a deed about metes
+and bounds, and the balance sheet about a Fixed Asset with a purchase price. Only
+one of those is a unit everyone agrees on. So the register is keyed on the
+parcel, carries the assessor's number as the identifier a third party will
+recognise, and links out to the Asset rather than trying to be one.
+
+**Appraised value is not book value, and they are meant to differ.**
+`gross_purchase_amount` on an Asset is what was paid, which is what the balance
+sheet must carry; `appraised_value` on a Parcel is what it is worth, which is
+what an estate plan turns on. A single field would force one of those two
+questions to be answered wrongly. `link_parcel_to_asset` reports the gap between
+them — a parcel appraised at 3,100,000 sitting on the books at a 1998 cost of
+240,000 is not a discrepancy to be fixed, it is unrealised appreciation, and it
+is the single most important number in a succession conversation. Nothing posts
+it, because unrealised appreciation is not a journal entry.
+
+**The docname carries the entity**: `"Red Camp - HLD"`, not `"Red Camp"`. Family
+land gets reorganised, and two entities in one family end up with a "Home Place"
+apiece. A docname keyed on the name alone would make the second impossible to
+file and the first impossible to trust.
+
+**A duplicate assessor parcel id inside one entity is refused.** That number is
+the county's primary key; two parcels sharing one means a typo in one of them,
+and it is the refusal that catches a bad import.
+
+**Direction on a lease is stated, not inferred.** Outbound means the owning
+entity is the lessor. The alternative — working out which party is "us" by
+matching a legal name against a Company docname — is wrong for every entity whose
+legal name is not its ERPNext name, which is most of them ("Highland Ltd
+Liability Co." against a Company called "Highland LLC"). So the caller says, and
+`create_lease` reports whether the claim looks *consistent* with the parties
+named. Reported, never enforced: a refusal built on a string comparison it cannot
+win is a refusal nobody could get past.
+
+**Nothing expires a lease.** A lease marked Active whose expiration date has
+passed is reported by `list_leases` and left exactly as it was. Farm ground
+routinely runs on month to month past its stated term, and a status that flipped
+itself on a calendar would erase the difference between "still running" and
+"nobody has looked at this in years". The warning says so in capitals, because a
+reader who assumes the system tidied up is a reader who has stopped checking.
+
+**The rent roll refuses to treat an unknown as a zero.** Rent is annualised from
+amount and frequency for Active leases only. A crop share and a one-time payment
+have no annual rate; they are listed under `rent_not_annualisable` rather than
+counted as nothing, because a rent roll that quietly zeroed them would understate
+the whole portfolio.
+
+New tools: `create_parcel`, `update_parcel`, `list_parcels`, `get_parcel`,
+`link_parcel_to_asset`, `create_lease`, `update_lease`, `list_leases`,
+`get_lease`. The four read tools default ON, the five mutating ones OFF.
+
+### `Related Party` — the governance register
+
+**This is not the Party field on a Journal Entry.** ERPNext already answers "who
+was this transaction with" through Supplier, Customer, Employee and Shareholder
+links; those work and nothing here replaces or shadows them. This answers a
+different question — "who is related to us, in what capacity, from when, and
+under what document" — which no transactional field can, because a transaction is
+an event and a relationship is a state. "Was the person we paid $24,000 last year
+a manager of this company at the time" is a question the ledger cannot answer and
+the IRS asks anyway.
+
+**Four digits, never nine.** `tax_id_last4` takes exactly four digits and refuses
+nine — not truncated, not masked, not accepted with a warning. The refusal names
+the four digits to send instead, because a validator that says "invalid format"
+to somebody who has just pasted a real SSN has told them nothing about why it
+matters. The controller enforces the same rule, since the Desk form is a second
+door into the same field, and the field is declared four characters long as the
+belt to that brace. The full number belongs on the signed W-9, on paper. And
+`get_related_party` never returns more than four digits *even from a linked
+Supplier* — `supplier_detail.tax_id` says only whether one is on file.
+
+**A person is not one row.** In an LLC the ordinary case is somebody who is both
+Manager and Member, under two different instruments, from two different dates.
+One row with one Select cannot hold that, and picking a "primary" role would mean
+the register quietly disagrees with the operating agreement. So the docname
+carries the relationship — `"Tim Polehn - Manager - OML"` beside
+`"Tim Polehn - Member - OML"` — and `list_related_parties` reports `count`
+(relationships) and `distinct_people` (names) separately.
+
+**Nothing is deleted when a relationship ends.** `end_date` is set and the row
+stays: the transactions it explains are still in the ledger, and a prior year's
+disclosure schedule still needs to know who was who at the time.
+
+It sits beside the cap table rather than inside it. `Cap Table Entry` maps an
+anonymous member id to an ownership percentage — deliberately the only place on
+the site where that mapping exists. Related Party holds every other kind of
+relationship: the trustee who owns nothing, the estate attorney, the son who is a
+beneficiary but not yet a member. Folding those in would mean rows with no
+percentage in a register whose whole purpose is that the percentages total 100.
+The two link, so a member appears in both without either being copied.
+
+New tools: `create_related_party`, `update_related_party`,
+`list_related_parties`, `get_related_party`.
+
+### `generate_quarterly_investment_report` (mutating, default OFF)
+
+**Kairos, not chronos.** A quarterly report is not due on a date; it is due when
+the quarter is *actually closed*. Four things must be true, and the refusal names
+every one that is not — all of them at once, so a single call answers "am I
+ready?" rather than sending the caller round the loop four times:
+
+1. the quarter has ended;
+2. the custodian's statement is filed as a **Prior Statement** governance
+   document with an effective date inside it — a report written before the
+   statement arrived is a report written from a guess;
+3. no journal entry touching the investment accounts is still a draft, because an
+   account that reconciles today and will not once three drafts are posted is not
+   reconciled, it is about to not be;
+4. no bank transaction in the period is unreconciled.
+
+A report generated on a calendar date regardless of state is a report whose
+numbers may be wrong, signed by somebody who assumed the schedule meant
+something. `dry_run=true` runs every precondition and computes every figure
+without writing, which is the right first call.
+
+**It invents nothing.** Without `benchmark_rate_percent` the return over
+benchmark and the performance fee are NOT computed and say so in words. They are
+not zero and not estimated: the 10-year Treasury yield is a market fact this site
+does not hold, and a performance fee computed against an assumed benchmark of
+nothing overstates what the manager is owed. Same for the high-water mark and for
+`net_contributions`, which is reported as an assumption when it is one.
+
+**Holdings come from the caller.** This app reads one ERPNext site and the
+custodian's positions are not on it. Pass `holdings` and the report reconciles
+the snapshot against the ledger and reports the variance; omit it and assets
+under management are the ledger balance of the investment accounts, stated as
+such. The accounts themselves are matched by name off the company's own chart and
+**listed in the report**, so the reader sees exactly what was included — or named
+explicitly, and a chart with no match is refused rather than guessed at.
+
+**Manager and custody fees accrue at 1.00% each** by default — the split the
+Investment Management Agreement is actually charged at, inside its 2.00% cap —
+computed on average assets for the quarter. It is an accrual and nothing posts
+it; the result says which tool does. A combined rate above the cap is flagged,
+not refused, because a later agreement may raise it.
+
+**PDF is the primary format and that is a requirement, not a preference.** A
+`.docx` handed over on 2026-07-29 could not be opened on the machine it was sent
+to. `output_format="docx"` exists for a report that has to be edited before it is
+signed, and the default is never it.
+
+### `generate_1099_prefill` (mutating, default OFF)
+
+A calendar year of supplier payments, aggregated into an xlsx worksheet and a
+per-recipient 1099-NEC form (Copies A, B and C), filed together in the governance
+archive as a **Tax Filing**.
+
+**It is called a pre-fill and it means it.** Recipient taxpayer ids print as
+`XXX-XX-nnnn` because this site holds four digits on purpose. Copy A must be the
+official scannable red-ink form or an electronic filing; the Copy A page here is
+stamped as an information copy and says that printing and mailing it is not a
+filing. Copies B and C print on plain paper and are the ones that go out.
+
+**Classification is never silent.** Every recipient comes back `reportable`,
+`exempt` or `borderline` with the reason in a sentence:
+
+- an **LLC** is borderline, because a disregarded entity is reportable and one
+  taxed as a corporation is not, and only the W-9 says which;
+- a **law firm** is borderline even when incorporated, because attorneys are
+  reportable regardless — which is precisely why "ends in PC, skip it" is the
+  wrong rule, and why the matching is on word tokens rather than substrings
+  ("Lawson Supply" is not an attorney);
+- a **government-sounding name** is flagged rather than dropped, because a name
+  is a hint and not a determination;
+- a vendor with **nothing recorded** is borderline with the remedy: register it
+  as a Related Party, or read the W-9.
+
+That last one is why these two features are one release: a Supplier row cannot
+say "this vendor is the manager's own LLC", and the related-party register can —
+through the `supplier` link, which is what turns a payment in the ledger into a
+disclosure on the return.
+
+**The arithmetic, which is the part worth arguing with.** Payments are summed
+from **GL Entry** rows carrying a Supplier party — so every voucher type, and
+only submitted ones, since cancelled vouchers leave no GL row to filter out:
+
+- on a **Payable** account: **debits only**. A debit to accounts payable is a
+  bill being paid; a credit is a bill being raised, and a 1099 reports cash paid.
+- on **every other account**: **debits minus credits**. A site that books a
+  supplier straight from expense to bank puts the party on the expense line, so
+  the debit is the payment and a credit is a refund that genuinely reduces it.
+
+That rule is right in both bookkeeping styles, which is why it is a rule and not
+a switch. `by_account` shows the debits and credits behind every total so the
+reasoning can be checked rather than believed.
+
+**What is excluded is said out loud.** Employees, because that is W-2 territory —
+and the count and total of employee-party postings is reported anyway, so "nobody
+looked" and "somebody looked and excluded them" are different-looking answers.
+Opening entries. Anything under the threshold, listed with its total so a case
+near $600 is visible rather than absent.
+
+**It refuses a tax year that has not ended**, naming the earliest date it could
+be run.
+
+### Document writers: PDF, XLSX and DOCX in the standard library
+
+`erpnext_mcp/render/` writes all three formats with `zipfile`, byte offsets and
+nothing else. This app promises no runtime dependency beyond Frappe/ERPNext, and
+that promise is what makes `bench get-app` safe on somebody else's bench. Frappe
+ships two routes to a document and both are conditional: `frappe.utils.pdf`
+shells out to a **wkhtmltopdf binary** present in some images and absent in
+others, and `xlsxutils` imports openpyxl. Either means a tool that works on the
+machine it was written on and fails on the one it was deployed to, at the moment
+somebody needs the report.
+
+**Courier, and only Courier.** A PDF naming a base-14 font carries no glyph data,
+but the writer still has to know how wide each glyph is to wrap a line or
+right-align money. For Helvetica that is a 230-entry width table transcribed by
+hand, where one wrong number is a column that silently overlaps in the printed
+copy. Courier is monospaced at exactly 600/1000 em: the arithmetic is exact
+rather than approximately right, and decimal points line up because they cannot
+do anything else.
+
+**Money columns never wrap.** A right-aligned column holds a formatted amount,
+and an amount broken across two lines reads as two figures. When a table will not
+fit, the prose columns give way and the numbers keep their width.
+
+**The same inputs give the same bytes.** Zip members carry a fixed timestamp and
+`render()` does not mutate the document, so the archive copy and the printed copy
+cannot differ in a way nobody can see.
+
+### `scripts/seed_related_parties.py`
+
+Seeds the related-party register from a JSON file the operator keeps **outside
+this repository** — the useful content of that register is people's names, and
+this repository is public.
+
+It runs outside `bench execute`, so it configures Frappe itself: `--sites-path`
+or auto-detection by looking for `common_site_config.json`, `--site` or
+`currentsite.txt`, and the log directories created before `frappe.connect()`
+rather than assumed. Dry-run by default; `--apply` writes. The whole plan is
+validated before the first insert — including the four-digits-never-nine rule,
+refused before Frappe is even started — so a plan of forty records is refused
+whole rather than half-applied. The module docstring documents the
+`docker cp` sequence for getting both the script and the plan into a container,
+and there is a test comparing the flags the docstring names against the flags
+`argparse` actually registers.
+
+### Also
+
+- `Governance Document` gained two categories: **Tax Filing** and **Lease**.
+- `args.py` gained `select_options` and `as_choice`, which read a Select's
+  options off the site's own meta. `governance.py`'s private copies now delegate
+  to them rather than being a second implementation of the same rule.
+- `output_path` on both generators is confined to the site's own
+  `private/files` and `public/files`, checked on the **resolved** real path so a
+  symlink cannot step outside, and refusing to overwrite an existing file unless
+  told to. A bad path refuses the whole run before the first write rather than
+  leaving an archive entry behind.
+- `before_uninstall` now warns about Parcel, Lease and Related Party rows too.
+- Standalone suite: 1222 → 1536 tests; in-bench suite 255 → 284.
+
 ## 0.10.0 — 2026-07-29
 
 One tool, for the gap found the day somebody tried to put a year of brokerage

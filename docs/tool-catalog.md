@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 77 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 92 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -2649,7 +2649,7 @@ nothing to post and is refused with that said.
 `parties`, `notes`.
 
 `category` is one of Operating Agreement, Trust Document, Advisory Agreement,
-Board Resolution, Prior Statement, Amendment, Other.
+Board Resolution, Prior Statement, Amendment, Lease, Tax Filing, Other.
 
 **Content.** `file_content` is base64 of the document's bytes (no `data:`
 prefix) and needs `file_name`; it is stored as a **private** File attached to
@@ -3508,6 +3508,375 @@ Journal Entry ACC-JV-2026-03369 as File a7f3c9e21b (private)
 
 ---
 
+## 78. `list_parcels`
+
+Read-only, default ON (`allow_list_parcels`).
+
+**Arguments:** `owning_entity` (or `company` — the same thing), `county`,
+`use_type`, `title_holder`, `linked_to_asset` (boolean), `limit`.
+
+**Returns** `parcels`, `count`, `total_in_register`, `total_acreage`,
+`total_appraised_value`, `average_per_acre`, `by_use_type`, `oldest_appraisal`,
+`newest_appraisal` and `parcels_without_value`.
+
+Totals cover the rows returned, not the whole register, and a `limit` that hides
+part of it says so before the totals are trusted. `oldest_appraisal` is how you
+find out the valuation is four years stale.
+
+**Appraised value is not book value.** What the balance sheet carries is the
+Asset's cost; this is market. They are meant to differ — see **82**.
+
+---
+
+## 79. `get_parcel`
+
+Read-only, default ON (`allow_get_parcel`).
+
+**Arguments:** `parcel` (required — a docname like `Red Camp - HLD`, or just
+`Red Camp`), `owning_entity`.
+
+**Returns** the parcel, its `asset` (with the gap between cost and appraised
+value), every `lease` over it in either direction, `active_leases` and
+`attachments`.
+
+A bare parcel name matching parcels in two entities is refused with both named
+rather than resolved to whichever came first.
+
+---
+
+## 80. `create_parcel`
+
+**MUTATING**, default OFF (`allow_create_parcel`).
+
+**Arguments:** `parcel_name` (required), `owning_entity` (or `company`),
+`parcel_id`, `county`, `state`, `address`, `acreage`, `use_type`,
+`title_holder`, `appraised_value`, `appraised_as_of`, `appraiser`,
+`appraisal_document`, `related_asset`, `notes`.
+
+**The docname is `<parcel_name> - <entity abbr>`**, so two entities in one family
+may each have a "Home Place".
+
+| Refusal | Why |
+| --- | --- |
+| A second parcel with the same name for one entity | the docname is built from it |
+| A second parcel with the same `parcel_id` for one entity | that number is the county assessor's primary key; two of them means a typo |
+| Negative acreage or appraised value | not opinions |
+| An unknown `use_type` | the options are read off the DocType, so a customised site's own list is what applies |
+| A `title_holder`, `appraisal_document` or `related_asset` on another company's books | a parcel and the records explaining it belong to one entity |
+
+**Warns rather than refusing** when a value arrives with no as-of date, or with
+no appraisal document behind it. A figure somebody remembered is worth recording;
+it just should not be mistaken for a valuation.
+
+---
+
+## 81. `update_parcel`
+
+**MUTATING**, default OFF (`allow_update_parcel`).
+
+**Arguments:** `parcel` (required), plus any of `parcel_id`, `county`, `state`,
+`address`, `acreage`, `use_type`, `appraised_value`, `appraised_as_of`,
+`appraiser`, `title_holder`, `appraisal_document`, `notes`. An empty string
+clears an optional field.
+
+**Returns** the parcel and `changes`, every one as `[before, after]`.
+
+Cannot rename it (the docname is built from `parcel_name`, and every lease and
+asset link points at that docname), cannot move it between entities (a parcel
+changing hands is a conveyance, not an edit), and cannot set `related_asset` —
+that is **82**, which checks things this does not. A no-op update is refused
+rather than reported as a success.
+
+---
+
+## 82. `link_parcel_to_asset`
+
+**MUTATING**, default OFF (`allow_link_parcel_to_asset`).
+
+**Arguments:** `parcel` (required), `asset` (required), `replace` (default
+`false`), `dry_run` (default `false`).
+
+**Returns** the parcel, an `asset` block with `gross_purchase_amount`,
+`appraised_value` and `appraisal_over_book`, and `unrealised_appreciation` when
+both figures exist.
+
+**The gap is the point.** A parcel appraised at 3,100,000 sitting on the books at
+a 1998 cost of 240,000 is not a discrepancy to be fixed — it is unrealised
+appreciation, it is the single most important number in a succession
+conversation, and neither record shows it alone. Nothing here posts it, because
+unrealised appreciation is not a journal entry.
+
+Refuses an asset on another company's books, an asset already claimed by a
+different parcel, and a parcel that is already linked unless `replace=true`.
+
+---
+
+## 83. `list_leases`
+
+Read-only, default ON (`allow_list_leases`).
+
+**Arguments:** `owning_entity` (or `company`), `status`, `direction`, `parcel`,
+`counterparty`, `active_on`, `expiring_within_days` (default 90), `limit`.
+
+**Returns** `leases`, `annual_rent_receivable`, `annual_rent_payable`,
+`net_annual_rent`, `rent_not_annualisable`, `expiring_soon`,
+`active_past_expiration` and `as_of`.
+
+**Rent is annualised for Active leases only.** A crop share and a one-time
+payment have no annual rate: they are listed under `rent_not_annualisable`
+rather than counted as zero, because a rent roll that quietly treats an unknown
+as nothing understates the whole portfolio.
+
+**Nothing here expires a lease.** A lease marked Active whose expiration date has
+passed is reported under `active_past_expiration` and left exactly as it was.
+Farm ground routinely runs on month to month past its stated term, and a status
+that flipped itself on a calendar would erase the difference between "still
+running" and "nobody has looked at this in years".
+
+---
+
+## 84. `get_lease`
+
+Read-only, default ON (`allow_get_lease`).
+
+**Arguments:** `lease` (required), `owning_entity`.
+
+**Returns** the lease, `parcel_detail`, `attachments`, `annualised_rent`,
+`past_expiration` and `in_force_today`.
+
+Read `direction` before reading `rent_amount`: Outbound means the owning entity
+collects it, Inbound means it pays it.
+
+---
+
+## 85. `create_lease`
+
+**MUTATING**, default OFF (`allow_create_lease`).
+
+**Arguments:** `lease_name`, `direction`, `lessor`, `lessee`, `effective_date`
+(all required), `owning_entity` (or `company`), `expiration_date`, `status`
+(default `Active`), `termination_date`, `termination_reason`, `parcel`,
+`counterparty`, `rent_amount`, `rent_frequency` (default `Annual`), `rent_terms`,
+`governance_document`, `lease_document_url` **or** `file_content` +
+`file_name`, `notes`.
+
+**Books nothing.** No journal entry, no receivable, no schedule. Recording an
+agreement and booking its consequences are separate acts, and this is the first
+one.
+
+**Direction is stated, not guessed.** The result carries a `direction_check`
+saying whether the party names agree with the stated direction —
+`consistent`, `inconsistent` or `unverified`. Reported, never enforced: a legal
+name ("Highland Ltd Liability Co.") and a Company docname ("Highland LLC")
+routinely differ, and a refusal built on string matching is one nobody could get
+past.
+
+Refuses a duplicate lease name for one entity, the same party as both lessor and
+lessee, an expiration or termination date before the effective date, `Terminated`
+with no termination date, and negative rent (rent flowing the other way is a
+lease in the other direction). `file_content` is base64 with the same 8 MB
+ceiling every attachment tool uses; a large scan is better uploaded in the Desk
+and recorded with `lease_document_url`.
+
+---
+
+## 86. `update_lease`
+
+**MUTATING**, default OFF (`allow_update_lease`).
+
+**Arguments:** `lease` (required), plus any of `status`, `expiration_date`,
+`termination_date`, `termination_reason`, `rent_amount`, `rent_frequency`,
+`rent_terms`, `lessor`, `lessee`, `parcel`, `counterparty`,
+`governance_document`, `notes`.
+
+Cannot rename it — a renewed lease is a **new** lease with its own term — and
+cannot move it between entities. Marking one `Terminated` requires a
+`termination_date` in the same call: "we ended it" without "when" is not a record
+anybody can rely on later.
+
+---
+
+## 87. `list_related_parties`
+
+Read-only, default ON (`allow_list_related_parties`).
+
+**Arguments:** `company`, `party_type`, `relationship_to_company`, `supplier`,
+`current_only` (default `false`), `limit`.
+
+**Returns** `parties`, `count`, `distinct_people`, `current_count`,
+`ended_count`, `by_relationship`, `by_party_type`, `linked_to_supplier`,
+`linked_to_cap_table`, `without_governing_document` and `without_tax_id`.
+
+**One person may appear more than once.** A Manager who is also a Member is two
+entries, under two instruments, from two dates — `count` counts relationships and
+`distinct_people` counts names. Ended relationships are listed by default: the
+transactions they explain are still in the ledger.
+
+`without_governing_document` is the first thing an examiner asks for.
+
+---
+
+## 88. `get_related_party`
+
+Read-only, default ON (`allow_get_related_party`).
+
+**Arguments:** `party` (required — a docname like
+`Tim Polehn - Manager - OML`, or just the name), `company`.
+
+**Returns** the relationship, `other_roles`, `cap_table_detail`,
+`supplier_detail`, `parcels_titled` and `leases_as_counterparty`.
+
+**Never returns more than four digits of a taxpayer id**, including from a linked
+Supplier: `supplier_detail.tax_id` says only whether one is on file. A bare name
+held in two capacities is refused with both docnames listed.
+
+---
+
+## 89. `create_related_party`
+
+**MUTATING**, default OFF (`allow_create_related_party`).
+
+**Arguments:** `party_name`, `party_type`, `relationship_to_company`,
+`effective_date` (all required), `company`, `end_date`, `tax_id_type`,
+`tax_id_last4`, `address`, `cap_table_entry`, `supplier`, `governing_document`,
+`notes`.
+
+**The docname is `<name> - <relationship> - <company abbr>`**, because somebody
+who is both Manager and Member of an LLC is two entries under two instruments.
+The same name and role twice is refused; a second role is expected.
+
+**Four digits, never nine.** `tax_id_last4` takes exactly four digits and refuses
+nine, naming the four to send instead. Not truncated, not masked, not accepted
+with a warning. The controller enforces the same rule, because the Desk form is a
+second door into the same field. The full number belongs on the signed W-9, on
+paper.
+
+**This is not the Party field on a Journal Entry.** ERPNext already answers "who
+was this transaction with"; this answers "who is related to us, in what capacity,
+since when, and under what document", which no transactional field can, because a
+transaction is an event and a relationship is a state.
+
+---
+
+## 90. `update_related_party`
+
+**MUTATING**, default OFF (`allow_update_related_party`).
+
+**Arguments:** `party` (required), plus any of `party_type`, `effective_date`,
+`end_date`, `tax_id_type`, `tax_id_last4`, `address`, `cap_table_entry`,
+`supplier`, `governing_document`, `notes`.
+
+`party_name`, `relationship_to_company` and `company` are the key and cannot
+change: a change of role is a **new** relationship, so register it and set an
+`end_date` on this one. An entry is never deleted when a relationship ends — the
+transactions it explains are still in the ledger, and a prior year's disclosure
+schedule still needs to know who was who at the time.
+
+---
+
+## 91. `generate_quarterly_investment_report`
+
+**MUTATING**, default OFF (`allow_generate_quarterly_investment_report`).
+
+**Arguments:** `quarter` (required, as `2026-Q2`), `company`, `output_format`
+(`pdf` default, or `docx`), `output_path`, `overwrite`, `investment_accounts`,
+`cash_clearing_account`, `holdings`, `benchmark_rate_percent`,
+`manager_fee_percent` (default 1.00), `custody_fee_percent` (default 1.00),
+`performance_fee_percent` (default 20), `high_water_mark`, `net_contributions`,
+`title`, `dry_run`.
+
+**Returns** `aum`, `activity`, `fees`, `performance`, `holdings`,
+`cash_clearing`, `reconciliation`, `preconditions`, `governance_document`,
+`document` (the attached file's metadata and sha256) and `written_to_disk`.
+
+**It refuses a quarter that is not closed**, and names everything missing in one
+reply:
+
+| Precondition | Why it is a precondition |
+| --- | --- |
+| The quarter has ended | there is no such thing as a report on a quarter that is still happening |
+| The custodian's statement is filed as a **Prior Statement** with an effective date inside it | a report written before the statement arrived is a report written from a guess |
+| No journal entry touching the investment accounts is still a draft | an account that reconciles today and will not once three drafts post is not reconciled, it is about to not be |
+| No bank transaction in the period is unreconciled | the same argument, from the other side of the ledger |
+
+**It invents nothing.** Without `benchmark_rate_percent` the return over
+benchmark and the performance fee are **not computed** and say so — they are not
+zero and not estimated, because a performance fee against an assumed benchmark of
+nothing overstates what the manager is owed. `high_water_mark` caps the
+fee-eligible gain, and closing assets at or below it earn nothing however the
+quarter went. `net_contributions` defaults to zero and the report says that is an
+assumption.
+
+**Holdings come from the caller.** This app reads one ERPNext site; the
+custodian's positions are not on it. Pass `holdings` — a list of objects with
+`symbol`, `description`, `quantity`, `price`, `market_value`, `cost_basis` — and
+the report reconciles the snapshot against the ledger and reports the variance.
+Omit it and assets under management are the ledger balance, stated as such.
+
+The investment accounts are matched by name off the company's own chart and
+**listed in the report**, or named explicitly; a chart with no match is refused
+rather than guessed at.
+
+**PDF is the default and the right answer.** `docx` exists for a report that has
+to be edited before signing; a `.docx` is a file the recipient may not be able to
+open.
+
+---
+
+## 92. `generate_1099_prefill`
+
+**MUTATING**, default OFF (`allow_generate_1099_prefill`).
+
+**Arguments:** `tax_year` (required), `company`, `threshold` (default 600),
+`output_path` (a **directory**), `overwrite`, `payer_address`, `include_forms`
+(default `true`), `title`, `dry_run`.
+
+**Returns** `recipients`, `exempt_above_threshold`, `below_threshold`,
+`total_box_1`, `related_party_recipients`, `excluded`, `basis`,
+`governance_document`, `workbook` and `forms`.
+
+**It is a pre-fill.** Recipient taxpayer ids print as `XXX-XX-nnnn`, because this
+site holds four digits on purpose. Copy A must be the official scannable red-ink
+form or an electronic filing; the Copy A page here is stamped as an information
+copy. Copies B and C print on plain paper and are the ones that go out.
+
+**Classification is never silent.** Every recipient is `reportable`, `exempt` or
+`borderline` with the reason in a sentence:
+
+| Signal | Verdict |
+| --- | --- |
+| Related Party says Individual, Partnership, Family Member or Trust | reportable |
+| Related Party says Corporation | exempt — **unless** the name says law firm, which is borderline |
+| Related Party says LLC, or the name does | **borderline** — a disregarded entity is reportable and one taxed as a corporation is not, and only the W-9 says which |
+| The name looks like a law firm | **borderline** — attorneys are reportable **even when incorporated**, which is why "ends in PC, skip it" is the wrong rule |
+| The name looks governmental | **borderline** — a name is a hint, not a determination |
+| Supplier type is Individual / Proprietorship / Partnership | reportable |
+| The name ends in a corporate suffix | exempt |
+| Nothing on the site says | **borderline**, with the remedy: register it as a Related Party, or read the W-9 |
+
+**Where the money comes from.** GL Entry rows carrying a Supplier party — every
+voucher type, and only submitted ones, since cancelled vouchers leave no GL row.
+Debits **only** on Payable-type accounts (a debit to payables is a bill being
+paid; a credit is one being raised). Debits **minus** credits everywhere else
+(the party sits on the expense line, so a credit is a refund). That rule is right
+in both bookkeeping styles, and `by_account` shows both sides so the arithmetic
+can be checked rather than believed.
+
+**Excluded and said so.** Employees, because that is W-2 territory — and the
+count and total of employee-party postings is reported anyway, so "nobody looked"
+and "somebody looked and excluded them" are different-looking answers. Opening
+entries. Anything under the threshold, listed with its total so a case near the
+line is visible rather than absent.
+
+Refuses a tax year that has not ended, naming the earliest date it could run.
+
+```
+1099-NEC pre-fill for Orchard Meadow LLC 2025: 4 recipient(s), 29,485.00 in Box
+1, filed as GD-00214
+```
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -3515,7 +3884,7 @@ Everything a tool needs is in two places:
 1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
    `workflow`, `accounts`, `banking`, `dimensions`, `fiscal`, `governance`,
    `assets`, `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`,
-   `meta` or `packets` —
+   `meta`, `packets`, `realestate`, `parties`, `investment_report` or `tax` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

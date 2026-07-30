@@ -1358,3 +1358,210 @@ class HRTestCase(V2TestCase):
 	def setUp(self):
 		super().setUp()
 		install_hrms()
+
+
+# ── v0.11.0 fixtures: land, leases, related parties and a year of vendor pay ──
+#: The portfolio the quarterly report reads, and the clearing account beside it.
+#: `1190 - Cash Clearing` is already in the base chart (`UNUSED_ACCOUNT`), which
+#: is why the report's clearing section has something to find without this
+#: fixture adding one — and why a test that wants a NON-zero clearing balance has
+#: to post to it deliberately.
+MARKETABLE_SECURITIES = f"1310 - Marketable Securities - {MAIN_ABBR}"
+
+#: A Payable-typed account, so the 1099 rule that counts debits only on payables
+#: is exercised against a real account type rather than a mocked one.
+ACCOUNTS_PAYABLE = f"2110 - Accounts Payable - {MAIN_ABBR}"
+PROFESSIONAL_FEES = f"5400 - Professional Fees - {MAIN_ABBR}"
+CONTRACT_LABOR = f"5410 - Contract Labor - {MAIN_ABBR}"
+
+#: The vendors the 1099 tests classify. Each one is a distinct branch of
+#: `tax._verdict`, and the names are the shapes that occur in life: an accountant
+#: trading as an LLC, a person, an incorporated law firm, a plain corporation, a
+#: partnership with no supplier type set, and somebody under the threshold.
+SORREN = "Sorren Accounting LLC"
+MITCHELL = "Mitchell Huru"
+FRIEND_REAGAN = "Friend & Reagan PC"
+BRIGHT_ORCHARD = "Bright Orchard Supply Inc"
+COOPER = "Cooper Family Orchards"
+QUILL = "Quill Stationery"
+
+#: The tax year the vendor postings sit in. One whole year in the past relative
+#: to the fixture's frozen today (2026-07-24), so `generate_1099_prefill` can run
+#: for it and refuse for 2026.
+TAX_YEAR = 2025
+
+#: The quarter the investment report tests use. Ended 2026-06-30, comfortably
+#: before the fixture's today, which is what makes it reportable at all.
+QUARTER = "2026-Q2"
+QUARTER_START = "2026-04-01"
+QUARTER_END = "2026-06-30"
+
+#: The Prior Statement that has to be on file before a quarter can be reported.
+STATEMENT_DOC = "GOV-STATEMENT-2026-Q2"
+
+
+def seed_v11() -> None:
+	"""Accounts, vendors, a year of payments and a quarter of portfolio activity."""
+	_v11_accounts()
+	_suppliers()
+	_vendor_payments()
+	_investment_activity()
+	_quarter_statement()
+
+
+def _v11_accounts() -> None:
+	STORE.seed(
+		"Account",
+		[
+			_account(
+				MARKETABLE_SECURITIES,
+				"Marketable Securities",
+				"1310",
+				"Asset",
+				"",
+				parent=ASSETS_ROOT,
+			),
+			_account(
+				ACCOUNTS_PAYABLE, "Accounts Payable", "2110", "Liability", "Payable", parent=LIABILITIES_ROOT
+			),
+			_account(PROFESSIONAL_FEES, "Professional Fees", "5400", "Expense", "", parent=EXPENSES_ROOT),
+			_account(CONTRACT_LABOR, "Contract Labor", "5410", "Expense", "", parent=EXPENSES_ROOT),
+		],
+	)
+
+
+def _suppliers() -> None:
+	STORE.seed(
+		"Supplier",
+		[
+			{"name": SORREN, "supplier_name": SORREN, "supplier_type": "Company", "supplier_group": "Services"},
+			{"name": MITCHELL, "supplier_name": MITCHELL, "supplier_type": "Individual"},
+			{
+				"name": FRIEND_REAGAN,
+				"supplier_name": FRIEND_REAGAN,
+				"supplier_type": "Company",
+				"supplier_group": "Legal",
+			},
+			{"name": BRIGHT_ORCHARD, "supplier_name": BRIGHT_ORCHARD, "supplier_type": "Company"},
+			# No supplier_type at all — the "nothing on this site says what this is"
+			# branch, and the one a related-party entry is meant to resolve.
+			{"name": COOPER, "supplier_name": COOPER, "supplier_group": "Farm Labor"},
+			{"name": QUILL, "supplier_name": QUILL, "supplier_type": "Individual"},
+		],
+	)
+
+
+def _party_gl(account, posting_date, party, debit=0, credit=0, cost_center_name="Main", **extra):
+	row = _gl(account, posting_date, debit=debit, credit=credit)
+	row.update(
+		{
+			"name": f"GL-{party}-{posting_date}-{debit}-{credit}-{len(STORE.rows('GL Entry'))}",
+			"party_type": "Supplier",
+			"party": party,
+			"cost_center": cost_center(cost_center_name),
+			"voucher_no": f"ACC-JV-{posting_date[:4]}-{abs(hash((party, posting_date, debit, credit))) % 100000:05d}",
+			"is_opening": "No",
+		}
+	)
+	row.update(extra)
+	return row
+
+
+def _vendor_payments() -> None:
+	"""A year of supplier postings, one shape per rule the classifier has.
+
+	Every payment carries its own balancing credit to the bank with NO party, so
+	the fixture stays double-entry without those rows reaching the 1099 — which
+	is itself worth having, since a counter-leg wrongly picked up would double
+	every recipient's Box 1.
+	"""
+	rows = [
+		# Sorren: paid monthly, across two cost centers, straight from expense.
+		_party_gl(PROFESSIONAL_FEES, "2025-03-31", SORREN, debit=6090, cost_center_name="Main"),
+		_party_gl(PROFESSIONAL_FEES, "2025-06-30", SORREN, debit=6090, cost_center_name="Main"),
+		_party_gl(PROFESSIONAL_FEES, "2025-09-30", SORREN, debit=6090, cost_center_name="Operations"),
+		_party_gl(PROFESSIONAL_FEES, "2025-12-31", SORREN, debit=6090, cost_center_name="Operations"),
+		# Mitchell: paid, then refunded part of it. The credit reduces Box 1
+		# because it is not on a payable account.
+		_party_gl(CONTRACT_LABOR, "2025-08-15", MITCHELL, debit=1450, cost_center_name="Field Work"),
+		_party_gl(CONTRACT_LABOR, "2025-09-01", MITCHELL, credit=200, cost_center_name="Field Work"),
+		# The incorporated law firm.
+		_party_gl(PROFESSIONAL_FEES, "2025-09-08", FRIEND_REAGAN, debit=675, cost_center_name="Main"),
+		# A plain corporation, over the threshold and exempt.
+		_party_gl(supplies(), "2025-05-02", BRIGHT_ORCHARD, debit=5000, cost_center_name="Operations"),
+		# Cooper, booked through payables: a bill raised (credit) and paid
+		# (debit). Only the debit is a payment, and that is the whole point of
+		# the payable rule.
+		_party_gl(ACCOUNTS_PAYABLE, "2025-07-01", COOPER, credit=3200, cost_center_name="Field Work"),
+		_party_gl(ACCOUNTS_PAYABLE, "2025-07-20", COOPER, debit=3200, cost_center_name="Field Work"),
+		# Under the threshold.
+		_party_gl(supplies(), "2025-04-04", QUILL, debit=120, cost_center_name="Main"),
+		# Excluded: an opening entry, a cancelled voucher, and the next year.
+		_party_gl(PROFESSIONAL_FEES, "2025-01-01", SORREN, debit=999, is_opening="Yes"),
+		_party_gl(PROFESSIONAL_FEES, "2025-02-02", SORREN, debit=888, is_cancelled=1),
+		_party_gl(PROFESSIONAL_FEES, "2026-01-31", SORREN, debit=6090),
+	]
+	# Excluded: wages, which are W-2 territory. Counted and reported, not silent.
+	wages = _party_gl(CONTRACT_LABOR, "2025-11-15", "HR-EMP-00001", debit=45000)
+	wages["party_type"] = "Employee"
+	rows.append(wages)
+
+	# The balancing bank legs, party-free by construction.
+	balancing = []
+	for row in rows:
+		if row.get("is_cancelled"):
+			continue
+		leg = _gl(BANK, row["posting_date"], debit=row.get("credit") or 0, credit=row.get("debit") or 0)
+		leg["name"] = f"{row['name']}-leg"
+		leg["voucher_no"] = row["voucher_no"]
+		leg["is_opening"] = row.get("is_opening", "No")
+		balancing.append(leg)
+
+	STORE.seed("GL Entry", rows + balancing)
+
+
+def _investment_activity() -> None:
+	"""A portfolio position before the quarter, and two trades inside it."""
+	rows = [
+		("2025-12-31", 1400000, 0),
+		("2026-05-15", 100000, 0),
+		("2026-06-20", 0, 25000),
+	]
+	entries = []
+	for index, (posting_date, debit, credit) in enumerate(rows, start=1):
+		entry = _gl(MARKETABLE_SECURITIES, posting_date, debit=debit, credit=credit)
+		entry["name"] = f"GL-INV-{index}"
+		entry["voucher_no"] = f"ACC-JV-INV-{index:05d}"
+		entry["cost_center"] = cost_center("Operations")
+		entry["is_opening"] = "No"
+		entries.append(entry)
+		leg = _gl(BANK, posting_date, debit=credit, credit=debit)
+		leg["name"] = f"GL-INV-{index}-leg"
+		leg["voucher_no"] = entry["voucher_no"]
+		leg["is_opening"] = "No"
+		entries.append(leg)
+	STORE.seed("GL Entry", entries)
+
+
+def _quarter_statement() -> None:
+	"""The custodian's quarter-end statement, filed where the report looks for it."""
+	STORE.seed(
+		"Governance Document",
+		[
+			{
+				"name": STATEMENT_DOC,
+				"title": f"WFA Statement {QUARTER_END}",
+				"category": "Prior Statement",
+				"company": MAIN,
+				"effective_date": QUARTER_END,
+			}
+		],
+	)
+
+
+class V11TestCase(V8TestCase):
+	"""...and the land, party, vendor-payment and portfolio fixtures."""
+
+	def setUp(self):
+		super().setUp()
+		seed_v11()

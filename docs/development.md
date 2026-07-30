@@ -272,16 +272,28 @@ erpnext_mcp/                     repo root
     tools/trade.py               sales/purchase orders, receivables ageing
     tools/meta.py                custom fields, client scripts
     tools/packets.py             the two MCP tools over the packet framework
+    tools/realestate.py          the parcel and lease registers
+    tools/parties.py             the related-party governance register
+    tools/investment_report.py   the quarterly report and its kairotic gate
+    tools/tax.py                 the 1099-NEC pre-fill
+    tools/artifacts.py           where a generated document goes: onto a record,
+                                 and — confined — onto disk
     packets/base.py              PacketSpec, Flag, provenance envelope
     packets/reconciliation.py    one account, one period
     packets/fiscal_year_audit.py one company, one fiscal year
+    render/pdf.py                a PDF writer: base-14 Courier, exact metrics
+    render/xlsx.py               an XLSX writer: a zip of XML, inline strings
+    render/docx.py               a DOCX writer, for output_format="docx"
     charts/base.py               ChartTemplate, tree validation, account-type rules
     charts/us_llc_farm.py        the one shipped chart template — pure data
     erpnext_mcp/doctype/         ERPNext MCP Settings, MCP Action Log,
                                  Cap Table Entry, Member Event,
                                  Governance Document, Asset Cost Profile
                                  (+ its two child tables), Note Payable
-                                 (+ Note Payable Event)
+                                 (+ Note Payable Event), Parcel, Lease,
+                                 Related Party
+scripts/seed_related_parties.py  seeds the related-party register from a JSON
+                                 file kept OUTSIDE this repository
 ```
 
 **Read `registry.py` first.** It is the only file you edit to add a tool, and it is
@@ -298,6 +310,17 @@ contract live.
   script for one site.
 - **No field selected without checking it exists.** Selecting a missing column is a
   hard SQL error. Use `compat.existing_fields()` / `compat.first_field()`.
+- **No runtime dependency beyond Frappe/ERPNext.** That promise is what makes
+  `bench get-app` safe on somebody else's bench, and it is why `render/` writes
+  PDF, XLSX and DOCX with `zipfile` and byte offsets rather than importing a
+  library. Frappe's own routes are conditional — `frappe.utils.pdf` shells out to
+  a wkhtmltopdf **binary**, `xlsxutils` imports openpyxl — so either would mean a
+  tool that works where it was written and fails where it was deployed.
+- **No unconfined filesystem write.** A generated document's home is a private
+  File attached to a record. `output_path` exists for a batch somebody has to
+  print, and `tools/artifacts.py` confines it to the site's own `private/files`
+  and `public/files`, checked on the **resolved** real path so a symlink cannot
+  step outside.
 - **Never query `tabSingles` with `frappe.db.get_value` / `get_values` /
   `get_all`.** They default to `order_by="modified"`, and `tabSingles` is not a
   DocType table — three columns, no framework columns — so the query dies with

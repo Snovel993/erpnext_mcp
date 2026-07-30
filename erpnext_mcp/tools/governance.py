@@ -40,6 +40,7 @@ import frappe
 from .. import compat, settings
 from ..args import (
 	as_bool,
+	as_choice,
 	as_date,
 	as_float,
 	as_limit,
@@ -47,6 +48,7 @@ from ..args import (
 	resolve_account,
 	resolve_company,
 	resolve_cost_center,
+	select_options,
 )
 from ..errors import ToolError
 from ..result import ToolResult
@@ -156,28 +158,12 @@ def _company_abbr(company: str) -> str:
 	return frappe.db.get_value("Company", company, "abbr") or ""
 
 
-def _select_options(doctype: str, fieldname: str) -> list[str]:
-	"""A Select field's options, read off this site's meta rather than hardcoded.
-
-	The entity types and event types are declared in the shipped DocType JSON. A
-	tool that carried its own copy of the list would accept a value the doctype
-	rejects the moment somebody customises it, and the failure would arrive from
-	`doc.insert()` as a framework error instead of as a sentence naming the
-	choices.
-	"""
-	field = compat.field_meta(doctype, fieldname)
-	raw = str((field or {}).get("options") or "")
-	return [line.strip() for line in raw.split("\n") if line.strip()]
-
-
-def _validated_choice(doctype: str, fieldname: str, value: str, label: str) -> str:
-	options = _select_options(doctype, fieldname)
-	if not options:  # pragma: no cover - a site whose meta has no options at all
-		return value
-	for option in options:
-		if option.lower() == value.lower():
-			return option
-	raise ToolError(f"{label} must be one of: {', '.join(options)}. Got {value!r}. Nothing was created.")
+#: The entity types and event types are declared in the shipped DocType JSON and
+#: read off the site at call time. Both helpers moved to `args` in v0.11.0 when
+#: the real-estate and related-party tools needed the same rule; these aliases
+#: stay so the reading of this module does not change.
+_select_options = select_options
+_validated_choice = as_choice
 
 
 def cap_table_entry(member: str, company: str = "") -> dict:
