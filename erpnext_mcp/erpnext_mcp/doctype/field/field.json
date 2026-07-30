@@ -1,0 +1,366 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-30 12:00:00.000000",
+ "description": "One planted block inside a parcel: what grows on it, when it went in, what condition it is in, and the food-safety facts a Produce Safety Rule inspector asks about that ground. The unit is the block a crew is sent to and a spray is recorded against, which is the same unit a cost centre allocates to.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "field_name",
+  "parcel",
+  "owning_entity",
+  "acreage",
+  "identity_col",
+  "block_number",
+  "external_farm_app_id",
+  "cost_center",
+  "planting_section",
+  "crop",
+  "variety",
+  "rootstock",
+  "planting_col",
+  "planting_year",
+  "planting_density_per_acre",
+  "condition",
+  "compliance_section",
+  "last_spray_date",
+  "water_test_last_date",
+  "wildlife_intrusion_last_report",
+  "compliance_col",
+  "food_safety_zone",
+  "worker_hygiene_station_present",
+  "boundary_section",
+  "boundary_geojson",
+  "boundary_centroid_lat",
+  "boundary_centroid_lon",
+  "boundary_col",
+  "boundary_bbox_geojson",
+  "h3_cells",
+  "area_computed_acres",
+  "imagery_section",
+  "satellite_provider",
+  "imagery_asset_ref",
+  "imagery_col",
+  "last_ndvi_pull_date",
+  "last_ndvi_mean",
+  "last_ndvi_stddev",
+  "imagery_notes",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What the block is called on the radio: 'Yellow Camp Block 3', 'North 40'. The docname is built from this and the parcel's abbreviation, so two parcels may each have a 'Block 3'.",
+   "fieldname": "field_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Field Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The parcel this block is part of. A field cannot move between parcels: ground does not move, and a block that turns out to be on the neighbouring parcel was mis-registered rather than relocated.",
+   "fieldname": "parcel",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Parcel",
+   "options": "Parcel",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The company whose books carry the parcel. Copied from the parcel rather than set here, because a field on Highland's ground belongs to Highland whatever anyone types.",
+   "fetch_from": "parcel.owning_entity",
+   "fieldname": "owning_entity",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Owning Entity",
+   "options": "Company",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Planted acres in this block. The sum of a parcel's fields cannot exceed the parcel's own acreage — roads, ditches and headlands mean it usually should not come close.",
+   "fieldname": "acreage",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Acreage",
+   "precision": "2"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The block number as the crew and the old records know it. Free text, because legacy block ids are not numbers ('3A', 'N-12').",
+   "fieldname": "block_number",
+   "fieldtype": "Data",
+   "label": "Block Number",
+   "search_index": 1
+  },
+  {
+   "description": "The id this block carries in the Farm App, for the sync bridge to match on. Set once at import and not edited afterwards: it is somebody else's primary key.",
+   "fieldname": "external_farm_app_id",
+   "fieldtype": "Data",
+   "label": "Farm App ID",
+   "search_index": 1
+  },
+  {
+   "description": "The Cost Center this block's costs are booked to, when it has its own. Set by link_field_to_cost_center, which checks the cost centre is on the same books and is not a group.",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "planting_section",
+   "fieldtype": "Section Break",
+   "label": "Planting"
+  },
+  {
+   "default": "Cherry",
+   "description": "What grows here. Defaulted to Cherry because that is what this was built for, and left as free text because a block of table grapes is not a schema change.",
+   "fieldname": "crop",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Crop"
+  },
+  {
+   "description": "Bing, Rainier, Sweetheart, Chelan, Skeena — or whatever is actually planted. Free text on purpose: a Select would refuse the next variety somebody puts in the ground. list_fields reports the varieties already on the site, which is the suggestion list worth having.",
+   "fieldname": "variety",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Variety",
+   "search_index": 1
+  },
+  {
+   "description": "Mazzard, Gisela 6, Krymsk 5. Determines vigour and spacing, and is the first thing a consultant asks.",
+   "fieldname": "rootstock",
+   "fieldtype": "Data",
+   "label": "Rootstock"
+  },
+  {
+   "fieldname": "planting_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The year the trees went in. Age drives yield expectation, replant timing and what an appraiser calls the block.",
+   "fieldname": "planting_year",
+   "fieldtype": "Int",
+   "label": "Planting Year"
+  },
+  {
+   "description": "Trees per acre. With acreage this gives the tree count, which is the denominator for per-tree cost and for a replant estimate.",
+   "fieldname": "planting_density_per_acre",
+   "fieldtype": "Int",
+   "label": "Planting Density (per acre)"
+  },
+  {
+   "description": "How the block is doing. Fallow is a condition, not a crop: a block out of production still has acreage, a cost centre and a water right.",
+   "fieldname": "condition",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Condition",
+   "options": "\nExcellent\nGood\nFair\nPoor\nFallow"
+  },
+  {
+   "description": "Food safety and worker protection facts about this ground. They are here rather than in a compliance register because they are the same facts the operation runs on: 'when was this block last sprayed' is a re-entry-interval question before it is a WPS report, and a block with no hygiene station is a block a crew cannot legally be sent to.",
+   "fieldname": "compliance_section",
+   "fieldtype": "Section Break",
+   "label": "Food Safety and Worker Protection"
+  },
+  {
+   "description": "The last application recorded on this block. Answers the re-entry interval question for a crew waiting at the gate, and is the per-field line of a WPS record-keeping report. Where farm_precision_ag is installed the read tools take the later of this and the newest Spray Log, and say which they used.",
+   "fieldname": "last_spray_date",
+   "fieldtype": "Date",
+   "label": "Last Spray Date"
+  },
+  {
+   "description": "When the agricultural water serving this block was last tested. FSMA Produce Safety Rule Subpart E. Per-zone tests live on the Irrigation Zone; this is the block-level answer where the water is not zoned.",
+   "fieldname": "water_test_last_date",
+   "fieldtype": "Date",
+   "label": "Water Test Last Date"
+  },
+  {
+   "description": "The last recorded sign of animal intrusion — droppings, tracks, damage. FSMA Subpart I requires the assessment before harvest, and the answer decides whether fruit off this block can be picked at all.",
+   "fieldname": "wildlife_intrusion_last_report",
+   "fieldtype": "Date",
+   "label": "Wildlife Intrusion Last Report"
+  },
+  {
+   "fieldname": "compliance_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "Ticked when this block grows produce that is eaten raw and is therefore inside the Produce Safety Rule's covered-produce scope. It changes what the other fields on this section mean, which is why it is a field and not a note.",
+   "fieldname": "food_safety_zone",
+   "fieldtype": "Check",
+   "label": "Food Safety Zone"
+  },
+  {
+   "default": "0",
+   "description": "Ticked when toilets and handwashing are available within a quarter mile of this block, as FSMA Subpart L and the WPS both require before a crew works it.",
+   "fieldname": "worker_hygiene_station_present",
+   "fieldtype": "Check",
+   "label": "Worker Hygiene Station Present"
+  },
+  {
+   "description": "The shape on the ground. Everything below the polygon is DERIVED from it on save and must not be edited by hand — a figure a person can change independently of the polygon is a figure that will disagree with it, and the disagreement surfaces as a geofence saying no to somebody standing in the right place.",
+   "fieldname": "boundary_section",
+   "fieldtype": "Section Break",
+   "label": "Boundary"
+  },
+  {
+   "description": "The block boundary as a GeoJSON Polygon or MultiPolygon, in [longitude, latitude] degrees. Set it with the boundary tool rather than by hand: they validate the shape and recompute everything derived from it. Zones on this block are expected to sit inside it; one that does not is reported rather than refused, because a shared water line really can cross a boundary.",
+   "fieldname": "boundary_geojson",
+   "fieldtype": "Long Text",
+   "label": "Boundary (GeoJSON)"
+  },
+  {
+   "description": "Computed. Where a map opens, and the cheap first cut for a distance query. For a shape whose true centroid falls outside it — a block wrapped round a farmstead — this is an interior point instead, because centring on the farmstead is centring on somebody else's ground.",
+   "fieldname": "boundary_centroid_lat",
+   "fieldtype": "Float",
+   "label": "Centroid Latitude",
+   "precision": "7",
+   "read_only": 1
+  },
+  {
+   "description": "Computed. See Centroid Latitude.",
+   "fieldname": "boundary_centroid_lon",
+   "fieldtype": "Float",
+   "label": "Centroid Longitude",
+   "precision": "7",
+   "read_only": 1
+  },
+  {
+   "fieldname": "boundary_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Computed. A bounding box is a guaranteed superset of the shape it bounds, which is what makes it the only safe cheap prefilter for 'is this point inside' — a candidate set built from it can never miss the right answer.",
+   "fieldname": "boundary_bbox_geojson",
+   "fieldtype": "Text",
+   "label": "Bounding Box (GeoJSON)",
+   "read_only": 1
+  },
+  {
+   "description": "Computed. JSON of {resolution: [cells]} at resolutions 6, 7, 8, 9 and 10, holding every cell the shape TOUCHES. Not every cell whose centre is inside it: an orchard block is smaller than one cell at resolutions 6 to 8, so a centre-based fill returns nothing for most fields and an index built on it would answer 'in no field' for a point plainly in one.",
+   "fieldname": "h3_cells",
+   "fieldtype": "Long Text",
+   "label": "H3 Cells",
+   "read_only": 1
+  },
+  {
+   "description": "Computed from the polygon by spherical excess. This is a different number from the acreage somebody typed and both are worth having: a deed, a GIS trace and a tape measure routinely disagree by a few percent. A gap over 5% is reported; over 25% the boundary is refused, because at that point one of the two figures is about a different piece of ground.",
+   "fieldname": "area_computed_acres",
+   "fieldtype": "Float",
+   "label": "Computed Area (acres)",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "description": "Where this block's imagery comes from and what the last pull said. Imagery is per-field rather than per-zone: a satellite does not resolve a valve.",
+   "fieldname": "imagery_section",
+   "fieldtype": "Section Break",
+   "label": "Satellite Imagery"
+  },
+  {
+   "description": "Sentinel-2, Planet Labs, Landsat, or whoever else. Free text, because the provider a farm can afford changes and a Select would have to be migrated when it does.",
+   "fieldname": "satellite_provider",
+   "fieldtype": "Data",
+   "label": "Satellite Provider"
+  },
+  {
+   "description": "The provider's own handle on the scene: a Sentinel scene id, a tile URL, a capture timestamp. Free text because every provider names its assets differently and none of them will agree to ours.",
+   "fieldname": "imagery_asset_ref",
+   "fieldtype": "Long Text",
+   "label": "Imagery Asset Reference"
+  },
+  {
+   "fieldname": "imagery_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When imagery for this block was last processed. What decides whether the next pull is due is this date AND the crop cycle AND whether a boundary exists at all — not a calendar tick on its own.",
+   "fieldname": "last_ndvi_pull_date",
+   "fieldtype": "Date",
+   "label": "Last NDVI Pull"
+  },
+  {
+   "description": "Mean NDVI over the block at the last pull. The index runs -1 to 1, not 0 to 1: water and bare soil read negative, and clamping the floor to zero would make a flooded block indistinguishable from an unmeasured one.",
+   "fieldname": "last_ndvi_mean",
+   "fieldtype": "Float",
+   "label": "Last NDVI Mean",
+   "precision": "4"
+  },
+  {
+   "description": "Spread of NDVI across the block. The mean says how the block is doing; this says whether it is doing it evenly, which is the number that finds a failed irrigation set.",
+   "fieldname": "last_ndvi_stddev",
+   "fieldtype": "Float",
+   "label": "Last NDVI Std Dev",
+   "precision": "4"
+  },
+  {
+   "fieldname": "imagery_notes",
+   "fieldtype": "Text",
+   "label": "Imagery Notes"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-30 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "field_name,parcel,variety,block_number",
+ "sort_field": "field_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "field_name",
+ "track_changes": 1
+}

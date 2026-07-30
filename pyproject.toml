@@ -14,11 +14,24 @@ classifiers = [
   "Framework :: Frappe",
 ]
 
-# No runtime dependencies beyond Frappe/ERPNext itself. The MCP wire protocol
-# is JSON-RPC 2.0 over HTTP, which this app speaks with the standard library —
-# pulling in the `mcp` SDK would add an asyncio server runtime that a
-# Frappe/Werkzeug (synchronous WSGI) request never uses.
-dependencies = []
+# The MCP wire protocol is JSON-RPC 2.0 over HTTP, which this app speaks with the
+# standard library — pulling in the `mcp` SDK would add an asyncio server runtime
+# that a Frappe/Werkzeug (synchronous WSGI) request never uses.
+#
+# The two below arrived in v0.12.0 with field boundaries, and they are the only
+# runtime dependencies beyond Frappe/ERPNext itself. Both do geometry this app
+# has no business reimplementing: shapely decides whether a polygon is valid and
+# whether a point is inside it, and h3 turns a shape into an index a bucket log
+# or a crew track can be joined against.
+#
+# THEY ARE IMPORTED DEFENSIVELY ANYWAY. A bench that somehow lacks them loses the
+# five geospatial tools — which say so by name, with the pip command to fix it —
+# rather than failing to load the other hundred and sixteen. That is the same
+# promise the rest of the app makes: installing it cannot break a site.
+dependencies = [
+  "shapely>=2.0",
+  "h3>=4.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/polehntim-commits/erpnext_mcp"

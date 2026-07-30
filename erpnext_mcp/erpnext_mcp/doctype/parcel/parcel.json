@@ -8,6 +8,7 @@
  "engine": "InnoDB",
  "field_order": [
   "parcel_name",
+  "abbr",
   "owning_entity",
   "parcel_id",
   "use_type",
@@ -37,6 +38,15 @@
    "in_list_view": 1,
    "label": "Parcel Name",
    "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "A short key for this parcel — 'MC' for Mill Creek, 'RC' for Red Camp. Left blank it is derived from the parcel name, and the derivation is what every Field, Irrigation Zone and Housing Unit docname on this parcel is suffixed with. Change it and those docnames do not follow: it is a key, not a label.",
+   "fieldname": "abbr",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Abbreviation",
+   "length": 8,
    "search_index": 1
   },
   {
@@ -167,7 +177,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-07-30 09:00:00.000000",
+ "modified": "2026-07-30 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Parcel",
@@ -198,7 +208,7 @@
   }
  ],
  "quick_entry": 0,
- "search_fields": "parcel_name,parcel_id,county,owning_entity",
+ "search_fields": "parcel_name,abbr,parcel_id,county,owning_entity",
  "sort_field": "parcel_name",
  "sort_order": "ASC",
  "states": [],

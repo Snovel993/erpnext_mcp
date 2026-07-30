@@ -183,6 +183,11 @@ ERPNEXT_SCHEMA = {
 	# `tools.accounts` falls back to a comment. A site that added the custom
 	# field is a separate case, and its test adds the field deliberately.
 	"Currency": ["name", "enabled"],
+	# `Party Type` is what a GL Entry's `party_type` points at, and v0.12.0 adds
+	# two of its own to it. `Country` is here so `create_company`'s ISO check has
+	# something real to refuse against rather than a mock that always agrees.
+	"Party Type": ["name", "party_type", "account_type"],
+	"Country": ["name", "code"],
 	"GL Entry": [
 		"name",
 		"account",
@@ -626,6 +631,13 @@ ERPNEXT_AUTONAME = {
 	"Bank": "field:bank_name",
 	"Fiscal Year": "field:year",
 	"Supplier": "field:supplier_name",
+	# A Party Type IS its name, which is what makes `frappe.db.exists("Party
+	# Type", "Family")` the check every caller writes.
+	"Party Type": "field:party_type",
+	# ERPNext's Company is `field:company_name`, and `create_company` depends on
+	# it: a Company that came back named "C-00001" would make every account
+	# docname built from its abbreviation point at a company nobody can find.
+	"Company": "field:company_name",
 }
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
@@ -644,6 +656,10 @@ APP_DOCTYPES = {
 	"Parcel": "parcel",
 	"Lease": "lease",
 	"Related Party": "related_party",
+	"Field": "field",
+	"Irrigation Zone": "irrigation_zone",
+	"Housing Unit": "housing_unit",
+	"Housing Assignment": "housing_assignment",
 }
 
 

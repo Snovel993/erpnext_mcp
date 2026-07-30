@@ -1,0 +1,660 @@
+# SPDX-License-Identifier: MIT
+"""Companies, and the party types a family operation actually pays.
+
+WHY A COMPANY TOOL AT ALL. Every other tool in this app takes a company and
+none of them could make one, so standing up a second entity meant leaving the
+model and clicking through the Desk. For an operation whose structure is a
+holding company, an operating company and a trust, "add the opco" is not an
+administrative afterthought — it is the step everything else waits on.
+
+WHAT `create_company` DOES NOT DO. It does not choose a chart of accounts beyond
+naming one ERPNext already ships, it does not post an opening balance, and it
+does not copy anything from an existing company. ERPNext's own Company
+controller builds the chart, the root cost centers and the default warehouses on
+insert; this tool's job is to hand it a correct set of arguments and then report
+what it actually got, which is not always what was asked for.
+
+WHAT `update_company` REFUSES, AND WHY THOSE THREE. The abbreviation, because it
+is baked into the docname of every account, cost center and parcel on the books —
+renaming it is a migration, not an edit. The currency, once there is a single GL
+entry, because every one of those entries was measured in the old one and
+changing the label silently restates the lot. The fiscal year start month, once
+a fiscal year exists, because a year that changes shape mid-cycle produces two
+overlapping periods and no way to say which a posting belongs to.
+
+THE TWO CUSTOM PARTY TYPES ARE THE POINT OF THE OTHER HALF OF THIS MODULE.
+ERPNext ships Customer, Supplier, Employee and Shareholder. A family operation
+pays two kinds of people that fit none of them:
+
+  * `Family` — a brother, a son, a parent. Money moves and it is neither payroll
+    nor a purchase. Recording those as Suppliers puts family transfers into
+    vendor spend and, worse, into a 1099 pre-fill.
+  * `Contact` — the consultant who looks at the orchard twice a year, the
+    neighbour who runs a tractor for a weekend. Not a formal Supplier, but paid
+    for services, which is exactly the shape the IRS cares about.
+
+They are registered as real Party Type records so a Journal Entry can carry
+them, and the 1099 pre-fill treats them differently on purpose: Family is
+excluded and says so, Contact is included as BORDERLINE. Neither is silently
+dropped. See `tools/tax.py`.
+"""
+
+import frappe
+
+from .. import compat
+from ..args import as_bool, as_limit, as_str
+from ..errors import ToolError
+from ..result import ToolResult
+
+PARTY_TYPE = "Party Type"
+
+#: The party types this app registers, and the account type each one settles
+#: against. Both are payees: a Family transfer and a Contact invoice are money
+#: going out, which makes them Payable in ERPNext's terms.
+#:
+#: `Family` exists because the alternative — recording a transfer to a brother
+#: as a Supplier payment — puts it in vendor spend and in the 1099 pre-fill,
+#: both of which are wrong. A family transfer below the gift threshold needs no
+#: W-9 and produces no form.
+#:
+#: `Contact` exists because the alternative is the same mistake in the other
+#: direction: leaving an occasional consultant unclassified, where the pre-fill
+#: has nothing to go on. A Contact payment IS potentially reportable, which is
+#: why it lands as borderline rather than exempt.
+CUSTOM_PARTY_TYPES = {
+	"Family": {
+		"account_type": "Payable",
+		"why": (
+			"Family members receiving money who are not Employees, Suppliers, Shareholders or "
+			"Customers. Excluded from the 1099 pre-fill: a family transfer below the IRS gift "
+			"threshold is not a payment for services and needs no W-9."
+		),
+	},
+	"Contact": {
+		"account_type": "Payable",
+		"why": (
+			"Professionals and one-off consultants paid occasionally who are not formal "
+			"Suppliers. Surfaced by the 1099 pre-fill as BORDERLINE — a payment for services "
+			"is reportable unless the W-9 says otherwise, and nothing on this site knows which."
+		),
+	},
+}
+
+#: Fields worth reporting about a company, filtered against the site's own meta
+#: so a version without one of them degrades instead of erroring.
+_COMPANY_FIELDS = (
+	"name",
+	"abbr",
+	"default_currency",
+	"country",
+	"tax_id",
+	"parent_company",
+	"is_group",
+	"chart_of_accounts",
+	"cost_center",
+	"domain",
+	"date_of_establishment",
+	"creation",
+)
+
+#: ERPNext's Company doctype names the fiscal year start month field
+#: inconsistently across versions, and on several it has none at all — the
+#: Fiscal Year records are the truth. Named here so the fallback is visible.
+_FY_START_FIELDS = ("fy_start_date_month", "fiscal_year_start_month")
+
+MONTHS = (
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+)
+
+
+# ── shared ──────────────────────────────────────────────────────────────────
+def _company_row(company: str) -> dict:
+	fields = compat.existing_fields("Company", _COMPANY_FIELDS)
+	return dict(frappe.db.get_value("Company", company, fields, as_dict=True) or {})
+
+
+def _tax_id_status(tax_id) -> dict:
+	"""Whether a tax id is on file, and its last four — never the whole number.
+
+	The full EIN is on the SS-4 and belongs there. What a caller needs from a
+	register is "is this set, and is it the one I am thinking of", and four
+	digits answers both without putting a taxpayer id into a model's context.
+	"""
+	digits = "".join(character for character in str(tax_id or "") if character.isdigit())
+	return {
+		"tax_id_on_file": bool(digits),
+		"tax_id_last4": digits[-4:] if len(digits) >= 4 else "",
+	}
+
+
+def _month_number(value, key: str) -> int:
+	"""A month as 1-12, from a number or from its name.
+
+	A model asked for "the fiscal year start month" is as likely to say `"April"`
+	as `4`, and refusing one of those is a round trip for nothing.
+	"""
+	if value is None or value == "":
+		return 0
+	text = str(value).strip()
+	if text.isdigit():
+		number = int(text)
+		if not 1 <= number <= 12:
+			raise ToolError(f"{key} must be 1-12 (1 = January), got {value!r}. Nothing was created.")
+		return number
+	for index, name in enumerate(MONTHS, start=1):
+		if name.lower().startswith(text.lower()) and len(text) >= 3:
+			return index
+	raise ToolError(
+		f"{key} must be a month: 1-12, or a name such as 'April'. Got {value!r}. Nothing was created."
+	)
+
+
+def _fiscal_year_dates(start_month: int, today: str) -> tuple[str, str, str]:
+	"""The fiscal year containing `today` for a year starting in `start_month`.
+
+	Returned as `(year_name, start_date, end_date)`. A calendar year is named for
+	its year; anything else is named for the span it covers, which is the
+	convention ERPNext's own installer uses and the one an accountant reads
+	without asking.
+	"""
+	year = int(str(today)[:4])
+	month = int(str(today)[5:7])
+	if month < start_month:
+		year -= 1
+	start = f"{year:04d}-{start_month:02d}-01"
+	end_year = year + 1 if start_month > 1 else year
+	end_month = start_month - 1 if start_month > 1 else 12
+	end = f"{end_year:04d}-{end_month:02d}-{_last_day(end_year, end_month):02d}"
+	name = str(year) if start_month == 1 else f"{year}-{year + 1}"
+	return name, start, end
+
+
+def _last_day(year: int, month: int) -> int:
+	if month == 2:
+		leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+		return 29 if leap else 28
+	return 30 if month in (4, 6, 9, 11) else 31
+
+
+def _gl_facts(company: str) -> dict:
+	"""How much ledger a company has, which is what decides what may be changed.
+
+	Three cheap queries rather than one big one. Reading every posting date and
+	counting the rows in Python is the obvious way to write this and the wrong
+	one: `list_companies` calls it once per company, and a real ledger has
+	hundreds of thousands of GL entries — so the obvious version pulls the whole
+	general ledger into memory to answer "are there any". A COUNT and two
+	LIMIT 1 lookups answer the same question in constant space.
+	"""
+	filters = {"company": company, "is_cancelled": 0}
+	count = frappe.db.count("GL Entry", filters)
+	if not count:
+		return {"gl_entry_count": 0, "first_gl_entry": None, "last_gl_entry": None}
+
+	def edge(direction: str):
+		rows = frappe.db.get_all(
+			"GL Entry",
+			filters=filters,
+			fields=["posting_date"],
+			order_by=f"posting_date {direction}",
+			limit=1,
+		)
+		return str(rows[0].get("posting_date") or "") or None if rows else None
+
+	return {"gl_entry_count": count, "first_gl_entry": edge("asc"), "last_gl_entry": edge("desc")}
+
+
+# ── 96. list_companies ──────────────────────────────────────────────────────
+def list_companies(args: dict) -> ToolResult:
+	"""Every company on the site, with enough about each to tell them apart."""
+	limit = as_limit(args)
+	names = frappe.db.get_all("Company", pluck="name", order_by="name asc", limit=limit + 1) or []
+	truncated = len(names) > limit
+	names = names[:limit]
+
+	# Fiscal Year is site-wide on every ERPNext this app supports, not per-company,
+	# so it is read once rather than once per company. A version that scopes years
+	# to a company would need this moved back inside the loop — the child table
+	# `companies` is the tell, and `create_company` already writes it where it exists.
+	years = frappe.db.get_all(
+		"Fiscal Year",
+		fields=compat.existing_fields("Fiscal Year", ("name", "year_start_date", "year_end_date")),
+		order_by="year_start_date asc",
+		limit=200,
+	)
+
+	companies = []
+	for name in names:
+		row = _company_row(name)
+		gl = _gl_facts(name)
+		companies.append(
+			{
+				"company": name,
+				"abbr": row.get("abbr") or None,
+				"default_currency": row.get("default_currency") or None,
+				"country": row.get("country") or None,
+				"parent_company": row.get("parent_company") or None,
+				"is_group": compat.checked(row.get("is_group")),
+				"chart_of_accounts": row.get("chart_of_accounts") or None,
+				"default_cost_center": row.get("cost_center") or None,
+				**_tax_id_status(row.get("tax_id")),
+				"fiscal_year_start_month": _fiscal_year_start_month(row, years),
+				"fiscal_year_first": years[0]["name"] if years else None,
+				"fiscal_year_last": years[-1]["name"] if years else None,
+				"fiscal_year_count": len(years),
+				"cost_center_count": frappe.db.count("Cost Center", {"company": name}),
+				"account_count": frappe.db.count("Account", {"company": name}),
+				**gl,
+			}
+		)
+
+	data = {
+		"company_count": len(companies),
+		"companies": companies,
+		"truncated": truncated,
+		"party_types": _party_type_status(),
+	}
+	if truncated:
+		data["note"] = (
+			f"more than {limit} companies on this site; raise limit to see the rest."
+		)
+	posted = [row for row in companies if row["gl_entry_count"]]
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{len(companies)} compan{'y' if len(companies) == 1 else 'ies'}, "
+			f"{len(posted)} with posted entries"
+		),
+	)
+
+
+def _fiscal_year_start_month(row: dict, years) -> int | None:
+	"""The month a fiscal year starts in, from the company or from the years.
+
+	Company carries the field on some ERPNext versions and not others, and even
+	where it exists it is what the *installer* was told rather than what the
+	Fiscal Year records say. So the records win where there are any, which is
+	also the only answer that can be checked against a posting.
+	"""
+	for field in _FY_START_FIELDS:
+		value = row.get(field)
+		if value:
+			for index, name in enumerate(MONTHS, start=1):
+				if str(value).strip().lower().startswith(name.lower()[:3]):
+					return index
+			if str(value).isdigit():
+				return int(value)
+	if years:
+		start = str(years[-1].get("year_start_date") or "")
+		if len(start) >= 7:
+			return int(start[5:7])
+	return None
+
+
+def _party_type_status() -> dict:
+	"""Which of this app's custom party types are registered on this site.
+
+	Reported by `list_companies` because it is the tool a client calls when it is
+	working out what this site can express, and "can I book a Journal Entry line
+	to a Family member" is exactly that question.
+	"""
+	if not compat.doctype_exists(PARTY_TYPE):
+		return {"available": False, "registered": [], "missing": sorted(CUSTOM_PARTY_TYPES)}
+	registered, missing = [], []
+	for name in sorted(CUSTOM_PARTY_TYPES):
+		(registered if frappe.db.exists(PARTY_TYPE, name) else missing).append(name)
+	out = {"available": True, "registered": registered, "missing": missing}
+	if missing:
+		out["hint"] = (
+			f"{', '.join(missing)} not registered. They are seeded on install and on every "
+			"`bench --site <site> migrate`; run one, or use register_party_types."
+		)
+	return out
+
+
+# ── 97. create_company ──────────────────────────────────────────────────────
+def create_company(args: dict) -> ToolResult:
+	"""Stand up one Company, and report the chart ERPNext actually built for it."""
+	company_name = as_str(args, "company_name", required=True)
+	abbr = as_str(args, "abbr", required=True).strip()
+	country = as_str(args, "country") or "United States"
+	currency = (as_str(args, "default_currency") or "USD").upper()
+	tax_id = as_str(args, "tax_id")
+	parent_company = as_str(args, "parent_company")
+	notes = as_str(args, "notes")
+	chart = as_str(args, "chart_of_accounts")
+	start_month = _month_number(args.get("fiscal_year_start_month"), "fiscal_year_start_month") or 1
+	dry_run = as_bool(args, "dry_run", False)
+
+	if frappe.db.exists("Company", company_name):
+		raise ToolError(
+			f"a Company called {company_name!r} is already on this site. Nothing was created."
+		)
+	collision = frappe.db.get_value("Company", {"abbr": abbr}, "name")
+	if collision:
+		raise ToolError(
+			f"abbreviation {abbr!r} is already {collision!r}'s. Every account, cost center and "
+			"parcel docname on a company ends in its abbreviation, so two companies sharing one "
+			"would make those docnames ambiguous. Nothing was created."
+		)
+	if not abbr.replace("-", "").replace(" ", "").isalnum():
+		raise ToolError(
+			f"abbr {abbr!r} has to be letters and digits — it becomes the tail of every account "
+			"docname on these books. Nothing was created."
+		)
+
+	if compat.doctype_exists("Country") and not frappe.db.exists("Country", country):
+		raise ToolError(
+			f"no Country called {country!r} on this site. ERPNext ships the ISO list, so this is "
+			"a spelling rather than a missing record — 'United States', not 'USA'. Nothing was "
+			"created."
+		)
+	if compat.doctype_exists("Currency") and not frappe.db.exists("Currency", currency):
+		raise ToolError(
+			f"no Currency called {currency!r} on this site. Nothing was created."
+		)
+	if parent_company:
+		if not frappe.db.exists("Company", parent_company):
+			raise ToolError(f"no Company called {parent_company!r} to be the parent. Nothing was created.")
+		if not compat.checked(frappe.db.get_value("Company", parent_company, "is_group")):
+			raise ToolError(
+				f"{parent_company!r} is not a group company, so nothing can consolidate under it. "
+				"Tick 'Is Group' on it first. Nothing was created."
+			)
+
+	fy_name, fy_start, fy_end = _fiscal_year_dates(start_month, frappe.utils.today())
+	existing_year = frappe.db.exists("Fiscal Year", fy_name)
+
+	plan = {
+		"company": company_name,
+		"abbr": abbr,
+		"country": country,
+		"default_currency": currency,
+		"parent_company": parent_company or None,
+		"fiscal_year_start_month": start_month,
+		"fiscal_year_start_month_name": MONTHS[start_month - 1],
+		"fiscal_year": {
+			"name": fy_name,
+			"year_start_date": fy_start,
+			"year_end_date": fy_end,
+			"already_exists": bool(existing_year),
+		},
+		**_tax_id_status(tax_id),
+	}
+	if dry_run:
+		return ToolResult(
+			data={**plan, "dry_run": True, "created": False},
+			summary=f"dry run: would create {company_name} ({abbr})",
+		)
+
+	doc = frappe.new_doc("Company")
+	doc.company_name = company_name
+	doc.abbr = abbr
+	doc.default_currency = currency
+	doc.country = country
+	if tax_id and compat.has_field("Company", "tax_id"):
+		doc.tax_id = tax_id
+	if parent_company:
+		doc.parent_company = parent_company
+	if chart:
+		doc.chart_of_accounts = chart
+	if notes and compat.has_field("Company", "company_description"):
+		doc.company_description = notes
+	doc.insert(ignore_permissions=True)
+
+	if not existing_year:
+		_ensure_fiscal_year(fy_name, fy_start, fy_end, company_name)
+
+	row = _company_row(doc.name)
+	built = {
+		"account_count": frappe.db.count("Account", {"company": doc.name}),
+		"cost_center_count": frappe.db.count("Cost Center", {"company": doc.name}),
+		"default_cost_center": row.get("cost_center") or None,
+		"chart_of_accounts": row.get("chart_of_accounts") or None,
+	}
+	warnings = []
+	if not built["account_count"]:
+		warnings.append(
+			"ERPNext built no accounts for this company. That happens when the named chart of "
+			"accounts does not exist on this site — import one with import_chart_of_accounts, or "
+			"the ledger has nowhere to post."
+		)
+	if not built["cost_center_count"]:
+		warnings.append("No cost centers were created. create_cost_center can add the tree by hand.")
+	if notes and not compat.has_field("Company", "company_description"):
+		warnings.append("This ERPNext's Company has no description field, so `notes` was not stored.")
+
+	data = {**plan, "created": True, "name": doc.name, **built}
+	if warnings:
+		data["warnings"] = warnings
+	return ToolResult(
+		data=data,
+		summary=(
+			f"created company {doc.name} ({abbr}), {built['account_count']} accounts, "
+			f"{built['cost_center_count']} cost centers, fiscal year {fy_name}"
+		),
+		docstatus_delta="none → 0 (created)",
+	)
+
+
+def _ensure_fiscal_year(name: str, start: str, end: str, company: str) -> None:
+	"""Create the fiscal year the company's first postings will need.
+
+	Wrapped in its own function because ERPNext's Fiscal Year is site-wide rather
+	than per-company on every version this app supports — the company link is a
+	child table that only some versions have — and a caller reading the tool
+	result should not have to know that.
+	"""
+	doc = frappe.new_doc("Fiscal Year")
+	doc.year = name
+	doc.year_start_date = start
+	doc.year_end_date = end
+	if compat.has_field("Fiscal Year", "companies"):
+		doc.append("companies", {"company": company})
+	doc.insert(ignore_permissions=True)
+
+
+# ── 98. update_company ──────────────────────────────────────────────────────
+def update_company(args: dict) -> ToolResult:
+	"""Change a company's country, tax id or description. Refuses the three that re-key books."""
+	company = as_str(args, "company", required=True)
+	if not frappe.db.exists("Company", company):
+		match = frappe.db.get_value("Company", {"abbr": company}, "name")
+		if not match:
+			raise ToolError(f"no Company called {company!r} on this site. Nothing was changed.")
+		company = match
+
+	for forbidden, why in (
+		(
+			"abbr",
+			"the abbreviation is the tail of every account, cost center, parcel and lease "
+			"docname on these books. Changing it is a rename of thousands of documents, which "
+			"is a migration rather than an edit",
+		),
+		(
+			"company_name",
+			"the company name IS the docname, and every document on the site links to it by "
+			"that name. Renaming is Frappe's own rename tool, not this",
+		),
+	):
+		if as_str(args, forbidden):
+			raise ToolError(f"{forbidden} cannot be changed here: {why}. Nothing was changed.")
+
+	row = _company_row(company)
+	gl = _gl_facts(company)
+	changes, unchanged = {}, []
+
+	currency = as_str(args, "default_currency").upper()
+	if currency:
+		if gl["gl_entry_count"]:
+			raise ToolError(
+				f"{company} has {gl['gl_entry_count']} posted GL entries "
+				f"({gl['first_gl_entry']} to {gl['last_gl_entry']}), every one of them measured in "
+				f"{row.get('default_currency')}. Relabelling the currency would restate the whole "
+				"ledger without touching a single number. Nothing was changed."
+			)
+		if compat.doctype_exists("Currency") and not frappe.db.exists("Currency", currency):
+			raise ToolError(f"no Currency called {currency!r} on this site. Nothing was changed.")
+		_stage(changes, unchanged, row, "default_currency", currency)
+
+	start_month = _month_number(args.get("fiscal_year_start_month"), "fiscal_year_start_month")
+	if start_month:
+		years = frappe.db.count("Fiscal Year")
+		if years:
+			raise ToolError(
+				f"this site already has {years} fiscal year(s). Moving the start month now would "
+				"produce two periods claiming the same days, and no way to say which one a "
+				"posting belongs to. A change of fiscal year is a short year deliberately "
+				"created with create_fiscal_year, not an edit to a company. Nothing was changed."
+			)
+		raise ToolError(
+			"this site has no fiscal years at all, so there is nothing for a start month to "
+			"change — create the year you want with create_fiscal_year. Nothing was changed."
+		)
+
+	country = as_str(args, "country")
+	if country:
+		if compat.doctype_exists("Country") and not frappe.db.exists("Country", country):
+			raise ToolError(f"no Country called {country!r} on this site. Nothing was changed.")
+		_stage(changes, unchanged, row, "country", country)
+
+	if "tax_id" in args:
+		if not compat.has_field("Company", "tax_id"):
+			raise ToolError(
+				"this ERPNext's Company has no tax_id field. Nothing was changed."
+			)
+		_stage(changes, unchanged, row, "tax_id", as_str(args, "tax_id"))
+
+	if "notes" in args:
+		if not compat.has_field("Company", "company_description"):
+			raise ToolError(
+				"this ERPNext's Company has no description field to hold notes. Nothing was changed."
+			)
+		_stage(changes, unchanged, row, "company_description", as_str(args, "notes"))
+
+	if not changes and not unchanged:
+		raise ToolError(
+			"nothing to change. This tool takes country, tax_id, notes and — only on a company "
+			"with no postings — default_currency."
+		)
+
+	if changes:
+		doc = frappe.get_doc("Company", company)
+		for field, (_before, after) in changes.items():
+			doc.set(field, after or None)
+		doc.save(ignore_permissions=True)
+
+	reported = {
+		field: [_redact(field, before), _redact(field, after)]
+		for field, (before, after) in changes.items()
+	}
+	return ToolResult(
+		data={
+			"company": company,
+			"changed": reported,
+			"unchanged": unchanged,
+			**_tax_id_status(changes.get("tax_id", (row.get("tax_id"), row.get("tax_id")))[1]),
+			**gl,
+		},
+		summary=(
+			f"{company}: {len(changes)} field(s) changed"
+			if changes
+			else f"{company}: already as asked, nothing changed"
+		),
+		docstatus_delta="0 → 0 (updated)" if changes else "",
+	)
+
+
+def _stage(changes: dict, unchanged: list, row: dict, field: str, wanted: str) -> None:
+	before = str(row.get(field) or "")
+	if before == wanted:
+		unchanged.append(field)
+	else:
+		changes[field] = [before, wanted]
+
+
+def _redact(field: str, value):
+	"""Never echo a whole taxpayer id back, even one the caller just sent."""
+	if field != "tax_id":
+		return value
+	digits = "".join(character for character in str(value or "") if character.isdigit())
+	return f"…{digits[-4:]}" if len(digits) >= 4 else ("" if not digits else "set")
+
+
+# ── 99. register_party_types ────────────────────────────────────────────────
+def register_party_types(args: dict) -> ToolResult:
+	"""Make `Family` and `Contact` real Party Types on this site. Idempotent."""
+	compat.require_doctype(
+		PARTY_TYPE,
+		"It is core ERPNext — a site without it is not an ERPNext site.",
+	)
+	dry_run = as_bool(args, "dry_run", False)
+
+	created, existing = [], []
+	for name, spec in sorted(CUSTOM_PARTY_TYPES.items()):
+		if frappe.db.exists(PARTY_TYPE, name):
+			existing.append(name)
+			continue
+		if dry_run:
+			created.append(name)
+			continue
+		doc = frappe.new_doc(PARTY_TYPE)
+		doc.party_type = name
+		if compat.has_field(PARTY_TYPE, "account_type"):
+			doc.account_type = spec["account_type"]
+		doc.insert(ignore_permissions=True)
+		created.append(name)
+
+	return ToolResult(
+		data={
+			"created": created,
+			"already_registered": existing,
+			"dry_run": bool(dry_run),
+			"party_types": {
+				name: {"account_type": spec["account_type"], "why": spec["why"]}
+				for name, spec in sorted(CUSTOM_PARTY_TYPES.items())
+			},
+			"note": (
+				"Existing rules and Journal Entries using Shareholder, Employee or Supplier are "
+				"untouched — this adds party types, it does not reclassify anything."
+			),
+		},
+		summary=(
+			f"party types: {len(created)} {'would be ' if dry_run else ''}registered, "
+			f"{len(existing)} already there"
+		),
+		docstatus_delta="none → 0 (created)" if created and not dry_run else "",
+	)
+
+
+def ensure_party_types() -> list:
+	"""Seed the custom party types. Called on install and after every migrate.
+
+	Returns the names it created, so the caller can say so. Swallows nothing: a
+	site where this fails is a site where a Journal Entry to a family member
+	cannot be booked, and that should be loud rather than discovered later.
+	"""
+	if not compat.doctype_exists(PARTY_TYPE):
+		return []
+	created = []
+	for name, spec in sorted(CUSTOM_PARTY_TYPES.items()):
+		if frappe.db.exists(PARTY_TYPE, name):
+			continue
+		doc = frappe.new_doc(PARTY_TYPE)
+		doc.party_type = name
+		if compat.has_field(PARTY_TYPE, "account_type"):
+			doc.account_type = spec["account_type"]
+		doc.insert(ignore_permissions=True)
+		created.append(name)
+	return created

@@ -1,0 +1,172 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-30 12:00:00.000000",
+ "description": "Who slept where, and between which dates. The record persists after the person leaves: an assignment that is deleted when it ends cannot defend an IRS Section 119 classification, cannot answer a wage claim about a housing deduction, and cannot tell a food safety investigator who was in the camp the week in question.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "unit",
+  "employee",
+  "employee_name",
+  "parcel",
+  "assignment_col",
+  "assigned_date",
+  "end_date",
+  "status",
+  "money_section",
+  "deposit_paid",
+  "deposit_returned",
+  "money_col",
+  "housing_deduction_from_wages",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The unit this person was housed in.",
+   "fieldname": "unit",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Housing Unit",
+   "options": "Housing Unit",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Employee, where Frappe HR is installed. Where it is not, the tools record the name in Employee Name and leave this blank — a camp roster that cannot be written until an HR module is installed is a camp roster nobody keeps.",
+   "fieldname": "employee",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "The person's name as the roster has it. Copied from the Employee record when there is one, so a report reads without a join and so the record survives an Employee being renamed.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name"
+  },
+  {
+   "fetch_from": "unit.parcel",
+   "fieldname": "parcel",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Parcel",
+   "options": "Parcel",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "assignment_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "assigned_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Assigned Date",
+   "reqd": 1
+  },
+  {
+   "description": "Blank means currently assigned. That is the whole occupancy model: there is no separate 'active' flag to fall out of step with the dates.",
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "End Date"
+  },
+  {
+   "default": "Current",
+   "description": "Derived from the dates on every save, so a filter and a report can use it. Never set by hand — the dates are the record and this is a reading of them.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Current\nEnded",
+   "read_only": 1
+  },
+  {
+   "fieldname": "money_section",
+   "fieldtype": "Section Break",
+   "label": "Deposit and Wages"
+  },
+  {
+   "fieldname": "deposit_paid",
+   "fieldtype": "Currency",
+   "label": "Deposit Paid"
+  },
+  {
+   "description": "What went back when the assignment ended. A deposit returned that exceeds the deposit paid is refused, because that is a refund of money nobody took.",
+   "fieldname": "deposit_returned",
+   "fieldtype": "Currency",
+   "label": "Deposit Returned"
+  },
+  {
+   "fieldname": "money_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "Unknown",
+   "description": "Whether a housing charge was deducted from this person's wages. ORS 653 and OAR 839-015 constrain when that is lawful and for how much, and the question is asked of the arrangement rather than of the building — which is why it is on the assignment. Unknown is a distinct answer from No and is the honest default.",
+   "fieldname": "housing_deduction_from_wages",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Housing Deduction from Wages",
+   "options": "Unknown\nYes\nNo"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-30 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Housing Assignment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "unit,employee,employee_name,assigned_date",
+ "sort_field": "assigned_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}

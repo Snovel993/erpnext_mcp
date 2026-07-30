@@ -179,10 +179,13 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_ninety_two_tools_forty_four_read_forty_eight_write(self):
-		self.assertEqual(len(registry.TOOLS), 92)
-		self.assertEqual(len(registry.READ_TOOLS), 44)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 48)
+	def test_catalogue_is_one_hundred_twenty_one_tools_fifty_seven_read_sixty_four_write(self):
+		"""v0.12.0 added 29: four for multi-company and the custom party types,
+		eleven for fields and irrigation zones, five for their boundaries, and
+		nine for labor camp housing."""
+		self.assertEqual(len(registry.TOOLS), 121)
+		self.assertEqual(len(registry.READ_TOOLS), 57)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 64)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

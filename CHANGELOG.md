@@ -3,6 +3,279 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.12.0 — 2026-07-30
+
+Three features in one release, because they share a backbone. A field sits on a
+parcel; a cabin sits on the same parcel; and both of them belong to a company
+that, until this release, this app could read but not create. Shipping them
+separately would have meant two releases that each pointed at something the next
+one adds.
+
+Twenty-nine tools, four DocTypes, two Party Types, one new field on `Parcel`,
+and the app's first two runtime dependencies — `shapely` and `h3`, for field
+boundaries, both imported defensively so a bench without them loses five tools
+by name rather than failing to load the other hundred and sixteen.
+
+### Multi-Company — `create_company`, `update_company`, `list_companies`
+
+**Every other tool took a company and none of them could make one.** For an
+operation whose structure is a holding company, an operating company and a
+trust, "add the opco" is not an administrative afterthought — it is the step
+everything else waits on, and it meant leaving the model and clicking through the
+Desk.
+
+`create_company` hands ERPNext a correct set of arguments and then reports what
+it **actually** built, which is not always what was asked for: an account count
+of zero means the named chart of accounts does not exist on this site, and the
+result says so rather than looking like a success. It also creates the fiscal
+year containing today for the start month given — April for a farm year, January
+for a calendar one, named for the span it covers rather than for one of the two
+years it straddles.
+
+**`update_company` refuses three things and says why each one.** The
+abbreviation and the company name, because both are baked into the docname of
+every account, cost center, parcel and lease on the books — changing either is a
+migration, not an edit. The currency, but only once something is posted: every
+one of those entries was measured in the old one, and relabelling it would
+restate the whole ledger without touching a single number. A company with no
+postings can still have its currency corrected, because the rule is about the
+ledger rather than about the field. And the fiscal year start month once any
+fiscal year exists, because a year that changes shape mid-cycle produces two
+periods claiming the same days and no way to say which one a posting belongs to —
+a short year created deliberately with `create_fiscal_year` is how that is done.
+
+`list_companies` reports the GL entry count with the first and last posting
+dates, which is how a caller tells a live company from a shell before it tries
+anything.
+
+### Two custom Party Types — `Family` and `Contact`
+
+ERPNext ships Customer, Supplier, Employee and Shareholder. A family operation
+pays two kinds of people that fit none of them, and recording them as Suppliers
+is wrong in two different directions.
+
+**`Family`** is a relative receiving money that is neither payroll nor a
+purchase. `generate_1099_prefill` now reads those postings and **excludes** them,
+reporting the count, the total and the names — so "nobody looked" and "somebody
+looked and excluded them" are different-looking answers, and so a Family posting
+that was really a payment for work is visible enough to be reclassified. A
+transfer below the IRS annual gift exclusion is not compensation for services: it
+needs no W-9 and produces no form. Without this party type those payments end up
+recorded as Supplier payments, which puts family money into vendor spend **and**
+onto a 1099 the recipient owes no tax on.
+
+**`Contact`** is the consultant who looks at the orchard twice a year, the
+neighbour who runs a tractor for a weekend — not a formal Supplier, but paid for
+services, which is exactly the shape a 1099 exists for. The pre-fill now reads
+those postings too and classifies them **borderline**, naming the W-9, rather
+than leaving them unclassified where it has nothing to go on.
+
+Both are seeded on install and on every `bench migrate`, and both are idempotent.
+Registering a Party Type changes nothing already recorded: existing rules and
+Journal Entries using Shareholder, Employee or Supplier keep working exactly as
+they did.
+
+### Field and Irrigation Zone — the structure under a parcel
+
+**This app owns structure; the field apps own events.** A spray, a pick, a water
+set and a soil test all happen to a *block*, and every one of them is recorded by
+a different system. What none of those systems can be is the place the block
+itself is defined, because a block outlives the app that last recorded something
+against it — and because a cost centre, a lease and an appraisal all need to
+point at the same ground.
+
+**The docname is suffixed with the parcel, at every level.** A field is
+`"Yellow Camp Block 3 - MC"` and a zone is `"YC3-Zone2 - MC"` — not
+`"YC3-Zone2 - YC3"`, because a zone name already carries its block and repeating
+it says the same thing twice while dropping the ground. That needs a short key
+per parcel, so `Parcel` gains an `abbr` field. An operator who types one gets
+theirs and a collision is refused; one who does not gets initials, and a
+*derived* collision is disambiguated rather than refused, because nobody chose
+that key. Parcels registered before this release carry no stored abbreviation
+until something saves them, and nothing reads the field without falling back to
+the same deterministic derivation — so there is no data patch.
+
+**Two arithmetic refusals, both contradictions rather than opinions.** Blocks
+summing to more acres than their parcel; zones summing to more area than their
+block. Both are the failure a bad import produces every time, and both name both
+figures and the excess, because the useful next question is which of the two is
+wrong. Blocks summing to *less* than the parcel is left alone: roads, ditches,
+headlands and the house are all real, and a controller that complained about that
+would complain about every real farm.
+
+**The variety autosuggest comes from the ground.** `list_fields` reports the
+varieties already planted on the site. A hardcoded list would be wrong the first
+time somebody puts a new one in the ground; what is already there cannot be.
+
+`import_farm_app_fields` is the schema-alignment foundation, not the sync: it
+creates Fields carrying each legacy record's Farm App id so a later engine has
+something to match on. Dry run by default, the whole batch validated before the
+first insert — a half-imported farm is worse than an unimported one, because the
+second run has to work out which half — and a block already registered is skipped
+with the reason, so the same batch re-runs safely.
+
+#### Boundaries, and the geofence they make possible
+
+Both doctypes now carry a GeoJSON polygon, and `set_field_boundary` /
+`set_zone_boundary` derive everything indexable from it: centroid, bounding box,
+H3 coverage at resolutions 6-10, and the area the shape actually encloses. None
+of those can be set directly — a figure a caller could edit independently of the
+polygon is a figure that will disagree with it, and the disagreement surfaces as
+a geofence saying no to somebody standing in the right place.
+
+**THE H3 FILL STORES EVERY CELL THE SHAPE TOUCHES, and that is the single most
+consequential line in the release.** H3's default polygon fill keeps cells whose
+*centre* is inside the shape. An orchard block is smaller than one H3 cell at
+resolutions 6, 7 and 8 — so the default returns an **empty set** for a real
+field, and a spatial index built on it answers "in no field" for a point plainly
+in one. A false negative that reads like a policy decision is exactly what a
+geofence must not produce, so the fill uses `contain="overlap"`, which is a true
+superset. There is a test asserting no stored resolution is ever empty, because
+that empty set is what the obvious implementation silently returns.
+
+For the same reason `find_fields_containing_point` narrows with the **bounding
+box** rather than with the H3 cells — a bbox is a guaranteed superset of the
+shape it bounds, so a candidate set built from it cannot miss the right answer —
+and then tests every candidate exactly. The boundary counts as inside: a pick
+recorded on the headland is in the block, and a geofence that excludes its own
+edge tells the picker they are nowhere. The result also reports how many blocks
+have **no** boundary, because on a half-mapped farm an empty answer means "not
+inside any *mapped* block" rather than "not on the farm".
+
+**Area is spherical and says so.** `shapely` computes area in the units of its
+coordinates, and these are degrees — so `.area` is degrees squared, which is not
+an area of anything. The computed acreage uses the standard spherical-excess
+integral; a test checks it against a rectangle whose true size is worked out by
+hand, and the two agree to 0.2%. A polygon more than 25% from the recorded
+acreage is refused because one of the two figures is then about a different piece
+of ground; 5-25% is reported and both figures are kept, since a deed, a GIS trace
+and a tape measure routinely disagree.
+
+**Zone containment is reported, never enforced.** A shared water line crosses a
+boundary, a pump house sits on the headland, a mainline runs down an easement.
+`boundary_contained_in_field` comes back true, false, or **null** when the block
+has no boundary to check against — "we could not check" and "we checked and it is
+outside" being different answers that a report must not conflate.
+
+`import_field_boundary_geojson` migrates a farm's existing polygons in one go,
+and is deliberately the OPPOSITE of `import_farm_app_fields`: per-feature errors
+rather than whole-batch refusal, because it only sets a field on records that
+already exist. One bad feature in forty is a bad feature, not a reason to refuse
+the other thirty-nine. It never creates a Field.
+
+The satellite fields on `Field` — provider, asset reference, last pull date, NDVI
+mean and standard deviation — are schema only; nothing fetches imagery in this
+release. NDVI is stored on its real range of **-1 to 1** rather than 0 to 1:
+water and bare soil read negative, and clamping the floor to zero would make a
+flooded block indistinguishable from an unmeasured one. When the pull lands it
+should fire on state — a boundary exists AND the last pull is stale AND the block
+is in an active crop cycle — not on a calendar tick that would spend imagery
+credits on a fallow block in January.
+
+### Housing Unit and Housing Assignment — the labor camp
+
+Employer-provided farm housing sits at the intersection of three regimes that
+each want a different fact about the same cabin, and none of them accept "we know
+who lives there" as an answer: IRS Section 119, Oregon's ORS 653 and OAR 839-015,
+and the FSMA Produce Safety Rule's Subpart L. None of the flags this release adds
+is a determination and none of this is legal advice — they record what somebody
+decided and when, so the decision can be defended or revisited.
+
+**Overlap is refused by default and allowed on request.** Two people in one cabin
+on one night is a data-entry mistake most of the time and the whole point of a
+Multi-Unit Building the rest of the time. Refusing outright would make the
+barracks unusable; allowing silently would let a typo become a bed somebody does
+not have. So it refuses, names the assignment already there, and takes
+`allow_multi_occupancy=true` from a caller who means it. Somebody moving out on
+the 15th and somebody moving in on the 15th **did** share the cabin that night,
+and the comparison is inclusive at both ends for that reason.
+
+**Nothing deletes an assignment.** `end_housing_assignment` writes an end date;
+the row stays. An assignment removed when the person leaves cannot defend a
+Section 119 classification, cannot answer a wage claim about a housing deduction,
+and cannot tell an investigator who was in the camp the week in question — and
+those are the three moments the record exists for.
+
+**The employee link is soft until an HR app makes it hard.** `Employee` is a Data
+field rather than a Link, because Frappe HR is not a dependency of this app and a
+Link would make the whole doctype fail to migrate on a site without it. Where an
+HR app *is* installed the refusal is real: an assignment naming somebody not on
+file is a roster that has already drifted from payroll.
+
+**The lawful occupancy is computed once and then left alone.** Fifty square feet
+of sleeping area per occupant — 29 CFR 1910.142(b)(1), which Oregon's rules
+follow — gives a unit with a floor area an answer without anybody typing one. But
+it is a default, not a derivation: a cabin with a fixed bunk layout keeps the
+number somebody worked out, and changing the square footage recomputes only a
+limit that was itself computed. A capacity over 20 outside a Multi-Unit Building
+is warned about rather than refused, because a twenty-person cabin is barracks by
+another name and some of them really are.
+
+### Compliance is woven into the operational doctypes, not bolted beside them
+
+The food-safety fields are on `Field`, the water-quality fields are on
+`Irrigation Zone`, and the habitability and detector dates are on `Housing
+Unit`. The test is whether removing a field breaks operations or only breaks
+reporting — and each one has a test that asserts **both halves of the same
+removal**:
+
+- Remove `last_spray_date` and the Worker Protection Standard report loses a line
+  *and* nobody can answer whether the re-entry interval on block 3 has run.
+- Remove `worker_hygiene_station_present` and an inspector loses a checkbox *and*
+  dispatch loses the fact that decides whether a crew may work that block at all.
+- Blank a zone's `water_test_last_date` and it lands on the FSMA Subpart E list
+  *and* `get_irrigation_zone` starts saying not to run it before harvest.
+- Remove a Field's boundary and the spray record loses the one thing an auditor
+  can check a GPS fix against *and* the geofence stops answering for a crew
+  standing in the block.
+- Mark a Housing Unit uninhabitable and it appears on the register's exception
+  list *and* `create_housing_assignment` refuses to put anybody in it.
+
+A separate "Field Compliance Log" that somebody fills in after the fact would
+fail that test — nothing about picking would stop if it disappeared — which is
+why this release does not have one.
+
+### Fixed
+
+- **`compat.checked`, and every Check field read through it.** `bool("0")` is
+  True, and a Check field does not always come back as an integer:
+  `frappe.new_doc` copies the DocType's declared default onto the document
+  verbatim, and in the DocType JSON that default is the *string* `"0"`. A tool
+  describing that document with a bare `bool()` reports every unticked box as
+  ticked — which would have said a block with no worker hygiene station had one,
+  and a housing unit outside the Produce Safety Rule was inside it. This is the
+  same failure `settings.as_bool` exists to prevent for the tool switches, and
+  the two are deliberately identical in behaviour.
+- **`link_field_to_cost_center`'s cross-company refusal was unreachable.** The
+  cost center resolver refused first with a terser message, so the sentence
+  explaining *why* a cost allocated across two companies is an intercompany
+  transaction rather than a dimension never appeared. Resolution is now scoped
+  first and site-wide only as a fallback, so the explanatory refusal is the one a
+  caller gets.
+- **`create_housing_assignment` reported one occupant too many** in a shared
+  unit, because it recounted the overlaps after inserting the row and counted the
+  new row as one of its own.
+- **`create_housing_unit` never checked an Asset's company.** It read
+  `owning_entity` off a document whose controller had not run yet, so the field
+  was empty and the cross-company check silently passed everything.
+- **`create_housing_assignment` let an end date before the start reach the
+  controller**, so the caller got a raw `ValidationError` instead of a sentence
+  saying nothing was created.
+
+### Notes
+
+- `Field` is a doctype name with no core Frappe or ERPNext collision today, but
+  it is a common enough word to be worth knowing you have taken. If a future app
+  wants it, this one has it.
+- `Parcel.abbr` is additive and nullable. Existing parcels are unaffected until
+  something saves them, and every read falls back to deriving the same key.
+- `shapely` and `h3` are declared dependencies but imported defensively, and CI
+  runs the whole suite **twice** — once before installing them and once after —
+  because a build that only ever saw them present would never check that the
+  graceful-degrade path works.
+- Full suite: 1951 tests, 0 failures. 73 of them skip on a bench without the
+  geospatial libraries.
+
 ## 0.11.0 — 2026-07-30
 
 Four features in one release, because they are one feature. A parcel is held by

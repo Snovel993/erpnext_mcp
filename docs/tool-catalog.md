@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 92 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 121 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -3877,6 +3877,784 @@ Refuses a tax year that has not ended, naming the earliest date it could run.
 
 ---
 
+## 93. `list_companies`
+
+Read-only, default ON (`allow_list_companies`).
+
+**Arguments:** `limit`.
+
+**Returns** `companies`, `company_count`, `truncated` and `party_types`. Each
+company carries `abbr`, `default_currency`, `country`, `parent_company`,
+`is_group`, `chart_of_accounts`, `default_cost_center`, `tax_id_on_file`,
+`tax_id_last4`, `fiscal_year_start_month`, `fiscal_year_first`,
+`fiscal_year_last`, `fiscal_year_count`, `cost_center_count`, `account_count`,
+`gl_entry_count`, `first_gl_entry` and `last_gl_entry`.
+
+**The GL counts are the point on a multi-company site.** A company with no
+postings can still have its currency changed; one with postings cannot, and this
+is where you find out which you are looking at.
+
+`party_types` reports whether this app's `Family` and `Contact` Party Types are
+registered on the site, with a hint naming the fix when they are not — because
+"can I book a Journal Entry line to a family member" is exactly the question a
+client calls this tool to answer.
+
+Never returns more than four digits of a tax id.
+
+---
+
+## 94. `create_company`
+
+**MUTATING**, default OFF (`allow_create_company`).
+
+**Arguments:** `company_name` (required), `abbr` (required), `country` (default
+`United States`), `default_currency` (default `USD`), `fiscal_year_start_month`
+(1-12 or a month name, default 1), `tax_id`, `parent_company`,
+`chart_of_accounts`, `notes`, `dry_run` (default `false`).
+
+**Returns** the plan it worked from, `created`, `name`, `account_count`,
+`cost_center_count`, `default_cost_center`, `chart_of_accounts`, the
+`fiscal_year` it created or found, and `warnings`.
+
+ERPNext's own Company controller builds the chart, the root cost centers and the
+defaults on insert. This tool's job is to hand it correct arguments and then
+report **what it actually got** — an `account_count` of zero means the named
+chart does not exist on this site, and the result says so rather than looking
+like a success.
+
+It also creates the fiscal year containing today for the start month given.
+April (4) is a farm year and is named for the span it covers (`2026-2027`);
+January (1) is a calendar year and is named `2026`.
+
+| Refusal | Why |
+| --- | --- |
+| A duplicate company name | it is the docname |
+| A duplicate abbreviation | every account, cost center, parcel and lease docname ends in it; two companies sharing one makes those ambiguous |
+| A non-alphanumeric abbreviation | it becomes the tail of a docname |
+| A `country` or `default_currency` this site does not have | ERPNext ships the ISO lists, so this is a spelling — `United States`, not `USA` |
+| A `parent_company` that is not a group | nothing can consolidate under a non-group company |
+| A month outside 1-12, or an unparseable month name | refused rather than defaulted |
+
+```
+create_company {"company_name": "Constancy Farms LLC", "abbr": "CF",
+                "fiscal_year_start_month": 4}
+→ created company Constancy Farms LLC (CF), 68 accounts, 3 cost centers,
+  fiscal year 2026-2027
+```
+
+---
+
+## 95. `update_company`
+
+**MUTATING**, default OFF (`allow_update_company`).
+
+**Arguments:** `company` (required — docname or abbreviation), `country`,
+`tax_id`, `notes`, `default_currency`.
+
+**Returns** `changed` (each as `[before, after]`, with `tax_id` redacted to
+`…nnnn`), `unchanged`, `tax_id_on_file`, `tax_id_last4` and the GL facts.
+
+| Refusal | Why |
+| --- | --- |
+| `abbr` | it is the tail of every account, cost center, parcel and lease docname on these books. Changing it renames thousands of documents, which is a migration rather than an edit |
+| `company_name` | it **is** the docname, and every document links to it by that name |
+| `default_currency` **once anything is posted** | every one of those entries was measured in the old one; relabelling it restates the whole ledger without touching a number. The refusal names the entry count and the date range |
+| `fiscal_year_start_month` | a year that changes shape mid-cycle produces two periods claiming the same days. A short year created deliberately with **72** is how that is done |
+
+The currency rule is about the **ledger**, not the field: a company with no
+postings can still have its currency corrected, which is the first-day case a
+blanket refusal would have blocked.
+
+---
+
+## 96. `register_party_types`
+
+**MUTATING**, default OFF (`allow_register_party_types`). Idempotent.
+
+**Arguments:** `dry_run` (default `false`).
+
+**Returns** `created`, `already_registered`, and `party_types` with the
+`account_type` and the reason each one exists.
+
+Registers `Family` and `Contact` as real Party Type records so a Journal Entry
+line can carry them. Both settle against a **Payable** account, because both are
+payees.
+
+**Why these two.** ERPNext ships Customer, Supplier, Employee and Shareholder,
+and a family operation pays two kinds of people that fit none of them:
+
+- **`Family`** — a relative receiving money that is neither payroll nor a
+  purchase. **92** excludes those postings and reports the count, total and
+  names. A transfer below the IRS annual gift exclusion is not compensation for
+  services: no W-9, no form. Recording them as Suppliers puts family money into
+  vendor spend *and* onto a 1099 the recipient owes no tax on.
+- **`Contact`** — the occasional consultant who is not a formal Supplier but IS
+  paid for services. **92** reads those and classifies them **borderline**,
+  naming the W-9, rather than dropping them.
+
+They are also seeded on install and on every `bench migrate`; this tool is for a
+site that cannot be migrated right now. **It changes nothing that already
+exists** — every rule and Journal Entry using Shareholder, Employee or Supplier
+keeps working exactly as it did.
+
+---
+
+## 97. `list_fields`
+
+Read-only, default ON (`allow_list_fields`).
+
+**Arguments:** `owning_entity` (or `company`), `parcel`, `crop`, `variety`,
+`condition`, `food_safety_zone` (boolean), `linked_to_cost_center` (boolean),
+`limit`.
+
+**Returns** `fields`, `field_count`, `total_acreage`, `average_acreage`,
+`oldest_planting_year`, `newest_planting_year`, `by_variety`,
+`known_varieties`, `without_acreage` and
+`spray_dates_from_farm_precision_ag`.
+
+**`known_varieties` is the autosuggest.** It is what is already planted on this
+site. A hardcoded list would be wrong the first time somebody puts a new variety
+in the ground; what is already there cannot be.
+
+**`last_spray_date` comes from two places and says which.** What is recorded on
+the Field, and — where `farm_precision_ag` is installed — the newest Spray Log
+against it. The later of the two is `last_spray_date`, with `last_spray_source`
+naming where it came from, and both raw values are returned as
+`last_spray_date_recorded` and `last_spray_date_observed` so they can be compared
+rather than believed.
+
+---
+
+## 98. `get_field`
+
+Read-only, default ON (`allow_get_field`).
+
+**Arguments:** `field` (required — a docname like `Yellow Camp Block 3 - MC`, or
+just `Yellow Camp Block 3`), `parcel`, `owning_entity`.
+
+**Returns** the block, `parcel_detail`, `zone_count`, `zone_acreage`,
+`unzoned_acreage`, `water_rights` and every `zone` over it.
+
+A bare field name matching blocks on two parcels is refused with both named
+rather than resolved to whichever came first; `parcel` narrows it.
+
+---
+
+## 99. `create_field`
+
+**MUTATING**, default OFF (`allow_create_field`).
+
+**Arguments:** `parcel` (required), `field_name` (required), `owning_entity` (or
+`company`), `acreage`, `crop` (default `Cherry`), `variety`, `rootstock`,
+`planting_year`, `planting_density_per_acre`, `condition`, `block_number`,
+`external_farm_app_id`, `last_spray_date`, `water_test_last_date`,
+`wildlife_intrusion_last_report`, `food_safety_zone`,
+`worker_hygiene_station_present`, `notes`.
+
+**The docname is `<field_name> - <parcel abbr>`**, so every parcel may have a
+"Block 3". The parcel's abbreviation is its `abbr`, or initials derived from its
+name when it has none.
+
+**The food-safety fields are part of the block, not a separate log.**
+`last_spray_date` answers the re-entry interval question a crew is waiting at
+the gate for before it answers a WPS report;
+`worker_hygiene_station_present` decides whether a crew may work the block at
+all.
+
+| Refusal | Why |
+| --- | --- |
+| A second block with the same name on one parcel | the docname is built from it |
+| A `external_farm_app_id` already on another block | that id is the other system's primary key; two of them makes the sync bridge ambiguous |
+| Negative acreage or planting density | not opinions |
+| Blocks whose acreage would sum to **more than the parcel** | two numbers that cannot both be true. Named with the parcel's acreage, the total and the excess |
+
+Blocks summing to *less* than the parcel is the normal case and is left alone —
+roads, ditches, headlands and the house are all real.
+
+**Warns rather than refusing** on no acreage, and on a food-safety block with no
+hygiene station or no water test. Every one of those is a fact worth recording
+precisely because it is a problem.
+
+---
+
+## 100. `update_field`
+
+**MUTATING**, default OFF (`allow_update_field`).
+
+**Arguments:** `field` (required), plus any of `acreage`, `crop`, `variety`,
+`rootstock`, `planting_year`, `planting_density_per_acre`, `condition`,
+`block_number`, `external_farm_app_id`, `last_spray_date`,
+`water_test_last_date`, `wildlife_intrusion_last_report`, `food_safety_zone`,
+`worker_hygiene_station_present`, `notes`.
+
+**Returns** the block and `changed`, every one as `[before, after]`.
+
+Cannot rename it (the docname is built from `field_name`, and every zone points
+at that docname), cannot move it to another parcel (ground does not move — a
+block on the wrong parcel was mis-registered), and cannot set `cost_center` —
+that is **101**. The parcel acreage rule applies here too. A no-op update is
+refused rather than reported as a success.
+
+---
+
+## 101. `link_field_to_cost_center`
+
+**MUTATING**, default OFF (`allow_link_field_to_cost_center`).
+
+**Arguments:** `field` (required), `cost_center` (required — docname, number or
+name), `owning_entity`, `replace` (default `false`), `dry_run` (default
+`false`).
+
+**Returns** `field`, `cost_center`, `previous_cost_center`, `acreage`,
+`shared_with`, `changed` and — when other blocks book to the same cost center —
+a `note`.
+
+| Refusal | Why |
+| --- | --- |
+| A cost center on another company's books | a cost allocated across two companies is an intercompany transaction, not a dimension |
+| A group cost center | ERPNext will not let a posting land on one |
+| A disabled cost center | nothing can book to it |
+| Repointing a block that is already linked, without `replace=true` | this season's costs and last season's would land in different places |
+
+**Reports rather than refuses** when other blocks already book there. A cost
+center per orchard is a legitimate design; it just is not per-block costing, and
+the result says which one you have.
+
+---
+
+## 102. `get_parcel_field_summary`
+
+Read-only, default ON (`allow_get_parcel_field_summary`).
+
+**Arguments:** `parcel` (required), `owning_entity`.
+
+**Returns** `field_count`, `planted_acreage`, `parcel_acreage`,
+`unassigned_acreage`, `average_field_acreage`, `zone_count`, `zoned_acreage`,
+`average_zones_per_field`, `total_flow_gpm`, `oldest_planting_year`,
+`newest_planting_year`, `by_condition`, `by_variety`, `water_rights`,
+`food_safety_blocks`, `blocks_without_hygiene_station`,
+`zones_without_water_test` and a per-block `fields` list.
+
+**`unassigned_acreage` is usually the interesting number.** Blocks summing to
+less than the parcel is normal, but a large gap on a parcel somebody thinks is
+fully blocked out is a missing Field.
+
+---
+
+## 103. `import_farm_app_fields`
+
+**MUTATING**, default OFF (`allow_import_farm_app_fields`). **Dry run by
+default.**
+
+**Arguments:** `records` (required — an array of objects), `parcel` (a default
+for records with no `parcel_hint`), `owning_entity`, `apply` (default `false`).
+
+Each record may carry `name` (required), `parcel_hint`, `acreage`, `variety`,
+`planting_year`, `block_number` and `farm_app_uuid`. **An unrecognised key is
+refused rather than ignored** — a typo silently dropped is a field somebody
+thinks they imported.
+
+**Returns** `record_count`, `would_create`, `already_present`, `applied`, the
+per-record `plan`, and `created` when applied.
+
+**This is the schema-alignment foundation, not the sync.** It creates ERPNext
+Fields carrying `external_farm_app_id` so a later sync engine has something to
+match on. It never updates an existing Field, never deletes, and never writes
+back to the Farm App.
+
+**The whole batch is validated before the first insert.** A half-imported farm is
+worse than an unimported one, because the second run has to work out which half.
+A `parcel_hint` matching no Parcel, a batch repeating a name or a `farm_app_uuid`,
+a negative acreage — any of those refuses the lot.
+
+A block already registered under that name, or already carrying that Farm App
+id, is **skipped** with the reason and the existing docname, so the same batch
+re-runs safely.
+
+---
+
+## 104. `list_irrigation_zones`
+
+Read-only, default ON (`allow_list_irrigation_zones`).
+
+**Arguments:** `owning_entity` (or `company`), `field`, `parcel`,
+`water_source`, `sprinkler_type`, `water_source_class`, `chlorination_active`
+(boolean), `limit`.
+
+**Returns** `zones`, `zone_count`, `total_area_acres`, `total_flow_gpm`,
+`by_water_source`, `water_rights`, `without_water_test` and
+`surface_water_without_a_right`.
+
+**The last two lists are the report.** A zone with no agricultural water test is
+one whose fruit cannot be cleared under FSMA Subpart E; a creek, pond or shared
+diversion with no water right is not something Oregon treats as self-evident.
+
+---
+
+## 105. `get_irrigation_zone`
+
+Read-only, default ON (`allow_get_irrigation_zone`).
+
+**Arguments:** `zone` (required — a docname like `YC3-Zone2 - MC`, or just
+`YC3-Zone2`), `field`, `owning_entity`.
+
+**Returns** the zone, `field_detail`, `zones_on_this_field`,
+`field_acreage_zoned`, `share_of_field` and `compliance_notes` — the gaps in
+sentences rather than left to be inferred.
+
+---
+
+## 106. `create_irrigation_zone`
+
+**MUTATING**, default OFF (`allow_create_irrigation_zone`).
+
+**Arguments:** `field` (required), `zone_name` (required), `owning_entity`,
+`zone_number`, `water_source`, `water_right_id`, `flow_rate_gpm`,
+`sprinkler_type`, `area_sq_ft`, `water_test_last_date`, `water_source_class`,
+`chlorination_active`, `notes`.
+
+**The docname is `<zone_name> - <parcel abbr>`** — not the *field's*
+abbreviation. A zone name already carries its block (`YC3-Zone2`), and suffixing
+it with the block again gives `YC3-Zone2 - YC3`, which says the same thing twice
+and drops the ground.
+
+**`area_acres` is computed** from `area_sq_ft` at 43,560 to the acre and cannot
+be passed. Two figures a caller sets independently are two figures that will
+disagree; passing it is refused with the conversion offered.
+
+| Refusal | Why |
+| --- | --- |
+| A second zone with the same name on one parcel | the docname is filed under the parcel |
+| A `zone_number` already used on that block | that number is what somebody types into the controller at two in the morning; two answers means water goes somewhere nobody chose |
+| Negative area or flow | not opinions |
+| Zones whose area would sum to **more than the block** | reported in acres and in the square feet you typed |
+
+**Warns rather than refusing** on no area, on surface water with no water right,
+and on a zone watering a food-safety block with no water test.
+
+---
+
+## 107. `update_irrigation_zone`
+
+**MUTATING**, default OFF (`allow_update_irrigation_zone`).
+
+**Arguments:** `zone` (required), plus any of `zone_number`, `water_source`,
+`water_right_id`, `flow_rate_gpm`, `sprinkler_type`, `area_sq_ft`,
+`water_test_last_date`, `water_source_class`, `chlorination_active`, `notes`.
+
+**Returns** the zone and `changed`, every one as `[before, after]`. `area_acres`
+is recomputed.
+
+Cannot rename it, cannot move it to another block (pipe does not move), and
+cannot set `area_acres`. The block area rule and the zone number rule both apply.
+
+---
+
+## 108. `list_housing_units`
+
+Read-only, default ON (`allow_list_housing_units`).
+
+**Arguments:** `owning_entity` (or `company`), `parcel`, `unit_type`,
+`condition`, `or_housing_law_compliant`, `fsma_worker_facility` (boolean),
+`limit`.
+
+**Returns** `units` (each with its current `occupants`), `unit_count`,
+`residential_unit_count`, `total_capacity`, `currently_assigned`, `open_beds`,
+`by_unit_type`, `overdue_inspections`, `uninhabitable`,
+`fsma_worker_facilities` and `over_lawful_occupancy`.
+
+**Capacity and lawful occupancy are different questions and both are reported.**
+One is how the operation uses the unit; the other is what 50 square feet per
+occupant allows. A gap between them is the finding.
+
+Non-residential units — a shower block, a kitchen, a shop — are counted as units
+but contribute no capacity. A unit never inspected counts as overdue, which is
+the answer that gets somebody to go and look.
+
+---
+
+## 109. `get_housing_unit`
+
+Read-only, default ON (`allow_get_housing_unit`).
+
+**Arguments:** `unit` (required — a docname like `MC-Cabin-01 - MC`, or just
+`MC-Cabin-01`), `owning_entity`.
+
+**Returns** the unit, `currently_assigned`, `open_beds`, `assignment_count`,
+`current_assignments`, the whole `assignment_history` newest first, and
+`compliance_notes`.
+
+The notes name what is missing in sentences: capacity over the lawful occupancy,
+no habitability inspection in a year, no smoke or CO detector test on record,
+Uninhabitable, subject to FSMA Subpart L.
+
+---
+
+## 110. `create_housing_unit`
+
+**MUTATING**, default OFF (`allow_create_housing_unit`).
+
+**Arguments:** `parcel` (required), `unit_name` (required), `owning_entity`,
+`unit_type`, `square_footage`, `capacity`, `year_built`, `condition`,
+`related_asset`, `access_card_zone`, `fsma_worker_facility`,
+`or_housing_law_compliant`, `max_occupants_per_or_law`,
+`last_habitability_inspection`, `smoke_detector_last_test`,
+`co_detector_last_test`, `notes`.
+
+**The docname is `<unit_name> - <parcel abbr>`**, so every camp may number its
+cabins from one.
+
+**The lawful occupancy is computed** from `square_footage` at 50 sq ft per
+occupant — 29 CFR 1910.142(b)(1), which Oregon's agricultural labor housing
+rules follow — unless you pass `max_occupants_per_or_law`. It is a **default,
+not a derivation**: a cabin with a fixed bunk layout keeps the number somebody
+worked out.
+
+| Refusal | Why |
+| --- | --- |
+| A second unit with the same name on one parcel | every camp numbers its cabins from one, so the name has to be unique inside the parcel |
+| An Asset on another company's books | a building and the asset carrying it belong to one set of books |
+| An Asset already carrying a different unit | one asset, one building — split the cost first |
+
+**Warns rather than refusing** a `capacity` over 20 outside a Multi-Unit
+Building. A twenty-person cabin is barracks by another name, and some of them
+really are. Also warns on missing square footage, missing detector tests and a
+missing habitability inspection.
+
+`or_housing_law_compliant` defaults to **Unknown**, which is a distinct answer
+from No: an operator who has not looked should not be recorded as having found a
+violation.
+
+---
+
+## 111. `update_housing_unit`
+
+**MUTATING**, default OFF (`allow_update_housing_unit`).
+
+**Arguments:** `unit` (required), plus any of `unit_type`, `square_footage`,
+`capacity`, `year_built`, `condition`, `related_asset`, `access_card_zone`,
+`fsma_worker_facility`, `or_housing_law_compliant`, `max_occupants_per_or_law`,
+`last_habitability_inspection`, `smoke_detector_last_test`,
+`co_detector_last_test`, `notes`.
+
+**Returns** the unit, `changed` as `[before, after]`, and `compliance_notes`.
+
+Changing `square_footage` **recomputes the lawful occupancy only when the stored
+limit was itself the computed one**. A figure somebody typed is kept.
+
+Cannot rename it (assignments point at the docname), and cannot move a building
+between parcels — even a manufactured home that really was moved should be
+re-registered where it stands, so the assignment history stays attached to the
+ground it happened on.
+
+---
+
+## 112. `list_housing_assignments`
+
+Read-only, default ON (`allow_list_housing_assignments`).
+
+**Arguments:** `owning_entity` (or `company`), `unit`, `parcel`, `employee`,
+`current_only` (**default `true`**), `from_date`, `to_date`, `limit`.
+
+**Returns** `assignments`, `assignment_count`, `currently_assigned`,
+`distinct_units`, `distinct_people`, `with_wage_deduction` and
+`deposits_outstanding`.
+
+**`with_wage_deduction` is the compliance answer.** ORS 653 and OAR 839-015
+constrain deducting housing from wages, and this is where the assignments that
+did are named. Pass `current_only=false` with a date range for the historical
+roster.
+
+---
+
+## 113. `create_housing_assignment`
+
+**MUTATING**, default OFF (`allow_create_housing_assignment`).
+
+**Arguments:** `unit` (required), `assigned_date` (required), `employee` or
+`employee_name` (one of the two required), `end_date`, `owning_entity`,
+`deposit_paid`, `deposit_returned`, `housing_deduction_from_wages` (Yes / No /
+Unknown), `allow_multi_occupancy` (default `false`), `notes`.
+
+Auto-named `HA-YYYY-MM-<seq>`, sequenced within the month, so a camp's intake
+sorts into seasons without a report.
+
+**Returns** the assignment, `unit_capacity`, `occupants_after`,
+`multi_occupancy`, `warnings` and a `section_119_note`.
+
+**This record is the audit trail** for an IRS Section 119 exclusion — lodging on
+the business premises, for the employer's convenience, required as a condition of
+employment. It records the facts; it does not make the determination.
+
+| Refusal | Why |
+| --- | --- |
+| An overlapping assignment on that unit | usually a typo. Names the assignment already there. Pass `allow_multi_occupancy=true` for a genuine bunk room |
+| A unit typed Toilet-Shower, Kitchen, Bath House, Barn or Shop | nobody is assigned to a shower block; if people really sleep there, its type is wrong |
+| A unit marked Uninhabitable | change the condition once it has been repaired and inspected, then assign |
+| An `employee` not on file, **where an HR app is installed** | a roster naming somebody payroll has never heard of has already drifted |
+| An `end_date` before `assigned_date` | nobody moved out before they moved in |
+| A `deposit_returned` larger than `deposit_paid` | a refund of money nobody took |
+
+Overlap is **inclusive at both ends**: somebody moving out on the 15th and
+somebody moving in on the 15th shared the cabin that night, and a camp manager
+told otherwise puts two people in one bed.
+
+**Where no HR app is installed** the employee is stored as text and the tool says
+so. A camp roster that cannot be written until an HR module exists is a camp
+roster nobody keeps.
+
+---
+
+## 114. `end_housing_assignment`
+
+**MUTATING**, default OFF (`allow_end_housing_assignment`).
+
+**Arguments:** `assignment` (required), `end_date` (required),
+`deposit_returned`, `notes` (appended, not replacing), `dry_run` (default
+`false`).
+
+**Returns** the assignment, `changed` and `warnings`.
+
+**It never deletes.** An assignment removed when the person leaves cannot defend
+a Section 119 classification, cannot answer a wage claim about a housing
+deduction, and cannot tell an investigator who was in the camp the week in
+question.
+
+| Refusal | Why |
+| --- | --- |
+| An assignment that has already ended | re-dating a departure is a correction, not a close. The refusal names the date on record |
+| An `end_date` before the start | nobody moved out before they moved in |
+| A `deposit_returned` larger than the one on record as paid | a refund of money nobody took |
+
+A deposit still held is **reported**, so it is either refunded or explained.
+
+---
+
+## 115. `get_housing_capacity`
+
+Read-only, default ON (`allow_get_housing_capacity`).
+
+**Arguments:** `owning_entity` (or `company`), `parcel`.
+
+**Returns** `parcel_count`, `unit_count`, `total_capacity`,
+`total_lawful_capacity`, `currently_assigned`, `open_beds`,
+`overdue_inspection_count`, a `by_parcel` breakdown, `inspection_window_days`
+and a plain `readout` — one sentence per parcel.
+
+```
+get_housing_capacity {}
+→ Mill Creek - ETC: 25 residential units, capacity 100, currently 87 assigned,
+  13 open. Overdue habitability inspections: 3.
+```
+
+Non-residential units are counted but contribute no capacity: a bath house and a
+shop are part of the camp, nobody sleeps in them, and adding their zero capacity
+to the total would make the register look thinner than it is.
+
+---
+
+## 116. `get_employee_housing_history`
+
+Read-only, default ON (`allow_get_employee_housing_history`).
+
+**Arguments:** `employee` (required — an Employee id, or the person's name as
+the roster has it).
+
+**Returns** `assignment_count`, `currently_assigned`, `units_lived_in`,
+`first_assigned`, `last_assigned`, `deposits_paid`, `deposits_returned`,
+`deposits_outstanding`, `wage_deduction_taken`, every `assignment`, and a plain
+`readout`.
+
+```
+get_employee_housing_history {"employee": "Antony"}
+→ Antony assigned MC-Cabin-12 - MC 2026-06-01 → 2026-07-15
+  Antony is currently unassigned.
+```
+
+Matches on the employee id first and then on the name, because a site with no HR
+app records the name and a site with one records the id.
+
+---
+
+## 117. `set_field_boundary`
+
+**MUTATING**, default OFF (`allow_set_field_boundary`). Needs `shapely` and `h3`.
+
+**Arguments:** `field` (required), `boundary_geojson` (required),
+`owning_entity`, `dry_run` (default `false`).
+
+**Returns** `area_computed_acres`, `acreage_recorded`,
+`area_disagreement_ratio`, `boundary_centroid`, `boundary_bbox_geojson`,
+`h3_cell_counts`, `h3_resolutions`, `zones_outside_boundary`, `warnings` and
+`changed`.
+
+The polygon may arrive as a bare geometry, a Feature, or a FeatureCollection
+holding exactly one Feature — whichever your export button produced. Coordinates
+are `[longitude, latitude]` in degrees, as GeoJSON specifies.
+
+**Everything else is derived and none of it can be set directly.** Centroid,
+bounding box, H3 coverage at resolutions 6–10, and the area the polygon
+encloses are all functions of the shape. A field a caller could edit
+independently is one that will disagree with the polygon, and the disagreement
+surfaces as a geofence saying no to somebody standing in the right place.
+
+| Refusal | Why |
+| --- | --- |
+| Not valid JSON, or not a GeoJSON object | reported with the parser's own message |
+| A Point, LineString or GeometryCollection | a boundary has to be an area |
+| A ring that is not closed | a boundary that does not come back to itself does not enclose anything |
+| A ring with fewer than four positions | a closed ring needs at least four, because the first and last are the same point |
+| Coordinates off Earth | a latitude past 90 usually means the pair is the wrong way round, and the refusal says so |
+| A self-intersecting polygon | a bow tie has an area a computer will report and a containment test nobody can trust. It is what two swapped vertices produce |
+| An area more than **25%** from the recorded acreage | at that point one of the two is about a different piece of ground |
+
+**Warns rather than refusing:** a 5–25% area difference (a deed, a GIS trace and
+a tape measure routinely disagree, and both figures are kept); a shape spanning
+more than a degree of latitude or longitude — about seventy miles, which is a
+county rather than a block; coordinates at `[0, 0]`, which is what an unset
+coordinate looks like; zones on this block that now fall outside it; and the fact
+that **a parcel has no boundary in this release**, so nothing checked that the
+block sits inside its parcel.
+
+```
+set_field_boundary {"field": "Yellow Camp Block 3", "boundary_geojson": "{...}"}
+→ Yellow Camp Block 3 - MC: boundary set, 25.7089 acres,
+  centroid 45.6015,-121.178
+```
+
+---
+
+## 118. `set_zone_boundary`
+
+**MUTATING**, default OFF (`allow_set_zone_boundary`). Needs `shapely` and `h3`.
+
+**Arguments:** `zone` (required), `boundary_geojson` (required),
+`owning_entity`, `dry_run` (default `false`).
+
+**Returns** everything **117** returns, plus `boundary_contained_in_field`.
+
+**Containment is reported, never enforced.** The obvious rule is that a zone must
+sit inside the field it waters, and it is wrong often enough to matter — a shared
+water line crosses a boundary, a pump house sits on the headland, a mainline runs
+down a road easement. Refusing those would make them unrecordable, so:
+
+| `boundary_contained_in_field` | Means |
+| --- | --- |
+| `true` | the zone is wholly inside its block |
+| `false` | it is not, which is allowed and warned about |
+| `null` | the block has no boundary of its own, so nothing could be checked |
+
+That last row matters: "we could not check" and "we checked and it is outside"
+are different answers, and reporting the first as the second is a lie a report
+would repeat.
+
+The area comparison is against the zone's own acreage, which is computed from its
+square footage — so a polygon and a design drawing disagreeing by a quarter means
+one of them is a different zone.
+
+---
+
+## 119. `find_fields_containing_point`
+
+Read-only, default ON (`allow_find_fields_containing_point`). Needs `shapely`
+and `h3`.
+
+**Arguments:** `lat` (required), `lon` (required), `owning_entity`.
+
+**Returns** `match_count`, the matching `fields` in full, the point's own
+`h3_cells` at every stored resolution, `searched`, `candidates_after_bbox`,
+`fields_without_a_boundary`, `boundary_inclusive` and a `note`.
+
+**This is the geofence query.** "Is this pick inside an assigned block?" "Is this
+worker on ground they are rostered to?"
+
+**Bounding box first, then point-in-polygon exactly.** The prefilter is the
+bounding box rather than the H3 index, and that is deliberate: a bbox is a
+guaranteed superset of the shape it bounds, so a candidate set built from it
+cannot miss the right answer. `candidates_after_bbox` reports how many survived
+the cut, and the exact test settles every one of them.
+
+**The boundary counts as inside.** A pick recorded on the edge of a block is in
+the block; a geofence that excludes its own boundary tells a picker standing on
+the headland that they are nowhere.
+
+**`fields_without_a_boundary` is not decoration.** On a half-mapped farm an empty
+result means "not inside any *mapped* block", not "not on the farm", and those
+are different things to act on. The failure this guards against is the quiet one:
+a geofence saying no because the ground was never traced, read as a policy
+decision.
+
+```
+find_fields_containing_point {"lat": 45.6015, "lon": -121.1780}
+→ [45.6015, -121.178] is inside 1 block(s): Yellow Camp Block 3 - MC
+```
+
+---
+
+## 120. `find_fields_by_h3_cell`
+
+Read-only, default ON (`allow_find_fields_by_h3_cell`). Needs `shapely` and `h3`.
+
+**Arguments:** `cell` (required — an H3 index at any resolution),
+`owning_entity`.
+
+**Returns** `cell_resolution`, `matched_at_resolution`, `probe_cell`,
+`stored_resolutions`, `match_count`, the matching `fields`, `searched` and a
+`note`.
+
+The spatial-index query, for joining against anything else keyed on H3 — a bucket
+log, a crew track, a weather grid.
+
+**Stored cells are every cell the shape TOUCHES**, not every cell whose centre is
+inside it. H3's default polygon fill is centre-based, and an orchard block is
+smaller than one cell at resolutions 6 through 8 — so the default returns an
+empty set for most fields, and an index built on it would answer "in no field"
+for a point plainly in one. The fill uses `contain="overlap"` instead, which is a
+true superset.
+
+Resolution handling, and the result says which was used:
+
+| Query resolution | How it matches |
+| --- | --- |
+| 6–10 | directly against the stored cells at that resolution |
+| finer than 10 | rolled up to 10, then matched |
+| coarser than 6 | each block's resolution-6 cells are rolled up to the query's resolution and compared there |
+
+**A match means the cell touches the block**, not that everything in the cell is
+inside it. Use **119** when the question is about a specific position.
+
+---
+
+## 121. `import_field_boundary_geojson`
+
+**MUTATING**, default OFF (`allow_import_field_boundary_geojson`). **Dry run by
+default.** Needs `shapely` and `h3`.
+
+**Arguments:** `feature_collection` (required — a GeoJSON FeatureCollection, as
+an object or a JSON string), `parcel` (a default for features with no
+`parcel_hint`), `owning_entity`, `apply` (default `false`).
+
+Each Feature's `properties` needs `field_name`, and `parcel_hint` unless a
+default `parcel` is given.
+
+**Returns** `feature_count`, `would_set`, `skipped`, the per-feature `results`,
+and `set` / `failed` when applied.
+
+**Per-feature, not whole-batch — the opposite of 103, on purpose.**
+`import_farm_app_fields` CREATES records, so a half-run leaves a farm somebody
+has to reconcile and it refuses the whole batch on the first bad record. This one
+only sets a field on records that already exist, so one bad feature in forty is a
+bad feature: naming it and applying the other thirty-nine beats refusing the lot.
+
+**It never creates a Field.** A feature naming a block that is not registered is
+skipped with that said — register it first with **99** or **103**.
+
+Every per-feature refusal **117** makes applies here too, including the 25% area
+rule, and each is reported against its own feature index so a malformed
+collection can be fixed one line at a time.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -3884,7 +4662,8 @@ Everything a tool needs is in two places:
 1. A handler in the right module under `erpnext_mcp/tools/` — `read`, `mutate`,
    `workflow`, `accounts`, `banking`, `dimensions`, `fiscal`, `governance`,
    `assets`, `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`,
-   `meta`, `packets`, `realestate`, `parties`, `investment_report` or `tax` —
+   `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
+   `company`, `farm` or `housing` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

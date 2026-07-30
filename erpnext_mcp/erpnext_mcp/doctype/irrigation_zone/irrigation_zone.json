@@ -1,0 +1,287 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-30 12:00:00.000000",
+ "description": "One irrigation zone inside a field: where the water comes from, which water right it runs under, how much of it there is and what puts it on the ground. The zone is the unit a valve turns, which makes it the smallest unit water cost and water quality can honestly be attributed to.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "zone_name",
+  "field",
+  "parcel",
+  "owning_entity",
+  "identity_col",
+  "zone_number",
+  "area_sq_ft",
+  "area_acres",
+  "water_section",
+  "water_source",
+  "water_right_id",
+  "flow_rate_gpm",
+  "water_col",
+  "sprinkler_type",
+  "compliance_section",
+  "water_test_last_date",
+  "water_source_class",
+  "compliance_col",
+  "chlorination_active",
+  "boundary_section",
+  "boundary_geojson",
+  "boundary_centroid_lat",
+  "boundary_centroid_lon",
+  "boundary_col",
+  "boundary_bbox_geojson",
+  "h3_cells",
+  "area_computed_acres",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What the zone is called at the valve: 'YC3-Zone2'. The docname is built from this and the parcel's abbreviation — not the field's, because the zone name already carries its field and 'YC3-Zone2 - YC3' says nothing twice.",
+   "fieldname": "zone_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Zone Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The block this zone waters.",
+   "fieldname": "field",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Field",
+   "options": "Field",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The parcel the field is on. Copied from the field, and the key the docname is suffixed with.",
+   "fetch_from": "field.parcel",
+   "fieldname": "parcel",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Parcel",
+   "options": "Parcel",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "field.owning_entity",
+   "fieldname": "owning_entity",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Owning Entity",
+   "options": "Company",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The zone's number within its field, as the controller has it. Two zones of one field cannot share a number: that number is what somebody types into the irrigation controller at two in the morning.",
+   "fieldname": "zone_number",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Zone Number"
+  },
+  {
+   "description": "Irrigated area in square feet, which is the unit a design drawing uses.",
+   "fieldname": "area_sq_ft",
+   "fieldtype": "Float",
+   "label": "Area (sq ft)",
+   "precision": "2"
+  },
+  {
+   "description": "The same area in acres, computed from square feet at 43,560 to the acre. Stored rather than derived at read time so a report can sort on it; recomputed on every save, so it cannot drift from the square footage.",
+   "fieldname": "area_acres",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Area (acres)",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "water_section",
+   "fieldtype": "Section Break",
+   "label": "Water"
+  },
+  {
+   "description": "Where the water comes from. This is the first question in an FSMA agricultural water assessment and the first question in a drought year, which is the same question.",
+   "fieldname": "water_source",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Water Source",
+   "options": "\nwell\ncreek\nmunicipal\npond\nshared\nother"
+  },
+  {
+   "description": "The Oregon water right or certificate number this zone draws under. Without it a surface-water zone is a zone nobody can prove the right to run.",
+   "fieldname": "water_right_id",
+   "fieldtype": "Data",
+   "label": "Water Right ID",
+   "search_index": 1
+  },
+  {
+   "description": "Design flow in gallons per minute. With area this gives application rate, which is what a set length is calculated from.",
+   "fieldname": "flow_rate_gpm",
+   "fieldtype": "Float",
+   "label": "Flow Rate (GPM)",
+   "precision": "2"
+  },
+  {
+   "fieldname": "water_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What puts the water on the ground. Drip and micro wet the soil; impact and gun wet the fruit, which is what makes them an agricultural-water question rather than only an agronomic one.",
+   "fieldname": "sprinkler_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Sprinkler Type",
+   "options": "\ndrip\nmicro\nimpact\ngun\nsub-surface"
+  },
+  {
+   "description": "Agricultural water compliance for this zone. It is here rather than in a compliance register because the zone is the unit the water actually moves through: a test result that is not attached to a valve cannot tell anybody which fruit to hold.",
+   "fieldname": "compliance_section",
+   "fieldtype": "Section Break",
+   "label": "Agricultural Water Compliance"
+  },
+  {
+   "description": "When this zone's water was last tested. FSMA Produce Safety Rule Subpart E sets the testing cadence; the operational use is the same date — an untested zone on a block that overhead-irrigates ready-to-eat fruit is a zone you do not run before harvest.",
+   "fieldname": "water_test_last_date",
+   "fieldtype": "Date",
+   "label": "Water Test Last Date"
+  },
+  {
+   "description": "The water quality class this source is assessed at, I through IV. Class drives the testing cadence and whether the water may contact harvestable fruit at all.",
+   "fieldname": "water_source_class",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Water Source Class",
+   "options": "\nI\nII\nIII\nIV"
+  },
+  {
+   "fieldname": "compliance_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "Ticked when this zone is running a chlorination or other antimicrobial treatment. It changes what a test result means and it changes what the crew handles at the pump house, which is why it lives with the zone.",
+   "fieldname": "chlorination_active",
+   "fieldtype": "Check",
+   "label": "Chlorination Active"
+  },
+  {
+   "description": "The shape on the ground. Everything below the polygon is DERIVED from it on save and must not be edited by hand — a figure a person can change independently of the polygon is a figure that will disagree with it, and the disagreement surfaces as a geofence saying no to somebody standing in the right place.",
+   "fieldname": "boundary_section",
+   "fieldtype": "Section Break",
+   "label": "Boundary"
+  },
+  {
+   "description": "The zone boundary as a GeoJSON Polygon or MultiPolygon, in [longitude, latitude] degrees. Set it with the boundary tool rather than by hand: they validate the shape and recompute everything derived from it. A zone is expected to sit inside its block's boundary; one that does not is reported rather than refused.",
+   "fieldname": "boundary_geojson",
+   "fieldtype": "Long Text",
+   "label": "Boundary (GeoJSON)"
+  },
+  {
+   "description": "Computed. Where a map opens, and the cheap first cut for a distance query. For a shape whose true centroid falls outside it — a block wrapped round a farmstead — this is an interior point instead, because centring on the farmstead is centring on somebody else's ground.",
+   "fieldname": "boundary_centroid_lat",
+   "fieldtype": "Float",
+   "label": "Centroid Latitude",
+   "precision": "7",
+   "read_only": 1
+  },
+  {
+   "description": "Computed. See Centroid Latitude.",
+   "fieldname": "boundary_centroid_lon",
+   "fieldtype": "Float",
+   "label": "Centroid Longitude",
+   "precision": "7",
+   "read_only": 1
+  },
+  {
+   "fieldname": "boundary_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Computed. A bounding box is a guaranteed superset of the shape it bounds, which is what makes it the only safe cheap prefilter for 'is this point inside' — a candidate set built from it can never miss the right answer.",
+   "fieldname": "boundary_bbox_geojson",
+   "fieldtype": "Text",
+   "label": "Bounding Box (GeoJSON)",
+   "read_only": 1
+  },
+  {
+   "description": "Computed. JSON of {resolution: [cells]} at resolutions 6, 7, 8, 9 and 10, holding every cell the shape TOUCHES. Not every cell whose centre is inside it: an orchard block is smaller than one cell at resolutions 6 to 8, so a centre-based fill returns nothing for most fields and an index built on it would answer 'in no field' for a point plainly in one.",
+   "fieldname": "h3_cells",
+   "fieldtype": "Long Text",
+   "label": "H3 Cells",
+   "read_only": 1
+  },
+  {
+   "description": "Computed from the polygon by spherical excess. This is a different number from the acreage somebody typed and both are worth having: a deed, a GIS trace and a tape measure routinely disagree by a few percent. A gap over 5% is reported; over 25% the boundary is refused, because at that point one of the two figures is about a different piece of ground.",
+   "fieldname": "area_computed_acres",
+   "fieldtype": "Float",
+   "label": "Computed Area (acres)",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-30 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Irrigation Zone",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "zone_name,field,water_source,water_right_id",
+ "sort_field": "zone_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "zone_name",
+ "track_changes": 1
+}

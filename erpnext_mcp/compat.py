@@ -91,6 +91,33 @@ def existing_fields(doctype: str, candidates) -> list[str]:
 	return [f for f in candidates if has_field(doctype, f)]
 
 
+def checked(value) -> bool:
+	"""Whether a Check field is ticked. NEVER use a bare `bool()` for this.
+
+	`bool("0")` is True. A Check field does not always come back as an integer:
+	`frappe.new_doc` copies the DocType's declared default onto the document
+	verbatim, and in the DocType JSON that default is the *string* `"0"` — so a
+	document read back before it has been through the database layer carries a
+	string that Python calls true. A tool describing that document with `bool()`
+	reports every unticked box as ticked.
+
+	That is not hypothetical. It is the same failure `settings.as_bool` exists to
+	prevent for the tool switches, where reading every disabled tool as enabled
+	would be about the worst possible direction for a bug to fail in. Here the
+	direction is only slightly better: it would report a block with no worker
+	hygiene station as having one, and a housing unit outside the Produce Safety
+	Rule as inside it. Both are answers somebody would act on.
+
+	`settings.as_bool` is the same judgement for the settings Single; this is it
+	for ordinary documents, and the two are deliberately identical in behaviour.
+	"""
+	if value is None or isinstance(value, bool):
+		return bool(value)
+	if isinstance(value, (int, float)):
+		return bool(value)
+	return str(value).strip().lower() not in ("", "0", "false", "no", "none")
+
+
 def bank_transaction_amount_fields() -> dict:
 	"""Describe how *this* site's Bank Transaction stores money.
 

@@ -35,7 +35,7 @@ import json
 
 import frappe
 
-from . import audit, settings
+from . import audit, geo, settings
 from .compat import doctype_exists, traceback_text
 from .errors import ToolError
 from .result import ToolResult
@@ -44,10 +44,13 @@ from .tools import (
 	assets,
 	banking,
 	collab,
+	company,
 	dimensions,
+	farm,
 	files,
 	fiscal,
 	governance,
+	housing,
 	hr,
 	investment_report,
 	meta,
@@ -110,6 +113,32 @@ def _needs_doctype(*doctypes: str):
 	def predicate() -> bool:
 		try:
 			return any(doctype_exists(doctype) for doctype in doctypes)
+		except Exception:
+			return False
+
+	return predicate
+
+
+
+#: What a geospatial tool needs beyond a DocType: the two libraries that do the
+#: geometry. They are declared dependencies, so a normal install has them — but
+#: this app's promise is that installing it cannot break a site, so a bench
+#: missing them loses these five tools by name rather than failing to load the
+#: other hundred and sixteen.
+_GEO_REQUIRES = (
+	"the Field DocType (run `bench migrate`) and the shapely and h3 Python packages, "
+	"which this app declares as dependencies — install them into the bench's environment "
+	"with `./env/bin/pip install 'shapely>=2.0' 'h3>=4.0.0'` and restart"
+)
+
+
+def _geo_ready(*doctypes: str):
+	"""Predicate: this site has the doctype AND can do geometry."""
+	needs_doctype = _needs_doctype(*doctypes)
+
+	def predicate() -> bool:
+		try:
+			return bool(needs_doctype() and geo.available())
 		except Exception:
 			return False
 
@@ -3329,6 +3358,934 @@ TOOLS = {
 		title="Generate a 1099-NEC pre-fill",
 		available=_needs_doctype("Governance Document"),
 		requires="the Governance Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── multi-company ───────────────────────────────────────────────────────
+	"list_companies": _tool(
+		company.list_companies,
+		"Every Company on this site with its abbreviation, currency, country, parent "
+		"company, chart of accounts and default cost center; whether a tax id is on "
+		"file and its last four; the fiscal year period and how many years exist; the "
+		"cost center and account counts; and the GL entry count with the first and "
+		"last posting dates. Also reports whether this app's custom Party Types "
+		"(Family, Contact) are registered. Read-only.\n\n"
+		"THE GL COUNTS ARE THE POINT ON A MULTI-COMPANY SITE. A company with no "
+		"postings can still have its currency changed; one with postings cannot, and "
+		"this is where you find out which you are looking at.",
+		{"limit": _field(_INTEGER, "Maximum companies returned. Default 100, hard maximum 500.")},
+		title="List companies",
+	),
+	"create_company": _tool(
+		company.create_company,
+		"MUTATING (default OFF). Stand up one Company: name, abbreviation, country, "
+		"default currency, tax id, optional parent for consolidation, and the fiscal "
+		"year start month. ERPNext builds the chart of accounts, the root cost "
+		"centers and the defaults on insert; this reports what it ACTUALLY got, "
+		"which is not always what was asked for — an account count of zero means the "
+		"named chart does not exist on this site.\n\n"
+		"IT ALSO CREATES THE FISCAL YEAR containing today for the start month given, "
+		"unless one of that name already exists. April (4) is the farm default; 1 is "
+		"a calendar year.\n\n"
+		"REFUSES: a duplicate company name; a duplicate abbreviation, because every "
+		"account, cost center, parcel and lease docname ends in it and two companies "
+		"sharing one makes those ambiguous; an abbreviation that is not alphanumeric; "
+		"a country or currency this site does not have; a parent company that is not "
+		"a group. `dry_run=true` reports the plan and the fiscal year it would create "
+		"without writing.",
+		{
+			"company_name": _field(_STRING, "The legal or trading name, e.g. 'Constancy Farms LLC'."),
+			"abbr": _field(
+				_STRING,
+				"Short key, e.g. 'CF'. Becomes the tail of every account docname on these "
+				"books and cannot be changed afterwards.",
+			),
+			"country": _field(_STRING, "Country as ERPNext spells it. Default 'United States'."),
+			"default_currency": _field(_STRING, "ISO code. Default 'USD'."),
+			"fiscal_year_start_month": _field(
+				_STRING,
+				"1-12, or a month name. 4 (April) for a farm year, 1 for a calendar year. "
+				"Default 1.",
+			),
+			"tax_id": _field(_STRING, "EIN or equivalent. Only the last four are ever echoed back."),
+			"parent_company": _field(
+				_STRING,
+				"An existing GROUP company to consolidate under. Omit unless you are building "
+				"a holding structure.",
+			),
+			"chart_of_accounts": _field(
+				_STRING,
+				"Name of a chart ERPNext ships, e.g. 'Standard'. Omit for the default; "
+				"import_chart_of_accounts can replace it afterwards.",
+			),
+			"notes": _field(_STRING, "Stored in the company description where the version has one."),
+			"dry_run": _field(_BOOLEAN, "Report the plan without writing. Default false."),
+		},
+		required=("company_name", "abbr"),
+		mutating=True,
+		title="Create a company",
+	),
+	"update_company": _tool(
+		company.update_company,
+		"MUTATING (default OFF). Change a company's country, tax id, notes — and its "
+		"default currency, but ONLY while it has no posted GL entries. Every change "
+		"is echoed as before → after, with the tax id redacted to its last four.\n\n"
+		"REFUSES THREE THINGS AND SAYS WHY. The abbreviation and the company name, "
+		"because both are baked into thousands of docnames and changing either is a "
+		"migration rather than an edit. The currency once anything is posted, because "
+		"every one of those entries was measured in the old one and a relabel "
+		"restates the ledger without touching a number. The fiscal year start month "
+		"once any fiscal year exists, because a year that changes shape mid-cycle "
+		"produces two periods claiming the same days — a short year created "
+		"deliberately with create_fiscal_year is the way to do that.",
+		{
+			"company": _field(_STRING, "Company docname or abbreviation."),
+			"country": _field(_STRING, "New country."),
+			"tax_id": _field(_STRING, "New EIN. Empty string clears it."),
+			"notes": _field(_STRING, "New description. Empty string clears it."),
+			"default_currency": _field(
+				_STRING, "New ISO code. Refused outright once anything has been posted."
+			),
+			"fiscal_year_start_month": _field(
+				_STRING, "Always refused, with the reason and the tool that does it properly."
+			),
+			"abbr": _field(_STRING, "Always refused — see the description."),
+			"company_name": _field(_STRING, "Always refused — see the description."),
+		},
+		required=("company",),
+		mutating=True,
+		title="Update a company",
+	),
+	"register_party_types": _tool(
+		company.register_party_types,
+		"MUTATING (default OFF). Register this app's two custom Party Types so a "
+		"Journal Entry line can carry them. Idempotent — a party type already there "
+		"is reported, not recreated. They are also seeded on install and on every "
+		"`bench migrate`; this is the tool for a site that cannot be migrated right "
+		"now.\n\n"
+		"WHY THESE TWO. ERPNext ships Customer, Supplier, Employee and Shareholder, "
+		"and a family operation pays two kinds of people that fit none of them. "
+		"`Family` is a relative receiving money that is neither payroll nor a "
+		"purchase — booking those as Suppliers puts family transfers into vendor "
+		"spend AND into the 1099 pre-fill, both wrong; a transfer below the gift "
+		"threshold needs no W-9. `Contact` is the occasional consultant who is not a "
+		"formal Supplier but IS paid for services, so the pre-fill surfaces them as "
+		"BORDERLINE rather than dropping them.\n\n"
+		"CHANGES NOTHING EXISTING. Rules and Journal Entries using Shareholder, "
+		"Employee or Supplier are untouched; this adds party types, it does not "
+		"reclassify anything.",
+		{"dry_run": _field(_BOOLEAN, "Report what would be registered without writing. Default false.")},
+		mutating=True,
+		idempotent=True,
+		title="Register the custom party types",
+		available=_needs_doctype("Party Type"),
+		requires="the Party Type DocType, which is core ERPNext",
+	),
+	# ── farm structure: fields ──────────────────────────────────────────────
+	"list_fields": _tool(
+		farm.list_fields,
+		"The block register: every Field with its parcel, acreage, crop, variety, "
+		"rootstock, planting year and density, condition, cost center and food-safety "
+		"facts — plus totals for acreage, the oldest and newest planting years, a "
+		"count by variety, and the varieties already in use on this site (which is "
+		"the autosuggest list worth having, because a hardcoded one is wrong the "
+		"first time somebody plants something new). Read-only.\n\n"
+		"LAST SPRAY DATE COMES FROM TWO PLACES AND SAYS WHICH. What is recorded on "
+		"the Field, and — where farm_precision_ag is installed — the newest Spray Log "
+		"against it. The later of the two is reported as `last_spray_date` with "
+		"`last_spray_source` naming where it came from, and both raw values are "
+		"returned so they can be compared rather than believed.",
+		{
+			"owning_entity": _field(_STRING, "The company whose blocks to read. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"parcel": _field(_STRING, "Only blocks on this parcel. Docname or parcel name."),
+			"crop": _field(_STRING, "Only this crop."),
+			"variety": _field(_STRING, "Only this variety."),
+			"condition": _field(_STRING, "Excellent, Good, Fair, Poor or Fallow."),
+			"food_safety_zone": _field(_BOOLEAN, "true for only covered-produce blocks, false for only the rest."),
+			"linked_to_cost_center": _field(
+				_BOOLEAN, "true for only blocks with a cost center, false for only those without."
+			),
+			"limit": _field(_INTEGER, "Maximum blocks returned. Default 100, hard maximum 500."),
+		},
+		title="List fields",
+		available=_needs_doctype("Field"),
+		requires="the Field DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_field": _tool(
+		farm.get_field,
+		"One block in full: its planting, condition, cost center and food-safety "
+		"facts, the parcel it sits on, every irrigation zone over it with the water "
+		"rights they run under, and how much of the block is not zoned at all. "
+		"Read-only.",
+		{
+			"field": _field(
+				_STRING,
+				"The Field docname ('Yellow Camp Block 3 - MC') or just the field name. A name "
+				"matching blocks on two parcels is refused with both named.",
+			),
+			"parcel": _field(_STRING, "Narrow a bare field name to one parcel."),
+			"owning_entity": _field(_STRING, "Narrow to one company. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+		},
+		required=("field",),
+		title="Get a field",
+		available=_needs_doctype("Field"),
+		requires="the Field DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_field": _tool(
+		farm.create_field,
+		"MUTATING (default OFF). Register one planted block under a parcel: acreage, "
+		"crop, variety, rootstock, planting year and density, condition, block "
+		"number, and the Farm App id for a later sync. Creates one Field and nothing "
+		"else — no cost center, no posting.\n\n"
+		"THE DOCNAME IS '<field_name> - <parcel abbr>', so every parcel may have a "
+		"'Block 3'. The parcel's abbreviation is derived from its name when it has "
+		"none.\n\n"
+		"FOOD SAFETY FIELDS ARE PART OF THE BLOCK, NOT A SEPARATE LOG. "
+		"last_spray_date answers the re-entry interval question before it answers a "
+		"WPS report; worker_hygiene_station_present decides whether a crew may work "
+		"the block at all. Both are set here.\n\n"
+		"REFUSES: a second block with the same name on one parcel; a Farm App id "
+		"already claimed by another block; negative acreage or density; and — the one "
+		"that catches a bad import — blocks whose acreage would sum to more than the "
+		"parcel they are on, named with both figures and the excess.\n\n"
+		"WARNS without refusing: no acreage; a food-safety block with no hygiene "
+		"station or no water test. Every one of those is a fact worth recording "
+		"precisely because it is a problem.",
+		{
+			"parcel": _field(_STRING, "The Parcel this block is part of. Docname or parcel name."),
+			"field_name": _field(_STRING, "What it is called on the radio: 'Yellow Camp Block 3'."),
+			"owning_entity": _field(_STRING, "Narrow a bare parcel name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"acreage": _field(_NUMBER, "Planted acres."),
+			"crop": _field(_STRING, "What grows here. Default 'Cherry'."),
+			"variety": _field(
+				_STRING,
+				"Bing, Rainier, Sweetheart, Chelan, Skeena — or whatever is actually planted. "
+				"Free text; list_fields reports what this site already uses.",
+			),
+			"rootstock": _field(_STRING, "Mazzard, Gisela 6, Krymsk 5."),
+			"planting_year": _field(_INTEGER, "The year the trees went in."),
+			"planting_density_per_acre": _field(_INTEGER, "Trees per acre."),
+			"condition": _field(_STRING, "Excellent, Good, Fair, Poor or Fallow."),
+			"block_number": _field(_STRING, "The legacy block id, free text ('3A', 'N-12')."),
+			"external_farm_app_id": _field(_STRING, "The Farm App's own id for this block."),
+			"last_spray_date": _field(_STRING, "Last application on this block, YYYY-MM-DD."),
+			"water_test_last_date": _field(_STRING, "Agricultural water test date, YYYY-MM-DD."),
+			"wildlife_intrusion_last_report": _field(
+				_STRING, "Last recorded animal intrusion, YYYY-MM-DD (FSMA Subpart I)."
+			),
+			"food_safety_zone": _field(_BOOLEAN, "Grows produce eaten raw, so inside the Produce Safety Rule."),
+			"worker_hygiene_station_present": _field(
+				_BOOLEAN, "Toilets and handwashing within a quarter mile (FSMA Subpart L, WPS)."
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("parcel", "field_name"),
+		mutating=True,
+		title="Create a field",
+		available=_needs_doctype("Field"),
+		requires="the Field DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_field": _tool(
+		farm.update_field,
+		"MUTATING (default OFF). Change a registered block: acreage, crop, variety, "
+		"rootstock, planting year and density, condition, block number, Farm App id, "
+		"and every food-safety date and flag. Every change is echoed as "
+		"before → after.\n\n"
+		"CANNOT re-key: field_name is refused because the docname is built from it "
+		"and every zone points at that docname. CANNOT move a block to another "
+		"parcel — ground does not move, so a block on the wrong parcel was "
+		"mis-registered. CANNOT set cost_center; that is link_field_to_cost_center, "
+		"which checks the cost centre is on the same books and is not a group.\n\n"
+		"The parcel acreage rule applies here too: raising a block's acreage past "
+		"what the parcel has left is refused with both figures.",
+		{
+			"field": _field(_STRING, "The Field docname, or its field name."),
+			"owning_entity": _field(_STRING, "Narrow a bare field name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"acreage": _field(_NUMBER, "New acreage."),
+			"crop": _field(_STRING, "New crop."),
+			"variety": _field(_STRING, "New variety."),
+			"rootstock": _field(_STRING, "New rootstock."),
+			"planting_year": _field(_INTEGER, "New planting year."),
+			"planting_density_per_acre": _field(_INTEGER, "New trees per acre."),
+			"condition": _field(_STRING, "New condition. Empty string clears it."),
+			"block_number": _field(_STRING, "New block number."),
+			"external_farm_app_id": _field(_STRING, "New Farm App id. Empty string clears it."),
+			"last_spray_date": _field(_STRING, "New last spray date, YYYY-MM-DD."),
+			"water_test_last_date": _field(_STRING, "New water test date, YYYY-MM-DD."),
+			"wildlife_intrusion_last_report": _field(_STRING, "New intrusion report date, YYYY-MM-DD."),
+			"food_safety_zone": _field(_BOOLEAN, "New covered-produce flag."),
+			"worker_hygiene_station_present": _field(_BOOLEAN, "New hygiene station flag."),
+			"notes": _field(_STRING, "New notes."),
+			"field_name": _field(_STRING, "Always refused — see the description."),
+			"parcel": _field(_STRING, "Always refused — see the description."),
+			"cost_center": _field(_STRING, "Always refused — use link_field_to_cost_center."),
+		},
+		required=("field",),
+		mutating=True,
+		title="Update a field",
+		available=_needs_doctype("Field"),
+		requires="the Field DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"link_field_to_cost_center": _tool(
+		farm.link_field_to_cost_center,
+		"MUTATING (default OFF). Point a block at the Cost Center its costs are "
+		"booked to, so per-acre and per-block costing has somewhere to land. Sets one "
+		"field; posts nothing and moves no existing entry.\n\n"
+		"REFUSES: a cost center on another company's books, because a cost allocated "
+		"across two companies is an intercompany transaction rather than a dimension; "
+		"a group cost center, which ERPNext will not let a posting land on; a "
+		"disabled one; and repointing a block that is already linked, unless "
+		"replace=true — repointing means this season's costs and last season's land "
+		"in different places.\n\n"
+		"REPORTS, rather than refuses, when other blocks already book to the same "
+		"cost center. A cost center per orchard is a legitimate design; it just is "
+		"not per-block costing, and the result says so. `dry_run` validates and "
+		"reports without writing.",
+		{
+			"field": _field(_STRING, "The Field docname, or its field name."),
+			"cost_center": _field(_STRING, "Cost Center docname, number or name."),
+			"owning_entity": _field(_STRING, "Narrow a bare field name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"replace": _field(_BOOLEAN, "Repoint a block that is already linked. Default false."),
+			"dry_run": _field(_BOOLEAN, "Validate and report without writing. Default false."),
+		},
+		required=("field", "cost_center"),
+		mutating=True,
+		idempotent=True,
+		title="Link a field to a cost center",
+		available=_needs_doctype("Field"),
+		requires="the Field DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_parcel_field_summary": _tool(
+		farm.get_parcel_field_summary,
+		"One parcel rolled up: how many blocks, planted acres against the parcel's "
+		"own acreage and the difference, average block size, zone count and average "
+		"zones per block, total flow, oldest and newest planting years, counts by "
+		"condition and by variety, every water right in use, which blocks are "
+		"food-safety blocks, which of those have no hygiene station, and which zones "
+		"have no water test. Read-only.\n\n"
+		"THE UNASSIGNED ACREAGE IS USUALLY THE INTERESTING NUMBER. Roads, ditches, "
+		"headlands and the house are all real, so blocks summing to less than the "
+		"parcel is normal — but a large gap on a parcel somebody thinks is fully "
+		"blocked out is a missing Field.",
+		{
+			"parcel": _field(_STRING, "The Parcel docname, or its parcel name."),
+			"owning_entity": _field(_STRING, "Narrow a bare parcel name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+		},
+		required=("parcel",),
+		title="Parcel field summary",
+		available=_needs_doctype("Field"),
+		requires="the Field DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"import_farm_app_fields": _tool(
+		farm.import_farm_app_fields,
+		"MUTATING (default OFF, DRY RUN BY DEFAULT). Create ERPNext Fields from a "
+		"batch of legacy Farm App records, each carrying its Farm App id so a later "
+		"sync engine has something to match on. This is the schema-alignment "
+		"foundation, NOT the sync: it never updates an existing Field, never deletes, "
+		"and never writes back to the Farm App.\n\n"
+		"EACH RECORD takes name, parcel_hint, acreage, variety, planting_year, "
+		"block_number and farm_app_uuid. An unrecognised key is refused rather than "
+		"ignored, because a typo silently dropped is a field somebody thinks they "
+		"imported.\n\n"
+		"THE WHOLE BATCH IS VALIDATED BEFORE THE FIRST INSERT. A half-imported farm "
+		"is worse than an unimported one, because the second run has to work out "
+		"which half. A record whose parcel_hint matches no Parcel, a batch that "
+		"repeats a name or a Farm App id, a negative acreage — any of those refuses "
+		"the lot.\n\n"
+		"A block already registered under that name, or already carrying that Farm "
+		"App id, is SKIPPED with the reason and the existing docname, so the same "
+		"batch can be re-run safely. `apply=true` writes; without it you get the "
+		"plan.",
+		{
+			"records": _field(
+				{"type": "array", "items": _OBJECT},
+				"The legacy field records. Each is an object with `name` and optionally "
+				"parcel_hint, acreage, variety, planting_year, block_number, farm_app_uuid.",
+			),
+			"parcel": _field(
+				_STRING,
+				"Default Parcel for records with no parcel_hint. Without it, such a record is "
+				"refused rather than guessed at.",
+			),
+			"owning_entity": _field(_STRING, "The company whose parcels the hints resolve against."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"apply": _field(
+				_BOOLEAN, "Actually create the fields. Default false, which reports the plan only."
+			),
+		},
+		required=("records",),
+		mutating=True,
+		title="Import Farm App fields",
+		available=_needs_doctype("Field"),
+		requires="the Field DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── farm structure: irrigation zones ────────────────────────────────────
+	"list_irrigation_zones": _tool(
+		farm.list_irrigation_zones,
+		"The zone register: every zone with its block, number, water source, Oregon "
+		"water right, flow, sprinkler type and area — plus total acres and gallons "
+		"per minute, a count by water source, every water right in use, which zones "
+		"have no agricultural water test on record, and which surface-water zones "
+		"have no water right named. Read-only.\n\n"
+		"THE TWO LISTS AT THE END ARE THE REPORT. A zone with no water test is a zone "
+		"whose fruit cannot be cleared under FSMA Subpart E; a creek diversion with "
+		"no right is not something Oregon treats as self-evident.",
+		{
+			"owning_entity": _field(_STRING, "The company whose zones to read. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"field": _field(_STRING, "Only zones on this block. Docname or field name."),
+			"parcel": _field(_STRING, "Only zones on this parcel."),
+			"water_source": _field(_STRING, "well, creek, municipal, pond, shared or other."),
+			"sprinkler_type": _field(_STRING, "drip, micro, impact, gun or sub-surface."),
+			"water_source_class": _field(_STRING, "I, II, III or IV."),
+			"chlorination_active": _field(_BOOLEAN, "true for only chlorinated zones, false for only the rest."),
+			"limit": _field(_INTEGER, "Maximum zones returned. Default 100, hard maximum 500."),
+		},
+		title="List irrigation zones",
+		available=_needs_doctype("Irrigation Zone"),
+		requires="the Irrigation Zone DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_irrigation_zone": _tool(
+		farm.get_irrigation_zone,
+		"One zone in full: source, water right, flow, sprinkler type, area in both "
+		"square feet and acres, and its water-quality compliance — with the block it "
+		"waters, how many zones that block has, and this zone's share of it. Names "
+		"the compliance gaps in sentences rather than leaving them to be inferred. "
+		"Read-only.",
+		{
+			"zone": _field(_STRING, "The Irrigation Zone docname ('YC3-Zone2 - MC') or just the zone name."),
+			"field": _field(_STRING, "Narrow a bare zone name to one block."),
+			"owning_entity": _field(_STRING, "Narrow to one company. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+		},
+		required=("zone",),
+		title="Get an irrigation zone",
+		available=_needs_doctype("Irrigation Zone"),
+		requires="the Irrigation Zone DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_irrigation_zone": _tool(
+		farm.create_irrigation_zone,
+		"MUTATING (default OFF). Register one irrigation zone under a block: zone "
+		"number, water source, Oregon water right, flow in GPM, sprinkler type, area "
+		"in square feet, and the FSMA agricultural water facts.\n\n"
+		"THE DOCNAME IS '<zone_name> - <parcel abbr>'. Not the block's abbreviation: "
+		"a zone name already carries its block ('YC3-Zone2'), and suffixing it with "
+		"the block again would say the same thing twice and drop the ground.\n\n"
+		"AREA IN ACRES IS COMPUTED from square feet at 43,560 to the acre and cannot "
+		"be passed — two figures a caller sets independently are two figures that "
+		"will disagree.\n\n"
+		"REFUSES: a second zone with the same name on one parcel; a zone number "
+		"already used on that block, because that number is what somebody types into "
+		"the controller at two in the morning; negative area or flow; and zones whose "
+		"area would sum to more than the block they are on.\n\n"
+		"WARNS without refusing: no area; surface water with no water right; a "
+		"food-safety block whose zone has no water test.",
+		{
+			"field": _field(_STRING, "The Field this zone waters. Docname or field name."),
+			"zone_name": _field(_STRING, "What it is called at the valve: 'YC3-Zone2'."),
+			"owning_entity": _field(_STRING, "Narrow a bare field name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"zone_number": _field(_INTEGER, "The zone's number within its block, as the controller has it."),
+			"water_source": _field(_STRING, "well, creek, municipal, pond, shared or other."),
+			"water_right_id": _field(_STRING, "The Oregon water right or certificate number."),
+			"flow_rate_gpm": _field(_NUMBER, "Design flow in gallons per minute."),
+			"sprinkler_type": _field(_STRING, "drip, micro, impact, gun or sub-surface."),
+			"area_sq_ft": _field(_NUMBER, "Irrigated area in square feet."),
+			"water_test_last_date": _field(_STRING, "Last agricultural water test, YYYY-MM-DD (FSMA Subpart E)."),
+			"water_source_class": _field(_STRING, "FSMA water quality class: I, II, III or IV."),
+			"chlorination_active": _field(_BOOLEAN, "Running a chlorination or antimicrobial treatment."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+			"area_acres": _field(_NUMBER, "Always refused — computed from area_sq_ft."),
+		},
+		required=("field", "zone_name"),
+		mutating=True,
+		title="Create an irrigation zone",
+		available=_needs_doctype("Irrigation Zone"),
+		requires="the Irrigation Zone DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_irrigation_zone": _tool(
+		farm.update_irrigation_zone,
+		"MUTATING (default OFF). Change a registered zone: number, water source, "
+		"water right, flow, sprinkler type, area, and the water-quality fields. Every "
+		"change is echoed as before → after, and area in acres is recomputed.\n\n"
+		"CANNOT re-key: zone_name is refused because the docname is built from it. "
+		"CANNOT move a zone to another block — pipe does not move. CANNOT set "
+		"area_acres directly. Refuses a zone number already used on that block, and "
+		"an area that would push the block's zones past its acreage.",
+		{
+			"zone": _field(_STRING, "The Irrigation Zone docname, or its zone name."),
+			"owning_entity": _field(_STRING, "Narrow a bare zone name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"zone_number": _field(_INTEGER, "New zone number."),
+			"water_source": _field(_STRING, "New source. Empty string clears it."),
+			"water_right_id": _field(_STRING, "New water right. Empty string clears it."),
+			"flow_rate_gpm": _field(_NUMBER, "New flow."),
+			"sprinkler_type": _field(_STRING, "New sprinkler type. Empty string clears it."),
+			"area_sq_ft": _field(_NUMBER, "New area in square feet."),
+			"water_test_last_date": _field(_STRING, "New water test date, YYYY-MM-DD."),
+			"water_source_class": _field(_STRING, "New class: I, II, III or IV."),
+			"chlorination_active": _field(_BOOLEAN, "New chlorination flag."),
+			"notes": _field(_STRING, "New notes."),
+			"zone_name": _field(_STRING, "Always refused — see the description."),
+			"field": _field(_STRING, "Always refused — see the description."),
+			"area_acres": _field(_NUMBER, "Always refused — computed from area_sq_ft."),
+		},
+		required=("zone",),
+		mutating=True,
+		title="Update an irrigation zone",
+		available=_needs_doctype("Irrigation Zone"),
+		requires="the Irrigation Zone DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── farm structure: boundaries ──────────────────────────────────────────
+	"set_field_boundary": _tool(
+		farm.set_field_boundary,
+		"MUTATING (default OFF). Give a block its shape on the ground as a GeoJSON "
+		"Polygon or MultiPolygon, and derive everything indexable from it: centroid, "
+		"bounding box, H3 coverage at resolutions 6-10, and the area the polygon "
+		"actually encloses. Sets no other field and posts nothing.\n\n"
+		"THE POLYGON IS THE COMPLIANCE EVIDENCE. 'Which block was sprayed' is a "
+		"Worker Protection Standard answer and 'was the crew in an authorised area' "
+		"is a payroll and food-safety one, and both resolve to a shape. Without it "
+		"the record says a name, and a name is not something anybody can check "
+		"against a GPS fix.\n\n"
+		"EVERY DERIVED FIELD IS REWRITTEN FROM THE POLYGON and none of them can be "
+		"set directly — a figure a caller could edit independently is one that will "
+		"disagree with the shape, and the disagreement shows up as a geofence saying "
+		"no to somebody standing in the right place.\n\n"
+		"REFUSES: anything that is not valid GeoJSON, with the parser's own message; "
+		"a Point or LineString; a ring that is not closed; coordinates off Earth (a "
+		"latitude past 90 usually means the pair is the wrong way round); a "
+		"self-intersecting polygon, which has an area a computer will report and a "
+		"containment test nobody can trust; and a polygon whose area differs from "
+		"the recorded acreage by more than 25%, because at that point one of the two "
+		"is about a different piece of ground.\n\n"
+		"WARNS, DOES NOT REFUSE: a 5-25% area difference (a deed, a GIS trace and a "
+		"tape measure routinely disagree); a shape spanning more than a degree; "
+		"coordinates at [0, 0]; and zones on this block that now fall outside it. "
+		"`dry_run=true` computes everything and writes nothing.",
+		{
+			"field": _field(_STRING, "The Field docname, or its field name."),
+			"boundary_geojson": _field(
+				_STRING,
+				"The boundary as GeoJSON, in [longitude, latitude] degrees. A bare geometry, a "
+				"Feature, or a FeatureCollection holding exactly one Feature — whichever your "
+				"export produced.",
+			),
+			"owning_entity": _field(_STRING, "Narrow a bare field name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"dry_run": _field(_BOOLEAN, "Validate and compute without writing. Default false."),
+		},
+		required=("field", "boundary_geojson"),
+		mutating=True,
+		idempotent=True,
+		title="Set a field boundary",
+		available=_geo_ready("Field"),
+		requires=_GEO_REQUIRES,
+	),
+	"set_zone_boundary": _tool(
+		farm.set_zone_boundary,
+		"MUTATING (default OFF). The same for an irrigation zone, plus one more "
+		"answer: whether the zone sits inside the block it waters.\n\n"
+		"CONTAINMENT IS REPORTED, NEVER ENFORCED. The obvious rule is that a zone "
+		"must be inside its field, and it is wrong often enough to matter — a shared "
+		"water line crosses a boundary, a pump house sits on the headland, a mainline "
+		"runs down a road easement. Refusing those would make them unrecordable, so "
+		"`boundary_contained_in_field` comes back true, false, or null when the block "
+		"has no boundary of its own to check against.\n\n"
+		"Refuses everything set_field_boundary refuses, comparing the area against "
+		"the zone's own acreage (which is computed from its square footage).",
+		{
+			"zone": _field(_STRING, "The Irrigation Zone docname, or its zone name."),
+			"boundary_geojson": _field(_STRING, "The boundary as GeoJSON, [longitude, latitude]."),
+			"owning_entity": _field(_STRING, "Narrow a bare zone name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"dry_run": _field(_BOOLEAN, "Validate and compute without writing. Default false."),
+		},
+		required=("zone", "boundary_geojson"),
+		mutating=True,
+		idempotent=True,
+		title="Set an irrigation zone boundary",
+		available=_geo_ready("Irrigation Zone"),
+		requires=_GEO_REQUIRES,
+	),
+	"find_fields_containing_point": _tool(
+		farm.find_fields_containing_point,
+		"Which blocks is this GPS fix inside? Read-only. THIS IS THE GEOFENCE "
+		"QUERY — 'is this pick inside an assigned block', 'is this worker on ground "
+		"they are rostered to'.\n\n"
+		"BOUNDING BOX FIRST, THEN POINT-IN-POLYGON EXACTLY. The bounding box is the "
+		"prefilter rather than the H3 index, and that is deliberate: a bbox is a "
+		"guaranteed superset of the shape it bounds, so a candidate set built from "
+		"it cannot miss the right answer. The exact test settles every candidate.\n\n"
+		"THE BOUNDARY COUNTS AS INSIDE. A pick recorded on the edge of a block is in "
+		"the block; a geofence that excludes its own boundary tells a picker standing "
+		"on the headland that they are nowhere.\n\n"
+		"Returns the matching blocks in full, the point's own H3 cell at every stored "
+		"resolution, how many blocks were searched and how many survived the bbox "
+		"cut — and HOW MANY BLOCKS HAVE NO BOUNDARY AT ALL, because an empty result "
+		"on a half-mapped farm means 'not inside any MAPPED block', not 'not on the "
+		"farm', and those are different answers to act on.",
+		{
+			"lat": _field(_NUMBER, "Latitude in decimal degrees, -90 to 90."),
+			"lon": _field(_NUMBER, "Longitude in decimal degrees, -180 to 180."),
+			"owning_entity": _field(_STRING, "Only this company's blocks. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+		},
+		required=("lat", "lon"),
+		title="Find fields containing a point",
+		available=_geo_ready("Field"),
+		requires=_GEO_REQUIRES,
+	),
+	"find_fields_by_h3_cell": _tool(
+		farm.find_fields_by_h3_cell,
+		"Which blocks does this H3 cell touch? Read-only. The spatial-index query, "
+		"for joining against anything else keyed on H3 — a bucket log, a crew "
+		"track, a weather grid.\n\n"
+		"STORED CELLS ARE EVERY CELL THE SHAPE TOUCHES, not every cell whose centre "
+		"is inside it. That matters: an orchard block is smaller than one cell at "
+		"resolutions 6 through 8, so a centre-based index returns nothing for most "
+		"fields and would answer 'in no field' for a point plainly in one.\n\n"
+		"Cells at resolutions 6-10 are matched directly. A finer cell is rolled up "
+		"to 10 and a coarser one is compared against each block's rolled-up cells, "
+		"so any resolution works and the result says which one the match was made "
+		"at.\n\n"
+		"A MATCH MEANS THE CELL TOUCHES THE BLOCK, not that everything in the cell "
+		"is inside it. Use find_fields_containing_point when the question is about a "
+		"specific position.",
+		{
+			"cell": _field(_STRING, "An H3 cell index, e.g. '8928f66e68fffff'. Any resolution."),
+			"owning_entity": _field(_STRING, "Only this company's blocks. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+		},
+		required=("cell",),
+		title="Find fields by H3 cell",
+		available=_geo_ready("Field"),
+		requires=_GEO_REQUIRES,
+	),
+	"import_field_boundary_geojson": _tool(
+		farm.import_field_boundary_geojson,
+		"MUTATING (default OFF, DRY RUN BY DEFAULT). Set boundaries on blocks that "
+		"already exist, from a GeoJSON FeatureCollection — the tool for migrating a "
+		"farm's existing polygons in one go. Each Feature's `properties` needs "
+		"`field_name`, and `parcel_hint` unless a default `parcel` is given.\n\n"
+		"PER-FEATURE, NOT WHOLE-BATCH, and that is the opposite of "
+		"import_farm_app_fields on purpose. That tool CREATES records, so a half-run "
+		"leaves a farm somebody has to reconcile. This one only sets a field on "
+		"records that already exist, so one bad feature in forty is a bad feature: "
+		"naming it and applying the other thirty-nine beats refusing the lot.\n\n"
+		"NEVER CREATES A FIELD. A feature naming a block that is not registered is "
+		"skipped with that said — register it first with create_field or "
+		"import_farm_app_fields.\n\n"
+		"Every per-feature refusal set_field_boundary makes applies here too, "
+		"including the 25% area rule. `apply=true` writes; without it you get the "
+		"plan.",
+		{
+			"feature_collection": _field(
+				_OBJECT,
+				"A GeoJSON FeatureCollection. Accepted as an object or as a JSON string.",
+			),
+			"parcel": _field(
+				_STRING,
+				"Default Parcel for features with no `parcel_hint`. Without it, such a feature "
+				"is skipped rather than guessed at.",
+			),
+			"owning_entity": _field(_STRING, "The company whose parcels the hints resolve against."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"apply": _field(
+				_BOOLEAN, "Actually set the boundaries. Default false, which reports the plan only."
+			),
+		},
+		required=("feature_collection",),
+		mutating=True,
+		title="Import field boundaries from GeoJSON",
+		available=_geo_ready("Field"),
+		requires=_GEO_REQUIRES,
+	),
+	# ── labor camp housing ──────────────────────────────────────────────────
+	"list_housing_units": _tool(
+		housing.list_housing_units,
+		"The camp register: every Housing Unit with its type, parcel, square footage, "
+		"capacity, condition, access-card zone and compliance dates, plus who is "
+		"currently in it — and totals for capacity, bodies and open beds. Also lists "
+		"the units with overdue habitability inspections, the ones marked "
+		"Uninhabitable, the ones that are FSMA worker facilities, and the ones whose "
+		"recorded capacity exceeds what their floor area lawfully allows. "
+		"Read-only.\n\n"
+		"CAPACITY AND LAWFUL OCCUPANCY ARE DIFFERENT QUESTIONS and both are reported. "
+		"One is how the operation uses the unit; the other is what 50 square feet per "
+		"occupant allows. A gap between them is the finding.",
+		{
+			"owning_entity": _field(_STRING, "The company whose camp to read. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"parcel": _field(_STRING, "Only units on this parcel."),
+			"unit_type": _field(
+				_STRING,
+				"Cabin, Toilet-Shower, Kitchen, Single-Family House, Multi-Unit Building, "
+				"Manufactured Home, Bath House, Barn or Shop.",
+			),
+			"condition": _field(_STRING, "Excellent, Good, Fair, Poor, Needs Repair or Uninhabitable."),
+			"or_housing_law_compliant": _field(_STRING, "Yes, No, Unknown or Not Applicable."),
+			"fsma_worker_facility": _field(_BOOLEAN, "true for only FSMA worker facilities."),
+			"limit": _field(_INTEGER, "Maximum units returned. Default 100, hard maximum 500."),
+		},
+		title="List housing units",
+		available=_needs_doctype("Housing Unit"),
+		requires="the Housing Unit DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_housing_unit": _tool(
+		housing.get_housing_unit,
+		"One unit in full, with everyone currently in it AND everyone who has ever "
+		"been assigned to it, newest first. Names the compliance gaps in sentences: "
+		"capacity over the lawful occupancy, no habitability inspection in a year, no "
+		"smoke or CO detector test on record, Uninhabitable, subject to FSMA Subpart "
+		"L. Read-only.",
+		{
+			"unit": _field(_STRING, "The Housing Unit docname ('MC-Cabin-01 - MC') or just the unit name."),
+			"owning_entity": _field(_STRING, "Narrow a bare unit name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+		},
+		required=("unit",),
+		title="Get a housing unit",
+		available=_needs_doctype("Housing Unit"),
+		requires="the Housing Unit DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_housing_unit": _tool(
+		housing.create_housing_unit,
+		"MUTATING (default OFF). Register one building on a camp: type, square "
+		"footage, capacity, year built, condition, the Fixed Asset carrying it, an "
+		"access-card zone for a system not yet installed, and the compliance facts — "
+		"FSMA worker facility, Oregon housing law status, habitability and detector "
+		"test dates.\n\n"
+		"LAWFUL OCCUPANCY IS COMPUTED from square footage at 50 sq ft per occupant "
+		"(29 CFR 1910.142(b)(1), which Oregon's agricultural labor housing rules "
+		"follow) unless you pass one. It is a default, not a derivation: a number "
+		"somebody worked out for a fixed bunk layout is kept.\n\n"
+		"REFUSES: a second unit with the same name on one parcel; an Asset on another "
+		"company's books or already carrying a different unit.\n\n"
+		"WARNS without refusing a capacity over 20 in anything not typed Multi-Unit "
+		"Building — a twenty-person cabin is barracks by another name, and some "
+		"really are. Also warns about missing square footage, missing detector tests "
+		"and a missing habitability inspection.",
+		{
+			"parcel": _field(_STRING, "The Parcel the building stands on. Docname or parcel name."),
+			"unit_name": _field(_STRING, "What is painted on the door: 'MC-Cabin-01'."),
+			"owning_entity": _field(_STRING, "Narrow a bare parcel name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"unit_type": _field(
+				_STRING,
+				"Cabin, Toilet-Shower, Kitchen, Single-Family House, Multi-Unit Building, "
+				"Manufactured Home, Bath House, Barn or Shop.",
+			),
+			"square_footage": _field(_NUMBER, "Floor area. Drives the lawful occupancy."),
+			"capacity": _field(_INTEGER, "How many people it sleeps, as the operation uses it."),
+			"year_built": _field(_INTEGER, "Year built."),
+			"condition": _field(_STRING, "Excellent, Good, Fair, Poor, Needs Repair or Uninhabitable."),
+			"related_asset": _field(_STRING, "The Fixed Asset carrying the building, if there is one."),
+			"access_card_zone": _field(_STRING, "Access-control zone name, for a card system to come."),
+			"fsma_worker_facility": _field(
+				_BOOLEAN, "Subject to FSMA Produce Safety Rule Subpart L worker facility requirements."
+			),
+			"or_housing_law_compliant": _field(_STRING, "Yes, No, Unknown or Not Applicable. Default Unknown."),
+			"max_occupants_per_or_law": _field(
+				_INTEGER, "Override the computed occupancy limit. Omit to compute it from square footage."
+			),
+			"last_habitability_inspection": _field(_STRING, "YYYY-MM-DD."),
+			"smoke_detector_last_test": _field(_STRING, "YYYY-MM-DD."),
+			"co_detector_last_test": _field(_STRING, "YYYY-MM-DD."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("parcel", "unit_name"),
+		mutating=True,
+		title="Create a housing unit",
+		available=_needs_doctype("Housing Unit"),
+		requires="the Housing Unit DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_housing_unit": _tool(
+		housing.update_housing_unit,
+		"MUTATING (default OFF). Change a registered unit: type, square footage, "
+		"capacity, year built, condition, asset link, access-card zone, and every "
+		"compliance flag and date. Every change is echoed as before → after.\n\n"
+		"CANNOT re-key: unit_name is refused because the docname is built from it and "
+		"every assignment points at that docname. CANNOT move a building between "
+		"parcels — even a manufactured home that really was moved should be "
+		"re-registered where it stands, so the assignment history stays attached to "
+		"the ground it happened on.\n\n"
+		"CHANGING THE SQUARE FOOTAGE RECOMPUTES THE LAWFUL OCCUPANCY, but only when "
+		"the stored limit was the computed one. A figure somebody typed themselves is "
+		"kept.",
+		{
+			"unit": _field(_STRING, "The Housing Unit docname, or its unit name."),
+			"owning_entity": _field(_STRING, "Narrow a bare unit name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"unit_type": _field(_STRING, "New unit type. Empty string clears it."),
+			"square_footage": _field(_NUMBER, "New floor area."),
+			"capacity": _field(_INTEGER, "New capacity."),
+			"year_built": _field(_INTEGER, "New year built."),
+			"condition": _field(_STRING, "New condition. Empty string clears it."),
+			"related_asset": _field(_STRING, "New Fixed Asset. Empty string clears it."),
+			"access_card_zone": _field(_STRING, "New access-card zone."),
+			"fsma_worker_facility": _field(_BOOLEAN, "New FSMA worker facility flag."),
+			"or_housing_law_compliant": _field(_STRING, "Yes, No, Unknown or Not Applicable."),
+			"max_occupants_per_or_law": _field(_INTEGER, "New occupancy limit."),
+			"last_habitability_inspection": _field(_STRING, "New inspection date, YYYY-MM-DD."),
+			"smoke_detector_last_test": _field(_STRING, "New smoke detector test, YYYY-MM-DD."),
+			"co_detector_last_test": _field(_STRING, "New CO detector test, YYYY-MM-DD."),
+			"notes": _field(_STRING, "New notes."),
+			"unit_name": _field(_STRING, "Always refused — see the description."),
+			"parcel": _field(_STRING, "Always refused — see the description."),
+		},
+		required=("unit",),
+		mutating=True,
+		title="Update a housing unit",
+		available=_needs_doctype("Housing Unit"),
+		requires="the Housing Unit DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_housing_assignments": _tool(
+		housing.list_housing_assignments,
+		"Who is housed where. Defaults to current assignments only; pass "
+		"current_only=false with a date range for the historical roster. Reports the "
+		"distinct units and people, which assignments took a wage deduction, and how "
+		"much deposit is still held. Read-only.\n\n"
+		"THE WAGE DEDUCTION LIST IS THE COMPLIANCE ANSWER. ORS 653 and OAR 839-015 "
+		"constrain deducting housing from wages, and this is where the assignments "
+		"that did are named.",
+		{
+			"owning_entity": _field(_STRING, "The company whose camp to read. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"unit": _field(_STRING, "Only assignments on this unit."),
+			"parcel": _field(_STRING, "Only assignments on this parcel."),
+			"employee": _field(_STRING, "Only assignments for this employee id."),
+			"current_only": _field(
+				_BOOLEAN,
+				"Only assignments with no end date. Default TRUE — pass false for history.",
+			),
+			"from_date": _field(_STRING, "Earliest assigned date, YYYY-MM-DD. Needs current_only=false."),
+			"to_date": _field(_STRING, "Latest assigned date, YYYY-MM-DD. Needs current_only=false."),
+			"limit": _field(_INTEGER, "Maximum assignments returned. Default 100, hard maximum 500."),
+		},
+		title="List housing assignments",
+		available=_needs_doctype("Housing Assignment"),
+		requires="the Housing Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_housing_assignment": _tool(
+		housing.create_housing_assignment,
+		"MUTATING (default OFF). Put one person in one unit from a date, with the "
+		"deposit taken and whether a housing charge was deducted from their wages. "
+		"Auto-named HA-YYYY-MM-<seq>, so a camp's intake sorts into seasons without a "
+		"report.\n\n"
+		"THIS RECORD IS THE AUDIT TRAIL for an IRS Section 119 exclusion — lodging on "
+		"the business premises, for the employer's convenience, required as a "
+		"condition of employment. It records the facts; it does not make the "
+		"determination.\n\n"
+		"REFUSES: an overlapping assignment on the same unit, naming the one already "
+		"there — unless allow_multi_occupancy=true, which is the barracks case and is "
+		"legitimate; a unit typed Toilet-Shower, Kitchen, Bath House, Barn or Shop, "
+		"because nobody is assigned to a shower block; a unit marked Uninhabitable; "
+		"and — where an HR app is installed — an employee who is not on file, because "
+		"a roster naming somebody payroll has never heard of has already drifted.\n\n"
+		"WHERE NO HR APP IS INSTALLED the employee is stored as text and the tool "
+		"says so, because a camp roster that cannot be written until an HR module "
+		"exists is a camp roster nobody keeps.",
+		{
+			"unit": _field(_STRING, "The Housing Unit docname, or its unit name."),
+			"employee": _field(
+				_STRING,
+				"The Employee id, or their name where an HR app can resolve it. Free text on a "
+				"site with no HR app.",
+			),
+			"employee_name": _field(
+				_STRING, "The person's name. Required when no employee id is given."
+			),
+			"assigned_date": _field(_STRING, "The date they moved in, YYYY-MM-DD."),
+			"end_date": _field(
+				_STRING, "The date they moved out, if it is already known. Blank means current."
+			),
+			"owning_entity": _field(_STRING, "Narrow a bare unit name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"deposit_paid": _field(_NUMBER, "Deposit taken."),
+			"deposit_returned": _field(_NUMBER, "Deposit already returned. Cannot exceed deposit_paid."),
+			"housing_deduction_from_wages": _field(
+				_STRING,
+				"Yes, No or Unknown. ORS 653 constrains the deduction; Unknown is the answer "
+				"that cannot be defended later.",
+			),
+			"allow_multi_occupancy": _field(
+				_BOOLEAN,
+				"Accept an overlapping assignment on this unit. Default false. Right for a bunk "
+				"room, wrong for a typo.",
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("unit", "assigned_date"),
+		mutating=True,
+		title="Create a housing assignment",
+		available=_needs_doctype("Housing Assignment"),
+		requires="the Housing Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"end_housing_assignment": _tool(
+		housing.end_housing_assignment,
+		"MUTATING (default OFF). Write the date somebody moved out, and optionally "
+		"the deposit returned. NEVER DELETES: an assignment removed when the person "
+		"leaves cannot defend a Section 119 classification, cannot answer a wage "
+		"claim, and cannot tell an investigator who was in the camp that week.\n\n"
+		"REFUSES: an assignment that has already ended, because re-dating a departure "
+		"is a correction rather than a close; an end date before the start; a deposit "
+		"returned larger than the one on record as paid. REPORTS a deposit still "
+		"held, so it is either refunded or explained. `dry_run` validates and reports "
+		"without writing.",
+		{
+			"assignment": _field(_STRING, "The Housing Assignment docname, e.g. 'HA-2026-06-00003'."),
+			"end_date": _field(_STRING, "The date they moved out, YYYY-MM-DD."),
+			"deposit_returned": _field(_NUMBER, "How much of the deposit went back."),
+			"notes": _field(_STRING, "Appended to the existing notes rather than replacing them."),
+			"dry_run": _field(_BOOLEAN, "Validate and report without writing. Default false."),
+		},
+		required=("assignment", "end_date"),
+		mutating=True,
+		title="End a housing assignment",
+		available=_needs_doctype("Housing Assignment"),
+		requires="the Housing Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_housing_capacity": _tool(
+		housing.get_housing_capacity,
+		"Beds, bodies and what is overdue, broken down per parcel and totalled: "
+		"residential units, capacity as the operation uses it, the lawful capacity "
+		"the floor areas allow, how many are currently assigned, how many beds are "
+		"open, and the units with overdue habitability inspections, marked "
+		"Uninhabitable, or filled past what their floor area allows. Includes a plain "
+		"`readout` — one sentence per parcel. Read-only.\n\n"
+		"NON-RESIDENTIAL UNITS ARE COUNTED BUT NOT IN THE CAPACITY. A bath house and "
+		"a shop are part of the camp; nobody sleeps in them, and adding their zero "
+		"capacity to the total would make the register look thinner than it is.",
+		{
+			"owning_entity": _field(_STRING, "The company whose camp to read. `company` is an alias."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"parcel": _field(_STRING, "Only this parcel. Omit for every parcel with housing."),
+		},
+		title="Housing capacity",
+		available=_needs_doctype("Housing Unit"),
+		requires="the Housing Unit DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_employee_housing_history": _tool(
+		housing.get_employee_housing_history,
+		"Everywhere one person has been housed, in order: every unit, every date "
+		"range, whether they are currently assigned, deposits paid and returned and "
+		"still outstanding, and which assignments took a wage deduction. Includes a "
+		"plain `readout` — 'Antony assigned MC-Cabin-12 2026-06-01 → 2026-07-15', and "
+		"a closing line when they are currently unassigned. Read-only.\n\n"
+		"MATCHES ON THE EMPLOYEE ID FIRST, then on the name, because a site with no "
+		"HR app records the name and a site with one records the id.",
+		{
+			"employee": _field(_STRING, "The Employee id, or the person's name as the roster has it.")
+		},
+		required=("employee",),
+		title="Employee housing history",
+		available=_needs_doctype("Housing Assignment"),
+		requires="the Housing Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 

@@ -9,7 +9,7 @@ build.
 
 import json
 
-from erpnext_mcp import packets, registry, settings
+from erpnext_mcp import geo, packets, registry, settings
 from erpnext_mcp.erpnext_mcp.doctype.erpnext_mcp_settings.erpnext_mcp_settings import (
 	TOKEN_LENGTH,
 )
@@ -19,6 +19,17 @@ from .harness import META, STORE, _load_app_doctype, frappe
 
 #: Tools the default fixture site cannot run, because it has no `hrms`.
 HR_TOOLS = ("get_attendance_summary", "get_leave_balance", "list_employees")
+
+#: Tools that need shapely and h3. Declared dependencies, so a normal install has
+#: them — but the suite has to pass on a bench that does not, because that is the
+#: whole point of the `available` predicate on them.
+GEO_TOOLS = (
+	"set_field_boundary",
+	"set_zone_boundary",
+	"find_fields_containing_point",
+	"find_fields_by_h3_cell",
+	"import_field_boundary_geojson",
+)
 
 
 class ShippedDefaults(SeededTestCase):
@@ -445,11 +456,22 @@ class SelfTest(SeededTestCase):
 		self.configure(enabled=1, allow_create_journal_entry=1)
 		report = mcp.selftest()
 		self.assertEqual(report["mutating_tools_enabled"], ["create_journal_entry"])
-		self.assertEqual(report["tools_total"], 92)
-		# 44 read tools minus the three HR ones this site cannot run, plus the
-		# one write tool just enabled.
-		self.assertEqual(len(report["tools_enabled"]), 42)
-		self.assertEqual(sorted(report["tools_unavailable"]), sorted(HR_TOOLS))
+		self.assertEqual(report["tools_total"], 121)
+		# Every read tool this site can actually run, plus the one write tool just
+		# enabled. Computed rather than hardcoded, because what is runnable now
+		# depends on what is pip-installed: the three HR tools need hrms, and the
+		# five geospatial ones need shapely and h3. A hardcoded number would pass
+		# on the developer's bench and fail in CI, or the reverse.
+		runnable = [name for name in registry.READ_TOOLS if registry.is_available(name)]
+		self.assertEqual(len(report["tools_enabled"]), len(runnable) + 1)
+		self.assertEqual(sorted(report["tools_unavailable"]), sorted(self.expected_unavailable()))
+
+	def expected_unavailable(self) -> list:
+		"""Exactly which tools this fixture site cannot run, and why each one."""
+		out = list(HR_TOOLS)
+		if not geo.available():
+			out += list(GEO_TOOLS)
+		return out
 
 	def test_it_reports_not_ready_when_disabled(self):
 		from erpnext_mcp import mcp

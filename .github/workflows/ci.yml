@@ -40,10 +40,23 @@ jobs:
           cache: pip
 
       - name: Install werkzeug
-        # The only third-party import in the app: erpnext_mcp.mcp returns a
-        # werkzeug Response so it can control the HTTP status. It arrives with
-        # Frappe in a real bench, so it is not a declared dependency.
+        # werkzeug is not a declared dependency: erpnext_mcp.mcp returns a
+        # werkzeug Response so it can control the HTTP status, and it arrives
+        # with Frappe in a real bench.
         run: python -m pip install --upgrade pip werkzeug
+
+      - name: Run the standalone suite WITHOUT shapely and h3
+        # Proves the graceful-degrade path: the geospatial tools go unavailable
+        # and nothing else notices.
+        run: python -m unittest discover -s tests_standalone -t .
+
+      - name: Install the geospatial dependencies
+        # shapely and h3 ARE declared dependencies (see pyproject.toml). They are
+        # installed as a separate step so the previous job still proves the suite
+        # passes without them — the five geospatial tools are supposed to go
+        # quietly unavailable on a bench that lacks them, and a CI run that only
+        # ever saw them present would never check that.
+        run: python -m pip install "shapely>=2.0" "h3>=4.0.0"
 
       - name: Run the standalone suite
         run: python -m unittest discover -s tests_standalone -t . -v

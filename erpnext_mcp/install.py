@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Install / migrate / uninstall hooks.
 
-The one job here is making the DocType JSON's declared defaults *true in the
+Two jobs, and the second one arrived in v0.12.0.
+
+The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
 after `bench install-app` the settings document has no rows at all and every
 field reads as None — which for the read-tool switches (default ON) would look
@@ -12,6 +14,17 @@ its switch seeded without a bespoke patch. It only ever fills in fields with no
 stored value, so it cannot undo an operator's decision — including a deliberate
 "off".
 
+The second is registering the two custom Party Types — `Family` and `Contact`.
+Those are not settings; they are records a Journal Entry line links to, and a
+site without them cannot book a payment to a family member at all. Seeding them
+here rather than in a one-shot patch means a site upgrading from any earlier
+version gets them on its next migrate, and re-running is a no-op because the
+seeder checks before it inserts.
+
+Registering a Party Type changes nothing that already exists. Rules and entries
+using Shareholder, Employee or Supplier keep working exactly as they did; this
+adds options, it does not reclassify anything.
+
 What install does NOT do: generate a token, or set `enabled`. A freshly
 installed app must be inert. Turning it on is a decision an operator makes on
 the settings form, and there is no code path that makes it for them.
@@ -20,15 +33,18 @@ the settings form, and there is no code path that makes it for them.
 import frappe
 
 from . import settings
+from .tools import company
 
 
 def after_install() -> None:
 	settings.seed_defaults()
+	company.ensure_party_types()
 	frappe.db.commit()
 
 
 def after_migrate() -> None:
 	settings.seed_defaults()
+	company.ensure_party_types()
 
 
 #: Doctypes whose contents are records an operator would want back, and what
@@ -65,6 +81,28 @@ _PRECIOUS_DOCTYPES = (
 		"the related-party register — who is related to the company, in what "
 		"capacity, from when, and which document says so. The source for a "
 		"related-party disclosure on a return",
+	),
+	(
+		"Field",
+		"the block register — acreage, variety, rootstock, planting year and the "
+		"food-safety facts about each piece of planted ground, including the last "
+		"spray date a Worker Protection Standard report is built from",
+	),
+	(
+		"Irrigation Zone",
+		"the irrigation register — water sources, Oregon water right numbers, flow "
+		"rates and the agricultural water test dates FSMA Subpart E turns on",
+	),
+	(
+		"Housing Unit",
+		"the labor camp register — every cabin and building with its capacity, "
+		"condition, habitability inspection and detector test dates",
+	),
+	(
+		"Housing Assignment",
+		"who slept where and when. The audit trail defending an IRS Section 119 "
+		"exclusion, the answer to an ORS 653 wage-deduction claim, and the camp "
+		"roster a food safety investigation asks for. It exists nowhere else",
 	),
 )
 

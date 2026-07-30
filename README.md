@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **92 tools** — 44 read-only, 48 mutating.
+- **121 tools** — 57 read-only, 64 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -22,7 +22,8 @@ site at call time.
 - **Its own doctypes, one endpoint, no hooks.** It adds no field to any doctype
   it did not create, so installing it cannot change how anything already on your
   site behaves.
-- MIT. No runtime dependencies beyond Frappe/ERPNext.
+- MIT. Two runtime dependencies beyond Frappe/ERPNext (`shapely` and `h3`, for
+  field boundaries), and the app still loads without them.
 
 <!-- Screenshots: replace these placeholders with real captures. -->
 | | |
@@ -95,6 +96,16 @@ bench --site yoursite.localhost install-app erpnext_mcp
 # 3. Migrate and restart.
 bench --site yoursite.localhost migrate
 bench restart          # in development, `bench start` picks it up on its own
+```
+
+`bench get-app` installs the two declared dependencies (`shapely` and `h3`) into
+the bench's environment along with the app. If yours did not — an offline
+install, a locked-down environment — the five field-boundary tools go quietly
+unavailable and say so by name when a client asks for them; everything else
+works. To add them afterwards:
+
+```bash
+./env/bin/pip install "shapely>=2.0" "h3>=4.0.0" && bench restart
 ```
 
 `install-app` syncs this app's doctypes and seeds their defaults, so after step 3
@@ -242,7 +253,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 92 tools
+## The 121 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -251,7 +262,7 @@ Tools whose site prerequisite is missing are not advertised at all — on a site
 without Frappe HR, the three HR tools simply do not exist as far as a client is
 concerned.
 
-### Read-only — 44, all ON by default, each individually switchable
+### Read-only — 57, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -355,7 +366,25 @@ write tools below.)
 | `list_related_parties` | Who is related to this company, in what capacity, since when, and which relationships have **no governing document behind them** — the first thing an examiner asks for. |
 | `get_related_party` | One relationship with everything pointing at it: the person's other roles, their cap table entry, their Supplier, the parcels they hold title to. Never returns more than four digits of a taxpayer id. |
 
-### Mutating — 48, all OFF by default
+**Companies, ground and camps** — the v0.12.0 surface
+
+| Tool | What it answers |
+| --- | --- |
+| `list_companies` | Every company with its abbreviation, currency, tax-id status, fiscal year period, cost center and account counts, and **the GL entry count with the first and last posting dates** — which is how you tell a live company from a shell, and what decides whether its currency can still be changed. Also reports whether the `Family` and `Contact` party types are registered. |
+| `list_fields` | The block register: acreage totalled, plantings summarised, condition and food-safety facts per block — and **the varieties already planted on this site**, which is the autosuggest list worth having because a hardcoded one is wrong the first time somebody plants something new. |
+| `get_field` | One block in full, with every irrigation zone over it, the water rights they run under, and how much of the block is not zoned at all. |
+| `get_parcel_field_summary` | One parcel rolled up: blocks, planted acres against the parcel's own acreage **and the gap**, zones, flow, planting ages, counts by condition and variety, and the food-safety exceptions. |
+| `list_irrigation_zones` | The zone register with area and flow totalled — plus the zones with **no agricultural water test** on record and the surface-water zones with **no water right named**. Those two lists are the report. |
+| `get_irrigation_zone` | One zone in full, with the block it waters, this zone's share of it, and the compliance gaps in sentences rather than left to be inferred. |
+| `list_housing_units` | The camp register: capacity, occupancy and open beds, plus the overdue habitability inspections, the uninhabitable units, the FSMA worker facilities, and the units filled past what their floor area lawfully allows. |
+| `get_housing_unit` | One unit in full with its **whole assignment history**, and what each missing compliance date obliges. |
+| `list_housing_assignments` | Who is housed where, currently or over a period, with the wage-deduction assignments named and the deposits still held. |
+| `get_housing_capacity` | Beds, bodies and overdue inspections per parcel and in total, with a plain one-sentence-per-parcel readout. |
+| `get_employee_housing_history` | Everywhere one person has been housed, in order, with deposits and wage deductions — the audit trail an IRS Section 119 exclusion is defended with. |
+| `find_fields_containing_point` | **The geofence query.** Which blocks a GPS fix is inside — bounding box first, then exact point-in-polygon, with the boundary counting as inside. Reports how many blocks have no boundary at all, because an empty result on a half-mapped farm means "not inside any *mapped* block", not "not on the farm". |
+| `find_fields_by_h3_cell` | Which blocks an H3 cell touches, at any resolution. The spatial-index join for anything else keyed on H3 — a bucket log, a crew track, a weather grid. |
+
+### Mutating — 64, all OFF by default
 
 **Postings into the ledger**
 
@@ -448,6 +477,37 @@ write tools below.)
 | `create_related_party` | Registers one relationship: who, what kind of entity, in what capacity, from when, under what document. | Store more than four digits of a taxpayer id. Nine is **refused**, naming the four to send — see [Four digits, never nine](#four-digits-never-nine). |
 | `update_related_party` | Changes party type, dates, tax identity, address and the links to a cap table entry, a Supplier and a governing document. | Re-key it. A change of role is a new relationship; the old entry gets an end date rather than being deleted. |
 
+**Companies, and the two party types a family operation actually pays**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_company` | Stands up a Company plus the chart of accounts, cost centers and the fiscal year containing today — April for a farm year, January for a calendar one — and reports what ERPNext **actually** built, which is not always what was asked for. | Reuse a name or an abbreviation. Every account, cost center, parcel and lease docname ends in the abbreviation, and two companies sharing one makes those ambiguous. |
+| `update_company` | Changes country, tax id and notes; changes the currency **only while nothing is posted**. Echoes every change as before → after, with the tax id redacted to its last four. | Change the abbreviation or the name (both are a migration, not an edit), the currency once anything is posted, or the fiscal year start month once any year exists — see [Two party types, and one exclusion](#two-party-types-and-one-exclusion). |
+| `register_party_types` | Registers `Family` and `Contact` so a Journal Entry line can carry them. Idempotent, and already seeded on install and every `bench migrate`. | Reclassify anything. Existing rules and entries using Shareholder, Employee or Supplier are untouched. |
+
+**The structure under a parcel**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_field` | Registers one planted block: acreage, crop, variety, rootstock, planting year and density, condition — and the food-safety facts, which live on the block because they are the same facts the operation runs on. Docname is `<field name> - <parcel abbr>`. | Register blocks whose acreage sums to **more than the parcel they are on**, named with both figures and the excess. That is the failure a bad import produces every time. |
+| `update_field` | Changes any of the above, echoing before → after. | Re-key it, move it to another parcel (ground does not move), or set the cost center — that is its own tool. |
+| `link_field_to_cost_center` | Points a block at the Cost Center its costs book to, so per-acre and per-block costing has somewhere to land. | Use a cost center on another company's books (that is an intercompany transaction, not a dimension), a group cost center, or repoint a linked block without `replace=true`. |
+| `create_irrigation_zone` | Registers one zone: source, Oregon water right, flow, sprinkler type, area — and the FSMA agricultural water facts. Docname is `<zone name> - <parcel abbr>`; acres are **computed** from square feet. | Reuse a zone number on one block — that number is what somebody types into the controller at two in the morning — or let zones sum past their block's acreage. |
+| `update_irrigation_zone` | Changes any of the above and recomputes the acres. | Re-key it, move it to another block (pipe does not move), or set the acres directly. |
+| `import_farm_app_fields` | Creates Fields from a batch of legacy Farm App records **carrying their ids**, so a later sync engine has something to match on. Dry run by default; a block already registered is skipped with the reason, so the same batch re-runs safely. | Update anything, delete anything, or half-import a farm — the whole batch is validated before the first insert. |
+| `set_field_boundary` | Gives a block its shape as GeoJSON and derives centroid, bounding box, H3 coverage at resolutions 6–10 and the area the polygon encloses. | Accept invalid GeoJSON, a self-intersecting polygon, coordinates off Earth, or an area more than 25% from the recorded acreage — at that point one of the two figures is about a different piece of ground. |
+| `set_zone_boundary` | The same for a zone, and reports whether it sits inside the block it waters. | **Enforce** that containment. A shared water line crosses a boundary, a pump house sits on the headland — refusing would make those unrecordable, so it reports and lets the operator decide. |
+| `import_field_boundary_geojson` | Sets boundaries on **existing** blocks from a GeoJSON FeatureCollection — for migrating a farm's polygons in one go. Per-feature errors, so one bad feature in forty does not stop the other thirty-nine. | Create a Field. A feature naming an unregistered block is skipped with that said. |
+
+**The camp**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_housing_unit` | Registers one building with its capacity, condition and the compliance facts, computing the lawful occupancy from floor area at 50 sq ft a head unless you pass one. | Reuse a unit name on one parcel, or link an Asset on other books or already carrying a different unit. **Warns rather than refuses** a capacity over 20 outside a Multi-Unit Building — a twenty-person cabin is barracks by another name, and some really are. |
+| `update_housing_unit` | Changes any of the above; recomputes the lawful occupancy when the square footage moves, **unless** the stored limit was one somebody typed. | Re-key it, or move a building between parcels — even a manufactured home that really was moved should be re-registered where it stands, so the assignment history stays attached to the ground it happened on. |
+| `create_housing_assignment` | Puts one person in one unit from a date, with the deposit and the ORS 653 wage-deduction answer. Auto-named `HA-YYYY-MM-<seq>`. | Overlap an existing assignment on that unit unless `allow_multi_occupancy=true`; assign anybody to a shower block, a shop or an uninhabitable unit; or, where an HR app is installed, name somebody who is not on file. |
+| `end_housing_assignment` | Writes the date somebody moved out and the deposit returned. | **Delete.** The record is what defends a Section 119 exclusion, answers a wage claim and tells an investigator who was in the camp that week. |
+
 **Documents that get produced and filed**
 
 | Tool | What it does | What it cannot do |
@@ -468,6 +528,98 @@ into the same field, and the field is declared four characters long as the belt
 to that brace. `get_related_party` never returns more than four digits **even
 from a linked Supplier** — `supplier_detail.tax_id` says only whether one is on
 file.
+
+#### Two party types, and one exclusion
+
+ERPNext ships Customer, Supplier, Employee and Shareholder. A family operation
+pays two kinds of people that fit none of them, and v0.12.0 registers both:
+
+- **`Family`** — a relative receiving money that is neither payroll nor a
+  purchase. `generate_1099_prefill` **excludes** those postings and reports the
+  count, the total and the names, so "nobody looked" and "somebody looked and
+  excluded them" are different-looking answers. A transfer below the IRS annual
+  gift exclusion is not compensation for services: it needs no W-9 and produces
+  no form. Without this party type those payments end up recorded as Supplier
+  payments, which puts family money into vendor spend **and** onto a 1099 the
+  recipient owes no tax on.
+- **`Contact`** — the consultant who looks at the orchard twice a year, the
+  neighbour who runs a tractor for a weekend. Not a formal Supplier, but paid
+  for services. The pre-fill reads those postings and classifies them
+  **borderline**, naming the W-9, rather than dropping them — which is the same
+  mistake in the other direction.
+
+Both are seeded on install and on every `bench migrate`, and neither touches
+anything already recorded: an existing rule or Journal Entry using Shareholder,
+Employee or Supplier keeps working exactly as it did.
+
+#### The polygon is the evidence, and the index has to be a superset
+
+A boundary is not decoration on a Field. "Which block was sprayed" is a Worker
+Protection Standard answer, "which zone got the water test" is an FSMA Subpart E
+answer, and "was the worker in an authorised area" is both a payroll question and
+a food-safety one. Every one of those resolves to a shape on the ground — without
+it the record says a name, and a name is not something anybody can check against
+a GPS fix.
+
+**Everything derived is derived on save and cannot be set directly.** Centroid,
+bounding box, H3 coverage and computed area are all functions of the polygon. A
+figure a caller could edit independently is a figure that will disagree with the
+shape, and the disagreement surfaces as a geofence saying no to somebody standing
+in the right place.
+
+**The H3 fill stores every cell the shape *touches*, not every cell whose centre
+is inside it.** This is the one implementation detail worth knowing. H3's default
+polygon fill is centre-based, and an orchard block is smaller than one H3 cell at
+resolutions 6, 7 and 8 — so the default returns an **empty set** for a real
+field, and an index built on it answers "in no field" for a point plainly in one.
+A false negative that reads like a policy decision is exactly what a geofence
+must not produce, so the fill uses `contain="overlap"`, which is a true superset.
+
+For the same reason `find_fields_containing_point` narrows with the **bounding
+box** rather than with the H3 cells: a bbox is a guaranteed superset of the shape
+it bounds, so a candidate set built from it cannot miss the right answer. The
+exact point-in-polygon test then settles every candidate, and the boundary counts
+as inside — a pick recorded on the headland is in the block.
+
+**Area is spherical, and said so.** `shapely` computes area in the units of its
+coordinates, and these coordinates are degrees, so `.area` is degrees squared —
+not an area of anything. The computed acreage uses the standard spherical-excess
+integral, which differs from a WGS84 ellipsoidal area by well under 1% at these
+latitudes. That is far inside the 5% and 25% thresholds it is compared against,
+and a projection library to close a gap smaller than the disagreement between a
+deed and a GIS trace would be precision theatre.
+
+The satellite fields (`satellite_provider`, `imagery_asset_ref`,
+`last_ndvi_pull_date`, `last_ndvi_mean`, `last_ndvi_stddev`) are schema only in
+this release — nothing fetches imagery yet. NDVI is stored on its real range of
+**-1 to 1**, not 0 to 1: water and bare soil read negative, and clamping the
+floor to zero would make a flooded block indistinguishable from an unmeasured
+one.
+
+#### Compliance lives on the record it belongs to
+
+The food-safety fields are on `Field`, the water-quality fields are on
+`Irrigation Zone`, and the habitability and detector dates are on `Housing
+Unit` — not in a compliance register beside them. The test is whether removing a
+field breaks **operations** or only breaks **reporting**:
+
+- Remove `last_spray_date` and the Worker Protection Standard report loses a
+  line — *and* nobody can answer whether the re-entry interval on block 3 has
+  run, which is a question a crew is waiting at the gate for.
+- Remove `worker_hygiene_station_present` and an inspector loses a checkbox —
+  *and* dispatch loses the fact that decides whether a crew may work that block
+  at all.
+- Remove a Housing Unit's condition and a habitability finding disappears —
+  *and* `create_housing_assignment` stops refusing to put somebody in an
+  uninhabitable cabin.
+- Remove a Field's boundary and the spray record loses the thing an auditor
+  checks a GPS fix against — *and* the geofence has no answer for a crew standing
+  in the block.
+
+Each of those has a test that asserts **both halves of the same removal**. A
+separate "Field Compliance Log" that somebody fills in after the fact would fail
+that test — nothing about picking would stop if it disappeared — which is why
+this release does not have one.
 
 The difference between a site holding four digits and a site holding nine is the
 difference between an inconvenience and a notifiable breach. The full number
@@ -953,8 +1105,36 @@ Candidates for the next release, roughly in order of how often they come up:
 - **Deeper 1099 filing.** State 1099 filings and electronic filing to the IRS.
   What ships today stops at a pre-fill on purpose — the taxpayer id has to come
   off a signed W-9, and Copy A has to be the official scannable form.
+- **Satellite imagery, on state rather than on a schedule.** The schema is here:
+  provider, asset reference, last pull date, NDVI mean and standard deviation.
+  The pull itself is not, and when it lands it should fire when a boundary
+  exists AND the last pull is stale AND the block is in an active crop cycle —
+  not on a calendar tick, which would burn imagery credits on a fallow block in
+  January.
+- **Geofence enforcement.** `find_fields_containing_point` answers the question;
+  nothing yet *acts* on the answer. Wiring it into a bucket log ("is this pick
+  inside an assigned block?") or a time clock ("is this worker on ground they
+  are rostered to?") is the other half.
+- **Parcel boundaries.** Fields and zones have polygons; parcels do not, so
+  nothing checks that a block sits inside the ground it is recorded against.
+  `set_field_boundary` says so in a warning rather than leaving it a silent gap.
+- **The Farm App sync engine.** v0.12.0 ships `import_farm_app_fields`, which
+  aligns the schemas by carrying each legacy record's id onto the ERPNext Field
+  it creates. The engine that keeps the two in step afterwards — reading
+  structure out, pushing per-zone cost and revenue events back — is the next
+  half, and it needs the ids this release establishes.
+- **The compliance framework proper.** The metadata is already woven into the
+  operational doctypes; what is missing is the external evidence that does not
+  emerge from operations — Compliance Policy, Certification/License, Regulatory
+  Filing, Audit Event — and the engines that read both: a due-date calendar that
+  fires on **state** rather than on a calendar tick, an audit packet generator,
+  and a readiness dashboard.
+- **Access control for the camp.** `Housing Unit.access_card_zone` is recorded
+  now and read by nothing. Wiring it to a real card system is what turns the
+  register into a door that opens.
 - **Real estate for the operating company.** The land register is per-entity by
-  construction; standing up a second company's parcels is data entry, not code.
+  construction; standing up a second company's parcels is data entry, not code —
+  and since v0.12.0, `create_company` can stand up the company too.
 
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -969,7 +1149,11 @@ bench --site yoursite.localhost uninstall-app erpnext_mcp
 Drops this app's own doctypes and everything in them: **ERPNext MCP Settings**,
 **MCP Action Log** (the audit history), **Cap Table Entry**, **Member Event**,
 **Governance Document**, **Asset Cost Profile**, **Note Payable**, **Parcel**,
-**Lease** and **Related Party**. Nothing else on the site is touched — the
+**Lease**, **Related Party**, **Field**, **Irrigation Zone**, **Housing Unit**
+and **Housing Assignment**. The last two are worth a pause: a camp roster is the
+only record of who slept where, and it is what an IRS Section 119 exclusion and
+an ORS 653 wage claim are both answered with. Nothing else on the site is
+touched — the
 accounts, cost centers, dimensions, journal entries, bank accounts and Assets
 these tools created are ordinary ERPNext records and stay exactly as they are.
 

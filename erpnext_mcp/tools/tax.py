@@ -42,12 +42,27 @@ That rule is right in both bookkeeping styles, which is why it is a rule and not
 a switch. `by_account` in the output shows the debits and credits behind every
 total so the reasoning can be checked rather than believed.
 
+WHICH PARTY TYPES ARE READ, AND WHY THOSE. `Supplier` and `Contact` are payments
+for goods or services and both are read. `Contact` — this app's own party type,
+for the consultant who is not a formal vendor — is never exempt on its own:
+somebody paid for services is reportable unless a W-9 says otherwise, and nothing
+on this site knows which, so a Contact lands in `borderline` with that sentence
+attached.
+
+`Family` is read and DELIBERATELY EXCLUDED, and the count and total are reported
+so the exclusion is visible. A transfer to a relative is not compensation for
+services: below the IRS gift threshold it needs no W-9 and produces no form.
+Booking those as Suppliers — which is what an operation without a Family party
+type ends up doing — puts family money into vendor spend and then onto a 1099,
+and the second of those is a form sent to somebody who owes no tax on it.
+
 WHAT IS EXCLUDED, AND SAID SO OUT LOUD. Employees, because that is W-2 territory
 — and the count and total of employee-party postings is reported anyway, so
 "nobody looked" and "somebody looked and excluded them" are distinguishable.
-Opening entries, because an opening balance is not a payment. Cancelled vouchers,
-which GL Entry does not carry. Anything under the threshold, listed with its
-total so a borderline case near $600 is visible rather than absent.
+Family parties, for the reason above. Opening entries, because an opening balance
+is not a payment. Cancelled vouchers, which GL Entry does not carry. Anything
+under the threshold, listed with its total so a borderline case near $600 is
+visible rather than absent.
 """
 
 from __future__ import annotations
@@ -117,6 +132,27 @@ _GOVERNMENT_PHRASES = (
 _REPORTABLE_SUPPLIER_TYPES = ("individual", "proprietorship", "sole proprietorship", "partnership")
 _EXEMPT_SUPPLIER_TYPES = ("company", "corporation")
 
+#: GL Entry party types whose postings are payments this looks at. `Contact` is
+#: this app's own (see `tools/company.py`) and is included because an occasional
+#: consultant is paid for services, which is the shape a 1099 exists for.
+REPORTABLE_PARTY_TYPES = ("Supplier", "Contact")
+
+#: Party types read from the ledger and then deliberately left out, with the
+#: reason each is left out. Counted and reported rather than silently filtered:
+#: "nobody looked" and "somebody looked and excluded them" have to look different.
+EXCLUDED_PARTY_TYPES = {
+	"Employee": (
+		"W-2 territory. Wages, salary and reimbursed expenses to an employee are reported on a "
+		"W-2, not a 1099-NEC, whatever account they were booked to."
+	),
+	"Family": (
+		"A transfer to a family member is not compensation for services. Below the IRS annual "
+		"gift exclusion it needs no W-9 and produces no information return. If money to this "
+		"person WAS for work done, the posting should carry a Contact or Supplier party rather "
+		"than a Family one — reclassify the entry, not the exclusion."
+	),
+}
+
 CLASSIFICATION_REPORTABLE = "reportable"
 CLASSIFICATION_BORDERLINE = "borderline"
 CLASSIFICATION_EXEMPT = "exempt"
@@ -166,17 +202,17 @@ def generate_1099_prefill(args: dict) -> ToolResult:
 	ledger = _read_ledger(company, start, end)
 	totals = _aggregate(ledger["rows"])
 	if not totals:
-		seen = (
-			f" {ledger['employee_count']} Employee-party posting(s) were found and excluded as "
-			"W-2 territory."
-			if ledger["employee_count"]
-			else ""
+		seen = "".join(
+			f" {bucket['count']} {name}-party posting(s) were found and excluded."
+			for name, bucket in sorted(ledger["excluded"].items())
+			if bucket["count"]
 		)
 		raise ToolError(
-			f"no ledger postings for {company} in {tax_year} carry a Supplier party, so there is "
-			f"nothing to report.{seen} Either no supplier was paid that year, or the party field "
-			"was never filled in on the entries that paid them — check a known vendor's postings "
-			"with get_journal_entries before concluding the first."
+			f"no ledger postings for {company} in {tax_year} carry a "
+			f"{' or '.join(REPORTABLE_PARTY_TYPES)} party, so there is nothing to report."
+			f"{seen} Either nobody reportable was paid that year, or the party field was never "
+			"filled in on the entries that paid them — check a known vendor's postings with "
+			"get_journal_entries before concluding the first."
 		)
 
 	recipients = [_classify(company, party, figures) for party, figures in sorted(totals.items())]
@@ -225,13 +261,24 @@ def generate_1099_prefill(args: dict) -> ToolResult:
 		"excluded": {
 			"employee_party_postings": ledger["employee_count"],
 			"employee_party_total": _money(ledger["employee_total"]),
+			"family_party_postings": ledger["excluded"]["Family"]["count"],
+			"family_party_total": _money(ledger["excluded"]["Family"]["total"]),
+			"family_parties": ledger["excluded"]["Family"]["parties"],
+			"by_party_type": ledger["excluded"],
 			"opening_entries": ledger["opening_count"],
 			"note": (
-				"Employee-party postings are W-2 territory and are not on any 1099 produced "
-				"here. They are counted rather than merely skipped so that 'nobody looked' and "
-				"'somebody looked and excluded them' are different-looking answers."
+				"Employee-party postings are W-2 territory; Family-party postings are transfers "
+				"rather than compensation for services and need no W-9 below the gift "
+				"exclusion. Neither is on any 1099 produced here. Both are counted rather than "
+				"merely skipped so that 'nobody looked' and 'somebody looked and excluded them' "
+				"are different-looking answers — and so that a Family posting that was really a "
+				"payment for work is visible enough to be reclassified."
 			),
 		},
+		"party_types_read": list(REPORTABLE_PARTY_TYPES),
+		"contact_recipients": [
+			row["recipient"] for row in recipients if "Contact" in row["ledger_party_types"]
+		],
 		"basis": _basis_note(),
 		"mcp_action_log_id": None,
 	}
@@ -361,27 +408,41 @@ def _read_ledger(company: str, start: str, end: str) -> dict:
 			"instead. This is a volume this tool is not built for."
 		)
 
-	supplier_rows = []
-	employee_count = 0
-	employee_total = 0.0
+	payment_rows = []
+	excluded = {name: {"count": 0, "total": 0.0, "parties": set()} for name in EXCLUDED_PARTY_TYPES}
 	opening_count = 0
 	for row in rows:
 		if str(row.get("is_opening") or "").strip().lower() == "yes":
 			opening_count += 1
 			continue
 		party_type = row.get("party_type")
-		if party_type == "Employee":
-			employee_count += 1
-			employee_total += float(row.get("debit") or 0) - float(row.get("credit") or 0)
+		if party_type in excluded:
+			bucket = excluded[party_type]
+			bucket["count"] += 1
+			bucket["total"] += float(row.get("debit") or 0) - float(row.get("credit") or 0)
+			if row.get("party"):
+				bucket["parties"].add(str(row["party"]))
 			continue
-		if party_type != "Supplier":
+		if party_type not in REPORTABLE_PARTY_TYPES:
 			continue
-		supplier_rows.append(dict(row))
+		payment_rows.append(dict(row))
 
 	return {
-		"rows": supplier_rows,
-		"employee_count": employee_count,
-		"employee_total": employee_total,
+		"rows": payment_rows,
+		"excluded": {
+			name: {
+				"count": bucket["count"],
+				"total": round(bucket["total"], 2),
+				"parties": sorted(bucket["parties"]),
+				"why": EXCLUDED_PARTY_TYPES[name],
+			}
+			for name, bucket in excluded.items()
+		},
+		# Kept under their old names because the tool result has always carried
+		# them and a caller reading `employee_party_postings` should not have to
+		# be rewritten to learn that Family joined the list.
+		"employee_count": excluded["Employee"]["count"],
+		"employee_total": excluded["Employee"]["total"],
 		"opening_count": opening_count,
 	}
 
@@ -419,10 +480,12 @@ def _aggregate(rows) -> dict:
 				"by_account": {},
 				"by_voucher_type": {},
 				"vouchers": set(),
+				"party_types": set(),
 				"first": None,
 				"last": None,
 			},
 		)
+		figures["party_types"].add(str(row.get("party_type") or ""))
 		figures["total"] += amount
 		cost_center = row.get("cost_center") or "unassigned"
 		figures["by_cost_center"][cost_center] = round(
@@ -447,6 +510,7 @@ def _aggregate(rows) -> dict:
 	for figures in totals.values():
 		figures["total"] = round(figures["total"], 2)
 		figures["vouchers"] = sorted(figures["vouchers"])
+		figures["party_types"] = sorted(entry for entry in figures["party_types"] if entry)
 	return totals
 
 
@@ -456,11 +520,13 @@ def _classify(company: str, party: str, figures: dict) -> dict:
 	supplier = _supplier(party)
 	related = _related_party(company, party)
 	name = str(supplier.get("supplier_name") or party)
-	verdict, reason = _verdict(name, supplier, related)
+	ledger_party_types = list(figures.get("party_types") or [])
+	verdict, reason = _verdict(name, supplier, related, ledger_party_types)
 
 	return {
 		"recipient": name,
 		"supplier": party,
+		"ledger_party_types": ledger_party_types,
 		"supplier_type": supplier.get("supplier_type") or None,
 		"supplier_group": supplier.get("supplier_group") or None,
 		"supplier_has_tax_id": bool(supplier.get("tax_id")),
@@ -504,7 +570,7 @@ _ATTORNEY_REASON = (
 )
 
 
-def _verdict(name: str, supplier: dict, related: dict) -> tuple[str, str]:
+def _verdict(name: str, supplier: dict, related: dict, ledger_party_types=()) -> tuple[str, str]:
 	"""The classification rules, most specific first. Never silently exempt.
 
 	ORDER MATTERS, AND IT IS THIS. What the related-party register says about an
@@ -514,6 +580,13 @@ def _verdict(name: str, supplier: dict, related: dict) -> tuple[str, str]:
 	*registered as a Corporation* whose name says law firm is borderline rather
 	than exempt. A name-only attorney signal is borderline too, because nothing
 	has said otherwise.
+
+	A `Contact` party sits between those two. It is a stronger signal than a name
+	— somebody deliberately said this is a person paid for occasional services —
+	and a weaker one than a tax classification on the related-party register,
+	which is an answer off a W-9. So it is checked after the register and after
+	the attorney rule, and it can only ever produce `borderline`: a Contact
+	payment IS potentially reportable and nothing here can settle it.
 	"""
 	tokens = _tokens(name)
 	token_set = set(tokens)
@@ -546,6 +619,16 @@ def _verdict(name: str, supplier: dict, related: dict) -> tuple[str, str]:
 
 	if attorney:
 		return (CLASSIFICATION_BORDERLINE, f"Looks like a law firm. {_ATTORNEY_REASON}")
+
+	if "Contact" in set(ledger_party_types or ()):
+		return (
+			CLASSIFICATION_BORDERLINE,
+			"Paid as a Contact — an occasional consultant or professional who is not a formal "
+			"Supplier. Payments for services are reportable in Box 1 unless the recipient is an "
+			"entity type that is exempt, and nothing on this site says which this is. Get the "
+			"W-9 before filing, then register them on the related-party register so the answer "
+			"is here next year.",
+		)
 
 	supplier_type = str(supplier.get("supplier_type") or "").strip().lower()
 	if supplier_type in _REPORTABLE_SUPPLIER_TYPES:
@@ -655,6 +738,7 @@ def _workbook(company, tax_year, threshold, payer, forms, below, exempt_above, l
 				"Related Party",
 				"Relationship",
 				"Supplier",
+				"Ledger Party Type",
 				"Vouchers",
 				"First Payment",
 				"Last Payment",
@@ -671,6 +755,7 @@ def _workbook(company, tax_year, threshold, payer, forms, below, exempt_above, l
 					row["related_party"] or "",
 					row["relationship"] or "",
 					row["supplier"],
+					", ".join(row["ledger_party_types"]),
 					row["voucher_count"],
 					row["first_payment"] or "",
 					row["last_payment"] or "",
@@ -888,6 +973,7 @@ def _public_row(row: dict) -> dict:
 	return {
 		"recipient": row["recipient"],
 		"supplier": row["supplier"],
+		"ledger_party_types": row["ledger_party_types"],
 		"total_payments": row["total_payments"],
 		"classification": row["classification"],
 		"reason": row["reason"],

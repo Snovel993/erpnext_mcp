@@ -150,7 +150,44 @@
   "document_tools_section",
   "allow_generate_quarterly_investment_report",
   "document_tools_col",
-  "allow_generate_1099_prefill"
+  "allow_generate_1099_prefill",
+  "company_tools_section",
+  "allow_list_companies",
+  "allow_create_company",
+  "company_tools_col",
+  "allow_update_company",
+  "allow_register_party_types",
+  "farm_tools_section",
+  "allow_list_fields",
+  "allow_get_field",
+  "allow_get_parcel_field_summary",
+  "allow_list_irrigation_zones",
+  "allow_get_irrigation_zone",
+  "farm_tools_col",
+  "allow_create_field",
+  "allow_update_field",
+  "allow_link_field_to_cost_center",
+  "allow_import_farm_app_fields",
+  "allow_create_irrigation_zone",
+  "allow_update_irrigation_zone",
+  "housing_tools_section",
+  "allow_list_housing_units",
+  "allow_get_housing_unit",
+  "allow_list_housing_assignments",
+  "allow_get_housing_capacity",
+  "allow_get_employee_housing_history",
+  "housing_tools_col",
+  "allow_create_housing_unit",
+  "allow_update_housing_unit",
+  "allow_create_housing_assignment",
+  "allow_end_housing_assignment",
+  "geo_tools_section",
+  "allow_find_fields_containing_point",
+  "allow_find_fields_by_h3_cell",
+  "geo_tools_col",
+  "allow_set_field_boundary",
+  "allow_set_zone_boundary",
+  "allow_import_field_boundary_geojson"
  ],
  "fields": [
   {
@@ -1095,12 +1132,255 @@
    "fieldname": "allow_generate_1099_prefill",
    "fieldtype": "Check",
    "label": "Generate 1099-NEC Pre-Fill"
+  },
+  {
+   "fieldname": "company_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Multi-Company and Party Types"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every company with its abbreviation, currency, tax-id status, fiscal year period, cost center and account counts, and the GL entry count with first and last posting dates.",
+   "fieldname": "allow_list_companies",
+   "fieldtype": "Check",
+   "label": "List Companies"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Stand up a Company plus its chart of accounts, cost centers and the fiscal year containing today. Refuses a duplicate name or abbreviation, an unknown country or currency, and a non-group parent.",
+   "fieldname": "allow_create_company",
+   "fieldtype": "Check",
+   "label": "Create Company"
+  },
+  {
+   "fieldname": "company_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a company's country, tax id or notes — and its currency only while nothing is posted. Refuses the abbreviation, the name, and the fiscal year start month, each with the reason.",
+   "fieldname": "allow_update_company",
+   "fieldtype": "Check",
+   "label": "Update Company"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register the Family and Contact Party Types so a Journal Entry line can carry them. Idempotent, and already seeded on install and on every migrate. Changes no existing record.",
+   "fieldname": "allow_register_party_types",
+   "fieldtype": "Check",
+   "label": "Register Party Types"
+  },
+  {
+   "fieldname": "farm_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Fields and Irrigation Zones"
+  },
+  {
+   "default": "1",
+   "description": "READ. The block register with acreage totalled, plantings summarised, and the varieties already in use on this site.",
+   "fieldname": "allow_list_fields",
+   "fieldtype": "Check",
+   "label": "List Fields"
+  },
+  {
+   "default": "1",
+   "description": "READ. One block in full, with its irrigation zones, their water rights, and how much of the block is not zoned.",
+   "fieldname": "allow_get_field",
+   "fieldtype": "Check",
+   "label": "Get Field"
+  },
+  {
+   "default": "1",
+   "description": "READ. One parcel rolled up: blocks, planted acres against the parcel's own, zones, flow, planting ages, and the food-safety gaps.",
+   "fieldname": "allow_get_parcel_field_summary",
+   "fieldtype": "Check",
+   "label": "Parcel Field Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. The zone register with area and flow totalled, plus the zones with no water test and the surface-water zones with no water right.",
+   "fieldname": "allow_list_irrigation_zones",
+   "fieldtype": "Check",
+   "label": "List Irrigation Zones"
+  },
+  {
+   "default": "1",
+   "description": "READ. One zone in full, with the block it waters and that block's share of it.",
+   "fieldname": "allow_get_irrigation_zone",
+   "fieldtype": "Check",
+   "label": "Get Irrigation Zone"
+  },
+  {
+   "fieldname": "farm_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register a planted block under a parcel, with its food-safety facts. Refuses a duplicate name on one parcel, a claimed Farm App id, and blocks summing to more acres than the parcel has.",
+   "fieldname": "allow_create_field",
+   "fieldtype": "Check",
+   "label": "Create Field"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a registered block. Cannot re-key it, cannot move it to another parcel, and cannot set the cost center — that is its own tool.",
+   "fieldname": "allow_update_field",
+   "fieldtype": "Check",
+   "label": "Update Field"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Point a block at the Cost Center its costs book to. Sets one field; posts nothing and moves no existing entry.",
+   "fieldname": "allow_link_field_to_cost_center",
+   "fieldtype": "Check",
+   "label": "Link Field to Cost Center"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Create Fields from a batch of legacy Farm App records carrying their ids. Dry run by default, whole batch validated before the first insert, never updates an existing record.",
+   "fieldname": "allow_import_farm_app_fields",
+   "fieldtype": "Check",
+   "label": "Import Farm App Fields"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register a zone under a block. Refuses a duplicate zone name on the parcel, a zone number already used on that block, and zones summing to more area than the block.",
+   "fieldname": "allow_create_irrigation_zone",
+   "fieldtype": "Check",
+   "label": "Create Irrigation Zone"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a registered zone. Cannot re-key it, cannot move it to another block, and cannot set the area in acres — that is computed.",
+   "fieldname": "allow_update_irrigation_zone",
+   "fieldtype": "Check",
+   "label": "Update Irrigation Zone"
+  },
+  {
+   "fieldname": "housing_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Labor Camp Housing"
+  },
+  {
+   "default": "1",
+   "description": "READ. The camp register with capacity, occupancy and open beds, plus the overdue inspections, the uninhabitable units and the ones filled past what their floor area allows.",
+   "fieldname": "allow_list_housing_units",
+   "fieldtype": "Check",
+   "label": "List Housing Units"
+  },
+  {
+   "default": "1",
+   "description": "READ. One unit in full with its whole assignment history, and the compliance gaps named in sentences.",
+   "fieldname": "allow_get_housing_unit",
+   "fieldtype": "Check",
+   "label": "Get Housing Unit"
+  },
+  {
+   "default": "1",
+   "description": "READ. Who is housed where, currently or over a period, with the wage-deduction assignments named and the deposits still held.",
+   "fieldname": "allow_list_housing_assignments",
+   "fieldtype": "Check",
+   "label": "List Housing Assignments"
+  },
+  {
+   "default": "1",
+   "description": "READ. Beds, bodies and overdue inspections per parcel and in total, with a plain readout.",
+   "fieldname": "allow_get_housing_capacity",
+   "fieldtype": "Check",
+   "label": "Housing Capacity"
+  },
+  {
+   "default": "1",
+   "description": "READ. Everywhere one person has been housed, in order, with deposits and wage deductions.",
+   "fieldname": "allow_get_employee_housing_history",
+   "fieldtype": "Check",
+   "label": "Employee Housing History"
+  },
+  {
+   "fieldname": "housing_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register a building on a camp with its compliance facts. Computes the lawful occupancy from floor area unless one is given.",
+   "fieldname": "allow_create_housing_unit",
+   "fieldtype": "Check",
+   "label": "Create Housing Unit"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a registered unit. Cannot re-key it and cannot move it between parcels.",
+   "fieldname": "allow_update_housing_unit",
+   "fieldtype": "Check",
+   "label": "Update Housing Unit"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Put one person in one unit from a date. Refuses an overlapping assignment unless multi-occupancy is asked for, a non-residential unit, an uninhabitable one, and an unknown employee where an HR app is installed.",
+   "fieldname": "allow_create_housing_assignment",
+   "fieldtype": "Check",
+   "label": "Create Housing Assignment"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Write the date somebody moved out and the deposit returned. Never deletes: the record is the audit trail for IRS Section 119 and for a wage claim.",
+   "fieldname": "allow_end_housing_assignment",
+   "fieldtype": "Check",
+   "label": "End Housing Assignment"
+  },
+  {
+   "fieldname": "geo_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Boundaries and Geofencing"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which blocks a GPS fix is inside. Bounding box first, then exact point-in-polygon; the boundary counts as inside. This is the geofence query.",
+   "fieldname": "allow_find_fields_containing_point",
+   "fieldtype": "Check",
+   "label": "Find Fields Containing a Point"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which blocks an H3 cell touches, at any resolution. The spatial-index join for anything else keyed on H3.",
+   "fieldname": "allow_find_fields_by_h3_cell",
+   "fieldtype": "Check",
+   "label": "Find Fields by H3 Cell"
+  },
+  {
+   "fieldname": "geo_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Give a block its GeoJSON polygon and derive centroid, bounding box, H3 coverage and area from it. Refuses invalid or self-intersecting shapes, coordinates off Earth, and an area more than 25% from the recorded acreage.",
+   "fieldname": "allow_set_field_boundary",
+   "fieldtype": "Check",
+   "label": "Set Field Boundary"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. The same for an irrigation zone, and reports whether it sits inside the block it waters — reported rather than enforced, because a shared line really does cross boundaries.",
+   "fieldname": "allow_set_zone_boundary",
+   "fieldtype": "Check",
+   "label": "Set Zone Boundary"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Set boundaries on existing blocks from a GeoJSON FeatureCollection. Dry run by default, per-feature errors, and it never creates a Field.",
+   "fieldname": "allow_import_field_boundary_geojson",
+   "fieldtype": "Check",
+   "label": "Import Field Boundaries"
   }
  ],
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-26 15:00:00.000000",
+ "modified": "2026-07-30 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

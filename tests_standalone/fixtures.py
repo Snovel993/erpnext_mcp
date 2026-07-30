@@ -1565,3 +1565,86 @@ class V11TestCase(V8TestCase):
 	def setUp(self):
 		super().setUp()
 		seed_v11()
+
+
+# ── v0.12.0 fixtures: party types, countries, and two family payees ─────────
+#: A relative who gets money that is not payroll and not a purchase. The whole
+#: reason the `Family` party type exists: without it this posting would carry a
+#: Supplier party and land on a 1099 the recipient owes no tax on.
+ALEX = "Alex Bramwell"
+
+#: A consultant paid twice a year who is not a formal vendor. `Contact` is the
+#: other half of the same problem — leaving them unclassified means the 1099
+#: pre-fill has nothing to go on, which is how a reportable payment goes unfiled.
+ANTONY = "Antony Sedge"
+
+
+def seed_v12() -> None:
+	"""The custom party types, a country list, and a year of Family/Contact pay."""
+	_party_types()
+	_countries()
+	_family_and_contact_payments()
+
+
+def _party_types() -> None:
+	"""ERPNext's four, plus the two this app registers.
+
+	The stock four are seeded here rather than assumed because
+	`register_party_types` has to be able to report "already registered" for
+	something, and because a test that Family is absent needs the others present
+	to prove the absence is specific.
+	"""
+	STORE.seed(
+		"Party Type",
+		[
+			{"name": "Customer", "party_type": "Customer", "account_type": "Receivable"},
+			{"name": "Supplier", "party_type": "Supplier", "account_type": "Payable"},
+			{"name": "Employee", "party_type": "Employee", "account_type": "Payable"},
+			{"name": "Shareholder", "party_type": "Shareholder", "account_type": "Payable"},
+		],
+	)
+
+
+def _countries() -> None:
+	"""Two, so `create_company`'s ISO check has something real to refuse against."""
+	STORE.seed(
+		"Country",
+		[{"name": "United States", "code": "us"}, {"name": "Canada", "code": "ca"}],
+	)
+
+
+def _family_and_contact_payments() -> None:
+	"""One payee of each new party type, both over the 1099 threshold.
+
+	Both are over $600 on purpose. A Family payment under the threshold would be
+	excluded by the threshold rather than by the party type, and the test would
+	pass for the wrong reason — which is the bug this fixture exists to prevent.
+	"""
+	rows = [
+		_party_gl(CONTRACT_LABOR, "2025-05-10", ALEX, debit=4000, cost_center_name="Main"),
+		_party_gl(CONTRACT_LABOR, "2025-10-10", ALEX, debit=3500, cost_center_name="Main"),
+		_party_gl(PROFESSIONAL_FEES, "2025-04-18", ANTONY, debit=1800, cost_center_name="Operations"),
+		_party_gl(PROFESSIONAL_FEES, "2025-11-06", ANTONY, debit=1200, cost_center_name="Operations"),
+	]
+	for row in rows[:2]:
+		row["party_type"] = "Family"
+	for row in rows[2:]:
+		row["party_type"] = "Contact"
+
+	balancing = []
+	for row in rows:
+		leg = _gl(BANK, row["posting_date"], debit=row.get("credit") or 0, credit=row.get("debit") or 0)
+		leg["name"] = f"{row['name']}-leg"
+		leg["voucher_no"] = row["voucher_no"]
+		leg["is_opening"] = "No"
+		balancing.append(leg)
+
+	STORE.seed("GL Entry", rows + balancing)
+
+
+class V12TestCase(V11TestCase):
+	"""...and the party types, countries and family/contact payments."""
+
+	def setUp(self):
+		super().setUp()
+		seed_v12()

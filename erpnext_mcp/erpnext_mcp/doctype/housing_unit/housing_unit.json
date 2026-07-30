@@ -1,0 +1,241 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-30 12:00:00.000000",
+ "description": "One building on a labor camp: a cabin, a bath house, a kitchen, a house. What it is, how big, how many people it holds, what condition it is in, and whether it currently satisfies the three regimes that govern employer-provided farm housing — IRS Section 119, Oregon's ORS 653 wage rules, and the FSMA Produce Safety Rule's worker facility requirements.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "unit_name",
+  "unit_type",
+  "parcel",
+  "owning_entity",
+  "identity_col",
+  "square_footage",
+  "capacity",
+  "year_built",
+  "condition",
+  "linkage_section",
+  "related_asset",
+  "linkage_col",
+  "access_card_zone",
+  "compliance_section",
+  "fsma_worker_facility",
+  "or_housing_law_compliant",
+  "max_occupants_per_or_law",
+  "compliance_col",
+  "last_habitability_inspection",
+  "smoke_detector_last_test",
+  "co_detector_last_test",
+  "legal_section",
+  "legal_basis",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What is painted on the door: 'MC-Cabin-01', 'GC-BathHouse'. The docname is built from this and the parcel's abbreviation, so every camp may number its cabins from one.",
+   "fieldname": "unit_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Unit Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What kind of building it is. A Toilet-Shower or Kitchen has no capacity and takes no assignment; a Multi-Unit Building is the barracks case where several people share one unit by design.",
+   "fieldname": "unit_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Unit Type",
+   "options": "\nCabin\nToilet-Shower\nKitchen\nSingle-Family House\nMulti-Unit Building\nManufactured Home\nBath House\nBarn\nShop"
+  },
+  {
+   "description": "The parcel the building stands on.",
+   "fieldname": "parcel",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Parcel",
+   "options": "Parcel",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "parcel.owning_entity",
+   "fieldname": "owning_entity",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Owning Entity",
+   "options": "Company",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Floor area. Drives the occupancy limit under Oregon's agricultural labor housing rules, which is why an unmeasured cabin is a cabin nobody can lawfully fill.",
+   "fieldname": "square_footage",
+   "fieldtype": "Float",
+   "label": "Square Footage",
+   "precision": "2"
+  },
+  {
+   "description": "How many people this unit sleeps, as the operation actually uses it. Compare against max_occupants_per_or_law, which is what the code allows — the two are different questions and are meant to be visible together.",
+   "fieldname": "capacity",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Capacity (people)"
+  },
+  {
+   "fieldname": "year_built",
+   "fieldtype": "Int",
+   "label": "Year Built"
+  },
+  {
+   "description": "Uninhabitable is a real answer and it is not the same as Needs Repair: one is a unit that should not be assigned, the other is a unit with a work order against it.",
+   "fieldname": "condition",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Condition",
+   "options": "\nExcellent\nGood\nFair\nPoor\nNeeds Repair\nUninhabitable"
+  },
+  {
+   "fieldname": "linkage_section",
+   "fieldtype": "Section Break",
+   "label": "Accounting and Access"
+  },
+  {
+   "description": "The Fixed Asset carrying this building on the balance sheet, when there is one. Buildings depreciate; the ground under them does not, and that is the Parcel's own asset link.",
+   "fieldname": "related_asset",
+   "fieldtype": "Link",
+   "label": "Related Asset",
+   "options": "Asset"
+  },
+  {
+   "fieldname": "linkage_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The access-control zone this unit's door belongs to, for a card system that has not been installed yet. Recorded now because retrofitting zone names onto fifty doors after the fact is the expensive way to do it.",
+   "fieldname": "access_card_zone",
+   "fieldtype": "Data",
+   "label": "Access Card Zone"
+  },
+  {
+   "description": "The facts three different regimes ask about the same building. They are on the unit rather than in a compliance register because they are also the facts that decide whether anybody can be put in it tonight: an Uninhabitable unit with no smoke detector test is not a reporting problem, it is a unit that has to stay empty.",
+   "fieldname": "compliance_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance"
+  },
+  {
+   "default": "0",
+   "description": "Ticked when this unit is subject to the FSMA Produce Safety Rule's worker facility requirements — a kitchen, toilet or shower serving a crew that handles covered produce, or housing inside a produce contact area. Subpart L.",
+   "fieldname": "fsma_worker_facility",
+   "fieldtype": "Check",
+   "label": "FSMA Worker Facility"
+  },
+  {
+   "default": "Unknown",
+   "description": "Whether this unit meets Oregon's agricultural labor housing requirements. Unknown is the honest default and it is a distinct answer from No — an operator who has not looked should not be recorded as having found a violation.",
+   "fieldname": "or_housing_law_compliant",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "OR Housing Law Compliant",
+   "options": "Unknown\nYes\nNo\nNot Applicable"
+  },
+  {
+   "description": "The occupancy the floor area allows, at 50 square feet of sleeping area per person. Computed from square_footage when left blank, and left alone once set: a unit whose bunk layout or local code says otherwise keeps the number somebody worked out.",
+   "fieldname": "max_occupants_per_or_law",
+   "fieldtype": "Int",
+   "label": "Max Occupants per OR Law"
+  },
+  {
+   "fieldname": "compliance_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When somebody last walked this unit and signed off that it is fit to live in.",
+   "fieldname": "last_habitability_inspection",
+   "fieldtype": "Date",
+   "label": "Last Habitability Inspection"
+  },
+  {
+   "fieldname": "smoke_detector_last_test",
+   "fieldtype": "Date",
+   "label": "Smoke Detector Last Test"
+  },
+  {
+   "description": "Required wherever there is a fuel-burning appliance. A blank here on a cabin with a propane heater is the single most consequential empty field on this doctype.",
+   "fieldname": "co_detector_last_test",
+   "fieldtype": "Date",
+   "label": "CO Detector Last Test"
+  },
+  {
+   "fieldname": "legal_section",
+   "fieldtype": "Section Break",
+   "label": "What the record is for"
+  },
+  {
+   "fieldname": "legal_basis",
+   "fieldtype": "HTML",
+   "label": "Legal Basis",
+   "options": "<p><b>IRS Section 119.</b> Lodging furnished on the business premises, for the employer's convenience, and required as a condition of employment may be excluded from the employee's wages. All three tests have to hold. The Housing Assignment records are the audit trail that defends the classification: who was housed, where, and over what dates.</p><p><b>ORS 653 and OAR 839-015.</b> Oregon constrains what may be deducted from wages for housing. Each Housing Assignment carries its own <code>housing_deduction_from_wages</code> answer, because the question is asked of the arrangement rather than of the building.</p><p><b>FSMA Produce Safety Rule, Subpart L.</b> Worker housing and facilities that touch produce contact areas carry hygiene and sanitation requirements. <code>fsma_worker_facility</code> is what surfaces which units those are.</p><p>None of this is legal advice, and none of these flags is a determination. They record what somebody decided, and when, so that the decision can be defended or revisited.</p>"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-30 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Housing Unit",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "unit_name,unit_type,parcel,condition",
+ "sort_field": "unit_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "unit_name",
+ "track_changes": 1
+}

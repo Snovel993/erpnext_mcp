@@ -14,10 +14,23 @@ ALL_ON = {f"allow_{name}": 1 for name in registry.MUTATING_TOOLS}
 
 class DefaultsAreOff(SeededTestCase):
 	def test_every_mutating_tool_is_refused_out_of_the_box(self):
+		"""Nothing mutates on a fresh install — and the refusal says which kind.
+
+		A tool whose site prerequisite is missing is refused for THAT reason
+		rather than for the switch, because `dispatch` checks availability first
+		and the two need different words: "your operator turned this off" is a
+		request to go and ask them, while "this site has no shapely" is a request
+		to stop trying. Both are refusals and neither writes anything, which is
+		what this test is really about.
+		"""
 		for name in registry.MUTATING_TOOLS:
 			with self.subTest(tool=name):
 				message = self.tool_error(name, {})
-				self.assertIn(f"allow_{name}", message)
+				if registry.is_available(name):
+					self.assertIn(f"allow_{name}", message)
+				else:
+					self.assertIn("not available on this site", message)
+					self.assertIn("not something an operator can switch on", message)
 
 	def test_a_refused_mutation_writes_nothing(self):
 		before = len(STORE.rows("Journal Entry"))
