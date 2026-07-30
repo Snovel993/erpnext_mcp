@@ -45,6 +45,7 @@ from ..errors import ToolError
 from ..result import ToolResult
 
 RELATED_PARTY = "Related Party"
+FAMILY = "Family"
 CAP_TABLE = "Cap Table Entry"
 GOVERNANCE_DOCUMENT = "Governance Document"
 PARCEL = "Parcel"
@@ -605,3 +606,356 @@ def get_related_party(args: dict) -> ToolResult:
 def relationship_options() -> list[str]:
 	"""The relationships this site declares, read off the meta. Used by `tax.py`."""
 	return select_options(RELATED_PARTY, "relationship_to_company")
+
+
+# ── the family register ─────────────────────────────────────────────────────
+#: Why this register exists at all, in one place. ERPNext resolves a posting's
+#: counterparty as a Dynamic Link THROUGH its party type: `party_type` is a Link
+#: to DocType, so a party type called `Family` is only valid if there is a DocType
+#: called Family, and `party` is only valid if it is a record in it. Customer,
+#: Supplier, Employee and Shareholder each have one. A relative had none, which is
+#: what took v0.12.0's `bench migrate` down — see `tools/company.py`.
+#:
+#: WHAT IT DELIBERATELY DOES NOT HOLD: a tax id. A transfer below the IRS annual
+#: gift exclusion is not compensation for services, needs no W-9 and produces no
+#: 1099, which is the whole reason this party type is separate from Supplier.
+#: Where a relative ALSO has a tax identity worth recording — because they are a
+#: member, a lessor, a trustee — `related_party` points at the register that holds
+#: four digits and never more.
+_FAMILY_FIELDS = (
+	"name",
+	"family_member_name",
+	"relationship",
+	"related_party",
+	"active",
+	"notes",
+	"creation",
+	"owner",
+)
+
+
+def _require_family() -> None:
+	compat.require_doctype(
+		FAMILY,
+		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
+	)
+
+
+def _describe_family(row: dict) -> dict:
+	return {
+		"name": row.get("name"),
+		"family_member_name": row.get("family_member_name"),
+		"relationship": row.get("relationship") or None,
+		"related_party": row.get("related_party") or None,
+		"has_related_party": bool(row.get("related_party")),
+		"active": compat.checked(row.get("active")),
+		"notes": row.get("notes") or None,
+	}
+
+
+def family_row(member: str) -> dict:
+	"""One Family record as a dict, from its docname — which is the person's name."""
+	member = (member or "").strip()
+	if not member:
+		raise ToolError("family_name is required (the person's name, which is the docname)")
+	fields = compat.existing_fields(FAMILY, _FAMILY_FIELDS)
+
+	if frappe.db.exists(FAMILY, member):
+		return dict(frappe.db.get_value(FAMILY, member, fields, as_dict=True) or {})
+
+	matches = frappe.db.get_all(
+		FAMILY, filters={"family_member_name": ("like", member)}, fields=fields, limit=25
+	)
+	if len(matches) == 1:
+		return dict(matches[0])
+	if len(matches) > 1:
+		names = ", ".join(sorted(str(match.get("name")) for match in matches))
+		raise ToolError(f"{member!r} matches {len(matches)} family members: {names}.")
+	raise ToolError(f"nobody called {member!r} is on the family register. list_family_members has it.")
+
+
+def _party_postings(member: str) -> dict:
+	"""How often this person has been the party on a posting, and over what span.
+
+	The traceability half of the register. "We moved money to Alex eleven times
+	last year" is the question a family petty-cash arrangement gets asked, and
+	the answer is in the ledger rather than here — so this reads it rather than
+	keeping a second copy that would drift.
+	"""
+	if not compat.doctype_exists("GL Entry"):
+		return {"posting_count": 0, "first_posting": None, "last_posting": None, "companies": []}
+	fields = compat.existing_fields(
+		"GL Entry", ("name", "posting_date", "company", "debit", "credit")
+	)
+	rows = frappe.db.get_all(
+		"GL Entry",
+		filters={"party_type": FAMILY, "party": member, "is_cancelled": 0},
+		fields=fields,
+		order_by="posting_date asc",
+		limit=REGISTER_CAP,
+	)
+	dates = [str(row.get("posting_date") or "") for row in rows or [] if row.get("posting_date")]
+	total = sum(float(row.get("debit") or 0) - float(row.get("credit") or 0) for row in rows or [])
+	return {
+		"posting_count": len(rows or []),
+		"first_posting": dates[0] if dates else None,
+		"last_posting": dates[-1] if dates else None,
+		"net_amount": round(total, 2),
+		"companies": sorted({row.get("company") for row in rows or [] if row.get("company")}),
+	}
+
+
+# ── 122. create_family_member ───────────────────────────────────────────────
+def create_family_member(args: dict) -> ToolResult:
+	"""Put one person on the family register, so a posting can name them."""
+	_require_family()
+	family_name = as_str(args, "family_name", required=True)
+
+	existing = frappe.db.get_value(FAMILY, {"family_member_name": family_name}, "name")
+	if existing:
+		raise ToolError(
+			f"{existing} is already on the family register. One record per person: the name is "
+			"the docname, and it is what every posting to them points at. Change it with "
+			"update_family_member. Nothing was created."
+		)
+
+	doc = frappe.new_doc(FAMILY)
+	doc.family_member_name = family_name
+	doc.notes = as_str(args, "notes")
+
+	relationship = as_str(args, "relationship")
+	if relationship:
+		doc.relationship = as_choice(FAMILY, "relationship", relationship, "relationship")
+
+	related_party = as_str(args, "related_party")
+	if related_party:
+		compat.require_doctype(RELATED_PARTY, "It ships with erpnext_mcp — run `bench migrate`.")
+		if not frappe.db.exists(RELATED_PARTY, related_party):
+			raise ToolError(
+				f"no Related Party called {related_party!r}. Register it with "
+				"create_related_party first, or leave this blank — a family member needs no "
+				"related-party entry unless they also hold a role worth disclosing. Nothing was "
+				"created."
+			)
+		doc.related_party = related_party
+
+	active = as_bool(args, "active")
+	doc.active = 1 if (active is None or active) else 0
+	doc.insert()
+
+	described = _describe_family(dict(doc.as_dict()))
+	notes = [
+		"This register holds no tax id on purpose. A transfer below the IRS annual gift "
+		"exclusion is not compensation for services: no W-9, no 1099. Somebody paid for work "
+		"is a Contact or a Supplier, and the posting should say so."
+	]
+	if not described["relationship"]:
+		notes.append(
+			"No relationship recorded. 'Why did money go to this person' is the first question "
+			"these postings get asked, and a name alone does not answer it."
+		)
+	return ToolResult(
+		data={
+			**described,
+			"party_type": FAMILY,
+			"next_step": (
+				f"Journal entry lines can now carry party_type='Family', party='{doc.name}'. The "
+				"1099 pre-fill excludes Family-party postings and reports the count, so they are "
+				"visibly excluded rather than silently missing."
+			),
+			"notes_on_use": notes,
+		},
+		summary=f"added {doc.name} to the family register",
+		docstatus_delta="none → 0 (created)",
+	)
+
+
+# ── 123. update_family_member ───────────────────────────────────────────────
+def update_family_member(args: dict) -> ToolResult:
+	"""Change a family member's relationship, related party, active flag or notes."""
+	_require_family()
+	row = family_row(as_str(args, "family_name", required=True))
+
+	if as_str(args, "new_family_name") or as_str(args, "family_member_name"):
+		raise ToolError(
+			"a family member's name cannot be changed here: it IS the docname, and every "
+			"journal entry that named them points at it. Renaming would orphan those postings. "
+			"Nothing was changed."
+		)
+
+	doc = frappe.get_doc(FAMILY, row["name"])
+	changes = {}
+
+	if "relationship" in args:
+		value = as_str(args, "relationship")
+		_stage_family(
+			changes, doc, "relationship", as_choice(FAMILY, "relationship", value, "relationship") if value else ""
+		)
+	if "notes" in args:
+		_stage_family(changes, doc, "notes", as_str(args, "notes"))
+	if "related_party" in args:
+		related_party = as_str(args, "related_party")
+		if related_party and not frappe.db.exists(RELATED_PARTY, related_party):
+			raise ToolError(
+				f"no Related Party called {related_party!r}. Nothing was changed."
+			)
+		_stage_family(changes, doc, "related_party", related_party)
+	if "active" in args:
+		_stage_family(changes, doc, "active", 1 if as_bool(args, "active") else 0)
+
+	if not changes:
+		raise ToolError(
+			"nothing to change. Pass at least one of: relationship, related_party, active, notes."
+		)
+
+	doc.save()
+	described = _describe_family(dict(doc.as_dict()))
+	warnings = []
+	if "active" in changes and not described["active"]:
+		postings = _party_postings(row["name"])["posting_count"]
+		warnings.append(
+			f"Marked inactive rather than deleted, which is right: {postings} posting(s) already "
+			"name this person and deleting the record would orphan them."
+		)
+	return ToolResult(
+		data={
+			**described,
+			"changed": {key: [before, after] for key, (before, after) in changes.items()},
+			"warnings": warnings,
+		},
+		summary=f"{doc.name}: {len(changes)} field(s) changed",
+		docstatus_delta="0 → 0 (updated)",
+	)
+
+
+def _stage_family(changes: dict, doc, field: str, wanted) -> None:
+	before = doc.get(field)
+	before = "" if before is None else before
+	if str(before) == str(wanted):
+		return
+	changes[field] = [before or None, wanted or None]
+	doc.set(field, wanted if wanted != "" else None)
+
+
+# ── 124. list_family_members ────────────────────────────────────────────────
+def list_family_members(args: dict) -> ToolResult:
+	"""The family register, and which entries have a related-party record behind them."""
+	_require_family()
+	limit = as_limit(args)
+
+	filters = {}
+	if "active" in args:
+		filters["active"] = 1 if as_bool(args, "active") else 0
+	relationship = as_str(args, "relationship")
+	if relationship:
+		filters["relationship"] = relationship
+
+	rows = frappe.db.get_all(
+		FAMILY,
+		filters=filters,
+		fields=compat.existing_fields(FAMILY, _FAMILY_FIELDS),
+		order_by="family_member_name asc",
+		limit=min(limit, REGISTER_CAP),
+	)
+	members = [_describe_family(dict(row)) for row in rows]
+
+	by_relationship: dict = {}
+	for member in members:
+		key = member["relationship"] or "(unrecorded)"
+		by_relationship[key] = by_relationship.get(key, 0) + 1
+
+	return ToolResult(
+		data={
+			"member_count": len(members),
+			"active_count": len([member for member in members if member["active"]]),
+			"by_relationship": dict(sorted(by_relationship.items())),
+			"with_related_party": [member["name"] for member in members if member["has_related_party"]],
+			"without_related_party": [
+				member["name"] for member in members if not member["has_related_party"]
+			],
+			"without_relationship": [member["name"] for member in members if not member["relationship"]],
+			"party_type": FAMILY,
+			"members": members,
+			"note": (
+				"A missing related-party entry is not a gap for most of these — a relative who "
+				"only receives transfers needs no W-9 and no disclosure. It IS a gap for one who "
+				"also holds a role: a member, a lessor, a trustee. That is the list to read."
+			),
+		},
+		summary=(
+			f"{len(members)} family member(s), "
+			f"{len([member for member in members if member['active']])} active"
+		),
+	)
+
+
+# ── 125. get_family_member ──────────────────────────────────────────────────
+def get_family_member(args: dict) -> ToolResult:
+	"""One family member, their related-party record, and every posting naming them."""
+	_require_family()
+	row = family_row(as_str(args, "family_name", required=True))
+	described = _describe_family(row)
+	postings = _party_postings(row["name"])
+
+	related = {}
+	if row.get("related_party") and compat.doctype_exists(RELATED_PARTY):
+		detail = dict(
+			frappe.db.get_value(
+				RELATED_PARTY,
+				row["related_party"],
+				compat.existing_fields(
+					RELATED_PARTY,
+					(
+						"name",
+						"party_name",
+						"party_type",
+						"relationship_to_company",
+						"company",
+						"effective_date",
+						"end_date",
+						"tax_id_type",
+						"tax_id_last4",
+					),
+				),
+				as_dict=True,
+			)
+			or {}
+		)
+		related = {
+			"name": detail.get("name"),
+			"party_name": detail.get("party_name"),
+			"party_type": detail.get("party_type"),
+			"relationship_to_company": detail.get("relationship_to_company"),
+			"company": detail.get("company"),
+			"effective_date": str(detail.get("effective_date") or "") or None,
+			"end_date": str(detail.get("end_date") or "") or None,
+			"tin_type": detail.get("tax_id_type") or "None",
+			# Four digits, never nine — the same rule get_related_party keeps.
+			"tin_last4": detail.get("tax_id_last4") or "",
+		}
+
+	notes = []
+	if not described["active"] and postings["posting_count"]:
+		notes.append(
+			f"Marked inactive, and {postings['posting_count']} posting(s) still name them. That "
+			"is correct: the record stays so the postings keep resolving."
+		)
+	if not related:
+		notes.append(
+			"No related-party entry. Fine for a relative who only receives transfers; a gap for "
+			"one who is also a member, a lessor or a trustee, because that is what a "
+			"related-party disclosure is built from."
+		)
+	return ToolResult(
+		data={
+			**described,
+			"party_type": FAMILY,
+			"related_party_detail": related or None,
+			**postings,
+			"compliance_notes": notes,
+		},
+		summary=(
+			f"{row['name']}: {described['relationship'] or 'relationship unrecorded'}, "
+			f"{postings['posting_count']} posting(s)"
+		),
+	)

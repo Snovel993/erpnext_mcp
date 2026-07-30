@@ -3,6 +3,114 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.12.2 — 2026-07-30
+
+Two Sprint 6 gaps closed. Four new tools, no new doctypes, no migration.
+
+### `create_company` was already there — the switch was off
+
+Worth stating plainly, because it cost somebody an afternoon: `create_company`
+shipped in v0.12.0 and is in the catalogue. It was absent from a live
+`tools/list` because **it is a mutating tool and mutating tools ship OFF**, which
+is the entire point of them. `update_company` appeared in the same inventory
+because its switch had been ticked and `create_company`'s had not.
+
+`tools/list` advertises only what is switched on AND available, so an absent tool
+means one of those two, never "not built". There is now a test class saying so
+where somebody hunting for the tool will find it, and the tool's own refusal has
+always named the switch to tick.
+
+### What did change about `create_company`
+
+The spec it was measured against had moved, so the tool moved to meet it:
+
+- **`abbr` is now 2–5 characters.** One is not an abbreviation of anything and
+  collides immediately; past five, every account docname on the books carries it
+  and `1100 - Cash - LONGER` is a name nobody reads twice.
+- **It refuses an abbreviation left behind by a deleted company.** A duplicate
+  `Company.abbr` was already refused; this catches the harder case, where a
+  company was removed in the Desk and its chart was not, so docnames ending in
+  `" - GHO"` still exist with no company behind them. A new company reusing that
+  abbreviation would inherit docnames that look like its own and are not.
+- **`chart_of_accounts` defaults to `Standard with Numbers`.** Numbered because
+  this app resolves accounts by number as well as by name, and an unnumbered
+  chart makes `resolve_account("1100")` impossible on a brand-new company. Where
+  ERPNext's own template list is importable, an unknown template is refused with
+  the available ones named — a template ERPNext cannot find produces a company
+  with no accounts, which looks like a success and is not. Where it is not
+  importable the check degrades to "cannot say" rather than to "refuse
+  everything".
+- **It creates the current AND previous fiscal year.** A company stood up in
+  March is one whose first task is often last year's closing balances, and an
+  opening-balance journal entry with no fiscal year to land in is refused by
+  ERPNext with a message about a period that does not exist. Two rows, one
+  conversation saved. Years that already exist are left alone and reported as
+  such.
+- **The result now carries the cost center tree, the fiscal years created, and a
+  `next_step`** pointing at `set_company_defaults` — ERPNext books to those
+  default account fields without asking, and a company whose defaults are empty
+  fails at the first invoice rather than at creation.
+
+Atomicity was already structural: `dispatch` rolls back before it logs, so a tool
+that wrote a Company and then died cannot leave a half-built entity behind.
+v0.12.2 adds the test that proves it for this tool specifically, and a second one
+proving a *refusal* never gets as far as writing, since every validation runs
+before the insert.
+
+### The family register got a way in that is not the Desk
+
+v0.12.1 shipped the `Family` DocType so `bench migrate` would stop dying and so a
+`party_type='Family'` posting could resolve. It shipped with no MCP surface, so
+adding a person meant `/app/family`. Four tools close that:
+
+- `create_family_member` — name (which becomes the docname), relationship,
+  optional `related_party`, active flag, notes.
+- `update_family_member` — relationship, related party, active, notes. **Refuses
+  a rename**: the name IS the docname and every journal entry that named them
+  points at it.
+- `list_family_members` — the register, filterable by active status and
+  relationship, reporting who has a related-party record behind them and who
+  does not.
+- `get_family_member` — one person, their related-party detail, and **every
+  posting that names them**: count, first and last date, net amount, companies.
+
+**The posting count is read from the ledger, not kept.** A stored copy would
+drift from what actually happened, and the entire value of the number is that it
+cannot. That is the traceability half of a family petty-cash arrangement.
+
+**The register holds no tax id, still on purpose.** A transfer below the IRS
+annual gift exclusion is not compensation for services: no W-9, no 1099, which is
+the whole reason the party type is separate from Supplier. Where a relative also
+holds a role worth disclosing — member, lessor, trustee — `related_party` points
+at the register that keeps four digits and never more, and `get_family_member` is
+tested for never returning more than four.
+
+**Retiring somebody is `active=false`, not a delete**, and the tool reports how
+many postings would have been orphaned — which is the argument for the flag
+existing.
+
+`list_family_members` says out loud that a missing related-party entry is *not* a
+gap for most of these. A list that read as forty problems would be a list nobody
+acts on; the entries that matter are the ones who also hold a role.
+
+### Added
+
+- `create_family_member`, `update_family_member`, `list_family_members`,
+  `get_family_member`. Catalogue: **125 tools — 59 read, 66 mutating.**
+- `tests_standalone/test_family.py` — 45 tests, including the end-to-end loop
+  this release closes: create a member over MCP, post a journal entry naming
+  them, read the count back. v0.12.0 claimed that worked and could not deliver
+  it; v0.12.1 made it possible from the Desk only.
+- A test that the 1099 pre-fill still excludes Family postings — adding a way to
+  create members must not change what the pre-fill does with them.
+
+### Notes
+
+- No doctype changes, so **no migration is required beyond the usual
+  `bench migrate`** to pick up the new settings switches.
+- The two new read tools default ON; the two new write tools default OFF.
+- Full suite: 2058 tests, 0 failures. 73 skip without shapely and h3.
+
 ## 0.12.1 — 2026-07-30
 
 A hotfix. `bench migrate` on v0.12.0 aborted in

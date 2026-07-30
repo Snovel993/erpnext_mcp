@@ -3479,6 +3479,112 @@ TOOLS = {
 		available=_needs_doctype("Party Type"),
 		requires="the Party Type DocType, which is core ERPNext",
 	),
+	# ── the family register ─────────────────────────────────────────────────
+	"list_family_members": _tool(
+		parties.list_family_members,
+		"The family register: everybody a `Family`-party posting can name, with "
+		"their relationship, whether they are still active, and whether a "
+		"related-party record sits behind them. Read-only.\n\n"
+		"THE TWO LISTS AT THE END ARE THE POINT. A missing related-party entry is "
+		"not a gap for most of these — a relative who only receives transfers needs "
+		"no W-9 and no disclosure. It IS a gap for one who also holds a role: a "
+		"member, a lessor, a trustee. `without_related_party` is the list to read; "
+		"`without_relationship` is the one to fill in, because 'why did money go to "
+		"this person' is the first question these postings get asked.",
+		{
+			"active": _field(_BOOLEAN, "true for only active members, false for only retired ones."),
+			"relationship": _field(
+				_STRING,
+				"Only this relationship: Spouse, Child, Parent, Sibling, Grandchild, "
+				"Grandparent, In-Law or Other.",
+			),
+			"limit": _field(_INTEGER, "Maximum members returned. Default 100, hard maximum 500."),
+		},
+		title="List family members",
+		available=_needs_doctype("Family"),
+		requires="the Family DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_family_member": _tool(
+		parties.get_family_member,
+		"One family member in full: relationship, active status, the related-party "
+		"record behind them if there is one, and EVERY POSTING THAT NAMES THEM — "
+		"count, first and last date, net amount and which companies. Read-only.\n\n"
+		"The postings are read from the ledger rather than kept here, so the count "
+		"cannot drift from what actually happened. That is the traceability half of "
+		"a family petty-cash arrangement: 'we moved money to Alex eleven times last "
+		"year' is a question with one true answer and it is in the GL.\n\n"
+		"Never returns more than four digits of a taxpayer id, even from the linked "
+		"related-party record.",
+		{"family_name": _field(_STRING, "The person's name, which is the docname.")},
+		required=("family_name",),
+		title="Get a family member",
+		available=_needs_doctype("Family"),
+		requires="the Family DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_family_member": _tool(
+		parties.create_family_member,
+		"MUTATING (default OFF). Put one person on the family register so a Journal "
+		"Entry line can carry `party_type='Family'` and name them.\n\n"
+		"WHY THE REGISTER HAS TO EXIST. ERPNext resolves a posting's counterparty as "
+		"a Dynamic Link THROUGH its party type: `party_type` is a Link to DocType, "
+		"so `Family` only works because this app ships a Family DocType, and `party` "
+		"only works if the person is a record in it. Customer, Supplier, Employee "
+		"and Shareholder each have one.\n\n"
+		"IT HOLDS NO TAX ID, ON PURPOSE. A transfer below the IRS annual gift "
+		"exclusion is not compensation for services: no W-9, no 1099, which is the "
+		"whole reason this party type is separate from Supplier. A relative who is "
+		"genuinely paid for work is a Contact or a Supplier, and the posting should "
+		"say so rather than the exclusion being widened. Where a relative ALSO holds "
+		"a role worth disclosing — member, lessor, trustee — `related_party` points "
+		"at the register that keeps four digits and never more.\n\n"
+		"REFUSES a second record for the same name (the name is the docname, and it "
+		"is what every posting points at) and a `related_party` that does not exist.",
+		{
+			"family_name": _field(
+				_STRING,
+				"The person's name as a posting should read it. This becomes the docname and "
+				"cannot be changed afterwards.",
+			),
+			"relationship": _field(
+				_STRING,
+				"Spouse, Child, Parent, Sibling, Grandchild, Grandparent, In-Law or Other.",
+			),
+			"related_party": _field(
+				_STRING,
+				"The Related Party entry for this person, when they also hold a role worth "
+				"disclosing. Leave blank otherwise.",
+			),
+			"active": _field(_BOOLEAN, "Default true."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("family_name",),
+		mutating=True,
+		title="Add a family member",
+		available=_needs_doctype("Family"),
+		requires="the Family DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_family_member": _tool(
+		parties.update_family_member,
+		"MUTATING (default OFF). Change a family member's relationship, related "
+		"party, active flag or notes. Every change is echoed as before → after.\n\n"
+		"CANNOT RENAME THEM. The name IS the docname and every journal entry that "
+		"named them points at it; renaming would orphan those postings.\n\n"
+		"RETIRING SOMEBODY IS `active=false`, NOT A DELETE, and the result says how "
+		"many postings would have been orphaned — which is why the flag exists.",
+		{
+			"family_name": _field(_STRING, "The person's name, which is the docname."),
+			"relationship": _field(_STRING, "New relationship. Empty string clears it."),
+			"related_party": _field(_STRING, "New Related Party. Empty string clears it."),
+			"active": _field(_BOOLEAN, "False retires them without deleting the record."),
+			"notes": _field(_STRING, "New notes."),
+			"new_family_name": _field(_STRING, "Always refused — see the description."),
+		},
+		required=("family_name",),
+		mutating=True,
+		title="Update a family member",
+		available=_needs_doctype("Family"),
+		requires="the Family DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	# ── farm structure: fields ──────────────────────────────────────────────
 	"list_fields": _tool(
 		farm.list_fields,

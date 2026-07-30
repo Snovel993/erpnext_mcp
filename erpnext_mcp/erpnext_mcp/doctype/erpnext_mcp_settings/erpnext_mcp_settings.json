@@ -187,7 +187,13 @@
   "geo_tools_col",
   "allow_set_field_boundary",
   "allow_set_zone_boundary",
-  "allow_import_field_boundary_geojson"
+  "allow_import_field_boundary_geojson",
+  "family_tools_section",
+  "allow_list_family_members",
+  "allow_get_family_member",
+  "family_tools_col",
+  "allow_create_family_member",
+  "allow_update_family_member"
  ],
  "fields": [
   {
@@ -1375,12 +1381,50 @@
    "fieldname": "allow_import_field_boundary_geojson",
    "fieldtype": "Check",
    "label": "Import Field Boundaries"
+  },
+  {
+   "fieldname": "family_tools_section",
+   "fieldtype": "Section Break",
+   "label": "The Family Register"
+  },
+  {
+   "default": "1",
+   "description": "READ. Everybody a Family-party posting can name, with their relationship and whether a related-party record sits behind them.",
+   "fieldname": "allow_list_family_members",
+   "fieldtype": "Check",
+   "label": "List Family Members"
+  },
+  {
+   "default": "1",
+   "description": "READ. One family member with their related-party record and every posting that names them, read live from the ledger.",
+   "fieldname": "allow_get_family_member",
+   "fieldtype": "Check",
+   "label": "Get Family Member"
+  },
+  {
+   "fieldname": "family_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Put one person on the family register so a journal entry line can carry party_type='Family' and name them. Holds no tax id on purpose.",
+   "fieldname": "allow_create_family_member",
+   "fieldtype": "Check",
+   "label": "Add Family Member"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change relationship, related party, active flag or notes. Cannot rename — the name is the docname every posting points at.",
+   "fieldname": "allow_update_family_member",
+   "fieldtype": "Check",
+   "label": "Update Family Member"
   }
  ],
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-30 13:00:00.000000",
+ "modified": "2026-07-30 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

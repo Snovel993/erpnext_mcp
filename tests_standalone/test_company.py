@@ -615,3 +615,219 @@ class MultiCompanyScoping(CompanyTestCase):
 		)
 		self.assertEqual(STORE.get_raw("Company", MAIN)["default_cash_account"], cash())
 		self.assertFalse(STORE.get_raw("Company", OTHER).get("default_cash_account"))
+
+
+# ── v0.12.2: create_company brought up to spec ──────────────────────────────
+class AbbreviationRules(CompanyTestCase):
+	"""An abbreviation is the tail of every account docname on the books, which
+	is why the rules are about length and collision rather than taste."""
+
+	def test_one_character_is_refused(self):
+		error = self.tool_error("create_company", {"company_name": "Short LLC", "abbr": "S"})
+		self.assertIn("2 to 5", error)
+		self.assertIn("Nothing was created", error)
+
+	def test_six_characters_are_refused_and_the_message_shows_what_it_would_look_like(self):
+		error = self.tool_error("create_company", {"company_name": "Longish LLC", "abbr": "LONGER"})
+		self.assertIn("1100 - Cash - LONGER", error)
+
+	def test_two_characters_are_accepted(self):
+		self.assertEqual(self.a_company("Two LLC", "CF")["abbr"], "CF")
+
+	def test_five_characters_are_accepted(self):
+		self.assertEqual(self.a_company("Five LLC", "CONST")["abbr"], "CONST")
+
+	def test_an_abbreviation_left_behind_by_a_deleted_company_is_refused(self):
+		"""The collision a duplicate-company check misses. Delete a company in
+		the Desk and its chart does not always go with it; a new company reusing
+		the abbreviation inherits docnames that look like its own and are not."""
+		STORE.seed(
+			"Account",
+			[{"name": "1100 - Cash - GHO", "account_name": "Cash", "company": "Gone Holdings"}],
+		)
+		error = self.tool_error("create_company", {"company_name": "Ghost LLC", "abbr": "GHO"})
+		self.assertIn("1100 - Cash - GHO", error)
+		self.assertIn("somebody deleted", error)
+		self.assertFalse(STORE.get_raw("Company", "Ghost LLC"))
+
+	def test_a_clean_abbreviation_is_not_blocked_by_the_orphan_check(self):
+		STORE.seed(
+			"Account",
+			[{"name": "1100 - Cash - GHO", "account_name": "Cash", "company": "Gone Holdings"}],
+		)
+		self.assertTrue(self.a_company("Constancy Farms LLC", "CF")["created"])
+
+
+class ChartOfAccountsTemplate(CompanyTestCase):
+	def test_it_defaults_to_the_numbered_standard_chart(self):
+		"""Numbered on purpose: this app resolves accounts by number as well as
+		by name, and an unnumbered chart makes resolve_account('1100')
+		impossible on a brand-new company."""
+		self.assertEqual(self.a_company()["chart_of_accounts"], "Standard with Numbers")
+
+	def test_an_explicit_template_is_used(self):
+		data = self.a_company(chart_of_accounts="Standard")
+		self.assertEqual(data["chart_of_accounts"], "Standard")
+
+	def test_an_unknown_template_is_refused_when_the_site_can_enumerate_them(self):
+		"""ERPNext keeps these as JSON files rather than records, so this app can
+		only check when its helper is importable. The fixture has no ERPNext, so
+		the check degrades to 'cannot say' — which must NOT become 'refuse
+		everything'."""
+		from erpnext_mcp.tools import company as company_tools
+
+		self.assertIsNone(company_tools.chart_templates("United States"))
+		self.assertTrue(self.a_company(chart_of_accounts="Something Invented")["created"])
+
+
+class FiscalYearsCreated(CompanyTestCase):
+	def test_it_creates_the_current_and_the_previous_year(self):
+		"""A company stood up in March is one whose first task is often last
+		year's closing balances, and an opening-balance JE with no fiscal year to
+		land in is refused by ERPNext.
+
+		April, because the fixture already carries calendar 2025 and 2026 — so a
+		calendar company proves nothing about creation and an April one proves
+		both."""
+		data = self.a_company(fiscal_year_start_month=4)
+		self.assertEqual(data["fiscal_years_created"], ["2025-2026", "2026-2027"])
+
+	def test_a_calendar_year_company_really_gets_calendar_years(self):
+		"""Tim's acceptance check: fiscal_year_start_month=1 has to mean January
+		to December, both years, whether they were created here or found."""
+		years = {year["name"]: year for year in self.a_company(fiscal_year_start_month=1)["fiscal_years"]}
+		self.assertEqual(sorted(years), ["2025", "2026"])
+		self.assertEqual(years["2026"]["year_start_date"], "2026-01-01")
+		self.assertEqual(years["2026"]["year_end_date"], "2026-12-31")
+		self.assertEqual(years["2025"]["year_start_date"], "2025-01-01")
+		self.assertEqual(years["2025"]["year_end_date"], "2025-12-31")
+
+	def test_a_calendar_year_company_on_a_site_that_has_none_creates_both(self):
+		for name in ("2025", "2026"):
+			STORE.tables["Fiscal Year"].pop(name, None)
+		data = self.a_company(fiscal_year_start_month=1)
+		self.assertEqual(data["fiscal_years_created"], ["2025", "2026"])
+		self.assertEqual(STORE.get_raw("Fiscal Year", "2025")["year_end_date"], "2025-12-31")
+
+	def test_an_april_company_gets_two_april_years(self):
+		data = self.a_company(fiscal_year_start_month=4)
+		self.assertEqual(data["fiscal_years_created"], ["2025-2026", "2026-2027"])
+		self.assertEqual(STORE.get_raw("Fiscal Year", "2025-2026")["year_start_date"], "2025-04-01")
+
+	def test_a_year_that_already_exists_is_not_recreated(self):
+		"""The fixture carries calendar 2025 and 2026, so a calendar company
+		creates neither and says so rather than duplicating them."""
+		data = self.a_company(fiscal_year_start_month=1)
+		self.assertEqual(data["fiscal_years_created"], [])
+		self.assertTrue(all(year["already_exists"] for year in data["fiscal_years"]))
+		self.assertEqual(len(STORE.rows("Fiscal Year")), 2)
+
+	def test_the_old_single_fiscal_year_key_still_answers(self):
+		"""A caller written against v0.12.0 keeps working."""
+		data = self.a_company(fiscal_year_start_month=1)
+		self.assertEqual(data["fiscal_year"]["name"], "2026")
+
+	def test_dry_run_counts_the_years_it_would_create_and_makes_none(self):
+		before = len(STORE.rows("Fiscal Year"))
+		data = self.tool_data(
+			"create_company",
+			{"company_name": "Dry LLC", "abbr": "DRY", "fiscal_year_start_month": 4, "dry_run": True},
+		)
+		self.assertEqual(len(data["fiscal_years"]), 2)
+		self.assertFalse(any(year["already_exists"] for year in data["fiscal_years"]))
+		self.assertEqual(len(STORE.rows("Fiscal Year")), before)
+
+
+class WhatCreateCompanyReports(CompanyTestCase):
+	def test_it_returns_the_cost_center_tree(self):
+		data = self.a_company()
+		self.assertIn("cost_center_tree", data)
+		self.assertEqual(data["cost_center_count"], len(data["cost_center_tree"]))
+
+	def test_the_next_step_names_set_company_defaults(self):
+		"""ERPNext books to those fields without asking, and a company whose
+		defaults are empty fails at the first invoice rather than here."""
+		data = self.a_company()
+		self.assertIn("set_company_defaults", data["next_step"])
+		self.assertIn("default_receivable_account", data["next_step"])
+
+	def test_the_summary_names_the_fiscal_years(self):
+		result = self.tool("create_company", {"company_name": "Constancy Farms LLC", "abbr": "CF"})
+		self.assertFalse(result.get("isError"))
+
+
+class CreateCompanyIsAtomic(CompanyTestCase):
+	def test_a_failure_after_the_company_row_leaves_nothing_behind(self):
+		"""The transactional promise. `dispatch` rolls back before it logs, so a
+		tool that wrote a Company and then died on the fiscal year cannot leave a
+		half-built entity on the site."""
+		from erpnext_mcp.tools import company as company_tools
+
+		original = company_tools._cost_center_tree
+
+		def explode(*args, **kwargs):
+			raise RuntimeError("blew up after the company row was written")
+
+		before = len(STORE.rows("Company"))
+		company_tools._cost_center_tree = explode
+		try:
+			result = self.tool("create_company", {"company_name": "Doomed LLC", "abbr": "DMD"})
+		finally:
+			company_tools._cost_center_tree = original
+
+		self.assertTrue(result.get("isError"))
+		self.assertEqual(len(STORE.rows("Company")), before, "a half-built company survived")
+		self.assertFalse(STORE.get_raw("Company", "Doomed LLC"))
+
+	def test_the_failure_is_still_audited(self):
+		from erpnext_mcp.tools import company as company_tools
+
+		original = company_tools._cost_center_tree
+		company_tools._cost_center_tree = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no"))
+		try:
+			self.tool("create_company", {"company_name": "Doomed LLC", "abbr": "DMD"})
+		finally:
+			company_tools._cost_center_tree = original
+		self.assertAudited("create_company", "Error")
+
+	def test_a_refusal_never_gets_as_far_as_writing(self):
+		"""Every validation runs before the insert, so a refusal is atomic by
+		construction rather than by rollback."""
+		before = len(STORE.rows("Company"))
+		self.tool_error("create_company", {"company_name": MAIN, "abbr": "ZZ"})
+		self.assertEqual(len(STORE.rows("Company")), before)
+
+
+class TheToolWasAlwaysThere(CompanyTestCase):
+	"""v0.12.2 did not add `create_company`; v0.12.0 did.
+
+	It is absent from a live `tools/list` until an operator ticks its switch,
+	which is true of every mutating tool and is the entire point of them. This
+	is the test that says so in a place somebody looking for the tool will find.
+	"""
+
+	def test_it_is_in_the_catalogue(self):
+		from erpnext_mcp import registry
+
+		self.assertIn("create_company", registry.TOOLS)
+		self.assertIn("create_company", registry.MUTATING_TOOLS)
+
+	def test_it_is_not_advertised_until_the_switch_is_on(self):
+		from erpnext_mcp import registry
+
+		self.configure(enabled=1)
+		advertised = {tool["name"] for tool in registry.tools_list()["tools"]}
+		self.assertNotIn("create_company", advertised)
+
+	def test_it_is_advertised_once_the_switch_is_on(self):
+		from erpnext_mcp import registry
+
+		self.configure(enabled=1, allow_create_company=1)
+		advertised = {tool["name"] for tool in registry.tools_list()["tools"]}
+		self.assertIn("create_company", advertised)
+
+	def test_the_refusal_names_the_switch_to_tick(self):
+		self.configure(enabled=1)
+		error = self.tool_error("create_company", {"company_name": "X LLC", "abbr": "XX"})
+		self.assertIn("allow_create_company", error)
+		self.assertIn("ERPNext MCP Settings", error)

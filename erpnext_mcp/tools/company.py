@@ -120,6 +120,17 @@ _COMPANY_FIELDS = (
 #: Fiscal Year records are the truth. Named here so the fallback is visible.
 _FY_START_FIELDS = ("fy_start_date_month", "fiscal_year_start_month")
 
+#: What an abbreviation may be. Two characters because one is not an
+#: abbreviation of anything and collides immediately; five because it becomes the
+#: tail of every account docname on the books and `"1100 - Cash - CONSTANCY"` is
+#: a docname nobody reads twice.
+ABBR_MIN, ABBR_MAX = 2, 5
+
+#: The chart ERPNext builds when nobody says otherwise. Numbered on purpose: this
+#: app's own tools resolve accounts by number as well as by name, and a chart with
+#: no numbers makes `resolve_account("1100")` impossible on a brand-new company.
+DEFAULT_CHART = "Standard with Numbers"
+
 MONTHS = (
 	"January",
 	"February",
@@ -203,6 +214,73 @@ def _last_day(year: int, month: int) -> int:
 		leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
 		return 29 if leap else 28
 	return 30 if month in (4, 6, 9, 11) else 31
+
+
+def chart_templates(country: str) -> list | None:
+	"""Chart-of-accounts templates this site offers, or None if it cannot say.
+
+	ERPNext keeps these as JSON files rather than as records, so the only honest
+	way to enumerate them is its own helper. That helper is an ERPNext internal
+	and this app imports nothing from ERPNext anywhere else — so the import is
+	guarded, and a version that has moved it gives `None`, meaning "cannot
+	check". `None` is not an empty list: refusing every template because the
+	lookup failed would be worse than accepting one ERPNext will reject with its
+	own message.
+	"""
+	try:
+		from erpnext.accounts.doctype.account.chart_of_accounts.chart_of_accounts import (
+			get_charts_for_country,
+		)
+	except Exception:
+		return None
+	try:
+		return list(get_charts_for_country(country) or []) or None
+	except Exception:
+		return None
+
+
+def _abbr_collisions(abbr: str) -> dict:
+	"""Everything already on this site whose docname ends in `" - <abbr>"`.
+
+	A duplicate `Company.abbr` is the obvious collision and it is not the only
+	one. Delete a company in the Desk and ERPNext does not always take its whole
+	chart with it; the orphaned accounts keep the suffix, and a new company
+	reusing that abbreviation inherits docnames that look like its own and are
+	not. So the accounts are checked too, and reported separately, because the
+	two need different words.
+	"""
+	tail = f" - {abbr}"
+	out = {"company": frappe.db.get_value("Company", {"abbr": abbr}, "name"), "orphans": []}
+	for doctype in ("Account", "Cost Center"):
+		if not compat.doctype_exists(doctype):
+			continue
+		rows = frappe.db.get_all(doctype, filters={"name": ("like", f"%{tail}")}, pluck="name", limit=5)
+		out["orphans"].extend(rows or [])
+	return out
+
+
+def _cost_center_tree(company: str) -> list:
+	"""The company's cost centers as `{name, is_group, parent}`, parents first."""
+	if not compat.doctype_exists("Cost Center"):
+		return []
+	rows = frappe.db.get_all(
+		"Cost Center",
+		filters={"company": company},
+		fields=compat.existing_fields(
+			"Cost Center", ("name", "cost_center_name", "is_group", "parent_cost_center")
+		),
+		order_by="lft asc",
+		limit=200,
+	)
+	return [
+		{
+			"name": row.get("name"),
+			"cost_center_name": row.get("cost_center_name"),
+			"is_group": compat.checked(row.get("is_group")),
+			"parent": row.get("parent_cost_center") or None,
+		}
+		for row in rows or []
+	]
 
 
 def _gl_facts(company: str) -> dict:
@@ -358,7 +436,7 @@ def create_company(args: dict) -> ToolResult:
 	tax_id = as_str(args, "tax_id")
 	parent_company = as_str(args, "parent_company")
 	notes = as_str(args, "notes")
-	chart = as_str(args, "chart_of_accounts")
+	chart = as_str(args, "chart_of_accounts") or DEFAULT_CHART
 	start_month = _month_number(args.get("fiscal_year_start_month"), "fiscal_year_start_month") or 1
 	dry_run = as_bool(args, "dry_run", False)
 
@@ -366,17 +444,33 @@ def create_company(args: dict) -> ToolResult:
 		raise ToolError(
 			f"a Company called {company_name!r} is already on this site. Nothing was created."
 		)
-	collision = frappe.db.get_value("Company", {"abbr": abbr}, "name")
-	if collision:
-		raise ToolError(
-			f"abbreviation {abbr!r} is already {collision!r}'s. Every account, cost center and "
-			"parcel docname on a company ends in its abbreviation, so two companies sharing one "
-			"would make those docnames ambiguous. Nothing was created."
-		)
 	if not abbr.replace("-", "").replace(" ", "").isalnum():
 		raise ToolError(
 			f"abbr {abbr!r} has to be letters and digits — it becomes the tail of every account "
 			"docname on these books. Nothing was created."
+		)
+	if not ABBR_MIN <= len(abbr) <= ABBR_MAX:
+		raise ToolError(
+			f"abbr {abbr!r} is {len(abbr)} character(s); it has to be {ABBR_MIN} to {ABBR_MAX}. "
+			"One character is not an abbreviation of anything and collides immediately; past "
+			f"{ABBR_MAX} every account docname on these books carries it — '1100 - Cash - {abbr}' "
+			"is a name nobody reads twice. Nothing was created."
+		)
+
+	collisions = _abbr_collisions(abbr)
+	if collisions["company"]:
+		raise ToolError(
+			f"abbreviation {abbr!r} is already {collisions['company']!r}'s. Every account, cost "
+			"center and parcel docname on a company ends in its abbreviation, so two companies "
+			"sharing one would make those docnames ambiguous. Nothing was created."
+		)
+	if collisions["orphans"]:
+		raise ToolError(
+			f"no company holds the abbreviation {abbr!r}, but {len(collisions['orphans'])} "
+			f"docname(s) already end in ' - {abbr}': {', '.join(sorted(collisions['orphans']))}. "
+			"That is usually a chart left behind by a company somebody deleted, and a new "
+			"company reusing the abbreviation would inherit docnames that look like its own and "
+			"are not. Clear those first, or pick another abbreviation. Nothing was created."
 		)
 
 	if compat.doctype_exists("Country") and not frappe.db.exists("Country", country):
@@ -389,6 +483,15 @@ def create_company(args: dict) -> ToolResult:
 		raise ToolError(
 			f"no Currency called {currency!r} on this site. Nothing was created."
 		)
+
+	available_charts = chart_templates(country)
+	if available_charts is not None and chart not in available_charts:
+		raise ToolError(
+			f"no chart of accounts template called {chart!r} for {country}. This site offers: "
+			f"{', '.join(sorted(available_charts))}. A template ERPNext cannot find produces a "
+			"company with no accounts at all, which looks like a success and is not. Nothing was "
+			"created."
+		)
 	if parent_company:
 		if not frappe.db.exists("Company", parent_company):
 			raise ToolError(f"no Company called {parent_company!r} to be the parent. Nothing was created.")
@@ -398,8 +501,26 @@ def create_company(args: dict) -> ToolResult:
 				"Tick 'Is Group' on it first. Nothing was created."
 			)
 
-	fy_name, fy_start, fy_end = _fiscal_year_dates(start_month, frappe.utils.today())
-	existing_year = frappe.db.exists("Fiscal Year", fy_name)
+	# The year containing today, and the one before it. A company stood up in
+	# March is a company whose first task is often entering last year's closing
+	# balances, and an opening-balance journal entry with no fiscal year to land
+	# in is refused by ERPNext with a message about a period that does not exist.
+	# Creating both costs one row and saves that conversation.
+	today = frappe.utils.today()
+	wanted = [_fiscal_year_dates(start_month, today)]
+	previous_anchor = f"{int(str(today)[:4]) - 1}{str(today)[4:]}"
+	earlier = _fiscal_year_dates(start_month, previous_anchor)
+	if earlier[0] != wanted[0][0]:
+		wanted.insert(0, earlier)
+	fiscal_years = [
+		{
+			"name": name,
+			"year_start_date": start,
+			"year_end_date": end,
+			"already_exists": bool(frappe.db.exists("Fiscal Year", name)),
+		}
+		for name, start, end in wanted
+	]
 
 	plan = {
 		"company": company_name,
@@ -409,18 +530,20 @@ def create_company(args: dict) -> ToolResult:
 		"parent_company": parent_company or None,
 		"fiscal_year_start_month": start_month,
 		"fiscal_year_start_month_name": MONTHS[start_month - 1],
-		"fiscal_year": {
-			"name": fy_name,
-			"year_start_date": fy_start,
-			"year_end_date": fy_end,
-			"already_exists": bool(existing_year),
-		},
+		"chart_of_accounts": chart,
+		"fiscal_years": fiscal_years,
+		# The year containing today, kept under its old key so a caller written
+		# against v0.12.0 keeps working.
+		"fiscal_year": fiscal_years[-1],
 		**_tax_id_status(tax_id),
 	}
 	if dry_run:
 		return ToolResult(
 			data={**plan, "dry_run": True, "created": False},
-			summary=f"dry run: would create {company_name} ({abbr})",
+			summary=(
+				f"dry run: would create {company_name} ({abbr}) and "
+				f"{len([year for year in fiscal_years if not year['already_exists']])} fiscal year(s)"
+			),
 		)
 
 	doc = frappe.new_doc("Company")
@@ -438,15 +561,21 @@ def create_company(args: dict) -> ToolResult:
 		doc.company_description = notes
 	doc.insert(ignore_permissions=True)
 
-	if not existing_year:
-		_ensure_fiscal_year(fy_name, fy_start, fy_end, company_name)
+	created_years = []
+	for year in fiscal_years:
+		if year["already_exists"]:
+			continue
+		_ensure_fiscal_year(year["name"], year["year_start_date"], year["year_end_date"], company_name)
+		created_years.append(year["name"])
 
 	row = _company_row(doc.name)
+	tree = _cost_center_tree(doc.name)
 	built = {
 		"account_count": frappe.db.count("Account", {"company": doc.name}),
-		"cost_center_count": frappe.db.count("Cost Center", {"company": doc.name}),
+		"cost_center_count": len(tree),
+		"cost_center_tree": tree,
 		"default_cost_center": row.get("cost_center") or None,
-		"chart_of_accounts": row.get("chart_of_accounts") or None,
+		"chart_of_accounts": row.get("chart_of_accounts") or chart,
 	}
 	warnings = []
 	if not built["account_count"]:
@@ -460,14 +589,27 @@ def create_company(args: dict) -> ToolResult:
 	if notes and not compat.has_field("Company", "company_description"):
 		warnings.append("This ERPNext's Company has no description field, so `notes` was not stored.")
 
-	data = {**plan, "created": True, "name": doc.name, **built}
+	data = {
+		**plan,
+		"created": True,
+		"name": doc.name,
+		**built,
+		"fiscal_years_created": created_years,
+		"next_step": (
+			"Point this company's standard account fields at real accounts with "
+			"set_company_defaults — default_receivable_account, default_payable_account, "
+			"round_off_account and the rest. ERPNext books to those without asking, and a "
+			"company whose defaults are empty fails at the first invoice rather than here."
+		),
+	}
 	if warnings:
 		data["warnings"] = warnings
 	return ToolResult(
 		data=data,
 		summary=(
 			f"created company {doc.name} ({abbr}), {built['account_count']} accounts, "
-			f"{built['cost_center_count']} cost centers, fiscal year {fy_name}"
+			f"{built['cost_center_count']} cost centers, fiscal year(s) "
+			f"{', '.join(created_years) or 'already present'}"
 		),
 		docstatus_delta="none → 0 (created)",
 	)

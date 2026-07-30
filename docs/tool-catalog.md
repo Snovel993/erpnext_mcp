@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 121 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 125 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -3922,9 +3922,22 @@ report **what it actually got** — an `account_count` of zero means the named
 chart does not exist on this site, and the result says so rather than looking
 like a success.
 
-It also creates the fiscal year containing today for the start month given.
-April (4) is a farm year and is named for the span it covers (`2026-2027`);
-January (1) is a calendar year and is named `2026`.
+It creates the fiscal year containing today for the start month given **and the
+one before it**. April (4) is a farm year and is named for the span it covers
+(`2026-2027`); January (1) is a calendar year and is named `2026`. Two years
+because a company stood up in March is one whose first task is often last year's
+closing balances, and an opening-balance journal entry with no fiscal year to
+land in is refused by ERPNext with a message about a period that does not exist.
+Years that already exist are left alone and reported as such.
+
+`chart_of_accounts` defaults to `Standard with Numbers` — numbered because this
+app resolves accounts by number as well as by name, and an unnumbered chart makes
+`resolve_account("1100")` impossible on a brand-new company.
+
+The result carries the `cost_center_tree`, `fiscal_years_created`, and a
+`next_step` pointing at **56** — ERPNext books to a company's default account
+fields without asking, and one whose defaults are empty fails at the first
+invoice rather than here.
 
 | Refusal | Why |
 | --- | --- |
@@ -3934,6 +3947,9 @@ January (1) is a calendar year and is named `2026`.
 | A `country` or `default_currency` this site does not have | ERPNext ships the ISO lists, so this is a spelling — `United States`, not `USA` |
 | A `parent_company` that is not a group | nothing can consolidate under a non-group company |
 | A month outside 1-12, or an unparseable month name | refused rather than defaulted |
+| An `abbr` outside 2-5 characters | one is not an abbreviation and collides immediately; past five, every account docname carries it |
+| An `abbr` already used by docnames with no company behind them | a chart left behind by a deleted company. A new company reusing it would inherit docnames that look like its own and are not |
+| A `chart_of_accounts` template this site does not offer | only checked where ERPNext's own template list is importable. A template it cannot find produces a company with no accounts, which looks like a success and is not |
 
 ```
 create_company {"company_name": "Constancy Farms LLC", "abbr": "CF",
@@ -4663,6 +4679,95 @@ skipped with that said — register it first with **99** or **103**.
 Every per-feature refusal **117** makes applies here too, including the 25% area
 rule, and each is reported against its own feature index so a malformed
 collection can be fixed one line at a time.
+
+---
+
+## 122. `list_family_members`
+
+Read-only, default ON (`allow_list_family_members`).
+
+**Arguments:** `active` (boolean), `relationship`, `limit`.
+
+**Returns** `members`, `member_count`, `active_count`, `by_relationship`,
+`with_related_party`, `without_related_party`, `without_relationship` and a
+`note`.
+
+**The two lists at the end are the point.** A missing related-party entry is not
+a gap for most of these — a relative who only receives transfers needs no W-9 and
+no disclosure. It IS a gap for one who also holds a role: a member, a lessor, a
+trustee. A list that read as forty problems would be a list nobody acts on.
+
+---
+
+## 123. `get_family_member`
+
+Read-only, default ON (`allow_get_family_member`).
+
+**Arguments:** `family_name` (required — the person's name, which is the
+docname).
+
+**Returns** the member, `related_party_detail`, and **every posting that names
+them**: `posting_count`, `first_posting`, `last_posting`, `net_amount`,
+`companies`. Plus `compliance_notes`.
+
+The postings are read from the GL rather than kept on the record, so the count
+cannot drift from what actually happened — which is the entire value of it. "We
+moved money to Alex eleven times last year" is the question a family petty-cash
+arrangement gets asked, and it has one true answer.
+
+Never returns more than four digits of a taxpayer id, even from the linked
+related-party record — the same rule **88** keeps, kept here because this is a
+second door onto the same field.
+
+---
+
+## 124. `create_family_member`
+
+**MUTATING**, default OFF (`allow_create_family_member`).
+
+**Arguments:** `family_name` (required), `relationship`, `related_party`,
+`active` (default true), `notes`.
+
+**WHY THE REGISTER HAS TO EXIST.** ERPNext resolves a posting's counterparty as a
+Dynamic Link THROUGH its party type: `party_type` is a `Link` to `DocType`, so
+`Family` only works because this app ships a Family DocType, and `party` only
+works if the person is a record in it. Customer, Supplier, Employee and
+Shareholder each have one.
+
+**IT HOLDS NO TAX ID, ON PURPOSE.** A transfer below the IRS annual gift
+exclusion is not compensation for services: no W-9, no 1099, which is the whole
+reason this party type is separate from Supplier. A relative genuinely paid for
+work is a Contact or a Supplier, and the posting should say so rather than the
+exclusion being widened. Where a relative ALSO holds a role worth disclosing,
+`related_party` points at the register that keeps four digits and never more.
+
+| Refusal | Why |
+| --- | --- |
+| A second record for the same name | the name is the docname, and it is what every posting points at |
+| A `related_party` that does not exist | register it with **89** first, or leave it blank |
+| An unknown `relationship` | the options are read off the DocType |
+
+**Warns rather than refusing** when no relationship is given: "why did money go
+to this person" is the first question these postings get asked, and a name alone
+does not answer it.
+
+---
+
+## 125. `update_family_member`
+
+**MUTATING**, default OFF (`allow_update_family_member`).
+
+**Arguments:** `family_name` (required), plus any of `relationship`,
+`related_party`, `active`, `notes`.
+
+**Returns** the member and `changed`, every one as `[before, after]`.
+
+**Cannot rename them.** The name IS the docname and every journal entry that
+named them points at it; renaming would orphan those postings.
+
+**Retiring somebody is `active=false`, not a delete**, and the result reports how
+many postings would have been orphaned — which is the argument for the flag
+existing.
 
 ---
 

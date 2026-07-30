@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **121 tools** — 57 read-only, 64 mutating.
+- **125 tools** — 59 read-only, 66 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -253,7 +253,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 121 tools
+## The 125 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -262,7 +262,13 @@ Tools whose site prerequisite is missing are not advertised at all — on a site
 without Frappe HR, the three HR tools simply do not exist as far as a client is
 concerned.
 
-### Read-only — 57, all ON by default, each individually switchable
+**A tool missing from your client's list is switched off, not absent.**
+`tools/list` advertises only what is enabled AND runnable here, and every
+mutating tool ships OFF — so a write tool you cannot see is one nobody has ticked
+yet. Tick it in **ERPNext MCP Settings**; the refusal message names the exact
+switch if you call the tool anyway.
+
+### Read-only — 59, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -383,8 +389,10 @@ write tools below.)
 | `get_employee_housing_history` | Everywhere one person has been housed, in order, with deposits and wage deductions — the audit trail an IRS Section 119 exclusion is defended with. |
 | `find_fields_containing_point` | **The geofence query.** Which blocks a GPS fix is inside — bounding box first, then exact point-in-polygon, with the boundary counting as inside. Reports how many blocks have no boundary at all, because an empty result on a half-mapped farm means "not inside any *mapped* block", not "not on the farm". |
 | `find_fields_by_h3_cell` | Which blocks an H3 cell touches, at any resolution. The spatial-index join for anything else keyed on H3 — a bucket log, a crew track, a weather grid. |
+| `list_family_members` | The family register: everybody a `Family`-party posting can name, with their relationship and whether a related-party record sits behind them. Names who has one and who does not — a gap for a member or a trustee, not for a relative who only receives transfers. |
+| `get_family_member` | One person, their related-party detail, and **every posting that names them** — count, first and last date, net amount, companies. Read from the ledger rather than kept, so the count cannot drift from what happened. Never returns more than four digits of a taxpayer id. |
 
-### Mutating — 64, all OFF by default
+### Mutating — 66, all OFF by default
 
 **Postings into the ledger**
 
@@ -507,6 +515,13 @@ write tools below.)
 | `update_housing_unit` | Changes any of the above; recomputes the lawful occupancy when the square footage moves, **unless** the stored limit was one somebody typed. | Re-key it, or move a building between parcels — even a manufactured home that really was moved should be re-registered where it stands, so the assignment history stays attached to the ground it happened on. |
 | `create_housing_assignment` | Puts one person in one unit from a date, with the deposit and the ORS 653 wage-deduction answer. Auto-named `HA-YYYY-MM-<seq>`. | Overlap an existing assignment on that unit unless `allow_multi_occupancy=true`; assign anybody to a shower block, a shop or an uninhabitable unit; or, where an HR app is installed, name somebody who is not on file. |
 | `end_housing_assignment` | Writes the date somebody moved out and the deposit returned. | **Delete.** The record is what defends a Section 119 exclusion, answers a wage claim and tells an investigator who was in the camp that week. |
+
+**The family register**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_family_member` | Puts one person on the register so a journal entry line can carry `party_type='Family'` and name them. Optional link to a Related Party where they also hold a role worth disclosing. | Hold a tax id — deliberately. A transfer below the IRS gift exclusion needs no W-9; somebody paid for work is a Contact or a Supplier and the posting should say so. |
+| `update_family_member` | Changes relationship, related party, active flag, notes. Retiring somebody is `active=false`, and the result says how many postings would have been orphaned by a delete. | **Rename them.** The name IS the docname and every journal entry that named them points at it. |
 
 **Documents that get produced and filed**
 
