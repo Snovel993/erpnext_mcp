@@ -361,6 +361,207 @@ def get_journal_entry(args: dict) -> ToolResult:
 	)
 
 
+# ── 133. investigate_je_gl_link ─────────────────────────────────────────────
+def investigate_je_gl_link(args: dict) -> ToolResult:
+	"""Every line of a Journal Entry beside every GL Entry row it posted.
+
+	WHAT THIS ANSWERS. "The voucher says X and the ageing report says Y — which
+	row is which, and why did the tool that was supposed to keep them in step
+	match nothing?" Before this, answering that meant raw SQL against `tabGL
+	Entry` on somebody's production box. Now it is one call.
+
+	IT EXISTS BECAUSE OF A REAL ZERO. Sprint 6 verification on 2026-07-30 ran
+	`update_journal_entry_party` against ACC-JV-2026-00073, a $10 member
+	distribution, and got `gl_entries_matched: 0`. Three explanations were on the
+	table: an Equity-account quirk, a Bank Bridge JE-crafting bug, or ordinary
+	ERPNext behaviour. It was the third, and none of the guesses would have been
+	settled without seeing both tables side by side.
+
+	THE ANSWER, FOR ANYONE WHO NEVER HAS TO RUN THIS. ERPNext does NOT put the
+	account line's docname in `GL Entry.voucher_detail_no` for a Journal Entry. It
+	fills that column from the line's `reference_detail_no`, which names a payment
+	schedule row on an invoice being settled and is empty on every ordinary line.
+	`voucher_detail_no` carrying a child-row docname is the Sales Invoice Item /
+	Purchase Invoice Item convention, not the Journal Entry one. So a lookup keyed
+	on it matches nothing — on Equity, on Expense, on Payable, on anything. That
+	is not a defect in the site and it is not specific to any account type.
+
+	`voucher_detail_no_populated` in the result is the field's actual state on
+	this voucher, so the explanation above can be checked rather than believed.
+
+	Read-only. It changes nothing, and it is deliberately available on a
+	cancelled entry too — a voucher whose rows were reversed is exactly the one
+	somebody is trying to understand.
+	"""
+	# Imported here rather than at module scope purely for locality: the matcher
+	# belongs beside the tool that writes through it, and this is the tool that
+	# explains what it did.
+	from . import mutate
+
+	name = as_str(args, "journal_entry", required=True)
+	if not frappe.db.exists("Journal Entry", name):
+		raise ToolError(f"no Journal Entry named {name!r}")
+	doc = frappe.get_doc("Journal Entry", name)
+	lines = list(doc.get("accounts") or [])
+	gl_rows = mutate.voucher_gl_rows(name)
+
+	account_facts = _account_facts(str(row.get("account") or "") for row in lines)
+	claimed: set = set()
+	reports, disagreements = [], []
+	for index, line in enumerate(lines, start=1):
+		link = mutate.gl_link_for_line(name, lines, index, gl_rows=gl_rows)
+		facts = account_facts.get(str(line.get("account") or ""), {})
+		matched = []
+		for row in link["rows"]:
+			claimed.add(row.get("name"))
+			disagrees = (
+				str(row.get("party_type") or "") != str(line.get("party_type") or "")
+				or str(row.get("party") or "") != str(line.get("party") or "")
+			)
+			if disagrees:
+				disagreements.append(index)
+			matched.append(
+				{
+					"gl_entry": row.get("name"),
+					"account": row.get("account"),
+					"debit": round(float(row.get("debit") or 0), 2),
+					"credit": round(float(row.get("credit") or 0), 2),
+					"party_type": row.get("party_type") or None,
+					"party": row.get("party") or None,
+					"voucher_type": row.get("voucher_type"),
+					"voucher_no": row.get("voucher_no"),
+					"voucher_detail_no": row.get("voucher_detail_no") or None,
+					"posting_date": str(row.get("posting_date") or ""),
+					"cost_center": row.get("cost_center"),
+					"party_disagrees_with_line": disagrees,
+				}
+			)
+		reports.append(
+			{
+				"line_index": index,
+				"line_name": line.get("name"),
+				"account": line.get("account"),
+				"account_type": facts.get("account_type") or None,
+				"root_type": facts.get("root_type") or None,
+				"debit": round(float(line.get("debit") or 0), 2),
+				"credit": round(float(line.get("credit") or 0), 2),
+				"party_type": line.get("party_type") or None,
+				"party": line.get("party") or None,
+				"reference_detail_no": line.get("reference_detail_no") or None,
+				"gl_entries": matched,
+				"gl_entries_matched": len(matched),
+				"matched_by": link["basis"],
+				"match_is_exact": bool(link["exact"]),
+				"blocker": link["blocker"] or None,
+			}
+		)
+
+	orphans = [
+		{
+			"gl_entry": row.get("name"),
+			"account": row.get("account"),
+			"debit": round(float(row.get("debit") or 0), 2),
+			"credit": round(float(row.get("credit") or 0), 2),
+			"party_type": row.get("party_type") or None,
+			"party": row.get("party") or None,
+			"voucher_detail_no": row.get("voucher_detail_no") or None,
+		}
+		for row in gl_rows
+		if row.get("name") not in claimed
+	]
+	with_detail_no = [row for row in gl_rows if str(row.get("voucher_detail_no") or "")]
+	unmatched_lines = [report["line_index"] for report in reports if not report["gl_entries_matched"]]
+
+	docstatus = int(doc.get("docstatus") or 0)
+	data = {
+		"journal_entry": name,
+		"company": doc.get("company"),
+		"posting_date": str(doc.get("posting_date") or ""),
+		"voucher_type": doc.get("voucher_type"),
+		"docstatus": docstatus,
+		"docstatus_label": _docstatus_label(docstatus),
+		"lines": reports,
+		"unmatched_gl_entries": orphans,
+		"summary": {
+			"journal_entry_lines": len(lines),
+			"gl_entry_rows": len(gl_rows),
+			"matched_pairs": len(claimed),
+			"unmatched_journal_entry_lines": unmatched_lines,
+			"unmatched_gl_entry_rows": len(orphans),
+			"lines_whose_party_disagrees_with_the_ledger": sorted(set(disagreements)),
+			"voucher_detail_no_populated": len(with_detail_no),
+		},
+		"finding": _je_gl_finding(docstatus, lines, gl_rows, with_detail_no, unmatched_lines, orphans),
+		"sign_convention": (
+			"debit and credit are shown as ERPNext stores them, in company currency. "
+			"Nothing here is sign-flipped."
+		),
+	}
+	return ToolResult(
+		data,
+		f"{name}: {len(lines)} line(s), {len(gl_rows)} live GL row(s), {len(claimed)} matched"
+		+ (f", lines {unmatched_lines} unmatched" if unmatched_lines else "")
+		+ (f", {len(orphans)} GL row(s) unexplained" if orphans else ""),
+	)
+
+
+def _account_facts(accounts) -> dict:
+	"""`account_type` and `root_type` for a set of accounts, in one query."""
+	names = sorted({name for name in accounts if name})
+	if not names:
+		return {}
+	fields = compat.existing_fields("Account", ("name", "account_type", "root_type"))
+	rows = frappe.db.get_all("Account", filters={"name": ("in", names)}, fields=fields, limit=500)
+	return {str(row["name"]): dict(row) for row in rows or []}
+
+
+def _je_gl_finding(docstatus, lines, gl_rows, with_detail_no, unmatched_lines, orphans) -> str:
+	"""One paragraph saying what the numbers above mean, in the reader's terms."""
+	if docstatus == 0:
+		return (
+			"This entry is a DRAFT. A draft posts no GL Entry rows at all, so there is nothing "
+			"to match and nothing wrong. It becomes a general ledger question on submit."
+		)
+	if docstatus == 2:
+		return (
+			"This entry is CANCELLED. Its live rows are excluded here and only the reversal "
+			"remains in the ledger; a cancelled voucher is the record of a posting that was "
+			"undone, and its attribution is not something to correct."
+		)
+	if not gl_rows:
+		return (
+			"This entry is submitted and has NO live GL Entry rows. That is unusual: a submitted "
+			"Journal Entry normally posts one row per line. Either something removed them or the "
+			"entry was written by a path that does not post a general ledger."
+		)
+	detail = (
+		f"{len(with_detail_no)} of the {len(gl_rows)} GL row(s) carry a voucher_detail_no"
+		if with_detail_no
+		else "NOT ONE of the GL rows carries a voucher_detail_no"
+	)
+	base = (
+		f"{detail}. This is ordinary ERPNext behaviour, not a defect and not an account-type "
+		"quirk: `JournalEntry.get_gl_entries` fills that column from the line's "
+		"`reference_detail_no`, which names a payment schedule row on an invoice being settled "
+		"and is empty on every ordinary line. Carrying the child-row docname is the Sales "
+		"Invoice Item convention, not the Journal Entry one. Lines are therefore matched to GL "
+		"rows on account plus debit plus credit, and that match is refused rather than guessed "
+		"wherever two lines of this voucher look alike."
+	)
+	if unmatched_lines:
+		base += (
+			f" Line(s) {unmatched_lines} could not be matched to a row at all — read the `blocker` "
+			"on each. ERPNext merges lines that share an account, a party and a cost center into "
+			"one summed GL row, which is the commonest reason for it."
+		)
+	if orphans:
+		base += (
+			f" {len(orphans)} GL row(s) are not explained by any single line, which is what a "
+			"merge looks like from the other side."
+		)
+	return base
+
+
 # ── 5. list_bank_transactions ───────────────────────────────────────────────
 def list_bank_transactions(args: dict) -> ToolResult:
 	"""Bank Transactions, filtered the way a reconciliation actually asks.

@@ -14,14 +14,17 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **127 tools** — 59 read-only, 68 mutating.
+- **135 tools** — 61 read-only, 74 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
 - **LAN-only by default.** Token *and* a CIDR allowlist.
-- **Its own doctypes, one endpoint, no hooks.** It adds no field to any doctype
-  it did not create, so installing it cannot change how anything already on your
-  site behaves.
+- **Its own doctypes, one endpoint, no `doc_events` and no overrides.** It adds
+  no field to any doctype it did not create, so installing it cannot change how
+  anything already on your site behaves. The only two hooks it does install are
+  additive and namespaced: one daily job that deletes this app's own expired
+  upload-staging rows, and one Jinja method (`erpnext_mcp_amount_in_words`) the
+  check print format calls.
 - MIT. Two runtime dependencies beyond Frappe/ERPNext (`shapely` and `h3`, for
   field boundaries), and the app still loads without them.
 
@@ -253,7 +256,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 127 tools
+## The 135 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -268,7 +271,7 @@ mutating tool ships OFF — so a write tool you cannot see is one nobody has tic
 yet. Tick it in **ERPNext MCP Settings**; the refusal message names the exact
 switch if you call the tool anyway.
 
-### Read-only — 59, all ON by default, each individually switchable
+### Read-only — 61, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -278,6 +281,7 @@ switch if you call the tool anyway.
 | `get_account_balance` | Balance of one account as of a date, from GL Entry, in both raw and natural sign convention. |
 | `get_journal_entries` | JE headers by date range, company, account-on-any-line, docstatus. |
 | `get_journal_entry` | One JE in full, every line with party, cost center and reference. |
+| `investigate_je_gl_link` | **The diagnostic.** Every line of one JE beside every GL Entry row it posted, with the join spelled out, every line whose party disagrees with the ledger flagged, and a plain-English `finding`. What you call when the voucher says one thing and the ageing report says another. |
 | `list_bank_transactions` | Bank Transactions by account, date range and status, amounts normalised to one signed number. |
 | `get_bank_statement` | One Bank Statement, on versions that have the doctype. |
 | `list_fiscal_years` | Fiscal years and the companies they apply to. |
@@ -309,6 +313,7 @@ switch if you call the tool anyway.
 | --- | --- |
 | `list_attachments` | Files on a document: name, size, private flag, who uploaded it. |
 | `get_attachment_content` | One file's bytes, base64, size-capped. |
+| `list_staged_uploads` | Every chunked upload in flight: pieces received out of pieces expected, **which indexes are missing** as compact ranges, bytes staged, and whether it is ready to commit. What you call when call 43 of 60 failed and you need to resume rather than re-send. |
 
 (`attach_file_to_document` puts one *there* — it writes, so it lives with the
 write tools below.)
@@ -392,7 +397,7 @@ write tools below.)
 | `list_family_members` | The family register: everybody a `Family`-party posting can name, with their relationship and whether a related-party record sits behind them. Names who has one and who does not — a gap for a member or a trustee, not for a relative who only receives transfers. |
 | `get_family_member` | One person, their related-party detail, and **every posting that names them** — count, first and last date, net amount, companies. Read from the ledger rather than kept, so the count cannot drift from what happened. Never returns more than four digits of a taxpayer id. |
 
-### Mutating — 68, all OFF by default
+### Mutating — 74, all OFF by default
 
 **Postings into the ledger**
 
@@ -402,7 +407,7 @@ write tools below.)
 | `submit_journal_entry` | Submits an existing draft, `0 → 1`. Writes GL Entries. **This moves balances.** | Create anything — it takes a name. |
 | `bulk_submit_journal_entries` | Submits up to 500 drafts, each in its own transaction, and reports per document. One failure does not undo the rest. | Run at all unless `submit_journal_entry` is also switched on. |
 | `cancel_journal_entry` | Cancels a submitted JE, `1 → 2`, writing reversing entries. `reason` mandatory. | Delete anything. |
-| `update_journal_entry_party` | Sets or changes `party_type` and `party` on **one line** of a JE — including a submitted one — in the voucher **and** in its GL Entry rows, with a mandatory reason written to the entry's timeline. | Move a balance. Account, debit, credit and date are not arguments, so the trial balance afterwards is arithmetically identical. Nor touch a cancelled entry, a rounding line, or a bank or cash line. |
+| `update_journal_entry_party` | Sets or changes `party_type` and `party` on **one line** of a JE — including a submitted one — in the voucher **and** in its GL Entry rows, with a mandatory reason written to the entry's timeline. **Fixed in v0.14.0** — see [When the voucher and the ledger disagree](#when-the-voucher-and-the-ledger-disagree). | Move a balance. Account, debit, credit and date are not arguments, so the trial balance afterwards is arithmetically identical. Nor touch a cancelled entry, a rounding line, a bank or cash line, or a line whose GL rows cannot be identified with certainty. |
 | `delete_draft_journal_entry` | Deletes a **draft** outright, recording what it was and why in the audit log. | Touch a submitted entry (cancel it) or a cancelled one (its reversing rows are the trail). |
 | `create_bank_transaction` | Inserts a **draft** Bank Transaction. | Submit it. |
 | `reconcile_bank_transaction` | Attaches payment vouchers, refusing to over-allocate. | Allocate past the remaining amount. |
@@ -434,6 +439,7 @@ write tools below.)
 | `create_accounting_dimension` | Creates the dimension, adds its Link field to the documents that carry it, and — only when asked — generates the custom DocType whose records are its values. | Point at a Single, a child table or a core doctype; reuse a fieldname another field already holds. |
 | `create_dimension_value` | One record in the DocType a dimension points at. | Touch a ledger, or add a field. |
 | `set_company_defaults` | Points the company's default account and cost center fields at real accounts, **type-checked**. Idempotent. | Write any of them if one value in the batch fails validation. |
+| `bulk_wire_default_accounts` | The same fields, **found rather than given** — by account number for a numbered chart, then by account type, then by name, then by root type, every candidate passing the same type checks. The setup call to make after `create_company`. | Fill a field with something merely plausible. What nothing matched is reported with what was looked for, and the rest are still wired. |
 
 **Who owns it, and what happened to their interest**
 
@@ -451,6 +457,14 @@ write tools below.)
 | Tool | What it does | What it cannot do |
 | --- | --- | --- |
 | `attach_file_to_document` | Attaches one file to **any** document — a statement onto the Journal Entry that books it, a receipt onto a Bank Transaction, a contract onto an Asset. Private by default, sha256 in the result and the audit row. | Attach to a document the acting user cannot write, to a cancelled one without being told to, or twice under the same filename. Move a balance, or change any existing row. |
+
+**Files too big for one tool call** — see [Streaming uploads](#streaming-uploads-a-file-bigger-than-a-tool-call)
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `stage_file_chunk` | Puts one piece of a file into a staging **table**, so the upload survives a `bench restart`. Re-sending an index replaces that piece, because a caller whose call timed out has no other safe move. | Create a File. Staging alone lands nothing — `commit_staged_file` is the switch that decides whether anything does. |
+| `commit_staged_file` | Reassembles the pieces, verifies them against the SHA-256 the caller computed **before** sending anything, and turns them into a File — attached to a document, filed as a new Governance Document, or standing alone. | Commit with a gap, a wrong hash or a wrong size. Delete a single staged piece until the File exists, so every refusal is fixed by changing the argument rather than re-sending the file. |
+| `cancel_staged_upload` | Throws away a staged upload and its pieces. | Touch any File. What it destroys is half a file nobody has committed. |
 
 **Assets that serve more than one segment**
 
@@ -531,6 +545,8 @@ write tools below.)
 | --- | --- | --- |
 | `generate_quarterly_investment_report` | Builds the quarter's report as a **PDF** and files it as a Prior Statement with the PDF attached: assets under management, activity, fee accrual, performance against a benchmark with a high-water mark, cash clearing, reconciliation state. | Run on a quarter that is not genuinely closed — see [A quarter closes when it closes](#a-quarter-closes-when-it-closes). Or invent a benchmark rate. |
 | `generate_1099_prefill` | Aggregates a calendar year of supplier payments into an xlsx worksheet and a per-recipient 1099-NEC (Copies A, B and C), filed as a Tax Filing. | Finish the job: taxpayer ids print as the last four digits, and Copy A is stamped as an information copy rather than a filing. |
+| `regenerate_governance_document_pdf` | Converts an archive entry's `.docx` attachment to PDF, attaches the PDF beside it, and repoints `attached_file` so a reader lands on something that opens. | Remove the `.docx` — it ADDS a fixed copy. Or guess between two `.docx` attachments, or replace an existing PDF without `overwrite=true` naming what it deleted. |
+| `create_check_print_format` | Creates the Print Format that cuts a printed check out of a Payment Entry, laid out for US laser check stock — see [Cutting a check](#cutting-a-check). | Render MICR. That is printed in magnetic ink on the stock you buy, against your account. Or overwrite an app-shipped STANDARD format. |
 
 #### A conveyance is not an edit
 
@@ -596,6 +612,221 @@ says which.
 the child of is a fact only the family has, so records written before v0.13.0
 arrive with `related_to` empty. `list_family_members` names them under
 `without_related_to` and warns — that is the work list, not an error.
+
+#### Streaming uploads: a file bigger than a tool call
+
+`attach_file_to_document` accepts up to 8 MB of base64 in one call, and no caller
+has ever reached that. The real ceiling is that an AI operator has to **compose**
+the argument, and a base64 string lives inside the tool call it is writing —
+which runs out around two hundred kilobytes. So every file-bearing operation
+collapsed into the same four manual steps: write a Python script, `scp` it to the
+box, `docker cp` it into the container, `docker exec` it. Per-parcel appraisal
+PDFs. The master appraisal, three times, once per company after a conveyance.
+
+Three tools replace that:
+
+```
+stage_file_chunk(session_id, chunk_index, total_chunks, chunk_base64)   × N
+commit_staged_file(session_id, file_name, attach_to_doctype, attach_to_name)
+```
+
+**Cut the bytes, then encode.** Each `chunk_base64` is the base64 of **its own
+slice of the file's bytes**. Do not base64 the whole file and then cut the
+resulting string up — the middle pieces of that are not valid base64 on their
+own, they cannot be checked when they arrive, and their per-piece hashes mean
+nothing. The tool's refusal names this specifically, because a caller who has
+done it will otherwise go looking for corruption in a file that is fine. Slices
+need not be any particular size or divide evenly.
+
+**The pieces are rows in a table, not entries in the cache.** That is the whole
+design decision. A 5 MB upload is a hundred round trips over some minutes, and in
+that window a `bench restart`, a worker recycle or a redis eviction under memory
+pressure would throw the lot away — with the caller finding out at commit, having
+spent the entire upload. Rows survive all of it. "Restart the bench halfway
+through and finish the upload" is a test in the suite.
+
+**Nothing is deleted until the File exists.** Every commit refusal — a missing
+piece, a hash that does not match, a parent that is cancelled, a filename the
+document already has — leaves the staged pieces exactly where they were. A
+refusal is fixed by changing the argument, never by re-sending the file. The
+target document is validated **before** a byte is reassembled, so a bad argument
+costs nothing.
+
+**`expected_sha256` is the point.** A hundred separate calls that each said
+"fine" can still add up to a file that is not the one somebody meant to send. The
+hash the caller computed before sending anything is the only thing that proves
+otherwise, and it can be supplied on any call, including the last. Every piece
+additionally records the hash of its own bytes, so a file that fails its
+aggregate check is narrowed to the call that carried the bad piece rather than
+reported as "the upload is wrong".
+
+**A session belongs to whoever staged its first piece**, and only they may add to
+it, commit it or cancel it. Not paranoia about other operators: two callers who
+happened to pick the same session id would otherwise interleave their pieces into
+one file, and the failure would present as corruption rather than as the
+collision it is.
+
+`commit_staged_file` has three destinations. Give `attach_to_doctype` and
+`attach_to_name` to hang the file off a document; give `governance_document: true`
+with a `title` and `category` to file a new archive entry with the file attached —
+the same thing `attach_governance_document` does, for the documents too big to
+send in one call; give neither and the File lands unattached.
+
+**Staging cleans up after itself, twice.** A session is deleted on commit and on
+cancel. Sessions idle for 24 hours are swept by a daily scheduler job **and** at
+the top of every `stage_file_chunk` call. The second is the kairotic one — the
+right moment to clear out abandoned uploads is when somebody is uploading, not at
+three in the morning — and it is what keeps a bench with its scheduler switched
+off from quietly accumulating ninety megabytes of a PDF nobody finished sending.
+
+`list_staged_uploads` is the recovery tool: it reports which indexes are missing
+as compact ranges (`3-6, 9`, not three hundred numbers) and which sessions are
+ready to commit.
+
+Ceilings: 200 KB of base64 per call, 600 pieces, 100 MB assembled. Past that, the
+Desk's own upload control or a `file_url` this site can fetch is the better tool,
+and the refusal says so.
+
+#### Cutting a check
+
+`create_check_print_format` writes the Print Format that turns a **Payment
+Entry** — ERPNext's own check-cutting document — into a printed check. It is a
+custom format, so `bench migrate` never overwrites it and a margin tuned for your
+printer survives.
+
+The layout is the standard US business one: **8.5 × 11, three 3.5-inch panels** —
+check on top, remittance stub in the middle, remittance stub at the bottom. The
+middle voucher tears off for the payee; the bottom one stays in the file. The
+check panel carries the date, the payee, the amount in figures in a box, the
+amount in words, the memo and a signature line. Both stubs carry the
+invoice-by-invoice detail from the payment's references, which answers "what was
+this for" without anybody having to ring up and ask.
+
+**The amount in words follows US check convention** and not Frappe's
+internationalised `money_in_words`:
+
+```
+1234.56  →  One Thousand Two Hundred Thirty-Four and 56/100
+```
+
+No currency word, because the stock already says **DOLLARS**. No "Only". A hyphen
+inside the compound tens. The cents as a two-digit numerator over 100 — including
+`00/100` on a whole-dollar amount, because a words line that stops at the dollars
+is a line somebody can add to. The rest of the line is filled with asterisks for
+the same reason.
+
+##### The stock to buy
+
+| | |
+| --- | --- |
+| **Format** | Laser check, **check on top**, two stubs. Sometimes sold as "check-voucher" or "voucher check". |
+| **Deluxe** | Form **1000** / **9000** family (Business Voucher Checks). |
+| **Costco Business** | Their laser voucher checks are the same layout at roughly half Deluxe's price. |
+| **Intuit / QuickBooks** | Their "Voucher Checks" are the same geometry — the layout is an industry standard, not a vendor's. |
+| **Paper** | 24 lb security paper with a chemical-wash stain, microprint border and a padlock icon. Do not print checks on plain paper. |
+| **Envelope** | #10 double-window envelopes designed for voucher checks — the payee address block on the check panel lines up with the window when the sheet is folded in thirds. Confirm the window position against a sample before ordering a box of 500. |
+
+**MICR is printed on the stock, by the people who sell it to you, against your
+account.** Nothing here renders it and nothing should: it needs magnetic ink, the
+right font at the right position, and a bank that has approved the layout. Order
+the stock preprinted with your routing and account numbers and the check number
+sequence. `reference_no` on the Payment Entry is what ERPNext records as the
+check number — key it from the stock rather than expecting ERPNext to drive the
+sequence.
+
+**Ordering, in the order it matters:** confirm the bank's MICR specification (most
+will send a spec sheet or approve a sample), order a small first run — 250, not
+2000 — print one against blank paper, hold it over a real check at a window, and
+adjust `margin_top` on the Print Format if the panels are off. Printers disagree
+about the top margin by a few hundredths of an inch, and that is exactly what
+that field is for. Only then order the box.
+
+**Signatures.** `signature_image_url` prints a signature image above the line;
+leave it empty and the line prints for a hand signature. A signature stamp or an
+image on file is a control decision, not a technical one: anything that can print
+a check can then print a signed check, so the usual arrangement is a
+dual-signature threshold above some amount and a stamp kept where the person who
+signs keeps it. The tool has no opinion; it prints what it is given.
+
+#### When the voucher and the ledger disagree
+
+Sprint 6 verification ran `update_journal_entry_party` against a $10 member
+distribution and got `gl_entries_matched: 0`. The tool updated the voucher, left
+the general ledger saying the old party, and returned a warning suggesting the
+site was unusual. The site was not unusual.
+
+**`GL Entry.voucher_detail_no` does not hold the account line's docname for a
+Journal Entry.** That is the Sales Invoice Item convention. ERPNext's
+`JournalEntry.get_gl_entries` fills that column from the line's
+`reference_detail_no` — a pointer at a payment schedule row on an invoice being
+settled — which is empty on every ordinary line. So a lookup keyed on it matched
+nothing, on every submitted entry, for every account type. It looked like an
+Equity quirk because that is where it was found. It was not.
+
+v0.14.0 matches GL rows the way the ledger actually identifies a line — account
+plus debit plus credit, preferring `voucher_detail_no` where a site does carry
+one — and **refuses before writing anything** when the match is not certain:
+
+- two lines of the same voucher with the same account and the same amounts are
+  indistinguishable in the ledger, so choosing one would be a coin toss;
+- ERPNext's `merge_similar_entries` collapses lines sharing an account, a party
+  and a cost center into ONE summed row, so writing a party onto it would
+  attribute somebody else's money to this party;
+- a line that posted no GL row at all is a fact worth reporting rather than a
+  count of zero to shrug at.
+
+`allow_unmatched_gl: true` goes ahead anyway and the result leads with the
+disagreement, because a refusal a caller cannot get past is how a safety gate
+becomes the failure.
+
+**`investigate_je_gl_link` is the tool that settles this kind of question.** One
+call, read-only: every line of a Journal Entry beside every GL Entry row it
+posted, with `account_type` and `root_type`, the party on each side, which lines
+disagree with the ledger, which GL rows no single line explains, and a `finding`
+that says in one paragraph what the counts mean. It works on drafts and on
+cancelled entries and says which case it is looking at.
+
+**If you ran v0.13.0's version of the party tool against a submitted entry, the
+ledger still says what it said before.** `investigate_je_gl_link` shows which
+entries are in that state — look for lines under
+`lines_whose_party_disagrees_with_the_ledger`.
+
+#### Wiring a company's defaults
+
+`set_company_defaults` only sets fields you already know the accounts for. Run
+against four freshly-created companies it comes back "idempotent" for the four
+`create_company` already did and says nothing about cash, bank, income or
+expense — because nobody passed them. A company with no `default_income_account`
+does not fail loudly; it fails weeks later, the first time somebody saves an
+invoice line with no account on it.
+
+`bulk_wire_default_accounts` **finds** them. In order: your `overrides`; then the
+well-known account number for the chart template (1310 receivable, 2110 payable,
+1140 cash, 1110 bank — descending into the sub-ledger when the number names a
+group, as ERPNext's 1110 "Bank Accounts" does, 4100 income, 5100 expense, 5212
+round off, 5218 write off); then an account whose `account_type` means the right
+thing; then an account whose **name** says so (an account literally called "Write
+Off" is evidence, not a guess); then, only where the field permits an untyped
+account, the first leaf of the right root type.
+
+**Every candidate has to pass the same type checks `set_company_defaults`
+applies to a hand-written value.** The search proposes; those rules dispose. A
+`1310` that exists and is a plain Asset rather than a Receivable is *not used* —
+ERPNext keys party ledgers off `account_type`, so a `default_receivable_account`
+pointed at the wrong kind of account posts fine and stops ageing correctly a
+quarter later.
+
+**It never fills a field with something merely plausible, and it never sulks.**
+A field nothing matched is reported in `unresolved` with what was looked for and
+how to fix it, and every other field is still wired — a company with nine of ten
+defaults set is better off than one with none, and a chart with no Cost of Goods
+Sold account is ordinary rather than broken. `strict: true` refuses the whole call
+instead. An `overrides` value that cannot be resolved is always a hard refusal:
+an explicit instruction that cannot be honoured is a different thing from a search
+that came up empty.
+
+Deterministic, so "idempotent" is true on the second run: where two accounts of
+the same type exist, the lower account number wins, every time.
 
 #### Four digits, never nine
 
@@ -1061,6 +1292,7 @@ attempt did not.
 | **Frappe** | v14, **v15**, v16 (`develop`) | Developed and run in production against **v15.115.0**. v15.100+ is the tested floor. The in-bench workflow suite builds a real Workflow on a synthetic DocType, so it verifies the framework contract on whichever version you run it against. |
 | **ERPNext** | v14, v15, v16 | Required — `hooks.py` declares it, so `install-app` refuses on a Frappe-only site. |
 | **Frappe HR (`hrms`)** | optional | Present → the three HR tools appear. Absent → they are not advertised at all. |
+| **LibreOffice headless** | optional | Present → `regenerate_governance_document_pdf` can convert a `.docx`. Absent → it refuses cleanly and names the package. Nothing is installed at runtime. |
 | **Python** | 3.10+ | CI runs 3.10 and 3.11. |
 | **Database** | MariaDB, Postgres | No raw SQL anywhere, so whatever your bench runs. |
 
@@ -1201,8 +1433,6 @@ Candidates for the next release, roughly in order of how often they come up:
 - **A Workspace**, so this app's doctypes appear in the app switcher instead of
   only via search.
 
-- **Check printing**, and re-generating the PDF of a document that was
-  archived as a `.docx`.
 - **Deeper 1099 filing.** State 1099 filings and electronic filing to the IRS.
   What ships today stops at a pre-fill on purpose — the taxpayer id has to come
   off a signed W-9, and Copy A has to be the official scannable form.

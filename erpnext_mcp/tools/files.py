@@ -86,7 +86,7 @@ def list_attachments(args: dict) -> ToolResult:
 	for row in rows:
 		row["uploaded_by"] = row.get("owner")
 		row["uploaded_on"] = row.get("creation")
-		row["size_human"] = _human_size(row.get("file_size"))
+		row["size_human"] = human_size(row.get("file_size"))
 		row["mime_type"] = _mime_type(row.get("file_name"))
 		row["retrievable"] = int(row.get("file_size") or 0) <= DEFAULT_MAX_BYTES
 
@@ -97,14 +97,14 @@ def list_attachments(args: dict) -> ToolResult:
 		"attachments": rows,
 		"count": len(rows),
 		"total_size": total,
-		"total_size_human": _human_size(total),
+		"total_size_human": human_size(total),
 		"note": (
 			"Use get_attachment_content with an attachment's `name` to read one. "
 			"`retrievable` is false for files over the default size cap — fetch "
 			"those from file_url instead."
 		),
 	}
-	return ToolResult(data, f"{doctype} {name}: {len(rows)} attachment(s), {_human_size(total)}")
+	return ToolResult(data, f"{doctype} {name}: {len(rows)} attachment(s), {human_size(total)}")
 
 
 # ── 24. get_attachment_content ──────────────────────────────────────────────
@@ -122,7 +122,7 @@ def get_attachment_content(args: dict) -> ToolResult:
 	if max_bytes > ABSOLUTE_MAX_BYTES:
 		raise ToolError(
 			f"max_bytes {max_bytes} exceeds this tool's hard ceiling of "
-			f"{ABSOLUTE_MAX_BYTES} bytes ({_human_size(ABSOLUTE_MAX_BYTES)}). "
+			f"{ABSOLUTE_MAX_BYTES} bytes ({human_size(ABSOLUTE_MAX_BYTES)}). "
 			"Fetch larger files from their file_url."
 		)
 
@@ -139,9 +139,9 @@ def get_attachment_content(args: dict) -> ToolResult:
 	declared = int(doc.get("file_size") or 0)
 	if declared > max_bytes:
 		raise ToolError(
-			f"{doc.get('file_name')} is {_human_size(declared)}, over the "
-			f"{_human_size(max_bytes)} cap. Raise max_bytes (hard ceiling "
-			f"{_human_size(ABSOLUTE_MAX_BYTES)}), or fetch it from "
+			f"{doc.get('file_name')} is {human_size(declared)}, over the "
+			f"{human_size(max_bytes)} cap. Raise max_bytes (hard ceiling "
+			f"{human_size(ABSOLUTE_MAX_BYTES)}), or fetch it from "
 			f"{doc.get('file_url')}. Base64 inflates content by a third, so "
 			"anything past a few hundred kilobytes will not fit in a model's "
 			"context anyway."
@@ -152,9 +152,9 @@ def get_attachment_content(args: dict) -> ToolResult:
 		# file_size can be stale — a file replaced on disk, or a row imported
 		# without it. The real length is the one that matters.
 		raise ToolError(
-			f"{doc.get('file_name')} is actually {_human_size(len(content))} on "
-			f"disk (its File record says {_human_size(declared)}), over the "
-			f"{_human_size(max_bytes)} cap. Nothing was returned."
+			f"{doc.get('file_name')} is actually {human_size(len(content))} on "
+			f"disk (its File record says {human_size(declared)}), over the "
+			f"{human_size(max_bytes)} cap. Nothing was returned."
 		)
 
 	data = {
@@ -167,14 +167,14 @@ def get_attachment_content(args: dict) -> ToolResult:
 		"uploaded_by": doc.get("owner"),
 		"uploaded_on": str(doc.get("creation")),
 		"file_size": len(content),
-		"size_human": _human_size(len(content)),
+		"size_human": human_size(len(content)),
 		"mime_type": _mime_type(doc.get("file_name")),
 		"encoding": "base64",
 		"content_base64": base64.b64encode(content).decode("ascii"),
 	}
 	return ToolResult(
 		data,
-		f"read attachment {doc.get('file_name')} ({_human_size(len(content))}) "
+		f"read attachment {doc.get('file_name')} ({human_size(len(content))}) "
 		f"from {doc.get('attached_to_doctype') or '<unattached>'} "
 		f"{doc.get('attached_to_name') or ''}".strip(),
 	)
@@ -227,13 +227,12 @@ def attach_file_to_document(args: dict) -> ToolResult:
 			"lives) is required — there is nothing to attach otherwise. Nothing was attached."
 		)
 
-	parent = _require_parent_write(doctype, name)
-	_check_docstatus(doctype, name, parent, allow_cancelled)
-	company_field, parent_company = _check_company(doctype, name, parent, company)
-	_check_extension(file_name)
-	existing = _existing_attachments(doctype, name)
-	_check_duplicate(doctype, name, file_name, existing)
-	_check_attachment_limit(doctype, name, len(existing))
+	checks = check_attachable(
+		doctype, name, file_name, allow_cancelled=allow_cancelled, company=company, tail="Nothing was attached."
+	)
+	parent = checks["parent"]
+	company_field, parent_company = checks["company_field"], checks["parent_company"]
+	existing = checks["existing"]
 
 	content = decode_base64_content(file_content, tail="Nothing was attached.") if file_content else b""
 	digest = hashlib.sha256(content).hexdigest() if content else ""
@@ -246,7 +245,7 @@ def attach_file_to_document(args: dict) -> ToolResult:
 		"company_field": company_field,
 		"file_name": file_name,
 		"file_size": len(content) if content else None,
-		"size_human": _human_size(len(content)) if content else None,
+		"size_human": human_size(len(content)) if content else None,
 		"mime_type": _mime_type(file_name),
 		"sha256": digest or None,
 		"is_private": is_private,
@@ -268,22 +267,18 @@ def attach_file_to_document(args: dict) -> ToolResult:
 		return ToolResult(
 			data,
 			f"dry run: would attach {file_name}"
-			+ (f" ({_human_size(len(content))}, sha256 {digest[:12]})" if content else f" from {file_url}")
+			+ (f" ({human_size(len(content))}, sha256 {digest[:12]})" if content else f" from {file_url}")
 			+ f" to {doctype} {name}",
 		)
 
-	payload = {
-		"doctype": "File",
-		"file_name": file_name,
-		"is_private": 1 if is_private else 0,
-		"attached_to_doctype": doctype,
-		"attached_to_name": name,
-	}
-	if content:
-		payload["content"] = content
-	else:
-		payload["file_url"] = file_url
-	attachment = frappe.get_doc(payload).insert()
+	attachment = insert_attachment(
+		file_name,
+		content,
+		is_private=is_private,
+		doctype=doctype,
+		name=name,
+		file_url=file_url,
+	)
 
 	stored_size = int(attachment.get("file_size") or len(content) or 0)
 	data = {
@@ -292,7 +287,7 @@ def attach_file_to_document(args: dict) -> ToolResult:
 		"file": attachment.name,
 		"file_url": attachment.get("file_url") or file_url,
 		"file_size": stored_size or None,
-		"size_human": _human_size(stored_size) if stored_size else None,
+		"size_human": human_size(stored_size) if stored_size else None,
 		"attachments_after": len(existing) + 1,
 		"attached_to_doctype": doctype,
 		"attached_to_name": name,
@@ -316,11 +311,107 @@ def attach_file_to_document(args: dict) -> ToolResult:
 	return ToolResult(
 		data,
 		f"attached {file_name}"
-		+ (f" ({_human_size(stored_size)}, sha256 {digest[:12]})" if content else f" from {file_url}")
+		+ (f" ({human_size(stored_size)}, sha256 {digest[:12]})" if content else f" from {file_url}")
 		+ f" to {doctype} {name} as File {attachment.name}"
 		+ (" (private)" if is_private else " (PUBLIC)"),
 		docstatus_delta="none → 0 (File created)",
 	)
+
+
+def read_file_bytes(name: str) -> bytes:
+	"""One File's bytes, with the same permission check `get_attachment_content` applies.
+
+	Public because `regenerate_governance_document_pdf` needs the .docx it is
+	about to convert, and it needs it as BYTES rather than as the base64 payload
+	`get_attachment_content` returns — a 5 MB document round-tripped through
+	base64 to be immediately decoded is a third of the memory and all of the CPU
+	spent on nothing. The authorization is identical: whoever can read the parent
+	document can read what hangs off it.
+
+	No size ceiling. The one on `get_attachment_content` is about what fits in a
+	model's context on the way out; nothing here leaves the server.
+	"""
+	if not frappe.db.exists("File", name):
+		raise ToolError(f"no File named {name!r}")
+	doc = frappe.get_doc("File", name)
+	if doc.get("is_folder"):
+		raise ToolError(f"File {name!r} is a folder, not a document")
+	_authorize_file(doc)
+	return _content_bytes(doc)
+
+
+def check_attachable(
+	doctype: str,
+	name: str,
+	file_name: str,
+	*,
+	allow_cancelled: bool = False,
+	company: str = "",
+	tail: str = "Nothing was attached.",
+) -> dict:
+	"""Every site-read check that has to pass before a file may hang off a document.
+
+	Public because two tools now need the same set and neither of them should own
+	it. `attach_file_to_document` runs it with bytes already in hand;
+	`commit_staged_file` runs it BEFORE reassembling ninety megabytes of chunks,
+	which is the whole reason it is a separate function — finding out the parent
+	is cancelled after building the file in memory is finding out too late.
+
+	Returns the parent's row, whether it has a company field and what that says,
+	and the attachments already on it, so callers do not each re-fetch them.
+	Raises `ToolError` and writes nothing.
+	"""
+	parent = _require_parent_write(doctype, name, tail=tail)
+	_check_docstatus(doctype, name, parent, allow_cancelled, tail=tail)
+	company_field, parent_company = _check_company(doctype, name, parent, company, tail=tail)
+	_check_extension(file_name, tail=tail)
+	existing = _existing_attachments(doctype, name)
+	_check_duplicate(doctype, name, file_name, existing, tail=tail)
+	_check_attachment_limit(doctype, name, len(existing), tail=tail)
+	return {
+		"parent": parent,
+		"company_field": company_field,
+		"parent_company": parent_company,
+		"existing": existing,
+	}
+
+
+def insert_attachment(
+	file_name: str,
+	content: bytes,
+	*,
+	is_private: bool = True,
+	doctype: str = "",
+	name: str = "",
+	file_url: str = "",
+	attached_to_field: str = "",
+):
+	"""Write one File, from bytes or from a URL, and return the document.
+
+	The single place in this app that inserts a File. `content` wins over
+	`file_url` when both are given, because bytes are the thing the caller
+	actually has; a caller that means the URL passes no content.
+
+	No size ceiling here on purpose. The 8 MB limit in `decode_base64_content` is
+	a property of what fits in ONE JSON tool call, and a file assembled from
+	chunks never travelled in one — applying it here would refuse exactly the
+	uploads chunking exists to make possible.
+	"""
+	payload = {
+		"doctype": "File",
+		"file_name": file_name,
+		"is_private": 1 if is_private else 0,
+	}
+	if doctype and name:
+		payload["attached_to_doctype"] = doctype
+		payload["attached_to_name"] = name
+	if attached_to_field:
+		payload["attached_to_field"] = attached_to_field
+	if content:
+		payload["content"] = content
+	else:
+		payload["file_url"] = file_url
+	return frappe.get_doc(payload).insert()
 
 
 def decode_base64_content(file_content: str, tail: str = "Nothing was created.") -> bytes:
@@ -353,7 +444,7 @@ def decode_base64_content(file_content: str, tail: str = "Nothing was created.")
 
 
 # ── attach-side validation, all of it read off the site ─────────────────────
-def _require_parent_write(doctype: str, name: str) -> dict:
+def _require_parent_write(doctype: str, name: str, tail: str = "Nothing was attached.") -> dict:
 	"""Refuse unless the acting user may modify the document being attached to.
 
 	`write`, not `read`: the Desk's attach control is disabled without write
@@ -362,16 +453,16 @@ def _require_parent_write(doctype: str, name: str) -> dict:
 	"""
 	if not compat.doctype_exists(doctype):
 		raise ToolError(
-			f"no DocType named {doctype!r} on this site. Nothing was attached. "
+			f"no DocType named {doctype!r} on this site. {tail} "
 			"get_company_topology lists what this install actually has."
 		)
 	if not frappe.db.exists(doctype, name):
-		raise ToolError(f"no {doctype} named {name!r} on this site. Nothing was attached.")
+		raise ToolError(f"no {doctype} named {name!r} on this site. {tail}")
 	if not frappe.has_permission(doctype, "write", doc=name):
 		raise ToolError(
 			f"{frappe.session.user} is not permitted to write {doctype} {name}, so nothing "
 			"may be attached to it. Attachment tools honour Frappe permissions even though "
-			"the ledger read tools do not — see docs/security.md. Nothing was attached."
+			f"the ledger read tools do not — see docs/security.md. {tail}"
 		)
 
 	fields = compat.existing_fields(doctype, ("name", "docstatus", "company"))
@@ -383,7 +474,9 @@ def _docstatus(parent: dict):
 	return int(raw) if raw is not None else None
 
 
-def _check_docstatus(doctype: str, name: str, parent: dict, allow_cancelled: bool) -> None:
+def _check_docstatus(
+	doctype: str, name: str, parent: dict, allow_cancelled: bool, tail: str = "Nothing was attached."
+) -> None:
 	"""Kairos, not chronos: attach when the document is in a state that means it.
 
 	A draft and a submitted document are both live records that evidence belongs
@@ -396,11 +489,11 @@ def _check_docstatus(doctype: str, name: str, parent: dict, allow_cancelled: boo
 			f"{doctype} {name} is CANCELLED (docstatus 2). Attaching to it now would grow "
 			"the evidence file of a document that was undone, which is rarely what a caller "
 			"means. If it is — a cancellation memo belongs on the thing cancelled — pass "
-			"allow_cancelled=true. Nothing was attached."
+			f"allow_cancelled=true. {tail}"
 		)
 
 
-def _check_company(doctype: str, name: str, parent: dict, company: str):
+def _check_company(doctype: str, name: str, parent: dict, company: str, tail: str = "Nothing was attached."):
 	"""Refuse a cross-company attach, and refuse to pretend to check one.
 
 	A `company` argument this cannot evaluate is worse than no argument: the
@@ -416,19 +509,19 @@ def _check_company(doctype: str, name: str, parent: dict, company: str):
 		raise ToolError(
 			f"{doctype} has no company field on this site, so the company guard you asked "
 			f"for cannot be applied to {name}. Drop the company argument if you meant to "
-			"attach anyway. Nothing was attached."
+			f"attach anyway. {tail}"
 		)
 	resolved = resolve_company(company, required=True)
 	if resolved != parent_company:
 		raise ToolError(
 			f"{doctype} {name} belongs to company {parent_company!r}, not {resolved!r}. "
 			"Attaching a document from one company's books onto another's is how two sets "
-			"of records stop reconciling. Nothing was attached."
+			f"of records stop reconciling. {tail}"
 		)
 	return company_field, parent_company
 
 
-def _check_extension(file_name: str) -> None:
+def _check_extension(file_name: str, tail: str = "Nothing was attached.") -> None:
 	"""Honour whatever extension allowlist this site declares, and no other.
 
 	Frappe grew a System Settings allowlist at different points in different
@@ -453,7 +546,7 @@ def _check_extension(file_name: str) -> None:
 			f"this site's System Settings allow only these file extensions: "
 			f"{', '.join(sorted(allowed))} — and {file_name!r} is "
 			f"{'.' + extension if extension else 'extensionless'}. That list is the site's "
-			"own, not this app's. Nothing was attached."
+			f"own, not this app's. {tail}"
 		)
 
 
@@ -466,7 +559,9 @@ def _existing_attachments(doctype: str, name: str) -> list:
 	)
 
 
-def _check_duplicate(doctype: str, name: str, file_name: str, existing: list) -> None:
+def _check_duplicate(
+	doctype: str, name: str, file_name: str, existing: list, tail: str = "Nothing was attached."
+) -> None:
 	"""One filename per document. A re-run of a batch attach says so and stops.
 
 	The anticipated caller is a script walking a year of statements onto their
@@ -481,11 +576,13 @@ def _check_duplicate(doctype: str, name: str, file_name: str, existing: list) ->
 			f"{doctype} {name} already has an attachment named {file_name!r} "
 			f"(File {clash['name']}). Two files with one name on one document is a question "
 			"nobody can answer later. If this is a re-run, that one is already done; if the "
-			"contents differ, give this one a name that says how. Nothing was attached."
+			f"contents differ, give this one a name that says how. {tail}"
 		)
 
 
-def _check_attachment_limit(doctype: str, name: str, current: int) -> None:
+def _check_attachment_limit(
+	doctype: str, name: str, current: int, tail: str = "Nothing was attached."
+) -> None:
 	"""The parent doctype's own `max_attachments`, whatever this site set it to."""
 	try:
 		limit = int(getattr(frappe.get_meta(doctype), "max_attachments", 0) or 0)
@@ -495,7 +592,7 @@ def _check_attachment_limit(doctype: str, name: str, current: int) -> None:
 		raise ToolError(
 			f"{doctype} allows at most {limit} attachment(s) on this site and {name} already "
 			f"has {current}. That limit is set on the DocType, not by this app — raise it in "
-			"the Desk or remove an attachment first. Nothing was attached."
+			f"the Desk or remove an attachment first. {tail}"
 		)
 
 
@@ -574,7 +671,7 @@ def _mime_type(file_name) -> str | None:
 	return mimetypes.guess_type(str(file_name))[0]
 
 
-def _human_size(size) -> str:
+def human_size(size) -> str:
 	size = float(size or 0)
 	for unit in ("B", "KB", "MB", "GB"):
 		if size < 1024 or unit == "GB":

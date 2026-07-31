@@ -179,15 +179,21 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_one_hundred_twenty_seven_tools_fifty_nine_read_sixty_eight_write(self):
-		"""v0.12.0 added 29, v0.12.2 added the four that reach the family register
-		— which v0.12.1 shipped as a DocType with no way in but the Desk — and
-		v0.13.0 added two writes: convey_parcel and update_journal_entry_party.
-		Both are corrections to records that already exist, which is why neither
-		of them is a read."""
-		self.assertEqual(len(registry.TOOLS), 127)
-		self.assertEqual(len(registry.READ_TOOLS), 59)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 68)
+	def test_catalogue_is_one_hundred_thirty_five_tools_sixty_one_read_seventy_four_write(self):
+		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
+		both corrections to records that already exist, which is why neither is a
+		read. v0.14.0 added eight — six writes and two reads.
+
+		The six writes: three that move a file onto the site a piece at a time
+		(stage_file_chunk, commit_staged_file, cancel_staged_upload),
+		bulk_wire_default_accounts, create_check_print_format, and
+		regenerate_governance_document_pdf. The two reads are the ones you call
+		when something has gone wrong and you need to see rather than change it:
+		list_staged_uploads for an upload that died partway, and
+		investigate_je_gl_link for a voucher and a ledger that disagree."""
+		self.assertEqual(len(registry.TOOLS), 135)
+		self.assertEqual(len(registry.READ_TOOLS), 61)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 74)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

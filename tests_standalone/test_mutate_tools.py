@@ -17,7 +17,7 @@ from .fixtures import (
 	sales,
 	supplies,
 )
-from .harness import STORE
+from .harness import STORE, post_journal_entry_gl
 
 ALL_ON = {f"allow_{name}": 1 for name in registry.MUTATING_TOOLS}
 
@@ -1034,28 +1034,15 @@ class UpdateJournalEntryParty(V12TestCase):
 		return name
 
 	def post_gl(self, name):
-		entry = STORE.get_raw("Journal Entry", name)
-		STORE.seed(
-			"GL Entry",
-			[
-				{
-					"name": f"GL-{name}-{row['idx']}",
-					"account": row["account"],
-					"posting_date": entry["posting_date"],
-					"debit": row.get("debit") or 0,
-					"credit": row.get("credit") or 0,
-					"company": entry["company"],
-					"is_cancelled": 0,
-					"voucher_type": "Journal Entry",
-					"voucher_no": name,
-					"voucher_detail_no": row["name"],
-					"party_type": row.get("party_type"),
-					"party": row.get("party"),
-					"is_opening": "No",
-				}
-				for row in entry["accounts"]
-			],
-		)
+		"""Post the GL rows a real ERPNext submit would post.
+
+		This used to be a hand-written seed that set
+		`voucher_detail_no = <the account line's docname>`, and that one line is
+		why v0.13.0 shipped a tool that matched zero GL rows on every submitted
+		entry on a real site. See `harness.post_journal_entry_gl` for what ERPNext
+		actually does and why the difference is load-bearing.
+		"""
+		return post_journal_entry_gl(name)
 
 	def gl_rows(self, name):
 		return [row for row in STORE.rows("GL Entry") if row.get("voucher_no") == name]
@@ -1114,10 +1101,7 @@ class UpdateJournalEntryParty(V12TestCase):
 		self.assertIsNone(self.line(name, 2).get("party"))
 		self.assertEqual([row["party"] for row in self.gl_rows(name) if row["party"]], [ALEX])
 
-	def test_two_identical_lines_stay_distinguishable(self):
-		"""Two lines to the same account for the same amount produce two GL rows
-		that differ in nothing but `voucher_detail_no`. Matching on account and
-		amount would move both."""
+	def two_identical_lines(self):
 		name = self.tool_data(
 			"create_journal_entry",
 			{
@@ -1133,7 +1117,16 @@ class UpdateJournalEntryParty(V12TestCase):
 		)["name"]
 		self.tool_data("submit_journal_entry", {"name": name})
 		self.post_gl(name)
-		data = self.tool_data(
+		return name
+
+	def test_two_identical_lines_are_refused_rather_than_guessed_between(self):
+		"""v0.13.0 believed two identical lines produced two GL rows told apart by
+		`voucher_detail_no`. They do not: a Journal Entry's GL rows carry no line
+		docname, and ERPNext merges the two into one summed row. There is nothing
+		in the ledger distinguishing them, so the tool says so and writes nothing
+		rather than moving a party onto whichever row it saw first."""
+		name = self.two_identical_lines()
+		message = self.tool_error(
 			"update_journal_entry_party",
 			{
 				"journal_entry": name,
@@ -1143,9 +1136,50 @@ class UpdateJournalEntryParty(V12TestCase):
 				"reason": "the second of the two was Alex's",
 			},
 		)
-		self.assertEqual(data["gl_entries_updated"], 1)
+		self.assertIn("coin toss", message)
+		self.assertIn("investigate_je_gl_link", message)
 		self.assertIsNone(self.line(name, 1).get("party"))
+		self.assertIsNone(self.line(name, 2).get("party"))
+		self.assertEqual([row["party"] for row in self.gl_rows(name) if row["party"]], [])
+
+	def test_the_ambiguous_case_can_be_forced_and_says_the_ledger_now_disagrees(self):
+		"""The escape hatch, because a refusal a caller cannot get past is how a
+		safety gate becomes the failure. It writes the voucher only and the result
+		leads with the disagreement."""
+		name = self.two_identical_lines()
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 2,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "the second of the two was Alex's",
+				"allow_unmatched_gl": True,
+			},
+		)
+		self.assertEqual(data["gl_entries_updated"], 0)
 		self.assertEqual(self.line(name, 2)["party"], ALEX)
+		self.assertIn("DISAGREE", data["warning"])
+		self.assertIn("coin toss", data["gl_match_problem"])
+		self.assertEqual([row["party"] for row in self.gl_rows(name) if row["party"]], [])
+
+	def test_merged_gl_rows_are_refused(self):
+		"""ERPNext collapses lines sharing an account, party and cost center into
+		one summed GL row. Writing a party onto it would attribute the other
+		line's money to this line's party."""
+		name = self.two_identical_lines()
+		rows = [row for row in self.gl_rows(name) if row["account"] == supplies()]
+		self.assertEqual(len(rows), 1, "the two 600 lines should have merged into one row")
+		self.assertEqual(rows[0]["debit"], 1200)
+
+	def test_a_journal_entrys_gl_rows_carry_no_line_docname(self):
+		"""The fact the whole of Feature E turns on, asserted directly."""
+		name = self.a_posted_entry()
+		lines = {row["name"] for row in STORE.get_raw("Journal Entry", name)["accounts"]}
+		for row in self.gl_rows(name):
+			self.assertEqual(row["voucher_detail_no"], "")
+			self.assertNotIn(row["voucher_detail_no"], lines)
 
 	def test_it_changes_one_party_to_another(self):
 		"""The case that started this: attributing Apple Cash to the right son."""

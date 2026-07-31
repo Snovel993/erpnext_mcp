@@ -773,9 +773,19 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 	report, party ledger and statement of account reads. Updating only the first
 	produces a voucher that says one thing and a report that says another, which
 	is worse than not having edited it — the two disagree and nothing says which
-	is right. The GL rows are found by `voucher_detail_no`, which is the line's
-	own docname, so a two-line entry to the same account still updates only the
-	line asked for.
+	is right. So a submitted entry whose GL rows cannot be matched to the line
+	with certainty is REFUSED before anything is written, rather than half-done
+	with a warning. `gl_link_for_line` explains how the match is made and every
+	way it declines to make one.
+
+	v0.13.0 DID THIS WRONG AND v0.14.0 FIXES IT. It looked the GL rows up by
+	`voucher_detail_no == line.name`, which is right for a Sales Invoice Item and
+	wrong for a Journal Entry: ERPNext fills that column from the line's
+	`reference_detail_no`, which is empty on an ordinary line. Every call against
+	a submitted entry therefore matched zero rows, updated the voucher only, and
+	returned a warning blaming the site. If you ran v0.13.0's version of this tool
+	against a submitted entry, the ledger still says what it said before —
+	investigate_je_gl_link will show you which entries are in that state.
 
 	A DRAFT GOES THROUGH THE DOCUMENT INSTEAD. A draft has written no GL Entries
 	and can still be saved normally, so it is saved normally and every validation
@@ -785,9 +795,12 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 	REFUSES: a cancelled entry (evidence with a hole in it); a line index outside
 	the entry; a rounding or write-off line ERPNext wrote itself; a bank or cash
 	line; a party type this site has not registered; a party that is not a record
-	in it; and a change that changes nothing. Refuses an account whose type does
-	not normally carry a party unless `allow_non_party_account=true` says the
-	caller meant it — the refusal exists to catch a mistake, not to become one.
+	in it; a change that changes nothing; and a submitted line whose GL rows are
+	ambiguous, merged or missing. Refuses an account whose type does not normally
+	carry a party unless `allow_non_party_account=true` says the caller meant it,
+	and refuses an unmatchable GL unless `allow_unmatched_gl=true` says the caller
+	will accept a voucher and a ledger that disagree — both refusals exist to
+	catch a mistake, not to become one.
 
 	Writes NO journal entry and reverses nothing.
 	"""
@@ -859,7 +872,25 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 			"Nothing to change, and nothing was changed."
 		)
 
-	gl_rows = _gl_rows_for_line(doc, line) if docstatus == 1 else []
+	link = (
+		gl_link_for_line(doc.name, rows, line_index)
+		if docstatus == 1
+		else {"rows": [], "basis": "draft — no GL Entry rows exist yet", "exact": False, "blocker": ""}
+	)
+	gl_rows = link["rows"]
+	accepted_unmatched = False
+	if link["blocker"]:
+		if not as_bool(args, "allow_unmatched_gl", False):
+			raise ToolError(
+				f"{link['blocker']} The voucher and the general ledger would end up saying "
+				"different things about who this line belongs to, which is worse than leaving "
+				"it as it is. Run investigate_je_gl_link on "
+				f"{doc.name} to see every line beside every GL row. If you have read that and "
+				"still want the voucher changed on its own, pass allow_unmatched_gl=true — the "
+				"result will carry the disagreement as a warning. Nothing was changed."
+			)
+		accepted_unmatched = True
+
 	plan = {
 		"journal_entry": doc.name,
 		"company": doc.get("company"),
@@ -875,10 +906,14 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 		"after": after,
 		"reason": reason,
 		"gl_entries_matched": len(gl_rows),
+		"gl_match_basis": link["basis"],
+		"gl_match_exact": bool(link["exact"]),
 		"tables": (
-			["Journal Entry Account", "GL Entry"] if docstatus == 1 else ["Journal Entry"]
+			["Journal Entry Account", "GL Entry"] if docstatus == 1 and gl_rows else ["Journal Entry"]
 		),
 	}
+	if accepted_unmatched:
+		plan["gl_match_problem"] = link["blocker"]
 
 	if as_bool(args, "dry_run", False):
 		return ToolResult(
@@ -932,7 +967,11 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 				f", in both the voucher and the {updated_gl} GL Entry row(s) every ageing report "
 				"reads."
 				if updated_gl
-				else " on a draft, which has written no GL Entries yet."
+				else (
+					" on the voucher ONLY — see the warning."
+					if accepted_unmatched
+					else " on a draft, which has written no GL Entries yet."
+				)
 			)
 		),
 		"next_step": (
@@ -944,14 +983,13 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 			else "get_journal_entry shows the line as it now reads."
 		),
 	}
-	if updated_gl == 0 and docstatus == 1:
+	if accepted_unmatched:
 		data["warning"] = (
-			f"The line was updated but NO GL Entry row matched it. A submitted Journal Entry "
-			f"normally has one GL row per line, so either this site posts them differently or "
-			f"they were removed. The voucher now says "
-			f"{after['party'] or 'no party'} and every ageing report still says "
-			f"{before['party'] or 'no party'}; check the General Ledger for {doc.name} before "
-			"relying on either."
+			f"THE VOUCHER AND THE LEDGER NOW DISAGREE, and you asked for that with "
+			f"allow_unmatched_gl=true. {link['blocker']} Journal Entry {doc.name} line "
+			f"{line_index} now reads {after['party'] or 'no party'}; every ageing report, party "
+			f"ledger and statement of account still reads {before['party'] or 'no party'}, "
+			"because no GL Entry row was written. Whoever reconciles this next needs to know."
 		)
 	return ToolResult(
 		data,
@@ -1083,41 +1121,174 @@ def _assert_party_exists(party_type: str, party: str) -> None:
 		)
 
 
-def _gl_rows_for_line(doc, line) -> list[dict]:
-	"""The GL Entry rows this one Journal Entry line produced.
+#: The GL Entry columns every JE↔GL question here is answered from.
+_GL_FIELDS = (
+	"name",
+	"account",
+	"party_type",
+	"party",
+	"debit",
+	"credit",
+	"cost_center",
+	"voucher_type",
+	"voucher_no",
+	"voucher_detail_no",
+	"posting_date",
+	"against_voucher_type",
+	"against_voucher",
+	"is_opening",
+)
 
-	`voucher_detail_no` is the line's own docname, which is what makes this exact
-	rather than approximate: an entry with two lines to the same account for the
-	same amount has two GL rows that differ in nothing else. A site whose GL Entry
-	predates that column falls back to matching on the account and the amounts,
-	and the caller is told in the result how many rows matched so an unexpected
-	count is visible rather than silent.
 
-	Cancelled GL rows are excluded. They are the reversal of a posting that has
-	already been undone, and rewriting their attribution would change what the
-	record says was undone.
+def voucher_gl_rows(name: str) -> list[dict]:
+	"""Every live GL Entry row one Journal Entry posted, cancelled ones excluded.
+
+	Cancelled rows are the reversal of a posting that has already been undone.
+	Rewriting their attribution would change what the record says was undone, and
+	counting them would make a two-line entry look like it posted four rows.
 	"""
 	if not compat.doctype_exists("GL Entry"):  # pragma: no cover - ERPNext always ships it
 		return []
-	filters = {"voucher_type": "Journal Entry", "voucher_no": doc.name}
+	filters = {"voucher_type": "Journal Entry", "voucher_no": name}
 	if compat.has_field("GL Entry", "is_cancelled"):
 		filters["is_cancelled"] = 0
-	if compat.has_field("GL Entry", "voucher_detail_no") and line.get("name"):
-		filters["voucher_detail_no"] = line.get("name")
-	else:  # pragma: no cover - only on an ERPNext older than this app supports
-		filters["account"] = line.get("account")
-		filters["debit"] = round(float(line.get("debit") or 0), 2)
-		filters["credit"] = round(float(line.get("credit") or 0), 2)
 	return [
 		dict(row)
 		for row in frappe.db.get_all(
 			"GL Entry",
 			filters=filters,
-			fields=compat.existing_fields("GL Entry", ("name", "account", "party_type", "party")),
-			limit=100,
+			fields=compat.existing_fields("GL Entry", _GL_FIELDS),
+			order_by="name asc",
+			limit=500,
 		)
 		or []
 	]
+
+
+def _amounts(row) -> tuple:
+	return (round(float(row.get("debit") or 0), 2), round(float(row.get("credit") or 0), 2))
+
+
+def gl_link_for_line(name: str, lines: list, line_index: int, gl_rows: list | None = None) -> dict:
+	"""Which GL Entry rows belong to line `line_index` of a Journal Entry, and how sure.
+
+	THIS IS THE FUNCTION v0.13.0 GOT WRONG, and the way it was wrong is worth
+	writing down because it is a trap anybody would fall into twice.
+
+	`GL Entry.voucher_detail_no` holds the child-row docname for Sales Invoice
+	Item, Purchase Invoice Item and the other line-item doctypes. It does NOT for
+	a Journal Entry. ERPNext's `JournalEntry.get_gl_entries` fills that column
+	from the line's **`reference_detail_no`** — a field that names a payment
+	schedule row on the invoice being settled, and which is empty on every
+	ordinary line. So a lookup keyed on `voucher_detail_no == line.name` matches
+	nothing on a real site, every time, for every account type. v0.13.0's
+	`update_journal_entry_party` therefore updated the voucher, silently failed to
+	update the ledger, and reported `gl_entries_matched: 0` with a warning
+	suggesting the site was unusual. The site was not unusual. This was.
+
+	It surfaced on ACC-JV-2026-00073, a $10 member distribution against an Equity
+	account, which made it look like an Equity quirk. It is not: the same zero
+	comes back for an expense line, a payable line and every other line on every
+	Journal Entry ERPNext has ever posted.
+
+	SO THE MATCH IS MADE THE WAY THE LEDGER ACTUALLY IDENTIFIES A LINE — account
+	plus debit plus credit — and every way that can be wrong is checked BEFORE a
+	caller is told the match is good:
+
+	  * `voucher_detail_no` is still tried first. Some sites do carry it (a JE
+	    written against a payment schedule), and where it is there it is exact.
+	  * Two lines of the same entry with the same account and the same amounts
+	    are indistinguishable in the GL. Ambiguous — refuse rather than guess.
+	  * More GL rows than expected match the signature. Ambiguous.
+	  * No row matches the amounts but the account has rows on this voucher:
+	    ERPNext's `merge_similar_entries` combines lines sharing an account, a
+	    party and a cost center into ONE summed row, so the row that exists covers
+	    this line AND another. Writing a party onto it would attribute the other
+	    line's money to this line's party. Refuse.
+	  * Nothing at all on that account: the line posted no GL row, which is a
+	    fact worth reporting rather than a count of zero to shrug at.
+
+	Returns `{"rows", "basis", "exact", "blocker"}`. `blocker` is "" when the
+	rows may be written to and a whole sentence naming the problem when they may
+	not. Nothing here writes anything.
+	"""
+	rows = voucher_gl_rows(name) if gl_rows is None else list(gl_rows)
+	line = lines[line_index - 1]
+	empty = {"rows": [], "basis": "none", "exact": False, "blocker": ""}
+	if not rows:
+		return {
+			**empty,
+			"blocker": (
+				f"Journal Entry {name} has no live GL Entry rows at all. A submitted entry "
+				"normally posts one per line, so either this entry was posted by something "
+				"that does not write a general ledger or its rows were removed."
+			),
+		}
+
+	detail_no = str(line.get("name") or "")
+	if detail_no:
+		exact = [row for row in rows if str(row.get("voucher_detail_no") or "") == detail_no]
+		if exact:
+			return {"rows": exact, "basis": "voucher_detail_no", "exact": True, "blocker": ""}
+
+	account = str(line.get("account") or "")
+	signature = _amounts(line)
+	twins = [
+		index
+		for index, other in enumerate(lines, start=1)
+		if index != line_index
+		and str(other.get("account") or "") == account
+		and _amounts(other) == signature
+	]
+	if twins:
+		return {
+			**empty,
+			"basis": "account and amount",
+			"blocker": (
+				f"line {line_index} and line(s) {', '.join(str(i) for i in twins)} of {name} post "
+				f"the same amount to {account}, and this site's GL Entry rows do not carry the "
+				"account line's docname (ERPNext fills `voucher_detail_no` from the line's "
+				"`reference_detail_no`, which is empty on an ordinary line). There is nothing in "
+				"the ledger that tells the two apart, so choosing one would be a coin toss."
+			),
+		}
+
+	on_account = [row for row in rows if str(row.get("account") or "") == account]
+	matched = [row for row in on_account if _amounts(row) == signature]
+	if len(matched) == 1:
+		return {"rows": matched, "basis": "account and amount", "exact": False, "blocker": ""}
+	if len(matched) > 1:
+		return {
+			**empty,
+			"basis": "account and amount",
+			"blocker": (
+				f"{len(matched)} GL Entry rows on {name} post {signature[0]} / {signature[1]} to "
+				f"{account} and only one line of the voucher does, so the ledger holds more rows "
+				"than the voucher explains. Read them with investigate_je_gl_link before changing "
+				"anything."
+			),
+		}
+	if on_account:
+		return {
+			**empty,
+			"basis": "account and amount",
+			"blocker": (
+				f"line {line_index} posts {signature[0]} / {signature[1]} to {account}, and the "
+				f"{len(on_account)} GL Entry row(s) on that account for {name} carry different "
+				"amounts. ERPNext merges lines that share an account, a party and a cost center "
+				"into one summed GL row, so the row that exists covers this line and at least one "
+				"other — writing a party onto it would attribute somebody else's money to this "
+				"party."
+			),
+		}
+	return {
+		**empty,
+		"basis": "account and amount",
+		"blocker": (
+			f"no GL Entry row on {name} posts to {account} at all, so line {line_index} reached "
+			"the voucher but not the ledger."
+		),
+	}
 
 
 def _record_party_change(doc, line_index: int, before: dict, after: dict, reason: str):

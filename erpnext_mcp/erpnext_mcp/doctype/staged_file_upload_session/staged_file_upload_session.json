@@ -1,0 +1,122 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-07-31 09:00:00.000000",
+ "description": "One file being pushed to this site a piece at a time, because the whole of it will not fit in a single tool call. Holds the accounting for the upload — how many pieces are expected, how many arrived, how big it is so far, and what the finished bytes are supposed to hash to. The pieces themselves are Staged File Chunk rows pointing back here. A session is TRANSIENT: it is deleted the moment the file is committed or the upload is cancelled, and swept automatically once it has been idle for a day. Nothing here is a record of anything; the File that comes out the other end is.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "session_id",
+  "total_chunks",
+  "chunks_received",
+  "progress_col",
+  "staged_bytes",
+  "last_activity",
+  "expected_section",
+  "expected_sha256",
+  "expected_size"
+ ],
+ "fields": [
+  {
+   "description": "The caller's own name for this upload — a UUID, or anything else unique. Unique across the site: two uploads sharing an id would interleave their pieces into one corrupt file.",
+   "fieldname": "session_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Session Id",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "How many pieces the caller says there will be. Declared on the first call and fixed from then on, so a commit can tell 'still uploading' from 'finished' without asking.",
+   "fieldname": "total_chunks",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Total Chunks",
+   "reqd": 1
+  },
+  {
+   "description": "How many distinct pieces have actually arrived. Not necessarily contiguous — a caller may send them in any order, and the gaps are what list_staged_uploads reports.",
+   "fieldname": "chunks_received",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Chunks Received",
+   "read_only": 1
+  },
+  {
+   "fieldname": "progress_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Decoded bytes staged so far — the size of the file if it were committed now, not the size of the base64 that carried it.",
+   "fieldname": "staged_bytes",
+   "fieldtype": "Int",
+   "label": "Staged Bytes",
+   "read_only": 1
+  },
+  {
+   "description": "When a piece last arrived. This is what the garbage collector reads: a session nobody has touched for a day is an upload that died partway through, and its pieces are megabytes of nothing.",
+   "fieldname": "last_activity",
+   "fieldtype": "Datetime",
+   "label": "Last Activity",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expected_section",
+   "fieldtype": "Section Break",
+   "label": "What The Finished File Should Be"
+  },
+  {
+   "description": "SHA-256 of the WHOLE file, as the caller computed it before sending anything. Verified on commit against the reassembled bytes. Optional, and the only thing that proves a hundred separate tool calls added up to the document somebody meant to send.",
+   "fieldname": "expected_sha256",
+   "fieldtype": "Data",
+   "label": "Expected Sha256"
+  },
+  {
+   "description": "Size of the whole file in bytes, as the caller computed it. Verified on commit. Cheaper than the hash and catches the commonest corruption — a piece that never arrived.",
+   "fieldname": "expected_size",
+   "fieldtype": "Int",
+   "label": "Expected Size"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Staged File Upload Session",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "session_id",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "session_id",
+ "track_changes": 0
+}

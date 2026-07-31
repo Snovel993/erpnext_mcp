@@ -39,11 +39,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install werkzeug
-        # werkzeug is not a declared dependency: erpnext_mcp.mcp returns a
-        # werkzeug Response so it can control the HTTP status, and it arrives
-        # with Frappe in a real bench.
-        run: python -m pip install --upgrade pip werkzeug
+      - name: Install werkzeug and jinja2
+        # Neither is a declared dependency, and both arrive with Frappe in a real
+        # bench. erpnext_mcp.mcp returns a werkzeug Response so it can control the
+        # HTTP status; jinja2 is what renders the v0.14.0 check Print Format, and
+        # the tests that render it are the only proof the template produces a page
+        # rather than an UndefinedError the first time somebody presses Print.
+        # Those tests skip themselves where jinja2 is absent, so the suite still
+        # passes on a bare environment — installing it here is what stops that
+        # skip from being permanent.
+        run: python -m pip install --upgrade pip werkzeug jinja2
 
       - name: Run the standalone suite WITHOUT shapely and h3
         # Proves the graceful-degrade path: the geospatial tools go unavailable

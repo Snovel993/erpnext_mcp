@@ -59,11 +59,13 @@ from .tools import (
 	opening,
 	packets,
 	parties,
+	printing,
 	read,
 	realestate,
 	reports,
 	tax,
 	trade,
+	uploads,
 	workflow,
 )
 
@@ -264,6 +266,37 @@ TOOLS = {
 		{"name": _field(_STRING, "Journal Entry docname, e.g. 'ACC-JV-2026-00042'.")},
 		required=("name",),
 		title="Journal entry detail",
+	),
+	"investigate_je_gl_link": _tool(
+		read.investigate_je_gl_link,
+		"DIAGNOSTIC. Every line of one Journal Entry beside every GL Entry row it "
+		"posted, with the join between them spelled out. Read-only.\n\n"
+		"WHAT IT ANSWERS. 'The voucher says one thing and the ageing report says "
+		"another — which row is which, and why did the tool meant to keep them in "
+		"step match nothing?' Per line: account, account_type, root_type, debit, "
+		"credit, party_type, party, `reference_detail_no`, and the GL rows matched "
+		"to it with their own party, voucher_type, posting date and "
+		"`voucher_detail_no`. Flags every line whose party disagrees with the "
+		"ledger, every line that matched no row, and every GL row no single line "
+		"explains. `summary` counts all of it; `finding` says in one paragraph what "
+		"the counts mean.\n\n"
+		"THE THING IT MOST OFTEN EXPLAINS. ERPNext does NOT put the account line's "
+		"docname in `GL Entry.voucher_detail_no` for a Journal Entry — it fills that "
+		"column from the line's `reference_detail_no`, which names a payment "
+		"schedule row on an invoice being settled and is empty on an ordinary line. "
+		"That is Sales Invoice Item's convention, not Journal Entry's, and it is "
+		"true of every account type. `voucher_detail_no_populated` reports the "
+		"field's real state on this voucher so the explanation can be checked.\n\n"
+		"Works on drafts (no GL rows exist yet) and on cancelled entries (only the "
+		"reversal remains), and says which case it is looking at.",
+		{
+			"journal_entry": _field(
+				_STRING,
+				"Journal Entry docname, e.g. 'ACC-JV-2026-00073'.",
+			)
+		},
+		required=("journal_entry",),
+		title="Investigate JE/GL link",
 	),
 	"list_bank_transactions": _tool(
 		read.list_bank_transactions,
@@ -498,20 +531,32 @@ TOOLS = {
 		"what the voucher shows; `tabGL Entry` is what every ageing report, party "
 		"ledger and statement of account reads. Updating one and not the other "
 		"leaves the voucher and the reports disagreeing with nothing to say which "
-		"is right. The GL rows are matched on `voucher_detail_no` — the line's own "
-		"docname — so two lines to the same account for the same amount stay "
-		"distinguishable, and the result reports how many rows were updated. A "
-		"DRAFT is saved through the document instead, since it has written no GL "
-		"Entries and full validation can still run.\n\n"
+		"is right, so a line whose GL rows cannot be identified WITH CERTAINTY is "
+		"refused before anything is written. A DRAFT is saved through the document "
+		"instead, since it has written no GL Entries and full validation can still "
+		"run.\n\n"
+		"HOW THE GL ROWS ARE FOUND, AND WHY IT CHANGED IN v0.14.0. ERPNext does "
+		"NOT put the account line's docname in `GL Entry.voucher_detail_no` for a "
+		"Journal Entry — it fills that column from the line's `reference_detail_no`, "
+		"which is empty on an ordinary line. v0.13.0 matched on it and therefore "
+		"matched NOTHING on every submitted entry, updating the voucher alone. Rows "
+		"are now matched on account plus debit plus credit, with "
+		"`voucher_detail_no` preferred where a site does carry it. If v0.13.0 was "
+		"used against a submitted entry, the ledger still says what it said before: "
+		"investigate_je_gl_link shows which entries are in that state.\n\n"
 		"REFUSES: a cancelled entry (evidence with a hole in it); a line index "
 		"outside the entry; the rounding or write-off line ERPNext wrote itself; a "
 		"bank or cash line, where a party would make an ageing report claim somebody "
 		"owes the account balance; a party type this site has not registered; a "
-		"party that is not a record in the register its type names; and a change "
-		"that changes nothing. An account whose type does not normally carry a party "
-		"is refused unless `allow_non_party_account=true` says it was meant — then "
-		"it goes through with a warning. `dry_run` reports the whole plan, including "
-		"which GL rows would move, without writing.",
+		"party that is not a record in the register its type names; a change that "
+		"changes nothing; and a submitted line whose GL rows are ambiguous (two "
+		"lines that look alike), merged (ERPNext combines lines sharing an account, "
+		"party and cost center into one summed row) or missing. An account whose "
+		"type does not normally carry a party is refused unless "
+		"`allow_non_party_account=true` says it was meant, and an unidentifiable GL "
+		"unless `allow_unmatched_gl=true` accepts a voucher and a ledger that "
+		"disagree — both then go through with a warning. `dry_run` reports the whole "
+		"plan, including which GL rows would move, without writing.",
 		{
 			"journal_entry": _field(_STRING, "Journal Entry docname, e.g. 'ACC-JV-2026-00042'."),
 			"line_index": _field(
@@ -541,6 +586,14 @@ TOOLS = {
 				"Go ahead on an account whose type does not normally carry a party (an "
 				"expense attributed to the person it was incurred for, say). Default false, "
 				"which refuses. Never opens a bank, cash or round-off line.",
+			),
+			"allow_unmatched_gl": _field(
+				_BOOLEAN,
+				"Update the voucher even though this line's GL Entry rows cannot be "
+				"identified — ambiguous, merged or absent. Default false, which refuses. "
+				"Passing true accepts a voucher and a general ledger that say different "
+				"things about who this line belongs to, and the result carries that as a "
+				"warning. Read investigate_je_gl_link first.",
 			),
 			"dry_run": _field(_BOOLEAN, "Report the change and the GL rows without writing. Default false."),
 		},
@@ -1475,6 +1528,69 @@ TOOLS = {
 		idempotent=True,
 		title="Set company defaults",
 	),
+	"bulk_wire_default_accounts": _tool(
+		dimensions.bulk_wire_default_accounts,
+		"MUTATING (default OFF). Wire a Company's default accounts by FINDING "
+		"them, rather than by being told their docnames. The setup call to make "
+		"after create_company.\n\n"
+		"THE GAP IT FILLS. set_company_defaults only sets fields the caller "
+		"already knows the accounts for. Run against four freshly-created "
+		"companies it comes back 'idempotent' for the four create_company already "
+		"did and says nothing about cash, bank, income or expense — because nobody "
+		"passed them. A company with no default_income_account does not fail "
+		"loudly; it fails weeks later, the first time somebody saves an invoice "
+		"line with no account on it.\n\n"
+		"WHERE IT LOOKS, IN ORDER. Your `overrides` first; then the well-known "
+		"account number for the chart template (1310 receivable, 2110 payable, "
+		"1140 cash, 1110 bank — descending into the sub-ledger when the number "
+		"names a group, 4100 income, 5100 expense, 5212 round off, 5218 write "
+		"off); then an account whose `account_type` means the right thing; then, "
+		"only where the field permits an untyped account, the first leaf of the "
+		"right root type. Every candidate has to pass the same type checks "
+		"set_company_defaults applies to a hand-written value — so it proposes and "
+		"those rules dispose.\n\n"
+		"IT NEVER FILLS A FIELD WITH SOMETHING MERELY PLAUSIBLE. A field nothing "
+		"matched is reported in `unresolved` with what was looked for and how to "
+		"fix it, and the rest are still wired — a company with nine of ten "
+		"defaults set is better off than one with none, and a chart with no Cost "
+		"of Goods Sold account is ordinary rather than broken. `strict=true` "
+		"refuses the whole call instead. An `overrides` value that cannot be "
+		"resolved is ALWAYS a hard refusal, strict or not.\n\n"
+		"Idempotent — a re-run reports everything unchanged and saves nothing. "
+		"`dry_run` reports every pick, and what each was picked by, without "
+		"writing. Changes no existing posting.",
+		{
+			"company": _COMPANY,
+			"strategy": _field(
+				_STRING,
+				"How to search: 'standard_with_numbers' (default) tries ERPNext's own "
+				"account numbers before matching on account type; 'account_type' skips "
+				"the numbers, which is what a hand-written chart needs; 'auto' reads the "
+				"company's own chart_of_accounts template and picks between the two.",
+			),
+			"overrides": _field(
+				_OBJECT,
+				"Company field → account, pinning a specific answer regardless of what "
+				'the search would have found, e.g. {"default_bank_account": "1112"}. '
+				"Accepts docname, account number or account name. Fields: "
+				+ ", ".join(dimensions.WIRED_COMPANY_DEFAULTS)
+				+ ".",
+			),
+			"strict": _field(
+				_BOOLEAN,
+				"Refuse the whole call if any field cannot be resolved, instead of wiring "
+				"the rest and reporting the gaps. Default false.",
+			),
+			"dry_run": _field(
+				_BOOLEAN,
+				"Report every pick and what it was picked by, without writing. Default false.",
+			),
+		},
+		required=("company",),
+		mutating=True,
+		idempotent=True,
+		title="Wire company default accounts",
+	),
 	# ── workflow ────────────────────────────────────────────────────────────
 	"list_workflows": _tool(
 		workflow.list_workflows,
@@ -1716,6 +1832,220 @@ TOOLS = {
 		required=("doctype", "name", "file_name"),
 		mutating=True,
 		title="Attach a file to a document",
+	),
+	# ── printing ────────────────────────────────────────────────────────────
+	"create_check_print_format": _tool(
+		printing.create_check_print_format,
+		"MUTATING (default OFF). Create or update the Print Format that cuts a "
+		"printed check out of a Payment Entry, for one Company.\n\n"
+		"WHAT IT PRODUCES. A Jinja Print Format on Payment Entry — ERPNext's own "
+		"check-cutting document — laid out for US laser check stock: three "
+		"3.5-inch panels on Letter, check on top, remittance stub in the middle, "
+		"remittance stub at the bottom (Deluxe form 1000/9000 and the Costco and "
+		"Intuit equivalents). The check panel carries date, payee, the amount in "
+		"figures in a box, the amount in words in US convention ('One Thousand Two "
+		"Hundred Thirty-Four and 56/100' — no currency word, because the stock "
+		"says DOLLARS), the memo and a signature line. Both stubs carry the "
+		"invoice-by-invoice detail from the payment's references.\n\n"
+		"MICR IS NOT RENDERED. The routing and account numbers along the bottom "
+		"are printed in magnetic ink on the stock you buy, against your account. "
+		"Nothing here writes them, and nothing should.\n\n"
+		"IT IS A CUSTOM FORMAT, so `bench migrate` never overwrites it and a "
+		"margin tuned for your printer survives. Idempotent: a re-run with the "
+		"same arguments reports `unchanged` and writes nothing. Refuses a format "
+		"name already used by a STANDARD (app-shipped) format, whose contents "
+		"would be silently replaced at the next upgrade, and one already pointed "
+		"at a different doctype. `dry_run` reports the whole plan without writing.",
+		{
+			"company": _COMPANY,
+			"format_name": _field(
+				_STRING,
+				"What to call it. Defaults to '<Company Abbr> Check — Middle Voucher'. "
+				"ERPNext does not scope Print Formats by company, so the name is what "
+				"tells two companies' formats apart.",
+			),
+			"payee_field": _field(
+				_STRING,
+				"Which Payment Entry field the payee line prints. Default 'party_name' — "
+				"the supplier's full name where ERPNext has one; the template falls back "
+				"to `party` when it is empty. Refused if this site's Payment Entry has no "
+				"such field, rather than printing a blank payee.",
+			),
+			"signature_image_url": _field(
+				_STRING,
+				"Optional. A file_url on this site for a signature image printed above "
+				"the signature line. Leave empty to print the line and sign by hand.",
+			),
+			"dry_run": _field(
+				_BOOLEAN, "Report what would be created or updated without writing. Default false."
+			),
+		},
+		required=("company",),
+		mutating=True,
+		idempotent=True,
+		available=_needs_doctype("Payment Entry"),
+		requires="ERPNext's Payment Entry doctype, which is what a printed check is cut from",
+		title="Create check print format",
+	),
+	# ── streaming uploads ───────────────────────────────────────────────────
+	"stage_file_chunk": _tool(
+		uploads.stage_file_chunk,
+		"MUTATING (default OFF). Stage ONE piece of a file for a later commit. "
+		"This is how you move a file bigger than a tool call onto this site.\n\n"
+		"WHY IT EXISTS. attach_file_to_document takes up to 8 MB of base64 in one "
+		"call, and no caller can reach that: the base64 string has to be COMPOSED "
+		"inside the tool call, which runs out at a couple of hundred kilobytes. So "
+		"a 5 MB PDF meant writing a script and running it on the box by hand. Now "
+		"it means calling this N times and commit_staged_file once.\n\n"
+		"CUT THE BYTES, THEN ENCODE. Each `chunk_base64` must be the base64 of ITS "
+		"OWN slice of the file's bytes. Do NOT base64 the whole file and cut the "
+		"resulting string into pieces — the middle pieces of that are not valid "
+		"base64, and the tool will say so. Slices may be any size up to the "
+		"200 KB-of-base64 per-call limit and need not divide evenly.\n\n"
+		"THE PIECES SURVIVE A RESTART. They are rows in a table, not cache "
+		"entries, so a `bench restart` or a worker recycle mid-upload loses "
+		"nothing — resume from `next_expected_index`.\n\n"
+		"The first call creates the session; every later call must declare the "
+		"same `total_chunks`. Re-sending an index REPLACES that piece and says so, "
+		"because a caller whose call timed out has no other safe move. Returns how "
+		"many pieces have arrived, how many bytes are staged, which index is "
+		"expected next and which are still missing.",
+		{
+			"session_id": _field(
+				_STRING,
+				"Your own name for this upload — a UUID, or any unique descriptor. "
+				"Every piece of one file uses the same one. Unique across the site.",
+			),
+			"chunk_index": _field(
+				_INTEGER,
+				"Where this piece goes in the finished file, counting from 0. Pieces may "
+				"be sent in any order.",
+			),
+			"total_chunks": _field(
+				_INTEGER,
+				"How many pieces there will be in total. Declared on the first call and "
+				"fixed from then on. Maximum 600.",
+			),
+			"chunk_base64": _field(
+				_STRING,
+				"This piece: the base64 of ITS OWN slice of the file's bytes, up to "
+				"200 KB of base64 per call. Not a slice of the base64 of the whole file.",
+			),
+			"expected_sha256": _field(
+				_STRING,
+				"Optional. SHA-256 of the WHOLE file, hex, as you computed it before "
+				"sending anything. Verified on commit. May be supplied on any call, "
+				"including the last, but cannot then be changed.",
+			),
+			"expected_size": _field(
+				_INTEGER,
+				"Optional. Size of the WHOLE file in bytes. Verified on commit.",
+			),
+		},
+		required=("session_id", "chunk_index", "total_chunks", "chunk_base64"),
+		mutating=True,
+		idempotent=True,
+		title="Stage a file chunk",
+	),
+	"commit_staged_file": _tool(
+		uploads.commit_staged_file,
+		"MUTATING (default OFF). Reassemble a staged upload into a File, verify it "
+		"against the caller's own hash, and clear the staging behind it.\n\n"
+		"THREE DESTINATIONS. Pass `attach_to_doctype` and `attach_to_name` to hang "
+		"the file off a document. Pass `governance_document=true` with `title` and "
+		"`category` to file a NEW Governance Document with the file attached — the "
+		"same archive entry attach_governance_document creates, for the documents "
+		"too big to send in one call. Pass neither and the File lands on the site "
+		"attached to nothing.\n\n"
+		"IT REFUSES BEFORE IT ASSEMBLES. A missing piece is named by index range. "
+		"A parent document that does not exist, cannot be written, is cancelled, "
+		"already has a file by this name or belongs to another company is refused "
+		"before a byte is reassembled, so a bad argument costs nothing. "
+		"`expected_sha256` and `expected_size` are checked against the assembled "
+		"bytes and refuse on mismatch.\n\n"
+		"NOTHING IS DELETED UNTIL THE FILE EXISTS. Every refusal leaves the staged "
+		"pieces exactly where they were, so a rejected commit is fixed by changing "
+		"the argument, never by re-sending the file. `dry_run` reassembles and "
+		"checks WITHOUT writing or clearing, so its reported sha256 is the sha256 "
+		"of the file that would be created.",
+		{
+			"session_id": _field(_STRING, "The upload to commit, as given to stage_file_chunk."),
+			"file_name": _field(
+				_STRING,
+				"Filename for the File this creates, with its extension — e.g. "
+				"'2026-appraisal.pdf'.",
+			),
+			"attach_to_doctype": _field(
+				_STRING, "DocType of the document to attach it to. Give with attach_to_name."
+			),
+			"attach_to_name": _field(_STRING, "That document's docname."),
+			"is_private": _field(
+				_BOOLEAN,
+				"Store it private (default TRUE). A private file is readable only by "
+				"somebody with read permission on the document it hangs off.",
+			),
+			"governance_document": _field(
+				_BOOLEAN,
+				"File a NEW Governance Document and attach the file to it, instead of "
+				"attaching to an existing document. Default false. Needs `title` and "
+				"`category`; refuses alongside attach_to_doctype.",
+			),
+			"title": _field(_STRING, "Governance Document only: what the document is called."),
+			"category": _field(
+				_STRING,
+				"Governance Document only: one of the categories the Governance Document "
+				"doctype offers on this site (Operating Agreement, Trust Document, ...).",
+			),
+			"company": _field(
+				_STRING,
+				"Governance Document only: whose archive it belongs in. Also serves as "
+				"the cross-company guard when attaching to a document.",
+			),
+			"effective_date": _field(_STRING, "Governance Document only: YYYY-MM-DD."),
+			"execution_date": _field(_STRING, "Governance Document only: YYYY-MM-DD."),
+			"parties": _field(_STRING, "Governance Document only: who signed it."),
+			"notes": _field(_STRING, "Governance Document only: anything else worth recording."),
+			"supersedes": _field(
+				_STRING,
+				"Governance Document only: the docname of the entry this one replaces. "
+				"That entry is marked superseded_by this one.",
+			),
+			"allow_cancelled": _field(
+				_BOOLEAN, "Attach to a cancelled (docstatus 2) parent anyway. Default false."
+			),
+			"dry_run": _field(
+				_BOOLEAN,
+				"Assemble and verify without writing or clearing the staging. Default false.",
+			),
+		},
+		required=("session_id", "file_name"),
+		mutating=True,
+		title="Commit a staged file",
+	),
+	"cancel_staged_upload": _tool(
+		uploads.cancel_staged_upload,
+		"MUTATING (default OFF). Discard a staged upload and its pieces without "
+		"committing anything. What it destroys is half a file nobody has committed; "
+		"no File is created and none is removed. Use it when a piece was mis-sent, "
+		"when an upload is being restarted under a fresh session id, or to free a "
+		"session id. Sessions idle for 24 hours are swept automatically, so this is "
+		"for when you do not want to wait.",
+		{"session_id": _field(_STRING, "The upload to discard.")},
+		required=("session_id",),
+		mutating=True,
+		idempotent=True,
+		title="Cancel a staged upload",
+	),
+	"list_staged_uploads": _tool(
+		uploads.list_staged_uploads,
+		"Every chunked upload currently in flight: session id, pieces received out "
+		"of pieces expected, WHICH indexes are missing (as compact ranges), bytes "
+		"staged, when a piece last arrived, and whether it is ready to commit. The "
+		"tool you want when call 43 of 60 failed and you need to resume rather than "
+		"re-send. A System Manager sees every session on the site; anybody else "
+		"sees their own, which is the same set they may commit. Read-only.",
+		{},
+		title="List staged uploads",
 	),
 	# ── comments and tasks ──────────────────────────────────────────────────
 	"list_comments": _tool(
@@ -2065,6 +2395,62 @@ TOOLS = {
 		title="Read a governance document",
 		available=_needs_doctype("Governance Document"),
 		requires="the Governance Document DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"regenerate_governance_document_pdf": _tool(
+		governance.regenerate_governance_document_pdf,
+		"MUTATING (default OFF). Convert a governance document's .docx attachment "
+		"to PDF, attach the PDF beside it, and repoint the entry at it.\n\n"
+		"WHY. A .docx is an editing format. It renders differently in different "
+		"applications, some refuse to open it at all, and 'the copy on file' stops "
+		"being one thing the moment two people open it in two programs. A "
+		"governance document's primary format is a PDF; the .docx is the version "
+		"somebody amends. Several archive entries landed .docx-only and this is how "
+		"they get a fixed copy.\n\n"
+		"THE .docx IS KEPT. This ADDS a PDF and never removes the source. What it "
+		"changes besides adding a file is `attached_file`, which now points at the "
+		"PDF so a reader following the archive lands on something that opens.\n\n"
+		"IT NEEDS LibreOffice IN THE CONTAINER. Converting a .docx means a layout "
+		"engine, and this app does not ship one. A host without it is refused "
+		"BEFORE anything is read, naming the package to install, and nothing is "
+		"installed at runtime. `dry_run` reports which converter would be used "
+		"without converting.\n\n"
+		"REFUSES: an entry with no .docx; an entry with SEVERAL .docx attachments "
+		"unless `source_docx_file` names one (guessing between an original and an "
+		"amendment and being right half the time is worse than asking); a "
+		"`source_docx_file` that is not attached here or is not a .docx; and an "
+		"entry that already has a PDF, unless `overwrite=true` — which then names "
+		"the File it deleted, because removing an attachment from a governance "
+		"archive is not something to do quietly.",
+		{
+			"governance_document": _field(
+				_STRING, "Governance Document docname — list_governance_documents gives it."
+			),
+			"source_docx_file": _field(
+				_STRING,
+				"Which attachment to convert, by File docname or file name. Omit when the "
+				"entry has exactly one .docx; required when it has more than one.",
+			),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Replace an existing PDF rather than refusing. Default false. The File "
+				"that is deleted is named in the result; the .docx is kept either way.",
+			),
+			"dry_run": _field(
+				_BOOLEAN,
+				"Report the source, the converter and what would be replaced, without "
+				"converting or writing. Default false.",
+			),
+		},
+		required=("governance_document",),
+		mutating=True,
+		available=_needs_doctype("Governance Document"),
+		requires=(
+			"the Governance Document DocType (run bench migrate) and a .docx-to-PDF "
+			"converter in the container — LibreOffice headless, or docx2pdf on a host with "
+			"Microsoft Word. The tool reports which it found and refuses cleanly with "
+			"neither"
+		),
+		title="Regenerate a governance document PDF",
 	),
 	"create_cap_table_entry": _tool(
 		governance.create_cap_table_entry,

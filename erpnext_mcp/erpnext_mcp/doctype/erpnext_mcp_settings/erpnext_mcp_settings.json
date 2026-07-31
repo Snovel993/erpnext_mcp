@@ -27,6 +27,7 @@
   "allow_get_account_balance",
   "allow_get_journal_entries",
   "allow_get_journal_entry",
+  "allow_investigate_je_gl_link",
   "allow_list_bank_transactions",
   "read_tools_col",
   "allow_get_bank_statement",
@@ -68,6 +69,7 @@
   "allow_create_accounting_dimension",
   "allow_create_dimension_value",
   "allow_set_company_defaults",
+  "allow_bulk_wire_default_accounts",
   "workflow_tools_section",
   "allow_list_workflows",
   "allow_get_workflow_state",
@@ -83,6 +85,14 @@
   "allow_get_attachment_content",
   "attachment_tools_col",
   "allow_attach_file_to_document",
+  "printing_tools_section",
+  "allow_create_check_print_format",
+  "upload_tools_section",
+  "allow_list_staged_uploads",
+  "allow_stage_file_chunk",
+  "upload_tools_col",
+  "allow_commit_staged_file",
+  "allow_cancel_staged_upload",
   "collab_tools_section",
   "allow_list_comments",
   "allow_list_assigned_todos",
@@ -118,6 +128,7 @@
   "allow_get_governance_document_content",
   "archive_tools_col",
   "allow_attach_governance_document",
+  "allow_regenerate_governance_document_pdf",
   "asset_tools_section",
   "allow_depreciation_note_alignment_check",
   "allow_create_asset",
@@ -322,6 +333,13 @@
    "fieldname": "allow_get_journal_entry",
    "fieldtype": "Check",
    "label": "Get Journal Entry"
+  },
+  {
+   "default": "1",
+   "description": "READ. Diagnostic: every line of one Journal Entry beside every GL Entry row it posted, with the join spelled out and every disagreement flagged. Explains why a party edit matched no ledger rows.",
+   "fieldname": "allow_investigate_je_gl_link",
+   "fieldtype": "Check",
+   "label": "Investigate JE/GL Link"
   },
   {
    "default": "1",
@@ -597,6 +615,13 @@
    "label": "Set Company Defaults"
   },
   {
+   "default": "0",
+   "description": "WRITE. The same fields, but FOUND rather than given — by account number for a numbered chart, then by account type, then by root type, with every candidate passing the same type checks. The setup call to make after Create Company. Never fills a field with something merely plausible: what it cannot resolve it reports. Idempotent.",
+   "fieldname": "allow_bulk_wire_default_accounts",
+   "fieldtype": "Check",
+   "label": "Wire Company Default Accounts"
+  },
+  {
    "description": "Reading a site's approval structure, and — behind its own switch — acting on it. Workflow actions run through Frappe's own apply_workflow, so they respect the acting user's roles and the transition's conditions.",
    "fieldname": "workflow_tools_section",
    "fieldtype": "Section Break",
@@ -692,6 +717,57 @@
    "fieldname": "allow_attach_file_to_document",
    "fieldtype": "Check",
    "label": "Attach File To Document"
+  },
+  {
+   "description": "Putting a document on paper.",
+   "fieldname": "printing_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Printing"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Create or update the Print Format that cuts a printed check out of a Payment Entry, laid out for US laser check stock (three 3.5-inch panels: check, stub, stub). Creates no payment and posts nothing — it decides where the fields land on paper. MICR is preprinted on the stock and is never rendered here. Custom format, so bench migrate never overwrites it.",
+   "fieldname": "allow_create_check_print_format",
+   "fieldtype": "Check",
+   "label": "Create Check Print Format"
+  },
+  {
+   "description": "Files too big to fit in one tool call, moved onto the site a piece at a time. Pieces are rows in a table, so an upload survives a bench restart; a session idle for 24 hours is swept automatically. Staging alone creates no File — Commit Staged File is the switch that decides whether anything lands.",
+   "fieldname": "upload_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Streaming Uploads"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every chunked upload in flight: pieces received, which indexes are missing, bytes staged, and whether it is ready to commit. What you call when an upload died partway and you need to resume rather than re-send.",
+   "fieldname": "allow_list_staged_uploads",
+   "fieldtype": "Check",
+   "label": "List Staged Uploads"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Stage one piece of a file. Creates no File on its own — the pieces sit in a staging table until Commit Staged File assembles them, and are discarded if it never does. Enabling this without Commit Staged File gives an AI somewhere to put bytes and no way to land them.",
+   "fieldname": "allow_stage_file_chunk",
+   "fieldtype": "Check",
+   "label": "Stage File Chunk"
+  },
+  {
+   "fieldname": "upload_tools_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Assemble a staged upload into a File — attached to a document, or filed as a new Governance Document. Verifies the caller's own SHA-256 and size against the assembled bytes and refuses on mismatch. This is the switch that decides whether a chunked upload can land anything at all.",
+   "fieldname": "allow_commit_staged_file",
+   "fieldtype": "Check",
+   "label": "Commit Staged File"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Throw away a staged upload and its pieces. Destroys half a file nobody has committed; creates and removes no File. Low risk, and the way to free a session id without waiting for the 24-hour sweep.",
+   "fieldname": "allow_cancel_staged_upload",
+   "fieldtype": "Check",
+   "label": "Cancel Staged Upload"
   },
   {
    "description": "The human layer: what people said about a document, and what is on somebody's list. List Comments checks read permission on the document. Create Todo writes.",
@@ -924,6 +1000,13 @@
    "fieldname": "allow_attach_governance_document",
    "fieldtype": "Check",
    "label": "Attach Governance Document"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Convert an entry's .docx attachment to PDF, attach the PDF beside it, and repoint the entry at it — because a .docx is an editing format that renders differently everywhere and some applications will not open at all. The .docx is KEPT. Needs LibreOffice headless in the container and refuses cleanly without it; overwriting an existing PDF is a separate, non-default flag.",
+   "fieldname": "allow_regenerate_governance_document_pdf",
+   "fieldtype": "Check",
+   "label": "Regenerate Governance Document PDF"
   },
   {
    "description": "Assets that serve more than one part of the business, and assets that are financed. Depreciation written here is split by usage and is always a draft.",

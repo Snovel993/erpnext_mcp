@@ -3,6 +3,318 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.14.0 — 2026-07-31
+
+The Sprint 6 tail, closed. Five features, one release, every one of them
+grounded in something that actually went wrong between 2026-07-25 and
+2026-07-30 rather than in a list of things that would be nice to have.
+
+Two new doctypes, eight new tools, one bug fix that matters more than any of
+them, and a test double that has been made to stop agreeing with code that could
+not work.
+
+### `stage_file_chunk` / `commit_staged_file` — moving a file bigger than a tool call
+
+**The bottleneck was never the 8 MB ceiling.** `attach_file_to_document` has
+always accepted eight megabytes of base64 in a single call, and no caller has
+ever reached it. The real constraint is that an AI operator has to *compose* the
+argument, and a base64 string lives inside the tool call it is writing — which
+runs out around two hundred kilobytes. The tool advertised 8 MB and could be
+handed 200 KB.
+
+So every file-bearing operation through Sprint 5 and Sprint 6 collapsed into the
+same four manual steps: write a Python script, `scp` it to the box, `docker cp`
+it into the container, `docker exec` it. Per-parcel appraisal PDFs, eight of
+them. The 5.8 MB master appraisal. The same master appraisal again, three times,
+once per company after the conveyance. Backfilling suppliers. Every one of them
+interrupted the work it was part of. Tim, 2026-07-30, in one sentence: *"So we
+don't have to run these scripts."*
+
+**`stage_file_chunk`** takes one piece at a time and writes it to a table.
+**`commit_staged_file`** reassembles the pieces, verifies them against a SHA-256
+the caller computed before sending anything, and turns them into a File —
+attached to a document, filed as a new Governance Document, or standing alone.
+**`cancel_staged_upload`** throws a dead upload away. **`list_staged_uploads`**
+(read-only, on by default) reports what is in flight and, more usefully, *which
+indexes are missing*, as compact ranges — `3-6, 9` rather than three hundred
+numbers.
+
+**The pieces are rows in a table and not entries in the cache, and that is the
+whole design.** A 5 MB upload is a hundred round trips over some minutes. In that
+window a `bench restart`, a worker recycle or a redis eviction under memory
+pressure would throw the lot away, and the caller would find out at commit having
+spent the entire upload. Rows survive all of it. "Stage three pieces, restart the
+workers, stage two more, commit" is a test, and it genuinely reloads the module
+and rebinds the catalogue rather than asserting that no state exists.
+
+**`Staged File Chunk` is NOT a child table, and the reason is arithmetic.** The
+obvious shape for "many pieces belonging to one upload" is a child table on the
+session — it is what the specification asked for — and it does not work at the
+far end of a big upload. Frappe rewrites a document's entire child table on every
+save, so appending piece 600 means writing 600 rows of 200 KB to record 200 KB of
+new data, and doing that per piece makes a large upload quadratic in its own
+size. It would have passed the 25-chunk test and fallen over on the real 5 MB PDF
+it was built for. A separate doctype with a Link back at the session costs one
+row per piece, one write per call, and lets the missing-piece query count and sum
+without ever loading a payload into memory.
+
+**Cut the bytes, then encode.** Each `chunk_base64` is the base64 of *its own
+slice* of the file's bytes. Base64-ing the whole file and then cutting the
+resulting string up produces middle pieces that are not valid base64 on their
+own, cannot be checked when they arrive, and whose per-piece hashes mean nothing.
+That is the one thing a caller can get wrong, so the refusal names it
+specifically — a caller who has done it will otherwise go looking for corruption
+in a file that is fine.
+
+**Nothing is deleted until the File exists.** Every commit refusal — a gap, a
+hash that does not match, a size that does not match, a cancelled parent, a
+filename the document already has, a cross-company attach — leaves the staged
+pieces exactly where they were. A refusal is fixed by changing the argument,
+never by re-sending the file. The target document is validated *before* a byte is
+reassembled, so a bad argument costs nothing rather than stalling a worker
+through ninety megabytes first.
+
+**Every piece carries the hash of its own bytes.** Not for security; the
+transport already had a bearer token. For diagnosis. A file that fails its
+aggregate check is a mystery; a file that fails its aggregate check *and* whose
+piece 17 hashes differently from what the caller recorded is a fixed piece 17.
+
+**A session belongs to whoever staged its first piece**, and only they may add
+to it, commit it or cancel it. Not paranoia about other operators: two callers
+who happened to pick the same session id would otherwise interleave their pieces
+into one file, and the failure would present as corruption rather than as the
+collision it is.
+
+**Staging cleans up after itself twice.** A session is deleted on commit and on
+cancel; sessions idle for 24 hours are swept by a daily scheduler job *and* at
+the top of every `stage_file_chunk` call. The second is the kairotic one — the
+right moment to clear out abandoned uploads is when somebody is uploading, not at
+three in the morning — and it is what keeps a bench with its scheduler switched
+off from quietly accumulating ninety megabytes of a PDF nobody finished sending.
+
+Ceilings: 200 KB of base64 per call (because that is roughly where a model stops
+being able to compose the argument), 600 pieces, 100 MB assembled.
+
+Tests: a five-megabyte round trip in thirty-five calls compared **byte for byte**
+against the original; a skipped chunk refused by index range; a wrong SHA-256
+refused with the per-piece hashes pointed at; a wrong size refused; session
+isolation in all three directions; worker-restart resilience; cancellation;
+the governance-document flow including supersession; the audit log eliding the
+payload rather than storing a second copy of every piece.
+
+### `bulk_wire_default_accounts` — company setup that finds the accounts itself
+
+Running `set_company_defaults` against four freshly-created companies on
+2026-07-30 came back "idempotent" for receivable, payable, round-off and
+write-off — the four `create_company` already does — and said nothing at all
+about cash, bank, income and expense, because nobody had passed them. A company
+with no `default_income_account` does not fail loudly. It fails weeks later, the
+first time somebody saves an invoice line with no account on it, nowhere near the
+setup that caused it.
+
+This finds them. In order: the caller's `overrides`; then the well-known account
+number for the chart template (1310 receivable, 2110 payable, 1140 cash, 1110
+bank — descending into the sub-ledger when the number names a group, as ERPNext's
+1110 "Bank Accounts" does, 4100 income, 5100 expense, 5212 round off, 5218 write
+off); then an account whose `account_type` means the right thing; then an account
+whose *name* says so; then, only where the field permits an untyped account, the
+first leaf of the right root type.
+
+**Every candidate has to pass the same type checks `set_company_defaults` applies
+to a hand-written value.** The search proposes and those rules dispose. A 1310
+that exists and is a plain Asset rather than a Receivable is not used — ERPNext
+keys party ledgers off `account_type`, so a `default_receivable_account` pointed
+at the wrong kind of account posts fine and stops ageing correctly a quarter
+later. That is the test that matters most in the file.
+
+**It never fills a field with something merely plausible, and it never sulks.**
+A field nothing matched is reported in `unresolved` with what was looked for and
+how to fix it, and every other field is still wired: a company with nine of ten
+defaults set is better off than one with none, and a chart with no Cost of Goods
+Sold account is ordinary rather than broken. `strict=true` refuses the whole call
+instead. An `overrides` value that cannot be resolved is always a hard refusal —
+an explicit instruction that cannot be honoured is a different thing from a search
+that came up empty.
+
+`exchange_gain_loss_account` is deliberately **not** in the table. Its only
+constraint is a root type of Income or Expense, so the only way to "find" it is
+to take the first expense leaf, which is exactly the plausible-looking guess this
+tool exists not to make. A field with no honest search stays
+`set_company_defaults`' job.
+
+Deterministic: where two accounts of the same type exist, the lower account
+number wins every time, so "idempotent" is true on the second run rather than a
+claim that happens to hold.
+
+### `create_check_print_format` — cutting a printed check
+
+Sorren's monthly invoice, the utilities and the occasional vendor who does not
+take an ACH get paid by check, and until now they got paid by somebody writing
+one out by hand and keying it into the ledger afterwards. The ledger is the thing
+that ends up wrong.
+
+Payment Entry *is* ERPNext's check-cutting document — party, amount, bank
+account, reference number, the invoices being settled, and it posts the ledger
+side itself. What it has no opinion about is where any of that lands on a piece
+of paper. ERPNext ships no Print Format that fits US laser check stock.
+
+This writes one: **8.5 × 11, three 3.5-inch panels** — check on top, remittance
+stub in the middle, remittance stub at the bottom, which is the Deluxe form
+1000/9000 layout and the Costco and Intuit equivalents of it. Date, payee, amount
+in figures in a box, amount in words, memo, signature line; both stubs carry the
+invoice-by-invoice detail that answers "what was this for".
+
+**The amount in words is ours and not Frappe's.** `frappe.utils.money_in_words`
+appends the currency name, varies with the site's number format, and on an
+Indian-format site groups in lakhs. A check that says "Dollars" where the stock
+already says DOLLARS is one a teller queries, and one that reads "Twelve Lakh" is
+one a US bank will not take. `erpnext_mcp.render.checks.amount_in_words` writes
+`One Thousand Two Hundred Thirty-Four and 56/100` — no currency word, no "Only",
+a hyphen inside the compound tens, cents as a two-digit numerator over 100
+including `00/100` on a whole amount, because a words line that stops at the
+dollars is a line somebody can add to. It reaches the template through a
+namespaced Jinja method declared under both the `jinja` and the `jenv` hook keys,
+since Frappe renamed that hook and which one a bench reads depends on its
+version; the template falls back to Frappe's own if it is somehow there on
+neither, because a valid check with wordier text beats a blank line.
+
+**MICR is not rendered and should not be.** The routing and account numbers are
+printed in magnetic ink on the stock you buy, by the people who sold it to you,
+against your account. The README's new **Cutting a check** section has the stock
+to order, the paper weight, the envelope caveat, the bank's MICR spec sheet, and
+the advice to order 250 rather than 2000 and hold one over a real check at a
+window before committing.
+
+**The template is a constant and the Print Format is a per-company record.** A
+Print Format shipped as an app fixture would be one record with one name on every
+site that installs this, and its `standard = "Yes"` would mean an operator's
+margin tuning is overwritten on the next `bench migrate`. So the tool writes a
+CUSTOM format named after the company's abbreviation, and refuses to overwrite a
+STANDARD one — anything written into one of those disappears at the next upgrade
+without a word.
+
+The format is not inspected for substrings in the tests; it is **rendered**,
+through Jinja, against a real Payment Entry with real references, with
+`StrictUndefined` on so a field nobody has raises in the suite rather than at the
+moment somebody presses Print.
+
+### `regenerate_governance_document_pdf` — a fixed copy beside the editable one
+
+Several archive entries landed as `.docx` only — the Q3 25 and Q1/Q2 26
+quarterlies, the 2025 annual. A `.docx` is an editing format: it renders
+differently in different applications, some refuse to open it at all (Tim's Pages
+did), and "the copy on file" stops being one thing the moment two people open it
+in two programs. A governance document's primary format is a PDF; the `.docx` is
+the version somebody amends.
+
+This converts one and attaches the PDF beside it, then repoints `attached_file`
+so a reader following the archive lands on something that opens. **The `.docx` is
+kept.** An archive that threw away the editable original to gain a fixed one
+would have traded a problem for a worse one.
+
+It needs LibreOffice headless in the container, and says so. Converting a `.docx`
+means a layout engine — a `.docx` encodes styles, numbering, tables, section
+breaks and fonts, and reimplementing enough of that to lay it out on a page is
+not a few hundred lines of `zipfile`, which is why everything else under
+`render/` is standard-library and this is not. A host without a converter is
+refused **before anything is read**, naming the package to install, and nothing
+is installed at runtime: a tool that fetched a package mid-request would hang a
+worker and leave the container different from its image.
+
+LibreOffice is tried before `docx2pdf`, which is the opposite of the obvious
+order and the right one: `docx2pdf` drives Microsoft Word through COM or
+AppleScript, so on the Linux container this app actually runs in it does nothing
+at all. Every invocation points `-env:UserInstallation` at a profile directory
+inside the temp directory it just created, because `soffice` writes a profile on
+first run and fails obscurely where HOME is not writable — the same lesson as "a
+script that runs outside the bench must make its own log directories before it
+connects".
+
+Refuses an entry with no `.docx`; an entry with *several* unless
+`source_docx_file` names one (an original and an amendment filed together is a
+real thing, and being right half the time is worse than asking); a source that is
+not attached here or is not a `.docx`; and an entry that already has a PDF unless
+`overwrite=true` — which then names the File it deleted, because removing an
+attachment from a governance archive is not something to do quietly.
+
+### `investigate_je_gl_link` — and the v0.13.0 bug it found
+
+Sprint 6 verification ran `update_journal_entry_party` against
+ACC-JV-2026-00073, a $10 member distribution against an Equity account, and got
+`gl_entries_matched: 0`. Three explanations were live: an Equity-account quirk, a
+Bank Bridge JE-crafting bug, or ordinary ERPNext behaviour.
+
+**It was ordinary ERPNext behaviour, and it was a real bug in v0.13.0.**
+
+`GL Entry.voucher_detail_no` holds the child-row docname for Sales Invoice Item,
+Purchase Invoice Item and the other line-item doctypes. It does not for a Journal
+Entry: `JournalEntry.get_gl_entries` fills that column from the line's
+**`reference_detail_no`**, a pointer at a payment schedule row on an invoice being
+settled, which is empty on every ordinary line. So v0.13.0's lookup — keyed on
+`voucher_detail_no == line.name` — matched **nothing**, on every submitted entry,
+for every account type. The tool updated the voucher, silently failed to update
+the ledger, and returned a warning suggesting the site was unusual. The site was
+not unusual. This was.
+
+**Fixed.** GL rows are now matched the way the ledger actually identifies a line
+— account plus debit plus credit, preferring `voucher_detail_no` where a site
+does carry one — and the write is **refused before anything happens** when the
+match is not certain: two lines of one voucher with the same account and amounts
+are indistinguishable in the ledger; `merge_similar_entries` collapses lines
+sharing an account, party and cost center into one summed row, so writing a party
+onto it would attribute somebody else's money to this party; and a line that
+posted no GL row at all is reported rather than shrugged at.
+`allow_unmatched_gl=true` goes ahead anyway, and the result leads with the
+disagreement — a refusal a caller cannot get past is how a safety gate becomes
+the failure.
+
+**If you ran v0.13.0's party tool against a submitted entry, the ledger still
+says what it said before.** `investigate_je_gl_link` shows which entries are in
+that state: one read-only call returning every line beside every GL row it
+posted, with `account_type` and `root_type`, the party on both sides, which lines
+disagree with the ledger, which GL rows no single line explains, and a `finding`
+that says in one paragraph what the counts mean. It works on drafts and on
+cancelled entries and says which case it is looking at.
+
+**Why the standalone suite did not catch it.** The fixture seeded GL rows by hand
+with `voucher_detail_no = <the line's docname>` — which is what anybody would
+write, and what the code believed. A double built from the same wrong belief as
+the code cannot contradict it. `harness.post_journal_entry_gl` now models what
+ERPNext actually writes, including `merge_similar_entries`, so a two-line entry
+posting twice to the same account produces one merged GL row rather than two. It
+is the fifth time in this project's history that a permissive double certified
+code that could not run; the module docstring says so.
+
+The harness also grew `add_to_date` and a total sort key: `_sorted` used to spell
+its column read `row.get(column) or ""`, which turns a legitimate zero into a
+string and then compares it against the integers beside it —
+`TypeError: '<' not supported between instances of 'int' and 'str'` on any query
+ordered by a column counting from 0. MariaDB has no such problem, so that was the
+double refusing a query a real site answers, which is the mirror image of the
+usual failure and just as capable of blocking working code.
+
+### Also
+
+- **`files.check_attachable` / `files.insert_attachment` / `files.read_file_bytes`
+  are now public**, and `attach_file_to_document`, `attach_governance_document`
+  and `commit_staged_file` all go through them. Three copies of "may this file
+  hang off this document" would have been three places to forget a rule.
+- **`governance.file_governance_document` takes bytes rather than base64**, so a
+  chunked upload can file an archive entry without re-encoding ninety megabytes
+  to have `decode_base64_content` refuse it against a ceiling that describes what
+  fits in one JSON call — a limit that is simply not a fact about a chunked
+  upload.
+- **Two hooks, both additive and namespaced.** One daily scheduler job that
+  deletes this app's own expired staging rows, and one Jinja method
+  (`erpnext_mcp_amount_in_words`). `hooks.py`'s docstring, which used to say "no
+  scheduler jobs", says what is true now.
+- **CI installs `jinja2`** alongside `werkzeug`, for the same reason: neither is
+  a declared dependency and both arrive with Frappe. The check-rendering tests
+  skip themselves where it is absent, so a bare environment still passes;
+  installing it is what stops that skip being permanent.
+
+**135 tools** — 61 read-only, 74 mutating. Full suite: 2407 pass, 0 fail.
+
 ## 0.13.0 — 2026-07-31
 
 A cleanup wave out of real verification friction on 2026-07-30. Four features,

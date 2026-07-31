@@ -1261,3 +1261,455 @@ def _or_list(values) -> str:
 	if len(values) == 1:
 		return f"an {values[0]}" if values[0][0] in "AEIOU" else f"a {values[0]}"
 	return " or ".join([", ".join(values[:-1]), values[-1]])
+
+
+# ── 134. bulk_wire_default_accounts ─────────────────────────────────────────
+#: The defaults a company needs before it can transact at all, and where to look
+#: for each one. `numbers` are ERPNext's own account numbers in the "Standard
+#: with Numbers" chart template; `account_types` is the fallback for every other
+#: chart, and it is the one that keeps working on a chart somebody wrote by hand.
+#:
+#: DELIBERATELY NOT EVERY SUPPORTED DEFAULT. `set_company_defaults` accepts
+#: twenty-five fields and most of them are for modules a farm does not run —
+#: stock valuation, capital work in progress, deferred revenue. Guessing at those
+#: is how a company ends up with a plausible-looking default pointing at the
+#: wrong account and nobody noticing until a document posts through it. These ten
+#: are the ones whose absence stops a document being saved.
+#:
+#: `exchange_gain_loss_account` is NOT here, and its absence is the rule this
+#: table is built on. Its only constraint is a root type of Income or Expense, so
+#: the only way to "find" it is to take the first expense leaf — which is exactly
+#: the plausible-looking guess this tool exists not to make. A field with no
+#: honest search stays `set_company_defaults`' job.
+#:
+#: `names` matches on the account's own name, and it earns its place on the three
+#: rows where it appears: an account literally called "Write Off" is real
+#: evidence, not a guess, and it is what makes this work on a chart somebody
+#: numbered differently. It is tried after account_type and before root_type.
+_WIRING_PLAN = {
+	"default_receivable_account": {
+		"numbers": ("1310",),
+		"account_types": ("Receivable",),
+		"names": (),
+		"root_types": (),
+	},
+	"default_payable_account": {
+		"numbers": ("2110",),
+		"account_types": ("Payable",),
+		"names": (),
+		"root_types": (),
+	},
+	"default_cash_account": {
+		"numbers": ("1140",),
+		"account_types": ("Cash",),
+		"names": (),
+		"root_types": (),
+	},
+	"default_bank_account": {
+		"numbers": ("1110",),
+		"account_types": ("Bank",),
+		"names": (),
+		"root_types": (),
+	},
+	"default_income_account": {
+		"numbers": ("4100",),
+		"account_types": ("Income Account", "Direct Income", "Indirect Income"),
+		"names": (),
+		"root_types": ("Income",),
+	},
+	"default_expense_account": {
+		"numbers": ("5100",),
+		"account_types": ("Expense Account", "Direct Expense", "Indirect Expense"),
+		"names": (),
+		"root_types": ("Expense",),
+	},
+	"cost_of_goods_sold_account": {
+		"numbers": ("5111",),
+		"account_types": ("Cost of Goods Sold",),
+		"names": ("cost of goods sold",),
+		"root_types": (),
+	},
+	"round_off_account": {
+		"numbers": ("5212",),
+		"account_types": ("Round Off",),
+		"names": ("round off",),
+		"root_types": (),
+	},
+	"write_off_account": {
+		"numbers": ("5218",),
+		"account_types": (),
+		"names": ("write off", "bad debt"),
+		"root_types": (),
+	},
+	"round_off_cost_center": {
+		"numbers": (),
+		"account_types": (),
+		"names": (),
+		"root_types": (),
+	},
+}
+
+#: Just the field names. Public because `registry` lists them in the tool's own
+#: argument description and a second hand-maintained copy there would drift.
+WIRED_COMPANY_DEFAULTS = tuple(_WIRING_PLAN)
+
+#: How a strategy decides where to look. `auto` reads the company's own
+#: `chart_of_accounts` and picks one of the other two, which is what a caller who
+#: does not know what chart a company was created from actually wants.
+WIRING_STRATEGIES = ("standard_with_numbers", "account_type", "auto")
+
+
+def bulk_wire_default_accounts(args: dict) -> ToolResult:
+	"""Wire a company's default accounts by finding them, rather than by being told.
+
+	THE GAP THIS FILLS. `create_company` sets four defaults and
+	`set_company_defaults` sets any of twenty-five — but only ones the caller
+	already knows the docnames of. Running `set_company_defaults` against four
+	freshly-created companies on 2026-07-30 came back "idempotent" for receivable,
+	payable, round-off and write-off, and said nothing at all about cash, bank,
+	income and expense, because nobody had passed them. A company with no
+	`default_income_account` does not fail loudly; it fails the first time
+	somebody saves a Sales Invoice with no account on the line, which is weeks
+	later and nowhere near the setup that caused it.
+
+	IT REFUSES TO GUESS, WHICH IS NOT THE SAME AS REFUSING TO WORK. Each field is
+	looked for in a fixed order — the caller's own override, then the well-known
+	account number for this chart template, then an account whose `account_type`
+	means the right thing, then (only where the field's rule permits an untyped
+	account) the first leaf of the right root type. If none of those finds an
+	account that PASSES `set_company_defaults`' own type checks, the field is
+	reported unresolved with what was looked for. It is never filled with
+	something merely plausible.
+
+	AND IT DOES NOT REFUSE THE WHOLE CALL FOR ONE MISSING ACCOUNT. A company with
+	nine of ten defaults wired is strictly better off than one with none, and a
+	chart with no Cost of Goods Sold account is an ordinary chart rather than a
+	broken one. So the unresolved fields are named, loudly, in the summary and in
+	`unresolved` — and `strict=true` is there for the caller who wants
+	all-or-nothing. An OVERRIDE that cannot be resolved is always a hard refusal,
+	strict or not: an explicit instruction that cannot be honoured is a different
+	thing from a search that came up empty.
+
+	Idempotent. Every field is compared before it is written, so a re-run reports
+	everything unchanged and saves nothing — which matters here because
+	`Company.save` is not a cheap write.
+	"""
+	company = resolve_company(as_str(args, "company"), required=True)
+	strategy = as_str(args, "strategy") or "standard_with_numbers"
+	if strategy not in WIRING_STRATEGIES:
+		raise ToolError(
+			f"unknown strategy {strategy!r}. Known: {', '.join(WIRING_STRATEGIES)}. "
+			"'standard_with_numbers' looks for ERPNext's own account numbers first, "
+			"'account_type' skips straight to matching on what each account IS, and 'auto' "
+			"reads the company's chart template and picks. Nothing was changed."
+		)
+	overrides = args.get("overrides")
+	if overrides in (None, ""):
+		overrides = {}
+	if not isinstance(overrides, dict):
+		raise ToolError(
+			"overrides must be an object of company field → account, e.g. "
+			'{"default_bank_account": "1112"}. Nothing was changed.'
+		)
+	unknown = sorted(set(overrides) - set(_WIRING_PLAN))
+	if unknown:
+		raise ToolError(
+			f"overrides names field(s) this tool does not wire: {', '.join(unknown)}. It wires "
+			f"{', '.join(_WIRING_PLAN)}. For anything else use set_company_defaults, which takes "
+			"any of the twenty-five supported defaults by name. Nothing was changed."
+		)
+	dry_run = bool(as_bool(args, "dry_run", False))
+	strict = bool(as_bool(args, "strict", False))
+
+	resolved_strategy = _resolved_strategy(strategy, company)
+	accounts = _company_accounts(company)
+
+	picks, unresolved, absent = {}, {}, []
+	for field, spec in _WIRING_PLAN.items():
+		if not compat.has_field("Company", field):
+			# A supported default this ERPNext does not have. Not an error and not
+			# a silence: the caller is told the field is absent from their version.
+			absent.append(field)
+			continue
+		if field in overrides:
+			picks[field] = {
+				"account": _resolve_company_default(field, overrides[field], company),
+				"picked_by": "override",
+			}
+			continue
+		pick = _pick_default(field, spec, company, resolved_strategy, accounts)
+		if pick["account"]:
+			picks[field] = pick
+		else:
+			unresolved[field] = pick["reason"]
+
+	if unresolved and strict:
+		raise ToolError(
+			f"strict=true and {len(unresolved)} field(s) could not be resolved on {company}: "
+			+ "; ".join(f"{field} — {reason}" for field, reason in sorted(unresolved.items()))
+			+ ". Pass them in `overrides`, create the missing accounts with create_account, or "
+			"drop strict to wire the rest. Nothing was changed."
+		)
+
+	current = frappe.db.get_value("Company", company, sorted(picks), as_dict=True) if picks else {}
+	changes, unchanged = {}, []
+	for field, pick in picks.items():
+		before = str((current or {}).get(field) or "")
+		if before == pick["account"]:
+			unchanged.append(field)
+		else:
+			changes[field] = [before, pick["account"]]
+
+	data = {
+		"company": company,
+		"strategy": strategy,
+		"strategy_used": resolved_strategy,
+		"changed": changes,
+		"unchanged": sorted(unchanged),
+		"defaults_now": {field: pick["account"] for field, pick in sorted(picks.items())},
+		"picked_by": {field: pick["picked_by"] for field, pick in sorted(picks.items())},
+		"unresolved": unresolved,
+		"fields_absent_on_this_erpnext": sorted(absent),
+		"idempotent": True,
+		"dry_run": dry_run,
+		"note": (
+			"Company defaults decide which account a document reaches for when nothing on the "
+			"document says. They touch no existing posting — every document already written "
+			"keeps the accounts it was written with. Nothing here was guessed: each field was "
+			"looked for by number, then by account type, then by root type, and left unresolved "
+			"rather than filled with something merely plausible."
+		),
+	}
+	if unresolved:
+		data["next_step"] = (
+			f"{len(unresolved)} field(s) are still empty on {company}: "
+			f"{', '.join(sorted(unresolved))}. Create the accounts with create_account and re-run, "
+			"or pass them explicitly in `overrides`. get_chart_of_accounts shows what this company "
+			"actually has."
+		)
+
+	if dry_run:
+		data["note"] = "Nothing was written. " + data["note"]
+		return ToolResult(
+			data,
+			f"dry run: would set {len(changes)} default(s) on {company} "
+			f"({resolved_strategy}), leave {len(unchanged)} unchanged"
+			+ (f", {len(unresolved)} unresolved: {', '.join(sorted(unresolved))}" if unresolved else ""),
+			docstatus_delta="",
+		)
+
+	if changes:
+		doc = frappe.get_doc("Company", company)
+		for field, (_before, after) in changes.items():
+			doc.set(field, after or None)
+		doc.save()
+
+	summary = ", ".join(f"{field}={after!r}" for field, (_before, after) in sorted(changes.items()))
+	return ToolResult(
+		data,
+		(
+			f"wired {len(changes)} default(s) on {company} ({resolved_strategy}): {summary}"
+			if changes
+			else f"{company} already had all {len(unchanged)} resolvable default(s); nothing changed"
+		)
+		+ (f" — UNRESOLVED: {', '.join(sorted(unresolved))}" if unresolved else ""),
+		docstatus_delta="",
+	)
+
+
+def _resolved_strategy(strategy: str, company: str) -> str:
+	"""`auto` turned into a real strategy by reading the company's own chart template."""
+	if strategy != "auto":
+		return strategy
+	template = str(frappe.db.get_value("Company", company, "chart_of_accounts") or "")
+	return "standard_with_numbers" if "number" in template.lower() else "account_type"
+
+
+#: Fields on `_WIRING_PLAN` that take a Cost Center rather than an Account.
+_WIRED_COST_CENTERS = ("round_off_cost_center",)
+
+
+def _company_accounts(company: str) -> list:
+	"""Every account of this company, groups and disabled ones included.
+
+	Read once and filtered in Python rather than queried per field: ten fields
+	against one company is ten round trips for a table that is a few hundred
+	rows, and having the whole list in hand is what lets a refusal say what WAS
+	there instead of only what was missing.
+
+	Groups are kept because the search has to be able to WALK them — ERPNext's
+	1110 is "Bank Accounts", a group nothing can post to, and the account a
+	default belongs on is the one underneath it.
+	"""
+	fields = compat.existing_fields(
+		"Account",
+		("name", "account_number", "account_name", "root_type", "account_type", "is_group",
+		 "disabled", "parent_account"),
+	)
+	rows = frappe.db.get_all("Account", filters={"company": company}, fields=fields, limit=2000)
+	return [dict(row) for row in rows or []]
+
+
+def _postable(rows: list) -> list:
+	"""Just the accounts a document could actually post to.
+
+	Group and disabled accounts are excluded here rather than checked later,
+	because a company default has to point at something a posting can reach and
+	neither of those is.
+	"""
+	return [row for row in rows if not int(row.get("is_group") or 0) and not int(row.get("disabled") or 0)]
+
+
+def _under(group: dict, rows: list) -> list:
+	"""Every postable account below a group, breadth-first.
+
+	Breadth-first and not by number prefix, which was the obvious shortcut and is
+	wrong: ERPNext's 1110 group holds 1111 and 1112, and neither string starts
+	with "1110". The parent link is the only thing that actually says what is
+	inside what.
+	"""
+	by_parent: dict = {}
+	for row in rows:
+		by_parent.setdefault(str(row.get("parent_account") or ""), []).append(row)
+	found, frontier, seen = [], [group], {group["name"]}
+	while frontier:
+		nxt = []
+		for parent in frontier:
+			for child in by_parent.get(parent["name"], []):
+				if child["name"] in seen:  # pragma: no cover - a chart is a tree
+					continue
+				seen.add(child["name"])
+				(nxt if int(child.get("is_group") or 0) else found).append(child)
+		frontier = nxt
+	return _postable(found)
+
+
+def _plain_or(values) -> str:
+	"""`a, b or c` with no article in front. `_or_list` adds one, which reads
+	right inside a sentence about ONE account and wrong inside a list of things
+	that were looked for."""
+	values = [str(value) for value in values if str(value)]
+	if len(values) < 2:
+		return values[0] if values else ""
+	return " or ".join([", ".join(values[:-1]), values[-1]])
+
+
+def _pick_default(field: str, spec: dict, company: str, strategy: str, rows: list) -> dict:
+	"""One default resolved by search, or a sentence saying what was looked for."""
+	if field in _WIRED_COST_CENTERS:
+		return _pick_cost_center(field, company)
+
+	rule = _ACCOUNT_DEFAULTS[field]
+	leaves = _postable(rows)
+	tried = []
+
+	if strategy == "standard_with_numbers" and spec["numbers"]:
+		tried.append(f"account number {_plain_or(spec['numbers'])}")
+		for number in spec["numbers"]:
+			numbered = [row for row in rows if str(row.get("account_number") or "") == number]
+			match = _first_passing(_postable(numbered), field, company)
+			if match:
+				return {"account": match, "picked_by": f"account number {number}"}
+			for group in [row for row in numbered if int(row.get("is_group") or 0)]:
+				descended = _first_passing(_under(group, rows), field, company)
+				if descended:
+					return {"account": descended, "picked_by": f"a sub-ledger under {number}"}
+
+	if spec["account_types"]:
+		tried.append(f"account_type {_plain_or(spec['account_types'])}")
+		for account_type in spec["account_types"]:
+			match = _first_passing(
+				[row for row in leaves if str(row.get("account_type") or "") == account_type],
+				field,
+				company,
+			)
+			if match:
+				return {"account": match, "picked_by": f"account_type {account_type}"}
+
+	if spec["names"]:
+		tried.append("an account named " + _plain_or([f"'{name}'" for name in spec["names"]]))
+		for keyword in spec["names"]:
+			match = _first_passing(
+				[row for row in leaves if keyword in str(row.get("account_name") or "").lower()],
+				field,
+				company,
+			)
+			if match:
+				return {"account": match, "picked_by": f"an account named like {keyword!r}"}
+
+	if spec["root_types"]:
+		tried.append(f"the first {_plain_or(spec['root_types'])} leaf")
+		for root_type in spec["root_types"]:
+			match = _first_passing(
+				[row for row in leaves if str(row.get("root_type") or "") == root_type],
+				field,
+				company,
+			)
+			if match:
+				return {"account": match, "picked_by": f"the first {root_type} leaf"}
+
+	if not tried:  # pragma: no cover - every account field in the plan has a rule
+		tried.append("nothing — this field has no search rule and must be given in `overrides`")
+	wanted = _plain_or(rule["root_type"]) if rule["root_type"] else "any root type"
+	return {
+		"account": "",
+		"picked_by": "",
+		"reason": (
+			f"no {wanted} leaf account on {company} matched. Looked for: {'; then '.join(tried)}. "
+			f"This field is {rule['what']}. Create the account with create_account, or pass it in "
+			"`overrides`."
+		),
+	}
+
+
+def _first_passing(candidates: list, field: str, company: str) -> str:
+	"""The first candidate `set_company_defaults` would accept, in number order.
+
+	Sorted so the answer is deterministic: a chart with two Bank accounts must
+	wire the same one on every run, or "idempotent" would be a lie the second time
+	somebody called this.
+
+	`_resolve_company_default` is reused rather than reimplemented, which is the
+	whole point — the search is allowed to propose, and the same type checks that
+	guard a hand-written default decide. A candidate it refuses is skipped rather
+	than raised on: a search that hits a Receivable-shaped account with the wrong
+	account_type should move on to the next one, not fail the call.
+	"""
+	for row in sorted(candidates, key=lambda row: (str(row.get("account_number") or "~"), row["name"])):
+		try:
+			return _resolve_company_default(field, row["name"], company)
+		except ToolError:
+			continue
+	return ""
+
+
+def _pick_cost_center(field: str, company: str) -> dict:
+	"""The company's own default cost center, if it has one and it is a leaf."""
+	current = compat.company_default_cost_center(company)
+	if current:
+		try:
+			return {"account": _resolve_company_default(field, current, company), "picked_by": "the company's default cost center"}
+		except ToolError:
+			pass
+	rows = frappe.db.get_all(
+		"Cost Center",
+		filters={"company": company, "is_group": 0},
+		fields=compat.existing_fields("Cost Center", ("name", "cost_center_number", "disabled")),
+		limit=500,
+	)
+	for row in sorted(
+		(row for row in rows or [] if not int(row.get("disabled") or 0)),
+		key=lambda row: (str(row.get("cost_center_number") or "~"), row["name"]),
+	):
+		try:
+			return {"account": _resolve_company_default(field, row["name"], company), "picked_by": "the first leaf cost center"}
+		except ToolError:
+			continue
+	return {
+		"account": "",
+		"picked_by": "",
+		"reason": (
+			f"{company} has no leaf cost center to file a rounding difference against. Create one "
+			"with create_cost_center, or pass it in `overrides`."
+		),
+	}

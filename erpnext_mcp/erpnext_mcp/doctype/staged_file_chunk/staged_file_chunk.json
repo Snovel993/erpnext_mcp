@@ -1,0 +1,107 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-07-31 09:00:00.000000",
+ "description": "One piece of a file being uploaded across many tool calls, held as base64 exactly as it arrived. Rows live only as long as the Staged File Upload Session they point at. NOT a child table, and the reason is arithmetic: Frappe rewrites every child row of a document on save, so appending the six hundredth 200 KB piece to a child table would rewrite the other five hundred and ninety-nine. A separate table is written once per piece.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "session",
+  "chunk_index",
+  "chunk_col",
+  "chunk_bytes",
+  "chunk_sha256",
+  "payload_section",
+  "chunk_base64"
+ ],
+ "fields": [
+  {
+   "description": "The upload this piece belongs to.",
+   "fieldname": "session",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Session",
+   "options": "Staged File Upload Session",
+   "reqd": 1
+  },
+  {
+   "description": "Where this piece goes in the finished file, counting from 0. Pieces may arrive in any order; this is what puts them back together.",
+   "fieldname": "chunk_index",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Chunk Index",
+   "reqd": 1
+  },
+  {
+   "fieldname": "chunk_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Decoded length of this piece, in bytes.",
+   "fieldname": "chunk_bytes",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Chunk Bytes",
+   "read_only": 1
+  },
+  {
+   "description": "SHA-256 of this piece's decoded bytes. Every piece gets one, so a corrupted upload can be narrowed to the call that carried it rather than reported as 'the file is wrong'.",
+   "fieldname": "chunk_sha256",
+   "fieldtype": "Data",
+   "label": "Chunk Sha256",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payload_section",
+   "fieldtype": "Section Break",
+   "label": "Payload"
+  },
+  {
+   "description": "The piece itself, base64, stored exactly as it arrived. Long Text because a MariaDB LONGTEXT is the only column that holds 200 KB of it without truncating silently.",
+   "fieldname": "chunk_base64",
+   "fieldtype": "Long Text",
+   "label": "Chunk Base64",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Staged File Chunk",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "session,chunk_index",
+ "sort_field": "chunk_index",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

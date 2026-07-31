@@ -297,6 +297,13 @@ ERPNEXT_SCHEMA = {
 		"reference_type",
 		"reference_name",
 		"reference_due_date",
+		# THE FIELD THAT CAUSED v0.14.0's FEATURE E. ERPNext's
+		# `JournalEntry.get_gl_entries` fills `GL Entry.voucher_detail_no` from
+		# THIS field, not from the line's docname — it names a payment schedule
+		# row on an invoice being settled and is empty on an ordinary line. The
+		# fixture had no such column, so nothing here could express the truth
+		# that a Journal Entry's GL rows carry no line docname at all.
+		"reference_detail_no",
 		"user_remark",
 		"is_advance",
 		"parent",
@@ -371,7 +378,63 @@ ERPNEXT_SCHEMA = {
 		"closing_balance",
 		"company",
 	],
-	"Payment Entry": ["name", "posting_date", "paid_amount", "docstatus", "company"],
+	# ERPNext's check-cutting document. The v0.14.0 check Print Format renders
+	# against it, so the fields it prints have to be here — a fixture that stopped
+	# at the amount would let a template reference a column nobody has.
+	"Payment Entry": [
+		"name",
+		"posting_date",
+		"paid_amount",
+		"docstatus",
+		"company",
+		"payment_type",
+		"party_type",
+		"party",
+		"party_name",
+		"paid_from",
+		"paid_from_account_currency",
+		"paid_to",
+		"paid_to_account_currency",
+		"reference_no",
+		"reference_date",
+		"remarks",
+		"mode_of_payment",
+		"bank_account",
+		"references",
+	],
+	"Payment Entry Reference": [
+		"reference_doctype",
+		"reference_name",
+		"due_date",
+		"total_amount",
+		"outstanding_amount",
+		"allocated_amount",
+		"parent",
+		"parenttype",
+	],
+	# Core Frappe. Only the columns `create_check_print_format` writes or reads —
+	# `standard` above all, because a STANDARD format is one an app rewrites on
+	# every migrate and the refusal that protects it is the point.
+	"Print Format": [
+		"name",
+		"print_format_name",
+		"doc_type",
+		"module",
+		"standard",
+		"custom_format",
+		"print_format_type",
+		"print_format_builder",
+		"disabled",
+		"page_size",
+		"margin_top",
+		"margin_bottom",
+		"margin_left",
+		"margin_right",
+		"align_labels_right",
+		"line_breaks",
+		"show_section_headings",
+		"html",
+	],
 	"User": ["name", "enabled", "full_name"],
 	"DocType": [
 		"name",
@@ -695,6 +758,8 @@ APP_DOCTYPES = {
 	"Housing Unit": "housing_unit",
 	"Housing Assignment": "housing_assignment",
 	"Family": "family",
+	"Staged File Upload Session": "staged_file_upload_session",
+	"Staged File Chunk": "staged_file_chunk",
 }
 
 
@@ -1014,6 +1079,7 @@ CHILD_TABLES = {
 	("Asset Cost Profile", "depreciation_postings"): "Asset Depreciation Posting",
 	("Note Payable", "payment_events"): "Note Payable Event",
 	("Parcel", "conveyance_events"): "Parcel Conveyance Event",
+	("Payment Entry", "references"): "Payment Entry Reference",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1026,6 +1092,7 @@ REHYDRATED_CHILD_FIELDS = (
 	"cost_center_allocation",
 	"depreciation_postings",
 	"payment_events",
+	"references",
 )
 
 
@@ -1558,6 +1625,91 @@ class JournalEntryDocument(Document):
 		self.validate()
 
 
+def post_journal_entry_gl(name: str) -> list[dict]:
+	"""Write the GL Entry rows a real ERPNext submit would write for one entry.
+
+	THE FIFTH TIME A PERMISSIVE DOUBLE CERTIFIED CODE THAT COULD NOT WORK. Until
+	v0.14.0 the tests seeded GL rows by hand with
+	`voucher_detail_no = <the account line's docname>`, because that is the
+	obvious thing to write and because it is true of Sales Invoice Item. It is
+	not true of Journal Entry. ERPNext's `JournalEntry.get_gl_entries` fills that
+	column from the line's **`reference_detail_no`** — a pointer at a payment
+	schedule row on an invoice being settled, empty on every ordinary line — so a
+	real Journal Entry's GL rows carry NO line docname whatsoever.
+
+	v0.13.0's `update_journal_entry_party` looked its GL rows up by that column,
+	the fixture agreed, every test passed, and on Tim's site the tool matched zero
+	rows on every submitted entry: it updated the voucher, left the general ledger
+	saying the old party, and blamed the site in a warning. That is precisely the
+	failure the module docstring at the top of this file promises this double
+	exists to prevent, and it happened anyway because the double was written from
+	the same wrong belief as the code.
+
+	TWO THINGS ARE MODELLED, AND THE SECOND MATTERS AS MUCH AS THE FIRST.
+
+	  * `voucher_detail_no` comes from `reference_detail_no`, so it is empty
+	    unless a test deliberately sets one.
+	  * GL entries are MERGED. `make_gl_entries` runs `merge_similar_entries` by
+	    default, which collapses rows sharing an account, cost center, party and
+	    against-voucher into ONE row with the amounts summed. So a two-line entry
+	    posting twice to the same account produces one GL row, not two — and a
+	    tool that writes a party onto it would attribute both lines to one person.
+	    A double that emitted one row per line would have made that unreachable.
+
+	Cancelled and draft entries post nothing, as they do on a real site. Returns
+	the rows it wrote.
+	"""
+	entry = STORE.get_raw("Journal Entry", name)
+	if entry is None:
+		raise DoesNotExistError(f"Journal Entry {name} not found")
+	if int(entry.get("docstatus") or 0) != 1:
+		return []
+
+	merged: dict = {}
+	order: list = []
+	for row in entry.get("accounts") or []:
+		detail_no = str(row.get("reference_detail_no") or "")
+		key = (
+			str(row.get("account") or ""),
+			str(row.get("cost_center") or ""),
+			str(row.get("party_type") or ""),
+			str(row.get("party") or ""),
+			detail_no,
+			str(row.get("reference_type") or ""),
+			str(row.get("reference_name") or ""),
+		)
+		if key not in merged:
+			merged[key] = {
+				"name": f"GL-{name}-{len(order) + 1}",
+				"account": row.get("account"),
+				"posting_date": entry.get("posting_date"),
+				"debit": 0.0,
+				"credit": 0.0,
+				"company": entry.get("company"),
+				"is_cancelled": 0,
+				"voucher_type": "Journal Entry",
+				"voucher_no": name,
+				"voucher_detail_no": detail_no,
+				"party_type": row.get("party_type"),
+				"party": row.get("party"),
+				"cost_center": row.get("cost_center"),
+				"against_voucher_type": row.get("reference_type"),
+				"against_voucher": row.get("reference_name"),
+				"is_opening": "Yes" if entry.get("is_opening") == "Yes" else "No",
+			}
+			order.append(key)
+		merged[key]["debit"] = round(merged[key]["debit"] + float(row.get("debit") or 0), 2)
+		merged[key]["credit"] = round(merged[key]["credit"] + float(row.get("credit") or 0), 2)
+
+	rows = [merged[key] for key in order]
+	table = STORE.tables.setdefault("GL Entry", {})
+	for row in rows:
+		row.setdefault("docstatus", 1)
+		row.setdefault("creation", _now())
+		table[row["name"]] = row
+	return rows
+
+
 #: Doctypes whose stub behaviour differs from a plain Document.
 STUB_CONTROLLERS = {
 	"File": FileDocument,
@@ -2010,6 +2162,29 @@ def _grouped_aggregate(rows, fields, aggregates, group_by):
 	return out
 
 
+def _sort_key(value):
+	"""A total ordering key, so a column of mixed types cannot raise.
+
+	`0 or ""` was the original spelling and it has a hole in it that only shows on
+	a column that is legitimately zero: `chunk_index` counts from 0, so ordering
+	staged upload pieces turned index 0 into the empty string and then compared a
+	string against the integers beside it — `TypeError: '<' not supported between
+	instances of 'int' and 'str'`. MariaDB has no such problem, so this was the
+	double refusing a query a real site answers, which is the mirror image of the
+	usual failure and just as capable of blocking working code.
+
+	Empty and NULL sort first, as MariaDB puts NULLs first ascending; then
+	numbers; then text. The three-part tuple is what makes the comparison total
+	whatever the column holds.
+	"""
+	if value is None or value == "":
+		return (0, 0.0, "")
+	key = _key(value)
+	if isinstance(key, (int, float)) and not isinstance(key, bool):
+		return (1, float(key), "")
+	return (2, 0.0, str(key))
+
+
 def _sorted(rows: list[dict], order_by: str) -> list[dict]:
 	out = list(rows)
 	# Apply each clause in reverse so the leftmost wins, as SQL does.
@@ -2017,7 +2192,7 @@ def _sorted(rows: list[dict], order_by: str) -> list[dict]:
 		parts = clause.split()
 		column = parts[0].split(".")[-1].strip("`")
 		reverse = len(parts) > 1 and parts[1].lower() == "desc"
-		out.sort(key=lambda row: _key(row.get(column) or ""), reverse=reverse)
+		out.sort(key=lambda row: _sort_key(row.get(column)), reverse=reverse)
 	return out
 
 
@@ -2070,6 +2245,44 @@ def _build_utils() -> types.ModuleType:
 
 	module.add_days = add_days
 	module.date_diff = date_diff
+
+	def add_to_date(
+		date=None,
+		years=0,
+		months=0,
+		weeks=0,
+		days=0,
+		hours=0,
+		minutes=0,
+		seconds=0,
+		as_string=False,
+		as_datetime=False,
+	):
+		"""frappe.utils.add_to_date, in the shapes this app uses it.
+
+		`as_string=True, as_datetime=True` returns Frappe's own DATETIME_FORMAT,
+		which matters: the staged-upload sweeper compares the result against the
+		`modified` COLUMN, and a value formatted any other way — an isoformat with
+		a `T`, say — compares as a string and quietly matches nothing. Months and
+		years are refused rather than approximated, because this double has no
+		dateutil and a 30-day month would be a lie a test could come to rely on.
+		"""
+		if months or years:  # pragma: no cover - nothing in the app asks for these
+			raise NotImplementedError("stub add_to_date does not do months or years")
+		if isinstance(date, datetime.datetime):
+			base = date
+		elif isinstance(date, datetime.date):
+			base = datetime.datetime(date.year, date.month, date.day)
+		else:
+			base = datetime.datetime.fromisoformat(str(date or _now()).strip().replace("T", " "))
+		moved = base + datetime.timedelta(
+			weeks=weeks, days=days, hours=hours, minutes=minutes, seconds=seconds
+		)
+		if as_string:
+			return moved.strftime("%Y-%m-%d %H:%M:%S.%f" if as_datetime else "%Y-%m-%d")
+		return moved
+
+	module.add_to_date = add_to_date
 	return module
 
 

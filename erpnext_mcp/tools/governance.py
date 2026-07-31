@@ -35,9 +35,11 @@ switch as well as its own, because posting to the general ledger is a permission
 an operator grants once, in one place, whatever route reaches it.
 """
 
+import hashlib
+
 import frappe
 
-from .. import compat, settings
+from .. import compat, convert, settings
 from ..args import (
 	as_bool,
 	as_choice,
@@ -1064,19 +1066,6 @@ def submit_member_event(args: dict) -> ToolResult:
 # ── 57. attach_governance_document ──────────────────────────────────────────
 def attach_governance_document(args: dict) -> ToolResult:
 	"""File a governing document in the archive, with its content attached."""
-	compat.require_doctype(
-		GOVERNANCE_DOCUMENT,
-		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
-	)
-	company = resolve_company(as_str(args, "company"), required=True)
-	title = as_str(args, "title", required=True)
-	category = _validated_choice(
-		GOVERNANCE_DOCUMENT, "category", as_str(args, "category", required=True), "category"
-	)
-	effective_date = as_date(args, "effective_date")
-	execution_date = as_date(args, "execution_date")
-	parties = as_str(args, "parties")
-	notes = as_str(args, "notes")
 	file_url = as_str(args, "file_url")
 	file_content = as_str(args, "file_content")
 	file_name = as_str(args, "file_name")
@@ -1092,6 +1081,52 @@ def attach_governance_document(args: dict) -> ToolResult:
 			"name is one nobody can identify later. Nothing was created."
 		)
 
+	return file_governance_document(
+		args,
+		content=_decoded_file_content(file_content) if file_content else b"",
+		file_name=file_name,
+		file_url=file_url,
+	)
+
+
+def file_governance_document(
+	args: dict,
+	*,
+	content: bytes = b"",
+	file_name: str = "",
+	file_url: str = "",
+	tail: str = "Nothing was created.",
+) -> ToolResult:
+	"""Create one Governance Document and attach `content` to it, if there is any.
+
+	Public and taking BYTES rather than base64, because `commit_staged_file` files
+	governance documents too and its bytes never travelled through a single tool
+	call. Routing it back through `attach_governance_document` would have meant
+	re-encoding a reassembled 5 MB PDF to base64 only to have
+	`decode_base64_content` refuse it against a ceiling that describes what fits
+	in one JSON call — a limit that is simply not a fact about a chunked upload.
+
+	Everything an archive entry has to be right about is decided here, so both
+	doors enforce the same rules: the category has to be one this site's DocType
+	offers, one company cannot hold two documents of the same category and title,
+	and a superseded document has to exist, belong to the same company and not
+	already have been superseded. That last one is why amendments chain rather
+	than fork.
+	"""
+	compat.require_doctype(
+		GOVERNANCE_DOCUMENT,
+		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
+	)
+	company = resolve_company(as_str(args, "company"), required=True)
+	title = as_str(args, "title", required=True)
+	category = _validated_choice(
+		GOVERNANCE_DOCUMENT, "category", as_str(args, "category", required=True), "category"
+	)
+	effective_date = as_date(args, "effective_date")
+	execution_date = as_date(args, "execution_date")
+	parties = as_str(args, "parties")
+	notes = as_str(args, "notes")
+
 	duplicate = frappe.db.get_value(
 		GOVERNANCE_DOCUMENT, {"company": company, "category": category, "title": title}, "name"
 	)
@@ -1100,29 +1135,26 @@ def attach_governance_document(args: dict) -> ToolResult:
 			f"{company} already has a {category} titled {title!r} ({duplicate}). Filing it twice "
 			"would leave two documents claiming to be the same one. Use a title that includes "
 			"the version or date, or amend the existing entry by filing the new document with "
-			f"supersedes={duplicate!r}. Nothing was created."
+			f"supersedes={duplicate!r}. {tail}"
 		)
 
 	supersedes = as_str(args, "supersedes")
 	if supersedes:
 		if not frappe.db.exists(GOVERNANCE_DOCUMENT, supersedes):
-			raise ToolError(f"no Governance Document named {supersedes!r}. Nothing was created.")
+			raise ToolError(f"no Governance Document named {supersedes!r}. {tail}")
 		superseded_row = frappe.db.get_value(
 			GOVERNANCE_DOCUMENT, supersedes, ["company", "superseded_by", "title"], as_dict=True
 		)
 		if superseded_row.get("company") != company:
 			raise ToolError(
-				f"{supersedes} belongs to {superseded_row.get('company')!r}, not {company!r}. "
-				"Nothing was created."
+				f"{supersedes} belongs to {superseded_row.get('company')!r}, not {company!r}. {tail}"
 			)
 		if superseded_row.get("superseded_by"):
 			raise ToolError(
 				f"{supersedes} ({superseded_row.get('title')}) has already been superseded by "
 				f"{superseded_row['superseded_by']}. Chain the new document onto the end of "
-				"the chain, not the middle of it. Nothing was created."
+				f"the chain, not the middle of it. {tail}"
 			)
-
-	content = _decoded_file_content(file_content) if file_content else b""
 
 	doc = frappe.new_doc(GOVERNANCE_DOCUMENT)
 	doc.title = title
@@ -1144,17 +1176,14 @@ def attach_governance_document(args: dict) -> ToolResult:
 
 	attachment = None
 	if content:
-		attachment = frappe.get_doc(
-			{
-				"doctype": "File",
-				"file_name": file_name,
-				"is_private": 1,
-				"content": content,
-				"attached_to_doctype": GOVERNANCE_DOCUMENT,
-				"attached_to_name": doc.name,
-				"attached_to_field": "attached_file",
-			}
-		).insert()
+		attachment = files.insert_attachment(
+			file_name,
+			content,
+			is_private=True,
+			doctype=GOVERNANCE_DOCUMENT,
+			name=doc.name,
+			attached_to_field="attached_file",
+		)
 		doc.db_set("attached_file", attachment.get("file_url"))
 
 	if supersedes:
@@ -1361,3 +1390,239 @@ def get_governance_document_content(args: dict) -> ToolResult:
 		metadata,
 		f"read governance document {name} ({row.get('title')}) — {content.data.get('file_name')}",
 	)
+
+
+# ── 136. regenerate_governance_document_pdf ─────────────────────────────────
+def regenerate_governance_document_pdf(args: dict) -> ToolResult:
+	"""Convert a governance document's .docx attachment to PDF and file it beside it.
+
+	THE PROBLEM IT SOLVES, WHICH IS SMALLER AND MORE ANNOYING THAN IT SOUNDS.
+	Several archive entries landed as .docx only — the Q3 25 and Q1/Q2 26
+	quarterlies, the 2025 annual. A .docx is an editing format: it renders
+	differently in different applications, some of them refuse to open it at all
+	(Tim's Pages did), and "the copy on file" stops being one thing the moment two
+	people open it in two programs. A governance document's primary format is a
+	PDF. The .docx is the version somebody amends.
+
+	SO THE .docx IS KEPT. This adds a PDF; it never removes the source. An archive
+	that threw away the editable original to gain a fixed one would have traded a
+	problem for a worse one.
+
+	IT REPOINTS `attached_file` AT THE PDF, and says so. That field is what a
+	reader following the archive lands on, and the whole point of the exercise is
+	that they land on something that opens.
+
+	IT DEPENDS ON A BINARY THIS APP DOES NOT SHIP. Converting a .docx means
+	LibreOffice; see `erpnext_mcp/convert.py` for why reimplementing it is not on
+	the table. A container without it gets a refusal naming the package to
+	install, checked BEFORE anything is read, and nothing is installed at runtime.
+
+	REFUSES: an entry with no .docx; a `source_docx_file` that is not attached to
+	this entry or is not a .docx; an entry that already has a PDF, unless
+	`overwrite=true` — and then it names the File it deleted, because deleting an
+	attachment from a governance archive is not something to do quietly.
+	"""
+	compat.require_doctype(GOVERNANCE_DOCUMENT, "It ships with erpnext_mcp.")
+	name = as_str(args, "governance_document", required=True)
+	overwrite = bool(as_bool(args, "overwrite", False))
+	dry_run = bool(as_bool(args, "dry_run", False))
+	tail = "Nothing was written and no attachment was removed."
+
+	row = frappe.db.get_value(
+		GOVERNANCE_DOCUMENT,
+		name,
+		compat.existing_fields(GOVERNANCE_DOCUMENT, ("name", "title", "company", "category", "attached_file")),
+		as_dict=True,
+	)
+	if not row:
+		raise ToolError(
+			f"no Governance Document named {name!r}. list_governance_documents has the names. {tail}"
+		)
+	if not frappe.has_permission(GOVERNANCE_DOCUMENT, "write", doc=name):
+		raise ToolError(
+			f"{frappe.session.user} is not permitted to write Governance Document {name}. "
+			f"Attachment tools honour Frappe permissions — see docs/security.md. {tail}"
+		)
+
+	attachments = _governance_attachments(name)
+	source = _source_docx(attachments, as_str(args, "source_docx_file"), name, tail)
+	pdf_name = f"{_stem(source.get('file_name'))}.pdf"
+	clash = next(
+		(row for row in attachments if str(row.get("file_name") or "").lower() == pdf_name.lower()), None
+	)
+	existing_pdfs = [
+		row for row in attachments if str(row.get("file_name") or "").lower().endswith(".pdf")
+	]
+	if existing_pdfs and not overwrite:
+		raise ToolError(
+			f"Governance Document {name} already has {len(existing_pdfs)} PDF attachment(s): "
+			f"{', '.join(str(row.get('file_name')) for row in existing_pdfs)}. Regenerating would "
+			"put a second copy of the same document in the archive and leave nobody able to say "
+			"which is authoritative. Pass overwrite=true to replace "
+			f"{pdf_name!r} — the .docx is kept either way. {tail}"
+		)
+
+	route = convert.available()
+	if not route["ready"]:
+		raise ToolError(
+			f"this container cannot convert a .docx: {route['detail']} {tail}"
+		)
+
+	plan = {
+		"governance_document": name,
+		"title": row.get("title"),
+		"company": row.get("company"),
+		"source_file": source["name"],
+		"source_file_name": source.get("file_name"),
+		"source_size": int(source.get("file_size") or 0),
+		"pdf_file_name": pdf_name,
+		"converter": route["via"],
+		"converter_detail": route["detail"],
+		"would_replace": [row["name"] for row in existing_pdfs] if overwrite else [],
+		"attached_file_was": row.get("attached_file") or None,
+		"dry_run": dry_run,
+	}
+
+	if dry_run:
+		return ToolResult(
+			{
+				**plan,
+				"regenerated": False,
+				"note": (
+					f"Nothing was written. {source.get('file_name')} would be converted with "
+					f"{route['detail']} and attached as {pdf_name!r}"
+					+ (
+						f", replacing File(s) {', '.join(plan['would_replace'])}."
+						if plan["would_replace"]
+						else "."
+					)
+					+ " The .docx is kept either way."
+				),
+			},
+			f"dry run: would convert {source.get('file_name')} on {name} to {pdf_name} "
+			f"via {route['via']}",
+		)
+
+	content = files.read_file_bytes(source["name"])
+	try:
+		pdf = convert.docx_to_pdf(content, str(source.get("file_name") or "document.docx"))
+	except convert.ConversionError as exc:
+		raise ToolError(f"{exc} {tail}") from None
+
+	removed = []
+	if overwrite and clash:
+		frappe.delete_doc("File", clash["name"], force=True, ignore_permissions=True)
+		removed.append({"file": clash["name"], "file_name": clash.get("file_name")})
+
+	attachment = files.insert_attachment(
+		pdf_name,
+		pdf,
+		is_private=True,
+		doctype=GOVERNANCE_DOCUMENT,
+		name=name,
+		attached_to_field="attached_file",
+	)
+	frappe.db.set_value(GOVERNANCE_DOCUMENT, name, "attached_file", attachment.get("file_url"))
+
+	digest = hashlib.sha256(pdf).hexdigest()
+	data = {
+		**plan,
+		"regenerated": True,
+		"file": attachment.name,
+		"file_url": attachment.get("file_url"),
+		"file_size": len(pdf),
+		"size_human": files.human_size(len(pdf)),
+		"sha256": digest,
+		"is_private": True,
+		"removed": removed,
+		"attached_file_now": attachment.get("file_url"),
+		"source_kept": True,
+		"note": (
+			f"The PDF is attached PRIVATE and `attached_file` now points at it, so a reader "
+			f"following the archive lands on something that opens. {source.get('file_name')} is "
+			"still attached — this adds a fixed copy, it does not replace the editable one."
+			+ (
+				f" File(s) {', '.join(entry['file'] for entry in removed)} were DELETED because "
+				"overwrite=true asked for a replacement rather than a second copy."
+				if removed
+				else ""
+			)
+		),
+		"next_step": (
+			"get_governance_document_content reads it back. If several entries landed .docx-only, "
+			"list_governance_documents shows which — this tool takes one at a time on purpose, so "
+			"a conversion that goes wrong goes wrong once."
+		),
+	}
+	return ToolResult(
+		data,
+		f"converted {source.get('file_name')} on {name} to {pdf_name} "
+		f"({files.human_size(len(pdf))}, sha256 {digest[:12]}) via {route['via']}"
+		+ (f", replacing {len(removed)} File(s)" if removed else ""),
+		docstatus_delta="none → 0 (File created)",
+	)
+
+
+def _governance_attachments(name: str) -> list:
+	return [
+		dict(row)
+		for row in frappe.db.get_all(
+			"File",
+			filters={"attached_to_doctype": GOVERNANCE_DOCUMENT, "attached_to_name": name},
+			fields=compat.existing_fields("File", ("name", "file_name", "file_url", "file_size", "is_private")),
+			order_by="creation asc",
+			limit=200,
+		)
+		or []
+	]
+
+
+def _stem(file_name) -> str:
+	text = str(file_name or "document")
+	return text[: text.rfind(".")] if "." in text else text
+
+
+def _source_docx(attachments: list, requested: str, name: str, tail: str) -> dict:
+	"""The .docx to convert: the one asked for, or the first one attached.
+
+	"The FIRST .docx" is ordered by creation, which is what `_governance_attachments`
+	asks the database for. An entry with two of them is a real thing — an original
+	and an amendment filed together — and the answer there is to name the one you
+	mean rather than to have this guess and be right half the time.
+	"""
+	docx = [row for row in attachments if str(row.get("file_name") or "").lower().endswith(".docx")]
+	if requested:
+		chosen = next(
+			(
+				row
+				for row in attachments
+				if requested in (row.get("name"), row.get("file_name"))
+			),
+			None,
+		)
+		if chosen is None:
+			raise ToolError(
+				f"Governance Document {name} has no attachment called {requested!r}. It has: "
+				f"{', '.join(str(row.get('file_name')) for row in attachments) or '<none>'}. {tail}"
+			)
+		if not str(chosen.get("file_name") or "").lower().endswith(".docx"):
+			raise ToolError(
+				f"{chosen.get('file_name')!r} is not a .docx, so there is nothing to convert. This "
+				"tool exists for archive entries that landed as an editing format and need a fixed "
+				f"one beside them. {tail}"
+			)
+		return chosen
+	if not docx:
+		raise ToolError(
+			f"Governance Document {name} has no .docx attachment. It has: "
+			f"{', '.join(str(row.get('file_name')) for row in attachments) or '<nothing attached>'}. "
+			f"There is nothing to convert. {tail}"
+		)
+	if len(docx) > 1:
+		raise ToolError(
+			f"Governance Document {name} has {len(docx)} .docx attachments: "
+			f"{', '.join(str(row.get('file_name')) for row in docx)}. Name the one to convert in "
+			f"`source_docx_file` — guessing between an original and an amendment and being right "
+			f"half the time is worse than asking. {tail}"
+		)
+	return docx[0]
