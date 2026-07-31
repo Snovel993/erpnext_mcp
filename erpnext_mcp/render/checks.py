@@ -89,8 +89,9 @@ def amount_in_words(amount, currency: str = "USD") -> str:
 	a currency the stock was not printed for says which currency it is rather than
 	silently reading as dollars.
 
-	Registered as a Jinja method (`erpnext_mcp_amount_in_words`) so the shipped
-	check Print Format can call it. See `hooks.py`.
+	Reaches the shipped check Print Format through `erpnext_mcp_amount_in_words`
+	below, which is what `hooks.py` registers. See that function for why the
+	indirection exists.
 	"""
 	try:
 		value = Decimal(str(amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -143,3 +144,35 @@ def _whole(number: int) -> str:
 		return f"{_UNITS[head]} Hundred" + (f" {_whole(tail)}" if tail else "")
 	tens, units = divmod(number, 10)
 	return _TENS[tens] + (f"-{_UNITS[units]}" if units else "")
+
+
+def erpnext_mcp_amount_in_words(amount, currency: str = "USD") -> str:
+	"""`amount_in_words` under a name that is safe to be a global. THIS IS THE HOOK TARGET.
+
+	WHY IT EXISTS AS A SEPARATE FUNCTION, WHICH v0.14.1 LEARNED THE HARD WAY.
+	Frappe's modern `jinja` hook takes a **bare dotted path** and takes the Jinja
+	global's name from the callable's own `__name__`:
+
+	    def get_obj_dict_from_paths(object_paths):
+	        for obj_path in object_paths:
+	            obj = frappe.get_attr(obj_path)      # the WHOLE string
+	            out[obj.__name__] = obj
+
+	The `"<name>:<path>"` syntax belongs to the OLDER `jenv` hook, whose reader
+	splits on the colon first. v0.14.0 declared jenv's syntax under jinja's key,
+	so `frappe.get_attr` was handed
+	`"erpnext_mcp_amount_in_words:erpnext_mcp.render.checks.amount_in_words"`,
+	split it on the first dot to find an app name, and threw
+	`AppNotInstalledError: App erpnext_mcp_amount_in_words:erpnext_mcp is not
+	installed`.
+
+	**That took every page render down, including the error page**, because
+	Frappe builds the Jinja environment to render the error page too. A cosmetic
+	string on a print format turned into a total outage. See `hooks.py`.
+
+	So the name comes from the function rather than from the hook string, and it
+	is spelled with the app's own prefix because a Jinja global is a name in a
+	namespace shared with Frappe, ERPNext and every other installed app. Nothing
+	else in this module should be a hook target.
+	"""
+	return amount_in_words(amount, currency)

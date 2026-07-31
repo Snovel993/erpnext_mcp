@@ -24,7 +24,9 @@ site at call time.
   anything already on your site behaves. The only two hooks it does install are
   additive and namespaced: one daily job that deletes this app's own expired
   upload-staging rows, and one Jinja method (`erpnext_mcp_amount_in_words`) the
-  check print format calls.
+  check print format calls. Both are resolved by a test — see
+  `tests_standalone/test_hooks.py`, and v0.14.1 in the changelog for why that
+  test exists.
 - MIT. Two runtime dependencies beyond Frappe/ERPNext (`shapely` and `h3`, for
   field boundaries), and the app still loads without them.
 

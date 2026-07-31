@@ -76,12 +76,16 @@ PAGE_SIZE = "Letter"
 #: writes it, and a site that has edited its own copy keeps the edit because this
 #: only overwrites when asked.
 #:
-#: THE AMOUNT IN WORDS HAS A FALLBACK, and it is not padding. `amount_in_words`
-#: reaches Jinja through the `jinja` hook in hooks.py, which older Frappe spells
-#: `jenv`. Both are declared, but a site running something in between would leave
-#: the method undefined — and a check with no amount in words is not a check. So
-#: the template falls back to Frappe's own `money_in_words`, which is wordier and
-#: says "Dollars" where the stock already says DOLLARS, but is a valid check.
+#: THE AMOUNT IN WORDS HAS A FALLBACK, and v0.14.1 is why it earns its place.
+#: `erpnext_mcp_amount_in_words` reaches Jinja through the `jinja` hook in
+#: hooks.py — as a BARE dotted path, taking its Jinja name from the callable's
+#: own `__name__`. v0.14.0 wrote the older `jenv` hook's `"<name>:<path>"` syntax
+#: under that key instead, `frappe.get_attr` was handed the whole string, and
+#: since Frappe builds the Jinja environment to render the error page too, every
+#: page on a live site returned 500. The guard below is what a check still prints
+#: through when the method is not registered for any reason at all: Frappe's own
+#: `money_in_words` is wordier and says "Dollars" where the stock already says
+#: DOLLARS, but it is a valid check, and a check with no amount in words is not.
 CHECK_TEMPLATE = """
 <style>
   .chk-check-page { width: 8.5in; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif;

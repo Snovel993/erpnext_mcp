@@ -505,11 +505,14 @@ class TheTemplateItself(unittest.TestCase):
 		self.assertIn("erpnext_mcp_amount_in_words is defined", printing.CHECK_TEMPLATE)
 		self.assertIn("frappe.utils.money_in_words", printing.CHECK_TEMPLATE)
 
-	def test_the_jinja_hook_is_declared_under_both_names(self):
-		"""Frappe renamed this hook from `jenv` to `jinja`, and which one a bench
-		reads depends on its version."""
+	def test_the_jinja_hook_is_a_bare_path_to_the_namespaced_wrapper(self):
+		"""v0.14.0 wrote the OLD `jenv` syntax under the modern `jinja` key and took
+		every page render on a live site down with it. `test_hooks.py` owns this
+		question properly; this is the check-printing half of it — the template and
+		the hook have to agree on a name, and nothing else makes them."""
 		from erpnext_mcp import hooks
 
-		target = "erpnext_mcp_amount_in_words:erpnext_mcp.render.checks.amount_in_words"
-		self.assertIn(target, hooks.jinja["methods"])
-		self.assertIn(target, hooks.jenv["methods"])
+		target = "erpnext_mcp.render.checks.erpnext_mcp_amount_in_words"
+		self.assertEqual(hooks.jinja["methods"], [target])
+		self.assertNotIn(":", target)
+		self.assertFalse(hasattr(hooks, "jenv"))

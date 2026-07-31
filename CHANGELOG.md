@@ -3,6 +3,102 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.14.1 — 2026-07-31
+
+**Hotfix. v0.14.0's Jinja hook was malformed and took every page render on a
+live site down, including the error page.** Upgrade immediately; there is no
+workaround short of uninstalling the app.
+
+### What broke
+
+v0.14.0's Feature C declared its amount-in-words helper as
+
+```python
+jinja = {"methods": ["erpnext_mcp_amount_in_words:erpnext_mcp.render.checks.amount_in_words"]}
+jenv = jinja
+```
+
+That `"<name>:<path>"` form belongs to Frappe's **older `jenv` hook**, whose
+reader splits on the colon before resolving. The modern **`jinja` hook does
+not**: it hands each entry straight to `frappe.get_attr` and takes the Jinja
+global's name from the callable's own `__name__`. So `get_attr` received the
+whole string, took everything before the first dot as an app name, and threw:
+
+```
+AppNotInstalledError: App erpnext_mcp_amount_in_words:erpnext_mcp is not installed
+  File ".../frappe/utils/jinja.py", line 206, in get_jinja_hooks
+  File ".../frappe/utils/jinja.py", line 192, in get_obj_dict_from_paths
+  File ".../frappe/__init__.py", line 1748, in get_attr
+```
+
+**Frappe builds the Jinja environment to render the error page too**, so the
+exception was raised inside the handler for its own exception. Every request
+returned 500 — including the page that would have said why. The MCP endpoint
+itself was largely unaffected (it returns JSON and renders no template), which
+is how the site could be diagnosed at all.
+
+Two mistakes, not one. The syntax was `jenv`'s under `jinja`'s key; and `jenv`
+was declared as a bare alias of the same dict, so one wrong string was
+registered under two hook names with two different grammars.
+
+### The fix
+
+```python
+jinja = {"methods": ["erpnext_mcp.render.checks.erpnext_mcp_amount_in_words"]}
+```
+
+A bare dotted path, which is what the `jinja` hook has always taken. `jenv` is
+gone: it is the deprecated spelling, the `jinja` hook has existed since v14 and
+v14 is this app's compatibility floor, so a second declaration bought nothing
+and doubled the surface for exactly this class of mistake.
+
+Because the hook no longer names the Jinja global, the **function** does.
+`erpnext_mcp.render.checks.erpnext_mcp_amount_in_words` is a one-line wrapper
+around `amount_in_words` whose only job is to carry a namespaced `__name__` — a
+Jinja global lands in a namespace shared with Frappe, ERPNext and every other
+installed app, and that namespacing had been the hook string's job until it
+stopped being.
+
+Nothing else changed. The check Print Format is unaltered and already guarded
+with `{% if erpnext_mcp_amount_in_words is defined %}`, falling back to
+`frappe.utils.money_in_words` — which is why a check would still have printed,
+wordier, on a site that had somehow got past the crash.
+
+### `test_hooks.py` — the test that did not exist
+
+The real defect is that a 2400-test suite had never read `hooks.py`. A hook is a
+string this app never executes itself: nothing imports it, nothing calls it, and
+every existing test exercises the functions it names *directly*. So a hook can
+name a missing module, a renamed function, or a real function in a syntax the
+reader does not speak, and the suite stays green until `bench migrate` on
+somebody's site.
+
+The new module resolves **every** dotted path in `hooks.py` the way Frappe
+resolves it — reproducing `get_attr`'s app-name rule, which is the specific line
+that threw, rather than skipping to `importlib` and proving nothing. It also:
+
+- refuses a colon in any hook path, which is the shipped bug asserted directly;
+- refuses `jenv`, `doc_events`, `override_whitelisted_methods`,
+  `permission_query_conditions`, `has_permission`, `fixtures`,
+  `override_doctype_class` and `doctype_js` by name, since the README and the
+  module docstring both promise this app installs none of them;
+- **fails on any hook key it does not already know about**, so a future hook
+  cannot arrive without somebody stating its shape and therefore how it is
+  validated;
+- checks that the name the hook actually registers is the name the check
+  template actually calls, which nothing else made true;
+- resolves the `scheduler_events` daily sweep and the install/migrate/uninstall
+  hooks, none of which had ever been resolved by a test either.
+
+Verified against the defect: reverting `hooks.py` to the v0.14.0 string fails
+eight tests in this module, including by name the app Frappe could not find.
+
+Every other v0.14.0 hook was audited and is correct.
+`scheduler_events["daily"] = ["erpnext_mcp.tools.uploads.collect_expired_sessions"]`
+is a bare dotted path, which is that hook's format, and it resolves.
+
+Full suite: 2424 pass, 0 fail.
+
 ## 0.14.0 — 2026-07-31
 
 The Sprint 6 tail, closed. Five features, one release, every one of them
@@ -173,10 +269,10 @@ one a US bank will not take. `erpnext_mcp.render.checks.amount_in_words` writes
 a hyphen inside the compound tens, cents as a two-digit numerator over 100
 including `00/100` on a whole amount, because a words line that stops at the
 dollars is a line somebody can add to. It reaches the template through a
-namespaced Jinja method declared under both the `jinja` and the `jenv` hook keys,
-since Frappe renamed that hook and which one a bench reads depends on its
-version; the template falls back to Frappe's own if it is somehow there on
-neither, because a valid check with wordier text beats a blank line.
+namespaced Jinja method — **declared wrongly; see 0.14.1 above, which is the
+release that fixed it.** The template falls back to Frappe's own if the method is
+not registered, because a valid check with wordier text beats a blank line, and
+that fallback is the only reason a check still printed at all.
 
 **MICR is not rendered and should not be.** The routing and account numbers are
 printed in magnetic ink on the stock you buy, by the people who sold it to you,

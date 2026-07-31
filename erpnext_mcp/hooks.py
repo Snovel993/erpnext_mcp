@@ -52,19 +52,40 @@ scheduler_events = {
 	"daily": ["erpnext_mcp.tools.uploads.collect_expired_sessions"],
 }
 
-#: ONE Jinja method, namespaced so it cannot collide with anything.
+#: ONE Jinja method: the amount-in-words the check Print Format renders.
 #:
-#: `create_check_print_format` writes a Print Format that has to render an amount
-#: the way a US check writes one — "One Thousand Two Hundred Thirty-Four and
+#: `create_check_print_format` writes a Print Format that has to say an amount
+#: the way a US check says one — "One Thousand Two Hundred Thirty-Four and
 #: 56/100", with no currency word, because the stock says DOLLARS already.
 #: Frappe's own `money_in_words` says it differently and varies with the site's
 #: number format, so the check template calls ours.
 #:
-#: DECLARED UNDER BOTH KEYS ON PURPOSE. Frappe renamed this hook from `jenv` to
-#: `jinja`, and which one a bench reads depends on its version. An unrecognised
-#: hook key is ignored, so declaring both costs nothing and means the method is
-#: there on either. The template falls back to `frappe.utils.money_in_words` if
-#: it is somehow there on neither — a check with no amount in words is not a
-#: check, and a valid check with wordier text beats a blank line.
-jinja = {"methods": ["erpnext_mcp_amount_in_words:erpnext_mcp.render.checks.amount_in_words"]}
-jenv = jinja
+#: A BARE DOTTED PATH, AND NOTHING ELSE. THIS LINE TOOK A SITE DOWN IN v0.14.0.
+#: Frappe's `jinja` hook hands each entry STRAIGHT to `frappe.get_attr` and takes
+#: the Jinja global's name from the callable's own `__name__`. The
+#: `"<name>:<path>"` form belongs to the OLDER `jenv` hook, whose reader splits
+#: on the colon first. v0.14.0 wrote jenv's syntax under jinja's key, so
+#: `frappe.get_attr` was handed the whole string, split it on the first dot
+#: looking for an app name, and threw `AppNotInstalledError: App
+#: erpnext_mcp_amount_in_words:erpnext_mcp is not installed`.
+#:
+#: Frappe builds the Jinja environment to render the ERROR page too, so that
+#: raised inside the handler for its own exception: **every page on the site
+#: returned 500, including the one that would have explained why**. A cosmetic
+#: string on a print format took out the whole UI. There is a test —
+#: `test_hooks.py` — that now resolves every path in this file and refuses a
+#: colon in a `jinja` entry, because reading this line correctly is evidently not
+#: something to leave to a reader.
+#:
+#: `jenv` is NOT declared. It is the deprecated spelling with a DIFFERENT
+#: syntax, so a second declaration would be a second chance to get a format
+#: wrong for a version this app's compatibility table does not claim (the
+#: `jinja` hook has existed since v14, and v14 is the floor).
+#:
+#: The name is namespaced by naming the FUNCTION that way, since the hook no
+#: longer gets a say in it — a Jinja global lands in a namespace shared with
+#: Frappe, ERPNext and every other installed app. The check template guards with
+#: `is defined` and falls back to `frappe.utils.money_in_words` regardless: a
+#: check with no amount in words is not a check, and a valid check with wordier
+#: text beats a blank line.
+jinja = {"methods": ["erpnext_mcp.render.checks.erpnext_mcp_amount_in_words"]}
