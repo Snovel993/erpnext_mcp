@@ -115,12 +115,31 @@ class Catalogue(SeededTestCase):
 			sorted(name for name in registry.TOOLS if registry.is_available(name)),
 		)
 
-	def test_default_catalogue_is_every_available_read_tool(self):
-		"""Straight out of the box: everything readable, nothing writable."""
+	def test_default_catalogue_is_every_available_read_tool_plus_the_one_installer(self):
+		"""Straight out of the box: everything readable, and one thing writable.
+
+		The one is `install_compliance_fields`, which ships enabled — the single
+		exception to "mutating tools default off", named and argued for in
+		`registry.DEFAULT_ON_MUTATING_TOOLS`. It is asserted here EXPLICITLY rather
+		than filtered out, because the catalogue a fresh install advertises is the
+		thing this test exists to pin down, and a second default-on write tool
+		should break it.
+		"""
 		body, _ = self.call("tools/list")
 		names = sorted(tool["name"] for tool in body["result"]["tools"])
-		self.assertEqual(names, sorted(n for n in registry.READ_TOOLS if registry.is_available(n)))
-		self.assertFalse(set(names) & set(registry.MUTATING_TOOLS))
+		expected = sorted(
+			[name for name in registry.READ_TOOLS if registry.is_available(name)]
+			+ [
+				name
+				for name in registry.DEFAULT_ON_MUTATING_TOOLS
+				if registry.is_available(name)
+			]
+		)
+		self.assertEqual(names, expected)
+		self.assertEqual(
+			set(names) & set(registry.MUTATING_TOOLS),
+			{"install_compliance_fields"},
+		)
 
 	def test_hr_tools_are_absent_without_the_hrms_app(self):
 		"""A tool that can never work here is not a tool that fails — it is a tool
@@ -179,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_one_hundred_thirty_five_tools_sixty_one_read_seventy_four_write(self):
+	def test_catalogue_is_one_hundred_sixty_seven_tools_seventy_five_read_ninety_two_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -190,10 +209,29 @@ class Catalogue(SeededTestCase):
 		regenerate_governance_document_pdf. The two reads are the ones you call
 		when something has gone wrong and you need to see rather than change it:
 		list_staged_uploads for an upload that died partway, and
-		investigate_je_gl_link for a voucher and a ledger that disagree."""
-		self.assertEqual(len(registry.TOOLS), 135)
-		self.assertEqual(len(registry.READ_TOOLS), 61)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 74)
+		investigate_je_gl_link for a voucher and a ledger that disagree.
+
+		v0.15.0 ADDED THIRTY-TWO, and they are the compliance framework:
+
+		  * two for the fields that go ON the operational doctypes —
+		    get_compliance_field_map reads the table, install_compliance_fields
+		    writes the columns;
+		  * nineteen over the four external-evidence doctypes (Compliance Policy,
+		    Certification, Regulatory Filing, Audit Event), eight of which are
+		    reads;
+		  * seven for the kairotic compliance calendar —
+		    get_compliance_calendar, list_compliance_rules and get_audit_readiness
+		    read it, refresh_compliance_alerts rebuilds it, and snooze_alert,
+		    dismiss_alert and dismiss_alert_bulk are the three different ways
+		    something comes off it;
+		  * two for audit packets, one of which assembles a PDF and files it;
+		  * two for the Journal Entry attribution drift v0.13.0 left behind —
+		    find_drifted_je_attributions reads it, repair_drifted_je_attributions
+		    fixes it in a batch.
+		"""
+		self.assertEqual(len(registry.TOOLS), 167)
+		self.assertEqual(len(registry.READ_TOOLS), 75)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 92)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

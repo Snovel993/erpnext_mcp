@@ -3,6 +3,433 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.15.0 — 2026-07-31
+
+**Sprint 7: the compliance framework, and the cleanup of the attribution drift
+v0.13.0 left behind.** Thirty-two new tools, seven new DocTypes, one new
+scheduled job, and one deliberate exception to a promise this app has kept since
+v0.1.0.
+
+The organising idea is one sentence, and every design decision below answers to
+it:
+
+> **Compliance is a lens on operational data, not a duplicate set of records.**
+
+Every spray IS an EPA and Worker Protection Standard record. Every hire IS an
+I-9 record. Every bucket IS an FSMA traceability record. Compliance that lives
+in its own module beside the operation is a shadow that drifts from reality the
+first busy week of harvest — and an auditor who finds two records of one spray
+that disagree has found something far worse than a missing field.
+
+The test for whether a feature is woven in or bolted on, used throughout:
+
+> Does removing it break **operations**, or only break **compliance reporting**?
+> Breaks operations too → woven in correctly. Only breaks reporting → it is a
+> shadow layer; refactor.
+
+---
+
+## Feature A — Wave 1: compliance metadata as Custom Fields on operational DocTypes
+
+**This app now adds fields to three DocTypes it did not create, on purpose. It
+is the only such exception, and it is the one thing in this release that needs
+defending rather than describing.**
+
+`hooks.py` has promised since v0.1.0 that installing erpnext_mcp adds no field
+to any DocType it did not create — so an operator who removes it gets their site
+back exactly as it was. v0.7.0's asset tooling keeps its cost split in an `Asset
+Cost Profile` beside ERPNext's Asset for precisely that reason.
+
+The alternative to breaking that promise is a "Spray Compliance Log" DocType
+that somebody fills in *after* doing the spraying, and it fails the test above:
+delete it and spraying carries on exactly as before. So the applicator's name,
+the EPA registration number, the restricted-entry interval and the pre-harvest
+interval go **on the spray record** — where the person doing the spraying
+already is, and where leaving them blank stops the spray being recorded at all.
+
+**Twenty-four fields across five DocTypes. Seven are required.**
+
+| DocType | Owner | Fields |
+| --- | --- | --- |
+| Spray Log | farm_precision_ag | `applicator_name`\*, `epa_reg_number`\*, `rei_hours`\*, `phi_hours`\*, `weather_temp_f`, `weather_wind_mph`, `wind_direction`, `target_pest` |
+| Employee | farm_hr / hrms | `i9_status`\*, `w4_status`\*, `jurisdiction`\*, `flc_license_status`, `flc_license_expiration` |
+| Bucket Log Entry | the BucketLog bridge | `picker_id`, `crew_id`, `block_id`, `bin_id`, `shipment_id` |
+| Housing Unit | erpnext_mcp — **verified, not added** | `fsma_worker_facility`, `last_habitability_inspection`, `smoke_detector_last_test`, `co_detector_last_test` |
+| Field | erpnext_mcp — **verified, not added** | `food_safety_zone`, `last_spray_date` |
+
+\* required.
+
+`docs/compliance_fields.md` has every one with the framework that wants it, why
+that framework wants it, and — the column that matters — what breaks in the
+day-to-day WORK without it. `test_compliance_fields.py` requires that last
+sentence to exist for every field, so a shadow field cannot be added without
+somebody confronting the question, and it asserts the doc and the table cannot
+drift apart in either direction.
+
+Some of those answers, because they are the argument:
+
+* `rei_hours` — THE crew-scheduling number. Without it nobody knows when the
+  block can be picked, and the crew boss guesses. It is the field that makes the
+  compliance record and the work order the same record.
+* `i9_status` — whether this person may be put on a crew at all. Expired means
+  they cannot lawfully work tomorrow, which is a rostering fact before it is a
+  filing fact.
+* `picker_id` — piecework pay. Every bucket is somebody's money, and an
+  unattributed bucket is a payroll dispute at the end of the week.
+* `co_detector_last_test` — somebody sleeps there tonight.
+
+**How they are added.** Every field is a `Custom Field`, Frappe's supported way
+for one app to extend another's. The target app's repository is untouched, and a
+later farm_precision_ag that ships `epa_reg_number` itself finds this one
+already there rather than ending up with two columns — the check is "is the
+field present at all", not "is there a row we wrote".
+
+**Graceful degradation.** A DocType that is not on this site is skipped BY NAME
+with the app that would bring it. A site without farm_precision_ag is told so;
+it is not a failure. Install the app, run the tool again.
+
+**`verify` targets are not papered over.** Housing Unit and Field are this app's
+own DocTypes and declare their compliance columns in their shipped JSON. A
+missing one means the migration did not finish, and the installer REPORTS it and
+adds nothing — a Custom Field over the top would leave the site with two columns
+and no error, which is worse than the problem it hides.
+
+**Idempotent, and asserted three times.** `MigrateThreeTimes` runs the whole
+`after_migrate` hook three times and counts the Custom Field rows.
+
+**The number worth reading is the backlog.** Frappe binds `reqd` on save, not
+retroactively — so history stays readable and stops being re-saveable. The
+installer counts the rows that would now fail, per field. That count is the
+operation's compliance debt stated in rows, and it is the most useful thing
+either the hook or the tool produces on a site with history.
+
+**What it costs, said plainly.** Uninstalling this app drops those columns and
+everything typed into them. `before_uninstall` now names every one before it
+happens, with the `bench backup --only-doctype` lines to run first.
+
+**New tools:** `install_compliance_fields` (mutating, **defaults ON**),
+`get_compliance_field_map` (read).
+
+`install_compliance_fields` is the only mutating tool in this app that ships
+enabled, because a compliance field that arrives when an operator remembers to
+tick a box is missing on the sites that needed it most. The exception is named
+and argued for in `registry.DEFAULT_ON_MUTATING_TOOLS`, the settings form's
+"write tools are live" banner skips it (a banner that fires every time is one
+nobody reads), and a test asserts it is the ONLY exception. Turn the switch off
+and no field is added, through the tool or through the hook.
+
+---
+
+## Feature B — Wave 2: the four external-evidence DocTypes
+
+Compliance is a lens on operational data — but four kinds of evidence arrive
+from OUTSIDE the operation and have no operational act to hang off. Nobody
+writes a harvest hygiene SOP by harvesting. The certifier's certificate is
+theirs. The agency's docket number is theirs. An auditor's findings are an
+outside party's conclusions.
+
+Four DocTypes, and the set is small because the test above is run in reverse: a
+record that would be filled in AFTER an operational act, describing that act, is
+a shadow record and belongs in the operational DocType.
+
+### Compliance Policy — the SOP library
+
+The version is a FIELD and not part of the name, so a policy at v3 is the same
+record every audit finding already cites. `supersede_compliance_policy` writes
+**both ends of the chain in one act**, because "which procedure was in force on
+the day this happened" is asked from whichever end the auditor starts.
+
+Refuses: a policy superseding itself; one already superseded (two successors
+make "what was in force" unanswerable); a successor whose effective date
+PREDATES the one it replaces, which would leave a period with two procedures in
+force. A superseded policy is historical rather than wrong, and audit packets
+covering the dates it governed still include it.
+
+### Certification — certificates and licences
+
+**The status is not derived from the dates, and that is deliberate.** A
+controller that flipped `status` to Expired when a date passed would only run on
+documents somebody saved — so the expired certificates would be exactly the ones
+still reading Active, and a list filtered on status would show the lapsed ones as
+current. A derived field that is only correct when touched is worse than none.
+Every tool reads the DATE and says so.
+
+`renew_certification` appends to a renewal history rather than editing the
+expiration in place, and **reports any lapse rather than hiding it**: renewing
+late does not close a gap that already happened, and that gap is exactly what an
+auditor asks about. Editing the expiration forward through
+`update_certification` is refused and points at the right tool.
+
+`renewal_window_days` is a LEAD TIME, not a reminder preference — 90 days
+because that is roughly what an Oregon farm labor contractor renewal takes once
+the bond and background check are counted.
+
+### Regulatory Filing — what went to an agency, and what came back
+
+A filing nobody can prove was made is a filing that was not made; the agency's
+position is that they have no record. So a filing marked Submitted with **no
+submission date is refused** — a half-filled record would be assembled into an
+audit packet and read as evidence of something that may not have happened. A
+Draft with no dates is exactly what a filing being prepared looks like and is
+allowed.
+
+### Audit Event — audits, inspections, and whether the findings were closed
+
+An operation is not judged on having no findings. Every audit produces some, and
+a clean report usually means the auditor did not look hard. It is judged on
+CLOSING them.
+
+`close_audit_event` **refuses while any corrective action is open**, naming every
+one — enforced in the controller as well as the tool, so there is no second door.
+A closure date over an open finding is the most misleading thing this app could
+record: `generate_audit_packet` reads it as "this audit is finished", would
+assemble it into a packet, and the packet would be contradicted by the auditor's
+first question. Closing an individual action requires saying what actually
+changed; a tick in a box is what an auditor is trained to disbelieve, and it is
+refused.
+
+**Nineteen tools.** Eight reads (on by default), eleven writes (off).
+
+---
+
+## Feature C — Wave 3: the Kairotic Compliance Calendar
+
+**Chronos serves Kairos, and this is where that stops being a slogan.**
+
+The clock runs the sweep. The sweep decides nothing. Nine rules ask the same
+question every night — *is this condition true right now* — and the answer is
+read off the state of the world, never off the calendar:
+
+> "It is the first of the month, so remind somebody about water testing" — fires
+> on fallow ground, fires on ground tested last week, and is ignored by the third
+> month because most of it is noise.
+>
+> "This block was sprayed eleven days ago and its agricultural water has not been
+> tested in 118 days" — fires on exactly the blocks where FSMA Subpart E is
+> engaged, on exactly the days it is engaged, and is worth reading every time.
+
+**The nine rules, with the gate that makes each ripe:**
+
+| Rule | Fires when | Silent when |
+| --- | --- | --- |
+| `certification_expiring` | inside the lead time the certificate's OWN issuing body takes; Critical inside 30 days | 200 days out; superseded; revoked |
+| `policy_review_overdue` | a procedure IN FORCE is past the review date IT committed to | a draft; a superseded or retired version |
+| `water_test_stale` | a block **in active spray rotation** has no test inside 90 days | fallow ground; a block nobody has sprayed this season; a current test |
+| `housing_inspection_overdue` | a cabin somebody can be ASSIGNED to has no walk inside a year | a shower block; a unit already marked Uninhabitable |
+| `housing_detector_test_stale` | a **FSMA worker facility** has an untested smoke or CO detector | a shed on the same parcel |
+| `i9_expired` | an ACTIVE employee's I-9 has expired | Pending (inside the lawful 3-day window); a former employee |
+| `flc_license_expiring` | a crew boss's licence is inside 90 days; Critical inside 30 | an employee with no licence |
+| `filing_response_due` | a SUBMITTED filing has no response and the deadline is near | a draft; a filing that was answered |
+| `audit_action_overdue` | an action is past the deadline the SCHEME set | an action with no due date; a closed audit |
+
+`water_test_stale` is the clearest case and the one with the most tests. FSMA
+Subpart E is engaged by water contacting a crop, and on a tree fruit block that
+is mostly what goes through the sprayer — so an untested block nobody is
+spraying is dormant rather than unsafe, and becomes Critical **the day it
+re-enters rotation.** There is a test for the gate opening.
+
+**Auto-dismissal is the other half, and it is the half people forget.** An alert
+whose condition resolves is dismissed by the sweep with no human reason
+attached. The water test was done; the licence was renewed; the cabin was
+inspected. Nobody should have to remember to switch off a reminder about
+something that already happened. If the condition comes BACK, the same alert is
+reopened — because an alert is a statement about the present, not a task
+somebody once closed. A dismissal a PERSON made is never reopened: they looked
+and decided, and the sweep does not overrule them by noticing the same thing
+again.
+
+**The sweep is idempotent, and that is the whole design.** Each alert's docname
+is derived from its rule and its source record and from NOTHING that changes
+daily. A key carrying the due date would spawn a new alert every morning as a
+certificate ticked from 60 days out to 59, each one discarding the snooze
+somebody set on the last — silent and cumulative. `first_seen` is never moved
+forward, so an alert open four months reads as four months old.
+
+**Three different ways off the calendar, kept distinct:** auto-dismissal (the
+sweep noticed the work was done), snooze (a DATE; the condition is still true
+and it comes back on its own), and dismissal (a person decided, and the reason
+is mandatory because it is the only part of the record nobody can reconstruct).
+
+`dismiss_alert_bulk` **requires a dry run first.** The whole calendar is one
+filter away: a `severity` typed where an `alert_type` was meant matches
+everything, fails nothing, and looks exactly like success while leaving an
+operation reading as compliant with nothing fixed.
+
+**New DocType:** Compliance Alert (transient — the sweep rebuilds it).
+**New scheduled job:** `erpnext_mcp.alerts.sweep`, daily, never raises, writes
+only this app's own alert table.
+**New tools:** `get_compliance_calendar`, `list_compliance_rules`,
+`get_audit_readiness` (reads); `refresh_compliance_alerts`, `snooze_alert`,
+`dismiss_alert`, `dismiss_alert_bulk` (writes, off).
+
+---
+
+## Feature D — Wave 4: the Audit Packet Generator and the Command Center
+
+### `generate_audit_packet`
+
+Eight regimes — FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA and an unscoped
+Other — assembled into a PDF and filed as a Governance Document in the company's
+archive. Each is scoped to the evidence its regulator actually asks for: a DOL
+packet has no business containing a GlobalGAP certificate, and including one
+invites a question nobody wanted to answer.
+
+**It pulls from the operational records, not from a copy.** The spray records
+ARE the spray logs. The worker facility records ARE the housing register. The
+traceability rows ARE the bucket log. Nothing in a packet is a compliance copy,
+which is why nothing in one can have drifted from what was actually done.
+
+**The kairotic gate is a REFUSAL, not a warning.** A packet asserts a compliant
+period. It is refused on a period that has not finished, and on one whose
+corrective actions are still OPEN — because an open finding inside the period
+contradicts the assertion, and a warning at the top of a printed document is not
+read by the person the document is handed to. Every open action is named in the
+refusal. `allow_open_actions=true` produces it anyway, with the open items in a
+section at the FRONT: an operation that must hand something over mid-remediation
+is better served by disclosing the remediation than by having the auditor find
+it.
+
+**Empty sections say why they are empty.** An FSMA packet on a site with no
+BucketLog bridge says the bridge is not installed and the traceability has to be
+supplied separately. A silently omitted section reads as an operation with
+nothing to declare.
+
+Idempotent by (audit_type, company, period): a second call is refused without
+`overwrite=true`. PDF by default, DOCX available — a .docx handed to somebody
+who cannot open it is a document that did not arrive, which is why
+`generate_quarterly_investment_report` made the same choice.
+
+`stage_via_chunks` routes the assembled bytes through the v0.14.0 staging
+pipeline for a checkpoint, and the tool is straight about when that matters: the
+bytes never cross the MCP boundary, so it buys resumability on a large assembly
+rather than transport. It defaults on above 2 MB and off below, where the
+checkpoint costs more than the failure it guards against — and says so in the
+result.
+
+### The Compliance Command Center
+
+A Frappe Dashboard at `/app/compliance-command-center`: six Number Cards
+(Critical / Warning / Info alerts, overdue corrective actions, expiring
+certificates, open audits) and four Charts (alerts by category, alerts raised
+over time, the certificate expiration timeline, filings by agency).
+
+**Built by an installer, NOT shipped as `fixtures`** — which `test_hooks.py`
+forbids by name, and this is why. A fixture cannot look at what is already
+there, so an operator who reordered their cards or deleted a chart would get it
+silently put back on every migrate, forever. The installer checks before it
+writes; a card somebody edited is left exactly as they left it. Three migrations
+build it once, and there is a test.
+
+`get_audit_readiness` computes the one number somebody acts on — resolved over
+raised, as a percentage — because a count only means something to a person who
+already knows what normal looks like, and a percentage is comparable to
+yesterday's. It also reports how the score was EARNED: an operation at 95%
+entirely through human dismissals is a different operation from one at 95%
+because the work got done, and a score that could not tell them apart would be a
+score worth gaming.
+
+**New tools:** `generate_audit_packet` (write, off), `list_audit_packet_types`
+(read).
+
+---
+
+## Feature E — Journal Entry attribution drift: find it, repair it, in bulk
+
+### The damage class
+
+A Journal Entry line carries `party_type` and `party`; so does every GL Entry row
+it posted. The voucher is what the entry shows; the GL is what every ageing
+report, party ledger and statement of account reads.
+
+v0.13.0's `update_journal_entry_party` looked its GL rows up by
+`voucher_detail_no == line.name` — the Sales Invoice Item convention, and NOT the
+Journal Entry one. Every call against a submitted entry matched zero rows, wrote
+the voucher, and returned a warning blaming the site. v0.14.0 fixed the matcher.
+It did not fix the entries already damaged: a voucher saying one party, a ledger
+saying another, and nothing in either table admitting to the disagreement.
+
+### `find_drifted_je_attributions` (read, on by default)
+
+Scans submitted entries in a date range and reports every line whose voucher and
+ledger disagree, with both sides, the account, the amounts and the matched GL
+row. Three queries whatever the range, matched by the same function the repair
+writes through — so a line reported as drifted is one the repair can act on.
+
+Lines whose GL rows cannot be identified with certainty (two lines of one
+voucher posting the same amount to one account) are reported separately as
+`ambiguous` and are NOT counted as drift: reporting a coin toss as a finding
+would be worse than reporting nothing.
+
+`by_vintage` groups on modification date against the window v0.13.0 was live,
+and the window is an argument — a site that upgraded later ran the broken tool
+for longer. The grouping is reported BESIDE the finding and never used to filter
+it: drift from a restored backup or a direct database edit is just as real and
+lands outside the window.
+
+### `update_journal_entry_party` — the idempotence check now reads BOTH tables
+
+v0.14.0 fixed the matcher and kept a check that read only the VOUCHER: if the
+line already said what was asked for, it refused with "nothing to change". **On a
+damaged line that is precisely wrong** — the voucher agreeing is the SIGNATURE of
+the damage, so the one state the tool most needed to repair was the one it
+declined to look at, while telling the caller everything was fine.
+
+Nothing to change now means nothing to change ANYWHERE. A voucher that agrees
+over a ledger that does not is a GL-only repair; it proceeds, and the result
+reports `gl_only_update: true` so nobody mistakes it for a fresh attribution.
+`force_gl_sync=true` writes the GL rows regardless, for an operator who wants the
+write to be an explicit act rather than a consequence of a comparison.
+
+### `repair_drifted_je_attributions` (write, off, dry run defaults TRUE)
+
+Takes `find_drifted_je_attributions`' `repair_input` verbatim and brings each
+drifted ledger row back into step with its voucher — the right direction for this
+damage class by construction, since the broken tool wrote the voucher and failed
+to write the ledger.
+
+**Moves no balance, ever.** `party` is an attribution column: every debit,
+credit, account and date is refused as an argument, so the trial balance after a
+repair of two hundred lines is arithmetically identical to the one before it.
+There is a test that adds up the ledger before and after. That property is what
+makes a batch write to submitted vouchers defensible at all.
+
+It does not abort on the first failure. Each item is a different voucher, and a
+run that stopped half way would leave the ledger in a state neither the report
+before it nor the report after it describes. Every item is attempted and every
+outcome is reported.
+
+`TheAccJv73Damage` reproduces the original incident — a $10 member distribution
+against an Equity account, damaged exactly the way v0.13.0 damaged it — finds it,
+repairs it, and rescans clean. It is also the regression guard: a matcher that
+went back to v0.13.0's lookup would find nothing there and report a clean ledger.
+
+---
+
+## Tests
+
+**2719 pass, 0 fail** (2424 before this release). New modules:
+
+* `test_compliance_fields.py` — the table, the installer, three migrations,
+  `WovenNotShadow`, and the doc-cannot-drift check
+* `test_evidence.py` — the four DocTypes, and mostly what they refuse
+* `test_alerts.py` — every rule gets fires-when-ripe, silent-when-unripe and
+  auto-dismisses-when-resolved; plus idempotence over three sweeps
+* `test_audit_packets.py` — every audit type round-trips AND its PDF renders;
+  the kairotic gate; the Command Center over three migrations
+* `test_je_drift.py` — including `TheAccJv73Damage`
+
+`test_hooks.py` from v0.14.1 gained the second scheduled job and asserts the
+list exactly, so a third has to be argued for.
+
+## Housekeeping
+
+* `README.md` and `docs/tool-catalog.md` updated for v0.15.0.
+* `docs/compliance_fields.md` is new.
+* `erpnext_mcp/__init__.py` `__version__` is `0.15.0`.
+* The fixture site now seeds an `Administrator` User. Every Frappe site has one
+  and this app writes it into Link-to-User columns; without the row the double
+  was refusing something the real framework accepts.
+
 ## 0.14.1 — 2026-07-31
 
 **Hotfix. v0.14.0's Jinja hook was malformed and took every page render on a

@@ -661,6 +661,44 @@ ERPNEXT_SCHEMA = {
 		"owner",
 		"modified",
 	],
+	# ── v0.15.0: what the Compliance Command Center is built out of ─────────
+	#
+	# Frappe's own dashboard doctypes. Modelled because `dashboard.py` builds
+	# them on every migrate and the property that has to be true — that a second
+	# migrate changes nothing — is only testable against something that records
+	# what the first one wrote.
+	"Dashboard": ["name", "dashboard_name", "is_default", "is_standard", "module", "charts", "cards"],
+	"Dashboard Chart": [
+		"name",
+		"chart_name",
+		"chart_type",
+		"document_type",
+		"based_on",
+		"group_by_type",
+		"group_by_based_on",
+		"time_interval",
+		"timespan",
+		"timeseries",
+		"type",
+		"filters_json",
+		"number_of_groups",
+		"is_public",
+		"module",
+	],
+	"Dashboard Chart Link": ["name", "chart"],
+	"Number Card": [
+		"name",
+		"label",
+		"document_type",
+		"function",
+		"aggregate_function_based_on",
+		"filters_json",
+		"is_public",
+		"color",
+		"type",
+		"module",
+	],
+	"Number Card Link": ["name", "card"],
 	"Client Script": [
 		"name",
 		"dt",
@@ -734,6 +772,12 @@ ERPNEXT_AUTONAME = {
 	# it: a Company that came back named "C-00001" would make every account
 	# docname built from its abbreviation point at a company nobody can find.
 	"Company": "field:company_name",
+	# A Dashboard, a Chart and a Card are each named by their label, which is what
+	# makes `frappe.db.exists("Number Card", "Critical Compliance Alerts")` the
+	# idempotence check `dashboard.install_command_center` writes.
+	"Dashboard": "field:dashboard_name",
+	"Dashboard Chart": "field:chart_name",
+	"Number Card": "field:label",
 }
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
@@ -760,6 +804,14 @@ APP_DOCTYPES = {
 	"Family": "family",
 	"Staged File Upload Session": "staged_file_upload_session",
 	"Staged File Chunk": "staged_file_chunk",
+	# ── v0.15.0: the compliance framework ───────────────────────────────────
+	"Compliance Policy": "compliance_policy",
+	"Certification": "certification",
+	"Certification Renewal": "certification_renewal",
+	"Regulatory Filing": "regulatory_filing",
+	"Audit Event": "audit_event",
+	"Audit Corrective Action": "audit_corrective_action",
+	"Compliance Alert": "compliance_alert",
 }
 
 
@@ -1080,6 +1132,10 @@ CHILD_TABLES = {
 	("Note Payable", "payment_events"): "Note Payable Event",
 	("Parcel", "conveyance_events"): "Parcel Conveyance Event",
 	("Payment Entry", "references"): "Payment Entry Reference",
+	("Certification", "renewals"): "Certification Renewal",
+	("Audit Event", "corrective_actions_required"): "Audit Corrective Action",
+	("Dashboard", "charts"): "Dashboard Chart Link",
+	("Dashboard", "cards"): "Number Card Link",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1093,6 +1149,8 @@ REHYDRATED_CHILD_FIELDS = (
 	"depreciation_postings",
 	"payment_events",
 	"references",
+	"renewals",
+	"corrective_actions_required",
 )
 
 

@@ -32,8 +32,14 @@ class DefaultsAreOff(SeededTestCase):
 		request to go and ask them, while "this site has no shapely" is a request
 		to stop trying. Both are refusals and neither writes anything, which is
 		what this test is really about.
+
+		THE ONE EXCEPTION IS SKIPPED HERE AND ASSERTED BELOW.
+		`registry.DEFAULT_ON_MUTATING_TOOLS` names it and argues for it; skipping
+		it silently would let a second exception hide inside this loop.
 		"""
 		for name in registry.MUTATING_TOOLS:
+			if name in registry.DEFAULT_ON_MUTATING_TOOLS:
+				continue
 			with self.subTest(tool=name):
 				message = self.tool_error(name, {})
 				if registry.is_available(name):
@@ -41,6 +47,36 @@ class DefaultsAreOff(SeededTestCase):
 				else:
 					self.assertIn("not available on this site", message)
 					self.assertIn("not something an operator can switch on", message)
+
+	def test_the_default_on_installer_runs_out_of_the_box_and_touches_no_record(self):
+		"""The exception, asserted rather than assumed.
+
+		`install_compliance_fields` ships enabled, so on a fresh install it RUNS
+		rather than refusing — and the thing that makes that acceptable is that it
+		writes COLUMNS and not DATA. Both halves are checked here: the call
+		succeeds, and not one document of any kind was created or changed by it.
+		"""
+		watched = ("Journal Entry", "GL Entry", "Employee", "Housing Unit", "Field")
+		before = {doctype: len(STORE.rows(doctype)) for doctype in watched}
+		data = self.tool_data("install_compliance_fields", {})
+		self.assertTrue(data["enabled"])
+		for doctype, count in before.items():
+			self.assertEqual(
+				len(STORE.rows(doctype)),
+				count,
+				f"{doctype} rows changed — the installer is supposed to add columns, not data",
+			)
+
+	def test_the_default_on_installer_is_refused_when_an_operator_turns_it_off(self):
+		"""Shipping ON is not the same as being unswitchable.
+
+		An operator who does not want this app touching their Spray Log turns the
+		switch off, and then nothing is added — through the tool OR through
+		`after_migrate`, which asks the same switch.
+		"""
+		self.configure(allow_install_compliance_fields=0)
+		message = self.tool_error("install_compliance_fields", {})
+		self.assertIn("allow_install_compliance_fields", message)
 
 	def test_a_refused_mutation_writes_nothing(self):
 		before = len(STORE.rows("Journal Entry"))

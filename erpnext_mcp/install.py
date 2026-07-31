@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Install / migrate / uninstall hooks.
 
-Two jobs, and the second one arrived in v0.12.0.
+Four jobs. The second arrived in v0.12.0 and the last two in v0.15.0.
 
 The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
@@ -25,6 +25,28 @@ Registering a Party Type changes nothing that already exists. Rules and entries
 using Shareholder, Employee or Supplier keep working exactly as they did; this
 adds options, it does not reclassify anything.
 
+The third is the v0.15.0 compliance fields, and it is the one that needs a
+sentence of defence. It adds Custom Fields to Spray Log, to Employee and to the
+BucketLog bridge — three doctypes this app did not create — which is the exact
+thing `hooks.py` promises it does not do. `compliance_fields.py` argues the case
+at length; the short version is that compliance woven into the operational record
+is defensible under audit and a shadow log beside it is not, and you cannot weave
+anything into a doctype you refuse to touch. It is the only such exception in the
+app, it is behind a switch, and `before_uninstall` names the cost.
+
+The fourth is the Compliance Command Center: a Dashboard, its Charts and its
+Number Cards, built the same way — idempotently, on every migrate, checking
+before it writes. Deliberately NOT shipped as `fixtures`, which `test_hooks.py`
+forbids by name: a fixture is imported by `bench migrate` with no ability to skip
+what a site already has, and an operator who rearranged their dashboard would get
+it silently rearranged back.
+
+None of the four raises. Every one of them runs inside `bench migrate`, where an
+exception aborts the migration for the whole bench — so a failure here is
+reported and the next job still runs. That is not defensive padding: v0.12.0
+shipped an `after_migrate` that died on a link validation and left operators with
+a traceback instead of an app.
+
 What install does NOT do: generate a token, or set `enabled`. A freshly
 installed app must be inert. Turning it on is a decision an operator makes on
 the settings form, and there is no code path that makes it for them.
@@ -32,19 +54,53 @@ the settings form, and there is no code path that makes it for them.
 
 import frappe
 
-from . import settings
+from . import compliance_fields, dashboard, settings
 from .tools import company
 
 
 def after_install() -> None:
 	settings.seed_defaults()
 	company.ensure_party_types()
+	_compliance_fields()
+	_command_center()
 	frappe.db.commit()
 
 
 def after_migrate() -> None:
 	settings.seed_defaults()
 	company.ensure_party_types()
+	_compliance_fields()
+	_command_center()
+
+
+def _compliance_fields() -> None:
+	"""Add the v0.15.0 compliance fields, reporting anything that could not be done.
+
+	`install_compliance_fields` already never raises; this wraps it anyway,
+	because the thing that would take a migration down is not the installer
+	failing, it is the installer failing in a way the installer did not anticipate.
+	"""
+	try:
+		report = compliance_fields.install_compliance_fields()
+	except Exception as exc:  # pragma: no cover - the installer already swallows its own
+		print(f"erpnext_mcp: compliance fields were not installed — {type(exc).__name__}: {exc}")
+		return
+	for failure in report.get("failed") or ():
+		print(
+			f"erpnext_mcp: could not add {failure['doctype']}.{failure['fieldname']} — "
+			f"{failure['reason']}"
+		)
+
+
+def _command_center() -> None:
+	"""Build or repair the Compliance Command Center dashboard."""
+	try:
+		dashboard.install_command_center()
+	except Exception as exc:  # pragma: no cover - the installer already swallows its own
+		print(
+			f"erpnext_mcp: the Compliance Command Center was not built — "
+			f"{type(exc).__name__}: {exc}"
+		)
 
 
 #: Doctypes whose contents are records an operator would want back, and what
@@ -111,6 +167,46 @@ _PRECIOUS_DOCTYPES = (
 		"exclusion, the answer to an ORS 653 wage-deduction claim, and the camp "
 		"roster a food safety investigation asks for. It exists nowhere else",
 	),
+	(
+		"Compliance Policy",
+		"the SOP library — harvest hygiene procedures, spray SOPs, worker training "
+		"documents, with their versions, their effective dates and the PDFs "
+		"attached. An audit asks which procedure was in force on a date, and this "
+		"is the only record that answers",
+	),
+	(
+		"Certification",
+		"the certificate and licence register — GAP, GlobalGAP, PrimusGFS, organic, "
+		"applicator and farm labor contractor licences, with issue and expiration "
+		"dates and the certificates themselves. Operating without a current one is "
+		"a violation, and this is what says whether it is current",
+	),
+	(
+		"Regulatory Filing",
+		"what was filed, to whom, on what date, under what docket number, and what "
+		"they said back. A filing nobody can prove was made is a filing that was "
+		"not made",
+	),
+	(
+		"Audit Event",
+		"every third-party audit and agency inspection, its findings, and whether "
+		"each corrective action was ever closed. The single most damaging record to "
+		"lose: an open corrective action nobody can produce a closure for is how a "
+		"finding becomes a penalty",
+	),
+)
+
+#: Doctypes that go with the app and are NOT worth warning about, with why. The
+#: list exists so a reader can tell "deliberately omitted" from "forgotten".
+#:
+#: Compliance Alert is regenerated from operational state by the nightly job, so
+#: losing it loses nothing that cannot be rebuilt in one scheduler tick. The only
+#: irreplaceable thing on one is a human's dismissal reason, and a dismissal on
+#: an alert whose source condition still holds comes back anyway.
+_REGENERATED_DOCTYPES = (
+	("Compliance Alert", "regenerated from operational state by the nightly sweep"),
+	("Staged File Upload Session", "half-finished uploads"),
+	("Staged File Chunk", "half-finished uploads"),
 )
 
 
@@ -129,19 +225,59 @@ def before_uninstall() -> None:
 			continue
 		if count:
 			losses.append((doctype, count, what))
-	if not losses:
+
+	grafted = _compliance_field_losses()
+	if not losses and not grafted:
 		return
 
-	lines = "\n".join(f"  {count:>6}  {doctype} — {what}" for doctype, count, what in losses)
-	exports = "\n".join(
-		f"  bench --site <site> backup --only-doctype '{doctype}'" for doctype, _count, _what in losses
-	)
-	print(
-		"\nerpnext_mcp: uninstalling will drop these records permanently:\n"
-		f"{lines}\n\n"
-		"Attachments on a Governance Document are Files and survive the uninstall, "
-		"but nothing will say which document they belonged to.\n"
-		"To keep any of it, export first — in the Desk via Report View > Menu > "
-		"Export, or:\n"
-		f"{exports}\n"
-	)
+	if losses:
+		lines = "\n".join(f"  {count:>6}  {doctype} — {what}" for doctype, count, what in losses)
+		exports = "\n".join(
+			f"  bench --site <site> backup --only-doctype '{doctype}'"
+			for doctype, _count, _what in losses
+		)
+		print(
+			"\nerpnext_mcp: uninstalling will drop these records permanently:\n"
+			f"{lines}\n\n"
+			"Attachments on a Governance Document are Files and survive the uninstall, "
+			"but nothing will say which document they belonged to.\n"
+			"To keep any of it, export first — in the Desk via Report View > Menu > "
+			"Export, or:\n"
+			f"{exports}\n"
+		)
+
+	if grafted:
+		columns = "\n".join(f"  {doctype}.{fieldname}" for doctype, fieldname in grafted)
+		print(
+			"\nerpnext_mcp: it will ALSO drop these columns from doctypes belonging to "
+			"OTHER apps, and everything anybody has typed into them:\n"
+			f"{columns}\n\n"
+			"These are the v0.15.0 compliance fields. The records they sit on — spray "
+			"logs, employees, bucket log entries — survive the uninstall; the applicator "
+			"names, EPA registration numbers, REIs, PHIs, I-9 statuses and traceability "
+			"links do not. Export the affected doctypes BEFORE uninstalling, not after:\n"
+			f"{chr(10).join(sorted({f'  bench --site <site> backup --only-doctype {doctype!r}' for doctype, _f in grafted}))}\n"
+		)
+
+
+def _compliance_field_losses() -> list:
+	"""The v0.15.0 Custom Fields that are on this site, as (doctype, fieldname).
+
+	Only the ones this app grafted onto somebody ELSE'S doctype — the `verify`
+	targets are declared fields of this app's own doctypes and go with those, and
+	are already covered by `_PRECIOUS_DOCTYPES`.
+	"""
+	out = []
+	for target in compliance_fields.TARGETS:
+		if target.mode != "extend":
+			continue
+		for spec in target.fields:
+			try:
+				if frappe.db.exists(
+					compliance_fields.CUSTOM_FIELD,
+					{"dt": target.doctype, "fieldname": spec.fieldname},
+				):
+					out.append((target.doctype, spec.fieldname))
+			except Exception:
+				continue
+	return out

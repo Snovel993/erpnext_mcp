@@ -1,0 +1,198 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:cert_name",
+ "creation": "2026-07-31 12:00:00.000000",
+ "description": "One certificate or licence, and the date it stops being a defence. GAP, GlobalGAP, PrimusGFS, organic, pesticide applicator, farm labor contractor. Operating without a current one is a violation in itself, which makes the expiration date the single most load-bearing column in this app.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "cert_name",
+  "cert_type",
+  "status",
+  "identity_col",
+  "company",
+  "holder",
+  "issuing_body",
+  "dates_section",
+  "issued_date",
+  "expiration_date",
+  "dates_col",
+  "renewal_window_days",
+  "certificate_number",
+  "renewal_section",
+  "renewals",
+  "file_section",
+  "attached_certificate",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this certificate is called, distinctly enough that two of them cannot collide: 'GlobalGAP — Highland LLC 2026', 'Applicator License — T Polehn'. The docname is built from it.",
+   "fieldname": "cert_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Certificate Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Which regime issued it. Drives what an audit packet pulls: a GAP packet takes the GAP certificate and the applicator licences of everyone who sprayed; a DOL packet takes the farm labor contractor licences.",
+   "fieldname": "cert_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Certificate Type",
+   "options": "\nGAP\nGlobalGAP\nPrimusGFS\nOrganic\nApplicator License\nFarm Labor Contractor License\nCommercial Driver License\nFood Safety Training\nFirst Aid / CPR\nWater Test Certification\nOther",
+   "reqd": 1
+  },
+  {
+   "default": "Active",
+   "description": "Active is the claim that this is currently a defence. Nothing sets it for you except renew_certification, which sets it back to Active on a renewal — an expired certificate keeps saying Active until somebody looks, which is exactly why the alert engine reads the expiration date rather than this field.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nExpired\nSuspended\nRevoked\nSuperseded\nNot Yet Effective"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The entity the certificate covers. Blank means it is not entity-specific — a personal applicator licence follows the person across whichever company they work for that week.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "Whose certificate it is. Free text on purpose: the holder may be a Related Party, a Family member, an employee, a company, or somebody in none of those registers — and a Frappe Link points at exactly one doctype. Read back, the tools resolve the name against the registers this site has and report which one it was found in, exactly as Family.related_to does.",
+   "fieldname": "holder",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Holder",
+   "search_index": 1
+  },
+  {
+   "description": "Who issued it: 'Oregon Department of Agriculture', 'Primus Auditing Ops', 'SCS Global Services'. The body a renewal application goes back to.",
+   "fieldname": "issuing_body",
+   "fieldtype": "Data",
+   "label": "Issuing Body"
+  },
+  {
+   "fieldname": "dates_section",
+   "fieldtype": "Section Break",
+   "label": "Validity"
+  },
+  {
+   "fieldname": "issued_date",
+   "fieldtype": "Date",
+   "label": "Issued"
+  },
+  {
+   "description": "The date it stops being a defence. The most load-bearing column in this app: the alert engine turns Warning inside the renewal window and Critical inside thirty days, and an audit packet will not include a certificate that had expired during the period it covers.",
+   "fieldname": "expiration_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Expires",
+   "search_index": 1
+  },
+  {
+   "fieldname": "dates_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "90",
+   "description": "How long before expiry the renewal has to start, in days. This is not a reminder preference — it is how long the issuing body actually takes. An Oregon farm labor contractor licence needs a bond and a background check and cannot be turned round in a week, so the window is the real lead time and the alert fires on it.",
+   "fieldname": "renewal_window_days",
+   "fieldtype": "Int",
+   "label": "Renewal Window (days)"
+  },
+  {
+   "description": "The number printed on the certificate, if it carries one. What an inspector asks for at the gate.",
+   "fieldname": "certificate_number",
+   "fieldtype": "Data",
+   "label": "Certificate Number"
+  },
+  {
+   "fieldname": "renewal_section",
+   "fieldtype": "Section Break",
+   "label": "Renewal History"
+  },
+  {
+   "description": "Every renewal, with the expiration date it moved from and to. A certificate that has been renewed four times and a certificate issued yesterday look identical from the current dates alone, and only one of them is evidence of a maintained programme.",
+   "fieldname": "renewals",
+   "fieldtype": "Table",
+   "label": "Renewals",
+   "options": "Certification Renewal"
+  },
+  {
+   "fieldname": "file_section",
+   "fieldtype": "Section Break",
+   "label": "The Certificate"
+  },
+  {
+   "description": "The certificate itself. An auditor asks to see it, not to see a record saying it exists.",
+   "fieldname": "attached_certificate",
+   "fieldtype": "Attach",
+   "label": "Attached Certificate"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Certification",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 1,
+ "search_fields": "cert_type,holder,expiration_date,status",
+ "sort_field": "expiration_date",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "cert_name",
+ "track_changes": 1
+}

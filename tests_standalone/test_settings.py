@@ -82,8 +82,38 @@ class ShippedDefaults(SeededTestCase):
 
 	def test_mutating_tools_default_off(self):
 		for name in registry.MUTATING_TOOLS:
+			if name in registry.DEFAULT_ON_MUTATING_TOOLS:
+				continue
 			with self.subTest(tool=name):
 				self.assertEqual(self.by_name[f"allow_{name}"]["default"], "0")
+
+	def test_the_default_on_exceptions_are_named_and_argued_for(self):
+		"""A promise with an undocumented exception is not a promise.
+
+		`DEFAULT_ON_MUTATING_TOOLS` is the one place an exception to "mutating
+		tools ship off" may live, and it has to carry a real sentence saying why —
+		so a new exception cannot arrive without somebody writing the argument for
+		it, and a reader has one place to check.
+		"""
+		for name, why in registry.DEFAULT_ON_MUTATING_TOOLS.items():
+			with self.subTest(tool=name):
+				self.assertIn(name, registry.MUTATING_TOOLS)
+				self.assertEqual(self.by_name[f"allow_{name}"]["default"], "1")
+				self.assertGreater(
+					len(why),
+					120,
+					f"{name} is a mutating tool that ships ON and its justification is a "
+					"phrase. Write the argument.",
+				)
+
+	def test_the_only_default_on_exception_is_the_compliance_field_installer(self):
+		"""Asserted as an exact set rather than a membership check.
+
+		The whole value of "mutating tools ship off" is that it is true without
+		qualification, and every exception erodes it. A second one has to fail here
+		and be argued for in a review rather than added quietly beside the first.
+		"""
+		self.assertEqual(set(registry.DEFAULT_ON_MUTATING_TOOLS), {"install_compliance_fields"})
 
 	def test_the_master_switch_defaults_off(self):
 		self.assertEqual(self.by_name["enabled"]["default"], "0")
@@ -455,15 +485,24 @@ class SelfTest(SeededTestCase):
 
 		self.configure(enabled=1, allow_create_journal_entry=1)
 		report = mcp.selftest()
-		self.assertEqual(report["mutating_tools_enabled"], ["create_journal_entry"])
-		self.assertEqual(report["tools_total"], 135)
-		# Every read tool this site can actually run, plus the one write tool just
-		# enabled. Computed rather than hardcoded, because what is runnable now
-		# depends on what is pip-installed: the three HR tools need hrms, and the
-		# five geospatial ones need shapely and h3. A hardcoded number would pass
-		# on the developer's bench and fail in CI, or the reverse.
+		# `install_compliance_fields` is here because it genuinely IS on — it is
+		# the one mutating tool that ships enabled, and a diagnostic that hid that
+		# would be lying about the site's write surface to the one person who
+		# asked. See registry.DEFAULT_ON_MUTATING_TOOLS. The settings FORM skips it
+		# in its warning banner, which is a different judgement about a different
+		# audience: a banner that fires every time is a banner nobody reads.
+		self.assertEqual(
+			sorted(report["mutating_tools_enabled"]),
+			["create_journal_entry", "install_compliance_fields"],
+		)
+		self.assertEqual(report["tools_total"], len(registry.TOOLS))
+		# Every read tool this site can actually run, plus the two write tools that
+		# are on. Computed rather than hardcoded, because what is runnable depends
+		# on what is pip-installed: the three HR tools need hrms, and the five
+		# geospatial ones need shapely and h3. A hardcoded number would pass on the
+		# developer's bench and fail in CI, or the reverse.
 		runnable = [name for name in registry.READ_TOOLS if registry.is_available(name)]
-		self.assertEqual(len(report["tools_enabled"]), len(runnable) + 1)
+		self.assertEqual(len(report["tools_enabled"]), len(runnable) + 2)
 		self.assertEqual(sorted(report["tools_unavailable"]), sorted(self.expected_unavailable()))
 
 	def expected_unavailable(self) -> list:

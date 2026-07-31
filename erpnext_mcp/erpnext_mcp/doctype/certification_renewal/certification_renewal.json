@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-31 12:00:00.000000",
+ "description": "One renewal of one certificate: the expiration date it moved from, the date it moved to, when that happened and who did it. A child table rather than its own doctype because a renewal has no existence apart from the certificate it renews — unlike a Note Payable Event, which records money moving and has to survive its note being closed.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "renewed_on",
+  "previous_expiration",
+  "new_expiration",
+  "renewal_col",
+  "renewed_by",
+  "certificate_number",
+  "reason"
+ ],
+ "fields": [
+  {
+   "description": "The date the renewal was recorded here — not necessarily the date the issuing body signed it, which belongs in the notes if the two differ and it matters.",
+   "fieldname": "renewed_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Renewed On",
+   "reqd": 1
+  },
+  {
+   "description": "What the certificate expired on before this renewal. Kept so a lapse is visible: a renewal recorded after the previous expiration date is a period the operation was uncertified, and that gap does not disappear because somebody renewed late.",
+   "fieldname": "previous_expiration",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Previous Expiration"
+  },
+  {
+   "fieldname": "new_expiration",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "New Expiration",
+   "reqd": 1
+  },
+  {
+   "fieldname": "renewal_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "renewed_by",
+   "fieldtype": "Data",
+   "label": "Renewed By"
+  },
+  {
+   "description": "The new certificate number, where a renewal issues one. Blank means it kept the old number.",
+   "fieldname": "certificate_number",
+   "fieldtype": "Data",
+   "label": "New Certificate Number"
+  },
+  {
+   "description": "What was done to renew it — the audit that was passed, the fee that was paid, the training that was completed. The part nobody can reconstruct from the dates.",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "What Was Done"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-31 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Certification Renewal",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

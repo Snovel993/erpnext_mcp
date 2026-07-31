@@ -98,6 +98,12 @@ SESSION_TTL_HOURS = 24
 #: `list_staged_uploads`; a UUID is 36 characters.
 MAX_SESSION_ID = 140
 
+#: Piece size for `stage_internal_bytes`, which is not composing an argument in a
+#: model's context and is therefore not bound by `MAX_CHUNK_BASE64`. One megabyte
+#: of raw bytes is a row a database is comfortable with and a checkpoint fine
+#: enough to be worth having.
+INTERNAL_CHUNK_BYTES = 1024 * 1024
+
 
 # ── 129. stage_file_chunk ───────────────────────────────────────────────────
 def stage_file_chunk(args: dict) -> ToolResult:
@@ -794,3 +800,94 @@ def _clear_session(session: str) -> int:
 		frappe.delete_doc(CHUNK_DOCTYPE, row["name"], force=True, ignore_permissions=True)
 	frappe.delete_doc(SESSION_DOCTYPE, session, force=True, ignore_permissions=True)
 	return len(rows or [])
+
+
+# ── the in-app door onto the same pipeline ──────────────────────────────────
+def stage_internal_bytes(content: bytes, session_id: str, chunk_bytes: int = INTERNAL_CHUNK_BYTES) -> dict:
+	"""Run bytes this SITE produced through the staging tables, then hand them back.
+
+	WHY A SERVER-SIDE PRODUCER WOULD WANT THIS AT ALL, since the bytes never cross
+	the MCP boundary and no chunking is needed to get them here. The answer is not
+	transport, it is CHECKPOINTING. `generate_audit_packet` assembles a document
+	out of several hundred records and then has to write it; a worker killed
+	between "assembled" and "written" loses the assembly and the caller finds out
+	as a timeout. Staged in pieces first, the same failure leaves a resumable
+	session and a per-piece digest naming exactly how far it got.
+
+	For a two-hundred-kilobyte packet that is ceremony, and `generate_audit_packet`
+	says so and lets a caller turn it off. For the forty-megabyte FSMA packet a
+	real season produces it is the difference between a retry and a mystery.
+
+	Returns `{"session": <docname>, "chunks": n, "sha256": ..., "content": bytes}`
+	with the content READ BACK OUT of staging rather than passed through — so a
+	round trip that corrupted anything is caught here rather than in a PDF nobody
+	can open.
+
+	The caller is responsible for `clear_internal_session`. Deliberately: the
+	session has to outlive this function for the checkpoint to be worth anything,
+	and it is cleared once the File exists.
+	"""
+	_require_doctypes()
+	session_id = _session_id(session_id)
+	if len(content) > MAX_TOTAL_BYTES:
+		raise ToolError(
+			f"this document is {files.human_size(len(content))}, over the "
+			f"{files.human_size(MAX_TOTAL_BYTES)} ceiling for one assembled file. Narrow the "
+			"period. Nothing was staged."
+		)
+	chunk_bytes = max(1, int(chunk_bytes))
+	pieces = [content[start : start + chunk_bytes] for start in range(0, len(content), chunk_bytes)] or [b""]
+	if len(pieces) > MAX_TOTAL_CHUNKS:
+		# Widen the pieces rather than refuse. The per-piece ceiling exists because
+		# a MODEL has to compose the argument, and nothing here is composed by a
+		# model — these bytes came off this site's own disk.
+		chunk_bytes = (len(content) // MAX_TOTAL_CHUNKS) + 1
+		pieces = [content[start : start + chunk_bytes] for start in range(0, len(content), chunk_bytes)]
+
+	digest = hashlib.sha256(content).hexdigest()
+	if frappe.db.exists(SESSION_DOCTYPE, {"session_id": session_id}):
+		# A previous run that died after staging and before committing. Its pieces
+		# are of a document assembled from data that may since have changed, so they
+		# are discarded rather than resumed — a packet half from Tuesday and half
+		# from Thursday would be worse than either.
+		row = frappe.db.get_value(SESSION_DOCTYPE, {"session_id": session_id}, "name")
+		_clear_session(row)
+
+	session = _open_session(session_id, len(pieces), digest, len(content))
+	staged = 0
+	for index, piece in enumerate(pieces):
+		encoded = base64.b64encode(piece).decode("ascii")
+		frappe.get_doc(
+			{
+				"doctype": CHUNK_DOCTYPE,
+				"session": session.name,
+				"chunk_index": index,
+				"chunk_base64": encoded,
+				"chunk_bytes": len(piece),
+				"chunk_sha256": hashlib.sha256(piece).hexdigest(),
+			}
+		).insert()
+		staged += len(piece)
+	session.chunks_received = len(pieces)
+	session.staged_bytes = staged
+	session.save()
+
+	# Read it back out of staging rather than trusting the bytes we still hold.
+	# A round trip that corrupted something is caught here, not in a PDF nobody
+	# can open three weeks later.
+	assembled = _assemble(session.name, len(pieces))
+	if hashlib.sha256(assembled).hexdigest() != digest:  # pragma: no cover - a genuinely broken site
+		_clear_session(session.name)
+		raise ToolError(
+			"the document did not survive a round trip through this site's own staging tables. "
+			"That is a database problem rather than a compliance one. Nothing was written."
+		)
+	return {"session": session.name, "chunks": len(pieces), "sha256": digest, "content": assembled}
+
+
+def clear_internal_session(session: str) -> int:
+	"""Delete a staging session once the File it built exists."""
+	try:
+		return _clear_session(session)
+	except Exception:
+		return 0

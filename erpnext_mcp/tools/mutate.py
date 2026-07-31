@@ -787,6 +787,19 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 	against a submitted entry, the ledger still says what it said before —
 	investigate_je_gl_link will show you which entries are in that state.
 
+	v0.15.0 FIXES WHAT v0.14.0'S FIX LEFT BEHIND. v0.14.0 corrected the matcher but
+	kept an idempotence check that read only the VOUCHER: if the line already said
+	what was asked for, it refused with "nothing to change". On an entry damaged by
+	v0.13.0 that is precisely wrong — the voucher was updated, the ledger was not,
+	and the one state the tool most needed to repair was the one it declined to
+	look at, while telling the caller everything was fine. The check now asks BOTH
+	tables. Nothing to change means nothing to change anywhere. A voucher that
+	agrees over a ledger that does not is a GL-only repair, it proceeds, and the
+	result says `gl_only_update: true` so nobody mistakes it for a fresh
+	attribution. `force_gl_sync=true` writes the GL rows even where nothing
+	disagrees, for an operator who wants the write to be an explicit act rather
+	than a consequence of a comparison.
+
 	A DRAFT GOES THROUGH THE DOCUMENT INSTEAD. A draft has written no GL Entries
 	and can still be saved normally, so it is saved normally and every validation
 	on the doctype runs. The direct write is reserved for the case that has no
@@ -865,12 +878,6 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 		"party": str(line.get("party") or "") or None,
 	}
 	after = {"party_type": party_type or None, "party": party or None}
-	if before == after:
-		raise ToolError(
-			f"line {line_index} of {doc.name} already reads "
-			f"{before['party_type'] or 'no party type'} / {before['party'] or 'no party'}. "
-			"Nothing to change, and nothing was changed."
-		)
 
 	link = (
 		gl_link_for_line(doc.name, rows, line_index)
@@ -878,6 +885,36 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 		else {"rows": [], "basis": "draft — no GL Entry rows exist yet", "exact": False, "blocker": ""}
 	)
 	gl_rows = link["rows"]
+
+	# ── the v0.15.0 idempotence fix ─────────────────────────────────────────
+	#
+	# v0.14.0 refused here whenever the VOUCHER already read what was asked for,
+	# on the reasonable-sounding grounds that there was nothing to change. That
+	# was wrong in exactly the case this tool most needs to handle, and the case
+	# v0.13.0 created: a line whose voucher was updated and whose GL rows were
+	# not. On one of those, the voucher already reads the requested party, the
+	# ledger still reads the old one, and "nothing to change" was the one answer
+	# that left the ledger wrong AND told the caller it was fine.
+	#
+	# So the check now asks both tables. Nothing to change means nothing to change
+	# ANYWHERE — voucher and ledger agreeing with the request. A voucher that
+	# agrees over a ledger that does not is a GL-only repair, and it proceeds.
+	gl_drifted = [row for row in gl_rows if _party_of(row) != after]
+	gl_only_update = before == after and bool(gl_drifted)
+	forced = as_bool(args, "force_gl_sync", False)
+
+	if before == after and not gl_drifted and not forced:
+		raise ToolError(
+			f"line {line_index} of {doc.name} already reads "
+			f"{before['party_type'] or 'no party type'} / {before['party'] or 'no party'}"
+			+ (
+				f", and so do the {len(gl_rows)} GL Entry row(s) it posted. "
+				if gl_rows
+				else ". It has posted no GL Entry rows to disagree with it. "
+			)
+			+ "Nothing to change, and nothing was changed."
+		)
+
 	accepted_unmatched = False
 	if link["blocker"]:
 		if not as_bool(args, "allow_unmatched_gl", False):
@@ -906,14 +943,27 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 		"after": after,
 		"reason": reason,
 		"gl_entries_matched": len(gl_rows),
+		"gl_entries_drifted": len(gl_drifted),
 		"gl_match_basis": link["basis"],
 		"gl_match_exact": bool(link["exact"]),
+		"gl_only_update": bool(gl_only_update),
+		"force_gl_sync": bool(forced),
 		"tables": (
 			["Journal Entry Account", "GL Entry"] if docstatus == 1 and gl_rows else ["Journal Entry"]
 		),
 	}
 	if accepted_unmatched:
 		plan["gl_match_problem"] = link["blocker"]
+	if gl_drifted:
+		plan["gl_drift"] = [
+			{
+				"gl_entry": row.get("name"),
+				"account": row.get("account"),
+				"party_type": str(row.get("party_type") or "") or None,
+				"party": str(row.get("party") or "") or None,
+			}
+			for row in gl_drifted
+		]
 
 	if as_bool(args, "dry_run", False):
 		return ToolResult(
@@ -924,6 +974,13 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 				"note": (
 					"Nothing was written. Call again without dry_run to make the change. No "
 					"balance would move either way: only party_type and party are touched."
+					+ (
+						" The voucher ALREADY reads what was asked for and "
+						f"{len(gl_drifted)} GL Entry row(s) do not — this would be a GL-only "
+						"repair, which is exactly the damage class v0.13.0 left behind."
+						if gl_only_update
+						else ""
+					)
 				),
 			},
 			f"dry run: would attribute line {line_index} of {doc.name} ({account}) to "
@@ -960,7 +1017,17 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 		"gl_entries_updated": updated_gl,
 		"comment_added": comment,
 		"note": (
-			"NO balance moved. Account, debit, credit and date are not arguments to this tool, "
+			(
+				"THE VOUCHER ALREADY SAID THIS AND THE LEDGER DID NOT. This was a GL-only "
+				f"repair: {len(gl_drifted)} GL Entry row(s) that read "
+				f"{gl_drifted[0].get('party') or 'no party'} now read "
+				f"{after['party'] or 'no party'}, and the voucher was not touched because it was "
+				"already right. That state is the signature of v0.13.0's broken party tool, "
+				"which wrote the voucher and silently failed to write the ledger. "
+				if gl_only_update
+				else ""
+			)
+			+ "NO balance moved. Account, debit, credit and date are not arguments to this tool, "
 			"so the trial balance after this call is arithmetically identical to the one before "
 			"it. What changed is who the line is attributed to"
 			+ (
@@ -983,6 +1050,8 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 			else "get_journal_entry shows the line as it now reads."
 		),
 	}
+	if gl_only_update:
+		data["repaired_drift"] = True
 	if accepted_unmatched:
 		data["warning"] = (
 			f"THE VOUCHER AND THE LEDGER NOW DISAGREE, and you asked for that with "
@@ -993,12 +1062,33 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 		)
 	return ToolResult(
 		data,
-		f"attributed line {line_index} of {doc.name} ({account}) to "
-		f"{after['party_type'] or 'nobody'} / {after['party'] or 'nobody'}"
-		f" — was {before['party_type'] or 'nobody'} / {before['party'] or 'nobody'}"
-		f", {updated_gl} GL Entry row(s) updated — {reason}",
+		(
+			f"re-synced the ledger for line {line_index} of {doc.name} ({account}) to "
+			f"{after['party_type'] or 'nobody'} / {after['party'] or 'nobody'} — the voucher "
+			f"already said so and {len(gl_drifted)} GL Entry row(s) did not"
+			if gl_only_update
+			else (
+				f"attributed line {line_index} of {doc.name} ({account}) to "
+				f"{after['party_type'] or 'nobody'} / {after['party'] or 'nobody'}"
+				f" — was {before['party_type'] or 'nobody'} / {before['party'] or 'nobody'}"
+				f", {updated_gl} GL Entry row(s) updated"
+			)
+		)
+		+ f" — {reason}",
 		docstatus_delta="",
 	)
+
+
+def _party_of(row) -> dict:
+	"""One row's attribution, in the shape `before`/`after` use.
+
+	Shared so the drift comparison and the idempotence check cannot disagree about
+	whether an empty string and a None are the same attribution. They are.
+	"""
+	return {
+		"party_type": str(row.get("party_type") or "") or None,
+		"party": str(row.get("party") or "") or None,
+	}
 
 
 def _assert_line_takes_a_party(doc, line, line_index: int, account: str, party_type: str, args: dict) -> None:
@@ -1507,3 +1597,211 @@ def _validated_vouchers(raw) -> list[dict]:
 			}
 		)
 	return out
+
+
+# ── 151. repair_drifted_je_attributions ─────────────────────────────────────
+#: Most lines one repair run will touch. Deliberately smaller than the scan's
+#: cap: reading five hundred findings is a report, writing to five hundred GL
+#: rows is an event, and the two want different ceilings.
+REPAIR_CAP = 200
+
+
+def repair_drifted_je_attributions(args: dict) -> ToolResult:
+	"""Bring drifted GL Entry rows back into step with their vouchers, in a batch.
+
+	TAKES `repair_input` FROM `find_drifted_je_attributions` VERBATIM. That is the
+	whole ergonomic point: the diagnostic already knows which line of which entry
+	should read what, and re-deriving it here would be a second implementation of
+	the matcher with its own opportunity to be wrong. Each item is
+	`{journal_entry, line_index, party_type, party}`.
+
+	IT REPAIRS IN ONE DIRECTION, AND THE DIRECTION IS A JUDGEMENT WORTH STATING.
+	Every item brings the LEDGER into line with the VOUCHER. For the v0.13.0
+	damage class that is right by construction — the broken tool wrote the voucher
+	and failed to write the ledger, so the voucher holds the attribution somebody
+	actually intended and the ledger holds the stale one. For drift from some
+	other cause it may not be, which is why the diagnostic reports the vintage and
+	why a line whose LEDGER is the correct side should go through
+	`update_journal_entry_party` individually with the party you want on both.
+
+	MOVES NO BALANCE, EVER. `party` is an attribution column. Every debit, credit,
+	account and date is untouched, so the trial balance after a repair of two
+	hundred lines is arithmetically identical to the one before it. That is what
+	makes a batch write to submitted vouchers defensible at all.
+
+	IT DOES NOT STOP ON THE FIRST FAILURE. Each item is independent — a different
+	voucher, a different line — and a run that aborted half way would leave the
+	ledger in a state neither the report before it nor the report after it
+	describes. Every item is attempted, and every outcome is reported per item.
+	The other half of that trade is that a partial run is a real outcome, which is
+	why `failed` is in the summary line and not only in the payload.
+
+	DRY RUN DEFAULTS TRUE.
+	"""
+	reason = as_str(args, "reason", required=True)
+	if len(reason) < 8:
+		raise ToolError(
+			"reason must be a real explanation of why these attributions are being repaired, and "
+			"it is written onto every entry this touches. 'Repairing drift left by v0.13.0's "
+			"update_journal_entry_party, per find_drifted_je_attributions on <date>' is the kind "
+			"of sentence that answers the question in two years. Nothing was changed."
+		)
+
+	items = args.get("repairs")
+	if items is None:
+		items = args.get("repair_input")
+	if not isinstance(items, list) or not items:
+		raise ToolError(
+			"repairs must be a non-empty list of "
+			'{"journal_entry", "line_index", "party_type", "party"} objects — which is exactly '
+			"what find_drifted_je_attributions returns under `repair_input`. Pass that through. "
+			"Nothing was changed."
+		)
+	if len(items) > REPAIR_CAP:
+		raise ToolError(
+			f"{len(items)} repairs were passed, over the {REPAIR_CAP} this tool will take in one "
+			"run. Reading five hundred findings is a report; writing to five hundred ledger rows "
+			"is an event, and the two deserve different ceilings. Split the list. Nothing was "
+			"changed."
+		)
+
+	plan = []
+	for index, item in enumerate(items, start=1):
+		if not isinstance(item, dict):
+			raise ToolError(f"repairs[{index}] must be an object, got {type(item).__name__}.")
+		unknown = sorted(set(item) - {"journal_entry", "line_index", "party_type", "party"})
+		if unknown:
+			raise ToolError(
+				f"repairs[{index}] has unsupported field(s): {', '.join(unknown)}. Each item is "
+				"{journal_entry, line_index, party_type, party}. Nothing was changed."
+			)
+		journal_entry = str(item.get("journal_entry") or "").strip()
+		if not journal_entry:
+			raise ToolError(f"repairs[{index}] has no journal_entry. Nothing was changed.")
+		line_index = item.get("line_index")
+		try:
+			line_index = int(line_index)
+		except (TypeError, ValueError):
+			raise ToolError(
+				f"repairs[{index}].line_index must be a whole number counting from 1, got "
+				f"{line_index!r}. Nothing was changed."
+			) from None
+		plan.append(
+			{
+				"journal_entry": journal_entry,
+				"line_index": line_index,
+				"party_type": str(item.get("party_type") or ""),
+				"party": str(item.get("party") or ""),
+			}
+		)
+
+	dry_run = as_bool(args, "dry_run", True)
+	results, repaired, failed, unchanged = [], 0, 0, 0
+
+	for item in plan:
+		call = {
+			"journal_entry": item["journal_entry"],
+			"line_index": item["line_index"],
+			"party_type": item["party_type"],
+			"party": item["party"],
+			"reason": reason,
+			# The whole point of the batch: write the ledger even where the voucher
+			# already agrees, which on the v0.13.0 damage class is every item.
+			"force_gl_sync": True,
+			"dry_run": dry_run,
+		}
+		try:
+			result = update_journal_entry_party(call)
+			data = result.data
+			outcome = "would_repair" if dry_run else "repaired"
+			if not dry_run and not data.get("gl_entries_updated"):
+				outcome = "nothing_written"
+				unchanged += 1
+			else:
+				repaired += 1
+			results.append(
+				{
+					"journal_entry": item["journal_entry"],
+					"line_index": item["line_index"],
+					"outcome": outcome,
+					"account": data.get("account"),
+					"party_type": item["party_type"] or None,
+					"party": item["party"] or None,
+					"gl_entries_updated": data.get("gl_entries_updated", 0),
+					"gl_entries_drifted": data.get("gl_entries_drifted", 0),
+					"gl_only_update": bool(data.get("gl_only_update")),
+					"summary": result.summary,
+				}
+			)
+		except ToolError as exc:
+			failed += 1
+			results.append(
+				{
+					"journal_entry": item["journal_entry"],
+					"line_index": item["line_index"],
+					"outcome": "refused",
+					"party_type": item["party_type"] or None,
+					"party": item["party"] or None,
+					"error": str(exc),
+				}
+			)
+		except Exception as exc:  # pragma: no cover - a bug, reported per item rather than aborting
+			failed += 1
+			results.append(
+				{
+					"journal_entry": item["journal_entry"],
+					"line_index": item["line_index"],
+					"outcome": "failed",
+					"error": f"{type(exc).__name__}: {exc}",
+				}
+			)
+
+	entries = sorted({item["journal_entry"] for item in plan})
+	data = {
+		"dry_run": bool(dry_run),
+		"reason": reason,
+		"requested": len(plan),
+		"journal_entries": entries,
+		"repaired": repaired,
+		"unchanged": unchanged,
+		"failed": failed,
+		"results": results,
+		"note": (
+			(
+				"NOTHING WAS WRITTEN. Every item above was checked against the live voucher and "
+				"its GL rows, so an item reported as would_repair is one that will, and an item "
+				"reported as refused says why. Call again with dry_run=false and the same list."
+				if dry_run
+				else (
+					f"{repaired} line(s) had their ledger rows brought into step with their "
+					f"voucher. NO BALANCE MOVED: party is an attribution column, and the trial "
+					"balance after this run is arithmetically identical to the one before it. "
+					"Every entry touched carries a comment saying what changed and why."
+				)
+			)
+			+ (
+				f" {failed} item(s) were refused or failed and are reported individually — the "
+				"run did NOT abort on them, because each item is a different voucher and a run "
+				"that stopped half way would leave the ledger in a state neither report "
+				"describes."
+				if failed
+				else ""
+			)
+		),
+		"next_step": (
+			"Run find_drifted_je_attributions over the same range again. A clean second scan is "
+			"the only proof the repair worked, and it is cheaper than reading this list twice."
+		),
+	}
+	return ToolResult(
+		data,
+		(
+			f"dry run: would repair {repaired} of {len(plan)} drifted line(s) across "
+			f"{len(entries)} entr(y/ies)"
+			if dry_run
+			else f"repaired {repaired} of {len(plan)} drifted line(s) across {len(entries)} entr(y/ies)"
+		)
+		+ (f", {failed} refused or failed" if failed else "")
+		+ f" — {reason}",
+		docstatus_delta="",
+	)

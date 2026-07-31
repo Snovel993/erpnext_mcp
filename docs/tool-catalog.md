@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 135 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 167 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -4960,6 +4960,383 @@ than leaving two.
 
 ---
 
+# v0.15.0 — the compliance framework
+
+Thirty-two tools. They interlock, and reading them in wave order is the fastest
+way to understand what any one of them is for.
+
+The organising idea is one sentence: **compliance is a lens on operational data,
+not a duplicate set of records.** Every spray IS an EPA and Worker Protection
+Standard record; every hire IS an I-9 record; every bucket IS an FSMA
+traceability record. The test for whether a feature is woven in or bolted on:
+*does removing it break OPERATIONS, or only break COMPLIANCE REPORTING?*
+
+## 128. `get_compliance_field_map`
+
+Read-only. What compliance requires of an OPERATIONAL record on this site, field
+by field: which DocType carries it, which framework wants it, why, and — the
+column that matters — what breaks in the day-to-day WORK if it is missing.
+Reports which fields are actually present here and which are not.
+
+`docs/compliance_fields.md` is the same content in prose, and a test asserts the
+two cannot drift apart.
+
+## 129. `install_compliance_fields`
+
+**MUTATING, and the only tool in this app whose switch ships ON.**
+
+Adds the compliance columns to the DocTypes where the work happens: applicator,
+EPA registration number, REI, PHI and weather on **Spray Log**; I-9 status, W-4
+status, wage-law jurisdiction and farm labor contractor licensing on
+**Employee**; picker, crew, block, bin and shipment on the **BucketLog bridge**.
+Verifies (and does not touch) the compliance columns on **Housing Unit** and
+**Field**, which this app already ships.
+
+| Argument | Meaning |
+| --- | --- |
+| `dry_run` | Report what would be added, including the backlog counts, and write nothing |
+
+**This is the one place erpnext_mcp extends a DocType it did not create**, and
+`erpnext_mcp/compliance_fields.py` makes the argument at length. The short
+version: compliance woven into the operational record is defensible under audit
+and a shadow log beside it is not, and you cannot weave anything into a DocType
+you refuse to touch. The cost is real and stated — uninstalling this app drops
+those columns and everything typed into them, which `before_uninstall` now names
+by hand.
+
+Every field is a `Custom Field`, so the target app's repository and migrations
+are untouched. Idempotent: the same installer runs on every `bench migrate` and
+a second run creates nothing.
+
+**The number worth reading is `backlog`.** Seven fields are required, and Frappe
+binds `reqd` on save rather than retroactively — so history stays readable and
+stops being re-saveable. The count of rows that would now fail is the operation's
+compliance debt, stated in rows.
+
+A DocType not on this site is skipped BY NAME with the app that would bring it.
+
+---
+
+## Wave 2 — the four external-evidence DocTypes
+
+Four kinds of evidence arrive from OUTSIDE the operation and have no operational
+act to hang off. Nobody writes a harvest hygiene SOP by harvesting.
+
+## 130. `list_compliance_policies`
+## 131. `get_compliance_policy`
+
+Read-only. The SOP library, and one procedure in full with its whole version
+chain (walked in BOTH directions) and every audit corrective action that cited
+it.
+
+`without_a_document` in the listing is the list worth acting on first: a policy
+record with no attached procedure is a claim that a procedure exists, and an
+auditor asks to read the procedure.
+
+## 132. `create_compliance_policy`
+## 133. `update_compliance_policy`
+## 134. `supersede_compliance_policy`
+
+MUTATING (off). **The version is a FIELD, not part of the name** — a policy at v3
+is the same record every audit finding already cites — so a second policy under
+an existing name is refused and points at `supersede_compliance_policy`.
+
+Superseding writes **both ends of the chain in one act**, because "which
+procedure was in force on the day this happened" is asked from whichever end the
+auditor starts. Refuses a policy superseding itself, one already superseded (two
+successors make the question unanswerable), and a successor whose effective date
+PREDATES the one it replaces. The superseded policy is historical rather than
+wrong, and audit packets covering the dates it governed still include it.
+
+## 135. `list_certifications`
+## 136. `get_certification`
+
+Read-only. The certificate and licence register, **soonest expiry first** — the
+order somebody works them in — with what has lapsed and what is inside its
+renewal window.
+
+`expired` is read from the DATE, never from the status field. Nothing in this app
+rewrites a status when a date passes: a controller that did would only run on
+documents somebody saved, so the expired certificates would be exactly the ones
+still reading Active.
+
+`get_certification` resolves the holder against the Related Party, Family,
+Employee and Company registers and reports which answered. A name in none of them
+is not a failure — an applicator licence held by a contractor on nobody's payroll
+is exactly what the fallback is for — and it returns the full renewal history
+including **every period the certificate was allowed to lapse.**
+
+## 137. `create_certification`
+## 138. `update_certification`
+## 139. `renew_certification`
+
+MUTATING (off). `renewal_window_days` is a LEAD TIME, not a reminder preference:
+90 days by default because that is roughly what an Oregon farm labor contractor
+renewal takes once the bond and background check are counted.
+
+**Editing the expiration forward through `update_certification` is refused** and
+points at `renew_certification` — editing it in place would produce a certificate
+that looks as though it never expired, which is exactly the fact somebody would
+want hidden and exactly the fact an auditor asks about. `renew_certification`
+appends to a history, requires saying what was actually done to earn the new
+term, and **reports any lapse rather than hiding it**: renewing late does not
+close a gap that already happened.
+
+## 140. `list_regulatory_filings`
+## 141. `get_regulatory_filing`
+## 142. `create_regulatory_filing`
+## 143. `update_regulatory_filing`
+
+Reads on, writes off. What went to an agency, when, under what docket number, and
+what came back.
+
+**A filing marked Submitted with no submission date is refused.** A filing nobody
+can prove was made is a filing that was not made — the agency's position in a
+dispute is that they have no record — and a half-filled record would be
+assembled into an audit packet and read as evidence of something that may not
+have happened. A Draft with no dates is exactly what a filing being prepared
+looks like and is allowed.
+
+Recording a response auto-dismisses the filing's response alert on the next
+sweep. Nobody has to switch it off.
+
+## 144. `list_audit_events`
+## 145. `get_audit_event`
+## 146. `create_audit_event`
+## 147. `update_audit_event`
+## 148. `close_audit_event`
+
+Reads on, writes off. Every audit and inspection, its findings, and one row per
+thing that has to be fixed — with the deadline the SCHEME set, an owner who is a
+PERSON rather than a department, and what actually changed.
+
+**An operation is not judged on having no findings.** Every audit produces some,
+and a clean report usually means the auditor did not look hard. It is judged on
+closing them.
+
+`update_audit_event`'s `corrective_actions` REPLACES the whole table, which is
+the only safe semantics for rows addressed by index — a merge would silently
+reorder them and close the wrong finding. `add_corrective_actions` appends and
+`close_corrective_action` closes one, so nobody has to resend every row exactly to
+change one. Closing requires saying what changed: a tick in a box is what an
+auditor is trained to disbelieve, and it is refused.
+
+**`close_audit_event` REFUSES while any corrective action is open**, naming every
+one — and the controller refuses it too, so there is no second door. A closure
+date over an open finding is the most misleading thing this app could record:
+`generate_audit_packet` reads it as "this audit is finished". An audit that raised
+no findings at all is closeable; a clean PrimusGFS is a real event.
+
+---
+
+## Wave 3 — the Kairotic Compliance Calendar
+
+**Chronos serves Kairos.** The clock runs the sweep; the sweep decides nothing.
+Nine rules ask whether a condition is true RIGHT NOW, and fire on that state
+rather than on the date the sweep happened to run.
+
+## 149. `get_compliance_calendar`
+
+Read-only, on by default — the main read of the whole framework. What is due and
+what is late, worst first, grouped by category.
+
+| Argument | Meaning |
+| --- | --- |
+| `severity_min` | `Critical`, `Warning` or `Info` — this severity and worse |
+| `days_ahead` | Only alerts due within this many days. **Overdue alerts are always shown**, because they were due in the past |
+| `category` | Certifications, Policies, Workforce, Housing, Water and Sanitation, Spray and Pesticides, Filings, Audits, Other |
+| `alert_type` | One rule's alerts |
+| `include_snoozed` / `include_dismissed` | Default false. Snoozed alerts are hidden and COUNTED |
+| `as_of` | Read the calendar as of a date |
+
+Categories are chosen so a whole group can be cleared in one afternoon: every
+housing item is one walk round the camp, every certificate is one trip to an
+agency website.
+
+It reports which rules cannot run on this site at all, because **an empty
+category is not the same as a clean one.**
+
+## 150. `list_compliance_rules`
+
+Read-only. Every rule with its `kairotic_gate` — the state that makes it ripe —
+plus the framework it serves and whether it can run here. A rule listed as
+unavailable raises nothing AND dismisses nothing: an absent DocType is not
+evidence that anybody did the work.
+
+The nine, and what makes each one fire:
+
+| Rule | Fires when | Silent when |
+| --- | --- | --- |
+| `certification_expiring` | inside the lead time the certificate's OWN issuing body takes; Critical inside 30 days | 200 days out; superseded; revoked |
+| `policy_review_overdue` | a procedure IN FORCE is past the review date IT committed to | a draft; a superseded or retired version |
+| `water_test_stale` | a block **in active spray rotation** has no test inside 90 days | fallow ground; a block nobody has sprayed this season |
+| `housing_inspection_overdue` | a cabin somebody can be ASSIGNED to has no walk inside a year | a shower block; a unit already Uninhabitable |
+| `housing_detector_test_stale` | a **FSMA worker facility** has an untested smoke or CO detector | a shed on the same parcel |
+| `i9_expired` | an ACTIVE employee's I-9 has expired | Pending (the lawful 3-day window); a former employee |
+| `flc_license_expiring` | a crew boss's licence is inside 90 days; Critical inside 30 | an employee with no licence |
+| `filing_response_due` | a SUBMITTED filing has no response and the deadline is near | a draft; a filing that was answered |
+| `audit_action_overdue` | an action is past the deadline the SCHEME set | an action with no due date; a closed audit |
+
+## 151. `get_audit_readiness`
+
+Read-only. Resolved alerts over alerts raised, as one percentage — because a
+count only means something to somebody who already knows what normal looks like,
+and a percentage is comparable to yesterday's.
+
+It also reports **how the score was earned**: `resolved_by_hand_percent` splits
+conditions that cleared themselves from dismissals somebody made. An operation at
+95% through dismissals is a different operation from one at 95% because the work
+got done, and a score that could not tell them apart would be worth gaming. A
+single open Critical is called out regardless of the percentage.
+
+## 152. `refresh_compliance_alerts`
+
+MUTATING (off). Runs the whole rule set now instead of waiting for tonight's
+scheduled sweep. Creates, refreshes, reopens and auto-dismisses.
+
+**It touches no operational record.** Every rule is a read; the only rows written
+are this app's own Compliance Alerts. That is why it is safe at any moment and
+why the nightly scheduler calls the same function.
+
+**It cannot duplicate an alert.** Each alert's docname is derived from its rule
+and its source record and from nothing that changes daily, so tonight's sweep
+finds and refreshes what last night's wrote — and a snooze somebody set last week
+survives. A dismissal a PERSON made is never reopened.
+
+## 153. `snooze_alert`
+
+MUTATING (off). Hides one alert until a date. **Not a dismissal:** the condition
+is still true, the alert still exists, and it reappears on its own — a snooze is
+a date rather than a flag somebody has to clear. A date not in the future is
+refused.
+
+## 154. `dismiss_alert`
+
+MUTATING (off). Takes one alert off the calendar, with a **mandatory reason**.
+The reason is the only part of the record nobody can reconstruct — the alert
+itself the sweep can rebuild from the source record — and it is the answer when
+the same finding turns up next year. The alert is never deleted: the record that
+somebody looked and decided is itself compliance evidence.
+
+Dismissing an alert changes nothing underneath it. Dismissing one about an
+expired certificate does not renew the certificate.
+
+## 155. `dismiss_alert_bulk`
+
+MUTATING (off). **Dry run defaults TRUE and the first call writes nothing.**
+
+The whole calendar is one filter away: a `severity` typed where an `alert_type`
+was meant matches everything, fails nothing, looks exactly like success, and
+leaves an operation reading as compliant while nothing has been fixed. A call
+with no filter at all is refused. Capped at 200 per run.
+
+---
+
+## Wave 4 — audit packets and the Command Center
+
+## 156. `list_audit_packet_types`
+
+Read-only. The eight regimes — FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA
+and an unscoped Other — with the sections each pulls, what it is scoped to, and
+**which sections will be empty on this site** because the DocType behind them is
+not installed.
+
+## 157. `generate_audit_packet`
+
+MUTATING (off). Assembles every piece of evidence for one audit type over one
+period into a PDF and files it as a Governance Document in the company's archive.
+Returns the file_url and the counts — never the bytes.
+
+| Argument | Meaning |
+| --- | --- |
+| `audit_type` | FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA, Other |
+| `period_start` / `period_end` | A period that has not finished is refused |
+| `output_format` | `pdf` (default) or `docx` |
+| `output_path` | ALSO write it under the site's private/files |
+| `stage_via_chunks` | Checkpoint the assembly. Defaults on above 2 MB |
+| `allow_open_actions` | Produce it over open findings, disclosing them at the FRONT |
+| `overwrite` | Replace an existing packet for the same type and period |
+| `dry_run` | Assemble it, report every count, write nothing |
+
+**It pulls from the operational records, not from a copy.** The spray records ARE
+the spray logs; the worker facility records ARE the housing register; the
+traceability rows ARE the bucket log. Nothing in a packet is a compliance copy,
+which is why nothing in one can have drifted from what was actually done.
+
+**The kairotic gate is a REFUSAL, not a warning.** A packet asserts a compliant
+period, and an open corrective action inside that period contradicts the
+assertion — a warning at the top of a printed document is not read by the person
+the document is handed to. Every open action is named in the refusal.
+
+**Empty sections say why they are empty.** A packet on a site with no BucketLog
+bridge says the bridge is not installed and the traceability has to be supplied
+separately; a silently omitted section reads as an operation with nothing to
+declare.
+
+Idempotent by (audit_type, company, period).
+
+### The Compliance Command Center
+
+Not a tool — a Frappe Dashboard at `/app/compliance-command-center`, built
+idempotently on every migrate. Six Number Cards, four Charts, and
+`get_audit_readiness` for the one number somebody acts on.
+
+Deliberately NOT shipped as `fixtures`, which `test_hooks.py` forbids by name: a
+fixture cannot look at what is already there, so an operator who reordered their
+cards would get it silently put back on every migrate.
+
+---
+
+## Journal Entry attribution drift
+
+## 158. `find_drifted_je_attributions`
+
+Read-only, on by default, **DIAGNOSTIC**. Every submitted Journal Entry in a date
+range whose voucher and general ledger disagree about who a line belongs to.
+
+v0.13.0's `update_journal_entry_party` looked its GL rows up by
+`voucher_detail_no == line.name` — the Sales Invoice Item convention, not the
+Journal Entry one. Every call against a submitted entry matched zero rows, wrote
+the voucher, and left the ledger alone. This finds what that left behind.
+
+**Not limited to that.** Drift also arrives from a direct database edit, a
+restored backup, or a migration that moved one table and not the other, so
+`by_vintage` is reported BESIDE the finding rather than used to filter it.
+
+Lines whose GL rows cannot be identified with certainty are reported separately
+as `ambiguous` and are NOT in `repair_input` — reporting a coin toss as a finding
+would be worse than reporting nothing.
+
+Three queries whatever the range, matched by the same function the repair writes
+through.
+
+## 159. `repair_drifted_je_attributions`
+
+MUTATING (off). **Dry run defaults TRUE.** Takes `find_drifted_je_attributions`'
+`repair_input` verbatim and brings each drifted ledger row back into step with its
+voucher.
+
+**Moves no balance, ever.** `party` is an attribution column: every debit, credit,
+account and date is refused as an argument, so the trial balance after a repair of
+two hundred lines is arithmetically identical to the one before it. That property
+is what makes a batch write to submitted vouchers defensible at all.
+
+It does not abort on the first failure — each item is a different voucher, and a
+run that stopped half way would leave the ledger in a state neither report
+describes. Capped at 200. Requires a `reason`, written onto every entry touched.
+
+### `update_journal_entry_party` — what changed in v0.15.0
+
+Its idempotence check now reads **both tables**. v0.14.0 read only the voucher: if
+the line already said what was asked for it refused with "nothing to change",
+which on a damaged line is precisely wrong — the voucher agreeing is the SIGNATURE
+of the damage. Nothing to change now means nothing to change ANYWHERE; a voucher
+that agrees over a ledger that does not is a GL-only repair and it proceeds,
+reporting `gl_only_update: true`. New `force_gl_sync` writes the GL rows
+regardless, which is what the batch tool passes.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -4968,7 +5345,8 @@ Everything a tool needs is in two places:
    `workflow`, `accounts`, `banking`, `dimensions`, `fiscal`, `governance`,
    `assets`, `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`,
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
-   `company`, `farm` or `housing` —
+   `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar` or
+   `auditpacket` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

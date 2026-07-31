@@ -278,6 +278,20 @@ erpnext_mcp/                     repo root
     tools/tax.py                 the 1099-NEC pre-fill
     tools/artifacts.py           where a generated document goes: onto a record,
                                  and — confined — onto disk
+    tools/uploads.py             chunked uploads, and the internal checkpoint
+                                 door onto the same pipeline
+    tools/compliance.py          the compliance-field installer and its map
+    tools/evidence.py            Compliance Policy, Certification, Regulatory
+                                 Filing, Audit Event
+    tools/calendar.py            the compliance calendar, and the three ways
+                                 something comes off it
+    tools/auditpacket.py         assembling an audit packet and filing it
+    compliance_fields.py         WHICH compliance columns go on WHOSE doctype,
+                                 and the argument for putting them there at all
+    alerts/base.py               Rule, Observation, the idempotent sweep
+    alerts/rules.py              the nine rules, each with its kairotic gate
+    audit_packets.py             the eight audit regimes and their sections
+    dashboard.py                 the Compliance Command Center installer
     packets/base.py              PacketSpec, Flag, provenance envelope
     packets/reconciliation.py    one account, one period
     packets/fiscal_year_audit.py one company, one fiscal year
@@ -291,7 +305,13 @@ erpnext_mcp/                     repo root
                                  Governance Document, Asset Cost Profile
                                  (+ its two child tables), Note Payable
                                  (+ Note Payable Event), Parcel, Lease,
-                                 Related Party
+                                 Related Party, Family, Field, Irrigation Zone,
+                                 Housing Unit, Housing Assignment, the two
+                                 upload-staging doctypes, and the v0.15.0
+                                 compliance five — Compliance Policy,
+                                 Certification (+ Certification Renewal),
+                                 Regulatory Filing, Audit Event (+ Audit
+                                 Corrective Action), Compliance Alert
 scripts/seed_related_parties.py  seeds the related-party register from a JSON
                                  file kept OUTSIDE this repository
 ```

@@ -23,6 +23,7 @@ from ..args import (
 	MAX_LIMIT,
 	as_date,
 	as_docstatus,
+	as_int,
 	as_limit,
 	as_str,
 	resolve_account,
@@ -959,3 +960,264 @@ def _resolve_bank_account(value: str) -> str:
 
 def _docstatus_label(docstatus) -> str:
 	return {0: "draft", 1: "submitted", 2: "cancelled"}.get(int(docstatus or 0), "unknown")
+
+
+# ── 149. find_drifted_je_attributions ───────────────────────────────────────
+#: When v0.13.0 shipped the broken `update_journal_entry_party`, and when v0.14.0
+#: fixed it. Upstream dates: a site that upgraded later ran the broken tool for
+#: longer, which is why both ends are arguments with these as defaults rather
+#: than constants the report asserts.
+V013_RELEASED = "2026-07-30"
+V014_RELEASED = "2026-07-31"
+
+#: Most Journal Entries one scan will read. The scan is three queries whatever
+#: this is, but the matcher runs per line and a caller asking for the whole
+#: ledger wants a report they can act on rather than one they have to page
+#: through.
+DRIFT_SCAN_CAP = 500
+
+
+def find_drifted_je_attributions(args: dict) -> ToolResult:
+	"""Every submitted Journal Entry whose voucher and ledger disagree about a party.
+
+	WHAT DRIFT IS, AND WHERE IT CAME FROM. A Journal Entry line carries
+	`party_type` and `party`; so does each GL Entry row it posted. The voucher is
+	what the entry shows and the GL is what every ageing report, party ledger and
+	statement of account reads. They are supposed to say the same thing.
+
+	v0.13.0's `update_journal_entry_party` looked its GL rows up by
+	`voucher_detail_no == line.name`, which is the Sales Invoice Item convention
+	and NOT the Journal Entry one — ERPNext fills that column from the line's
+	`reference_detail_no`, empty on every ordinary line. So every call against a
+	submitted entry matched zero GL rows, wrote the voucher, and returned a
+	warning blaming the site. The result is a specific and silent damage class:
+	entries whose voucher says one party and whose ledger says another, where
+	nothing in either table admits to the disagreement. This tool finds them.
+
+	IT IS NOT LIMITED TO THAT DAMAGE CLASS. Drift can also arrive from a direct
+	database edit, a restored backup, or a migration that moved parties on one
+	table and not the other. The scan reads the current state of both tables and
+	does not care what caused it, which is why the vintage grouping is reported
+	beside the finding rather than used to filter it.
+
+	READ-ONLY, AND THREE QUERIES WHATEVER THE RANGE. Every candidate entry's lines
+	and every candidate entry's GL rows are read in one query each, then matched in
+	memory by the same `gl_link_for_line` the repair writes through — so a line
+	this reports as drifted is a line the repair can actually match, and a line
+	whose GL rows are ambiguous is reported as ambiguous rather than as clean.
+	"""
+	from . import mutate
+
+	company = resolve_company(as_str(args, "company"), required=False)
+	from_date = as_date(args, "from_date", required=True)
+	to_date = as_date(args, "to_date", required=True)
+	if to_date < from_date:
+		raise ToolError(f"to_date {to_date} is before from_date {from_date}.")
+	limit = min(as_int(args, "limit", 500) or 500, DRIFT_SCAN_CAP)
+	vintage_from = as_date(args, "vintage_from") or V013_RELEASED
+	vintage_to = as_date(args, "vintage_to") or V014_RELEASED
+
+	filters = {"docstatus": 1, "posting_date": ("between", (from_date, to_date))}
+	if company:
+		filters["company"] = company
+	entries = frappe.db.get_all(
+		"Journal Entry",
+		filters=filters,
+		fields=compat.existing_fields(
+			"Journal Entry", ("name", "company", "posting_date", "modified", "voucher_type", "user_remark")
+		),
+		order_by="posting_date asc, name asc",
+		limit=limit,
+	)
+	if not entries:
+		return ToolResult(
+			data={
+				"company": company,
+				"from_date": from_date,
+				"to_date": to_date,
+				"entries_scanned": 0,
+				"drifted_entry_count": 0,
+				"drifted_line_count": 0,
+				"drifted": [],
+				"note": "No submitted Journal Entry falls in that range, so there is nothing to check.",
+			},
+			summary=f"0 submitted entries between {from_date} and {to_date}",
+		)
+
+	names = [str(entry["name"]) for entry in entries]
+	lines_by_entry = _lines_by_entry(names)
+	gl_by_entry = _gl_by_entry(names)
+
+	drifted, ambiguous = [], []
+	for entry in entries:
+		name = str(entry["name"])
+		lines = lines_by_entry.get(name) or []
+		gl_rows = gl_by_entry.get(name) or []
+		if not lines or not gl_rows:
+			continue
+		for index, line in enumerate(lines, start=1):
+			link = mutate.gl_link_for_line(name, lines, index, gl_rows=gl_rows)
+			if link["blocker"]:
+				if _line_has_party(line) or any(_line_has_party(row) for row in gl_rows):
+					ambiguous.append(
+						{
+							"journal_entry": name,
+							"line_index": index,
+							"account": line.get("account"),
+							"why": link["blocker"],
+						}
+					)
+				continue
+			for row in link["rows"]:
+				if not _party_differs(line, row):
+					continue
+				drifted.append(
+					{
+						"journal_entry": name,
+						"company": entry.get("company"),
+						"posting_date": str(entry.get("posting_date") or ""),
+						"modified": str(entry.get("modified") or ""),
+						"line_index": index,
+						"line_name": line.get("name"),
+						"account": line.get("account"),
+						"debit": round(float(line.get("debit") or 0), 2),
+						"credit": round(float(line.get("credit") or 0), 2),
+						"jea_party_type": str(line.get("party_type") or "") or None,
+						"jea_party": str(line.get("party") or "") or None,
+						"gle_party_type": str(row.get("party_type") or "") or None,
+						"gle_party": str(row.get("party") or "") or None,
+						"gl_entry": row.get("name"),
+						"matched_by": link["basis"],
+						"match_is_exact": bool(link["exact"]),
+						"vintage": _vintage(entry.get("modified"), vintage_from, vintage_to),
+						"repair": {
+							"journal_entry": name,
+							"line_index": index,
+							"party_type": str(line.get("party_type") or ""),
+							"party": str(line.get("party") or ""),
+						},
+					}
+				)
+
+	by_vintage: dict = {}
+	for row in drifted:
+		by_vintage[row["vintage"]] = by_vintage.get(row["vintage"], 0) + 1
+	by_entry: dict = {}
+	for row in drifted:
+		by_entry.setdefault(row["journal_entry"], []).append(row["line_index"])
+
+	return ToolResult(
+		data={
+			"company": company,
+			"from_date": from_date,
+			"to_date": to_date,
+			"entries_scanned": len(entries),
+			"scan_capped": len(entries) >= limit,
+			"drifted_entry_count": len(by_entry),
+			"drifted_line_count": len(drifted),
+			"drifted_entries": sorted(by_entry),
+			"by_vintage": dict(sorted(by_vintage.items())),
+			"vintage_window": {"from": vintage_from, "to": vintage_to},
+			"drifted": drifted,
+			"ambiguous": ambiguous,
+			"repair_input": [row["repair"] for row in drifted],
+			"note": (
+				"`repair_input` is the list repair_drifted_je_attributions takes verbatim. Every "
+				"entry in it brings the LEDGER into line with the VOUCHER, which is the right "
+				"direction for the v0.13.0 damage class — that tool wrote the voucher and failed "
+				"to write the ledger, so the voucher holds the attribution somebody intended. "
+				"If a particular line drifted for some other reason and the LEDGER is right, "
+				"call update_journal_entry_party on it directly with the party you want on both."
+			),
+			"vintage_note": (
+				f"`by_vintage` groups on the entry's modification date against the window "
+				f"{vintage_from} to {vintage_to}, when the broken tool was live upstream. A site "
+				"that upgraded later ran it for longer — pass vintage_from and vintage_to to "
+				"match when YOUR site was on v0.13.0. The grouping is reported beside the "
+				"finding and never used to filter it: drift from a restored backup or a direct "
+				"database edit is just as real and lands outside the window."
+			),
+			"ambiguous_note": (
+				f"{len(ambiguous)} line(s) carry a party somewhere but could not be matched to "
+				"their GL rows with certainty — usually two lines of one voucher posting the same "
+				"amount to the same account, which the ledger cannot tell apart. They are NOT "
+				"counted as drifted and NOT in `repair_input`: reporting a coin toss as a finding "
+				"would be worse than reporting nothing. investigate_je_gl_link shows each one."
+				if ambiguous
+				else "Every line with a party matched its GL rows unambiguously."
+			),
+		},
+		summary=(
+			f"{len(drifted)} drifted line(s) across {len(by_entry)} of {len(entries)} submitted "
+			f"entr(y/ies) between {from_date} and {to_date}"
+			+ (f", {len(ambiguous)} ambiguous" if ambiguous else "")
+		),
+	)
+
+
+def _lines_by_entry(names: list) -> dict:
+	"""Every account line of every candidate entry, in one query, in `idx` order.
+
+	Order matters: `line_index` is the position ERPNext numbers a line by, and a
+	report that indexed them in whatever order the database returned would name
+	the wrong line in a repair instruction.
+	"""
+	rows = frappe.db.get_all(
+		"Journal Entry Account",
+		filters={"parent": ("in", names)},
+		fields=compat.existing_fields(
+			"Journal Entry Account",
+			("name", "parent", "idx", "account", "debit", "credit", "party_type", "party", "reference_detail_no"),
+		),
+		order_by="parent asc, idx asc",
+		limit=DRIFT_SCAN_CAP * 20,
+	)
+	out: dict = {}
+	for row in rows or []:
+		out.setdefault(str(row.get("parent")), []).append(dict(row))
+	return out
+
+
+def _gl_by_entry(names: list) -> dict:
+	"""Every live GL Entry row of every candidate entry, in one query."""
+	if not compat.doctype_exists("GL Entry"):  # pragma: no cover - ERPNext always ships it
+		return {}
+	filters = {"voucher_type": "Journal Entry", "voucher_no": ("in", names)}
+	if compat.has_field("GL Entry", "is_cancelled"):
+		filters["is_cancelled"] = 0
+	rows = frappe.db.get_all(
+		"GL Entry",
+		filters=filters,
+		fields=compat.existing_fields(
+			"GL Entry",
+			("name", "voucher_no", "account", "debit", "credit", "party_type", "party", "voucher_detail_no", "posting_date", "cost_center"),
+		),
+		order_by="voucher_no asc, name asc",
+		limit=DRIFT_SCAN_CAP * 20,
+	)
+	out: dict = {}
+	for row in rows or []:
+		out.setdefault(str(row.get("voucher_no")), []).append(dict(row))
+	return out
+
+
+def _line_has_party(row) -> bool:
+	return bool(str(row.get("party_type") or "") or str(row.get("party") or ""))
+
+
+def _party_differs(line, row) -> bool:
+	return str(line.get("party_type") or "") != str(row.get("party_type") or "") or str(
+		line.get("party") or ""
+	) != str(row.get("party") or "")
+
+
+def _vintage(modified, vintage_from: str, vintage_to: str) -> str:
+	"""Which side of the v0.13.0 window an entry was last modified on."""
+	stamp = str(modified or "")[:10]
+	if not stamp:
+		return "unknown (no modification date)"
+	if stamp < vintage_from:
+		return f"before {vintage_from} (predates the broken tool)"
+	if stamp > vintage_to:
+		return f"after {vintage_to} (postdates the fix — drift from another cause)"
+	return f"{vintage_from} to {vintage_to} (the v0.13.0 window)"

@@ -12,19 +12,44 @@ depreciation history in an `Asset Cost Profile` beside ERPNext's Asset rather
 than in custom fields grafted onto it: a doctype of ours goes with the app, a
 field on theirs does not.
 
-THERE IS EXACTLY ONE SCHEDULED JOB, AND IT ARRIVED IN v0.14.0. Chunked uploads
-stage their pieces in a table so an upload survives a worker restart, which means
-an upload nobody finishes leaves rows behind. `collect_expired_sessions` deletes
-sessions idle for more than a day, and it touches nothing but this app's own two
-staging doctypes — it reads no ERPNext table and writes to none, so the promise
-above still holds. It never raises: it runs beside real work, and a sweeper that
-took a site's scheduler down would be worse than the litter it removes.
+v0.15.0 IS THE EXCEPTION TO THE PARAGRAPH ABOVE, AND IT IS DELIBERATE. The
+compliance framework adds Custom Fields to Spray Log, to Employee and to the
+BucketLog bridge — three doctypes this app did not create — through the
+`after_migrate` hook. It is the only such exception, it is behind a switch an
+operator can turn off, and `compliance_fields.py` argues the case at length. The
+short version: compliance woven into the operational record is defensible under
+audit and a shadow log beside it is not, and you cannot weave anything into a
+doctype you refuse to touch. `before_uninstall` names every column that goes.
+
+THERE ARE EXACTLY TWO SCHEDULED JOBS.
+
+The first arrived in v0.14.0. Chunked uploads stage their pieces in a table so an
+upload survives a worker restart, which means an upload nobody finishes leaves
+rows behind. `collect_expired_sessions` deletes sessions idle for more than a day,
+and it touches nothing but this app's own two staging doctypes — it reads no
+ERPNext table and writes to none. It never raises: it runs beside real work, and a
+sweeper that took a site's scheduler down would be worse than the litter it
+removes.
 
 It is a BACKSTOP rather than the mechanism. The same sweep runs at the top of
 every `stage_file_chunk` call, which is the kairotic moment — the right time to
 clear out abandoned uploads is when somebody is uploading, not at three in the
 morning — and it is what keeps a bench with its scheduler switched off from
 quietly accumulating ninety megabytes of a PDF nobody finished sending.
+
+The second arrived in v0.15.0 and is the compliance alert sweep. It READS
+certificates, policies, employees, blocks, cabins, filings and audits, and writes
+only this app's own Compliance Alert table — so the promise about not changing how
+a site behaves still holds. It also never raises.
+
+IT IS THE CLOCK SERVING KAIROS, AND THAT IS THE WHOLE POINT OF PUTTING IT ON A
+SCHEDULE. The sweep runs nightly and DECIDES NOTHING. Every rule it runs asks
+whether a condition is true right now — is this certificate genuinely inside the
+lead time its issuing body takes, is this block genuinely in spray rotation with
+untested water — and an alert fires on that state rather than on the date the
+sweep happened to run. Chronos gathers; kairos acts. A rule that fired because it
+was the first of the month would be the other way round, and would be ignored by
+March.
 """
 
 app_name = "erpnext_mcp"
@@ -46,10 +71,17 @@ before_uninstall = "erpnext_mcp.install.before_uninstall"
 #: migrate. Idempotent, and never overwrites an operator's choice.
 after_migrate = "erpnext_mcp.install.after_migrate"
 
-#: See the module docstring. Touches this app's two staging doctypes and nothing
-#: else, and never raises.
+#: See the module docstring. Both jobs write ONLY this app's own doctypes, and
+#: neither ever raises — they run on somebody's scheduler beside their real work.
+#:
+#: BARE DOTTED PATHS, like every other hook in this file. `scheduler_events`
+#: hands each entry to `frappe.get_attr` exactly as `jinja` does, so the colon
+#: that took a site down in v0.14.0 would take it down from here too.
 scheduler_events = {
-	"daily": ["erpnext_mcp.tools.uploads.collect_expired_sessions"],
+	"daily": [
+		"erpnext_mcp.tools.uploads.collect_expired_sessions",
+		"erpnext_mcp.alerts.sweep",
+	],
 }
 
 #: ONE Jinja method: the amount-in-words the check Print Format renders.

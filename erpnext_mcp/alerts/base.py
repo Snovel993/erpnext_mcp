@@ -1,0 +1,483 @@
+# SPDX-License-Identifier: MIT
+"""The Kairotic Compliance Calendar: what a rule is, and the sweep that runs them.
+
+CHRONOS SERVES KAIROS, AND THIS FILE IS WHERE THAT STOPS BEING A SLOGAN.
+
+The clock runs the sweep. The sweep decides nothing. Every night at whatever hour
+the scheduler fires, `refresh_compliance_alerts` walks the operational and
+evidence records and asks each rule the same question — *is this condition true
+right now* — and the answer is read off the state of the world, never off the
+calendar. A rule that fires "on the 15th" would be chronological and therefore
+suspect. A rule that fires when the certificate is genuinely inside its renewal
+lead time, or when the block being sprayed genuinely has no current water test,
+is kairotic and therefore correct.
+
+The distinction has teeth here. It is the difference between:
+
+    "It is the first of the month, so remind somebody about water testing"
+        — fires on fallow ground, fires on a field tested last week, and is
+          ignored by the third month because most of it is noise.
+
+    "This block was sprayed eleven days ago and its agricultural water has not
+     been tested in 118 days"
+        — fires on exactly the blocks where FSMA Subpart E is engaged, on
+          exactly the days it is engaged, and is worth reading every time.
+
+THE SWEEP IS IDEMPOTENT, AND THAT IS THE WHOLE DESIGN. Each alert's docname is
+`alert_key(rule, source_doctype, source_docname)` — derived from the rule and the
+record, and from NOTHING that changes daily. So tonight's run finds the row it
+wrote last night and updates it. If the key carried the due date or the message,
+a certificate ticking from 60 days out to 59 would produce a brand new alert every
+morning, each one discarding the snooze somebody set on the last, and the calendar
+would fill with duplicates of one fact. That failure is silent and cumulative,
+which is why the key is computed in one function and the DocType refuses a
+document without one.
+
+AUTO-DISMISSAL IS THE OTHER HALF, AND IT IS THE HALF PEOPLE FORGET. An alert
+whose condition has resolved is dismissed by the sweep, with `auto_dismissed`
+set and no human reason attached. Nobody should have to remember to switch off a
+reminder about something that already happened: the water test was done, the
+licence was renewed, the cabin was inspected. If the condition comes BACK — the
+renewed certificate approaches its new expiry — the same key is un-dismissed and
+raised again, because the alert is a statement about the present, not a task
+somebody once closed.
+
+A SNOOZE IS NOT A DISMISSAL. Snoozing sets a date; the alert stays, the condition
+stays true, and it reappears on its own when the date passes. It is the honest
+way to say "not this week", and it expires without anybody having to clear it.
+
+RULES ARE REGISTERED, NOT LISTED. `rules.py` ends each rule with `register(...)`
+and this package imports it at load time, exactly as `packets` and `charts` do.
+A rule whose `requires` doctypes are absent from a site is skipped by name — a
+site without farm_precision_ag gets no spray rules and is told so, rather than
+getting an empty calendar that looks like compliance.
+
+NOTHING HERE RAISES. The sweep runs on somebody's scheduler beside their real
+work, and a compliance calendar that took the scheduler down would be worse than
+one that missed a night. A rule that throws is caught, reported in the run's
+report, and the other rules still run.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+
+import frappe
+
+from ..compat import doctype_exists
+
+ALERT_DOCTYPE = "Compliance Alert"
+
+SEVERITY_INFO = "Info"
+SEVERITY_WARNING = "Warning"
+SEVERITY_CRITICAL = "Critical"
+
+#: Worst first. The calendar sorts on this, and `severity_min` filters on it.
+SEVERITY_ORDER = (SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO)
+
+#: Longest a docname may be, which is what `alert_key` has to fit inside.
+#: Frappe's `name` column is varchar(140).
+MAX_KEY = 140
+
+#: Most alerts one rule may raise in a single sweep. A rule that wants to raise
+#: two thousand is a rule whose condition is wrong — usually a field that is
+#: empty on every record rather than stale on a few — and filling the calendar
+#: with it would bury the twelve that matter. The cap is reported, never silent.
+RULE_CAP = 500
+
+
+@dataclass
+class Observation:
+	"""One true statement about one record, at the moment the sweep looked.
+
+	Deliberately NOT called an alert. An observation is what a rule produces; the
+	alert is the durable row the sweep reconciles observations against, and it
+	carries things the rule knows nothing about — when the condition was first
+	seen, whether somebody snoozed it, why somebody dismissed it.
+	"""
+
+	source_doctype: str
+	source_docname: str
+	message: str
+	severity: str = SEVERITY_WARNING
+	due_date: str = ""
+	company: str = ""
+	#: Overrides the rule's category. Used where one rule covers two kinds of
+	#: thing — a certificate that is a licence is Workforce, not Certifications.
+	category: str = ""
+
+
+@dataclass(frozen=True)
+class Rule:
+	"""One condition worth knowing about, and the state that makes it true.
+
+	`scan` takes a context dict — `{"today": ..., "company": ...}` — and returns
+	Observations. It reads; it writes nothing. That separation is what lets the
+	whole rule set be run in a dry run, and what lets a rule be tested by calling
+	it rather than by running a sweep and reading the database afterwards.
+
+	`kairotic_gate` is prose, and it is required. It is the sentence explaining
+	what makes this rule fire on ripeness rather than on a date — and a rule whose
+	author cannot write that sentence has written a calendar reminder, which
+	belongs in somebody's phone rather than in a compliance system.
+	"""
+
+	key: str
+	title: str
+	category: str
+	scan: object
+	kairotic_gate: str
+	purpose: str = ""
+	requires: tuple = ()
+	#: Framework(s) this rule serves, for the docs and the calendar readout.
+	framework: str = ""
+
+	def is_available(self) -> bool:
+		try:
+			return all(doctype_exists(doctype) for doctype in self.requires)
+		except Exception:
+			return False
+
+	def missing(self) -> list:
+		try:
+			return [doctype for doctype in self.requires if not doctype_exists(doctype)]
+		except Exception:
+			return list(self.requires)
+
+	def describe(self) -> dict:
+		return {
+			"alert_type": self.key,
+			"title": self.title,
+			"category": self.category,
+			"purpose": self.purpose,
+			"kairotic_gate": self.kairotic_gate,
+			"framework": self.framework,
+			"requires": list(self.requires),
+			"available": self.is_available(),
+		}
+
+
+#: key → Rule. Populated by `register` at import time.
+RULES: dict = {}
+
+
+def register(rule: Rule) -> Rule:
+	if rule.key in RULES:
+		raise RuntimeError(f"duplicate compliance rule {rule.key!r}")
+	if not str(rule.kairotic_gate or "").strip():
+		raise RuntimeError(
+			f"compliance rule {rule.key!r} has no kairotic_gate. Say what state makes it ripe, "
+			"or it is a calendar reminder rather than a compliance rule."
+		)
+	RULES[rule.key] = rule
+	return rule
+
+
+def names() -> list:
+	return sorted(RULES)
+
+
+def alert_key(rule_key: str, source_doctype: str, source_docname: str) -> str:
+	"""The deterministic docname for one rule firing on one record.
+
+	Readable where it fits, hashed where it does not — a docname is something a
+	human reads in a list view, and `certification_expiring:Certification:
+	GlobalGAP 2026` tells them what it is at a glance in a way a bare digest never
+	would. The hash is a suffix rather than a replacement so even a truncated key
+	keeps its rule name at the front.
+
+	CARRIES NOTHING THAT CHANGES DAILY. Not the due date, not the severity, not
+	the message. See the module docstring: a key that moved would make every
+	sweep write a duplicate and orphan every snooze.
+	"""
+	raw = f"{rule_key}:{source_doctype}:{source_docname}"
+	if len(raw) <= MAX_KEY:
+		return raw
+	# sha1 because this is an IDENTITY, not a signature: it only has to be stable
+	# and collision-free across one site's alert keys.
+	digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+	return f"{raw[: MAX_KEY - len(digest) - 1]}~{digest}"
+
+
+def severity_at_least(severity: str, minimum: str) -> bool:
+	"""Is `severity` as bad as `minimum` or worse?"""
+	try:
+		return SEVERITY_ORDER.index(severity) <= SEVERITY_ORDER.index(minimum)
+	except ValueError:
+		return True
+
+
+def days_until(today: str, target) -> int | None:
+	"""Whole days from `today` to `target`. Negative when `target` has passed."""
+	if not target:
+		return None
+	try:
+		return int(frappe.utils.date_diff(str(target), today))
+	except Exception:
+		return None
+
+
+def days_since(today: str, target) -> int | None:
+	"""Whole days from `target` to `today`. Negative when `target` is in the future."""
+	value = days_until(today, target)
+	return None if value is None else -value
+
+
+# ── the sweep ───────────────────────────────────────────────────────────────
+def refresh_compliance_alerts(company: str = "", today: str = "", dry_run: bool = False) -> dict:
+	"""Run every available rule and reconcile the Compliance Alert table to it.
+
+	This is the scheduler's entry point and the `refresh_compliance_alerts` tool's
+	handler, and it NEVER RAISES. It runs on somebody's scheduler beside their
+	real work; a rule that throws is caught, named in the report, and the rest of
+	the sweep continues. A compliance calendar that took the site's scheduler down
+	would be considerably worse than one that missed a night.
+
+	Reconciliation, per rule, in this order:
+
+	  1. every observation the rule makes becomes an alert — created if new,
+	     refreshed if the key is already there, un-dismissed if it had been
+	     auto-dismissed and the condition has come back;
+	  2. every existing alert of that rule whose key the rule did NOT observe is
+	     auto-dismissed, because its condition has resolved.
+
+	Step 2 is scoped to the rule that owns the alert type. A rule skipped because
+	its doctypes are absent auto-dismisses nothing, which is the only safe reading
+	— "farm_precision_ag was uninstalled this afternoon" is not evidence that
+	anybody performed a water test.
+	"""
+	today = today or frappe.utils.today()
+	report = {
+		"today": today,
+		"company": company or None,
+		"dry_run": bool(dry_run),
+		"created": 0,
+		"refreshed": 0,
+		"auto_dismissed": 0,
+		"reopened": 0,
+		"rules_run": [],
+		"rules_skipped": [],
+		"rules_failed": [],
+		"alerts": [],
+	}
+
+	if not doctype_exists(ALERT_DOCTYPE):
+		report["rules_skipped"] = [
+			{
+				"alert_type": key,
+				"reason": (
+					"this site has no Compliance Alert DocType, which ships with erpnext_mcp — "
+					"run `bench --site <site> migrate`"
+				),
+			}
+			for key in names()
+		]
+		return report
+
+	for key in names():
+		rule = RULES[key]
+		if not rule.is_available():
+			report["rules_skipped"].append(
+				{
+					"alert_type": key,
+					"title": rule.title,
+					"reason": (
+						f"this site does not have {', '.join(rule.missing())}, so there is nothing "
+						"for this rule to read. No alert of this type was created, and none was "
+						"dismissed — an absent DocType is not evidence that anybody did the work."
+					),
+				}
+			)
+			continue
+		try:
+			_run_rule(rule, {"today": today, "company": company}, report, dry_run)
+		except Exception as exc:
+			report["rules_failed"].append(
+				{"alert_type": key, "title": rule.title, "error": f"{type(exc).__name__}: {exc}"}
+			)
+
+	report["rules_run"] = sorted(
+		{entry["alert_type"] for entry in report["alerts"]}
+		| {key for key in names() if RULES[key].is_available()}
+		- {entry["alert_type"] for entry in report["rules_failed"]}
+	)
+	return report
+
+
+def _run_rule(rule: Rule, context: dict, report: dict, dry_run: bool) -> None:
+	observations = list(rule.scan(context) or [])
+	if len(observations) > RULE_CAP:
+		report.setdefault("capped", []).append(
+			{
+				"alert_type": rule.key,
+				"observed": len(observations),
+				"kept": RULE_CAP,
+				"note": (
+					f"{rule.key} observed {len(observations)} records, past the {RULE_CAP} cap. A "
+					"rule firing on this many records is usually firing on a field that is empty "
+					"everywhere rather than stale on a few. The calendar shows the first "
+					f"{RULE_CAP}; the rest are neither shown nor dismissed."
+				),
+			}
+		)
+		observations = observations[:RULE_CAP]
+
+	observed = {}
+	for observation in observations:
+		key = alert_key(rule.key, observation.source_doctype, observation.source_docname)
+		observed[key] = observation
+
+	existing = _existing_alerts(rule.key, context.get("company") or "")
+
+	for key, observation in sorted(observed.items()):
+		row = existing.get(key)
+		outcome = _upsert(rule, key, observation, row, context["today"], dry_run)
+		report[outcome] += 1
+		report["alerts"].append(
+			{
+				"name": key,
+				"alert_type": rule.key,
+				"outcome": outcome,
+				"severity": observation.severity,
+				"source": f"{observation.source_doctype} {observation.source_docname}",
+				"due_date": observation.due_date or None,
+			}
+		)
+
+	for key, row in sorted(existing.items()):
+		if key in observed:
+			continue
+		if frappe.utils.cint(row.get("dismissed")):
+			continue
+		report["auto_dismissed"] += 1
+		report["alerts"].append(
+			{
+				"name": key,
+				"alert_type": rule.key,
+				"outcome": "auto_dismissed",
+				"severity": row.get("severity"),
+				"source": f"{row.get('source_doctype')} {row.get('source_docname')}",
+				"due_date": str(row.get("due_date") or "") or None,
+			}
+		)
+		if not dry_run:
+			_auto_dismiss(key)
+
+
+def _existing_alerts(alert_type: str, company: str) -> dict:
+	"""Every alert of this type already on the site, keyed by docname.
+
+	Includes dismissed ones. A dismissed alert whose condition has come back has
+	to be found and re-raised, and a sweep that only looked at live rows would
+	create a second alert with the same key and fail on the unique constraint.
+	"""
+	filters = {"alert_type": alert_type}
+	if company:
+		filters["company"] = company
+	rows = frappe.db.get_all(
+		ALERT_DOCTYPE,
+		filters=filters,
+		fields=[
+			"name",
+			"alert_type",
+			"severity",
+			"category",
+			"company",
+			"source_doctype",
+			"source_docname",
+			"alert_message",
+			"due_date",
+			"first_seen",
+			"snoozed_until",
+			"dismissed",
+			"auto_dismissed",
+			"dismissed_reason",
+		],
+		limit=RULE_CAP * 4,
+	)
+	return {str(row["name"]): dict(row) for row in rows or []}
+
+
+def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry_run: bool) -> str:
+	"""Create, refresh or reopen one alert. Returns which of the three it was."""
+	category = observation.category or rule.category
+
+	if row is None:
+		if not dry_run:
+			doc = frappe.new_doc(ALERT_DOCTYPE)
+			doc.alert_key = key
+			doc.alert_type = rule.key
+			doc.severity = observation.severity
+			doc.category = category
+			doc.company = observation.company or None
+			doc.source_doctype = observation.source_doctype
+			doc.source_docname = observation.source_docname
+			doc.alert_message = observation.message
+			doc.due_date = observation.due_date or None
+			doc.first_seen = today
+			doc.last_refreshed = frappe.utils.now()
+			doc.insert(ignore_permissions=True)
+		return "created"
+
+	reopening = bool(frappe.utils.cint(row.get("auto_dismissed")))
+	if dry_run:
+		return "reopened" if reopening else "refreshed"
+
+	doc = frappe.get_doc(ALERT_DOCTYPE, key)
+	doc.severity = observation.severity
+	doc.category = category
+	doc.company = observation.company or None
+	doc.alert_message = observation.message
+	doc.due_date = observation.due_date or None
+	doc.last_refreshed = frappe.utils.now()
+	# `first_seen` is deliberately not touched. An alert open four months is
+	# evidence of four months, and resetting it would make a chronic problem look
+	# new every morning — see the module docstring.
+	if reopening:
+		# The condition resolved and has come back. A human dismissal is NOT
+		# reopened here: somebody looked at this and decided, and the sweep does
+		# not get to overrule them by noticing the same thing again.
+		doc.dismissed = 0
+		doc.auto_dismissed = 0
+		doc.dismissed_by = None
+		doc.dismissed_on = None
+		doc.dismissed_reason = None
+	doc.save(ignore_permissions=True)
+	return "reopened" if reopening else "refreshed"
+
+
+def _auto_dismiss(key: str) -> None:
+	"""Dismiss one alert because its source condition resolved."""
+	doc = frappe.get_doc(ALERT_DOCTYPE, key)
+	doc.dismissed = 1
+	doc.auto_dismissed = 1
+	doc.dismissed_on = frappe.utils.today()
+	doc.dismissed_by = None
+	# Must be empty — the controller refuses a reason on an auto-dismissal, so the
+	# two kinds of dismissal stay distinguishable six months later.
+	doc.dismissed_reason = None
+	doc.save(ignore_permissions=True)
+
+
+def sweep() -> int:
+	"""The scheduler's entry point. Never raises, and returns what it did.
+
+	A bare function with no arguments because that is what `scheduler_events`
+	calls, and a return value because a job that reports nothing is a job nobody
+	can tell has stopped working.
+	"""
+	try:
+		if not doctype_exists(ALERT_DOCTYPE):
+			return 0
+		report = refresh_compliance_alerts()
+		return int(report["created"] + report["refreshed"] + report["reopened"] + report["auto_dismissed"])
+	except Exception:
+		try:
+			frappe.log_error(
+				title="erpnext_mcp: the compliance alert sweep failed",
+				message=frappe.get_traceback(),
+			)
+		except Exception:
+			pass
+		return 0

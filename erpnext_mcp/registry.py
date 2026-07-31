@@ -42,10 +42,14 @@ from .result import ToolResult
 from .tools import (
 	accounts,
 	assets,
+	auditpacket,
 	banking,
+	calendar,
 	collab,
 	company,
+	compliance,
 	dimensions,
+	evidence,
 	farm,
 	files,
 	fiscal,
@@ -594,6 +598,13 @@ TOOLS = {
 				"Passing true accepts a voucher and a general ledger that say different "
 				"things about who this line belongs to, and the result carries that as a "
 				"warning. Read investigate_je_gl_link first.",
+			),
+			"force_gl_sync": _field(
+				_BOOLEAN,
+				"Write the GL Entry rows even where nothing disagrees with the voucher. Default "
+				"false. The GL is already written whenever it has DRIFTED from the voucher — this "
+				"only makes the write an explicit act rather than a consequence of a comparison, "
+				"which is what repair_drifted_je_attributions passes.",
 			),
 			"dry_run": _field(_BOOLEAN, "Report the change and the GL rows without writing. Default false."),
 		},
@@ -4973,12 +4984,1038 @@ TOOLS = {
 		available=_needs_doctype("Housing Assignment"),
 		requires="the Housing Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	# ── v0.15.0: Sprint 7 compliance framework ──────────────────────────────
+	#
+	# Read tools first inside each wave, mutating after, the same order the rest of
+	# this catalogue keeps. Every mutating tool here defaults OFF except
+	# `install_compliance_fields`, which is an installer rather than a writer of
+	# somebody's data and is argued for in compliance_fields.py.
+	"get_compliance_field_map": _tool(
+		compliance.get_compliance_field_map,
+		"What compliance requires of an OPERATIONAL record on this site, field by "
+		"field: which doctype carries it, which framework wants it, why that "
+		"framework wants it, and — the part that matters — what breaks in the "
+		"day-to-day WORK if it is missing. Reports which fields are actually present "
+		"here and which are not. Read-only.\n\n"
+		"THE TEST IT ENCODES. Does removing a field break OPERATIONS, or only break "
+		"COMPLIANCE REPORTING? Breaks operations too → compliance is woven in "
+		"correctly. Only breaks reporting → it is a shadow layer and belongs "
+		"somewhere else. Every field carries its answer under `breaks_operationally`.",
+		{},
+		title="Compliance field map",
+	),
+	"install_compliance_fields": _tool(
+		compliance.install_compliance_fields,
+		"MUTATING (default ON — the only one in this app). Adds the compliance "
+		"columns to the doctypes where the work happens: applicator, EPA registration "
+		"number, REI, PHI and weather on Spray Log; I-9 status, W-4 status, wage-law "
+		"jurisdiction and farm labor contractor licensing on Employee; picker, crew, "
+		"block, bin and shipment on the BucketLog bridge. Idempotent — the same "
+		"installer runs on every migrate and a second run creates nothing.\n\n"
+		"THIS IS THE ONE PLACE erpnext_mcp EXTENDS A DOCTYPE IT DID NOT CREATE, and "
+		"it is deliberate. Compliance woven into the operational record is defensible "
+		"under audit; a shadow log filled in afterwards drifts from reality the first "
+		"busy week of harvest, and an auditor who finds two records of one spray that "
+		"disagree has found something far worse than a missing field. The cost is "
+		"real and stated: uninstalling this app drops these columns and everything "
+		"typed into them.\n\n"
+		"EVERY FIELD IS A CUSTOM FIELD, so the target app's own repository and "
+		"migrations are untouched, and a version of farm_precision_ag that later adds "
+		"the same field finds it already there rather than ending up with two.\n\n"
+		"THE NUMBER WORTH READING IS THE BACKLOG. Three of the Employee fields and "
+		"four of the Spray Log fields are REQUIRED, and Frappe enforces that on save "
+		"rather than retroactively — so existing records stay readable and stop being "
+		"re-saveable. `backlog` counts them per field. That is the operation's "
+		"compliance debt stated in rows.\n\n"
+		"A doctype that is not on this site is skipped BY NAME rather than failing. "
+		"Supports dry_run.",
+		{
+			"dry_run": _field(
+				_BOOLEAN,
+				"Report what would be added, including the backlog counts, and write nothing. "
+				"Default false.",
+			)
+		},
+		mutating=True,
+		idempotent=True,
+		title="Install compliance fields",
+	),
+	# ── Wave 2: external evidence ───────────────────────────────────────────
+	"list_compliance_policies": _tool(
+		evidence.list_compliance_policies,
+		"The SOP library: every written procedure, its category, version, effective "
+		"date and review date, with the ones overdue for review and — the list worth "
+		"acting on first — the ones with NO document attached. A policy record with "
+		"no attached procedure is a claim that a procedure exists, and an auditor "
+		"asks to read the procedure. Read-only.",
+		{
+			"company": _COMPANY,
+			"category": _field(
+				_STRING,
+				"Harvest Hygiene, Spray SOP, Worker Training, Food Defense, Water Testing, "
+				"Equipment Sanitation, Recall and Traceability, Worker Safety, Housing or Other.",
+			),
+			"status": _field(_STRING, "Draft, Active, Superseded or Retired."),
+			"in_force_only": _field(_BOOLEAN, "Only Active policies. Default false."),
+			"limit": _LIMIT,
+		},
+		title="List compliance policies",
+		available=_needs_doctype("Compliance Policy"),
+		requires="the Compliance Policy DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_compliance_policy": _tool(
+		evidence.get_compliance_policy,
+		"One procedure in full, with its WHOLE version chain — walked in both "
+		"directions from this record — and every audit corrective action that named "
+		"it as evidence. Read-only.\n\n"
+		"THE CHAIN IS WHY THIS EXISTS. An audit asks which procedure was in force on "
+		"the day something happened, and the answer is usually not the current "
+		"version. A superseded policy is historical rather than wrong: it was correct "
+		"on the dates it was in force.",
+		{
+			"policy": _field(_STRING, "The Compliance Policy docname, which is its name."),
+			"company": _COMPANY,
+		},
+		required=("policy",),
+		title="Get a compliance policy",
+		available=_needs_doctype("Compliance Policy"),
+		requires="the Compliance Policy DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_compliance_policy": _tool(
+		evidence.create_compliance_policy,
+		"MUTATING (default OFF). Register one written procedure at one version: "
+		"category, version, effective date, review date, the person answerable for "
+		"it, and the document itself.\n\n"
+		"THE VERSION IS A FIELD, NOT PART OF THE NAME. A policy at v3 is the same "
+		"policy it was at v1, and every audit finding that cited it should still "
+		"resolve to it — so a second policy under an existing name is refused, and "
+		"supersede_compliance_policy is how a genuinely separate revision is chained.\n\n"
+		"REFUSES a review date before the effective date, which would be a procedure "
+		"overdue for review before it took effect. WARNS about a missing document, a "
+		"missing effective date and a missing review date, without refusing any of "
+		"them.",
+		{
+			"policy_name": _field(
+				_STRING,
+				"What the procedure is called, in the words the crew and the auditor both use: "
+				"'Harvest Hygiene SOP'. Becomes the docname.",
+			),
+			"category": _field(
+				_STRING,
+				"Harvest Hygiene, Spray SOP, Worker Training, Food Defense, Water Testing, "
+				"Equipment Sanitation, Recall and Traceability, Worker Safety, Housing or Other.",
+			),
+			"version": _field(_STRING, "As the document states it: 'v3', '2026.1', 'Rev C'."),
+			"company": _COMPANY,
+			"policy_owner": _field(
+				_STRING,
+				"The User an auditor's question gets forwarded to. Login email or full name; "
+				"one that does not exist is refused rather than silently dropped.",
+			),
+			"status": _field(_STRING, "Draft, Active, Superseded or Retired. Default Active."),
+			"effective_date": _field(_STRING, "When this version took effect, YYYY-MM-DD."),
+			"review_due_date": _field(_STRING, "When it is next due to be read and re-adopted."),
+			"attached_document": _field(
+				_STRING,
+				"file_url of the procedure itself. Upload it with stage_file_chunk + "
+				"commit_staged_file, or attach_file_to_document afterwards.",
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("policy_name", "category"),
+		mutating=True,
+		title="Create a compliance policy",
+		available=_needs_doctype("Compliance Policy"),
+		requires="the Compliance Policy DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_compliance_policy": _tool(
+		evidence.update_compliance_policy,
+		"MUTATING (default OFF). Change a procedure's category, version, status, "
+		"dates, owner, document or notes. Every change is echoed as before → after.\n\n"
+		"CANNOT re-key it — the docname is what every audit finding points at. CANNOT "
+		"set either end of the version chain: a chain written from one end only says "
+		"something different to a reader coming from the other, so both links are "
+		"written in one act by supersede_compliance_policy.",
+		{
+			"policy": _field(_STRING, "The Compliance Policy docname."),
+			"company": _COMPANY,
+			"category": _field(_STRING, "New category."),
+			"version": _field(_STRING, "New version."),
+			"status": _field(_STRING, "Draft, Active, Superseded or Retired."),
+			"effective_date": _field(_STRING, "New effective date, YYYY-MM-DD."),
+			"review_due_date": _field(_STRING, "New review date, YYYY-MM-DD."),
+			"policy_owner": _field(_STRING, "New owner. Empty string clears it."),
+			"attached_document": _field(_STRING, "New file_url."),
+			"notes": _field(_STRING, "New notes."),
+			"policy_name": _field(_STRING, "Always refused — see the description."),
+			"supersedes": _field(_STRING, "Always refused — see the description."),
+			"superseded_by": _field(_STRING, "Always refused — see the description."),
+		},
+		required=("policy",),
+		mutating=True,
+		title="Update a compliance policy",
+		available=_needs_doctype("Compliance Policy"),
+		requires="the Compliance Policy DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"supersede_compliance_policy": _tool(
+		evidence.supersede_compliance_policy,
+		"MUTATING (default OFF). Replace one procedure with another, writing BOTH "
+		"ends of the chain in one act and setting the old one's status to "
+		"Superseded. Requires a `reason` and records it on both timelines.\n\n"
+		"BOTH ENDS, BECAUSE 'WHICH PROCEDURE WAS IN FORCE ON THE DAY THIS HAPPENED' "
+		"is asked from whichever end the auditor happens to start. A half-written "
+		"chain tells the two readers different things.\n\n"
+		"REFUSES: a policy superseding itself; one that was already superseded (a "
+		"procedure has one successor, and two would make 'what was in force' "
+		"unanswerable); a successor whose effective date PREDATES the one it "
+		"replaces, which would leave a period with two procedures in force and no "
+		"way to tell which.\n\n"
+		"The superseded policy is NOT deleted and is NOT wrong — it was correct on "
+		"the dates it was in force. Supports dry_run.",
+		{
+			"policy": _field(_STRING, "The procedure being replaced."),
+			"superseded_by": _field(_STRING, "The procedure replacing it."),
+			"reason": _field(
+				_STRING,
+				"Why the procedure was revised. Recorded on both records; must be a real "
+				"sentence, not a word.",
+			),
+			"company": _COMPANY,
+			"dry_run": _field(_BOOLEAN, "Report what would be written and write nothing."),
+		},
+		required=("policy", "superseded_by", "reason"),
+		mutating=True,
+		title="Supersede a compliance policy",
+		available=_needs_doctype("Compliance Policy"),
+		requires="the Compliance Policy DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_certifications": _tool(
+		evidence.list_certifications,
+		"The certificate and licence register, SOONEST EXPIRY FIRST, which is the "
+		"order somebody works them in. Reports what has expired, what is inside its "
+		"renewal window, and what has no certificate attached. Read-only.\n\n"
+		"`expired` IS READ FROM THE DATE, NOT FROM THE STATUS FIELD. Nothing in this "
+		"app rewrites a status when a date passes: a controller that did would only "
+		"run on documents somebody saved, so the expired certificates would be "
+		"exactly the ones still reading Active.",
+		{
+			"company": _COMPANY,
+			"cert_type": _field(
+				_STRING,
+				"GAP, GlobalGAP, PrimusGFS, Organic, Applicator License, Farm Labor Contractor "
+				"License, Commercial Driver License, Food Safety Training, First Aid / CPR, "
+				"Water Test Certification or Other.",
+			),
+			"status": _field(_STRING, "Active, Expired, Suspended, Revoked, Superseded or Not Yet Effective."),
+			"holder": _field(_STRING, "Only certificates held by this person or company."),
+			"expiring_only": _field(_BOOLEAN, "Only ones inside their renewal window. Default false."),
+			"limit": _LIMIT,
+		},
+		title="List certifications",
+		available=_needs_doctype("Certification"),
+		requires="the Certification DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_certification": _tool(
+		evidence.get_certification,
+		"One certificate with its FULL renewal history, including every period it "
+		"was allowed to lapse. Resolves the holder's name against the Related Party, "
+		"Family, Employee and Company registers and reports which one answered — a "
+		"name in none of them is a contractor on nobody's payroll, which is a "
+		"legitimate answer rather than a failure. Read-only.\n\n"
+		"THE LAPSES ARE THE POINT. A certificate renewed four times and one issued "
+		"yesterday look identical from the current dates alone, and only one of them "
+		"is evidence of a maintained programme. Renewing late does not close a gap "
+		"that already happened, and the history keeps it visible.",
+		{
+			"certification": _field(_STRING, "The Certification docname."),
+			"company": _COMPANY,
+		},
+		required=("certification",),
+		title="Get a certification",
+		available=_needs_doctype("Certification"),
+		requires="the Certification DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_certification": _tool(
+		evidence.create_certification,
+		"MUTATING (default OFF). Register one certificate or licence: type, holder, "
+		"issuing body, issue and expiration dates, renewal window and the certificate "
+		"itself.\n\n"
+		"THE RENEWAL WINDOW IS A LEAD TIME, NOT A REMINDER PREFERENCE. It defaults to "
+		"90 days because that is roughly what an Oregon farm labor contractor licence "
+		"renewal takes once the bond and background check are counted. Setting it to "
+		"7 does not make the agency faster; it makes the alert arrive too late to act "
+		"on.\n\n"
+		"REFUSES an expiration before the issue date (a transposition every time) and "
+		"a duplicate name — a renewal is not a new record, it is renew_certification, "
+		"which keeps the history of every previous term.",
+		{
+			"cert_name": _field(
+				_STRING,
+				"Distinct enough that two cannot collide: 'GlobalGAP — Highland LLC 2026'. "
+				"Becomes the docname.",
+			),
+			"cert_type": _field(
+				_STRING,
+				"GAP, GlobalGAP, PrimusGFS, Organic, Applicator License, Farm Labor Contractor "
+				"License, Commercial Driver License, Food Safety Training, First Aid / CPR, "
+				"Water Test Certification or Other.",
+			),
+			"company": _COMPANY,
+			"holder": _field(
+				_STRING,
+				"Whose certificate it is. Free text: the holder may be a Related Party, a Family "
+				"member, an employee, a company or somebody in no register at all, and a Frappe "
+				"Link points at exactly one doctype.",
+			),
+			"issuing_body": _field(_STRING, "'Oregon Department of Agriculture', 'Primus Auditing Ops'."),
+			"issued_date": _field(_STRING, "YYYY-MM-DD."),
+			"expiration_date": _field(
+				_STRING, "The date it stops being a defence. The most load-bearing column here."
+			),
+			"renewal_window_days": _field(
+				_INTEGER, "How long the issuing body actually takes. Default 90."
+			),
+			"certificate_number": _field(_STRING, "The number printed on it."),
+			"status": _field(_STRING, "Active, Expired, Suspended, Revoked, Superseded or Not Yet Effective."),
+			"attached_certificate": _field(_STRING, "file_url of the certificate itself."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("cert_name", "cert_type"),
+		mutating=True,
+		title="Create a certification",
+		available=_needs_doctype("Certification"),
+		requires="the Certification DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_certification": _tool(
+		evidence.update_certification,
+		"MUTATING (default OFF). Change a certificate's type, status, holder, issuing "
+		"body, dates, renewal window, number, document or notes.\n\n"
+		"MOVING THE EXPIRATION FORWARD IS REFUSED — that is a RENEWAL, and "
+		"renew_certification is the tool. Editing the date in place would produce a "
+		"certificate that looks as though it never expired, which is exactly the fact "
+		"somebody would want hidden and exactly the fact an auditor asks about.",
+		{
+			"certification": _field(_STRING, "The Certification docname."),
+			"company": _COMPANY,
+			"cert_type": _field(_STRING, "New type."),
+			"status": _field(_STRING, "New status."),
+			"holder": _field(_STRING, "New holder."),
+			"issuing_body": _field(_STRING, "New issuing body."),
+			"issued_date": _field(_STRING, "New issue date, YYYY-MM-DD."),
+			"expiration_date": _field(
+				_STRING, "New expiration. Moving it FORWARD is refused — see the description."
+			),
+			"renewal_window_days": _field(_INTEGER, "New renewal window."),
+			"certificate_number": _field(_STRING, "New certificate number."),
+			"attached_certificate": _field(_STRING, "New file_url."),
+			"notes": _field(_STRING, "New notes."),
+			"cert_name": _field(_STRING, "Always refused — it is the docname."),
+		},
+		required=("certification",),
+		mutating=True,
+		title="Update a certification",
+		available=_needs_doctype("Certification"),
+		requires="the Certification DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"renew_certification": _tool(
+		evidence.renew_certification,
+		"MUTATING (default OFF). Move a certificate's expiration OUT and record what "
+		"was actually done to earn it — the audit that was passed, the fee that was "
+		"paid, the training that was completed. Appends to the renewal history rather "
+		"than editing the date in place.\n\n"
+		"A LAPSE IS REPORTED, NOT HIDDEN. A renewal recorded after the previous "
+		"expiration is a period the operation was uncertified, and renewing late does "
+		"not close a gap that already happened — `lapsed_days` names it and the "
+		"renewal row keeps it.\n\n"
+		"REFUSES a new expiration that is not after the current one: that is a "
+		"correction, not a renewal, and recording it as one would put a term in the "
+		"history that never existed. Sets the status back to Active where it had "
+		"lapsed. Supports dry_run.",
+		{
+			"certification": _field(_STRING, "The Certification docname."),
+			"new_expiration": _field(_STRING, "The new expiration date, YYYY-MM-DD. Must be later than the current one."),
+			"what_was_done": _field(
+				_STRING,
+				"What was actually done to renew it. The part nobody can reconstruct from the "
+				"dates; must be a real sentence.",
+			),
+			"renewed_on": _field(_STRING, "When the renewal happened. Defaults to today; a future date is refused."),
+			"renewed_by": _field(_STRING, "Who did it. Defaults to the calling user."),
+			"certificate_number": _field(_STRING, "New certificate number, where a renewal issues one."),
+			"attached_certificate": _field(_STRING, "file_url of the new certificate."),
+			"company": _COMPANY,
+			"dry_run": _field(_BOOLEAN, "Report the lapse and the new term, and write nothing."),
+		},
+		required=("certification", "new_expiration", "what_was_done"),
+		mutating=True,
+		title="Renew a certification",
+		available=_needs_doctype("Certification"),
+		requires="the Certification DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_regulatory_filings": _tool(
+		evidence.list_regulatory_filings,
+		"What was filed, to whom, when, under what docket number and what came back. "
+		"Calls out the ones still awaiting a response, the ones whose response is "
+		"overdue, and the ones with no document attached. Read-only.\n\n"
+		"A FILING NOBODY CAN PROVE WAS MADE IS A FILING THAT WAS NOT MADE. The "
+		"agency's position in a dispute is that they have no record, and 'we sent it' "
+		"is worth nothing against that without a date, a confirmation number and the "
+		"document.",
+		{
+			"company": _COMPANY,
+			"agency": _field(
+				_STRING, "USDA, ODA, DOL, EPA, IRS, OR-DOR, OR-BOLI, OSHA, FDA, WA-L&I or Other."
+			),
+			"filing_type": _field(_STRING, "'1099-NEC', 'OSHA-300A', 'Pesticide-Application-Report'."),
+			"status": _field(_STRING, "Draft, Submitted, Accepted, Rejected, Amended or Withdrawn."),
+			"from_date": _field(_STRING, "Earliest submission date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest submission date, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List regulatory filings",
+		available=_needs_doctype("Regulatory Filing"),
+		requires="the Regulatory Filing DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_regulatory_filing": _tool(
+		evidence.get_regulatory_filing,
+		"One filing with its response, both attached documents, and what is missing "
+		"from the proof it was made. Read-only.",
+		{
+			"filing": _field(_STRING, "The Regulatory Filing docname."),
+			"company": _COMPANY,
+		},
+		required=("filing",),
+		title="Get a regulatory filing",
+		available=_needs_doctype("Regulatory Filing"),
+		requires="the Regulatory Filing DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_regulatory_filing": _tool(
+		evidence.create_regulatory_filing,
+		"MUTATING (default OFF). Record something submitted to an agency: the agency, "
+		"the form, the period it covers, when it went, the docket number, the "
+		"documents, and any response deadline.\n\n"
+		"REFUSES a filing marked Submitted (or Accepted, Rejected, Amended) with NO "
+		"submission date. A half-filled filing record is more dangerous than none: an "
+		"audit packet would include it and an auditor would read it as evidence of "
+		"something that may not have happened. A Draft with no dates is exactly what "
+		"a filing being prepared looks like and is allowed.\n\n"
+		"Also refuses a submission date in the future, a response received before the "
+		"filing was sent, and a response deadline that had passed before it was sent.",
+		{
+			"filing_name": _field(
+				_STRING,
+				"Said once and distinctly: '1099-NEC 2025 — Orchard Meadow LLC'. Becomes the docname.",
+			),
+			"agency": _field(
+				_STRING, "USDA, ODA, DOL, EPA, IRS, OR-DOR, OR-BOLI, OSHA, FDA, WA-L&I or Other."
+			),
+			"filing_type": _field(
+				_STRING,
+				"The form in the agency's own name for it: '1099-NEC', 'OSHA-300A', 'Form 943'. "
+				"Free text — agencies invent forms faster than a Select can be maintained.",
+			),
+			"company": _COMPANY,
+			"period_covered": _field(_STRING, "As the filing states it: '2025', 'Q3 2026'."),
+			"status": _field(
+				_STRING, "Draft, Submitted, Accepted, Rejected, Amended or Withdrawn. Default Submitted."
+			),
+			"submission_date": _field(_STRING, "When it actually went, YYYY-MM-DD."),
+			"docket_number": _field(_STRING, "The agency's own reference — docket, confirmation, certified mail number."),
+			"response_due_date": _field(_STRING, "When a response is expected or required by."),
+			"response_received_date": _field(_STRING, "When they answered. Setting this dismisses the response alert."),
+			"response": _field(_STRING, "What the agency said, in their words where possible."),
+			"attached_filing": _field(_STRING, "file_url of the filing AS SUBMITTED — not the working copy."),
+			"attached_response": _field(_STRING, "file_url of their reply."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("filing_name", "agency", "filing_type"),
+		mutating=True,
+		title="Create a regulatory filing",
+		available=_needs_doctype("Regulatory Filing"),
+		requires="the Regulatory Filing DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_regulatory_filing": _tool(
+		evidence.update_regulatory_filing,
+		"MUTATING (default OFF). Record the response, the docket number, the attached "
+		"documents or a change of status. Recording a response date auto-dismisses "
+		"the filing's response alert on the next sweep — nobody has to switch it off.",
+		{
+			"filing": _field(_STRING, "The Regulatory Filing docname."),
+			"company": _COMPANY,
+			"agency": _field(_STRING, "New agency."),
+			"filing_type": _field(_STRING, "New form."),
+			"period_covered": _field(_STRING, "New period."),
+			"status": _field(_STRING, "New status."),
+			"submission_date": _field(_STRING, "New submission date, YYYY-MM-DD."),
+			"docket_number": _field(_STRING, "New docket or confirmation number."),
+			"response_due_date": _field(_STRING, "New response deadline."),
+			"response_received_date": _field(_STRING, "When they answered."),
+			"response": _field(_STRING, "What they said."),
+			"attached_filing": _field(_STRING, "New file_url for the filing."),
+			"attached_response": _field(_STRING, "New file_url for the response."),
+			"notes": _field(_STRING, "New notes."),
+			"filing_name": _field(_STRING, "Always refused — it is the docname."),
+		},
+		required=("filing",),
+		mutating=True,
+		title="Update a regulatory filing",
+		available=_needs_doctype("Regulatory Filing"),
+		requires="the Regulatory Filing DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_audit_events": _tool(
+		evidence.list_audit_events,
+		"Every audit and inspection, with open corrective actions counted and the "
+		"OVERDUE ones named. Read-only.\n\n"
+		"AN OPERATION IS NOT JUDGED ON HAVING NO FINDINGS. Every audit produces some, "
+		"and a clean report usually means the auditor did not look hard. It is judged "
+		"on closing them, which is what `overdue_corrective_actions` counts and what "
+		"the same auditor asks about on the next visit.",
+		{
+			"company": _COMPANY,
+			"audit_type": _field(
+				_STRING,
+				"FSMA, GAP, GlobalGAP, PrimusGFS, Organic, OSHA, USDA, DOL, EPA, ODA, FDA, "
+				"Buyer Audit, Internal Audit or Other.",
+			),
+			"result": _field(_STRING, "Pending, Passed, Passed With Conditions, Failed or Not Scored."),
+			"from_date": _field(_STRING, "Earliest audit date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest audit date, YYYY-MM-DD."),
+			"open_only": _field(_BOOLEAN, "Only audits whose corrective actions are not all closed."),
+			"limit": _LIMIT,
+		},
+		title="List audit events",
+		available=_needs_doctype("Audit Event"),
+		requires="the Audit Event DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_audit_event": _tool(
+		evidence.get_audit_event,
+		"One audit in full: scope, findings, and every corrective action with its "
+		"severity, its deadline, how many days past it is, what was actually done and "
+		"what proves it. Read-only.\n\n"
+		"Flags a conditional pass or a failure with NO corrective actions recorded — "
+		"a conditional pass has conditions and a failure has reasons, and if neither "
+		"is written down here they are not written down anywhere.",
+		{
+			"audit": _field(_STRING, "The Audit Event docname."),
+			"company": _COMPANY,
+		},
+		required=("audit",),
+		title="Get an audit event",
+		available=_needs_doctype("Audit Event"),
+		requires="the Audit Event DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_audit_event": _tool(
+		evidence.create_audit_event,
+		"MUTATING (default OFF). Record an audit or inspection: who came, when, what "
+		"they looked at, what they found, and one row per thing that has to be "
+		"fixed.\n\n"
+		"THE CORRECTIVE ACTIONS TABLE IS THE SUBSTANCE. Each row takes a finding IN "
+		"THE AUDITOR'S WORDS, a severity, an owner who is a PERSON rather than a "
+		"department, and a deadline — most schemes give 28 days for a Major and days "
+		"for a Critical. A row with no due date is warned about, because nothing will "
+		"ever say it is late.\n\n"
+		"Warns about a missing report (it is the auditor's own words, and nothing "
+		"else is) and about a conditional pass or failure with no actions recorded.",
+		{
+			"audit_name": _field(
+				_STRING, "'PrimusGFS 2026 — Highland Ranch', 'ODA Pesticide Inspection 2026-06-14'."
+			),
+			"audit_type": _field(
+				_STRING,
+				"FSMA, GAP, GlobalGAP, PrimusGFS, Organic, OSHA, USDA, DOL, EPA, ODA, FDA, "
+				"Buyer Audit, Internal Audit or Other.",
+			),
+			"audit_date": _field(_STRING, "The date they were on the ground, YYYY-MM-DD."),
+			"auditor": _field(_STRING, "Who did it — the name, and the firm if they differ."),
+			"company": _COMPANY,
+			"result": _field(
+				_STRING,
+				"Pending, Passed, Passed With Conditions, Failed or Not Scored. Default Pending — "
+				"the report often arrives weeks after the visit.",
+			),
+			"scope": _field(
+				_STRING,
+				"What they actually looked at. An audit of the packing house is not evidence "
+				"about the camp.",
+			),
+			"findings": _field(_STRING, "The findings as written, in full."),
+			"corrective_actions": _field(
+				{"type": "array", "items": _OBJECT},
+				"One object per finding: {finding, severity, status, assigned_to, due_date, "
+				"closed_date, corrective_action, evidence, notes}. `finding` is required on each. "
+				"Severity is Observation, Minor, Major or Critical.",
+			),
+			"attached_report": _field(_STRING, "file_url of the audit report."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("audit_name", "audit_type", "audit_date"),
+		mutating=True,
+		title="Create an audit event",
+		available=_needs_doctype("Audit Event"),
+		requires="the Audit Event DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_audit_event": _tool(
+		evidence.update_audit_event,
+		"MUTATING (default OFF). Change the scope, findings, result or report; ADD "
+		"corrective actions; and CLOSE one by index.\n\n"
+		"CLOSING ONE REQUIRES SAYING WHAT WAS DONE. 'Trained the crew' is not a "
+		"corrective action; 'added a hand-wash check to the pre-harvest walk and "
+		"retrained the four crew bosses on 2026-08-03' is. A tick in a box is what an "
+		"auditor is specifically trained to disbelieve, so it is refused.\n\n"
+		"`corrective_actions` REPLACES the whole table when given, which is the only "
+		"safe semantics for rows addressed by index — a merge would silently reorder "
+		"them and close the wrong finding. `add_corrective_actions` appends and "
+		"`close_corrective_action` closes one, and both exist so nobody has to resend "
+		"every row exactly to change one.\n\n"
+		"CANNOT set corrective_actions_closed — close_audit_event does that, and "
+		"refuses while any action is open.",
+		{
+			"audit": _field(_STRING, "The Audit Event docname."),
+			"company": _COMPANY,
+			"audit_type": _field(_STRING, "New audit type."),
+			"auditor": _field(_STRING, "New auditor."),
+			"audit_date": _field(_STRING, "New audit date, YYYY-MM-DD."),
+			"result": _field(_STRING, "New result."),
+			"scope": _field(_STRING, "New scope."),
+			"findings": _field(_STRING, "New findings."),
+			"corrective_actions": _field(
+				{"type": "array", "items": _OBJECT},
+				"REPLACES the whole table. Same shape as create_audit_event.",
+			),
+			"add_corrective_actions": _field(
+				{"type": "array", "items": _OBJECT}, "Appends to the table without disturbing it."
+			),
+			"close_corrective_action": _field(
+				_INTEGER, "Close the action at this index, counting from 1. get_audit_event lists them."
+			),
+			"corrective_action": _field(
+				_STRING, "What actually changed. Required when closing one; a tick in a box is refused."
+			),
+			"closed_date": _field(_STRING, "When it was closed. Defaults to today."),
+			"evidence": _field(
+				_STRING,
+				"What proves it: a photo, a training sign-in sheet, a revised policy's docname. "
+				"A Compliance Policy named here is resolved and pulled into audit packets.",
+			),
+			"attached_report": _field(_STRING, "New file_url for the report."),
+			"notes": _field(_STRING, "New notes."),
+			"audit_name": _field(_STRING, "Always refused — it is the docname."),
+			"corrective_actions_closed": _field(_STRING, "Always refused — see close_audit_event."),
+		},
+		required=("audit",),
+		mutating=True,
+		title="Update an audit event",
+		available=_needs_doctype("Audit Event"),
+		requires="the Audit Event DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"close_audit_event": _tool(
+		evidence.close_audit_event,
+		"MUTATING (default OFF). Declare an audit finished, with a mandatory closure "
+		"note saying how the closure was accepted — the auditor's confirmation, the "
+		"certificate that issued, the re-inspection that passed.\n\n"
+		"REFUSES WHILE ANY CORRECTIVE ACTION IS STILL OPEN, naming every one. An "
+		"audit marked closed over an open finding is the most misleading thing this "
+		"app could record: generate_audit_packet reads that date as 'this audit is "
+		"finished', would assemble it into a packet, and the packet would be "
+		"contradicted by the auditor's first question — open items are what auditors "
+		"look for.\n\n"
+		"An audit that raised NO findings at all is closeable; a clean PrimusGFS is a "
+		"real event. Supports dry_run.",
+		{
+			"audit": _field(_STRING, "The Audit Event docname."),
+			"closure_note": _field(
+				_STRING,
+				"How the closure was accepted. Must be a real sentence, not a word.",
+			),
+			"closed_date": _field(_STRING, "When. Defaults to today; before the audit date is refused."),
+			"closed_by": _field(_STRING, "Who. Defaults to the calling user."),
+			"company": _COMPANY,
+			"dry_run": _field(_BOOLEAN, "Check the gate and write nothing."),
+		},
+		required=("audit", "closure_note"),
+		mutating=True,
+		title="Close an audit event",
+		available=_needs_doctype("Audit Event"),
+		requires="the Audit Event DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── Wave 3: the kairotic compliance calendar ────────────────────────────
+	"get_compliance_calendar": _tool(
+		calendar.get_compliance_calendar,
+		"WHAT IS DUE AND WHAT IS LATE, worst first, grouped by category. The main "
+		"read of the whole compliance framework. Read-only.\n\n"
+		"EVERY ALERT IS STATE-DRIVEN, NOT CALENDAR-DRIVEN. Nothing here fires because "
+		"a date arrived: a certificate raises an alert when it is genuinely inside "
+		"the lead time its own issuing body takes, a block raises one when it is in "
+		"active spray rotation AND its agricultural water is untested, an employee "
+		"raises one when their I-9 has actually expired. A rule that fired on the "
+		"calendar alone would fire on fallow ground and on ground tested last week, "
+		"and would be ignored by the third month.\n\n"
+		"ALERTS AUTO-DISMISS WHEN THE CONDITION RESOLVES. The water test is done, the "
+		"licence is renewed, the inspection happens — and the alert goes away on the "
+		"next sweep without anybody switching it off.\n\n"
+		"GROUPED SO A WHOLE GROUP CAN BE CLEARED IN ONE AFTERNOON: every housing item "
+		"is one walk round the camp, every certificate is one trip to an agency "
+		"website. Snoozed alerts are hidden by default and counted; an overdue alert "
+		"is NEVER hidden by `days_ahead`, because it was due in the past.\n\n"
+		"Reports which rules cannot run on this site at all — an empty category is "
+		"not the same as a clean one.",
+		{
+			"company": _COMPANY,
+			"severity_min": _field(
+				_STRING, "Critical, Warning or Info. Only this severity and worse. Default Info (everything)."
+			),
+			"days_ahead": _field(
+				_INTEGER,
+				"Only alerts due within this many days. Overdue alerts are always shown "
+				"regardless. Omit for no horizon.",
+			),
+			"category": _field(
+				_STRING,
+				"Certifications, Policies, Workforce, Housing, Water and Sanitation, Spray and "
+				"Pesticides, Filings, Audits or Other.",
+			),
+			"alert_type": _field(_STRING, "One rule's alerts only. list_compliance_rules names them."),
+			"include_snoozed": _field(_BOOLEAN, "Show snoozed alerts too. Default false."),
+			"include_dismissed": _field(_BOOLEAN, "Show dismissed alerts too. Default false."),
+			"as_of": _field(_STRING, "Read the calendar as of this date, YYYY-MM-DD. Defaults to today."),
+			"limit": _LIMIT,
+		},
+		title="Compliance calendar",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_compliance_rules": _tool(
+		calendar.list_compliance_rules,
+		"Every alert rule this app has, with the STATE that makes each one fire "
+		"rather than the date — each rule carries a `kairotic_gate` saying exactly "
+		"what ripeness means for it — plus the compliance framework it serves and "
+		"whether it can run on this site at all. Read-only.\n\n"
+		"A rule listed as unavailable raises nothing AND dismisses nothing: an absent "
+		"DocType is not evidence that anybody did the work.",
+		{},
+		title="List compliance rules",
+	),
+	"get_audit_readiness": _tool(
+		calendar.get_audit_readiness,
+		"Audit readiness as ONE COMPARABLE NUMBER — resolved alerts over alerts "
+		"raised, as a percentage — plus the honesty check on it. Read-only.\n\n"
+		"WHY A RATIO RATHER THAN A COUNT. 'Eleven open warnings' is not actionable on "
+		"a Tuesday in July, because it means nothing to anybody who does not already "
+		"know what normal looks like. A percentage is comparable to yesterday's, "
+		"which is the property that makes a number worth putting on a wall.\n\n"
+		"IT REPORTS HOW IT WAS EARNED. `resolved_by_hand_percent` splits conditions "
+		"that cleared themselves from dismissals somebody made by hand. An operation "
+		"at 95% through dismissals is a different operation from one at 95% because "
+		"the work got done, and a score that could not tell them apart would be a "
+		"score worth gaming. A single open Critical is called out regardless of the "
+		"percentage.",
+		{
+			"company": _COMPANY,
+			"as_of": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+		},
+		title="Audit readiness score",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"refresh_compliance_alerts": _tool(
+		calendar.refresh_compliance_alerts,
+		"MUTATING (default OFF). Run the whole rule set NOW instead of waiting for "
+		"tonight's scheduled sweep. Creates new alerts, refreshes existing ones, "
+		"reopens ones whose condition has come back, and AUTO-DISMISSES ones whose "
+		"condition has resolved.\n\n"
+		"IT TOUCHES NO OPERATIONAL RECORD. Every rule is a read over certificates, "
+		"policies, employees, blocks, cabins, filings and audits; the only rows "
+		"written are this app's own Compliance Alerts. That is why it is safe to run "
+		"at any moment and why the nightly scheduler calls the same function.\n\n"
+		"IT CANNOT DUPLICATE AN ALERT. Each alert's docname is derived from its rule "
+		"and its source record and from nothing that changes daily, so tonight's "
+		"sweep finds and refreshes what last night's wrote — and a snooze somebody "
+		"set last week survives.\n\n"
+		"A DISMISSAL A PERSON MADE IS NEVER REOPENED. Somebody looked at it and "
+		"decided; the sweep does not overrule them by noticing the same thing again. "
+		"Supports dry_run.",
+		{
+			"company": _COMPANY,
+			"as_of": _field(_STRING, "Evaluate every rule as of this date, YYYY-MM-DD. Defaults to today."),
+			"dry_run": _field(_BOOLEAN, "Report what would change and write nothing. Default false."),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Refresh compliance alerts",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"snooze_alert": _tool(
+		calendar.snooze_alert,
+		"MUTATING (default OFF). Hide one alert until a date.\n\n"
+		"NOT A DISMISSAL. The condition is still true and the alert still exists; it "
+		"is hidden from the calendar until the date and reappears ON ITS OWN, without "
+		"anybody having to clear a flag. It is the honest way to say 'not this "
+		"week'.\n\n"
+		"REFUSES a date that is not in the future — a snooze that has already expired "
+		"is not a snooze — and refuses to snooze an already-dismissed alert.",
+		{
+			"alert": _field(_STRING, "The Compliance Alert docname. get_compliance_calendar lists them."),
+			"until_date": _field(_STRING, "Hide it until this date, YYYY-MM-DD. Must be in the future."),
+			"reason": _field(_STRING, "Why not this week. Optional; recorded on the alert's timeline."),
+		},
+		required=("alert", "until_date"),
+		mutating=True,
+		title="Snooze a compliance alert",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"dismiss_alert": _tool(
+		calendar.dismiss_alert,
+		"MUTATING (default OFF). Take one alert off the calendar, with a MANDATORY "
+		"reason.\n\n"
+		"THE REASON IS THE POINT. It is the only part of this record nobody can "
+		"reconstruct — the alert itself the sweep can rebuild from the source record, "
+		"but why somebody judged it unnecessary exists nowhere else. It is also the "
+		"answer when the same finding turns up next year.\n\n"
+		"THE ALERT IS NOT DELETED. The record that somebody looked at this and "
+		"decided is itself compliance evidence. And a dismissal a person made is "
+		"never reopened by the sweep — if the condition is still true tomorrow night, "
+		"the judgement stands.\n\n"
+		"DISMISSING AN ALERT CHANGES NOTHING UNDERNEATH IT. Dismissing one about an "
+		"expired certificate does not renew the certificate.",
+		{
+			"alert": _field(_STRING, "The Compliance Alert docname."),
+			"reason": _field(
+				_STRING,
+				"Why this does not need doing. Must be a real explanation, not a word — see the "
+				"description.",
+			),
+		},
+		required=("alert", "reason"),
+		mutating=True,
+		title="Dismiss a compliance alert",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"dismiss_alert_bulk": _tool(
+		calendar.dismiss_alert_bulk,
+		"MUTATING (default OFF). Dismiss every alert matching a filter, with one "
+		"reason written onto all of them. DRY RUN DEFAULTS TRUE and the first call "
+		"writes nothing.\n\n"
+		"THE DRY RUN IS NOT POLITENESS. The whole calendar is one filter away: a "
+		"`severity` typed where an `alert_type` was meant matches everything, fails "
+		"nothing, looks exactly like success, and leaves an operation reading as "
+		"compliant while nothing has been fixed. So the first call returns exactly "
+		"what would be dismissed, and a second call with dry_run=false and the same "
+		"filter does the work.\n\n"
+		"REFUSES A CALL WITH NO FILTER at all. Capped at 200 alerts per run: a filter "
+		"matching more than that is a filter worth reading again.",
+		{
+			"reason": _field(
+				_STRING, "Written onto every alert this touches. Must be a real explanation."
+			),
+			"alert_type": _field(_STRING, "One rule's alerts. list_compliance_rules names them."),
+			"category": _field(
+				_STRING,
+				"Certifications, Policies, Workforce, Housing, Water and Sanitation, Spray and "
+				"Pesticides, Filings, Audits or Other.",
+			),
+			"severity": _field(_STRING, "Critical, Warning or Info — EXACTLY this severity, not 'and worse'."),
+			"source_doctype": _field(_STRING, "Only alerts whose source is this doctype."),
+			"company": _COMPANY,
+			"dry_run": _field(
+				_BOOLEAN, "DEFAULTS TRUE. Pass false, with the same filter, to actually dismiss."
+			),
+		},
+		required=("reason",),
+		mutating=True,
+		destructive=True,
+		title="Dismiss compliance alerts in bulk",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── Wave 4: audit packets ───────────────────────────────────────────────
+	"list_audit_packet_types": _tool(
+		auditpacket.list_audit_packet_types,
+		"Which audit regimes this app can assemble an evidence packet for — FSMA, "
+		"GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA and an unscoped Other — with the "
+		"sections each one pulls in, what it is scoped to, and which sections will be "
+		"EMPTY on this site because the DocType behind them is not installed. "
+		"Read-only.\n\n"
+		"A section with nothing behind it SAYS SO in the packet rather than being "
+		"omitted: an absent traceability section reads as an operation with nothing "
+		"to declare, and a section saying the BucketLog bridge is not installed reads "
+		"as the truth.",
+		{},
+		title="List audit packet types",
+	),
+	"generate_audit_packet": _tool(
+		auditpacket.generate_audit_packet,
+		"MUTATING (default OFF). Assemble every piece of evidence for one audit type "
+		"over one period into a PDF, and file it as a Governance Document in the "
+		"company's archive. Returns the file_url and the counts — never the bytes.\n\n"
+		"IT PULLS FROM THE OPERATIONAL RECORDS, NOT FROM A COPY. The spray records "
+		"ARE the spray logs; the worker facility records ARE the housing register; "
+		"the traceability rows ARE the bucket log. Nothing in the packet is a "
+		"compliance copy, which is why nothing in it can have drifted from what was "
+		"actually done.\n\n"
+		"THE KAIROTIC GATE IS A REFUSAL, NOT A WARNING. A packet asserts a compliant "
+		"period. It is refused on a period that has not finished, and on one whose "
+		"corrective actions are still OPEN — because an open finding inside the "
+		"period contradicts the assertion, and a warning at the top of a printed "
+		"document is not read by the person the document is handed to. Every open "
+		"action is named in the refusal. `allow_open_actions=true` produces it "
+		"anyway, with the open items in a section at the FRONT.\n\n"
+		"IDEMPOTENT BY (audit_type, company, period): a second call is refused "
+		"without overwrite=true, because two packets for one audit period differing "
+		"in whatever changed between them is a question nobody wants to be asked.\n\n"
+		"PDF by default; DOCX available. Supports dry_run.",
+		{
+			"audit_type": _field(
+				_STRING, "FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA or Other."
+			),
+			"company": _COMPANY,
+			"period_start": _field(_STRING, "First day the packet covers, YYYY-MM-DD."),
+			"period_end": _field(
+				_STRING, "Last day it covers, YYYY-MM-DD. A period that has not finished is refused."
+			),
+			"output_format": _field(
+				_STRING,
+				"'pdf' (default) or 'docx'. PDF is the one to use — a .docx is a file the "
+				"recipient may not be able to open.",
+			),
+			"output_path": _field(
+				_STRING,
+				"ALSO write it to a path under the site's private/files or public/files. The "
+				"attachment is the durable copy either way.",
+			),
+			"stage_via_chunks": _field(
+				_BOOLEAN,
+				"Route the assembled bytes through the staging pipeline for a checkpoint. "
+				"Defaults on for packets over 2 MB and off below that, where the checkpoint costs "
+				"more than the failure it guards against.",
+			),
+			"allow_open_actions": _field(
+				_BOOLEAN,
+				"Produce the packet over open corrective actions, disclosing them in a section "
+				"at the FRONT. Default false.",
+			),
+			"overwrite": _field(_BOOLEAN, "Replace an existing packet for the same type and period."),
+			"dry_run": _field(_BOOLEAN, "Assemble it, report every count, and write nothing."),
+		},
+		required=("audit_type", "period_start", "period_end"),
+		mutating=True,
+		title="Generate an audit packet",
+		available=_needs_doctype("Governance Document"),
+		requires="the Governance Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.15.0: Journal Entry attribution drift ────────────────────────────
+	"find_drifted_je_attributions": _tool(
+		read.find_drifted_je_attributions,
+		"DIAGNOSTIC. Every submitted Journal Entry in a date range whose VOUCHER and "
+		"GENERAL LEDGER disagree about who a line belongs to. Read-only.\n\n"
+		"THE DAMAGE CLASS IT FINDS. v0.13.0's update_journal_entry_party looked its "
+		"GL rows up by `voucher_detail_no == line.name`, which is the Sales Invoice "
+		"Item convention and NOT the Journal Entry one. Every call against a "
+		"submitted entry therefore matched zero rows, wrote the voucher, and left the "
+		"ledger alone — so the voucher says one party and every ageing report, party "
+		"ledger and statement of account says another, and nothing in either table "
+		"admits to it.\n\n"
+		"NOT LIMITED TO THAT. Drift also arrives from a direct database edit, a "
+		"restored backup, or a migration that moved one table and not the other. The "
+		"scan reads the current state of both and does not care what caused it, which "
+		"is why `by_vintage` is reported BESIDE the finding rather than used to "
+		"filter it.\n\n"
+		"`repair_input` IS THE LIST repair_drifted_je_attributions TAKES VERBATIM. "
+		"Lines whose GL rows cannot be matched with certainty are reported separately "
+		"as `ambiguous` and are NOT in it — reporting a coin toss as a finding would "
+		"be worse than reporting nothing.\n\n"
+		"Three queries whatever the range, and matched by the same function the "
+		"repair writes through.",
+		{
+			"from_date": _field(_STRING, "Start of the posting-date range, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "End of the posting-date range, YYYY-MM-DD."),
+			"company": _COMPANY,
+			"limit": _field(_INTEGER, "Maximum entries to scan. Default 500, hard maximum 500."),
+			"vintage_from": _field(
+				_STRING,
+				"Start of the window when YOUR site was running v0.13.0. Defaults to 2026-07-30, "
+				"when it shipped upstream.",
+			),
+			"vintage_to": _field(
+				_STRING, "End of that window. Defaults to 2026-07-31, when v0.14.0 fixed it."
+			),
+		},
+		required=("from_date", "to_date"),
+		title="Find drifted JE attributions",
+	),
+	"repair_drifted_je_attributions": _tool(
+		mutate.repair_drifted_je_attributions,
+		"MUTATING (default OFF). Bring drifted GL Entry rows back into step with "
+		"their vouchers, in a batch. Takes find_drifted_je_attributions' "
+		"`repair_input` VERBATIM. DRY RUN DEFAULTS TRUE.\n\n"
+		"IT REPAIRS IN ONE DIRECTION: every item brings the LEDGER into line with the "
+		"VOUCHER. For the v0.13.0 damage class that is right by construction — the "
+		"broken tool wrote the voucher and failed to write the ledger, so the voucher "
+		"holds the attribution somebody actually intended. If a line drifted for some "
+		"other reason and the LEDGER is the correct side, use "
+		"update_journal_entry_party on it individually.\n\n"
+		"MOVES NO BALANCE, EVER. `party` is an attribution column: every debit, "
+		"credit, account and date is untouched, so the trial balance after a repair "
+		"of two hundred lines is arithmetically identical to the one before it. That "
+		"is what makes a batch write to submitted vouchers defensible at all.\n\n"
+		"IT DOES NOT ABORT ON THE FIRST FAILURE. Each item is a different voucher, "
+		"and a run that stopped half way would leave the ledger in a state neither "
+		"the report before it nor the report after it describes. Every item is "
+		"attempted and every outcome is reported per item.\n\n"
+		"Capped at 200 items. Requires a `reason`, written onto every entry touched.",
+		{
+			"repairs": _field(
+				{"type": "array", "items": _OBJECT},
+				"One object per line: {journal_entry, line_index, party_type, party}. This is "
+				"exactly find_drifted_je_attributions' `repair_input` — pass it through.",
+			),
+			"reason": _field(
+				_STRING,
+				"Why these attributions are being repaired. Written onto every entry touched; "
+				"must be a real explanation.",
+			),
+			"dry_run": _field(
+				_BOOLEAN,
+				"DEFAULTS TRUE. Every item is checked against the live voucher and its GL rows, "
+				"so an item reported as would_repair is one that will.",
+			),
+		},
+		required=("repairs", "reason"),
+		mutating=True,
+		title="Repair drifted JE attributions",
+	),
 }
 
 #: Tool names in catalogue order, read tools first. Used by the settings doctype
 #: generator and the docs to stay in step with this file.
 READ_TOOLS = tuple(name for name, spec in TOOLS.items() if not spec["mutating"])
 MUTATING_TOOLS = tuple(name for name, spec in TOOLS.items() if spec["mutating"])
+
+#: THE MUTATING TOOLS THAT SHIP WITH THEIR SWITCH ON, and the argument for each.
+#:
+#: "Mutating tools default off" is one of this app's two or three load-bearing
+#: promises, and a promise with an undocumented exception is not a promise. So the
+#: exceptions live here, by name, with their reasoning — one place a reader can
+#: check, one place a test asserts against, and a new exception cannot arrive
+#: without somebody writing the sentence that justifies it.
+#:
+#: The settings form's "mutating tools are live" warning skips these, because a
+#: warning that fires on every save of a default configuration is noise, and its
+#: whole job is to make enabling `submit_journal_entry` conspicuous.
+DEFAULT_ON_MUTATING_TOOLS = {
+	"install_compliance_fields": (
+		"It is an INSTALLER, not a writer of anybody's data: it adds columns to a schema "
+		"and touches no record. A compliance field that arrives only when an operator "
+		"remembers to tick a box is a compliance field that is missing on the sites that "
+		"needed it most — the applicator's name would be absent from exactly the spray "
+		"records a Worker Protection Standard inspection asks for. Turning it off is a "
+		"real and supported choice, and then no field is ever added. See "
+		"erpnext_mcp/compliance_fields.py for the whole argument, and `before_uninstall` "
+		"for what it costs."
+	),
+}
 
 
 def is_available(tool_name: str) -> bool:

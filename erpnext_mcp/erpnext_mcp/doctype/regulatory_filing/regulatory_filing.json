@@ -1,0 +1,210 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:filing_name",
+ "creation": "2026-07-31 12:00:00.000000",
+ "description": "Something that was submitted to an agency, and what they said back. A filing nobody can prove was made is a filing that was not made, and the proof is a submission date, a docket number and the document itself — not a memory of having sent it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "filing_name",
+  "agency",
+  "filing_type",
+  "identity_col",
+  "company",
+  "period_covered",
+  "status",
+  "dates_section",
+  "submission_date",
+  "docket_number",
+  "dates_col",
+  "response_due_date",
+  "response_received_date",
+  "response_section",
+  "response",
+  "file_section",
+  "attached_filing",
+  "file_col",
+  "attached_response",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this filing is, said once and distinctly: '1099-NEC 2025 — Orchard Meadow LLC', 'OSHA 300A 2025 — Constancy Farms'. The docname is built from it.",
+   "fieldname": "filing_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Filing Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Who it went to. Determines which audit packet picks it up and which agency's response deadline applies.",
+   "fieldname": "agency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Agency",
+   "options": "\nUSDA\nODA\nDOL\nEPA\nIRS\nOR-DOR\nOR-BOLI\nOSHA\nFDA\nWA-L&I\nOther",
+   "reqd": 1
+  },
+  {
+   "description": "The form or report, in the agency's own name for it: '1099-NEC', 'Pesticide-Application-Report', 'OSHA-300A', 'Form 943'. Free text because agencies invent forms faster than a Select can be maintained, and a filing that cannot be recorded because its form is not on a list is a filing that goes unrecorded.",
+   "fieldname": "filing_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Filing Type",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "What period the filing reports on, as the filing itself states it: '2025', 'Q3 2026', '2026-05-01 to 2026-05-31'. Free text because a period is whatever the form says it is, and half of them are not calendar quarters.",
+   "fieldname": "period_covered",
+   "fieldtype": "Data",
+   "label": "Period Covered"
+  },
+  {
+   "default": "Submitted",
+   "description": "Draft is written and not sent, which is not a filing. Submitted is sent and unanswered. Accepted, Rejected and Amended record what came back. Only Submitted and later are ever produced in an audit packet.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nSubmitted\nAccepted\nRejected\nAmended\nWithdrawn"
+  },
+  {
+   "fieldname": "dates_section",
+   "fieldtype": "Section Break",
+   "label": "Submission"
+  },
+  {
+   "description": "The date it was actually sent. The date the statute of limitations runs from, and the one fact a filing must have.",
+   "fieldname": "submission_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Submitted",
+   "search_index": 1
+  },
+  {
+   "description": "The agency's own reference: a docket number, a confirmation number, a certified mail number. What a follow-up call quotes.",
+   "fieldname": "docket_number",
+   "fieldtype": "Data",
+   "label": "Docket / Confirmation Number"
+  },
+  {
+   "fieldname": "dates_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When a response is expected or required by. Drives an Info alert as it approaches — and the alert clears itself the moment a response date is recorded, which is the point: nobody should have to remember to switch off a reminder about something that already happened.",
+   "fieldname": "response_due_date",
+   "fieldtype": "Date",
+   "label": "Response Due"
+  },
+  {
+   "description": "When they answered. Setting this is what dismisses the response alert.",
+   "fieldname": "response_received_date",
+   "fieldtype": "Date",
+   "label": "Response Received"
+  },
+  {
+   "fieldname": "response_section",
+   "fieldtype": "Section Break",
+   "label": "Response"
+  },
+  {
+   "description": "What the agency said. In their words where possible — a paraphrase of a rejection is not what an appeal is argued from.",
+   "fieldname": "response",
+   "fieldtype": "Text",
+   "label": "Response"
+  },
+  {
+   "fieldname": "file_section",
+   "fieldtype": "Section Break",
+   "label": "Documents"
+  },
+  {
+   "description": "The filing as submitted. Not the working copy — the thing that went.",
+   "fieldname": "attached_filing",
+   "fieldtype": "Attach",
+   "label": "Attached Filing"
+  },
+  {
+   "fieldname": "file_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "attached_response",
+   "fieldtype": "Attach",
+   "label": "Attached Response"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Regulatory Filing",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 1,
+ "search_fields": "agency,filing_type,submission_date,docket_number",
+ "sort_field": "submission_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "filing_name",
+ "track_changes": 1
+}

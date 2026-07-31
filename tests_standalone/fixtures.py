@@ -416,7 +416,20 @@ def _banking() -> None:
 			}
 		],
 	)
-	STORE.seed("User", [{"name": "mcp@example.test", "enabled": 1, "full_name": "MCP Bot"}])
+	#: Administrator is seeded because EVERY Frappe site has it and this app writes
+	#: it into Link-to-User columns: `settings.FALLBACK_USER` is what a mutation is
+	#: attributed to when no MCP System User is configured, and it is what
+	#: `frappe.session.user` reads as in this double. Without the row, a Link field
+	#: holding it fails `_validate_links` — which is the double refusing something
+	#: the real framework accepts, the mirror of the v0.12.1 failure the link
+	#: validation was added for.
+	STORE.seed(
+		"User",
+		[
+			{"name": "Administrator", "enabled": 1, "full_name": "Administrator"},
+			{"name": "mcp@example.test", "enabled": 1, "full_name": "MCP Bot"},
+		],
+	)
 
 
 class SeededTestCase(MCPTestCase):

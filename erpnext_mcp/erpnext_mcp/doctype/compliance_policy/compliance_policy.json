@@ -1,0 +1,198 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:policy_name",
+ "creation": "2026-07-31 12:00:00.000000",
+ "description": "One written procedure, at one version, in force from one date. The thing an auditor means by 'show me your SOP'. Policies do not emerge from operations the way a spray record does — nobody writes a harvest hygiene procedure by harvesting — which is why this is a record of its own rather than a flag on something else.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "policy_name",
+  "category",
+  "version",
+  "identity_col",
+  "company",
+  "policy_owner",
+  "status",
+  "dates_section",
+  "effective_date",
+  "dates_col",
+  "review_due_date",
+  "chain_section",
+  "supersedes",
+  "chain_col",
+  "superseded_by",
+  "file_section",
+  "attached_document",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What the procedure is called, in the words the crew and the auditor both use: 'Harvest Hygiene SOP', 'Spray Drift Management SOP'. The docname is built from this, so the version goes in its own field rather than in the name — a policy at v3 is the same policy it was at v1, and every Audit Event that cited it should still point at it.",
+   "fieldname": "policy_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Policy Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Which compliance domain the procedure serves. Drives what an audit packet pulls in: an FSMA packet takes Harvest Hygiene, Water Testing and Worker Training; a WPS inspection takes Spray SOP.",
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "\nHarvest Hygiene\nSpray SOP\nWorker Training\nFood Defense\nWater Testing\nEquipment Sanitation\nRecall and Traceability\nWorker Safety\nHousing\nOther",
+   "reqd": 1
+  },
+  {
+   "description": "The version as the document itself states it: 'v3', '2026.1', 'Rev C'. Free text because every operation numbers these differently and a scheme imposed here would be one more thing to reconcile.",
+   "fieldname": "version",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Version"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The entity whose procedure this is. Left blank it is read as applying across every company on the site, which is the honest answer for an operation that runs one set of procedures over several legal entities.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The person answerable for keeping it current. Not the person who wrote it — the person an auditor's question gets forwarded to.",
+   "fieldname": "policy_owner",
+   "fieldtype": "Link",
+   "label": "Policy Owner",
+   "options": "User"
+  },
+  {
+   "default": "Active",
+   "description": "Active means in force. Draft means written and not yet adopted, which is not the same thing and should never be produced in an audit packet as though it were. Superseded is set for you when a newer version replaces this one; Retired is a procedure the operation no longer performs at all.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nActive\nSuperseded\nRetired"
+  },
+  {
+   "fieldname": "dates_section",
+   "fieldtype": "Section Break",
+   "label": "In Force"
+  },
+  {
+   "description": "The date this version took effect. An audit asks which procedure was in force on the day something happened, and this is the field that answers.",
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective Date"
+  },
+  {
+   "fieldname": "dates_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When this is next due to be read and re-adopted. GAP and GlobalGAP both expect an annual review; a procedure nobody has looked at in three years is a finding whether or not it is still correct.",
+   "fieldname": "review_due_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Review Due"
+  },
+  {
+   "fieldname": "chain_section",
+   "fieldtype": "Section Break",
+   "label": "Version Chain"
+  },
+  {
+   "description": "The older policy this one replaces. Set by supersede_compliance_policy, which writes both ends of the link in one act so the chain cannot end up pointing one way only.",
+   "fieldname": "supersedes",
+   "fieldtype": "Link",
+   "label": "Supersedes",
+   "options": "Compliance Policy"
+  },
+  {
+   "fieldname": "chain_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The newer policy that replaced this one. Its presence is what makes this record historical rather than wrong — a superseded procedure was correct on the dates it was in force, and an audit of those dates wants it.",
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "Compliance Policy"
+  },
+  {
+   "fieldname": "file_section",
+   "fieldtype": "Section Break",
+   "label": "The Document"
+  },
+  {
+   "description": "The procedure itself. A policy record with no document attached is a claim that a procedure exists, which is not the same as a procedure existing.",
+   "fieldname": "attached_document",
+   "fieldtype": "Attach",
+   "label": "Attached Document"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Compliance Policy",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 1,
+ "search_fields": "category,version,effective_date,status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "policy_name",
+ "track_changes": 1
+}

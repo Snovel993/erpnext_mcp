@@ -248,19 +248,30 @@ class TheJinjaMethod(unittest.TestCase):
 		self.assertEqual(set(hooks.jinja), {"methods"})
 
 
-class TheScheduledJob(unittest.TestCase):
-	def test_the_daily_sweep_resolves(self):
+class TheScheduledJobs(unittest.TestCase):
+	def test_every_daily_job_resolves(self):
 		self.assertEqual(list(hooks.scheduler_events), ["daily"])
-		self.assertTrue(callable(resolve(hooks.scheduler_events["daily"][0])))
+		for path in hooks.scheduler_events["daily"]:
+			with self.subTest(path=path):
+				self.assertTrue(callable(resolve(path)))
 
-	def test_it_is_the_staged_upload_sweeper_and_nothing_else(self):
-		"""One job, and it touches only this app's own two staging doctypes."""
+	def test_they_are_these_two_and_nothing_else(self):
+		"""Two jobs, and each writes only this app's own doctypes.
+
+		Asserted as an exact list rather than a membership check, so a third job
+		fails here and has to be argued for. Every scheduled job is code that runs
+		on somebody's site at three in the morning with nobody watching, which is
+		the same reason `KNOWN_HOOKS` refuses an unexamined hook key.
+		"""
 		self.assertEqual(
 			hooks.scheduler_events["daily"],
-			["erpnext_mcp.tools.uploads.collect_expired_sessions"],
+			[
+				"erpnext_mcp.tools.uploads.collect_expired_sessions",
+				"erpnext_mcp.alerts.sweep",
+			],
 		)
 
-	def test_the_sweeper_never_raises(self):
+	def test_the_upload_sweeper_never_raises(self):
 		"""It runs on the site's scheduler beside everybody else's jobs."""
 		from erpnext_mcp.tools import uploads
 
@@ -271,6 +282,30 @@ class TheScheduledJob(unittest.TestCase):
 			self.assertEqual(uploads.collect_expired_sessions(), 0)
 		finally:
 			INSTALLED_DOCTYPES.add("Staged File Upload Session")
+
+	def test_the_alert_sweep_never_raises(self):
+		"""Same contract, same reason. A compliance calendar that took the site's
+		scheduler down would be considerably worse than one that missed a night."""
+		from erpnext_mcp import alerts
+
+		from .harness import INSTALLED_DOCTYPES
+
+		INSTALLED_DOCTYPES.discard("Compliance Alert")
+		try:
+			self.assertEqual(alerts.sweep(), 0)
+		finally:
+			INSTALLED_DOCTYPES.add("Compliance Alert")
+
+	def test_the_alert_sweep_takes_no_arguments(self):
+		"""`scheduler_events` calls it bare. A job whose signature needs arguments
+		is a job that raises TypeError on the first tick, on somebody's site, at
+		three in the morning."""
+		import inspect
+
+		from erpnext_mcp import alerts
+
+		signature = inspect.signature(alerts.sweep)
+		self.assertEqual(list(signature.parameters), [])
 
 
 class TheInstallHooks(unittest.TestCase):

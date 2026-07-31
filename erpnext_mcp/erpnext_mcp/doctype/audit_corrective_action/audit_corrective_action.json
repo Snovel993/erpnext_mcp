@@ -1,0 +1,108 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-31 12:00:00.000000",
+ "description": "One thing an auditor said to fix, who owns it, when it is due, and whether it was ever actually done. The single most consequential row in this app: an open corrective action nobody can produce a closure for is how a finding becomes a penalty on the next visit.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "finding",
+  "severity",
+  "status",
+  "action_col",
+  "assigned_to",
+  "due_date",
+  "closed_date",
+  "detail_section",
+  "corrective_action",
+  "evidence",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What the auditor found, in their words. Paraphrasing a finding is how a corrective action ends up addressing something the auditor did not say.",
+   "fieldname": "finding",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Finding",
+   "reqd": 1
+  },
+  {
+   "default": "Minor",
+   "description": "As the audit scheme grades it. Critical and Major usually carry a deadline the certificate depends on; a Critical left open past its due date is a suspended certificate, not a late task.",
+   "fieldname": "severity",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Severity",
+   "options": "Observation\nMinor\nMajor\nCritical"
+  },
+  {
+   "default": "Open",
+   "description": "Closed means the corrective action was done AND there is evidence of it. Nothing sets this for you except close_audit_event, which refuses to close an audit while any action is still open.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Open\nIn Progress\nClosed\nNot Applicable"
+  },
+  {
+   "fieldname": "action_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The person who is going to do it. Not a department — a person. An action assigned to 'the farm' is an action nobody is doing.",
+   "fieldname": "assigned_to",
+   "fieldtype": "Data",
+   "label": "Assigned To"
+  },
+  {
+   "description": "The date the audit scheme requires it closed by. Most schemes give 28 days for a Major and 24 hours to 7 days for a Critical.",
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Due"
+  },
+  {
+   "fieldname": "closed_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Closed"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "What Was Done"
+  },
+  {
+   "description": "What was actually changed. 'Trained the crew' is not a corrective action; 'added a hand-wash check to the pre-harvest walk and retrained the four crew bosses on 2026-08-03' is.",
+   "fieldname": "corrective_action",
+   "fieldtype": "Small Text",
+   "label": "Corrective Action"
+  },
+  {
+   "description": "What proves it: a photo, a training sign-in sheet, a revised SOP's docname, a work order. Where the proof is a Compliance Policy, name it — an audit packet resolves the name and pulls the document in.",
+   "fieldname": "evidence",
+   "fieldtype": "Data",
+   "label": "Evidence"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-31 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Audit Corrective Action",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

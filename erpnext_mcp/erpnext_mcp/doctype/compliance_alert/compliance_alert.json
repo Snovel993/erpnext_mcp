@@ -1,0 +1,240 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:alert_key",
+ "creation": "2026-07-31 12:00:00.000000",
+ "description": "One thing that is about to stop being compliant, generated from the state of an operational or evidence record rather than typed by anybody. Transient: the nightly sweep creates, refreshes and auto-dismisses these, so the only irreplaceable thing on one is a human's dismissal reason.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "alert_key",
+  "alert_type",
+  "severity",
+  "category",
+  "identity_col",
+  "company",
+  "source_doctype",
+  "source_docname",
+  "message_section",
+  "alert_message",
+  "timing_section",
+  "due_date",
+  "first_seen",
+  "timing_col",
+  "last_refreshed",
+  "snoozed_until",
+  "dismissal_section",
+  "dismissed",
+  "auto_dismissed",
+  "dismissal_col",
+  "dismissed_by",
+  "dismissed_on",
+  "dismissed_reason"
+ ],
+ "fields": [
+  {
+   "description": "The deterministic identity of this alert: rule, source doctype and source record, hashed to fit a docname. It is what makes the nightly sweep idempotent — the same condition on the same record produces the same key, so it is refreshed rather than duplicated, and a snooze somebody set last week survives tonight's run.",
+   "fieldname": "alert_key",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Alert Key",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Which rule fired: 'certification_expiring', 'i9_expired', 'water_test_stale'. Stable across releases — a rule renamed is a rule whose whole history of snoozes and dismissals is orphaned.",
+   "fieldname": "alert_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Alert Type",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Warning",
+   "description": "Critical blocks something: an expired I-9 means somebody cannot lawfully work tomorrow, a stale water test means a block cannot be sprayed. Warning means act this month. Info is context. The distinction is what makes the calendar readable at all — a list where everything is urgent is a list nobody reads.",
+   "fieldname": "severity",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Severity",
+   "options": "Info\nWarning\nCritical",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "How the calendar groups it. Chosen so a person can act on a whole group in one afternoon: every certificate renewal is one trip to the agency's website, every housing item is one walk round the camp.",
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "\nCertifications\nPolicies\nWorkforce\nHousing\nWater and Sanitation\nSpray and Pesticides\nFilings\nAudits\nOther"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The doctype of the record whose state produced this alert. A Link to DocType rather than free text, so the Dynamic Link below resolves and the Desk can click through to the thing that needs doing.",
+   "fieldname": "source_doctype",
+   "fieldtype": "Link",
+   "label": "Source DocType",
+   "options": "DocType",
+   "search_index": 1
+  },
+  {
+   "description": "The record itself. Clicking it goes to the certificate that is expiring, the cabin that has not been inspected, the employee whose I-9 lapsed — because an alert that cannot be acted on from where it is read is a list somebody transcribes rather than works.",
+   "fieldname": "source_docname",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Source Record",
+   "options": "source_doctype",
+   "search_index": 1
+  },
+  {
+   "fieldname": "message_section",
+   "fieldtype": "Section Break",
+   "label": "What Is Wrong"
+  },
+  {
+   "description": "One or two sentences naming the record, the date and what happens if nothing is done. Written by the rule, refreshed every night, so a certificate that has moved from 60 days out to 20 says so.",
+   "fieldname": "alert_message",
+   "fieldtype": "Text",
+   "label": "Message",
+   "reqd": 1
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "Timing"
+  },
+  {
+   "description": "The date the underlying obligation actually falls due — the expiry, the review date, the deadline. NOT the date this alert was raised: an alert is raised when the state is ripe, and the due date is a fact about the world that does not move because nobody looked.",
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Due",
+   "search_index": 1
+  },
+  {
+   "description": "When this condition was first observed. Kept across refreshes, so an alert that has been open for four months reads as four months old rather than as new every morning.",
+   "fieldname": "first_seen",
+   "fieldtype": "Date",
+   "label": "First Seen",
+   "read_only": 1
+  },
+  {
+   "fieldname": "timing_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The last time the sweep confirmed this condition still holds. An alert whose last refresh is old is an alert the sweep has stopped seeing, which usually means the scheduler is not running.",
+   "fieldname": "last_refreshed",
+   "fieldtype": "Datetime",
+   "label": "Last Refreshed",
+   "read_only": 1
+  },
+  {
+   "description": "Hidden from the calendar until this date. A snooze is not a dismissal: the condition is still true and the alert is still here, somebody has just said 'not this week'. It expires on its own.",
+   "fieldname": "snoozed_until",
+   "fieldtype": "Date",
+   "label": "Snoozed Until"
+  },
+  {
+   "fieldname": "dismissal_section",
+   "fieldtype": "Section Break",
+   "label": "Dismissal"
+  },
+  {
+   "default": "0",
+   "description": "Taken off the calendar. A dismissed alert is not deleted — the record that somebody looked at this and decided it did not need doing is itself compliance evidence, and it is what an auditor asks for when the same finding turns up twice.",
+   "fieldname": "dismissed",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Dismissed"
+  },
+  {
+   "default": "0",
+   "description": "Dismissed by the sweep rather than by a person, because the source condition resolved — the water test was done, the licence was renewed, the inspection happened. This is the kairotic half of the engine: an alert about something that is no longer true should go away without anybody having to remember to switch it off.",
+   "fieldname": "auto_dismissed",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Auto-Dismissed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "dismissal_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "dismissed_by",
+   "fieldtype": "Link",
+   "label": "Dismissed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "dismissed_on",
+   "fieldtype": "Date",
+   "label": "Dismissed On"
+  },
+  {
+   "description": "Why a person decided this did not need doing. Required on a human dismissal and empty on an auto-dismissal, which is how the two are told apart six months later.",
+   "fieldname": "dismissed_reason",
+   "fieldtype": "Text",
+   "label": "Dismissed Because"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Compliance Alert",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "alert_type,severity,due_date,source_docname",
+ "sort_field": "due_date",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "alert_type",
+ "track_changes": 0
+}

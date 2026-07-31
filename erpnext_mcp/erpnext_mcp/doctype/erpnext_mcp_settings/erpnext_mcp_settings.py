@@ -103,8 +103,18 @@ class ERPNextMCPSettings(Document):
 		Not a confirmation dialog — the operator ticked the box on purpose. But
 		"submit_journal_entry is on" is worth reading once in plain language,
 		because it is the switch that lets an AI client move a balance.
+
+		THE DEFAULT-ON INSTALLERS ARE SKIPPED. `registry.DEFAULT_ON_MUTATING_TOOLS`
+		names them and argues for each. Including them would fire this warning on
+		every save of a stock configuration, and a warning that fires every time is
+		a warning nobody reads — which would cost exactly the thing it exists for.
 		"""
-		live = [name for name in registry.MUTATING_TOOLS if settings.as_bool(self.get(f"allow_{name}"))]
+		live = [
+			name
+			for name in registry.MUTATING_TOOLS
+			if name not in registry.DEFAULT_ON_MUTATING_TOOLS
+			and settings.as_bool(self.get(f"allow_{name}"))
+		]
 		if not (settings.as_bool(self.enabled) and live):
 			return
 		frappe.msgprint(

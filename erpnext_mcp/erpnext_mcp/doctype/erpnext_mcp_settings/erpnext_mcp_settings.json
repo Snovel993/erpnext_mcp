@@ -206,7 +206,48 @@
   "allow_get_family_member",
   "family_tools_col",
   "allow_create_family_member",
-  "allow_update_family_member"
+  "allow_update_family_member",
+  "compliance_schema_section",
+  "allow_get_compliance_field_map",
+  "allow_install_compliance_fields",
+  "evidence_read_section",
+  "allow_list_compliance_policies",
+  "allow_get_compliance_policy",
+  "allow_list_certifications",
+  "allow_get_certification",
+  "evidence_read_col",
+  "allow_list_regulatory_filings",
+  "allow_get_regulatory_filing",
+  "allow_list_audit_events",
+  "allow_get_audit_event",
+  "evidence_write_section",
+  "allow_create_compliance_policy",
+  "allow_update_compliance_policy",
+  "allow_supersede_compliance_policy",
+  "allow_create_certification",
+  "allow_update_certification",
+  "evidence_write_col",
+  "allow_renew_certification",
+  "allow_create_regulatory_filing",
+  "allow_update_regulatory_filing",
+  "allow_create_audit_event",
+  "allow_update_audit_event",
+  "allow_close_audit_event",
+  "calendar_section",
+  "allow_get_compliance_calendar",
+  "allow_get_audit_readiness",
+  "allow_list_compliance_rules",
+  "calendar_col",
+  "allow_refresh_compliance_alerts",
+  "allow_snooze_alert",
+  "allow_dismiss_alert",
+  "allow_dismiss_alert_bulk",
+  "audit_packet_section",
+  "allow_generate_audit_packet",
+  "allow_list_audit_packet_types",
+  "drift_section",
+  "allow_find_drifted_je_attributions",
+  "allow_repair_drifted_je_attributions"
  ],
  "fields": [
   {
@@ -1518,12 +1559,281 @@
    "fieldname": "allow_update_family_member",
    "fieldtype": "Check",
    "label": "Update Family Member"
+  },
+  {
+   "fieldname": "compliance_schema_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance Fields on Operational DocTypes"
+  },
+  {
+   "default": "1",
+   "description": "READ. What compliance requires of an operational record on this site, field by field — which framework wants each one, why, and what breaks in the day-to-day WORK if it is missing.",
+   "fieldname": "allow_get_compliance_field_map",
+   "fieldtype": "Check",
+   "label": "Compliance Field Map"
+  },
+  {
+   "default": "1",
+   "description": "WRITE, and the ONE switch in this app that defaults ON. Adds the compliance columns — applicator, EPA reg number, REI, PHI, weather, I-9 status, W-4 status, wage-law jurisdiction, traceability links — to Spray Log, Employee and the BucketLog bridge, as Custom Fields, on every migrate. This is the one place erpnext_mcp extends a DocType it did not create, and it is deliberate: compliance woven into the operational record is defensible under audit and a shadow log beside it is not. Turn it OFF and no field is ever added. See docs/compliance_fields.md.",
+   "fieldname": "allow_install_compliance_fields",
+   "fieldtype": "Check",
+   "label": "Install Compliance Fields"
+  },
+  {
+   "fieldname": "evidence_read_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance Evidence — Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every written procedure, its version, when it took effect and when it is next due for review.",
+   "fieldname": "allow_list_compliance_policies",
+   "fieldtype": "Check",
+   "label": "List Compliance Policies"
+  },
+  {
+   "default": "1",
+   "description": "READ. One procedure in full, with its whole version chain and every audit that cited it.",
+   "fieldname": "allow_get_compliance_policy",
+   "fieldtype": "Check",
+   "label": "Get Compliance Policy"
+  },
+  {
+   "default": "1",
+   "description": "READ. The certificate and licence register, soonest expiry first, with what has lapsed and what is inside its renewal window.",
+   "fieldname": "allow_list_certifications",
+   "fieldtype": "Check",
+   "label": "List Certifications"
+  },
+  {
+   "default": "1",
+   "description": "READ. One certificate with its full renewal history, including any period it was allowed to lapse.",
+   "fieldname": "allow_get_certification",
+   "fieldtype": "Check",
+   "label": "Get Certification"
+  },
+  {
+   "fieldname": "evidence_read_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "1",
+   "description": "READ. What was filed, to whom, when, and what came back — with the ones still awaiting a response called out.",
+   "fieldname": "allow_list_regulatory_filings",
+   "fieldtype": "Check",
+   "label": "List Regulatory Filings"
+  },
+  {
+   "default": "1",
+   "description": "READ. One filing with its response and both attached documents.",
+   "fieldname": "allow_get_regulatory_filing",
+   "fieldtype": "Check",
+   "label": "Get Regulatory Filing"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every audit and inspection, with open corrective actions counted and the overdue ones named.",
+   "fieldname": "allow_list_audit_events",
+   "fieldtype": "Check",
+   "label": "List Audit Events"
+  },
+  {
+   "default": "1",
+   "description": "READ. One audit in full: scope, findings, and every corrective action with its deadline and its closure.",
+   "fieldname": "allow_get_audit_event",
+   "fieldtype": "Check",
+   "label": "Get Audit Event"
+  },
+  {
+   "fieldname": "evidence_write_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance Evidence — Write"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register one written procedure at one version. Refuses a review date before the effective date.",
+   "fieldname": "allow_create_compliance_policy",
+   "fieldtype": "Check",
+   "label": "Create Compliance Policy"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a procedure's version, dates, owner, status or attached document. Cannot re-key it.",
+   "fieldname": "allow_update_compliance_policy",
+   "fieldtype": "Check",
+   "label": "Update Compliance Policy"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Replace one procedure with another, writing both ends of the chain in one act so a reader following it from either end reaches the same conclusion.",
+   "fieldname": "allow_supersede_compliance_policy",
+   "fieldtype": "Check",
+   "label": "Supersede Compliance Policy"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register one certificate or licence with the date it stops being a defence.",
+   "fieldname": "allow_create_certification",
+   "fieldtype": "Check",
+   "label": "Create Certification"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a certificate's dates, holder, issuing body, renewal window or status. Moving the expiration forward is refused here — that is a renewal.",
+   "fieldname": "allow_update_certification",
+   "fieldtype": "Check",
+   "label": "Update Certification"
+  },
+  {
+   "fieldname": "evidence_write_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Move the expiration date out and record what was actually done to earn it. Records any period the certificate was allowed to lapse rather than hiding it.",
+   "fieldname": "allow_renew_certification",
+   "fieldtype": "Check",
+   "label": "Renew Certification"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record something submitted to an agency. Refuses a filing marked Submitted with no submission date.",
+   "fieldname": "allow_create_regulatory_filing",
+   "fieldtype": "Check",
+   "label": "Create Regulatory Filing"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record the response, the docket number, the attached documents, the status.",
+   "fieldname": "allow_update_regulatory_filing",
+   "fieldtype": "Check",
+   "label": "Update Regulatory Filing"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record an audit or inspection with its findings and every corrective action it raised.",
+   "fieldname": "allow_create_audit_event",
+   "fieldtype": "Check",
+   "label": "Create Audit Event"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change the scope, findings, result or report; add, amend and close individual corrective actions.",
+   "fieldname": "allow_update_audit_event",
+   "fieldtype": "Check",
+   "label": "Update Audit Event"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Declare an audit finished. REFUSES while any corrective action is still open — a closure date over an open finding is the most misleading thing this app could record.",
+   "fieldname": "allow_close_audit_event",
+   "fieldtype": "Check",
+   "label": "Close Audit Event"
+  },
+  {
+   "fieldname": "calendar_section",
+   "fieldtype": "Section Break",
+   "label": "Kairotic Compliance Calendar"
+  },
+  {
+   "default": "1",
+   "description": "READ. What is due and what is late, worst first, grouped by category — read live from the alerts the nightly sweep maintains.",
+   "fieldname": "allow_get_compliance_calendar",
+   "fieldtype": "Check",
+   "label": "Compliance Calendar"
+  },
+  {
+   "default": "1",
+   "description": "READ. Resolved alerts over alerts raised, as one comparable number, with the split between conditions that cleared themselves and dismissals somebody made by hand.",
+   "fieldname": "allow_get_audit_readiness",
+   "fieldtype": "Check",
+   "label": "Audit Readiness Score"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every alert rule this site can run, with the state that makes each one fire rather than the date.",
+   "fieldname": "allow_list_compliance_rules",
+   "fieldtype": "Check",
+   "label": "List Compliance Rules"
+  },
+  {
+   "fieldname": "calendar_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Run the whole rule set now instead of waiting for tonight. Creates, refreshes and auto-dismisses alerts; touches no operational record. Supports dry_run.",
+   "fieldname": "allow_refresh_compliance_alerts",
+   "fieldtype": "Check",
+   "label": "Refresh Compliance Alerts"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Hide one alert until a date. Not a dismissal — the condition is still true and it comes back on its own.",
+   "fieldname": "allow_snooze_alert",
+   "fieldtype": "Check",
+   "label": "Snooze Alert"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Take one alert off the calendar, with a mandatory reason. The reason is the only part of the record nobody can reconstruct.",
+   "fieldname": "allow_dismiss_alert",
+   "fieldtype": "Check",
+   "label": "Dismiss Alert"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Dismiss every alert matching a filter, with one reason for all of them. REQUIRES a dry run first — the whole calendar is one filter away.",
+   "fieldname": "allow_dismiss_alert_bulk",
+   "fieldtype": "Check",
+   "label": "Dismiss Alerts in Bulk"
+  },
+  {
+   "fieldname": "audit_packet_section",
+   "fieldtype": "Section Break",
+   "label": "Audit Packets"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Assemble every piece of evidence for one audit type over one period into a PDF, and file it as a Governance Document. REFUSES an incomplete period — a packet produced while corrective actions are still open would be contradicted by the auditor's first question.",
+   "fieldname": "allow_generate_audit_packet",
+   "fieldtype": "Check",
+   "label": "Generate Audit Packet"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which audit types this site can assemble a packet for, and what each one pulls in.",
+   "fieldname": "allow_list_audit_packet_types",
+   "fieldtype": "Check",
+   "label": "List Audit Packet Types"
+  },
+  {
+   "fieldname": "drift_section",
+   "fieldtype": "Section Break",
+   "label": "Journal Entry Attribution Drift"
+  },
+  {
+   "default": "1",
+   "description": "READ, DIAGNOSTIC. Every submitted Journal Entry whose voucher and general ledger disagree about who a line belongs to — the damage class v0.13.0's broken update_journal_entry_party left behind. Writes nothing.",
+   "fieldname": "allow_find_drifted_je_attributions",
+   "fieldtype": "Check",
+   "label": "Find Drifted JE Attributions"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Walk a list from find_drifted_je_attributions and bring each drifted GL Entry row back into step with its voucher. Moves no balance: party is an attribution column. Supports dry_run.",
+   "fieldname": "allow_repair_drifted_je_attributions",
+   "fieldtype": "Check",
+   "label": "Repair Drifted JE Attributions"
   }
  ],
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-31 09:00:00.000000",
+ "modified": "2026-07-31 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

@@ -1,0 +1,215 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:audit_name",
+ "creation": "2026-07-31 12:00:00.000000",
+ "description": "One third-party audit or agency inspection: who came, when, what they looked at, what they found, and whether every finding was ever closed. The corrective actions are the part that matters — an operation is not judged on having no findings, it is judged on closing them.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "audit_name",
+  "audit_type",
+  "auditor",
+  "identity_col",
+  "company",
+  "audit_date",
+  "result",
+  "scope_section",
+  "scope",
+  "findings_section",
+  "findings",
+  "actions_section",
+  "corrective_actions_required",
+  "closure_section",
+  "corrective_actions_closed",
+  "closure_col",
+  "closed_by",
+  "closure_note",
+  "file_section",
+  "attached_report",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this audit was, said once: 'PrimusGFS 2026 — Highland Ranch', 'ODA Pesticide Inspection 2026-06-14'. The docname is built from it.",
+   "fieldname": "audit_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Audit Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Which regime. Drives which audit packet includes it: an FSMA packet takes FSMA and FDA inspections, a GAP packet takes GAP, GlobalGAP and PrimusGFS.",
+   "fieldname": "audit_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Audit Type",
+   "options": "\nFSMA\nGAP\nGlobalGAP\nPrimusGFS\nOrganic\nOSHA\nUSDA\nDOL\nEPA\nODA\nFDA\nBuyer Audit\nInternal Audit\nOther",
+   "reqd": 1
+  },
+  {
+   "description": "Who did it — the auditor's name, and the firm if they are not the same. The person a disputed finding is argued with.",
+   "fieldname": "auditor",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Auditor"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The date they were on the ground. What an audit packet's period filter matches against.",
+   "fieldname": "audit_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Audit Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Pending",
+   "description": "What the audit concluded, in the scheme's own vocabulary where it has one. Pending means the report has not arrived yet, which is a real and common state for weeks after the visit.",
+   "fieldname": "result",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Result",
+   "options": "Pending\nPassed\nPassed With Conditions\nFailed\nNot Scored"
+  },
+  {
+   "fieldname": "scope_section",
+   "fieldtype": "Section Break",
+   "label": "Scope"
+  },
+  {
+   "description": "What they actually looked at — which blocks, which buildings, which records, which period. An audit of the packing house is not evidence about the camp, and a packet that presented it as such would be misleading.",
+   "fieldname": "scope",
+   "fieldtype": "Text",
+   "label": "Scope"
+  },
+  {
+   "fieldname": "findings_section",
+   "fieldtype": "Section Break",
+   "label": "Findings"
+  },
+  {
+   "description": "The findings as written, in full. The narrative; the individual items that need fixing go in the corrective actions table below, where each one can be tracked to a closure.",
+   "fieldname": "findings",
+   "fieldtype": "Long Text",
+   "label": "Findings"
+  },
+  {
+   "fieldname": "actions_section",
+   "fieldtype": "Section Break",
+   "label": "Corrective Actions"
+  },
+  {
+   "description": "One row per thing that has to be fixed. This table is why the doctype exists: an operation is not judged on having no findings, it is judged on closing them, and an open action nobody can produce evidence for is what turns last year's finding into this year's penalty.",
+   "fieldname": "corrective_actions_required",
+   "fieldtype": "Table",
+   "label": "Corrective Actions Required",
+   "options": "Audit Corrective Action"
+  },
+  {
+   "fieldname": "closure_section",
+   "fieldtype": "Section Break",
+   "label": "Closure"
+  },
+  {
+   "description": "The date every corrective action was closed and the audit was done with. Set by close_audit_event, which refuses while any action is still open — a closure date over an open action is the single most misleading thing this app could record.",
+   "fieldname": "corrective_actions_closed",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Corrective Actions Closed"
+  },
+  {
+   "fieldname": "closure_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "closed_by",
+   "fieldtype": "Data",
+   "label": "Closed By"
+  },
+  {
+   "description": "How the closure was accepted — the auditor's confirmation email, the certificate that issued, the re-inspection that passed.",
+   "fieldname": "closure_note",
+   "fieldtype": "Small Text",
+   "label": "Closure Note"
+  },
+  {
+   "fieldname": "file_section",
+   "fieldtype": "Section Break",
+   "label": "The Report"
+  },
+  {
+   "fieldname": "attached_report",
+   "fieldtype": "Attach",
+   "label": "Attached Report"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Audit Event",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "audit_type,auditor,audit_date,result",
+ "sort_field": "audit_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "audit_name",
+ "track_changes": 1
+}
