@@ -412,3 +412,298 @@ class EndToEnd(FamilyTestCase):
 		)
 		self.assertEqual(data["excluded"]["family_party_postings"], 2)
 		self.assertNotIn(ALEX, [row["recipient"] for row in data["recipients"]])
+
+
+# ── v0.13.0: Son and Daughter, and the "of whom" question ───────────────────
+class RelationshipVocabulary(FamilyTestCase):
+	"""Son and Daughter arrived BESIDE Child, not instead of it.
+
+	The whole point of adding them was a vocabulary somebody actually uses. The
+	whole point of not removing Child is that records already saying it are still
+	true, and a register that forced a re-pick would be asking somebody to restate
+	a fact that has not changed.
+	"""
+
+	def test_son_is_a_first_class_option(self):
+		self.assertEqual(self.a_member("Alexander Polehn", relationship="Son")["relationship"], "Son")
+
+	def test_daughter_is_a_first_class_option(self):
+		self.assertEqual(self.a_member("Ada Polehn", relationship="Daughter")["relationship"], "Daughter")
+
+	def test_child_is_still_accepted(self):
+		self.assertEqual(self.a_member("Antony Polehn", relationship="Child")["relationship"], "Child")
+
+	def test_a_record_written_before_the_enum_grew_still_loads(self):
+		"""The migration behaviour that matters: nothing was rewritten, so a Child
+		seeded under v0.12.x has to read back unchanged."""
+		STORE.seed(
+			"Family",
+			[{"name": "Legacy Child", "family_member_name": "Legacy Child", "relationship": "Child", "active": 1}],
+		)
+		data = self.tool_data("get_family_member", {"family_name": "Legacy Child"})
+		self.assertEqual(data["relationship"], "Child")
+
+	def test_the_case_a_caller_sends_is_normalised_to_the_doctypes(self):
+		self.assertEqual(self.a_member("Casey Polehn", relationship="daughter")["relationship"], "Daughter")
+
+	def test_it_can_be_changed_from_child_to_son(self):
+		self.a_member("Antony Polehn", relationship="Child")
+		data = self.tool_data(
+			"update_family_member", {"family_name": "Antony Polehn", "relationship": "Son"}
+		)
+		self.assertEqual(data["changed"]["relationship"], ["Child", "Son"])
+
+	def test_something_that_is_not_a_relationship_is_still_refused_with_the_new_list(self):
+		message = self.tool_error(
+			"create_family_member", {"family_name": "Nobody", "relationship": "Heir Presumptive"}
+		)
+		self.assertIn("Son", message)
+		self.assertIn("Daughter", message)
+
+
+class RelatedTo(FamilyTestCase):
+	"""`related_to` answers "of whom", which the register could not before.
+
+	"Alexander Polehn — Child" is ambiguous the moment an entity has two members,
+	and Orchard Meadow has two. The field is Data rather than Link on purpose: the
+	answer is a Family record OR a Related Party record OR somebody in neither
+	register, and no Frappe Link points at two doctypes.
+	"""
+
+	def test_it_records_who_somebody_is_related_to(self):
+		self.a_member("Tim Polehn", relationship="Parent")
+		data = self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
+		self.assertEqual(data["related_to"], "Tim Polehn")
+
+	def test_a_name_on_the_family_register_resolves_to_it(self):
+		self.a_member("Tim Polehn", relationship="Parent")
+		data = self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
+		self.assertEqual(data["related_to_doctype"], "Family")
+		self.assertEqual(data["related_to_name"], "Tim Polehn")
+
+	def test_a_name_on_the_related_party_register_resolves_to_that_one(self):
+		"""By party NAME, not only by docname. The register scopes a docname to a
+		company ('Donella Polehn - ETC'), and the name is what somebody types."""
+		party = self.a_related_party("Donella Polehn")["name"]
+		data = self.a_member("Marguerite Bramwell", related_to="Donella Polehn")
+		self.assertEqual(data["related_to_doctype"], "Related Party")
+		self.assertEqual(data["related_to_name"], party)
+
+	def test_a_related_party_docname_resolves_too(self):
+		party = self.a_related_party("Donella Polehn")["name"]
+		data = self.a_member("Marguerite Bramwell", related_to=party)
+		self.assertEqual(data["related_to_doctype"], "Related Party")
+
+	def test_the_family_register_wins_when_a_name_is_in_both(self):
+		"""One person recorded twice for two different reasons. The Family record
+		is the one this register's own reader is looking at."""
+		self.a_related_party("Tim Polehn")
+		self.a_member("Tim Polehn", relationship="Parent")
+		data = self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
+		self.assertEqual(data["related_to_doctype"], "Family")
+
+	def test_a_name_in_neither_register_is_kept_as_free_text(self):
+		"""The designed fallback, not a failure: a grandmother who has never
+		received a transfer and holds no role is exactly who this is for."""
+		data = self.a_member("Alexander Polehn", relationship="Son", related_to="Great Aunt Ida")
+		self.assertEqual(data["related_to"], "Great Aunt Ida")
+		self.assertIsNone(data["related_to_doctype"])
+
+	def test_free_text_is_said_out_loud_rather_than_left_looking_linked(self):
+		data = self.a_member("Alexander Polehn", relationship="Son", related_to="Great Aunt Ida")
+		self.assertTrue(any("free text" in note for note in data["notes_on_use"]))
+
+	def test_the_row_carries_the_sentence_the_register_exists_to_say(self):
+		self.a_member("Tim Polehn", relationship="Parent")
+		data = self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
+		self.assertEqual(data["described_as"], "Alexander Polehn — Son of Tim Polehn")
+
+	def test_a_member_with_no_related_to_is_warned_about_not_refused(self):
+		data = self.a_member("Unattributed Cousin")
+		self.assertIsNone(data["related_to"])
+		self.assertTrue(any("unassigned parent" in note for note in data["notes_on_use"]))
+
+	def test_somebody_related_to_themselves_is_refused(self):
+		message = self.tool_error(
+			"create_family_member", {"family_name": "Tim Polehn", "related_to": "Tim Polehn"}
+		)
+		self.assertIn("cannot be related to themselves", message)
+
+	def test_update_sets_it_on_a_record_that_had_none(self):
+		"""The migration story: nothing backfilled these, so this is how the two
+		members seeded before v0.13.0 acquire an answer."""
+		self.a_member("Tim Polehn", relationship="Parent")
+		self.a_member("Alexander Polehn", relationship="Son")
+		data = self.tool_data(
+			"update_family_member", {"family_name": "Alexander Polehn", "related_to": "Tim Polehn"}
+		)
+		self.assertEqual(data["changed"]["related_to"], [None, "Tim Polehn"])
+		self.assertEqual(data["related_to_doctype"], "Family")
+
+	def test_update_clears_it_with_an_empty_string(self):
+		self.a_member("Tim Polehn", relationship="Parent")
+		self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
+		data = self.tool_data(
+			"update_family_member", {"family_name": "Alexander Polehn", "related_to": ""}
+		)
+		self.assertIsNone(data["related_to"])
+
+	def test_update_refuses_a_self_reference(self):
+		self.a_member("Tim Polehn", relationship="Parent")
+		message = self.tool_error(
+			"update_family_member", {"family_name": "Tim Polehn", "related_to": "Tim Polehn"}
+		)
+		self.assertIn("cannot be related to themselves", message)
+
+	def test_update_warns_when_the_new_value_resolves_to_nothing(self):
+		self.a_member("Alexander Polehn", relationship="Son")
+		data = self.tool_data(
+			"update_family_member", {"family_name": "Alexander Polehn", "related_to": "Tim Poleen"}
+		)
+		self.assertTrue(any("free text" in warning for warning in data["warnings"]))
+
+	def test_it_is_named_in_the_nothing_to_change_refusal(self):
+		self.a_member("Alexander Polehn")
+		self.assertIn("related_to", self.tool_error("update_family_member", {"family_name": "Alexander Polehn"}))
+
+	def test_a_pre_migration_record_with_no_related_to_column_loads(self):
+		"""Records written before the field existed carry no value at all, and the
+		read path has to treat that as "unassigned" rather than as an error."""
+		STORE.seed(
+			"Family",
+			[{"name": "Seeded Before", "family_member_name": "Seeded Before", "relationship": "Child", "active": 1}],
+		)
+		data = self.tool_data("get_family_member", {"family_name": "Seeded Before"})
+		self.assertIsNone(data["related_to"])
+		self.assertIsNone(data["related_to_doctype"])
+		self.assertEqual(data["described_as"], "Seeded Before — Child")
+
+
+class RelatedToInTheRegister(FamilyTestCase):
+	def setUp(self):
+		super().setUp()
+		self.a_member("Tim Polehn", relationship="Parent")
+		self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
+		self.a_member("Antony Polehn", relationship="Son", related_to="Tim Polehn")
+		self.a_member("Unattributed Cousin")
+
+	def test_every_row_carries_related_to(self):
+		rows = {row["name"]: row for row in self.tool_data("list_family_members")["members"]}
+		self.assertEqual(rows["Alexander Polehn"]["related_to"], "Tim Polehn")
+
+	def test_it_names_everybody_still_unassigned(self):
+		data = self.tool_data("list_family_members")
+		self.assertIn("Unattributed Cousin", data["without_related_to"])
+		self.assertNotIn("Alexander Polehn", data["without_related_to"])
+
+	def test_the_unassigned_are_a_warning_rather_than_a_refusal(self):
+		data = self.tool_data("list_family_members")
+		self.assertIn("unassigned parent", data["warning"])
+		self.assertIn("NOTHING BACKFILLED", data["warning"])
+
+	def test_it_filters_to_one_persons_children(self):
+		data = self.tool_data("list_family_members", {"related_to": "Tim Polehn"})
+		self.assertEqual(
+			sorted(row["name"] for row in data["members"]), ["Alexander Polehn", "Antony Polehn"]
+		)
+
+	def test_free_text_values_are_listed_separately_from_missing_ones(self):
+		self.a_member("Ida's Granddaughter", related_to="Great Aunt Ida")
+		data = self.tool_data("list_family_members")
+		self.assertIn("Ida's Granddaughter", data["related_to_free_text"])
+		self.assertNotIn("Ida's Granddaughter", data["without_related_to"])
+
+	def test_the_summary_counts_the_unassigned(self):
+		"""The audit row is what an operator skims, so the gap belongs in it."""
+		self.tool_data("list_family_members")
+		self.assertIn("with no related_to", self.assertAudited("list_family_members")["result_summary"])
+
+
+class TheChainUpward(FamilyTestCase):
+	"""`get_family_member` walks `related_to` and then crosses to the company.
+
+	Two different edges. `related_to` goes to another PERSON and is followed as
+	far as it goes; `related_party` goes to the SAME person's entry in the
+	register that holds roles and entities, and is followed once, at the top.
+	Rendering the second as though it were the first produces "Tim → Parent of
+	Tim", which is why the two are distinguished at all.
+	"""
+
+	def a_family(self):
+		"""Tim in both registers, Alex pointing at him.
+
+		The Related Party docname is not the party name — the register scopes it to
+		a company — which is exactly why `related_to` resolves a party NAME as well
+		as a docname. A test that only ever passed the docname would never exercise
+		the lookup a human actually types.
+		"""
+		party = self.a_related_party("Tim Polehn")["name"]
+		self.a_member("Tim Polehn", relationship="Parent", related_party=party)
+		self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
+		return party
+
+	def test_it_reaches_the_company_through_both_registers(self):
+		self.a_family()
+		data = self.tool_data("get_family_member", {"family_name": "Alexander Polehn"})
+		self.assertEqual(
+			data["relationship_path"],
+			f"Alexander Polehn → Son of Tim Polehn → Member of {MAIN}",
+		)
+
+	def test_the_chain_names_which_register_each_hop_came_from(self):
+		self.a_family()
+		chain = self.tool_data("get_family_member", {"family_name": "Alexander Polehn"})["relationship_chain"]
+		self.assertEqual([hop["doctype"] for hop in chain], ["Family", "Family", "Related Party"])
+
+	def test_the_related_party_hop_does_not_name_the_person_twice(self):
+		"""The same person in another register is not a relationship to them."""
+		self.a_family()
+		path = self.tool_data("get_family_member", {"family_name": "Alexander Polehn"})["relationship_path"]
+		self.assertNotIn("Parent of Tim Polehn", path)
+
+	def test_a_chain_of_one_is_still_a_chain(self):
+		self.a_member("Solitary Cousin")
+		data = self.tool_data("get_family_member", {"family_name": "Solitary Cousin"})
+		self.assertEqual(len(data["relationship_chain"]), 1)
+		self.assertIn("top of the chain", data["relationship_chain"][0]["chain_ends_because"])
+
+	def test_free_text_ends_the_chain_and_says_so(self):
+		self.a_member("Alexander Polehn", relationship="Son", related_to="Great Aunt Ida")
+		chain = self.tool_data("get_family_member", {"family_name": "Alexander Polehn"})["relationship_chain"]
+		self.assertFalse(chain[-1]["resolved"])
+		self.assertIn("free text", chain[-1]["chain_ends_because"])
+
+	def test_a_cycle_stops_rather_than_looping(self):
+		"""Two people each recorded as the other's parent. Somebody typed that in
+		and the walk has to survive it."""
+		self.a_member("Tim Polehn", relationship="Parent")
+		self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
+		STORE.get_raw("Family", "Tim Polehn")["related_to"] = "Alexander Polehn"
+		data = self.tool_data("get_family_member", {"family_name": "Alexander Polehn"})
+		self.assertIn("cycle", data["relationship_chain"][-1]["chain_ends_because"])
+
+	def test_a_chain_deeper_than_the_limit_stops_and_says_which_name_was_next(self):
+		names = [f"Generation {index}" for index in range(10)]
+		for index, name in enumerate(names):
+			self.a_member(name, relationship="Parent")
+			if index:
+				self.tool_data(
+					"update_family_member", {"family_name": names[index - 1], "related_to": name}
+				)
+		data = self.tool_data("get_family_member", {"family_name": names[0]})
+		self.assertIn("depth limit", data["relationship_chain"][-1]["chain_ends_because"])
+
+	def test_an_unassigned_member_is_told_so_in_the_compliance_notes(self):
+		self.a_member("Unattributed Cousin")
+		data = self.tool_data("get_family_member", {"family_name": "Unattributed Cousin"})
+		self.assertTrue(any("unassigned parent" in note for note in data["compliance_notes"]))
+
+	def test_the_chain_never_returns_more_than_four_digits_of_a_tax_id(self):
+		"""The rule the related-party register keeps, kept across the new hop too."""
+		party = self.a_family()
+		STORE.get_raw("Related Party", party).update({"tax_id_type": "SSN", "tax_id_last4": "6789"})
+		import json as _json
+
+		body = _json.dumps(self.tool_data("get_family_member", {"family_name": "Alexander Polehn"}))
+		self.assertNotIn("123456789", body)
+		self.assertNotIn("123-45-6789", body)

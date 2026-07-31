@@ -27,11 +27,23 @@ string comparison it cannot win. A legal name is "Highland Ltd Liability Co." an
 a Company docname is "Highland LLC"; no amount of matching makes that reliable,
 and a refusal built on it would be a refusal nobody could get past.
 
+WHY A CONVEYANCE IS ITS OWN TOOL AND NOT AN EDIT. `update_parcel` refuses to move
+a parcel between entities, and that refusal is right: ground changing hands is a
+legal event with a date, an instrument behind it and consequences for two sets of
+books, and a tool that let it happen by changing a field would record none of
+those. `convey_parcel` is the door that refusal points at. It destroys the record
+on one entity's books and builds it on the other's, carries everything that hung
+off it across, and writes the event onto the survivor — because after a
+conveyance there is exactly one document left to carry the history.
+
 WHAT NOTHING HERE DOES. It does not post. A lease with rent on it produces no
 Journal Entry, no receivable and no schedule — recording an agreement and booking
 its consequences are separate acts, and the tool that records the agreement is not
-the tool that can move money. It does not expire a lease because a date has
-passed either: see the note in `list_leases` on why a calendar is not a decision.
+the tool that can move money. Neither does a conveyance: basis transfer and
+gain-or-loss recognition are entries somebody writes on purpose, with a narrative
+of their own, and `convey_parcel` says which ones are owed rather than guessing
+at them. It does not expire a lease because a date has passed either: see the
+note in `list_leases` on why a calendar is not a decision.
 """
 
 import frappe
@@ -55,10 +67,73 @@ PARCEL = "Parcel"
 LEASE = "Lease"
 RELATED_PARTY = "Related Party"
 GOVERNANCE_DOCUMENT = "Governance Document"
+CONVEYANCE_EVENT = "Parcel Conveyance Event"
+
+#: Every doctype this app ships that points at a Parcel, and the field it points
+#: with. A conveyance repoints all of them, and a register missing from this
+#: tuple is a register left pointing at a document that no longer exists — which
+#: Frappe would refuse to let the delete happen over, so the failure would be a
+#: refusal mid-conveyance rather than a silent orphan. That is the safe direction,
+#: and `test_realestate` checks the tuple against the shipped DocType JSON anyway,
+#: so a doctype added in a later release cannot be forgotten quietly.
+#:
+#: DOCNAMES DO NOT FOLLOW, AND DO NOT NEED TO. A Field, an Irrigation Zone and a
+#: Housing Unit are all named `"<their name> - <PARCEL abbr>"` — the parcel's key,
+#: not the company's — and the conveyance preserves that key. So every one of
+#: those docnames is still correct on the other side; only the link moves.
+PARCEL_REFERRERS = (
+	(LEASE, "parcel"),
+	("Field", "parcel"),
+	("Irrigation Zone", "parcel"),
+	("Housing Unit", "parcel"),
+	("Housing Assignment", "parcel"),
+)
+
+#: Referring registers that also carry their own `owning_entity`, which has to
+#: move with the parcel or the register will disagree with the ground it
+#: describes. Housing Assignment has none — it hangs off a Housing Unit, which
+#: does — and Lease's is the entity that is party to the agreement, which a
+#: conveyance does NOT change: a lease signed by the old owner is still that
+#: entity's contract until somebody novates it, which is its own document.
+REFERRER_COMPANY_FIELDS = {
+	"Field": "owning_entity",
+	"Irrigation Zone": "owning_entity",
+	"Housing Unit": "owning_entity",
+}
+
+#: The parcel fields a conveyance copies across unchanged. Identity, geography,
+#: size and valuation are facts about the ground; they do not change because the
+#: deed did. `owning_entity`, `title_holder`, `appraisal_document` and
+#: `related_asset` are each decided separately below, for four different reasons.
+CONVEYED_FIELDS = (
+	"parcel_name",
+	"abbr",
+	"parcel_id",
+	"use_type",
+	"county",
+	"state",
+	"acreage",
+	"address",
+	"appraised_value",
+	"appraised_as_of",
+	"appraiser",
+	"notes",
+)
+
+#: The shortest `reason` a conveyance is allowed to carry. A conveyance with no
+#: narrative is a parcel that moved and nobody can say why, which is the one
+#: question an estate attorney will certainly ask.
+MIN_REASON = 12
 
 _PARCEL_FIELDS = (
 	"name",
 	"parcel_name",
+	# The parcel's own short key. Every Field, Irrigation Zone and Housing Unit
+	# docname is suffixed with it, which is why `convey_parcel` has to be able to
+	# read it — a conveyance that let the key be re-derived on the other side
+	# would file the parcel's future blocks under a different suffix from its
+	# existing ones.
+	"abbr",
 	"owning_entity",
 	"parcel_id",
 	"use_type",
@@ -157,6 +232,7 @@ def _describe_parcel(row: dict) -> dict:
 	return {
 		"name": row.get("name"),
 		"parcel_name": row.get("parcel_name"),
+		"abbr": row.get("abbr") or None,
 		"owning_entity": row.get("owning_entity"),
 		"parcel_id": row.get("parcel_id") or None,
 		"use_type": row.get("use_type") or None,
@@ -1316,5 +1392,535 @@ def link_parcel_to_asset(args: dict) -> ToolResult:
 		f"(cost {summary['gross_purchase_amount']:,.2f}, appraised {summary['appraised_value']:,.2f})",
 		docstatus_delta="",
 	)
+
+
+# ── 127. convey_parcel ──────────────────────────────────────────────────────
+def convey_parcel(args: dict) -> ToolResult:
+	"""Move one parcel onto another entity's books, with everything that hangs off it.
+
+	THE SITUATION THIS IS FOR. Eight parcels get registered under the only company
+	that existed when somebody started typing. Later the other four entities are
+	set up, and the ground belongs on its actual title holder's books. That is not
+	an edit — `update_parcel` refuses it, correctly — it is a conveyance, and a
+	conveyance has a date, an instrument behind it, and a trail.
+
+	IT DELETES AND RECREATES, WHICH IS THE HONEST SHAPE. A Parcel's docname
+	encodes its entity: `"Mill Creek - OML"` on one set of books and
+	`"Mill Creek - HLD"` on the other, the same way every Account docname carries
+	a company abbreviation. There is no field to change that makes that true — the
+	record on the old books has to stop existing and the record on the new ones has
+	to start. So: create the new one, repoint everything at it, move the
+	attachments, delete the old one, write the event.
+
+	THE PARCEL'S OWN KEY IS PRESERVED, AND THAT IS WHY THE FARM REGISTERS SURVIVE.
+	Every Field, Irrigation Zone and Housing Unit is named
+	`"<its name> - <parcel abbr>"` — the PARCEL's short key, not the company's. The
+	conveyance carries that key across unchanged, so all 29 of Mill Creek's cabins
+	keep the docnames they have always had and only their `parcel` link moves. A
+	target entity that already uses the same key is refused rather than
+	disambiguated: a silently changed key would file this parcel's future blocks
+	under a different suffix from its existing ones.
+
+	IT WRITES NO JOURNAL ENTRY, DELIBERATELY. Recording that ground changed hands
+	and booking what that costs are separate acts. Basis transfer between two sets
+	of books, and any gain or loss the transfer recognises, are entries with real
+	tax consequences that somebody should write on purpose with a narrative of
+	their own — not produce as a side effect of filing a deed. The result names
+	the entries that are still owed.
+
+	WHAT IT REFUSES, AND WHY EACH ONE IS A DIFFERENT DOCUMENT'S JOB:
+
+	  * **An active lease over the ground.** Conveying out from under a live lease
+	    is a legal event of its own: the lease is either novated to the new owner
+	    or terminated, and either way there is a document. Refused with the
+	    offending leases named. A lease with no expiration date counts as running.
+	  * **A linked Fixed Asset.** The asset is the balance-sheet side, it belongs
+	    to the old entity's books, and moving it is a posting rather than a
+	    filing. Unlink it or move it first.
+	  * **A half-built target company** — no chart of accounts, or no cost centers.
+	    A parcel filed against an entity that cannot carry a cost is a parcel that
+	    will be found again in six months.
+	  * **A name, an assessor id or an abbreviation the target already uses.**
+	  * **More referring records than one call should move silently.** No silent
+	    caps: if the register is bigger than the ceiling, it says so and moves
+	    nothing.
+
+	EVERY REFUSAL IS REPORTED AT ONCE. A conveyance that failed on the lease, was
+	fixed, and then failed on the asset is two round trips to learn two facts that
+	were both true from the start. `dry_run=true` returns the whole plan and the
+	whole list without touching anything.
+
+	ATOMIC BY CONSTRUCTION. `registry.dispatch` rolls the transaction back before
+	it logs, so a conveyance that dies half way — on a link nobody expected, on a
+	permission — leaves neither parcel changed rather than leaving two.
+	"""
+	_require(PARCEL)
+	requested = as_str(args, "parcel", required=True)
+	scope = _entity(args, required=False) or ""
+	source = parcel_row(requested, "" if frappe.db.exists(PARCEL, requested) else scope)
+	from_company = source["owning_entity"]
+	source_name = source["name"]
+
+	target_company = resolve_company(as_str(args, "target_company", required=True), required=True)
+	effective_date = as_date(args, "effective_date", required=True)
+	reason = as_str(args, "reason", required=True)
+	dry_run = bool(as_bool(args, "dry_run", False))
+
+	if len(reason) < MIN_REASON:
+		raise ToolError(
+			"reason must be a real narrative of the conveyance — why the ground moved and what "
+			"authorises it: the deed, the assignment, the trust amendment. It is the part of this "
+			"record nobody can reconstruct later, and it is the first thing an estate attorney "
+			"asks. Nothing was changed."
+		)
+	if target_company == from_company:
+		raise ToolError(
+			f"parcel {source_name} already belongs to {target_company!r}. A conveyance to the "
+			"entity that already holds it is not a conveyance. Nothing was changed."
+		)
+
+	new_title_holder = as_str(args, "new_title_holder")
+	if new_title_holder:
+		_require(RELATED_PARTY)
+		new_title_holder = _check_link(
+			RELATED_PARTY, new_title_holder, target_company, "company", "new_title_holder"
+		)
+
+	target_abbr = str(frappe.db.get_value("Company", target_company, "abbr") or "")
+	new_name = f"{source['parcel_name']} - {target_abbr}" if target_abbr else source["parcel_name"]
+
+	title = _conveyed_title_holder(source, target_company, new_title_holder)
+	appraisal = _conveyed_appraisal_document(source, target_company)
+	referrers = _referring_records(source_name)
+	attachments = _parcel_attachments(source_name)
+	refusals = _conveyance_refusals(source, target_company, effective_date, referrers)
+
+	plan = {
+		"conveyed": False,
+		"from": source_name,
+		"to": new_name,
+		"from_entity": from_company,
+		"to_entity": target_company,
+		"effective_date": effective_date,
+		"reason": reason,
+		"parcel_abbr": source.get("abbr") or None,
+		"migrated_attachments": len(attachments),
+		"migrated_leases": len(referrers.get(LEASE, [])),
+		"migrated_housing_units": len(referrers.get("Housing Unit", [])),
+		"migrated_fields": len(referrers.get("Field", [])),
+		"migrated_irrigation_zones": len(referrers.get("Irrigation Zone", [])),
+		"migrated_housing_assignments": len(referrers.get("Housing Assignment", [])),
+		"relinked_records": sum(len(names) for names in referrers.values()),
+		"relink_detail": _relink_detail(referrers),
+		"title_holder": title["value"],
+		"title_holder_status": title["status"],
+		"appraisal_document": appraisal["value"],
+		"appraisal_document_status": appraisal["status"],
+		"refusals": refusals,
+		"warnings": [entry for entry in (title["warning"], appraisal["warning"]) if entry],
+	}
+
+	if refusals:
+		if dry_run:
+			return ToolResult(
+				{
+					**plan,
+					"dry_run": True,
+					"note": (
+						"Nothing was written, and nothing would be: the refusals above have to be "
+						"settled first. Each one is a different document's job — see the tool "
+						"description for which."
+					),
+				},
+				f"dry run: parcel {source_name} CANNOT be conveyed to {target_company} — "
+				f"{len(refusals)} refusal(s)",
+			)
+		raise ToolError(
+			f"parcel {source_name} cannot be conveyed to {target_company}:\n  - "
+			+ "\n  - ".join(refusals)
+			+ "\nNothing was changed. Every refusal is listed rather than only the first, so "
+			"they can be settled in one pass."
+		)
+
+	if dry_run:
+		return ToolResult(
+			{
+				**plan,
+				"dry_run": True,
+				"note": (
+					f"Nothing was written. Call again without dry_run to convey. It would delete "
+					f"{source_name}, create {new_name}, repoint "
+					f"{plan['relinked_records']} record(s) and {len(attachments)} attachment(s), "
+					"and write NO journal entry."
+				),
+			},
+			f"dry run: would convey parcel {source_name} to {target_company} as {new_name}, "
+			f"moving {plan['relinked_records']} linked record(s) and {len(attachments)} attachment(s)",
+		)
+
+	# ── the conveyance itself ───────────────────────────────────────────────
+	# Order matters and is not arbitrary. The new record has to exist before
+	# anything can be repointed at it, and everything has to be repointed before
+	# the old one can be deleted — Frappe refuses to delete a document another
+	# document links to, which means a register missing from PARCEL_REFERRERS
+	# fails the whole call rather than leaving a silent orphan.
+	new_doc = frappe.new_doc(PARCEL)
+	for field in CONVEYED_FIELDS:
+		if compat.has_field(PARCEL, field) and source.get(field) not in (None, ""):
+			new_doc.set(field, source.get(field))
+	new_doc.owning_entity = target_company
+	if title["value"]:
+		new_doc.title_holder = title["value"]
+	if appraisal["value"]:
+		new_doc.appraisal_document = appraisal["value"]
+	new_doc.insert()
+
+	relinked = _relink_referrers(referrers, new_doc.name, target_company)
+	for attachment in attachments:
+		frappe.db.set_value("File", attachment, "attached_to_name", new_doc.name)
+
+	frappe.delete_doc(PARCEL, source_name, ignore_permissions=False)
+
+	# Guarded on both halves: a request landing mid-`bench migrate` may have the
+	# Parcel field synced and the child doctype not, and a conveyance that lost
+	# its own history would be the one record nobody could reconstruct.
+	if compat.doctype_exists(CONVEYANCE_EVENT) and compat.has_field(PARCEL, "conveyance_events"):
+		new_doc.append(
+			"conveyance_events",
+			{
+				"event_type": "Conveyed In",
+				"effective_date": effective_date,
+				"from_entity": from_company,
+				"from_docname": source_name,
+				"to_entity": target_company,
+				"reason": reason,
+				"migrated_attachments": len(attachments),
+				"relinked_records": relinked,
+				"relink_detail": plan["relink_detail"],
+				"appraisal_document_status": appraisal["status"],
+				"recorded_on": frappe.utils.now(),
+			},
+		)
+		new_doc.save()
+
+	after = dict(
+		frappe.db.get_value(PARCEL, new_doc.name, compat.existing_fields(PARCEL, _PARCEL_FIELDS), as_dict=True)
+		or {}
+	)
+	data = {
+		**plan,
+		**_describe_parcel(after),
+		"conveyed": True,
+		"from": source_name,
+		"to": new_doc.name,
+		"relinked_records": relinked,
+		"refusals": [],
+		"journal_entry": None,
+		"note": (
+			"NO journal entry was written. A conveyance is a change to the land register; the "
+			"basis sitting on "
+			f"{from_company}'s books has not moved, and any gain or loss the transfer recognises "
+			"has not been booked. Both are entries somebody should write on purpose — "
+			"create_journal_entry drafts them — because debt-free transfers between related "
+			"entities are exactly where an unconsidered posting becomes a tax problem."
+		),
+		"next_step": (
+			"The appraisal report is filed under the previous entity and did NOT come across. "
+			"Re-file it with attach_governance_document against " + target_company + ", then "
+			"point appraisal_document at it with update_parcel."
+			if appraisal["status"] == "unlinked_needs_reattach"
+			else "Record the basis transfer with create_journal_entry when your accountant has "
+			"decided what it is. get_parcel shows the new record with its conveyance history."
+		),
+	}
+	if not data["warnings"]:
+		data.pop("warnings")
+
+	return ToolResult(
+		data,
+		f"conveyed parcel {source_name} ({from_company}) to {target_company} as {new_doc.name}, "
+		f"effective {effective_date}: {relinked} linked record(s) and {len(attachments)} "
+		f"attachment(s) moved, appraisal document {appraisal['status']} — {reason}",
+		docstatus_delta="none → 0 (recreated on the new entity)",
+	)
+
+
+def _conveyance_refusals(source: dict, target_company: str, effective_date: str, referrers: dict) -> list:
+	"""Every reason this conveyance cannot happen, collected rather than raised.
+
+	Collected because a caller who fixes the lease and then learns about the asset
+	has spent two round trips finding out two things that were both true from the
+	start — and because `dry_run` has to be able to report them without raising at
+	all.
+	"""
+	out = []
+	source_name = source["name"]
+
+	if source.get("related_asset"):
+		out.append(
+			f"{source_name} is linked to Fixed Asset {source['related_asset']}, which sits on "
+			f"{source['owning_entity']}'s balance sheet. Moving an asset between entities is a "
+			"posting, not a filing, and it is not this tool's business. Unlink it "
+			"(link_parcel_to_asset with the asset it should point at, or clear it in the Desk) "
+			"or move the asset first."
+		)
+
+	for lease in _blocking_leases(source_name, effective_date):
+		out.append(
+			f"Lease {lease['name']} is Active over this parcel"
+			+ (f" until {lease['expiration_date']}" if lease["expiration_date"] else " with no end date")
+			+ f", and the conveyance date {effective_date} falls inside its term. Conveying out "
+			"from under a live lease is a legal event of its own: the lease is either novated to "
+			"the new owner or terminated, and either way there is a document. Record it with "
+			"update_lease, then convey."
+		)
+
+	if not compat.doctype_exists("Cost Center") or not frappe.db.count(
+		"Cost Center", {"company": target_company}
+	):
+		out.append(
+			f"{target_company} has no cost centers. A parcel filed against an entity that cannot "
+			"carry a cost is one somebody finds again in six months — set the company up with "
+			"create_cost_center first."
+		)
+	if not frappe.db.count("Account", {"company": target_company}):
+		out.append(
+			f"{target_company} has no chart of accounts. Import one with import_chart_of_accounts "
+			"before moving ground onto its books."
+		)
+
+	name_clash = frappe.db.get_value(
+		PARCEL, {"parcel_name": source["parcel_name"], "owning_entity": target_company}, "name"
+	)
+	if name_clash:
+		out.append(
+			f"{target_company} already has a parcel called {source['parcel_name']!r} "
+			f"({name_clash}). One parcel per name per entity, and the two would be impossible to "
+			"tell apart."
+		)
+	if source.get("parcel_id"):
+		id_clash = frappe.db.get_value(
+			PARCEL, {"parcel_id": source["parcel_id"], "owning_entity": target_company}, "name"
+		)
+		if id_clash:
+			out.append(
+				f"assessor parcel id {source['parcel_id']!r} is already on {id_clash} for "
+				f"{target_company}. That number is the county's key: two parcels sharing one "
+				"means a typo in one of them."
+			)
+	if source.get("abbr") and compat.has_field(PARCEL, "abbr"):
+		abbr_clash = frappe.db.get_value(
+			PARCEL, {"abbr": source["abbr"], "owning_entity": target_company}, "name"
+		)
+		if abbr_clash:
+			out.append(
+				f"abbreviation {source['abbr']!r} is already used by {abbr_clash} for "
+				f"{target_company}. Every field, irrigation zone and housing unit on this parcel "
+				"is filed under that key, and the conveyance keeps it rather than inventing a new "
+				"one — so two parcels sharing it would file their blocks together. Change one "
+				"parcel's abbreviation in the Desk first."
+			)
+
+	for doctype, names in referrers.items():
+		if len(names) >= REGISTER_CAP:
+			out.append(
+				f"{len(names)} {doctype} record(s) point at {source_name}, which is at or above "
+				f"this tool's ceiling of {REGISTER_CAP} per register. Nothing was moved rather "
+				"than some of it — a half-conveyed parcel is worse than an unconveyed one."
+			)
+	return out
+
+
+def _blocking_leases(parcel_name: str, effective_date: str) -> list:
+	"""Active, unterminated leases whose term covers the conveyance date.
+
+	`termination_date` is what says a lease actually ended, and a status of Active
+	with no termination is a lease still running whatever its expiration says —
+	`list_leases` explains at length why nothing here expires a lease on a
+	calendar. So a lease with no expiration date BLOCKS: open-ended means still
+	running, and reading a missing end date as "already over" is the one wrong
+	answer that fails silently.
+	"""
+	if not compat.doctype_exists(LEASE):
+		return []
+	rows = frappe.db.get_all(
+		LEASE,
+		filters={"parcel": parcel_name, "status": "Active"},
+		fields=compat.existing_fields(LEASE, ("name", "expiration_date", "termination_date", "lease_name")),
+		order_by="name asc",
+		limit=REGISTER_CAP,
+	)
+	out = []
+	for row in rows or []:
+		if str(row.get("termination_date") or ""):
+			continue
+		expiration = str(row.get("expiration_date") or "")
+		if expiration and effective_date >= expiration:
+			continue
+		out.append({"name": row.get("name"), "expiration_date": expiration or None})
+	return out
+
+
+def _conveyed_title_holder(source: dict, target_company: str, new_title_holder: str) -> dict:
+	"""Who holds title on the other side, and whether that had to be decided here.
+
+	An explicit `new_title_holder` wins — the caller has already been made to pass
+	one that belongs to the target entity. Otherwise the existing one is kept only
+	if it is a related party of the target (or of nobody in particular); a title
+	holder registered against the entity the ground just left is a pointer that
+	would read as current and is not, so it is dropped and said so.
+	"""
+	if new_title_holder:
+		return {
+			"value": new_title_holder,
+			"status": "set_from_argument",
+			"warning": None,
+		}
+	current = str(source.get("title_holder") or "")
+	if not current:
+		return {"value": None, "status": "none_on_source", "warning": None}
+	if not compat.doctype_exists(RELATED_PARTY) or not frappe.db.exists(RELATED_PARTY, current):
+		return {
+			"value": None,
+			"status": "dropped_missing",
+			"warning": (
+				f"title_holder {current!r} is not in the related-party register any more, so it "
+				"was not carried across. Set one with update_parcel."
+			),
+		}
+	owner = str(frappe.db.get_value(RELATED_PARTY, current, "company") or "")
+	if owner and owner != target_company:
+		return {
+			"value": None,
+			"status": "dropped_wrong_company",
+			"warning": (
+				f"title_holder {current!r} is registered against {owner}, which is not the entity "
+				f"receiving this parcel. It was NOT carried across — a title holder filed under "
+				"the entity the ground just left would read as current and would be wrong. "
+				"Register the holder against " + target_company + " with create_related_party "
+				"and set it with update_parcel, or pass new_title_holder next time."
+			),
+		}
+	return {"value": current, "status": "preserved", "warning": None}
+
+
+def _conveyed_appraisal_document(source: dict, target_company: str) -> dict:
+	"""Whether the appraisal report can follow the parcel, and what to say if not.
+
+	A Governance Document belongs to a company, and the archive is scoped that way
+	on purpose. So a report filed under the entity the ground came from cannot
+	simply be pointed at from the other entity's parcel — the link would cross a
+	boundary the archive exists to keep. It is dropped, flagged
+	`unlinked_needs_reattach`, and named in the result and in the conveyance event,
+	because "the appraisal needs re-filing" is a real piece of work and a silent
+	null is how it gets forgotten.
+	"""
+	current = str(source.get("appraisal_document") or "")
+	if not current:
+		return {"value": None, "status": "n/a", "warning": None}
+	if not compat.doctype_exists(GOVERNANCE_DOCUMENT) or not frappe.db.exists(
+		GOVERNANCE_DOCUMENT, current
+	):
+		return {
+			"value": None,
+			"status": "unlinked_needs_reattach",
+			"warning": (
+				f"appraisal_document {current!r} is no longer in the archive, so nothing was "
+				"carried across."
+			),
+		}
+	owner = str(frappe.db.get_value(GOVERNANCE_DOCUMENT, current, "company") or "")
+	if owner and owner != target_company:
+		return {
+			"value": None,
+			"status": "unlinked_needs_reattach",
+			"warning": (
+				f"appraisal report {current!r} is filed in {owner}'s archive and did NOT come "
+				f"across — a governance document belongs to a company, and pointing at it from "
+				f"{target_company}'s parcel would cross the boundary the archive exists to keep. "
+				"The appraised value and date DID come across; the report behind them has to be "
+				"re-filed with attach_governance_document and relinked with update_parcel."
+			),
+		}
+	return {"value": current, "status": "linked", "warning": None}
+
+
+def _referring_records(parcel_name: str) -> dict:
+	"""Every record in every register that points at this parcel, by doctype.
+
+	Read once, before anything is written, so the same list drives the plan, the
+	dry run, the ceiling refusal and the relink. Reading it twice would let a dry
+	run promise a number the real call did not move.
+	"""
+	out: dict = {}
+	for doctype, fieldname in PARCEL_REFERRERS:
+		if not compat.doctype_exists(doctype) or not compat.has_field(doctype, fieldname):
+			continue
+		names = (
+			frappe.db.get_all(
+				doctype, filters={fieldname: parcel_name}, pluck="name", order_by="name asc", limit=REGISTER_CAP
+			)
+			or []
+		)
+		if names:
+			out[doctype] = list(names)
+	return out
+
+
+def _relink_referrers(referrers: dict, new_name: str, target_company: str) -> int:
+	"""Repoint every referring record at the new parcel, and move its entity with it.
+
+	`frappe.db.set_value` rather than `doc.save()` on purpose. Nothing here is a
+	change to what those records MEAN — a cabin is the same cabin, on the same
+	ground, with the same docname — so re-running each register's own validation
+	mid-conveyance would be asking a Housing Unit to re-check a parcel link while
+	the old parcel still exists and the new one is not yet everything it will be.
+	The field write is the whole of the change, and it is the whole of what is
+	done.
+
+	`owning_entity` moves too, but only on the registers that describe the GROUND.
+	A Lease's owning entity is the party to the agreement, and a conveyance does
+	not change who signed a contract — that is a novation, and it is its own
+	document.
+	"""
+	moved = 0
+	for doctype, fieldname in PARCEL_REFERRERS:
+		names = referrers.get(doctype) or []
+		if not names:
+			continue
+		company_field = REFERRER_COMPANY_FIELDS.get(doctype)
+		updates = {fieldname: new_name}
+		if company_field and compat.has_field(doctype, company_field):
+			updates[company_field] = target_company
+		for name in names:
+			frappe.db.set_value(doctype, name, dict(updates))
+			moved += 1
+	return moved
+
+
+def _parcel_attachments(parcel_name: str) -> list:
+	"""File rows attached to this parcel, which follow it to the new docname.
+
+	A File points at its parent by `attached_to_name`, which is a docname and not
+	a link — so a conveyance that did not rewrite these would leave the tax
+	statements and the survey attached to a string nothing resolves, with no
+	error anywhere to say so. That is the failure mode this exists to prevent.
+	"""
+	return list(
+		frappe.db.get_all(
+			"File",
+			filters={"attached_to_doctype": PARCEL, "attached_to_name": parcel_name},
+			pluck="name",
+			order_by="creation asc",
+			limit=REGISTER_CAP,
+		)
+		or []
+	)
+
+
+def _relink_detail(referrers: dict) -> str:
+	"""The relink counts as one readable line: "Lease: 1, Housing Unit: 29"."""
+	parts = [f"{doctype}: {len(names)}" for doctype, names in sorted(referrers.items()) if names]
+	return ", ".join(parts) or "nothing pointed at it"
 
 

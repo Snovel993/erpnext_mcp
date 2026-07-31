@@ -456,7 +456,7 @@ class SelfTest(SeededTestCase):
 		self.configure(enabled=1, allow_create_journal_entry=1)
 		report = mcp.selftest()
 		self.assertEqual(report["mutating_tools_enabled"], ["create_journal_entry"])
-		self.assertEqual(report["tools_total"], 125)
+		self.assertEqual(report["tools_total"], 127)
 		# Every read tool this site can actually run, plus the one write tool just
 		# enabled. Computed rather than hardcoded, because what is runnable now
 		# depends on what is pip-installed: the three HR tools need hrms, and the

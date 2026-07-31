@@ -221,6 +221,12 @@ ERPNEXT_SCHEMA = {
 		"is_cancelled",
 		"voucher_type",
 		"voucher_no",
+		# The Journal Entry Account row this GL row came from. It is what makes
+		# "update the party on line 2" exact rather than approximate: an entry
+		# with two lines to the same account for the same amount produces two GL
+		# rows that differ in nothing else, and a fixture without this column
+		# would let `update_journal_entry_party` match both and look correct.
+		"voucher_detail_no",
 		"party",
 		"party_type",
 		"cost_center",
@@ -270,6 +276,10 @@ ERPNEXT_SCHEMA = {
 		"accounts",
 	],
 	"Journal Entry Account": [
+		# A child row has a docname of its own, and it is not decoration: a GL
+		# Entry points back at it through `voucher_detail_no`, and that pointer is
+		# the only thing distinguishing two identical lines of one voucher.
+		"name",
 		"idx",
 		"account",
 		"account_type",
@@ -677,6 +687,7 @@ APP_DOCTYPES = {
 	"Note Payable": "note_payable",
 	"Note Payable Event": "note_payable_event",
 	"Parcel": "parcel",
+	"Parcel Conveyance Event": "parcel_conveyance_event",
 	"Lease": "lease",
 	"Related Party": "related_party",
 	"Field": "field",
@@ -1002,6 +1013,7 @@ CHILD_TABLES = {
 	("Asset Cost Profile", "cost_center_allocation"): "Asset Cost Center Allocation",
 	("Asset Cost Profile", "depreciation_postings"): "Asset Depreciation Posting",
 	("Note Payable", "payment_events"): "Note Payable Event",
+	("Parcel", "conveyance_events"): "Parcel Conveyance Event",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1049,6 +1061,7 @@ class Document(FrappeDict):
 		self._run("validate")
 		self._run("before_save")
 		self._validate_links()
+		self._name_children()
 		STORE.put(self)
 		self._run("after_insert")
 		self._run("on_update")
@@ -1064,9 +1077,37 @@ class Document(FrappeDict):
 		self._run("validate")
 		self._run("before_save")
 		self._validate_links()
+		self._name_children()
 		STORE.put(self)
 		self._run("on_update")
 		return self
+
+	def _name_children(self):
+		"""Give every child row a docname, as Frappe does on save.
+
+		Not cosmetic. Frappe names child rows with a hash and other tables point
+		at them: a GL Entry's `voucher_detail_no` IS the Journal Entry Account
+		row's name, and it is the only thing that tells two identical lines of one
+		voucher apart. A double that left children unnamed would let a tool that
+		matched on it appear to work while matching nothing, or — worse — let one
+		that matched on account and amount instead look correct here and update
+		the wrong row on a real site.
+
+		Names are assigned once and never reassigned, because a row that changed
+		its name on every save would orphan whatever already points at it.
+		"""
+		for (parent, fieldname), child_doctype in CHILD_TABLES.items():
+			if parent != self.doctype:
+				continue
+			for index, row in enumerate(self.get(fieldname) or [], start=1):
+				if not isinstance(row, dict):  # pragma: no cover - rows are always dicts
+					continue
+				row.setdefault("idx", index)
+				if not row.get("name"):
+					row["name"] = STORE.next_child_name(child_doctype)
+				row.setdefault("parent", self.get("name"))
+				row.setdefault("parenttype", self.doctype)
+				row.setdefault("parentfield", fieldname)
 
 	def submit(self):
 		self.docstatus = 1
@@ -1206,9 +1247,26 @@ class Document(FrappeDict):
 		STORE.put(self)
 
 	def add_comment(self, comment_type, text):
+		"""Frappe inserts a Comment row and RETURNS IT. So does this.
+
+		The return value is not incidental: a tool that reports the docname of the
+		note it left needs one, and a double returning None would let the tool ship
+		reporting None forever. `STORE.comments` stays as it is because a dozen
+		existing tests read it, and the Comment row is what a tool asserting on the
+		timeline actually queries.
+		"""
 		STORE.comments.append(
 			{"doctype": self.doctype, "name": self.name, "type": comment_type, "text": text}
 		)
+		return frappe.get_doc(
+			{
+				"doctype": "Comment",
+				"comment_type": comment_type,
+				"content": text,
+				"reference_doctype": self.doctype,
+				"reference_name": self.name,
+			}
+		).insert()
 
 	def get_password(self, fieldname, raise_exception=True):
 		value = STORE.passwords.get((self.doctype, self.get("name"), fieldname))
@@ -1535,6 +1593,17 @@ class Store:
 		# Rows written since the last commit, so a rollback can discard exactly
 		# those — which is what the audit-survives-rollback tests need to see.
 		self.pending: list[tuple[str, str]] = []
+		# Before-images of rows CHANGED or DELETED since the last commit, so a
+		# rollback puts them back. Discarding new rows was never the whole of what
+		# a rollback does, and modelling only that half made a multi-step tool look
+		# atomic when it was not: `convey_parcel` repoints a dozen leases and
+		# housing units before it deletes anything, and a double that kept those
+		# updates through a rollback would certify a half-conveyed parcel as
+		# impossible while a real MariaDB transaction was the only thing making it
+		# so. One entry per (doctype, name), taken the FIRST time it is touched —
+		# the state to restore is the one the transaction opened with, not the one
+		# the second write found.
+		self.before_images: dict[tuple[str, str], dict | None] = {}
 
 	def _seed_doctypes(self):
 		"""A row per DocType, because `tabDocType` really is a table.
@@ -1569,6 +1638,18 @@ class Store:
 		prefix = "".join(word[0] for word in doctype.split() if word).upper() or "DOC"
 		return f"{prefix}-{self.counters[doctype]:05d}"
 
+	def next_child_name(self, doctype: str) -> str:
+		"""A child row's docname. Frappe uses a hash; the shape does not matter.
+
+		What matters is that it is opaque and stable: a test that could predict it
+		from the row's contents would let a tool "find" a row by reconstructing the
+		name rather than by following the pointer, which is not what a real site
+		allows.
+		"""
+		key = f"child:{doctype}"
+		self.counters[key] = self.counters.get(key, 0) + 1
+		return f"{secrets.token_hex(5)}{self.counters[key]:03d}"
+
 	def put(self, doc: Document):
 		self._extract_passwords(doc)
 		if META.get(doc.doctype) and META[doc.doctype].issingle:
@@ -1576,9 +1657,24 @@ class Store:
 			return
 		table = self.tables.setdefault(doc.doctype, {})
 		is_new = doc.name not in table
+		self.snapshot(doc.doctype, doc.name)
 		table[doc.name] = _plain(doc)
 		if is_new:
 			self.pending.append((doc.doctype, doc.name))
+
+	def snapshot(self, doctype: str, name: str) -> None:
+		"""Remember what a row looked like before this transaction touched it.
+
+		Only the first touch is recorded. A row updated three times and then
+		rolled back has to come back as it was before the first of them, and
+		keeping the latest before-image would restore it to the state left by the
+		second write — which is not a state the database was ever in.
+		"""
+		key = (doctype, name)
+		if key in self.before_images:
+			return
+		row = self.tables.get(doctype, {}).get(name)
+		self.before_images[key] = copy.deepcopy(row) if row is not None else None
 
 	def _extract_passwords(self, doc: Document):
 		"""Move Password field values out of the row, as Frappe does on save.
@@ -1621,16 +1717,25 @@ class Store:
 			table[row["name"]] = row
 		# Seeded fixtures are "already committed" state.
 		self.pending.clear()
+		self.before_images.clear()
 
 	def commit(self):
 		self.committed += 1
 		self.pending.clear()
+		self.before_images.clear()
 
 	def rollback(self):
 		self.rolled_back += 1
 		for doctype, name in self.pending:
 			self.tables.get(doctype, {}).pop(name, None)
+		for (doctype, name), row in self.before_images.items():
+			table = self.tables.setdefault(doctype, {})
+			if row is None:
+				table.pop(name, None)
+			else:
+				table[name] = copy.deepcopy(row)
 		self.pending.clear()
+		self.before_images.clear()
 
 
 def _plain(doc) -> dict:
@@ -1797,13 +1902,42 @@ class FakeDB:
 		return len(self.get_all(doctype, filters=filters))
 
 	def set_value(self, doctype, name, fieldname, value=None, **kwargs):
+		if doctype in CHILD_TABLE_SOURCES:
+			return self._set_child_value(doctype, name, fieldname, value)
 		row = STORE.get_raw(doctype, name)
 		if row is None:
 			return
+		STORE.snapshot(doctype, name)
 		if isinstance(fieldname, dict):
 			row.update(fieldname)
 		else:
 			row[fieldname] = value
+
+	def _set_child_value(self, doctype, name, fieldname, value):
+		"""`frappe.db.set_value` against a child row, found by its own docname.
+
+		Real Frappe writes `tabJournal Entry Account` directly and this is how a
+		submitted document's line gets a field changed at all — `party` is not
+		allowed on submit, so `doc.save()` is not available. The double stores
+		children inside their parents, so the row has to be located by walking
+		them; the observable behaviour is the same, which is the point.
+
+		Silently does nothing for a name that matches no row, exactly as
+		`frappe.db.set_value` does for a missing document.
+		"""
+		parent_doctype, fieldname_on_parent = CHILD_TABLE_SOURCES[doctype]
+		for parent in STORE.rows(parent_doctype):
+			for row in parent.get(fieldname_on_parent) or []:
+				if row.get("name") != name:
+					continue
+				# The child lives inside its parent's row, so the parent is what a
+				# rollback has to restore.
+				STORE.snapshot(parent_doctype, parent.get("name"))
+				if isinstance(fieldname, dict):
+					row.update(fieldname)
+				else:
+					row[fieldname] = value
+				return
 
 	def commit(self):
 		STORE.commit()
@@ -1823,6 +1957,7 @@ class FakeDB:
 #: flatten the parents first.
 CHILD_TABLE_SOURCES = {
 	"Journal Entry Account": ("Journal Entry", "accounts"),
+	"Parcel Conveyance Event": ("Parcel", "conveyance_events"),
 	"Bank Transaction Payments": ("Bank Transaction", "payment_entries"),
 	"Fiscal Year Company": ("Fiscal Year", "companies"),
 	"Workflow Document State": ("Workflow", "states"),
@@ -2110,6 +2245,7 @@ def _build_frappe() -> types.ModuleType:
 		"""
 
 	def delete_doc(doctype, name, force=False, ignore_permissions=False, **kwargs):
+		STORE.snapshot(doctype, name)
 		STORE.tables.get(doctype, {}).pop(name, None)
 
 	def rename_doc(doctype, old, new, force=False, merge=False, **kwargs):

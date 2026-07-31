@@ -28,7 +28,8 @@ in years".
 import base64
 import json
 
-from .fixtures import ASSET_CATEGORY, MAIN, MAIN_ABBR, OTHER, V11TestCase
+from .fixtures import ASSET_CATEGORY, MAIN, MAIN_ABBR, OTHER, OTHER_ABBR, V11TestCase
+from .harness import STORE, frappe
 
 ALL_ON = {
 	"allow_create_parcel": 1,
@@ -902,3 +903,630 @@ class Switches(RealEstateTestCase):
 		self.assertAudited("create_parcel", "Success")
 		self.tool_error("create_parcel", {"owning_entity": MAIN, "parcel_name": "Red Camp"})
 		self.assertAudited("create_parcel", "Error")
+
+
+# ── v0.13.0: convey_parcel ──────────────────────────────────────────────────
+CONVEY_ON = {
+	**ALL_ON,
+	"allow_convey_parcel": 1,
+	"allow_create_housing_unit": 1,
+	"allow_create_housing_assignment": 1,
+	"allow_create_field": 1,
+	"allow_attach_file_to_document": 1,
+	"allow_list_attachments": 1,
+}
+
+
+class ConveyParcelTestCase(RealEstateTestCase):
+	"""Ground moving between two entities' books, with everything that hangs off it.
+
+	Five things these tests are really about.
+
+	THE DOCNAME CARRIES THE ENTITY, SO THE MOVE IS A DELETE AND A CREATE. There is
+	no field to change that makes "Red Camp - ETC" into "Red Camp - SEL". The
+	tests assert on both halves: the new docname exists and the old one is gone.
+
+	THE PARCEL'S OWN SHORT KEY SURVIVES, WHICH IS WHY THE FARM REGISTERS DO. Every
+	Field, Irrigation Zone and Housing Unit is named after the PARCEL's
+	abbreviation, not the company's, so the conveyance carries that key across and
+	all of their docnames stay correct. Only their `parcel` link moves.
+
+	NOTHING IS SILENTLY LOST. Attachments follow the docname, every referring
+	register is repointed, and an appraisal report that CANNOT follow — because it
+	is filed in the old entity's archive — is reported as needing re-filing rather
+	than nulled quietly.
+
+	EVERY REFUSAL AT ONCE. A conveyance that failed on the lease, was fixed, and
+	then failed on the asset is two round trips to learn two things that were both
+	true from the start.
+
+	NOTHING POSTS. No Journal Entry, no basis transfer, no gain recognised — and a
+	test asserts the ledger is untouched, because "recording a conveyance and
+	booking its consequences are separate acts" is a claim and not a hope.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, **CONVEY_ON)
+
+	def a_parcel(self, parcel_name="Mill Creek", company=MAIN, **overrides):
+		payload = {
+			"owning_entity": company,
+			"parcel_name": parcel_name,
+			"parcel_id": "1N-13E-8-1200",
+			"county": "Wasco",
+			"state": "OR",
+			"acreage": 131.43,
+			"use_type": "Labor Housing",
+			"address": "2535 Dry Hollow Rd",
+			"appraised_value": 3100000,
+			"appraised_as_of": "2026-02-01",
+			"appraiser": "Moore Valuation",
+			"notes": "deeded acreage disagrees with GIS by 0.4",
+		}
+		payload.update(overrides)
+		return self.tool_data("create_parcel", payload)
+
+	def convey(self, **overrides):
+		payload = {
+			"parcel": f"Mill Creek - {MAIN_ABBR}",
+			"target_company": OTHER,
+			"effective_date": "2026-07-30",
+			"reason": "assigned by deed recorded 2026-07-30, Wasco County instrument 2026-4417",
+		}
+		payload.update(overrides)
+		return self.tool_data("convey_parcel", payload)
+
+	def convey_error(self, **overrides):
+		payload = {
+			"parcel": f"Mill Creek - {MAIN_ABBR}",
+			"target_company": OTHER,
+			"effective_date": "2026-07-30",
+			"reason": "assigned by deed recorded 2026-07-30, Wasco County instrument 2026-4417",
+		}
+		payload.update(overrides)
+		return self.tool_error("convey_parcel", payload)
+
+
+class ConveyParcel(ConveyParcelTestCase):
+	def test_it_moves_the_parcel_to_the_other_entitys_books(self):
+		self.a_parcel()
+		data = self.convey()
+		self.assertTrue(data["conveyed"])
+		self.assertEqual(data["from"], f"Mill Creek - {MAIN_ABBR}")
+		self.assertEqual(data["to"], f"Mill Creek - {OTHER_ABBR}")
+		self.assertEqual(data["owning_entity"], OTHER)
+
+	def test_the_old_record_stops_existing(self):
+		"""Not a flag, not a status. A parcel on two sets of books is a parcel two
+		balance sheets can claim."""
+		self.a_parcel()
+		self.convey()
+		self.assertIsNone(STORE.get_raw("Parcel", f"Mill Creek - {MAIN_ABBR}"))
+		self.assertTrue(STORE.get_raw("Parcel", f"Mill Creek - {OTHER_ABBR}"))
+
+	def test_every_fact_about_the_ground_comes_across_unchanged(self):
+		"""Identity, geography, size and valuation do not change because the deed
+		did."""
+		self.a_parcel()
+		data = self.convey()
+		self.assertEqual(data["parcel_id"], "1N-13E-8-1200")
+		self.assertEqual(data["county"], "Wasco")
+		self.assertEqual(data["state"], "OR")
+		self.assertEqual(data["acreage"], 131.43)
+		self.assertEqual(data["use_type"], "Labor Housing")
+		self.assertEqual(data["address"], "2535 Dry Hollow Rd")
+		self.assertEqual(data["appraised_value"], 3100000.0)
+		self.assertEqual(data["appraised_as_of"], "2026-02-01")
+		self.assertEqual(data["appraiser"], "Moore Valuation")
+		self.assertIn("GIS", data["notes"])
+
+	def test_the_parcels_own_short_key_is_preserved(self):
+		"""The whole reason the farm registers survive the move."""
+		self.a_parcel()
+		self.convey()
+		self.assertEqual(STORE.get_raw("Parcel", f"Mill Creek - {OTHER_ABBR}")["abbr"], "MC")
+
+	def test_it_is_audited_with_the_reason(self):
+		self.a_parcel()
+		self.convey()
+		row = self.assertAudited("convey_parcel", "Success")
+		self.assertIn("instrument 2026-4417", row["result_summary"])
+
+	def test_the_ledger_is_untouched(self):
+		"""No basis transfer, no gain recognised, no journal entry of any kind."""
+		self.a_parcel()
+		before = len(STORE.rows("Journal Entry")), len(STORE.rows("GL Entry"))
+		data = self.convey()
+		self.assertIsNone(data["journal_entry"])
+		self.assertEqual((len(STORE.rows("Journal Entry")), len(STORE.rows("GL Entry"))), before)
+		self.assertIn("NO journal entry", data["note"])
+
+	def test_it_says_which_entries_are_still_owed(self):
+		self.a_parcel()
+		self.assertIn("basis", self.convey()["note"])
+
+
+class ConveyanceHistory(ConveyParcelTestCase):
+	"""The trail lives on the survivor, because it is the only record left."""
+
+	def event(self):
+		return STORE.get_raw("Parcel", f"Mill Creek - {OTHER_ABBR}")["conveyance_events"][0]
+
+	def test_the_new_parcel_carries_the_conveyance(self):
+		self.a_parcel()
+		self.convey()
+		self.assertEqual(self.event()["event_type"], "Conveyed In")
+
+	def test_it_names_where_the_ground_came_from(self):
+		"""Both the entity and the docname that no longer exists, so a reader can
+		join the two without either record still being there."""
+		self.a_parcel()
+		self.convey()
+		event = self.event()
+		self.assertEqual(event["from_entity"], MAIN)
+		self.assertEqual(event["from_docname"], f"Mill Creek - {MAIN_ABBR}")
+		self.assertEqual(event["to_entity"], OTHER)
+
+	def test_it_keeps_the_date_and_the_narrative(self):
+		self.a_parcel()
+		self.convey()
+		event = self.event()
+		self.assertEqual(event["effective_date"], "2026-07-30")
+		self.assertIn("instrument 2026-4417", event["reason"])
+
+	def test_it_records_what_actually_moved(self):
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", status="Expired", expiration_date="2026-01-01")
+		self.convey()
+		event = self.event()
+		self.assertEqual(event["relinked_records"], 1)
+		self.assertIn("Lease: 1", event["relink_detail"])
+
+	def test_a_parcel_that_never_moved_has_no_history(self):
+		data = self.a_parcel()
+		self.assertFalse(STORE.get_raw("Parcel", data["name"]).get("conveyance_events"))
+
+
+class ConveyanceRelinks(ConveyParcelTestCase):
+	"""Everything pointing at the old parcel points at the new one, or nothing does."""
+
+	def a_camp(self):
+		self.a_parcel()
+		self.tool_data(
+			"create_housing_unit",
+			{
+				"parcel": "Mill Creek",
+				"unit_name": "MC-Cabin-01",
+				"unit_type": "Cabin",
+				"square_footage": 384,
+				"capacity": 4,
+			},
+		)
+		self.tool_data(
+			"create_housing_assignment",
+			{"unit": "MC-Cabin-01", "employee": "Antony", "assigned_date": "2026-06-01"},
+		)
+
+	def test_leases_follow_the_parcel(self):
+		self.a_parcel()
+		lease = self.a_lease(parcel="Mill Creek", status="Expired", expiration_date="2026-01-01")["name"]
+		data = self.convey()
+		self.assertEqual(data["migrated_leases"], 1)
+		self.assertEqual(STORE.get_raw("Lease", lease)["parcel"], f"Mill Creek - {OTHER_ABBR}")
+
+	def test_a_leases_own_entity_does_NOT_follow(self):
+		"""A conveyance does not change who signed a contract. That is a novation,
+		and it is its own document."""
+		self.a_parcel()
+		lease = self.a_lease(parcel="Mill Creek", status="Expired", expiration_date="2026-01-01")["name"]
+		self.convey()
+		self.assertEqual(STORE.get_raw("Lease", lease)["owning_entity"], MAIN)
+
+	def test_housing_units_follow_the_parcel(self):
+		self.a_camp()
+		data = self.convey()
+		self.assertEqual(data["migrated_housing_units"], 1)
+		unit = STORE.get_raw("Housing Unit", "MC-Cabin-01 - MC")
+		self.assertEqual(unit["parcel"], f"Mill Creek - {OTHER_ABBR}")
+
+	def test_a_housing_units_entity_DOES_follow(self):
+		"""It describes the ground, and the ground moved."""
+		self.a_camp()
+		self.convey()
+		self.assertEqual(STORE.get_raw("Housing Unit", "MC-Cabin-01 - MC")["owning_entity"], OTHER)
+
+	def test_housing_assignments_follow_too(self):
+		self.a_camp()
+		data = self.convey()
+		self.assertEqual(data["migrated_housing_assignments"], 1)
+		rows = [row for row in STORE.rows("Housing Assignment")]
+		self.assertEqual(rows[0]["parcel"], f"Mill Creek - {OTHER_ABBR}")
+
+	def test_blocks_follow_the_parcel(self):
+		self.a_parcel()
+		self.tool_data(
+			"create_field",
+			{"parcel": "Mill Creek", "field_name": "Yellow Camp Block 3", "acreage": 12.5, "crop": "Cherry"},
+		)
+		data = self.convey()
+		self.assertEqual(data["migrated_fields"], 1)
+		self.assertEqual(STORE.get_raw("Field", "Yellow Camp Block 3 - MC")["parcel"], f"Mill Creek - {OTHER_ABBR}")
+
+	def test_their_docnames_do_not_change(self):
+		"""They are suffixed with the PARCEL's key, which the conveyance keeps —
+		so 29 cabins keep the names they have always had."""
+		self.a_camp()
+		self.convey()
+		self.assertTrue(STORE.get_raw("Housing Unit", "MC-Cabin-01 - MC"))
+
+	def test_the_counts_are_reported_per_register(self):
+		self.a_camp()
+		self.a_lease(parcel="Mill Creek", status="Expired", expiration_date="2026-01-01")
+		data = self.convey()
+		self.assertEqual(data["relinked_records"], 3)
+		self.assertIn("Housing Unit: 1", data["relink_detail"])
+		self.assertIn("Lease: 1", data["relink_detail"])
+
+	def test_the_declared_referrer_list_covers_every_doctype_that_links_to_a_parcel(self):
+		"""The test that stops a register added in a later release being forgotten.
+
+		Read off the shipped DocType JSON rather than from a list somebody
+		maintains twice — a doctype with a Link to Parcel and no entry in
+		PARCEL_REFERRERS is one the conveyance would leave pointing at a document
+		that no longer exists.
+		"""
+		from erpnext_mcp.tools import realestate
+
+		from .harness import APP_DOCTYPES, _load_app_doctype
+
+		found = set()
+		for doctype, folder in APP_DOCTYPES.items():
+			for field in _load_app_doctype(folder).get("fields") or []:
+				if field.get("fieldtype") == "Link" and field.get("options") == "Parcel":
+					found.add((doctype, field["fieldname"]))
+		self.assertEqual(found, set(realestate.PARCEL_REFERRERS))
+
+
+class ConveyanceAttachments(ConveyParcelTestCase):
+	"""A File points at its parent by docname, which is a string and not a link.
+
+	So a conveyance that did not rewrite these would leave the tax statements and
+	the survey attached to a name nothing resolves, with no error anywhere to say
+	so. That is the failure this exists to prevent.
+	"""
+
+	def attach(self, file_name="tax-statement-2026.pdf"):
+		return self.tool_data(
+			"attach_file_to_document",
+			{
+				"doctype": "Parcel",
+				"name": f"Mill Creek - {MAIN_ABBR}",
+				"file_name": file_name,
+				"file_content": base64.b64encode(b"%PDF-1.4 assessor statement").decode(),
+			},
+		)
+
+	def test_attachments_follow_the_parcel_to_its_new_docname(self):
+		self.a_parcel()
+		self.attach()
+		data = self.convey()
+		self.assertEqual(data["migrated_attachments"], 1)
+		self.assertEqual(
+			self.tool_data("list_attachments", {"doctype": "Parcel", "name": f"Mill Creek - {OTHER_ABBR}"})["count"],
+			1,
+		)
+
+	def test_nothing_is_left_attached_to_the_old_docname(self):
+		self.a_parcel()
+		self.attach()
+		self.convey()
+		orphans = [
+			row
+			for row in STORE.rows("File")
+			if row.get("attached_to_name") == f"Mill Creek - {MAIN_ABBR}"
+		]
+		self.assertEqual(orphans, [])
+
+	def test_several_attachments_all_move(self):
+		self.a_parcel()
+		self.attach("tax-statement-2026.pdf")
+		self.attach("survey-1998.pdf")
+		self.assertEqual(self.convey()["migrated_attachments"], 2)
+
+
+class ConveyanceAppraisalDocument(ConveyParcelTestCase):
+	"""A governance document belongs to a company, so it cannot simply follow."""
+
+	def an_appraisal(self, company=MAIN):
+		return self.tool_data(
+			"attach_governance_document",
+			{
+				"company": company,
+				"title": "Moore Valuation 2026 appraisal",
+				"category": "Other",
+				"effective_date": "2026-02-01",
+				"file_name": "appraisal-2026.pdf",
+				"file_content": base64.b64encode(b"%PDF-1.4 appraisal").decode(),
+			},
+		)["name"]
+
+	def test_a_report_in_the_old_entitys_archive_is_flagged_for_re_filing(self):
+		document = self.an_appraisal(MAIN)
+		self.a_parcel(appraisal_document=document)
+		data = self.convey()
+		self.assertEqual(data["appraisal_document_status"], "unlinked_needs_reattach")
+		self.assertIsNone(data["appraisal_document"])
+
+	def test_the_re_filing_is_said_out_loud_rather_than_nulled_quietly(self):
+		document = self.an_appraisal(MAIN)
+		self.a_parcel(appraisal_document=document)
+		data = self.convey()
+		self.assertTrue(any("re-filed" in warning for warning in data["warnings"]))
+		self.assertIn("attach_governance_document", data["next_step"])
+
+	def test_the_flag_is_written_into_the_conveyance_history(self):
+		document = self.an_appraisal(MAIN)
+		self.a_parcel(appraisal_document=document)
+		self.convey()
+		event = STORE.get_raw("Parcel", f"Mill Creek - {OTHER_ABBR}")["conveyance_events"][0]
+		self.assertEqual(event["appraisal_document_status"], "unlinked_needs_reattach")
+
+	def test_the_value_and_the_date_still_come_across(self):
+		"""The number is a fact about the ground. Only the report is filed
+		somewhere this entity cannot reach."""
+		document = self.an_appraisal(MAIN)
+		self.a_parcel(appraisal_document=document)
+		data = self.convey()
+		self.assertEqual(data["appraised_value"], 3100000.0)
+		self.assertEqual(data["appraised_as_of"], "2026-02-01")
+
+	def test_a_parcel_with_no_appraisal_document_reports_n_a(self):
+		self.a_parcel()
+		self.assertEqual(self.convey()["appraisal_document_status"], "n/a")
+
+
+class ConveyanceTitleHolder(ConveyParcelTestCase):
+	def a_holder(self, party_name="Polehn Family Trust", company=MAIN):
+		return self.tool_data(
+			"create_related_party",
+			{
+				"company": company,
+				"party_name": party_name,
+				"party_type": "Trust",
+				"relationship_to_company": "Trustee",
+				"effective_date": "2020-01-01",
+			},
+		)["name"]
+
+	def test_an_explicit_new_title_holder_is_used(self):
+		holder = self.a_holder(company=OTHER)
+		self.a_parcel()
+		data = self.convey(new_title_holder=holder)
+		self.assertEqual(data["title_holder"], holder)
+		self.assertEqual(data["title_holder_status"], "set_from_argument")
+
+	def test_a_new_title_holder_belonging_to_the_wrong_entity_is_refused(self):
+		holder = self.a_holder(company=MAIN)
+		self.a_parcel()
+		self.assertIn("belongs to", self.convey_error(new_title_holder=holder))
+
+	def test_a_holder_registered_against_the_old_entity_is_dropped_and_said_so(self):
+		"""A title holder filed under the entity the ground just left would read as
+		current and would be wrong."""
+		holder = self.a_holder(company=MAIN)
+		self.a_parcel(title_holder=holder)
+		data = self.convey()
+		self.assertIsNone(data["title_holder"])
+		self.assertEqual(data["title_holder_status"], "dropped_wrong_company")
+		self.assertTrue(any("NOT carried across" in warning for warning in data["warnings"]))
+
+	def test_a_parcel_with_no_title_holder_says_so_without_a_warning(self):
+		self.a_parcel()
+		data = self.convey()
+		self.assertEqual(data["title_holder_status"], "none_on_source")
+		self.assertNotIn("warnings", data)
+
+
+class ConveyanceRefusals(ConveyParcelTestCase):
+	def test_an_active_lease_over_the_ground_refuses_the_conveyance(self):
+		"""Conveying out from under a live lease is a legal event of its own."""
+		self.a_parcel()
+		lease = self.a_lease(parcel="Mill Creek", expiration_date="2027-12-31")["name"]
+		message = self.convey_error()
+		self.assertIn(lease, message)
+		self.assertIn("novated", message)
+
+	def test_a_lease_with_no_end_date_counts_as_running(self):
+		"""Open-ended means still running. Reading a missing end date as 'already
+		over' is the one wrong answer that fails silently."""
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", expiration_date="")
+		self.assertIn("no end date", self.convey_error())
+
+	def test_a_lease_that_has_already_expired_does_not_block(self):
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", expiration_date="2026-01-01")
+		self.assertTrue(self.convey()["conveyed"])
+
+	def test_a_terminated_lease_does_not_block(self):
+		"""`termination_date` is what says a lease actually ended."""
+		self.a_parcel()
+		self.a_lease(
+			parcel="Mill Creek",
+			expiration_date="2027-12-31",
+			status="Terminated",
+			termination_date="2026-06-30",
+		)
+		self.assertTrue(self.convey()["conveyed"])
+
+	def test_a_linked_fixed_asset_refuses_the_conveyance(self):
+		"""The balance-sheet side moves by posting, not by filing."""
+		self.a_parcel()
+		asset = self.tool_data(
+			"create_asset",
+			{
+				"company": MAIN,
+				"asset_name": "Mill Creek land",
+				"item_code": "MILL-CREEK-LAND",
+				"asset_category": ASSET_CATEGORY,
+				"purchase_date": "1998-04-01",
+				"purchase_amount": 240000,
+				"useful_life_months": 12,
+			},
+		)["asset"]
+		self.tool_data("link_parcel_to_asset", {"parcel": f"Mill Creek - {MAIN_ABBR}", "asset": asset})
+		message = self.convey_error()
+		self.assertIn(asset, message)
+		self.assertIn("balance sheet", message)
+
+	def test_a_name_the_target_already_uses_is_refused(self):
+		self.a_parcel()
+		self.a_parcel(company=OTHER, parcel_id="9Z-99E-9-9999")
+		self.assertIn("already has a parcel called", self.convey_error())
+
+	def test_an_assessor_id_the_target_already_uses_is_refused(self):
+		self.a_parcel()
+		self.a_parcel(company=OTHER, parcel_name="Somewhere Else")
+		self.assertIn("county's key", self.convey_error())
+
+	def test_an_abbreviation_the_target_already_uses_is_refused(self):
+		"""Silently changing the key would file this parcel's future blocks under a
+		different suffix from its existing ones."""
+		self.a_parcel()
+		self.a_parcel(company=OTHER, parcel_name="Meadow Creek", parcel_id="9Z-99E-9-9999")
+		self.assertIn("abbreviation 'MC'", self.convey_error())
+
+	def test_a_target_with_no_cost_centers_is_refused(self):
+		self.a_parcel()
+		for row in list(STORE.tables["Cost Center"].values()):
+			if row["company"] == OTHER:
+				STORE.tables["Cost Center"].pop(row["name"])
+		self.assertIn("no cost centers", self.convey_error())
+
+	def test_a_target_with_no_chart_of_accounts_is_refused(self):
+		self.a_parcel()
+		for row in list(STORE.tables["Account"].values()):
+			if row["company"] == OTHER:
+				STORE.tables["Account"].pop(row["name"])
+		self.assertIn("no chart of accounts", self.convey_error())
+
+	def test_conveying_to_the_entity_that_already_holds_it_is_refused(self):
+		self.a_parcel()
+		self.assertIn("not a conveyance", self.convey_error(target_company=MAIN))
+
+	def test_a_placeholder_reason_is_refused(self):
+		self.a_parcel()
+		self.assertIn("real narrative", self.convey_error(reason="moved"))
+
+	def test_every_refusal_is_reported_at_once(self):
+		"""Two round trips to learn two things that were both true from the start
+		is exactly what this avoids."""
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", expiration_date="2027-12-31")
+		self.a_parcel(company=OTHER, parcel_id="9Z-99E-9-9999")
+		message = self.convey_error()
+		self.assertIn("Active over this parcel", message)
+		self.assertIn("already has a parcel called", message)
+
+	def test_a_refused_conveyance_changes_nothing(self):
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", expiration_date="2027-12-31")
+		self.convey_error()
+		self.assertTrue(STORE.get_raw("Parcel", f"Mill Creek - {MAIN_ABBR}"))
+		self.assertIsNone(STORE.get_raw("Parcel", f"Mill Creek - {OTHER_ABBR}"))
+
+	def test_an_unknown_parcel_is_refused(self):
+		self.assertIn("no Parcel called", self.convey_error(parcel="Nowhere"))
+
+	def test_an_unknown_target_company_is_refused(self):
+		self.a_parcel()
+		self.assertIn("no Company named", self.convey_error(target_company="Invented Holdings"))
+
+	def test_a_bad_effective_date_is_refused(self):
+		self.a_parcel()
+		self.assertIn("must be a date", self.convey_error(effective_date="last Tuesday"))
+
+
+class ConveyanceDryRun(ConveyParcelTestCase):
+	def test_it_reports_the_whole_plan_without_writing(self):
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", status="Expired", expiration_date="2026-01-01")
+		data = self.convey(dry_run=True)
+		self.assertTrue(data["dry_run"])
+		self.assertFalse(data["conveyed"])
+		self.assertEqual(data["to"], f"Mill Creek - {OTHER_ABBR}")
+		self.assertEqual(data["migrated_leases"], 1)
+		self.assertTrue(STORE.get_raw("Parcel", f"Mill Creek - {MAIN_ABBR}"))
+		self.assertIsNone(STORE.get_raw("Parcel", f"Mill Creek - {OTHER_ABBR}"))
+
+	def test_it_reports_the_refusals_rather_than_raising_them(self):
+		"""A dry run that raised would make the caller fix one thing at a time to
+		find out what else is wrong."""
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", expiration_date="2027-12-31")
+		data = self.convey(dry_run=True)
+		self.assertFalse(data["conveyed"])
+		self.assertEqual(len(data["refusals"]), 1)
+		self.assertIn("Active over this parcel", data["refusals"][0])
+
+	def test_the_dry_run_count_is_the_count_the_real_call_moves(self):
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", status="Expired", expiration_date="2026-01-01")
+		planned = self.convey(dry_run=True)["relinked_records"]
+		self.assertEqual(self.convey()["relinked_records"], planned)
+
+
+class ConveyanceAtomicity(ConveyParcelTestCase):
+	"""Both parcels or neither. `dispatch` rolls back before it logs."""
+
+	def test_a_failure_part_way_through_leaves_neither_parcel_changed(self):
+		self.a_parcel()
+		self.a_lease(parcel="Mill Creek", status="Expired", expiration_date="2026-01-01")
+		lease = STORE.rows("Lease")[0]["name"]
+
+		# Break the delete: a second parcel record pointing at the same ground is
+		# not something the tool can produce, so this stands in for any unexpected
+		# failure after the new record has already been inserted.
+		original = frappe.delete_doc
+
+		def exploding_delete(doctype, name, *args, **kwargs):
+			raise RuntimeError("something nobody anticipated")
+
+		frappe.delete_doc = exploding_delete
+		try:
+			message = self.convey_error()
+		finally:
+			frappe.delete_doc = original
+
+		self.assertIn("something nobody anticipated", message)
+		self.assertTrue(STORE.get_raw("Parcel", f"Mill Creek - {MAIN_ABBR}"))
+		self.assertIsNone(STORE.get_raw("Parcel", f"Mill Creek - {OTHER_ABBR}"))
+		self.assertEqual(STORE.get_raw("Lease", lease)["parcel"], f"Mill Creek - {MAIN_ABBR}")
+
+	def test_the_failure_is_still_audited(self):
+		self.a_parcel()
+		original = frappe.delete_doc
+		frappe.delete_doc = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+		try:
+			self.convey_error()
+		finally:
+			frappe.delete_doc = original
+		self.assertAudited("convey_parcel", "Error")
+
+
+class ConveyanceSwitch(ConveyParcelTestCase):
+	def test_it_ships_off(self):
+		self.configure(enabled=1, allow_create_parcel=1)
+		self.a_parcel()
+		message = self.convey_error()
+		self.assertIn("allow_convey_parcel", message)
+		self.assertIn("switched off", message)
+
+	def test_update_parcel_still_points_at_it(self):
+		"""The refusal that sends somebody here has to keep sending them here."""
+		self.a_parcel()
+		message = self.tool_error(
+			"update_parcel", {"parcel": f"Mill Creek - {MAIN_ABBR}", "owning_entity": OTHER, "county": "Hood River"}
+		)
+		self.assertIn("conveyance", message)

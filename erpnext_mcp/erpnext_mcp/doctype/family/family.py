@@ -27,6 +27,24 @@ should be reclassified rather than the exclusion widened.
 NOTHING IS DELETED. `active` is a checkbox rather than a delete, because a person
 who no longer receives transfers still appears on every posting that already
 named them.
+
+`related_to` ANSWERS "OF WHOM", AND IT IS DATA RATHER THAN A LINK ON PURPOSE.
+v0.12.2 shipped a register that could say "Alexander Polehn — Child" and could
+not say whose child, which is ambiguous the moment an entity has two members —
+and Orchard Meadow has two. The obvious fix is a Link, and it does not fit: a
+Frappe Link points at exactly one doctype, the answer is a Family record OR a
+Related Party record OR somebody in neither register, and a Dynamic Link would
+buy the first two at the cost of a discriminator column beside it. So the field
+holds a name and `parties._resolve_related_to` decides at read time which
+register that name is in, reporting `related_to_doctype` as `Family`, `Related
+Party` or None. A name in neither is not an error: a grandmother who has never
+received a transfer and holds no role is exactly the person a free-text fallback
+is for.
+
+WHAT IT REFUSES IS ONLY THE SELF-REFERENCE. Somebody related to themselves is a
+cycle of length one and the tree walk would have to special-case it. Longer
+cycles are caught by the walk itself rather than here, because seeing one
+requires reading records this document has no business loading during validate.
 """
 
 import frappe
@@ -52,4 +70,14 @@ class Family(Document):
 					"the docname, and it is what every posting to them points at."
 				).format(duplicate),
 				title=_("Duplicate Family Member"),
+			)
+
+		self.related_to = str(self.related_to or "").strip()
+		if self.related_to and self.related_to.lower() == self.family_member_name.lower():
+			frappe.throw(
+				_(
+					"{0} cannot be related to themselves. Related To names the OTHER person — "
+					"the parent, the grandparent, the member this one hangs off."
+				).format(self.family_member_name),
+				title=_("Circular Relationship"),
 			)

@@ -622,16 +622,31 @@ def relationship_options() -> list[str]:
 #: Where a relative ALSO has a tax identity worth recording — because they are a
 #: member, a lessor, a trustee — `related_party` points at the register that holds
 #: four digits and never more.
+#:
+#: WHAT `related_to` IS FOR, AND WHY IT IS NOT A LINK. "Alexander Polehn — Son"
+#: does not say whose son, and a register belonging to a company with two members
+#: answers that two ways. The field holds the name of the other person; which
+#: register that name is in is decided on read by `_resolve_related_to`, because
+#: a Frappe Link points at exactly one doctype and the answer is a Family record,
+#: a Related Party record, or somebody in neither. See the Family controller.
 _FAMILY_FIELDS = (
 	"name",
 	"family_member_name",
 	"relationship",
+	"related_to",
 	"related_party",
 	"active",
 	"notes",
 	"creation",
 	"owner",
 )
+
+#: How far `get_family_member` will follow `related_to` before it stops. Three
+#: generations is the whole of what this register is for — a son, his father, the
+#: entity that father manages — and a walk with no ceiling is a walk that hangs on
+#: a cycle somebody typed in by hand. The walk also refuses to visit a name twice,
+#: so the ceiling is a second belt rather than the only one.
+RELATED_TO_MAX_DEPTH = 6
 
 
 def _require_family() -> None:
@@ -642,15 +657,74 @@ def _require_family() -> None:
 
 
 def _describe_family(row: dict) -> dict:
+	related_to = str(row.get("related_to") or "").strip()
+	doctype, resolved = _resolve_related_to(related_to)
 	return {
 		"name": row.get("name"),
 		"family_member_name": row.get("family_member_name"),
 		"relationship": row.get("relationship") or None,
+		"related_to": related_to or None,
+		# Which register answered, or None for a name in neither. A caller that
+		# wants to follow the pointer needs the doctype as well as the value, and
+		# a caller that only wants to print the row does not have to look.
+		"related_to_doctype": doctype,
+		"related_to_name": resolved,
 		"related_party": row.get("related_party") or None,
 		"has_related_party": bool(row.get("related_party")),
 		"active": compat.checked(row.get("active")),
 		"notes": row.get("notes") or None,
+		"described_as": _described_as(row.get("family_member_name"), row.get("relationship"), related_to),
 	}
+
+
+def _described_as(member_name, relationship, related_to: str) -> str:
+	"""The row as a human reads it: "Alexander Polehn — Son of Tim Polehn".
+
+	One string rather than three fields a caller has to assemble, because this is
+	the sentence the register exists to be able to say and every consumer of it
+	would otherwise write the same join. Degrades cleanly: with no `related_to` it
+	stops after the relationship, and with neither it is just the name.
+	"""
+	out = str(member_name or "")
+	relationship = str(relationship or "").strip()
+	if relationship:
+		out = f"{out} — {relationship}"
+		if related_to:
+			out = f"{out} of {related_to}"
+	elif related_to:
+		out = f"{out} — related to {related_to}"
+	return out
+
+
+def _resolve_related_to(related_to: str) -> tuple[str | None, str | None]:
+	"""Which register holds `related_to`, and under what docname.
+
+	Family first, then Related Party. The order is the answer to the ambiguous
+	case rather than an arbitrary preference: a name that is in both registers is
+	one person recorded twice for two different reasons, and the Family record is
+	the one this register's own reader is looking at. A name in neither register
+	resolves to `(None, None)` — free text, which is the fallback the field was
+	designed with and not a failure.
+
+	Never raises. This runs on every row of `list_family_members`, and a register
+	that refused to list itself because one member's parent is not on file would
+	be a register nobody could fill in incrementally.
+	"""
+	related_to = str(related_to or "").strip()
+	if not related_to:
+		return None, None
+	try:
+		if compat.doctype_exists(FAMILY) and frappe.db.exists(FAMILY, related_to):
+			return FAMILY, related_to
+		if compat.doctype_exists(RELATED_PARTY):
+			if frappe.db.exists(RELATED_PARTY, related_to):
+				return RELATED_PARTY, related_to
+			match = frappe.db.get_value(RELATED_PARTY, {"party_name": related_to}, "name")
+			if match:
+				return RELATED_PARTY, match
+	except Exception:  # pragma: no cover - a half-migrated site mid-`bench migrate`
+		return None, None
+	return None, None
 
 
 def family_row(member: str) -> dict:
@@ -707,7 +781,30 @@ def _party_postings(member: str) -> dict:
 
 # ── 122. create_family_member ───────────────────────────────────────────────
 def create_family_member(args: dict) -> ToolResult:
-	"""Put one person on the family register, so a posting can name them."""
+	"""Put one person on the family register, so a posting can name them.
+
+	RELATIONSHIP VOCABULARY. Spouse, Son, Daughter, Child, Parent, Sibling,
+	Grandchild, Grandparent, In-Law, Other. Son and Daughter arrived in v0.13.0
+	beside Child rather than instead of it — records already saying Child are
+	still true, and asking somebody to re-pick a value that has not changed is
+	work with no answer at the end of it.
+
+	`related_to` ANSWERS "OF WHOM". A register that says "Alexander Polehn — Son"
+	and cannot say whose son is ambiguous the moment the entity has two members.
+	Pass the other person's name: a Family docname, a Related Party docname or
+	party name, or — for somebody in neither register — their name as plain text.
+	The result reports which register answered as `related_to_doctype`, and None
+	there means free text rather than a failure.
+
+	SIMPLE CASE, ONE POINTER. Alex is Tim's son → `related_to="Tim Polehn"`.
+	COMPLEX CASE, POINTER PLUS PROSE. Alex is Tim's son AND Donella's grandson →
+	`related_to="Tim Polehn"` and "also grandson of Donella Polehn" in `notes`.
+	One primary pointer is deliberate: a child table of relationships would model
+	a family tree properly and would turn a register whose job is to make a
+	posting resolve into a genealogy database. If full genealogical modelling is
+	ever genuinely needed it belongs in a Family Tree doctype of its own, and this
+	field would point into it rather than grow into one.
+	"""
 	_require_family()
 	family_name = as_str(args, "family_name", required=True)
 
@@ -726,6 +823,10 @@ def create_family_member(args: dict) -> ToolResult:
 	relationship = as_str(args, "relationship")
 	if relationship:
 		doc.relationship = as_choice(FAMILY, "relationship", relationship, "relationship")
+
+	related_to = as_str(args, "related_to")
+	if related_to:
+		doc.related_to = related_to
 
 	related_party = as_str(args, "related_party")
 	if related_party:
@@ -754,6 +855,19 @@ def create_family_member(args: dict) -> ToolResult:
 			"No relationship recorded. 'Why did money go to this person' is the first question "
 			"these postings get asked, and a name alone does not answer it."
 		)
+	if not described["related_to"]:
+		notes.append(
+			"No related_to set — unassigned parent. The register can say what this person is "
+			"but not whose, and 'Child' means two different people in an entity with two "
+			"members. Set it with update_family_member."
+		)
+	elif not described["related_to_doctype"]:
+		notes.append(
+			f"related_to {described['related_to']!r} is in neither the family register nor the "
+			"related-party register, so it is being kept as free text. That is the intended "
+			"fallback for somebody who receives nothing and holds no role — register them if "
+			"either of those changes."
+		)
 	return ToolResult(
 		data={
 			**described,
@@ -772,7 +886,14 @@ def create_family_member(args: dict) -> ToolResult:
 
 # ── 123. update_family_member ───────────────────────────────────────────────
 def update_family_member(args: dict) -> ToolResult:
-	"""Change a family member's relationship, related party, active flag or notes."""
+	"""Change a family member's relationship, `related_to`, related party, active flag or notes.
+
+	`related_to` is where an existing record acquires the answer to "of whom".
+	Nothing backfilled it on upgrade and nothing will: which of two members
+	somebody is the child of is a fact only the family knows, and a migration that
+	guessed would produce a register that looks complete and is wrong. An empty
+	string clears it.
+	"""
 	_require_family()
 	row = family_row(as_str(args, "family_name", required=True))
 
@@ -791,6 +912,15 @@ def update_family_member(args: dict) -> ToolResult:
 		_stage_family(
 			changes, doc, "relationship", as_choice(FAMILY, "relationship", value, "relationship") if value else ""
 		)
+	if "related_to" in args:
+		related_to = as_str(args, "related_to")
+		if related_to and related_to.lower() == str(row.get("family_member_name") or "").lower():
+			raise ToolError(
+				f"{row['name']} cannot be related to themselves. related_to names the OTHER "
+				"person — the parent, the grandparent, the member this one hangs off. Nothing "
+				"was changed."
+			)
+		_stage_family(changes, doc, "related_to", related_to)
 	if "notes" in args:
 		_stage_family(changes, doc, "notes", as_str(args, "notes"))
 	if "related_party" in args:
@@ -805,7 +935,8 @@ def update_family_member(args: dict) -> ToolResult:
 
 	if not changes:
 		raise ToolError(
-			"nothing to change. Pass at least one of: relationship, related_party, active, notes."
+			"nothing to change. Pass at least one of: relationship, related_to, related_party, "
+			"active, notes."
 		)
 
 	doc.save()
@@ -816,6 +947,12 @@ def update_family_member(args: dict) -> ToolResult:
 		warnings.append(
 			f"Marked inactive rather than deleted, which is right: {postings} posting(s) already "
 			"name this person and deleting the record would orphan them."
+		)
+	if "related_to" in changes and described["related_to"] and not described["related_to_doctype"]:
+		warnings.append(
+			f"related_to {described['related_to']!r} matches no Family and no Related Party "
+			"record, so it is kept as free text. That is the intended fallback, not an error — "
+			"but check the spelling if you expected it to resolve."
 		)
 	return ToolResult(
 		data={
@@ -839,7 +976,19 @@ def _stage_family(changes: dict, doc, field: str, wanted) -> None:
 
 # ── 124. list_family_members ────────────────────────────────────────────────
 def list_family_members(args: dict) -> ToolResult:
-	"""The family register, and which entries have a related-party record behind them."""
+	"""The family register: who each person is, whose they are, and who has a party record.
+
+	EVERY ROW CARRIES `related_to` AND THE SENTENCE IT MAKES. "Alexander Polehn —
+	Son of Tim Polehn" is what somebody reading this register wants, and a list
+	that returned the two halves separately would have every caller joining them
+	the same way.
+
+	A MEMBER WITH NO `related_to` IS WARNED ABOUT, NOT REFUSED. Records written
+	before v0.13.0 have none, nothing backfilled them, and the answer — which of
+	two members somebody is the child of — is a fact only the family has. So they
+	are listed under `without_related_to` and named in a warning, which is the
+	work list rather than an error.
+	"""
 	_require_family()
 	limit = as_limit(args)
 
@@ -848,7 +997,10 @@ def list_family_members(args: dict) -> ToolResult:
 		filters["active"] = 1 if as_bool(args, "active") else 0
 	relationship = as_str(args, "relationship")
 	if relationship:
-		filters["relationship"] = relationship
+		filters["relationship"] = as_choice(FAMILY, "relationship", relationship, "relationship")
+	related_to = as_str(args, "related_to")
+	if related_to:
+		filters["related_to"] = related_to
 
 	rows = frappe.db.get_all(
 		FAMILY,
@@ -864,38 +1016,75 @@ def list_family_members(args: dict) -> ToolResult:
 		key = member["relationship"] or "(unrecorded)"
 		by_relationship[key] = by_relationship.get(key, 0) + 1
 
+	unassigned = [member["name"] for member in members if not member["related_to"]]
+	unresolved = [
+		member["name"]
+		for member in members
+		if member["related_to"] and not member["related_to_doctype"]
+	]
+	data = {
+		"member_count": len(members),
+		"active_count": len([member for member in members if member["active"]]),
+		"by_relationship": dict(sorted(by_relationship.items())),
+		"with_related_party": [member["name"] for member in members if member["has_related_party"]],
+		"without_related_party": [
+			member["name"] for member in members if not member["has_related_party"]
+		],
+		"without_relationship": [member["name"] for member in members if not member["relationship"]],
+		"without_related_to": unassigned,
+		"related_to_free_text": unresolved,
+		"party_type": FAMILY,
+		"members": members,
+		"note": (
+			"A missing related-party entry is not a gap for most of these — a relative who "
+			"only receives transfers needs no W-9 and no disclosure. It IS a gap for one who "
+			"also holds a role: a member, a lessor, a trustee. That is the list to read. "
+			"`related_to` is a different question: not 'do they have a tax identity' but "
+			"'whose relative are they', and `related_to_doctype` says which register answered "
+			"it — None there means the name is being kept as free text, which is the "
+			"designed fallback for somebody in neither register."
+		),
+	}
+	if unassigned:
+		data["warning"] = (
+			f"{len(unassigned)} member(s) have no related_to set — unassigned parent: "
+			f"{', '.join(unassigned[:5])}. The register can say what they are and not whose, "
+			"and 'Child' means two different people in an entity with two members. NOTHING "
+			"BACKFILLED THESE and nothing will: which member somebody is the child of is a "
+			"fact only the family has, and a guess would produce a register that looks "
+			"complete and is wrong. Fill them in with update_family_member."
+		)
 	return ToolResult(
-		data={
-			"member_count": len(members),
-			"active_count": len([member for member in members if member["active"]]),
-			"by_relationship": dict(sorted(by_relationship.items())),
-			"with_related_party": [member["name"] for member in members if member["has_related_party"]],
-			"without_related_party": [
-				member["name"] for member in members if not member["has_related_party"]
-			],
-			"without_relationship": [member["name"] for member in members if not member["relationship"]],
-			"party_type": FAMILY,
-			"members": members,
-			"note": (
-				"A missing related-party entry is not a gap for most of these — a relative who "
-				"only receives transfers needs no W-9 and no disclosure. It IS a gap for one who "
-				"also holds a role: a member, a lessor, a trustee. That is the list to read."
-			),
-		},
+		data=data,
 		summary=(
 			f"{len(members)} family member(s), "
 			f"{len([member for member in members if member['active']])} active"
+			+ (f", {len(unassigned)} with no related_to" if unassigned else "")
 		),
 	)
 
 
 # ── 125. get_family_member ──────────────────────────────────────────────────
 def get_family_member(args: dict) -> ToolResult:
-	"""One family member, their related-party record, and every posting naming them."""
+	"""One family member, whose they are all the way up, and every posting naming them.
+
+	THE CHAIN IS THE POINT. `related_to` on one record answers "whose son"; the
+	chain answers the question somebody actually has, which is where this person
+	sits in the family and what the family sits in. Alex → Son of Tim → Manager of
+	Orchard Meadow, LLC crosses two registers to get there and neither one holds
+	it alone. `relationship_chain` is that walk, `relationship_path` is the
+	sentence it makes.
+
+	IT STOPS RATHER THAN LOOPS. A name already visited ends the walk, and so does
+	`RELATED_TO_MAX_DEPTH`. Free text is a leaf: a name in neither register has
+	nothing to follow, and reporting it as the end of the chain is more honest
+	than dropping it.
+	"""
 	_require_family()
 	row = family_row(as_str(args, "family_name", required=True))
 	described = _describe_family(row)
 	postings = _party_postings(row["name"])
+	chain = _relationship_chain(row)
 
 	related = {}
 	if row.get("related_party") and compat.doctype_exists(RELATED_PARTY):
@@ -946,16 +1135,206 @@ def get_family_member(args: dict) -> ToolResult:
 			"one who is also a member, a lessor or a trustee, because that is what a "
 			"related-party disclosure is built from."
 		)
+	if not described["related_to"]:
+		notes.append(
+			"No related_to set — unassigned parent. This register can say what this person is "
+			"and not whose, which is ambiguous in an entity with more than one member. Set it "
+			"with update_family_member; nothing guessed it on upgrade and nothing will."
+		)
+	elif not described["related_to_doctype"]:
+		notes.append(
+			f"related_to {described['related_to']!r} is free text — it matches no Family and no "
+			"Related Party record, so the chain ends there. That is the designed fallback for "
+			"somebody in neither register, not a broken link."
+		)
 	return ToolResult(
 		data={
 			**described,
 			"party_type": FAMILY,
 			"related_party_detail": related or None,
+			"relationship_chain": chain,
+			"relationship_path": _chain_sentence(chain),
 			**postings,
 			"compliance_notes": notes,
 		},
 		summary=(
-			f"{row['name']}: {described['relationship'] or 'relationship unrecorded'}, "
+			f"{_chain_sentence(chain) or row['name']}, "
 			f"{postings['posting_count']} posting(s)"
 		),
 	)
+
+
+#: The three kinds of hop the walk makes, named because the sentence it produces
+#: reads differently for each. `related_to` is a step to ANOTHER PERSON — "Son of
+#: Tim". `related_party` is a step to THE SAME PERSON in the other register, which
+#: is what carries their role and their company — "Manager of Orchard Meadow,
+#: LLC". Rendering the second as though it were the first would produce "Tim, Son
+#: of Tim", which is the bug that made this distinction worth a field.
+VIA_SELF = "self"
+VIA_RELATED_TO = "related_to"
+VIA_RELATED_PARTY = "related_party"
+
+
+def _family_hop(row: dict, via: str) -> dict:
+	return {
+		"doctype": FAMILY,
+		"name": row.get("name"),
+		"display_name": row.get("family_member_name") or row.get("name"),
+		"relationship": row.get("relationship") or None,
+		"relates_to": str(row.get("related_to") or "").strip() or None,
+		"via": via,
+		"resolved": True,
+	}
+
+
+def _party_hop(name: str, via: str, ends_because: str) -> dict:
+	row = dict(
+		frappe.db.get_value(
+			RELATED_PARTY,
+			name,
+			compat.existing_fields(
+				RELATED_PARTY, ("name", "party_name", "relationship_to_company", "company")
+			),
+			as_dict=True,
+		)
+		or {}
+	)
+	return {
+		"doctype": RELATED_PARTY,
+		"name": row.get("name") or name,
+		"display_name": row.get("party_name") or name,
+		"relationship": row.get("relationship_to_company") or None,
+		"company": row.get("company") or None,
+		"relates_to": row.get("company") or None,
+		"via": via,
+		"resolved": True,
+		"chain_ends_because": ends_because,
+	}
+
+
+def _relationship_chain(row: dict) -> list[dict]:
+	"""`related_to` followed upward until it runs out, then across to the company.
+
+	TWO DIFFERENT EDGES, WHICH IS THE WHOLE DESIGN. `related_to` goes to another
+	*person*, so it is followed as far as it goes. `related_party` goes to the
+	*same* person's entry in the register that holds roles and entities, so it is
+	followed exactly once, at the top, and it is what turns a family chain into an
+	answer about the business: Alex → Son of Tim → Manager of Orchard Meadow, LLC
+	crosses Family → Related Party → Company and no single record holds it.
+
+	IT TERMINATES, AND IT SAYS WHY. A name already in the chain (a cycle somebody
+	typed by hand), the depth ceiling, a name in neither register (free text,
+	which is a leaf rather than a break), or simply running out of pointers. Every
+	one of those writes `chain_ends_because` onto the last entry, because a chain
+	that just stops leaves the reader wondering whether it stopped or broke.
+	"""
+	current = dict(row)
+	chain: list[dict] = [_family_hop(current, VIA_SELF)]
+	seen = {str(current.get("name") or "").lower()}
+
+	while len(chain) < RELATED_TO_MAX_DEPTH:
+		pointer = str(current.get("related_to") or "").strip()
+
+		if not pointer:
+			# The family runs out here. If this person also has a related-party
+			# entry, that is where their role and their company live, and it is
+			# the last hop worth making.
+			party = str(current.get("related_party") or "").strip()
+			if party and compat.doctype_exists(RELATED_PARTY) and frappe.db.exists(RELATED_PARTY, party):
+				chain.append(
+					_party_hop(
+						party,
+						VIA_RELATED_PARTY,
+						"the related-party register is where the family meets the company: it "
+						"names the role and the entity, and an entity has no parent to follow.",
+					)
+				)
+			else:
+				chain[-1].setdefault(
+					"chain_ends_because",
+					"no related_to and no related-party entry — this is the top of the chain.",
+				)
+			break
+
+		if pointer.lower() in seen:
+			chain[-1]["chain_ends_because"] = (
+				f"{pointer!r} is already in this chain — a related_to cycle. The walk stopped "
+				"rather than looping; fix it with update_family_member."
+			)
+			break
+
+		doctype, resolved = _resolve_related_to(pointer)
+		if doctype is None:
+			chain.append(
+				{
+					"doctype": None,
+					"name": None,
+					"display_name": pointer,
+					"relationship": None,
+					"relates_to": None,
+					"via": VIA_RELATED_TO,
+					"resolved": False,
+					"chain_ends_because": (
+						"free text — this name is in neither register, so there is nothing "
+						"further to follow. That is the designed fallback, not a broken link."
+					),
+				}
+			)
+			break
+
+		seen.add(str(resolved or "").lower())
+		if doctype == RELATED_PARTY:
+			chain.append(
+				_party_hop(
+					resolved,
+					VIA_RELATED_TO,
+					"the related-party register is where the family meets the company: it names "
+					"the role and the entity, and an entity has no parent to follow.",
+				)
+			)
+			break
+
+		current = dict(
+			frappe.db.get_value(
+				FAMILY, resolved, compat.existing_fields(FAMILY, _FAMILY_FIELDS), as_dict=True
+			)
+			or {}
+		)
+		chain.append(_family_hop(current, VIA_RELATED_TO))
+	else:
+		remaining = chain[-1].get("relates_to") or current.get("related_party")
+		chain[-1]["chain_ends_because"] = (
+			f"depth limit of {RELATED_TO_MAX_DEPTH} reached with {remaining!r} still to follow. "
+			"A family register this deep is one to read in the Desk."
+			if remaining
+			else "no related_to and no related-party entry — this is the top of the chain."
+		)
+	return chain
+
+
+def _chain_sentence(chain: list[dict]) -> str:
+	"""The chain as one line: "Alex → Son of Tim → Manager of Orchard Meadow, LLC".
+
+	A `related_to` hop reads as "<the previous entry's relationship> of <this
+	one>", because that is what the previous record claims to be. A
+	`related_party` hop reads as "<role> of <company>" and never names the person
+	again — it is the same person, and "Tim → Parent of Tim" is nonsense.
+	"""
+	if not chain:  # pragma: no cover - the walk always seeds itself
+		return ""
+	parts = [str(chain[0]["display_name"] or "")]
+	for index, entry in enumerate(chain[1:], start=1):
+		if entry.get("via") == VIA_RELATED_PARTY:
+			role = entry.get("relationship")
+			company = entry.get("company")
+			if role and company:
+				parts.append(f"{role} of {company}")
+			elif company:
+				parts.append(f"in the related-party register for {company}")
+			continue
+		relationship = chain[index - 1].get("relationship")
+		lead = f"{relationship} of " if relationship else "related to "
+		parts.append(f"{lead}{entry['display_name']}")
+		if entry.get("doctype") == RELATED_PARTY and entry.get("relationship") and entry.get("company"):
+			parts.append(f"{entry['relationship']} of {entry['company']}")
+	return " → ".join(parts)

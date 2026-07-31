@@ -3,6 +3,218 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.13.0 — 2026-07-31
+
+A cleanup wave out of real verification friction on 2026-07-30. Four features,
+one release, two new tools and no data migration.
+
+Everything here came out of the same afternoon: eight parcels seeded under the
+only company that existed at the time, a payment nobody could attribute to the
+right son without opening the Desk, and a family register that could say what
+somebody was but not whose.
+
+### `convey_parcel` — ground moving between two entities' books
+
+`update_parcel` has always refused to move a parcel between entities, and that
+refusal is right: ground changing hands has a date, an instrument behind it and
+consequences for two sets of books, and a tool that let it happen by changing a
+field would record none of them. This is the door that refusal points at.
+
+**It deletes and recreates, which is the honest shape.** A Parcel's docname
+encodes its entity — `Mill Creek - OML` on one set of books and
+`Mill Creek - HLD` on the other, the same way every Account docname carries a
+company abbreviation. There is no field to change that makes the move true. So:
+create the new record, repoint everything at it, move the attachments, delete the
+old one, write the event.
+
+**The parcel's own short key is preserved, which is why the farm registers
+survive.** Every Field, Irrigation Zone and Housing Unit is named
+`<its name> - <PARCEL abbr>` — the parcel's key, not the company's — so all 29 of
+a camp's cabins keep the docnames they have always had and only their `parcel`
+link moves. A target entity already using that key is refused rather than
+disambiguated, because a silently changed key would file the parcel's future
+blocks under a different suffix from its existing ones.
+
+Five registers are repointed: Lease, Field, Irrigation Zone, Housing Unit and
+Housing Assignment. `owning_entity` moves too on the three that describe the
+*ground*; a **Lease's** does not, because a conveyance does not change who signed
+a contract — that is a novation, and it is its own document. The list is declared
+in `realestate.PARCEL_REFERRERS` and a test checks it against the shipped DocType
+JSON, so a register added in a later release cannot be forgotten quietly. (And if
+one ever were, Frappe would refuse the delete rather than leave an orphan, which
+is the safe direction.)
+
+Every `File` attached to the old docname is rewritten to the new one. A File
+points at its parent by `attached_to_name`, which is a docname and not a link, so
+a conveyance that did not rewrite those would leave the tax statements and the
+survey attached to a string nothing resolves, with no error anywhere to say so.
+
+**It writes no Journal Entry, deliberately** — the same discipline as
+`close_note_payable`. Basis transfer and any gain or loss recognised are entries
+with real tax consequences that somebody should write on purpose, with a
+narrative of their own, not produce as a side effect of filing a deed. The result
+names the entries still owed.
+
+**The trail lives on the survivor.** A new child table, `Parcel Conveyance
+Event`, hangs off Parcel: it names the entity the ground came from and the
+docname it had there, the date, the narrative, what moved and whether the
+appraisal came with it. After a conveyance there is exactly one document left to
+carry the history, and it is the new one.
+
+Refusals, each because it is a different document's job:
+
+- **An active, unterminated lease whose term covers the conveyance date**, named.
+  A lease with no expiration date counts as running — reading a missing end date
+  as "already over" is the one wrong answer that fails silently.
+- **A linked Fixed Asset.** That is the balance-sheet side and it moves by
+  posting, not by filing.
+- **A target company with no chart of accounts, or no cost centers.**
+- **A parcel name, assessor id or abbreviation the target already uses.**
+- **More referring records than the per-register ceiling.** No silent caps: a
+  half-conveyed parcel is worse than an unconveyed one.
+
+**Every refusal comes back at once**, not one per round trip — a conveyance that
+failed on the lease, was fixed, and then failed on the asset is two round trips
+to learn two things that were both true from the start. `dry_run: true` returns
+the whole plan and the whole refusal list without touching anything.
+
+The appraisal report does **not** follow if it is filed in the old entity's
+archive; a Governance Document belongs to a company. That comes back as
+`appraisal_document_status: "unlinked_needs_reattach"` in the result and in the
+conveyance event, never as a silent null, because "the appraisal needs re-filing"
+is real work and a quiet null is how it gets forgotten. The appraised value and
+its as-of date do come across — they are facts about the ground.
+
+Atomicity was already structural: `dispatch` rolls back before it logs. v0.13.0
+adds the test that proves it for this tool specifically — and, more usefully,
+**taught the standalone test double to model a rollback properly**. It used to
+discard rows inserted since the last commit and nothing else, so a tool that
+repointed a dozen leases and then died looked atomic when only a real MariaDB
+transaction was making it so. The double now keeps before-images of every row it
+changes or deletes and restores them, which is the fourth time in this project's
+history a permissive double has been caught certifying something it could not
+see.
+
+Kill switch: `allow_convey_parcel`, OFF.
+
+### `update_journal_entry_party` — attribution on a submitted entry
+
+A payment leaves a shared account and only afterwards does anybody establish
+which of two sons it was for. The posting is right — right account, right amount,
+right date — and one attribution column is empty or wrong. Until now that meant
+cancel-and-repost, which replaces a clerical correction with a cancelled voucher,
+a reversing pair and a new number no statement reconciles against; or the Desk,
+which is what an MCP server exists so nobody has to open.
+
+One line, two columns, a mandatory reason.
+
+**It cannot move a balance.** Account, debit, credit, date, cost center and
+remark are not arguments to it. The trial balance after the call is
+arithmetically identical to the one before, which is what makes editing a
+submitted document defensible at all: this is attribution, not restatement.
+
+**It writes in both places the party lives.** `tabJournal Entry Account` is what
+the voucher shows; `tabGL Entry` is what every ageing report, party ledger and
+statement of account reads. Updating one and not the other leaves the voucher and
+the reports disagreeing with nothing to say which is right — worse than not
+having edited at all. The GL rows are matched on `voucher_detail_no`, the line's
+own docname, so an entry with two lines to the same account for the same amount
+stays distinguishable, and the result reports how many rows moved. A **draft** is
+saved through the document instead, since it has written no GL Entries and full
+validation can still run.
+
+This is the one field-level exception to "every write goes through the document"
+in `tools/mutate.py`, and the module docstring now says so and fences it: still
+the ORM's db layer rather than raw SQL, still incapable of touching an amount,
+and there is no supported alternative — ERPNext marks `party` as not allowed on
+submit. The rule that stands is the one that matters: no tool here writes an
+*amount* to a GL Entry.
+
+The reason is written twice — to the entry's own comment thread, where an
+accountant with the voucher open will see it, and to the MCP Action Log.
+
+Refuses a cancelled entry (evidence with a hole in it); a line index outside the
+entry; the rounding or write-off line ERPNext wrote itself; a bank or cash line,
+where a party would make an ageing report claim somebody owes the account
+balance; a party type this site has not registered; a party that is not a record
+in the register its type names; and a change that changes nothing. An account
+whose type does not normally carry a party is refused unless
+`allow_non_party_account=true` says it was meant — the refusal exists to catch a
+mistake, not to become one, so it names the way past. Bank, cash and round-off
+lines have no way past, on purpose.
+
+`dry_run: true` reports the plan, including which GL rows would move.
+
+A Family attribution stays excluded from `generate_1099_prefill`, with a test
+saying so. Attributing a transfer correctly does not make it reportable.
+
+Kill switch: `allow_update_journal_entry_party`, OFF.
+
+### The family register learned Son, Daughter, and "of whom"
+
+`Family.relationship` gained **Son** and **Daughter**, *beside* Child rather than
+instead of it. Records already saying Child are still true, and a register that
+forced a re-pick would be asking somebody to restate a fact that has not changed.
+No migration, no backfill, nothing rewritten.
+
+The bigger gap was that "Alexander Polehn — Child" did not say **whose** child,
+which is ambiguous the moment an entity has two members — and Orchard Meadow has
+two. **`related_to`** holds the other person's name.
+
+It is a `Data` field rather than a `Link`, and that is the design rather than a
+shortcut: a Frappe `Link` points at exactly one doctype, a `Dynamic Link` needs a
+discriminator column beside it, and the answer here is a Family record *or* a
+Related Party record *or* somebody in neither register. So the field holds a name
+and the tools resolve it on read, reporting `related_to_doctype` as `Family`,
+`Related Party` or `None`. A name in neither register is not an error — a
+grandmother who has never received a transfer and holds no role is exactly who
+the free-text fallback is for, and the result says out loud that it is being kept
+as text rather than leaving it looking linked.
+
+- `create_family_member` and `update_family_member` take it; the docstrings carry
+  the simple case (one pointer), the complex case (one pointer plus prose in
+  `notes`), and the line where genealogy stops being this register's job.
+- `list_family_members` surfaces it on every row, adds `described_as`
+  — `"Alexander Polehn — Son of Tim Polehn"` — and filters by it, so "everybody's
+  children" is one call.
+- `get_family_member` walks the chain: `related_to` upward through the family as
+  far as it goes, then **once**, at the top, across `related_party` into the
+  register that holds roles and entities. That is how
+  `Alex → Son of Tim → Manager of Orchard Meadow, LLC` gets assembled out of
+  Family → Related Party → Company, which no single record holds. It terminates
+  on a cycle, a depth limit or free text, and says which.
+
+The two edges are deliberately distinguished: `related_to` goes to another
+*person*, `related_party` goes to the *same* person in another register. Treating
+the second like the first produces "Tim → Parent of Tim", which is how the
+distinction earned a field.
+
+**Nothing was backfilled and nothing will be.** Which of two members somebody is
+the child of is a fact only the family has, and a migration that guessed would
+produce a register that looks complete and is wrong. Records written before this
+release load with `related_to` empty — there is a test asserting exactly that —
+and `list_family_members` names them under `without_related_to` and warns. That
+is the work list, not an error.
+
+Somebody related to themselves is refused, in the tool and in the controller,
+because a cycle of length one would have to be special-cased everywhere else.
+
+### Also
+
+- The standalone test double now names child rows on save (Frappe does, and a GL
+  Entry's `voucher_detail_no` *is* a Journal Entry Account row's name),
+  supports `frappe.db.set_value` against a child doctype, returns the Comment
+  document from `add_comment` as Frappe does, and models rollback properly as
+  described above. Four fidelity gaps, all of which would have let something
+  untrue pass.
+- `Parcel.abbr` is now returned by `get_parcel` and `list_parcels`. It is the key
+  every Field, Irrigation Zone and Housing Unit docname is suffixed with, and it
+  was previously readable only in the Desk.
+- The uninstall warning for `Parcel` now mentions the conveyance history it would
+  take with it.
+
+**Tools: 127** — 59 read, 68 mutating.
+
 ## 0.12.2 — 2026-07-30
 
 Two Sprint 6 gaps closed. Four new tools, no new doctypes, no migration.

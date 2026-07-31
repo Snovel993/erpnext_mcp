@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **125 tools** — 59 read-only, 66 mutating.
+- **127 tools** — 59 read-only, 68 mutating.
 - **Every mutating tool ships OFF.** A fresh install cannot change a document
   until you tick a box.
 - **Every call is audited**, reads included, in an append-only doctype.
@@ -253,7 +253,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 125 tools
+## The 127 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -392,7 +392,7 @@ write tools below.)
 | `list_family_members` | The family register: everybody a `Family`-party posting can name, with their relationship and whether a related-party record sits behind them. Names who has one and who does not — a gap for a member or a trustee, not for a relative who only receives transfers. |
 | `get_family_member` | One person, their related-party detail, and **every posting that names them** — count, first and last date, net amount, companies. Read from the ledger rather than kept, so the count cannot drift from what happened. Never returns more than four digits of a taxpayer id. |
 
-### Mutating — 66, all OFF by default
+### Mutating — 68, all OFF by default
 
 **Postings into the ledger**
 
@@ -402,6 +402,7 @@ write tools below.)
 | `submit_journal_entry` | Submits an existing draft, `0 → 1`. Writes GL Entries. **This moves balances.** | Create anything — it takes a name. |
 | `bulk_submit_journal_entries` | Submits up to 500 drafts, each in its own transaction, and reports per document. One failure does not undo the rest. | Run at all unless `submit_journal_entry` is also switched on. |
 | `cancel_journal_entry` | Cancels a submitted JE, `1 → 2`, writing reversing entries. `reason` mandatory. | Delete anything. |
+| `update_journal_entry_party` | Sets or changes `party_type` and `party` on **one line** of a JE — including a submitted one — in the voucher **and** in its GL Entry rows, with a mandatory reason written to the entry's timeline. | Move a balance. Account, debit, credit and date are not arguments, so the trial balance afterwards is arithmetically identical. Nor touch a cancelled entry, a rounding line, or a bank or cash line. |
 | `delete_draft_journal_entry` | Deletes a **draft** outright, recording what it was and why in the audit log. | Touch a submitted entry (cancel it) or a cancelled one (its reversing rows are the trail). |
 | `create_bank_transaction` | Inserts a **draft** Bank Transaction. | Submit it. |
 | `reconcile_bank_transaction` | Attaches payment vouchers, refusing to over-allocate. | Allocate past the remaining amount. |
@@ -475,6 +476,7 @@ write tools below.)
 | `create_parcel` | Registers one parcel: county, assessor parcel id, acreage, use type, appraised value and the date it was appraised as of. | Register a second parcel with the same name, or the same assessor id, for one entity — that number is the county's key and two of them means a typo. |
 | `update_parcel` | Changes a registered parcel, echoing every change as before → after. | Re-key it, move it between entities (a conveyance is not an edit), or set the asset link — that is its own tool. |
 | `link_parcel_to_asset` | Points a parcel at the Fixed Asset carrying it and **reports the gap between cost and appraised value**. | Post anything. Land is not depreciated and this does not pretend otherwise. |
+| `convey_parcel` | Moves a parcel onto **another entity's books**, carrying its attachments and every lease, block, irrigation zone, housing unit and housing assignment pointing at it. `reason` mandatory and written into the parcel's own conveyance history. | Post anything — basis transfer and gain recognition are entries somebody writes on purpose. Or convey out from under an **active lease**, or move a parcel with a Fixed Asset still linked. |
 | `create_lease` | Records one lease in either direction, with the executed document attached. Reports whether the stated direction agrees with the party names. | Book anything. Recording the agreement and booking its consequences are separate acts. |
 | `update_lease` | Changes status, term, rent, parties, parcel or counterparty. | Mark a lease Terminated without a termination date, or rename it — a renewal is a new lease with its own term. |
 
@@ -520,8 +522,8 @@ write tools below.)
 
 | Tool | What it does | What it cannot do |
 | --- | --- | --- |
-| `create_family_member` | Puts one person on the register so a journal entry line can carry `party_type='Family'` and name them. Optional link to a Related Party where they also hold a role worth disclosing. | Hold a tax id — deliberately. A transfer below the IRS gift exclusion needs no W-9; somebody paid for work is a Contact or a Supplier and the posting should say so. |
-| `update_family_member` | Changes relationship, related party, active flag, notes. Retiring somebody is `active=false`, and the result says how many postings would have been orphaned by a delete. | **Rename them.** The name IS the docname and every journal entry that named them points at it. |
+| `create_family_member` | Puts one person on the register so a journal entry line can carry `party_type='Family'` and name them. `relationship` takes Son and Daughter as well as Child; `related_to` says **whose** relative they are. Optional link to a Related Party where they also hold a role worth disclosing. | Hold a tax id — deliberately. A transfer below the IRS gift exclusion needs no W-9; somebody paid for work is a Contact or a Supplier and the posting should say so. Or record somebody as related to themselves. |
+| `update_family_member` | Changes relationship, `related_to`, related party, active flag, notes. Retiring somebody is `active=false`, and the result says how many postings would have been orphaned by a delete. | **Rename them.** The name IS the docname and every journal entry that named them points at it. |
 
 **Documents that get produced and filed**
 
@@ -529,6 +531,71 @@ write tools below.)
 | --- | --- | --- |
 | `generate_quarterly_investment_report` | Builds the quarter's report as a **PDF** and files it as a Prior Statement with the PDF attached: assets under management, activity, fee accrual, performance against a benchmark with a high-water mark, cash clearing, reconciliation state. | Run on a quarter that is not genuinely closed — see [A quarter closes when it closes](#a-quarter-closes-when-it-closes). Or invent a benchmark rate. |
 | `generate_1099_prefill` | Aggregates a calendar year of supplier payments into an xlsx worksheet and a per-recipient 1099-NEC (Copies A, B and C), filed as a Tax Filing. | Finish the job: taxpayer ids print as the last four digits, and Copy A is stamped as an information copy rather than a filing. |
+
+#### A conveyance is not an edit
+
+`update_parcel` refuses to move a parcel between entities, and that refusal is
+right: ground changing hands has a date, an instrument behind it and
+consequences for two sets of books, and a tool that let it happen by changing a
+field would record none of them. `convey_parcel` is the door that refusal points
+at.
+
+**It deletes and recreates, which is the honest shape.** A Parcel's docname
+encodes its entity — `Mill Creek - OML` on one set of books and
+`Mill Creek - HLD` on the other, the same way every Account docname carries a
+company abbreviation. There is no field to change that makes that true.
+
+**The parcel's own short key is preserved, which is why the farm registers
+survive.** Every Field, Irrigation Zone and Housing Unit is named
+`<its name> - <PARCEL abbr>` — the parcel's key, not the company's — so all 29 of
+a camp's cabins keep the docnames they have always had and only their `parcel`
+link moves. A target entity already using that key is **refused** rather than
+disambiguated, because a silently changed key would file the parcel's future
+blocks under a different suffix from its existing ones.
+
+**It writes no Journal Entry.** Recording that ground changed hands and booking
+what that costs are separate acts — basis transfer and any gain or loss
+recognised are entries with real tax consequences that somebody should write on
+purpose, not produce as a side effect of filing a deed. The result names the
+entries still owed. Same discipline as `close_note_payable`.
+
+**Every refusal comes back at once.** A conveyance that failed on the lease, was
+fixed, and then failed on the asset is two round trips to learn two things that
+were both true from the start. `dry_run: true` returns the whole plan and the
+whole refusal list without touching anything.
+
+An appraisal report filed in the **old** entity's archive does not follow — a
+Governance Document belongs to a company. That comes back as
+`appraisal_document_status: "unlinked_needs_reattach"`, never as a silent null,
+because "the appraisal needs re-filing" is real work and a quiet null is how it
+gets forgotten.
+
+#### "Son of whom?" — the family register answers it now
+
+`Family.relationship` gained **Son** and **Daughter** in v0.13.0, beside `Child`
+rather than instead of it: records already saying Child are still true, and a
+register that forced a re-pick would be asking somebody to restate a fact that
+has not changed.
+
+The bigger gap was that "Alexander Polehn — Child" did not say **whose** child,
+which is ambiguous the moment an entity has two members. `related_to` holds the
+other person's name, and it is a **Data** field on purpose — a Frappe Link points
+at exactly one doctype, and the answer here is a Family record, *or* a Related
+Party record, *or* somebody in neither register. The tools resolve it on read and
+report which register answered as `related_to_doctype`; `None` there means free
+text, which is the designed fallback and not a failure.
+
+`get_family_member` walks the chain and reports it as one sentence —
+`Alex → Son of Tim → Manager of Orchard Meadow, LLC` — following `related_to`
+upward through the family and then crossing **once**, at the top, through
+`related_party` into the register that holds roles and entities. No single record
+holds that, and the walk stops on a cycle, on a depth limit or on free text, and
+says which.
+
+**Nothing was backfilled, and nothing will be.** Which of two members somebody is
+the child of is a fact only the family has, so records written before v0.13.0
+arrive with `related_to` empty. `list_family_members` names them under
+`without_related_to` and warns — that is the work list, not an error.
 
 #### Four digits, never nine
 

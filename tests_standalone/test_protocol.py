@@ -179,12 +179,15 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_one_hundred_twenty_five_tools_fifty_nine_read_sixty_six_write(self):
-		"""v0.12.0 added 29 and v0.12.2 added the four that reach the family
-		register, which v0.12.1 shipped as a DocType with no way in but the Desk."""
-		self.assertEqual(len(registry.TOOLS), 125)
+	def test_catalogue_is_one_hundred_twenty_seven_tools_fifty_nine_read_sixty_eight_write(self):
+		"""v0.12.0 added 29, v0.12.2 added the four that reach the family register
+		— which v0.12.1 shipped as a DocType with no way in but the Desk — and
+		v0.13.0 added two writes: convey_parcel and update_journal_entry_party.
+		Both are corrections to records that already exist, which is why neither
+		of them is a read."""
+		self.assertEqual(len(registry.TOOLS), 127)
 		self.assertEqual(len(registry.READ_TOOLS), 59)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 66)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 68)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

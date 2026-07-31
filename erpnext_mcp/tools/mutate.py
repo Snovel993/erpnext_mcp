@@ -18,6 +18,20 @@ human in the UI. There is no raw SQL in this file, and there should never be:
 the day an MCP tool writes a GL Entry directly is the day this app can corrupt a
 ledger.
 
+THE ONE FIELD-LEVEL EXCEPTION, AND THE FENCE AROUND IT.
+`update_journal_entry_party` sets `party_type` and `party` on a *submitted*
+entry's line with `frappe.db.set_value`, on the line and on its GL Entry rows.
+That is a deliberate exception to the paragraph above and it is fenced on three
+sides. It is still not raw SQL — the ORM's db layer, one field at a time, no
+`frappe.db.sql` anywhere in this app. It cannot move a balance: `party` is an
+attribution column, and every debit, credit, account and date is refused as an
+argument, so the trial balance after the call is arithmetically identical to the
+one before. And there is no supported alternative — ERPNext marks `party` as not
+allowed on submit, so the only other routes are cancel-and-repost, which destroys
+the evidence trail for a clerical correction, or the Desk, which is what an MCP
+server exists to make unnecessary. The rule that stands is the one that matters:
+no tool here writes an *amount* to a GL Entry.
+
 DOUBLE ENTRY IS CHECKED HERE ANYWAY. ERPNext validates that debits equal credits
 on submit, but `create_journal_entry` checks before insert so an unbalanced
 proposal fails with an arithmetic message the model can act on, instead of
@@ -41,7 +55,7 @@ one function, and one of them getting it right would have left the rest wrong.
 import frappe
 
 from .. import compat, settings
-from ..args import as_date, as_float, as_str, resolve_account, resolve_company
+from ..args import as_bool, as_date, as_float, as_int, as_str, resolve_account, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 from .read import _resolve_bank_account
@@ -714,6 +728,422 @@ def _journal_entry(name: str):
 	if not frappe.db.exists("Journal Entry", name):
 		raise ToolError(f"no Journal Entry named {name!r}")
 	return frappe.get_doc("Journal Entry", name)
+
+
+# ── 126. update_journal_entry_party ─────────────────────────────────────────
+#: Account types on which naming a party is meaningful. Receivable and Payable
+#: are the two ERPNext itself resolves a party against; Equity is the one an
+#: owner draw or a member distribution lands on and is the whole reason a family
+#: transfer has a party at all; blank is by far the commonest — an ordinary
+#: expense or income account usually carries no `account_type`, and refusing
+#: those would refuse the case this tool was built for.
+PARTY_BEARING_ACCOUNT_TYPES = ("", "Receivable", "Payable", "Equity")
+
+#: Account types where a party is not merely unusual but wrong, and which no
+#: escape hatch opens. `Round Off` and the rounding/write-off accounts a company
+#: nominates are written by ERPNext itself to absorb a fraction of a cent; a
+#: party on one attributes a rounding artefact to a person. `Bank` and `Cash` are
+#: the operation's own money, and a party there is a reconciliation error that
+#: will make an ageing report claim a person owes the bank balance.
+PARTY_FORBIDDEN_ACCOUNT_TYPES = ("Round Off", "Bank", "Cash")
+
+#: Party types this app itself registers, named here only so the refusal for an
+#: unregistered one can point at the tool that registers them.
+_CUSTOM_PARTY_TYPES = ("Family", "Contact")
+
+
+def update_journal_entry_party(args: dict) -> ToolResult:
+	"""Set or change `party_type` and `party` on ONE line of a Journal Entry.
+
+	WHY THIS EXISTS. A payment goes out of a shared account and only afterwards
+	does anybody establish which of two sons it was for. The posting is right —
+	right account, right amount, right date — and one attribution column is empty
+	or wrong. The alternatives are cancel-and-repost, which replaces a clerical
+	correction with a cancelled voucher, a reversing pair and a new number that no
+	statement reconciles against; or the Desk, which is the thing an MCP server
+	exists so nobody has to open. So: one line, two columns, a mandatory reason.
+
+	WHAT IT WILL NOT TOUCH. Account, debit, credit, date, cost center, remark.
+	They are not arguments. Every balance in the ledger is arithmetically
+	identical after this call, which is what makes editing a submitted document
+	defensible at all — this is attribution, not restatement.
+
+	IT WRITES IN TWO PLACES BECAUSE THE PARTY LIVES IN TWO PLACES. `tabJournal
+	Entry Account` is what the voucher shows; `tabGL Entry` is what every ageing
+	report, party ledger and statement of account reads. Updating only the first
+	produces a voucher that says one thing and a report that says another, which
+	is worse than not having edited it — the two disagree and nothing says which
+	is right. The GL rows are found by `voucher_detail_no`, which is the line's
+	own docname, so a two-line entry to the same account still updates only the
+	line asked for.
+
+	A DRAFT GOES THROUGH THE DOCUMENT INSTEAD. A draft has written no GL Entries
+	and can still be saved normally, so it is saved normally and every validation
+	on the doctype runs. The direct write is reserved for the case that has no
+	other door.
+
+	REFUSES: a cancelled entry (evidence with a hole in it); a line index outside
+	the entry; a rounding or write-off line ERPNext wrote itself; a bank or cash
+	line; a party type this site has not registered; a party that is not a record
+	in it; and a change that changes nothing. Refuses an account whose type does
+	not normally carry a party unless `allow_non_party_account=true` says the
+	caller meant it — the refusal exists to catch a mistake, not to become one.
+
+	Writes NO journal entry and reverses nothing.
+	"""
+	journal_entry = as_str(args, "journal_entry", required=True)
+	reason = as_str(args, "reason", required=True)
+	if len(reason) < 8:
+		raise ToolError(
+			"reason must be a real explanation of why the attribution is being changed — what "
+			"establishes that this line belongs to this party. It is the part of this record "
+			"nobody can reconstruct later, and it is the only thing distinguishing a correction "
+			"from a rewrite. Nothing was changed."
+		)
+
+	line_index = as_int(args, "line_index")
+	if line_index is None:
+		raise ToolError(
+			"line_index is required: which line of the entry to attribute, counting from 1 the "
+			"way ERPNext numbers them. get_journal_entry lists them. Nothing was changed."
+		)
+
+	if "party_type" not in args or "party" not in args:
+		raise ToolError(
+			"party_type and party must BOTH be given. ERPNext resolves `party` as a Dynamic Link "
+			"through `party_type`, so one without the other is not half an answer — it is an "
+			"unresolvable reference. Pass both, or pass both as empty strings to clear the "
+			"attribution. Nothing was changed."
+		)
+	party_type = as_str(args, "party_type")
+	party = as_str(args, "party")
+	if bool(party_type) != bool(party):
+		raise ToolError(
+			f"party_type is {party_type!r} and party is {party!r}. Set both to name somebody, or "
+			"both to empty strings to clear the attribution. Nothing was changed."
+		)
+
+	doc = _journal_entry(journal_entry)
+	docstatus = int(doc.get("docstatus") or 0)
+	if docstatus == 2:
+		raise ToolError(
+			f"Journal Entry {doc.name} is cancelled. A cancelled entry and its reversing GL rows "
+			"are the evidence that a posting was made and undone, and editing one leaves that "
+			"evidence saying something that never happened. If the correct attribution matters, "
+			"it belongs on the entry that replaced this one. Nothing was changed."
+		)
+
+	rows = list(doc.get("accounts") or [])
+	if line_index < 1 or line_index > len(rows):
+		raise ToolError(
+			f"line_index {line_index} is outside Journal Entry {doc.name}, which has {len(rows)} "
+			f"line(s). They are numbered from 1. get_journal_entry lists them with their accounts "
+			"and amounts. Nothing was changed."
+		)
+	line = rows[line_index - 1]
+	account = str(line.get("account") or "")
+
+	_assert_line_takes_a_party(doc, line, line_index, account, party_type, args)
+	if party_type:
+		_assert_party_exists(party_type, party)
+
+	before = {
+		"party_type": str(line.get("party_type") or "") or None,
+		"party": str(line.get("party") or "") or None,
+	}
+	after = {"party_type": party_type or None, "party": party or None}
+	if before == after:
+		raise ToolError(
+			f"line {line_index} of {doc.name} already reads "
+			f"{before['party_type'] or 'no party type'} / {before['party'] or 'no party'}. "
+			"Nothing to change, and nothing was changed."
+		)
+
+	gl_rows = _gl_rows_for_line(doc, line) if docstatus == 1 else []
+	plan = {
+		"journal_entry": doc.name,
+		"company": doc.get("company"),
+		"posting_date": str(doc.get("posting_date") or ""),
+		"docstatus": docstatus,
+		"docstatus_label": "submitted" if docstatus == 1 else "draft",
+		"line_index": line_index,
+		"line_name": line.get("name"),
+		"account": account,
+		"debit": round(float(line.get("debit") or 0), 2),
+		"credit": round(float(line.get("credit") or 0), 2),
+		"before": before,
+		"after": after,
+		"reason": reason,
+		"gl_entries_matched": len(gl_rows),
+		"tables": (
+			["Journal Entry Account", "GL Entry"] if docstatus == 1 else ["Journal Entry"]
+		),
+	}
+
+	if as_bool(args, "dry_run", False):
+		return ToolResult(
+			{
+				**plan,
+				"dry_run": True,
+				"updated": False,
+				"note": (
+					"Nothing was written. Call again without dry_run to make the change. No "
+					"balance would move either way: only party_type and party are touched."
+				),
+			},
+			f"dry run: would attribute line {line_index} of {doc.name} ({account}) to "
+			f"{after['party_type'] or 'nobody'} / {after['party'] or 'nobody'}"
+			+ (f", and {len(gl_rows)} GL Entry row(s) with it" if gl_rows else ""),
+		)
+
+	if docstatus == 0:
+		# A draft can still be saved, so it is saved — the doctype's own validation
+		# runs and there are no GL rows to keep in step.
+		doc.accounts[line_index - 1].party_type = party_type or None
+		doc.accounts[line_index - 1].party = party or None
+		doc.save()
+		updated_gl = 0
+	else:
+		frappe.db.set_value(
+			_LINE_DOCTYPE,
+			line.get("name"),
+			{"party_type": party_type or None, "party": party or None},
+		)
+		for gl_row in gl_rows:
+			frappe.db.set_value(
+				"GL Entry",
+				gl_row.get("name"),
+				{"party_type": party_type or None, "party": party or None},
+			)
+		updated_gl = len(gl_rows)
+
+	comment = _record_party_change(doc, line_index, before, after, reason)
+
+	data = {
+		**plan,
+		"updated": True,
+		"gl_entries_updated": updated_gl,
+		"comment_added": comment,
+		"note": (
+			"NO balance moved. Account, debit, credit and date are not arguments to this tool, "
+			"so the trial balance after this call is arithmetically identical to the one before "
+			"it. What changed is who the line is attributed to"
+			+ (
+				f", in both the voucher and the {updated_gl} GL Entry row(s) every ageing report "
+				"reads."
+				if updated_gl
+				else " on a draft, which has written no GL Entries yet."
+			)
+		),
+		"next_step": (
+			"get_journal_entry shows the line as it now reads. A Family party stays excluded "
+			"from generate_1099_prefill and is reported in its excluded counts — a transfer to a "
+			"relative is not compensation for services, and attributing one correctly does not "
+			"make it reportable."
+			if party_type == "Family"
+			else "get_journal_entry shows the line as it now reads."
+		),
+	}
+	if updated_gl == 0 and docstatus == 1:
+		data["warning"] = (
+			f"The line was updated but NO GL Entry row matched it. A submitted Journal Entry "
+			f"normally has one GL row per line, so either this site posts them differently or "
+			f"they were removed. The voucher now says "
+			f"{after['party'] or 'no party'} and every ageing report still says "
+			f"{before['party'] or 'no party'}; check the General Ledger for {doc.name} before "
+			"relying on either."
+		)
+	return ToolResult(
+		data,
+		f"attributed line {line_index} of {doc.name} ({account}) to "
+		f"{after['party_type'] or 'nobody'} / {after['party'] or 'nobody'}"
+		f" — was {before['party_type'] or 'nobody'} / {before['party'] or 'nobody'}"
+		f", {updated_gl} GL Entry row(s) updated — {reason}",
+		docstatus_delta="",
+	)
+
+
+def _assert_line_takes_a_party(doc, line, line_index: int, account: str, party_type: str, args: dict) -> None:
+	"""Refuse a line that is not somebody's, and one nobody wrote on purpose.
+
+	Two separate refusals with two different characters. The forbidden types are
+	absolute: a party on a Round Off line attributes a fraction of a cent that
+	ERPNext invented to a person, and a party on a bank line makes an ageing
+	report claim they owe the account balance. Neither has a legitimate reading,
+	so neither has an escape hatch.
+
+	The account-type check is the softer one, and it is soft on purpose. Naming a
+	party is *normal* on Receivable, Payable, Equity and untyped accounts and
+	*unusual* everywhere else — but unusual is not wrong, and a refusal a caller
+	cannot get past is how a safety gate turns into the failure. So it names the
+	argument that says "I meant it", and the result carries a warning rather than
+	pretending the unusual case is ordinary.
+
+	Clearing an attribution (`party_type=""`) skips both: taking a party OFF a
+	line that should never have had one is the correction, not the mistake.
+	"""
+	if _is_round_off_line(doc, line):
+		raise ToolError(
+			f"line {line_index} of {doc.name} is the rounding/write-off line on {account}. "
+			"ERPNext wrote it itself to absorb a fraction of a cent, and attributing that "
+			"fraction to a person is not a fact about the person. If the entry is genuinely "
+			"somebody's, the line that says so is the one carrying the amount. Nothing was "
+			"changed."
+		)
+	if not party_type:
+		return
+
+	account_type = str(frappe.db.get_value("Account", account, "account_type") or "")
+	if account_type in PARTY_FORBIDDEN_ACCOUNT_TYPES:
+		raise ToolError(
+			f"line {line_index} of {doc.name} posts to {account}, whose account type is "
+			f"{account_type!r}. That account is the operation's own money, and a party on it "
+			"makes every ageing report claim the party owes its balance. The party belongs on "
+			"the line facing it. Nothing was changed."
+		)
+	if account_type not in PARTY_BEARING_ACCOUNT_TYPES and not as_bool(
+		args, "allow_non_party_account", False
+	):
+		raise ToolError(
+			f"line {line_index} of {doc.name} posts to {account}, whose account type is "
+			f"{account_type!r}. A party is normally carried on a Receivable, Payable or Equity "
+			f"account, or on one with no account type at all — {', '.join(PARTY_BEARING_ACCOUNT_TYPES[1:])} "
+			"or blank. This may still be what you mean: an expense attributed to the person it "
+			"was incurred for is a real thing to record. Pass allow_non_party_account=true to "
+			"say so, and the result will carry a warning rather than a refusal. Nothing was "
+			"changed."
+		)
+
+
+def _is_round_off_line(doc, line) -> bool:
+	"""Is this the line ERPNext wrote itself, rather than one somebody meant?
+
+	Three tests because three ERPNext versions answer differently and any one of
+	them alone lets the line through on a site that spells it another way: the
+	account's own `account_type`, the company's nominated round-off and write-off
+	accounts, and the account name. The last is the weakest and is checked last.
+	"""
+	account = str(line.get("account") or "")
+	if not account:  # pragma: no cover - a line with no account cannot be indexed to
+		return False
+	if str(frappe.db.get_value("Account", account, "account_type") or "") == "Round Off":
+		return True
+
+	company = str(doc.get("company") or "")
+	if company:
+		nominated = [
+			str(
+				frappe.db.get_value("Company", company, field) or ""
+			)
+			for field in ("round_off_account", "write_off_account")
+			if compat.has_field("Company", field)
+		]
+		if account in [entry for entry in nominated if entry]:
+			return True
+	name = str(frappe.db.get_value("Account", account, "account_name") or account).lower()
+	return "round off" in name or "write off" in name
+
+
+def _assert_party_exists(party_type: str, party: str) -> None:
+	"""A party type this site has registered, and a party that is a record in it.
+
+	ERPNext resolves `party` as a Dynamic Link THROUGH `party_type`: the party
+	type's name has to be a DocType and the party has to be a row in it. Both
+	halves are checked here rather than left to the insert, because the framework
+	error for the second is "Could not find Party: Alex Polehn" with no clue that
+	the register it looked in was the one this app ships.
+	"""
+	if compat.doctype_exists("Party Type") and not frappe.db.exists("Party Type", party_type):
+		registered = sorted(frappe.db.get_all("Party Type", pluck="name", limit=50) or [])
+		extra = (
+			" register_custom_party_types adds Family and Contact."
+			if party_type in _CUSTOM_PARTY_TYPES
+			else ""
+		)
+		raise ToolError(
+			f"{party_type!r} is not a Party Type on this site. Registered: "
+			f"{', '.join(registered) or '<none>'}.{extra} Nothing was changed."
+		)
+	if not compat.doctype_exists(party_type):
+		raise ToolError(
+			f"there is no {party_type} DocType on this site, so no posting can resolve a party "
+			"through it — ERPNext reads `party` as a Dynamic Link through `party_type`, and a "
+			"party type whose name is not a DocType resolves to nothing. Nothing was changed."
+		)
+	if not frappe.db.exists(party_type, party):
+		hint = (
+			" list_family_members has the register, and create_family_member adds to it."
+			if party_type == "Family"
+			else ""
+		)
+		raise ToolError(
+			f"there is no {party_type} called {party!r}. A party has to be a record in the "
+			f"register its party type names, or the posting points at nothing.{hint} Nothing "
+			"was changed."
+		)
+
+
+def _gl_rows_for_line(doc, line) -> list[dict]:
+	"""The GL Entry rows this one Journal Entry line produced.
+
+	`voucher_detail_no` is the line's own docname, which is what makes this exact
+	rather than approximate: an entry with two lines to the same account for the
+	same amount has two GL rows that differ in nothing else. A site whose GL Entry
+	predates that column falls back to matching on the account and the amounts,
+	and the caller is told in the result how many rows matched so an unexpected
+	count is visible rather than silent.
+
+	Cancelled GL rows are excluded. They are the reversal of a posting that has
+	already been undone, and rewriting their attribution would change what the
+	record says was undone.
+	"""
+	if not compat.doctype_exists("GL Entry"):  # pragma: no cover - ERPNext always ships it
+		return []
+	filters = {"voucher_type": "Journal Entry", "voucher_no": doc.name}
+	if compat.has_field("GL Entry", "is_cancelled"):
+		filters["is_cancelled"] = 0
+	if compat.has_field("GL Entry", "voucher_detail_no") and line.get("name"):
+		filters["voucher_detail_no"] = line.get("name")
+	else:  # pragma: no cover - only on an ERPNext older than this app supports
+		filters["account"] = line.get("account")
+		filters["debit"] = round(float(line.get("debit") or 0), 2)
+		filters["credit"] = round(float(line.get("credit") or 0), 2)
+	return [
+		dict(row)
+		for row in frappe.db.get_all(
+			"GL Entry",
+			filters=filters,
+			fields=compat.existing_fields("GL Entry", ("name", "account", "party_type", "party")),
+			limit=100,
+		)
+		or []
+	]
+
+
+def _record_party_change(doc, line_index: int, before: dict, after: dict, reason: str):
+	"""Write the change onto the entry's own timeline, and never fail the call for it.
+
+	The reason is in the MCP Action Log whatever happens here. The comment is for
+	the other reader — an accountant with the voucher open in the Desk, who will
+	never see the action log and for whom an attribution that changed after
+	submission with no note beside it is exactly the thing that makes a year-end
+	close miserable.
+	"""
+	text = (
+		f"Party updated on line {line_index} via MCP (erpnext_mcp): "
+		f"{before['party_type'] or 'none'} / {before['party'] or 'none'} → "
+		f"{after['party_type'] or 'none'} / {after['party'] or 'none'}. "
+		f"Reason: {reason}. By {frappe.session.user} at {frappe.utils.now()}."
+	)
+	try:
+		comment = doc.add_comment("Comment", text)
+	except Exception:
+		frappe.log_error(
+			title="erpnext_mcp: could not attach party-change comment",
+			message=compat.traceback_text(),
+		)
+		return None
+	return getattr(comment, "name", None) or (comment.get("name") if isinstance(comment, dict) else None)
 
 
 # ── 14. create_bank_transaction ─────────────────────────────────────────────

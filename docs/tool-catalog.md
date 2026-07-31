@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 125 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 127 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -4686,16 +4686,24 @@ collection can be fixed one line at a time.
 
 Read-only, default ON (`allow_list_family_members`).
 
-**Arguments:** `active` (boolean), `relationship`, `limit`.
+**Arguments:** `active` (boolean), `relationship`, `related_to`, `limit`.
 
 **Returns** `members`, `member_count`, `active_count`, `by_relationship`,
-`with_related_party`, `without_related_party`, `without_relationship` and a
-`note`.
+`with_related_party`, `without_related_party`, `without_relationship`,
+`without_related_to`, `related_to_free_text` and a `note`. Every row carries
+`described_as` — `"Alexander Polehn — Son of Tim Polehn"` — which is the sentence
+this register exists to be able to say.
 
-**The two lists at the end are the point.** A missing related-party entry is not
+**The lists at the end are the point.** A missing related-party entry is not
 a gap for most of these — a relative who only receives transfers needs no W-9 and
 no disclosure. It IS a gap for one who also holds a role: a member, a lessor, a
 trustee. A list that read as forty problems would be a list nobody acts on.
+
+`without_related_to` is a different question: not "do they have a tax identity"
+but "whose relative are they". Records written before v0.13.0 have no
+`related_to`, **nothing backfilled them and nothing will** — which of two members
+somebody is the child of is a fact only the family has — so they are listed and
+warned about rather than guessed at.
 
 ---
 
@@ -4706,9 +4714,18 @@ Read-only, default ON (`allow_get_family_member`).
 **Arguments:** `family_name` (required — the person's name, which is the
 docname).
 
-**Returns** the member, `related_party_detail`, and **every posting that names
-them**: `posting_count`, `first_posting`, `last_posting`, `net_amount`,
-`companies`. Plus `compliance_notes`.
+**Returns** the member, `related_party_detail`, `relationship_chain`,
+`relationship_path`, and **every posting that names them**: `posting_count`,
+`first_posting`, `last_posting`, `net_amount`, `companies`. Plus
+`compliance_notes`.
+
+**The chain crosses two registers to answer one question.** `related_to` goes to
+another *person* and is followed as far as it goes; `related_party` goes to the
+*same* person's entry in the register that holds roles and entities, and is
+followed once, at the top. That is how `relationship_path` reads
+`Alex → Son of Tim → Manager of Orchard Meadow, LLC`, which no single record
+holds. It terminates on a cycle, on a depth limit, or on free text, and the last
+entry says which in `chain_ends_because`.
 
 The postings are read from the GL rather than kept on the record, so the count
 cannot drift from what actually happened — which is the entire value of it. "We
@@ -4725,8 +4742,14 @@ second door onto the same field.
 
 **MUTATING**, default OFF (`allow_create_family_member`).
 
-**Arguments:** `family_name` (required), `relationship`, `related_party`,
-`active` (default true), `notes`.
+**Arguments:** `family_name` (required), `relationship`, `related_to`,
+`related_party`, `active` (default true), `notes`.
+
+`relationship` takes **Son** and **Daughter** as well as Child, Spouse, Parent,
+Sibling, Grandchild, Grandparent, In-Law and Other. Son and Daughter arrived in
+v0.13.0 *beside* Child rather than instead of it: records already saying Child
+are still true, and asking somebody to re-pick a value that has not changed is
+work with no answer at the end of it.
 
 **WHY THE REGISTER HAS TO EXIST.** ERPNext resolves a posting's counterparty as a
 Dynamic Link THROUGH its party type: `party_type` is a `Link` to `DocType`, so
@@ -4741,15 +4764,34 @@ work is a Contact or a Supplier, and the posting should say so rather than the
 exclusion being widened. Where a relative ALSO holds a role worth disclosing,
 `related_party` points at the register that keeps four digits and never more.
 
+**`related_to` ANSWERS "OF WHOM".** A register that says "Alexander Polehn —
+Son" and cannot say whose son is ambiguous the moment an entity has two members.
+Pass the other person's name: a Family docname, a Related Party docname or party
+name, or — for somebody in neither register — their name as plain text. The
+result reports which register answered as `related_to_doctype`, and `None` there
+means free text rather than a failure.
+
+It is a `Data` field rather than a `Link` on purpose: a Frappe `Link` points at
+exactly one doctype, a `Dynamic Link` needs a discriminator column beside it, and
+the answer here is one of three kinds of thing. Resolution happens on read.
+
+| Case | What to do |
+| --- | --- |
+| Simple — Alex is Tim's son | `related_to="Tim Polehn"` |
+| Complex — Alex is Tim's son AND Donella's grandson | `related_to="Tim Polehn"`, and `"also grandson of Donella Polehn"` in `notes` |
+| Genuine genealogy | not this field. A child table of relationships would turn a register whose job is to make a posting resolve into a genealogy database; if it is ever really needed it is a Family Tree doctype of its own, and this field would point into it |
+
 | Refusal | Why |
 | --- | --- |
 | A second record for the same name | the name is the docname, and it is what every posting points at |
 | A `related_party` that does not exist | register it with **89** first, or leave it blank |
 | An unknown `relationship` | the options are read off the DocType |
+| Somebody related to themselves | a cycle of length one |
 
 **Warns rather than refusing** when no relationship is given: "why did money go
 to this person" is the first question these postings get asked, and a name alone
-does not answer it.
+does not answer it. Same for no `related_to` — the result says "unassigned
+parent" and the record is still created.
 
 ---
 
@@ -4758,9 +4800,14 @@ does not answer it.
 **MUTATING**, default OFF (`allow_update_family_member`).
 
 **Arguments:** `family_name` (required), plus any of `relationship`,
-`related_party`, `active`, `notes`.
+`related_to`, `related_party`, `active`, `notes`. An empty string clears
+`related_to`.
 
 **Returns** the member and `changed`, every one as `[before, after]`.
+
+**This is where an existing record acquires `related_to`.** Nothing backfilled it
+on upgrade and nothing will: a migration that guessed which member somebody is
+the child of would produce a register that looks complete and is wrong.
 
 **Cannot rename them.** The name IS the docname and every journal entry that
 named them points at it; renaming would orphan those postings.
@@ -4768,6 +4815,148 @@ named them points at it; renaming would orphan those postings.
 **Retiring somebody is `active=false`, not a delete**, and the result reports how
 many postings would have been orphaned — which is the argument for the flag
 existing.
+
+---
+
+## 126. `update_journal_entry_party`
+
+**MUTATING**, default OFF (`allow_update_journal_entry_party`).
+
+**Arguments:** `journal_entry`, `line_index` (1-based, the way ERPNext numbers
+them), `party_type`, `party`, `reason` — all required — plus
+`allow_non_party_account` and `dry_run`.
+
+**Returns** `updated`, `before` and `after` as `{party_type, party}`,
+`line_index`, `line_name`, `account`, `debit`, `credit`, `gl_entries_updated`,
+`comment_added`, `tables`, and a `note`.
+
+**The case it is for.** A payment leaves a shared account and only afterwards
+does anybody establish which of two sons it was for. The posting is right — right
+account, right amount, right date — and one attribution column is empty or wrong.
+The alternatives are cancel-and-repost, which replaces a clerical correction with
+a cancelled voucher, a reversing pair and a new number that no statement
+reconciles against; or the Desk, which is what an MCP server exists so nobody has
+to open.
+
+**It cannot move a balance.** Account, debit, credit, date, cost center and
+remark are not arguments to it. The trial balance after the call is
+arithmetically identical to the one before, which is what makes editing a
+submitted document defensible at all: this is attribution, not restatement. No
+journal entry is written and nothing is reversed.
+
+**It writes in both places the party lives.** `tabJournal Entry Account` is what
+the voucher shows; `tabGL Entry` is what every ageing report, party ledger and
+statement of account reads. Updating one and not the other leaves the voucher and
+the reports disagreeing with nothing to say which is right — worse than not
+having edited. GL rows are matched on `voucher_detail_no`, the line's own
+docname, so an entry with two lines to the same account for the same amount stays
+distinguishable, and `gl_entries_updated` reports how many moved.
+
+This is the one field-level exception to "every write goes through the document"
+in `tools/mutate.py`, and it is fenced: still the ORM's db layer rather than raw
+SQL, still incapable of touching an amount, and there is no supported
+alternative — ERPNext marks `party` as not allowed on submit. A **draft** is
+saved through the document instead, since it has written no GL Entries and full
+validation can still run.
+
+**The reason is written twice**: to the entry's own comment thread, where an
+accountant with the voucher open will see it, and to the MCP Action Log, where it
+survives whatever happens to the document.
+
+| Refusal | Why |
+| --- | --- |
+| A cancelled entry | it and its reversing rows are the evidence a posting was made and undone; editing one makes that evidence say something that never happened |
+| `line_index` outside the entry | the count is named in the message |
+| A rounding or write-off line | ERPNext wrote it itself to absorb a fraction of a cent, and attributing that fraction to a person is not a fact about the person |
+| A bank or cash line | that is the operation's own money, and a party there makes every ageing report claim they owe its balance. **No escape hatch** |
+| A party type this site has not registered | with the registered ones listed, and `register_custom_party_types` named where it applies |
+| A party that is not a record in its register | ERPNext resolves `party` as a Dynamic Link through `party_type` |
+| `party_type` without `party`, or either omitted | one without the other is an unresolvable reference, not half an answer. Pass both empty to clear |
+| A change that changes nothing | |
+| An account type that does not normally carry a party | Receivable, Payable, Equity and blank go through silently; anything else needs `allow_non_party_account=true`, which is the way past rather than a wall. An ordinary expense account carries no `account_type` at all, which is the commonest case and needs nothing |
+
+`dry_run: true` reports the whole plan, including how many GL rows would move,
+without writing.
+
+**A Family attribution stays out of the 1099.** `generate_1099_prefill` excludes
+Family-party postings and reports the count; attributing a transfer correctly
+does not make it reportable.
+
+---
+
+## 127. `convey_parcel`
+
+**MUTATING**, default OFF (`allow_convey_parcel`).
+
+**Arguments:** `parcel`, `target_company`, `effective_date`, `reason` — all
+required — plus `owning_entity` / `company` (to narrow a bare parcel name),
+`new_title_holder` and `dry_run`.
+
+**Returns** `conveyed`, `from`, `to`, `from_entity`, `to_entity`,
+`migrated_attachments`, `migrated_leases`, `migrated_housing_units`,
+`migrated_fields`, `migrated_irrigation_zones`,
+`migrated_housing_assignments`, `relinked_records`, `relink_detail`,
+`title_holder_status`, `appraisal_document_status`, `refusals`, `warnings`, the
+whole new parcel, and a `note`.
+
+**This is the door `update_parcel` refuses to be.** Ground changing hands has a
+date, an instrument behind it and consequences for two sets of books; a tool that
+let it happen by editing a field would record none of them. `reason` is mandatory
+and is the narrative — the deed, the assignment, the trust amendment.
+
+**It deletes and recreates, which is the honest shape.** A Parcel's docname
+encodes its entity (`Mill Creek - OML` vs `Mill Creek - HLD`), the same way every
+Account docname carries a company abbreviation, so there is no field to change
+that makes the move true. The order is: create the new record, repoint everything
+at it, move the attachments, delete the old one, write the event. Frappe refuses
+to delete a document another document links to, so a register missing from
+`realestate.PARCEL_REFERRERS` fails the whole call rather than leaving a silent
+orphan — and a standalone test checks that tuple against the shipped DocType JSON
+so a register added later cannot be forgotten quietly.
+
+**The parcel's own short key is preserved.** Every Field, Irrigation Zone and
+Housing Unit is named `<its name> - <PARCEL abbr>` — the parcel's key, not the
+company's — so all of a camp's cabins keep the docnames they have always had and
+only their `parcel` link moves. `owning_entity` moves with them on the registers
+that describe the *ground*; a **Lease's** does not, because a conveyance does not
+change who signed a contract. That is a novation, and it is its own document.
+
+**It writes no Journal Entry.** Basis transfer and any gain or loss recognised
+are entries with real tax consequences that somebody should write on purpose,
+with a narrative of their own — not produce as a side effect of filing a deed.
+The result names the entries still owed. Same discipline as `close_note_payable`.
+
+**The trail lives on the survivor.** A conveyance destroys one record and creates
+another, so the new parcel's `conveyance_events` child table is the only place
+the history can be: it names the entity the ground came from and the docname it
+had there, so a reader who finds `Mill Creek - HLD` and remembers
+`Mill Creek - OML` can join the two without either record still existing.
+
+| Refusal | Why it is a different document's job |
+| --- | --- |
+| An **Active**, unterminated lease whose term covers the conveyance date, named | conveying out from under a live lease needs a novation or a termination first. A lease with **no expiration date** counts as running — reading a missing end date as "already over" is the one wrong answer that fails silently |
+| A linked Fixed Asset | that is the balance-sheet side and it moves by posting, not by filing |
+| A target with no chart of accounts, or no cost centers | a parcel filed against an entity that cannot carry a cost is one somebody finds again in six months |
+| A parcel name, assessor id or abbreviation the target already uses | the last one because a silently changed key would file the parcel's future blocks under a different suffix from its existing ones |
+| More referring records than the per-register ceiling | no silent caps: a half-conveyed parcel is worse than an unconveyed one |
+
+**Every refusal comes back at once**, not one per round trip. `dry_run: true`
+returns the whole plan and the whole refusal list without touching anything.
+
+**The appraisal report does not follow** if it is filed in the old entity's
+archive — a Governance Document belongs to a company, and pointing at it across
+that boundary is what the archive exists to prevent. That is reported as
+`appraisal_document_status: "unlinked_needs_reattach"` in the result *and* in the
+conveyance event, never as a silent null. The appraised value and its as-of date
+DO come across: they are facts about the ground.
+
+A `title_holder` registered against the entity the ground just left is dropped
+with a warning, because one filed under the old entity would read as current and
+would be wrong. Pass `new_title_holder` to set the right one in the same call.
+
+**Atomic by construction.** `registry.dispatch` rolls the transaction back before
+it logs, so a conveyance that dies half way leaves neither parcel changed rather
+than leaving two.
 
 ---
 

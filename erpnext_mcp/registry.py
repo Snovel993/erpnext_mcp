@@ -478,6 +478,76 @@ TOOLS = {
 		destructive=True,
 		title="Cancel journal entry",
 	),
+	"update_journal_entry_party": _tool(
+		mutate.update_journal_entry_party,
+		"MUTATING (default OFF). Set or change `party_type` and `party` on ONE line "
+		"of a Journal Entry — including a SUBMITTED one — and record why.\n\n"
+		"THE CASE IT IS FOR. A payment leaves a shared account and only afterwards "
+		"does anybody establish which of two sons it was for. The posting is right: "
+		"right account, right amount, right date, and one attribution column empty "
+		"or wrong. The alternatives are cancel-and-repost, which replaces a clerical "
+		"correction with a cancelled voucher, a reversing pair and a new number no "
+		"statement reconciles against — or the Desk, which is the thing an MCP "
+		"server exists so nobody has to open.\n\n"
+		"IT CANNOT MOVE A BALANCE. Account, debit, credit, date, cost center and "
+		"remark are not arguments to it. The trial balance after the call is "
+		"arithmetically identical to the one before, which is what makes editing a "
+		"submitted document defensible: this is attribution, not restatement. No "
+		"journal entry is written and nothing is reversed.\n\n"
+		"IT WRITES IN BOTH PLACES THE PARTY LIVES. `tabJournal Entry Account` is "
+		"what the voucher shows; `tabGL Entry` is what every ageing report, party "
+		"ledger and statement of account reads. Updating one and not the other "
+		"leaves the voucher and the reports disagreeing with nothing to say which "
+		"is right. The GL rows are matched on `voucher_detail_no` — the line's own "
+		"docname — so two lines to the same account for the same amount stay "
+		"distinguishable, and the result reports how many rows were updated. A "
+		"DRAFT is saved through the document instead, since it has written no GL "
+		"Entries and full validation can still run.\n\n"
+		"REFUSES: a cancelled entry (evidence with a hole in it); a line index "
+		"outside the entry; the rounding or write-off line ERPNext wrote itself; a "
+		"bank or cash line, where a party would make an ageing report claim somebody "
+		"owes the account balance; a party type this site has not registered; a "
+		"party that is not a record in the register its type names; and a change "
+		"that changes nothing. An account whose type does not normally carry a party "
+		"is refused unless `allow_non_party_account=true` says it was meant — then "
+		"it goes through with a warning. `dry_run` reports the whole plan, including "
+		"which GL rows would move, without writing.",
+		{
+			"journal_entry": _field(_STRING, "Journal Entry docname, e.g. 'ACC-JV-2026-00042'."),
+			"line_index": _field(
+				_INTEGER,
+				"Which line to attribute, counting from 1 the way ERPNext numbers them. "
+				"get_journal_entry lists them with their accounts and amounts.",
+			),
+			"party_type": _field(
+				_STRING,
+				"Supplier, Customer, Employee, Shareholder, Family, Contact — any Party Type "
+				"registered on this site. Empty string clears the attribution, and then "
+				"`party` must be empty too.",
+			),
+			"party": _field(
+				_STRING,
+				"The party's docname in the register its type names, e.g. a Family member's "
+				"name. Empty string clears the attribution.",
+			),
+			"reason": _field(
+				_STRING,
+				"Why the attribution is being changed — what establishes that this line "
+				"belongs to this party. Written to the entry's comment thread and to the "
+				"audit log. Mandatory.",
+			),
+			"allow_non_party_account": _field(
+				_BOOLEAN,
+				"Go ahead on an account whose type does not normally carry a party (an "
+				"expense attributed to the person it was incurred for, say). Default false, "
+				"which refuses. Never opens a bank, cash or round-off line.",
+			),
+			"dry_run": _field(_BOOLEAN, "Report the change and the GL rows without writing. Default false."),
+		},
+		required=("journal_entry", "line_index", "party_type", "party", "reason"),
+		mutating=True,
+		title="Update a journal entry line's party",
+	),
 	"create_fiscal_year": _tool(
 		fiscal.create_fiscal_year,
 		"MUTATING (default OFF). Create one Fiscal Year, so ERPNext will accept "
@@ -2917,6 +2987,74 @@ TOOLS = {
 		available=_needs_doctype("Parcel"),
 		requires="the Parcel DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"convey_parcel": _tool(
+		realestate.convey_parcel,
+		"MUTATING (default OFF). Move one parcel onto ANOTHER entity's books as a "
+		"conveyance, carrying everything that hangs off it: the record itself, its "
+		"attachments, and every lease, block, irrigation zone, housing unit and "
+		"housing assignment pointing at it.\n\n"
+		"THIS IS THE DOOR update_parcel REFUSES TO BE. Ground changing hands has a "
+		"date, an instrument behind it and consequences for two sets of books; a "
+		"tool that let it happen by editing a field would record none of those. "
+		"`reason` is mandatory and is the narrative — the deed, the assignment, the "
+		"trust amendment.\n\n"
+		"IT DELETES AND RECREATES, WHICH IS THE HONEST SHAPE. A Parcel's docname "
+		"encodes its entity ('Mill Creek - OML' vs 'Mill Creek - HLD'), the same way "
+		"every Account docname carries a company abbreviation, so there is no field "
+		"to change that makes the move true. THE PARCEL'S OWN SHORT KEY IS "
+		"PRESERVED, which is why the farm registers survive: a Field, an Irrigation "
+		"Zone and a Housing Unit are named after the PARCEL's abbreviation, not the "
+		"company's, so all of a parcel's cabins keep the docnames they have always "
+		"had and only their `parcel` link moves.\n\n"
+		"IT WRITES NO JOURNAL ENTRY, DELIBERATELY. Recording that ground changed "
+		"hands and booking what that costs are separate acts — basis transfer and "
+		"any gain or loss recognised are entries with real tax consequences that "
+		"somebody should write on purpose. The result names the entries still owed.\n\n"
+		"REFUSES, EACH BECAUSE IT IS A DIFFERENT DOCUMENT'S JOB: an ACTIVE, "
+		"unterminated lease whose term covers the conveyance date, with the leases "
+		"named — conveying out from under a live lease needs a novation or a "
+		"termination first, and a lease with no end date counts as running; a linked "
+		"Fixed Asset, which is the balance-sheet side and moves by posting rather "
+		"than by filing; a target company with no chart of accounts or no cost "
+		"centers; a parcel name, assessor id or abbreviation the target already "
+		"uses. EVERY refusal is reported at once rather than one per round trip.\n\n"
+		"The appraisal report does NOT follow if it is filed in the old entity's "
+		"archive — a governance document belongs to a company. That is reported as "
+		"`appraisal_document_status: unlinked_needs_reattach`, never as a silent "
+		"null. `dry_run=true` returns the whole plan and the whole refusal list "
+		"without touching anything.",
+		{
+			"parcel": _field(_STRING, "The Parcel docname, or its parcel name."),
+			"owning_entity": _field(_STRING, "Narrow a bare parcel name to the entity it is leaving."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"target_company": _field(
+				_STRING, "The Company receiving the parcel. Must already have a chart and cost centers."
+			),
+			"effective_date": _field(
+				_STRING,
+				"When the conveyance happened, YYYY-MM-DD — the date on the deed, not the date "
+				"it is being recorded here.",
+			),
+			"reason": _field(
+				_STRING,
+				"Why the ground moved and what authorises it. Mandatory, and written into the "
+				"parcel's own conveyance history.",
+			),
+			"new_title_holder": _field(
+				_STRING,
+				"The Related Party holding title on the other side. Left out, the existing "
+				"holder is kept only if it belongs to the receiving entity — one registered "
+				"against the entity the ground just left is dropped and said so.",
+			),
+			"dry_run": _field(_BOOLEAN, "Report the full plan and every refusal without writing. Default false."),
+		},
+		required=("parcel", "target_company", "effective_date", "reason"),
+		mutating=True,
+		destructive=True,
+		title="Convey a parcel to another entity",
+		available=_needs_doctype("Parcel"),
+		requires="the Parcel DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	# ── real estate: leases ─────────────────────────────────────────────────
 	"list_leases": _tool(
 		realestate.list_leases,
@@ -3483,20 +3621,30 @@ TOOLS = {
 	"list_family_members": _tool(
 		parties.list_family_members,
 		"The family register: everybody a `Family`-party posting can name, with "
-		"their relationship, whether they are still active, and whether a "
-		"related-party record sits behind them. Read-only.\n\n"
-		"THE TWO LISTS AT THE END ARE THE POINT. A missing related-party entry is "
+		"their relationship, WHOSE they are, whether they are still active, and "
+		"whether a related-party record sits behind them. Every row carries "
+		"`described_as` — 'Alexander Polehn — Son of Tim Polehn' — which is the "
+		"sentence this register exists to be able to say. Read-only.\n\n"
+		"THE THREE LISTS AT THE END ARE THE POINT. A missing related-party entry is "
 		"not a gap for most of these — a relative who only receives transfers needs "
 		"no W-9 and no disclosure. It IS a gap for one who also holds a role: a "
 		"member, a lessor, a trustee. `without_related_party` is the list to read; "
 		"`without_relationship` is the one to fill in, because 'why did money go to "
-		"this person' is the first question these postings get asked.",
+		"this person' is the first question these postings get asked; and "
+		"`without_related_to` names everybody the register can describe but not "
+		"attribute — 'Child' means two different people in an entity with two "
+		"members. NOTHING BACKFILLED `related_to` on upgrade and nothing will, "
+		"because which member somebody is the child of is a fact only the family "
+		"has.",
 		{
 			"active": _field(_BOOLEAN, "true for only active members, false for only retired ones."),
 			"relationship": _field(
 				_STRING,
-				"Only this relationship: Spouse, Child, Parent, Sibling, Grandchild, "
-				"Grandparent, In-Law or Other.",
+				"Only this relationship: Spouse, Son, Daughter, Child, Parent, Sibling, "
+				"Grandchild, Grandparent, In-Law or Other.",
+			),
+			"related_to": _field(
+				_STRING, "Only members whose related_to is this exact name — everybody's children."
 			),
 			"limit": _field(_INTEGER, "Maximum members returned. Default 100, hard maximum 500."),
 		},
@@ -3507,8 +3655,17 @@ TOOLS = {
 	"get_family_member": _tool(
 		parties.get_family_member,
 		"One family member in full: relationship, active status, the related-party "
-		"record behind them if there is one, and EVERY POSTING THAT NAMES THEM — "
-		"count, first and last date, net amount and which companies. Read-only.\n\n"
+		"record behind them if there is one, WHERE THEY SIT IN THE FAMILY, and "
+		"EVERY POSTING THAT NAMES THEM — count, first and last date, net amount and "
+		"which companies. Read-only.\n\n"
+		"`relationship_chain` FOLLOWS `related_to` UPWARD AND THEN CROSSES TO THE "
+		"COMPANY. Two different edges: `related_to` goes to another person and is "
+		"followed as far as it goes, `related_party` goes to the SAME person's entry "
+		"in the register that holds roles and entities and is followed once, at the "
+		"top. That is how 'Alex → Son of Tim → Manager of Orchard Meadow, LLC' gets "
+		"assembled out of Family → Related Party → Company, which no single record "
+		"holds. `relationship_path` is the same walk as one sentence. It terminates "
+		"on a cycle, on a depth limit, or on free text, and says which.\n\n"
 		"The postings are read from the ledger rather than kept here, so the count "
 		"cannot drift from what actually happened. That is the traceability half of "
 		"a family petty-cash arrangement: 'we moved money to Alex eleven times last "
@@ -3537,8 +3694,23 @@ TOOLS = {
 		"say so rather than the exclusion being widened. Where a relative ALSO holds "
 		"a role worth disclosing — member, lessor, trustee — `related_party` points "
 		"at the register that keeps four digits and never more.\n\n"
+		"`related_to` ANSWERS 'OF WHOM'. A register that says 'Alexander Polehn — "
+		"Son' and cannot say whose son is ambiguous the moment an entity has two "
+		"members, and Orchard Meadow has two. Pass the other person's name: a Family "
+		"docname, a Related Party docname or party name, or — for somebody in "
+		"neither register — their name as plain text. The result reports which "
+		"register answered as `related_to_doctype`, and None there means free text "
+		"rather than a failure.\n\n"
+		"SIMPLE CASE, ONE POINTER: Alex is Tim's son → related_to='Tim Polehn'. "
+		"COMPLEX CASE, POINTER PLUS PROSE: Alex is Tim's son AND Donella's grandson "
+		"→ related_to='Tim Polehn' and 'also grandson of Donella Polehn' in notes. "
+		"One primary pointer is deliberate — a child table of relationships would "
+		"turn a register whose job is to make a posting resolve into a genealogy "
+		"database. Full genealogical modelling, if it is ever genuinely needed, "
+		"belongs in a Family Tree doctype of its own.\n\n"
 		"REFUSES a second record for the same name (the name is the docname, and it "
-		"is what every posting points at) and a `related_party` that does not exist.",
+		"is what every posting points at), a `related_party` that does not exist, "
+		"and somebody related to themselves.",
 		{
 			"family_name": _field(
 				_STRING,
@@ -3547,7 +3719,14 @@ TOOLS = {
 			),
 			"relationship": _field(
 				_STRING,
-				"Spouse, Child, Parent, Sibling, Grandchild, Grandparent, In-Law or Other.",
+				"Spouse, Son, Daughter, Child, Parent, Sibling, Grandchild, Grandparent, "
+				"In-Law or Other. Son and Daughter sit beside Child rather than replacing "
+				"it — records already saying Child stay valid.",
+			),
+			"related_to": _field(
+				_STRING,
+				"Whose relative this is: a Family docname, a Related Party docname or party "
+				"name, or plain text for somebody in neither register.",
 			),
 			"related_party": _field(
 				_STRING,
@@ -3565,15 +3744,30 @@ TOOLS = {
 	),
 	"update_family_member": _tool(
 		parties.update_family_member,
-		"MUTATING (default OFF). Change a family member's relationship, related "
-		"party, active flag or notes. Every change is echoed as before → after.\n\n"
+		"MUTATING (default OFF). Change a family member's relationship, `related_to`, "
+		"related party, active flag or notes. Every change is echoed as "
+		"before → after.\n\n"
+		"THIS IS WHERE AN EXISTING RECORD ACQUIRES `related_to`. Nothing backfilled "
+		"it on upgrade and nothing will: which of two members somebody is the child "
+		"of is a fact only the family has, and a migration that guessed would "
+		"produce a register that looks complete and is wrong. "
+		"`list_family_members` names everybody still missing one.\n\n"
 		"CANNOT RENAME THEM. The name IS the docname and every journal entry that "
 		"named them points at it; renaming would orphan those postings.\n\n"
 		"RETIRING SOMEBODY IS `active=false`, NOT A DELETE, and the result says how "
 		"many postings would have been orphaned — which is why the flag exists.",
 		{
 			"family_name": _field(_STRING, "The person's name, which is the docname."),
-			"relationship": _field(_STRING, "New relationship. Empty string clears it."),
+			"relationship": _field(
+				_STRING,
+				"New relationship — Spouse, Son, Daughter, Child, Parent, Sibling, "
+				"Grandchild, Grandparent, In-Law or Other. Empty string clears it.",
+			),
+			"related_to": _field(
+				_STRING,
+				"Whose relative they are: a Family docname, a Related Party docname or party "
+				"name, or plain text. Empty string clears it. Refused if it names them.",
+			),
 			"related_party": _field(_STRING, "New Related Party. Empty string clears it."),
 			"active": _field(_BOOLEAN, "False retires them without deleting the record."),
 			"notes": _field(_STRING, "New notes."),

@@ -40,6 +40,7 @@
   "allow_create_journal_entry",
   "allow_submit_journal_entry",
   "allow_cancel_journal_entry",
+  "allow_update_journal_entry_party",
   "mutating_tools_col",
   "allow_create_bank_transaction",
   "allow_reconcile_bank_transaction",
@@ -137,6 +138,7 @@
   "allow_update_parcel",
   "realestate_tools_col",
   "allow_link_parcel_to_asset",
+  "allow_convey_parcel",
   "allow_list_leases",
   "allow_get_lease",
   "allow_create_lease",
@@ -408,6 +410,13 @@
    "fieldname": "allow_cancel_journal_entry",
    "fieldtype": "Check",
    "label": "Cancel Journal Entry"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Set or change party_type and party on ONE line of a Journal Entry, including a submitted one, in both the voucher and its GL Entry rows. Moves no balance — account, debit, credit and date are not arguments. Requires a reason, which is written to the entry's comment thread.",
+   "fieldname": "allow_update_journal_entry_party",
+   "fieldtype": "Check",
+   "label": "Update Journal Entry Party"
   },
   {
    "fieldname": "mutating_tools_col",
@@ -1048,6 +1057,13 @@
    "label": "Link Parcel to Asset"
   },
   {
+   "default": "0",
+   "description": "WRITE. Move a Parcel to another Company as a conveyance: the parcel record, its attachments, and every lease, block, irrigation zone, housing unit and housing assignment pointing at it. Writes no Journal Entry — recording a conveyance and booking its consequences are separate acts. Refuses over an active lease.",
+   "fieldname": "allow_convey_parcel",
+   "fieldtype": "Check",
+   "label": "Convey Parcel"
+  },
+  {
    "default": "1",
    "description": "READ. Leases in both directions with the annual rent roll, and which ones run out soon. Never expires a lease itself.",
    "fieldname": "allow_list_leases",
@@ -1424,7 +1440,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-30 20:00:00.000000",
+ "modified": "2026-07-31 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

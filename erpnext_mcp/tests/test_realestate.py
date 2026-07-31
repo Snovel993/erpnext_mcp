@@ -374,3 +374,72 @@ class CatalogueContract(RealEstateIntegrationTestCase):
 		for name in V11_TOOLS:
 			with self.subTest(tool=name):
 				self.assertTrue(meta.has_field(f"allow_{name}"))
+
+
+# ── v0.13.0 schema facts only a bench can confirm ───────────────────────────
+class ConveyanceSchemaMigrated(RealEstateIntegrationTestCase):
+	"""The child table v0.13.0 adds, and the Parcel field that holds it.
+
+	A conveyance destroys one record and creates another, so the surviving
+	parcel's `conveyance_events` table is the ONLY record that the ground ever
+	moved. A DocType JSON Frappe refuses, or a child table whose controller
+	cannot be imported, is that record not existing — and it is the exact shape
+	of the failure that broke `bench migrate` in v0.7.0.
+	"""
+
+	def test_the_conveyance_event_doctype_migrated(self):
+		self.assertTrue(frappe.db.exists("DocType", "Parcel Conveyance Event"))
+
+	def test_frappe_can_import_its_controller(self):
+		from frappe.modules.utils import load_doctype_module
+
+		self.assertIsNotNone(load_doctype_module("Parcel Conveyance Event"))
+		self.assertEqual(frappe.get_controller("Parcel Conveyance Event").__name__, "ParcelConveyanceEvent")
+
+	def test_it_is_a_child_table_and_belongs_to_this_app(self):
+		self.assertTrue(frappe.db.get_value("DocType", "Parcel Conveyance Event", "istable"))
+		self.assertEqual(
+			frappe.db.get_value("DocType", "Parcel Conveyance Event", "module"), "ERPNext MCP"
+		)
+
+	def test_the_parcel_carries_the_table(self):
+		field = frappe.get_meta("Parcel").get_field("conveyance_events")
+		self.assertIsNotNone(field, "Parcel has no conveyance_events table")
+		self.assertEqual(field.fieldtype, "Table")
+		self.assertEqual(field.options, "Parcel Conveyance Event")
+
+	def test_the_parcel_carries_its_own_short_key(self):
+		"""The key every Field, Irrigation Zone and Housing Unit docname is
+		suffixed with, and the one a conveyance has to preserve."""
+		self.assertIsNotNone(frappe.get_meta("Parcel").get_field("abbr"))
+
+
+class FamilyRegisterSchemaMigrated(RealEstateIntegrationTestCase):
+	"""Son, Daughter and `related_to` — added without a data migration.
+
+	The whole migration story is that there isn't one: Child stays in the option
+	list so existing records remain valid, and `related_to` arrives empty on every
+	record that predates it. Both of those are facts about the DocType JSON, which
+	only a real `bench migrate` proves.
+	"""
+
+	def test_son_and_daughter_joined_the_relationship_options(self):
+		options = frappe.get_meta("Family").get_field("relationship").options
+		self.assertIn("Son", options)
+		self.assertIn("Daughter", options)
+
+	def test_child_is_still_there_so_existing_records_stay_valid(self):
+		self.assertIn("Child", frappe.get_meta("Family").get_field("relationship").options)
+
+	def test_related_to_is_a_data_field_not_a_link(self):
+		"""Deliberately Data: the answer is a Family record OR a Related Party
+		record OR somebody in neither register, and no Frappe Link points at two
+		doctypes. The tools resolve it on read."""
+		field = frappe.get_meta("Family").get_field("related_to")
+		self.assertIsNotNone(field, "Family has no related_to field")
+		self.assertEqual(field.fieldtype, "Data")
+
+	def test_it_is_not_mandatory(self):
+		"""Records seeded before v0.13.0 carry no value, and a required field would
+		make every one of them unsaveable."""
+		self.assertFalse(frappe.get_meta("Family").get_field("related_to").reqd)

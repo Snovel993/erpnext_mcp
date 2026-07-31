@@ -1,0 +1,112 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-31 09:00:00.000000",
+ "description": "One conveyance that brought this parcel onto this entity's books: when, from whom, under what authority, and what came with it. Rows are written by convey_parcel and are read-only on the form — the counts record what a migration actually moved, not numbers to retype.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "event_type",
+  "effective_date",
+  "from_entity",
+  "from_docname",
+  "to_entity",
+  "reason",
+  "migrated_attachments",
+  "relinked_records",
+  "relink_detail",
+  "appraisal_document_status",
+  "recorded_on"
+ ],
+ "fields": [
+  {
+   "description": "Conveyed In is the only thing a surviving record can witness: the parcel it came from was deleted by the same call that wrote this row, so there is nothing left to carry a Conveyed Out. Note is for anything added by hand afterwards.",
+   "fieldname": "event_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Event Type",
+   "options": "Conveyed In\nNote",
+   "reqd": 1
+  },
+  {
+   "description": "When the conveyance happened, which is the date on the deed and not the date somebody recorded it here.",
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective Date",
+   "reqd": 1
+  },
+  {
+   "description": "The entity whose books carried this ground before.",
+   "fieldname": "from_entity",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "From Entity",
+   "options": "Company"
+  },
+  {
+   "description": "The docname this parcel had on the previous entity's books. Deliberately Data rather than Link: that record no longer exists, and a Link to a deleted document is a link Frappe will not let you save.",
+   "fieldname": "from_docname",
+   "fieldtype": "Data",
+   "label": "From Docname"
+  },
+  {
+   "fieldname": "to_entity",
+   "fieldtype": "Link",
+   "label": "To Entity",
+   "options": "Company"
+  },
+  {
+   "description": "Why the ground moved and what authorises it — the deed, the assignment, the trust amendment. This is the part of the record nobody can reconstruct later.",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "reqd": 1
+  },
+  {
+   "description": "How many File rows followed the parcel to its new docname.",
+   "fieldname": "migrated_attachments",
+   "fieldtype": "Int",
+   "label": "Migrated Attachments"
+  },
+  {
+   "description": "How many records pointing at the old parcel were repointed at this one — leases, blocks, irrigation zones, housing units, housing assignments.",
+   "fieldname": "relinked_records",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Relinked Records"
+  },
+  {
+   "description": "The same count broken out by register, so a reader can tell 29 housing units from 29 leases.",
+   "fieldname": "relink_detail",
+   "fieldtype": "Small Text",
+   "label": "Relink Detail"
+  },
+  {
+   "description": "Whether the appraisal report came across. linked means it did; unlinked_needs_reattach means the report is filed under the previous entity and somebody has to re-file it, which is a real piece of work and not a silent loss.",
+   "fieldname": "appraisal_document_status",
+   "fieldtype": "Data",
+   "label": "Appraisal Document Status"
+  },
+  {
+   "fieldname": "recorded_on",
+   "fieldtype": "Datetime",
+   "label": "Recorded On",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-31 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Parcel Conveyance Event",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": []
+}

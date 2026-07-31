@@ -10,6 +10,7 @@
  "field_order": [
   "family_member_name",
   "relationship",
+  "related_to",
   "identity_col",
   "related_party",
   "active",
@@ -27,13 +28,20 @@
    "unique": 1
   },
   {
-   "description": "How they are related. Recorded because 'why did money go to this person' is the first question anybody asks of these postings, and a name alone does not answer it.",
+   "description": "How they are related. Recorded because 'why did money go to this person' is the first question anybody asks of these postings, and a name alone does not answer it. Son and Daughter sit alongside Child rather than replacing it: records written before v0.13.0 say Child and stay valid, and a register that forced a re-pick would be asking somebody to restate a fact that has not changed.",
    "fieldname": "relationship",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Relationship",
-   "options": "\nSpouse\nChild\nParent\nSibling\nGrandchild\nGrandparent\nIn-Law\nOther"
+   "options": "\nSpouse\nSon\nDaughter\nChild\nParent\nSibling\nGrandchild\nGrandparent\nIn-Law\nOther"
+  },
+  {
+   "description": "Related to WHOM. 'Alexander Polehn - Son' does not say whose son, and a register scoped to a company with two members answers that question two ways. Holds the name of a Family record, or of a Related Party record, or — where the person is in neither register — their name as plain text. Deliberately Data rather than Link: Frappe's Link points at exactly one doctype and a Dynamic Link needs a discriminator field beside it, so both would cost a second column to say something the name already says. The tools resolve it on read and report which register answered.",
+   "fieldname": "related_to",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Related To"
   },
   {
    "fieldname": "identity_col",
@@ -68,7 +76,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-07-30 18:00:00.000000",
+ "modified": "2026-07-31 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Family",
@@ -99,7 +107,7 @@
   }
  ],
  "quick_entry": 1,
- "search_fields": "family_member_name,relationship",
+ "search_fields": "family_member_name,relationship,related_to",
  "sort_field": "family_member_name",
  "sort_order": "ASC",
  "states": [],

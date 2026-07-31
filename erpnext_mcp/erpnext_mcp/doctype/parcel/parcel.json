@@ -27,6 +27,8 @@
   "appraisal_document",
   "linkage_section",
   "related_asset",
+  "conveyance_section",
+  "conveyance_events",
   "notes_section",
   "notes"
  ],
@@ -165,6 +167,19 @@
    "options": "Asset"
   },
   {
+   "description": "Every conveyance that brought this parcel onto this entity's books. Empty for a parcel that was registered here and has never moved, which is most of them.",
+   "fieldname": "conveyance_section",
+   "fieldtype": "Section Break",
+   "label": "Conveyance History"
+  },
+  {
+   "description": "Written by convey_parcel and read-only in practice. A conveyance deletes the record on the old entity's books and creates this one, so the surviving record is the only place the history can live — the row names the entity it came from and the docname it had there.",
+   "fieldname": "conveyance_events",
+   "fieldtype": "Table",
+   "label": "Conveyance Events",
+   "options": "Parcel Conveyance Event"
+  },
+  {
    "fieldname": "notes_section",
    "fieldtype": "Section Break",
    "label": "Notes"
@@ -177,7 +192,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-07-30 12:00:00.000000",
+ "modified": "2026-07-31 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Parcel",

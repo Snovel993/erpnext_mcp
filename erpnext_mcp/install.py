@@ -68,8 +68,9 @@ _PRECIOUS_DOCTYPES = (
 	),
 	(
 		"Parcel",
-		"the land register — assessor parcel ids, acreage, appraised values and the "
-		"dates they were appraised as of, none of which is anywhere else on the site",
+		"the land register — assessor parcel ids, acreage, appraised values, the "
+		"dates they were appraised as of, and the conveyance history of any ground "
+		"that has changed entities, none of which is anywhere else on the site",
 	),
 	(
 		"Lease",

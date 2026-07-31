@@ -6,7 +6,17 @@ Most of these tests are about what does NOT happen.
 
 from erpnext_mcp import registry
 
-from .fixtures import BANK_ACCOUNT, MAIN, OTHER, SeededTestCase, cash, sales, supplies
+from .fixtures import (
+	ALEX,
+	BANK_ACCOUNT,
+	MAIN,
+	OTHER,
+	SeededTestCase,
+	V12TestCase,
+	cash,
+	sales,
+	supplies,
+)
 from .harness import STORE
 
 ALL_ON = {f"allow_{name}": 1 for name in registry.MUTATING_TOOLS}
@@ -949,3 +959,666 @@ class DeleteDraftJournalEntry(SeededTestCase):
 		message = self.tool_error("delete_draft_journal_entry", self.payload())
 		self.assertIn("allow_delete_draft_journal_entry", message)
 		self.assertIsNotNone(STORE.get_raw("Journal Entry", "ACC-JV-2026-00002"))
+
+
+# ── v0.13.0: update_journal_entry_party ─────────────────────────────────────
+PARTY_EDIT_ON = {
+	"allow_create_journal_entry": 1,
+	"allow_submit_journal_entry": 1,
+	"allow_cancel_journal_entry": 1,
+	"allow_update_journal_entry_party": 1,
+	"allow_create_family_member": 1,
+	"allow_get_journal_entry": 1,
+	"allow_generate_1099_prefill": 1,
+	"allow_register_party_types": 1,
+}
+
+
+class UpdateJournalEntryParty(V12TestCase):
+	"""Attribution on a submitted entry, in both places the party lives.
+
+	Three things these tests are really about.
+
+	IT WRITES TWICE OR IT HAS NOT WRITTEN. `tabJournal Entry Account` is what the
+	voucher shows and `tabGL Entry` is what every ageing report reads. A tool that
+	updated one and not the other leaves the two disagreeing with nothing to say
+	which is right, which is worse than not having edited at all. The GL rows are
+	found by `voucher_detail_no` — the line's own docname — so an entry with two
+	lines to the same account for the same amount stays distinguishable.
+
+	IT CANNOT MOVE A BALANCE. Account, debit, credit and date are not arguments,
+	and there is a test asserting the trial balance is identical afterwards.
+	That is what makes editing a submitted document defensible.
+
+	THE REFUSALS ARE ABOUT MEANING, NOT ABOUT CAUTION. A cancelled entry is
+	evidence of something that was undone. A Round Off line is a fraction of a
+	cent ERPNext invented. A bank line with a party makes an ageing report claim
+	somebody owes the account balance. None of those is a party's, and the last
+	two have no escape hatch on purpose.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, **PARTY_EDIT_ON)
+		# The v0.12 fixture seeds ERPNext's four stock party types and NOT this
+		# app's two, so that `register_party_types` has something real to do. A
+		# Family attribution needs the party type to exist, so it is registered
+		# here through the tool that registers it rather than by seeding a row —
+		# which is also the sequence a real site goes through.
+		self.tool_data("register_party_types", {})
+
+	def a_draft(self, first_line=None, account=None):
+		line = {"account": account or supplies(), "debit": 1200}
+		line.update(first_line or {})
+		return self.tool_data(
+			"create_journal_entry",
+			{
+				"company": MAIN,
+				"posting_date": "2026-03-01",
+				"user_remark": "Apple Cash — which son is not yet established",
+				"accounts": [line, {"account": cash(), "credit": 1200}],
+			},
+		)["name"]
+
+	def a_posted_entry(self, **kwargs):
+		"""A submitted entry WITH the GL rows a real submit would have written.
+
+		The GL rows are seeded rather than derived because this double does not
+		implement ERPNext's posting engine — but they are pointed back at the real
+		child-row docnames the insert assigned, which is the part the tool depends
+		on and the part a hand-written fixture would get wrong.
+		"""
+		name = self.a_draft(**kwargs)
+		self.tool_data("submit_journal_entry", {"name": name})
+		self.post_gl(name)
+		return name
+
+	def post_gl(self, name):
+		entry = STORE.get_raw("Journal Entry", name)
+		STORE.seed(
+			"GL Entry",
+			[
+				{
+					"name": f"GL-{name}-{row['idx']}",
+					"account": row["account"],
+					"posting_date": entry["posting_date"],
+					"debit": row.get("debit") or 0,
+					"credit": row.get("credit") or 0,
+					"company": entry["company"],
+					"is_cancelled": 0,
+					"voucher_type": "Journal Entry",
+					"voucher_no": name,
+					"voucher_detail_no": row["name"],
+					"party_type": row.get("party_type"),
+					"party": row.get("party"),
+					"is_opening": "No",
+				}
+				for row in entry["accounts"]
+			],
+		)
+
+	def gl_rows(self, name):
+		return [row for row in STORE.rows("GL Entry") if row.get("voucher_no") == name]
+
+	def line(self, name, index=1):
+		return STORE.get_raw("Journal Entry", name)["accounts"][index - 1]
+
+	# -- the happy path ------------------------------------------------------
+	def test_it_names_a_family_member_on_a_line_that_had_nobody(self):
+		name = self.a_posted_entry()
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "Apple Cash receipt establishes this was Alex's phone",
+			},
+		)
+		self.assertTrue(data["updated"])
+		self.assertEqual(data["after"], {"party_type": "Family", "party": ALEX})
+		self.assertEqual(self.line(name)["party"], ALEX)
+
+	def test_it_updates_the_gl_entry_row_as_well_as_the_voucher(self):
+		"""The one that matters. Without this, every ageing report keeps saying
+		what the voucher no longer says."""
+		name = self.a_posted_entry()
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertEqual(data["gl_entries_updated"], 1)
+		moved = [row for row in self.gl_rows(name) if row["party"] == ALEX]
+		self.assertEqual(len(moved), 1)
+		self.assertEqual(moved[0]["party_type"], "Family")
+
+	def test_it_updates_only_the_line_asked_for(self):
+		name = self.a_posted_entry()
+		self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIsNone(self.line(name, 2).get("party"))
+		self.assertEqual([row["party"] for row in self.gl_rows(name) if row["party"]], [ALEX])
+
+	def test_two_identical_lines_stay_distinguishable(self):
+		"""Two lines to the same account for the same amount produce two GL rows
+		that differ in nothing but `voucher_detail_no`. Matching on account and
+		amount would move both."""
+		name = self.tool_data(
+			"create_journal_entry",
+			{
+				"company": MAIN,
+				"posting_date": "2026-03-01",
+				"user_remark": "two identical transfers on one voucher",
+				"accounts": [
+					{"account": supplies(), "debit": 600},
+					{"account": supplies(), "debit": 600},
+					{"account": cash(), "credit": 1200},
+				],
+			},
+		)["name"]
+		self.tool_data("submit_journal_entry", {"name": name})
+		self.post_gl(name)
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 2,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "the second of the two was Alex's",
+			},
+		)
+		self.assertEqual(data["gl_entries_updated"], 1)
+		self.assertIsNone(self.line(name, 1).get("party"))
+		self.assertEqual(self.line(name, 2)["party"], ALEX)
+
+	def test_it_changes_one_party_to_another(self):
+		"""The case that started this: attributing Apple Cash to the right son."""
+		name = self.a_posted_entry(first_line={"party_type": "Family", "party": ALEX})
+		self.tool_data("create_family_member", {"family_name": "Antony Polehn", "relationship": "Son"})
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": "Antony Polehn",
+				"reason": "the receipt is Antony's, not Alex's",
+			},
+		)
+		self.assertEqual(data["before"]["party"], ALEX)
+		self.assertEqual(data["after"]["party"], "Antony Polehn")
+
+	def test_it_clears_an_attribution_with_two_empty_strings(self):
+		name = self.a_posted_entry(first_line={"party_type": "Family", "party": ALEX})
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "",
+				"party": "",
+				"reason": "this line was never anybody's — the transfer was operational",
+			},
+		)
+		self.assertEqual(data["after"], {"party_type": None, "party": None})
+		self.assertIsNone(self.line(name)["party"])
+
+	def test_it_moves_no_balance(self):
+		"""The claim the whole tool rests on."""
+		name = self.a_posted_entry()
+		before = [(row["account"], row["debit"], row["credit"]) for row in self.gl_rows(name)]
+		self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertEqual(
+			[(row["account"], row["debit"], row["credit"]) for row in self.gl_rows(name)], before
+		)
+
+	def test_the_change_is_readable_through_get_journal_entry(self):
+		name = self.a_posted_entry()
+		self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		lines = self.tool_data("get_journal_entry", {"name": name})["accounts"]
+		self.assertEqual(lines[0]["party"], ALEX)
+		self.assertEqual(lines[0]["party_type"], "Family")
+
+	# -- the trail ----------------------------------------------------------
+	def test_it_writes_the_reason_onto_the_entrys_own_timeline(self):
+		"""For the other reader: an accountant with the voucher open in the Desk,
+		who will never see the MCP action log."""
+		name = self.a_posted_entry()
+		self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "Apple Cash receipt establishes this was Alex's phone",
+			},
+		)
+		text = STORE.comments[-1]["text"]
+		self.assertIn("line 1", text)
+		self.assertIn(ALEX, text)
+		self.assertIn("Apple Cash receipt", text)
+
+	def test_the_comment_docname_comes_back(self):
+		name = self.a_posted_entry()
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertTrue(data["comment_added"])
+		self.assertTrue(STORE.get_raw("Comment", data["comment_added"]))
+
+	def test_the_reason_reaches_the_audit_log(self):
+		name = self.a_posted_entry()
+		self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn(
+			"receipt establishes the attribution",
+			self.assertAudited("update_journal_entry_party", status="Success")["result_summary"],
+		)
+
+	# -- dry run ------------------------------------------------------------
+	def test_dry_run_reports_the_plan_and_writes_nothing(self):
+		name = self.a_posted_entry()
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+				"dry_run": True,
+			},
+		)
+		self.assertTrue(data["dry_run"])
+		self.assertFalse(data["updated"])
+		self.assertEqual(data["gl_entries_matched"], 1)
+		self.assertIsNone(self.line(name).get("party"))
+		self.assertIsNone(self.gl_rows(name)[0].get("party"))
+
+	def test_dry_run_still_refuses_what_the_real_call_would(self):
+		name = self.a_posted_entry()
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 99,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+				"dry_run": True,
+			},
+		)
+		self.assertIn("outside Journal Entry", message)
+
+	# -- refusals -----------------------------------------------------------
+	def test_a_cancelled_entry_is_refused(self):
+		"""Evidence with a hole in it. The cancelled entry and its reversing rows
+		are the record that a posting was made and undone."""
+		name = self.a_posted_entry()
+		self.tool_data("cancel_journal_entry", {"name": name, "reason": "posted to the wrong month"})
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("cancelled", message)
+		self.assertIn("never happened", message)
+
+	def test_a_line_index_past_the_end_is_refused_with_the_count(self):
+		name = self.a_posted_entry()
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 7,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("has 2 line(s)", message)
+
+	def test_line_index_is_one_based(self):
+		name = self.a_posted_entry()
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 0,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("numbered from 1", message)
+
+	def test_a_round_off_line_is_refused(self):
+		"""A fraction of a cent ERPNext invented is not a fact about a person."""
+		STORE.seed(
+			"Account",
+			[
+				{
+					"name": "5210 - Round Off - ETC",
+					"account_name": "Round Off",
+					"account_number": "5210",
+					"parent_account": "Expenses - ETC",
+					"is_group": 0,
+					"root_type": "Expense",
+					"account_type": "Round Off",
+					"account_currency": "USD",
+					"company": MAIN,
+				}
+			],
+		)
+		name = self.a_posted_entry(account="5210 - Round Off - ETC")
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("rounding/write-off line", message)
+
+	def test_the_companys_nominated_write_off_account_is_refused_too(self):
+		"""A site that spells it differently is still a site whose write-off line
+		nobody wrote on purpose."""
+		STORE.get_raw("Company", MAIN)["write_off_account"] = supplies()
+		name = self.a_posted_entry()
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("rounding/write-off line", message)
+
+	def test_a_bank_or_cash_line_is_refused_with_no_escape_hatch(self):
+		"""A party on the operation's own money makes an ageing report claim they
+		owe its balance. There is no argument that opens this."""
+		name = self.a_posted_entry()
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 2,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+				"allow_non_party_account": True,
+			},
+		)
+		self.assertIn("the operation's own money", message)
+
+	def test_a_party_type_this_site_has_not_registered_is_refused(self):
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": self.a_posted_entry(),
+				"line_index": 1,
+				"party_type": "Beneficiary",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("not a Party Type on this site", message)
+
+	def test_a_party_that_is_not_on_the_register_is_refused(self):
+		"""The Dynamic Link's own rule, enforced with words that name the register
+		rather than with a framework error."""
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": self.a_posted_entry(),
+				"line_index": 1,
+				"party_type": "Family",
+				"party": "Never Added",
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("no Family called 'Never Added'", message)
+		self.assertIn("list_family_members", message)
+
+	def test_a_party_type_without_a_party_is_refused(self):
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": self.a_posted_entry(),
+				"line_index": 1,
+				"party_type": "Family",
+				"party": "",
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("Set both", message)
+
+	def test_omitting_one_of_the_pair_entirely_is_refused(self):
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": self.a_posted_entry(),
+				"line_index": 1,
+				"party_type": "Family",
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("must BOTH be given", message)
+
+	def test_a_change_that_changes_nothing_is_refused(self):
+		name = self.a_posted_entry(first_line={"party_type": "Family", "party": ALEX})
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("Nothing to change", message)
+
+	def test_a_placeholder_reason_is_refused(self):
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": self.a_posted_entry(),
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "fix",
+			},
+		)
+		self.assertIn("real explanation", message)
+
+	def test_an_unknown_entry_is_refused(self):
+		self.assertIn(
+			"no Journal Entry named",
+			self.tool_error(
+				"update_journal_entry_party",
+				{
+					"journal_entry": "ACC-JV-9999-99999",
+					"line_index": 1,
+					"party_type": "",
+					"party": "",
+					"reason": "receipt establishes the attribution",
+				},
+			),
+		)
+
+	def test_a_refused_call_writes_nothing(self):
+		name = self.a_posted_entry()
+		self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 2,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIsNone(self.line(name, 2).get("party"))
+		self.assertFalse([row for row in self.gl_rows(name) if row.get("party")])
+
+	# -- the softer gate ----------------------------------------------------
+	def test_an_account_type_that_does_not_normally_carry_a_party_is_refused(self):
+		STORE.get_raw("Account", supplies())["account_type"] = "Expense Account"
+		message = self.tool_error(
+			"update_journal_entry_party",
+			{
+				"journal_entry": self.a_posted_entry(),
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertIn("allow_non_party_account=true", message)
+
+	def test_and_goes_through_when_the_caller_says_they_meant_it(self):
+		"""A refusal a caller cannot get past is how a safety gate becomes the
+		failure. This one names the way through."""
+		STORE.get_raw("Account", supplies())["account_type"] = "Expense Account"
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": self.a_posted_entry(),
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "the phone was bought for Alex and the expense is his",
+				"allow_non_party_account": True,
+			},
+		)
+		self.assertTrue(data["updated"])
+
+	def test_an_untyped_expense_account_needs_no_escape_hatch(self):
+		"""Which is the commonest case by far, and the one this tool was built
+		for — an ordinary expense account carries no account_type at all."""
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": self.a_posted_entry(),
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		self.assertTrue(data["updated"])
+
+	# -- drafts -------------------------------------------------------------
+	def test_a_draft_goes_through_the_document_instead(self):
+		"""It has written no GL Entries and can still be saved, so it is saved —
+		and the doctype's own validation runs."""
+		name = self.a_draft()
+		data = self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "attributing before this is posted at all",
+			},
+		)
+		self.assertEqual(data["tables"], ["Journal Entry"])
+		self.assertEqual(data["gl_entries_updated"], 0)
+		self.assertEqual(self.line(name)["party"], ALEX)
+
+	# -- what it must not change --------------------------------------------
+	def test_the_1099_prefill_still_excludes_a_family_attribution(self):
+		"""Attributing a transfer correctly does not make it reportable. A
+		transfer to a relative is not compensation for services."""
+		before = self.tool_data(
+			"generate_1099_prefill", {"company": MAIN, "tax_year": 2025, "dry_run": True}
+		)
+		name = self.a_posted_entry()
+		self.tool_data(
+			"update_journal_entry_party",
+			{
+				"journal_entry": name,
+				"line_index": 1,
+				"party_type": "Family",
+				"party": ALEX,
+				"reason": "receipt establishes the attribution",
+			},
+		)
+		after = self.tool_data(
+			"generate_1099_prefill", {"company": MAIN, "tax_year": 2025, "dry_run": True}
+		)
+		self.assertEqual(
+			[row["recipient"] for row in after["recipients"]],
+			[row["recipient"] for row in before["recipients"]],
+		)
+		self.assertNotIn(ALEX, [row["recipient"] for row in after["recipients"]])
+
+	def test_the_switch_is_off_out_of_the_box(self):
+		self.configure(enabled=1)
+		self.assertIn(
+			"allow_update_journal_entry_party",
+			self.tool_error("update_journal_entry_party", {}),
+		)
