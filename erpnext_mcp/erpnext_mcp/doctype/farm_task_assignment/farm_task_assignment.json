@@ -1,0 +1,230 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-31 18:00:00.000000",
+ "description": "Who took one task, when they claimed it, when they started, when they finished, what they found and what proves it. A SEPARATE DOCTYPE AND NOT A CHILD TABLE — see the controller for the arithmetic. This is the chain of custody: the answer to 'who did this and how do you know'.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "task",
+  "assigned_to",
+  "assigned_to_name",
+  "state",
+  "identity_col",
+  "company",
+  "task_name",
+  "dispatched_by_foreman",
+  "timing_section",
+  "claimed_at",
+  "started_at",
+  "timing_col",
+  "completed_at",
+  "actual_duration_minutes",
+  "outcome_section",
+  "completion_narrative",
+  "findings_text",
+  "outcome_col",
+  "witness",
+  "rejection_reason",
+  "evidence_section",
+  "signature_file",
+  "produced_record",
+  "evidence_files"
+ ],
+ "fields": [
+  {
+   "description": "The work. A Link and not a parent, so a query for 'everything this worker is holding' is one indexed read rather than a walk over every task on the site.",
+   "fieldname": "task",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Task",
+   "options": "Farm Task",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Employee id. Data and not a Link for the same reason it is on Farm Task: Frappe HR is not a dependency of this app, and a Link would make the doctype fail to migrate on a site without it.",
+   "fieldname": "assigned_to",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Assigned To",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "assigned_to_name",
+   "fieldtype": "Data",
+   "label": "Assigned To (Name)"
+  },
+  {
+   "default": "Claimed",
+   "description": "Claimed, In-Progress, Completed or Rejected. Rejected is a FIRST-CLASS STATE and the reason is mandatory: 'I could not get to it and dispatch never followed up' is the answer nobody can defend, and this is the field that makes it impossible to end there silently.",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "State",
+   "options": "Claimed\nIn-Progress\nCompleted\nRejected",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The task's title, copied at claim time so a list of somebody's work reads without a join — and so it still reads if the task is renamed afterwards.",
+   "fieldname": "task_name",
+   "fieldtype": "Data",
+   "label": "Task Name"
+  },
+  {
+   "default": "0",
+   "description": "Set when a foreman put this person on the task, clear when they took it from the pool themselves. The distinction is worth keeping: work that has to be dispatched because it needs a named licence holder is a different kind of work from work anybody with the skill can pick up, and an operation that cannot tell them apart cannot staff either properly.",
+   "fieldname": "dispatched_by_foreman",
+   "fieldtype": "Check",
+   "label": "Dispatched by a Foreman"
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "Timing"
+  },
+  {
+   "fieldname": "claimed_at",
+   "fieldtype": "Datetime",
+   "label": "Claimed"
+  },
+  {
+   "description": "The clock-in for this task specifically. Not the same as a shift clock-in: a worker on the clock all morning did this particular cabin between ten and half past, and that is what an hour charged to a job has to mean.",
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started"
+  },
+  {
+   "fieldname": "timing_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "label": "Completed"
+  },
+  {
+   "description": "Minutes actually spent. Computed from started_at and completed_at where both are there, and takeable from the worker where they are not — a phone that was in a pocket all morning is not a clock.",
+   "fieldname": "actual_duration_minutes",
+   "fieldtype": "Int",
+   "label": "Actual Duration (Minutes)"
+  },
+  {
+   "fieldname": "outcome_section",
+   "fieldtype": "Section Break",
+   "label": "What Happened"
+  },
+  {
+   "description": "What the worker did, in their words.",
+   "fieldname": "completion_narrative",
+   "fieldtype": "Small Text",
+   "label": "Completion Narrative"
+  },
+  {
+   "description": "What they FOUND, which is a different question from what they did — and the one a compliance record is built from. Blank findings on an inspection means it passed; it does not mean nobody wrote anything down.",
+   "fieldname": "findings_text",
+   "fieldtype": "Long Text",
+   "label": "Findings"
+  },
+  {
+   "fieldname": "outcome_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Somebody else who was there and saw the same thing. Required only where the task's evidence contract asks for it — which is the work where one person's word is not the standard.",
+   "fieldname": "witness",
+   "fieldtype": "Data",
+   "label": "Witness"
+  },
+  {
+   "description": "Why this could not be done: the equipment is broken, the conditions are unsafe, this needs a licence I do not hold. MANDATORY on a rejection, and the most useful sentence in the doctype — it is what turns 'nobody got to it' into a fact somebody can act on.",
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence"
+  },
+  {
+   "description": "The signature capture, where the task asked for one.",
+   "fieldname": "signature_file",
+   "fieldtype": "Attach",
+   "label": "Signature"
+  },
+  {
+   "description": "The compliance record this completion produced — a Housing Inspection, a Detector Test, a Water Test. Read with the task's `creates_record` as its doctype. This is the link that makes the completion evidence rather than a status change.",
+   "fieldname": "produced_record",
+   "fieldtype": "Data",
+   "label": "Produced Record",
+   "read_only": 1
+  },
+  {
+   "description": "Photographs and documents filed against this completion.",
+   "fieldname": "evidence_files",
+   "fieldtype": "Table",
+   "label": "Evidence Files",
+   "options": "Farm Task Evidence"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Task Assignment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "task,assigned_to,state",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "task_name",
+ "track_changes": 1
+}

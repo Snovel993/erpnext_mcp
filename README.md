@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **167 tools** — 75 read-only, 92 mutating.
+- **190 tools** — 85 read-only, 105 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -268,7 +268,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 167 tools
+## The 190 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -283,7 +283,7 @@ mutating tool ships OFF — so a write tool you cannot see is one nobody has tic
 yet. Tick it in **ERPNext MCP Settings**; the refusal message names the exact
 switch if you call the tool anyway.
 
-### Read-only — 75, all ON by default, each individually switchable
+### Read-only — 85, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -428,8 +428,20 @@ write tools below.)
 | `list_audit_packet_types` | The eight audit regimes, what each pulls in, and which sections will be empty on this site because the DocType behind them is not installed. |
 | `find_drifted_je_attributions` | **DIAGNOSTIC.** Every submitted JE whose voucher and general ledger disagree about who a line belongs to — the damage v0.13.0's broken party tool left behind. Three queries whatever the range. |
 
+**Dispatch and the records that close the loop** — the v0.16.0 surface
 
-### Mutating — 92, all OFF by default, with one named exception
+| Tool | What it answers |
+| --- | --- |
+| `list_dispatch_board` | **The Kanban as JSON.** Every task grouped into its state column, worst urgency first, with the pool, the open Critical work, and **how much of the board came from a compliance alert** — which is the honest measure of whether the calendar is driving work or being read and ignored. |
+| `list_available_tasks` | The pool: what a worker could pick up right now, filtered by location, skill or type, with their concurrent-claim count and whether they may take another. Dispatched work is **deliberately absent** — somebody has to be sent to that by name. |
+| `list_dispatched_tasks` | What one worker is holding, and their history on request. |
+| `get_farm_task` | One task in full: its evidence contract in sentences, every assignment and **every rejection with the reason given**, the compliance record its completion produced, and whether the alert it came from has since auto-dismissed. |
+| `list_housing_inspections` / `get_housing_inspection` | Every habitability walk, with the ones that **found something and nobody closed** named separately. One walk in full with its photographs, the unit's whole history, and the later clean walk that superseded it. |
+| `list_detector_tests` / `get_detector_test` | Every smoke and CO detector test, with the failures and the buildings that have **no detector at all** as open findings. |
+| `list_water_tests` / `get_water_test` | Every agricultural water sample, with the contaminated and the **unreadable** ones named — a result nobody can interpret is not evidence that the water is safe. |
+
+
+### Mutating — 105, all OFF by default, with one named exception
 
 **Postings into the ledger**
 
@@ -1212,6 +1224,21 @@ rather than dropped.
 | `generate_audit_packet` | Assembles one audit type's evidence for one period into a PDF and files it as a Governance Document. Pulls from the operational records, not from a copy. | Produce a packet for a period that has not finished, or one whose corrective actions are still open — refused, with every open action named, because a warning on a printed document is not read by the person holding it. |
 | `repair_drifted_je_attributions` | Brings drifted GL Entry rows back into step with their vouchers, in a batch, from `find_drifted_je_attributions`' own output. | Move a balance. `party` is an attribution column, so the trial balance after two hundred repairs is arithmetically identical. Nor abort on the first failure: each item is a different voucher. |
 
+**Farm Task Dispatch, and the evidence a completion produces** — the v0.16.0 surface
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_farm_task` | Raises one piece of work with its type, location, skill, urgency, dispatch mode and the record completing it produces. | **Exist without an evidence contract.** `evidence_required` is mandatory, an empty one is refused, and so is a misspelt key — `{"photo": true}` asks for nothing while looking exactly like a photograph requirement. Nor promise a `creates_record` this site does not have, nor answer an alert that already has a task. |
+| `assign_farm_task` | Sends a named person to a task — the foreman's half of the dual mode, for work where the named holder matters. | Take work off somebody who already holds it without `reassign=true` **and** a reason, which is written onto their assignment. Or reassign finished work: that rewrites history rather than dispatching anybody. |
+| `claim_farm_task` | A worker takes one from the pool, and is told the evidence they will need. | Hold more than **three at once** — a hoarding limit, not a productivity one; completing one frees a slot in the same instant. Or claim Dispatched work: self-picking it would put the wrong person's name on a regulated record. |
+| `start_farm_task` | Clocks in on **this task**, not on the shift. | Start twice. That would move the clock-in forward and shorten the hour actually spent. |
+| `complete_farm_task` | Checks the evidence against the contract, files it, and **writes the compliance record the task promised** — the actual Housing Inspection, Detector Test or Water Test, with the photographs on it. | Accept a submission short of the contract, naming each requirement that is missing. Or accept a completion filed by anybody **other than the worker holding the task** — that is not a chain of custody, it is a rumour. |
+| `reject_farm_task` | Hands one back with a **mandatory reason** and returns it to the pool. | Lose the rejection. The assignment stays: it is the proof somebody was sent, went, and could not do it, which answers an auditor in a way an absence never does. |
+| `generate_tasks_from_compliance_alerts` | **The bridge.** Turns every open alert into a dispatchable task carrying the evidence its completion must produce, with the shape of the work inferred from the rule. | Duplicate. A task carries the alert that raised it, so a second run finds what the first did and skips it — two people are never sent to walk the same cabin. Nor invent a recipe for a rule it does not know: that is reported by name. |
+| `create_housing_inspection` / `update_housing_inspection` | Records one habitability walk and moves the unit's inspection date forward, which is what dismisses `housing_inspection_overdue`. | Be argued into looking clean. The state is **computed from the findings** on every save, so somebody who typed "water stain, north wall" is not offered the option of marking it passed. Nor drag a register backwards with a back-dated walk. |
+| `create_detector_test` / `update_detector_test` | Records a smoke and CO test, moves the unit's detector dates, and **raises a Farm Task** where a replacement is needed. | Write a date for a detector recorded **Not Present** — there was nothing to test, so nothing is known, and the calendar should go on saying so. A *failed* test does write the date: the ignorance is over. |
+| `create_water_test` / `update_water_test` | Records one sample and moves **both** the zone's and the parent block's test date, because Subpart E is engaged by water contacting a crop and the crop is on the block. | Treat an unreadable result as a pass. Where neither the words nor a number can be read it routes to Corrective Action Required, because a clean record of nothing is worse than no record. |
+
 
 ---
 
@@ -1390,6 +1417,128 @@ put back on every migrate.
 raised — and reports **how it was earned**. An operation at 95% entirely through
 human dismissals is a different operation from one at 95% because the work got
 done, and a score that could not tell them apart would be worth gaming.
+
+---
+
+## Farm Task Dispatch
+
+v0.15.0 could tell an operation that fifty-four things were wrong. Nothing in it
+could send anybody to fix one.
+
+That is not a missing feature, it is a missing half. A compliance calendar whose
+alerts have no actionable path is a list somebody reads on a Tuesday and
+transcribes onto a whiteboard, and by August the whiteboard and the calendar
+disagree. v0.16.0 closes the loop:
+
+```
+Compliance Alert  →  Farm Task        →  worker claims, starts, completes
+   (a condition)      (with an evidence   (photographs, signature, findings)
+                       contract)
+                            ↓
+                    Housing Inspection / Detector Test / Water Test
+                            ↓
+                    the unit's last_habitability_inspection moves forward
+                            ↓
+                    tonight's sweep finds the condition no longer true
+                            ↓
+                    the alert auto-dismisses. Nobody touched it.
+```
+
+**Nothing in this release dismisses an alert**, and that prohibition is the
+design. The only honest way an alert goes away is to change the world and let the
+sweep notice — anything else is a system where the calendar and the camp disagree
+and the calendar is the one that looks clean.
+
+### Evidence is required before the work is, not after
+
+`evidence_required` is a mandatory field on `Farm Task`. A task cannot be created
+without stating what closing it obliges somebody to produce:
+
+```json
+{"photos": true, "signature": true, "findings_text": true, "witness": false}
+```
+
+`complete_farm_task` then refuses a submission that does not meet it, naming each
+requirement that is short. **There is no path to a task somebody can close by
+saying they did it.** An empty contract is refused; so is one whose every
+requirement is false; so is a misspelt key, because `{"photo": true}` asks for
+nothing, refuses nothing, and looks exactly like a photograph requirement right
+up until the audit.
+
+One subtlety worth knowing before you meet it: a `findings_text` requirement is
+satisfied by passing an **empty string**. A clean inspection is a positive
+statement and that is how it is made; leaving the argument out entirely records
+that nobody was asked.
+
+### Dual mode, because one mode is wrong for half the work
+
+| | For | Why |
+| --- | --- | --- |
+| **Self-pick** | habitability walks, detector tests, camp maintenance, water sampling | Fifty-four walks a foreman has to assign by hand are fifty-four walks that do not happen. |
+| **Dispatched** | applicator-licensed spraying, electrical work, I-9 re-verification, licence renewals | Somebody is SENT, by name, and the record says who sent them. `claim_farm_task` refuses these outright: self-picking one puts the wrong person's name on a regulated record. |
+| **Either** | most general work | Both doors open. |
+
+**Three concurrent claims per worker.** A hoarding limit, not a productivity one:
+completing or rejecting a task frees a slot in the same instant, so it never
+stands between somebody and their next job — only between them and their fourth
+simultaneous one. Without it, one worker empties the pool onto their own name and
+the board looks worked.
+
+### Rejection is an answer
+
+"Nobody got to it and dispatch never followed up" is the sentence nobody can
+defend in front of an auditor. `reject_farm_task` requires a reason, returns the
+task to the pool, and **keeps the rejected assignment** — the proof that somebody
+was sent, went, and could not do it. "The ladder is broken and I could not reach
+the detector" is a fact somebody can act on; an absence is not.
+
+### The board
+
+`/app/farm-task/view/kanban/Farm Task Dispatch` — a Frappe **Kanban Board** with
+one column per state, Rejected included. A foreman drags a card and Frappe writes
+the field, on desktop and on a phone, with the site's own permissions and theme.
+**There is no custom UI in this release and none is needed.** A landing Workspace
+sits at `/app/farm-task-dispatch`, and `list_dispatch_board` returns the same
+columns as JSON for a caller that cannot see a screen.
+
+Built by the same idempotent installer as the Command Center, for the same
+reason: an existing board is left exactly as somebody has since arranged it.
+
+### The records a completion produces
+
+Three DocTypes, and one rule shared by all of them:
+
+```
+findings blank    →  Recorded
+findings present  →  Corrective Action Required
+```
+
+**The state is computed from what was found, never chosen.** Somebody who has
+typed "water stain, north wall, spreading" is not offered the option of marking
+the walk as passed, because the state is recomputed from the text on every save.
+`workflow_state` is the framework's own field name, so a site that wants Frappe's
+native Workflow layered on top attaches one and `advance_workflow` drives it —
+but the branch ships working, because a branch that needs configuring first is a
+branch that is off on every site nobody configured.
+
+Three judgements inside them that are easy to get backwards:
+
+- **A failed detector test still writes the date.** The stale-detector alert asks
+  whether anybody *knows* the detector works. A Fail answers it. The answer is
+  bad, so the record raises a Critical alert of its own — but the ignorance is
+  over, and leaving the date blank would have the calendar saying "nobody has
+  tested this" about a building somebody tested this morning.
+- **"Not Present" writes no date**, for the mirror reason, and is a finding in
+  its own right.
+- **An unreadable laboratory result is not a clean result.** Results are read by
+  words first and numbers second, with generic E. coli compared against the FSMA
+  112.44(b) criterion of 126 CFU/100 mL. Where neither reading works, somebody
+  has to go and look at the report. Treating an uninterpretable result as a pass
+  is how a compliance file becomes a clean record of nothing.
+
+And a write-back rule that only ever moves forward: March's walk entered in July
+is filed as evidence and does **not** drag a register that already knows about
+June — that would re-raise an alert about work which has since been done.
 
 ---
 
@@ -1638,8 +1787,8 @@ Candidates for the next release, roughly in order of how often they come up:
   siblings (assign, close) rather than posting invoices.
 - **Prepared-report support** in `run_report`, for reports too slow to run
   inline.
-- **A Workspace**, so this app's doctypes appear in the app switcher instead of
-  only via search.
+- **A Workspace for the whole app.** v0.16.0 builds one for Farm Task Dispatch;
+  the rest of this app's doctypes still appear only via search.
 
 - **Deeper 1099 filing.** State 1099 filings and electronic filing to the IRS.
   What ships today stops at a pre-fill on purpose — the taxpayer id has to come
@@ -1662,12 +1811,15 @@ Candidates for the next release, roughly in order of how often they come up:
   it creates. The engine that keeps the two in step afterwards — reading
   structure out, pushing per-zone cost and revenue events back — is the next
   half, and it needs the ids this release establishes.
-- **The compliance framework proper.** The metadata is already woven into the
-  operational doctypes; what is missing is the external evidence that does not
-  emerge from operations — Compliance Policy, Certification/License, Regulatory
-  Filing, Audit Event — and the engines that read both: a due-date calendar that
-  fires on **state** rather than on a calendar tick, an audit packet generator,
-  and a readiness dashboard.
+- **Mobile capture for dispatch.** The backend is here and the evidence contract
+  is enforced server-side, so the missing half is a phone in a cabin: a worker's
+  task list, a camera roll, a signature pad and an offline queue, uploading
+  through `stage_file_chunk`. Everything the app needs from a client is already
+  a tool call.
+- **Skill and location routing.** `skill_required` and `location` are recorded
+  and filtered on; nothing yet *suggests* the nearest available worker who holds
+  the right skill. That is the useful next step, and it should fire on state —
+  somebody is on that parcel now — rather than on a roster.
 - **Access control for the camp.** `Housing Unit.access_card_zone` is recorded
   now and read by nothing. Wiring it to a real card system is what turns the
   register into a door that opens.
@@ -1690,12 +1842,17 @@ Drops this app's own doctypes and everything in them: **ERPNext MCP Settings**,
 **Governance Document**, **Asset Cost Profile**, **Note Payable**, **Parcel**,
 **Lease**, **Related Party**, **Family**, **Field**, **Irrigation Zone**,
 **Housing Unit**, **Housing Assignment**, **Compliance Policy**,
-**Certification**, **Regulatory Filing** and **Audit Event**. Two of those are
-worth a pause. A camp roster is the only record of who slept where, and it is
-what an IRS Section 119 exclusion and an ORS 653 wage claim are both answered
-with. And an **Audit Event** holds whether each corrective action was ever
-closed — an open finding nobody can produce a closure for is how last year's
-finding becomes this year's penalty.
+**Certification**, **Regulatory Filing**, **Audit Event**, **Farm Task**, **Farm
+Task Assignment**, **Housing Inspection**, **Detector Test** and **Water Test**.
+Four of those are worth a pause. A camp roster is the only record of who slept
+where, and it is what an IRS Section 119 exclusion and an ORS 653 wage claim are
+both answered with. An **Audit Event** holds whether each corrective action was
+ever closed — an open finding nobody can produce a closure for is how last year's
+finding becomes this year's penalty. A **Housing Inspection** and a **Water
+Test** are the only records that anybody ever went and looked. And a **Farm Task
+Assignment** holds, for every job somebody could *not* do, the reason they gave —
+which exists nowhere else on the site and is the answer to "why was this never
+done".
 
 **It also drops the v0.15.0 compliance COLUMNS from doctypes belonging to other
 apps** — the applicator names, EPA registration numbers, REIs, PHIs, I-9

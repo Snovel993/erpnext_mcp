@@ -1,0 +1,214 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-31 18:00:00.000000",
+ "description": "One habitability walk of one cabin: who went, when, what they found, and the photographs that prove it. The evidence behind OAR 437-004-1120 and 29 CFR 1910.142, and the record whose existence dismisses the alert that asked for it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "unit",
+  "inspection_date",
+  "workflow_state",
+  "keep_as_draft",
+  "identity_col",
+  "company",
+  "inspector",
+  "inspector_name",
+  "source_task",
+  "findings_section",
+  "findings",
+  "corrective_section",
+  "corrective_action",
+  "corrective_col",
+  "corrective_action_closed",
+  "closure_note",
+  "evidence_section",
+  "signature",
+  "photos",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The cabin that was walked. Recording an inspection moves this unit's `last_habitability_inspection` forward — which is the whole mechanism by which doing the work takes the alert off the calendar.",
+   "fieldname": "unit",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Housing Unit",
+   "options": "Housing Unit",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The day somebody was actually stood in it. Not the day the paperwork was entered — a walk done in March and typed up in July happened in March, and the register is written from this date.",
+   "fieldname": "inspection_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Inspection Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "description": "COMPUTED FROM THE FINDINGS, never chosen. Blank findings means the walk was clean and the record is Recorded. Anything written in the findings routes it to Corrective Action Required, which raises a Critical compliance alert that persists until a later clean inspection of the same unit supersedes it or somebody closes it by hand. A worker who has typed 'water stain, north wall' is not offered the option of marking it passed.",
+   "fieldname": "workflow_state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nRecorded\nCorrective Action Required",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "Hold this record in Draft. The one thing about the state a person gets to decide, because a walk started in a cabin with no signal and finished in the evening is legitimate. A Draft writes nothing to the unit and dismisses no alert.",
+   "fieldname": "keep_as_draft",
+   "fieldtype": "Check",
+   "label": "Keep as Draft"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The Employee id of whoever walked it. Data and not a Link because Frappe HR is not a dependency of this app — see Housing Assignment for the same decision and the same reason.",
+   "fieldname": "inspector",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Inspector",
+   "search_index": 1
+  },
+  {
+   "fieldname": "inspector_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Inspector Name"
+  },
+  {
+   "description": "The Farm Task whose completion produced this record, blank where somebody recorded a walk directly. Both doors are open on purpose: a compliance record that can only be written by finishing a dispatched task is a compliance record nobody writes on the day the dispatch board is down.",
+   "fieldname": "source_task",
+   "fieldtype": "Link",
+   "label": "Source Task",
+   "options": "Farm Task",
+   "search_index": 1
+  },
+  {
+   "fieldname": "findings_section",
+   "fieldtype": "Section Break",
+   "label": "Findings"
+  },
+  {
+   "description": "WHAT WAS WRONG. Blank means the walk was clean — which is a positive statement and the commonest one. Anything here routes the record to Corrective Action Required and raises a Critical alert, so write what was actually seen: 'no smoke detector in the back bedroom' is a finding, 'needs attention' is not.",
+   "fieldname": "findings",
+   "fieldtype": "Long Text",
+   "label": "Findings"
+  },
+  {
+   "fieldname": "corrective_section",
+   "fieldtype": "Section Break",
+   "label": "Corrective Action"
+  },
+  {
+   "description": "What is going to be done about it, and by when. An operation is judged on closing findings, not on having none.",
+   "fieldname": "corrective_action",
+   "fieldtype": "Small Text",
+   "label": "Corrective Action"
+  },
+  {
+   "fieldname": "corrective_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The day the finding was actually fixed. Setting it takes the Critical alert off the calendar; a later clean inspection of the same unit does the same thing without anybody having to remember this field.",
+   "fieldname": "corrective_action_closed",
+   "fieldtype": "Date",
+   "label": "Corrective Action Closed"
+  },
+  {
+   "description": "What was done, and what proves it. 'Fixed' is what an auditor is trained to disbelieve.",
+   "fieldname": "closure_note",
+   "fieldtype": "Small Text",
+   "label": "Closure Note"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence"
+  },
+  {
+   "description": "The inspector's signature capture. What turns a row somebody typed into an attestation somebody made.",
+   "fieldname": "signature",
+   "fieldtype": "Attach",
+   "label": "Signature"
+  },
+  {
+   "description": "Photographs from the walk. A clean inspection with photographs is defensible; a clean inspection with nothing attached is a sentence.",
+   "fieldname": "photos",
+   "fieldtype": "Table",
+   "label": "Photos",
+   "options": "Farm Task Evidence"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Housing Inspection",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "unit,inspection_date,workflow_state",
+ "sort_field": "inspection_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "unit",
+ "track_changes": 1
+}

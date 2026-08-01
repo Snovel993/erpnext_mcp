@@ -247,7 +247,37 @@
   "allow_list_audit_packet_types",
   "drift_section",
   "allow_find_drifted_je_attributions",
-  "allow_repair_drifted_je_attributions"
+  "allow_repair_drifted_je_attributions",
+  "dispatch_read_section",
+  "allow_list_available_tasks",
+  "allow_list_dispatched_tasks",
+  "allow_list_dispatch_board",
+  "allow_get_farm_task",
+  "dispatch_read_col",
+  "allow_create_farm_task",
+  "allow_assign_farm_task",
+  "allow_claim_farm_task",
+  "allow_start_farm_task",
+  "dispatch_write_col",
+  "allow_complete_farm_task",
+  "allow_reject_farm_task",
+  "allow_generate_tasks_from_compliance_alerts",
+  "records_read_section",
+  "allow_list_housing_inspections",
+  "allow_get_housing_inspection",
+  "allow_list_detector_tests",
+  "allow_get_detector_test",
+  "records_read_col",
+  "allow_list_water_tests",
+  "allow_get_water_test",
+  "records_write_section",
+  "allow_create_housing_inspection",
+  "allow_update_housing_inspection",
+  "allow_create_detector_test",
+  "allow_update_detector_test",
+  "records_write_col",
+  "allow_create_water_test",
+  "allow_update_water_test"
  ],
  "fields": [
   {
@@ -1828,6 +1858,202 @@
    "fieldname": "allow_repair_drifted_je_attributions",
    "fieldtype": "Check",
    "label": "Repair Drifted JE Attributions"
+  },
+  {
+   "fieldname": "dispatch_read_section",
+   "fieldtype": "Section Break",
+   "label": "Farm Task Dispatch"
+  },
+  {
+   "default": "1",
+   "description": "READ. The pool: every task a worker could pick up right now, with their concurrent-claim count. Self-pick and Either only — dispatched work is not in the pool by design.",
+   "fieldname": "allow_list_available_tasks",
+   "fieldtype": "Check",
+   "label": "List Available Tasks"
+  },
+  {
+   "default": "1",
+   "description": "READ. What one worker is holding, and their history on request.",
+   "fieldname": "allow_list_dispatched_tasks",
+   "fieldtype": "Check",
+   "label": "List Dispatched Tasks"
+  },
+  {
+   "default": "1",
+   "description": "READ. The Kanban as JSON: every task grouped by state, with the open Critical work and how much of the board came from a compliance alert.",
+   "fieldname": "allow_list_dispatch_board",
+   "fieldtype": "Check",
+   "label": "Dispatch Board"
+  },
+  {
+   "default": "1",
+   "description": "READ. One task in full — its evidence contract, every assignment and rejection, the record its completion produced, and whether the alert it came from has since auto-dismissed.",
+   "fieldname": "allow_get_farm_task",
+   "fieldtype": "Check",
+   "label": "Get Farm Task"
+  },
+  {
+   "fieldname": "dispatch_read_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Raise one piece of work. REFUSES without an evidence contract saying what closing it requires, and refuses a creates_record naming a DocType this site does not have.",
+   "fieldname": "allow_create_farm_task",
+   "fieldtype": "Check",
+   "label": "Create Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Send a named person to a task. Taking work off somebody who already holds it needs reassign=true and a reason, written onto their assignment.",
+   "fieldname": "allow_assign_farm_task",
+   "fieldtype": "Check",
+   "label": "Assign Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. A worker takes a task from the pool. Capped at three concurrent claims per worker — a hoarding limit, not a productivity one. Refuses Dispatched work.",
+   "fieldname": "allow_claim_farm_task",
+   "fieldtype": "Check",
+   "label": "Claim Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Clock in on a claimed task. This is the clock-in for the TASK, not the shift, and starting twice is refused.",
+   "fieldname": "allow_start_farm_task",
+   "fieldtype": "Check",
+   "label": "Start Farm Task"
+  },
+  {
+   "fieldname": "dispatch_write_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Finish a task, check the evidence against its contract, and write the compliance record it promised. REFUSES a submission short of the contract, and refuses a completion filed by anybody other than the worker holding the task.",
+   "fieldname": "allow_complete_farm_task",
+   "fieldtype": "Check",
+   "label": "Complete Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Hand a task back with a MANDATORY reason and return it to the pool. The rejected assignment stays: it is the proof somebody was sent and could not do it.",
+   "fieldname": "allow_reject_farm_task",
+   "fieldtype": "Check",
+   "label": "Reject Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. THE BRIDGE. Turns every open Compliance Alert into a dispatchable Farm Task carrying the evidence its completion has to produce. Idempotent — a second run finds the tasks the first raised and skips them.",
+   "fieldname": "allow_generate_tasks_from_compliance_alerts",
+   "fieldtype": "Check",
+   "label": "Generate Tasks from Compliance Alerts"
+  },
+  {
+   "fieldname": "records_read_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance Records"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every habitability walk, with the ones that found something and nobody closed named separately.",
+   "fieldname": "allow_list_housing_inspections",
+   "fieldtype": "Check",
+   "label": "List Housing Inspections"
+  },
+  {
+   "default": "1",
+   "description": "READ. One walk in full, with its evidence and the unit's whole inspection history.",
+   "fieldname": "allow_get_housing_inspection",
+   "fieldtype": "Check",
+   "label": "Get Housing Inspection"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every smoke and CO detector test, with the failures and the buildings that have no detector at all.",
+   "fieldname": "allow_list_detector_tests",
+   "fieldtype": "Check",
+   "label": "List Detector Tests"
+  },
+  {
+   "default": "1",
+   "description": "READ. One test in full, with the building's testing history.",
+   "fieldname": "allow_get_detector_test",
+   "fieldtype": "Check",
+   "label": "Get Detector Test"
+  },
+  {
+   "fieldname": "records_read_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "1",
+   "description": "READ. Every agricultural water sample, with the contaminated ones nobody has resolved.",
+   "fieldname": "allow_list_water_tests",
+   "fieldtype": "Check",
+   "label": "List Water Tests"
+  },
+  {
+   "default": "1",
+   "description": "READ. One sample in full: laboratory, results, report and the zone's testing history.",
+   "fieldname": "allow_get_water_test",
+   "fieldtype": "Check",
+   "label": "Get Water Test"
+  },
+  {
+   "fieldname": "records_write_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance Records — Write"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record one habitability walk and move the unit's inspection date forward, which is what dismisses housing_inspection_overdue. The state is computed from the findings, never chosen.",
+   "fieldname": "allow_create_housing_inspection",
+   "fieldtype": "Check",
+   "label": "Record Housing Inspection"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Correct or close one walk. Closing a finding requires a note saying what was actually done.",
+   "fieldname": "allow_update_housing_inspection",
+   "fieldtype": "Check",
+   "label": "Update Housing Inspection"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record a smoke and CO detector test and move the unit's detector dates forward. A Fail still writes the date; Not Present does not, because there is nothing to have tested.",
+   "fieldname": "allow_create_detector_test",
+   "fieldtype": "Check",
+   "label": "Record Detector Test"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Correct a detector test or close its fault.",
+   "fieldname": "allow_update_detector_test",
+   "fieldtype": "Check",
+   "label": "Update Detector Test"
+  },
+  {
+   "fieldname": "records_write_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record one agricultural water sample and move BOTH the zone's and the parent block's test date forward. An unreadable result is not a clean result.",
+   "fieldname": "allow_create_water_test",
+   "fieldtype": "Check",
+   "label": "Record Water Test"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. File the laboratory's answer against a sample taken days earlier, or close a contamination finding.",
+   "fieldname": "allow_update_water_test",
+   "fieldtype": "Check",
+   "label": "Update Water Test"
   }
  ],
  "index_web_pages_for_search": 0,

@@ -1,5 +1,19 @@
 # SPDX-License-Identifier: MIT
-"""The nine compliance rules, and the state that makes each one ripe.
+"""The eleven compliance rules, and the state that makes each one ripe.
+
+v0.16.0 ADDED THE LAST TWO, AND THEY ARE A DIFFERENT SHAPE FROM THE FIRST NINE.
+Rules 1-9 fire on IGNORANCE: nobody has walked this cabin, nobody has tested this
+water, nobody has renewed this licence. Rules 10 and 11 fire on KNOWLEDGE —
+somebody went and looked and found something — and they exist because Sprint 8
+gave the operation a way to go and look. A framework that could only tell you
+what had not been checked, and had nothing to say when the check came back bad,
+would have been half a compliance system.
+
+Both of the new ones close by being SUPERSEDED rather than by being ticked: a
+cabin re-inspected with nothing found, a water source re-sampled clean. That is
+deliberate. The work that makes the finding untrue is the work anybody would
+want done, so it is the work that silences the alert.
+
 
 EVERY RULE IN THIS FILE READS STATE AND NONE OF THEM READS A CALENDAR. That is
 the whole point of the file, so it is worth being concrete about what the
@@ -43,6 +57,7 @@ from __future__ import annotations
 import frappe
 
 from .. import compat
+from ..records import CORRECTIVE_ACTION_REQUIRED, RECORDED
 from .base import (
 	SEVERITY_CRITICAL,
 	SEVERITY_INFO,
@@ -823,5 +838,211 @@ register(
 			"audit are one conversation, not five problems."
 		),
 		scan=_scan_corrective_actions,
+	)
+)
+
+
+# ── 10. housing_corrective_action_open ──────────────────────────────────────
+#: The two camp records a finding can come out of, and how to describe one. Both
+#: are read by one rule rather than two, because a cabin with a water stain and a
+#: cabin with a dead CO detector are the same conversation with the same person
+#: on the same walk round the camp, and splitting them into two alert types would
+#: split one afternoon's work across two lists.
+_CAMP_RECORDS = (
+	("Housing Inspection", "inspection_date", "the habitability inspection", SEVERITY_CRITICAL),
+	("Detector Test", "test_date", "the detector test", SEVERITY_CRITICAL),
+)
+
+
+def _scan_camp_corrective_actions(context: dict) -> list:
+	"""Camp records that found something nobody has closed or superseded.
+
+	THE GATE IS WHETHER THE FINDING IS STILL TRUE, and there are two ways for it
+	to stop being true. Somebody can close it by hand — `corrective_action_closed`
+	with a note saying what was done. Or a LATER CLEAN RECORD for the same unit
+	can supersede it, which is the one that matters in practice: a cabin
+	re-inspected in September with nothing found says more about July's water
+	stain than a checkbox ever will, and it requires nobody to remember a field.
+
+	So this fires on a finding that is open AND unsuperseded, and goes quiet by
+	itself the moment either happens. That is the difference between a compliance
+	rule and a task list somebody has to tidy.
+	"""
+	today = context["today"]
+	out = []
+	for doctype, date_field, what, severity in _CAMP_RECORDS:
+		if not compat.doctype_exists(doctype):
+			continue
+		rows = _rows(
+			doctype,
+			_company_filter({"workflow_state": CORRECTIVE_ACTION_REQUIRED}, context.get("company") or ""),
+			("name", "unit", "company", date_field, "workflow_state", "corrective_action_closed", "findings"),
+		)
+		# Every clean record per unit, so "superseded" is one pass rather than a
+		# query per finding. A camp with fifty cabins and four years of history is
+		# two queries, not four hundred.
+		clean = _clean_records_by_unit(doctype, date_field, context.get("company") or "")
+
+		for row in rows:
+			if str(row.get("corrective_action_closed") or "").strip():
+				continue
+			found_on = str(row.get(date_field) or "")
+			later = [date for date in clean.get(str(row.get("unit") or ""), ()) if date > found_on]
+			if later:
+				continue
+			open_days = days_since(today, found_on)
+			detail = str(row.get("findings") or "").strip() or "a fault was recorded with no detail"
+			out.append(
+				Observation(
+					source_doctype=doctype,
+					source_docname=row["name"],
+					message=(
+						f"{row.get('unit')} — {what} on {found_on or 'an unrecorded date'} found: "
+						f"{detail[:200]}"
+						+ (f". Open {open_days} day(s)" if open_days is not None else "")
+						+ ". Somebody sleeps in this building tonight. It closes when the fault is "
+						"fixed and a fresh clean record is written for the same unit, or when the "
+						"corrective action is closed by hand with a note saying what was done."
+					),
+					severity=severity,
+					due_date="",
+					company=str(row.get("company") or ""),
+					category="Housing",
+				)
+			)
+	return out
+
+
+def _clean_records_by_unit(doctype: str, date_field: str, company: str) -> dict:
+	"""unit → every date on which a CLEAN record was written for it."""
+	out: dict = {}
+	for row in _rows(
+		doctype,
+		_company_filter({"workflow_state": RECORDED}, company),
+		("name", "unit", date_field),
+	):
+		out.setdefault(str(row.get("unit") or ""), []).append(str(row.get(date_field) or ""))
+	return out
+
+
+register(
+	Rule(
+		key="housing_corrective_action_open",
+		title="A camp inspection or detector test found something nobody has fixed",
+		category="Housing",
+		requires=("Housing Inspection",),
+		framework="OAR 437-004-1120 agricultural labor housing; 29 CFR 1910.142; FSMA Subpart L; ORS 479",
+		purpose=(
+			"The other half of doing the work. Sprint 7 could say a cabin had not been walked; "
+			"this is what happens when somebody walks it and finds a dead CO detector."
+		),
+		kairotic_gate=(
+			"Fires on a finding that is STILL TRUE, and there are exactly two ways for it to "
+			"stop being true — both of which silence this rule by themselves. Somebody closes "
+			"the corrective action by hand with a note saying what was done; or a later CLEAN "
+			"record for the same unit supersedes it, which is the one that happens in practice "
+			"and requires nobody to remember a field. A cabin re-inspected in September with "
+			"nothing found says more about July's water stain than a checkbox does. Drafts raise "
+			"nothing — a draft is a note, not evidence."
+		),
+		scan=_scan_camp_corrective_actions,
+	)
+)
+
+
+# ── 11. water_test_contamination ────────────────────────────────────────────
+def _scan_water_contamination(context: dict) -> list:
+	"""Water samples that came back dirty, or unreadable, and have not been re-tested.
+
+	Same gate as the camp rule and the same two exits: closed by hand, or
+	superseded by a later clean sample from the same zone. The second is what a
+	real operation does — treat the line, flush it, re-sample — and the rule going
+	quiet on its own is what makes the re-sample worth doing rather than worth
+	remembering to record.
+	"""
+	today = context["today"]
+	if not compat.doctype_exists("Water Test"):
+		return []
+	rows = _rows(
+		"Water Test",
+		_company_filter({"workflow_state": CORRECTIVE_ACTION_REQUIRED}, context.get("company") or ""),
+		(
+			"name",
+			"source",
+			"block",
+			"company",
+			"test_date",
+			"coliform_result",
+			"ecoli_result",
+			"contamination_detected",
+			"corrective_action_closed",
+			"findings",
+		),
+	)
+	clean: dict = {}
+	for row in _rows(
+		"Water Test",
+		_company_filter({"workflow_state": RECORDED}, context.get("company") or ""),
+		("name", "source", "test_date"),
+	):
+		clean.setdefault(str(row.get("source") or ""), []).append(str(row.get("test_date") or ""))
+
+	out = []
+	for row in rows:
+		if str(row.get("corrective_action_closed") or "").strip():
+			continue
+		sampled = str(row.get("test_date") or "")
+		if [date for date in clean.get(str(row.get("source") or ""), ()) if date > sampled]:
+			continue
+		open_days = days_since(today, sampled)
+		detail = (
+			f"coliform {row.get('coliform_result') or 'unrecorded'}, "
+			f"E. coli {row.get('ecoli_result') or 'unrecorded'}"
+		)
+		out.append(
+			Observation(
+				source_doctype="Water Test",
+				source_docname=row["name"],
+				message=(
+					f"{row.get('source')}"
+					+ (f" (block {row.get('block')})" if row.get("block") else "")
+					+ f" was sampled on {sampled or 'an unrecorded date'} and the result was not "
+					f"clean: {detail}"
+					+ (f". Open {open_days} day(s)" if open_days is not None else "")
+					+ ". This is agricultural water going onto a crop being harvested, so FSMA "
+					"Produce Safety Rule Subpart E is engaged and the next application is not "
+					"defensible until the source is treated or switched and a clean sample comes "
+					"back."
+				),
+				severity=SEVERITY_CRITICAL,
+				due_date="",
+				company=str(row.get("company") or ""),
+				category="Water and Sanitation",
+			)
+		)
+	return out
+
+
+register(
+	Rule(
+		key="water_test_contamination",
+		title="An agricultural water source came back contaminated and has not been re-tested",
+		category="Water and Sanitation",
+		requires=("Water Test",),
+		framework="FSMA Produce Safety Rule 21 CFR 112 Subpart E, including the 112.44(b) criterion",
+		purpose=(
+			"A stale water test is ignorance and this is knowledge. The stale rule stops firing "
+			"the moment a sample is taken; this one starts if the sample says the water is dirty."
+		),
+		kairotic_gate=(
+			"Fires on a result that is still the LATEST word on that zone. A later clean sample "
+			"from the same source SUPERSEDES it, which is exactly what treating the line and "
+			"re-sampling produces — so the rule rewards the work rather than the paperwork. "
+			"Closing the corrective action by hand also silences it. An UNREADABLE result counts "
+			"as not clean and fires here, because a result nobody can interpret is not evidence "
+			"that the water is safe; treating it as clean is how a compliance file becomes a "
+			"clean record of nothing."
+		),
+		scan=_scan_water_contamination,
 	)
 )

@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-31 18:00:00.000000",
+ "description": "One piece of proof filed against a task completion or a compliance record: a photograph, a signature capture, a laboratory report. The row exists so the proof has a caption and a time beside it — a folder of untitled photographs is not evidence, it is a folder.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "evidence_type",
+  "file",
+  "evidence_col",
+  "file_url",
+  "captured_on",
+  "detail_section",
+  "caption"
+ ],
+ "fields": [
+  {
+   "default": "Photo",
+   "description": "What this is. The type is what lets a completion be checked against its evidence contract without opening anything: a task requiring a signature is not satisfied by four more photographs of the same cabin.",
+   "fieldname": "evidence_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Type",
+   "options": "Photo\nSignature\nDocument\nLab Report\nVideo\nOther",
+   "reqd": 1
+  },
+  {
+   "description": "The File record. Files arrive through stage_file_chunk and commit_staged_file, so a photograph taken on a phone in a cabin with no signal gets there in pieces and survives a worker restart on the way.",
+   "fieldname": "file",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "File",
+   "options": "File"
+  },
+  {
+   "fieldname": "evidence_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Where the bytes are, copied off the File when the row is written. Kept because a packet generator that had to resolve every File to render a URL would be a query per photograph, and because it is what stays readable if the File is ever moved.",
+   "fieldname": "file_url",
+   "fieldtype": "Data",
+   "label": "File URL"
+  },
+  {
+   "description": "When the evidence was captured, which is not always when it was uploaded — a camp with no signal uploads in the evening.",
+   "fieldname": "captured_on",
+   "fieldtype": "Datetime",
+   "label": "Captured"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What it shows. 'North wall, water stain under the window' is evidence; 'IMG_4471' is a filename.",
+   "fieldname": "caption",
+   "fieldtype": "Small Text",
+   "label": "Caption"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-31 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Task Evidence",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

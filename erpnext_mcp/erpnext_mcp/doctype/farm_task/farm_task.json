@@ -1,0 +1,275 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-07-31 18:00:00.000000",
+ "description": "One piece of work somebody has to go and do, carrying the evidence its completion has to produce. Compliance-native from the first field: a task cannot be created without stating what evidence closing it requires, and completing it writes the compliance record that dismisses the alert it came from.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "task_name",
+  "task_type",
+  "state",
+  "urgency",
+  "identity_col",
+  "company",
+  "location_doctype",
+  "location",
+  "skill_required",
+  "dispatch_section",
+  "dispatch_mode",
+  "assigned_to",
+  "assigned_to_name",
+  "dispatch_col",
+  "estimated_duration_minutes",
+  "source_section",
+  "source_alert",
+  "source_workorder",
+  "evidence_section",
+  "evidence_required",
+  "record_section",
+  "creates_record",
+  "produced_record",
+  "record_col",
+  "creates_record_data",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What a foreman calls it out loud: 'Habitability walk — MC-Cabin-01'. The docname is a sequence, because the same walk happens again next year and a name-as-key would collide with its own history.",
+   "fieldname": "task_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Task",
+   "reqd": 1
+  },
+  {
+   "description": "The kind of work, which is what a skill filter and a dispatch board group on. Chosen so a whole type can be worked in one trip round the operation.",
+   "fieldname": "task_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Task Type",
+   "options": "Inspection\nTest\nSpray\nRepair\nHarvest\nTraining\nCompliance-Audit\nHousing-Cleanup\nWater-Sampling\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "description": "Where the work has got to. Draft is not yet dispatchable; Available is in the pool; Claimed has somebody's name on it; In-Progress means they are stood in front of it; Awaiting-Review means it was done AND the record it produced needs somebody to look at it; Completed, Rejected and Cancelled are terminal. This is the field the Kanban board columns are built from.",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "State",
+   "options": "Draft\nAvailable\nClaimed\nIn-Progress\nAwaiting-Review\nCompleted\nRejected\nCancelled",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Normal",
+   "description": "How soon. Critical is reserved for work whose absence is already unlawful — an expired licence, a failed CO detector in an occupied cabin. A board where everything is Critical is a board nobody reads.",
+   "fieldname": "urgency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Urgency",
+   "options": "Low\nNormal\nHigh\nCritical",
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Whose operation the work belongs to. Filled in from the location where the location knows, because a dispatch board is read one company at a time.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "Which register the place is in: Parcel, Field, Irrigation Zone or Housing Unit. A Link to DocType rather than free text, so the Dynamic Link below resolves and the Desk can click through to the ground the work happens on.",
+   "fieldname": "location_doctype",
+   "fieldtype": "Link",
+   "label": "Location DocType",
+   "options": "DocType",
+   "search_index": 1
+  },
+  {
+   "description": "The cabin, block, zone or parcel. A task with no location is legitimate — a certificate renewal happens at a desk — but a task about a place that does not name it cannot be routed to whoever is already stood there.",
+   "fieldname": "location",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Location",
+   "options": "location_doctype",
+   "search_index": 1
+  },
+  {
+   "description": "What somebody has to be able to do: 'camp_maintenance', 'applicator_license', 'water_sampling', 'electrical_licensed'. Free text, because the skills an operation recognises are its own — the pool query matches on it, it is not validated against a list this app invented.",
+   "fieldname": "skill_required",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Skill Required",
+   "search_index": 1
+  },
+  {
+   "fieldname": "dispatch_section",
+   "fieldtype": "Section Break",
+   "label": "Dispatch"
+  },
+  {
+   "default": "Either",
+   "description": "Dispatched means a foreman picks the person — specialised, licensed or safety-critical work where the named holder matters. Self-pick means workers take it from the pool. Either means both doors are open, which is right for most general labour.",
+   "fieldname": "dispatch_mode",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Dispatch Mode",
+   "options": "Either\nDispatched\nSelf-pick"
+  },
+  {
+   "description": "The Employee id currently holding this task, blank while it sits in the pool. DATA AND NOT A LINK, for the same reason Housing Assignment.employee is: Frappe HR is not a dependency of this app, and a Link would make the whole doctype fail to migrate on a site without it. It is validated against the Employee register wherever there is one.",
+   "fieldname": "assigned_to",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Assigned To",
+   "search_index": 1
+  },
+  {
+   "fieldname": "assigned_to_name",
+   "fieldtype": "Data",
+   "label": "Assigned To (Name)"
+  },
+  {
+   "fieldname": "dispatch_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "How long it should take, in minutes. Used to plan a day, and compared against the actual on the assignment afterwards — which is how an estimate stops being a guess somebody made once.",
+   "fieldname": "estimated_duration_minutes",
+   "fieldtype": "Int",
+   "label": "Estimated Duration (Minutes)"
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Where This Came From"
+  },
+  {
+   "description": "The Compliance Alert that produced this task, blank when a foreman raised it out of the operation's own needs. THIS FIELD IS WHAT CLOSES THE LOOP: it is what generate_tasks_from_compliance_alerts checks to stay idempotent, and it is what lets an operation report what fraction of its alerts ever became work somebody was actually sent to do.",
+   "fieldname": "source_alert",
+   "fieldtype": "Link",
+   "label": "Source Alert",
+   "options": "Compliance Alert",
+   "search_index": 1
+  },
+  {
+   "description": "A work order in some other system this task answers. Data rather than a Link because the doctype it would point at does not exist yet on any site; when it does, this becomes the migration's join column.",
+   "fieldname": "source_workorder",
+   "fieldtype": "Data",
+   "label": "Source Work Order"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence Required to Close It"
+  },
+  {
+   "default": "{}",
+   "description": "JSON: which of photos, signature, findings_text and witness a completion has to carry. REQUIRED AT CREATION AND THE WHOLE POINT OF THE DOCTYPE. A task that does not say what closing it requires is a task that gets closed with a tick in a box, and a tick in a box is what an auditor is trained to disbelieve. complete_farm_task refuses a submission that does not meet it.",
+   "fieldname": "evidence_required",
+   "fieldtype": "Code",
+   "label": "Evidence Required",
+   "options": "JSON",
+   "reqd": 1
+  },
+  {
+   "fieldname": "record_section",
+   "fieldtype": "Section Break",
+   "label": "What Completing It Produces"
+  },
+  {
+   "description": "The DocType this task's completion creates: 'Housing Inspection', 'Detector Test', 'Water Test'. Refused at creation if the site does not have it, because a task promising a record nobody can write is a promise that fails in front of a worker stood in a cabin.",
+   "fieldname": "creates_record",
+   "fieldtype": "Data",
+   "label": "Creates Record"
+  },
+  {
+   "description": "The record the completion actually produced, once it has. Read with `creates_record` as its doctype.",
+   "fieldname": "produced_record",
+   "fieldtype": "Data",
+   "label": "Produced Record",
+   "read_only": 1
+  },
+  {
+   "fieldname": "record_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "{}",
+   "description": "JSON: the fields to put on the record the completion produces, for anything the task already knows and the worker should not have to retype — the laboratory a water sample goes to, the unit an inspection is of. Merged under whatever the completion itself supplies.",
+   "fieldname": "creates_record_data",
+   "fieldtype": "Code",
+   "label": "Creates Record Data",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Instructions"
+  },
+  {
+   "description": "What the worker needs to know before they get there: where the key is, which breaker, who to ask. This is the field that decides whether a task is doable by somebody who was not in the room when it was written.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Instructions"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Task",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "task_type,state,location,assigned_to",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "task_name",
+ "track_changes": 1
+}

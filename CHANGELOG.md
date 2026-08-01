@@ -3,6 +3,258 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.16.0 — 2026-07-31
+
+**Sprint 8: the operational half of the compliance framework.** Twenty-three new
+tools, six new DocTypes, two new alert rules and a Kanban board — and one
+sentence that says why the release exists:
+
+> Sprint 7 could tell an operation that fifty-four things were wrong. Nothing in
+> it could send anybody to fix one.
+
+That is not a missing feature; it is a missing half. A compliance calendar whose
+alerts have no actionable path is a list somebody reads on a Tuesday and
+transcribes onto a whiteboard, and by August the whiteboard and the calendar
+disagree. v0.16.0 closes the loop: an alert becomes a dispatchable task, the task
+carries the evidence its completion must produce, completing it writes the
+compliance record, the record moves the operational register, and the alert
+auto-dismisses on the next sweep because its condition is no longer true.
+
+**Nothing in this release dismisses an alert.** That is the design, stated as a
+prohibition because it is the thing that would be easiest to get wrong. The only
+honest way an alert goes away is to change the world and let the sweep notice —
+anything else is a system where the calendar and the camp disagree and the
+calendar is the one that looks clean.
+
+---
+
+## Feature A — Farm Task Dispatch: FSM-style crew dispatch, compliance-native from day one
+
+Three DocTypes — `Farm Task`, `Farm Task Assignment` and the `Farm Task
+Evidence` child table — and eleven tools over them.
+
+**`evidence_required` IS MANDATORY ON THE DOCTYPE, AND IT IS THE WHOLE DESIGN.**
+A task cannot be created without stating, as JSON, what closing it obliges
+somebody to produce: photographs, a signature, a statement of findings, a
+witness. There is no path to a task somebody can close by saying they did it.
+The controller refuses a blank contract, refuses one whose every requirement is
+false, and refuses a key it does not recognise — because `{"photo": true}` asks
+for nothing, refuses nothing, and looks exactly like a photograph requirement
+right up until the audit.
+
+`complete_farm_task` then refuses a submission that does not meet it, naming each
+requirement that is short. **That refusal is the point of the whole doctype.**
+
+**DUAL MODE, BECAUSE ONE MODE IS WRONG FOR HALF THE WORK.** A habitability walk
+is general labour: anybody with camp-maintenance skills takes it from the pool,
+and making a foreman assign fifty-four of them by hand is how fifty-four of them
+do not happen. Fitting a CO detector, spraying under an applicator licence, or
+anything where the named holder matters is *dispatched* — somebody is SENT, by
+name, and the assignment records who sent them. `claim_farm_task` refuses a
+Dispatched task outright: self-picking one would put the wrong person's name on a
+regulated record.
+
+**THE CONCURRENT-CLAIM LIMIT IS A HOARDING LIMIT, NOT A PRODUCTIVITY ONE.** Three
+tasks at once per worker. Completing or rejecting one frees a slot in the same
+instant, so it never stands between somebody and their next job — only between
+them and their fourth simultaneous one. Without it one worker empties the pool
+onto their own name and the board looks worked.
+
+**REJECTION IS A FIRST-CLASS STATE WITH A MANDATORY REASON.** "Nobody got to it
+and dispatch never followed up" is the answer nobody can defend. `reject_farm_task`
+turns it into "the ladder is broken and I could not reach the detector", the task
+goes back to the pool, and **the rejected assignment stays on the record** — it is
+the proof somebody was sent, went, and could not do it, which answers an auditor
+in a way an absence never does.
+
+**AWAITING-REVIEW IS NOT A SECOND APPROVAL STEP.** A completion lands there when
+the compliance record it produced found something. The work IS done and the
+register IS updated — what needs a person is the finding, and the Critical alert
+raised against the record is how they hear about it. A clean completion goes
+straight to Completed, because routing clean work through a review queue is how a
+review queue stops being read.
+
+### Two decisions worth writing down
+
+**`Farm Task Assignment` is a separate DocType, not a child table.** The Sprint 8
+note left the choice open and asked for whichever shape survives the class of bug
+v0.14.0 found in chunked uploads. It is the same arithmetic and it comes out the
+same way — but the deciding factor is not the quadratic write. It is the query the
+dispatch board runs constantly: *everything worker 42 is holding*. Against a child
+table that is a scan of every Farm Task on the site, unnesting every history,
+filtering in Python, because a child row's parent is the only indexed way in and
+the worker is not the parent. Against a DocType it is one indexed read. The
+concurrent-claim check asks that question on every claim, by every worker, all
+morning. (`evidence_files` IS a child table, and that is consistent: written once
+at completion, a handful of rows, only ever read with its parent.)
+
+**The docname is `FT-YYYY-MM-<seq>`, not the task name.** The specification asked
+for `task_name` as the docname and this is the one place the implementation
+departs from it. A habitability walk on MC-Cabin-01 happens *every year*: a
+docname built from the task's name collides with its own history the second time
+it is raised, and fifty-four tasks generated from fifty-four alerts in one call
+have to produce fifty-four distinct names with no human in the loop. So
+`task_name` stays as the title a foreman reads on the board, and the key is a
+sequence — carrying the month, like `Housing Assignment`, because farm work
+arrives in the same fortnight every year.
+
+### The dispatch board
+
+`/app/farm-task/view/kanban/Farm Task Dispatch` — a Frappe **Kanban Board**,
+built by the installer, with one column per state including Rejected. A foreman
+drags a card and Frappe writes the field, on desktop and on a phone, with the
+site's own permissions and theme. **There is no custom UI in this release and
+none is needed.** A landing Workspace at `/app/farm-task-dispatch` is built
+alongside it where the site has the doctype. `list_dispatch_board` returns the
+same columns as JSON for a caller that cannot see a screen.
+
+Built like the Compliance Command Center and for the same reason: an existing
+board is left exactly as it is, including every column somebody has since
+reordered or deleted. Not shipped as `fixtures`, which `test_hooks.py` forbids
+by name.
+
+---
+
+## Feature B — Housing Inspection, Detector Test and Water Test
+
+Three DocTypes and twelve tools. These are the records a task completion
+produces, and each one is the evidence behind a specific obligation: OAR
+437-004-1120 and 29 CFR 1910.142 for the habitability walk, ORS 479 and FSMA
+Subpart L for the detectors, FSMA Subpart E for the water.
+
+**THE WORKFLOW BRANCHES ON WHAT WAS FOUND, NOT ON WHO PRESSED WHAT.**
+
+```
+findings blank    →  Recorded
+findings present  →  Corrective Action Required
+```
+
+A clean inspection is not something anybody should have to route or approve. It
+happened, it was clean, the unit's inspection date moves forward, and the alert
+that asked for it dismisses itself. The only records that need a human afterwards
+are the ones that found something.
+
+Deriving the state from the findings rather than from a transition somebody
+chooses is what makes it honest: **a worker who has typed "water stain, north
+wall, spreading" is not offered the option of marking the walk as passed**,
+because the state is recomputed from the text on every save. `workflow_state` is
+the framework's own field name, so a site that wants Frappe's native Workflow
+layered on top attaches one and `advance_workflow` drives it — but the branch
+ships working, because a branch that needs a Workflow record configured first is
+a branch that is off on every site nobody configured.
+
+**THE WRITE-BACK LIVES IN THE CONTROLLER, NOT IN THE TOOL.** A record typed into
+the Desk by a camp manager who has never heard of MCP updates the register
+exactly as one written through a tool does. A compliance system where the
+evidence and the register agree only when the right door was used disagrees with
+itself by August.
+
+**IT ONLY EVER MOVES A DATE FORWARD.** March's walk entered in July is filed as
+evidence and does not drag a register that already knows about June — that would
+re-raise an alert about work which has since been done.
+
+### The judgements inside each one
+
+**A failed detector test still writes the date.** The stale-detector alert asks
+one question — *does anybody know whether this works* — and a Fail answers it. The
+answer is bad, so the record routes to Corrective Action Required and raises a
+Critical alert of its own; but the ignorance is over, and leaving the date blank
+would have the calendar saying "nobody has tested this" about a building somebody
+tested this morning.
+
+**"Not Present" writes no date**, for the mirror reason: there is nothing to have
+tested, so nothing is known. It is also a finding in its own right — a building
+somebody sleeps in with no CO detector is the most dangerous state this app
+records.
+
+**Replacement needed raises a Farm Task.** A checkbox with nobody dispatched
+against it is a finding that survives until next year's test rediscovers it. This
+is the one place a compliance record creates work rather than merely recording
+it, and it is deliberate.
+
+**A Water Test writes TWO registers.** The sample came out of an Irrigation Zone,
+but `water_test_stale` reads the *block* — Subpart E is engaged by water
+contacting a crop, and the crop is on the block. A test filed only against the
+zone would leave the calendar calling ground untested whose water was tested last
+week.
+
+**AN UNREADABLE RESULT IS NOT A CLEAN RESULT.** A laboratory says the same thing
+eight ways — "Absent", "<1 MPN/100mL", "0", "Present", "12", "Positive" — so
+results are read by words first and numbers second, with generic E. coli compared
+against the FSMA 112.44(b) criterion of 126 CFU/100 mL. Where neither reading
+works, the record routes to Corrective Action Required and somebody has to go and
+look at the report. Treating an uninterpretable result as a pass is how a
+compliance file becomes a clean record of nothing.
+
+### Two new alert rules — the calendar learns to fire on knowledge
+
+`housing_corrective_action_open` and `water_test_contamination` bring the rule
+set to eleven, and they are a different shape from the first nine. Rules 1–9 fire
+on **ignorance**: nobody has walked this cabin, nobody has tested this water.
+These two fire on **knowledge** — somebody went and looked and found something —
+and they exist because Sprint 8 gave the operation a way to go and look.
+
+Both close by being **superseded** rather than ticked: a cabin re-inspected with
+nothing found, a water source re-sampled clean. The work that makes the finding
+untrue is the work anybody would want done, so it is the work that silences the
+alert. Closing the corrective action by hand also works, and needs a note saying
+what was actually done.
+
+---
+
+## Feature C — `generate_tasks_from_compliance_alerts`, the bridge
+
+One tool, and the reason the other twenty-two are worth having. It walks the open
+Compliance Alerts, maps each to the *shape* of work it actually is, and raises a
+Farm Task carrying the evidence its completion must produce.
+
+The mapping is a table of judgements, and the two that matter are `dispatch` and
+`evidence`. Self-pick for general labour; Dispatched wherever the named holder
+matters. Urgency follows severity — Critical becomes **High**, Warning becomes
+Normal, Info becomes Low — deliberately *not* the identity mapping, because a
+board where everything is Critical is a board nobody reads.
+
+**IDEMPOTENT BY CONSTRUCTION.** A task carries `source_alert`, so a second run
+finds the task the first raised and skips the alert. Re-running after fixing half
+the camp raises tasks only for the half still outstanding, which is the property
+that makes it safe to run whenever somebody wonders. Two people are never sent to
+walk the same cabin.
+
+**An alert type with no recipe is reported by name rather than turned into a
+generic task.** A task with a made-up evidence contract is worse than no task: it
+produces a compliance record nobody can rely on.
+
+**`dry_run` defaults FALSE**, unlike `dismiss_alert_bulk`, and the asymmetry is
+deliberate. A mis-typed filter there *hides* non-compliance and leaves an
+operation reading as clean while nothing was fixed. The failure mode here is too
+many idempotent tasks on a board, none of which changes an operational record.
+Gating the useful direction behind a second call would be safety theatre paid for
+by the person trying to get work dispatched.
+
+On a camp with twenty-seven cabins carrying stale detector tests and overdue
+inspections, one call produces fifty-four dispatchable tasks and the dispatch
+board fills.
+
+---
+
+## Also in this release
+
+- **The compliance calendar is unchanged and untouched.** No tool in this release
+  writes a Compliance Alert. Every dismissal in the loop happens because the
+  nightly sweep found a condition no longer true.
+- `install.py` gains a fifth idempotent job — the Kanban board and its workspace —
+  and `before_uninstall` names all six new DocTypes among the records an operator
+  would want back. `Farm Task Assignment` is called out specifically: the reason
+  somebody could *not* do a job exists nowhere else on the site.
+- The standalone harness learned two things a real bench already knew: one child
+  table can have several parents (`Farm Task Evidence` has four), and
+  `frappe.utils.time_diff_in_seconds` returns seconds between datetimes.
+
+**Full suite: 2864 pass, 0 fail.** README and `docs/tool-catalog.md` updated for
+v0.16.0. Version stamp bumped in `erpnext_mcp/__init__.py`.
+
+---
+
 ## 0.15.0 — 2026-07-31
 
 **Sprint 7: the compliance framework, and the cleanup of the attribution drift

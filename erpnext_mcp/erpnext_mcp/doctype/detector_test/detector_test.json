@@ -1,0 +1,245 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-31 18:00:00.000000",
+ "description": "One test of the smoke and CO detectors in one camp building. A propane heater in a cabin with an untested CO detector is how somebody dies in their sleep, which is why this is a record with photographs and not a tick on a clipboard.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "unit",
+  "test_date",
+  "workflow_state",
+  "keep_as_draft",
+  "identity_col",
+  "company",
+  "tester",
+  "tester_name",
+  "source_task",
+  "results_section",
+  "smoke_detector_result",
+  "co_detector_result",
+  "results_col",
+  "replacement_needed",
+  "replacement_task",
+  "findings_section",
+  "findings",
+  "corrective_section",
+  "corrective_action_closed",
+  "closure_note",
+  "evidence_section",
+  "photos",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The building. A passing test moves this unit's `smoke_detector_last_test` and `co_detector_last_test` forward, which is what takes `housing_detector_test_stale` off the calendar.",
+   "fieldname": "unit",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Housing Unit",
+   "options": "Housing Unit",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The day somebody pressed the button. Not the day it was typed up.",
+   "fieldname": "test_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Test Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "description": "COMPUTED, never chosen. Both detectors passing gives Recorded. A Fail, a detector that is Not Present, a replacement needed, or anything written in the findings routes it to Corrective Action Required — which raises a Critical alert that persists until the fault is closed or a later clean test of the same building supersedes it.",
+   "fieldname": "workflow_state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nRecorded\nCorrective Action Required",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "Hold this record in Draft. A Draft writes nothing to the unit and dismisses no alert.",
+   "fieldname": "keep_as_draft",
+   "fieldtype": "Check",
+   "label": "Keep as Draft"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The Employee id of whoever tested it. Data and not a Link because Frappe HR is not a dependency of this app.",
+   "fieldname": "tester",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Tester",
+   "search_index": 1
+  },
+  {
+   "fieldname": "tester_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tester Name"
+  },
+  {
+   "description": "The Farm Task whose completion produced this record, blank where somebody recorded the test directly.",
+   "fieldname": "source_task",
+   "fieldtype": "Link",
+   "label": "Source Task",
+   "options": "Farm Task",
+   "search_index": 1
+  },
+  {
+   "fieldname": "results_section",
+   "fieldtype": "Section Break",
+   "label": "Results"
+  },
+  {
+   "default": "Pass",
+   "description": "Pass, Fail or Not Present. NOT PRESENT IS NOT A PASS AND IS NOT AN OMISSION — it is the finding that there is no detector in a building somebody sleeps in, and it is why the option exists rather than leaving the field blank.",
+   "fieldname": "smoke_detector_result",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Smoke Detector",
+   "options": "Pass\nFail\nNot Present",
+   "reqd": 1
+  },
+  {
+   "default": "Pass",
+   "description": "Pass, Fail or Not Present. A cabin heated with propane and no working CO detector is the single most dangerous state this app records.",
+   "fieldname": "co_detector_result",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "CO Detector",
+   "options": "Pass\nFail\nNot Present",
+   "reqd": 1
+  },
+  {
+   "fieldname": "results_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "A unit needs new hardware. Set automatically when either detector failed or is not there, and settable by hand for one that passed but is out of its service life — most domestic detectors are rated for ten years.",
+   "fieldname": "replacement_needed",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Replacement Needed"
+  },
+  {
+   "description": "The Farm Task raised to go and fit the new detector. Written by create_detector_test, which raises one rather than leaving 'replacement needed' as a checkbox nobody is dispatched against.",
+   "fieldname": "replacement_task",
+   "fieldtype": "Link",
+   "label": "Replacement Task",
+   "options": "Farm Task",
+   "read_only": 1
+  },
+  {
+   "fieldname": "findings_section",
+   "fieldtype": "Section Break",
+   "label": "Findings"
+  },
+  {
+   "description": "Anything else seen while testing. Blank on a clean test.",
+   "fieldname": "findings",
+   "fieldtype": "Long Text",
+   "label": "Findings"
+  },
+  {
+   "fieldname": "corrective_section",
+   "fieldtype": "Section Break",
+   "label": "Corrective Action"
+  },
+  {
+   "description": "The day the detector was actually replaced or repaired. Setting it takes the Critical alert off the calendar; a later clean test of the same building does the same without anybody remembering this field.",
+   "fieldname": "corrective_action_closed",
+   "fieldtype": "Date",
+   "label": "Corrective Action Closed"
+  },
+  {
+   "fieldname": "closure_note",
+   "fieldtype": "Small Text",
+   "label": "Closure Note"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence"
+  },
+  {
+   "description": "Photographs of the test. A photograph of the detector with its test light on is worth more than the row it sits beside.",
+   "fieldname": "photos",
+   "fieldtype": "Table",
+   "label": "Photos",
+   "options": "Farm Task Evidence"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Detector Test",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "unit,test_date,workflow_state",
+ "sort_field": "test_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "unit",
+ "track_changes": 1
+}

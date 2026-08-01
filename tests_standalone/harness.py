@@ -699,6 +699,19 @@ ERPNEXT_SCHEMA = {
 		"module",
 	],
 	"Number Card Link": ["name", "card"],
+	# ── v0.16.0: the Farm Task Dispatch Kanban board and its landing page ────
+	"Kanban Board": [
+		"name",
+		"kanban_board_name",
+		"reference_doctype",
+		"field_name",
+		"private",
+		"show_labels",
+		"columns",
+	],
+	"Kanban Board Column": ["name", "column_name", "indicator", "status", "order"],
+	"Workspace": ["name", "title", "label", "module", "icon", "public", "is_hidden", "content", "shortcuts"],
+	"Workspace Shortcut": ["name", "label", "type", "link_to"],
 	"Client Script": [
 		"name",
 		"dt",
@@ -778,6 +791,10 @@ ERPNEXT_AUTONAME = {
 	"Dashboard": "field:dashboard_name",
 	"Dashboard Chart": "field:chart_name",
 	"Number Card": "field:label",
+	# Same for a Kanban Board, which is what makes `install_dispatch_board`
+	# idempotent: the second migrate finds "Farm Task Dispatch" and leaves it
+	# exactly as somebody has since arranged it.
+	"Kanban Board": "field:kanban_board_name",
 }
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
@@ -812,6 +829,13 @@ APP_DOCTYPES = {
 	"Audit Event": "audit_event",
 	"Audit Corrective Action": "audit_corrective_action",
 	"Compliance Alert": "compliance_alert",
+	# ── v0.16.0: Farm Task Dispatch and the records a completion produces ────
+	"Farm Task": "farm_task",
+	"Farm Task Assignment": "farm_task_assignment",
+	"Farm Task Evidence": "farm_task_evidence",
+	"Housing Inspection": "housing_inspection",
+	"Detector Test": "detector_test",
+	"Water Test": "water_test",
 }
 
 
@@ -1136,6 +1160,12 @@ CHILD_TABLES = {
 	("Audit Event", "corrective_actions_required"): "Audit Corrective Action",
 	("Dashboard", "charts"): "Dashboard Chart Link",
 	("Dashboard", "cards"): "Number Card Link",
+	("Kanban Board", "columns"): "Kanban Board Column",
+	("Workspace", "shortcuts"): "Workspace Shortcut",
+	("Farm Task Assignment", "evidence_files"): "Farm Task Evidence",
+	("Housing Inspection", "photos"): "Farm Task Evidence",
+	("Detector Test", "photos"): "Farm Task Evidence",
+	("Water Test", "sample_photos"): "Farm Task Evidence",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1151,6 +1181,11 @@ REHYDRATED_CHILD_FIELDS = (
 	"references",
 	"renewals",
 	"corrective_actions_required",
+	"columns",
+	"shortcuts",
+	"evidence_files",
+	"photos",
+	"sample_photos",
 )
 
 
@@ -2135,7 +2170,10 @@ class FakeDB:
 		Silently does nothing for a name that matches no row, exactly as
 		`frappe.db.set_value` does for a missing document.
 		"""
-		parent_doctype, fieldname_on_parent = CHILD_TABLE_SOURCES[doctype]
+		for parent_doctype, fieldname_on_parent in CHILD_TABLE_SOURCES[doctype]:
+			self._set_child_value_in(parent_doctype, fieldname_on_parent, doctype, name, fieldname, value)
+
+	def _set_child_value_in(self, parent_doctype, fieldname_on_parent, doctype, name, fieldname, value):
 		for parent in STORE.rows(parent_doctype):
 			for row in parent.get(fieldname_on_parent) or []:
 				if row.get("name") != name:
@@ -2164,26 +2202,40 @@ class FakeDB:
 
 
 #: Child doctypes are stored inside their parents, so a query against one has to
-#: flatten the parents first.
+#: flatten the parents first. The value is a TUPLE OF (parent, fieldname) PAIRS
+#: rather than a single pair, because v0.16.0 ships a child table with four
+#: parents: `Farm Task Evidence` is the photographs on a task completion, on a
+#: housing inspection, on a detector test and on a water sample — one shape of
+#: row, one place to change it, four documents that carry it. A double that
+#: assumed one parent per child would have flattened only the first and reported
+#: every other record's evidence as absent, which is the kind of empty result
+#: that reads as "no photographs were filed".
 CHILD_TABLE_SOURCES = {
-	"Journal Entry Account": ("Journal Entry", "accounts"),
-	"Parcel Conveyance Event": ("Parcel", "conveyance_events"),
-	"Bank Transaction Payments": ("Bank Transaction", "payment_entries"),
-	"Fiscal Year Company": ("Fiscal Year", "companies"),
-	"Workflow Document State": ("Workflow", "states"),
-	"Workflow Transition": ("Workflow", "transitions"),
+	"Journal Entry Account": (("Journal Entry", "accounts"),),
+	"Parcel Conveyance Event": (("Parcel", "conveyance_events"),),
+	"Bank Transaction Payments": (("Bank Transaction", "payment_entries"),),
+	"Fiscal Year Company": (("Fiscal Year", "companies"),),
+	"Workflow Document State": (("Workflow", "states"),),
+	"Workflow Transition": (("Workflow", "transitions"),),
+	"Farm Task Evidence": (
+		("Farm Task Assignment", "evidence_files"),
+		("Housing Inspection", "photos"),
+		("Detector Test", "photos"),
+		("Water Test", "sample_photos"),
+	),
 }
 
 
 def _child_rows(child_doctype: str) -> list[dict]:
-	parent_doctype, fieldname = CHILD_TABLE_SOURCES[child_doctype]
 	out = []
-	for parent in STORE.rows(parent_doctype):
-		for row in parent.get(fieldname) or []:
-			merged = dict(row)
-			merged.setdefault("parent", parent.get("name"))
-			merged.setdefault("parenttype", parent_doctype)
-			out.append(merged)
+	for parent_doctype, fieldname in CHILD_TABLE_SOURCES[child_doctype]:
+		for parent in STORE.rows(parent_doctype):
+			for row in parent.get(fieldname) or []:
+				merged = dict(row)
+				merged.setdefault("parent", parent.get("name"))
+				merged.setdefault("parenttype", parent_doctype)
+				merged.setdefault("parentfield", fieldname)
+				out.append(merged)
 	return out
 
 
@@ -2303,6 +2355,27 @@ def _build_utils() -> types.ModuleType:
 
 	module.add_days = add_days
 	module.date_diff = date_diff
+
+	def time_diff_in_seconds(later, earlier):
+		"""frappe.utils.time_diff_in_seconds — seconds between two datetimes.
+
+		v0.16.0's dispatch tools use it to work out how long a task actually took
+		from its clock-in and clock-out. Faithful in the one way that matters:
+		it takes DATETIMES and returns a float, so a task that ran twenty-five
+		minutes reports twenty-five and not zero, which is what a date-only
+		double would have said.
+		"""
+
+		def parse(value):
+			if isinstance(value, datetime.datetime):
+				return value
+			if isinstance(value, datetime.date):
+				return datetime.datetime(value.year, value.month, value.day)
+			return datetime.datetime.fromisoformat(str(value).strip().replace("T", " "))
+
+		return (parse(later) - parse(earlier)).total_seconds()
+
+	module.time_diff_in_seconds = time_diff_in_seconds
 
 	def add_to_date(
 		date=None,

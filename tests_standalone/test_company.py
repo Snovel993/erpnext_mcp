@@ -457,6 +457,23 @@ class PartyTypesOnInstall(CompanyTestCase):
 		for doctype in ("Field", "Irrigation Zone", "Housing Unit", "Housing Assignment"):
 			self.assertIn(doctype, named)
 
+	def test_uninstall_warns_about_the_dispatch_registers_too(self):
+		"""v0.16.0. A Farm Task Assignment is the only place the reason somebody
+		could NOT do a job is written down, which is the answer to 'why was this
+		never done' — and a Housing Inspection is the only record that anybody
+		ever went and looked."""
+		from erpnext_mcp import install
+
+		named = [doctype for doctype, _what in install._PRECIOUS_DOCTYPES]
+		for doctype in (
+			"Farm Task",
+			"Farm Task Assignment",
+			"Housing Inspection",
+			"Detector Test",
+			"Water Test",
+		):
+			self.assertIn(doctype, named)
+
 
 # ── the 1099 consequences, which are the point of the party types ───────────
 class PartyTypesAndThe1099(CompanyTestCase):

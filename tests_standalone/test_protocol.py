@@ -198,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_one_hundred_sixty_seven_tools_seventy_five_read_ninety_two_write(self):
+	def test_catalogue_is_one_hundred_ninety_tools_eighty_five_read_one_hundred_five_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -228,10 +228,23 @@ class Catalogue(SeededTestCase):
 		  * two for the Journal Entry attribution drift v0.13.0 left behind —
 		    find_drifted_je_attributions reads it, repair_drifted_je_attributions
 		    fixes it in a batch.
+
+		v0.16.0 ADDED TWENTY-THREE, and they are the operational half of the same
+		framework — the half that lets somebody be SENT to fix what Sprint 7 could
+		only report:
+
+		  * eleven for Farm Task Dispatch — four reads (the pool, one worker's
+		    load, the board, one task in full), six writes for the state machine
+		    (create, assign, claim, start, complete, reject), and
+		    generate_tasks_from_compliance_alerts, which is the bridge that turns
+		    open alerts into dispatchable work;
+		  * twelve over the three compliance records a completion produces
+		    (Housing Inspection, Detector Test, Water Test) — list, get, create
+		    and update apiece, six of which are reads.
 		"""
-		self.assertEqual(len(registry.TOOLS), 167)
-		self.assertEqual(len(registry.READ_TOOLS), 75)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 92)
+		self.assertEqual(len(registry.TOOLS), 190)
+		self.assertEqual(len(registry.READ_TOOLS), 85)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 105)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

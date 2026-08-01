@@ -193,6 +193,155 @@ CHARTS = (
 )
 
 
+#: v0.16.0. The dispatch board is a Frappe KANBAN BOARD and not a page this app
+#: draws, for exactly the reasons the Command Center is a Dashboard: a foreman
+#: drags a card between columns and Frappe writes the field, on desktop and on a
+#: phone, with the site's own permissions and the site's own theme, and it keeps
+#: working when Frappe changes its front end. There is no custom UI in this
+#: release and there does not need to be.
+#:
+#: The route is Frappe's own: `/app/farm-task/view/kanban/Farm Task Dispatch`.
+#: The Sprint 8 note asked for `/app/farm-task-dispatch`, which is a Workspace
+#: route rather than a board route — a Workspace is a landing page of shortcuts,
+#: and it is what `WORKSPACE_SHORTCUTS` below builds where the site has the
+#: doctype for one. The board is the thing that works either way.
+KANBAN = "Kanban Board"
+KANBAN_COLUMN = "Kanban Board Column"
+WORKSPACE = "Workspace"
+
+DISPATCH_BOARD_NAME = "Farm Task Dispatch"
+DISPATCH_DOCTYPE = "Farm Task"
+
+#: The column each state gets, and its indicator colour. In board order, which is
+#: left-to-right the order work moves: pool, claimed, being done, found something,
+#: done. Rejected and Cancelled are columns too — a rejection is a first-class
+#: state and a board that hid it would hide the one thing a foreman has to act on.
+DISPATCH_COLUMNS = (
+	("Draft", "gray"),
+	("Available", "blue"),
+	("Claimed", "purple"),
+	("In-Progress", "orange"),
+	("Awaiting-Review", "red"),
+	("Completed", "green"),
+	("Rejected", "red"),
+	("Cancelled", "gray"),
+)
+
+#: What the Farm Task Dispatch workspace points at.
+WORKSPACE_SHORTCUTS = (
+	("Farm Task", "Farm Task"),
+	("Farm Task Assignment", "Farm Task Assignment"),
+	("Housing Inspection", "Housing Inspection"),
+	("Detector Test", "Detector Test"),
+	("Water Test", "Water Test"),
+	("Compliance Alert", "Compliance Alert"),
+)
+
+
+def dispatch_board_available() -> bool:
+	"""Whether this site can hold a Kanban Board for Farm Task."""
+	try:
+		return all(compat.doctype_exists(doctype) for doctype in (KANBAN, DISPATCH_DOCTYPE))
+	except Exception:
+		return False
+
+
+def install_dispatch_board() -> dict:
+	"""Build the Farm Task Dispatch Kanban. Idempotent, and NEVER raises.
+
+	Same contract as `install_command_center`: an existing board is left exactly
+	as it is, including every column an operator has since reordered, renamed or
+	deleted. A migrate that put a column back would be the fixture behaviour this
+	module exists to avoid.
+	"""
+	report = {
+		"board": DISPATCH_BOARD_NAME,
+		"route": f"/app/{_slug(DISPATCH_DOCTYPE)}/view/kanban/{DISPATCH_BOARD_NAME}",
+		"workspace_route": f"/app/{_slug(DISPATCH_BOARD_NAME)}",
+		"columns": [state for state, _colour in DISPATCH_COLUMNS],
+		"created": False,
+		"existed": False,
+		"workspace_created": False,
+		"workspace_existed": False,
+		"failed": [],
+		"available": dispatch_board_available(),
+	}
+	if not report["available"]:
+		report["note"] = (
+			"this site does not have both the Kanban Board and Farm Task doctypes, so there is "
+			"nothing to build the dispatch board out of. Every task on it is still readable "
+			"through list_dispatch_board, which returns the same columns as JSON."
+		)
+		return report
+
+	try:
+		if frappe.db.exists(KANBAN, DISPATCH_BOARD_NAME):
+			report["existed"] = True
+		else:
+			doc = frappe.new_doc(KANBAN)
+			doc.kanban_board_name = DISPATCH_BOARD_NAME
+			doc.reference_doctype = DISPATCH_DOCTYPE
+			# The field the columns ARE. Getting this wrong produces a board that
+			# renders and groups by nothing, which looks like a working board.
+			doc.field_name = "state"
+			if compat.has_field(KANBAN, "private"):
+				doc.private = 0
+			if compat.has_field(KANBAN, "show_labels"):
+				doc.show_labels = 1
+			if compat.has_field(KANBAN, "columns"):
+				for state, colour in DISPATCH_COLUMNS:
+					doc.append("columns", {"column_name": state, "indicator": colour, "status": "Active"})
+			doc.insert(ignore_permissions=True)
+			report["created"] = True
+	except Exception as exc:
+		report["failed"].append({"name": DISPATCH_BOARD_NAME, "reason": f"{type(exc).__name__}: {exc}"})
+
+	_build_dispatch_workspace(report)
+	return report
+
+
+def _slug(name: str) -> str:
+	return name.replace(" ", "-").lower()
+
+
+def _build_dispatch_workspace(report: dict) -> None:
+	"""The `/app/farm-task-dispatch` landing page, where the site has Workspaces.
+
+	Cosmetic and best-effort: the Workspace doctype has been rewritten twice
+	across the Frappe versions this app supports, so every field is set only if
+	the site actually has it and a failure is reported rather than raised. The
+	board works without it.
+	"""
+	if not compat.doctype_exists(WORKSPACE):
+		report["workspace_note"] = "this site has no Workspace doctype, so there is no landing page to build"
+		return
+	try:
+		if frappe.db.exists(WORKSPACE, DISPATCH_BOARD_NAME):
+			report["workspace_existed"] = True
+			return
+		doc = frappe.new_doc(WORKSPACE)
+		for fieldname, value in (
+			("title", DISPATCH_BOARD_NAME),
+			("label", DISPATCH_BOARD_NAME),
+			("name", DISPATCH_BOARD_NAME),
+			("module", MODULE),
+			("icon", "activity"),
+			("public", 1),
+			("is_hidden", 0),
+			("content", json.dumps([])),
+		):
+			if fieldname == "name" or compat.has_field(WORKSPACE, fieldname):
+				doc.set(fieldname, value)
+		if compat.has_field(WORKSPACE, "shortcuts"):
+			for label, link_to in WORKSPACE_SHORTCUTS:
+				if compat.doctype_exists(link_to):
+					doc.append("shortcuts", {"label": label, "type": "DocType", "link_to": link_to})
+		doc.insert(ignore_permissions=True)
+		report["workspace_created"] = True
+	except Exception as exc:
+		report["failed"].append({"name": f"{DISPATCH_BOARD_NAME} workspace", "reason": f"{type(exc).__name__}: {exc}"})
+
+
 def available() -> bool:
 	"""Whether this site has the dashboard doctypes at all.
 

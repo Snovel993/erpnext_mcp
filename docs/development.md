@@ -286,12 +286,20 @@ erpnext_mcp/                     repo root
     tools/calendar.py            the compliance calendar, and the three ways
                                  something comes off it
     tools/auditpacket.py         assembling an audit packet and filing it
+    tools/dispatch.py            Farm Task Dispatch: the pool, the board, the
+                                 state machine, and the bridge from the calendar
+    tools/inspections.py         the three records a completion produces —
+                                 Housing Inspection, Detector Test, Water Test
+    records.py                   what those three share: the findings branch,
+                                 the forward-only register write-back, and how a
+                                 laboratory result is read
     compliance_fields.py         WHICH compliance columns go on WHOSE doctype,
                                  and the argument for putting them there at all
     alerts/base.py               Rule, Observation, the idempotent sweep
-    alerts/rules.py              the nine rules, each with its kairotic gate
+    alerts/rules.py              the eleven rules, each with its kairotic gate
     audit_packets.py             the eight audit regimes and their sections
-    dashboard.py                 the Compliance Command Center installer
+    dashboard.py                 the Compliance Command Center installer, and the
+                                 Farm Task Dispatch Kanban board
     packets/base.py              PacketSpec, Flag, provenance envelope
     packets/reconciliation.py    one account, one period
     packets/fiscal_year_audit.py one company, one fiscal year

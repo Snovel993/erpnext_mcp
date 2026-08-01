@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Install / migrate / uninstall hooks.
 
-Four jobs. The second arrived in v0.12.0 and the last two in v0.15.0.
+Five jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
+and the fifth — the Farm Task Dispatch Kanban board — in v0.16.0.
 
 The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
@@ -35,13 +36,18 @@ anything into a doctype you refuse to touch. It is the only such exception in th
 app, it is behind a switch, and `before_uninstall` names the cost.
 
 The fourth is the Compliance Command Center: a Dashboard, its Charts and its
-Number Cards, built the same way — idempotently, on every migrate, checking
-before it writes. Deliberately NOT shipped as `fixtures`, which `test_hooks.py`
-forbids by name: a fixture is imported by `bench migrate` with no ability to skip
-what a site already has, and an operator who rearranged their dashboard would get
-it silently rearranged back.
+Number Cards, built idempotently on every migrate, checking before it writes.
+Deliberately NOT shipped as `fixtures`, which `test_hooks.py` forbids by name: a
+fixture is imported by `bench migrate` with no ability to skip what a site
+already has, and an operator who rearranged their dashboard would get it
+silently rearranged back.
 
-None of the four raises. Every one of them runs inside `bench migrate`, where an
+The fifth arrived in v0.16.0 and is the Farm Task Dispatch Kanban board, plus the
+workspace that lands somebody on it. Built exactly like the fourth and for
+exactly the same reasons — an existing board is left alone, including every
+column somebody has since reordered or deleted.
+
+None of the five raises. Every one of them runs inside `bench migrate`, where an
 exception aborts the migration for the whole bench — so a failure here is
 reported and the next job still runs. That is not defensive padding: v0.12.0
 shipped an `after_migrate` that died on a link validation and left operators with
@@ -63,6 +69,7 @@ def after_install() -> None:
 	company.ensure_party_types()
 	_compliance_fields()
 	_command_center()
+	_dispatch_board()
 	frappe.db.commit()
 
 
@@ -71,6 +78,7 @@ def after_migrate() -> None:
 	company.ensure_party_types()
 	_compliance_fields()
 	_command_center()
+	_dispatch_board()
 
 
 def _compliance_fields() -> None:
@@ -100,6 +108,16 @@ def _command_center() -> None:
 		print(
 			f"erpnext_mcp: the Compliance Command Center was not built — "
 			f"{type(exc).__name__}: {exc}"
+		)
+
+
+def _dispatch_board() -> None:
+	"""Build or repair the v0.16.0 Farm Task Dispatch Kanban board."""
+	try:
+		dashboard.install_dispatch_board()
+	except Exception as exc:  # pragma: no cover - the installer already swallows its own
+		print(
+			f"erpnext_mcp: the Farm Task Dispatch board was not built — {type(exc).__name__}: {exc}"
 		)
 
 
@@ -193,6 +211,37 @@ _PRECIOUS_DOCTYPES = (
 		"each corrective action was ever closed. The single most damaging record to "
 		"lose: an open corrective action nobody can produce a closure for is how a "
 		"finding becomes a penalty",
+	),
+	(
+		"Farm Task",
+		"the dispatch register — what work was raised, from which compliance alert, "
+		"what evidence closing it required and what it produced. The record that an "
+		"alert was not merely read but answered",
+	),
+	(
+		"Farm Task Assignment",
+		"the chain of custody: who took each job, when they claimed it, when they "
+		"started, when they finished, what they found, what proves it — and, for "
+		"every job somebody could NOT do, the reason they gave. That last one exists "
+		"nowhere else and is the answer to 'why was this never done'",
+	),
+	(
+		"Housing Inspection",
+		"every habitability walk of every cabin, with its findings and its "
+		"photographs. The evidence behind OAR 437-004-1120 and 29 CFR 1910.142, and "
+		"the only record that says a building somebody slept in was fit to",
+	),
+	(
+		"Detector Test",
+		"every smoke and CO detector test in the camp. A propane heater in a cabin "
+		"with an untested CO detector is how somebody dies in their sleep, and this "
+		"is the only record that says anybody checked",
+	),
+	(
+		"Water Test",
+		"every agricultural water sample, what the laboratory said, and the report "
+		"itself. FSMA Subpart E asks whether the water that touched a harvested crop "
+		"was tested, and nothing else on the site can answer",
 	),
 )
 

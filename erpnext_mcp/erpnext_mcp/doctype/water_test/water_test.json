@@ -1,0 +1,284 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-31 18:00:00.000000",
+ "description": "One agricultural water sample from one irrigation zone, and what the laboratory said about it. The evidence FSMA Produce Safety Rule Subpart E turns on: water that contacts a crop being harvested has to have been tested, and this is the record that says it was.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "source",
+  "test_date",
+  "workflow_state",
+  "keep_as_draft",
+  "identity_col",
+  "company",
+  "block",
+  "tester",
+  "tester_name",
+  "source_task",
+  "lab_section",
+  "laboratory",
+  "lab_sample_id",
+  "lab_col",
+  "sample_collected_on",
+  "lab_reported_on",
+  "results_section",
+  "coliform_result",
+  "ecoli_result",
+  "results_col",
+  "contamination_detected",
+  "findings_section",
+  "findings",
+  "corrective_section",
+  "corrective_action_closed",
+  "closure_note",
+  "evidence_section",
+  "lab_report",
+  "sample_photos",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The irrigation zone the sample came from. Recording a test moves this zone's `water_test_last_date` forward AND the parent block's, because the alert rule reads the block — a zone tested with a block that still says untested is a calendar that disagrees with the laboratory.",
+   "fieldname": "source",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Irrigation Zone",
+   "options": "Irrigation Zone",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The date this test is EFFECTIVE from, which is the day the sample was taken rather than the day the laboratory answered. Subpart E counts back from when the water was in the pipe.",
+   "fieldname": "test_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Test Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "description": "COMPUTED, never chosen. A clean result gives Recorded. Coliform or E. coli detected, generic E. coli above the FSMA action level, an unreadable result, or anything written in the findings routes it to Corrective Action Required — which raises a Critical alert, because water contacting a harvested crop is the one place a contamination result is not a paperwork problem.",
+   "fieldname": "workflow_state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nRecorded\nCorrective Action Required",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "Hold this record in Draft — the state a sample sits in between being taken and the laboratory answering. A Draft writes nothing to the zone or the block and dismisses no alert.",
+   "fieldname": "keep_as_draft",
+   "fieldtype": "Check",
+   "label": "Keep as Draft"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The block this zone waters, filled in from the zone. Kept on the record so a food safety investigation asking 'what water went on this block' is one query rather than a walk through the zone register.",
+   "fieldname": "block",
+   "fieldtype": "Link",
+   "label": "Block",
+   "options": "Field",
+   "search_index": 1
+  },
+  {
+   "description": "The Employee id of whoever took the sample. Data and not a Link because Frappe HR is not a dependency of this app.",
+   "fieldname": "tester",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Sampled By",
+   "search_index": 1
+  },
+  {
+   "fieldname": "tester_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Sampled By (Name)"
+  },
+  {
+   "fieldname": "source_task",
+   "fieldtype": "Link",
+   "label": "Source Task",
+   "options": "Farm Task",
+   "search_index": 1
+  },
+  {
+   "fieldname": "lab_section",
+   "fieldtype": "Section Break",
+   "label": "Laboratory"
+  },
+  {
+   "description": "Who did the analysis. An audit asks whether the laboratory was accredited, and a result with no laboratory named cannot answer.",
+   "fieldname": "laboratory",
+   "fieldtype": "Data",
+   "label": "Laboratory"
+  },
+  {
+   "description": "The laboratory's own sample identifier, which is how their copy and this one are matched when somebody has to go back and ask.",
+   "fieldname": "lab_sample_id",
+   "fieldtype": "Data",
+   "label": "Lab Sample ID"
+  },
+  {
+   "fieldname": "lab_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "sample_collected_on",
+   "fieldtype": "Datetime",
+   "label": "Sample Collected"
+  },
+  {
+   "description": "When the laboratory answered. The gap between this and the collection is the operation's real turnaround, and it is what makes 'we will have the result before we spray' either true or a hope.",
+   "fieldname": "lab_reported_on",
+   "fieldtype": "Date",
+   "label": "Lab Reported"
+  },
+  {
+   "fieldname": "results_section",
+   "fieldtype": "Section Break",
+   "label": "Results"
+  },
+  {
+   "description": "Total coliform, as the laboratory wrote it: 'Absent', 'Present', '<1', '0', '23 MPN/100mL'. Read both ways — words first, then any number, where anything above zero is a detection. A result nobody can read is reported as unreadable and routes to Corrective Action Required, because a result nobody can interpret is not a clean result.",
+   "fieldname": "coliform_result",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Coliform"
+  },
+  {
+   "description": "Generic E. coli, as the laboratory wrote it. A presence result is a detection; a count is compared against the FSMA 112.44(b) criterion of 126 CFU per 100 mL.",
+   "fieldname": "ecoli_result",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "E. coli"
+  },
+  {
+   "fieldname": "results_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "Set for you from the two results above. Recorded as its own field so a list of contaminated samples is one filter rather than a parse of every result string.",
+   "fieldname": "contamination_detected",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Contamination Detected"
+  },
+  {
+   "fieldname": "findings_section",
+   "fieldtype": "Section Break",
+   "label": "Findings"
+  },
+  {
+   "description": "Anything else about the sample or the source. Blank on a routine clean result.",
+   "fieldname": "findings",
+   "fieldtype": "Long Text",
+   "label": "Findings"
+  },
+  {
+   "fieldname": "corrective_section",
+   "fieldtype": "Section Break",
+   "label": "Corrective Action"
+  },
+  {
+   "description": "The day the water was actually dealt with — treated, the source switched, the line flushed and re-tested. Setting it takes the Critical alert off the calendar; a later clean test of the same zone does the same.",
+   "fieldname": "corrective_action_closed",
+   "fieldtype": "Date",
+   "label": "Corrective Action Closed"
+  },
+  {
+   "fieldname": "closure_note",
+   "fieldtype": "Small Text",
+   "label": "Closure Note"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence"
+  },
+  {
+   "description": "The laboratory's own report. THE ONE PIECE OF EVIDENCE ON THIS RECORD NOBODY CAN RECONSTRUCT — every other field is a transcription of it.",
+   "fieldname": "lab_report",
+   "fieldtype": "Attach",
+   "label": "Lab Report"
+  },
+  {
+   "description": "Photographs of the sampling point. What proves the sample came from where it says it did.",
+   "fieldname": "sample_photos",
+   "fieldtype": "Table",
+   "label": "Sample Photos",
+   "options": "Farm Task Evidence"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-07-31 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Water Test",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "source,test_date,workflow_state",
+ "sort_field": "test_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "source",
+ "track_changes": 1
+}

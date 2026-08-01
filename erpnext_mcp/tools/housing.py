@@ -126,7 +126,7 @@ def _date_str(value) -> str | None:
 	return str(value or "") or None
 
 
-def _hr_installed() -> bool:
+def hr_installed() -> bool:
 	"""Is there an Employee register on this site worth validating against?
 
 	Both the app and the doctype, because an app can be installed with its
@@ -671,7 +671,7 @@ def create_housing_assignment(args: dict) -> ToolResult:
 			"unit, not an assignment. Nothing was created."
 		)
 
-	if employee and _hr_installed():
+	if employee and hr_installed():
 		if not frappe.db.exists(EMPLOYEE, employee):
 			match = frappe.db.get_value(EMPLOYEE, {"employee_name": employee}, "name")
 			if not match:
@@ -754,7 +754,7 @@ def create_housing_assignment(args: dict) -> ToolResult:
 			"Whether a housing charge was deducted from wages is unrecorded. ORS 653 and OAR "
 			"839-015 constrain that deduction, and Unknown is the answer that cannot be defended."
 		)
-	if employee and not _hr_installed():
+	if employee and not hr_installed():
 		warnings.append(
 			"No HR app on this site, so the employee id was stored as text and not checked "
 			"against an Employee register."

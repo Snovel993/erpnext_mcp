@@ -49,6 +49,7 @@ from .tools import (
 	company,
 	compliance,
 	dimensions,
+	dispatch,
 	evidence,
 	farm,
 	files,
@@ -56,6 +57,7 @@ from .tools import (
 	governance,
 	housing,
 	hr,
+	inspections,
 	investment_report,
 	meta,
 	mutate,
@@ -5985,6 +5987,674 @@ TOOLS = {
 		required=("repairs", "reason"),
 		mutating=True,
 		title="Repair drifted JE attributions",
+	),
+	# ── v0.16.0: Farm Task Dispatch ─────────────────────────────────────────
+	"list_available_tasks": _tool(
+		dispatch.list_available_tasks,
+		"THE POOL. Every Farm Task a worker could pick up right now, worst urgency "
+		"first, optionally narrowed to a location, a skill or a task type. Pass "
+		"worker_id and it also reports how many tasks that person is already "
+		"holding and whether they may claim another. Read-only.\n\n"
+		"ONLY SELF-PICK AND EITHER TASKS ARE HERE. Dispatched work is deliberately "
+		"absent from the pool: somebody has to be SENT to it by name, because that "
+		"is how this app marks work where the named licence holder matters.",
+		{
+			"worker_id": _field(
+				_STRING, "Employee id. Adds this worker's claim count and whether they may claim."
+			),
+			"location": _field(_STRING, "Only tasks at this place (a Housing Unit, Field, Zone or Parcel docname)."),
+			"skill": _field(_STRING, "Only tasks needing this skill, e.g. 'camp_maintenance'."),
+			"task_type": _field(
+				_STRING,
+				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
+				"Housing-Cleanup, Water-Sampling or Other.",
+			),
+			"urgency": _field(_STRING, "Low, Normal, High or Critical."),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="List available tasks",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_dispatched_tasks": _tool(
+		dispatch.list_dispatched_tasks,
+		"What one worker is holding right now — claimed and in progress — with the "
+		"full task behind each assignment. Pass include_finished=true or a state for "
+		"their history. Read-only.",
+		{
+			"worker_id": _field(_STRING, "The Employee id. `assigned_to` is an alias."),
+			"assigned_to": _field(_STRING, "Alias for worker_id."),
+			"state": _field(_STRING, "Claimed, In-Progress, Completed or Rejected."),
+			"include_finished": _field(
+				_BOOLEAN, "Include completed and rejected assignments. Default false."
+			),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		required=("worker_id",),
+		title="List a worker's tasks",
+		available=_needs_doctype("Farm Task Assignment"),
+		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_dispatch_board": _tool(
+		dispatch.list_dispatch_board,
+		"THE KANBAN AS JSON. Every Farm Task grouped into its state column, worst "
+		"urgency first, with the pool, the open Critical work and the count of tasks "
+		"that came from a compliance alert. Closed states are excluded unless asked "
+		"for. Read-only.\n\n"
+		"The fraction of the board that came from an alert is the honest measure of "
+		"whether the compliance calendar is driving work or being read and ignored.\n\n"
+		"The same board renders in the Desk at "
+		"`/app/farm-task/view/kanban/Farm Task Dispatch`, where a foreman drags cards "
+		"between columns and Frappe writes the state.",
+		{
+			"company": _COMPANY,
+			"state_filter": _field(
+				_STRING,
+				"One state or a comma-separated list: Draft, Available, Claimed, In-Progress, "
+				"Awaiting-Review, Completed, Rejected, Cancelled.",
+			),
+			"include_closed": _field(
+				_BOOLEAN, "Include Completed, Rejected and Cancelled. Default false."
+			),
+			"task_type": _field(_STRING, "Only this task type."),
+			"urgency": _field(_STRING, "Only this urgency."),
+			"assigned_to": _field(_STRING, "Only tasks with this Employee id on them."),
+			"skill_required": _field(_STRING, "Only tasks needing this skill."),
+			"limit": _LIMIT,
+		},
+		title="Dispatch board",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_farm_task": _tool(
+		dispatch.get_farm_task,
+		"One task in full: its evidence contract in sentences, every assignment it "
+		"has ever had with the evidence filed against each, every rejection and the "
+		"reason given, the compliance record its completion produced, and the alert "
+		"it came from — including whether that alert has since auto-dismissed, which "
+		"is the loop visibly closing. Read-only.",
+		{"task": _field(_STRING, "The Farm Task docname, e.g. 'FT-2026-07-00012'.")},
+		required=("task",),
+		title="Get a farm task",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_farm_task": _tool(
+		dispatch.create_farm_task,
+		"MUTATING (default OFF). Raise one piece of work — its type, where it is, "
+		"what skill it needs, how urgent it is, whether it is dispatched or "
+		"self-picked, and what record completing it produces.\n\n"
+		"`evidence_required` IS MANDATORY AND IS THE POINT OF THE WHOLE DOCTYPE. It "
+		'is JSON: {\"photos\": true, \"signature\": true, \"findings_text\": true, '
+		'\"witness\": false}. A task that requires no evidence is a task that gets '
+		"closed with a tick in a box, and a tick in a box is what an auditor is "
+		"trained to disbelieve. An empty contract is refused; so is a misspelt key, "
+		"because `{\"photo\": true}` asks for nothing and looks like it asks for "
+		"something.\n\n"
+		"REFUSES: a `creates_record` naming a DocType this site does not have — a "
+		"task promising a record nobody can write is a promise that fails in front "
+		"of a worker stood in a cabin; a location that does not exist; a "
+		"`source_alert` that already has a task, because one alert is one job.\n\n"
+		"Tasks are named FT-YYYY-MM-<seq>, so the same annual walk can be raised "
+		"every year without colliding with its own history.",
+		{
+			"task_name": _field(_STRING, "What a foreman calls it out loud: 'Habitability walk — MC-Cabin-01'."),
+			"task_type": _field(
+				_STRING,
+				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
+				"Housing-Cleanup, Water-Sampling or Other.",
+			),
+			"evidence_required": _field(
+				_OBJECT,
+				'JSON object. Keys: photos, signature, findings_text, witness. REQUIRED — at '
+				"least one must be true.",
+			),
+			"location_doctype": _field(
+				_STRING, "The register the place is in: Housing Unit, Field, Irrigation Zone or Parcel."
+			),
+			"location": _field(_STRING, "The docname of the cabin, block, zone or parcel."),
+			"company": _COMPANY,
+			"skill_required": _field(_STRING, "e.g. 'camp_maintenance', 'applicator_license'."),
+			"urgency": _field(_STRING, "Low, Normal, High or Critical. Default Normal."),
+			"dispatch_mode": _field(
+				_STRING,
+				"Either (default), Dispatched (a foreman sends somebody by name) or Self-pick "
+				"(workers take it from the pool).",
+			),
+			"estimated_duration_minutes": _field(_INTEGER, "How long it should take."),
+			"creates_record": _field(
+				_STRING, "Housing Inspection, Detector Test or Water Test. Refused if the site lacks it."
+			),
+			"creates_record_data": _field(
+				_OBJECT, "JSON template merged under whatever the completion supplies."
+			),
+			"source_alert": _field(_STRING, "The Compliance Alert this answers, if any."),
+			"source_workorder": _field(_STRING, "A work order in another system this task answers."),
+			"assigned_to": _field(_STRING, "Dispatch it to this Employee id straight away."),
+			"assigned_to_name": _field(_STRING, "Their name, where no HR app can resolve it."),
+			"draft": _field(
+				_BOOLEAN, "Hold it in Draft rather than publishing to the pool. Default false."
+			),
+			"notes": _field(_STRING, "Instructions: where the key is, which breaker, who to ask."),
+		},
+		required=("task_name", "task_type", "evidence_required"),
+		mutating=True,
+		title="Create a farm task",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"assign_farm_task": _tool(
+		dispatch.assign_farm_task,
+		"MUTATING (default OFF). Send one named person to one task — the foreman's "
+		"half of the dual mode, for work where the named holder matters.\n\n"
+		"REFUSES to take work off somebody who already holds it unless you pass "
+		"reassign=true AND a reason, which is written onto their assignment. 'Taken "
+		"off them with no explanation' is a record nobody can defend. Refuses a task "
+		"that is already Completed, Rejected or Cancelled — reassigning finished "
+		"work rewrites history rather than dispatching anybody.",
+		{
+			"task": _field(_STRING, "The Farm Task docname."),
+			"assigned_to": _field(_STRING, "The Employee id to send."),
+			"assigned_to_name": _field(_STRING, "Their name, where no HR app can resolve it."),
+			"reassign": _field(_BOOLEAN, "Take it off whoever holds it. Requires `reason`."),
+			"reason": _field(_STRING, "Why it is being taken off them. Written onto their assignment."),
+		},
+		required=("task", "assigned_to"),
+		mutating=True,
+		title="Assign a farm task",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"claim_farm_task": _tool(
+		dispatch.claim_farm_task,
+		"MUTATING (default OFF). A worker takes one task from the pool — the "
+		"self-pick half of the dual mode, for general labour.\n\n"
+		"CAPPED AT THREE CONCURRENT CLAIMS PER WORKER. This is a hoarding limit and "
+		"not a productivity one: completing or rejecting a task frees a slot in the "
+		"same instant, and the point is that nobody can pull the whole pool onto "
+		"their own name and leave a board that looks worked.\n\n"
+		"REFUSES a Dispatched task — somebody has to be SENT to that by name, and "
+		"self-picking it would put the wrong person on a regulated record. Refuses a "
+		"task somebody else already holds, and a Draft that is not in the pool yet. "
+		"Returns the evidence the worker will need to close it.",
+		{
+			"task": _field(_STRING, "The Farm Task docname."),
+			"worker_id": _field(_STRING, "The claiming Employee id."),
+			"worker_name": _field(_STRING, "Their name, where no HR app can resolve it."),
+		},
+		required=("task", "worker_id"),
+		mutating=True,
+		title="Claim a farm task",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"start_farm_task": _tool(
+		dispatch.start_farm_task,
+		"MUTATING (default OFF). Clock in on one claimed task.\n\n"
+		"THIS IS THE CLOCK-IN FOR THE TASK, NOT FOR THE SHIFT. A worker on the clock "
+		"all morning did this particular cabin between ten and half past, and that "
+		"is what an hour charged to a job has to mean. Starting twice is refused: it "
+		"would move the clock-in forward and shorten the hour actually spent.",
+		{
+			"assignment": _field(_STRING, "The Farm Task Assignment docname. Or pass `task`."),
+			"task": _field(_STRING, "The Farm Task docname — its live assignment is used."),
+			"worker_id": _field(_STRING, "Checked against who holds it, if given."),
+			"started_at": _field(_STRING, "Override the clock-in time. Defaults to now."),
+		},
+		mutating=True,
+		title="Start a farm task",
+		available=_needs_doctype("Farm Task Assignment"),
+		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"complete_farm_task": _tool(
+		dispatch.complete_farm_task,
+		"MUTATING (default OFF). Finish one task: check the evidence against the "
+		"contract, file it, and WRITE THE COMPLIANCE RECORD the task promised — the "
+		"actual Housing Inspection, Detector Test or Water Test, with the "
+		"photographs on it. That record moves the register forward, and the alert "
+		"that asked for the work auto-dismisses on the next sweep because its "
+		"condition is no longer true. Nothing here touches an alert directly, and "
+		"nothing needs to.\n\n"
+		"REFUSES A SUBMISSION THAT DOES NOT MEET THE EVIDENCE CONTRACT, naming each "
+		"requirement that is short. This is the refusal the whole doctype exists "
+		"for. Note the findings_text rule: PASS AN EMPTY STRING to record that "
+		"nothing was wrong — a clean inspection is a positive statement, and leaving "
+		"the argument out records that nobody was asked.\n\n"
+		"REFUSES a completion filed by anybody other than the worker holding the "
+		"task. A completion by somebody who was not there is not a chain of "
+		"custody, it is a rumour, and it is the first thing an auditor pulls on.\n\n"
+		"LANDS IN Awaiting-Review WHEN THE RECORD FOUND SOMETHING — a water stain, a "
+		"dead detector, a coliform count. The work IS done and the register IS "
+		"updated; what needs a person is the finding, and a Critical alert now "
+		"stands against the record. A clean completion goes straight to Completed, "
+		"because routing clean work through a review queue is how a review queue "
+		"stops being read.",
+		{
+			"assignment": _field(_STRING, "The Farm Task Assignment docname. Or pass `task`."),
+			"task": _field(_STRING, "The Farm Task docname — its live assignment is used."),
+			"worker_id": _field(_STRING, "The worker completing it. Must be the one holding the task."),
+			"evidence_files": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}},
+				"File docnames from commit_staged_file, file URLs, or objects like "
+				'{"file": "...", "evidence_type": "Photo", "caption": "north wall"}. Max 40.',
+			),
+			"signature_file": _field(_STRING, "The signature capture's file URL or File docname."),
+			"completion_narrative": _field(_STRING, "What the worker did, in their words."),
+			"findings_text": _field(
+				_STRING,
+				"What was WRONG. Pass an empty string to record that nothing was — that is how a "
+				"clean inspection is stated, and it satisfies a findings_text requirement.",
+			),
+			"witness": _field(_STRING, "Somebody else who was there, where the contract asks."),
+			"actual_duration_minutes": _field(
+				_INTEGER, "Minutes spent. Computed from the clock-in where both times exist."
+			),
+			"completed_at": _field(_STRING, "Override the clock-out time. Defaults to now."),
+			"record_data": _field(
+				_OBJECT,
+				"Extra fields for the compliance record — a laboratory's results, a detector's "
+				"pass/fail, the irrigation zone a sample came from. Merged over the task's own "
+				"`creates_record_data`.",
+			),
+		},
+		required=("worker_id",),
+		mutating=True,
+		title="Complete a farm task",
+		available=_needs_doctype("Farm Task Assignment"),
+		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"reject_farm_task": _tool(
+		dispatch.reject_farm_task,
+		"MUTATING (default OFF). Hand one task back with a MANDATORY reason, and "
+		"return it to the pool.\n\n"
+		"REJECTION IS A FIRST-CLASS STATE AND THE REASON IS THE POINT. It is what "
+		"turns 'nobody got to it and dispatch never followed up' — the answer nobody "
+		"can defend — into 'the ladder is broken and I could not reach the detector', "
+		"which is a fact somebody can act on. The rejected assignment STAYS on the "
+		"record: it is the proof somebody was sent, went, and could not do it, which "
+		"answers an auditor in a way an absence never does.",
+		{
+			"assignment": _field(_STRING, "The Farm Task Assignment docname. Or pass `task`."),
+			"task": _field(_STRING, "The Farm Task docname — its live assignment is used."),
+			"worker_id": _field(_STRING, "Checked against who holds it, if given."),
+			"reason": _field(_STRING, "Why it could not be done. Mandatory."),
+			"cancel": _field(
+				_BOOLEAN,
+				"Cancel the task instead of returning it to the pool — for work that turned out "
+				"not to need doing at all. Default false.",
+			),
+		},
+		required=("reason",),
+		mutating=True,
+		title="Reject a farm task",
+		available=_needs_doctype("Farm Task Assignment"),
+		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"generate_tasks_from_compliance_alerts": _tool(
+		dispatch.generate_tasks_from_compliance_alerts,
+		"MUTATING (default OFF). THE BRIDGE. Turns every open Compliance Alert into "
+		"a dispatchable Farm Task carrying the evidence its completion has to "
+		"produce. This is the tool that makes the compliance calendar actionable "
+		"rather than merely readable.\n\n"
+		"Each alert type maps to the SHAPE of work it actually is: a habitability "
+		"walk is Self-pick general labour needing photos, a signature and findings; "
+		"an I-9 re-verification is Dispatched, because the named holder matters. "
+		"Urgency follows severity — Critical becomes High, Warning becomes Normal, "
+		"Info becomes Low — deliberately not the identity mapping, because a board "
+		"where everything is Critical is a board nobody reads.\n\n"
+		"IDEMPOTENT BY CONSTRUCTION. A task carries the alert that produced it, so a "
+		"second run finds what the first raised and skips it. Re-running after "
+		"fixing half the camp raises tasks only for the half still outstanding.\n\n"
+		"An alert type with no recipe is REPORTED BY NAME rather than turned into a "
+		"generic task: a task with a made-up evidence contract produces a compliance "
+		"record nobody can rely on.\n\n"
+		"`dry_run` defaults FALSE, unlike dismiss_alert_bulk. The failure mode here "
+		"is too many idempotent tasks on a board, not an operation reading as "
+		"compliant while nothing was fixed.",
+		{
+			"company": _COMPANY,
+			"dry_run": _field(
+				_BOOLEAN, "Report what would be raised without writing anything. Default FALSE."
+			),
+			"alert_types": _field(
+				{"type": "array", "items": _STRING},
+				"Only these rules, e.g. ['housing_inspection_overdue']. A comma-separated string "
+				"is accepted. Omit for all. list_compliance_rules has the names.",
+			),
+			"limit": _field(_INTEGER, "Most alerts to consider in one call. Default and maximum 500."),
+		},
+		mutating=True,
+		title="Generate tasks from compliance alerts",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.16.0: the compliance records a completion produces ───────────────
+	"list_housing_inspections": _tool(
+		inspections.list_housing_inspections,
+		"Every habitability walk, newest first, with the ones that FOUND SOMETHING "
+		"and nobody has closed named separately — that list is the one worth acting "
+		"on, because an operation is judged on closing findings rather than on "
+		"having none. Drafts are counted and named too: a draft writes nothing to "
+		"the register and dismisses no alert. Read-only.",
+		{
+			"unit": _field(_STRING, "Only walks of this Housing Unit. `subject` is an alias."),
+			"subject": _field(_STRING, "Alias for unit."),
+			"state": _field(_STRING, "Draft, Recorded or Corrective Action Required."),
+			"from_date": _field(_STRING, "Earliest inspection date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest inspection date, YYYY-MM-DD."),
+			"source_task_only": _field(_BOOLEAN, "Only walks produced by completing a Farm Task."),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="List housing inspections",
+		available=_needs_doctype("Housing Inspection"),
+		requires="the Housing Inspection DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_housing_inspection": _tool(
+		inspections.get_housing_inspection,
+		"One walk in full: findings, corrective action, every photograph and the "
+		"signature, plus the unit's whole inspection history and — where this one "
+		"found something — the later clean walk that superseded it. Read-only.",
+		{
+			"record": _field(_STRING, "The Housing Inspection docname, e.g. 'HI-2026-07-00003'."),
+			"housing_inspection": _field(_STRING, "Alias for record."),
+		},
+		title="Get a housing inspection",
+		available=_needs_doctype("Housing Inspection"),
+		requires="the Housing Inspection DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_housing_inspection": _tool(
+		inspections.create_housing_inspection,
+		"MUTATING (default OFF). Record one habitability walk, and move the unit's "
+		"`last_habitability_inspection` forward — which is the whole mechanism by "
+		"which doing the work takes `housing_inspection_overdue` off the calendar.\n\n"
+		"THE STATE IS COMPUTED FROM THE FINDINGS, NEVER CHOSEN. Blank findings means "
+		"the walk was clean and the record is Recorded. Anything written in the "
+		"findings routes it to Corrective Action Required and raises a Critical "
+		"alert that persists until the finding is closed or a later clean walk of "
+		"the same unit supersedes it. Somebody who has typed 'water stain, north "
+		"wall' is not offered the option of marking it passed.\n\n"
+		"IT ONLY EVER MOVES THE DATE FORWARD. A back-dated walk is filed as evidence "
+		"and does not move a register that already knows about something later — "
+		"that would re-raise an alert about work which has since been done.",
+		{
+			"unit": _field(_STRING, "The Housing Unit that was walked."),
+			"inspection_date": _field(_STRING, "The day somebody was stood in it, YYYY-MM-DD. Defaults to today."),
+			"inspector": _field(_STRING, "The Employee id of whoever walked it."),
+			"inspector_name": _field(_STRING, "Their name, where no HR app can resolve it."),
+			"findings": _field(
+				_STRING,
+				"WHAT WAS WRONG. Leave it out or empty for a clean walk — that is a positive "
+				"statement, and it is what keeps the record in Recorded.",
+			),
+			"corrective_action": _field(_STRING, "What is going to be done about it, and by when."),
+			"signature": _field(_STRING, "The inspector's signature capture: a file URL or File docname."),
+			"photos": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}},
+				"File docnames, file URLs, or objects with a type and a caption. Max 40.",
+			),
+			"source_task": _field(_STRING, "The Farm Task this came from, if any."),
+			"keep_as_draft": _field(
+				_BOOLEAN,
+				"Hold it in Draft — a walk started in a cabin with no signal and finished in the "
+				"evening. A Draft writes nothing to the unit. Default false.",
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+			"company": _COMPANY,
+		},
+		required=("unit",),
+		mutating=True,
+		title="Record a housing inspection",
+		available=_needs_doctype("Housing Inspection"),
+		requires="the Housing Inspection DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_housing_inspection": _tool(
+		inspections.update_housing_inspection,
+		"MUTATING (default OFF). Correct or close one walk: findings, corrective "
+		"action, signature, extra photographs, and the closure. Every change is "
+		"echoed as before → after, and the state is recomputed from the findings.\n\n"
+		"CLOSING A FINDING REQUIRES A CLOSURE NOTE saying what was actually done. A "
+		"date with nothing beside it is what an auditor is trained to disbelieve.",
+		{
+			"record": _field(_STRING, "The Housing Inspection docname."),
+			"housing_inspection": _field(_STRING, "Alias for record."),
+			"findings": _field(_STRING, "New findings. An empty string clears them and returns it to Recorded."),
+			"corrective_action": _field(_STRING, "What is being done about it."),
+			"corrective_action_closed": _field(_STRING, "The day it was fixed, YYYY-MM-DD."),
+			"closure_note": _field(_STRING, "What was done. Required with a closure date."),
+			"signature": _field(_STRING, "The signature capture."),
+			"inspection_date": _field(_STRING, "Correct the date, YYYY-MM-DD."),
+			"photos": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}}, "Photographs to ADD."
+			),
+			"keep_as_draft": _field(_BOOLEAN, "Clear this to publish a draft."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		mutating=True,
+		title="Update a housing inspection",
+		available=_needs_doctype("Housing Inspection"),
+		requires="the Housing Inspection DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_detector_tests": _tool(
+		inspections.list_detector_tests,
+		"Every smoke and CO detector test, newest first, with the failures and the "
+		"buildings that have no detector at all named as open findings. Read-only.",
+		{
+			"unit": _field(_STRING, "Only tests of this Housing Unit. `subject` is an alias."),
+			"subject": _field(_STRING, "Alias for unit."),
+			"state": _field(_STRING, "Draft, Recorded or Corrective Action Required."),
+			"from_date": _field(_STRING, "Earliest test date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest test date, YYYY-MM-DD."),
+			"source_task_only": _field(_BOOLEAN, "Only tests produced by completing a Farm Task."),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="List detector tests",
+		available=_needs_doctype("Detector Test"),
+		requires="the Detector Test DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_detector_test": _tool(
+		inspections.get_detector_test,
+		"One test in full, with its photographs, the building's whole testing "
+		"history and — where this one failed — the later clean test that superseded "
+		"it. Read-only.",
+		{
+			"record": _field(_STRING, "The Detector Test docname, e.g. 'DT-2026-07-00004'."),
+			"detector_test": _field(_STRING, "Alias for record."),
+		},
+		title="Get a detector test",
+		available=_needs_doctype("Detector Test"),
+		requires="the Detector Test DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_detector_test": _tool(
+		inspections.create_detector_test,
+		"MUTATING (default OFF). Record one smoke and CO detector test and move the "
+		"unit's detector dates forward, which is what takes "
+		"`housing_detector_test_stale` off the calendar.\n\n"
+		"A FAILED TEST STILL WRITES THE DATE, and that is deliberate: the stale "
+		"alert asks whether anybody KNOWS the detector works, and a Fail answers it. "
+		"The answer is bad, so the record routes to Corrective Action Required and "
+		"raises a Critical alert of its own — but the ignorance is over.\n\n"
+		"NOT PRESENT WRITES NO DATE, for the mirror reason. There is nothing to have "
+		"tested, so the stale alert goes on saying so — and a building somebody "
+		"sleeps in with no CO detector is the most dangerous state this app records.\n\n"
+		"WHERE A REPLACEMENT IS NEEDED IT RAISES A FARM TASK to go and fit one. "
+		"'Replacement needed' as a checkbox with nobody dispatched against it is a "
+		"finding that stays true until next year's test discovers it again.",
+		{
+			"unit": _field(_STRING, "The Housing Unit whose detectors were tested."),
+			"test_date": _field(_STRING, "The day the button was pressed, YYYY-MM-DD. Defaults to today."),
+			"tester": _field(_STRING, "The Employee id of whoever tested it."),
+			"tester_name": _field(_STRING, "Their name, where no HR app can resolve it."),
+			"smoke_detector_result": _field(_STRING, "Pass, Fail or Not Present. Default Pass."),
+			"co_detector_result": _field(_STRING, "Pass, Fail or Not Present. Default Pass."),
+			"replacement_needed": _field(
+				_BOOLEAN,
+				"Set for you on any Fail or Not Present. Set it by hand for a detector that "
+				"passed but is past its service life — most are rated ten years.",
+			),
+			"findings": _field(_STRING, "Anything else seen while testing."),
+			"photos": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}}, "Photographs. Max 40."
+			),
+			"source_task": _field(_STRING, "The Farm Task this came from, if any."),
+			"keep_as_draft": _field(_BOOLEAN, "Hold it in Draft. Default false."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+			"company": _COMPANY,
+		},
+		required=("unit",),
+		mutating=True,
+		title="Record a detector test",
+		available=_needs_doctype("Detector Test"),
+		requires="the Detector Test DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_detector_test": _tool(
+		inspections.update_detector_test,
+		"MUTATING (default OFF). Correct one detector test or close its fault: "
+		"results, replacement flag, findings, extra photographs and the closure. "
+		"Closing requires a note saying what was fitted or repaired.",
+		{
+			"record": _field(_STRING, "The Detector Test docname."),
+			"detector_test": _field(_STRING, "Alias for record."),
+			"smoke_detector_result": _field(_STRING, "Pass, Fail or Not Present."),
+			"co_detector_result": _field(_STRING, "Pass, Fail or Not Present."),
+			"replacement_needed": _field(_BOOLEAN, "New replacement flag."),
+			"findings": _field(_STRING, "New findings."),
+			"corrective_action_closed": _field(_STRING, "The day it was fixed, YYYY-MM-DD."),
+			"closure_note": _field(_STRING, "What was fitted or repaired. Required with a closure date."),
+			"test_date": _field(_STRING, "Correct the date, YYYY-MM-DD."),
+			"photos": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}}, "Photographs to ADD."
+			),
+			"keep_as_draft": _field(_BOOLEAN, "Clear this to publish a draft."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		mutating=True,
+		title="Update a detector test",
+		available=_needs_doctype("Detector Test"),
+		requires="the Detector Test DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_water_tests": _tool(
+		inspections.list_water_tests,
+		"Every agricultural water sample, newest first, with the contaminated ones "
+		"nobody has resolved named. Read-only.",
+		{
+			"source": _field(_STRING, "Only samples from this Irrigation Zone. `subject` is an alias."),
+			"subject": _field(_STRING, "Alias for source."),
+			"state": _field(_STRING, "Draft, Recorded or Corrective Action Required."),
+			"from_date": _field(_STRING, "Earliest sample date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest sample date, YYYY-MM-DD."),
+			"source_task_only": _field(_BOOLEAN, "Only samples produced by completing a Farm Task."),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="List water tests",
+		available=_needs_doctype("Water Test"),
+		requires="the Water Test DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_water_test": _tool(
+		inspections.get_water_test,
+		"One sample in full: the laboratory, the results, the report, the sampling "
+		"photographs, the zone's whole testing history and — where this one was "
+		"dirty — the later clean sample that superseded it. Read-only.",
+		{
+			"record": _field(_STRING, "The Water Test docname, e.g. 'WT-2026-07-00002'."),
+			"water_test": _field(_STRING, "Alias for record."),
+		},
+		title="Get a water test",
+		available=_needs_doctype("Water Test"),
+		requires="the Water Test DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_water_test": _tool(
+		inspections.create_water_test,
+		"MUTATING (default OFF). Record one agricultural water sample and move BOTH "
+		"the zone's and the parent block's `water_test_last_date` forward. Both, "
+		"because the sample came out of the zone but `water_test_stale` reads the "
+		"BLOCK — Subpart E is engaged by water contacting a crop, and the crop is on "
+		"the block.\n\n"
+		"RESULTS ARE READ BOTH WAYS, because a laboratory says the same thing eight "
+		"ways: words first ('Absent', 'Present', '<1'), then any number, where "
+		"anything above zero is a detection and generic E. coli is compared against "
+		"the FSMA 112.44(b) criterion of 126 CFU/100 mL.\n\n"
+		"AN UNREADABLE RESULT IS NOT A CLEAN RESULT. Where neither reading works the "
+		"record routes to Corrective Action Required and somebody has to go and look "
+		"at the report. Treating an uninterpretable result as a pass is how a "
+		"compliance file becomes a clean record of nothing.\n\n"
+		"DRAFT IS THE NORMAL FIRST STATE HERE: a sample is taken on Monday and "
+		"answered on Thursday. Use keep_as_draft, then file the answer with "
+		"update_water_test.",
+		{
+			"source": _field(_STRING, "The Irrigation Zone the sample came from."),
+			"test_date": _field(
+				_STRING,
+				"The day the sample was TAKEN, YYYY-MM-DD — which is what Subpart E's ninety days "
+				"count back from, not the day the laboratory answered. Defaults to today.",
+			),
+			"tester": _field(_STRING, "The Employee id of whoever took it."),
+			"tester_name": _field(_STRING, "Their name, where no HR app can resolve it."),
+			"laboratory": _field(_STRING, "Who did the analysis."),
+			"lab_sample_id": _field(_STRING, "The laboratory's own sample identifier."),
+			"sample_collected_on": _field(_STRING, "Datetime the sample was collected."),
+			"lab_reported_on": _field(_STRING, "The day the laboratory answered, YYYY-MM-DD."),
+			"coliform_result": _field(_STRING, "Total coliform, as the laboratory wrote it."),
+			"ecoli_result": _field(_STRING, "Generic E. coli, as the laboratory wrote it."),
+			"lab_report": _field(_STRING, "The laboratory's own report: a file URL or File docname."),
+			"findings": _field(_STRING, "Anything else about the sample or the source."),
+			"sample_photos": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}},
+				"Photographs of the sampling point. Max 40.",
+			),
+			"source_task": _field(_STRING, "The Farm Task this came from, if any."),
+			"keep_as_draft": _field(
+				_BOOLEAN, "Hold it in Draft until the laboratory answers. Default false."
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+			"company": _COMPANY,
+		},
+		required=("source",),
+		mutating=True,
+		title="Record a water test",
+		available=_needs_doctype("Water Test"),
+		requires="the Water Test DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_water_test": _tool(
+		inspections.update_water_test,
+		"MUTATING (default OFF). File the laboratory's answer against a sample taken "
+		"days earlier, or close a contamination finding. THIS IS WHAT THE DRAFT "
+		"STATE IS FOR: a sample and its result are one record, and filing the answer "
+		"as a second one would produce two rows about one sample whose only "
+		"difference is which was typed second.\n\n"
+		"Clearing keep_as_draft is what publishes it, recomputes the state from the "
+		"results, and moves both registers forward.",
+		{
+			"record": _field(_STRING, "The Water Test docname."),
+			"water_test": _field(_STRING, "Alias for record."),
+			"laboratory": _field(_STRING, "Who did the analysis."),
+			"lab_sample_id": _field(_STRING, "The laboratory's own identifier."),
+			"lab_reported_on": _field(_STRING, "The day they answered, YYYY-MM-DD."),
+			"coliform_result": _field(_STRING, "Total coliform, as written."),
+			"ecoli_result": _field(_STRING, "Generic E. coli, as written."),
+			"lab_report": _field(_STRING, "The report itself."),
+			"findings": _field(_STRING, "New findings."),
+			"corrective_action_closed": _field(_STRING, "The day the water was dealt with, YYYY-MM-DD."),
+			"closure_note": _field(
+				_STRING, "What was done — treated, source switched, line flushed. Required with a closure date."
+			),
+			"test_date": _field(_STRING, "Correct the sample date, YYYY-MM-DD."),
+			"sample_photos": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}}, "Photographs to ADD."
+			),
+			"keep_as_draft": _field(
+				_BOOLEAN, "Clear this to publish the record once the laboratory has answered."
+			),
+			"notes": _field(_STRING, "New notes."),
+		},
+		mutating=True,
+		title="Update a water test",
+		available=_needs_doctype("Water Test"),
+		requires="the Water Test DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 
