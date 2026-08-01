@@ -270,8 +270,10 @@ class TheScheduledJobs(unittest.TestCase):
 				with self.subTest(interval=interval, path=path):
 					self.assertTrue(callable(resolve(path)))
 
-	def test_they_are_these_three_and_nothing_else(self):
-		"""Three jobs, and each writes only this app's own doctypes — or nothing.
+	def test_they_are_these_four_and_nothing_else(self):
+		"""Four jobs. Three write only this app's own doctypes or nothing at all;
+		the fourth writes two credential fields on Frappe's User and had to argue
+		for it — see hooks.py and tools/mobile.sweep_idle_grants.
 
 		Asserted as an exact mapping rather than a membership check, so a third
 		job fails here and has to be argued for. Every scheduled job is code that
@@ -287,7 +289,10 @@ class TheScheduledJobs(unittest.TestCase):
 			hooks.scheduler_events,
 			{
 				"hourly": ["erpnext_mcp.alerts.sweep"],
-				"daily": ["erpnext_mcp.tools.uploads.collect_expired_sessions"],
+				"daily": [
+					"erpnext_mcp.tools.uploads.collect_expired_sessions",
+					"erpnext_mcp.tools.mobile.sweep_idle_grants",
+				],
 				"weekly": ["erpnext_mcp.drift.scan"],
 			},
 		)

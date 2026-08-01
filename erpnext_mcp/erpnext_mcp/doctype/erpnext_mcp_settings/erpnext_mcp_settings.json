@@ -20,6 +20,7 @@
   "allowed_cidrs",
   "public_url",
   "farm_ops_mobile_enabled",
+  "mobile_grant_idle_days",
   "drift_report_email",
   "attribution_section",
   "require_user_context",
@@ -383,6 +384,14 @@
    "fieldname": "farm_ops_mobile_enabled",
    "fieldtype": "Check",
    "label": "Farm Ops Mobile API Enabled"
+  },
+  {
+   "default": "30",
+   "description": "Days a Farm Ops credential may go unused before a nightly sweep revokes its token. This is what limits the damage from a phone lost in an orchard and never reported: an unreported device stops working by itself. The ACCOUNT is never disabled and the roles and entity access are untouched — only the token goes, and the worker gets a new QR. Tick \"Exempt From Idle Sweep\" on a Mobile Access Grant that is legitimately quiet for months. Set this to 0 to switch the sweep off entirely.",
+   "fieldname": "mobile_grant_idle_days",
+   "fieldtype": "Int",
+   "label": "Revoke Idle Mobile Credentials After (Days)",
+   "non_negative": 1
   },
   {
    "description": "Where the weekly Journal Entry attribution drift report goes when it finds something. Comma-separated; leave empty and it goes to every enabled System Manager on the site. The watch is READ-ONLY — it reports drift and never repairs it, because rewriting GL rows on submitted accounting documents on a timer is not something this app does. If no outgoing email account is configured the report lands in the Error Log instead, so a finding is never lost to an SMTP setting.",

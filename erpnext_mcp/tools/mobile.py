@@ -45,15 +45,32 @@ override it.
 WHAT THIS MODULE DOES NOT PROMISE
 ────────────────────────────────────────────────────────────────────────────
 
-**API secrets do not expire.** Frappe has no expiry on an API secret and this
-app installs no scheduled job to add one, because such a job would rewrite
-another app's User records on a timer with nobody watching — `hooks.py` declares
-exactly two scheduled jobs and argues for both, and this would not have survived
-the argument. `token_expires_on` is therefore a REVIEW DATE:
-`list_mobile_users` flags an overdue grant loudly, `get_current_user_context`
-reports it to the phone, and `revoke_api_token` is what actually ends access.
-Calling a reminder an expiry would be a false assurance, and a false assurance
-about a credential is worse than none.
+**API secrets still do not expire, and v0.17.1 added a sweep anyway.** Frappe has
+no expiry on an API secret, so `token_expires_on` remains a REVIEW DATE and
+calling it an expiry would be a false assurance about a credential, which is
+worse than none.
+
+WHAT CHANGED, AND WHY THE OLD ARGUMENT LOST. v0.17.0 said here that this app
+would install no scheduled job to revoke one, "because such a job would rewrite
+another app's User records on a timer with nobody watching". Every clause of that
+turned out to be answerable, and v0.17.1 answers them: `sweep_idle_grants`
+rewrites only the two credential fields, only on accounts this app created and
+minted a key for, only where a Mobile Access Grant says so — and somebody IS
+watching, because each revocation writes an MCP Action Log row and the run emails
+a summary.
+
+What actually changed is the threat. A key that only ever travelled to a laptop
+on the LAN could be left to a human to review. v0.17.1 put forty of them in forty
+pockets on the open internet, and a phone left on a truck seat and not mentioned
+is the ordinary case rather than the exotic one. A credential that stops working
+by itself is the only control that does not depend on somebody admitting to it.
+
+The sweep works on IDLENESS (`last_seen_on`, stamped by `api/guard` at most once
+a day) rather than on the review date: a credential in daily use is not stale
+because a date passed, and one nobody has touched for a month is stale whatever
+the date says. It revokes the TOKEN and never the account — the worker keeps
+their roles and entity access and needs one new QR. `revoke_mobile_user` is the
+other thing, and no timer ever reaches it.
 
 **The QR carries a live credential.** Anybody who photographs it over somebody's
 shoulder has the account. That is inherent to enrolment-by-QR and the mitigation
@@ -78,7 +95,7 @@ import json
 
 import frappe
 
-from .. import roles, security, settings
+from .. import audit, compat, roles, security, settings
 from ..args import as_bool, as_int, as_str, resolve_company
 from ..compat import doctype_exists
 from ..errors import ToolError
@@ -1263,6 +1280,175 @@ def _archive_card(user: str, png: bytes, url: str, expires_at, args: dict) -> di
 			"is the Mobile Access Grant, and it holds no secret."
 		),
 	}
+
+
+# ── the nightly idle sweep ──────────────────────────────────────────────────
+#: What the sweep writes into a swept grant's revocation reason.
+IDLE_REASON = "token revoked by the idle sweep: no call from this credential in {days} day(s)"
+
+
+def sweep_idle_grants() -> int:
+	"""Revoke the token on every credential nobody has used for the idle window.
+
+	v0.17.1. THIS IS THE JOB THE v0.17.0 DOCSTRING SAID THIS APP WOULD NOT
+	INSTALL, and the reversal is deliberate rather than an oversight — see the
+	module docstring, which now records both the old argument and why it lost.
+
+	The short version: the old objection was that such a job "would rewrite
+	another app's User records on a timer with nobody watching", and every clause
+	of that was answerable. It rewrites only the two credential fields, only on
+	accounts this app itself created and minted a key for, only where a Mobile
+	Access Grant says so — and somebody IS watching, because every revocation
+	writes an MCP Action Log row and the run emails a summary.
+
+	What actually changed is that v0.17.1 put those credentials on the open
+	internet. A key that only ever travelled to a laptop on the LAN could be left
+	to a human to review; forty of them in forty pockets, any one of which can be
+	left on a truck seat and not mentioned, cannot. An unreported lost phone is
+	the threat, and a credential that stops working by itself is the only control
+	that does not depend on somebody admitting to it.
+
+	FOUR THINGS IT DOES NOT DO, each of them a way this could have gone wrong:
+
+	  * It does NOT disable the account, remove roles, or touch entity access.
+	    The worker still exists and still has the same access the day they scan a
+	    new QR. This is "your phone went quiet", not "you no longer work here" —
+	    `revoke_mobile_user` is the other one and a timer must never reach it.
+	  * It does NOT touch a grant that is not Active, so a revoked grant is not
+	    revoked twice and an Expired one is left for a human.
+	  * It does NOT touch a grant marked `persistent`. A winter caretaker's phone
+	    is legitimately quiet for months.
+	  * It does NOT age a grant it has no clock for. Where `last_seen_on` is
+	    empty the token's ISSUE date is used, and where there is neither, the
+	    grant is left alone and reported — guessing an age for a credential and
+	    then acting on the guess is the shape of mistake that ends with somebody
+	    locked out mid-harvest.
+
+	Never raises, like every scheduled job here. Returns how many it revoked.
+	"""
+	try:
+		days = settings.mobile_grant_idle_days()
+		if days <= 0 or not doctype_exists(GRANT):
+			return 0
+		swept, skipped = _sweep_idle(days)
+		if swept:
+			_report_sweep(swept, skipped, days)
+		return len(swept)
+	except Exception:
+		try:
+			frappe.log_error(
+				title="erpnext_mcp: the idle mobile credential sweep failed",
+				message=frappe.get_traceback(),
+			)
+		except Exception:
+			pass
+		return 0
+
+
+def _sweep_idle(days: int) -> tuple:
+	"""Revoke the idle ones; return (what was revoked, what could not be judged)."""
+	cutoff = str(frappe.utils.add_days(frappe.utils.now(), -days))
+	rows = (
+		frappe.db.get_all(
+			GRANT,
+			filters={"state": "Active"},
+			fields=["name", "user", "full_name", "last_seen_on", "token_issued_on", "persistent"],
+			limit=LIST_CAP,
+		)
+		or []
+	)
+
+	swept, skipped = [], []
+	for row in rows:
+		row = dict(row)
+		if compat.checked(row.get("persistent")):
+			continue
+		# A grant carrying no credential has nothing to revoke — a worker whose
+		# token was already taken away is not swept again.
+		if not read_api_secret(row["user"]):
+			continue
+		clock = str(row.get("last_seen_on") or "") or str(row.get("token_issued_on") or "")
+		if not clock:
+			skipped.append({"user": row["user"], "reason": "no last_seen_on and no token_issued_on"})
+			continue
+		if clock >= cutoff:
+			continue
+		try:
+			_clear_token(row["user"])
+			_write_grant(
+				row["user"],
+				{
+					"mobile_role": _grant_row(row["user"]).get("mobile_role") or _role_from_held(row["user"]),
+					"state": "Revoked",
+					"api_key": "",
+					"token_revoked_on": _now(),
+					"revocation_reason": IDLE_REASON.format(days=days),
+					"revoked_on": _now(),
+					"revoked_by": "Administrator",
+				},
+			)
+		except Exception as exc:
+			# One grant that will not revoke must not stop the other thirty-nine.
+			skipped.append({"user": row["user"], "reason": f"{type(exc).__name__}: {exc}"})
+			continue
+		swept.append({"user": row["user"], "full_name": row.get("full_name"), "last_seen_on": clock})
+		audit.record(
+			"sweep_idle_grants",
+			{"user": row["user"], "idle_since": clock, "idle_days": days},
+			audit.STATUS_SUCCESS,
+			f"revoked the idle credential for {row['user']} (last seen {clock})",
+			commit=False,
+		)
+	return swept, skipped
+
+
+def _report_sweep(swept: list, skipped: list, days: int) -> None:
+	"""Tell somebody. A credential that stopped working silently is a support call.
+
+	Goes to the same recipients as the drift watch, and falls back to the Error
+	Log for the same reason: a site with no outgoing mail account is ordinary, and
+	the message that explains why forty phones asked to be re-enrolled is exactly
+	the one nobody should have to reconstruct.
+	"""
+	from .. import drift
+
+	lines = [
+		f"<p><b>{len(swept)} Farm Ops credential(s)</b> were revoked after {days} day(s) with no "
+		"call. The accounts are untouched — same roles, same entity access — and each worker "
+		"needs a fresh login QR (<code>generate_mobile_login_qr</code>) to get back on.</p>",
+		"<ul>"
+		+ "".join(
+			f"<li>{frappe.utils.escape_html(str(row.get('full_name') or row['user']))} "
+			f"({frappe.utils.escape_html(row['user'])}) — last seen {row['last_seen_on']}</li>"
+			for row in swept
+		)
+		+ "</ul>",
+		"<p>Tick <b>Exempt From Idle Sweep</b> on a Mobile Access Grant that is legitimately quiet "
+		"for months, or set the window to 0 on ERPNext MCP Settings to switch the sweep off.</p>",
+	]
+	if skipped:
+		lines.append(
+			"<p>Left alone because their age could not be judged: "
+			+ ", ".join(frappe.utils.escape_html(f"{row['user']} ({row['reason']})") for row in skipped)
+			+ "</p>"
+		)
+	body = "".join(lines)
+	try:
+		to = drift.recipients()
+		if to:
+			frappe.sendmail(
+				recipients=to,
+				subject=f"ERPNext MCP: {len(swept)} idle Farm Ops credential(s) revoked",
+				message=body,
+				now=False,
+			)
+			return
+	except Exception:
+		pass
+	try:
+		frappe.log_error(title="erpnext_mcp: idle Farm Ops credentials revoked", message=body)
+	except Exception:  # pragma: no cover
+		pass
 
 
 # ── the role catalogue, for a client that wants it without a user ───────────

@@ -22,6 +22,8 @@
   "token_col",
   "token_revoked_on",
   "token_issue_count",
+  "last_seen_on",
+  "persistent",
   "qr_section",
   "last_qr_issued_on",
   "qr_expires_at",
@@ -143,7 +145,7 @@
    "read_only": 1
   },
   {
-   "description": "The date the token should be reviewed and re-issued. A REVIEW DATE, NOT AN EXPIRY: Frappe API secrets have no expiry of their own, and this app installs no scheduled job that revokes one — a job that rewrote another app's User records at three in the morning is not a thing this app does. list_mobile_users flags a grant past this date loudly; revoke_api_token is what actually ends it.",
+   "description": "The date the token should be reviewed and re-issued. A REVIEW DATE, NOT AN EXPIRY: Frappe API secrets have no expiry of their own. From v0.17.1 there IS a scheduled sweep, but it works on IDLENESS (last_seen_on) rather than on this date — a credential in daily use is not stale because a review date passed, and one nobody has touched for a month is stale whatever this says. list_mobile_users flags a grant past this date loudly; revoke_api_token is what ends it on demand.",
    "fieldname": "token_expires_on",
    "fieldtype": "Date",
    "in_list_view": 1,
@@ -168,6 +170,22 @@
    "fieldtype": "Int",
    "label": "Tokens Issued",
    "read_only": 1
+  },
+  {
+   "description": "The last time this credential actually made a call, stamped by the mobile API gate at most once a day. EMPTY MEANS IT HAS NEVER BEEN USED — a card that was printed and never scanned reads the same as one scanned this morning if you only look at token_issued_on, and those are very different facts about a live credential.",
+   "fieldname": "last_seen_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Last Seen On",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "Exempt this grant from the idle sweep. Tick it for a credential that is legitimately quiet for months — a winter caretaker, a device kept for a seasonal crew, an integration. Everything else has its token revoked after the idle window on ERPNext MCP Settings, which is what limits the blast radius of a phone lost in an orchard and never reported. The ACCOUNT is never disabled by the sweep; only the token goes.",
+   "fieldname": "persistent",
+   "fieldtype": "Check",
+   "label": "Exempt From Idle Sweep"
   },
   {
    "fieldname": "qr_section",

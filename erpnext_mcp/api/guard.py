@@ -210,9 +210,40 @@ def _require_mobile_grant(user: str) -> None:
 	"""
 	if not doctype_exists(GRANT):
 		raise frappe.PermissionError("This endpoint requires an enrolled Farm Ops credential.")
-	state = frappe.db.get_value(GRANT, {"user": user}, "state")
-	if str(state or "") != "Active":
+	row = frappe.db.get_value(GRANT, {"user": user}, ["name", "state", "last_seen_on"], as_dict=True)
+	if not row or str(row.get("state") or "") != "Active":
 		raise frappe.PermissionError("This endpoint requires an enrolled Farm Ops credential.")
+	_stamp_last_seen(row)
+
+
+def _stamp_last_seen(row) -> None:
+	"""Remember that this credential was used today. AT MOST ONE WRITE A DAY.
+
+	v0.17.1. `sweep_idle_grants` revokes a token nobody has used for a month,
+	which is what limits the damage from a phone lost in an orchard and never
+	reported — and it can only do that if something records use. This is that
+	something, and it lives here because this is the one place every mobile call
+	passes through.
+
+	THE DATE COMPARISON IS THE WHOLE DESIGN. A phone polling its task list writes
+	nothing on the second and subsequent calls of a day, so forty devices cost
+	forty UPDATEs a day rather than forty an hour. Stamping a timestamp on every
+	request would put a write on the hot path of a read endpoint to serve a job
+	that runs at midnight and rounds to days.
+
+	It uses `db.set_value` rather than loading the document: this must not touch
+	`modified`-driven concurrency on a record an operator may have open, and it
+	must not fire the controller's validation on a field the controller does not
+	care about. It never raises — a failure to stamp is a credential that looks a
+	day staler than it is, which the sweep's own notification makes visible.
+	"""
+	try:
+		today = str(frappe.utils.today())
+		if str(row.get("last_seen_on") or "")[:10] == today:
+			return
+		frappe.db.set_value(GRANT, row["name"], "last_seen_on", frappe.utils.now(), update_modified=False)
+	except Exception:  # pragma: no cover - a stamp is never worth failing a call
+		pass
 
 
 # ── entity scoping ──────────────────────────────────────────────────────────

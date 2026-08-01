@@ -138,6 +138,24 @@ def farm_ops_mobile_enabled() -> bool:
 	return as_bool(_value("farm_ops_mobile_enabled"))
 
 
+def mobile_grant_idle_days() -> int:
+	"""Days a mobile credential may go unused before the nightly sweep revokes it.
+
+	0 switches the sweep off, and that is a real configuration rather than a
+	broken one: a site whose crew works one month in twelve is better served by
+	the operator revoking by hand than by a timer that fires every February.
+
+	Ships at 30. `tools/mobile.sweep_idle_grants` reads it on every run rather
+	than caching it, so shortening the window takes effect that night.
+	"""
+	try:
+		return max(0, int(_value("mobile_grant_idle_days") or 0))
+	except (TypeError, ValueError):
+		# An unparseable value must not be read as "0 = off", which would
+		# silently disable a security control. Fall back to the shipped default.
+		return 30
+
+
 def drift_report_email() -> str:
 	"""Who hears when the weekly JE drift watch finds something. May be empty.
 

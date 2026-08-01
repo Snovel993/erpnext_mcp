@@ -21,7 +21,7 @@ short version: compliance woven into the operational record is defensible under
 audit and a shadow log beside it is not, and you cannot weave anything into a
 doctype you refuse to touch. `before_uninstall` names every column that goes.
 
-THERE ARE EXACTLY THREE SCHEDULED JOBS, and the count is in this docstring
+THERE ARE EXACTLY FOUR SCHEDULED JOBS, and the count is in this docstring
 because it is a number somebody should have to change on purpose. Every one of
 them runs on somebody's site with nobody watching, so each has had to clear the
 same two bars: it writes only this app's own doctypes (or nothing at all), and
@@ -61,6 +61,23 @@ makes the argument at length.
 It exists because ACC-JV-2026-00073 was a bug whose entire character was that
 nothing complained about it, and "somebody remembers to run a scan" is not a
 control.
+
+The fourth arrived in v0.17.1 with the mobile API and is the idle credential
+sweep. IT IS THE ONE THAT WRITES ANOTHER APP'S TABLE — two fields on Frappe's
+User, `api_key` and `api_secret` — and v0.17.0's own docstring said this app
+would never install it. That reversal is argued in `tools/mobile.py` and the
+short version is that the threat changed: v0.17.1 put forty live credentials in
+forty pockets on the open internet, and a phone left on a truck seat and never
+mentioned is the ordinary case. A credential that stops working by itself is the
+only control that does not depend on somebody admitting to the loss.
+
+It is bounded in every direction that matters. It touches only accounts this app
+created and minted a key for, only where a Mobile Access Grant is Active, never
+one marked persistent, and never one whose age it cannot establish. It revokes
+the TOKEN and never the account — roles and entity access are untouched and the
+worker needs one new QR. Every revocation writes an MCP Action Log row and the
+run emails a summary, so "with nobody watching" is no longer true of it. Setting
+the window to 0 on ERPNext MCP Settings switches it off.
 
 IT IS THE CLOCK SERVING KAIROS, AND THAT IS THE WHOLE POINT OF PUTTING IT ON A
 SCHEDULE. The sweep DECIDES NOTHING. Every rule it runs asks whether a condition
@@ -120,6 +137,7 @@ scheduler_events = {
 	],
 	"daily": [
 		"erpnext_mcp.tools.uploads.collect_expired_sessions",
+		"erpnext_mcp.tools.mobile.sweep_idle_grants",
 	],
 	"weekly": [
 		"erpnext_mcp.drift.scan",
