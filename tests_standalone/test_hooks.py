@@ -50,6 +50,11 @@ from .harness import frappe  # noqa: F401 - installs the frappe double before er
 #:   "app_list"   a list of app names.
 #:   "path"       ONE dotted path to a callable.
 #:   "path_map"   a dict of lists of dotted paths — `scheduler_events`.
+#:   "path_dict"  a dict of ONE dotted path each, keyed by doctype — the two
+#:                permission hooks. A DIFFERENT SHAPE from `path_map`, and
+#:                conflating them is not cosmetic: the resolver iterates a
+#:                path_map's values, so a plain string gets walked one CHARACTER
+#:                at a time and every one of them "fails to resolve".
 #:   "jinja"      a dict of lists of dotted paths that must carry NO colon.
 #:
 #: A key missing from here fails `test_every_hook_key_is_accounted_for`, which is
@@ -68,6 +73,8 @@ KNOWN_HOOKS = {
 	"before_uninstall": "path",
 	"scheduler_events": "path_map",
 	"jinja": "jinja",
+	"permission_query_conditions": "path_dict",
+	"has_permission": "path_dict",
 }
 
 #: Hook keys this app must NOT declare, and why each one would be a lie.
@@ -77,13 +84,17 @@ KNOWN_HOOKS = {
 #: spelling, `jinja` has existed since v14, and v14 is this app's floor, so a
 #: second declaration buys nothing and doubles the surface for exactly the format
 #: mistake that caused the outage.
+#: `permission_query_conditions` and `has_permission` WERE here until v0.17.1,
+#: on the grounds that "this app changes nobody's visibility". That was a proxy
+#: for the invariant actually worth keeping — do not touch OTHER PEOPLE'S
+#: doctypes — and the proxy was wrong for two doctypes this app ships and never
+#: scoped. `test_permissions.py` enforces the narrower, stronger rule in its
+#: place. See `permissions.py`.
 FORBIDDEN_HOOKS = {
 	"jenv": "the deprecated spelling of `jinja`, with a DIFFERENT syntax",
 	"doc_events": "this app installs no document hooks — see the hooks.py docstring",
 	"override_doctype_class": "this app overrides no doctype",
 	"override_whitelisted_methods": "this app overrides no framework method",
-	"permission_query_conditions": "this app changes nobody's visibility",
-	"has_permission": "this app changes nobody's permissions",
 	"fixtures": "this app ships no fixtures",
 	"doctype_js": "this app adds no client script to a doctype it does not own",
 }
@@ -109,6 +120,9 @@ def dotted_paths() -> list:
 			for group, entries in (value or {}).items():
 				for entry in entries:
 					out.append((f"{name}.{group}", entry))
+		elif shape == "path_dict":
+			for group, entry in (value or {}).items():
+				out.append((f"{name}.{group}", entry))
 	return out
 
 

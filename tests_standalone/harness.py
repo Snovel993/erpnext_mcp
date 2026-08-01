@@ -2323,6 +2323,25 @@ def _reject_default_ordering(doctype: str, order_by) -> None:
 
 
 class FakeDB:
+	def escape(self, value, percent=True):
+		"""`frappe.db.escape`, reproduced. v0.17.1.
+
+		Returns a QUOTED, escaped SQL string literal — quoted is the part that
+		catches people out, because a double that returned the bare escaped text
+		would let `permissions.py` build a WHERE clause that looks right in a test
+		and is a syntax error on MariaDB.
+
+		Frappe delegates to pymysql's `escape_string` and wraps the result in
+		single quotes; this does the same two substitutions in the same order. The
+		order matters: escaping the quote first and the backslash second would
+		re-escape the backslash this function just inserted.
+		"""
+		text = "" if value is None else str(value)
+		text = text.replace("\\", "\\\\").replace("'", "\\'")
+		if percent:
+			text = text.replace("%", "%%")
+		return f"'{text}'"
+
 	def get_all(
 		self,
 		doctype,

@@ -121,3 +121,37 @@ scheduler_events = {
 #: check with no amount in words is not a check, and a valid check with wordier
 #: text beats a blank line.
 jinja = {"methods": ["erpnext_mcp.render.checks.erpnext_mcp_amount_in_words"]}
+
+#: ENTITY SCOPING FOR THE TWO DOCTYPES FRAPPE'S OWN MECHANISM CANNOT REACH.
+#: v0.17.1. See `permissions.py`, which argues it at length.
+#:
+#: The short version: a User Permission on Company restricts every document that
+#: LINKS to a Company, and `Housing Assignment` and `Family` are the only two
+#: doctypes this app created that do not. `Housing Assignment` is READ-granted to
+#: four roles and FULL to a fifth, so before this hook a field worker scoped to
+#: one entity could list every camp bed assignment on the site.
+#:
+#: THESE TWO KEYS WERE FORBIDDEN UNTIL v0.17.1, on the grounds that "this app
+#: changes nobody's visibility". The invariant actually worth keeping is about
+#: OTHER PEOPLE'S doctypes — the blanket ban was a proxy for it, and the proxy
+#: was wrong for a doctype this app ships. `test_permissions.py` now asserts the
+#: narrower and stronger rule: EVERY doctype named here is one this app created.
+#: Restricting a doctype that would not exist without this app cannot change how
+#: a site behaved before it was installed.
+#:
+#: Both handlers return the unrestricted answer on any error rather than failing
+#: closed. A query-conditions hook that raises does not fail one query — it fails
+#: every list view of that doctype for everybody, including the Desk page an
+#: operator would open to fix it.
+permission_query_conditions = {
+	"Housing Assignment": "erpnext_mcp.permissions.housing_assignment_query",
+	"Family": "erpnext_mcp.permissions.family_query",
+}
+
+#: The same two, for the reads a query condition never sees — `frappe.get_doc`
+#: and the form view. A doctype filtered out of a list but readable at
+#: `/app/housing-assignment/HA-0007` is not scoped, it is merely tidy.
+has_permission = {
+	"Housing Assignment": "erpnext_mcp.permissions.housing_assignment_has_permission",
+	"Family": "erpnext_mcp.permissions.family_has_permission",
+}
