@@ -69,6 +69,12 @@ def handle():
 		_audit_rejection(exc)
 		return _respond(protocol.rpc_error(None, protocol.INVALID_REQUEST, str(exc)), exc.http_status)
 
+	# ORDER MATTERS, AND IT IS THE ONLY PLACE IT DOES. Frappe has already
+	# authenticated whatever `Authorization: token <key>:<secret>` the caller
+	# sent, so `frappe.session.user` is the mobile worker RIGHT NOW and is the
+	# MCP System User one line later. v0.17.0's per-user scoping reads what this
+	# saves. See `security.capture_calling_user`.
+	security.capture_calling_user()
 	frappe.set_user(settings.effective_user())
 
 	try:

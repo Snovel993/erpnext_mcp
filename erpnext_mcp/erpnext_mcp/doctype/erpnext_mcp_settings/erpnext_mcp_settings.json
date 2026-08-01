@@ -277,7 +277,31 @@
   "allow_update_detector_test",
   "records_write_col",
   "allow_create_water_test",
-  "allow_update_water_test"
+  "allow_update_water_test",
+  "mobile_read_section",
+  "allow_list_mobile_users",
+  "allow_get_current_user_context",
+  "mobile_read_col",
+  "allow_validate_public_endpoint",
+  "allow_get_tailscale_funnel_config",
+  "fieldwork_read_section",
+  "allow_list_my_tasks",
+  "allow_list_available_for_me",
+  "fieldwork_read_col",
+  "allow_get_task_with_evidence_contract",
+  "allow_list_compliance_calendar_for_me",
+  "mobile_write_section",
+  "allow_create_mobile_user",
+  "allow_revoke_mobile_user",
+  "mobile_write_col",
+  "allow_generate_api_token",
+  "allow_revoke_api_token",
+  "allow_generate_mobile_login_qr",
+  "fieldwork_write_section",
+  "allow_claim_task_via_mobile",
+  "allow_start_task_via_mobile",
+  "fieldwork_write_col",
+  "allow_complete_task_via_mobile"
  ],
  "fields": [
   {
@@ -2054,6 +2078,154 @@
    "fieldname": "allow_update_water_test",
    "fieldtype": "Check",
    "label": "Update Water Test"
+  },
+  {
+   "fieldname": "mobile_read_section",
+   "fieldtype": "Section Break",
+   "label": "Mobile Accounts and Entity Scoping — Read"
+  },
+  {
+   "default": "1",
+   "description": "Who has a phone, which of the six roles they hold, which entities their User Permissions actually allow, and what is wrong with each account. Reads the LIVE permission rows, so a scoping somebody changed in the Desk shows as drift. Turning this off hides the one report that would tell you an account is unscoped.",
+   "fieldname": "allow_list_mobile_users",
+   "fieldtype": "Check",
+   "label": "List Mobile Users"
+  },
+  {
+   "default": "1",
+   "description": "Who is calling, what they may do, and which entity the app should open on. The mobile app's first call after enrolment. The identity comes from the request's own credential, never from an argument on a request that already authenticated as somebody else.",
+   "fieldname": "allow_get_current_user_context",
+   "fieldtype": "Check",
+   "label": "Current User Context"
+  },
+  {
+   "fieldname": "mobile_read_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Reach this site from outside over HTTPS and report the TLS certificate, the status and a verdict. Probes unauthenticated by default — a 401 is the best result. It will only reach the configured public_url or a host under .ts.net, because it makes an outbound request from inside your network.",
+   "fieldname": "allow_validate_public_endpoint",
+   "fieldtype": "Check",
+   "label": "Validate Public Endpoint"
+  },
+  {
+   "default": "1",
+   "description": "What this machine thinks it is serving: Funnel ports, URLs, the node's tailnet DNS name. Read-only, and nothing in this app can turn Funnel on or off — changing what is reachable from the whole internet is an operator decision.",
+   "fieldname": "allow_get_tailscale_funnel_config",
+   "fieldtype": "Check",
+   "label": "Tailscale Funnel Config"
+  },
+  {
+   "fieldname": "fieldwork_read_section",
+   "fieldtype": "Section Break",
+   "label": "Farm Ops Mobile — Read"
+  },
+  {
+   "default": "1",
+   "description": "What the authenticated caller is holding right now, with the tool each assignment is waiting for. The worker is resolved from the request through their Employee record, so the phone never has to know its own Employee id.",
+   "fieldname": "allow_list_my_tasks",
+   "fieldtype": "Check",
+   "label": "My Tasks"
+  },
+  {
+   "default": "1",
+   "description": "The pool the authenticated caller could take from, scoped to their entities. Honest about skills: nothing on a Frappe site records what skills a worker has, so an unfiltered pool comes back saying it is unfiltered rather than guessing from a job title.",
+   "fieldname": "allow_list_available_for_me",
+   "fieldtype": "Check",
+   "label": "Pool For Me"
+  },
+  {
+   "fieldname": "fieldwork_read_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "One task shaped for a screen: the job, and its evidence contract as a checklist with a satisfied flag and a capture hint per requirement. Same facts as get_farm_task, different reader.",
+   "fieldname": "allow_get_task_with_evidence_contract",
+   "fieldtype": "Check",
+   "label": "Task With Evidence Contract"
+  },
+  {
+   "default": "1",
+   "description": "The compliance calendar narrowed to the entities the caller may see — one call per entity, merged, Critical first. An account with no Company User Permission is refused rather than shown the whole site.",
+   "fieldname": "allow_list_compliance_calendar_for_me",
+   "fieldtype": "Check",
+   "label": "My Compliance Calendar"
+  },
+  {
+   "fieldname": "mobile_write_section",
+   "fieldtype": "Section Break",
+   "label": "Mobile Accounts and Auth — Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Creates a Frappe User, assigns one of the six mobile roles, writes a Company User Permission per entity, and issues an API credential that is readable in the result exactly once. entity_access is mandatory and there is no override: in Frappe an account with no Company User Permission sees EVERY company on the site.",
+   "fieldname": "allow_create_mobile_user",
+   "fieldtype": "Check",
+   "label": "Create Mobile User"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Disables a login, destroys its API credential and records WHY. The reason is required — 'left at the end of harvest' and 'dismissed for cause' are different answers to the same auditor question and the grant is the only place either survives.",
+   "fieldname": "allow_revoke_mobile_user",
+   "fieldtype": "Check",
+   "label": "Revoke Mobile User"
+  },
+  {
+   "fieldname": "mobile_write_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Mints a fresh Frappe API key/secret for one user and RETURNS THE SECRET — the only time it appears in a result. Issuing a new one stops the previous one working. The expiry_days argument sets a REVIEW DATE, not an expiry: Frappe API secrets do not expire on their own and this app installs no job that revokes one.",
+   "fieldname": "allow_generate_api_token",
+   "fieldtype": "Check",
+   "label": "Generate API Token"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Destroys one user's API credential and leaves the account enabled. This is 'they lost their phone'; revoke_mobile_user is 'they no longer work here'.",
+   "fieldname": "allow_revoke_api_token",
+   "fieldtype": "Check",
+   "label": "Revoke API Token"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Produces a scannable PNG carrying the public URL, the user and a live credential. ANYBODY WHO PHOTOGRAPHS IT HAS THE ACCOUNT until the token is revoked. It expires for enrolment in 24 hours by default and rotates the secret by default, which invalidates any phone already enrolled. Refuses a non-HTTPS endpoint.",
+   "fieldname": "allow_generate_mobile_login_qr",
+   "fieldtype": "Check",
+   "label": "Generate Mobile Login QR"
+  },
+  {
+   "fieldname": "fieldwork_write_section",
+   "fieldtype": "Section Break",
+   "label": "Farm Ops Mobile — Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. claim_farm_task with the worker resolved from the authenticated request. Adds no rule and weakens none — the concurrent-claim limit and the refusal to self-pick Dispatched work still come from the same code.",
+   "fieldname": "allow_claim_task_via_mobile",
+   "fieldtype": "Check",
+   "label": "Claim Task (Mobile)"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. start_farm_task with the worker resolved from the authenticated request. The clock-in for the task, not for the shift.",
+   "fieldname": "allow_start_task_via_mobile",
+   "fieldtype": "Check",
+   "label": "Start Task (Mobile)"
+  },
+  {
+   "fieldname": "fieldwork_write_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. complete_farm_task with the worker resolved from the authenticated request. Every refusal is unchanged, including the evidence contract check and the refusal of a completion filed by anybody but the worker holding the task.",
+   "fieldname": "allow_complete_task_via_mobile",
+   "fieldtype": "Check",
+   "label": "Complete Task (Mobile)"
   }
  ],
  "index_web_pages_for_search": 0,

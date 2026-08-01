@@ -3,6 +3,197 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.17.0 — 2026-08-01
+
+**Sprint 9 Wave A. Sprint 8 built a dispatch board; this is what makes it safe to
+point forty phones at from outside the LAN.** Six roles, per-entity scoping
+through Frappe's own User Permissions, an API credential with QR enrolment, a
+public HTTPS transport over Tailscale Funnel, and seven tools shaped for a screen
+rather than for a report.
+
+**206 tools** — 93 read-only, 113 mutating. Every new mutating tool ships OFF.
+
+### Feature A — the six roles, and the split that avoids a role per LLC
+
+`Field Worker`, `Foreman`, `Compliance Officer`, `Farm Manager`, `Family Member`,
+`Advisor`. Installed idempotently by `after_migrate`, alongside the Command
+Center and the dispatch board.
+
+**The role says what KIND of work somebody does; a User Permission on Company
+says WHOSE.** No company name appears in any role definition, which is what keeps
+the app install-agnostic — the alternative was "Field Worker — OpCo", "Field
+Worker — Holdings", and a new role every time a family adds an LLC.
+
+Two separations that look like oversights and are not, both asserted in **both**
+directions because asserting one half of a separation proves nothing:
+
+- **A Compliance Officer cannot dispatch.** Farm Task is read-only for that role.
+  The person who decides a walk is required and the person who decides who walks
+  it must not be one account, or that account could raise a task, assign it to
+  itself and close it.
+- **A Field Worker cannot read a Compliance Policy.** The SOP library names
+  procedures, versions and effective dates a certification hangs on; a worker who
+  needs one gets it in the task's `notes`, put there by whoever raised the job.
+
+New tools: `create_mobile_user`, `list_mobile_users`, `revoke_mobile_user`. New
+doctype: **Mobile Access Grant**, one row per person, named by their email —
+because Frappe knows who has a login and none of the story around it, and the
+part an audit asks for is *why it was taken away*.
+
+#### The Custom DocPerm trap, which is the sharpest edge in the release
+
+Frappe ignores **every standard DocPerm** on a doctype the moment ONE Custom
+DocPerm exists for it — for every role on the site, not just the one the row was
+written for. A single row granting Field Worker read on `Employee` would have
+silently revoked HR Manager, HR User and System Manager from the Employee
+register, during `bench migrate`, with nothing printed.
+
+Two rules, both enforced in code and both tested:
+
+1. **The standard permissions are mirrored into custom ones first**, per doctype,
+   before the first new row lands — which is exactly what Frappe's own Role
+   Permission Manager does under the name `setup_custom_perms`.
+2. **Permissions are written ONLY onto doctypes this app owns.** A target whose
+   module is not `ERPNext MCP` is refused and printed, not written. Not because
+   the write would fail — it would succeed, which is the problem.
+
+Consequence, stated rather than hidden: a Field Worker who needs their own
+Employee record needs a role from the app that owns `Employee`.
+`create_mobile_user` assigns the site's own `Employee` role alongside, and says so
+when the site has not got one.
+
+### Feature B — the credential, and what it does not promise
+
+`generate_api_token`, `revoke_api_token`, `get_current_user_context`,
+`generate_mobile_login_qr`.
+
+A mobile client sends `Authorization: token <api_key>:<api_secret>` **alongside**
+`X-MCP-Token`. The two do different jobs: the MCP token is **entry** and is still
+CIDR-gated; the API credential is **identity** and grants nothing extra. Frappe
+authenticates the second before this app's endpoint runs, and the new
+`security.capture_calling_user` saves who it was in the one-line window before
+`frappe.set_user()` assumes the MCP System User. That window is the whole basis of
+per-user scoping, and it is the only transport change in this release.
+
+A request that authenticated as one person and passes `user` naming another is
+**refused**. An account that can name somebody else in a request body is not
+scoped to anything.
+
+**API secrets do not expire, and this release does not pretend they do.** Frappe
+has no expiry on one, and adding a scheduled job to revoke them would mean
+rewriting another app's User records on a timer with nobody watching — `hooks.py`
+declares exactly two scheduled jobs and argues for both, and this would not have
+survived the argument. `token_expires_on` is therefore a **review date**:
+`list_mobile_users` flags an overdue grant loudly, `get_current_user_context`
+reports it to the phone, and `revoke_api_token` is what actually ends access.
+Calling a reminder an expiry would be a false assurance about a credential, which
+is worse than none.
+
+**The login QR is a live credential**, and every mitigation is time-shaped: 24
+hours to enrol by default, `rotate_token` defaulting to true so re-minting
+invalidates every older copy *and* every phone already enrolled, a hard refusal of
+any non-HTTPS endpoint, and a **private** archive attachment for offline
+distribution that the result tells you to delete once the phone is enrolled.
+
+The matrix comes from `segno` (or `qrcode` where a bench has it); the **PNG is
+written here**, in thirty lines of `zlib`, so the archived card is byte-identical
+whichever encoder a bench happens to have — and so this app's own tests can decode
+it. They do: the PNG is read back to a module matrix and compared with an
+independent encoding of the payload the tool says it wrote.
+
+### Feature C — Tailscale Funnel
+
+`validate_public_endpoint` and `get_tailscale_funnel_config`, both read-only.
+**There is deliberately no tool that turns Funnel on or off, and there will not
+be** — changing what is reachable from the entire internet is an operator
+decision made deliberately, and `tailscale funnel` needs a local socket and
+privileges a containerised Frappe worker does not have.
+
+`validate_public_endpoint` opens a TLS connection to the public name, reads the
+certificate and POSTs a real MCP `tools/list`. **A 401 to the default
+unauthenticated probe is the best possible result**: it proves the path is
+reachable, the certificate is valid and the token gate is holding, all at once.
+The reachable set is the configured `public_url` or a host under `.ts.net`, over
+HTTPS, base URL only, redirects not followed — and `authenticate=true`, which
+sends the real bearer token, refuses everything except `public_url`, because a
+tool that will POST your token to a hostname in its arguments is a tool that
+exfiltrates it.
+
+`get_tailscale_funnel_config` degrades honestly. A container with neither the
+`tailscale` binary nor the host's socket is the **expected** state on an Umbrel
+and not a fault; the tool distinguishes that from "a daemon socket with no
+client", and reports a config it cannot parse as unparsed rather than empty.
+
+The README gains a full setup section — enabling Funnel on the tailnet, pointing
+it at the port nginx already serves, making Frappe answer for the new hostname,
+and the allowlist step people get wrong (a Funnel request arrives from loopback,
+not from the phone). It also states the change in posture plainly: **everything
+the API exposes becomes public and discoverable, and the auth token becomes the
+whole boundary.**
+
+### Feature D — seven tools shaped for a screen
+
+`list_my_tasks`, `list_available_for_me`, `get_task_with_evidence_contract`,
+`list_compliance_calendar_for_me`, `claim_task_via_mobile`,
+`start_task_via_mobile`, `complete_task_via_mobile`.
+
+Thin wrappers over Sprint 8's tools that add exactly three things: the worker
+resolved from the authenticated request through their Employee record, a
+screen-shaped payload, and the entity filter. **They add no rule and weaken
+none** — the concurrent-claim limit, the refusal to self-pick Dispatched work,
+the evidence-contract check and the empty-string `findings_text` distinction all
+still come from `claim_farm_task` / `start_farm_task` / `complete_farm_task`,
+because they *are* those tools.
+
+Three refusals worth naming:
+
+- **A login with no Employee record is refused by name.** An empty list would read
+  on a phone as "nothing to do today", which is a different and much worse answer.
+- **A `company` outside the worker's entities is refused, not emptied.** An empty
+  result is indistinguishable from a quiet day.
+- **`list_compliance_calendar_for_me` refuses an account with no Company User
+  Permission.** This app reads through `frappe.db.get_all`, which does not consult
+  User Permissions, so returning the whole site's calendar under that name would
+  be a lie.
+
+And one honesty: **`list_available_for_me` does not invent a skill register.**
+Nothing on a Frappe site records what skills a worker has, so an unfiltered pool
+comes back saying it is unfiltered. Guessing from a job title would have hidden a
+spraying task from somebody because their title said "Harvest Crew", with no way
+to tell.
+
+### The test double grew four things it needed
+
+`Role`, `Has Role`, `User Permission`, `DocPerm` and `Custom DocPerm` are now
+modelled — `DocPerm` as a real child table of `DocType`, seeded from each
+doctype's own shipped permissions, so the mirror has something real to copy and a
+test can assert it copied. Three fidelity fixes came out of it, and each one is a
+test that would otherwise have passed for the wrong reason:
+
+- **`fields="*"` returns every column.** It is Frappe's own idiom and what
+  `copy_perms` passes; a double answering it with one key literally called `"*"`
+  would have made the mirror copy nothing while looking like it worked.
+- **A Password field explicitly set to `""` is DELETED**, as
+  `Document.save_passwords` does. Revocation clears `api_secret` that way, and a
+  double that kept the old secret would let "revoke, then the credential stops
+  working" pass while the credential still worked.
+- **`Authorization: token <key>:<secret>` is authenticated**, reproducing
+  Frappe's own api-key validation. That makes the credential round trip real
+  rather than a fixture asserting who the caller is.
+
+### Also
+
+- `pyproject.toml` declares `segno`. All three runtime dependencies are imported
+  defensively, and a bench missing one loses its own tools BY NAME with the pip
+  command to fix it.
+- `before_uninstall` warns about the Mobile Access Grant among the records that
+  go — **and separately about what uninstalling does NOT remove**: the six roles,
+  the User Permissions and the API credentials are all Frappe's own rows. Taking
+  the app off removes the MCP endpoint from those accounts and leaves everything
+  else, which is not what somebody uninstalling to revoke a fleet of phones would
+  assume. Run `revoke_mobile_user` first.
+- 3104 standalone tests, up from 2888.
+
 ## 0.16.1 — 2026-08-01
 
 **Hotfix. v0.16.0's Farm Task Dispatch Kanban board was never created on a real

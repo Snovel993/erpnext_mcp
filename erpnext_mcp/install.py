@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Install / migrate / uninstall hooks.
 
-Five jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
-and the fifth — the Farm Task Dispatch Kanban board — in v0.16.0.
+Six jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
+the fifth — the Farm Task Dispatch Kanban board — in v0.16.0, and the sixth —
+the six mobile roles — in v0.17.0.
 
 The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
@@ -47,7 +48,18 @@ workspace that lands somebody on it. Built exactly like the fourth and for
 exactly the same reasons — an existing board is left alone, including every
 column somebody has since reordered or deleted.
 
-None of the five raises. Every one of them runs inside `bench migrate`, where an
+The sixth arrived in v0.17.0: the six mobile roles — Field Worker, Foreman,
+Compliance Officer, Farm Manager, Family Member, Advisor — and their Custom
+DocPerm rows. It is the second job here that touches something outside this app's
+own records, and it is the one with the sharpest edge, which `roles.py` spends
+forty lines on: **the moment any Custom DocPerm row exists for a doctype, Frappe
+ignores every STANDARD permission on that doctype, for every role on the site.**
+So the installer mirrors the standard perms into custom ones first, and refuses
+outright to write a permission onto a doctype this app does not own. A role
+nobody holds changes nothing; a Custom DocPerm on somebody else's doctype could
+have taken HR Manager off Employee during a migration with nothing printed.
+
+None of the six raises. Every one of them runs inside `bench migrate`, where an
 exception aborts the migration for the whole bench — so a failure here is
 reported and the next job still runs. That is not defensive padding: v0.12.0
 shipped an `after_migrate` that died on a link validation and left operators with
@@ -60,7 +72,7 @@ the settings form, and there is no code path that makes it for them.
 
 import frappe
 
-from . import compliance_fields, dashboard, settings
+from . import compliance_fields, dashboard, roles, settings
 from .tools import company
 
 
@@ -70,6 +82,7 @@ def after_install() -> None:
 	_compliance_fields()
 	_command_center()
 	_dispatch_board()
+	_mobile_roles()
 	frappe.db.commit()
 
 
@@ -79,6 +92,7 @@ def after_migrate() -> None:
 	_compliance_fields()
 	_command_center()
 	_dispatch_board()
+	_mobile_roles()
 
 
 def _compliance_fields() -> None:
@@ -108,6 +122,18 @@ def _command_center() -> None:
 def _dispatch_board() -> None:
 	"""Build or repair the Farm Task Dispatch Kanban board and its workspace."""
 	_report_failures("the Farm Task Dispatch board", dashboard.install_dispatch_board)
+
+
+def _mobile_roles() -> None:
+	"""Create the six v0.17.0 mobile roles and their permissions.
+
+	Reported through the same printer as the two dashboard builders, and for the
+	same v0.16.1 reason: a builder that cannot raise and is never read cannot
+	report anything at all. A refused permission — one aimed at a doctype
+	belonging to another app — lands in `failed` and gets printed here, which is
+	the only way anybody would ever find out it did not happen.
+	"""
+	_report_failures("the mobile roles", roles.install_roles)
 
 
 def _report_failures(what: str, builder) -> None:
@@ -258,6 +284,14 @@ _PRECIOUS_DOCTYPES = (
 		"itself. FSMA Subpart E asks whether the water that touched a harvested crop "
 		"was tested, and nothing else on the site can answer",
 	),
+	(
+		"Mobile Access Grant",
+		"who was given a phone, what for, which entities they could see, when their "
+		"credential was issued — and, for every account that ended, WHO ended it and "
+		"WHY. Frappe keeps the access; it keeps none of the story. 'Left at the end "
+		"of harvest' and 'dismissed for cause' are different answers to the same "
+		"question and this is the only place either survives",
+	),
 )
 
 #: Doctypes that go with the app and are NOT worth warning about, with why. The
@@ -291,6 +325,7 @@ def before_uninstall() -> None:
 			losses.append((doctype, count, what))
 
 	grafted = _compliance_field_losses()
+	_report_surviving_roles()
 	if not losses and not grafted:
 		return
 
@@ -322,6 +357,44 @@ def before_uninstall() -> None:
 			"links do not. Export the affected doctypes BEFORE uninstalling, not after:\n"
 			f"{chr(10).join(sorted({f'  bench --site <site> backup --only-doctype {doctype!r}' for doctype, _f in grafted}))}\n"
 		)
+
+
+def _report_surviving_roles() -> None:
+	"""Say what UNINSTALLING DOES NOT REMOVE, which is the other half of honesty.
+
+	The six v0.17.0 roles are rows in Frappe's own `Role` table and the User
+	Permissions are rows in `User Permission`. Neither belongs to this app, so
+	neither is dropped — and an operator uninstalling to revoke a fleet of phones
+	would otherwise believe they had. They have not: the accounts still exist,
+	still hold the roles, and still have live API credentials. What they lose is
+	the ability to reach the MCP endpoint, which is a different thing.
+
+	`_PRECIOUS_DOCTYPES` warns about what goes. This warns about what stays,
+	because a surviving credential nobody knows about is worse than a lost
+	record somebody was told about.
+	"""
+	try:
+		held = [
+			name
+			for name in roles.ROLE_NAMES
+			if frappe.db.exists("Role", name)
+			and frappe.db.count("Has Role", {"role": name, "parenttype": "User"})
+		]
+	except Exception:
+		return
+	if not held:
+		return
+	print(
+		"\nerpnext_mcp: uninstalling does NOT remove these, and they are not this app's to "
+		"remove:\n"
+		+ "\n".join(f"  the {name} role, and every user holding it" for name in held)
+		+ "\n  every Company User Permission this app wrote\n"
+		+ "  every API key and secret on those users\n\n"
+		"Those accounts will lose the MCP endpoint and keep everything else — including "
+		"live credentials for Frappe's own REST API. To actually end mobile access, run "
+		"revoke_mobile_user for each account BEFORE uninstalling, or disable the users "
+		"afterwards by hand.\n"
+	)
 
 
 def _compliance_field_losses() -> list:

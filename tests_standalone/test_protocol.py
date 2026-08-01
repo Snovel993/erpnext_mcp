@@ -198,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_one_hundred_ninety_tools_eighty_five_read_one_hundred_five_write(self):
+	def test_catalogue_is_two_hundred_six_tools_ninety_three_read_one_hundred_thirteen_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -241,10 +241,31 @@ class Catalogue(SeededTestCase):
 		  * twelve over the three compliance records a completion produces
 		    (Housing Inspection, Detector Test, Water Test) — list, get, create
 		    and update apiece, six of which are reads.
+
+		v0.17.0 ADDED SIXTEEN, and they are what makes a phone outside the LAN a
+		safe thing to point at all of the above:
+
+		  * three for mobile accounts — list_mobile_users reads the roster and
+		    every way it has drifted, create_mobile_user and revoke_mobile_user
+		    write it. The role says what kind of work; the Company User
+		    Permissions this app writes say whose;
+		  * four for the credential — generate_api_token and revoke_api_token
+		    mint and destroy it, generate_mobile_login_qr puts it on a scannable
+		    card, and get_current_user_context is what the phone calls first to
+		    find out who it is;
+		  * two for the transport, both READ, and there is deliberately no third
+		    that flips it: validate_public_endpoint asks from outside whether the
+		    Funnel is up and the token gate is holding, get_tailscale_funnel_config
+		    asks from inside what this machine is serving;
+		  * seven mobile-ergonomic wrappers over Sprint 8's dispatch tools — four
+		    reads and three writes — which add the worker resolved from the
+		    authenticated request, a screen-shaped payload, and NOTHING ELSE. Every
+		    refusal in them comes from the tool underneath, because it IS the tool
+		    underneath.
 		"""
-		self.assertEqual(len(registry.TOOLS), 190)
-		self.assertEqual(len(registry.READ_TOOLS), 85)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 105)
+		self.assertEqual(len(registry.TOOLS), 206)
+		self.assertEqual(len(registry.READ_TOOLS), 93)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 113)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

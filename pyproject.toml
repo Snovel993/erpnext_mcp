@@ -28,9 +28,22 @@ classifiers = [
 # five geospatial tools — which say so by name, with the pip command to fix it —
 # rather than failing to load the other hundred and sixteen. That is the same
 # promise the rest of the app makes: installing it cannot break a site.
+# The third arrived in v0.17.0 with the mobile login QR. `segno` is pure Python
+# with no dependency of its own — which is why it and not `qrcode`, whose PNG
+# writer needs Pillow. It produces only the MODULE MATRIX here; the PNG is
+# written by `render/qr.py` in thirty lines of zlib, so the image an operator
+# archives is byte-identical whichever encoder a bench happens to have.
+#
+# ALL THREE ARE IMPORTED DEFENSIVELY. A bench missing shapely or h3 loses the
+# five geospatial tools; a bench missing every QR encoder loses exactly one —
+# `generate_mobile_login_qr` — and each says so BY NAME with the pip command to
+# fix it, rather than failing to load the other two hundred. `qrcode` is
+# accepted in segno's place where a bench already has it. That is the same
+# promise the rest of the app makes: installing it cannot break a site.
 dependencies = [
   "shapely>=2.0",
   "h3>=4.0.0",
+  "segno>=1.5",
 ]
 
 [project.urls]

@@ -1,0 +1,251 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-01 12:00:00.000000",
+ "description": "One person's access to the Farm Ops mobile app: which role they hold, which entities they may see, when their API token was issued and when — and by whom, and why — it was taken away. Frappe's User, Has Role and User Permission tables hold the access itself; this holds the story around it, which is the part an audit asks for and the part Frappe keeps nowhere.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "full_name",
+  "mobile_role",
+  "identity_col",
+  "state",
+  "preferred_company",
+  "entity_access",
+  "token_section",
+  "api_key",
+  "token_issued_on",
+  "token_expires_on",
+  "token_col",
+  "token_revoked_on",
+  "token_issue_count",
+  "qr_section",
+  "last_qr_issued_on",
+  "qr_expires_at",
+  "qr_col",
+  "qr_document",
+  "endpoint_url",
+  "revocation_section",
+  "revoked_on",
+  "revoked_by",
+  "revocation_col",
+  "revocation_reason",
+  "notes_section",
+  "notes"
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-01 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Mobile Access Grant",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "user,mobile_role,state",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "user",
+ "track_changes": 1,
+ "fields": [
+  {
+   "description": "The Frappe User this grant is about. One grant per user: re-issuing a token updates this row rather than adding a second one, so there is exactly one place to look for 'what does this person have'.",
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "description": "Their name as it should read on a phone's account screen.",
+   "fieldname": "full_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Full Name"
+  },
+  {
+   "description": "Which of the six mobile roles this account was made for: Field Worker, Foreman, Compliance Officer, Farm Manager, Family Member or Advisor. The authority on what they may actually do is the Has Role table; this records what the account was FOR, which is the question 'why does this person have a login' asks.",
+   "fieldname": "mobile_role",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Mobile Role",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Active",
+   "description": "Active means the account is enabled and its token has not been revoked. Expired means the review date on the token has passed and nobody has acted on it — Frappe API secrets do not expire on their own, so this is a flag for a human, not an enforcement. Revoked means somebody took it away, and revocation_reason says why.",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "State",
+   "options": "Active\nExpired\nRevoked",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Which entity the app should open on. One of the companies in entity_access, and the one carrying is_default on this user's Company User Permission.",
+   "fieldname": "preferred_company",
+   "fieldtype": "Link",
+   "label": "Preferred Company",
+   "options": "Company"
+  },
+  {
+   "description": "The Companies this account was granted, one per line. THE AUTHORITY IS THE User Permission TABLE, not this field — this is the record of what was asked for, so a grant that drifted from its User Permissions is visible rather than silent. list_mobile_users reports both and names the difference.",
+   "fieldname": "entity_access",
+   "fieldtype": "Small Text",
+   "label": "Entity Access"
+  },
+  {
+   "fieldname": "token_section",
+   "fieldtype": "Section Break",
+   "label": "API Token"
+  },
+  {
+   "description": "The public half of the Frappe API credential — the part before the colon in 'Authorization: token <api_key>:<api_secret>'. Recorded so an operator reading an access log can tell whose key it was. THE SECRET IS NOT HERE AND IS NOT ANYWHERE THIS APP CAN READ IT: Frappe stores it encrypted in its own password table, and generate_api_token is the only moment it exists in plaintext.",
+   "fieldname": "api_key",
+   "fieldtype": "Data",
+   "label": "API Key",
+   "read_only": 1
+  },
+  {
+   "description": "When the current token was generated.",
+   "fieldname": "token_issued_on",
+   "fieldtype": "Datetime",
+   "label": "Token Issued On",
+   "read_only": 1
+  },
+  {
+   "description": "The date the token should be reviewed and re-issued. A REVIEW DATE, NOT AN EXPIRY: Frappe API secrets have no expiry of their own, and this app installs no scheduled job that revokes one — a job that rewrote another app's User records at three in the morning is not a thing this app does. list_mobile_users flags a grant past this date loudly; revoke_api_token is what actually ends it.",
+   "fieldname": "token_expires_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Token Review Due",
+   "search_index": 1
+  },
+  {
+   "fieldname": "token_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "When the token was invalidated. Set by revoke_api_token and by revoke_mobile_user.",
+   "fieldname": "token_revoked_on",
+   "fieldtype": "Datetime",
+   "label": "Token Revoked On",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "How many times a token has been issued for this account. A number climbing on one account is somebody losing a phone repeatedly, which is a fact worth being able to see.",
+   "fieldname": "token_issue_count",
+   "fieldtype": "Int",
+   "label": "Tokens Issued",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qr_section",
+   "fieldtype": "Section Break",
+   "label": "Login QR"
+  },
+  {
+   "description": "When a login QR was last produced for this account.",
+   "fieldname": "last_qr_issued_on",
+   "fieldtype": "Datetime",
+   "label": "Last QR Issued",
+   "read_only": 1
+  },
+  {
+   "description": "When the QR payload stops being valid to enrol with. Short by design — the QR carries a live credential in a form anybody can photograph over somebody's shoulder, so it is minted for the length of an onboarding conversation and not for the length of a season.",
+   "fieldname": "qr_expires_at",
+   "fieldtype": "Datetime",
+   "label": "QR Expires At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qr_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The Governance Document the QR was filed against, where one was asked for. That is the offline distribution path: a camp office with no signal prints the archived copy.",
+   "fieldname": "qr_document",
+   "fieldtype": "Link",
+   "label": "QR Archive Document",
+   "options": "Governance Document",
+   "read_only": 1
+  },
+  {
+   "description": "The public HTTPS base URL the QR pointed the app at — the Tailscale Funnel address, normally. Recorded because an account enrolled against a URL that has since changed is an account that stops working for a reason nobody can see from the phone.",
+   "fieldname": "endpoint_url",
+   "fieldtype": "Data",
+   "label": "Endpoint URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revocation_section",
+   "fieldtype": "Section Break",
+   "label": "Revocation"
+  },
+  {
+   "fieldname": "revoked_on",
+   "fieldtype": "Datetime",
+   "label": "Revoked On",
+   "read_only": 1
+  },
+  {
+   "description": "Who took it away.",
+   "fieldname": "revoked_by",
+   "fieldtype": "Link",
+   "label": "Revoked By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revocation_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Why. REQUIRED WHEN state IS Revoked, and the controller refuses without it. 'Left at the end of harvest', 'phone lost in the orchard', 'moved to the packing house' and 'dismissed for cause' are four different answers to an auditor's question about why somebody's access ended, and a blank field answers none of them.",
+   "fieldname": "revocation_reason",
+   "fieldtype": "Small Text",
+   "label": "Revocation Reason"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Anything else about this account somebody will want in six months.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ]
+}

@@ -38,6 +38,7 @@ import frappe
 from . import audit, geo, settings
 from .compat import doctype_exists, traceback_text
 from .errors import ToolError
+from .render import qr
 from .result import ToolResult
 from .tools import (
 	accounts,
@@ -52,14 +53,17 @@ from .tools import (
 	dispatch,
 	evidence,
 	farm,
+	fieldwork,
 	files,
 	fiscal,
+	funnel,
 	governance,
 	housing,
 	hr,
 	inspections,
 	investment_report,
 	meta,
+	mobile,
 	mutate,
 	notes,
 	opening,
@@ -126,6 +130,21 @@ def _needs_doctype(*doctypes: str):
 
 	return predicate
 
+
+
+def _qr_available() -> bool:
+	"""Predicate: can this bench draw a QR code at all?
+
+	v0.17.0. Same shape as the geospatial predicates and for the same reason: a
+	bench without `segno` or `qrcode` loses ONE tool by name, with the pip command
+	to fix it, rather than losing the other two hundred and five. Everything else
+	in the mobile login flow works without it — `generate_api_token` returns the
+	same credential as text, and the QR only saves somebody typing it.
+	"""
+	try:
+		return qr.available()
+	except Exception:  # pragma: no cover - an encoder that explodes on import
+		return False
 
 
 #: What a geospatial tool needs beyond a DocType: the two libraries that do the
@@ -6655,6 +6674,483 @@ TOOLS = {
 		title="Update a water test",
 		available=_needs_doctype("Water Test"),
 		requires="the Water Test DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.17.0: multi-entity scoping, mobile auth, Tailscale Funnel ────────
+	"list_mobile_users": _tool(
+		mobile.list_mobile_users,
+		"EVERY MOBILE ACCOUNT AND WHAT IS WRONG WITH IT. Who has a phone, which of "
+		"the six roles they hold, which entities their User Permissions actually "
+		"allow, how old their credential is, and — the part worth reading — a "
+		"`concerns` list per account. Also returns the role catalogue, so a client "
+		"can show what each role is for without a second call. Read-only.\n\n"
+		"THE CONCERNS ARE THE POINT. Each one is a state that looks fine on a list "
+		"and is not: an account with NO Company User Permission (which in Frappe "
+		"means it sees EVERY entity), a grant that says one set of entities while "
+		"the live permissions say another, an account marked Revoked whose token "
+		"still works, a credential past its review date. entity_access is read from "
+		"the LIVE permission rows, so a scoping somebody changed in the Desk shows "
+		"as drift rather than agreeing with a stale record.",
+		{
+			"role": _field(
+				_STRING,
+				"Only this role: Field Worker, Foreman, Compliance Officer, Farm Manager, "
+				"Family Member or Advisor.",
+			),
+			"company": _field(_STRING, "Only accounts whose entity access includes this Company."),
+			"state": _field(_STRING, "Active, Expired or Revoked."),
+			"include_revoked": _field(
+				_BOOLEAN, "Include revoked accounts. Default false — they are history, not roster."
+			),
+		},
+		title="List mobile users",
+		available=_needs_doctype("Mobile Access Grant"),
+		requires="the Mobile Access Grant DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_current_user_context": _tool(
+		mobile.get_current_user_context,
+		"WHO IS CALLING, AND WHAT THEY MAY SEE. The mobile app's first call after "
+		"enrolment: the user, their mobile roles, the entities their User "
+		"Permissions allow, which entity to open on, and plain-language `can` / "
+		"`cannot` lists for the account screen. Read-only.\n\n"
+		"THE IDENTITY COMES FROM THE REQUEST, NOT FROM AN ARGUMENT. A client "
+		"identifies itself by sending `Authorization: token <api_key>:<api_secret>` "
+		"ALONGSIDE the X-MCP-Token header; this reports whichever Frappe user that "
+		"authenticated. A request that authenticates as one person and passes "
+		"`user` naming another is REFUSED — an account that can name somebody else "
+		"in a request body is not scoped to anything. With no per-user credential "
+		"at all (an operator's desktop client), `user` is accepted, and "
+		"`identity_source` always says which of the two happened.\n\n"
+		"An empty entity list means UNRESTRICTED in Frappe, not 'nothing', and the "
+		"result says so where it happens.",
+		{
+			"user": _field(
+				_STRING,
+				"Only honoured when the request carries no per-user credential. Refused when it "
+				"does and names somebody else.",
+			)
+		},
+		title="Current user context",
+	),
+	"list_my_tasks": _tool(
+		fieldwork.list_my_tasks,
+		"WHAT THE CALLER IS HOLDING RIGHT NOW — claimed and in progress — with the "
+		"full job behind each one and a `next` block naming the tool each is "
+		"waiting for, so a screen can draw the right button without owning the "
+		"rule. The worker is resolved from the authenticated request through their "
+		"Employee record; the phone never has to know it is EMP-0042. Read-only.\n\n"
+		"A login with no Employee record is REFUSED BY NAME rather than answered "
+		"with an empty list — 'nothing to do today' is a different and much worse "
+		"answer than 'your login is not linked to your employee record'.",
+		{
+			"state_filter": _field(_STRING, "Claimed, In-Progress, Completed or Rejected."),
+			"include_finished": _field(_BOOLEAN, "Include completed and rejected. Default false."),
+			"company": _field(
+				_STRING, "One of the caller's entities. Defaults to their preferred one."
+			),
+			"user": _field(_STRING, "Only when the request carries no per-user credential."),
+			"limit": _LIMIT,
+		},
+		title="My tasks",
+		available=_needs_doctype("Farm Task Assignment"),
+		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_available_for_me": _tool(
+		fieldwork.list_available_for_me,
+		"THE POOL THE CALLER COULD TAKE FROM, worst urgency first, with how many "
+		"claims they have left. Scoped to their entities; optionally narrowed to a "
+		"location. Read-only.\n\n"
+		"IT IS HONEST ABOUT SKILLS. Nothing on a Frappe site records what skills a "
+		"worker HAS — there is no register on Employee, in this app or in Frappe "
+		"HR. So `skill` filters if you pass it, a site that has added its own "
+		"skills field to Employee is read, and otherwise THE WHOLE POOL COMES BACK "
+		"AND `skill_matching` SAYS SO. Guessing from a job title was the "
+		"alternative, and hiding a spraying task from somebody because their title "
+		"said 'Harvest Crew' would be hiding work with no way to tell.",
+		{
+			"location_filter": _field(
+				_STRING, "Only tasks at this place (a Housing Unit, Field, Zone or Parcel docname)."
+			),
+			"skill": _field(_STRING, "Only tasks needing this skill, e.g. 'camp_maintenance'."),
+			"task_type": _field(_STRING, "Inspection, Test, Spray, Repair, Harvest, Training, and so on."),
+			"urgency": _field(_STRING, "Low, Normal, High or Critical."),
+			"company": _field(_STRING, "One of the caller's entities. Defaults to their preferred one."),
+			"user": _field(_STRING, "Only when the request carries no per-user credential."),
+			"limit": _LIMIT,
+		},
+		title="Pool for me",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_task_with_evidence_contract": _tool(
+		fieldwork.get_task_with_evidence_contract,
+		"ONE TASK SHAPED FOR A SCREEN: the job, and its evidence contract as a "
+		"CHECKLIST — each requirement with what it means in a worker's words, "
+		"whether it is already satisfied, and which part of the app collects it "
+		"(camera, signature pad, text field). Plus `next`, naming the tool this "
+		"task is waiting for. Read-only.\n\n"
+		"Same facts get_farm_task returns; different reader. get_farm_task answers "
+		"an auditor, this answers a phone. A task belonging to an entity the caller "
+		"has no access to is refused by name rather than returned.",
+		{
+			"task_name": _field(_STRING, "The Farm Task docname, e.g. 'FT-2026-07-00012'."),
+			"task": _field(_STRING, "Alias for task_name."),
+			"user": _field(_STRING, "Only when the request carries no per-user credential."),
+		},
+		title="Task with evidence contract",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_compliance_calendar_for_me": _tool(
+		fieldwork.list_compliance_calendar_for_me,
+		"THE COMPLIANCE CALENDAR, NARROWED TO THE ENTITIES THE CALLER MAY SEE — one "
+		"call per entity, merged, Critical first, with each alert stamped with the "
+		"company it came from. Read-only.\n\n"
+		"THE SCOPING IS EXPLICIT AND HAS TO BE. This app reads through "
+		"`frappe.db.get_all`, which does not consult User Permissions, so asking "
+		"the calendar once with no company would return every entity on the site. "
+		"An account with NO Company User Permission is refused rather than shown "
+		"everything under a name like this one.\n\n"
+		"An entity whose calendar could not be read is named in `failed_entities` "
+		"rather than silently contributing nothing — a clean calendar and an unread "
+		"one look identical otherwise.",
+		{
+			"company": _field(_STRING, "Just this one entity, instead of all of the caller's."),
+			"severity_min": _field(_STRING, "Info, Warning or Critical. Default Info."),
+			"days_ahead": _field(_INTEGER, "Only what is due inside this many days. Overdue is never hidden."),
+			"category": _field(_STRING, "One alert category."),
+			"alert_type": _field(_STRING, "One rule, e.g. 'certification_expiring'."),
+			"as_of": _field(_STRING, "Evaluate as of this date, YYYY-MM-DD. Defaults to today."),
+			"user": _field(_STRING, "Only when the request carries no per-user credential."),
+			"limit": _LIMIT,
+		},
+		title="My compliance calendar",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"validate_public_endpoint": _tool(
+		funnel.validate_public_endpoint,
+		"IS THIS SITE ACTUALLY REACHABLE FROM THE INTERNET? Opens a TLS connection "
+		"to the public hostname, reads the certificate (issuer, expiry, SANs), "
+		"POSTs a real MCP `tools/list` to the endpoint and reports the status, the "
+		"latency and a verdict with a next step. Read-only.\n\n"
+		"IT PROBES UNAUTHENTICATED BY DEFAULT, AND A 401 IS THE BEST RESULT: it "
+		"proves the path is reachable, the certificate is valid, and the token gate "
+		"is holding. `authenticate=true` proves the whole round trip and REFUSES "
+		"any URL that is not this site's own configured public_url — a tool that "
+		"will POST your bearer token to a hostname in its arguments is a tool that "
+		"exfiltrates it.\n\n"
+		"The reachable targets are the configured public_url and hosts under "
+		"`.ts.net`, over HTTPS, base URL only, redirects not followed. This makes "
+		"an outbound request from inside the site's network, which is the shape of "
+		"every server-side request forgery there has ever been.",
+		{
+			"url": _field(
+				_STRING,
+				"The base URL to probe, e.g. https://umbrel.tail1234.ts.net. Defaults to "
+				"`public_url` from ERPNext MCP Settings. No path, no query.",
+			),
+			"authenticate": _field(
+				_BOOLEAN,
+				"Send this site's own X-MCP-Token, proving the whole round trip. Only allowed "
+				"against the configured public_url. Default false.",
+			),
+			"timeout_seconds": _field(_INTEGER, "1–30. Default 8."),
+		},
+		title="Validate public endpoint",
+	),
+	"get_tailscale_funnel_config": _tool(
+		funnel.get_tailscale_funnel_config,
+		"WHAT THIS MACHINE THINKS IT IS SERVING: the Funnel ports and URLs, the "
+		"serve config, the node's own tailnet DNS name, and whether the configured "
+		"public_url matches any of it. Read-only.\n\n"
+		"IT DEGRADES INSTEAD OF FAILING. A containerised Frappe worker normally has "
+		"neither the `tailscale` binary nor the host's tailscaled socket — that is "
+		"the EXPECTED state on an Umbrel and it is not a fault, because Funnel "
+		"forwards to the port nginx already serves and needs no cooperation from "
+		"this process. When it cannot read the config it says which of the two "
+		"situations it is in (no Tailscale at all, versus Tailscale on the host and "
+		"invisible from in here) and points at validate_public_endpoint, which asks "
+		"from outside and needs none of this.\n\n"
+		"NOTHING IN THIS APP CAN TURN FUNNEL ON OR OFF, and nothing will. Changing "
+		"what is reachable from the entire internet is an operator decision made "
+		"deliberately. The commands are in the README.",
+		{"timeout_seconds": _field(_INTEGER, "1–20. Default 8.")},
+		title="Tailscale Funnel config",
+	),
+	"create_mobile_user": _tool(
+		mobile.create_mobile_user,
+		"MUTATING (default OFF). One call for what four Desk forms do in ten "
+		"minutes: the User, one of the six mobile roles, a Company User Permission "
+		"per entity, the Mobile Access Grant, and the API credential — WHICH IS "
+		"READABLE IN THE RESULT EXACTLY ONCE.\n\n"
+		"`entity_access` IS MANDATORY AND THERE IS NO OVERRIDE. In Frappe a user "
+		"with NO User Permission on Company sees EVERY company on the site, so an "
+		"account created without entities would be the LEAST scoped account here, "
+		"not the most — which in a release about scoping is the one mistake that "
+		"must be impossible.\n\n"
+		"THE ROLE SAYS WHAT KIND OF WORK; THE USER PERMISSIONS SAY WHOSE. That is "
+		"why no company name appears in any role definition, and why the same "
+		"Foreman role serves the operating company and the holding company.\n\n"
+		"REFUSES an existing User unless update_existing=true — re-running this on "
+		"a live account rewrites its roles and its scoping, which is a decision "
+		"rather than a retry. To only re-issue a credential, use generate_api_token.\n\n"
+		"It will NOT grant permissions on doctypes other apps own (Employee, "
+		"Company). It assigns the owning app's own role where the site has it and "
+		"says so where it does not — writing a Custom DocPerm on somebody else's "
+		"doctype would make Frappe ignore every standard permission on it, for "
+		"every role on the site.",
+		{
+			"email": _field(_STRING, "The address the account signs in with, and its docname."),
+			"full_name": _field(
+				_STRING,
+				"Their name. Required for a new account — a dispatch board and an evidence "
+				"record both name the person.",
+			),
+			"role": _field(
+				_STRING,
+				"One of: Field Worker, Foreman, Compliance Officer, Farm Manager, Family Member, "
+				"Advisor. list_mobile_users returns what each is for and what each cannot do.",
+			),
+			"entity_access": _field(
+				{"type": "array", "items": _STRING},
+				"The Companies this account may see. REQUIRED, at least one. Names or "
+				"abbreviations; a comma-separated string is accepted too.",
+			),
+			"preferred_company": _field(
+				_STRING, "Which entity the app opens on. Must be in entity_access. Defaults to the first."
+			),
+			"token_expiry_days": _field(
+				_INTEGER,
+				"When the credential should be REVIEWED, in days. Default 120. Not an expiry — "
+				"Frappe API secrets do not expire on their own and this app installs no job "
+				"that revokes one.",
+			),
+			"generate_token": _field(
+				_BOOLEAN,
+				"Issue an API credential now. DEFAULTS TRUE FOR A NEW ACCOUNT (one with no token "
+				"cannot sign in) and FALSE FOR AN UPDATE (that person has a phone in their "
+				"pocket, and re-scoping them should not silently invalidate it). Pass it "
+				"explicitly to override either.",
+			),
+			"update_existing": _field(
+				_BOOLEAN, "Rewrite the roles and scoping of an account that already exists. Default false."
+			),
+			"notes": _field(_STRING, "Anything about this account somebody will want in six months."),
+			"url": _field(_STRING, "The public base URL to record on the grant. Defaults to public_url."),
+		},
+		required=("email", "role", "entity_access"),
+		mutating=True,
+		title="Create a mobile user",
+		available=_needs_doctype("Mobile Access Grant"),
+		requires="the Mobile Access Grant DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"revoke_mobile_user": _tool(
+		mobile.revoke_mobile_user,
+		"MUTATING (default OFF). End one account: disable the login, destroy the "
+		"API credential, and RECORD WHY.\n\n"
+		"`reason` IS REQUIRED AND IS THE POINT. 'Left at the end of harvest', "
+		"'phone lost in the orchard' and 'dismissed for cause' are three different "
+		"answers to the question an auditor asks about why somebody's access "
+		"ended, and the grant is the only place any of them survives — Frappe keeps "
+		"the access and none of the story.\n\n"
+		"THE ROLES ARE LEFT ON THE ACCOUNT, DELIBERATELY. A disabled user with no "
+		"live token cannot sign in, and keeping the roles means the record still "
+		"says what this person WAS. An account stripped of its roles is one nobody "
+		"can later answer 'what could they see' about.\n\n"
+		"This is 'they no longer work here'. For 'they lost their phone', use "
+		"revoke_api_token, which kills the credential and leaves the account.",
+		{
+			"email": _field(_STRING, "The account to revoke."),
+			"user": _field(_STRING, "Alias for email."),
+			"reason": _field(
+				_STRING, "Why. Required, and it has to be a real one — at least eight characters."
+			),
+			"keep_user_permissions": _field(
+				_BOOLEAN,
+				"Keep the Company User Permissions as evidence of what this account could see. "
+				"Default true.",
+			),
+		},
+		required=("email", "reason"),
+		mutating=True,
+		title="Revoke a mobile user",
+		available=_needs_doctype("Mobile Access Grant"),
+		requires="the Mobile Access Grant DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"generate_api_token": _tool(
+		mobile.generate_api_token,
+		"MUTATING (default OFF). Mint a fresh Frappe API key/secret for one user "
+		"and return the pair — THE ONLY TIME THE SECRET APPEARS IN A RESULT. "
+		"Issuing a new one stops the previous one working, which is what makes "
+		"this the answer to a lost phone.\n\n"
+		"`expiry_days` SETS A REVIEW DATE, NOT AN EXPIRY, and the result says so. "
+		"Frappe API secrets do not expire on their own, and this app installs no "
+		"scheduled job that revokes one — a job rewriting another app's User "
+		"records at three in the morning is not a thing this app does. "
+		"list_mobile_users flags an overdue grant loudly; revoke_api_token is what "
+		"actually ends it. Calling a reminder an expiry would be a false assurance "
+		"about a credential, which is worse than no assurance.\n\n"
+		"THE CREDENTIAL BUYS IDENTITY, NOT ENTRY. A mobile request still presents "
+		"the shared X-MCP-Token and still has to come from an allowed CIDR; this "
+		"header goes alongside it and is what makes get_current_user_context and "
+		"every list_*_for_me tool answer for the right person.\n\n"
+		"Refuses a disabled user — a token minted for a login that cannot sign in "
+		"is a token somebody will spend an afternoon debugging.",
+		{
+			"user": _field(_STRING, "The account to issue for."),
+			"expiry_days": _field(_INTEGER, "Days until the credential should be reviewed. Default 120."),
+			"url": _field(_STRING, "Public base URL to report in the endpoint. Defaults to public_url."),
+		},
+		required=("user",),
+		mutating=True,
+		title="Generate an API token",
+	),
+	"revoke_api_token": _tool(
+		mobile.revoke_api_token,
+		"MUTATING (default OFF). Destroy one user's API credential. THE ACCOUNT "
+		"ITSELF IS UNTOUCHED and stays enabled — this is 'they lost their phone', "
+		"where revoke_mobile_user is 'they no longer work here'.\n\n"
+		"Both halves of the credential go, not just the secret: an api_key left on "
+		"the row reads like a live credential to anybody scanning the User list, "
+		"and the whole value of a revocation is that somebody can tell at a glance "
+		"that it happened.",
+		{
+			"user": _field(_STRING, "The account whose credential to destroy."),
+			"reason": _field(_STRING, "Why — appended to the grant's notes."),
+		},
+		required=("user",),
+		mutating=True,
+		title="Revoke an API token",
+	),
+	"generate_mobile_login_qr": _tool(
+		mobile.generate_mobile_login_qr,
+		"MUTATING (default OFF). The enrolment card: a scannable PNG carrying the "
+		"public URL, the user and the credential, returned base64. The app scans "
+		"it, stores the token in the Keychain, and every call after that carries "
+		"it as a header. The alternative is somebody typing a 15-character secret "
+		"into a phone keyboard in a farm office, which is how the secret ends up on "
+		"a whiteboard.\n\n"
+		"THIS IMAGE IS A LIVE CREDENTIAL. Anybody who photographs it over "
+		"somebody's shoulder has the account. That is inherent to enrolment by QR "
+		"and the mitigation is time: `expires_at` is 24 hours by default and is the "
+		"deadline for ENROLLING, and rotate_token (default TRUE) mints a fresh "
+		"secret so an older photograph of an older card stops working — and so does "
+		"any phone already enrolled on this account, which must re-scan.\n\n"
+		"REFUSES A NON-HTTPS ENDPOINT. Encoding a live credential for a plaintext "
+		"URL would put it on the wire in the clear at every call, forever. Refuses "
+		"a disabled user, and refuses when the site does not know its own public "
+		"URL — fill in `public_url` with the Tailscale Funnel address.\n\n"
+		"`archive=true` files it as a PRIVATE attachment on a Governance Document, "
+		"which is the offline distribution path for a camp office at the end of a "
+		"gravel road. Delete that document once the phone is enrolled: the durable "
+		"record is the Mobile Access Grant, and it holds no secret.",
+		{
+			"user": _field(_STRING, "The account to enrol."),
+			"expiry_hours": _field(_INTEGER, "How long the QR stays valid to enrol with. 1–168, default 24."),
+			"rotate_token": _field(
+				_BOOLEAN,
+				"Mint a fresh secret for the card. DEFAULT TRUE, which invalidates any phone "
+				"already enrolled. False re-prints the existing credential.",
+			),
+			"url": _field(_STRING, "Public base URL for the card. Defaults to public_url. Must be https."),
+			"archive": _field(
+				_BOOLEAN, "Also file it as a private attachment on a Governance Document. Default false."
+			),
+			"company": _field(_STRING, "Which entity to file the archived copy under."),
+			"error_correction": _field(_STRING, "L, M, Q or H. Default M."),
+		},
+		required=("user",),
+		mutating=True,
+		title="Generate a mobile login QR",
+		available=_qr_available,
+		requires=qr.REQUIRES,
+	),
+	"claim_task_via_mobile": _tool(
+		fieldwork.claim_task_via_mobile,
+		"MUTATING (default OFF). Take one task from the pool AS THE AUTHENTICATED "
+		"CALLER — claim_farm_task with the worker resolved from the request instead "
+		"of named in the body.\n\n"
+		"IT ADDS NO RULE AND WEAKENS NONE. The three-concurrent-claim limit, the "
+		"refusal to self-pick Dispatched work and the refusal of a Draft all still "
+		"come from claim_farm_task, because it IS claim_farm_task — a wrapper with "
+		"its own copy of those rules would be a second set to keep in step.",
+		{
+			"task_name": _field(_STRING, "The Farm Task docname."),
+			"task": _field(_STRING, "Alias for task_name."),
+			"user": _field(_STRING, "Only when the request carries no per-user credential."),
+		},
+		mutating=True,
+		title="Claim a task (mobile)",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"start_task_via_mobile": _tool(
+		fieldwork.start_task_via_mobile,
+		"MUTATING (default OFF). Clock in on one claimed task as the authenticated "
+		"caller — start_farm_task with the worker resolved from the request. Pass "
+		"the assignment, or the task and its live assignment is used.\n\n"
+		"This is the clock-in for the TASK, not for the shift: a worker on the "
+		"clock all morning did this particular cabin between ten and half past.",
+		{
+			"assignment_name": _field(_STRING, "The Farm Task Assignment docname."),
+			"assignment": _field(_STRING, "Alias for assignment_name."),
+			"task_name": _field(_STRING, "The Farm Task docname — its live assignment is used."),
+			"task": _field(_STRING, "Alias for task_name."),
+			"started_at": _field(_STRING, "Override the clock-in time. Defaults to now."),
+			"user": _field(_STRING, "Only when the request carries no per-user credential."),
+		},
+		mutating=True,
+		title="Start a task (mobile)",
+		available=_needs_doctype("Farm Task Assignment"),
+		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"complete_task_via_mobile": _tool(
+		fieldwork.complete_task_via_mobile,
+		"MUTATING (default OFF). Finish one task as the authenticated caller: check "
+		"the evidence against the contract, file it, and WRITE THE COMPLIANCE "
+		"RECORD the task promised.\n\n"
+		"`evidence` IS A LIST OF FILE REFERENCES, NOT BYTES. The photographs go up "
+		"first through stage_file_chunk / commit_staged_file; this call carries "
+		"their docnames.\n\n"
+		"NOTE THE findings_text RULE: PASS AN EMPTY STRING to record that nothing "
+		"was wrong. A clean inspection is a positive statement, and leaving the "
+		"argument out records that nobody was asked — the two are distinguished and "
+		"this wrapper preserves the distinction.\n\n"
+		"Every refusal comes from complete_farm_task and is unchanged: a submission "
+		"short of the evidence contract, a completion filed by anybody but the "
+		"worker holding the task, an unclaimed or finished task. A completion whose "
+		"record found something lands in Awaiting-Review — the work IS done and the "
+		"register IS updated; what needs a person is the finding.",
+		{
+			"assignment_name": _field(_STRING, "The Farm Task Assignment docname."),
+			"assignment": _field(_STRING, "Alias for assignment_name."),
+			"task_name": _field(_STRING, "The Farm Task docname — its live assignment is used."),
+			"task": _field(_STRING, "Alias for task_name."),
+			"evidence": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}},
+				"File docnames from commit_staged_file, file URLs, or objects like "
+				'{"file": "...", "evidence_type": "Photo", "caption": "north wall"}. Max 40.',
+			),
+			"evidence_files": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}}, "Alias for evidence."
+			),
+			"signature_file": _field(_STRING, "The signature capture's file URL or File docname."),
+			"completion_narrative": _field(_STRING, "What the worker did, in their words."),
+			"findings_text": _field(
+				_STRING, "What was WRONG. An empty string records that nothing was."
+			),
+			"witness": _field(_STRING, "Somebody else who was there, where the contract asks."),
+			"actual_duration_minutes": _field(_INTEGER, "Minutes spent."),
+			"completed_at": _field(_STRING, "Override the clock-out time. Defaults to now."),
+			"record_data": _field(
+				_OBJECT, "Extra fields for the compliance record — laboratory results, a detector's pass/fail."
+			),
+			"user": _field(_STRING, "Only when the request carries no per-user credential."),
+		},
+		mutating=True,
+		title="Complete a task (mobile)",
+		available=_needs_doctype("Farm Task Assignment"),
+		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 

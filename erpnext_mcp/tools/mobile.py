@@ -1,0 +1,1253 @@
+# SPDX-License-Identifier: MIT
+"""Mobile accounts, their entity scoping, and the credential a phone carries.
+
+v0.17.0. Sprint 8 built the dispatch board. This is what makes it safe to point
+forty phones at from outside the LAN, and it is three things:
+
+  1. **An account with a role and an entity list.** `create_mobile_user` does in
+     one call what four Desk forms do in ten minutes: the User, the role, a User
+     Permission per Company, the grant record, and the API credential.
+  2. **A credential the phone keeps.** Frappe's own API key/secret pair, over
+     HTTPS, in the Keychain. Not a session cookie — a worker in an orchard with
+     one bar of signal cannot re-authenticate, and a token that survives a lost
+     connection is the difference between an app and a demonstration.
+  3. **A way to hand it over that a person can actually do.** A QR code. Typing
+     a 15-character secret into a phone keyboard while standing in a farm office
+     is how the secret gets written on a whiteboard instead.
+
+────────────────────────────────────────────────────────────────────────────
+THE ENTITY SCOPING, WHICH IS THE POINT OF THE WHOLE RELEASE
+────────────────────────────────────────────────────────────────────────────
+
+Several entities are live on one site: an operating company, a land-holding
+company, a family office, trusts. A field worker at the operator must not see
+the holding company's parcels; an advisor to the family office must not see the
+operator's task board.
+
+Frappe answers this with **User Permission**, and the answer is better than
+anything this app could have built: one row saying `allow=Company,
+for_value=<name>, apply_to_all_doctypes=1` restricts EVERY document that links
+to a Company, across every doctype, for that user, in every list, report, API
+call and Desk view — including doctypes this app has not written yet.
+
+SO THE ROLE SAYS WHAT KIND OF WORK, AND THE USER PERMISSION SAYS WHOSE. See
+`roles.py`, which argues that split at length and is why no company name appears
+in any role definition.
+
+**AN EMPTY User Permission LIST MEANS EVERY COMPANY.** That is Frappe's rule,
+not this app's choice, and it is the one place where the safe-looking option is
+the dangerous one: a mobile account created without entity_access would see the
+entire site. `create_mobile_user` therefore REFUSES to make an account with no
+entities, in a release whose entire purpose is scoping. There is no flag to
+override it.
+
+────────────────────────────────────────────────────────────────────────────
+WHAT THIS MODULE DOES NOT PROMISE
+────────────────────────────────────────────────────────────────────────────
+
+**API secrets do not expire.** Frappe has no expiry on an API secret and this
+app installs no scheduled job to add one, because such a job would rewrite
+another app's User records on a timer with nobody watching — `hooks.py` declares
+exactly two scheduled jobs and argues for both, and this would not have survived
+the argument. `token_expires_on` is therefore a REVIEW DATE:
+`list_mobile_users` flags an overdue grant loudly, `get_current_user_context`
+reports it to the phone, and `revoke_api_token` is what actually ends access.
+Calling a reminder an expiry would be a false assurance, and a false assurance
+about a credential is worse than none.
+
+**The QR carries a live credential.** Anybody who photographs it over somebody's
+shoulder has the account. That is inherent to enrolment-by-QR and the mitigation
+is time: the payload carries `expires_at`, minted for the length of an
+onboarding conversation rather than the length of a season, and re-minting
+rotates the secret by default so the photograph stops working. The tool is
+kill-switched off, its result says all of this in `security_note`, and the
+archived copy is a PRIVATE file.
+
+**Nothing here weakens the transport gates.** A mobile request still presents
+the shared `X-MCP-Token` and still comes from an allowed CIDR. The per-user
+credential is carried ALONGSIDE it in `Authorization: token <key>:<secret>`, and
+what it buys is identity, not entry. `security.capture_calling_user` is where
+that identity is caught, in the one-line window before this app assumes the MCP
+System User.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+
+import frappe
+
+from .. import roles, security, settings
+from ..args import as_bool, as_int, as_str, resolve_company
+from ..compat import doctype_exists
+from ..errors import ToolError
+from ..render import qr
+from ..result import ToolResult
+from . import artifacts
+
+GRANT = "Mobile Access Grant"
+USER = "User"
+USER_PERMISSION = "User Permission"
+EMPLOYEE = "Employee"
+
+#: How long an API token goes before somebody should look at it again. A season
+#: — long enough that re-issuing is not a weekly chore, short enough that a
+#: worker who left in July is not still holding a live credential at Christmas.
+DEFAULT_TOKEN_REVIEW_DAYS = 120
+
+#: How long a login QR stays valid to enrol with. The spec asked for 24 hours
+#: and 24 hours is right: it is the length of an onboarding conversation plus a
+#: night, and a QR that is valid for a week is a QR sitting on a desk for a week.
+DEFAULT_QR_HOURS = 24
+
+#: Frappe's own API secret length. Matching it rather than inventing a longer
+#: one, because the value has to survive Frappe's own validation and storage.
+SECRET_LENGTH = 15
+
+#: The most accounts one `list_mobile_users` call reports. A number nobody's
+#: crew reaches, which is the point — a cap that truncates is a cap that lies.
+LIST_CAP = 500
+
+
+# ── shared helpers ──────────────────────────────────────────────────────────
+def _require_grant() -> None:
+	if not doctype_exists(GRANT):
+		raise ToolError(
+			f"this site has no {GRANT} doctype. It ships with erpnext_mcp — run "
+			"`bench --site <site> migrate` after upgrading the app."
+		)
+
+
+def _user_row(user: str) -> dict:
+	user = (user or "").strip()
+	if not user:
+		raise ToolError("user is required (the email address the account signs in with).")
+	if not frappe.db.exists(USER, user):
+		raise ToolError(
+			f"no User {user!r} on this site. list_mobile_users has every account this app made. "
+			"Nothing was changed."
+		)
+	fields = ["name", "enabled", "full_name", "user_type", "api_key"]
+	return dict(frappe.db.get_value(USER, user, fields, as_dict=True) or {})
+
+
+def _grant_row(user: str) -> dict:
+	if not doctype_exists(GRANT) or not frappe.db.exists(GRANT, user):
+		return {}
+	return dict(frappe.get_doc(GRANT, user).as_dict())
+
+
+def _resolve_entities(args: dict, key: str = "entity_access") -> list:
+	"""The Companies an account may see, resolved from names or abbreviations.
+
+	Refuses an empty list. See the module docstring: an account with no User
+	Permission on Company sees EVERY company, which is the exact opposite of
+	what somebody asking for entity scoping wants, and there is no flag here to
+	produce one.
+	"""
+	raw = args.get(key)
+	if isinstance(raw, str):
+		wanted = [part.strip() for part in raw.replace("\n", ",").split(",") if part.strip()]
+	elif isinstance(raw, (list, tuple)):
+		wanted = [str(part).strip() for part in raw if str(part).strip()]
+	elif raw is None:
+		wanted = []
+	else:
+		raise ToolError(f"{key} must be a list of Company names (or a comma-separated string).")
+
+	if not wanted:
+		raise ToolError(
+			f"{key} is required and must name at least one Company. In Frappe a user with NO "
+			"User Permission on Company sees EVERY company on the site — so an account created "
+			"without entities would be the least scoped account here, not the most. "
+			"get_company_topology lists what this site has."
+		)
+
+	resolved = []
+	for entry in wanted:
+		name = resolve_company(entry, required=False)
+		if not name:
+			raise ToolError(
+				f"{entry!r} is not a Company on this site (nor an abbreviation of one). "
+				"get_company_topology lists them. Nothing was changed."
+			)
+		if name not in resolved:
+			resolved.append(name)
+	return resolved
+
+
+def _preferred(args: dict, entities: list) -> str:
+	"""Which entity the app opens on. Defaults to the first one named."""
+	wanted = as_str(args, "preferred_company")
+	if not wanted:
+		return entities[0]
+	name = resolve_company(wanted, required=False)
+	if not name:
+		raise ToolError(f"preferred_company {wanted!r} is not a Company on this site.")
+	if name not in entities:
+		raise ToolError(
+			f"preferred_company {name!r} is not in entity_access ({', '.join(entities)}). The "
+			"entity the app opens on has to be one the account may actually see."
+		)
+	return name
+
+
+def _role_spec(args: dict) -> roles.RoleSpec:
+	role = as_str(args, "role", required=True)
+	spec = roles.spec_for(role)
+	if spec is None:
+		raise ToolError(
+			f"{role!r} is not one of this app's mobile roles. The six are: "
+			f"{', '.join(roles.ROLE_NAMES)}. list_mobile_users returns what each one is for."
+		)
+	return spec
+
+
+def _employee_for(user: str) -> str:
+	"""The Employee record linked to a login, where the site has one."""
+	if not doctype_exists(EMPLOYEE):
+		return ""
+	try:
+		return str(frappe.db.get_value(EMPLOYEE, {"user_id": user}, "name") or "")
+	except Exception:  # pragma: no cover - an Employee table without user_id
+		return ""
+
+
+def _assign_role(user: str, role: str) -> bool:
+	"""Add one role to a user. True if it was added, False if already held."""
+	doc = frappe.get_doc(USER, user)
+	if any(str(row.get("role")) == role for row in (doc.get("roles") or [])):
+		return False
+	doc.append("roles", {"role": role})
+	doc.flags.ignore_permissions = True
+	doc.save(ignore_permissions=True)
+	return True
+
+
+def _sync_user_permissions(user: str, entities: list, preferred: str) -> dict:
+	"""Make the user's Company User Permissions match `entities`. Additive-first.
+
+	ADDS what is missing and REMOVES what is no longer granted, because a stale
+	permission is the failure this release exists to prevent: an account moved
+	from the operator to the holding company that still carries the operator's
+	entity can still read the operator's task board, and nothing anywhere would
+	say so.
+
+	It touches ONLY `allow=Company` rows. A User Permission somebody added on
+	Cost Center, Warehouse or Project is a decision this app did not make and
+	does not get to undo.
+	"""
+	report = {"added": [], "removed": [], "kept": [], "default": preferred}
+	existing = (
+		frappe.db.get_all(
+			USER_PERMISSION,
+			filters={"user": user, "allow": "Company"},
+			fields=["name", "for_value", "is_default"],
+			limit=LIST_CAP,
+		)
+		or []
+	)
+	by_value = {str(row["for_value"]): row for row in existing}
+
+	for company in entities:
+		row = by_value.get(company)
+		if row is None:
+			doc = frappe.get_doc(
+				{
+					"doctype": USER_PERMISSION,
+					"user": user,
+					"allow": "Company",
+					"for_value": company,
+					"apply_to_all_doctypes": 1,
+					"is_default": 1 if company == preferred else 0,
+				}
+			)
+			doc.flags.ignore_permissions = True
+			doc.insert(ignore_permissions=True, ignore_if_duplicate=True)
+			report["added"].append(company)
+		else:
+			report["kept"].append(company)
+			wanted_default = 1 if company == preferred else 0
+			if int(row.get("is_default") or 0) != wanted_default:
+				frappe.db.set_value(USER_PERMISSION, row["name"], "is_default", wanted_default)
+
+	for value, row in by_value.items():
+		if value not in entities:
+			frappe.delete_doc(USER_PERMISSION, row["name"], force=True, ignore_permissions=True)
+			report["removed"].append(value)
+	return report
+
+
+def _write_grant(user: str, values: dict) -> str:
+	"""Create or update the one Mobile Access Grant for a user."""
+	_require_grant()
+	if frappe.db.exists(GRANT, user):
+		doc = frappe.get_doc(GRANT, user)
+	else:
+		doc = frappe.new_doc(GRANT)
+		doc.user = user
+	for key, value in values.items():
+		doc.set(key, value)
+	doc.flags.ignore_permissions = True
+	if doc.get("name") and frappe.db.exists(GRANT, user):
+		doc.save(ignore_permissions=True)
+	else:
+		doc.insert(ignore_permissions=True)
+	return doc.name
+
+
+def _issue_token(user: str) -> dict:
+	"""Mint a fresh API key/secret pair on a User. Returns the plaintext ONCE.
+
+	`api_key` is reused where one exists — it is the public half, it appears in
+	access logs, and rotating it would orphan every log line that named it. The
+	SECRET is always new, because the whole point of issuing a token is that the
+	previous one stops working.
+	"""
+	doc = frappe.get_doc(USER, user)
+	api_key = str(doc.get("api_key") or "").strip() or frappe.generate_hash(length=SECRET_LENGTH)
+	secret = frappe.generate_hash(length=SECRET_LENGTH)
+	doc.api_key = api_key
+	doc.api_secret = secret
+	doc.flags.ignore_permissions = True
+	doc.save(ignore_permissions=True)
+	return {"api_key": api_key, "api_secret": secret}
+
+
+def read_api_secret(user: str) -> str:
+	"""The stored API secret in plaintext, or "".
+
+	Used in exactly one place — `generate_mobile_login_qr` with
+	`rotate_token=false`, for re-printing a card without breaking the phone that
+	already has it — and by the tests that prove a revocation actually revoked.
+	Frappe stores this encrypted at rest; this is the framework's own accessor
+	and not a way round it.
+	"""
+	try:
+		return str(frappe.get_doc(USER, user).get_password("api_secret", raise_exception=False) or "")
+	except Exception:
+		return ""
+
+
+def _clear_token(user: str) -> bool:
+	"""Invalidate the credential. True if there was one to invalidate.
+
+	BOTH HALVES GO. Clearing only the secret leaves an api_key on the row that
+	reads like a live credential to anybody scanning the User list, and the
+	whole value of a revocation record is that somebody can tell at a glance
+	that it happened.
+	"""
+	had = bool(read_api_secret(user)) or bool(frappe.db.get_value(USER, user, "api_key"))
+	doc = frappe.get_doc(USER, user)
+	doc.api_secret = ""
+	doc.api_key = ""
+	doc.flags.ignore_permissions = True
+	doc.save(ignore_permissions=True)
+	return had
+
+
+def _endpoint_url(args: dict = None) -> str:
+	"""The base URL a phone should call. The operator's public_url wins.
+
+	`frappe.utils.get_url()` is correct for the server and useless to a phone
+	outside the LAN: a site behind a Tailscale Funnel has no way of knowing its
+	own public name from inside a request. So the settings field is the answer
+	whenever it is filled in, and `get_url()` is the fallback that at least
+	works on the LAN.
+	"""
+	explicit = as_str(args or {}, "url")
+	if explicit:
+		return explicit.rstrip("/")
+	configured = settings.public_url()
+	if configured:
+		return configured.rstrip("/")
+	try:
+		return str(frappe.utils.get_url() or "").rstrip("/")
+	except Exception:  # pragma: no cover
+		return ""
+
+
+def _now() -> str:
+	return str(frappe.utils.now())
+
+
+# ── 1. create_mobile_user ───────────────────────────────────────────────────
+def create_mobile_user(args: dict) -> ToolResult:
+	"""One call: the User, the role, the entity scoping, the grant, the token."""
+	_require_grant()
+	email = as_str(args, "email", required=True).strip().lower()
+	if "@" not in email:
+		raise ToolError(f"email {email!r} is not an email address, and a Frappe User is named by one.")
+
+	spec = _role_spec(args)
+	entities = _resolve_entities(args)
+	preferred = _preferred(args, entities)
+	full_name = as_str(args, "full_name")
+	review_days = as_int(args, "token_expiry_days", DEFAULT_TOKEN_REVIEW_DAYS) or DEFAULT_TOKEN_REVIEW_DAYS
+
+	existed = bool(frappe.db.exists(USER, email))
+	# THE DEFAULT DEPENDS ON WHETHER THE ACCOUNT IS NEW, AND THAT IS DELIBERATE.
+	# A new account with no credential cannot sign in, so issuing one is the only
+	# useful default. An EXISTING account already has a phone in somebody's
+	# pocket, and minting a fresh secret would silently knock it offline — so
+	# changing somebody's entity access defaults to leaving their credential
+	# alone. Either default can be overridden by passing `generate_token`
+	# explicitly, which is the point of having the argument at all.
+	with_token = as_bool(args, "generate_token", not existed)
+	if existed and not as_bool(args, "update_existing", False):
+		raise ToolError(
+			f"User {email!r} already exists on this site. Re-running this on a live account "
+			"would rewrite its roles and its entity scoping, which is a decision rather than a "
+			"retry — pass update_existing=true to say so. To only re-issue a credential, use "
+			"generate_api_token. Nothing was changed."
+		)
+
+	if not existed:
+		if not full_name:
+			raise ToolError(
+				"full_name is required for a new account. A dispatch board and an evidence "
+				"record both name the person; an account called 'jose@' names nobody."
+			)
+		first, _, last = full_name.partition(" ")
+		doc = frappe.get_doc(
+			{
+				"doctype": USER,
+				"email": email,
+				"first_name": first or full_name,
+				"last_name": last,
+				"full_name": full_name,
+				"enabled": 1,
+				# A System User, because API access and role permissions are what
+				# this account is for. Desk access is controlled on the ROLE — the
+				# two phone-only roles ship with desk_access off, so a Field Worker
+				# holds a System User account that cannot open /app.
+				"user_type": "System User",
+				# NOT sent. A welcome email to a crew address that does not exist
+				# is a bounce, and enrolment here is the QR, not a password reset.
+				"send_welcome_email": 0,
+			}
+		)
+		doc.flags.ignore_permissions = True
+		doc.insert(ignore_permissions=True)
+	elif full_name:
+		frappe.db.set_value(USER, email, "full_name", full_name)
+
+	assigned = []
+	if _assign_role(email, spec.name):
+		assigned.append(spec.name)
+	companions_missing = []
+	for companion in spec.companion_roles:
+		if frappe.db.exists("Role", companion):
+			if _assign_role(email, companion):
+				assigned.append(companion)
+		else:
+			companions_missing.append(companion)
+
+	permissions = _sync_user_permissions(email, entities, preferred)
+
+	token = {}
+	if with_token:
+		token = _issue_token(email)
+
+	grant_values = {
+		"full_name": full_name or str(frappe.db.get_value(USER, email, "full_name") or ""),
+		"mobile_role": spec.name,
+		"state": "Active",
+		"preferred_company": preferred,
+		"entity_access": "\n".join(entities),
+		"notes": as_str(args, "notes"),
+		"endpoint_url": _endpoint_url(args),
+		"revocation_reason": "",
+		"revoked_on": None,
+		"revoked_by": None,
+	}
+	if token:
+		grant_values.update(
+			{
+				"api_key": token["api_key"],
+				"token_issued_on": _now(),
+				"token_expires_on": frappe.utils.add_days(frappe.utils.today(), review_days),
+				"token_revoked_on": None,
+				"token_issue_count": int(_grant_row(email).get("token_issue_count") or 0) + 1,
+			}
+		)
+	grant = _write_grant(email, grant_values)
+
+	data = {
+		"user": email,
+		"created": not existed,
+		"updated": existed,
+		"full_name": grant_values["full_name"],
+		"role": spec.name,
+		"role_summary": spec.summary,
+		"role_cannot": list(spec.cannot),
+		"roles_assigned": assigned,
+		"desk_access": bool(spec.desk_access),
+		"entity_access": entities,
+		"preferred_company": preferred,
+		"user_permissions": permissions,
+		"grant": grant,
+		"employee": _employee_for(email) or None,
+		"endpoint_url": grant_values["endpoint_url"] or None,
+		"token_review_due": grant_values.get("token_expires_on"),
+	}
+	if token:
+		data["api_key"] = token["api_key"]
+		data["api_secret"] = token["api_secret"]
+		data["auth_header"] = f"Authorization: token {token['api_key']}:{token['api_secret']}"
+		data["secret_note"] = (
+			"THIS IS THE ONLY TIME THE SECRET IS READABLE IN A RESULT. Frappe stores it "
+			"encrypted; nothing reads it back except generate_mobile_login_qr with "
+			"rotate_token=false. Hand it over now or re-issue with generate_api_token."
+		)
+	elif existed:
+		data["secret_note"] = (
+			"NO CREDENTIAL WAS TOUCHED, which is the default when updating an account that "
+			"already exists: this person has a phone in their pocket and re-scoping them should "
+			"not knock it offline. Their existing token still works and now carries the new "
+			"entity access. Pass generate_token=true to mint a fresh one — which invalidates "
+			"the phone."
+		)
+	else:
+		data["secret_note"] = (
+			"No credential was issued (generate_token=false). The account exists and is scoped "
+			"but cannot sign in until generate_api_token is run for it."
+		)
+
+	if companions_missing:
+		data["companion_roles_missing"] = companions_missing
+		data["companion_note"] = (
+			f"This site has no {', '.join(companions_missing)} role, so it was not assigned. "
+			"That role belongs to another app (Frappe HR ships Employee), and this app will not "
+			"write permissions onto a doctype it does not own — doing so would make Frappe "
+			"ignore every standard permission on it, for every role. Install the owning app, or "
+			"accept that this account cannot read its own Employee record."
+		)
+
+	data["entity_note"] = roles.entity_access_note(entities)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{'created' if not existed else 'updated'} {email} as {spec.name} "
+			f"scoped to {len(entities)} entity/entities"
+			+ ("; token issued" if token else "; no token")
+		),
+	)
+
+
+# ── 2. list_mobile_users ────────────────────────────────────────────────────
+def list_mobile_users(args: dict) -> ToolResult:
+	"""Every mobile account: role, entity access, credential age, and any drift."""
+	_require_grant()
+	filters = {}
+	role = as_str(args, "role")
+	if role:
+		spec = roles.spec_for(role)
+		if spec is None:
+			raise ToolError(
+				f"{role!r} is not one of this app's mobile roles. The six are: {', '.join(roles.ROLE_NAMES)}."
+			)
+		filters["mobile_role"] = spec.name
+	state = as_str(args, "state")
+	if state:
+		filters["state"] = state
+	elif not as_bool(args, "include_revoked", False):
+		filters["state"] = ("!=", "Revoked")
+
+	company = resolve_company(as_str(args, "company"), required=False)
+	today = str(frappe.utils.today())
+
+	rows = (
+		frappe.db.get_all(
+			GRANT,
+			filters=filters or None,
+			fields=[
+				"name",
+				"user",
+				"full_name",
+				"mobile_role",
+				"state",
+				"preferred_company",
+				"entity_access",
+				"api_key",
+				"token_issued_on",
+				"token_expires_on",
+				"token_revoked_on",
+				"token_issue_count",
+				"last_qr_issued_on",
+				"revoked_on",
+				"revoked_by",
+				"revocation_reason",
+				"endpoint_url",
+				"notes",
+			],
+			order_by="modified desc",
+			limit=LIST_CAP,
+		)
+		or []
+	)
+
+	users = []
+	for row in rows:
+		row = dict(row)
+		user = str(row.get("user") or "")
+		live_entities = roles.companies_for(user)
+		recorded = [line for line in str(row.get("entity_access") or "").split("\n") if line.strip()]
+		if company and company not in live_entities:
+			continue
+		enabled = bool(frappe.db.get_value(USER, user, "enabled")) if frappe.db.exists(USER, user) else False
+		has_secret = bool(read_api_secret(user))
+		review_due = str(row.get("token_expires_on") or "")
+		overdue = bool(review_due and review_due < today and row.get("state") == "Active" and has_secret)
+
+		entry = {
+			"user": user,
+			"full_name": row.get("full_name") or None,
+			"role": row.get("mobile_role"),
+			"state": row.get("state"),
+			"user_enabled": enabled,
+			"has_live_token": has_secret,
+			"api_key": row.get("api_key") or None,
+			"entity_access": live_entities,
+			"entity_access_recorded": recorded,
+			"preferred_company": row.get("preferred_company") or None,
+			"token_issued_on": str(row.get("token_issued_on") or "") or None,
+			"token_review_due": review_due or None,
+			"token_review_overdue": overdue,
+			"token_revoked_on": str(row.get("token_revoked_on") or "") or None,
+			"tokens_issued": int(row.get("token_issue_count") or 0),
+			"last_qr_issued_on": str(row.get("last_qr_issued_on") or "") or None,
+			"endpoint_url": row.get("endpoint_url") or None,
+			"revoked_on": str(row.get("revoked_on") or "") or None,
+			"revoked_by": row.get("revoked_by") or None,
+			"revocation_reason": row.get("revocation_reason") or None,
+			"roles_held": roles.roles_of(user),
+			"all_roles": roles.all_roles_of(user),
+			"employee": _employee_for(user) or None,
+			"notes": row.get("notes") or None,
+		}
+
+		# THE DRIFT CHECKS. Each one is a state that looks fine on a list and is
+		# not, and each one has bitten somebody on some system somewhere.
+		concerns = []
+		if not live_entities:
+			concerns.append(
+				"NO User Permission on Company — in Frappe that means this account sees EVERY "
+				"entity on the site. Re-run create_mobile_user with update_existing=true."
+			)
+		if sorted(live_entities) != sorted(recorded) and recorded:
+			concerns.append(
+				f"the grant records {', '.join(recorded) or 'nothing'} but the live User "
+				f"Permissions allow {', '.join(live_entities) or 'nothing'}. Somebody changed "
+				"one without the other."
+			)
+		if row.get("state") == "Revoked" and has_secret:
+			concerns.append("REVOKED BUT THE TOKEN STILL WORKS. Run revoke_api_token.")
+		if row.get("state") == "Revoked" and enabled:
+			concerns.append("REVOKED BUT THE LOGIN IS STILL ENABLED.")
+		if overdue:
+			concerns.append(
+				f"the token's review date ({review_due}) has passed and it is still live. "
+				"Frappe API secrets do not expire on their own — this is a reminder, not an "
+				"enforcement. Re-issue with generate_api_token or end it with revoke_api_token."
+			)
+		if row.get("mobile_role") and row["mobile_role"] not in entry["roles_held"]:
+			concerns.append(
+				f"the grant says {row['mobile_role']} but the account does not hold that role."
+			)
+		entry["concerns"] = concerns
+		users.append(entry)
+
+	catalogue = [roles.describe_role(spec, include_permissions=False) for spec in roles.ROLE_SPECS]
+	flagged = [entry for entry in users if entry["concerns"]]
+	return ToolResult(
+		data={
+			"count": len(users),
+			"users": users,
+			"needing_attention": len(flagged),
+			"company_filter": company,
+			"roles": catalogue,
+			"note": (
+				"entity_access is read from the LIVE User Permission rows, not from the grant — "
+				"so a scoping somebody changed in the Desk shows here as drift rather than "
+				"agreeing with a record that is out of date."
+			),
+		},
+		summary=f"{len(users)} mobile account(s), {len(flagged)} needing attention",
+	)
+
+
+# ── 3. revoke_mobile_user ───────────────────────────────────────────────────
+def revoke_mobile_user(args: dict) -> ToolResult:
+	"""End one account: disable the login, kill the credential, record the reason."""
+	_require_grant()
+	email = as_str(args, "email") or as_str(args, "user")
+	if not email:
+		raise ToolError("email is required (the account to revoke).")
+	email = email.strip().lower()
+	row = _user_row(email)
+
+	reason = as_str(args, "reason").strip()
+	if len(reason) < 8:
+		raise ToolError(
+			"reason is required and has to be a real one. 'Left at the end of harvest', 'phone "
+			"lost in the orchard' and 'dismissed for cause' are three different answers to the "
+			"question an auditor asks about why somebody's access ended, and this record is the "
+			"only place any of them survives. Nothing was changed."
+		)
+
+	keep_permissions = as_bool(args, "keep_user_permissions", True)
+	had_token = _clear_token(email)
+	was_enabled = bool(row.get("enabled"))
+	if was_enabled:
+		frappe.db.set_value(USER, email, "enabled", 0)
+
+	removed = []
+	if not keep_permissions:
+		for permission in (
+			frappe.db.get_all(
+				USER_PERMISSION,
+				filters={"user": email, "allow": "Company"},
+				fields=["name", "for_value"],
+				limit=LIST_CAP,
+			)
+			or []
+		):
+			frappe.delete_doc(USER_PERMISSION, permission["name"], force=True, ignore_permissions=True)
+			removed.append(permission["for_value"])
+
+	now = _now()
+	grant = _write_grant(
+		email,
+		{
+			"state": "Revoked",
+			"revocation_reason": reason,
+			"revoked_on": now,
+			"revoked_by": frappe.session.user,
+			"token_revoked_on": now if had_token else None,
+			"api_key": "",
+			# An account revoked before it ever had a grant still needs one, and
+			# guessing "Field Worker" would put a fact on the record that nobody
+			# stated. The roles the account actually holds are the honest answer.
+			"mobile_role": _grant_row(email).get("mobile_role") or _role_from_held(email),
+		},
+	)
+
+	return ToolResult(
+		data={
+			"user": email,
+			"grant": grant,
+			"login_disabled": True,
+			"was_enabled": was_enabled,
+			"token_revoked": had_token,
+			"user_permissions_kept": keep_permissions,
+			"user_permissions_removed": removed,
+			"reason": reason,
+			"revoked_by": frappe.session.user,
+			"revoked_on": now,
+			"roles_kept": roles.roles_of(email),
+			"note": (
+				"The ROLES are left on the account, deliberately. A disabled user with no live "
+				"token cannot sign in, and keeping the roles means a re-hire is one "
+				"create_mobile_user away and — more importantly — that the record still says "
+				"what this person was. An account stripped of its roles is an account nobody "
+				"can later answer 'what could they see' about."
+				+ (
+					""
+					if keep_permissions
+					else " The Company User Permissions were removed as asked, which loses that "
+					"same evidence for the entity scoping. The grant still records it."
+				)
+			),
+		},
+		summary=f"revoked {email}: login disabled, {'token killed' if had_token else 'no token to kill'}",
+	)
+
+
+# ── 4. generate_api_token ───────────────────────────────────────────────────
+def generate_api_token(args: dict) -> ToolResult:
+	"""Mint a fresh API credential for one user. The secret is readable ONCE."""
+	email = (as_str(args, "user", required=True) or "").strip().lower()
+	row = _user_row(email)
+	if not row.get("enabled"):
+		raise ToolError(
+			f"User {email!r} is disabled, so a credential for it would not work. Enable the "
+			"account first — a token minted for a disabled login is a token somebody will spend "
+			"an afternoon debugging. Nothing was changed."
+		)
+
+	review_days = as_int(args, "expiry_days", DEFAULT_TOKEN_REVIEW_DAYS) or DEFAULT_TOKEN_REVIEW_DAYS
+	if review_days <= 0:
+		raise ToolError("expiry_days must be a positive number of days.")
+
+	replaced = bool(read_api_secret(email))
+	token = _issue_token(email)
+	review_due = frappe.utils.add_days(frappe.utils.today(), review_days)
+	existing = _grant_row(email)
+	grant = None
+	if doctype_exists(GRANT):
+		grant = _write_grant(
+			email,
+			{
+				"mobile_role": existing.get("mobile_role") or _role_from_held(email),
+				"full_name": existing.get("full_name") or str(row.get("full_name") or ""),
+				"state": "Active",
+				"api_key": token["api_key"],
+				"token_issued_on": _now(),
+				"token_expires_on": review_due,
+				"token_revoked_on": None,
+				"token_issue_count": int(existing.get("token_issue_count") or 0) + 1,
+				"revocation_reason": "",
+				"revoked_on": None,
+				"revoked_by": None,
+				"entity_access": existing.get("entity_access") or "\n".join(roles.companies_for(email)),
+				"preferred_company": existing.get("preferred_company") or roles.default_company_for(email),
+				"endpoint_url": existing.get("endpoint_url") or _endpoint_url(args),
+			},
+		)
+
+	return ToolResult(
+		data={
+			"user": email,
+			"api_key": token["api_key"],
+			"api_secret": token["api_secret"],
+			"auth_header": f"Authorization: token {token['api_key']}:{token['api_secret']}",
+			"endpoint": f"{_endpoint_url(args)}/api/method/erpnext_mcp.mcp.handle",
+			"replaced_previous_token": replaced,
+			"token_review_due": review_due,
+			"review_days": review_days,
+			"grant": grant,
+			"roles_held": roles.roles_of(email),
+			"entity_access": roles.companies_for(email),
+			"secret_note": (
+				"THIS IS THE ONLY TIME THE SECRET APPEARS IN A RESULT. Frappe stores it "
+				"encrypted from here on. Hand it over now, or re-run this — which mints a new "
+				"one and stops the old one working."
+			),
+			"expiry_note": (
+				f"token_review_due is {review_due}, and it is a REVIEW DATE, NOT AN EXPIRY. "
+				"Frappe API secrets do not expire on their own, and this app installs no "
+				"scheduled job that revokes one — a job rewriting another app's User records at "
+				"three in the morning is not a thing this app does. list_mobile_users flags an "
+				"overdue grant; revoke_api_token is what actually ends it."
+			),
+			"transport_note": (
+				"This credential buys IDENTITY, not entry. A mobile request still presents the "
+				"shared X-MCP-Token and still has to come from an allowed CIDR — send both "
+				"headers."
+			),
+		},
+		summary=f"issued an API token for {email}"
+		+ (" (replacing the previous one)" if replaced else "")
+		+ f", review due {review_due}",
+	)
+
+
+def _role_from_held(user: str) -> str:
+	held = roles.roles_of(user)
+	return held[0] if held else "Field Worker"
+
+
+# ── 5. revoke_api_token ─────────────────────────────────────────────────────
+def revoke_api_token(args: dict) -> ToolResult:
+	"""Invalidate one user's API credential. The account itself stays enabled."""
+	email = (as_str(args, "user", required=True) or "").strip().lower()
+	_user_row(email)
+	had = _clear_token(email)
+	reason = as_str(args, "reason")
+
+	grant = None
+	if doctype_exists(GRANT) and frappe.db.exists(GRANT, email):
+		existing = _grant_row(email)
+		grant = _write_grant(
+			email,
+			{
+				"mobile_role": existing.get("mobile_role") or _role_from_held(email),
+				"api_key": "",
+				"token_revoked_on": _now(),
+				"notes": _append_note(existing.get("notes"), f"token revoked: {reason}" if reason else ""),
+			},
+		)
+
+	return ToolResult(
+		data={
+			"user": email,
+			"token_revoked": had,
+			"grant": grant,
+			"reason": reason or None,
+			"login_still_enabled": bool(frappe.db.get_value(USER, email, "enabled")),
+			"note": (
+				"The credential is gone; the ACCOUNT is untouched and still enabled. That is the "
+				"difference between this and revoke_mobile_user: this is 'they lost their "
+				"phone', that is 'they no longer work here'."
+				if had
+				else "There was no live credential on this account, so nothing was revoked. The "
+				"account is unchanged."
+			),
+		},
+		summary=f"{'revoked' if had else 'found no'} API token for {email}",
+	)
+
+
+def _append_note(existing, addition: str) -> str:
+	existing = str(existing or "").strip()
+	addition = str(addition or "").strip()
+	if not addition:
+		return existing
+	return f"{existing}\n{addition}".strip()
+
+
+# ── 6. get_current_user_context ─────────────────────────────────────────────
+def get_current_user_context(args: dict) -> ToolResult:
+	"""Who is calling, what they may do, and which entity the app should open on."""
+	user, source = resolve_context_user(args)
+
+	if not user or user == "Guest":
+		return ToolResult(
+			data={
+				"user": None,
+				"identified": False,
+				"identity_source": source,
+				"note": (
+					"No per-user identity on this request. The MCP bearer token authorises the "
+					"CALL; it does not name a person. A mobile client identifies itself by "
+					"sending `Authorization: token <api_key>:<api_secret>` ALONGSIDE the "
+					"X-MCP-Token header — generate_api_token produces the pair and prints the "
+					"header. An operator driving this from a desktop client can pass `user` "
+					"explicitly instead."
+				),
+			},
+			summary="no per-user identity on this request",
+		)
+
+	row = dict(frappe.db.get_value(USER, user, ["name", "enabled", "full_name"], as_dict=True) or {})
+	grant = _grant_row(user)
+	held = roles.roles_of(user)
+	entities = roles.companies_for(user)
+	preferred = grant.get("preferred_company") or roles.default_company_for(user)
+	specs = [roles.describe_role(roles.BY_NAME[name]) for name in held]
+	today = str(frappe.utils.today())
+	review_due = str(grant.get("token_expires_on") or "")
+
+	return ToolResult(
+		data={
+			"user": user,
+			"identified": True,
+			"identity_source": source,
+			"full_name": row.get("full_name") or None,
+			"enabled": bool(row.get("enabled")),
+			"employee": _employee_for(user) or None,
+			"mobile_roles": held,
+			"all_roles": roles.all_roles_of(user),
+			"role_detail": specs,
+			"primary_role": held[0] if held else None,
+			"entity_access": entities,
+			"preferred_company": preferred or None,
+			"entity_note": roles.entity_access_note(entities),
+			"grant_state": grant.get("state") or None,
+			"token_review_due": review_due or None,
+			"token_review_overdue": bool(review_due and review_due < today),
+			"endpoint": f"{_endpoint_url(args)}/api/method/erpnext_mcp.mcp.handle",
+			"can": sorted({item for spec in specs for item in _can_lines(spec)}),
+			"cannot": sorted({line for spec in specs for line in spec.get("cannot", [])}),
+			"note": (
+				"entity_access is what this user's Company User Permissions allow. Every list "
+				"this app returns to them is already filtered by it at the framework level — the "
+				"app does not have to filter again and must not pretend it did."
+			),
+		},
+		summary=(
+			f"{user}: {', '.join(held) or 'no mobile role'}; "
+			f"{len(entities)} entity/entities; opens on {preferred or 'nothing'}"
+		),
+	)
+
+
+def _can_lines(spec: dict) -> list:
+	out = []
+	for perm in spec.get("permissions") or []:
+		verbs = [name for name in ("create", "write", "read") if perm.get(name)]
+		if verbs:
+			out.append(f"{'/'.join(verbs)} {perm['doctype']}")
+	return out
+
+
+def resolve_context_user(args: dict) -> tuple:
+	"""Which user a mobile-ergonomic tool is acting for, and how that was decided.
+
+	THE SESSION DECIDES; AN EXPLICIT ARGUMENT IS A FALLBACK, NOT AN OVERRIDE.
+	`security.caller_identity()` is the Frappe user who authenticated THIS
+	request — a real credential Frappe validated, caught in the one-line window
+	before this app assumes the MCP System User. When there is one, it wins, and
+	a `user` argument naming somebody else is REFUSED rather than quietly
+	honoured: a worker whose phone can act as another worker by adding a field
+	to a JSON body is not scoping, it is decoration.
+
+	When there is no per-user identity — an operator's desktop MCP client
+	presenting only the shared bearer token — an explicit `user` argument is
+	accepted, because that caller has already proved they hold the operator's
+	token and could read the same records through any read tool anyway.
+	"""
+	authenticated = security.caller_identity()
+	explicit = (as_str(args or {}, "user") or as_str(args or {}, "worker_user")).strip().lower()
+
+	if authenticated and authenticated not in ("Guest", settings.FALLBACK_USER):
+		if explicit and explicit != str(authenticated).lower():
+			raise ToolError(
+				f"this request is authenticated as {authenticated} and asked to act as "
+				f"{explicit!r}. It will not: an account that can name somebody else in a "
+				"request body is not scoped to anything. Drop the `user` argument, or call "
+				"with that account's own credential."
+			)
+		return str(authenticated), "authenticated request (Authorization: token …)"
+
+	if explicit:
+		if not frappe.db.exists(USER, explicit):
+			raise ToolError(f"no User {explicit!r} on this site.")
+		return explicit, "the `user` argument (this request carries no per-user credential)"
+
+	return "", "none"
+
+
+# ── 7. generate_mobile_login_qr ─────────────────────────────────────────────
+def generate_mobile_login_qr(args: dict) -> ToolResult:
+	"""The enrolment card: url + user + token, as a scannable PNG.
+
+	The mobile app scans it, stores the credential in the Keychain, and every
+	call after that carries it as a header. That is the whole flow, and the
+	alternative is somebody typing a 15-character secret into a phone keyboard
+	in a farm office, which is how the secret ends up on a whiteboard.
+	"""
+	if not qr.available():
+		raise ToolError(
+			"this site has no QR encoder, so the login card cannot be drawn. It needs "
+			+ qr.REQUIRES
+		)
+
+	email = (as_str(args, "user", required=True) or "").strip().lower()
+	row = _user_row(email)
+	if not row.get("enabled"):
+		raise ToolError(
+			f"User {email!r} is disabled. A login card for an account that cannot sign in is a "
+			"card somebody will scan in a field and blame the app for. Nothing was changed."
+		)
+
+	url = _endpoint_url(args)
+	if not url:
+		raise ToolError(
+			"this site does not know its own public URL, so the QR would point a phone at "
+			"nothing. Fill in `public_url` on ERPNext MCP Settings with the Tailscale Funnel "
+			"address — https://<host>.<tailnet>.ts.net — or pass `url`. get_tailscale_funnel_config "
+			"reports what this machine is actually serving."
+		)
+	if not str(url).lower().startswith("https://"):
+		raise ToolError(
+			f"the endpoint URL is {url!r}, which is not HTTPS. This QR carries a live credential; "
+			"encoding one for a plaintext endpoint would put it on the wire in the clear at every "
+			"call, forever. Fix public_url, or pass an https:// url. Nothing was written."
+		)
+
+	hours = as_int(args, "expiry_hours", DEFAULT_QR_HOURS) or DEFAULT_QR_HOURS
+	if hours <= 0 or hours > 168:
+		raise ToolError(
+			"expiry_hours must be between 1 and 168 (a week). A login QR is valid for the "
+			"length of an onboarding conversation; one valid for a season is a live credential "
+			"sitting in somebody's photo roll."
+		)
+
+	rotate = as_bool(args, "rotate_token", True)
+	if rotate:
+		token = _issue_token(email)
+		secret = token["api_secret"]
+		api_key = token["api_key"]
+	else:
+		secret = read_api_secret(email)
+		api_key = str(row.get("api_key") or "")
+		if not secret or not api_key:
+			raise ToolError(
+				f"{email} has no live API credential to put on a card, and rotate_token=false "
+				"says not to mint one. Run generate_api_token, or call this with "
+				"rotate_token=true (the default)."
+			)
+
+	expires_at = frappe.utils.add_to_date(_now(), hours=hours)
+	payload = mobile_login_payload(
+		url=url,
+		user=email,
+		api_key=api_key,
+		api_secret=secret,
+		expires_at=str(expires_at),
+	)
+	text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+	drawn = qr.render(text, error=as_str(args, "error_correction") or "M")
+	png = drawn["png"]
+
+	archived = None
+	if as_bool(args, "archive", False):
+		archived = _archive_card(email, png, url, expires_at, args)
+
+	grant = None
+	if doctype_exists(GRANT):
+		existing = _grant_row(email)
+		values = {
+			"mobile_role": existing.get("mobile_role") or _role_from_held(email),
+			"last_qr_issued_on": _now(),
+			"qr_expires_at": str(expires_at),
+			"endpoint_url": url,
+		}
+		if archived:
+			values["qr_document"] = archived["governance_document"]
+		if rotate:
+			values.update(
+				{
+					"api_key": api_key,
+					"token_issued_on": _now(),
+					"token_issue_count": int(existing.get("token_issue_count") or 0) + 1,
+					"token_revoked_on": None,
+					"state": "Active",
+				}
+			)
+		grant = _write_grant(email, values)
+
+	return ToolResult(
+		data={
+			"user": email,
+			"png_base64": base64.b64encode(png).decode("ascii"),
+			"mime_type": "image/png",
+			"bytes": len(png),
+			"pixels": drawn["pixels"],
+			"modules": drawn["modules"],
+			"encoder": drawn["encoder"],
+			"error_correction": drawn["error_correction"],
+			"payload": payload,
+			"payload_bytes": len(text),
+			"expires_at": str(expires_at),
+			"expiry_hours": hours,
+			"token_rotated": rotate,
+			"endpoint": payload["endpoint"],
+			"grant": grant,
+			"archive": archived,
+			"roles_held": roles.roles_of(email),
+			"entity_access": roles.companies_for(email),
+			"security_note": (
+				"THIS IMAGE IS A LIVE CREDENTIAL. Anybody who photographs it over somebody's "
+				"shoulder has this account until the token is revoked. That is inherent to "
+				f"enrolment by QR, and the mitigation is time: it stops being valid to enrol "
+				f"with at {expires_at} ({hours}h), and re-minting rotates the secret so an old "
+				"photograph stops working. Show it, let it be scanned, and do not put it in a "
+				"group chat."
+				+ (
+					" rotate_token=true means the previous credential has ALREADY stopped "
+					"working — any phone already enrolled on this account must re-scan."
+					if rotate
+					else " rotate_token=false: the existing credential was re-printed, so "
+					"phones already enrolled keep working — and so does any earlier copy of "
+					"this card."
+				)
+			),
+			"app_note": (
+				"The app should store `api_key` and `api_secret` in the Keychain and send BOTH "
+				"headers on every call: `Authorization: token <api_key>:<api_secret>` for "
+				"identity and `X-MCP-Token` for entry. `expires_at` is the deadline for "
+				"ENROLLING, not for the credential — once stored, the token works until it is "
+				"revoked."
+			),
+		},
+		summary=(
+			f"login QR for {email} ({drawn['pixels']}px, {len(png)} bytes), valid to enrol "
+			f"until {expires_at}" + ("; token rotated" if rotate else "")
+		),
+	)
+
+
+def mobile_login_payload(url: str, user: str, api_key: str, api_secret: str, expires_at: str) -> dict:
+	"""What goes IN the QR. One function, so the tests read the same shape the app does.
+
+	`token` is the whole `key:secret` pair in the form the header wants, because
+	the app's job at enrolment is to store a string and put it after the word
+	`token` — splitting it into two fields invites a client to reassemble it in
+	the wrong order, and the failure looks like an authentication bug rather than
+	a parsing one. `api_key` and `api_secret` are ALSO present, separately, for a
+	client that wants them apart.
+
+	Keys are short and stable. A QR's module count grows with its payload, and a
+	payload with roomy key names is a physically larger square somebody has to
+	hold a phone further back from.
+	"""
+	return {
+		"v": 1,
+		"url": str(url).rstrip("/"),
+		"endpoint": f"{str(url).rstrip('/')}/api/method/erpnext_mcp.mcp.handle",
+		"user": user,
+		"token": f"{api_key}:{api_secret}",
+		"api_key": api_key,
+		"api_secret": api_secret,
+		"expires_at": str(expires_at),
+	}
+
+
+def _archive_card(user: str, png: bytes, url: str, expires_at, args: dict) -> dict:
+	"""File the card in the governance archive, as a PRIVATE attachment.
+
+	THE OFFLINE DISTRIBUTION PATH. A camp office at the end of a gravel road
+	prints the archived copy rather than asking somebody to hold a laptop up.
+	Private is not an argument — see `artifacts.attach_bytes`; this one carries a
+	credential, so it is the last file on the site that should be at a public URL.
+	"""
+	if not doctype_exists("Governance Document"):
+		return {
+			"archived": False,
+			"reason": "this site has no Governance Document doctype, so there is nowhere to file it.",
+		}
+	company = resolve_company(as_str(args, "company"), required=False) or roles.default_company_for(user)
+	if not company:
+		return {
+			"archived": False,
+			"reason": (
+				"a Governance Document needs a Company and this account has no entity access to "
+				"take one from. Pass `company`."
+			),
+		}
+	doc = frappe.get_doc(
+		{
+			"doctype": "Governance Document",
+			"title": f"Farm Ops mobile enrolment card — {user}",
+			"category": "Other",
+			"company": company,
+			"effective_date": frappe.utils.today(),
+			"notes": (
+				f"<p>Enrolment QR for <b>{frappe.utils.escape_html(user)}</b> against "
+				f"{frappe.utils.escape_html(url)}. Valid to enrol until {expires_at}.</p>"
+				"<p><b>This attachment is a live credential.</b> It is private; keep it that "
+				"way. Once the account is enrolled, or once the deadline passes, this document "
+				"should be deleted rather than kept as a record — the record worth keeping is "
+				"the Mobile Access Grant, which holds no secret.</p>"
+			),
+		}
+	)
+	doc.flags.ignore_permissions = True
+	doc.insert(ignore_permissions=True)
+	attachment = artifacts.attach_bytes(
+		"Governance Document",
+		doc.name,
+		f"mobile-enrolment-{user.replace('@', '-at-')}.png",
+		png,
+		field="attached_file",
+	)
+	return {
+		"archived": True,
+		"governance_document": doc.name,
+		"company": company,
+		"attachment": artifacts.describe_attachment(attachment, png),
+		"note": (
+			"Filed PRIVATE. Delete this document once the phone is enrolled — the durable record "
+			"is the Mobile Access Grant, and it holds no secret."
+		),
+	}
+
+
+# ── the role catalogue, for a client that wants it without a user ───────────
+def list_mobile_roles() -> list:
+	"""Every role this app defines, in full. Used by list_mobile_users."""
+	return [roles.describe_role(spec) for spec in roles.ROLE_SPECS]

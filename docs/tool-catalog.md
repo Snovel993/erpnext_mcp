@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 190 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 206 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -5662,6 +5662,362 @@ evidence.
 
 ---
 
+# v0.17.0 — multi-entity scoping, mobile auth and the public endpoint
+
+**Sprint 8 built a dispatch board. These sixteen tools are what makes it safe to
+point forty phones at it from outside the LAN.**
+
+Three facts frame everything below, and each one is a refusal somewhere:
+
+1. **The role says what KIND of work; the User Permission says WHOSE.** No
+   company name appears in any role definition. A `User Permission` row with
+   `allow=Company, apply_to_all_doctypes=1` scopes every document that links to
+   a Company, for that user, across every doctype — including ones this app has
+   not written yet.
+2. **An empty entity list means EVERY company, not none.** That is Frappe's
+   rule, and it is why `create_mobile_user` refuses to make an account without
+   entities and why `list_compliance_calendar_for_me` refuses to answer for one.
+3. **The credential buys identity, not entry.** A mobile request presents
+   `X-MCP-Token` (entry, still CIDR-gated) *and*
+   `Authorization: token <api_key>:<api_secret>` (identity). Frappe
+   authenticates the second before this app's endpoint runs, and
+   `security.capture_calling_user` saves who it was in the one line before the
+   MCP System User is assumed.
+
+## The six roles
+
+Created idempotently on every `bench migrate`. `list_mobile_users` returns the
+whole catalogue with each role's `cannot` list, so a client needs no second call.
+
+| Role | Reads | Writes | Notably cannot |
+| --- | --- | --- | --- |
+| Field Worker | Farm Task, the three compliance records, camp and ground registers | Farm Task **Assignment** only | read a Compliance Policy or the calendar; rewrite the job |
+| Foreman | compliance registers, camp, ground | Farm Task, assignments, the three records, alerts | touch accounting; edit the certificate or SOP registers |
+| Compliance Officer | Farm Task, camp, ground, governance | the compliance registers, the three records, alerts | **dispatch anybody** — Farm Task is read-only, deliberately |
+| Farm Manager | governance | dispatch, compliance, ground, camp, leases | see the cap table; edit the governance archive |
+| Family Member | cap table, member events, notes payable, ground, leases | governance documents, related parties | see the operating company's task board |
+| Advisor | governance documents, related parties, regulatory filings | nothing, anywhere | everything else |
+
+**The Custom DocPerm trap, in one paragraph.** Frappe ignores every *standard*
+DocPerm on a doctype the moment ONE Custom DocPerm exists for it — for every role
+on the site. So the installer mirrors the standard permissions into custom ones
+before writing the first new row (exactly as Frappe's own Role Permission Manager
+does), and **refuses outright** to write a permission onto a doctype another app
+owns. A Custom DocPerm on `Employee` would have taken HR Manager off the Employee
+register during a migration with nothing printed. `roles.py` argues it at length;
+`tests_standalone/test_roles.py` asserts both halves.
+
+## 183. `list_mobile_users`
+
+Read-only, on by default. The roster **and everything wrong with it**.
+
+| Argument | Meaning |
+| --- | --- |
+| `role` | One of the six |
+| `company` | Only accounts whose entity access includes this Company |
+| `state` | `Active`, `Expired` or `Revoked` |
+| `include_revoked` | Default false — revoked accounts are history, not roster |
+
+`entity_access` is read from the **live** User Permission rows, not from the
+grant, so a scoping somebody changed in the Desk shows as drift rather than
+agreeing with a stale record. Each account carries a `concerns` list; every entry
+is a state that looks fine on a list and is not:
+
+- no Company User Permission at all — which in Frappe means **unrestricted**;
+- the grant and the live permissions disagree;
+- marked Revoked and the token still works;
+- marked Revoked and the login is still enabled;
+- the review date has passed and the credential is still live;
+- the grant names a role the account does not hold.
+
+## 184. `get_current_user_context`
+
+Read-only, on by default. The mobile app's first call after enrolment: the user,
+their mobile roles, the entities their User Permissions allow, which entity to
+open on, the credential's review date, and plain-language `can` / `cannot` lists
+for an account screen.
+
+**The identity comes from the request.** A client that sends
+`Authorization: token …` is reported as that user, with
+`identity_source: "authenticated request"`. A request that authenticated as one
+person and passes `user` naming another is **refused** — an account that can name
+somebody else in a request body is not scoped to anything. With no per-user
+credential (an operator's desktop client), `user` is accepted, because that
+caller already holds the operator's bearer token.
+
+With no identity at all it returns `identified: false` and the header to send,
+rather than guessing.
+
+## 185. `validate_public_endpoint`
+
+Read-only, on by default. Reaches this site **from outside** over HTTPS.
+
+| Argument | Meaning |
+| --- | --- |
+| `url` | Base URL to probe. Defaults to `public_url` from settings. No path, no query |
+| `authenticate` | Send this site's own `X-MCP-Token`. Default false |
+| `timeout_seconds` | 1–30, default 8 |
+
+Returns a `tls` block (issuer, subject, SANs, `not_after`, `days_until_expiry`,
+protocol, latency), an `http` block (status, whether a JSON-RPC body came back,
+how many tools were advertised), and a `working` boolean with a `summary` and a
+`next_step`.
+
+**A 401 to the default unauthenticated probe is the best possible result.** It
+proves three things at once: the path is reachable, the certificate is valid, and
+the token gate is holding. That is why the probe is unauthenticated by default.
+
+**The reachable set is a short allowlist, not an argument.** This makes an
+outbound request from inside the site's network, which is the shape of every
+server-side request forgery there has ever been. So: the configured `public_url`
+or a host under `.ts.net`, over HTTPS, base URL only, redirects not followed —
+and `authenticate=true` refuses everything except the configured `public_url`,
+because a tool that will POST your bearer token to a hostname in its arguments is
+a tool that exfiltrates it.
+
+## 186. `get_tailscale_funnel_config`
+
+Read-only, on by default. The same question from the inside: which ports are
+published, at which URLs, what the node's tailnet DNS name is, and whether the
+configured `public_url` matches any of it.
+
+**It degrades instead of failing.** A containerised Frappe worker normally has
+neither the `tailscale` binary nor the host's socket, and on an Umbrel that is the
+**expected** state rather than a fault — Funnel forwards to the port nginx already
+serves and needs no cooperation from this process. The tool distinguishes "no
+Tailscale anywhere" from "a daemon socket with no client", and points at
+`validate_public_endpoint`, which needs none of it.
+
+A config it cannot parse is reported as **unparsed**, not as empty: "no funnel
+ports" and "I could not tell" are different answers.
+
+**Nothing in this app can turn Funnel on or off**, and nothing will. See the
+README section for the commands, and `funnel.py` for the two reasons.
+
+## 187. `create_mobile_user`
+
+**MUTATING, default OFF.** One call for what four Desk forms do in ten minutes.
+
+| Argument | Meaning |
+| --- | --- |
+| `email` | Required. The address the account signs in with, and its docname |
+| `full_name` | Required for a new account |
+| `role` | Required. One of the six |
+| `entity_access` | **Required, at least one.** Company names or abbreviations |
+| `preferred_company` | Which entity the app opens on. Must be in `entity_access` |
+| `token_expiry_days` | Review date, in days. Default 120 |
+| `generate_token` | Issue a credential now. **True for a new account, false for an update** |
+| `update_existing` | Rewrite a live account's roles and scoping. Default false |
+| `notes`, `url` | Recorded on the grant |
+
+```json
+{"name": "create_mobile_user",
+ "arguments": {"email": "ana@constancyfarms.example",
+               "full_name": "Ana Ramos",
+               "role": "Field Worker",
+               "entity_access": ["Constancy Farms LLC"]}}
+```
+
+Writes the User, the role (plus the site's own `Employee` role where it has one),
+one `User Permission` per entity, the Mobile Access Grant, and returns
+`api_key`, `api_secret` and a ready-made `auth_header`. **That is the only time
+the secret appears in a result.**
+
+Refuses: an `entity_access` that is empty or names a Company this site does not
+have; a `preferred_company` outside it; a User that already exists, unless
+`update_existing=true` — re-running this on a live account rewrites its roles and
+scoping, which is a decision rather than a retry. To only re-issue a credential,
+use `generate_api_token`.
+
+With `update_existing=true` it also **removes** entities no longer granted. A
+stale permission is the failure this release exists to prevent: an account moved
+between entities that still carries the old one.
+
+**An update leaves the credential alone by default.** A new account with no token
+cannot sign in, so issuing one is the only useful default there. An existing
+account has a phone in somebody's pocket, and re-scoping them should not silently
+knock it offline — so `generate_token` defaults to false on an update. Pass it
+explicitly either way.
+
+## 188. `revoke_mobile_user`
+
+**MUTATING, default OFF.** Disables the login, destroys the credential, records
+why.
+
+| Argument | Meaning |
+| --- | --- |
+| `email` | Required |
+| `reason` | Required, at least eight characters |
+| `keep_user_permissions` | Keep the Company permissions as evidence. Default true |
+
+`reason` is the point. "Left at the end of harvest", "phone lost in the orchard"
+and "dismissed for cause" are three different answers to the question an auditor
+asks about why somebody's access ended, and the grant is the only place any of
+them survives — Frappe keeps the access and none of the story.
+
+**The roles are left on the account, deliberately.** A disabled user with no live
+token cannot sign in; keeping the roles means the record still says what this
+person *was*, and an account stripped of its roles is one nobody can later be
+asked "what could they see" about.
+
+This is *they no longer work here*. For *they lost their phone*, use
+`revoke_api_token`.
+
+## 189. `generate_api_token`
+
+**MUTATING, default OFF.** Mints a fresh Frappe API key/secret pair.
+
+| Argument | Meaning |
+| --- | --- |
+| `user` | Required |
+| `expiry_days` | Days until the credential should be **reviewed**. Default 120 |
+
+The `api_key` is reused where one exists — it is the public half and appears in
+access logs, so rotating it would orphan every log line naming it. The **secret**
+is always new, which is what makes this the answer to a lost phone: issuing one
+stops the previous one working.
+
+**`expiry_days` sets a review date, not an expiry, and the result says so.**
+Frappe API secrets do not expire on their own, and this app installs no scheduled
+job that revokes one — a job rewriting another app's User records at three in the
+morning is not a thing this app does. `list_mobile_users` flags an overdue grant;
+`revoke_api_token` is what actually ends it. Calling a reminder an expiry would be
+a false assurance about a credential, which is worse than none.
+
+Refuses a disabled user: a token minted for a login that cannot sign in is a token
+somebody will spend an afternoon debugging.
+
+## 190. `revoke_api_token`
+
+**MUTATING, default OFF.** Destroys one user's credential and leaves the account
+enabled.
+
+Both halves go, not just the secret: an `api_key` left on the row reads like a
+live credential to anybody scanning the User list, and the whole value of a
+revocation is that somebody can tell at a glance it happened.
+
+A call against an account with no live credential says so rather than pretending
+it revoked something.
+
+## 191. `generate_mobile_login_qr`
+
+**MUTATING, default OFF.** The enrolment card.
+
+| Argument | Meaning |
+| --- | --- |
+| `user` | Required |
+| `expiry_hours` | 1–168, default 24 |
+| `rotate_token` | **Default TRUE.** Mint a fresh secret for the card |
+| `url` | Base URL for the card. Defaults to `public_url`. Must be `https://` |
+| `archive` | Also file it privately on a Governance Document. Default false |
+| `company` | Which entity to file the archived copy under |
+| `error_correction` | `L`, `M`, `Q` or `H`. Default `M` |
+
+The payload the QR carries:
+
+```json
+{"v": 1,
+ "url": "https://umbrel.tail1234.ts.net",
+ "endpoint": "https://umbrel.tail1234.ts.net/api/method/erpnext_mcp.mcp.handle",
+ "user": "ana@constancyfarms.example",
+ "token": "<api_key>:<api_secret>",
+ "api_key": "...", "api_secret": "...",
+ "expires_at": "2026-08-02 09:00:00"}
+```
+
+`token` is the whole pair in the form the header wants, because the app's job at
+enrolment is to store a string and put it after the word `token`. `api_key` and
+`api_secret` are present separately for a client that wants them apart.
+
+**The image is a live credential.** Anybody who photographs it over somebody's
+shoulder has that account until the token is revoked. That is inherent to
+enrolment by QR; the mitigations are all time-shaped. `expires_at` is the deadline
+for **enrolling** — once stored, the credential works until revoked. With
+`rotate_token` true (the default) the previous credential has already stopped
+working, so any phone already enrolled must re-scan; that is what makes re-minting
+a card a real revocation of every older copy.
+
+Refuses a non-HTTPS endpoint outright: encoding a live credential for `http://`
+would put it on the wire in the clear at every call, forever. Also refuses a
+disabled user, an `expiry_hours` beyond a week, and a site that does not know its
+own public URL.
+
+`archive=true` files the PNG as a **private** attachment on a Governance Document
+— the offline path for a camp office at the end of a gravel road — and the result
+tells you to delete that document once the phone is enrolled. The durable record
+is the Mobile Access Grant, which holds no secret.
+
+**Site prerequisite.** Needs `segno` or `qrcode`. Without either, this one tool is
+not advertised and everything else in the flow still works: `generate_api_token`
+returns the same credential as text.
+
+## 192–195. The mobile-ergonomic reads
+
+`list_my_tasks`, `list_available_for_me`, `get_task_with_evidence_contract`,
+`list_compliance_calendar_for_me`. All read-only, all on by default.
+
+Every one is a thin wrapper over something Sprint 8 already shipped. They add
+exactly three things:
+
+1. **The worker, resolved from the authenticated request** through their Employee
+   record. `list_dispatched_tasks` needs an Employee docname; a phone knows an
+   email and a Keychain credential. That lookup lives here, once, rather than in
+   every mobile client that will ever exist.
+2. **A mobile-shaped payload.** `get_task_with_evidence_contract` returns the
+   contract as a checklist — each requirement with what it means in a worker's
+   words, a `satisfied` flag and a capture hint (`camera`, `signature pad`,
+   `text field`) — plus a `next` block naming the tool the task is waiting for, so
+   a screen draws the right button without owning the rule.
+3. **The entity filter** the phone would otherwise have to guess.
+
+**A login with no Employee record is refused by name.** Returning an empty list
+would read on a phone as "nothing to do today", which is a different and much
+worse answer. Same for a `company` outside the worker's entities: an empty result
+is indistinguishable from a quiet day, and a refusal that names the entity is a
+fact somebody can act on.
+
+**`list_available_for_me` is honest about skills.** Nothing on a Frappe site
+records what skills a worker HAS — there is no register on Employee, in this app
+or in Frappe HR. So an explicit `skill` filters, a site that has added its own
+skills field to Employee is read, and otherwise the whole pool comes back with
+`skill_matching` saying it is unfiltered. Guessing from a job title was the
+alternative, and hiding a spraying task from somebody because their title said
+"Harvest Crew" would be hiding work with no way to tell.
+
+**`list_compliance_calendar_for_me` asks once per entity.** This app reads through
+`frappe.db.get_all`, which does **not** consult User Permissions — so asking the
+calendar once with no company would return every entity on the site. An account
+with no Company User Permission is refused rather than shown everything under a
+name like that one, and an entity whose calendar could not be read is named in
+`failed_entities` rather than silently contributing nothing.
+
+## 196–198. `claim_task_via_mobile`, `start_task_via_mobile`, `complete_task_via_mobile`
+
+**MUTATING, all default OFF.** Sprint 8's `claim_farm_task`, `start_farm_task` and
+`complete_farm_task` with the worker resolved from the authenticated request
+instead of named in the body.
+
+**They add no rule and weaken none.** The three-concurrent-claim limit, the
+refusal to self-pick Dispatched work, the refusal of a Draft, the evidence
+contract check, the refusal of a completion filed by anybody but the worker
+holding the task, and the Awaiting-Review routing when the record found something
+— all of it still comes from those tools, because it **is** those tools. A wrapper
+with its own copy of the compliance rules would be a second set to keep in step,
+and those are exactly the set that must never drift.
+
+`complete_task_via_mobile` takes `evidence` as the mobile spelling of
+`evidence_files`; both are accepted and both mean **file references, not bytes**.
+Photographs go up first through `stage_file_chunk` / `commit_staged_file`; this
+call carries their docnames.
+
+**Note the `findings_text` rule survives the wrapper.** Passing an empty string
+records that nothing was wrong — a clean inspection is a positive statement —
+while leaving the argument out records that nobody was asked. The wrapper passes
+the argument through a presence test rather than a truthiness test, because a
+falsy value dropped in transit would silently turn the first into the second.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -5671,7 +6027,7 @@ Everything a tool needs is in two places:
    `assets`, `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`,
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
-   `auditpacket`, `dispatch` or `inspections` —
+   `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

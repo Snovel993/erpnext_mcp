@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **190 tools** — 85 read-only, 105 mutating.
+- **206 tools** — 93 read-only, 113 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -37,8 +37,15 @@ site at call time.
   `before_uninstall` names every column it would drop, and
   [docs/compliance_fields.md](docs/compliance_fields.md) makes the whole
   argument.
-- MIT. Two runtime dependencies beyond Frappe/ERPNext (`shapely` and `h3`, for
-  field boundaries), and the app still loads without them.
+- **Six mobile roles and per-entity scoping, added in v0.17.0.** Field Worker,
+  Foreman, Compliance Officer, Farm Manager, Family Member and Advisor, each
+  installed idempotently on migrate. The role says what KIND of work somebody
+  does; a Frappe User Permission on Company says WHOSE — see [Multi-entity
+  scoping and the six mobile roles](#multi-entity-scoping-and-the-six-mobile-roles).
+- MIT. Three runtime dependencies beyond Frappe/ERPNext (`shapely` and `h3` for
+  field boundaries, `segno` for the mobile login QR), and the app still loads
+  without any of them — each missing one costs its own tools BY NAME, with the
+  pip command to fix it.
 
 <!-- Screenshots: replace these placeholders with real captures. -->
 | | |
@@ -268,7 +275,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 190 tools
+## The 206 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -283,7 +290,7 @@ mutating tool ships OFF — so a write tool you cannot see is one nobody has tic
 yet. Tick it in **ERPNext MCP Settings**; the refusal message names the exact
 switch if you call the tool anyway.
 
-### Read-only — 85, all ON by default, each individually switchable
+### Read-only — 93, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -440,8 +447,21 @@ write tools below.)
 | `list_detector_tests` / `get_detector_test` | Every smoke and CO detector test, with the failures and the buildings that have **no detector at all** as open findings. |
 | `list_water_tests` / `get_water_test` | Every agricultural water sample, with the contaminated and the **unreadable** ones named — a result nobody can interpret is not evidence that the water is safe. |
 
+**Mobile accounts, the public endpoint, and the phone's own view** — the v0.17.0 surface
 
-### Mutating — 105, all OFF by default, with one named exception
+| Tool | What it answers |
+| --- | --- |
+| `list_mobile_users` | The roster **and everything wrong with it**: who has a phone, which role, which entities their User Permissions ACTUALLY allow — read live, so a scoping somebody changed in the Desk shows as drift — plus a `concerns` list per account. An account with no Company permission, a grant marked Revoked whose token still works, a credential past its review date. |
+| `get_current_user_context` | Who is calling, their roles, their entities, which entity to open on, and plain `can` / `cannot` lists for an account screen. The identity comes from the request's own credential; a request that authenticated as one person and passes `user` naming another is **refused**. |
+| `validate_public_endpoint` | Reaches this site **from outside** over HTTPS: certificate issuer and expiry, latency, what the MCP path answered, and a verdict with a next step. A 401 to the default unauthenticated probe is the best possible result. |
+| `get_tailscale_funnel_config` | What this machine thinks it is serving: Funnel ports, URLs, the node's tailnet DNS name. Degrades honestly when Tailscale is on the host and invisible from inside the container, which is the expected state on an Umbrel. |
+| `list_my_tasks` | What the authenticated caller is holding, with the tool each assignment is waiting for so a screen draws the right button. Worker resolved through their Employee record; a login with no Employee row is refused **by name** rather than answered with an empty list. |
+| `list_available_for_me` | The pool the caller could take from, scoped to their entities. **Honest about skills**: nothing on a Frappe site records what skills a worker has, so an unfiltered pool comes back saying so rather than guessing from a job title. |
+| `get_task_with_evidence_contract` | One task shaped for a phone: the evidence contract as a checklist with a `satisfied` flag and a capture hint per requirement. Same facts as `get_farm_task`; different reader. |
+| `list_compliance_calendar_for_me` | The calendar narrowed to the caller's entities — one call per entity, merged, Critical first. An account with **no** Company User Permission is refused rather than shown the whole site. |
+
+
+### Mutating — 113, all OFF by default, with one named exception
 
 **Postings into the ledger**
 
@@ -1239,6 +1259,17 @@ rather than dropped.
 | `create_detector_test` / `update_detector_test` | Records a smoke and CO test, moves the unit's detector dates, and **raises a Farm Task** where a replacement is needed. | Write a date for a detector recorded **Not Present** — there was nothing to test, so nothing is known, and the calendar should go on saying so. A *failed* test does write the date: the ignorance is over. |
 | `create_water_test` / `update_water_test` | Records one sample and moves **both** the zone's and the parent block's test date, because Subpart E is engaged by water contacting a crop and the crop is on the block. | Treat an unreadable result as a pass. Where neither the words nor a number can be read it routes to Corrective Action Required, because a clean record of nothing is worse than no record. |
 
+**Mobile accounts, credentials, and the phone's own writes** — the v0.17.0 surface
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_mobile_user` | One call for four Desk forms: the User, one of the six roles, a Company User Permission per entity, the grant record, and the API credential — readable in the result **exactly once**. An update leaves an existing credential alone, because re-scoping somebody should not knock their phone offline. | **Make an account with no entities.** In Frappe that means it sees EVERY company, so it would be the least scoped account on the site. There is no flag to override it. Nor rewrite a live account's roles and scoping without `update_existing=true`. Nor grant a permission on a doctype another app owns — see [the Custom DocPerm trap](#multi-entity-scoping-and-the-six-mobile-roles). |
+| `revoke_mobile_user` | Ends one account: disables the login, destroys the credential, and **records why**. | Accept a blank or throwaway reason. 'Left at the end of harvest' and 'dismissed for cause' are different answers to the same auditor question and the grant is the only place either survives. It also does **not** strip the roles — an account stripped bare is one nobody can be asked "what could they see". |
+| `generate_api_token` | Mints a fresh Frappe API key/secret and returns the pair. Issuing a new one stops the previous one working, which is what makes this the answer to a lost phone. | **Expire.** `expiry_days` sets a REVIEW DATE and the result says so: Frappe API secrets do not expire on their own and this app installs no job that revokes one. `list_mobile_users` flags an overdue grant; `revoke_api_token` is what ends it. Nor mint for a disabled login. |
+| `revoke_api_token` | Destroys the credential and leaves the account enabled — 'they lost their phone', where `revoke_mobile_user` is 'they no longer work here'. | Leave half of it behind. Both the key and the secret go: an api_key on the row reads like a live credential to anybody scanning the User list. |
+| `generate_mobile_login_qr` | The enrolment card: a scannable PNG carrying the public URL, the user and the credential, base64 in the result and optionally archived as a **private** attachment for a camp office with no signal. | Point at a plaintext endpoint — encoding a live credential for `http://` puts it on the wire in the clear at every call, forever. Nor stay valid: 24 hours to enrol by default, and `rotate_token` (default TRUE) mints a fresh secret so an older photograph of an older card stops working. |
+| `claim_task_via_mobile` / `start_task_via_mobile` / `complete_task_via_mobile` | Sprint 8's claim, start and complete with the worker resolved from the authenticated request instead of named in the body. | **Add a rule or weaken one.** The concurrent-claim limit, the refusal to self-pick Dispatched work, the evidence-contract check and the empty-string findings distinction all still come from `claim_farm_task` / `start_farm_task` / `complete_farm_task`, because they ARE those tools. |
+
 
 ---
 
@@ -1553,6 +1584,313 @@ June — that would re-raise an alert about work which has since been done.
 
 ---
 
+## Multi-entity scoping and the six mobile roles
+
+Several entities run on one site. An operating company that farms the ground, a
+land-holding company that owns it, a family office, trusts. A field worker at
+the operator must not see the holding company's parcels; an advisor to the
+family office must not see the operator's task board.
+
+**The role says what KIND of work somebody does. A Frappe User Permission on
+Company says WHOSE.** That split is the whole design, and it is why not one
+company name appears in any role definition in `erpnext_mcp/roles.py`.
+
+Bolting entities into the roles would have produced "Field Worker — OpCo",
+"Field Worker — Holdings", and a new role every time a family adds an LLC. It
+would also have made this app specific to one install, which is the promise its
+`hooks.py` opens with.
+
+### The six
+
+Installed idempotently on every `bench migrate`, by the same hook that builds
+the Compliance Command Center. A role that exists is left alone; a permission an
+operator has since edited is left alone too.
+
+| Role | What it is for | What it cannot do |
+| --- | --- | --- |
+| **Field Worker** | The phone in the orchard. Reads the pool and the job, writes their own assignment and the evidence on it. No desk access. | Read the SOP library or the compliance calendar. Raise, assign or cancel work. **Rewrite the job** — Farm Task is read-only for this role; only the assignment is writable, because a worker moves their own record through its states and does not change the task's urgency or its evidence contract. |
+| **Foreman** | The dispatch board for one operating company: raise work, send people to it, read the calendar that generated it. | Touch accounting — no accounting doctype is named in any role in this app. Edit the certificate or SOP registers. See the cap table or the governance archive. |
+| **Compliance Officer** | The registers end to end: policies, certificates, filings, audits, the alert calendar. Can build the packet an audit asks for. | **Dispatch anybody.** Farm Task is read-only, deliberately: the person who decides a walk is required and the person who decides who walks it must not be one account, or that account could raise a task, assign it to itself and close it. |
+| **Farm Manager** | Operations and the ground under them: dispatch, compliance, parcels, fields, zones, housing, leases. | See the cap table or member events. Edit the governance archive. Touch notes payable or asset cost profiles. |
+| **Family Member** | The holding-company view: cap table, member events, governance, related parties, land, debt. | See the operating company's task board — the day-to-day of whoever farms the ground is not the holding company's business. Edit the cap table or post a member event. |
+| **Advisor** | The narrowest role in the app: governance documents, related parties and regulatory filings, read-only, for the one entity they advise. | **Write anything, anywhere.** See the cap table, the ledger, the task board or the calendar. |
+
+The two headline separations are asserted in both directions in
+`tests_standalone/test_roles.py`: a Field Worker cannot read a Compliance Policy
+and a Compliance Officer can; a Compliance Officer cannot dispatch and a Foreman
+can. Asserting only one half of a separation proves nothing — a role that could
+read *nothing* would pass the first test.
+
+### Creating an account
+
+```
+create_mobile_user(
+  email          = "ana@constancyfarms.example",
+  full_name      = "Ana Ramos",
+  role           = "Field Worker",
+  entity_access  = ["Constancy Farms LLC"],       # REQUIRED. At least one.
+  preferred_company = "Constancy Farms LLC",      # which entity the app opens on
+)
+```
+
+That writes the User, assigns `Field Worker` (plus the site's own `Employee`
+role where it has one), writes one `User Permission` row per entity with
+`apply_to_all_doctypes`, files a Mobile Access Grant, and returns the API
+credential once.
+
+**`entity_access` is mandatory and there is no override.** In Frappe, a user
+with NO User Permission on Company sees **every** company on the site. So the
+account you would get by leaving it out is the *least* scoped account here, not
+the most — which in a release about scoping is the one mistake that has to be
+impossible.
+
+One `User Permission` row with `apply_to_all_doctypes` scopes every document
+that links to a Company, for that user, across every doctype at once — including
+doctypes this app has not written yet. That is why this uses Frappe's mechanism
+rather than filtering inside each tool.
+
+### The Custom DocPerm trap
+
+Worth knowing about even if you never touch `roles.py`, because it is a live
+site's permissions if it goes wrong.
+
+Frappe resolves a role's permissions roughly like this:
+
+```
+perms                      = every DocPerm for the role
+custom_perms               = every Custom DocPerm for the role
+doctypes_with_custom_perms = distinct parent from `tabCustom DocPerm`
+for p in perms:
+    if p.parent not in doctypes_with_custom_perms:
+        custom_perms.append(p)
+```
+
+Read the third line. **The moment ANY Custom DocPerm row exists for a doctype,
+every standard DocPerm on that doctype is ignored — for every role on the site,
+not just the one the row was written for.** One row granting Field Worker read
+on `Employee` would silently revoke HR Manager, HR User and System Manager from
+the Employee register, during `bench migrate`, with nothing printed.
+
+The installer does two things about it, and both are tested:
+
+1. **It mirrors the standard permissions into custom ones first**, per doctype,
+   before the first new row lands — which is exactly what Frappe's own Role
+   Permission Manager does under the name `setup_custom_perms`.
+2. **It refuses outright to write a permission onto a doctype this app does not
+   own.** Not because the write would fail — it would succeed, which is the
+   problem. A refused target lands in the migration's printed output rather than
+   disappearing.
+
+That second rule has a consequence stated plainly rather than hidden: a Field
+Worker who needs to read their own Employee record needs a role from the app
+that owns `Employee`. `create_mobile_user` assigns the site's own `Employee`
+role alongside, and tells you when the site has not got one.
+
+### The credential, and what it does not promise
+
+The mobile app carries Frappe's own API key/secret pair in the Keychain and
+sends it as `Authorization: token <api_key>:<api_secret>` **alongside**
+`X-MCP-Token`. The two headers do different jobs:
+
+- `X-MCP-Token` is **entry**. It is the same shared bearer token everything else
+  uses, and it is still gated by the CIDR allowlist.
+- `Authorization: token …` is **identity**. Frappe authenticates it before this
+  app's endpoint runs, so `list_my_tasks` and friends know which of forty
+  workers is holding the phone. It buys no additional access.
+
+**API secrets do not expire, and this app does not pretend otherwise.** Frappe
+has no expiry on one, and this app installs no scheduled job to add one — such a
+job would rewrite another app's User records on a timer with nobody watching,
+and `hooks.py` declares exactly two scheduled jobs and argues for both.
+`token_expires_on` is a **review date**: `list_mobile_users` flags an overdue
+grant loudly, `get_current_user_context` reports it to the phone, and
+`revoke_api_token` is what actually ends access. Calling a reminder an expiry
+would be a false assurance about a credential, which is worse than none.
+
+### Enrolment by QR
+
+`generate_mobile_login_qr` draws a card carrying `{url, user, token,
+expires_at}`. The app scans it, stores the credential, and every call after that
+carries the header. The alternative is somebody typing a 15-character secret
+into a phone keyboard in a farm office, which is how the secret ends up on a
+whiteboard.
+
+**The image is a live credential.** Anybody who photographs it over somebody's
+shoulder has that account until the token is revoked. That is inherent to
+enrolment by QR; the mitigations are all time-shaped:
+
+- it stops being valid to enrol with after 24 hours by default (1–168 allowed);
+- `rotate_token` defaults to **true**, so re-minting a card invalidates every
+  older copy of it — and every phone already enrolled on that account, which
+  must re-scan;
+- it refuses a non-HTTPS endpoint outright;
+- `archive=true` files it as a **private** attachment on a Governance Document
+  for offline distribution, and the result tells you to delete that document
+  once the phone is enrolled. The durable record is the Mobile Access Grant,
+  which holds no secret.
+
+### Mobile Access Grant
+
+One row per person, named by their email, tracked for changes. Frappe already
+knows who has a login, which roles they hold and which companies they may see.
+It knows none of the things an audit asks: who decided this person should have a
+phone, what it was for, when the credential was issued, and — the one that
+matters most — **why it was taken away**.
+
+`before_uninstall` names it among the records that go, and separately warns
+about what uninstalling does **not** remove: the six roles are rows in Frappe's
+own `Role` table, the User Permissions are rows in `User Permission`, and the
+API credentials are on the User records. Removing this app takes the MCP
+endpoint away from those accounts and leaves everything else. To actually end
+mobile access, run `revoke_mobile_user` for each account first.
+
+---
+
+## Exposing ERPNext MCP publicly via Tailscale Funnel
+
+Everything up to here assumed the endpoint is on your LAN. A phone in an orchard
+is not on your LAN. [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
+publishes one port of one tailnet node to the public internet at
+`https://<host>.<tailnet>.ts.net`, with TLS terminated by a certificate
+Tailscale obtains itself.
+
+> **READ THIS BEFORE YOU RUN ANY OF IT.**
+>
+> **Everything the API exposes becomes PUBLIC.** The hostname is in Tailscale's
+> public DNS and appears in certificate transparency logs, so it is
+> **discoverable** — not secret, not obscure, findable by anybody who looks.
+> **The auth token is the only thing between the internet and your ledger.**
+>
+> Three settings that were belt-and-braces on a LAN become load-bearing:
+> `auth_token` (now the whole boundary — long, unique, rotated when a phone is
+> lost), `allowed_cidrs` (see step 4, and getting it wrong either locks out the
+> app or opens the gate), and `enabled` (the one tick that takes the endpoint off
+> the internet with no restart and no deploy).
+>
+> **Nothing in this app can turn Funnel on or off, and nothing will.** Changing
+> what is reachable from the entire internet is an operator decision made
+> deliberately — and `tailscale funnel` needs a local socket and privileges a
+> containerised Frappe worker does not have, so a tool that shipped would fail
+> on the deployment it was written for while looking like it might work.
+
+### 1. Enable Funnel on the tailnet
+
+Funnel is off for a tailnet until an admin allows it. In the Tailscale admin
+console, under **Access controls**, the policy needs a `nodeAttrs` entry granting
+`funnel` to the node (or to a tag it carries):
+
+```jsonc
+"nodeAttrs": [
+  { "target": ["tag:server"], "attr": ["funnel"] },
+]
+```
+
+### 2. Point Funnel at the port nginx already serves
+
+On the **host** — not inside the Frappe container:
+
+```bash
+# What is serving now, and on which ports.
+tailscale serve status
+tailscale funnel status
+
+# Publish 443 to the internet, proxying to the port your bench's nginx listens on.
+# 8080 here; use whatever your deployment actually binds.
+sudo tailscale funnel --bg --https=443 http://127.0.0.1:8080
+```
+
+Funnel forwards to a port that is **already working**. If
+`curl -H 'X-MCP-Token: …' http://127.0.0.1:8080/api/method/erpnext_mcp.mcp.handle`
+does not answer locally, Funnel will not make it answer publicly.
+
+Your public name comes back from:
+
+```bash
+tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))'
+```
+
+### 3. Let nginx answer for the Funnel hostname
+
+Frappe routes by `Host`, so a request arriving as `umbrel.tail1234.ts.net`
+reaches a site of that name — which does not exist. Two ways out; pick one.
+
+**Either** add the Funnel hostname to the site's `host_name`, so Frappe knows the
+site by it:
+
+```bash
+bench --site <site> set-config host_name https://umbrel.tail1234.ts.net
+```
+
+**Or** make nginx serve your site for that hostname, by adding it to the
+`server_name` line of the site's block in
+`sites/../config/nginx.conf` and reloading:
+
+```nginx
+server_name  yoursite.local  umbrel.tail1234.ts.net;
+```
+
+Either way, set **`public_url`** on **ERPNext MCP Settings** to
+`https://umbrel.tail1234.ts.net`. That is what `generate_mobile_login_qr` puts on
+the card, and it is the only URL `validate_public_endpoint` will send your token
+to.
+
+### 4. Fix the allowlist, which is the step people get wrong
+
+A Funnel request does not arrive from the phone's IP. Tailscale forwards it to
+your local port, so `remote_addr` is loopback and the `X-Forwarded-For` chain is
+whatever nginx appended. This app gates on the **rightmost** hop (see
+`docs/security.md` on why), which under Funnel is normally `127.0.0.1`.
+
+So the loopback entries in the default `allowed_cidrs` are what let the mobile
+app through — leave them in, and **do not** be tempted to add `0.0.0.0/0`
+because something did not work. Confirm what the endpoint actually sees by
+making one call and reading the `caller_ip` column of **MCP Action Log**; that
+column and the gate decision can never disagree, which is what makes it worth
+reading.
+
+### 5. Confirm it, from outside, with the tool
+
+```
+validate_public_endpoint()
+```
+
+It opens a TLS connection to the public name, reads the certificate, and POSTs a
+real MCP `tools/list` to
+`https://<host>.<tailnet>.ts.net/api/method/erpnext_mcp.mcp.handle`.
+
+**A 401 is the best possible result.** It proves three things at once: the path
+is reachable, the certificate is valid, and the token gate is holding. The probe
+is unauthenticated by default precisely so that answer is available.
+
+To prove the whole round trip, `authenticate=true` sends this site's own token —
+and refuses any URL that is not your configured `public_url`, because a tool that
+will POST your bearer token to a hostname in its arguments is a tool that
+exfiltrates it. For the same reason the probe only ever reaches `public_url` or a
+host under `.ts.net`, over HTTPS, base URL only, and does not follow redirects.
+
+A 200 with tools advertised means it is working — and means everything your
+enabled tools expose is now reachable from the internet by anybody holding the
+token. That is the moment to re-read which mutating tools you have ticked.
+
+`get_tailscale_funnel_config` asks the same question from the inside. On an
+Umbrel it will usually report that it can see neither the `tailscale` binary nor
+the host's socket, because Frappe is in a container and Tailscale is not. **That
+is the expected state and not a fault** — Funnel needs no cooperation from the
+Frappe process at all — and the tool says so rather than reporting a problem you
+would go and try to fix.
+
+### Turning it off
+
+```bash
+sudo tailscale funnel --https=443 off
+```
+
+Or, faster and without a shell on the host: untick **enabled** on ERPNext MCP
+Settings. The endpoint then returns 404 to everybody, indistinguishable from an
+app that was never installed, and takes effect on the very next request.
+
+---
+
 ## Before you enable `advance_workflow`
 
 It is the one write tool whose blast radius is decided by your site rather than
@@ -1598,7 +1936,13 @@ Full threat model: **[docs/security.md](docs/security.md)**. The short version:
   goes to the audit log, not to the caller.
 - **The token is a Password field.** Encrypted at rest, never logged, never
   returned by any tool, shown to the operator exactly once.
-- **Not for the internet.** LAN-facing, behind your existing reverse proxy.
+- **LAN-facing by default, and it takes a deliberate act to change that.** The
+  shipped allowlist is loopback plus the three RFC1918 blocks. **If you publish
+  the endpoint** — see [Exposing ERPNext MCP publicly via Tailscale
+  Funnel](#exposing-erpnext-mcp-publicly-via-tailscale-funnel) — everything the
+  enabled tools expose becomes public and discoverable, and the auth token
+  becomes the whole boundary. `validate_public_endpoint` will tell you, from
+  outside, exactly what is answering.
 - **Ledger reads are authorized by the token, not by roles.** The accounting read
   tools use `frappe.db.get_all`, which does not consult Frappe permissions. Three
   categories are different and *do* enforce them: **reports** (they run through
@@ -1606,8 +1950,17 @@ Full threat model: **[docs/security.md](docs/security.md)**. The short version:
   parent document). Mutations always run the acting user's permission checks.
   The reasoning is in docs/security.md — it is a real trade-off, not an
   oversight.
+- **Per-user identity, from v0.17.0, and it is identity and NOT entry.** A
+  mobile client sends `Authorization: token <api_key>:<api_secret>` alongside
+  `X-MCP-Token`; Frappe authenticates it before this app's endpoint runs, and
+  `security.capture_calling_user` saves who it was in the one-line window before
+  the MCP System User is assumed. That is what lets `list_my_tasks` answer for
+  the right worker. It grants no access the shared token did not already grant,
+  and a request that authenticated as one person and asks to act as another is
+  refused.
 - **To stop everything right now:** untick **Enabled** and save. Next request is
-  a 404. No restart, no token rotation.
+  a 404. No restart, no token rotation. This is also how you take a public
+  endpoint off the internet without a shell on the host.
 
 ### Attribution
 
@@ -1661,6 +2014,8 @@ attempt did not.
 | **ERPNext** | v14, v15, v16 | Required — `hooks.py` declares it, so `install-app` refuses on a Frappe-only site. |
 | **Frappe HR (`hrms`)** | optional | Present → the three HR tools appear. Absent → they are not advertised at all. |
 | **LibreOffice headless** | optional | Present → `regenerate_governance_document_pdf` can convert a `.docx`. Absent → it refuses cleanly and names the package. Nothing is installed at runtime. |
+| **`segno` or `qrcode`** | optional | Either one → `generate_mobile_login_qr` appears. Neither → that one tool is not advertised, and everything else in the mobile login flow still works: `generate_api_token` returns the same credential as text. `segno` is the declared dependency because it is pure Python; `qrcode` is accepted where a bench already has it. |
+| **`tailscale` CLI** | optional | Present → `get_tailscale_funnel_config` reads the live serve config. Absent → it says which of two situations it is in and points at `validate_public_endpoint`, which asks from outside and needs none of it. A container with no Tailscale is the expected state, not a fault. |
 | **Python** | 3.10+ | CI runs 3.10 and 3.11. |
 | **Database** | MariaDB, Postgres | No raw SQL anywhere, so whatever your bench runs. |
 
@@ -1749,7 +2104,7 @@ python3 -m unittest discover -s tests_standalone -t .
 bench --site yoursite.localhost run-tests --app erpnext_mcp
 ```
 
-1536 standalone tests and 284 in-bench tests. The standalone suite installs an
+3104 standalone tests and 284 in-bench tests. The standalone suite installs an
 in-memory `frappe` double so the refusal tests get run every time rather than
 only when a bench is handy; the in-bench suite covers what only a real site can
 prove and skips rather than fails when the site lacks the setup a case needs.
@@ -1759,7 +2114,16 @@ The document writers are tested against their own bytes rather than against a
 mock of a library: the PDF tests open the file and check that every offset in the
 cross-reference table points at the object it claims, which is the one failure
 that would otherwise produce a report that is generated, attached, archived and
-unopenable.
+unopenable. The v0.17.0 login QR is held to the same standard — its PNG is
+decoded back to a module matrix and compared with an independent encoding of the
+payload the tool says it wrote, so "the card carries this JSON" is a checked
+claim rather than a hopeful one.
+
+The double reproduces Frappe's own `Authorization: token <key>:<secret>`
+validation, which is what makes the credential round trip real: generate a
+token, make a request the server identifies as that person, revoke it, make the
+same request and watch it stop being them. A fixture that simply asserted who
+the caller was would have passed for the wrong reason.
 
 ---
 
@@ -1822,11 +2186,25 @@ Candidates for the next release, roughly in order of how often they come up:
   it creates. The engine that keeps the two in step afterwards — reading
   structure out, pushing per-zone cost and revenue events back — is the next
   half, and it needs the ids this release establishes.
-- **Mobile capture for dispatch.** The backend is here and the evidence contract
-  is enforced server-side, so the missing half is a phone in a cabin: a worker's
-  task list, a camera roll, a signature pad and an offline queue, uploading
-  through `stage_file_chunk`. Everything the app needs from a client is already
-  a tool call.
+- **Mobile capture for dispatch — the iOS half.** As of v0.17.0 the server side
+  is complete: six roles, per-entity scoping, an API credential, QR enrolment, a
+  public HTTPS transport, and seven tools shaped for a screen rather than for a
+  report. What is left is the app itself — a camera roll, a signature pad and an
+  offline queue, uploading through `stage_file_chunk`. Every call it needs
+  already exists.
+- **A skill register.** `list_available_for_me` is honest about not having one:
+  nothing on a Frappe site records what skills a worker HAS, so the pool comes
+  back unfiltered and says so. A register somebody actually populates — probably
+  a child table on Employee owned by an HR app, not by this one — is what turns
+  `skill_required` from a filter into routing.
+- **OAuth / Sign in with Apple** for the mobile app, replacing the API token +
+  QR pair. Deferred deliberately: token and QR is enough for a pilot, and an
+  OAuth flow needs a redirect URI the phone can reach, which is a decision to
+  make after the Funnel address settles.
+- **Expiry that is an expiry.** Frappe API secrets do not expire and this app
+  will not pretend they do with a scheduled job that rewrites User records at
+  three in the morning. Doing it honestly means a token store this app owns and
+  an auth hook it currently refuses to install — a real design, not a to-do.
 - **Skill and location routing.** `skill_required` and `location` are recorded
   and filtered on; nothing yet *suggests* the nearest available worker who holds
   the right skill. That is the useful next step, and it should fire on state —

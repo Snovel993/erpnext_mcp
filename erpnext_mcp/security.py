@@ -51,6 +51,12 @@ from .errors import AuthError
 #: What every rejection says, whichever gate failed.
 _OPAQUE = "unauthorized"
 
+#: Where `capture_calling_user` parks the answer. On `frappe.local`, which is a
+#: per-request namespace the framework rebuilds for every request — so a value
+#: left here cannot leak from one caller's request into the next one's, which a
+#: module global emphatically could.
+_CALLING_USER_KEY = "erpnext_mcp_calling_user"
+
 
 def authorize() -> str:
 	"""Run all three gates. Returns the caller IP; raises AuthError otherwise.
@@ -83,6 +89,51 @@ def authorize() -> str:
 		)
 
 	return ip
+
+
+def capture_calling_user() -> str:
+	"""Remember WHO Frappe authenticated, before this app becomes somebody else.
+
+	v0.17.0. THIS IS THE WHOLE BASIS OF PER-USER SCOPING ON THE MOBILE APP, and
+	it has to happen in exactly one place at exactly one moment.
+
+	The transport authorizes with a shared bearer token and then calls
+	`frappe.set_user(settings.effective_user())`, so from that line onwards every
+	tool runs as the MCP System User. That is right — it is what makes an
+	AI-authored document traceable to a principal that is not a human — and it
+	also means `frappe.session.user` inside a tool tells you nothing about which
+	of forty field workers is holding the phone.
+
+	But Frappe has ALREADY authenticated the request by the time this app sees
+	it. A mobile client that sends `Authorization: token <api_key>:<api_secret>`
+	alongside `X-MCP-Token` arrives here with `frappe.session.user` set to that
+	worker, because Frappe's auth layer runs on every request whether or not the
+	whitelisted method allows guests. So the worker's identity is present for
+	exactly the window between "Frappe finished authenticating" and "this app set
+	the user" — and this function is what saves it before it is overwritten.
+
+	Returns "" for Guest, which is the ordinary case: an operator's Claude
+	Desktop presents the MCP token and nothing else, and there is no human
+	identity to scope by. `caller_identity()` reads it back.
+	"""
+	user = getattr(getattr(frappe.local, "session", None), "user", "") or ""
+	user = "" if user in ("Guest", None) else str(user)
+	try:
+		setattr(frappe.local, _CALLING_USER_KEY, user)
+	except Exception:  # pragma: no cover - a local that refuses attributes
+		return ""
+	return user
+
+
+def caller_identity() -> str:
+	"""The Frappe user who authenticated THIS request, or "" if nobody did.
+
+	NOT `frappe.session.user`, which is the MCP System User by the time any tool
+	runs. See `capture_calling_user`. Never raises: an identity this cannot
+	establish is an identity that is absent, and every caller of this treats
+	absent as "fall back to what the operator passed explicitly".
+	"""
+	return str(getattr(frappe.local, _CALLING_USER_KEY, "") or "")
 
 
 def presented_token() -> str:

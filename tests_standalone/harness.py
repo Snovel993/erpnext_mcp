@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import copy
 import datetime
+import hmac
 import json
 import os
 import secrets
@@ -435,7 +436,84 @@ ERPNEXT_SCHEMA = {
 		"show_section_headings",
 		"html",
 	],
-	"User": ["name", "enabled", "full_name"],
+	# v0.17.0. The mobile account tools write every one of these, and `api_secret`
+	# is a Password field on the real doctype — which matters, because the whole
+	# "generate → works → revoke → fails" round trip is a question about whether
+	# the value survives a save and stops existing after a revocation.
+	"User": [
+		"name",
+		"email",
+		"enabled",
+		"full_name",
+		"first_name",
+		"last_name",
+		"user_type",
+		"api_key",
+		"api_secret",
+		"send_welcome_email",
+		"roles",
+	],
+	# ── v0.17.0: the permission tables the six mobile roles are written into ──
+	#
+	# Modelled rather than stubbed because the ONE thing that could go wrong here
+	# is a framework rule, not an app rule: Frappe discards every standard DocPerm
+	# on a doctype the moment a single Custom DocPerm exists for it. `DocPerm` is
+	# therefore a real child table of DocType, seeded from each doctype's own
+	# shipped permissions, so `roles._mirror_standard_perms` has something real to
+	# copy and a test can assert it copied.
+	"Role": ["name", "role_name", "desk_access", "disabled", "is_custom"],
+	"Has Role": ["name", "role", "parent", "parenttype", "parentfield", "idx"],
+	"User Permission": [
+		"name",
+		"user",
+		"allow",
+		"for_value",
+		"apply_to_all_doctypes",
+		"applicable_for",
+		"is_default",
+		"hide_descendants",
+	],
+	"DocPerm": [
+		"name",
+		"parent",
+		"parenttype",
+		"parentfield",
+		"idx",
+		"role",
+		"permlevel",
+		"read",
+		"write",
+		"create",
+		"delete",
+		"submit",
+		"cancel",
+		"amend",
+		"report",
+		"export",
+		"print",
+		"email",
+		"share",
+		"if_owner",
+	],
+	"Custom DocPerm": [
+		"name",
+		"parent",
+		"role",
+		"permlevel",
+		"read",
+		"write",
+		"create",
+		"delete",
+		"submit",
+		"cancel",
+		"amend",
+		"report",
+		"export",
+		"print",
+		"email",
+		"share",
+		"if_owner",
+	],
 	"DocType": [
 		"name",
 		"module",
@@ -821,6 +899,12 @@ ERPNEXT_AUTONAME = {
 	# idempotent: the second migrate finds "Farm Task Dispatch" and leaves it
 	# exactly as somebody has since arranged it.
 	"Kanban Board": "field:kanban_board_name",
+	# v0.17.0. A Frappe User IS its email address and a Role IS its name — both
+	# are what `frappe.db.exists("User", "worker@example.com")` and
+	# `frappe.db.exists("Role", "Field Worker")` depend on, and both are the check
+	# every idempotent installer in this app writes.
+	"User": "field:email",
+	"Role": "field:role_name",
 }
 
 #: Doctypes this app owns. Their meta is loaded from the shipped JSON so tests
@@ -862,6 +946,8 @@ APP_DOCTYPES = {
 	"Housing Inspection": "housing_inspection",
 	"Detector Test": "detector_test",
 	"Water Test": "water_test",
+	# ── v0.17.0: mobile access ──────────────────────────────────────────────
+	"Mobile Access Grant": "mobile_access_grant",
 }
 
 
@@ -956,6 +1042,23 @@ ERPNEXT_FIELD_LINKS = {
 	("Journal Entry Account", "party"): ("Dynamic Link", "party_type"),
 }
 
+#: Fieldtypes that are neither Link, Dynamic Link, Select nor plain Data.
+#: v0.17.0 needed this because a Password field is not cosmetic in the double —
+#: `Store._extract_passwords` keys off the FIELDTYPE, so a `User.api_secret`
+#: modelled as Data would be readable straight off the row and the revocation
+#: test would prove nothing.
+ERPNEXT_FIELD_TYPES = {
+	("User", "api_secret"): ("Password", None),
+	("User", "roles"): ("Table", "Has Role"),
+	("DocType", "permissions"): ("Table", "DocPerm"),
+	("User Permission", "allow"): ("Link", "DocType"),
+	("User Permission", "for_value"): ("Dynamic Link", "allow"),
+	("Has Role", "role"): ("Link", "Role"),
+	("Custom DocPerm", "role"): ("Link", "Role"),
+	("DocPerm", "role"): ("Link", "Role"),
+	("User Permission", "user"): ("Link", "User"),
+}
+
 ERPNEXT_FIELD_OPTIONS = {
 	("Account", "account_type"): "\n".join(
 		[
@@ -1043,8 +1146,8 @@ ERPNEXT_FIELD_OPTIONS = {
 
 
 def _erpnext_field(doctype: str, name: str):
-	"""One ERPNext field, as a Link, a Dynamic Link, a Select or plain Data."""
-	link = ERPNEXT_FIELD_LINKS.get((doctype, name))
+	"""One ERPNext field, as a Link, a Dynamic Link, a Table, a Password, a Select or Data."""
+	link = ERPNEXT_FIELD_LINKS.get((doctype, name)) or ERPNEXT_FIELD_TYPES.get((doctype, name))
 	if link:
 		return Field(fieldname=name, fieldtype=link[0], options=link[1], label=name)
 	return Field(
@@ -1208,6 +1311,8 @@ CHILD_TABLES = {
 	("Dashboard", "cards"): "Number Card Link",
 	("Kanban Board", "columns"): "Kanban Board Column",
 	("Workspace", "shortcuts"): "Workspace Shortcut",
+	("User", "roles"): "Has Role",
+	("DocType", "permissions"): "DocPerm",
 	("Workspace", "links"): "Workspace Link",
 	("Workspace", "number_cards"): "Workspace Number Card",
 	("Workspace", "charts"): "Workspace Chart",
@@ -1919,6 +2024,25 @@ STUB_CONTROLLERS = {
 }
 
 
+#: The one permission a stock Frappe doctype ships with. Not a full palette:
+#: what the v0.17.0 tests need is that SOMETHING standard exists to be discarded,
+#: because "Frappe ignores every standard DocPerm once one Custom DocPerm exists"
+#: is a rule you can only demonstrate against a standard DocPerm.
+_STOCK_DOCPERM = {
+	"role": "System Manager",
+	"permlevel": 0,
+	"read": 1,
+	"write": 1,
+	"create": 1,
+	"delete": 1,
+	"report": 1,
+	"export": 1,
+	"print": 1,
+	"email": 1,
+	"share": 1,
+}
+
+
 class Store:
 	"""The in-memory database."""
 
@@ -1939,6 +2063,7 @@ class Store:
 		self.committed = 0
 		self.rolled_back = 0
 		self._seed_doctypes()
+		self._seed_roles()
 		# Rows written since the last commit, so a rollback can discard exactly
 		# those — which is what the audit-survives-rollback tests need to see.
 		self.pending: list[tuple[str, str]] = []
@@ -1953,6 +2078,34 @@ class Store:
 		# the state to restore is the one the transaction opened with, not the one
 		# the second write found.
 		self.before_images: dict[tuple[str, str], dict | None] = {}
+
+	def _seed_roles(self):
+		"""The stock roles a Frappe site ships with. v0.17.0.
+
+		Needed because every DocType row now carries its own DocPerm rows, and a
+		DocPerm's `role` is a Link — so a site with no Role table cannot hold a
+		permission at all. Seeding the ones the double already pretends users hold
+		(`ROLES`) plus `Employee`, which is the companion role the mobile installer
+		looks for and deliberately does not create.
+		"""
+		self.tables["Role"] = {
+			name: {
+				"name": name,
+				"role_name": name,
+				"desk_access": 1,
+				"disabled": 0,
+				"is_custom": 0,
+			}
+			for name in (
+				"System Manager",
+				"Accounts Manager",
+				"Accounts User",
+				"Purchase Manager",
+				"Purchase User",
+				"Employee",
+				"All",
+			)
+		}
 
 	def _seed_doctypes(self):
 		"""A row per DocType, because `tabDocType` really is a table.
@@ -1971,6 +2124,11 @@ class Store:
 				"module": "Core",
 				"issingle": 0,
 				"istable": 1 if doctype in child_tables else 0,
+				# v0.17.0. Every core doctype gets the one standard permission a
+				# stock Frappe install has, so `roles._mirror_standard_perms` has
+				# a real row to copy — and so the test that it copies BEFORE
+				# writing the first custom row has something to lose.
+				"permissions": [dict(_STOCK_DOCPERM)],
 			}
 		for doctype, folder in APP_DOCTYPES.items():
 			payload = _load_app_doctype(folder)
@@ -1979,6 +2137,10 @@ class Store:
 				"module": payload.get("module") or "ERPNext MCP",
 				"issingle": int(payload.get("issingle") or 0),
 				"istable": int(payload.get("istable") or 0),
+				# The doctype's OWN shipped permissions, from its JSON. These are
+				# what an operator loses if a Custom DocPerm lands without a
+				# mirror first, so the fixture has to carry the real ones.
+				"permissions": [dict(row) for row in (payload.get("permissions") or [])],
 			}
 		self.tables["DocType"] = rows
 
@@ -2041,6 +2203,20 @@ class Store:
 			if field.get("fieldtype") != "Password":
 				continue
 			value = doc.get(field["fieldname"])
+			if value == "":
+				# EXPLICITLY EMPTIED, WHICH FRAPPE TREATS AS A DELETION.
+				# `Document.save_passwords` calls `remove_encrypted_password` for a
+				# falsy value, and v0.17.0's revocation depends on it: `_clear_token`
+				# revokes by setting `api_secret = ""`, and a double that kept the
+				# old secret would let "revoke, then the credential stops working"
+				# pass while the credential still worked.
+				#
+				# `""` and not `not value`. A document loaded from the store carries
+				# None for a Password field nobody set, and treating THAT as a
+				# deletion would wipe the settings token on every `seed_defaults`
+				# save.
+				self.passwords.pop((doc.doctype, doc.get("name"), field["fieldname"]), None)
+				continue
 			if value and not set(str(value)) <= {"*"}:
 				self.passwords[(doc.doctype, doc.get("name"), field["fieldname"])] = value
 				doc[field["fieldname"]] = "*" * len(str(value))
@@ -2178,6 +2354,13 @@ class FakeDB:
 			rows = rows[: int(cap)]
 		if pluck:
 			return [row.get(pluck) for row in rows]
+		# `fields="*"` is Frappe's own idiom for "every column", and it is what
+		# `frappe.core.page.permission_manager.copy_perms` passes when it mirrors
+		# DocPerm into Custom DocPerm. A double that answered it with a single key
+		# literally called "*" would make that mirror copy nothing while looking
+		# like it worked. v0.17.0.
+		if fields in ("*", ["*"], ("*",)):
+			return [FrappeDict(copy.deepcopy(row)) for row in rows]
 		if fields:
 			return [FrappeDict({f: row.get(f) for f in fields}) for row in rows]
 		return [FrappeDict(copy.deepcopy(row)) for row in rows]
@@ -2327,6 +2510,10 @@ CHILD_TABLE_SOURCES = {
 		("Detector Test", "photos"),
 		("Water Test", "sample_photos"),
 	),
+	# v0.17.0. Both are child tables of core doctypes, and both are queried
+	# through `frappe.db.get_all` by `roles.py` exactly as they are on a site.
+	"Has Role": (("User", "roles"),),
+	"DocPerm": (("DocType", "permissions"),),
 }
 
 
@@ -2443,6 +2630,22 @@ def _build_utils() -> types.ModuleType:
 	module.flt = lambda value, precision=None: round(float(value or 0), precision or 2)
 	module.cint = lambda value: int(float(value or 0))
 	module.cstr = lambda value: "" if value is None else str(value)
+
+	def escape_html(text):
+		"""Frappe's own HTML escaper. Real, because a governance document's notes
+		field is a Text Editor and v0.17.0 writes a user's email address into it."""
+		if text is None:
+			return ""
+		return (
+			str(text)
+			.replace("&", "&amp;")
+			.replace("<", "&lt;")
+			.replace(">", "&gt;")
+			.replace('"', "&quot;")
+			.replace("'", "&#39;")
+		)
+
+	module.escape_html = escape_html
 
 	def get_url(uri=None, full_address=False):
 		"""frappe.utils.get_url — the site's own address, as the server sees it."""
@@ -2972,6 +3175,44 @@ class FakeRequest:
 
 
 # ── the base test case ──────────────────────────────────────────────────────
+def authenticated_user(headers: dict) -> str:
+	"""Frappe's own API-key auth, reproduced. v0.17.0.
+
+	WHY THE DOUBLE HAS TO DO THIS AT ALL. Frappe validates
+	`Authorization: token <api_key>:<api_secret>` in its request layer, BEFORE any
+	whitelisted method runs and whether or not the method allows guests. That is
+	the entire mechanism v0.17.0's per-user scoping rests on: the mobile worker is
+	`frappe.session.user` for the one line between "Frappe finished
+	authenticating" and `frappe.set_user(effective_user())`, and
+	`security.capture_calling_user` saves it there.
+
+	A double that left `session.user` as Administrator would make every scoping
+	test pass for the wrong reason — the tools would fall through to their "no
+	per-user identity" branch and nobody would notice the header was never read.
+
+	Returns "" when NO api-key header was presented, which means "leave the
+	session alone" — Frappe's validator does nothing in that case and the session
+	comes from a cookie. Returns "Guest" for a malformed or WRONG credential,
+	exactly as Frappe does; a wrong secret is Guest and not an error, and that is
+	the check that makes "revoke, then the request stops being that person" a real
+	assertion rather than a hopeful one.
+	"""
+	header = str(headers.get("Authorization") or "")
+	if header[:6].lower() != "token ":
+		return ""
+	api_key, _, secret = header[6:].strip().partition(":")
+	if not api_key or not secret:
+		return "Guest"
+	for row in STORE.rows("User"):
+		if str(row.get("api_key") or "") != api_key:
+			continue
+		stored = STORE.passwords.get(("User", row["name"], "api_secret"))
+		if stored and hmac.compare_digest(str(stored), secret) and int(row.get("enabled") or 0):
+			return row["name"]
+		return "Guest"
+	return "Guest"
+
+
 class MCPTestCase(unittest.TestCase):
 	"""Resets the fake site, and gives every test a configured-but-off server."""
 
@@ -3031,6 +3272,13 @@ class MCPTestCase(unittest.TestCase):
 			method=method,
 		)
 		frappe.local.request = request
+		# ONLY when a credential was actually presented. A request with no
+		# `Authorization: token …` leaves the session exactly as the test set it,
+		# which is faithful — Frappe's api-key validator does nothing when there is
+		# no api-key header, and the session comes from the cookie instead.
+		presented = authenticated_user(all_headers)
+		if presented:
+			frappe.local.session = FrappeDict(user=presented, data=FrappeDict())
 		return request
 
 	def call(self, method, params=None, request_id=1, **kwargs):

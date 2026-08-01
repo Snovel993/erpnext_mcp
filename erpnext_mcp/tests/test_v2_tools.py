@@ -500,10 +500,22 @@ class CatalogueOnThisSite(MCPIntegrationTestCase):
 		missing = [name for name in registry.TOOLS if not meta.has_field(f"allow_{name}")]
 		self.assertEqual(missing, [], f"tools with no switch on this site: {missing}")
 
-	def test_the_catalogue_is_thirty_five_tools(self):
+	def test_the_catalogue_size_matches_the_standalone_suite(self):
+		"""Read from the same registry the standalone suite counts, rather than a
+		second literal.
+
+		This assertion said `35` from v0.2.0 until v0.17.0 — a number that stopped
+		being true at v0.3.0 and went on failing quietly on any bench somebody ran
+		the in-bench suite against. A count duplicated in two files is a count that
+		drifts in one of them; the number lives in
+		`tests_standalone/test_protocol.py`, where it is accompanied by the
+		release-by-release argument for what was added, and this side only checks
+		that the site agrees with the code it installed.
+		"""
 		from erpnext_mcp import registry
 
-		self.assertEqual(len(registry.TOOLS), 35)
+		self.assertEqual(len(registry.TOOLS), len(registry.READ_TOOLS) + len(registry.MUTATING_TOOLS))
+		self.assertGreaterEqual(len(registry.TOOLS), 206)
 
 	def test_only_available_tools_are_advertised(self):
 		from erpnext_mcp import registry, settings
