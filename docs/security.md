@@ -5,8 +5,15 @@ What this app assumes, what it defends, and what it does not.
 ## The one-line version
 
 If you need to stop everything right now: open **ERPNext MCP Settings**, untick
-**Enabled**, save. The next request is a 404. No restart, no token rotation, no
-client reconfiguration.
+**Enabled** AND **Farm Ops Mobile API Enabled**, save. The next request is a 404
+and a 503 respectively. No restart, no token rotation, no client reconfiguration.
+
+**There are two switches because there are two surfaces**, and since v0.17.1 that
+is the first thing to know about this document: `Enabled` stops the MCP endpoint
+the AI uses, and `Farm Ops Mobile API Enabled` stops the eleven whitelisted
+methods the phones use. Neither stops the other. Everything from "Threat model"
+down to "Per-tool switches" describes the first surface only — see
+[The second transport](#the-second-transport-the-farm-ops-mobile-api-v0171).
 
 ---
 
@@ -317,20 +324,145 @@ Export first if you need the history; `before_uninstall` will remind you.
 
 ---
 
+## The second transport: the Farm Ops mobile API (v0.17.1)
+
+**Everything above this heading describes ONE endpoint,
+`/api/method/erpnext_mcp.mcp.handle`. Since v0.17.1 there is a second surface,
+and none of the three gates applies to it.**
+
+That is not an oversight, it is arithmetic. `security.authorize()` is called *by*
+`mcp.handle`; eleven whitelisted methods under `erpnext_mcp.api.mobile.*` and
+`erpnext_mcp.api.files.*` are reached directly by an iOS client and never pass
+through it. Each of the three gates is also individually inapplicable:
+
+- **The shared token.** A phone has never had one, and distributing one secret to
+  forty devices is a secret in name only.
+- **The CIDR allowlist.** The entire point is a worker on LTE in an orchard,
+  outside every RFC1918 range the default list contains.
+- **The per-tool switches.** Those govern what the *AI* may do. A field worker is
+  a different principal and gets a different gate; coupling them would mean you
+  could not stop the AI completing tasks without taking forty phones down with it.
+
+### What stands in their place
+
+Rebuilt in `erpnext_mcp/api/guard.py`, run on **every** call, in this order:
+
+| # | Gate | Refusal |
+|---|---|---|
+| 1 | `farm_ops_mobile_enabled` (Settings **or** `site_config.json`; either off means off) | **503** |
+| 2 | Not Guest | 403 |
+| 3 | One of `Field Worker`, `Farm Worker`, `Foreman`, `Farm Manager` | 403 |
+| 4 | An **Active Mobile Access Grant** | 403 |
+| 5 | Rate limit per user per method (read 60/min, write 10/min, completion 20/min, chunk 120/min) | **429** |
+| 6 | Entity scoping on every company argument and every returned row | 403 / 404 |
+| 7 | MCP Action Log row + secret strip — on success *and* on every refusal | — |
+
+Gates 2–4 all answer with the **same message**, so a caller cannot learn which
+one it failed. The reason is written to the audit log, where the operator can
+read it and the caller cannot — the same reasoning as "why the client never
+learns which gate it failed", above.
+
+### Gate 4 is the one that surprises people
+
+**Holding a field role is not being enrolled.** `Administrator` holds every role
+on the site, so the role gate alone would let the operator's own login drive the
+field API by accident — and an admin account is the one credential that could
+reach every entity at once. The grant is a deliberate act with a doctype and an
+owner; `revoke_mobile_user` ends it, and the door closes on the very next call
+rather than whenever the token is next rotated.
+
+### Entity scoping deliberately inverts Frappe's default
+
+In Frappe a user with **no** User Permission on Company is **unrestricted**. That
+is the framework's rule and every Desk surface honours it. On an endpoint
+reachable from the open internet it means the single worst-configured account on
+the site is also the least scoped one, so the mobile surface **refuses** a caller
+with no entities instead of showing them everything. `create_mobile_user` already
+refuses to create such an account; the two together mean there is no path to an
+unscoped phone.
+
+Scoping is applied twice on purpose — once as a query filter, once as
+`guard.scoped()` on everything leaving the building — because the tools read
+through `frappe.db.get_all`, which does **not** consult User Permissions. A
+wrapper that trusted the framework here would hand the holding company's task
+board to an operating company's picker.
+
+### The surface is a closed list and cannot grow by accident
+
+There is no dispatcher, no `call(tool_name, args)`, no registry lookup. A method
+exists as a function or its path 404s, so the reachable surface is eleven
+`@frappe.whitelist()` lines you can audit by reading them. The other ~195 tools
+are not reachable from a phone at any path.
+
+Arguments that would be dangerous are **absent from the signatures** rather than
+filtered out — Frappe drops body keys a whitelisted method does not declare, so an
+argument that is not in the signature is one no client can send: `cancel` (a
+rejection could otherwise delete the work), `record_data`, `worker_id`,
+`attach_to_doctype`/`attach_to_name`, `governance_document`, `is_private`.
+
+Uploads carry an extension allowlist (`.jpg .jpeg .png .heic .heif .webp .pdf` —
+`.html` and `.svg` both execute script when served and are not on it) and reduce
+filenames to a basename. Every committed evidence file is private and attached to
+nothing; it reaches its compliance record through `complete_task_via_mobile`,
+which checks the task belongs to the caller.
+
+### Statuses are part of the contract
+
+`FarmOpsKit` reads **401** as *"credential dead, sign out and re-scan"* and
+anything else as *"offline, keep working into the queue"*. So the kill switch
+answers 503 and the rate limit answers 429: a refusal that answered 401 would sign
+forty phones out and destroy every queued completion sitting on them. Do not
+"tidy" these into 401.
+
+### The perimeter is now your tunnel
+
+With the CIDR gate gone from this path, what stands between the internet and these
+eleven methods is Frappe's own token authentication plus the seven checks above.
+Two consequences worth acting on:
+
+- **Audit what your Tailscale Funnel actually publishes** (`tailscale serve
+  status --json`). A whole-port funnel publishes `/app` and every whitelisted
+  method of every installed app, not just these eleven.
+- **Never funnel `/api/method/` as a prefix.** Expose
+  `/api/method/erpnext_mcp.api.mobile.` and `/api/method/erpnext_mcp.api.files.`
+  specifically if your funnel is path-scoped.
+
+### Stopping it
+
+ERPNext MCP Settings → untick **Farm Ops Mobile API Enabled**, or:
+
+```sh
+bench --site <site> set-config farm_ops_mobile_enabled 0
+```
+
+Next request, every phone gets a 503 and keeps its queued work. The MCP endpoint
+is untouched — the two switches are separate on purpose.
+
+---
+
 ## What the endpoint is not
+
+*(This section is about the MCP endpoint. The mobile surface described above
+answers several of these differently — where it does, it says so.)*
 
 - **Not a public API.** It is one whitelisted Frappe method, intended to be reached
   over a LAN or a private tunnel. Do not add it to a public reverse-proxy path.
+  **The mobile surface is the exception and is public by design**, which is why it
+  carries its own seven gates instead of these three.
 - **Not a second listener.** No new port, no sidecar, no process to supervise. It
   inherits your site's TLS, nginx rate limits and access logs, and it is up
   whenever the site is.
 - **Not an SSE stream.** POST-only. This server never initiates a message, so
   there is nothing for a stream to carry, and a `GET` returns a 405 saying so
   rather than an idle connection that looks like it is working.
-- **Not a per-caller identity model.** One token, one configured acting user.
+- **Not a per-caller identity model.** One token, one configured acting user. The
+  mobile surface *is* per-caller: it runs as the authenticated worker throughout,
+  which is what makes its entity scoping and its staging-session ownership real.
   Two clients that should see different things need two sites, or a v0.3 that
   has per-token scopes — see the README roadmap.
-- **Not rate limited by this app.** If you want that, Frappe ships a decorator —
+- **Not rate limited by this app.** The MOBILE surface is — per user, per method,
+  per minute, in `api/guard.py` — because it is reachable from the internet and an
+  MCP session is not. For the MCP endpoint itself, if you want that, Frappe ships a decorator —
   add `@rate_limit(key="mcp", limit=120, seconds=60)` from `frappe.rate_limiter`
   above `handle()` in `erpnext_mcp/mcp.py`. It is left off by default because an
   MCP session legitimately makes many calls in quick succession, and a limit tuned
@@ -341,7 +473,14 @@ Export first if you need the history; `before_uninstall` will remind you.
 ## Hardening checklist
 
 - [ ] Narrow **Allowed CIDRs** to the subnet your client is actually on, not the
-      whole of `10.0.0.0/8`.
+      whole of `10.0.0.0/8`. (This does **not** cover the mobile surface — it has
+      no CIDR gate and cannot have one. See the two items below.)
+- [ ] Check what your tunnel actually publishes: `tailscale serve status --json`.
+      A whole-port funnel exposes `/app` and every whitelisted method of every
+      installed app, not only the eleven mobile ones.
+- [ ] Confirm every **Mobile Access Grant** is one you meant to issue, and that
+      each has entity access naming at least one Company — `list_mobile_users`
+      flags an account with none, and in Frappe none means *every*.
 - [ ] Create a dedicated **MCP System User** with **Accounts User** and nothing
       more. Do not leave mutations running as `Administrator`.
 - [ ] Leave every mutating switch off until you have a specific need, then enable

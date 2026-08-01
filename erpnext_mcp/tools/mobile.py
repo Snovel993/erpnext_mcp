@@ -1161,21 +1161,39 @@ def generate_mobile_login_qr(args: dict) -> ToolResult:
 	)
 
 
+#: What the payload says it IS. v0.17.1.
+#:
+#: `FarmOpsKit`'s `LoginQRParser` refuses any payload whose `type` is not exactly
+#: this, BY NAME, and v0.17.0 shipped without the key — so every scan failed
+#: with "That's a different kind of QR code, not a Farm Ops login" and enrolment
+#: was impossible. The check is not pedantry on the app's side: FarmCore and
+#: BucketLog issue their own onboarding codes (`farm_app_nostr_link`) on the same
+#: phones, and a scanner that accepted any well-formed JSON would let two apps
+#: cross-sign each other's credentials.
+LOGIN_QR_TYPE = "farm_ops_login"
+
+
 def mobile_login_payload(url: str, user: str, api_key: str, api_secret: str, expires_at: str) -> dict:
 	"""What goes IN the QR. One function, so the tests read the same shape the app does.
+
+	`type` comes first and is the whole reason v0.17.1 exists — see
+	`LOGIN_QR_TYPE`. It is a constant rather than an argument: a payload whose
+	type a caller could choose would be a payload that could claim to be another
+	app's.
 
 	`token` is the whole `key:secret` pair in the form the header wants, because
 	the app's job at enrolment is to store a string and put it after the word
 	`token` — splitting it into two fields invites a client to reassemble it in
 	the wrong order, and the failure looks like an authentication bug rather than
-	a parsing one. `api_key` and `api_secret` are ALSO present, separately, for a
-	client that wants them apart.
+	a parsing one. `api_key` and `api_secret` are ALSO present, separately, and
+	they are what `LoginQRParser` actually reads.
 
 	Keys are short and stable. A QR's module count grows with its payload, and a
 	payload with roomy key names is a physically larger square somebody has to
 	hold a phone further back from.
 	"""
 	return {
+		"type": LOGIN_QR_TYPE,
 		"v": 1,
 		"url": str(url).rstrip("/"),
 		"endpoint": f"{str(url).rstrip('/')}/api/method/erpnext_mcp.mcp.handle",

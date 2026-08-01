@@ -121,6 +121,23 @@ def public_url() -> str:
 	return str(_value("public_url") or "").strip()
 
 
+def farm_ops_mobile_enabled() -> bool:
+	"""The kill switch for the whole Farm Ops mobile HTTP surface.
+
+	Separate from `enabled`, which is the MCP endpoint's master switch, because
+	the two answer different questions and an operator needs to be able to answer
+	them differently: "stop the AI" and "stop the phones" are not the same
+	decision, and a release that made them the same control would guarantee that
+	shutting one off took the other with it.
+
+	Ships ON — v0.17.1 exists to make the phones work, and a switch that had to
+	be found and flipped before anything worked would be a support call rather
+	than a safeguard. `api/guard.mobile_enabled` reads this AND `site_config.json`
+	and treats either one saying off as off.
+	"""
+	return as_bool(_value("farm_ops_mobile_enabled"))
+
+
 def require_user_context() -> bool:
 	return as_bool(_value("require_user_context"))
 

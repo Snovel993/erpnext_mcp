@@ -678,6 +678,20 @@ def complete_farm_task(args: dict) -> ToolResult:
 	findings_given = "findings_text" in args
 	findings = as_str(args, "findings_text")
 
+	clean_pass = clean_pass_flag(args)
+	if clean_pass is True:
+		# An explicit "I walked it and found nothing" satisfies a contract that
+		# demands findings_text. See `clean_pass_flag` for why the flag has to
+		# exist at all.
+		findings_given = True
+	elif clean_pass is False and not findings.strip():
+		raise ToolError(
+			"clean_pass=false says something was found, and findings_text is empty. The whole "
+			"value of the flag is that it is the worker's own answer — an answer of 'issues "
+			"found' with nothing beside it opens a corrective action that names no fault, which "
+			"is the one thing an auditor cannot act on. Write what was wrong. Nothing was changed."
+		)
+
 	unmet = _unmet_evidence(contract, evidence, signature, findings_given, witness)
 	if unmet:
 		raise ToolError(
@@ -703,7 +717,19 @@ def complete_farm_task(args: dict) -> ToolResult:
 	for row in evidence:
 		doc.append("evidence_files", dict(row))
 
-	produced, record_note, record_state = _produce_record(task, doc, evidence, signature, findings, args)
+	# WHAT GOES ON THE COMPLIANCE RECORD IS NOT ALWAYS WHAT THE WORKER TYPED.
+	# `records.branch_state` reads a record's state off its findings text —
+	# non-empty means Corrective Action Required — so a worker who typed the
+	# literal words "clean pass" into a field the contract made mandatory would
+	# open a corrective action against a cabin that is fine. `clean_pass` is the
+	# authoritative signal, so on a clean pass the RECORD's findings are empty
+	# (which is how records.py spells "nothing was wrong") and the sentence goes
+	# in the record's notes instead. The ASSIGNMENT keeps the worker's own words
+	# either way — that is the evidence, and it is not this function's to edit.
+	record_findings = "" if clean_pass is True else findings
+	produced, record_note, record_state = _produce_record(
+		task, doc, evidence, signature, record_findings, args
+	)
 	if produced:
 		doc.produced_record = produced
 	doc.save(ignore_permissions=True)
@@ -745,6 +771,53 @@ def complete_farm_task(args: dict) -> ToolResult:
 			f"file(s)" + (f", produced {task.get('creates_record')} {produced}" if produced else "")
 		),
 		docstatus_delta=f"{assignment.get('state')} → {final_state}",
+	)
+
+
+#: What a clean pass is recorded AS, on the record that inherits an empty
+#: findings field. Blank findings and a blank notes field would be a record that
+#: cannot tell "walked, nothing wrong" from "nobody filled this in".
+CLEAN_PASS_NOTE = "No findings reported by inspector."
+
+
+def clean_pass_flag(args: dict):
+	"""The worker's own answer to "was this clean", as True, False, or None.
+
+	v0.17.1. THREE STATES, AND THE THIRD IS THE POINT. None means nobody was
+	asked, and the original rule applies: blank findings is a clean pass, text in
+	findings opens a corrective action. That rule is right and it stays.
+
+	It BREAKS when the evidence contract requires findings_text — as MC-Cabin-01's
+	habitability inspection does — because blank is then not a submittable state,
+	so a worker must type something, so every completion would open a corrective
+	action against a cabin that is fine. The app therefore asks outright ("Clean
+	pass" / "Issues found") and sends the answer, and Wave A treats that answer as
+	AUTHORITATIVE rather than re-deriving intent by parsing the text. A worker who
+	writes the words "clean pass" into a mandatory field must not trip a
+	corrective action, and no amount of string-matching on findings_text is a
+	sound way to avoid it.
+
+	Accepts what Frappe and an HTTP form actually deliver: a real bool, 1/0, and
+	the strings "true"/"false"/"1"/"0" that survive a JSON body reaching a
+	whitelisted method as form data.
+	"""
+	if "clean_pass" not in args:
+		return None
+	raw = args.get("clean_pass")
+	if raw is None or raw == "":
+		return None
+	if isinstance(raw, bool):
+		return raw
+	if isinstance(raw, (int, float)):
+		return bool(raw)
+	text = str(raw).strip().lower()
+	if text in ("1", "true", "yes", "y"):
+		return True
+	if text in ("0", "false", "no", "n"):
+		return False
+	raise ToolError(
+		f"clean_pass must be true or false, got {raw!r}. It is the worker's own answer to "
+		"whether the walk was clean, and a value nobody can read is not an answer."
 	)
 
 
@@ -833,6 +906,23 @@ def _produce_record(task: dict, assignment_doc, evidence: list, signature: str, 
 		payload.setdefault(_subject_field(doctype), task.get("location"))
 	payload["source_task"] = task.get("name")
 	payload["findings"] = payload.get("findings") or findings
+
+	if clean_pass_flag(args) is True:
+		# The record's findings are empty on purpose — see `complete_farm_task`.
+		# The attestation goes in notes, along with whatever the worker actually
+		# wrote, so the record says "walked, nothing wrong" rather than being
+		# indistinguishable from one nobody filled in.
+		payload["findings"] = ""
+		typed = as_str(args, "findings_text").strip()
+		payload["notes"] = "\n".join(
+			part
+			for part in (
+				str(payload.get("notes") or "").strip(),
+				CLEAN_PASS_NOTE,
+				f"Inspector's note: {typed}" if typed else "",
+			)
+			if part
+		)
 	payload.setdefault(_person_field(doctype), assignment_doc.assigned_to)
 	payload.setdefault(f"{_person_field(doctype)}_name", assignment_doc.assigned_to_name)
 	if doctype == inspections.HOUSING_INSPECTION and signature:

@@ -1879,6 +1879,51 @@ is the expected state and not a fault** — Funnel needs no cooperation from the
 Frappe process at all — and the tool says so rather than reporting a problem you
 would go and try to fix.
 
+### 6. The mobile app uses a DIFFERENT path, with different gates (v0.17.1)
+
+Everything above describes one endpoint,
+`/api/method/erpnext_mcp.mcp.handle`, which is what an AI client calls. **The
+Farm Ops iOS app does not use it.** It calls eleven plain Frappe whitelisted
+methods:
+
+```
+/api/method/erpnext_mcp.api.mobile.<one of nine>
+/api/method/erpnext_mcp.api.files.<one of two>
+```
+
+carrying only `Authorization: token <api_key>:<api_secret>`.
+
+**Step 4 above does not apply to them and cannot.** A whitelisted method reached
+directly never runs `security.authorize()`, so these paths have no
+`X-MCP-Token`, no CIDR allowlist and no per-tool switch — a phone on LTE has
+none of the three to offer. They carry their own seven gates instead, in
+`erpnext_mcp/api/guard.py`: a global kill switch, a role gate, an **Active
+Mobile Access Grant**, per-user rate limits, entity scoping on every argument and
+every returned row, an audit row for every call including refused ones, and
+secret stripping on the way out. `docs/security.md` §*The second transport*
+covers each in full, and it is the section to read before you widen anything.
+
+Two consequences for this chapter:
+
+- **A whole-port Funnel already publishes them**, along with `/app` and every
+  whitelisted method of every installed app. Check with
+  `tailscale serve status --json`. If your Funnel is path-scoped instead, add
+  the two prefixes above — and never funnel `/api/method/` as a whole prefix to
+  save typing.
+- **An enrolled account holding no Company User Permission is REFUSED here**,
+  not shown everything. That inverts Frappe's own rule on purpose; on a path
+  reachable from the internet, the framework's default is exactly backwards.
+
+To stop just the phones, leaving the AI endpoint up:
+
+```bash
+bench --site <site> set-config farm_ops_mobile_enabled 0
+```
+
+or untick **Farm Ops Mobile API Enabled** on ERPNext MCP Settings. Every phone
+gets a 503 — never a 401, which the app reads as "credential dead, sign out" and
+which would destroy every completion queued on every device.
+
 ### Turning it off
 
 ```bash
@@ -1888,6 +1933,11 @@ sudo tailscale funnel --https=443 off
 Or, faster and without a shell on the host: untick **enabled** on ERPNext MCP
 Settings. The endpoint then returns 404 to everybody, indistinguishable from an
 app that was never installed, and takes effect on the very next request.
+
+**That switch does not stop the mobile API** — see step 6. There are two
+surfaces and two switches, because stopping the AI and stopping forty phones are
+different decisions, and one control for both would guarantee that doing either
+did both.
 
 ---
 

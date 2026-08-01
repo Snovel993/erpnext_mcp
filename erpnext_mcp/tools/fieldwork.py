@@ -608,6 +608,14 @@ def complete_task_via_mobile(args: dict) -> ToolResult:
 	if "findings_text" in args:
 		inner["findings_text"] = args.get("findings_text")
 
+	# `clean_pass` goes through the SAME presence test, for the same reason.
+	# v0.17.1: it is the worker's own answer to "was this walk clean", and
+	# `complete_farm_task` treats it as authoritative rather than parsing the
+	# findings text for intent. Absent means nobody was asked, which is a third
+	# state and not a synonym for false — see `dispatch.clean_pass_flag`.
+	if "clean_pass" in args:
+		inner["clean_pass"] = args.get("clean_pass")
+
 	for key in (
 		"signature_file",
 		"completion_narrative",

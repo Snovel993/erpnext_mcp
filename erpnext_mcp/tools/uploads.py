@@ -622,6 +622,45 @@ def _merge_expectation(doc, field: str, value, session_id: str) -> None:
 		)
 
 
+def declare_expectations(session_id: str, expected_sha256: str = "", expected_size=None) -> dict:
+	"""Record what the caller says the finished file will be, before committing.
+
+	v0.17.1. `_merge_expectation` already lets a later `stage_file_chunk` supply a
+	hash the caller only learned after the last slice — its docstring makes that
+	argument. A client that learns it at FINALISE time rather than at staging
+	time has the same honest need, and the Farm Ops app is one: it computes the
+	SHA-256 at capture and sends it with the finalise call, not with the chunks.
+
+	So this is the same merge, reachable from `api/files.finalize_staged_file`,
+	and it inherits both of the properties that make the merge safe: a value that
+	CONTRADICTS one already recorded is refused rather than quietly taking the
+	newest answer, and the ownership check runs first. Without it the app's
+	sha256 would arrive too late to be checked and the audit trail would record
+	a hash nothing had verified — which is worse than recording none.
+	"""
+	session_id = _session_id(session_id)
+	row = _require_session(session_id, "Nothing was changed.")
+	doc = frappe.get_doc(SESSION_DOCTYPE, row["name"])
+	_merge_expectation(
+		doc,
+		"expected_sha256",
+		_sha256_arg({"expected_sha256": expected_sha256}, "expected_sha256"),
+		session_id,
+	)
+	_merge_expectation(
+		doc,
+		"expected_size",
+		as_int({"expected_size": expected_size}, "expected_size"),
+		session_id,
+	)
+	doc.save()
+	return {
+		"session_id": session_id,
+		"expected_sha256": doc.get("expected_sha256") or None,
+		"expected_size": int(doc.get("expected_size") or 0) or None,
+	}
+
+
 def _require_session(session_id: str, tail: str) -> dict:
 	row = frappe.db.get_value(
 		SESSION_DOCTYPE,

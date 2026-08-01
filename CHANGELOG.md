@@ -3,6 +3,102 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.17.1 — 2026-08-01
+
+**Sprint 9's two tracks shipped incompatible contracts. This joins them.** The
+backend worked and the app worked; they could not talk to each other, and the app
+told a worker *"That task no longer exists — someone may have taken it."* No new
+capability — every change here is a bridge to something v0.17.0 already shipped,
+or a refusal. Full notes: [`RELEASES/v0.17.1.md`](RELEASES/v0.17.1.md).
+
+### Fixed — the login QR was refused by the app it was for
+
+`generate_mobile_login_qr` emitted no `type` field. `LoginQRParser` checks
+`type == "farm_ops_login"` FIRST and refuses anything else by name, so every scan
+failed and enrolment was impossible. The app's check is not pedantry: FarmCore and
+BucketLog issue their own onboarding codes onto the same phones, and a scanner
+that accepted any well-formed JSON would let two apps cross-sign credentials.
+
+### Fixed — every call after enrolment was a 404
+
+Wave A published the mobile capabilities as MCP tools behind a JSON-RPC envelope
+at `erpnext_mcp.mcp.handle`; Wave B calls plain Frappe whitelisted methods at
+`erpnext_mcp.api.mobile.*` with per-user token auth. Different transports.
+
+New package **`erpnext_mcp/api/`** publishes exactly the eleven methods
+`MobileAPI.swift` names, as guarded wrappers over the tools that already existed.
+
+**THIS IS A NEW ATTACK SURFACE AND IS TREATED AS ONE.** `security.authorize()` is
+called by `mcp.handle` and does not run on a directly-reached whitelisted method,
+so these paths have no `X-MCP-Token`, no CIDR allowlist and no `allow_*` switch —
+by construction, since a phone on LTE has none of the three. The gate is rebuilt
+in `api/guard.py` and runs on every call: a global kill switch, a role gate, an
+**Active Mobile Access Grant** (which is what keeps an admin's own account out —
+Administrator holds every role, so the role gate alone would not), per-user rate
+limits, entity scoping on every argument and every returned row, an MCP Action Log
+row for every call including the refused ones, and secret stripping on the way out.
+
+**An account with no Company User Permission is REFUSED, not shown everything.**
+That deliberately inverts Frappe's own rule; on an endpoint reachable from the
+internet the framework default is exactly backwards.
+
+**There is no dispatcher.** A method exists as a function or its path 404s, so the
+whole reachable surface is eleven `@frappe.whitelist()` lines. The other ~195
+tools — `create_journal_entry`, `convey_parcel`, `import_chart_of_accounts` — are
+not reachable from a phone at any path, and a test asserts it by enumeration.
+Arguments that would have been dangerous are absent from the signatures rather
+than filtered: `cancel` (a rejection could have deleted the work), `record_data`,
+`worker_id`, `attach_to_doctype`/`attach_to_name`, `governance_document`,
+`is_private`.
+
+Refusals answer **503** (kill switch) and **429** (rate limit), never 401 —
+`FarmOpsKit` reads 401 as "credential dead, sign out", which would lose every
+queued completion on every phone.
+
+### Added — `farm_ops_mobile_enabled`, the one-flip mobile shutdown
+
+New Check field on ERPNext MCP Settings, **defaults ON**, honoured on every call.
+Also settable in `site_config.json`; either source saying off means off.
+Deliberately SEPARATE from the MCP master switch: stopping the AI and stopping the
+phones are different decisions, and one control for both would guarantee that
+doing either did both.
+
+### Added — `clean_pass`, resolving a real contradiction in the spec
+
+The rule "blank findings = clean pass" is unsatisfiable when the evidence contract
+REQUIRES findings text, as MC-Cabin-01's habitability inspection does: blank is
+then not submittable, so every completion would open a corrective action against a
+cabin that is fine. The app asks the worker outright and sends the answer; the
+server treats it as authoritative and does **not** parse the text for intent — a
+worker typing the literal words "clean pass" must not trip a corrective action.
+
+`clean_pass=true` leaves the produced record's findings field EMPTY, because that
+is how `records.py` spells "nothing was wrong"; `"No findings reported by
+inspector."` goes in the record's notes. `clean_pass=false` with nothing written
+is refused. **Absent is a third state, not a synonym for false** — nobody was
+asked, and the original rule applies unchanged. The worker's own words always
+survive on the Farm Task Assignment.
+
+### Added — the fields iOS decoded and the backend was not emitting
+
+All closed on the backend so no new iOS build is needed: `location_type`,
+`source_alert_explanation` (the app hides its "Why this task exists" card without
+it), `assignment`/`claimed_at`/`started_at` on the task, `latitude`/`longitude`
+where a boundary centroid exists (**omitted, not zeroed**, where it does not —
+0,0 is a real place in the Gulf of Guinea), `roles`/`companies`/`default_company`/
+`skills` on the user context, `urgency`/`regulation`/`linked_task` on alerts, and
+`created_record_name`/`dismissed_alert`/`corrective_action_opened` on a completion.
+
+### Added — evidence hashes are verified rather than recorded on trust
+
+`finalize_staged_file` puts the app's SHA-256 on the staging session before
+assembly (`uploads.declare_expectations`), so the commit is refused on mismatch
+and the staged pieces are kept. The digest is not written to Farm Task Evidence —
+that child doctype has no hash column and adding one is a schema change, not a
+hotfix — and is deliberately not stuffed into `caption`.
+
+**3180 tests pass.** 72 of them are new.
+
 ## 0.17.0 — 2026-08-01
 
 **Sprint 9 Wave A. Sprint 8 built a dispatch board; this is what makes it safe to
