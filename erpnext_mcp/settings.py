@@ -138,6 +138,18 @@ def farm_ops_mobile_enabled() -> bool:
 	return as_bool(_value("farm_ops_mobile_enabled"))
 
 
+def drift_report_email() -> str:
+	"""Who hears when the weekly JE drift watch finds something. May be empty.
+
+	Empty is a working configuration, not an unconfigured one: `drift.recipients`
+	falls back to the site's enabled System Managers, who are the people able to
+	act on a ledger finding. The field exists for the case where that is the wrong
+	list — an accountant who has no login, or an operator who wants it in a
+	ticket queue rather than an inbox.
+	"""
+	return str(_value("drift_report_email") or "").strip()
+
+
 def require_user_context() -> bool:
 	return as_bool(_value("require_user_context"))
 

@@ -21,7 +21,11 @@ short version: compliance woven into the operational record is defensible under
 audit and a shadow log beside it is not, and you cannot weave anything into a
 doctype you refuse to touch. `before_uninstall` names every column that goes.
 
-THERE ARE EXACTLY TWO SCHEDULED JOBS.
+THERE ARE EXACTLY THREE SCHEDULED JOBS, and the count is in this docstring
+because it is a number somebody should have to change on purpose. Every one of
+them runs on somebody's site with nobody watching, so each has had to clear the
+same two bars: it writes only this app's own doctypes (or nothing at all), and
+it never raises.
 
 The first arrived in v0.14.0. Chunked uploads stage their pieces in a table so an
 upload survives a worker restart, which means an upload nobody finishes leaves
@@ -41,6 +45,22 @@ The second arrived in v0.15.0 and is the compliance alert sweep. It READS
 certificates, policies, employees, blocks, cabins, filings and audits, and writes
 only this app's own Compliance Alert table — so the promise about not changing how
 a site behaves still holds. It also never raises.
+
+The third arrived in v0.17.1 and is the Journal Entry drift watch. It WRITES
+NOTHING — three queries and, at most, an email — so it clears a higher bar than
+the one stated above rather than merely meeting it.
+
+IT REPORTS AND IT DOES NOT REPAIR. `repair_drifted_je_attributions` exists,
+works, and is deliberately not called from a schedule: repairing drift rewrites
+GL rows on submitted accounting documents, and doing that on a timer with nobody
+watching is the single worst thing this app could be talked into. A repair that
+got it wrong would be indistinguishable from the bug it was fixing and would
+have been applied to a year of ledger before anybody read the email. `drift.py`
+makes the argument at length.
+
+It exists because ACC-JV-2026-00073 was a bug whose entire character was that
+nothing complained about it, and "somebody remembers to run a scan" is not a
+control.
 
 IT IS THE CLOCK SERVING KAIROS, AND THAT IS THE WHOLE POINT OF PUTTING IT ON A
 SCHEDULE. The sweep DECIDES NOTHING. Every rule it runs asks whether a condition
@@ -87,8 +107,9 @@ before_uninstall = "erpnext_mcp.install.before_uninstall"
 #: migrate. Idempotent, and never overwrites an operator's choice.
 after_migrate = "erpnext_mcp.install.after_migrate"
 
-#: See the module docstring. Both jobs write ONLY this app's own doctypes, and
-#: neither ever raises — they run on somebody's scheduler beside their real work.
+#: See the module docstring. Every job writes ONLY this app's own doctypes — the
+#: drift watch writes nothing at all — and none of them ever raises: they run on
+#: somebody's scheduler beside their real work.
 #:
 #: BARE DOTTED PATHS, like every other hook in this file. `scheduler_events`
 #: hands each entry to `frappe.get_attr` exactly as `jinja` does, so the colon
@@ -99,6 +120,9 @@ scheduler_events = {
 	],
 	"daily": [
 		"erpnext_mcp.tools.uploads.collect_expired_sessions",
+	],
+	"weekly": [
+		"erpnext_mcp.drift.scan",
 	],
 }
 

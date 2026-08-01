@@ -2059,6 +2059,13 @@ class Store:
 		self.passwords: dict[tuple, str] = {}
 		self.comments: list[dict] = []
 		self.errors: list[dict] = []
+		#: What `frappe.sendmail` was asked to send. v0.17.1 — the drift watch is
+		#: the first thing in this app that emails anybody, and "did it send, and
+		#: to whom" is the only interesting question about a watchdog.
+		self.emails: list[dict] = []
+		#: Set by a test to make `sendmail` raise, standing in for a site with no
+		#: outgoing email account. Reset here so it cannot leak into the next test.
+		self.mail_fails = False
 		self.counters: dict[str, int] = {}
 		self.committed = 0
 		self.rolled_back = 0
@@ -2862,6 +2869,23 @@ def _build_frappe() -> types.ModuleType:
 	def log_error(title=None, message=None, reference_doctype=None, reference_name=None):
 		STORE.errors.append({"title": title, "message": message})
 
+	def sendmail(recipients=None, subject=None, message=None, **kwargs):
+		"""Record the message rather than send it. v0.17.1.
+
+		NOT a no-op, and not a raiser. A double that silently succeeded would let
+		"the report went nowhere" pass; one that always raised would only ever
+		exercise the Error Log fallback. Recording lets the tests assert both
+		paths — `drift.notify` is required to fall back when mail is unavailable,
+		because a site with no outgoing email account is an ordinary state and
+		losing the one message that says the ledger disagrees with itself would
+		reproduce the original bug's defining property exactly.
+		"""
+		if getattr(STORE, "mail_fails", False):
+			raise ValidationError("no outgoing email account")
+		STORE.emails.append(
+			{"recipients": list(recipients or []), "subject": subject, "message": message}
+		)
+
 	def get_traceback(with_context=False):
 		return traceback.format_exc()
 
@@ -2964,6 +2988,7 @@ def _build_frappe() -> types.ModuleType:
 	module.get_request_header = get_request_header
 	module.set_user = set_user
 	module.log_error = log_error
+	module.sendmail = sendmail
 	module.get_traceback = get_traceback
 	module.generate_hash = generate_hash
 	module.msgprint = msgprint

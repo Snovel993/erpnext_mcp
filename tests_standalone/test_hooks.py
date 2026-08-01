@@ -264,14 +264,14 @@ class TheJinjaMethod(unittest.TestCase):
 
 class TheScheduledJobs(unittest.TestCase):
 	def test_every_scheduled_job_resolves(self):
-		self.assertEqual(sorted(hooks.scheduler_events), ["daily", "hourly"])
+		self.assertEqual(sorted(hooks.scheduler_events), ["daily", "hourly", "weekly"])
 		for interval, paths in hooks.scheduler_events.items():
 			for path in paths:
 				with self.subTest(interval=interval, path=path):
 					self.assertTrue(callable(resolve(path)))
 
-	def test_they_are_these_two_and_nothing_else(self):
-		"""Two jobs, and each writes only this app's own doctypes.
+	def test_they_are_these_three_and_nothing_else(self):
+		"""Three jobs, and each writes only this app's own doctypes — or nothing.
 
 		Asserted as an exact mapping rather than a membership check, so a third
 		job fails here and has to be argued for. Every scheduled job is code that
@@ -288,6 +288,7 @@ class TheScheduledJobs(unittest.TestCase):
 			{
 				"hourly": ["erpnext_mcp.alerts.sweep"],
 				"daily": ["erpnext_mcp.tools.uploads.collect_expired_sessions"],
+				"weekly": ["erpnext_mcp.drift.scan"],
 			},
 		)
 

@@ -20,6 +20,7 @@
   "allowed_cidrs",
   "public_url",
   "farm_ops_mobile_enabled",
+  "drift_report_email",
   "attribution_section",
   "require_user_context",
   "mcp_system_user",
@@ -382,6 +383,13 @@
    "fieldname": "farm_ops_mobile_enabled",
    "fieldtype": "Check",
    "label": "Farm Ops Mobile API Enabled"
+  },
+  {
+   "description": "Where the weekly Journal Entry attribution drift report goes when it finds something. Comma-separated; leave empty and it goes to every enabled System Manager on the site. The watch is READ-ONLY — it reports drift and never repairs it, because rewriting GL rows on submitted accounting documents on a timer is not something this app does. If no outgoing email account is configured the report lands in the Error Log instead, so a finding is never lost to an SMTP setting.",
+   "fieldname": "drift_report_email",
+   "fieldtype": "Data",
+   "label": "Drift Report Recipients",
+   "options": "Email"
   },
   {
    "fieldname": "attribution_section",
