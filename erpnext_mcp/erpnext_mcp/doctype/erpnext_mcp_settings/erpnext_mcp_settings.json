@@ -295,6 +295,7 @@
   "allow_list_compliance_calendar_for_me",
   "mobile_write_section",
   "allow_create_mobile_user",
+  "allow_onboard_employee",
   "allow_revoke_mobile_user",
   "mobile_write_col",
   "allow_generate_api_token",
@@ -2189,6 +2190,13 @@
    "fieldname": "allow_create_mobile_user",
    "fieldtype": "Check",
    "label": "Create Mobile User"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. One call for a new hire: the Employee record, their I-9 / W-4 / photo ID filed as PRIVATE attachments ON THAT EMPLOYEE RECORD, a scoped login with a credential, and optionally safety-training and camp-orientation tasks. The paperwork never goes to the governance archive — that register holds the documents describing the business, and an auditor, an advisor and a family member browse it. Reuses an existing Employee rather than creating a second one.",
+   "fieldname": "allow_onboard_employee",
+   "fieldtype": "Check",
+   "label": "Onboard Employee"
   },
   {
    "default": "0",

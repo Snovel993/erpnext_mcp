@@ -65,6 +65,7 @@ from .tools import (
 	meta,
 	mobile,
 	mutate,
+	newhire,
 	notes,
 	opening,
 	packets,
@@ -6943,6 +6944,94 @@ TOOLS = {
 		title="Create a mobile user",
 		available=_needs_doctype("Mobile Access Grant"),
 		requires="the Mobile Access Grant DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"onboard_employee": _tool(
+		newhire.onboard_employee,
+		"MUTATING (default OFF). One call for a new hire: the Employee record, "
+		"their paperwork filed privately ON THAT RECORD, a scoped login with a "
+		"credential, and optionally the two first-day tasks nobody skips.\n\n"
+		"THE PAPERWORK GOES ON THE EMPLOYEE, NOT IN THE GOVERNANCE ARCHIVE, and "
+		"that is the whole reason this tool exists rather than a checklist. An "
+		"I-9, a W-4 and a photograph of somebody's licence are PERSONAL records "
+		"about one person; attach_governance_document files into the register that "
+		"holds trust instruments, operating agreements and SOPs — the documents "
+		"describing the BUSINESS — which an auditor, an advisor and a family "
+		"member browse. Filing forty people's immigration paperwork there would "
+		"look tidy and be a disclosure. Every document here goes through "
+		"attach_file_to_document(doctype='Employee') as a PRIVATE attachment, and "
+		"is_private is not an argument.\n\n"
+		"IT REUSES AN EXISTING EMPLOYEE rather than making a second one. Two "
+		"Employee records for one person puts them on the dispatch board twice and "
+		"in the payroll register once, and is far easier to make than to find.\n\n"
+		"IT STOPS AT THE FIRST REAL REFUSAL AND REPORTS WHAT IT ALREADY DID, step "
+		"by step. Re-running is safe: each underlying tool is idempotent about the "
+		"thing it owns. The first-day tasks are the one step allowed to fail "
+		"quietly — a training task that could not be raised must not undo an "
+		"onboarding that worked, so it lands in `skipped` for somebody to raise by "
+		"hand.\n\n"
+		"THE CREDENTIAL IS NOT REPEATED IN THIS RESULT. create_mobile_user returns "
+		"a secret exactly once; echoing it into an orchestrator's summary would "
+		"put a live credential in a second, much more pasteable place. Run "
+		"generate_mobile_login_qr to hand it over.",
+		{
+			"full_name": _field(
+				_STRING,
+				"Their name, first and last. An I-9, a payroll register and a dispatch board "
+				"all name the same person; one word names nobody findable.",
+			),
+			"company": _field(_STRING, "The hiring entity. Name or abbreviation."),
+			"email": _field(
+				_STRING,
+				"The address they sign in with. Optional — without it the Employee is created "
+				"and no login is, which is right for somebody who will never hold a phone.",
+			),
+			"employee": _field(
+				_STRING, "An existing Employee docname to onboard against instead of creating one."
+			),
+			"role": _field(
+				_STRING,
+				"Their mobile role. Default 'Field Worker'. One of the six — list_mobile_users "
+				"returns what each is for.",
+			),
+			"entity_access": _field(
+				{"type": "array", "items": _STRING},
+				"The Companies the login may see. Defaults to the hiring company alone, which "
+				"is the right default and the scoped one.",
+			),
+			"preferred_company": _field(_STRING, "Which entity the app opens on. Defaults to company."),
+			"documents": _field(
+				{"type": "object"},
+				"The paperwork, keyed by kind: i9, w4, photo_id, direct_deposit, signed_offer. "
+				'Each value is {"file_name": "...", "file_content": "<base64>"} or '
+				'{"file_url": "..."}. All filed PRIVATELY on the Employee record.',
+			),
+			"date_of_joining": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"date_of_birth": _field(_STRING, "YYYY-MM-DD."),
+			"designation": _field(_STRING, "Their job title."),
+			"gender": _field(_STRING, "As the Employee doctype records it."),
+			"phone": _field(_STRING, "A mobile number for the Employee record."),
+			"housing_unit": _field(
+				_STRING,
+				"The Housing Unit they are moving into. Used to point the camp-orientation "
+				"task at the right cabin.",
+			),
+			"first_day_tasks": _field(
+				_BOOLEAN,
+				"Raise safety training and camp orientation as Farm Tasks. Default false. Both "
+				"demand a signature — 'I was told about the machinery' is a claim whose whole "
+				"value is that somebody attested to it.",
+			),
+			"update_existing": _field(
+				_BOOLEAN,
+				"Let the login step rewrite an account that already exists. Default false, and "
+				"the refusal is create_mobile_user's.",
+			),
+		},
+		required=("full_name", "company"),
+		mutating=True,
+		title="Onboard a new employee",
+		available=_needs_doctype("Employee"),
+		requires="the Employee DocType, which Frappe HR ships",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

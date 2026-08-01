@@ -198,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_six_tools_ninety_three_read_one_hundred_thirteen_write(self):
+	def test_catalogue_is_two_hundred_seven_tools_ninety_three_read_one_hundred_fourteen_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -262,10 +262,19 @@ class Catalogue(SeededTestCase):
 		    authenticated request, a screen-shaped payload, and NOTHING ELSE. Every
 		    refusal in them comes from the tool underneath, because it IS the tool
 		    underneath.
+
+		v0.17.1 ADDED ONE, and only one, because a hotfix that grew the catalogue
+		would be a release nobody could review. `onboard_employee` is an
+		ORCHESTRATOR over tools that already exist — the Employee, the paperwork
+		through attach_file_to_document, the login through create_mobile_user, the
+		first-day tasks through create_farm_task. It adds no rule any of them does
+		not already enforce. Its whole reason to exist is that the paperwork has to
+		land ON THE EMPLOYEE RECORD and not in the governance archive, and a
+		checklist cannot make that mistake impossible.
 		"""
-		self.assertEqual(len(registry.TOOLS), 206)
+		self.assertEqual(len(registry.TOOLS), 207)
 		self.assertEqual(len(registry.READ_TOOLS), 93)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 113)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 114)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
