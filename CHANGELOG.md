@@ -97,7 +97,61 @@ and the staged pieces are kept. The digest is not written to Farm Task Evidence 
 that child doctype has no hash column and adding one is a schema change, not a
 hotfix — and is deliberately not stuffed into `caption`.
 
-**3180 tests pass.** 72 of them are new.
+### Cleanup sweep — six items landed, four needed no code
+
+Full detail in [`RELEASES/v0.17.1.md`](RELEASES/v0.17.1.md). Each landed item is
+its own commit.
+
+**Fixed — `Housing Assignment` and `Family` were never entity-scoped.** The
+promise that a User Permission on Company "restricts EVERY document that links
+to a Company" is true, and the load-bearing clause is *that links to a Company*.
+These two are the only doctypes this app ships that do not. `Housing Assignment`
+is READ-granted to four roles and FULL to a fifth, so a field worker scoped to
+one entity could list every camp bed assignment on the site — names, cabins,
+wage-deduction status. Closed with `permission_query_conditions` and
+`has_permission` hooks, which were previously FORBIDDEN outright by
+`test_hooks.py`; the blanket ban is replaced by the narrower and stronger rule it
+was a proxy for, asserted directly: every doctype these hooks name must be one
+this app created. Both handlers fail OPEN — a query-conditions hook that raises
+fails every list view of that doctype for everybody, forever.
+
+**Changed — the compliance sweep runs hourly.** It is what makes a completed
+task's alert go away, and nightly meant a worker saw the phone asking them to
+walk a cabin they had already walked, all day. Safe at any cadence because it is
+a full reconciliation, not an increment; there is now a test for that property.
+
+**Added — a weekly Journal Entry drift watch that reports and never repairs.**
+ACC-JV-2026-00073's defining property was that nothing complained for a week.
+`repair_drifted_je_attributions` is deliberately not called from a schedule:
+rewriting GL rows on submitted accounting documents on a timer would be a worse
+bug than the one it watches for. It states the window it covered and says loudly
+when it hit the scan cap, because a job that truncated silently and reported
+nothing wrong would be worse than not running.
+
+**Added — idle Farm Ops credentials are revoked after 30 days.** This REVERSES a
+decision v0.17.0 wrote down, and the reversal is recorded rather than quietly
+made: the threat changed when forty live credentials went into forty pockets on
+the open internet. Mobile Access Grant gains `last_seen_on`, stamped by the
+mobile gate at most once a day, and `persistent` to exempt a grant. It revokes
+the TOKEN and never the account — roles and entity access are untouched and the
+worker needs one new QR. It never ages a grant whose age it cannot establish.
+
+**Added — `onboard_employee`.** One call for a new hire: Employee record,
+paperwork, scoped login, optional first-day tasks. **The paperwork goes ON the
+Employee record as private attachments, never in the governance archive** — that
+register holds the documents describing the business and an auditor, an advisor
+and a family member browse it. Asserted against the parsed module, because the
+docstrings deliberately name the wrong tool in order to forbid it and a grep
+cannot tell a prohibition from a call. Catalogue is now 207 tools.
+
+**Audited, no change needed:** there are no `TODO`/`FIXME`/`HACK` markers or
+`NotImplementedError` anywhere in the repository (every grep hit is a false
+positive); the Kanban Board installer and the dispatch workspace were both
+already shipped and tested in v0.16.1; and no dev flags (`developer_mode`,
+`allow_tests`, `disable_website_cache`, `login_with_email_link`,
+`enable_frappe_auto_indexer`) are set anywhere in the Docker image.
+
+**3276 tests pass.** 168 of them are new.
 
 ## 0.17.0 — 2026-08-01
 
