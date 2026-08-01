@@ -1497,12 +1497,23 @@ the detector" is a fact somebody can act on; an absence is not.
 `/app/farm-task/view/kanban/Farm Task Dispatch` — a Frappe **Kanban Board** with
 one column per state, Rejected included. A foreman drags a card and Frappe writes
 the field, on desktop and on a phone, with the site's own permissions and theme.
-**There is no custom UI in this release and none is needed.** A landing Workspace
-sits at `/app/farm-task-dispatch`, and `list_dispatch_board` returns the same
-columns as JSON for a caller that cannot see a screen.
+**There is no custom UI here and none is needed.** `list_dispatch_board` returns
+the same columns as JSON for a caller that cannot see a screen.
+
+The landing page at **`/app/farm-task-dispatch`** carries a quick-add shortcut,
+the board, five Number Cards (in the pool, open Critical, awaiting review, and
+raised-from-alerts against raised-by-hand), charts by type and urgency, and link
+cards for the compliance records a completion writes.
+
+The raised-from-alerts pair is two counts rather than one percentage on purpose:
+a Number Card counts one collection and cannot divide two, and a card that
+displayed a ratio would have to invent it.
 
 Built by the same idempotent installer as the Command Center, for the same
-reason: an existing board is left exactly as somebody has since arranged it.
+reason: an existing board is left exactly as somebody has since arranged it. The
+one exception, added in v0.16.1, is a workspace that exists and is **empty** —
+that is what the bad release wrote, not an arrangement anybody chose, so it is
+filled in.
 
 ### The records a completion produces
 

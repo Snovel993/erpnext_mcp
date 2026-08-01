@@ -35,13 +35,17 @@ FIVE CLAIMS, AND EVERY CLASS IN THIS FILE IS ONE OF THEM.
 idempotence: running it twice must not put two people in front of the same cabin.
 """
 
+import contextlib
+import io
 import json
+
+import frappe
 
 from erpnext_mcp import dashboard, records
 from erpnext_mcp.erpnext_mcp.doctype.farm_task.farm_task import MAX_CONCURRENT_CLAIMS
 
 from .fixtures import MAIN, V12TestCase
-from .harness import STORE
+from .harness import INSTALLED_DOCTYPES, META, STORE
 
 ALL_ON = {
 	f"allow_{name}": 1
@@ -841,8 +845,17 @@ class TheKanbanBoard(DispatchTestCase):
 		self.assertTrue(report["workspace_created"])
 		self.assertEqual(report["workspace_route"], "/app/farm-task-dispatch")
 		workspace = STORE.get_raw("Workspace", "Farm Task Dispatch")
-		self.assertIn(
-			"Housing Inspection", [row["link_to"] for row in workspace["shortcuts"]]
+		self.assertIn("Farm Task", [row["link_to"] for row in workspace["shortcuts"]])
+
+	def test_the_board_is_named_the_name_the_route_documents(self):
+		"""THE v0.16.0 REGRESSION, stated as plainly as it can be. The route is
+		documented in the README, the tool catalogue and list_dispatch_board's own
+		payload; a board under any other name is a board nobody finds."""
+		report = dashboard.install_dispatch_board()
+		self.assertEqual(report["board_name"], "Farm Task Dispatch")
+		self.assertTrue(frappe.db.exists("Kanban Board", "Farm Task Dispatch"))
+		self.assertEqual(
+			report["route"], "/app/farm-task/view/kanban/Farm Task Dispatch"
 		)
 
 	def test_a_site_without_the_kanban_doctype_is_told_rather_than_broken(self):
@@ -865,6 +878,269 @@ class TheKanbanBoard(DispatchTestCase):
 
 		install.after_migrate()
 		self.assertTrue(STORE.get_raw("Kanban Board", "Farm Task Dispatch"))
+
+
+class TheIndicatorPaletteIsNotAssumed(DispatchTestCase):
+	"""WHY v0.16.1 EXISTS.
+
+	`Kanban Board Column.indicator` is FRAPPE'S field, not this app's, and its
+	option list has been spelled differently across the versions this app
+	supports. v0.16.0 hardcoded `"gray"`, the site's options were capitalised,
+	`doc.insert()` threw, `install.py` discarded the report, and the migration
+	said nothing. Tim opened the documented route a week later and Frappe offered
+	him a "New Kanban Board" dialog.
+
+	The fix is not a better guess. It is not guessing: the options are read off
+	the site and matched case-insensitively, and a value with no match is DROPPED
+	rather than sent. These tests re-declare the field three incompatible ways and
+	require a working board from all three.
+	"""
+
+	def repalette(self, options):
+		META["Kanban Board Column"].get_field("indicator")["options"] = options
+
+	def board(self):
+		report = dashboard.install_dispatch_board()
+		self.assertEqual(report["failed"], [], report["failed"])
+		self.assertTrue(report["created"])
+		return STORE.get_raw("Kanban Board", "Farm Task Dispatch")
+
+	def test_capitalised_options_are_matched_and_stored_in_the_sites_own_casing(self):
+		"""The exact shape that broke Tim's site."""
+		self.repalette("Blue\nOrange\nRed\nGreen\nGray\nPurple")
+		self.assertEqual(
+			[column["indicator"] for column in self.board()["columns"]],
+			["Gray", "Blue", "Purple", "Orange", "Red", "Green", "Red", "Gray"],
+		)
+
+	def test_lowercase_options_are_matched_too(self):
+		self.repalette("blue\norange\nred\ngreen\ngray\npurple")
+		self.assertEqual(self.board()["columns"][0]["indicator"], "gray")
+
+	def test_a_palette_this_app_has_never_heard_of_drops_the_colour_and_keeps_the_board(self):
+		"""A column with no colour is cosmetic. A board that does not exist is not."""
+		self.repalette("#4287f5\n#f54242\n#42f554")
+		board = self.board()
+		self.assertEqual(len(board["columns"]), 8)
+		self.assertFalse(any(column.get("indicator") for column in board["columns"]))
+
+	def test_a_select_with_no_options_at_all_takes_the_value_unchanged(self):
+		"""A customised or runtime-populated Select is not policed by Frappe
+		either, so refusing it here would invent a refusal the site does not make."""
+		self.repalette("")
+		self.assertEqual(self.board()["columns"][0]["indicator"], "gray")
+
+	def test_the_double_now_polices_selects_which_is_what_was_missing(self):
+		"""The suite passed 2864 tests through the bad value because it never
+		looked at a Select. This asserts the double would now catch it."""
+		self.repalette("Blue\nGray")
+		doc = frappe.new_doc("Kanban Board")
+		doc.kanban_board_name = "Hand Rolled"
+		doc.reference_doctype = "Farm Task"
+		doc.field_name = "state"
+		doc.append("columns", {"column_name": "Draft", "indicator": "gray"})
+		with self.assertRaises(Exception) as caught:
+			doc.insert(ignore_permissions=True)
+		self.assertIn("not a valid value", str(caught.exception))
+
+
+class TheBoardSurvivesAFrappeThatRefusesTheColumns(DispatchTestCase):
+	def refuse_columns(self):
+		"""A Frappe whose column_name will not take our states, whatever we send."""
+		META["Kanban Board Column"].get_field("column_name")["fieldtype"] = "Select"
+		META["Kanban Board Column"].get_field("column_name")["options"] = "To Do\nDoing\nDone"
+
+	def test_it_falls_back_to_a_board_with_no_columns(self):
+		"""Frappe builds the columns from the distinct values of the field the
+		first time somebody opens the board. Degrade; do not vanish."""
+		self.refuse_columns()
+		report = dashboard.install_dispatch_board()
+		self.assertTrue(report["created"])
+		self.assertEqual(report["columns_written"], 0)
+		self.assertIn("WITHOUT its columns", report["note_columns"])
+		self.assertTrue(frappe.db.exists("Kanban Board", "Farm Task Dispatch"))
+
+	def test_the_reason_the_first_attempt_failed_is_kept(self):
+		self.refuse_columns()
+		report = dashboard.install_dispatch_board()
+		self.assertIn("not a valid value", report["note_columns"])
+
+	def test_a_total_failure_is_reported_rather_than_swallowed(self):
+		META["Kanban Board"].get_field("field_name")["fieldtype"] = "Select"
+		META["Kanban Board"].get_field("field_name")["options"] = "nothing_we_would_send"
+		report = dashboard.install_dispatch_board()
+		self.assertFalse(report["created"])
+		self.assertTrue(report["failed"])
+		self.assertIn("list_dispatch_board", report["failed"][0]["reason"])
+
+
+class MigrateSaysWhatItCouldNotBuild(DispatchTestCase):
+	"""THE ROOT CAUSE, AND THE MOST IMPORTANT CLASS IN THIS FILE.
+
+	Both bugs v0.16.1 fixes were survivable. What made them ship was that
+	`install.py` called an installer which cannot raise, and then discarded its
+	report — so a failure printed nothing, `bench migrate` exited zero, and the
+	first anybody knew was a missing page a week later.
+	"""
+
+	def migrate_output(self):
+		from erpnext_mcp import install
+
+		buffer = io.StringIO()
+		with contextlib.redirect_stdout(buffer):
+			install.after_migrate()
+		return buffer.getvalue()
+
+	def test_a_clean_migrate_says_nothing_about_the_board(self):
+		self.assertNotIn("Farm Task Dispatch", self.migrate_output())
+
+	def test_a_board_that_could_not_be_built_is_named_on_stdout(self):
+		META["Kanban Board"].get_field("field_name")["fieldtype"] = "Select"
+		META["Kanban Board"].get_field("field_name")["options"] = "nothing_we_would_send"
+		output = self.migrate_output()
+		self.assertIn("could not build Farm Task Dispatch", output)
+		self.assertIn("list_dispatch_board", output)
+
+	def test_the_command_center_reports_the_same_way(self):
+		"""One helper, both dashboards — so the next silent installer is not one
+		somebody has to remember to wire up."""
+		from erpnext_mcp import dashboard as dashboard_module
+
+		self.assertEqual(
+			dashboard_module.install_command_center.__module__, "erpnext_mcp.dashboard"
+		)
+		output = self.migrate_output()
+		self.assertNotIn("could not build", output)
+
+
+class TheWorkspaceHasSomethingOnIt(DispatchTestCase):
+	"""THE SECOND v0.16.0 BUG, and a different misunderstanding from the first.
+
+	A modern Frappe Workspace renders ONLY what its `content` block list names.
+	The `shortcuts`, `links`, `number_cards` and `charts` child tables supply the
+	data; `content` decides what appears. v0.16.0 wrote the child rows and then
+	set `content` to `[]` — a page with a title and nothing else, which is exactly
+	what Tim opened.
+	"""
+
+	def workspace(self):
+		dashboard.install_dispatch_board()
+		return STORE.get_raw("Workspace", "Farm Task Dispatch")
+
+	def content(self):
+		return json.loads(self.workspace()["content"])
+
+	def test_the_content_is_not_empty(self):
+		self.assertTrue(self.content())
+
+	def test_every_child_row_is_named_by_a_block_that_renders_it(self):
+		"""A shortcut row with no block is invisible; a block naming a row that is
+		not there is a rendering error. They are written in one pass so neither
+		can happen."""
+		workspace = self.workspace()
+		content = json.loads(workspace["content"])
+		named = {
+			block["data"].get("shortcut_name")
+			or block["data"].get("number_card_name")
+			or block["data"].get("chart_name")
+			or block["data"].get("card_name")
+			for block in content
+			if block["type"] != "header"
+		}
+		for row in workspace["shortcuts"]:
+			self.assertIn(row["label"], named)
+		for row in workspace["number_cards"]:
+			self.assertIn(row["number_card_name"], named)
+		for row in workspace["charts"]:
+			self.assertIn(row["chart_name"], named)
+
+	def test_there_is_a_quick_add_button(self):
+		"""The commonest thing a foreman does on this page is put work on the
+		board, and making them open a list first to find New is the friction that
+		ends with the job being shouted across a yard instead."""
+		shortcuts = {row["label"]: row for row in self.workspace()["shortcuts"]}
+		self.assertEqual(shortcuts["Raise a Task"]["doc_view"], "New")
+		self.assertEqual(shortcuts["Raise a Task"]["link_to"], "Farm Task")
+
+	def test_the_board_shortcut_points_at_the_board_that_was_just_built(self):
+		shortcuts = {row["label"]: row for row in self.workspace()["shortcuts"]}
+		self.assertEqual(shortcuts["Dispatch Board"]["kanban_board"], "Farm Task Dispatch")
+
+	def test_the_number_cards_are_real_records_and_are_on_the_page(self):
+		workspace = self.workspace()
+		on_page = [row["number_card_name"] for row in workspace["number_cards"]]
+		self.assertIn("Tasks in the Pool", on_page)
+		self.assertIn("Open Critical Tasks", on_page)
+		self.assertIn("Tasks Awaiting Review", on_page)
+		for label in on_page:
+			with self.subTest(card=label):
+				self.assertTrue(frappe.db.exists("Number Card", label))
+
+	def test_the_alert_provenance_pair_is_both_halves_or_neither(self):
+		"""A Number Card counts one collection and cannot divide two, so the
+		fraction that came from the calendar is shown as two counts side by side
+		rather than as a percentage the card would have to invent."""
+		on_page = [row["number_card_name"] for row in self.workspace()["number_cards"]]
+		self.assertIn("Tasks Raised From Alerts", on_page)
+		self.assertIn("Tasks Raised By Hand", on_page)
+
+	def test_the_charts_cover_type_and_urgency(self):
+		charts = [row["chart_name"] for row in self.workspace()["charts"]]
+		self.assertEqual(charts, ["Farm Tasks by Type", "Farm Tasks by Urgency"])
+		for name in charts:
+			with self.subTest(chart=name):
+				self.assertTrue(frappe.db.exists("Dashboard Chart", name))
+
+	def test_the_link_cards_name_the_records_a_completion_writes(self):
+		links = self.workspace()["links"]
+		breaks = [row["label"] for row in links if row["type"] == "Card Break"]
+		self.assertIn("Compliance Records", breaks)
+		targets = [row["link_to"] for row in links if row["type"] == "Link"]
+		for doctype in ("Housing Inspection", "Detector Test", "Water Test"):
+			self.assertIn(doctype, targets)
+
+	def test_an_empty_workspace_from_v0_16_0_is_repaired_on_the_next_migrate(self):
+		"""THE UPGRADE PATH. Tim's site already has the blank page, and a plain
+		existence check would have skipped it forever."""
+		blank = frappe.new_doc("Workspace")
+		blank.name = "Farm Task Dispatch"
+		blank.flags.name_set = True
+		blank.title = "Farm Task Dispatch"
+		blank.label = "Farm Task Dispatch"
+		blank.content = "[]"
+		blank.insert(ignore_permissions=True)
+
+		report = dashboard.install_dispatch_board()
+		self.assertTrue(report["workspace_filled"])
+		self.assertFalse(report["workspace_created"])
+		self.assertTrue(json.loads(STORE.get_raw("Workspace", "Farm Task Dispatch")["content"]))
+
+	def test_a_page_somebody_arranged_is_never_touched(self):
+		dashboard.install_dispatch_board()
+		workspace = frappe.get_doc("Workspace", "Farm Task Dispatch")
+		workspace.content = json.dumps([{"id": "mine", "type": "header", "data": {"text": "Mine", "col": 12}}])
+		workspace.save(ignore_permissions=True)
+
+		report = dashboard.install_dispatch_board()
+		self.assertTrue(report["workspace_existed"])
+		self.assertFalse(report["workspace_filled"])
+		self.assertEqual(
+			json.loads(STORE.get_raw("Workspace", "Farm Task Dispatch")["content"])[0]["id"], "mine"
+		)
+
+	def test_repairing_does_not_double_the_child_rows(self):
+		dashboard.install_dispatch_board()
+		before = len(STORE.get_raw("Workspace", "Farm Task Dispatch")["shortcuts"])
+		frappe.db.set_value("Workspace", "Farm Task Dispatch", "content", "[]")
+		dashboard.install_dispatch_board()
+		self.assertEqual(len(STORE.get_raw("Workspace", "Farm Task Dispatch")["shortcuts"]), before)
+
+	def test_a_site_with_no_workspace_doctype_is_told_rather_than_broken(self):
+		INSTALLED_DOCTYPES.discard("Workspace")
+		report = dashboard.install_dispatch_board()
+		self.assertIn("no Workspace doctype", report["workspace_note"])
+		self.assertFalse(report["failed"])
+		self.assertTrue(report["created"])
 
 
 # ── Feature C ───────────────────────────────────────────────────────────────

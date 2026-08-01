@@ -298,8 +298,11 @@ erpnext_mcp/                     repo root
     alerts/base.py               Rule, Observation, the idempotent sweep
     alerts/rules.py              the eleven rules, each with its kairotic gate
     audit_packets.py             the eight audit regimes and their sections
-    dashboard.py                 the Compliance Command Center installer, and the
-                                 Farm Task Dispatch Kanban board
+    dashboard.py                 the Compliance Command Center installer, the
+                                 Farm Task Dispatch Kanban board and its
+                                 workspace. Reads another app's Select options
+                                 off the site rather than assuming them — see
+                                 v0.16.1 for what assuming cost
     packets/base.py              PacketSpec, Flag, provenance envelope
     packets/reconciliation.py    one account, one period
     packets/fiscal_year_audit.py one company, one fiscal year

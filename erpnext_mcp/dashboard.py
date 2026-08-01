@@ -36,7 +36,23 @@ against human ones. An operation whose score is 95% entirely through dismissals
 is a different operation from one whose score is 95% because the work got done,
 and the dashboard says which.
 
-NOTHING HERE RAISES. It runs inside `after_migrate`. See `install.py`.
+NOTHING HERE RAISES — BUT IT REPORTS, AND v0.16.0 PROVED WHY THAT MATTERS. Every
+builder here catches its own exceptions into `report["failed"]` and returns. In
+v0.16.0 `install.py` then threw the report away, so when the Farm Task Dispatch
+Kanban failed to insert on a real site the migration printed nothing, reported
+success, and the board simply did not exist. Silence in an installer is not
+safety; it is a bug that has been given somewhere to hide. `install.py` now prints
+every entry in `failed`, and the two are only useful together.
+
+NOTHING HERE ASSUMES ANOTHER APP'S SELECT OPTIONS, AND THAT IS THE OTHER HALF OF
+THE SAME LESSON. `Kanban Board Column.indicator` is Frappe's field, not this
+app's, and its option list has changed across the versions this app supports.
+v0.16.0 hardcoded `"gray"`; on Tim's site the options were capitalised, the
+insert threw, and the swallowed exception did the rest. `_select_value` now reads
+the options off the site and matches case-insensitively, and drops the value
+entirely when nothing matches — a column with no colour is cosmetic, a board that
+does not exist is not. The rule generalises: this app validates its OWN Selects
+against its own JSON, and asks the site about everybody else's.
 """
 
 from __future__ import annotations
@@ -51,6 +67,38 @@ from .alerts import ALERT_DOCTYPE, SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WA
 DASHBOARD = "Dashboard"
 CHART = "Dashboard Chart"
 CARD = "Number Card"
+
+
+def _select_value(doctype: str, fieldname: str, wanted: str):
+	"""One Select value, matched against what the SITE says the options are.
+
+	Returns the option in the site's own casing, or None when this version offers
+	no match — and None means "do not set the field", which is always safer than
+	setting a value the doctype will refuse. A field with no options at all is a
+	customised or runtime-populated Select and the value is passed through, which
+	is what Frappe's own validation does.
+
+	THE WHOLE POINT IS THAT THIS APP DOES NOT KNOW. `Kanban Board Column`
+	belongs to Frappe and its colour palette has been lowercase, capitalised and
+	a list of hex codes in different releases. Guessing produced v0.16.0's
+	silently missing dispatch board.
+	"""
+	wanted = str(wanted or "").strip()
+	if not wanted:
+		return None
+	try:
+		field = compat.field_meta(doctype, fieldname)
+	except Exception:
+		return None
+	if field is None:
+		return None
+	options = [line.strip() for line in str(field.get("options") or "").split("\n") if line.strip()]
+	if not options:
+		return wanted
+	for option in options:
+		if option.lower() == wanted.lower():
+			return option
+	return None
 
 #: The dashboard's name, and therefore its route: Frappe slugifies this into
 #: `/app/compliance-command-center`.
@@ -227,14 +275,118 @@ DISPATCH_COLUMNS = (
 	("Cancelled", "gray"),
 )
 
-#: What the Farm Task Dispatch workspace points at.
-WORKSPACE_SHORTCUTS = (
-	("Farm Task", "Farm Task"),
-	("Farm Task Assignment", "Farm Task Assignment"),
-	("Housing Inspection", "Housing Inspection"),
-	("Detector Test", "Detector Test"),
-	("Water Test", "Water Test"),
-	("Compliance Alert", "Compliance Alert"),
+#: The shortcut row across the top of the workspace, in the order somebody uses
+#: them. "Raise a Task" is first and is a `doc_view: New` shortcut — the
+#: quick-add button — because the commonest thing a foreman does on this page is
+#: put work on the board, and making them open a list first to find New is the
+#: kind of friction that ends with the work being shouted across a yard instead.
+DISPATCH_SHORTCUTS = (
+	{"label": "Raise a Task", "link_to": DISPATCH_DOCTYPE, "type": "DocType", "doc_view": "New"},
+	{
+		"label": "Dispatch Board",
+		"link_to": DISPATCH_DOCTYPE,
+		"type": "DocType",
+		"doc_view": "Kanban",
+		"kanban_board": DISPATCH_BOARD_NAME,
+	},
+	{"label": "All Tasks", "link_to": DISPATCH_DOCTYPE, "type": "DocType", "doc_view": "List"},
+	{"label": "Assignments", "link_to": "Farm Task Assignment", "type": "DocType", "doc_view": "List"},
+	{"label": "Compliance Calendar", "link_to": ALERT_DOCTYPE, "type": "DocType", "doc_view": "List"},
+)
+
+#: The Number Cards on the workspace.
+#:
+#: THE LAST TWO ARE A PAIR AND HAVE TO BE READ TOGETHER. A Number Card counts one
+#: collection and cannot divide two, so "what fraction of the board came from the
+#: compliance calendar" is shown as the two counts side by side rather than as a
+#: percentage the card would have to invent. That fraction is the honest measure
+#: of whether the calendar is driving work or being read and ignored, and
+#: `list_dispatch_board` returns it as a single number for a caller that wants one.
+DISPATCH_NUMBER_CARDS = (
+	{
+		"label": "Tasks in the Pool",
+		"document_type": DISPATCH_DOCTYPE,
+		"function": "Count",
+		"filters_json": json.dumps({"state": "Available"}),
+		"color": "#449cf0",
+		"why": "Work nobody has taken yet. The number a foreman is trying to get to zero.",
+	},
+	{
+		"label": "Open Critical Tasks",
+		"document_type": DISPATCH_DOCTYPE,
+		"function": "Count",
+		"filters_json": json.dumps(
+			{"urgency": "Critical", "state": ["not in", ["Completed", "Rejected", "Cancelled"]]}
+		),
+		"color": "#e24c4c",
+		"why": "Something has already stopped being lawful and nobody has finished dealing with it.",
+	},
+	{
+		"label": "Tasks Awaiting Review",
+		"document_type": DISPATCH_DOCTYPE,
+		"function": "Count",
+		"filters_json": json.dumps({"state": "Awaiting-Review"}),
+		"color": "#f5a623",
+		"why": (
+			"Work that was DONE and found something. The register moved; what needs a person is "
+			"the finding."
+		),
+	},
+	{
+		"label": "Tasks Raised From Alerts",
+		"document_type": DISPATCH_DOCTYPE,
+		"function": "Count",
+		"filters_json": json.dumps({"source_alert": ["is", "set"]}),
+		"color": "#7575ff",
+		"why": "The compliance calendar turned into work somebody was actually sent to do.",
+	},
+	{
+		"label": "Tasks Raised By Hand",
+		"document_type": DISPATCH_DOCTYPE,
+		"function": "Count",
+		"filters_json": json.dumps({"source_alert": ["is", "not set"]}),
+		"color": "#98d85b",
+		"why": "The operation's own work. Read against the card beside it, not on its own.",
+	},
+)
+
+#: The charts on the workspace: what kind of work is outstanding, and how urgent.
+DISPATCH_CHARTS = (
+	{
+		"chart_name": "Farm Tasks by Type",
+		"chart_type": "Group By",
+		"document_type": DISPATCH_DOCTYPE,
+		"group_by_type": "Count",
+		"group_by_based_on": "task_type",
+		"type": "Donut",
+		"filters_json": json.dumps({"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}),
+		"number_of_groups": 10,
+		"why": (
+			"What kind of work is outstanding. A board that is nine-tenths inspections is a "
+			"different afternoon from one that is nine-tenths repairs."
+		),
+	},
+	{
+		"chart_name": "Farm Tasks by Urgency",
+		"chart_type": "Group By",
+		"document_type": DISPATCH_DOCTYPE,
+		"group_by_type": "Count",
+		"group_by_based_on": "urgency",
+		"type": "Bar",
+		"filters_json": json.dumps({"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}),
+		"number_of_groups": 4,
+		"why": (
+			"The shape of the queue. If this is flat at Critical, the urgency scale has stopped "
+			"meaning anything and the board has stopped being read."
+		),
+	},
+)
+
+#: The link cards down the side: the registers a completion writes into.
+DISPATCH_LINK_CARDS = (
+	("Compliance Records", ("Housing Inspection", "Detector Test", "Water Test")),
+	("Dispatch", (DISPATCH_DOCTYPE, "Farm Task Assignment")),
+	("The Camp", ("Housing Unit", "Housing Assignment", "Irrigation Zone")),
 )
 
 
@@ -247,12 +399,18 @@ def dispatch_board_available() -> bool:
 
 
 def install_dispatch_board() -> dict:
-	"""Build the Farm Task Dispatch Kanban. Idempotent, and NEVER raises.
+	"""Build the Farm Task Dispatch Kanban and its landing page. Idempotent, never raises.
 
-	Same contract as `install_command_center`: an existing board is left exactly
-	as it is, including every column an operator has since reordered, renamed or
-	deleted. A migrate that put a column back would be the fixture behaviour this
-	module exists to avoid.
+	Same contract as `install_command_center`: anything that already exists is
+	left exactly as it is, including every column an operator has since
+	reordered, renamed or deleted. Re-running is a no-op.
+
+	WITH ONE REPAIR CLAUSE, ADDED IN v0.16.1. A Workspace that exists but is
+	EMPTY is filled in. v0.16.0 created the workspace with `content: "[]"`, which
+	renders a page with nothing on it — and the plain existence check would have
+	skipped that page forever on every site that took the bad release. An empty
+	page is not an arrangement somebody chose; a page with anything on it is, and
+	that one is still left alone.
 	"""
 	report = {
 		"board": DISPATCH_BOARD_NAME,
@@ -263,6 +421,11 @@ def install_dispatch_board() -> dict:
 		"existed": False,
 		"workspace_created": False,
 		"workspace_existed": False,
+		"workspace_filled": False,
+		"created_cards": [],
+		"created_charts": [],
+		"existing_cards": [],
+		"existing_charts": [],
 		"failed": [],
 		"available": dispatch_board_available(),
 	}
@@ -274,30 +437,133 @@ def install_dispatch_board() -> dict:
 		)
 		return report
 
-	try:
-		if frappe.db.exists(KANBAN, DISPATCH_BOARD_NAME):
-			report["existed"] = True
-		else:
-			doc = frappe.new_doc(KANBAN)
-			doc.kanban_board_name = DISPATCH_BOARD_NAME
-			doc.reference_doctype = DISPATCH_DOCTYPE
-			# The field the columns ARE. Getting this wrong produces a board that
-			# renders and groups by nothing, which looks like a working board.
-			doc.field_name = "state"
-			if compat.has_field(KANBAN, "private"):
-				doc.private = 0
-			if compat.has_field(KANBAN, "show_labels"):
-				doc.show_labels = 1
-			if compat.has_field(KANBAN, "columns"):
-				for state, colour in DISPATCH_COLUMNS:
-					doc.append("columns", {"column_name": state, "indicator": colour, "status": "Active"})
-			doc.insert(ignore_permissions=True)
-			report["created"] = True
-	except Exception as exc:
-		report["failed"].append({"name": DISPATCH_BOARD_NAME, "reason": f"{type(exc).__name__}: {exc}"})
-
+	_build_kanban(report)
+	for spec in DISPATCH_NUMBER_CARDS:
+		_build(CARD, "label", spec, report, "cards")
+	for spec in DISPATCH_CHARTS:
+		_build(CHART, "chart_name", spec, report, "charts")
 	_build_dispatch_workspace(report)
 	return report
+
+
+def _build_kanban(report: dict) -> None:
+	"""Create the Kanban Board, twice if it has to.
+
+	THE SECOND ATTEMPT DROPS THE COLUMNS, and that is the lesson of v0.16.0 turned
+	into code. The columns are the only part of this document made of another
+	app's Select values, so they are the only part that can be refused by a
+	Frappe version this app did not anticipate. A board with no columns still
+	works — Frappe builds them from the distinct values of the field on first view
+	— and a board that does not exist does not. Degrade; do not vanish.
+
+	The name is FORCED rather than left to Frappe's autoname, because
+	`/app/farm-task/view/kanban/Farm Task Dispatch` is a route this app documents
+	in three places and a board named anything else is a board nobody finds. If a
+	version ignores the flag, the real name is reported rather than assumed.
+	"""
+	if frappe.db.exists(KANBAN, DISPATCH_BOARD_NAME):
+		report["existed"] = True
+		return
+
+	attempts = []
+	for with_columns in (True, False):
+		savepoint = _savepoint()
+		try:
+			doc = _new_kanban(with_columns)
+			doc.insert(ignore_permissions=True)
+			report["created"] = True
+			report["board_name"] = doc.name
+			report["columns_written"] = len(doc.get("columns") or [])
+			if not with_columns:
+				report["note_columns"] = (
+					"The board was created WITHOUT its columns: this Frappe version refused them, "
+					"and a board with no columns still works — Frappe builds them from the distinct "
+					f"values of `state` the first time somebody opens it. Reason: {attempts[0]}"
+				)
+			if doc.name != DISPATCH_BOARD_NAME:
+				report["failed"].append(
+					{
+						"name": DISPATCH_BOARD_NAME,
+						"reason": (
+							f"this Frappe version named the board {doc.name!r} rather than "
+							f"{DISPATCH_BOARD_NAME!r}, so the documented route "
+							f"{report['route']} will not find it. Open it from the Farm Task list "
+							"view instead."
+						),
+					}
+				)
+			return
+		except Exception as exc:
+			attempts.append(f"{type(exc).__name__}: {exc}")
+			_rollback_to(savepoint)
+
+	report["failed"].append(
+		{
+			"name": DISPATCH_BOARD_NAME,
+			"reason": (
+				"the Kanban Board could not be created, with or without its columns: "
+				+ "; ".join(attempts)
+				+ ". Every task is still readable through list_dispatch_board, which returns the "
+				"same columns as JSON, and a board can be made by hand from the Farm Task list "
+				"view."
+			),
+		}
+	)
+
+
+def _new_kanban(with_columns: bool):
+	doc = frappe.new_doc(KANBAN)
+	doc.kanban_board_name = DISPATCH_BOARD_NAME
+	doc.reference_doctype = DISPATCH_DOCTYPE
+	# The field the columns ARE. Getting this wrong produces a board that renders
+	# and groups by nothing, which looks like a working board.
+	doc.field_name = "state"
+	# Force the docname: the route is documented and a board under any other name
+	# is one nobody finds. Frappe honours `flags.name_set`; versions that do not
+	# are caught by the check on the way out.
+	doc.name = DISPATCH_BOARD_NAME
+	doc.flags.name_set = True
+	if compat.has_field(KANBAN, "private"):
+		doc.private = 0
+	if compat.has_field(KANBAN, "show_labels"):
+		doc.show_labels = 1
+	if with_columns and compat.has_field(KANBAN, "columns"):
+		for order, (state, colour) in enumerate(DISPATCH_COLUMNS, start=1):
+			row = {"column_name": state}
+			indicator = _select_value(KANBAN_COLUMN, "indicator", colour)
+			if indicator:
+				row["indicator"] = indicator
+			status = _select_value(KANBAN_COLUMN, "status", "Active")
+			if status:
+				row["status"] = status
+			if compat.has_field(KANBAN_COLUMN, "order"):
+				row["order"] = order
+			doc.append("columns", row)
+	return doc
+
+
+def _savepoint():
+	"""A named savepoint, where this Frappe has them. Returns None where it does not.
+
+	A failed insert inside `after_migrate` must not be allowed to poison the
+	migration's transaction, and must not roll back anything the migration
+	already did. A savepoint is the only tool that does both.
+	"""
+	name = "erpnext_mcp_dispatch_board"
+	try:
+		frappe.db.savepoint(name)
+		return name
+	except Exception:
+		return None
+
+
+def _rollback_to(savepoint) -> None:
+	if not savepoint:
+		return
+	try:
+		frappe.db.rollback(save_point=savepoint)
+	except Exception:
+		pass
 
 
 def _slug(name: str) -> str:
@@ -305,41 +571,162 @@ def _slug(name: str) -> str:
 
 
 def _build_dispatch_workspace(report: dict) -> None:
-	"""The `/app/farm-task-dispatch` landing page, where the site has Workspaces.
+	"""The `/app/farm-task-dispatch` landing page, with something actually on it.
 
-	Cosmetic and best-effort: the Workspace doctype has been rewritten twice
-	across the Frappe versions this app supports, so every field is set only if
-	the site actually has it and a failure is reported rather than raised. The
-	board works without it.
+	v0.16.0 CREATED THIS PAGE EMPTY, and that was a second, independent bug from
+	the same misunderstanding as the first. In a modern Frappe a Workspace renders
+	ONLY what its `content` block list names. Rows in `shortcuts`, `links`,
+	`number_cards` and `charts` supply the data; `content` decides what appears.
+	v0.16.0 wrote the child rows and then set `content` to `[]`, which is a page
+	with a title and nothing else — exactly what Tim saw.
+
+	Best-effort throughout, because the Workspace doctype has been rewritten twice
+	across the Frappe versions this app supports: every field and every child table
+	is written only where the site has it, and a failure is reported rather than
+	raised. The Kanban board works without any of this.
 	"""
 	if not compat.doctype_exists(WORKSPACE):
 		report["workspace_note"] = "this site has no Workspace doctype, so there is no landing page to build"
 		return
 	try:
-		if frappe.db.exists(WORKSPACE, DISPATCH_BOARD_NAME):
+		existing = frappe.db.exists(WORKSPACE, DISPATCH_BOARD_NAME)
+		if existing and not _workspace_is_empty(DISPATCH_BOARD_NAME):
+			# Somebody arranged this page. Leave it exactly as they left it.
 			report["workspace_existed"] = True
 			return
-		doc = frappe.new_doc(WORKSPACE)
+
+		doc = frappe.get_doc(WORKSPACE, DISPATCH_BOARD_NAME) if existing else frappe.new_doc(WORKSPACE)
+		if existing:
+			# Repairing a page v0.16.0 shipped blank. Clear the child tables first
+			# so a partial set from the bad release cannot be doubled.
+			for fieldname in ("shortcuts", "links", "number_cards", "charts"):
+				if compat.has_field(WORKSPACE, fieldname):
+					doc.set(fieldname, [])
+		else:
+			doc.name = DISPATCH_BOARD_NAME
+			doc.flags.name_set = True
+
 		for fieldname, value in (
 			("title", DISPATCH_BOARD_NAME),
 			("label", DISPATCH_BOARD_NAME),
-			("name", DISPATCH_BOARD_NAME),
 			("module", MODULE),
 			("icon", "activity"),
 			("public", 1),
 			("is_hidden", 0),
-			("content", json.dumps([])),
+			("sequence_id", 20.0),
 		):
-			if fieldname == "name" or compat.has_field(WORKSPACE, fieldname):
+			if compat.has_field(WORKSPACE, fieldname):
 				doc.set(fieldname, value)
-		if compat.has_field(WORKSPACE, "shortcuts"):
-			for label, link_to in WORKSPACE_SHORTCUTS:
-				if compat.doctype_exists(link_to):
-					doc.append("shortcuts", {"label": label, "type": "DocType", "link_to": link_to})
-		doc.insert(ignore_permissions=True)
-		report["workspace_created"] = True
+
+		content = _workspace_content(doc)
+		if compat.has_field(WORKSPACE, "content"):
+			doc.content = json.dumps(content)
+
+		doc.save(ignore_permissions=True) if existing else doc.insert(ignore_permissions=True)
+		report["workspace_filled" if existing else "workspace_created"] = True
+		report["workspace_blocks"] = len(content)
 	except Exception as exc:
-		report["failed"].append({"name": f"{DISPATCH_BOARD_NAME} workspace", "reason": f"{type(exc).__name__}: {exc}"})
+		report["failed"].append(
+			{"name": f"{DISPATCH_BOARD_NAME} workspace", "reason": f"{type(exc).__name__}: {exc}"}
+		)
+
+
+def _workspace_is_empty(name: str) -> bool:
+	"""Has anybody put anything on this page?
+
+	An empty `content` is what v0.16.0 wrote and is the thing worth repairing. A
+	page with blocks on it is somebody's arrangement and is never touched.
+	"""
+	try:
+		raw = frappe.db.get_value(WORKSPACE, name, "content")
+	except Exception:
+		return False
+	try:
+		return not (json.loads(raw) if raw else [])
+	except Exception:
+		return False
+
+
+def _workspace_content(doc) -> list:
+	"""Build the page, appending each child row as the block that renders it.
+
+	The two have to be written together — a shortcut row with no `shortcut` block
+	is invisible, and a block naming a shortcut row that does not exist is a
+	rendering error — so this does both in one pass and nothing can drift.
+	"""
+	content = []
+
+	def block(kind: str, key: str, value: str, col: int) -> None:
+		content.append({"id": _slug(f"{kind}-{value}")[:32], "type": kind, "data": {key: value, "col": col}})
+
+	def header(text: str) -> None:
+		content.append(
+			{
+				"id": _slug(f"header-{text}")[:32],
+				"type": "header",
+				"data": {"text": f'<span class="h4"><b>{text}</b></span>', "col": 12},
+			}
+		)
+
+	has_shortcuts = compat.has_field(WORKSPACE, "shortcuts")
+	if has_shortcuts:
+		header("Dispatch")
+		for spec in DISPATCH_SHORTCUTS:
+			if not compat.doctype_exists(spec["link_to"]):
+				continue
+			row = {"label": spec["label"], "link_to": spec["link_to"]}
+			kind = _select_value("Workspace Shortcut", "type", spec.get("type") or "DocType")
+			if kind:
+				row["type"] = kind
+			view = _select_value("Workspace Shortcut", "doc_view", spec.get("doc_view") or "")
+			if view and compat.has_field("Workspace Shortcut", "doc_view"):
+				row["doc_view"] = view
+			if spec.get("kanban_board") and compat.has_field("Workspace Shortcut", "kanban_board"):
+				if frappe.db.exists(KANBAN, spec["kanban_board"]):
+					row["kanban_board"] = spec["kanban_board"]
+				elif view == "Kanban":
+					# A Kanban shortcut with no board behind it is a dead link.
+					continue
+			doc.append("shortcuts", row)
+			block("shortcut", "shortcut_name", spec["label"], 3)
+
+	if compat.has_field(WORKSPACE, "number_cards") and compat.doctype_exists(CARD):
+		header("How the board stands")
+		for spec in DISPATCH_NUMBER_CARDS:
+			if not frappe.db.exists(CARD, spec["label"]):
+				continue
+			doc.append("number_cards", {"number_card_name": spec["label"], "label": spec["label"]})
+			block("number_card", "number_card_name", spec["label"], 4)
+
+	if compat.has_field(WORKSPACE, "charts") and compat.doctype_exists(CHART):
+		for spec in DISPATCH_CHARTS:
+			if not frappe.db.exists(CHART, spec["chart_name"]):
+				continue
+			doc.append("charts", {"chart_name": spec["chart_name"], "label": spec["chart_name"]})
+			block("chart", "chart_name", spec["chart_name"], 6)
+
+	if compat.has_field(WORKSPACE, "links"):
+		for card_name, links in DISPATCH_LINK_CARDS:
+			present = [link for link in links if compat.doctype_exists(link)]
+			if not present:
+				continue
+			break_row = {"label": card_name, "link_count": len(present)}
+			kind = _select_value("Workspace Link", "type", "Card Break")
+			if kind:
+				break_row["type"] = kind
+			doc.append("links", break_row)
+			for link in present:
+				link_row = {"label": link, "link_to": link}
+				kind = _select_value("Workspace Link", "type", "Link")
+				if kind:
+					link_row["type"] = kind
+				link_type = _select_value("Workspace Link", "link_type", "DocType")
+				if link_type:
+					link_row["link_type"] = link_type
+				doc.append("links", link_row)
+			block("card", "card_name", card_name, 4)
+
+	return content
 
 
 def available() -> bool:

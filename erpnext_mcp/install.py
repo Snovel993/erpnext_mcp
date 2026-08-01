@@ -102,23 +102,38 @@ def _compliance_fields() -> None:
 
 def _command_center() -> None:
 	"""Build or repair the Compliance Command Center dashboard."""
-	try:
-		dashboard.install_command_center()
-	except Exception as exc:  # pragma: no cover - the installer already swallows its own
-		print(
-			f"erpnext_mcp: the Compliance Command Center was not built — "
-			f"{type(exc).__name__}: {exc}"
-		)
+	_report_failures("the Compliance Command Center", dashboard.install_command_center)
 
 
 def _dispatch_board() -> None:
-	"""Build or repair the v0.16.0 Farm Task Dispatch Kanban board."""
+	"""Build or repair the Farm Task Dispatch Kanban board and its workspace."""
+	_report_failures("the Farm Task Dispatch board", dashboard.install_dispatch_board)
+
+
+def _report_failures(what: str, builder) -> None:
+	"""Run a dashboard builder and PRINT WHATEVER IT COULD NOT BUILD.
+
+	THIS FUNCTION IS THE v0.16.1 HOTFIX, and it matters more than either of the
+	two bugs it was written for.
+
+	Both builders catch their own exceptions into `report["failed"]` and return a
+	report — which is right, because an exception here aborts `bench migrate` for
+	the whole bench. But v0.16.0 called them and threw the report away. So when
+	the Kanban Board insert failed on a real site the migration printed nothing,
+	exited zero, and the board did not exist; the first anybody knew was an
+	operator opening the documented route a week later and being offered a "New
+	Kanban Board" dialog.
+
+	A builder that cannot raise AND is never read cannot report anything at all.
+	Not raising was the correct half; this is the half that was missing.
+	"""
 	try:
-		dashboard.install_dispatch_board()
-	except Exception as exc:  # pragma: no cover - the installer already swallows its own
-		print(
-			f"erpnext_mcp: the Farm Task Dispatch board was not built — {type(exc).__name__}: {exc}"
-		)
+		report = builder()
+	except Exception as exc:  # pragma: no cover - the builder already swallows its own
+		print(f"erpnext_mcp: {what} was not built — {type(exc).__name__}: {exc}")
+		return
+	for failure in (report or {}).get("failed") or ():
+		print(f"erpnext_mcp: could not build {failure.get('name')} — {failure.get('reason')}")
 
 
 #: Doctypes whose contents are records an operator would want back, and what

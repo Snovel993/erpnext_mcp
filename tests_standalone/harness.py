@@ -710,8 +710,34 @@ ERPNEXT_SCHEMA = {
 		"columns",
 	],
 	"Kanban Board Column": ["name", "column_name", "indicator", "status", "order"],
-	"Workspace": ["name", "title", "label", "module", "icon", "public", "is_hidden", "content", "shortcuts"],
-	"Workspace Shortcut": ["name", "label", "type", "link_to"],
+	"Workspace": [
+		"name",
+		"title",
+		"label",
+		"module",
+		"icon",
+		"public",
+		"is_hidden",
+		"content",
+		"sequence_id",
+		"shortcuts",
+		"links",
+		"number_cards",
+		"charts",
+	],
+	"Workspace Shortcut": ["name", "label", "type", "link_to", "doc_view", "kanban_board", "color"],
+	"Workspace Link": [
+		"name",
+		"type",
+		"label",
+		"link_type",
+		"link_to",
+		"link_count",
+		"onboard",
+		"hidden",
+	],
+	"Workspace Number Card": ["name", "number_card_name", "label"],
+	"Workspace Chart": ["name", "chart_name", "label"],
 	"Client Script": [
 		"name",
 		"dt",
@@ -971,6 +997,26 @@ ERPNEXT_FIELD_OPTIONS = {
 		]
 	),
 	("Account", "root_type"): "Asset\nLiability\nIncome\nExpense\nEquity",
+	# ── v0.16.1 ─────────────────────────────────────────────────────────────
+	# THE OPTIONS THAT COST A RELEASE. v0.16.0 wrote `indicator="gray"` at this
+	# field and the Kanban Board insert threw on a site where the options are
+	# capitalised — silently, because `install.py` discarded the report. The
+	# double could not catch it, because it did not police Select options at all.
+	#
+	# The casing here is DELIBERATELY NOT the casing v0.16.0 assumed, and this
+	# fixture does not claim to know what any given Frappe version ships. That is
+	# the whole point: `dashboard._select_value` now reads the options off the
+	# site and matches case-insensitively, and `TheIndicatorPaletteIsNotAssumed`
+	# re-declares this field three different ways to prove the board still
+	# installs against all of them.
+	("Kanban Board Column", "indicator"): "Blue\nOrange\nRed\nGreen\nGray\nPurple\nYellow\nPink",
+	("Kanban Board Column", "status"): "Active\nArchived",
+	("Workspace Shortcut", "type"): "DocType\nReport\nPage\nDashboard\nURL",
+	("Workspace Shortcut", "doc_view"): (
+		"\nList\nReport Builder\nDashboard\nTree\nNew\nCalendar\nKanban\nImage\nInbox\nGantt"
+	),
+	("Workspace Link", "type"): "Card Break\nLink",
+	("Workspace Link", "link_type"): "DocType\nPage\nReport\nDashboard",
 	# v15's Journal Entry voucher types. `set_opening_balance` sets "Opening
 	# Entry" only when the site's own meta offers it, so a double with no options
 	# would leave that branch — the one that keeps opening balances out of the
@@ -1162,6 +1208,9 @@ CHILD_TABLES = {
 	("Dashboard", "cards"): "Number Card Link",
 	("Kanban Board", "columns"): "Kanban Board Column",
 	("Workspace", "shortcuts"): "Workspace Shortcut",
+	("Workspace", "links"): "Workspace Link",
+	("Workspace", "number_cards"): "Workspace Number Card",
+	("Workspace", "charts"): "Workspace Chart",
 	("Farm Task Assignment", "evidence_files"): "Farm Task Evidence",
 	("Housing Inspection", "photos"): "Farm Task Evidence",
 	("Detector Test", "photos"): "Farm Task Evidence",
@@ -1183,6 +1232,9 @@ REHYDRATED_CHILD_FIELDS = (
 	"corrective_actions_required",
 	"columns",
 	"shortcuts",
+	"links",
+	"number_cards",
+	"charts",
 	"evidence_files",
 	"photos",
 	"sample_photos",
@@ -1221,6 +1273,7 @@ class Document(FrappeDict):
 		self._run("validate")
 		self._run("before_save")
 		self._validate_links()
+		self._validate_selects()
 		self._name_children()
 		STORE.put(self)
 		self._run("after_insert")
@@ -1237,6 +1290,7 @@ class Document(FrappeDict):
 		self._run("validate")
 		self._run("before_save")
 		self._validate_links()
+		self._validate_selects()
 		self._name_children()
 		STORE.put(self)
 		self._run("on_update")
@@ -1326,6 +1380,56 @@ class Document(FrappeDict):
 				continue
 			for row in self.get(fieldname) or []:
 				self._validate_links_on(child_doctype, row)
+
+	def _validate_selects(self):
+		"""Refuse a Select value the field does not offer, as Frappe does.
+
+		THIS IS THE v0.16.1 GAP, AND IT COST A RELEASE. The double validated Links
+		faithfully and did not look at Selects at all, so v0.16.0 could write
+		`indicator="gray"` into a `Kanban Board Column` whose real options are
+		capitalised, pass 2864 tests, and then throw on `doc.insert()` during
+		`bench migrate` on Tim's site. The exception was swallowed by an installer
+		that discarded its own report, so the migration reported success and the
+		board did not exist.
+
+		Both halves of that failure are now closed — the installer prints what it
+		could not build, and this refuses the value that broke it — but this is the
+		half that makes the *class* of bug catchable rather than the instance.
+
+		Faithful to Frappe in the three ways that matter: an empty value is always
+		allowed (it means "not set"), a field with no options at all is not
+		policed (that is a customised or dynamically-populated Select, and Frappe
+		does not police those either), and child rows are checked as well as the
+		parent — which is where `indicator` actually lives.
+		"""
+		if self.flags.get("ignore_validate"):
+			return
+		self._validate_selects_on(self.doctype, self)
+		for (parent, fieldname), child_doctype in CHILD_TABLES.items():
+			if parent != self.doctype:
+				continue
+			for row in self.get(fieldname) or []:
+				self._validate_selects_on(child_doctype, row)
+
+	def _validate_selects_on(self, doctype: str, doc):
+		meta = META.get(doctype)
+		if meta is None:
+			return
+		for field in meta.fields:
+			if field.get("fieldtype") != "Select":
+				continue
+			options = str(field.get("options") or "").split("\n")
+			if not [line for line in options if line.strip()]:
+				# No options: a Select whose choices the site fills in at runtime.
+				continue
+			value = doc.get(field["fieldname"])
+			if value in (None, ""):
+				continue
+			if str(value) not in options:
+				raise ValidationError(
+					f"{value!r} is not a valid value for {doctype}.{field['fieldname']}. "
+					f"Options are: {', '.join(line for line in options if line.strip())}"
+				)
 
 	def _validate_links_on(self, doctype: str, doc):
 		meta = META.get(doctype)

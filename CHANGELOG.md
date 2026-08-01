@@ -3,6 +3,108 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.16.1 — 2026-08-01
+
+**Hotfix. v0.16.0's Farm Task Dispatch Kanban board was never created on a real
+site, and the workspace beside it rendered empty.** The data half of v0.16.0 was
+fine — 54 alerts became 54 tasks and `list_dispatch_board` returned them all —
+but `/app/farm-task/view/kanban/Farm Task Dispatch` offered a "New Kanban Board"
+dialog, because no such record existed.
+
+Three defects, and the first is why nobody saw the other two.
+
+### 1. The installer could not raise, and nobody read it either
+
+`dashboard.install_dispatch_board()` catches its own exceptions into
+`report["failed"]` and returns — which is correct, because an exception inside
+`after_migrate` aborts `bench migrate` for the whole bench. But `install.py`
+called it and **threw the report away**. So the Kanban insert failed, the
+migration printed nothing, `bench migrate` exited zero, and the first anybody
+knew was an operator opening the documented route a week later.
+
+Not raising was the right half. This is the half that was missing:
+`_report_failures` now prints every entry in `failed`, for the Command Center and
+the dispatch board alike, so the next installer that cannot build something says
+so while somebody is still watching the migrate scroll past.
+
+**A builder that cannot raise AND is never read cannot report anything at all.**
+
+### 2. It hardcoded another app's Select options
+
+`Kanban Board Column.indicator` is Frappe's field, not this app's, and its
+palette has been spelled differently across the versions erpnext_mcp supports.
+v0.16.0 wrote `indicator="gray"`; the site's options were capitalised;
+`doc.insert()` threw; defect 1 did the rest.
+
+The fix is not a better guess — it is **not guessing**. `dashboard._select_value`
+reads the options off the site and matches case-insensitively, returns them in
+the site's own casing, and **drops the value entirely when nothing matches**: a
+column with no colour is cosmetic, a board that does not exist is not. The rule
+now generalises across the module — this app validates its OWN Selects against
+its own JSON, and asks the site about everybody else's.
+
+Two more belts on the same braces:
+
+- **The columns are retried without themselves.** They are the only part of the
+  document made of another app's Select values, so they are the only part a
+  Frappe this app did not anticipate can refuse. A board with no columns still
+  works — Frappe builds them from the distinct values of `state` on first view.
+  Degrade; do not vanish. The retry runs inside a savepoint so a failed attempt
+  cannot poison the migration's transaction.
+- **The docname is forced.** `/app/farm-task/view/kanban/Farm Task Dispatch` is
+  documented in three places, and a board Frappe autonamed something else is a
+  board nobody finds. Where a version ignores the flag, the real name is reported
+  rather than assumed.
+
+### 3. The workspace was created empty
+
+A second, independent bug from the same misunderstanding. In a modern Frappe a
+Workspace renders **only what its `content` block list names**: the `shortcuts`,
+`links`, `number_cards` and `charts` child tables supply the data, and `content`
+decides what appears. v0.16.0 wrote the child rows and then set `content` to
+`[]` — a page with a title and nothing else.
+
+`/app/farm-task-dispatch` now carries:
+
+- **a quick-add shortcut** (`Raise a Task`, a `doc_view: New` shortcut), the
+  dispatch board, all tasks, assignments and the compliance calendar;
+- **five Number Cards** — tasks in the pool, open Critical, awaiting review, and
+  the raised-from-alerts / raised-by-hand **pair**. A Number Card counts one
+  collection and cannot divide two, so the fraction of the board that came from
+  the compliance calendar is shown as two counts side by side rather than as a
+  percentage the card would have to invent;
+- **two charts** — tasks by type and by urgency, both scoped to open work;
+- **three link cards** — the compliance records a completion writes, the dispatch
+  registers, and the camp.
+
+Content and child rows are written in one pass, so a shortcut with no block (an
+invisible row) or a block naming a row that is not there (a rendering error)
+cannot drift apart.
+
+**The upgrade path is handled.** A site that already took v0.16.0 has the blank
+page, and a plain existence check would have skipped it forever — so a workspace
+that exists AND is empty is now filled in, while one with anything on it is left
+exactly as somebody arranged it. An empty page is not a choice; an arranged one
+is.
+
+### What let it through: the test double did not police Select options
+
+`tests_standalone/harness.py` validated Links faithfully — that fidelity is why
+v0.12.1 exists — and did not look at Selects at all. So `indicator="gray"` sailed
+through 2864 tests and threw on a real bench.
+
+`Document._validate_selects` now refuses a value a field does not offer, on the
+parent and on child rows, exactly as Frappe does — empty values allowed, fields
+with no options not policed. `TheIndicatorPaletteIsNotAssumed` re-declares the
+field three incompatible ways (capitalised, lowercase, hex codes) and requires a
+working board from all three; `MigrateSaysWhatItCouldNotBuild` captures stdout
+and asserts a failed build is named on it.
+
+**Full suite: 2888 pass, 0 fail** (24 new). No tool signature, doctype schema or
+kill switch changed — this release is the installer and the harness only.
+
+---
+
 ## 0.16.0 — 2026-07-31
 
 **Sprint 8: the operational half of the compliance framework.** Twenty-three new
