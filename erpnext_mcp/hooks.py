@@ -43,13 +43,29 @@ only this app's own Compliance Alert table — so the promise about not changing
 a site behaves still holds. It also never raises.
 
 IT IS THE CLOCK SERVING KAIROS, AND THAT IS THE WHOLE POINT OF PUTTING IT ON A
-SCHEDULE. The sweep runs nightly and DECIDES NOTHING. Every rule it runs asks
-whether a condition is true right now — is this certificate genuinely inside the
-lead time its issuing body takes, is this block genuinely in spray rotation with
-untested water — and an alert fires on that state rather than on the date the
-sweep happened to run. Chronos gathers; kairos acts. A rule that fired because it
-was the first of the month would be the other way round, and would be ignored by
+SCHEDULE. The sweep DECIDES NOTHING. Every rule it runs asks whether a condition
+is true right now — is this certificate genuinely inside the lead time its
+issuing body takes, is this block genuinely in spray rotation with untested
+water — and an alert fires on that state rather than on the date the sweep
+happened to run. Chronos gathers; kairos acts. A rule that fired because it was
+the first of the month would be the other way round, and would be ignored by
 March.
+
+v0.17.1 MOVED THE SWEEP FROM NIGHTLY TO HOURLY, and the reason is the phones.
+The sweep is also what makes an alert GO AWAY: `complete_farm_task` writes a
+compliance record, the register moves forward, and the next sweep notices the
+condition has stopped being true. That is the only honest way for an alert to
+clear — nothing here dismisses one directly. Nightly meant a worker who walked a
+cabin at eight in the morning saw the alert asking them to walk it for the rest
+of the day, on the phone, having just done the work. Eleven rules over a farm's
+registers is a cheap pass, and running it hourly costs about a second a day of
+somebody's worker in exchange for a calendar that tells the truth by lunchtime.
+
+THE SWEEP IS SAFE TO RUN AT ANY CADENCE because it is a full reconciliation
+rather than an increment: every run rebuilds the whole picture and every alert is
+keyed, so running it twice in a minute produces exactly what running it once
+does. That property is what makes the cadence a tuning decision rather than a
+correctness one.
 """
 
 app_name = "erpnext_mcp"
@@ -78,9 +94,11 @@ after_migrate = "erpnext_mcp.install.after_migrate"
 #: hands each entry to `frappe.get_attr` exactly as `jinja` does, so the colon
 #: that took a site down in v0.14.0 would take it down from here too.
 scheduler_events = {
+	"hourly": [
+		"erpnext_mcp.alerts.sweep",
+	],
 	"daily": [
 		"erpnext_mcp.tools.uploads.collect_expired_sessions",
-		"erpnext_mcp.alerts.sweep",
 	],
 }
 

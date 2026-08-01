@@ -263,27 +263,43 @@ class TheJinjaMethod(unittest.TestCase):
 
 
 class TheScheduledJobs(unittest.TestCase):
-	def test_every_daily_job_resolves(self):
-		self.assertEqual(list(hooks.scheduler_events), ["daily"])
-		for path in hooks.scheduler_events["daily"]:
-			with self.subTest(path=path):
-				self.assertTrue(callable(resolve(path)))
+	def test_every_scheduled_job_resolves(self):
+		self.assertEqual(sorted(hooks.scheduler_events), ["daily", "hourly"])
+		for interval, paths in hooks.scheduler_events.items():
+			for path in paths:
+				with self.subTest(interval=interval, path=path):
+					self.assertTrue(callable(resolve(path)))
 
 	def test_they_are_these_two_and_nothing_else(self):
 		"""Two jobs, and each writes only this app's own doctypes.
 
-		Asserted as an exact list rather than a membership check, so a third job
-		fails here and has to be argued for. Every scheduled job is code that runs
-		on somebody's site at three in the morning with nobody watching, which is
-		the same reason `KNOWN_HOOKS` refuses an unexamined hook key.
+		Asserted as an exact mapping rather than a membership check, so a third
+		job fails here and has to be argued for. Every scheduled job is code that
+		runs on somebody's site with nobody watching, which is the same reason
+		`KNOWN_HOOKS` refuses an unexamined hook key.
+
+		The alert sweep moved to HOURLY in v0.17.1 — see the hooks.py docstring.
+		The short version: the sweep is what makes a completed task's alert go
+		away, and nightly meant a worker saw the phone asking them to walk a cabin
+		they had already walked, all day.
 		"""
 		self.assertEqual(
-			hooks.scheduler_events["daily"],
-			[
-				"erpnext_mcp.tools.uploads.collect_expired_sessions",
-				"erpnext_mcp.alerts.sweep",
-			],
+			hooks.scheduler_events,
+			{
+				"hourly": ["erpnext_mcp.alerts.sweep"],
+				"daily": ["erpnext_mcp.tools.uploads.collect_expired_sessions"],
+			},
 		)
+
+	def test_the_sweep_is_a_full_reconciliation_so_the_cadence_is_only_tuning(self):
+		"""Running it twice must produce what running it once does — that is what
+		makes hourly a cost decision rather than a correctness one."""
+		from erpnext_mcp import alerts
+
+		first = alerts.sweep()
+		second = alerts.sweep()
+		self.assertEqual(first, 0)
+		self.assertEqual(second, 0)
 
 	def test_the_upload_sweeper_never_raises(self):
 		"""It runs on the site's scheduler beside everybody else's jobs."""
