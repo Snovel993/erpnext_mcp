@@ -513,6 +513,11 @@ def create_mobile_user(args: dict) -> ToolResult:
 		data["api_key"] = token["api_key"]
 		data["api_secret"] = token["api_secret"]
 		data["auth_header"] = f"Authorization: token {token['api_key']}:{token['api_secret']}"
+		# v0.17.2. THE SAME PAIR, UNDER A NAME NO PROXY HAS AN OPINION ABOUT. The
+		# Tailscale serve/funnel step removes `Authorization`, so a phone sending
+		# only the line above arrives as Guest and gets the Desk's `/me` page.
+		# The app sends BOTH on every call; see `api/fallback_auth.py`.
+		data["farmops_auth_header"] = f"X-FarmOps-Token: {token['api_key']}:{token['api_secret']}"
 		data["secret_note"] = (
 			"THIS IS THE ONLY TIME THE SECRET IS READABLE IN A RESULT. Frappe stores it "
 			"encrypted; nothing reads it back except generate_mobile_login_qr with "
@@ -830,6 +835,9 @@ def generate_api_token(args: dict) -> ToolResult:
 			"api_key": token["api_key"],
 			"api_secret": token["api_secret"],
 			"auth_header": f"Authorization: token {token['api_key']}:{token['api_secret']}",
+			#: v0.17.2 — the same pair for the mobile transport, which reaches
+			#: Frappe through a proxy that eats `Authorization`.
+			"farmops_auth_header": f"X-FarmOps-Token: {token['api_key']}:{token['api_secret']}",
 			"endpoint": f"{_endpoint_url(args)}/api/method/erpnext_mcp.mcp.handle",
 			"replaced_previous_token": replaced,
 			"token_review_due": review_due,
@@ -1164,11 +1172,15 @@ def generate_mobile_login_qr(args: dict) -> ToolResult:
 				)
 			),
 			"app_note": (
-				"The app should store `api_key` and `api_secret` in the Keychain and send BOTH "
-				"headers on every call: `Authorization: token <api_key>:<api_secret>` for "
-				"identity and `X-MCP-Token` for entry. `expires_at` is the deadline for "
-				"ENROLLING, not for the credential — once stored, the token works until it is "
-				"revoked."
+				"The app stores `api_key` and `api_secret` in the Keychain and sends the pair "
+				"TWICE on every call: `Authorization: token <api_key>:<api_secret>` and "
+				"`X-FarmOps-Token: <api_key>:<api_secret>`. The second is not decoration — "
+				"v0.17.2: the Tailscale serve/funnel proxy removes `Authorization`, so a phone "
+				"sending only the first arrives as Guest and gets the Desk's /me page instead "
+				"of JSON. A client that cannot set custom headers may send the same pair as "
+				'`{"_auth": {"api_key": …, "api_secret": …}}` in the POST body. `expires_at` is '
+				"the deadline for ENROLLING, not for the credential — once stored, the token "
+				"works until it is revoked."
 			),
 		},
 		summary=(

@@ -50,6 +50,16 @@ the seven checks above. `docs/security.md` and `RELEASES/v0.17.1.md` say so
 plainly; the Tailscale Funnel path list is deliberately narrow for the same
 reason.
 
+…AND THE FUNNEL TURNED OUT TO BE EATING THE CREDENTIAL. v0.17.2. Frappe's own
+token auth is the first item in that sentence, and it never ran: the Tailscale
+`serve`/`funnel` proxy removes the `Authorization` header, so every call arrived
+as Guest and was refused by `is_whitelisted` before the method — HTTP 200, the
+Desk's `/me` page, no JSON. `fallback_auth.py` re-establishes the same identity
+from `X-FarmOps-Token` or from `_auth` in the POST body, using Frappe's own
+api-key scheme, as an `auth_hooks` entry (which is where it has to be: the
+refusal happens in the framework, not in this package). The seven checks are
+unchanged and run on whichever door the caller came in through.
+
 ────────────────────────────────────────────────────────────────────────────
 THE SURFACE IS A CLOSED LIST OF ELEVEN METHODS
 ────────────────────────────────────────────────────────────────────────────

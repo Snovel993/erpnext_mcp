@@ -21,6 +21,14 @@ short version: compliance woven into the operational record is defensible under
 audit and a shadow log beside it is not, and you cannot weave anything into a
 doctype you refuse to touch. `before_uninstall` names every column that goes.
 
+v0.17.2 ADDS THE ONE REQUEST-LIFECYCLE HOOK, and it is the other exception.
+`auth_hooks` runs on every request to the site, which is as intrusive as this
+file gets. It buys the only thing that makes the mobile app work through a proxy
+that eats `Authorization` headers, and it is bounded to the point of dullness:
+it acts on `/api/method/erpnext_mcp.api.*` and nothing else, it never overrides
+an identity Frappe already established, it grants no permission of any kind, and
+it cannot raise. See the note above the declaration, and `api/fallback_auth.py`.
+
 THERE ARE EXACTLY FOUR SCHEDULED JOBS, and the count is in this docstring
 because it is a number somebody should have to change on purpose. Every one of
 them runs on somebody's site with nobody watching, so each has had to clear the
@@ -215,3 +223,30 @@ has_permission = {
 	"Housing Assignment": "erpnext_mcp.permissions.housing_assignment_has_permission",
 	"Family": "erpnext_mcp.permissions.family_has_permission",
 }
+
+#: THE ONLY REQUEST-LIFECYCLE HOOK THIS APP INSTALLS. v0.17.2, and it is here
+#: because the Tailscale `serve`/`funnel` proxy removes the `Authorization`
+#: header — proven three ways on 2026-08-01, including from inside the tailnet,
+#: so it is the proxy step and not the public edge. Every Farm Ops call arrived
+#: as Guest and Frappe rendered the Desk's `/me` page at it.
+#:
+#: IT COULD NOT HAVE BEEN DONE IN THE ENDPOINT. `is_whitelisted` refuses a Guest
+#: BEFORE the whitelisted method is dispatched, so a fallback check written
+#: inside `api/guard.py` would sit behind a door that never opens. `auth_hooks`
+#: is Frappe's own extension point for exactly this: `validate_auth()` runs it
+#: after the session is established and before the handler decides whether the
+#: caller may reach the method, which is the same window Frappe settles identity
+#: in for `Authorization: token`.
+#:
+#: WHAT IT DOES ON A REQUEST THAT IS NOT ONE OF THIS APP'S ELEVEN MOBILE PATHS:
+#: reads one attribute and returns. It cannot raise — `validate_auth` runs on
+#: every request to the site, so an exception here would be an exception on
+#: every Desk page of every installed app rather than a failure of one endpoint.
+#: It never overrides an identity Frappe already established, and it grants
+#: nothing: `guard.endpoint` still runs all seven of its checks on the user it
+#: resolves. See `api/fallback_auth.py`, which argues the whole thing.
+#:
+#: A BARE DOTTED PATH IN A LIST, which is the shape `frappe.get_hooks` returns
+#: and `validate_auth_via_hooks` iterates. Same `frappe.get_attr` rule as every
+#: other path in this file: no colon, no name prefix.
+auth_hooks = ["erpnext_mcp.api.fallback_auth.authenticate"]

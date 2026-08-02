@@ -15,6 +15,15 @@ SEVEN CHECKS, IN THIS ORDER, ALL OF THEM ON EVERY CALL:
 
   2. **A named human.** Guest is refused before anything reads a row.
 
+     v0.17.2 ADDED A SECOND DOOR INTO THIS CHECK AND NOT A WAY ROUND IT. The
+     Tailscale `serve`/`funnel` proxy removes the `Authorization` header, so a
+     phone that presented a perfectly good credential arrived as Guest and got
+     the Desk's `/me` page. `fallback_auth.resolve()` re-establishes the same
+     identity from `X-FarmOps-Token` or from `_auth` in the POST body, using
+     Frappe's own api-key scheme, and then EVERY CHECK IN THIS LIST STILL RUNS
+     on the user it established. A phone that came in through the fallback and
+     a phone whose header survived are the same principal with the same gates.
+
   3. **The role gate.** One of `FARM_OPS_ROLES`. Not "any authenticated user" —
      a Family Member and an Advisor are real roles on this site with real
      logins, and neither has any business on a dispatch board.
@@ -63,6 +72,7 @@ from .. import audit, security, settings
 from .. import roles as role_lib
 from ..compat import doctype_exists
 from ..errors import ToolError
+from . import fallback_auth
 
 GRANT = "Mobile Access Grant"
 
@@ -432,7 +442,6 @@ def endpoint(method: str, limit: int = READ_LIMIT, mutating: bool = False):
 		@functools.wraps(function)
 		def wrapper(*args, **kwargs):
 			ip = security.caller_ip()
-			user = str(getattr(frappe.session, "user", "") or "")
 
 			# AN ACCOUNT THAT CAN NAME SOMEBODY ELSE IN A REQUEST BODY IS NOT
 			# SCOPED TO ANYTHING. `user` is in every wrapped function's signature
@@ -443,6 +452,23 @@ def endpoint(method: str, limit: int = READ_LIMIT, mutating: bool = False):
 			# line prevents is loud; dropping the key is what also makes it
 			# impossible.
 			kwargs.pop("user", None)
+			# `_auth` is envelope, not argument. Frappe's own filter drops it
+			# already — it matches no signature — so this is belt to that brace,
+			# and it also keeps a credential out of the audit row's arguments on
+			# any path that reaches these functions in process.
+			kwargs.pop(fallback_auth.BODY_KEY, None)
+
+			# v0.17.2. THE HEADER MAY NOT HAVE SURVIVED THE PROXY — see
+			# `fallback_auth`, which sets out what was proven and how. This runs
+			# BEFORE the rate limit on purpose: the limit keys on the caller, and
+			# forty phones arriving through one funnel address would otherwise
+			# share a single Guest bucket and throttle each other off the site.
+			# It is a no-op when Frappe already authenticated somebody, which is
+			# what makes `Authorization: token` the winner where it survives.
+			user = str(getattr(frappe.session, "user", "") or "")
+			if not user or user == "Guest":
+				fallback_auth.resolve()
+				user = str(getattr(frappe.session, "user", "") or "")
 
 			try:
 				_require_enabled()
@@ -504,8 +530,32 @@ def endpoint(method: str, limit: int = READ_LIMIT, mutating: bool = False):
 
 
 def _record(method, arguments, status, outcome, user, ip, exc) -> None:
-	"""One MCP Action Log row. Never raises; see `audit.record`."""
+	"""One MCP Action Log row. Never raises; see `audit.record`.
+
+	v0.17.2 TAGS THE ROW WITH HOW THE CALLER GOT IN — `fallback_auth: header` or
+	`fallback_auth: body` — and says nothing at all when Frappe's own auth
+	handled it. That is what makes "which door are the phones actually using"
+	answerable from the Desk: filter MCP Action Log on `mobile:` and read the
+	summaries. An untagged row is a request whose `Authorization` header
+	survived the proxy.
+
+	THE TAG GOES ON THE ROW THIS FUNCTION ALREADY WRITES RATHER THAN INTO A ROW
+	OF ITS OWN, and the v0.17.2 brief asked for a separate Audit Event. The
+	reason for the change is arithmetic. If the proxy strips the header — which
+	is the whole premise of the release — then EVERY mobile call takes the
+	fallback path, so a row per fallback is a row per call: forty phones
+	polling a task list would put tens of thousands of rows a day into "Audit
+	Event", which on this site is the COMPLIANCE register a GlobalGAP auditor
+	reads. That is the same argument the module docstring makes about not
+	putting mobile traffic there at all, and it does not get weaker because the
+	rows would be about authentication. The fact wanted — how iOS got in — is
+	preserved exactly, on a row that was being written anyway, in the log an
+	operator already opens to answer "what did this credential do".
+	"""
 	summary = f"{outcome} — {user or 'Guest'}"
+	door = fallback_auth.source()
+	if door:
+		summary = f"{summary} (fallback_auth: {door})"
 	if exc is not None:
 		summary = f"{summary}: {type(exc).__name__}: {exc}"
 	if status != audit.STATUS_SUCCESS:

@@ -3,6 +3,14 @@
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
+    X-FarmOps-Token: <api_key>:<api_secret>
+
+THE SECOND HEADER IS NOT BELT-AND-BRACES FOR ITS OWN SAKE. v0.17.2: the Tailscale
+`serve`/`funnel` proxy removes `Authorization`, so every call arrived as Guest and
+Frappe rendered `/me` at a phone that had presented a perfectly good credential.
+`api/fallback_auth.py` reads the same pair out of `X-FarmOps-Token`, or out of
+`_auth` in the POST body when even that does not survive, and establishes the
+identical session. Every gate below runs unchanged on whichever door was used.
 
 One function per method, named exactly as
 `FarmOpsKit/Sources/FarmOpsKit/Networking/MobileAPI.swift` names it. THERE IS NO

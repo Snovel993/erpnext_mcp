@@ -55,6 +55,8 @@ from .harness import frappe  # noqa: F401 - installs the frappe double before er
 #:                conflating them is not cosmetic: the resolver iterates a
 #:                path_map's values, so a plain string gets walked one CHARACTER
 #:                at a time and every one of them "fails to resolve".
+#:   "path_list"  a plain list of dotted paths — `auth_hooks`, which is the
+#:                shape `validate_auth_via_hooks` iterates.
 #:   "jinja"      a dict of lists of dotted paths that must carry NO colon.
 #:
 #: A key missing from here fails `test_every_hook_key_is_accounted_for`, which is
@@ -75,6 +77,7 @@ KNOWN_HOOKS = {
 	"jinja": "jinja",
 	"permission_query_conditions": "path_dict",
 	"has_permission": "path_dict",
+	"auth_hooks": "path_list",
 }
 
 #: Hook keys this app must NOT declare, and why each one would be a lie.
@@ -116,6 +119,9 @@ def dotted_paths() -> list:
 		value = getattr(hooks, name, None)
 		if shape == "path":
 			out.append((name, value))
+		elif shape == "path_list":
+			for entry in value or []:
+				out.append((name, entry))
 		elif shape in ("path_map", "jinja"):
 			for group, entries in (value or {}).items():
 				for entry in entries:
