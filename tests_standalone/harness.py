@@ -3206,6 +3206,7 @@ class FakeRequest:
 		method="POST",
 		host="test.localhost",
 		scheme="https",
+		path="/api/method/erpnext_mcp.mcp.handle",
 	):
 		self.headers = {k: v for k, v in (headers or {}).items()}
 		self._body = body if isinstance(body, str) else json.dumps(body)
@@ -3213,6 +3214,12 @@ class FakeRequest:
 		self.method = method
 		self.host = host
 		self.scheme = scheme
+		# v0.17.2. `api/fallback_auth.authenticate` is an `auth_hooks` entry, so
+		# it runs on every request to the site and decides whether this one is
+		# any of its business by reading the path. A double with no path would
+		# make that check untestable — and the check is the only thing keeping
+		# the hook off every Desk page of every other installed app.
+		self.path = path
 
 	def get_data(self, as_text=False):
 		return self._body if as_text else self._body.encode()
@@ -3300,8 +3307,20 @@ class MCPTestCase(unittest.TestCase):
 	def set_token(self, token):
 		STORE.passwords[("ERPNext MCP Settings", "ERPNext MCP Settings", "auth_token")] = token
 
-	def request(self, payload, token=None, headers=None, remote_addr="127.0.0.1", method="POST"):
+	def request(self, payload, token=None, headers=None, remote_addr="127.0.0.1", method="POST", path=None):
 		"""Point frappe.local.request at a fake request and return it."""
+		# A NEW REQUEST IS A NEW `frappe.local`. Real Frappe rebuilds that
+		# namespace for every request, so the per-request scratch this app parks
+		# there cannot survive into the next call — the identity
+		# `security.capture_calling_user` saved, and v0.17.2's record of WHICH
+		# DOOR the caller came in through. A double that carried them forward
+		# would let one call's answer be read in the next call's audit row, which
+		# is a bug that cannot happen on a site and would be invisible here.
+		# `form_dict` goes with them. Real Frappe rebuilds it from THIS request's
+		# body in `make_form_dict`, so one request's arguments cannot be read by
+		# the next — and v0.17.2 reads `_auth` out of it.
+		for scratch in ("erpnext_mcp_calling_user", "erpnext_mcp_fallback_auth_source", "form_dict"):
+			frappe.local.pop(scratch, None)
 		all_headers = {"Content-Type": "application/json"}
 		if token is not False:
 			# X-MCP-Token, not Authorization: Bearer — see security.presented_token
@@ -3314,6 +3333,7 @@ class MCPTestCase(unittest.TestCase):
 			headers=all_headers,
 			remote_addr=remote_addr,
 			method=method,
+			**({"path": path} if path else {}),
 		)
 		frappe.local.request = request
 		# ONLY when a credential was actually presented. A request with no
