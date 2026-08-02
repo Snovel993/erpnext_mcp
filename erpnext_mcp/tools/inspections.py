@@ -266,7 +266,14 @@ def normalise_evidence(raw, label: str = "evidence_files") -> list:
 		if not isinstance(entry, dict):
 			raise ToolError(f"{label}[{index}] must be a string or an object, got {type(entry).__name__}.")
 
-		file_name = str(entry.get("file") or "").strip()
+		# v0.18.2: the Farm Ops iOS app serializes StagedFileRef as
+		# `{"file_token": ..., "file_name": ..., "sha256": ..., "kind": ...}`
+		# per fafo_ios/FarmOpsKit/Sources/FarmOpsKit/Models/CompletionSubmission.swift:29.
+		# `file_token` IS the File docname (finalize_staged_file returns it that way
+		# in api/files.py). Accepting it alongside `file` means the mobile app's
+		# completion doesn't need to rename its serializer, and MCP callers that
+		# have always sent `file` still work. Same for `kind` alongside `evidence_type`.
+		file_name = str(entry.get("file") or entry.get("file_token") or "").strip()
 		file_url = str(entry.get("file_url") or "").strip()
 		if not (file_name or file_url):
 			raise ToolError(f"{label}[{index}] names neither a `file` nor a `file_url`.")
@@ -281,7 +288,17 @@ def normalise_evidence(raw, label: str = "evidence_files") -> list:
 				)
 			file_url = file_url or str(frappe.db.get_value("File", file_name, "file_url") or "")
 
-		evidence_type = str(entry.get("evidence_type") or "").strip() or "Photo"
+		# v0.18.2: `kind` is the iOS spelling — LocalEvidenceFile.kind is a
+		# lowercase enum ("photo", "signature"). Title-case it before the choice
+		# validator sees it; unknown values fall through and are refused by
+		# as_choice with the doctype's own error, which is the same refusal as
+		# an unknown evidence_type sent by any other caller.
+		evidence_type_raw = entry.get("evidence_type") or entry.get("kind") or ""
+		evidence_type = str(evidence_type_raw).strip()
+		if evidence_type and evidence_type[0].islower():
+			evidence_type = evidence_type[:1].upper() + evidence_type[1:]
+		if not evidence_type:
+			evidence_type = "Photo"
 		out.append(
 			{
 				"evidence_type": as_choice(EVIDENCE_CHILD, "evidence_type", evidence_type, "evidence_type"),

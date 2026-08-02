@@ -208,6 +208,11 @@ CHARTS = (
 		"timespan": "Last Year",
 		"timeseries": 1,
 		"type": "Line",
+		# v0.18.3: Dashboard Chart's `filters_json` is mandatory even for a chart with
+		# no filters, and Frappe refuses to insert one where it is None. The three
+		# charts below were the ones after_migrate warned about every deploy —
+		# `"{}"` is the JSON-encoded empty dict Frappe accepts as "no filters".
+		"filters_json": "{}",
 		"why": (
 			"Raised, not open — `first_seen` is never moved forward, so this is the shape of "
 			"how often the operation drifts out of compliance rather than of how fast it "
@@ -223,6 +228,7 @@ CHARTS = (
 		"timespan": "Last Year",
 		"timeseries": 1,
 		"type": "Bar",
+		"filters_json": "{}",
 		"why": (
 			"The renewal calendar as a shape. Three certificates expiring in one month is a "
 			"week of somebody's life, and it is visible a year out."
@@ -236,6 +242,7 @@ CHARTS = (
 		"group_by_based_on": "agency",
 		"type": "Bar",
 		"number_of_groups": 11,
+		"filters_json": "{}",
 		"why": "Which agencies this operation actually deals with, which is rarely the list anybody expects.",
 	},
 )

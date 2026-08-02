@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.18.2 — 2026-08-02
+
+**iOS workflow hotfix — three bugs Tim's iPhone testing surfaced tonight.**
+`claim_task` returned `{"name": null, ...}` because it asked for a `"task"`
+wrapper `dispatch.claim_farm_task` deliberately doesn't produce, so every claim
+crashed the iOS Codable decoder with "Bad value at 'name'". Evidence never
+persisted because the iOS phone spelled its file references `file_token` and
+`kind` and the backend read only `file` and `evidence_type` — so
+`normalise_evidence` refused every completion silently, no Housing Inspection
+was ever written, no photo was ever attached. And three dashboard charts had
+been failing to build every migrate for weeks because their specs didn't set
+`filters_json` and Frappe treats it as mandatory. Full notes:
+[`RELEASES/v0.18.2.md`](RELEASES/v0.18.2.md).
+
+### Fixed
+
+- **`api/mobile.py:claim_task`** — extract task fields out of the flat
+  `dispatch.claim_farm_task` response instead of asking for a `"task"` wrapper
+  it doesn't produce. `start_task` and `get_task` worked because their inner
+  tools DO wrap `data["task"] = task` explicitly; claim was the odd one out.
+- **`tools/inspections.py:normalise_evidence`** — accepts iOS's field spellings
+  alongside the existing ones: `file_token` beside `file`, `kind` beside
+  `evidence_type`. iOS sends lowercase `"photo"` / `"signature"`, which is
+  title-cased before the doctype's Select validator sees it. Fixes evidence
+  attachment for Housing Inspection, Detector Test, Water Test, and Farm Task
+  Assignment (all four use the same `Farm Task Evidence` child doctype).
+- **`dashboard.py:CHARTS`** — three chart specs (Compliance Alerts Raised Over
+  Time, Certificate Expirations Ahead, Regulatory Filings by Agency) now set
+  `filters_json: "{}"`. Migrate no longer warns and the Command Center renders
+  complete.
+
 ## 0.18.1 — 2026-08-02
 
 **The Employee register, because a working credential is not a working task

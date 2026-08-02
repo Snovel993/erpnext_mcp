@@ -247,7 +247,27 @@ def claim_task(user: str, task=None) -> dict:
 	name = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
 
 	result = fieldwork.claim_task_via_mobile({"task": name})
-	return shape.task(result.data.get("task") or {}, result.data.get("assignment") or {})
+	# v0.18.2: dispatch.claim_farm_task spreads task fields at the TOP LEVEL of
+	# data (see dispatch.py `_describe_task(dict(task_doc.as_dict()))` inside
+	# `data={**_describe_task(...), "assignment": ..., ...}`), not nested under
+	# a "task" key like start_farm_task does. shape.task(data.get("task") or {})
+	# passed an empty dict and emitted {"name": null, ...}, which crashed the
+	# iOS Codable decoder with "Bad value at 'name'". Extract the task fields
+	# out of the flat response instead of asking for a "task" wrapper that
+	# isn't there.
+	task_row = {
+		key: value
+		for key, value in result.data.items()
+		if key not in (
+			"assignment",
+			"concurrent_claims",
+			"claims_remaining",
+			"evidence_you_will_need",
+			"me",
+			"next",
+		)
+	}
+	return shape.task(task_row, result.data.get("assignment") or {})
 
 
 # ── 6. start_task ───────────────────────────────────────────────────────────
