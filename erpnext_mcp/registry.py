@@ -51,6 +51,7 @@ from .tools import (
 	compliance,
 	dimensions,
 	dispatch,
+	employee,
 	evidence,
 	farm,
 	fieldwork,
@@ -6945,11 +6946,221 @@ TOOLS = {
 		available=_needs_doctype("Mobile Access Grant"),
 		requires="the Mobile Access Grant DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"create_employee": _tool(
+		employee.create_employee,
+		"MUTATING (default OFF). One Employee record — the register every Farm Ops "
+		"method scopes work by.\n\n"
+		"THIS IS THE RECORD THAT MAKES A LOGIN A PERSON. `list_my_tasks` and the "
+		"other ten mobile methods answer for an EMPLOYEE, not for a User: a task "
+		"board is a list of what somebody is assigned, and the Employee is the only "
+		"thing on a Frappe site that says which somebody a login is. An account with "
+		"no Employee behind it enrols perfectly and then gets refused, correctly, "
+		"with 'set user_id on their Employee record to this email address'.\n\n"
+		"IT WRITES FOURTEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME. Identity and "
+		"assignment only: who this person is, which entity hired them, what they do, "
+		"when they started, how to reach them. Payroll, tax and banking fields — "
+		"salary structure, income tax slab, bank account, CTC — are refused with "
+		"their own message, because each has a form, an approval and a retention "
+		"rule this app knows nothing about, and a tool that set `ctc` because it "
+		"appeared in a sentence would be a tool that quietly moved money.\n\n"
+		"THE SCHEMA IS ASKED, NEVER ASSUMED. Every Link is checked against this "
+		"site's own records (Department, Designation, Employment Type, Gender), "
+		"every Select against this site's own options, and a field this site's "
+		"Employee doctype does not carry is REPORTED rather than silently dropped. "
+		"If Frappe HR here marks a field mandatory — stock installs require `gender` "
+		"and `date_of_birth` — the refusal names it rather than passing a controller "
+		"traceback back.\n\n"
+		"IT REFUSES A SECOND RECORD for the same name at the same company, naming "
+		"the one that exists. Two Employee records for one person puts them on the "
+		"dispatch board twice and in the payroll register once, and is far easier to "
+		"make than to find. `allow_duplicate_name=true` covers two real people with "
+		"one name.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager on the account "
+		"this app acts as, and refuses a company that account cannot see.",
+		{
+			"employee_name": _field(
+				_STRING,
+				"Their name, first and last. An I-9, a payroll register and a dispatch board "
+				"all name the same person; one word names nobody findable.",
+			),
+			"company": _field(_STRING, "The hiring entity. Name or abbreviation."),
+			"first_name": _field(_STRING, "Defaults to the first token of employee_name."),
+			"last_name": _field(_STRING, "Defaults to the last token of employee_name."),
+			"date_of_joining": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"date_of_birth": _field(
+				_STRING, "YYYY-MM-DD. Mandatory on a stock Frappe HR; the refusal says so."
+			),
+			"gender": _field(
+				_STRING,
+				"Must be a Gender record on this site. Mandatory on a stock Frappe HR. The "
+				"refusal lists what this site has.",
+			),
+			"department": _field(_STRING, "Must be a Department on this site."),
+			"designation": _field(_STRING, "Their job title. Must be a Designation on this site."),
+			"employment_type": _field(
+				_STRING,
+				"Full-time, Part-time, Seasonal Worker — whatever this site's Employment Type "
+				"records are. The refusal lists them.",
+			),
+			"status": _field(_STRING, "Active (default), Inactive, Suspended or Left."),
+			"user_id": _field(
+				_STRING,
+				"The login this person signs in with. REFUSED if it is already another "
+				"Employee's login, and refused if the account has no Farm Ops role and no "
+				"Mobile Access Grant — a link that changes nothing today would silently grant "
+				"a task board the day somebody grants that account a role for an unrelated "
+				"reason. allow_unenrolled_user=true is the deliberate escape.",
+			),
+			"personal_email": _field(_STRING, "A personal address for the record. Not the login."),
+			"cell_number": _field(_STRING, "A mobile number for the Employee record."),
+			"allow_unenrolled_user": _field(
+				_BOOLEAN,
+				"Link a user_id that has no Farm Ops role or grant yet. Default false. Right "
+				"when you are deliberately creating the Employee ahead of the enrolment.",
+			),
+			"allow_duplicate_name": _field(
+				_BOOLEAN,
+				"Create a second Employee with a name this company already has. Default false. "
+				"For two real people with one name.",
+			),
+		},
+		required=("employee_name", "company"),
+		mutating=True,
+		title="Create an employee",
+		available=_needs_doctype("Employee"),
+		requires="the Employee DocType, which Frappe HR ships",
+	),
+	"update_employee": _tool(
+		employee.update_employee,
+		"MUTATING (default OFF). Change the identity and assignment fields on an "
+		"Employee that already exists — the same fourteen create_employee writes, "
+		"and nothing else.\n\n"
+		"THE COMMON USE IS `user_id` ON A RECORD THAT WAS MADE WITHOUT ONE, which is "
+		"what stands between a working mobile credential and a task board. "
+		"link_employee_to_user does that one job with the linkage checks spelled "
+		"out; this is the tool when several fields change at once.\n\n"
+		"PAYROLL, TAX AND BANKING FIELDS ARE REFUSED BY NAME — salary structure, "
+		"income tax slab, bank account, CTC. Those need the HR module's own form, "
+		"where its approvals and retention rules run. A field that is real on this "
+		"site but outside the fourteen gets a different refusal from a field that "
+		"does not exist at all, because they are different mistakes.\n\n"
+		"IT REPORTS WHAT ACTUALLY CHANGED, field by field, with the previous value — "
+		"a value that was already what you asked for lands in `unchanged` rather "
+		"than being reported as a write that did not happen.\n\n"
+		"RE-POINTING AN EXISTING LINK NEEDS `replace_user=true`: moving an Employee "
+		"to a different login moves that person's whole task history with it, which "
+		"is a decision rather than a retry.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager, and refuses "
+		"an employee whose company that account cannot see.",
+		{
+			"name": _field(
+				_STRING,
+				"The Employee. Accepts its docname, employee number, employee name, or the "
+				"login already linked to it.",
+			),
+			"employee": _field(_STRING, "Alias for name."),
+			"employee_name": _field(_STRING, "Their name, first and last."),
+			"company": _field(_STRING, "Move them to another entity. Must be one you can see."),
+			"first_name": _field(_STRING, "Given name."),
+			"last_name": _field(_STRING, "Family name."),
+			"date_of_joining": _field(_STRING, "YYYY-MM-DD."),
+			"date_of_birth": _field(_STRING, "YYYY-MM-DD."),
+			"gender": _field(_STRING, "Must be a Gender record on this site."),
+			"department": _field(_STRING, "Must be a Department on this site."),
+			"designation": _field(_STRING, "Must be a Designation on this site."),
+			"employment_type": _field(_STRING, "Must be an Employment Type on this site."),
+			"status": _field(
+				_STRING,
+				"Active, Inactive, Suspended or Left. The mobile methods answer for Active "
+				"employees.",
+			),
+			"user_id": _field(
+				_STRING,
+				"The login. Refused if it belongs to another Employee; needs replace_user=true "
+				"to displace one already on this record.",
+			),
+			"personal_email": _field(_STRING, "A personal address. Not the login."),
+			"cell_number": _field(_STRING, "A mobile number."),
+			"replace_user": _field(
+				_BOOLEAN, "Re-point an Employee that is already linked to a different login. Default false."
+			),
+			"allow_unenrolled_user": _field(
+				_BOOLEAN, "Accept a user_id with no Farm Ops role or grant yet. Default false."
+			),
+		},
+		required=(),
+		mutating=True,
+		idempotent=True,
+		title="Update an employee",
+		available=_needs_doctype("Employee"),
+		requires="the Employee DocType, which Frappe HR ships",
+	),
+	"link_employee_to_user": _tool(
+		employee.link_employee_to_user,
+		"MUTATING (default OFF). Point one Employee at one login — the single field "
+		"that turns a working mobile credential into a working task board.\n\n"
+		"CALL THIS WHEN A PHONE ENROLS AND THEN SHOWS NOTHING. Every Farm Ops method "
+		"resolves the caller to an Employee through `Employee.user_id` and refuses "
+		"an account it cannot resolve, with 'set user_id on their Employee record to "
+		"this email address'. This is that setting.\n\n"
+		"IT REPORTS WHETHER THE PHONE WILL NOW WORK, not merely whether the field "
+		"was written. `linkage.farm_ops_ready` is true only when the account holds a "
+		"Farm Ops role AND its Mobile Access Grant is Active AND the Employee is "
+		"Active; when it is false the note says which of the three is missing and "
+		"which tool fixes it.\n\n"
+		"ONE PERSON, ONE LOGIN. Refused if the User already belongs to another "
+		"Employee — two records naming one login gives list_my_tasks two answers "
+		"where it needs one. Refused if this Employee already has a different login, "
+		"unless replace_user=true. IDEMPOTENT when the link already says exactly "
+		"what you asked for: it reports 'already linked' and writes nothing.\n\n"
+		"REFUSED FOR A USER WITH NO FARM OPS ROLE AND NO GRANT, because the link "
+		"would change nothing today and silently grant a task board on the day "
+		"somebody grants that account a role for an unrelated reason. Run "
+		"create_mobile_user first, or pass allow_unenrolled_user=true to link ahead "
+		"of the enrolment deliberately.",
+		{
+			"employee_name": _field(
+				_STRING,
+				"The Employee. Accepts its docname, employee number, employee name, or a login "
+				"already linked to it.",
+			),
+			"employee": _field(_STRING, "Alias for employee_name."),
+			"name": _field(_STRING, "Alias for employee_name."),
+			"user_id": _field(_STRING, "The login this person signs in with."),
+			"replace_user": _field(
+				_BOOLEAN,
+				"Displace a different login already on this Employee. Default false — it moves "
+				"that person's whole task history.",
+			),
+			"allow_unenrolled_user": _field(
+				_BOOLEAN,
+				"Link an account that has no Farm Ops role and no Mobile Access Grant yet. "
+				"Default false.",
+			),
+		},
+		required=("user_id",),
+		mutating=True,
+		idempotent=True,
+		title="Link an employee to a login",
+		available=_needs_doctype("Employee"),
+		requires="the Employee DocType, which Frappe HR ships",
+	),
 	"onboard_employee": _tool(
 		newhire.onboard_employee,
-		"MUTATING (default OFF). One call for a new hire: the Employee record, "
-		"their paperwork filed privately ON THAT RECORD, a scoped login with a "
-		"credential, and optionally the two first-day tasks nobody skips.\n\n"
+		"MUTATING (default OFF). One call for a new hire, in the only order that "
+		"works: the Employee record, their paperwork filed privately ON THAT "
+		"RECORD, a scoped login with a credential, THE LINK BETWEEN THE TWO, "
+		"optionally the login QR, and optionally the two first-day tasks nobody "
+		"skips.\n\n"
+		"v0.18.1 ADDED THE LINK STEP AND FIXED THE ORDER. Until then this created "
+		"the Employee with `user_id` already filled in and THEN created the User — "
+		"and `Employee.user_id` is a Link, so Frappe refused the very first step of "
+		"any onboarding that named an email. Employee, then login, then link.\n\n"
+		"IT IS IDEMPOTENT. A second run with the same arguments finds the Employee "
+		"(by login, then by name and hiring company), finds the account, finds the "
+		"link already made, and reports each as reused. Nothing is duplicated. The "
+		"one thing a re-run does differently is mint a fresh QR, and only when "
+		"asked — issuing a credential twice is the point of asking twice.\n\n"
 		"THE PAPERWORK GOES ON THE EMPLOYEE, NOT IN THE GOVERNANCE ARCHIVE, and "
 		"that is the whole reason this tool exists rather than a checklist. An "
 		"I-9, a W-4 and a photograph of somebody's licence are PERSONAL records "
@@ -6969,10 +7180,13 @@ TOOLS = {
 		"quietly — a training task that could not be raised must not undo an "
 		"onboarding that worked, so it lands in `skipped` for somebody to raise by "
 		"hand.\n\n"
-		"THE CREDENTIAL IS NOT REPEATED IN THIS RESULT. create_mobile_user returns "
-		"a secret exactly once; echoing it into an orchestrator's summary would "
-		"put a live credential in a second, much more pasteable place. Run "
-		"generate_mobile_login_qr to hand it over.",
+		"THE PLAINTEXT CREDENTIAL IS NOT REPEATED IN THIS RESULT. create_mobile_user "
+		"returns a secret exactly once; echoing it into an orchestrator's summary "
+		"would put a live credential in a second, much more pasteable place. "
+		"`issue_qr=true` returns the scannable PNG — which encodes the same secret, "
+		"unavoidably, because that is what enrolment by QR IS — and still not the "
+		"decoded payload, because nobody pastes a PNG into a chat window by "
+		"accident.",
 		{
 			"full_name": _field(
 				_STRING,
@@ -7025,6 +7239,18 @@ TOOLS = {
 				_BOOLEAN,
 				"Let the login step rewrite an account that already exists. Default false, and "
 				"the refusal is create_mobile_user's.",
+			),
+			"issue_qr": _field(
+				_BOOLEAN,
+				"Return the login QR as a base64 PNG in this same result. DEFAULT FALSE, and "
+				"deliberately: minting a QR rotates the account's API secret, so a default-true "
+				"would mean re-running an onboarding to add a W-4 silently knocked a phone "
+				"already in somebody's pocket offline.",
+			),
+			"url": _field(
+				_STRING,
+				"The public base URL to encode on the QR. Defaults to public_url on ERPNext MCP "
+				"Settings. Only read when issue_qr is true.",
 			),
 		},
 		required=("full_name", "company"),

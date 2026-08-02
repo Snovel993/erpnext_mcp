@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **206 tools** — 93 read-only, 113 mutating.
+- **210 tools** — 93 read-only, 117 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -275,7 +275,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 206 tools
+## The 210 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -1269,6 +1269,17 @@ rather than dropped.
 | `revoke_api_token` | Destroys the credential and leaves the account enabled — 'they lost their phone', where `revoke_mobile_user` is 'they no longer work here'. | Leave half of it behind. Both the key and the secret go: an api_key on the row reads like a live credential to anybody scanning the User list. |
 | `generate_mobile_login_qr` | The enrolment card: a scannable PNG carrying the public URL, the user and the credential, base64 in the result and optionally archived as a **private** attachment for a camp office with no signal. | Point at a plaintext endpoint — encoding a live credential for `http://` puts it on the wire in the clear at every call, forever. Nor stay valid: 24 hours to enrol by default, and `rotate_token` (default TRUE) mints a fresh secret so an older photograph of an older card stops working. |
 | `claim_task_via_mobile` / `start_task_via_mobile` / `complete_task_via_mobile` | Sprint 8's claim, start and complete with the worker resolved from the authenticated request instead of named in the body. | **Add a rule or weaken one.** The concurrent-claim limit, the refusal to self-pick Dispatched work, the evidence-contract check and the empty-string findings distinction all still come from `claim_farm_task` / `start_farm_task` / `complete_farm_task`, because they ARE those tools. |
+
+**The person behind the login** — the v0.18.1 surface. Every mobile method scopes
+work by **Employee**, not by User, so an account with no Employee behind it enrols
+perfectly and then gets refused with "set `user_id` on their Employee record to
+this email address". These are what fix that without leaving the conversation.
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_employee` | One Employee record — the identity every task board, evidence row and payroll register names. Fourteen fields; Links checked against this site's own Department / Designation / Employment Type / Gender records, Selects against this site's own options, and both refusals list what is actually available. | **Write a payroll, tax or banking field.** Salary structure, income tax slab, CTC, bank account and provident fund each have a form, an approval and a retention rule this app knows nothing about; they are refused by name. Nor silently drop a field this site's doctype lacks — it is reported. Nor make a second record for a name this company already has, without `allow_duplicate_name=true`. |
+| `update_employee` | The same fourteen fields on a record that exists, reporting **field by field what actually changed**, with the previous value. A value that already matched lands in `unchanged`. | Re-point an Employee at a different login without `replace_user=true` — that moves the person's whole task history with it. Nor reach the payroll fields, for the same reason as above. |
+| `link_employee_to_user` | Sets `Employee.user_id`, and reports **whether the phone will now work** — `farm_ops_ready` is true only when the account holds a Farm Ops role, its grant is Active and the Employee is Active, and the note names whichever of the three is missing. | Link a User that already belongs to another Employee, in either direction — one login resolving to two people gives `list_my_tasks` two answers where it needs one. Nor link an account with no Farm Ops role and no grant, without `allow_unenrolled_user=true`: that link changes nothing today and silently grants a task board on the day somebody grants the account a role for an unrelated reason. |
 
 
 ---

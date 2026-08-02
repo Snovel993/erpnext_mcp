@@ -951,7 +951,28 @@ def install_hrms() -> None:
 EMPLOYEES = ("HR-EMP-00001", "HR-EMP-00002", "HR-EMP-00003")
 
 
+#: The HR master records the Employee's Links point at. v0.18.1 — the seeded
+#: employees below already named a department and a designation, and until the
+#: double modelled those fields as Links nothing checked that the masters existed.
+#: They do now, so they are seeded, and `create_employee` refusing a Department
+#: that is not here is a test rather than a hope.
+DEPARTMENTS = ("Operations", "Administration")
+DESIGNATIONS = ("Supervisor", "Operator", "Bookkeeper", "Picker")
+EMPLOYMENT_TYPES = ("Full-time", "Part-time", "Seasonal Worker")
+GENDERS = ("Female", "Male", "Non-Conforming", "Prefer not to say")
+
+
+def _hr_masters() -> None:
+	STORE.seed("Department", [{"name": name, "department_name": name, "company": MAIN} for name in DEPARTMENTS])
+	STORE.seed("Designation", [{"name": name, "designation_name": name} for name in DESIGNATIONS])
+	STORE.seed(
+		"Employment Type", [{"name": name, "employee_type_name": name} for name in EMPLOYMENT_TYPES]
+	)
+	STORE.seed("Gender", [{"name": name, "gender": name} for name in GENDERS])
+
+
 def _hr_data() -> None:
+	_hr_masters()
 	STORE.seed(
 		"Employee",
 		[

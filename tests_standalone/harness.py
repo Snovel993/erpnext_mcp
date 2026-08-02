@@ -614,10 +614,20 @@ ERPNEXT_SCHEMA = {
 		"creation",
 		"modified",
 	],
+	# v0.18.1 added the seven personal fields `create_employee` writes. They are
+	# on the stock Frappe HR Employee and were missing here, so a tool that wrote
+	# `gender` or `cell_number` would have had the value silently dropped by
+	# `compat.has_field` and the suite would have called that a pass.
 	"Employee": [
 		"name",
 		"employee_name",
 		"employee_number",
+		"first_name",
+		"last_name",
+		"gender",
+		"date_of_birth",
+		"personal_email",
+		"cell_number",
 		"department",
 		"designation",
 		"status",
@@ -629,6 +639,14 @@ ERPNEXT_SCHEMA = {
 		"branch",
 		"employment_type",
 	],
+	# The HR masters the Employee's Links point at. Present so the link
+	# validation below is a real check rather than a skipped one — see
+	# `_validate_links_on`, which does not validate a target doctype the fixture
+	# has never heard of.
+	"Department": ["name", "department_name", "company", "is_group"],
+	"Designation": ["name", "designation_name"],
+	"Employment Type": ["name", "employee_type_name"],
+	"Gender": ["name", "gender"],
 	"Attendance": [
 		"name",
 		"employee",
@@ -1035,6 +1053,20 @@ class Meta:
 #: is what makes a Party Type's name load-bearing rather than a label, and it is
 #: the fact the release was missing.
 ERPNEXT_FIELD_LINKS = {
+	# ── v0.18.1 ─────────────────────────────────────────────────────────────
+	# THE EMPLOYEE'S SIX LINKS, AND `user_id` IS THE ONE THAT MATTERS. Modelled
+	# as Data here until v0.18.1, which meant `onboard_employee` could insert an
+	# Employee whose `user_id` named a User THAT DID NOT EXIST YET — it created
+	# the record before it created the login — and this suite called it a pass.
+	# On a real bench Frappe validates that link and the insert raises. Modelling
+	# it faithfully is what turned that into a failing test, and the fix is the
+	# ordering change in `newhire.py`: employee, then login, then link.
+	("Employee", "company"): ("Link", "Company"),
+	("Employee", "department"): ("Link", "Department"),
+	("Employee", "designation"): ("Link", "Designation"),
+	("Employee", "employment_type"): ("Link", "Employment Type"),
+	("Employee", "gender"): ("Link", "Gender"),
+	("Employee", "user_id"): ("Link", "User"),
 	("Party Type", "party_type"): ("Link", "DocType"),
 	("GL Entry", "party_type"): ("Link", "DocType"),
 	("GL Entry", "party"): ("Dynamic Link", "party_type"),
@@ -1100,6 +1132,11 @@ ERPNEXT_FIELD_OPTIONS = {
 		]
 	),
 	("Account", "root_type"): "Asset\nLiability\nIncome\nExpense\nEquity",
+	# Frappe HR's four employee statuses. `create_employee` and `update_employee`
+	# match against the site's own options case-insensitively, so a double with no
+	# options would leave that path — and the refusal that lists the choices —
+	# untested.
+	("Employee", "status"): "Active\nInactive\nSuspended\nLeft",
 	# ── v0.16.1 ─────────────────────────────────────────────────────────────
 	# THE OPTIONS THAT COST A RELEASE. v0.16.0 wrote `indicator="gray"` at this
 	# field and the Kanban Board insert threw on a site where the options are

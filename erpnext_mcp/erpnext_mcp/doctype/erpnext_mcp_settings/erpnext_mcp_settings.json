@@ -295,6 +295,9 @@
   "allow_list_compliance_calendar_for_me",
   "mobile_write_section",
   "allow_create_mobile_user",
+  "allow_create_employee",
+  "allow_update_employee",
+  "allow_link_employee_to_user",
   "allow_onboard_employee",
   "allow_revoke_mobile_user",
   "mobile_write_col",
@@ -2193,7 +2196,28 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. One call for a new hire: the Employee record, their I-9 / W-4 / photo ID filed as PRIVATE attachments ON THAT EMPLOYEE RECORD, a scoped login with a credential, and optionally safety-training and camp-orientation tasks. The paperwork never goes to the governance archive — that register holds the documents describing the business, and an auditor, an advisor and a family member browse it. Reuses an existing Employee rather than creating a second one.",
+   "description": "MUTATING. Creates one Employee record — the register every Farm Ops mobile method scopes work by. Writes fourteen identity and assignment fields and refuses everything else by name; payroll, tax and banking fields get their own refusal, because each has a form, an approval and a retention rule this app knows nothing about. Every Link and Select is checked against this site's own schema, and a second record for a name this company already has is refused with the existing docname.",
+   "fieldname": "allow_create_employee",
+   "fieldtype": "Check",
+   "label": "Create Employee"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Changes the same fourteen identity and assignment fields on an Employee that already exists, and reports field by field what actually changed with the previous value. Payroll, tax and banking fields are refused by name. Re-pointing an existing login needs replace_user=true — it moves that person's whole task history with it.",
+   "fieldname": "allow_update_employee",
+   "fieldtype": "Check",
+   "label": "Update Employee"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Sets Employee.user_id — the single field that turns a working mobile credential into a working task board. Reports whether the phone will now actually work, not merely whether the field was written: farm_ops_ready is true only when the account holds a Farm Ops role, its Mobile Access Grant is Active and the Employee is Active, and says which of the three is missing when it is not. One person, one login: refused when the User already belongs to another Employee.",
+   "fieldname": "allow_link_employee_to_user",
+   "fieldtype": "Check",
+   "label": "Link Employee To User"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. One call for a new hire, in the only order that works: the Employee record, their I-9 / W-4 / photo ID filed as PRIVATE attachments ON THAT EMPLOYEE RECORD, a scoped login with a credential, THE LINK BETWEEN THE TWO, optionally the login QR, and optionally safety-training and camp-orientation tasks. The paperwork never goes to the governance archive — that register holds the documents describing the business, and an auditor, an advisor and a family member browse it. Idempotent: a second run reuses the Employee, the account and the link rather than duplicating any of them.",
    "fieldname": "allow_onboard_employee",
    "fieldtype": "Check",
    "label": "Onboard Employee"

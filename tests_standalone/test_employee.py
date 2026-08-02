@@ -1,0 +1,781 @@
+# SPDX-License-Identifier: MIT
+"""The personnel register — v0.18.1's three tools, and the gap they close.
+
+THE CLAIM BEHIND THE WHOLE RELEASE is that a mobile credential which enrols
+perfectly and then shows an empty screen is a bug in this app and not in the
+phone. v0.18.0 could create the User, the role, the entity scoping, the Mobile
+Access Grant, the credential and the QR — six things — and could not create or
+edit the ONE record every Farm Ops method scopes work by. `list_my_tasks` refused
+every account, correctly, and there was no way to fix it from here.
+
+SIX CLAIMS.
+
+1. `CreatingTheRecord` — the fourteen fields go in, the defaults fill themselves,
+   and what this site's schema does not have is REPORTED rather than silently
+   dropped. A tool that swallowed a value it never wrote would report success for
+   nothing having happened.
+
+2. `TheSchemaIsTheArbiter` — every Link is checked against this site's own
+   records, every Select against this site's own options, and both refusals list
+   what is actually available. A caller that is a language model can act on
+   "Known Department: Administration, Operations" and cannot act on a controller
+   traceback.
+
+3. `WhatItRefusesToWrite` — payroll, tax and banking fields get their own
+   refusal, and a real-but-not-writable field gets a different one from a field
+   that does not exist. Those are different mistakes and deserve different
+   sentences.
+
+4. `TheGuards` — the role gate and the company scope, both on the principal this
+   app acts as. Creating an Employee for an entity you cannot see would put a
+   person on a payroll register you cannot read.
+
+5. `Linking` — one person, one login, in every direction: refused when the User
+   belongs to somebody else, refused when the Employee does, a NO-OP when the link
+   already says what was asked for, and reporting whether the PHONE WILL NOW WORK
+   rather than merely whether the field was written.
+
+6. `OnboardingEndToEnd` — the orchestrator produces the Employee, the grant, the
+   link and the QR in one call, in the only order that works, and a second run
+   with the same arguments duplicates none of them.
+"""
+
+import json
+
+import frappe
+
+from erpnext_mcp import roles
+from erpnext_mcp.tools import employee as employee_tool
+
+from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
+from .harness import ROLES, STORE, set_roles
+
+FUNNEL = "https://umbrel.tail4a2b.ts.net"
+
+ON = {
+	f"allow_{name}": 1
+	for name in (
+		"create_employee",
+		"update_employee",
+		"link_employee_to_user",
+		"onboard_employee",
+		"create_mobile_user",
+		"generate_mobile_login_qr",
+		"list_employees",
+		"attach_file_to_document",
+		"create_farm_task",
+	)
+}
+
+WORKER = "ana@example.test"
+STRANGER = "nobody@example.test"
+
+
+class EmployeeTestCase(V12TestCase):
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, public_url=FUNNEL, **ON)
+		# The double ships without an Employee register — Frappe HR is a separate
+		# app, which is the whole reason these tools have an availability
+		# predicate — and `install_hrms` also seeds the Department, Designation,
+		# Employment Type and Gender masters the Employee's Links point at.
+		install_hrms()
+		self._roles_before = {user: list(held) for user, held in ROLES.items()}
+		self.addCleanup(self._restore_roles)
+		roles.install_roles()
+
+	def _restore_roles(self):
+		ROLES.clear()
+		ROLES.update(self._roles_before)
+
+	# -- helpers -------------------------------------------------------------
+	def create(self, **overrides):
+		payload = {"employee_name": "Ana Ramos", "company": MAIN}
+		payload.update(overrides)
+		return self.tool_data("create_employee", payload)
+
+	def create_error(self, **overrides):
+		payload = {"employee_name": "Ana Ramos", "company": MAIN}
+		payload.update(overrides)
+		return self.tool_error("create_employee", payload)
+
+	def enrolled(self, email=WORKER, name="Ana Ramos", entities=None):
+		"""A login with a Farm Ops role and an Active Mobile Access Grant."""
+		return self.tool_data(
+			"create_mobile_user",
+			{
+				"email": email,
+				"full_name": name,
+				"role": "Field Worker",
+				"entity_access": entities or [MAIN],
+			},
+		)
+
+	def plain_user(self, email=STRANGER, name="Nobody At All"):
+		"""A User with no Farm Ops role and no grant. Nothing to link to."""
+		STORE.seed("User", [{"name": email, "enabled": 1, "full_name": name, "user_type": "System User"}])
+		return email
+
+	def scope_actor_to(self, company):
+		"""Give the principal this app acts as a Company User Permission.
+
+		Frappe's rule is that NO permission means unrestricted, so a scope test has
+		to add one before it can test anything — which is also why
+		`require_company_scope` is written the way it is.
+		"""
+		STORE.seed(
+			"User Permission",
+			[
+				{
+					"name": f"UP-SCOPE-{company}",
+					"user": "Administrator",
+					"allow": "Company",
+					"for_value": company,
+					"apply_to_all_doctypes": 1,
+					"is_default": 1,
+				}
+			],
+		)
+
+
+# ── 1 ───────────────────────────────────────────────────────────────────────
+class CreatingTheRecord(EmployeeTestCase):
+	def test_every_field_it_takes_is_written(self):
+		data = self.create(
+			first_name="Ana",
+			last_name="Ramos",
+			date_of_joining="2026-07-01",
+			date_of_birth="1994-02-17",
+			gender="Female",
+			department="Operations",
+			designation="Picker",
+			employment_type="Seasonal Worker",
+			status="Active",
+			personal_email="ana.ramos@example.test",
+			cell_number="+1 509 555 0142",
+		)
+		row = frappe.db.get_value(
+			"Employee",
+			data["employee"],
+			[
+				"employee_name",
+				"first_name",
+				"last_name",
+				"company",
+				"date_of_joining",
+				"date_of_birth",
+				"gender",
+				"department",
+				"designation",
+				"employment_type",
+				"status",
+				"personal_email",
+				"cell_number",
+			],
+			as_dict=True,
+		)
+		self.assertEqual(row["employee_name"], "Ana Ramos")
+		self.assertEqual(row["company"], MAIN)
+		self.assertEqual(row["date_of_joining"], "2026-07-01")
+		self.assertEqual(row["date_of_birth"], "1994-02-17")
+		self.assertEqual(row["gender"], "Female")
+		self.assertEqual(row["department"], "Operations")
+		self.assertEqual(row["designation"], "Picker")
+		self.assertEqual(row["employment_type"], "Seasonal Worker")
+		self.assertEqual(row["status"], "Active")
+		self.assertEqual(row["personal_email"], "ana.ramos@example.test")
+		self.assertEqual(row["cell_number"], "+1 509 555 0142")
+
+	def test_the_minimum_is_a_name_and_a_company(self):
+		data = self.create()
+		row = frappe.db.get_value(
+			"Employee",
+			data["employee"],
+			["first_name", "last_name", "status", "date_of_joining"],
+			as_dict=True,
+		)
+		self.assertEqual(row["first_name"], "Ana")
+		self.assertEqual(row["last_name"], "Ramos")
+		self.assertEqual(row["status"], "Active")
+		self.assertEqual(row["date_of_joining"], frappe.utils.today())
+
+	def test_it_names_which_defaults_it_applied(self):
+		"""A caller has to be able to tell what it chose from what they chose."""
+		data = self.create()
+		self.assertEqual(
+			sorted(data["defaults_applied"]),
+			["date_of_joining", "first_name", "last_name", "status"],
+		)
+
+	def test_a_name_given_explicitly_is_not_reported_as_a_default(self):
+		data = self.create(first_name="Anastasia", status="Inactive")
+		self.assertNotIn("first_name", data["defaults_applied"])
+		self.assertNotIn("status", data["defaults_applied"])
+		self.assertEqual(frappe.db.get_value("Employee", data["employee"], "first_name"), "Anastasia")
+
+	def test_a_three_part_name_splits_at_the_ends(self):
+		data = self.create(employee_name="Ana Maria Ramos")
+		row = frappe.db.get_value("Employee", data["employee"], ["first_name", "last_name"], as_dict=True)
+		self.assertEqual(row["first_name"], "Ana")
+		self.assertEqual(row["last_name"], "Ramos")
+
+	def test_a_one_word_name_is_refused(self):
+		"""An I-9, a payroll register and a dispatch board all name the same
+		person, and one word names nobody findable."""
+		self.assertIn("names nobody findable", self.create_error(employee_name="Ana"))
+
+	def test_a_field_this_site_does_not_have_is_reported_not_swallowed(self):
+		"""A tool that quietly dropped a value would report success for nothing
+		having happened."""
+		from .harness import META
+
+		meta = META["Employee"]
+		removed = meta._by_name.pop("cell_number")
+		meta.fields = [field for field in meta.fields if field["fieldname"] != "cell_number"]
+		try:
+			data = self.create(cell_number="+1 509 555 0142")
+		finally:
+			meta.add(removed)
+		self.assertIn("cell_number", data["fields_not_on_this_site"])
+		self.assertIn("cell_number", data["note"])
+
+	def test_a_second_record_for_the_same_person_at_the_same_company_is_refused(self):
+		"""Two Employee records for one person puts them on the dispatch board
+		twice and in the payroll register once."""
+		first = self.create()
+		message = self.create_error()
+		self.assertIn(first["employee"], message)
+		self.assertIn("dispatch board twice", message)
+
+	def test_two_real_people_with_one_name_are_allowed_when_said_so(self):
+		first = self.create()
+		second = self.create(allow_duplicate_name=True)
+		self.assertNotEqual(first["employee"], second["employee"])
+
+	def test_the_same_name_at_a_different_entity_is_a_second_record_on_purpose(self):
+		"""One person genuinely can be employed by two entities."""
+		self.create()
+		second = self.create(company=OTHER)
+		self.assertTrue(second["employee"])
+
+	def test_it_reports_the_docname_and_what_it_set(self):
+		data = self.create(designation="Picker")
+		self.assertTrue(data["employee"])
+		self.assertEqual(data["fields_set"]["designation"], "Picker")
+		self.assertEqual(data["fields_set"]["company"], MAIN)
+
+	def test_a_mandatory_field_this_site_wants_is_named_rather_than_thrown(self):
+		"""Stock Frappe HR marks `gender` and `date_of_birth` mandatory and plenty
+		of operators do not. Which fields are required is the site's decision, so
+		the refusal reads it off the meta instead of carrying its own list."""
+		from .harness import META
+
+		field = META["Employee"].get_field("gender")
+		field["reqd"] = 1
+		try:
+			message = self.create_error()
+		finally:
+			field["reqd"] = 0
+		self.assertIn("gender", message)
+		self.assertIn("mandatory", message)
+		self.assertIn("Nothing was created", message)
+
+
+# ── 2 ───────────────────────────────────────────────────────────────────────
+class TheSchemaIsTheArbiter(EmployeeTestCase):
+	def test_a_department_that_does_not_exist_is_refused_with_the_ones_that_do(self):
+		message = self.create_error(department="Packing Line")
+		self.assertIn("Packing Line", message)
+		self.assertIn("Operations", message)
+
+	def test_a_designation_that_does_not_exist_is_refused(self):
+		self.assertIn("Combine Driver", self.create_error(designation="Combine Driver"))
+
+	def test_an_employment_type_that_does_not_exist_is_refused(self):
+		message = self.create_error(employment_type="Indentured")
+		self.assertIn("Indentured", message)
+		self.assertIn("Seasonal Worker", message)
+
+	def test_a_gender_that_is_not_a_record_on_this_site_is_refused(self):
+		message = self.create_error(gender="Yes")
+		self.assertIn("Gender", message)
+
+	def test_a_status_outside_the_sites_own_options_is_refused_with_them(self):
+		message = self.create_error(status="Probationary")
+		self.assertIn("Probationary", message)
+		self.assertIn("Active", message)
+		self.assertIn("Suspended", message)
+
+	def test_a_status_is_matched_case_insensitively_and_stored_in_the_sites_casing(self):
+		"""What is stored has to match what a list-view filter looks for."""
+		data = self.create(status="active")
+		self.assertEqual(frappe.db.get_value("Employee", data["employee"], "status"), "Active")
+
+	def test_a_date_that_is_not_a_date_is_refused(self):
+		self.assertIn("date_of_joining", self.create_error(date_of_joining="last Tuesday"))
+
+	def test_a_link_whose_target_doctype_is_absent_is_not_validated(self):
+		"""The value cannot be checked against a schema that is not here, and
+		refusing would refuse a good value on a site that never installed HR's
+		masters. Frappe does not validate that link either."""
+		from .harness import INSTALLED_DOCTYPES
+
+		INSTALLED_DOCTYPES.discard("Designation")
+		try:
+			data = self.create(designation="Combine Driver")
+		finally:
+			INSTALLED_DOCTYPES.add("Designation")
+		self.assertEqual(data["fields_set"]["designation"], "Combine Driver")
+
+	def test_a_site_with_no_records_of_that_master_says_so(self):
+		"""A site that has the doctype and has never made a record of it. The
+		refusal has to say that rather than list nothing."""
+		STORE.tables["Department"] = {}
+		self.assertIn("no Department records at all", self.create_error(department="Operations"))
+
+
+# ── 3 ───────────────────────────────────────────────────────────────────────
+class WhatItRefusesToWrite(EmployeeTestCase):
+	def test_a_payroll_field_is_refused_with_its_own_sentence(self):
+		"""A salary structure has a form, an approval and a retention rule this
+		app knows nothing about."""
+		message = self.create_error(ctc=48000)
+		self.assertIn("payroll, tax or banking", message)
+		self.assertIn("Desk", message)
+
+	def test_a_bank_account_number_is_refused(self):
+		self.assertIn("payroll, tax or banking", self.create_error(bank_ac_no="123456789"))
+
+	def test_an_income_tax_slab_is_refused(self):
+		self.assertIn("payroll, tax or banking", self.create_error(income_tax_slab="Slab A"))
+
+	def test_a_real_employee_field_outside_the_fourteen_is_refused_differently(self):
+		"""'Real but not mine' and 'not a field at all' are different mistakes."""
+		message = self.create_error(branch="Packhouse")
+		self.assertIn("is not one this tool writes", message)
+		self.assertIn("employee_name", message)
+
+	def test_a_field_that_is_not_on_the_doctype_at_all_is_refused_by_name(self):
+		message = self.create_error(favourite_colour="green")
+		self.assertIn("favourite_colour", message)
+		self.assertIn("not a field on this site's Employee doctype", message)
+
+	def test_none_of_the_refusals_create_anything(self):
+		before = len(STORE.rows("Employee"))
+		for payload in ({"ctc": 1}, {"branch": "x"}, {"nonsense": "y"}, {"employee_name": "Ana"}):
+			self.create_error(**payload)
+		self.assertEqual(len(STORE.rows("Employee")), before)
+
+
+# ── 4 ───────────────────────────────────────────────────────────────────────
+class TheGuards(EmployeeTestCase):
+	def test_a_principal_with_no_hr_role_may_not_hire(self):
+		set_roles("Administrator", ["Accounts User"])
+		message = self.create_error()
+		self.assertIn("may not change the personnel register", message)
+		self.assertIn("HR Manager", message)
+		self.assertIn("Farm Manager", message)
+
+	def test_the_refusal_names_the_account_so_the_fix_is_one_line(self):
+		"""Permission denied on a principal the operator chose themselves is a
+		one-line fix they cannot make without knowing which line."""
+		set_roles("Administrator", [])
+		message = self.create_error()
+		self.assertIn("Administrator", message)
+		self.assertIn("mcp_system_user", message)
+
+	def test_a_farm_manager_may_hire(self):
+		set_roles("Administrator", ["Farm Manager"])
+		self.assertTrue(self.create()["employee"])
+
+	def test_an_hr_user_may_hire(self):
+		set_roles("Administrator", ["HR User"])
+		self.assertTrue(self.create()["employee"])
+
+	def test_a_company_the_caller_cannot_see_is_refused(self):
+		"""Creating an Employee for an entity you cannot see would put a person on
+		a payroll register you cannot read."""
+		self.scope_actor_to(OTHER)
+		message = self.create_error(company=MAIN)
+		self.assertIn(MAIN, message)
+		self.assertIn("no access to company", message)
+
+	def test_the_company_the_caller_can_see_still_works(self):
+		self.scope_actor_to(OTHER)
+		self.assertTrue(self.create(company=OTHER)["employee"])
+
+	def test_no_user_permission_at_all_means_unrestricted_as_frappe_says(self):
+		"""api/guard.py inverts this for the mobile surface on purpose. A personnel
+		tool that refused every correctly-configured operator would be switched off
+		within the hour."""
+		self.assertEqual(roles.companies_for("Administrator"), [])
+		self.assertTrue(self.create()["employee"])
+
+	def test_the_refused_company_creates_nothing(self):
+		self.scope_actor_to(OTHER)
+		before = len(STORE.rows("Employee"))
+		self.create_error(company=MAIN)
+		self.assertEqual(len(STORE.rows("Employee")), before)
+
+
+# ── 5 ───────────────────────────────────────────────────────────────────────
+class Updating(EmployeeTestCase):
+	def setUp(self):
+		super().setUp()
+		self.employee = self.create()["employee"]
+
+	def change(self, **fields):
+		return self.tool_data("update_employee", {"name": self.employee, **fields})
+
+	def change_error(self, **fields):
+		return self.tool_error("update_employee", {"name": self.employee, **fields})
+
+	def test_it_changes_what_it_was_asked_to(self):
+		self.change(designation="Picker", department="Operations")
+		row = frappe.db.get_value(
+			"Employee", self.employee, ["designation", "department"], as_dict=True
+		)
+		self.assertEqual(row["designation"], "Picker")
+		self.assertEqual(row["department"], "Operations")
+
+	def test_it_changes_nothing_it_was_not_asked_to(self):
+		before = dict(frappe.db.get_value("Employee", self.employee, ["status", "company"], as_dict=True))
+		self.change(designation="Picker")
+		after = dict(frappe.db.get_value("Employee", self.employee, ["status", "company"], as_dict=True))
+		self.assertEqual(before, after)
+
+	def test_it_reports_each_change_with_the_previous_value(self):
+		data = self.change(status="Suspended")
+		entry = [row for row in data["changed"] if row["field"] == "status"][0]
+		self.assertEqual(entry["from"], "Active")
+		self.assertEqual(entry["to"], "Suspended")
+
+	def test_a_value_that_is_already_what_you_asked_for_is_not_reported_as_a_write(self):
+		data = self.change(status="Active")
+		self.assertEqual(data["changed"], [])
+		self.assertIn("status", data["unchanged"])
+
+	def test_a_payroll_field_is_refused_here_too(self):
+		self.assertIn("payroll, tax or banking", self.change_error(salary_mode="Bank"))
+
+	def test_an_update_with_nothing_to_change_is_refused(self):
+		self.assertIn("nothing to change", self.tool_error("update_employee", {"name": self.employee}))
+
+	def test_the_employee_can_be_named_by_its_number(self):
+		frappe.db.set_value("Employee", self.employee, "employee_number", "E-900")
+		data = self.tool_data("update_employee", {"name": "E-900", "designation": "Picker"})
+		self.assertEqual(data["employee"], self.employee)
+
+	def test_the_employee_can_be_named_by_its_login(self):
+		user = self.enrolled()["user"]
+		self.tool_data("link_employee_to_user", {"employee": self.employee, "user_id": user})
+		data = self.tool_data("update_employee", {"name": user, "designation": "Picker"})
+		self.assertEqual(data["employee"], self.employee)
+
+	def test_an_employee_that_does_not_exist_is_refused(self):
+		self.assertIn("EMP-NOPE", self.tool_error("update_employee", {"name": "EMP-NOPE", "status": "Left"}))
+
+	def test_setting_the_login_after_the_fact_is_the_whole_point(self):
+		"""This is the call that fixes an Employee created before its login was."""
+		user = self.enrolled()["user"]
+		self.change(user_id=user)
+		self.assertEqual(frappe.db.get_value("Employee", self.employee, "user_id"), user)
+
+	def test_re_pointing_an_existing_login_needs_saying_so(self):
+		first = self.enrolled()["user"]
+		self.change(user_id=first)
+		second = self.enrolled(email="beto@example.test", name="Beto Cruz")["user"]
+		message = self.change_error(user_id=second)
+		self.assertIn("already linked", message)
+		self.assertIn("replace_user", message)
+		self.assertEqual(frappe.db.get_value("Employee", self.employee, "user_id"), first)
+
+	def test_re_pointing_works_when_it_is_said(self):
+		first = self.enrolled()["user"]
+		self.change(user_id=first)
+		second = self.enrolled(email="beto@example.test", name="Beto Cruz")["user"]
+		self.change(user_id=second, replace_user=True)
+		self.assertEqual(frappe.db.get_value("Employee", self.employee, "user_id"), second)
+
+	def test_a_company_the_caller_cannot_see_is_refused(self):
+		self.scope_actor_to(OTHER)
+		self.assertIn("no access to company", self.change_error(status="Left"))
+
+
+# ── 6 ───────────────────────────────────────────────────────────────────────
+class Linking(EmployeeTestCase):
+	def setUp(self):
+		super().setUp()
+		self.employee = self.create()["employee"]
+
+	def link(self, user, **extra):
+		return self.tool_data(
+			"link_employee_to_user", {"employee_name": self.employee, "user_id": user, **extra}
+		)
+
+	def link_error(self, user, **extra):
+		return self.tool_error(
+			"link_employee_to_user", {"employee_name": self.employee, "user_id": user, **extra}
+		)
+
+	def test_both_sides_end_up_linked(self):
+		user = self.enrolled()["user"]
+		data = self.link(user)
+		self.assertEqual(frappe.db.get_value("Employee", self.employee, "user_id"), user)
+		self.assertEqual(data["employee"], self.employee)
+		self.assertEqual(data["user_id"], user)
+		self.assertEqual(data["action"], "linked")
+
+	def test_it_says_the_phone_will_now_work(self):
+		"""'The link was written' is not the fact anybody wanted."""
+		self.link(self.enrolled()["user"])
+		data = self.link(WORKER)
+		self.assertTrue(data["linkage"]["farm_ops_ready"])
+		self.assertIn("list_my_tasks", data["note"])
+
+	def test_it_reports_the_entity_access_the_login_carries(self):
+		self.link(self.enrolled()["user"])
+		self.assertEqual(self.link(WORKER)["linkage"]["entity_access"], [MAIN])
+
+	def test_a_user_with_no_grant_and_no_role_is_refused_with_the_reason(self):
+		"""A link that changes nothing today would silently grant a task board on
+		the day somebody grants that account a role for an unrelated reason."""
+		message = self.link_error(self.plain_user())
+		self.assertIn("no Farm Ops role and no Mobile Access Grant", message)
+		self.assertIn("create_mobile_user", message)
+		self.assertIsNone(frappe.db.get_value("Employee", self.employee, "user_id"))
+
+	def test_linking_ahead_of_the_grant_is_allowed_when_said_deliberately(self):
+		user = self.plain_user()
+		data = self.link(user, allow_unenrolled_user=True)
+		self.assertEqual(frappe.db.get_value("Employee", self.employee, "user_id"), user)
+		self.assertFalse(data["linkage"]["farm_ops_ready"])
+		self.assertIn("WILL STILL REFUSE", data["note"])
+
+	def test_a_user_that_does_not_exist_is_refused(self):
+		message = self.link_error("ghost@example.test")
+		self.assertIn("ghost@example.test", message)
+		self.assertIn("create_mobile_user", message)
+
+	def test_an_employee_that_does_not_exist_is_refused(self):
+		self.assertIn(
+			"EMP-NOPE",
+			self.tool_error(
+				"link_employee_to_user", {"employee_name": "EMP-NOPE", "user_id": self.enrolled()["user"]}
+			),
+		)
+
+	def test_a_login_already_belonging_to_somebody_else_is_refused(self):
+		"""Two Employee records naming one login gives list_my_tasks two answers
+		where it needs one."""
+		user = self.enrolled()["user"]
+		self.link(user)
+		other = self.create(employee_name="Beto Cruz")["employee"]
+		message = self.tool_error(
+			"link_employee_to_user", {"employee_name": other, "user_id": user}
+		)
+		self.assertIn(self.employee, message)
+		self.assertIn("one-to-one", message)
+
+	def test_the_same_link_twice_is_a_no_op_that_says_so(self):
+		user = self.enrolled()["user"]
+		self.link(user)
+		data = self.link(user)
+		self.assertEqual(data["action"], "already linked")
+		self.assertEqual(frappe.db.get_value("Employee", self.employee, "user_id"), user)
+
+	def test_a_different_login_on_this_employee_needs_replace_user(self):
+		self.link(self.enrolled()["user"])
+		second = self.enrolled(email="beto@example.test", name="Beto Cruz")["user"]
+		message = self.link_error(second)
+		self.assertIn("whole task history", message)
+		self.assertIn("replace_user", message)
+
+	def test_replacing_reports_what_it_displaced(self):
+		first = self.enrolled()["user"]
+		self.link(first)
+		second = self.enrolled(email="beto@example.test", name="Beto Cruz")["user"]
+		data = self.link(second, replace_user=True)
+		self.assertEqual(data["action"], "relinked")
+		self.assertEqual(data["previous_user_id"], first)
+
+	def test_an_inactive_employee_is_linked_and_flagged(self):
+		"""The mobile methods answer for Active employees, and a link on a Left
+		employee is a link that will not produce a task board."""
+		self.tool_data("update_employee", {"name": self.employee, "status": "Left"})
+		data = self.link(self.enrolled()["user"])
+		self.assertIn("THIS EMPLOYEE IS Left", data["note"])
+
+	def test_a_company_the_caller_cannot_see_is_refused(self):
+		user = self.enrolled()["user"]
+		self.scope_actor_to(OTHER)
+		self.assertIn("no access to company", self.link_error(user))
+
+
+# ── 7 ───────────────────────────────────────────────────────────────────────
+class OnboardingEndToEnd(EmployeeTestCase):
+	def hire(self, **overrides):
+		payload = {"full_name": "Ana Ramos", "company": MAIN, "email": WORKER}
+		payload.update(overrides)
+		return self.tool_data("onboard_employee", payload)
+
+	def test_it_produces_the_employee_the_grant_and_the_link(self):
+		data = self.hire()
+		self.assertTrue(data["employee"])
+		self.assertEqual(data["mobile"]["user"], WORKER)
+		self.assertTrue(data["mobile"]["grant"])
+		self.assertEqual(data["link"]["user_id"], WORKER)
+		self.assertEqual(frappe.db.get_value("Employee", data["employee"], "user_id"), WORKER)
+
+	def test_the_employee_is_created_before_the_login_and_linked_after(self):
+		"""THE ORDERING BUG. Employee.user_id is a Link to User, so creating the
+		Employee with the login already on it refuses on a real bench — the User
+		does not exist yet."""
+		data = self.hire()
+		order = [row["step"] for row in data["steps"]]
+		self.assertLess(order.index("employee"), order.index("mobile access"))
+		self.assertLess(order.index("mobile access"), order.index("link"))
+
+	def test_the_qr_comes_back_in_the_same_response_when_asked_for(self):
+		data = self.hire(issue_qr=True)
+		self.assertTrue(data["qr"]["png_base64"])
+		self.assertEqual(data["qr"]["mime_type"], "image/png")
+		self.assertTrue(data["qr"]["expires_at"])
+		self.assertTrue(data["qr"]["endpoint"])
+
+	def test_the_qr_is_opt_in(self):
+		"""Minting one rotates the account's secret. A default-true would mean
+		re-running an onboarding to add a W-4 knocked a live phone offline."""
+		self.assertIsNone(self.hire()["qr"])
+
+	def test_the_plaintext_credential_is_still_not_in_the_result(self):
+		"""THE ASSERTION IS AGAINST THE LIVE SECRET, not against the string
+		'api_secret' — the notes in this payload name that key in order to say it
+		is deliberately absent, and a substring test cannot tell a value from a
+		prohibition.
+
+		The PNG encodes the secret, unavoidably: that is what enrolment by QR IS,
+		and it is why png_base64 is excluded here rather than pretended about. What
+		must not appear is the decoded payload, which carries the same secret as
+		readable text into somewhere far more pasteable."""
+		from erpnext_mcp.tools import mobile
+
+		data = self.hire(issue_qr=True)
+		secret = mobile.read_api_secret(WORKER)
+		self.assertTrue(secret, "the fixture did not actually issue a credential")
+		scrubbed = {**data, "qr": {**data["qr"], "png_base64": "<image>"}}
+		self.assertNotIn(secret, json.dumps(scrubbed, default=str))
+		self.assertNotIn("payload", data["qr"])
+
+	def test_a_second_run_with_the_same_arguments_duplicates_nothing(self):
+		first = self.hire()
+		employees = len(STORE.rows("Employee"))
+		grants = len(STORE.rows("Mobile Access Grant"))
+		second = self.hire()
+		self.assertEqual(second["employee"], first["employee"])
+		self.assertEqual(len(STORE.rows("Employee")), employees)
+		self.assertEqual(len(STORE.rows("Mobile Access Grant")), grants)
+
+	def test_a_second_run_reports_the_link_as_already_made(self):
+		self.hire()
+		self.assertEqual(self.hire()["link"]["action"], "already linked")
+
+	def test_a_second_run_with_no_email_still_finds_the_person_by_name(self):
+		"""The lookup that covers a re-run where there is no login to match on."""
+		first = self.tool_data("onboard_employee", {"full_name": "Beto Cruz", "company": MAIN})
+		second = self.tool_data("onboard_employee", {"full_name": "Beto Cruz", "company": MAIN})
+		self.assertEqual(second["employee"], first["employee"])
+		self.assertEqual(
+			[row for row in second["steps"] if row["step"] == "employee"][0]["action"], "reused"
+		)
+
+	def test_the_next_step_names_one_thing(self):
+		self.assertIn("generate_mobile_login_qr", self.hire()["next_step"])
+		self.assertIn("curl", self.hire(issue_qr=True)["next_step"])
+
+	def test_a_link_that_cannot_be_made_does_not_undo_the_rest(self):
+		"""An Employee that exists and a login that exists are both worth keeping
+		when only the join between them failed.
+
+		The failure staged here is the real one: this person's record is already
+		pointed at a different login, and re-pointing it would move their whole
+		task history, which the orchestrator is not allowed to decide."""
+		existing = self.create()["employee"]
+		self.tool_data(
+			"link_employee_to_user",
+			{"employee_name": existing, "user_id": self.enrolled()["user"]},
+		)
+		data = self.hire(email="beto@example.test")
+		self.assertEqual(data["employee"], existing)
+		self.assertEqual(data["mobile"]["user"], "beto@example.test")
+		self.assertIsNone(data["link"])
+		self.assertTrue(any(row["step"] == "link" for row in data["skipped"]))
+
+	def test_it_still_refuses_a_site_with_no_employee_register(self):
+		"""The refusal arrives from the tool's availability predicate before the
+		handler runs at all, which is why it names the DocType."""
+		from .harness import INSTALLED_DOCTYPES
+
+		INSTALLED_DOCTYPES.discard("Employee")
+		try:
+			message = self.tool_error("create_employee", {"employee_name": "Ana Ramos", "company": MAIN})
+		finally:
+			INSTALLED_DOCTYPES.add("Employee")
+		self.assertIn("Employee", message)
+
+
+# ── the module's own claims ─────────────────────────────────────────────────
+class TheAllowlistIsClosed(EmployeeTestCase):
+	def test_the_fourteen_are_the_fourteen(self):
+		"""Asserted by name. `WRITABLE` is what every refusal message lists, and a
+		field added to it without a decision is a field this app writes without
+		one."""
+		self.assertEqual(
+			employee_tool.WRITABLE,
+			(
+				"employee_name",
+				"first_name",
+				"last_name",
+				"company",
+				"date_of_joining",
+				"date_of_birth",
+				"gender",
+				"department",
+				"designation",
+				"employment_type",
+				"status",
+				"user_id",
+				"personal_email",
+				"cell_number",
+			),
+		)
+
+	def test_no_sensitive_field_is_also_writable(self):
+		self.assertFalse(set(employee_tool.WRITABLE) & employee_tool.SENSITIVE_FIELDS)
+
+	def test_the_link_gate_is_the_mobile_surfaces_own_role_set(self):
+		"""Read from api/guard rather than re-listed, so the set this file refuses
+		against and the set the eleven methods gate on cannot drift apart."""
+		from erpnext_mcp.api import guard
+
+		self.assertIs(employee_tool._farm_ops_roles(), guard.FARM_OPS_ROLES)
+
+	def test_all_three_tools_are_mutating_and_default_off(self):
+		from erpnext_mcp import registry
+
+		for name in ("create_employee", "update_employee", "link_employee_to_user"):
+			with self.subTest(tool=name):
+				self.assertIn(name, registry.MUTATING_TOOLS)
+				self.assertNotIn(name, registry.DEFAULT_ON_MUTATING_TOOLS)
+
+	def test_each_one_says_which_switch_turns_it_on(self):
+		self.configure(enabled=1)
+		for name in ("create_employee", "update_employee", "link_employee_to_user"):
+			with self.subTest(tool=name):
+				self.assertIn(f"allow_{name}", self.tool_error(name, {}))
+
+	def test_every_mutation_leaves_an_audit_row(self):
+		data = self.create()
+		rows = [row for row in STORE.rows("MCP Action Log") if row["tool_name"] == "create_employee"]
+		self.assertEqual(len(rows), 1)
+		self.assertIn(data["employee"], rows[0]["result_summary"])

@@ -48,6 +48,39 @@ THE ONE STEP THAT IS ALLOWED TO FAIL QUIETLY IS THE TASKS. A safety-training tas
 that could not be raised because the dispatch doctypes are not installed must not
 undo an employee's onboarding — it is reported in `skipped` and somebody raises
 it by hand.
+
+────────────────────────────────────────────────────────────────────────────
+v0.18.1 CHANGED THE ORDER, AND THE ORDER WAS A BUG
+────────────────────────────────────────────────────────────────────────────
+
+Until v0.18.1 this created the Employee with `user_id` already filled in, and
+THEN created the User. `Employee.user_id` is a Link to User, so on a real bench
+Frappe validates it on insert and the very first step raised — an onboarding that
+named an email could not complete at all. The standalone suite modelled that field
+as plain Data and called it a pass; v0.18.1 models it as the Link it is, which is
+what turned a live failure into a failing test.
+
+So the order is now the only one that can work, and it is also the order somebody
+would describe out loud:
+
+  1. the Employee, with NO login on it yet
+  2. the scoped mobile account, with its role, entities, grant and credential
+  3. the LINK between them — `employee.link_employee_to_user`, which is also what
+     an operator calls on its own when the person already existed
+  4. the login QR, on request
+  5. the first-day tasks
+
+Every step still delegates. Step 1 goes through `employee.create_employee`, so the
+fourteen-field allowlist, the schema checks and the mandatory-field message are
+the same code an operator gets calling that tool directly.
+
+IT IS IDEMPOTENT, AND THAT IS A PROPERTY OF THE LOOKUPS RATHER THAN OF A FLAG.
+Called twice with the same arguments, the second run finds the Employee (by login,
+then by name and company), finds the User, finds the link already made, and
+reports every one of them as reused. Nothing is duplicated and nothing is
+rewritten — the one thing a second run does differently is mint a fresh QR, and
+only when asked, because a QR is a credential and re-issuing one is the point of
+asking for it twice.
 """
 
 from __future__ import annotations
@@ -58,7 +91,7 @@ from .. import compat
 from ..args import as_bool, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
-from . import dispatch, files, mobile
+from . import dispatch, employee as employee_tool, files, mobile
 from .housing import EMPLOYEE, hr_installed
 
 #: The paperwork this tool knows how to file, and what each is called on the
@@ -127,6 +160,8 @@ def onboard_employee(args: dict) -> ToolResult:
 		"employee": None,
 		"documents": [],
 		"mobile": None,
+		"link": None,
+		"qr": None,
 		"tasks": [],
 	}
 
@@ -137,13 +172,21 @@ def onboard_employee(args: dict) -> ToolResult:
 
 	if email:
 		_mobile_access(args, email, full_name, company, employee, report)
+		# THE LINK RUNS WHETHER OR NOT THE ACCOUNT WAS CREATED HERE. A second run
+		# finds `create_mobile_user` refusing an account it already made, which is
+		# right — and the link is the step that was missing when v0.18.0 could not
+		# serve a task board, so it must not be collateral damage from that
+		# refusal. It is idempotent on its own.
+		_link(args, email, employee, report)
+		_qr(args, email, report)
 	else:
 		report["skipped"].append(
 			{
 				"step": "mobile access",
 				"reason": (
 					"no email was given, and a Frappe User is named by one. The Employee exists and "
-					"can be given a login later with create_mobile_user."
+					"can be given a login later with create_mobile_user, then linked to this record "
+					"with link_employee_to_user."
 				),
 			}
 		)
@@ -151,6 +194,7 @@ def onboard_employee(args: dict) -> ToolResult:
 	if as_bool(args, "first_day_tasks", False):
 		_first_day(args, employee, full_name, company, report)
 
+	linked = bool((report["link"] or {}).get("user_id"))
 	return ToolResult(
 		data={
 			**report,
@@ -160,19 +204,34 @@ def onboard_employee(args: dict) -> ToolResult:
 				"one person, and the archive is where the documents describing the BUSINESS live. "
 				"Whoever can read the Employee can read them; nobody else can."
 			),
-			"next_step": (
-				"generate_mobile_login_qr for this account hands over the credential."
-				if report["mobile"]
-				else "create_mobile_user gives this person a login when they need one."
-			),
+			"next_step": _next_step(report, linked),
 		},
 		summary=(
 			f"onboarded {full_name} at {company}: employee {employee}"
 			+ (f", {len(report['documents'])} document(s)" if report["documents"] else "")
 			+ (", mobile access" if report["mobile"] else "")
+			+ (", linked" if linked else "")
+			+ (", QR issued" if report["qr"] else "")
 			+ (f", {len(report['tasks'])} first-day task(s)" if report["tasks"] else "")
 		),
 		docstatus_delta="none → 0 (Employee created)",
+	)
+
+
+def _next_step(report: dict, linked: bool) -> str:
+	"""The one thing left to do, named. Never a list of everything that exists."""
+	if not report["mobile"] and not linked:
+		return "create_mobile_user gives this person a login when they need one."
+	if not linked:
+		return (
+			"link_employee_to_user connects this Employee to the login — until it does, the "
+			"mobile methods have no person to scope a task board to."
+		)
+	if not report["qr"]:
+		return "generate_mobile_login_qr for this account hands over the credential."
+	return (
+		"Show the QR to the phone. `endpoint` in the qr block is the first URL it will call — "
+		"curl it before handing the phone to anybody standing in an orchard."
 	)
 
 
@@ -183,6 +242,18 @@ def _employee(args: dict, full_name: str, company: str, report: dict) -> str:
 	An existing Employee is REUSED rather than duplicated. Two Employee records
 	for one person is the failure that puts somebody on the dispatch board twice
 	and in the payroll register once, and it is far easier to make than to find.
+
+	THREE LOOKUPS BEFORE ANYTHING IS CREATED, and they are what makes a re-run
+	idempotent: the docname a caller named, then the login (which the previous run
+	linked), then the name and hiring company together. The third is the one that
+	covers a re-run with no email at all, where the first two have nothing to
+	match on.
+
+	CREATION DELEGATES to `create_employee`, so the fourteen-field allowlist, the
+	Link and Select checks against this site's own schema, and the mandatory-field
+	message are the same code an operator gets calling that tool by hand. NO
+	`user_id` IS PASSED — the login does not exist yet, and `Employee.user_id` is
+	a Link that Frappe validates. The link is step 3.
 	"""
 	existing = as_str(args, "employee")
 	if existing:
@@ -192,34 +263,32 @@ def _employee(args: dict, full_name: str, company: str, report: dict) -> str:
 		return existing
 
 	email = as_str(args, "email").strip().lower()
-	if email:
+	if email and compat.has_field(EMPLOYEE, "user_id"):
 		linked = frappe.db.get_value(EMPLOYEE, {"user_id": email}, "name")
 		if linked:
 			report["steps"].append({"step": "employee", "action": "reused", "name": str(linked)})
 			return str(linked)
 
-	first, _, last = full_name.partition(" ")
+	same = frappe.db.get_value(EMPLOYEE, {"employee_name": full_name, "company": company}, "name")
+	if same:
+		report["steps"].append({"step": "employee", "action": "reused", "name": str(same)})
+		return str(same)
+
 	payload = {
-		"doctype": EMPLOYEE,
 		"employee_name": full_name,
-		"first_name": first,
-		"last_name": last,
 		"company": company,
 		"status": "Active",
-		"date_of_joining": as_str(args, "date_of_joining") or frappe.utils.today(),
-		"gender": as_str(args, "gender") or None,
-		"date_of_birth": as_str(args, "date_of_birth") or None,
-		"designation": as_str(args, "designation") or None,
-		"cell_number": as_str(args, "phone") or None,
+		"date_of_joining": as_str(args, "date_of_joining"),
+		"date_of_birth": as_str(args, "date_of_birth"),
+		"gender": as_str(args, "gender"),
+		"designation": as_str(args, "designation"),
+		"cell_number": as_str(args, "phone"),
+		"personal_email": email,
 	}
-	if email:
-		payload["user_id"] = email
-		payload["personal_email"] = email
-	doc = frappe.get_doc({key: value for key, value in payload.items() if value is not None})
-	doc.flags.ignore_permissions = True
-	doc.insert(ignore_permissions=True)
-	report["steps"].append({"step": "employee", "action": "created", "name": doc.name})
-	return doc.name
+	result = employee_tool.create_employee({key: value for key, value in payload.items() if value})
+	name = result.data["employee"]
+	report["steps"].append({"step": "employee", "action": "created", "name": name})
+	return name
 
 
 # ── 2. the paperwork ────────────────────────────────────────────────────────
@@ -328,6 +397,87 @@ def _mobile_access(args: dict, email: str, full_name: str, company: str, employe
 		),
 	}
 	report["steps"].append({"step": "mobile access", "action": "created", "name": data.get("user")})
+
+
+# ── 3b. the link between the two ────────────────────────────────────────────
+def _link(args: dict, email: str, employee: str, report: dict) -> None:
+	"""Point the Employee at the login. THIS IS THE STEP v0.18.0 WAS MISSING.
+
+	Every Farm Ops method scopes work by EMPLOYEE. A login with no Employee behind
+	it gets `list_my_tasks` refusing it with "set user_id on their Employee record
+	to this email address" — which is correct and was, until v0.18.1, unfixable
+	from here. Without this step the other four produce a phone that enrols
+	perfectly and then shows an empty screen with an error on it.
+
+	`allow_unenrolled_user=true` because the account was created moments ago in
+	step 2 and its grant may or may not have landed depending on what that step
+	was allowed to do; refusing the link on those grounds would refuse it for a
+	reason this orchestrator itself caused. The refusal is real and useful when an
+	operator calls `link_employee_to_user` directly, which is where it belongs.
+
+	NOT FATAL. An Employee that exists and a login that exists are both worth
+	keeping when only the join between them failed — it is one call to repair, and
+	`skipped` says which call.
+	"""
+	try:
+		result = employee_tool.link_employee_to_user(
+			{"employee": employee, "user_id": email, "allow_unenrolled_user": True}
+		)
+	except ToolError as exc:
+		report["skipped"].append({"step": "link", "reason": str(exc)})
+		return
+	data = result.data
+	report["link"] = {
+		"employee": data.get("employee"),
+		"user_id": data.get("user_id"),
+		"action": data.get("action"),
+		"farm_ops_ready": (data.get("linkage") or {}).get("farm_ops_ready"),
+		"note": data.get("note"),
+	}
+	report["steps"].append({"step": "link", "action": data.get("action"), "name": data.get("user_id")})
+
+
+# ── 3c. the credential, as something a phone can scan ───────────────────────
+def _qr(args: dict, email: str, report: dict) -> None:
+	"""The login card, on request only, and WITHOUT the plaintext beside it.
+
+	`issue_qr` DEFAULTS FALSE. Minting a QR rotates the account's API secret, so a
+	default-true would mean that re-running an onboarding to add a W-4 silently
+	knocked a phone already in somebody's pocket offline. Asking for a credential
+	is how you say you intend to hand one over.
+
+	WHAT COMES BACK IS THE IMAGE AND NOT THE PAYLOAD. `generate_mobile_login_qr`
+	returns both; the payload carries `api_secret` as readable text, and copying
+	that into an orchestrator's summary would put a live credential in a second,
+	much more pasteable place — which is the rule this file has followed since
+	v0.17.1 and does not get an exception for being convenient. The PNG encodes the
+	same secret, unavoidably, because that is what enrolment by QR IS; the
+	difference is that nobody pastes a PNG into a chat window by accident.
+	"""
+	if not as_bool(args, "issue_qr", False):
+		return
+	try:
+		result = mobile.generate_mobile_login_qr({"user": email, "url": as_str(args, "url")})
+	except ToolError as exc:
+		report["skipped"].append({"step": "qr", "reason": str(exc)})
+		return
+	data = result.data
+	report["qr"] = {
+		"png_base64": data.get("png_base64"),
+		"mime_type": data.get("mime_type"),
+		"bytes": data.get("bytes"),
+		"pixels": data.get("pixels"),
+		"expires_at": data.get("expires_at"),
+		"endpoint": data.get("endpoint"),
+		"grant": data.get("grant"),
+		"security_note": data.get("security_note"),
+		"payload_note": (
+			"The scannable image only. The decoded payload — which carries the api_secret as "
+			"readable text — is deliberately not repeated here; generate_mobile_login_qr returns "
+			"it if you genuinely need it."
+		),
+	}
+	report["steps"].append({"step": "qr", "action": "issued", "name": email})
 
 
 # ── 4. the first day ────────────────────────────────────────────────────────

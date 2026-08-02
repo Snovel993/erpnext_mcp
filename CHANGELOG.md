@@ -3,6 +3,81 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.18.1 — 2026-08-02
+
+**The Employee register, because a working credential is not a working task
+board.** v0.18.0 got a phone all the way through the funnel and then
+`list_my_tasks` refused it — correctly — with "set `user_id` on their Employee
+record to this email address". Every Farm Ops method scopes work by EMPLOYEE, and
+this app could create the User, the role, the entity scoping, the grant, the
+credential and the QR — six things — and not the one that makes the other six
+useful. Full notes: [`RELEASES/v0.18.1.md`](RELEASES/v0.18.1.md).
+
+### Added — three tools, all mutating, all default OFF
+
+- **`create_employee`** — one Employee record. Writes fourteen identity and
+  assignment fields and refuses everything else BY NAME; payroll, tax and banking
+  fields get their own refusal, because each has a form, an approval and a
+  retention rule this app knows nothing about. Every Link is checked against this
+  site's own records and every Select against this site's own options, with both
+  refusals listing what is actually available. A field this site's Employee
+  doctype does not carry is REPORTED rather than silently dropped. Mandatory
+  fields are read off `frappe.get_meta` — stock Frappe HR requires `gender` and
+  `date_of_birth`, plenty of operators do not — and the refusal names them
+  before anything is written. A second record for the same name at the same
+  company is refused with the existing docname.
+- **`update_employee`** — the same fourteen fields on a record that exists, with
+  the same allowlist and the same schema checks. Reports field by field what
+  actually changed, with the previous value. Re-pointing an existing login needs
+  `replace_user=true` — it moves that person's whole task history with it.
+- **`link_employee_to_user`** — sets `Employee.user_id`, and REPORTS WHETHER THE
+  PHONE WILL NOW WORK rather than merely whether the field was written.
+  `linkage.farm_ops_ready` is true only when the account holds a Farm Ops role,
+  its Mobile Access Grant is Active and the Employee is Active; when it is false
+  the note says which of the three is missing and which tool fixes it. One
+  person, one login in both directions; idempotent when the link already says
+  what was asked for; refused for a User with no Farm Ops role and no grant,
+  because such a link changes nothing today and silently grants a task board on
+  the day somebody grants that account a role for an unrelated reason.
+
+Three switches on ERPNext MCP Settings — `allow_create_employee`,
+`allow_update_employee`, `allow_link_employee_to_user` — all default off.
+Catalogue: 207 → **210 tools** (93 read, 117 write).
+
+### Fixed — `onboard_employee` created the Employee before the login it named
+
+It set `user_id` on the Employee and THEN created the User. `Employee.user_id` is
+a Link, so on a real bench Frappe validates it on insert and the very first step
+raised: **any onboarding that named an email could not complete.** The standalone
+suite modelled that field as plain `Data` and called it a pass.
+
+The order is now employee → login → **link** → QR → tasks, creation delegates to
+`create_employee`, and the whole thing is idempotent: a second run with the same
+arguments finds the Employee (by login, then by name and hiring company), the
+account and the link, and duplicates none of them.
+
+### Changed
+
+- `onboard_employee` gains `issue_qr` (default **false**) and `url`. It returns
+  the scannable PNG in the same response — and still NOT the decoded payload,
+  which carries `api_secret` as readable text. The default is false because
+  minting a QR rotates the account's secret, so a default-true would mean
+  re-running an onboarding to add a W-4 knocked a live phone offline.
+- `onboard_employee`'s result gains `link` and `qr` blocks, and `next_step` now
+  names one thing rather than the first thing.
+
+### Tests
+
+78 new in `tests_standalone/test_employee.py`; suite 3,396 → **3,474**.
+
+Two fidelity fixes in the double, both of which turned a silent pass into a real
+check: the Employee's six Link fields are now modelled as Links rather than Data
+(`user_id` is the one that mattered — see the fix above), `Employee.status`
+carries its four options, and the seven personal fields `create_employee` writes
+were added to the doctype's field list. Without them `compat.has_field` would
+have dropped every value the new tool wrote. The four HR master doctypes
+(Department, Designation, Employment Type, Gender) are seeded by `install_hrms`.
+
 ## 0.18.0 — 2026-08-01
 
 **farmops-api: the mobile methods, off Frappe's request handler.** v0.17.2

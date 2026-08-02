@@ -198,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_seven_tools_ninety_three_read_one_hundred_fourteen_write(self):
+	def test_catalogue_is_two_hundred_ten_tools_ninety_three_read_one_hundred_seventeen_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -271,10 +271,31 @@ class Catalogue(SeededTestCase):
 		not already enforce. Its whole reason to exist is that the paperwork has to
 		land ON THE EMPLOYEE RECORD and not in the governance archive, and a
 		checklist cannot make that mistake impossible.
+
+		v0.18.1 ADDED THREE, ALL WRITES, AND THEY CLOSE THE GAP v0.18.0 OPENED. The
+		mobile app worked end to end and then `list_my_tasks` refused every account
+		— correctly — because the Farm Ops methods scope work by EMPLOYEE and this
+		app could not create, edit or link one. It could make the User, the role,
+		the entity scoping, the grant, the credential and the QR: six things, and
+		not the one that makes the other six useful.
+
+		  * `create_employee` writes fourteen identity and assignment fields and
+		    refuses everything else by name — payroll, tax and banking with their
+		    own message, because each has a form, an approval and a retention rule
+		    this app knows nothing about;
+		  * `update_employee` changes the same fourteen on a record that exists, and
+		    reports field by field what actually moved;
+		  * `link_employee_to_user` sets the one field that turns a working
+		    credential into a working task board, and reports whether the phone will
+		    NOW work rather than merely whether the field was written.
+
+		`onboard_employee` grew no siblings — it gained the link step it was
+		missing, and delegates its creation to `create_employee`, so there is still
+		exactly one implementation of what an Employee record may contain.
 		"""
-		self.assertEqual(len(registry.TOOLS), 207)
+		self.assertEqual(len(registry.TOOLS), 210)
 		self.assertEqual(len(registry.READ_TOOLS), 93)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 114)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 117)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
