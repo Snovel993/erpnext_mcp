@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.18.4 — 2026-08-02
+
+**Chunk size ceiling for iOS uploads.** v0.18.3 unblocked the *permission* on
+the upload path, but the phone was already failing on the *next* constraint:
+Farm Ops iOS sends 512 KB raw chunks (~700 KB base64), the server capped chunks
+at 200 KB base64, so every iPhone photo hit 400 and iOS's SyncEngine marked
+seven queued completions Failed. The 200 KB cap was chosen for MCP tool callers
+composing arguments in a model's context window — not relevant to iOS. Cap now
+800 KB, MCP callers keep self-limiting to their own context. Full notes:
+[`RELEASES/v0.18.4.md`](RELEASES/v0.18.4.md).
+
+### Fixed
+
+- **`tools/uploads.py:MAX_CHUNK_BASE64`** — `200 * 1024` → `800 * 1024`. Comment
+  rewritten to explain the ceiling now accommodates iOS's shipped chunk size
+  with a margin. Total-file cap moves from ~90 MB to ~360 MB (600 chunks × 800
+  KB base64) — well beyond the size of any inspection photo.
+
 ## 0.18.3 — 2026-08-02
 
 **Evidence upload permission fix — the last thing keeping Farm Ops's Complete

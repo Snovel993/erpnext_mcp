@@ -74,14 +74,19 @@ from . import files, governance
 SESSION_DOCTYPE = "Staged File Upload Session"
 CHUNK_DOCTYPE = "Staged File Chunk"
 
-#: Longest `chunk_base64` one call will take, in characters. 200 KB is roughly
-#: where a model's own context stops it composing a larger argument, so a bigger
-#: ceiling here would advertise something no caller can reach — which is exactly
-#: the trap `attach_file_to_document`'s 8 MB fell into.
-MAX_CHUNK_BASE64 = 200 * 1024
+#: Longest `chunk_base64` one call will take, in characters. 200 KB was the old
+#: ceiling — it fit the model-context constraint MCP tool callers work under. But
+#: v0.18.0's farmops-api sidecar has no such constraint, and Farm Ops iOS uses
+#: 512 KB raw slices (per `FarmOpsKit.FarmOpsConfig.uploadChunkBytes`), which
+#: base64-encode to ~700 KB per chunk. Every iPhone upload before v0.18.4 hit
+#: the old ceiling as a 400 and iOS marked the completion failed. 800 KB gives
+#: iOS the room its shipped build already assumes with a small margin, and MCP
+#: callers keep breaking their own uploads into smaller pieces because their
+#: context window is the true constraint, not this one.
+MAX_CHUNK_BASE64 = 800 * 1024
 
-#: Most pieces one upload may declare. 600 × 200 KB of base64 is roughly 90 MB of
-#: file. Also declared on the DocType, so a session saved by hand obeys it too.
+#: Most pieces one upload may declare. 600 × 800 KB of base64 is roughly 360 MB
+#: of file. Also declared on the DocType, so a session saved by hand obeys it too.
 MAX_TOTAL_CHUNKS = 600
 
 #: Ceiling on the whole assembled file. Past this the Desk's own upload control
