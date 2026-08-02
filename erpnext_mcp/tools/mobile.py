@@ -839,6 +839,12 @@ def generate_api_token(args: dict) -> ToolResult:
 			#: Frappe through a proxy that eats `Authorization`.
 			"farmops_auth_header": f"X-FarmOps-Token: {token['api_key']}:{token['api_secret']}",
 			"endpoint": f"{_endpoint_url(args)}/api/method/erpnext_mcp.mcp.handle",
+			#: v0.18.0 — where a PHONE goes, which is somewhere else entirely.
+			#: `endpoint` above is the MCP endpoint an AI client calls and means
+			#: the same thing in all three tools that emit it; this is the first
+			#: URL the Farm Ops app hits with this credential, and the one an
+			#: operator should curl before handing a phone to somebody.
+			"mobile_endpoint": f"{_endpoint_url(args)}{LOGIN_PROBE_PATH}",
 			"replaced_previous_token": replaced,
 			"token_review_due": review_due,
 			"review_days": review_days,
@@ -858,9 +864,12 @@ def generate_api_token(args: dict) -> ToolResult:
 				"overdue grant; revoke_api_token is what actually ends it."
 			),
 			"transport_note": (
-				"This credential buys IDENTITY, not entry. A mobile request still presents the "
-				"shared X-MCP-Token and still has to come from an allowed CIDR — send both "
-				"headers."
+				"This credential buys IDENTITY, not entry. Against the MCP endpoint it is the "
+				"second header: that request still presents the shared X-MCP-Token and still "
+				"has to come from an allowed CIDR. Against the mobile endpoint (mobile_endpoint "
+				"above, v0.18.0) it is the ONLY credential — there is no shared token and no "
+				"CIDR gate on that path, and what stands in their place is the role gate, the "
+				"Mobile Access Grant, entity scoping and the rate limit, on every call."
 			),
 		},
 		summary=f"issued an API token for {email}"
@@ -1182,6 +1191,17 @@ def generate_mobile_login_qr(args: dict) -> ToolResult:
 				"the deadline for ENROLLING, not for the credential — once stored, the token "
 				"works until it is revoked."
 			),
+			"endpoint_note": (
+				f"v0.18.0 MOVED WHERE THE PHONE CALLS: `{API_BASE}/mobile/<method>` and "
+				f"`{API_BASE}/files/<method>`, served by farmops-api — a separate process that "
+				"does not go through Frappe's /api/method handler, because through the Tailscale "
+				"funnel that handler answered every one of v0.17.2's five credential carriers "
+				"with the Desk's HTML login page. `api_base` in the payload carries the prefix, "
+				"so a site that ever moves it moves it in one place and the cards follow. The "
+				"old path stays live for the LAN. `endpoint` above is the FIRST URL the phone "
+				"will call — curl it with the X-FarmOps-Token header before handing the phone to "
+				"anybody, and a JSON user context back means enrolment will work."
+			),
 		},
 		summary=(
 			f"login QR for {email} ({drawn['pixels']}px, {len(png)} bytes), valid to enrol "
@@ -1200,6 +1220,21 @@ def generate_mobile_login_qr(args: dict) -> ToolResult:
 #: phones, and a scanner that accepted any well-formed JSON would let two apps
 #: cross-sign each other's credentials.
 LOGIN_QR_TYPE = "farm_ops_login"
+
+#: Where the phone's eleven methods answer from v0.18.0 on. The app builds each
+#: URL as `<url><API_BASE>/mobile/<method>` — see `farmops_api/routes.py`, which
+#: owns the same constant and is what actually serves them.
+#:
+#: `/api/method/erpnext_mcp.api.mobile.<method>` still works and is still tested;
+#: it is the LAN and in-container path. What it does not do is survive the
+#: Tailscale proxy, which is the whole of why this constant exists.
+API_BASE = "/farmops/api"
+
+#: What the card says to curl. The FIRST call any phone makes, so an operator who
+#: pastes it either gets a JSON user context — in which case enrolment will work
+#: — or learns which of the funnel, the service and the credential is wrong,
+#: before handing the phone to somebody standing in an orchard.
+LOGIN_PROBE_PATH = f"{API_BASE}/mobile/get_current_user_context"
 
 
 def mobile_login_payload(url: str, user: str, api_key: str, api_secret: str, expires_at: str) -> dict:
@@ -1220,12 +1255,35 @@ def mobile_login_payload(url: str, user: str, api_key: str, api_secret: str, exp
 	Keys are short and stable. A QR's module count grows with its payload, and a
 	payload with roomy key names is a physically larger square somebody has to
 	hold a phone further back from.
+
+	────────────────────────────────────────────────────────────────────────
+	v0.18.0: `api_base` IS NEW AND `v` DELIBERATELY DID NOT MOVE
+	────────────────────────────────────────────────────────────────────────
+
+	`LoginQRParser` refuses any payload whose `v` is greater than the build's own
+	`supportedVersion`, which is 1 — so bumping it here would make **every card
+	unscannable by every phone already in the field**, including the phones this
+	release exists to fix. The transport moved; the enrolment format did not.
+
+	`api_base` and the repointed `endpoint` are therefore ADDITIVE and
+	INFORMATIONAL. `LoginQRPayload` decodes six keys and ignores the rest, so a
+	shipped build reads this card exactly as it read the last one. What the two
+	keys are actually for is the human in the loop: an operator with a card and
+	a terminal can now `curl` the exact URL the phone is about to call, which is
+	how "the funnel is wrong" stops being indistinguishable from "the credential
+	is wrong" at the point somebody is standing in an orchard.
 	"""
+	base = str(url).rstrip("/")
 	return {
 		"type": LOGIN_QR_TYPE,
 		"v": 1,
-		"url": str(url).rstrip("/"),
-		"endpoint": f"{str(url).rstrip('/')}/api/method/erpnext_mcp.mcp.handle",
+		"url": base,
+		# The method-path prefix a v0.18.0 client joins to `url`. The app builds
+		# `<url><api_base>/mobile/<method>`; it is emitted rather than hardcoded
+		# in the client so a site that ever moves the prefix moves it in one
+		# place and the cards follow.
+		"api_base": API_BASE,
+		"endpoint": f"{base}{LOGIN_PROBE_PATH}",
 		"user": user,
 		"token": f"{api_key}:{api_secret}",
 		"api_key": api_key,

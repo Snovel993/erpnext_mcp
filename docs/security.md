@@ -470,6 +470,60 @@ Two consequences worth acting on:
   `/api/method/erpnext_mcp.api.mobile.` and `/api/method/erpnext_mcp.api.files.`
   specifically if your funnel is path-scoped.
 
+### The third transport: farmops-api (v0.18.0)
+
+**The eleven methods above are now ALSO served by a separate process, and that
+is the one a phone actually calls.** Everything in this section still applies to
+it, verbatim, because it is the same code — but the perimeter facts changed and
+an auditor needs both.
+
+| | The whitelisted path (v0.17.1–0.17.2) | farmops-api (v0.18.0) |
+|---|---|---|
+| Address | `/api/method/erpnext_mcp.api.{mobile,files}.*` | `/farmops/api/{mobile,files}/<method>` |
+| Served by | Frappe's own WSGI handler, port 8000 → nginx 8080 | `erpnext_mcp/farmops_api/`, gunicorn, port 5250 |
+| Identity | Frappe auth + `fallback_auth` `auth_hooks` | `X-FarmOps-Token`, verified by **the same** `fallback_auth` verifier |
+| The seven gates | `api/guard.py` | `api/guard.py` — literally the same decorated functions |
+| Reachable from | whatever the funnel publishes | only what is explicitly mounted at `/farmops/api/…` |
+| Status | **still live**, LAN and in-container | what the phones use |
+
+**Why a second process at all.** Through the Tailscale funnel, all five of
+v0.17.2's credential carriers returned the Desk's HTML login page, and all five
+worked against `localhost` inside the container. The remaining common factor was
+Frappe's `/api/method` handler on that path behind that proxy. This routes around
+it; it does not explain it. See `RELEASES/v0.18.0.md`.
+
+**What an auditor should check, specifically:**
+
+- **The route table is closed.** `farmops_api/routes.py` is eleven entries with
+  no dispatcher and no method-name argument, asserted against `api/mobile.py` and
+  `api/files.py` in both directions. `create_journal_entry`, `convey_parcel` and
+  `import_chart_of_accounts` are not reachable at any path.
+- **The gates are not copied.** Every route names a `@guard.endpoint`-wrapped
+  function. `ByteIdentical` in `tests_standalone/test_farmops_api.py` compares
+  both transports' serialised responses over every read, which is what would
+  catch a copy that had started to drift.
+- **The argument filter is reproduced.** Frappe's handler binds a body to a
+  signature by dropping unknown keys, and the eleven wrappers were written
+  against that — it is what makes `record_data`, `worker_id`, `cancel` and `user`
+  unreachable from a phone. `routes.bind` does the same by `inspect`, and the
+  four refused arguments are asserted absent from every route's accepted set.
+- **The bind address.** gunicorn listens on `0.0.0.0:5250` *inside the
+  container*; the compose publishes it as `127.0.0.1:5250` on the host. The
+  prefix is what keeps it off the farm LAN, and it is one edit away from not
+  being there. Check `docker compose config` on the running app, not the repo.
+- **The failure counter is shared.** `fallback_auth.verify_credential` meters
+  wrong answers per api_key, and both transports call it — so a guesser does not
+  get a fresh budget per door.
+- **Nothing answers HTML.** Every status the service can produce is JSON,
+  including 404, 405 and an unhandled exception in its own error handler.
+
+The **kill switch stops both**, because it is gate 1 inside the shared
+`guard.endpoint`. To stop only the new transport:
+
+```sh
+docker exec <container> supervisorctl stop farmops-api
+```
+
 ### Stopping it
 
 ERPNext MCP Settings → untick **Farm Ops Mobile API Enabled**, or:

@@ -212,13 +212,8 @@ def resolve() -> str:
 	if not (api_key and api_secret):
 		return ""
 
-	slot = _failure_slot(api_key)
-	if _failures(slot) >= FAILURE_LIMIT:
-		return ""
-
-	user = _verified_user(api_key, api_secret)
+	user = verify_credential(api_key, api_secret)
 	if not user:
-		_note_failure(slot)
 		return ""
 
 	_establish(user)
@@ -227,6 +222,53 @@ def resolve() -> str:
 	except Exception:  # pragma: no cover - a local that refuses attributes
 		pass
 	return source
+
+
+def verify_credential(api_key: str, api_secret: str) -> str:
+	"""One `<api_key>:<api_secret>` pair, metered and verified. The User, or "".
+
+	v0.18.0 SPLIT THIS OUT OF `resolve` SO THERE IS STILL EXACTLY ONE VERIFIER.
+	`farmops_api` presents the same pair on the same terms, but it reads it off
+	its own request object rather than out of `frappe.local`, so it needs the
+	half of `resolve` that checks a credential without the half that finds one.
+
+	The alternative was a second copy of Frappe's api-key scheme living in the
+	sidecar, and the day the two disagreed the symptom would be an
+	authentication bug on forty phones with two places to look for it. `resolve`
+	now calls this, so both transports share one verifier AND one failure
+	counter — a guesser working a key through the sidecar is metered by the same
+	bucket as one working it through the whitelisted path, which is what makes
+	the limit mean ten wrong answers a minute rather than ten per door.
+
+	NOTHING HERE ESTABLISHES A SESSION. It answers "whose credential is this?"
+	and stops; becoming that user is `_establish`'s job on one path and
+	`farmops_api.session`'s on the other, and every gate in `guard.py` runs
+	afterwards on either.
+	"""
+	api_key = str(api_key or "").strip()
+	api_secret = str(api_secret or "").strip()
+	if not (api_key and api_secret):
+		return ""
+
+	slot = _failure_slot(api_key)
+	if _failures(slot) >= FAILURE_LIMIT:
+		return ""
+
+	user = _verified_user(api_key, api_secret)
+	if not user:
+		_note_failure(slot)
+		return ""
+	return user
+
+
+def split_token(raw: str) -> tuple:
+	"""`key:secret` → the two halves, tolerating a leading `token `.
+
+	The public name for `_split`. `farmops_api.auth` reads the same
+	`X-FarmOps-Token` header in the same format, and parsing it a second way is
+	how a client that works against one door stops working against the other.
+	"""
+	return _split(raw)
 
 
 def source() -> str:

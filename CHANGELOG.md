@@ -3,6 +3,89 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.18.0 — 2026-08-01
+
+**farmops-api: the mobile methods, off Frappe's request handler.** v0.17.2
+carried the credential five ways and every one of them still came back as the
+Desk's HTML login page through the Tailscale funnel. Five independent carriers
+do not fail by coincidence — the remaining common factor was `/api/method/*`
+itself. Bank Bridge, a plain WSGI service, works perfectly through the same
+funnel. This release is that shape. Full notes:
+[`RELEASES/v0.18.0.md`](RELEASES/v0.18.0.md).
+
+### Added — a third transport for the same eleven methods
+
+`erpnext_mcp/farmops_api/` is a Werkzeug WSGI service on `0.0.0.0:5250` inside
+the ERPNext container, published to the host as **`127.0.0.1:5250`** so the
+Tailscale container (which shares the host network namespace) can reach it and
+the LAN cannot. The routes are:
+
+```
+POST /farmops/api/mobile/<one of nine>
+POST /farmops/api/files/<one of two>
+X-FarmOps-Token: <api_key>:<api_secret>
+```
+
+**IT DELEGATES TO v0.17.2's WRAPPERS — IT DOES NOT REIMPLEMENT THEM.**
+`farmops_api/routes.py` is eleven entries and each one names the same
+`@guard.endpoint`-wrapped function the whitelisted path calls, so the kill
+switch, the role gate, the **Active Mobile Access Grant**, entity scoping, the
+rate limit, the MCP Action Log row and the secret strip all run here because
+they ARE the same code running. `ByteIdentical` in the test suite asserts the
+responses match the old path's, serialised, over every read — which is what
+makes "the same code" checkable rather than claimed.
+
+Three things Frappe was doing and now are not, so this service does them:
+**identity** (`X-FarmOps-Token`, verified by v0.17.2's own verifier, sharing
+v0.17.2's failure counter — one credential, one budget, however many
+transports); **a request-scoped Frappe session** (`init`/`connect`/`set_user`/
+`destroy`, plus the commit Frappe's handler does at the end of a request —
+without it a worker claims a task, gets a 200, and finds it unclaimed on the
+next refresh); and **an envelope** — `{"message": …}` on success and Frappe's
+`_server_messages` shape on failure, so a refusal reaches the phone as the
+sentence it was written as.
+
+**Every answer is `application/json`.** There is no path out of the service that
+renders HTML and none that redirects — including a 404, a 405, and an unhandled
+exception in the service's own error handling. That is the whole point: the
+v0.17.x failure was HTTP 200 carrying an HTML login page.
+
+**No new dependencies.** Werkzeug ships with Frappe and gunicorn is already in
+the bench venv. Flask would have contributed `@app.route` and risked resolving
+against Frappe's pinned Werkzeug inside the venv that runs the ledger.
+
+### Changed
+
+- `generate_mobile_login_qr` — the payload gains `api_base` (`/farmops/api`) and
+  `endpoint` now points at the first URL a phone actually calls, so an operator
+  can `curl` a card before handing the phone to somebody. **`v` deliberately
+  stays 1**: `LoginQRParser` refuses a payload above the build's supported
+  version, so bumping it would make every card unscannable by every phone
+  already in the field.
+- `create_mobile_user` — a `mobile_endpoint` key, and a `transport_note` that
+  says plainly that the mobile path has no shared token and no CIDR gate, and
+  what stands in their place.
+- `api/fallback_auth.py` — `verify_credential` and `split_token` split out as
+  public functions so both transports share one verifier and one failure
+  counter. Behaviour unchanged.
+
+### Unchanged, on purpose
+
+`/api/method/erpnext_mcp.api.mobile.*` and `…api.files.*` are **still live and
+still tested**. They work on the LAN and from inside the container, and they are
+the fallback on the day the sidecar is the thing that is down.
+
+### Deployment
+
+Needs a rebuilt image (`ERPNEXT_MCP_VERSION=0.18.0`), the compose change that
+publishes `127.0.0.1:5250`, eleven Tailscale Funnel paths, and a two-file iOS
+change. All of it, in order, with the exact commands:
+[`RELEASES/v0.18.0.md`](RELEASES/v0.18.0.md).
+
+**Tests:** 3396 pass, 75 skipped, 0 failures (72 new).
+
+---
+
 ## 0.17.2 — 2026-08-01
 
 **The tunnel was eating the credential.** v0.17.1 shipped a working mobile API

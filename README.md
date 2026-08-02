@@ -1879,30 +1879,45 @@ is the expected state and not a fault** — Funnel needs no cooperation from the
 Frappe process at all — and the tool says so rather than reporting a problem you
 would go and try to fix.
 
-### 6. The mobile app uses a DIFFERENT path, with different gates (v0.17.1)
+### 6. The mobile app uses a DIFFERENT service, with different gates (v0.18.0)
 
 Everything above describes one endpoint,
 `/api/method/erpnext_mcp.mcp.handle`, which is what an AI client calls. **The
-Farm Ops iOS app does not use it.** It calls eleven plain Frappe whitelisted
-methods:
+Farm Ops iOS app does not use it, and since v0.18.0 it does not use Frappe's
+request handler at all.** It calls eleven routes on a separate process:
 
 ```
-/api/method/erpnext_mcp.api.mobile.<one of nine>
-/api/method/erpnext_mcp.api.files.<one of two>
+POST /farmops/api/mobile/<one of nine>
+POST /farmops/api/files/<one of two>
+X-FarmOps-Token: <api_key>:<api_secret>
 ```
 
-carrying `Authorization: token <api_key>:<api_secret>` **and, since v0.17.2,
-the same pair again as `X-FarmOps-Token: <api_key>:<api_secret>`.**
+served by `erpnext_mcp/farmops_api/` — a Werkzeug WSGI service on port 5250
+inside the same container, published to the host's loopback only.
 
-**The second header is why the app works through your tunnel at all.** The
-Tailscale `serve`/`funnel` proxy removes `Authorization` — proven on 2026-08-01
-from inside the tailnet as well as from the public funnel — so Frappe
-authenticated nobody, refused the Guest before the method ran, and answered a
-200 carrying the Desk's `/me` page. `erpnext_mcp/api/fallback_auth.py` reads the
-same credential out of `X-FarmOps-Token`, or out of `"_auth"` in the POST body
-when even that does not survive, and establishes the identical session with
-Frappe's own api-key scheme. **All seven gates below then run unchanged**; it is
-a second door, not a way round them. The audit row records which one was used.
+**Why it is not just another Frappe endpoint.** v0.17.1 put these eleven methods
+at `/api/method/erpnext_mcp.api.mobile.*` and every call from a phone came back
+as an HTTP 200 carrying the Desk's HTML login page. v0.17.2 established that the
+Tailscale `serve`/`funnel` proxy removes `Authorization` — proven from inside the
+tailnet as well as from the public funnel — and carried the credential four more
+ways, resolving all of them in an `auth_hooks` entry so identity was settled in
+the same window Frappe settles it. **Every one of the five still returned the
+login page through the funnel, and every one of them worked against `localhost`
+inside the container.** Five independent carriers do not fail by coincidence; the
+remaining common factor was `/api/method/*` itself. Bank Bridge, a plain WSGI
+service, works perfectly through the same funnel. So the methods moved to that
+shape.
+
+**The gates did not move, because it is the same code.** `farmops_api/routes.py`
+is eleven entries and each names the same `@guard.endpoint`-wrapped function the
+whitelisted path calls, so all seven checks below run here as they run there. The
+test suite asserts the two transports' responses are byte-identical for the same
+input, which is what makes that a checkable property rather than a claim.
+
+**The old path is still live** at `/api/method/erpnext_mcp.api.mobile.*`, with
+v0.17.2's three credential carriers intact. It works on the LAN and from inside
+the container, and it is the fallback if the sidecar is ever the thing that is
+down.
 
 **Step 4 above does not apply to them and cannot.** A whitelisted method reached
 directly never runs `security.authorize()`, so these paths have no
@@ -1916,11 +1931,13 @@ covers each in full, and it is the section to read before you widen anything.
 
 Two consequences for this chapter:
 
-- **A whole-port Funnel already publishes them**, along with `/app` and every
-  whitelisted method of every installed app. Check with
-  `tailscale serve status --json`. If your Funnel is path-scoped instead, add
-  the two prefixes above — and never funnel `/api/method/` as a whole prefix to
-  save typing.
+- **A whole-port Funnel does NOT publish them any more, and this changed in
+  v0.18.0.** A blanket `/` handler forwards to ERPNext's nginx; farmops-api is a
+  different port. Whichever shape your Funnel is, the eleven `/farmops/api/…`
+  paths have to be mounted explicitly — the exact commands are in
+  [`RELEASES/v0.18.0.md`](RELEASES/v0.18.0.md). Never funnel `/api/method/` as a
+  whole prefix to save typing; that publishes every whitelisted method of every
+  installed app.
 - **An enrolled account holding no Company User Permission is REFUSED here**,
   not shown everything. That inverts Frappe's own rule on purpose; on a path
   reachable from the internet, the framework's default is exactly backwards.

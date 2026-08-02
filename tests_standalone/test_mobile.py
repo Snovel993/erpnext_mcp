@@ -528,11 +528,26 @@ class TheLoginCard(MobileTestCase):
 		data = self.card()
 		payload = data["payload"]
 		self.assertEqual(payload["url"], FUNNEL)
-		self.assertEqual(payload["endpoint"], f"{FUNNEL}/api/method/erpnext_mcp.mcp.handle")
 		self.assertEqual(payload["user"], WORKER)
 		self.assertEqual(payload["token"], f"{payload['api_key']}:{payload['api_secret']}")
 		self.assertTrue(payload["expires_at"])
 		self.assertEqual(payload["v"], 1)
+
+	def test_the_card_points_at_where_v0180_actually_serves_the_phone(self):
+		"""v0.18.0. `endpoint` was the MCP path, which no phone has ever called.
+		It is now the FIRST URL the app hits — so an operator can curl the card
+		before handing the phone to somebody standing in an orchard."""
+		self.make()
+		payload = self.card()["payload"]
+		self.assertEqual(payload["api_base"], "/farmops/api")
+		self.assertEqual(payload["endpoint"], f"{FUNNEL}/farmops/api/mobile/get_current_user_context")
+
+	def test_the_payload_version_did_not_move_or_every_shipped_phone_stops_scanning(self):
+		"""`LoginQRParser` refuses a payload whose `v` exceeds the build's
+		`supportedVersion`, which is 1. The transport moved; the enrolment format
+		did not, and bumping this would brick the phones this release is for."""
+		self.make()
+		self.assertEqual(self.card()["payload"]["v"], 1)
 
 	def test_the_token_on_the_card_is_the_one_that_works(self):
 		self.make()
