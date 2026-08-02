@@ -3,6 +3,30 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.18.3 — 2026-08-02
+
+**Evidence upload permission fix — the last thing keeping Farm Ops's Complete
+button from writing a Housing Inspection.** Tim's iPhone showed "Completed —
+saved on this device, will sync when back in range" but the task stayed
+In-Progress on the server and no record ever appeared. Root cause: the very
+first server call in the evidence path, `stage_file_chunk`, returned HTTP 403
+"That request could not be completed" — Frappe's default PermissionError —
+because the `Staged File Upload Session` and `Staged File Chunk` doctypes grant
+Desk permissions to `System Manager` and `Accounts Manager` only. `guard.endpoint`
+had already validated the caller as a Farm Ops user with an active Mobile Access
+Grant (which IS the permission boundary for evidence uploads), but Frappe's
+doctype-level check refused the insert anyway. Full notes:
+[`RELEASES/v0.18.3.md`](RELEASES/v0.18.3.md).
+
+### Fixed
+
+- **`tools/uploads.py`** — four insert/save call sites now
+  `ignore_permissions=True`: `_open_session`, `stage_file_chunk` chunk insert +
+  session save, `declare_expectations` save, `commit_staged_file` bulk-chunk
+  insert + session save. No doctype JSON change (Desk visibility stays exactly
+  what it was — operators do not want the Desk showing every in-flight photo).
+  No guard change, no new roles, no schema migration.
+
 ## 0.18.2 — 2026-08-02
 
 **iOS workflow hotfix — three bugs Tim's iPhone testing surfaced tonight.**

@@ -173,6 +173,15 @@ def stage_file_chunk(args: dict) -> ToolResult:
 			{"chunk_base64": raw, "chunk_bytes": len(content), "chunk_sha256": digest},
 		)
 	else:
+		# v0.18.3: `guard.endpoint` has already validated the caller as a Farm
+		# Ops role with an active Mobile Access Grant — that IS the permission
+		# boundary for evidence uploads. The Staged File Upload Session /
+		# Staged File Chunk doctypes' Desk permissions are System Manager and
+		# Accounts Manager only (they exist to keep operators out of Desk lists
+		# of half-uploaded photos), so leaving `ignore_permissions=False` on
+		# these inserts makes every Farm Manager / Foreman / Farm Worker upload
+		# refuse with "That request could not be completed" — the exact 403
+		# that broke the whole iOS evidence path.
 		frappe.get_doc(
 			{
 				"doctype": CHUNK_DOCTYPE,
@@ -182,12 +191,12 @@ def stage_file_chunk(args: dict) -> ToolResult:
 				"chunk_bytes": len(content),
 				"chunk_sha256": digest,
 			}
-		).insert()
+		).insert(ignore_permissions=True)
 
 	received = _received_indexes(session.name)
 	session.chunks_received = len(received)
 	session.staged_bytes = staged_after
-	session.save()
+	session.save(ignore_permissions=True)
 
 	missing = _missing_indexes(received, total_chunks)
 	data = {
@@ -574,6 +583,8 @@ def _open_session(session_id: str, total_chunks: int, expected_sha256: str, expe
 	"""The session for this id, created on the first piece and vetted on every one."""
 	existing = frappe.db.get_value(SESSION_DOCTYPE, {"session_id": session_id}, "name")
 	if not existing:
+		# v0.18.3: `ignore_permissions=True` — see the chunk insert below for
+		# the reasoning. Session and chunk share the same permission story.
 		return frappe.get_doc(
 			{
 				"doctype": SESSION_DOCTYPE,
@@ -584,7 +595,7 @@ def _open_session(session_id: str, total_chunks: int, expected_sha256: str, expe
 				"expected_sha256": expected_sha256,
 				"expected_size": expected_size or 0,
 			}
-		).insert()
+		).insert(ignore_permissions=True)
 
 	doc = frappe.get_doc(SESSION_DOCTYPE, existing)
 	_assert_owner(doc, session_id, "Nothing was staged.")
@@ -653,7 +664,7 @@ def declare_expectations(session_id: str, expected_sha256: str = "", expected_si
 		as_int({"expected_size": expected_size}, "expected_size"),
 		session_id,
 	)
-	doc.save()
+	doc.save(ignore_permissions=True)  # v0.18.3 — see _open_session
 	return {
 		"session_id": session_id,
 		"expected_sha256": doc.get("expected_sha256") or None,
@@ -905,11 +916,11 @@ def stage_internal_bytes(content: bytes, session_id: str, chunk_bytes: int = INT
 				"chunk_bytes": len(piece),
 				"chunk_sha256": hashlib.sha256(piece).hexdigest(),
 			}
-		).insert()
+		).insert(ignore_permissions=True)  # v0.18.3 — see _open_session
 		staged += len(piece)
 	session.chunks_received = len(pieces)
 	session.staged_bytes = staged
-	session.save()
+	session.save(ignore_permissions=True)  # v0.18.3
 
 	# Read it back out of staging rather than trusting the bytes we still hold.
 	# A round trip that corrupted something is caught here, not in a PDF nobody
