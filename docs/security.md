@@ -406,6 +406,49 @@ filenames to a basename. Every committed evidence file is private and attached t
 nothing; it reaches its compliance record through `complete_task_via_mobile`,
 which checks the task belongs to the caller.
 
+### How the phone proves who it is — three carriers, one credential (v0.17.2)
+
+**The Tailscale `serve`/`funnel` proxy removes the `Authorization` header.**
+Proven three ways on 2026-08-01: the call works against `localhost` inside the
+container, and returns the Desk's `/me` page through the tunnel — including from
+a machine *on the tailnet*, which rules out the public funnel edge and leaves the
+proxy step. Frappe authenticated nobody, so `is_whitelisted` refused a Guest
+before the method ran, and the phone got HTML with a 200 on it.
+
+So the app sends the **same** `<api_key>:<api_secret>` pair three ways and the
+server takes the first that resolves:
+
+| | Carrier | Who reads it |
+|---|---|---|
+| a | `Authorization: token <key>:<secret>` | Frappe's own auth layer. Nothing in this app runs. |
+| b | `X-FarmOps-Token: <key>:<secret>` | `erpnext_mcp/api/fallback_auth.py`, via an `auth_hooks` entry |
+| c | `"_auth": {"api_key": …, "api_secret": …}` in the POST body | the same, when neither header survives |
+
+**(b) and (c) are doors, not bypasses.** They answer exactly one question —
+*which Frappe user is this* — and answer it with Frappe's own scheme: look the
+`api_key` up on User, compare the stored secret with `hmac.compare_digest`,
+refuse a disabled account. **All seven gates above then run on the user they
+establish**, unchanged. A wrong secret is Guest, not an error, and produces the
+same opaque refusal as everything else.
+
+Three properties worth knowing:
+
+- **A credential Frappe already validated is never overridden.** (a) beats (b)
+  beats (c), always.
+- **Failed verifications are metered per key, successes are not.** Ten wrong
+  answers for one `api_key` in a minute close the fallback path *for that key*.
+  The counter is deliberately **not** keyed on the caller's address: every phone
+  on the farm arrives from the funnel's single address, and one stale credential
+  would take the rest off the air.
+- **The audit row says which door.** `mobile:<method>` rows carry
+  `(fallback_auth: header)` or `(fallback_auth: body)`; a row with no such tag is
+  a request whose `Authorization` header survived the proxy. That is how you tell
+  whether your tunnel is still eating headers.
+
+The `auth_hooks` entry is this app's only request-lifecycle hook. It acts on
+`/api/method/erpnext_mcp.api.*` and nothing else, it grants no permission, and it
+cannot raise.
+
 ### Statuses are part of the contract
 
 `FarmOpsKit` reads **401** as *"credential dead, sign out and re-scan"* and

@@ -3,6 +3,83 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.17.2 — 2026-08-01
+
+**The tunnel was eating the credential.** v0.17.1 shipped a working mobile API
+and a working app, and every call from a phone still came back as an HTTP 200
+carrying the Desk's `/me` page. Full notes:
+[`RELEASES/v0.17.2.md`](RELEASES/v0.17.2.md).
+
+### Fixed — the Tailscale proxy strips `Authorization`, so every call was Guest
+
+Proven three ways on 2026-08-01: the call returns correct JSON against
+`localhost` inside the container with `Authorization: token key:secret`, and
+returns HTML `/me` with `sid=Guest` through `https://<host>.ts.net/…` — **both
+from the public funnel and from a machine on the tailnet**, which rules out the
+funnel edge and leaves the `tailscale serve` proxy step. Frappe authenticated
+nobody, so `is_whitelisted` refused the Guest *before the method ran* and Frappe
+rendered the login page at it. The credential was never wrong; it was never
+presented.
+
+**Fixed** — the app now sends the same `<api_key>:<api_secret>` pair three ways
+and the server takes the first that resolves:
+
+| | Carrier | Read by |
+|---|---|---|
+| a | `Authorization: token <key>:<secret>` | Frappe's own auth. Nothing in this app runs. |
+| b | `X-FarmOps-Token: <key>:<secret>` | **new** `erpnext_mcp/api/fallback_auth.py` |
+| c | `"_auth": {"api_key": …, "api_secret": …}` in the POST body | the same, when neither header survives |
+
+**IT IS A SECOND DOOR AND NOT A BYPASS.** (b) and (c) answer exactly one
+question — *which Frappe user is this* — using Frappe's own scheme: look the
+`api_key` up on User, compare the stored secret with `hmac.compare_digest`,
+refuse a disabled account. All seven of `api/guard.py`'s checks then run
+unchanged on the user they establish: role gate, **Active Mobile Access Grant**,
+entity scoping, kill switch, rate limit, audit row, secret strip. A wrong secret
+is Guest, not an error, and produces the same opaque refusal as everything else.
+An admin holding every role on the site still cannot get in without a grant.
+
+**It could not have been done inside the endpoint.** `is_whitelisted` refuses a
+Guest *before* a whitelisted method is dispatched, so a check written in
+`guard.py` alone would have sat behind a door that never opens — the `/me` page
+IS that refusal. Resolution therefore runs as an **`auth_hooks` entry**, which is
+Frappe's own extension point for custom authentication and runs in the same
+window Frappe settles identity in. `guard.endpoint` resolves a second time as a
+belt: the standalone suite has no request lifecycle, and it is idempotent.
+
+### Added — `auth_hooks`, this app's only request-lifecycle hook
+
+Declared in `hooks.py` and bounded to the point of dullness: it acts on
+`/api/method/erpnext_mcp.api.*` and returns after one attribute read for
+everything else on the site, it never overrides an identity Frappe already
+established, it grants no permission, and it cannot raise — `validate_auth` runs
+it on every request, so an exception there would be an exception on every Desk
+page of every installed app.
+
+### Added — the audit row says which door the caller came in through
+
+`mobile:<method>` rows in MCP Action Log now carry `(fallback_auth: header)` or
+`(fallback_auth: body)`; a row with no such tag is a request whose
+`Authorization` header survived. That is how you tell whether the tunnel is still
+eating headers, and it is deliberately a tag on the row that was already being
+written rather than a row of its own — if the proxy strips the header then every
+call takes the fallback, and a row per fallback would be tens of thousands of
+authentication records a day in the register a compliance auditor reads.
+
+### Added — failed fallback verifications are metered, per key
+
+Ten wrong answers for one `api_key` in a minute close the fallback path for that
+key. The counter is keyed on a hash of the presented key and **not** on the
+caller's address, because every phone on the farm arrives from the funnel's
+single address and one stale credential would otherwise take the rest off the
+air. A working phone never touches it.
+
+### Changed — `create_mobile_user` and `generate_api_token` print both headers
+
+New `farmops_auth_header` alongside `auth_header`, and the login-QR `app_note`
+now names both headers and the `_auth` body form. Same credential, same strip:
+the key trips `guard.strip_secrets` exactly as `auth_header` does.
+
 ## 0.17.1 — 2026-08-01
 
 **Sprint 9's two tracks shipped incompatible contracts. This joins them.** The

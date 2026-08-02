@@ -1891,7 +1891,18 @@ methods:
 /api/method/erpnext_mcp.api.files.<one of two>
 ```
 
-carrying only `Authorization: token <api_key>:<api_secret>`.
+carrying `Authorization: token <api_key>:<api_secret>` **and, since v0.17.2,
+the same pair again as `X-FarmOps-Token: <api_key>:<api_secret>`.**
+
+**The second header is why the app works through your tunnel at all.** The
+Tailscale `serve`/`funnel` proxy removes `Authorization` — proven on 2026-08-01
+from inside the tailnet as well as from the public funnel — so Frappe
+authenticated nobody, refused the Guest before the method ran, and answered a
+200 carrying the Desk's `/me` page. `erpnext_mcp/api/fallback_auth.py` reads the
+same credential out of `X-FarmOps-Token`, or out of `"_auth"` in the POST body
+when even that does not survive, and establishes the identical session with
+Frappe's own api-key scheme. **All seven gates below then run unchanged**; it is
+a second door, not a way round them. The audit row records which one was used.
 
 **Step 4 above does not apply to them and cannot.** A whitelisted method reached
 directly never runs `security.authorize()`, so these paths have no
