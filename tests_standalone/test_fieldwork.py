@@ -432,6 +432,40 @@ class TheRulesAreUnchanged(FieldworkTestCase):
 				self.assertIn(f"allow_{tool}", result["content"][0]["text"])
 
 
+class TheCompletionRecordsWhereItHappened(FieldworkTestCase):
+	"""v0.19.1. §112.161(a)(1)(i) asks an activity record for the farm's name AND
+	its location. `task_name` was only ever the first half."""
+
+	def _a_completed_task(self, **completion):
+		task = self.a_task(evidence_required={"findings_text": True})
+		self.worker_data("claim_task_via_mobile", {"task_name": task["name"]})
+		self.worker_data("start_task_via_mobile", {"task_name": task["name"]})
+		return self.worker_data(
+			"complete_task_via_mobile",
+			{"task_name": task["name"], "findings_text": "", **completion},
+		)
+
+	def test_a_coordinate_persists_on_the_assignment(self):
+		data = self._a_completed_task(farm_location_gps="45.5152,-122.6784")
+		self.assertEqual(data["assignment"]["farm_location_gps"], "45.5152,-122.6784")
+		stored = STORE.rows("Farm Task Assignment")[0]
+		self.assertEqual(stored["farm_location_gps"], "45.5152,-122.6784")
+
+	def test_a_place_name_is_as_valid_as_a_coordinate(self):
+		"""Free text on purpose: a cabin with a metal roof has no fix, and the name
+		of the cabin somebody stood in is worth more than a coordinate they could
+		not take."""
+		data = self._a_completed_task(farm_location_gps="MC-Cabin-01")
+		self.assertEqual(data["assignment"]["farm_location_gps"], "MC-Cabin-01")
+
+	def test_it_is_optional_and_a_completion_without_one_still_lands(self):
+		"""ADDITIVE. Every completion filed before v0.19.1 has it blank, and a
+		blank is an older record rather than an invalid one."""
+		data = self._a_completed_task()
+		self.assertIsNone(data["assignment"]["farm_location_gps"])
+		self.assertIn(data["final_state"], ("Completed", "Awaiting-Review"))
+
+
 class TheCalendarIsScoped(FieldworkTestCase):
 	def alerts(self):
 		self.a_camp()

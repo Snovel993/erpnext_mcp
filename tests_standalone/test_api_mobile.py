@@ -904,6 +904,50 @@ class TheWholeFlowWorks(MobileAPITestCase):
 
 
 # ── 9. the two things a hostile body could otherwise reach ──────────────────
+class TheHandsetsFixReachesTheRecord(MobileAPITestCase):
+	"""v0.19.1. The shipped app has been sending `latitude`/`longitude` since
+	v0.18 and they went only to the audit row, because Farm Task Assignment had
+	no column to put them in. It has one now, so they land on the record — which
+	is the location half of §112.161(a)(1)(i) arriving without an app release."""
+
+	def _complete(self, **kwargs):
+		self.a_camp()
+		task = self.a_task(evidence_required={"findings_text": True})
+		self.be()
+		mobile_api.claim_task(task=task)
+		mobile_api.start_task(task=task)
+		mobile_api.complete_task_via_mobile(task=task, findings_text="", **kwargs)
+		return STORE.rows("Farm Task Assignment")[0]
+
+	def test_a_coordinate_pair_becomes_the_location(self):
+		row = self._complete(latitude=45.6721, longitude=-121.1787)
+		self.assertEqual(row["farm_location_gps"], "45.6721000,-121.1787000")
+
+	def test_an_explicit_place_name_beats_the_handsets_fix(self):
+		"""A worker who typed a name did so where the fix was absent or wrong.
+		Overwriting it with whatever the GPS settled on outside would replace a
+		fact with a guess."""
+		row = self._complete(
+			farm_location_gps="MC-Cabin-01", latitude=45.6721, longitude=-121.1787
+		)
+		self.assertEqual(row["farm_location_gps"], "MC-Cabin-01")
+
+	def test_a_malformed_pair_is_dropped_rather_than_failing_the_completion(self):
+		"""THE ONE THAT MATTERS. The completion carries photographs, a signature
+		and a compliance record; refusing all of it over an unparseable coordinate
+		would trade the record for its least important field. The pair as sent is
+		still in the audit row, which is where a bad one is worth looking at."""
+		row = self._complete(latitude="not-a-number", longitude="also-not")
+		self.assertFalse(row.get("farm_location_gps"))
+		recorded = json.loads(self.audit_rows("complete_task_via_mobile")[0]["arguments_json"])
+		self.assertEqual(recorded["latitude"], "not-a-number")
+
+	def test_a_completion_carrying_no_location_at_all_still_lands(self):
+		row = self._complete()
+		self.assertFalse(row.get("farm_location_gps"))
+		self.assertEqual(row["state"], "Completed")
+
+
 class TheBodyCannotNameTheCaller(MobileAPITestCase):
 	"""Frappe binds body keys that match a method's signature, and `user` is in
 	every one of these signatures because the guard injects it."""

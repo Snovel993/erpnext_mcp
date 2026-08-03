@@ -139,6 +139,32 @@ def _evidence(raw) -> list:
 	return out
 
 
+def _location(given, latitude, longitude) -> str:
+	"""Where the work was done, as one string, from whichever half the app sent.
+
+	v0.19.1. A TYPED PLACE NAME BEATS A COORDINATE. The handset's fix is the
+	usual answer, but a worker who wrote "MC-Cabin-01" did so in a shed where
+	the fix was absent or wrong, and overwriting that with whatever the GPS
+	eventually settled on outside would replace a fact with a guess.
+
+	A pair that will not parse as numbers is DROPPED rather than raised on. The
+	field is optional and additive; failing a completion — with its photographs,
+	its signature and its compliance record — over a malformed coordinate would
+	trade the whole record for its least important field. The latitude and
+	longitude as sent are in the audit row regardless, which is where a
+	malformed pair is worth looking at anyway.
+	"""
+	typed = str(given or "").strip()
+	if typed:
+		return typed[:140]
+	if latitude in (None, "") or longitude in (None, ""):
+		return ""
+	try:
+		return f"{float(latitude):.7f},{float(longitude):.7f}"
+	except (TypeError, ValueError):
+		return ""
+
+
 # ── 1. get_current_user_context ─────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("get_current_user_context", limit=guard.READ_LIMIT)
@@ -301,6 +327,7 @@ def complete_task_via_mobile(
 	witness=None,
 	latitude=None,
 	longitude=None,
+	farm_location_gps=None,
 	evidence_files=None,
 ) -> dict:
 	"""Finish one task: file the evidence, write the compliance record.
@@ -317,10 +344,13 @@ def complete_task_via_mobile(
 	and the tool layer distinguishes it from the argument being absent, which
 	records that nobody was asked.
 
-	`latitude`/`longitude` are accepted and go to the audit row rather than to
-	the assignment: Farm Task Assignment has no coordinate column, and inventing
-	one in a hotfix would be a schema change on a compliance record. Refusing the
-	arguments instead would fail every completion the shipped app sends.
+	`latitude`/`longitude` NOW REACH THE RECORD. v0.19.1 added
+	`farm_location_gps` to Farm Task Assignment, so the pair the shipped app has
+	been sending since v0.18 stops being audit-row-only and becomes the location
+	half of FSMA §112.161(a)(1)(i). An explicit `farm_location_gps` wins — a
+	worker who typed "MC-Cabin-01" in a shed with no fix said something the
+	handset could not — and the coordinates are formatted only as a fallback.
+	Both still land in the audit row either way, unchanged.
 	"""
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
@@ -341,6 +371,9 @@ def complete_task_via_mobile(
 	):
 		if value is not None:
 			inner[key] = value
+	location = _location(farm_location_gps, latitude, longitude)
+	if location:
+		inner["farm_location_gps"] = location
 	evidence = _evidence(evidence_files)
 	if evidence:
 		inner["evidence_files"] = evidence

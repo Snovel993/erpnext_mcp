@@ -620,6 +620,7 @@ def complete_task_via_mobile(args: dict) -> ToolResult:
 		"signature_file",
 		"completion_narrative",
 		"witness",
+		"farm_location_gps",
 		"actual_duration_minutes",
 		"completed_at",
 		"record_data",

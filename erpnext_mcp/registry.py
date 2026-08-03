@@ -6659,6 +6659,12 @@ TOOLS = {
 				"Photographs of the sampling point. Max 40.",
 			),
 			"source_task": _field(_STRING, "The Farm Task this came from, if any."),
+			"farm_location_gps": _field(
+				_STRING,
+				"WHERE the sample was drawn — \"45.5152,-122.6784\" or a place name like "
+				"\"North standpipe\". The zone says which water; §112.161(a)(1)(i) also asks "
+				"where somebody stood. Optional.",
+			),
 			"keep_as_draft": _field(
 				_BOOLEAN, "Hold it in Draft until the laboratory answers. Default false."
 			),
@@ -7726,6 +7732,13 @@ TOOLS = {
 				_STRING, "What was WRONG. An empty string records that nothing was."
 			),
 			"witness": _field(_STRING, "Somebody else who was there, where the contract asks."),
+			"farm_location_gps": _field(
+				_STRING,
+				"WHERE the work was done — \"45.5152,-122.6784\" or a place name like "
+				"\"MC-Cabin-01\". FSMA §112.161(a)(1)(i) asks an activity record for the farm's "
+				"name AND its location; this is the second half. Optional, and only written "
+				"when given — an empty value leaves any location already on the assignment alone.",
+			),
 			"actual_duration_minutes": _field(_INTEGER, "Minutes spent."),
 			"completed_at": _field(_STRING, "Override the clock-out time. Defaults to now."),
 			"record_data": _field(

@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 85 read tools are **on** by default and can be switched off individually. A
+All 95 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -5634,6 +5634,14 @@ record routes to Corrective Action Required and somebody has to go and look at
 the report. Treating an uninterpretable result as a pass is how a compliance file
 becomes a clean record of nothing.
 
+**`farm_location_gps` (v0.19.1) says where the sample was drawn.** The zone
+names which water; §112.161(a)(1)(i) also asks which standpipe somebody stood
+at, and a zone that feeds four hydrants does not answer that. Free text, because
+a coordinate nobody could take is worth less than a place name somebody can
+stand in: `"45.5152,-122.6784"` where the phone had a fix, `"North standpipe"`
+where it did not. Optional and additive — samples filed before v0.19.1 have it
+blank.
+
 **Draft is the normal first state here**: a sample is taken on Monday and
 answered on Thursday. Use `keep_as_draft`, then file the answer with
 `update_water_test` — clearing the flag publishes the same record, recomputes the
@@ -6015,6 +6023,20 @@ records that nothing was wrong — a clean inspection is a positive statement �
 while leaving the argument out records that nobody was asked. The wrapper passes
 the argument through a presence test rather than a truthiness test, because a
 falsy value dropped in transit would silently turn the first into the second.
+
+**`farm_location_gps` (v0.19.1) records where the work was done.** FSMA
+§112.161(a)(1)(i) asks an activity record for the farm's name **and** its
+location, and `task_name` was only ever the first half. Free text — a coordinate
+pair where the handset had a fix, a place name like `"MC-Cabin-01"` where a
+metal roof meant it did not. Optional, and written only when given: an empty
+value leaves any location already on the assignment alone.
+
+Over the HTTP mobile API the same field is filled from the `latitude`/
+`longitude` the app has been sending since v0.18, which until v0.19.1 reached
+only the audit row. An explicit `farm_location_gps` wins over the pair, and a
+pair that will not parse is dropped rather than raised on — failing a completion
+that carries photographs, a signature and a compliance record over a malformed
+coordinate would trade the record for its least important field.
 
 ---
 

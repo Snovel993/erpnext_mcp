@@ -335,6 +335,44 @@ class WaterTests(RecordTestCase):
 		self.assertIn("transcription", data["missing_lab_report"])
 
 
+class TheSampleRecordsWhereItWasDrawn(RecordTestCase):
+	"""v0.19.1. §112.161(a)(1)(i) asks an activity record for the farm's name AND
+	its location. The zone names which water; `farm_location_gps` names the
+	standpipe somebody actually stood at."""
+
+	def test_a_coordinate_persists_on_the_record(self):
+		zone = self.a_zone()
+		data = self.tool_data(
+			"create_water_test",
+			{
+				"source": zone,
+				"test_date": TODAY,
+				"coliform_result": "Absent",
+				"farm_location_gps": "45.5152,-122.6784",
+			},
+		)
+		self.assertEqual(data["farm_location_gps"], "45.5152,-122.6784")
+		stored = STORE.rows("Water Test")[0]
+		self.assertEqual(stored["farm_location_gps"], "45.5152,-122.6784")
+
+	def test_a_place_name_is_as_valid_as_a_coordinate(self):
+		"""Free text on purpose — a phone with no fix still knows which standpipe."""
+		zone = self.a_zone()
+		data = self.tool_data(
+			"create_water_test",
+			{"source": zone, "test_date": TODAY, "farm_location_gps": "North standpipe"},
+		)
+		self.assertEqual(data["farm_location_gps"], "North standpipe")
+
+	def test_it_is_optional_and_a_sample_without_one_still_records(self):
+		"""ADDITIVE. Every sample taken before v0.19.1 has it blank, and a blank is
+		not a validation failure — it is an older record."""
+		zone = self.a_zone()
+		data = self.tool_data("create_water_test", {"source": zone, "test_date": TODAY})
+		self.assertFalse(data.get("farm_location_gps"))
+		self.assertEqual(data["workflow_state"], records.RECORDED)
+
+
 class UnreadableIsNotClean(RecordTestCase):
 	"""A result nobody can interpret is not evidence that the water is safe."""
 

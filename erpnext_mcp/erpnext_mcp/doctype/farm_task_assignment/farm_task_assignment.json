@@ -14,6 +14,7 @@
   "identity_col",
   "company",
   "task_name",
+  "farm_location_gps",
   "dispatched_by_foreman",
   "timing_section",
   "claimed_at",
@@ -88,6 +89,12 @@
    "fieldname": "task_name",
    "fieldtype": "Data",
    "label": "Task Name"
+  },
+  {
+   "description": "WHERE the work was actually done. FSMA §112.161(a)(1)(i) asks a record to carry the farm's name AND its location, and `task_name` is only the first half of that — a completion that says what was done and by whom, but not where, answers the question an inspector asks second. Free text on purpose: a phone that has a fix writes \"45.5152,-122.6784\", a phone in a metal-roofed shed writes \"MC-Cabin-01\", and a coordinate nobody could take is worth less than a place name somebody can stand in. Optional, and additive — completions filed before v0.19.1 have it blank and are not wrong, they are just older.",
+   "fieldname": "farm_location_gps",
+   "fieldtype": "Data",
+   "label": "Farm Location (GPS)"
   },
   {
    "default": "0",

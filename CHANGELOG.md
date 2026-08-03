@@ -3,6 +3,60 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.19.1 — 2026-08-03
+
+**Three items off the v0.19.0 debrief, one of which turned out not to exist.**
+The stale-citation sweep found the codebase already clean — every `-1090` and
+`-1130` in the repository is in the research documents' own account of
+correcting them — and the count assertion it was paired with found a real drift
+nobody had noticed. Full notes:
+[`RELEASES/v0.19.1.md`](RELEASES/v0.19.1.md).
+
+Suite: 3,588 → **3,601 passing**.
+
+### Added
+
+- **`farm_location_gps` on `Farm Task Assignment` and `Water Test`** — FSMA
+  §112.161(a)(1)(i) asks an activity record for the farm's name **and** its
+  location; the name was snapshotted and the location was not. Data, optional,
+  free text: `"45.5152,-122.6784"` where the handset had a fix, `"MC-Cabin-01"`
+  where a metal roof meant it did not — a coordinate nobody could take is worth
+  less than a place name somebody can stand in. Additive, so no migration and no
+  back-filling; records filed before this release have it blank, which makes
+  them older rather than invalid. `complete_task_via_mobile` and
+  `create_water_test` accept and forward it.
+- **The HTTP mobile API fills it from the fix the app already sends.**
+  `latitude`/`longitude` have been in every completion since v0.18 and reached
+  only the audit row, because Farm Task Assignment had no column for them. They
+  now become `farm_location_gps` — so the location half of §112.161(a)(1)(i)
+  arrives without an iOS release. An explicit `farm_location_gps` wins over the
+  pair, and **a pair that will not parse is dropped rather than raised on**:
+  failing a completion carrying photographs, a signature and a compliance record
+  over a malformed coordinate would trade the record for its least important
+  field. The pair as sent stays in the audit row either way.
+- **`tests_standalone/test_tool_catalog_count.py`** — the catalogue's own counts,
+  asserted against the registry they document. v0.19.0 caught the total saying
+  206 against 210 and fixed it by hand; this is the test that was named as the
+  follow-up.
+
+### Fixed
+
+- **`docs/tool-catalog.md` said 85 read tools; `registry.READ_TOOLS` has 95.**
+  Found by the new test on its first run — the total was correct at 214, so the
+  drift was in the number nobody had thought to check. Long-standing; no release
+  can be blamed for it, which is the argument for the test.
+
+### Unchanged, and why
+
+- **No OR-OSHA citation edits.** The sweep for `-1090`, `-1130` and
+  `-1005`-as-sanitation found nothing to correct in code, doctype JSON, fixtures
+  or comments. Every live citation was already `-1120` (labor housing), `-1131`
+  (heat illness) or `-1005(10)` used correctly for PPE. See the release notes for
+  the matches that were left alone and why.
+- **No `Spray Record` doctype.** It does not ship with this app — `Spray Log`
+  belongs to `farm_precision_ag` — so the field was not added there and nothing
+  was invented to hold it.
+
 ## 0.19.0 — 2026-08-03
 
 **The calendar could see every document on the farm and nothing a person knew.**

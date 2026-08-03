@@ -145,6 +145,7 @@ _ASSIGNMENT_FIELDS = (
 	"completion_narrative",
 	"findings_text",
 	"witness",
+	"farm_location_gps",
 	"rejection_reason",
 	"signature_file",
 	"produced_record",
@@ -241,6 +242,7 @@ def _describe_assignment(row: dict) -> dict:
 		"completion_narrative": row.get("completion_narrative") or None,
 		"findings_text": row.get("findings_text") or None,
 		"witness": row.get("witness") or None,
+		"farm_location_gps": row.get("farm_location_gps") or None,
 		"rejection_reason": row.get("rejection_reason") or None,
 		"signature_file": row.get("signature_file") or None,
 		"produced_record": row.get("produced_record") or None,
@@ -710,6 +712,14 @@ def complete_farm_task(args: dict) -> ToolResult:
 	doc.completion_narrative = narrative
 	doc.findings_text = findings
 	doc.witness = witness
+	# v0.19.1. FSMA §112.161(a)(1)(i) wants the location as well as the name, and
+	# the completion is where the location is knowable — the phone is standing in
+	# it. Written only when given: a blank is "nobody recorded it", and overwriting
+	# a location somebody already put on the assignment with an empty string would
+	# turn a recorded fact into a missing one.
+	location_gps = as_str(args, "farm_location_gps")
+	if location_gps:
+		doc.farm_location_gps = location_gps
 	doc.signature_file = signature or doc.signature_file
 	doc.actual_duration_minutes = as_int(args, "actual_duration_minutes") or _elapsed(
 		doc.started_at, doc.completed_at

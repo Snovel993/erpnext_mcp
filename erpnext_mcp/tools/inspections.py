@@ -140,6 +140,7 @@ SPECS = {
 			*_COMMON,
 			"source",
 			"block",
+			"farm_location_gps",
 			"test_date",
 			"tester",
 			"tester_name",
@@ -755,6 +756,9 @@ def build_water_test(payload: dict, evidence: list) -> object:
 	doc.findings = payload.get("findings") or ""
 	doc.notes = payload.get("notes") or ""
 	doc.source_task = payload.get("source_task") or None
+	# v0.19.1. §112.161(a)(1)(i) asks for the location as well as the name; the
+	# zone says which water, this says which standpipe. See the doctype field.
+	doc.farm_location_gps = payload.get("farm_location_gps") or ""
 	doc.keep_as_draft = 1 if payload.get("keep_as_draft") else 0
 	_attach_evidence(doc, "sample_photos", evidence)
 	doc.insert(ignore_permissions=True)
@@ -930,6 +934,7 @@ def create_water_test(args: dict) -> ToolResult:
 			"findings": as_str(args, "findings"),
 			"notes": as_str(args, "notes"),
 			"source_task": as_str(args, "source_task"),
+			"farm_location_gps": as_str(args, "farm_location_gps"),
 			"keep_as_draft": as_bool(args, "keep_as_draft", False),
 		},
 		evidence,

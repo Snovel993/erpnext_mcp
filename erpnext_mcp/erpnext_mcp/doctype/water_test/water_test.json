@@ -14,6 +14,7 @@
   "identity_col",
   "company",
   "block",
+  "farm_location_gps",
   "tester",
   "tester_name",
   "source_task",
@@ -99,6 +100,12 @@
    "label": "Block",
    "options": "Field",
    "search_index": 1
+  },
+  {
+   "description": "WHERE the sample was actually drawn. The zone and the block say which water this is; this says which standpipe somebody stood at, which is the half of FSMA §112.161(a)(1)(i) — farm name AND location — that a zone name does not answer. Free text: a coordinate pair \"45.5152,-122.6784\" where the phone had a fix, a place name where it did not. Optional and additive.",
+   "fieldname": "farm_location_gps",
+   "fieldtype": "Data",
+   "label": "Farm Location (GPS)"
   },
   {
    "description": "The Employee id of whoever took the sample. Data and not a Link because Frappe HR is not a dependency of this app.",
