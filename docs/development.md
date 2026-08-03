@@ -296,7 +296,7 @@ erpnext_mcp/                     repo root
     compliance_fields.py         WHICH compliance columns go on WHOSE doctype,
                                  and the argument for putting them there at all
     alerts/base.py               Rule, Observation, the idempotent sweep
-    alerts/rules.py              the eleven rules, each with its kairotic gate
+    alerts/rules.py              the twelve rules, each with its kairotic gate
     audit_packets.py             the eight audit regimes and their sections
     dashboard.py                 the Compliance Command Center installer, the
                                  Farm Task Dispatch Kanban board and its

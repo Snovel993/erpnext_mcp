@@ -1,0 +1,265 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 12:00:00.000000",
+ "description": "One training event, for one person, on one day — and the regimes it satisfies. WPS wants pesticide training every twelve months, OR-OSHA wants heat illness before the first hot shift, FSMA Subpart C wants food safety at hire and annually, NOP wants organic handling for anybody touching an approved input. Those are four audits asking about ONE afternoon in a shed, so this record carries a `regimes` tag list rather than being filed four times, and the audit packet generator pulls the subset each auditor is entitled to see. Every field FSMA §112.161 puts on an activity record — who performed it, when to the minute, who reviewed it and when — is on this doctype from its first version, because a record that has to be backfilled with a signature is a record an FDA inspector will read as having been created after the fact.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "training_type",
+  "status",
+  "identity_col",
+  "company",
+  "farm_name_snapshot",
+  "training_source",
+  "provider",
+  "completion_section",
+  "completed_date",
+  "completed_time",
+  "activity_datetime",
+  "completion_col",
+  "expires_date",
+  "certificate_file",
+  "coverage_section",
+  "regimes",
+  "content_topics_covered",
+  "attestation_section",
+  "person_performed_signature",
+  "attestation_col",
+  "supervisor_reviewed_by",
+  "supervisor_reviewed_on",
+  "supervisor_signature",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "Who was trained. The Employee record, not a name typed twice — a training log an auditor cannot reconcile to the payroll register is a training log for somebody who may not have been on the farm that day.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Their name at the time, denormalised. §112.30(b) asks for 'persons trained' on the face of the record; an Employee renamed or archived three years later must not take the evidence with it.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "description": "What the training was, in the words the certificate or the sign-in sheet uses: 'PSA Grower Training', 'WPS Handler Training', 'Heat Illness Prevention', 'OSHA 30', 'Applicator License Renewal'. Free text on purpose — a Select would have to be edited every time a regulator renames a curriculum, and an operator would then record the wrong one rather than the real one.",
+   "fieldname": "training_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Training Type",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Active",
+   "description": "COMPUTED, never chosen. Active until ninety days before expiry, Expiring inside that window, Expired past it — and Active forever where there is no expiry, because a one-time orientation does not lapse. Recomputed on every save; the alert engine reads `expires_date` directly and does not trust this column, for exactly the reason Certification.status says: a derived field is only correct on documents somebody happened to save.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nExpiring\nExpired",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The entity that employed them when the training happened. Filled from the Employee record, and it is what scopes this record to a company — a User Permission on Company reaches this doctype because this column links to one.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The farm's name as it stood when the record was made. §112.161(a)(1)(i) wants farm name and location ON each record; a lookup through the Company link at report time is a lookup that answers with today's name, and an inspector paging through last season's logs is entitled to the name that was on the gate then.",
+   "fieldname": "farm_name_snapshot",
+   "fieldtype": "Data",
+   "label": "Farm Name (as recorded)",
+   "read_only": 1
+  },
+  {
+   "default": "Internal",
+   "description": "Who delivered it. Matters for WPS handler training, where Oregon requires a qualified trainer under OAR 437-004-6502, and for the PSA grower certificate, which only the Produce Safety Alliance issues.",
+   "fieldname": "training_source",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Training Source",
+   "options": "Internal\nExternal\nContractor\nOnline-Course"
+  },
+  {
+   "description": "The instructor or the organisation: 'Oregon State University Extension', 'Produce Safety Alliance', 'T Polehn'. What an auditor asks for when the trainer's own qualification is in question.",
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "label": "Provider"
+  },
+  {
+   "fieldname": "completion_section",
+   "fieldtype": "Section Break",
+   "label": "When"
+  },
+  {
+   "description": "The day it was delivered. Not the day it was typed in — §112.161(a)(2) requires records to be created at the time of the activity, and a completion date later than the activity is one of the findings FDA writes up even when the training itself was fine.",
+   "fieldname": "completed_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Completed",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The time of day, where somebody recorded one. Optional, because a sign-in sheet often does not carry one — but §112.161(a)(1)(v) asks for date AND time of the activity, so a record that has it is a stronger record than one that does not.",
+   "fieldname": "completed_time",
+   "fieldtype": "Time",
+   "label": "Completed At (time)"
+  },
+  {
+   "description": "COMPUTED from the date and the time. The single timestamp §112.161(a)(1)(v) asks for, so a packet does not have to stitch two columns together on the page an inspector is reading. Midnight where no time was given, which is honest: it says the day is known and the hour is not.",
+   "fieldname": "activity_datetime",
+   "fieldtype": "Datetime",
+   "label": "Activity Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completion_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When it stops counting. EMPTY MEANS ONE-TIME — a new-hire orientation does not expire and putting a date on it would raise a renewal alert nobody can act on. WPS worker and handler training expires twelve months out; OR-OSHA heat illness twelve months; a PSA grower certificate does not expire at all today.",
+   "fieldname": "expires_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Expires",
+   "search_index": 1
+  },
+  {
+   "description": "The certificate, card or sign-in sheet itself. An auditor asks to see it, not to see a record saying it exists — and for WPS the verification card is the thing a handler has to be able to produce.",
+   "fieldname": "certificate_file",
+   "fieldtype": "Attach",
+   "label": "Certificate"
+  },
+  {
+   "fieldname": "coverage_section",
+   "fieldtype": "Section Break",
+   "label": "What It Satisfies"
+  },
+  {
+   "description": "Which audits this one afternoon counts towards, comma-separated from a closed list: GAP, NOP, WPS, FSMA, OR-OSHA, PrimusGFS, GlobalGAP, Other. THIS IS THE FIELD THE WHOLE DOCTYPE IS FOR. One session covering hygiene, pesticide safety and heat can satisfy GAP, WPS and OR-OSHA at once — provided the trainer covered all three curricula — and tagging it three times is how one record serves three audits instead of one record being filed three times and disagreeing with itself by August. Retention follows the LONGEST regime tagged: NOP is five years, OR-OSHA three, everything else two.",
+   "fieldname": "regimes",
+   "fieldtype": "Small Text",
+   "in_standard_filter": 1,
+   "label": "Regimes",
+   "search_index": 1
+  },
+  {
+   "description": "What was actually covered, comma-separated. This is what makes a `regimes` tag defensible rather than optimistic: OR-OSHA's heat rule names six topics that must be covered annually and a record claiming OR-OSHA without them is a record an inspector will disallow. Also what lets somebody reuse a session next year — 'we covered heat, water, shade, symptoms, reporting, emergency response' is a curriculum; 'safety meeting' is not.",
+   "fieldname": "content_topics_covered",
+   "fieldtype": "Small Text",
+   "label": "Content Topics Covered"
+  },
+  {
+   "fieldname": "attestation_section",
+   "fieldtype": "Section Break",
+   "label": "Signatures"
+  },
+  {
+   "description": "The trainee's own signature, captured at completion. §112.161(a)(4) requires each record to be signed or initialled by the person who performed the activity documented — and 'missing signatures on training records' is on the standard list of GAP section failures. Captured at the time, not backfilled: a signature added in the week before an audit is the finding, not the fix.",
+   "fieldname": "person_performed_signature",
+   "fieldtype": "Attach",
+   "label": "Trainee Signature"
+  },
+  {
+   "fieldname": "attestation_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Who reviewed it. §112.161(b) requires worker-training records to be reviewed, dated and signed by a supervisor or responsible party within a reasonable time after the record is made — and this is the FSMA-only requirement a GAP-only operation almost always lacks. Set by sign_training_supervisor_review, which refuses a supervisor from another entity.",
+   "fieldname": "supervisor_reviewed_by",
+   "fieldtype": "Link",
+   "label": "Supervisor Reviewed By",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "When the review happened. 'Within a reasonable time' is the rule's own phrase; weekly for daily-generated records is the practice it is read against. A review dated before the training is refused — nobody reviewed a record that did not exist.",
+   "fieldname": "supervisor_reviewed_on",
+   "fieldtype": "Datetime",
+   "label": "Supervisor Reviewed On"
+  },
+  {
+   "description": "The supervisor's signature file. Uploaded through the staging pipeline and referenced here by docname — the bytes do not travel through a tool argument.",
+   "fieldname": "supervisor_signature",
+   "fieldtype": "Attach",
+   "label": "Supervisor Signature"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Language delivered in, assessment result, who else was in the room, anything an auditor will ask about in two years.",
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Employee Training Record",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "employee_name,training_type,completed_date,expires_date",
+ "sort_field": "completed_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "training_type",
+ "track_changes": 1
+}

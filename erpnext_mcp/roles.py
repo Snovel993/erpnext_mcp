@@ -231,6 +231,13 @@ COMPLIANCE_REGISTERS = (
 	"Certification",
 	"Regulatory Filing",
 	"Audit Event",
+	# v0.19.0. A training record is compliance evidence in the same sense a
+	# certificate is — it is what a GAP auditor, an OR-OSHA compliance officer and
+	# an FDA inspector each ask to see — so it belongs in the group rather than in
+	# a permission of its own. A Foreman who can read the certificate register and
+	# not the training register cannot answer the question an inspector asks about
+	# their own crew.
+	"Employee Training Record",
 )
 CALENDAR = ("Compliance Alert",)
 GROUND = ("Parcel", "Field", "Irrigation Zone")

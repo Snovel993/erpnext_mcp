@@ -1376,6 +1376,23 @@ ALERT_TASK_MAP = {
 		"evidence": {"photos": True, "findings_text": True},
 		"what": "Treat or switch the source, then re-sample",
 	},
+	# v0.19.0. `creates_record` is deliberately EMPTY even though there is an
+	# Employee Training Record doctype now. Completing this task is arranging and
+	# delivering a retraining — a trainer, a crew, a language, a room — and the
+	# record it produces has to name the topics actually covered and carry the
+	# trainee's own signature. `complete_farm_task` has no builder that can invent
+	# either, and a task that auto-filed a training record with no topics and no
+	# signature would produce exactly the document an auditor disallows. So the
+	# task closes with findings text, and `record_training` files the evidence.
+	"training_expiring": {
+		"task_type": "Compliance-Audit",
+		"creates_record": "",
+		"skill": "hr_admin",
+		"dispatch": "Dispatched",
+		"minutes": 120,
+		"evidence": {"findings_text": True, "signature": True},
+		"what": "Arrange and deliver the retraining, then file it with record_training",
+	},
 }
 
 #: Alert severity to task urgency. Deliberately NOT the identity mapping: a

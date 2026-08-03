@@ -91,6 +91,14 @@ SWITCHES = {
 		"commit_staged_file",
 		"list_housing_units",
 		"get_housing_unit",
+		# v0.19.0. The onboarding walk now ends in the training register, so the
+		# switches for it belong in the same list — which is also the shortest
+		# honest statement of what onboarding an entity actually requires.
+		"record_training",
+		"list_trainings",
+		"get_training",
+		"sign_training_supervisor_review",
+		"generate_audit_packet",
 	)
 }
 
@@ -627,3 +635,103 @@ class TheOnboardingGapsSayWhatToDo(EndToEndWorkflow):
 		self.assertTrue(rows)
 		blob = json.dumps(rows[-1], default=str)
 		self.assertNotIn(payload["api_secret"], blob)
+
+
+# ── 5. v0.19.0: onboarding ends in the training register ────────────────────
+class OnboardingReachesTheAuditPacket(EndToEndWorkflow):
+	"""onboard → record_training → the training is in the packet for its regime.
+
+	THE SEAM THIS COVERS. `test_training.py` proves each tool in isolation against
+	a seeded HR fixture; `test_audit_packets.py` proves the packet assembles. What
+	neither proves is that a person hired through the real onboarding path — a
+	company built by `create_company`, an Employee whose company came from that
+	call rather than from a fixture literal — produces a training record the
+	packet generator can actually find. That join is the whole point of tagging by
+	regime, and it is exactly the kind of seam v0.18.2 through v0.18.4 were each
+	found at by somebody holding a phone rather than by CI.
+
+	It is ONE test, walked forward, for the same reason `test_the_whole_pipeline`
+	is: splitting it would either re-walk the flow per assertion or share state
+	between tests, and both are worse than a long test whose failure line names
+	the step.
+	"""
+
+	def test_a_new_hires_training_reaches_the_packet_for_its_regime(self):
+		self.be_the_operator()
+
+		# 1. The person. Through `create_employee`, so this covers the tool an
+		#    operator actually uses rather than a seeded row.
+		supervisor = self.tool_data(
+			"create_employee",
+			{"employee_name": "Sam Foreman", "company": COMPANY, "date_of_joining": "2026-01-05"},
+		)["employee"]
+
+		# 2. The training. Tagged WPS and GAP: one afternoon, two audits.
+		completed = str(frappe.utils.add_days(frappe.utils.today(), -3))
+		training_record = self.tool_data(
+			"record_training",
+			{
+				"employee": self.employee,
+				"training_type": "WPS Handler Training",
+				"completed_date": completed,
+				"completed_time": "08:15",
+				"regimes": ["WPS", "GAP"],
+				"content_topics_covered": "Label reading, PPE, REI, decontamination, heat",
+				"provider": "OSU Extension",
+				"expires_date": str(frappe.utils.add_days(frappe.utils.today(), 362)),
+				"person_performed_signature": "/files/worker-signature.png",
+			},
+		)
+		self.assertEqual(training_record["company"], COMPANY)
+		self.assertEqual(training_record["regimes"], ["GAP", "WPS"])
+		self.assertEqual(training_record["status"], "Active")
+
+		# 3. The §112.161(b) review, which is the element a GAP-only operation
+		#    lacks and FDA cites even where the training itself was fine.
+		self.assertFalse(training_record["supervisor_reviewed"])
+		signed = self.tool_data(
+			"sign_training_supervisor_review",
+			{"name": training_record["name"], "supervisor": supervisor},
+		)
+		self.assertTrue(signed["supervisor_reviewed"])
+		self.assertEqual(signed["supervisor_reviewed_by"], supervisor)
+
+		# 4. The register answers by regime, which is how a packet is assembled.
+		listed = self.tool_data("list_trainings", {"company": COMPANY, "regime": "WPS"})
+		self.assertEqual([row["name"] for row in listed["records"]], [training_record["name"]])
+		self.assertEqual(listed["without_supervisor_review"], [])
+
+		# 5. THE JOIN. The same record, found by the packet generator for BOTH
+		#    audits it was tagged for — and absent from the one it was not.
+		period = {
+			"company": COMPANY,
+			"period_start": str(frappe.utils.add_days(frappe.utils.today(), -30)),
+			"period_end": frappe.utils.today(),
+			"dry_run": True,
+		}
+		for audit_type in ("GAP", "EPA"):
+			with self.subTest(audit_type=audit_type):
+				packet = self.tool_data(
+					"generate_audit_packet", {**period, "audit_type": audit_type}
+				)
+				self.assertEqual(packet["section_counts"]["training"], 1, packet["section_counts"])
+
+		# A record tagged WPS and GAP is not organic-handling evidence, and a
+		# packet that pulled it into an NOP-shaped section would be the quiet
+		# wrong-evidence bug this whole tagging scheme exists to prevent.
+		narrowed = self.tool_data(
+			"generate_audit_packet", {**period, "audit_type": "GAP", "regime": "NOP"}
+		)
+		self.assertEqual(narrowed["section_counts"]["training"], 0)
+		self.assertEqual(narrowed["training_regime"], "NOP")
+
+		# 6. And the calendar has nothing to say about it, because it does not
+		#    expire for another year. An alert here would be the chronological
+		#    failure mode the whole rule engine is written against.
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		live = [
+			row
+			for row in STORE.rows("Compliance Alert")
+			if row.get("alert_type") == "training_expiring" and not is_true(row.get("dismissed"))
+		]
+		self.assertEqual(live, [])

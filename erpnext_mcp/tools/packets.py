@@ -14,9 +14,20 @@ Each packet type keeps its own `allow_<packet_type>` switch, so enabling the
 tool does not enable every packet. Two gates, deliberately: the tool switch says
 "this site produces compliance artefacts at all", the packet switch says "…and
 this one".
+
+v0.19.0 ADDED `regime` AS A TOP-LEVEL ARGUMENT RATHER THAN AS A FILTER ON EACH
+PACKET TYPE, and the distinction is worth a sentence. Both packet types this app
+ships today are accounting artefacts — a reconciliation and a fiscal-year audit —
+and putting a worker-training key in each one's `filters` schema would be putting
+a WPS question on a form about a bank account. It is an ANNEX: it changes nothing
+the packet computes and staples the training evidence for one regime to the back
+of it, which is exactly the request that produces it ("send the reconciliation,
+and your WPS training records for the same year"). See `_training_annex`.
 """
 
-from .. import packets, settings
+import frappe
+
+from .. import compat, packets, settings, training
 from ..errors import ToolError
 from ..result import ToolResult
 
@@ -91,15 +102,117 @@ def generate_compliance_packet(args: dict) -> ToolResult:
 			"enable it."
 		)
 
+	regime = str(args.get("regime") or "").strip()
+	if regime and not training.canon(regime):
+		raise ToolError(
+			f"regime {regime!r} is not one this app knows. The eight are: "
+			f"{', '.join(training.REGIMES)}."
+		)
+
 	filters = packets.validate_filters(spec, args.get("filters"))
 	result = spec.build(filters)
 	data = packets.envelope(spec, filters, result)
+	if regime:
+		data["training_evidence"] = _training_annex(training.canon(regime), filters)
 
 	worst = data["flag_summary"]["worst"]
 	summary = result.summary or f"generated {packet_type}"
 	if worst:
 		summary = f"{summary} [worst flag: {worst}]"
 	return ToolResult(data, summary)
+
+
+# ── the training annex ──────────────────────────────────────────────────────
+def _training_annex(regime: str, filters: dict) -> dict:
+	"""Every training record carrying `regime`, over whatever period the packet covers.
+
+	v0.19.0. WHY A TOP-LEVEL ARGUMENT RATHER THAN A FILTER ON EACH PACKET TYPE.
+	Both packet types this app ships today are accounting artefacts — a
+	reconciliation and a fiscal-year audit — and adding `regime` to each one's
+	`filters` schema would put a worker-training key on a form about a bank
+	account. It is an ANNEX: it does not change what the packet computes, it
+	staples the training evidence for one regime to the back of it, which is
+	exactly the request that produces it ("send the reconciliation, and your WPS
+	training records for the same year").
+
+	THE PERIOD IS THE PACKET'S OWN. `period_start`/`period_end` where the filters
+	carry them, the Fiscal Year's own dates where they carry a fiscal year, and
+	ALL TIME where neither — stated in the result rather than guessed at silently,
+	because "no training records" and "no period to look in" are different answers
+	and only one of them is about the crew.
+	"""
+	company = str(filters.get("company") or "")
+	start, end, basis = _period_of(filters)
+	if not compat.doctype_exists(training.DOCTYPE):
+		return {
+			"regime": regime,
+			"available": False,
+			"records": [],
+			"count": 0,
+			"note": (
+				"This site has no Employee Training Record DocType — it ships with erpnext_mcp "
+				"from v0.19.0, so run `bench --site <site> migrate`. This annex is ABSENT rather "
+				"than empty: an empty training table reads as a crew nobody trained."
+			),
+		}
+	rows = [
+		training.describe(row)
+		for row in training.for_regime(regime, company, start, end, limit=packets.ROW_CAP + 1)
+	]
+	capped = rows[: packets.ROW_CAP]
+	unreviewed = [row["name"] for row in capped if not row["supervisor_reviewed"]]
+	out = {
+		"regime": regime,
+		"regime_note": training.REGIME_NOTES.get(regime),
+		"available": True,
+		"company": company or None,
+		"period_start": start or None,
+		"period_end": end or None,
+		"period_basis": basis,
+		"count": len(capped),
+		"truncated": len(rows) > packets.ROW_CAP,
+		"records": capped,
+		"without_supervisor_review": unreviewed,
+		"retention_years": training.RETENTION_YEARS.get(regime, 3),
+		"retention_citation": training.RETENTION_CITATIONS.get(regime),
+	}
+	if unreviewed:
+		out["review_note"] = (
+			f"{len(unreviewed)} of these have no supervisor review. FSMA §112.161(b) requires "
+			"worker training records to be reviewed, dated and signed by a supervisor within a "
+			"reasonable time after the record is made."
+		)
+	if not capped:
+		out["empty_note"] = (
+			f"No training record tagged {regime} falls in this period. That is a statement about "
+			"the period and the tag, not about whether anybody was trained — an untagged record "
+			"exists but appears in no packet."
+		)
+	return out
+
+
+def _period_of(filters: dict) -> tuple:
+	"""(start, end, how we know) for a packet whose filters name a period differently."""
+	start = str(filters.get("period_start") or "")
+	end = str(filters.get("period_end") or "")
+	if start or end:
+		return start, end, "the packet's own period_start/period_end"
+
+	fiscal_year = str(filters.get("fiscal_year") or "")
+	if fiscal_year and compat.doctype_exists("Fiscal Year"):
+		row = (
+			frappe.db.get_value(
+				"Fiscal Year", fiscal_year, ["year_start_date", "year_end_date"], as_dict=True
+			)
+			or {}
+		)
+		if row.get("year_start_date"):
+			return (
+				str(row["year_start_date"]),
+				str(row.get("year_end_date") or ""),
+				f"the dates on Fiscal Year {fiscal_year}",
+			)
+	return "", "", "ALL TIME — these filters name no period, so every record is included"
 
 
 def packet_switch_names() -> tuple:

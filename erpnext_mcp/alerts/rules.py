@@ -1,7 +1,17 @@
 # SPDX-License-Identifier: MIT
-"""The eleven compliance rules, and the state that makes each one ripe.
+"""The twelve compliance rules, and the state that makes each one ripe.
 
-v0.16.0 ADDED THE LAST TWO, AND THEY ARE A DIFFERENT SHAPE FROM THE FIRST NINE.
+v0.19.0 ADDED THE TWELFTH, AND IT IS THE FIRST ONE ABOUT A PERSON RATHER THAN A
+DOCUMENT. Rules 1 and 7 watch certificates — things an agency issued to the
+operation. `training_expiring` watches what the crew was actually taught, which
+is what four separate regimes ask for (WPS every twelve months, Oregon's heat
+rule annually before the first hot shift, FSMA Subpart C on hiring and
+periodically, GAP annually) and which lived, until now, in a binder nobody opens
+between audits. The consequence is sharper than a certificate's, too: a handler
+whose WPS training lapsed cannot lawfully perform an application tomorrow
+morning, so the alert takes somebody off the sprayer rather than off a list.
+
+v0.16.0 ADDED RULES 10 AND 11, AND THEY ARE A DIFFERENT SHAPE FROM THE FIRST NINE.
 Rules 1-9 fire on IGNORANCE: nobody has walked this cabin, nobody has tested this
 water, nobody has renewed this licence. Rules 10 and 11 fire on KNOWLEDGE —
 somebody went and looked and found something — and they exist because Sprint 8
@@ -57,6 +67,7 @@ from __future__ import annotations
 import frappe
 
 from .. import compat
+from .. import training as training_records
 from ..records import CORRECTIVE_ACTION_REQUIRED, RECORDED
 from .base import (
 	SEVERITY_CRITICAL,
@@ -1044,5 +1055,176 @@ register(
 			"clean record of nothing."
 		),
 		scan=_scan_water_contamination,
+	)
+)
+
+
+# ── 12. training_expiring ───────────────────────────────────────────────────
+def _scan_training(context: dict) -> list:
+	"""Training that has lapsed, or is close enough that booking a course is urgent.
+
+	THE TWELFTH RULE, AND THE FIRST ONE ABOUT A PERSON'S QUALIFICATION RATHER THAN
+	A DOCUMENT'S DATE. Rules 1 and 7 watch certificates, which are things an agency
+	issues to the operation. This one watches what the crew was taught, which is
+	the evidence four separate regimes ask for and the one an operation is most
+	likely to have on paper in a binder nobody reads.
+
+	IT READS `expires_date`, NOT `status`. `status` is computed in the controller
+	and is therefore only correct on records somebody happened to save — so the
+	expired ones would be exactly the ones still reading Active. Same argument as
+	`_scan_certifications`, same reason.
+
+	NO EXPIRY IS SKIPPED ENTIRELY. A new-hire orientation and a PSA grower
+	certificate do not lapse, and raising a renewal alert nobody can clear is how
+	a compliance calendar stops being read.
+	"""
+	today = context["today"]
+	if not compat.doctype_exists(training_records.DOCTYPE):
+		return []
+	out = []
+	for row in _rows(
+		training_records.DOCTYPE,
+		_company_filter({}, context.get("company") or ""),
+		(
+			"name",
+			"employee",
+			"employee_name",
+			"company",
+			"training_type",
+			"provider",
+			"completed_date",
+			"expires_date",
+			"regimes",
+		),
+	):
+		expires = row.get("expires_date")
+		remaining = days_until(today, expires)
+		if remaining is None:
+			# One-time training. Nothing to renew, so nothing to say.
+			continue
+		if remaining > training_records.EXPIRING_WINDOW_DAYS:
+			continue
+
+		who = row.get("employee_name") or row.get("employee") or "somebody"
+		what = row.get("training_type") or "Training"
+		regimes = training_records.parse(row.get("regimes"))
+		# The regimes are in the MESSAGE, not merely on the record, because the
+		# calendar entry is what somebody reads on a phone at seven in the morning
+		# and "expires in 12 days" is a different decision from "WPS handler
+		# training expires in 12 days and he cannot lawfully spray after that".
+		coverage = (
+			f" It is the operation's evidence for {', '.join(regimes)}."
+			if regimes
+			else " It carries NO regime tag, so no audit packet will pull it — tag it with "
+			"record_training so the evidence counts for something."
+		)
+
+		if remaining < 0:
+			severity = SEVERITY_CRITICAL
+			message = (
+				f"{what} for {who} EXPIRED {abs(remaining)} day(s) ago, on {expires}."
+				+ _training_consequence(regimes)
+				+ coverage
+			)
+		elif remaining <= training_records.CRITICAL_WINDOW_DAYS:
+			severity = SEVERITY_CRITICAL
+			message = (
+				f"{what} for {who} expires in {remaining} day(s), on {expires}. Inside "
+				f"{training_records.CRITICAL_WINDOW_DAYS} days, booking a course is no longer "
+				"reliably enough to avoid the lapse — courses run on a published schedule and "
+				"the next one may be after the date."
+				+ _training_consequence(regimes)
+				+ coverage
+			)
+		else:
+			severity = SEVERITY_WARNING
+			message = (
+				f"{what} for {who} expires in {remaining} day(s), on {expires}, which is inside "
+				f"the {training_records.EXPIRING_WINDOW_DAYS}-day window a retraining actually "
+				"takes to arrange — trainer, crew, language, and a room."
+				+ coverage
+			)
+
+		out.append(
+			Observation(
+				source_doctype=training_records.DOCTYPE,
+				source_docname=row["name"],
+				message=message,
+				severity=severity,
+				due_date=str(expires),
+				company=str(row.get("company") or ""),
+				category="Workforce",
+			)
+		)
+	return out
+
+
+def _training_consequence(regimes: list) -> str:
+	"""What actually stops being lawful, per regime, in one sentence.
+
+	Severity says how urgent; this says WHY, and the two are different facts. A
+	worker whose WPS handler training has lapsed cannot legally perform an
+	application — that is not a paperwork problem, it is a person who has to be
+	taken off the sprayer tomorrow morning.
+	"""
+	if "WPS" in regimes:
+		return (
+			" A handler whose WPS training is more than twelve months old cannot lawfully "
+			"perform an application (40 CFR 170.501; Oregon OAR 437-004-6501), so this takes "
+			"somebody off the sprayer rather than merely off a list."
+		)
+	if "OR-OSHA" in regimes:
+		return (
+			" Oregon's heat rule (OAR 437-004-1131) requires the training annually BEFORE work "
+			"at any site where the heat index will reach 80 °F, so a lapse is a citation the "
+			"first hot morning rather than at the next inspection."
+		)
+	if "FSMA" in regimes:
+		return (
+			" FSMA Subpart C (§112.21–.30) requires training on hiring and periodically "
+			"thereafter, and a covered farm with lapsed worker training has no answer to the "
+			"first question of a produce safety inspection."
+		)
+	if "NOP" in regimes:
+		return (
+			" Organic handling training is part of the Organic System Plan the certifier "
+			"inspects against (7 CFR 205.201), and OSP-practice divergence is the "
+			"noncompliance Oregon Tilth writes most often."
+		)
+	return ""
+
+
+register(
+	Rule(
+		key="training_expiring",
+		title="A worker's training has lapsed, or is inside the window a retraining takes to arrange",
+		category="Workforce",
+		requires=(training_records.DOCTYPE,),
+		framework=(
+			"EPA Worker Protection Standard 40 CFR 170.401/.501 (12-month cycle) and 170.309 "
+			"(2-year records); Oregon OSHA OAR 437-004-1131 heat illness, -1110(9) field "
+			"sanitation hygiene, -9800 hazard communication, -1005(10) PPE, -0240 seasonal "
+			"orientation; FDA FSMA 21 CFR 112.21–.30 and the §112.161 record form; USDA GAP "
+			"worker health and hygiene; USDA NOP 7 CFR 205.201 organic handling"
+		),
+		purpose=(
+			"Expiring training is the same shape of fact as an expiring certificate and had "
+			"nowhere to be seen. A WPS handler whose training lapsed cannot lawfully spray "
+			"tomorrow; an unretrained crew on the first 80 °F morning is a citation under "
+			"Oregon's heat rule. Both were previously discoverable only by somebody opening "
+			"a binder."
+		),
+		kairotic_gate=(
+			"Fires on the RECORD'S OWN EXPIRY, read from `expires_date` rather than from a "
+			"date in a calendar — a training 200 days out raises nothing however many times "
+			"the sweep runs, the same one raises Warning at 90 days and Critical at 30, and "
+			"it goes away by itself the moment a newer record is filed with a later expiry. "
+			"Training with NO expiry — a new-hire orientation, a PSA grower certificate — is "
+			"skipped entirely, because a renewal alert nobody can clear is how a calendar "
+			"stops being read. Ninety days is what arranging a retraining actually takes "
+			"(trainer, crew, language, room); inside thirty, the next scheduled course may "
+			"already be after the lapse."
+		),
+		scan=_scan_training,
 	)
 )

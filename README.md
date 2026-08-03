@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **210 tools** — 93 read-only, 117 mutating.
+- **214 tools** — 95 read-only, 119 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -275,7 +275,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 210 tools
+## The 214 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -290,7 +290,7 @@ mutating tool ships OFF — so a write tool you cannot see is one nobody has tic
 yet. Tick it in **ERPNext MCP Settings**; the refusal message names the exact
 switch if you call the tool anyway.
 
-### Read-only — 93, all ON by default, each individually switchable
+### Read-only — 95, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -1280,6 +1280,21 @@ this email address". These are what fix that without leaving the conversation.
 | `create_employee` | One Employee record — the identity every task board, evidence row and payroll register names. Fourteen fields; Links checked against this site's own Department / Designation / Employment Type / Gender records, Selects against this site's own options, and both refusals list what is actually available. | **Write a payroll, tax or banking field.** Salary structure, income tax slab, CTC, bank account and provident fund each have a form, an approval and a retention rule this app knows nothing about; they are refused by name. Nor silently drop a field this site's doctype lacks — it is reported. Nor make a second record for a name this company already has, without `allow_duplicate_name=true`. |
 | `update_employee` | The same fourteen fields on a record that exists, reporting **field by field what actually changed**, with the previous value. A value that already matched lands in `unchanged`. | Re-point an Employee at a different login without `replace_user=true` — that moves the person's whole task history with it. Nor reach the payroll fields, for the same reason as above. |
 | `link_employee_to_user` | Sets `Employee.user_id`, and reports **whether the phone will now work** — `farm_ops_ready` is true only when the account holds a Farm Ops role, its grant is Active and the Employee is Active, and the note names whichever of the three is missing. | Link a User that already belongs to another Employee, in either direction — one login resolving to two people gives `list_my_tasks` two answers where it needs one. Nor link an account with no Farm Ops role and no grant, without `allow_unenrolled_user=true`: that link changes nothing today and silently grants a task board on the day somebody grants the account a role for an unrelated reason. |
+
+**The training register** — the v0.19.0 surface. Eleven compliance rules watched
+certificates, policies, cabins, water, filings and audits, and none watched what
+the crew was actually taught: WPS every twelve months, Oregon's heat rule
+annually before the first 80 °F shift, FSMA Subpart C on hiring and periodically,
+GAP annually with the signature attached. A single session can satisfy all of
+them, so **one record carries a tag list** and every audit packet pulls the subset
+that audit is entitled to see.
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `record_training` | One training event tagged with every regime it answers, with the §112.161 fields written at the time — trainee signature, farm name snapshotted onto the record, a date-and-time activity stamp. Retention follows the **longest** tag: five years where any is NOP, two for FSMA and WPS. | File a record with no regimes or no topics covered — an untagged record appears in no packet, and a regime tag without the topics is a claim an inspector will disallow. Nor accept a near-miss tag (`OSHA` for `OR-OSHA`), a training dated in the future, or an expiry before the completion. Nor **edit** last year's record on a renewal: it adds one and names what it supersedes. |
+| `list_trainings` | The register filtered by regime, status, expiry window, person or period — which is how an audit packet is assembled. Reports `without_supervisor_review` (the FSMA §112.161(b) gap) and `without_trainee_signature` (§112.161(a)(4)). | Match a regime by substring. `GlobalGAP` contains `GAP`, and a `LIKE` filter would hand a USDA GAP auditor evidence from a different scheme — matching is by tag. Nor read `status` off the stored column: it is computed as of today, because a record last saved in March holds March's answer. |
+| `get_training` | One record in full, that person's whole training history, the retention period **with its citation**, and the §112.161 elements this record lacks in the rule's own terms. | Fix those gaps. A signature added now is a signature dated now, and a record assembled before an inspection is what an inspector is trained to spot. |
+| `sign_training_supervisor_review` | The FSMA §112.161(b) review — reviewed, dated and signed by a supervisor within a reasonable time after the record was made. **The requirement USDA GAP does not have and FDA cites most.** Reports the lag and flags it when long. | Accept a self-review, a supervisor from another entity, or a review dated before the training it reviews. Nor overwrite an existing signature without `replace_reviewer=true`. It is a **separate call** from `record_training` on purpose: simultaneous timestamps are the shape of a record an inspector reads as assembled rather than kept. |
 
 
 ---

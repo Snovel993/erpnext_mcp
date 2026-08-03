@@ -198,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_ten_tools_ninety_three_read_one_hundred_seventeen_write(self):
+	def test_catalogue_is_two_hundred_fourteen_tools_ninety_five_read_one_hundred_nineteen_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -292,10 +292,34 @@ class Catalogue(SeededTestCase):
 		`onboard_employee` grew no siblings — it gained the link step it was
 		missing, and delegates its creation to `create_employee`, so there is still
 		exactly one implementation of what an Employee record may contain.
+
+		v0.19.0 ADDED FOUR — two reads, two writes — and they are the first pull
+		from the HR roadmap. Eleven compliance rules watched certificates,
+		policies, cabins, water, filings and audits, and not one of them watched
+		TRAINING: what WPS asks for every twelve months, what Oregon's heat rule
+		asks for annually before the first hot shift, what FSMA Subpart C asks for
+		on hiring and periodically, and what a GAP auditor asks for by name with
+		the signature attached. All of it lived in a binder.
+
+		  * `record_training` files one event tagged with every regime it answers,
+		    because one afternoon in a shed can satisfy four audits and filing it
+		    four times produces four records that disagree by August;
+		  * `list_trainings` filters by regime, which is how an audit packet is
+		    assembled, and reports the §112.161 elements each record is missing;
+		  * `get_training` answers the retention question — five years where any
+		    tag is NOP, three for OR-OSHA, two for FSMA and WPS, longest governs —
+		    with the citation beside the number;
+		  * `sign_training_supervisor_review` is a SEPARATE write because
+		    §112.161(b) asks for a review "after the record is made", and it is
+		    the requirement USDA GAP does not have and FDA cites most.
+
+		The twelfth compliance rule (`training_expiring`) and the training section
+		on every audit packet came with them and are not tools, which is why the
+		catalogue grew by four and the release by considerably more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 210)
-		self.assertEqual(len(registry.READ_TOOLS), 93)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 117)
+		self.assertEqual(len(registry.TOOLS), 214)
+		self.assertEqual(len(registry.READ_TOOLS), 95)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 119)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

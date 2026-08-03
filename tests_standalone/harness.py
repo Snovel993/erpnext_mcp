@@ -966,6 +966,8 @@ APP_DOCTYPES = {
 	"Water Test": "water_test",
 	# ── v0.17.0: mobile access ──────────────────────────────────────────────
 	"Mobile Access Grant": "mobile_access_grant",
+	# ── v0.19.0: the training register ──────────────────────────────────────
+	"Employee Training Record": "employee_training_record",
 }
 
 

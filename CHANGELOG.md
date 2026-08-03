@@ -3,6 +3,86 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.19.0 — 2026-08-03
+
+**The calendar could see every document on the farm and nothing a person knew.**
+Eleven compliance rules watched certificates, policies, cabins, water, filings
+and audits. None watched TRAINING — what WPS asks for every twelve months, what
+Oregon's heat rule asks for annually before the first 80 °F shift, what FSMA
+Subpart C asks for on hiring and periodically, and what a GAP auditor asks for by
+name with the signature attached. Full notes:
+[`RELEASES/v0.19.0.md`](RELEASES/v0.19.0.md).
+
+Suite: 3,514 → **3,588 passing**.
+
+### Added
+
+- **`Employee Training Record` doctype** — one training event, tagged with every
+  regime it answers. A single session covering hygiene, pesticide safety and heat
+  satisfies GAP, WPS and OR-OSHA at once, so `regimes` is a TAG LIST over a
+  closed vocabulary of eight and one record appears in every packet it earned.
+  Filing it three times produces three records that disagree by August.
+  **Matching is by token, never by substring**: `GlobalGAP` contains `GAP`, and a
+  `LIKE` filter would hand a USDA auditor evidence from a different scheme.
+  `status` is computed on save; `activity_datetime` and `farm_name_snapshot` are
+  derived; a future completion date, an expiry before the completion, a
+  self-review, a review dated before the training and an unknown regime tag are
+  all refused.
+- **The FSMA §112.161 fields, from the doctype's first version** —
+  `person_performed_signature`, `supervisor_reviewed_by/on/signature`,
+  `activity_datetime`, `regimes`, `content_topics_covered`, plus
+  `farm_name_snapshot` (§112.161(a)(1)(i), which the spec did not list). They are
+  impossible to retrofit truthfully: a signature backfilled the week before an
+  inspection is evidence that somebody signed the week before the inspection.
+  What is still missing is REPORTED as `fsma_112_161_gaps` rather than refused.
+- **`training_expiring`, the twelfth compliance rule** — Warning at 90 days
+  (what arranging a retraining actually takes), Critical at 30 (the next
+  scheduled course may already be after the lapse), Critical once lapsed, and
+  **nothing at all** where there is no expiry, because a renewal alert nobody can
+  clear is how a calendar stops being read. The message carries the regimes and
+  what stops being lawful — a handler whose WPS training lapsed cannot legally
+  perform an application. Reads `expires_date`, not `status`.
+- **Four MCP tools** — `record_training` and `sign_training_supervisor_review`
+  (mutating, ship OFF), `list_trainings` and `get_training` (read). Guards are
+  `create_employee`'s, imported rather than copied. The supervisor review is a
+  SEPARATE call because §112.161(b) says "after the record is made" — a sequence,
+  not a form field, and simultaneous timestamps are the shape of a record an
+  inspector reads as assembled rather than kept.
+- **A worker training section on every audit packet**, scoped to each audit
+  type's own regimes (GAP → GAP + WPS; OSHA → OR-OSHA + WPS; EPA → WPS; FSMA →
+  FSMA + WPS), plus a `regime` argument on `generate_audit_packet` that narrows
+  it and is **part of the idempotence key** — a narrowed packet must never
+  silently overwrite a buyer's full one. Unsigned and unreviewed records are
+  disclosed in the section rather than filtered out of it.
+- **`regime` on `generate_compliance_packet`** — a training annex over the
+  packet's own period. A top-level argument rather than a filter on each packet
+  type: both types this app ships are accounting artefacts, and a WPS key in a
+  reconciliation's filter schema would be a worker-training question on a form
+  about a bank account.
+- **Retention, with citations** — five years where any tag is NOP
+  (7 CFR 205.103(b)(4)), three for OR-OSHA, two for FSMA (21 CFR 112.164(a)(1))
+  and WPS (40 CFR 170.309). The longest tag governs; computed on read, because a
+  stored `destroy_after` that was right in 2026 and wrong in 2027 is worse than
+  no column.
+- **`tests_standalone/test_training.py`** (73 tests) and one integration test in
+  `test_e2e_workflow.py` walking onboard → record_training →
+  sign_training_supervisor_review → the record found by the packet generator for
+  both regimes it was tagged for, and absent from one it was not.
+
+### Changed
+
+- **`ALERT_TASK_MAP`** gains `training_expiring`, so a lapse becomes dispatchable
+  work like every other alert. `creates_record` is deliberately EMPTY: completing
+  the task is arranging a retraining, and no builder can invent the topics
+  covered or the trainee's signature — a task that auto-filed a record with
+  neither would produce exactly the document an auditor disallows.
+- **`roles.COMPLIANCE_REGISTERS`** gains `Employee Training Record`. A Foreman who
+  can read the certificate register and not the training register cannot answer
+  the question an inspector asks about their own crew.
+- **`docs/tool-catalog.md`** said 206 tools while the catalogue held 210. The
+  count is asserted in `test_protocol.py` for `registry.TOOLS` and nowhere for
+  the documentation.
+
 ## 0.18.5 — 2026-08-02
 
 **The workflow walks in CI, not at the iPhone.** A prevention release. v0.18.2,

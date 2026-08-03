@@ -77,6 +77,7 @@ from .tools import (
 	reports,
 	tax,
 	trade,
+	training,
 	uploads,
 	workflow,
 )
@@ -2314,6 +2315,16 @@ TOOLS = {
 				'"period_end": "2026-07-31"}. Unknown keys are rejected by name '
 				"rather than ignored — a packet scoped differently from what you "
 				"asked for is worse than an error.",
+			),
+			"regime": _field(
+				_STRING,
+				"Staple a TRAINING ANNEX to the packet: every Employee Training Record tagged "
+				"with this regime over the packet's own period. One of FSMA, GAP, GlobalGAP, "
+				"PrimusGFS, NOP, WPS, OR-OSHA, Other. It does not change what the packet "
+				"computes — it is the answer to 'send the reconciliation, and your WPS training "
+				"records for the same year'. The period comes from the filters' "
+				"period_start/period_end, or from the Fiscal Year's own dates, or is ALL TIME "
+				"when the filters name no period — which the annex states rather than guesses.",
 			),
 		},
 		required=("packet_type",),
@@ -5885,15 +5896,35 @@ TOOLS = {
 		"document is not read by the person the document is handed to. Every open "
 		"action is named in the refusal. `allow_open_actions=true` produces it "
 		"anyway, with the open items in a section at the FRONT.\n\n"
-		"IDEMPOTENT BY (audit_type, company, period): a second call is refused "
+		"IDEMPOTENT BY (audit_type, company, period, regime): a second call is refused "
 		"without overwrite=true, because two packets for one audit period differing "
 		"in whatever changed between them is a question nobody wants to be asked.\n\n"
+		"IT CARRIES A WORKER TRAINING SECTION (v0.19.0), scoped to the regimes this "
+		"audit type is entitled to see — a GAP packet takes GAP and WPS training, an "
+		"OSHA packet takes OR-OSHA and WPS, an EPA packet takes WPS alone. One "
+		"training session can satisfy several regimes at once and the record carries "
+		"every tag it earned, so one afternoon in a shed appears in every packet it "
+		"answers and in none it does not. `regime` narrows it further. Records with "
+		"no trainee signature or no §112.161(b) supervisor review are DISCLOSED in "
+		"the section rather than filtered out of it.\n\n"
 		"PDF by default; DOCX available. Supports dry_run.",
 		{
 			"audit_type": _field(
 				_STRING, "FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA or Other."
 			),
 			"company": _COMPANY,
+			"regime": _field(
+				_STRING,
+				"Narrow the WORKER TRAINING section to one scheme's records: FSMA, GAP, "
+				"GlobalGAP, PrimusGFS, NOP, WPS, OR-OSHA or Other. Every other section is "
+				"unchanged. Each audit type already pulls its own regimes — a GAP packet takes "
+				"GAP and WPS training, an OSHA packet takes OR-OSHA and WPS — so this is for "
+				"the buyer who asks for one scheme by name, and for the inspector wearing a "
+				"different hat from the packet's title, which in Oregon is the ordinary case: "
+				"the same ODA auditor runs a GAP audit one day and an FDA-contracted FSMA "
+				"inspection the next. It is PART OF THE IDEMPOTENCE KEY, so a narrowed packet "
+				"never silently overwrites the full one.",
+			),
 			"period_start": _field(_STRING, "First day the packet covers, YYYY-MM-DD."),
 			"period_end": _field(
 				_STRING, "Last day it covers, YYYY-MM-DD. A period that has not finished is refused."
@@ -7258,6 +7289,246 @@ TOOLS = {
 		title="Onboard a new employee",
 		available=_needs_doctype("Employee"),
 		requires="the Employee DocType, which Frappe HR ships",
+	),
+	# ── v0.19.0: the training register ──────────────────────────────────────
+	"record_training": _tool(
+		training.record_training,
+		"MUTATING (default OFF). File one training event for one person, tagged with "
+		"every audit it answers.\n\n"
+		"ONE AFTERNOON, FOUR AUDITS. WPS wants pesticide training every twelve "
+		"months (40 CFR 170.401/.501). Oregon's heat rule wants it annually before "
+		"the first shift at 80 °F (OAR 437-004-1131). FSMA Subpart C wants food "
+		"safety on hiring and periodically (§112.21–.30). USDA GAP wants a worker "
+		"health and hygiene log with the signature attached. A single session "
+		"covering all of it satisfies all of it — so `regimes` is a TAG LIST and one "
+		"record appears in every packet it earned. Filing it four times produces four "
+		"records that disagree by August.\n\n"
+		"`content_topics_covered` IS REQUIRED, and that is what makes a tag "
+		"defensible rather than optimistic: Oregon's heat rule names six topics that "
+		"must be covered annually, and a record claiming OR-OSHA without them is a "
+		"record an inspector will disallow. 'Heat, water, shade, symptoms, reporting, "
+		"emergency response' is a curriculum; 'safety meeting' is not.\n\n"
+		"NO `expires_date` MEANS ONE-TIME, and the compliance calendar will never ask "
+		"for it to be renewed. Right for a new-hire orientation or a PSA grower "
+		"certificate; WRONG for WPS, heat illness or annual GAP hygiene — the result "
+		"says so when you leave it empty.\n\n"
+		"IT WRITES THE §112.161 FIELDS AT THE TIME: the trainee's signature, the farm "
+		"name snapshotted onto the record itself, and a date-and-time activity stamp. "
+		"The SUPERVISOR review is a separate tool on purpose — §112.161(b) asks for a "
+		"review 'within a reasonable time AFTER the record is made', and a call that "
+		"took both signatures at one instant would produce records an inspector reads "
+		"as assembled rather than kept. Whatever is still missing is REPORTED rather "
+		"than refused: a training that happened and was recorded imperfectly is "
+		"better evidence than no record at all.\n\n"
+		"A renewal ADDS a record and never edits one — last year\'s card is the "
+		"evidence about last year — and the result names every earlier record it "
+		"supersedes so nobody deletes them to tidy up.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager on the account "
+		"this app acts as, and refuses an employee whose company that account cannot "
+		"see.",
+		{
+			"employee": _field(
+				_STRING,
+				"Who was trained. Accepts an Employee docname, employee number, employee name, "
+				"or the login linked to them.",
+			),
+			"training_type": _field(
+				_STRING,
+				"What it was, in the words the certificate or sign-in sheet uses: 'PSA Grower "
+				"Training', 'WPS Handler Training', 'Heat Illness Prevention', 'OSHA 30', "
+				"'Applicator License Renewal'.",
+			),
+			"completed_date": _field(
+				_STRING,
+				"The day it was delivered, YYYY-MM-DD. A future date is refused — §112.161(a)(2) "
+				"requires a record created at the time of the activity.",
+			),
+			"regimes": _field(
+				_STRING_ARRAY,
+				"Which audits this counts towards. One or more of FSMA, GAP, GlobalGAP, "
+				"PrimusGFS, NOP, WPS, OR-OSHA, Other. A comma-separated string is accepted too. "
+				"REQUIRED: an untagged record appears in no packet. A near-miss ('OSHA' for "
+				"'OR-OSHA') is refused rather than corrected, because it would file the evidence "
+				"where nothing looks for it.",
+			),
+			"content_topics_covered": _field(
+				_STRING_ARRAY,
+				"What was actually covered. A comma-separated string is accepted too. REQUIRED — "
+				"see the description.",
+			),
+			"expires_date": _field(
+				_STRING,
+				"When it stops counting, YYYY-MM-DD. LEAVE EMPTY FOR ONE-TIME TRAINING. Twelve "
+				"months out for WPS and for Oregon heat illness.",
+			),
+			"provider": _field(
+				_STRING, "The instructor or organisation: 'Produce Safety Alliance', 'OSU Extension'."
+			),
+			"training_source": _field(
+				_STRING, "Internal (default), External, Contractor or Online-Course."
+			),
+			"completed_time": _field(
+				_STRING,
+				"Time of day, HH:MM. Optional, and worth having: §112.161(a)(1)(v) asks for date "
+				"AND time of the activity.",
+			),
+			"certificate_file": _field(
+				_STRING,
+				"The certificate, card or sign-in sheet, as a File docname or file_url. Upload it "
+				"with attach_file_to_document or stage_file_chunk first.",
+			),
+			"person_performed_signature": _field(
+				_STRING,
+				"The TRAINEE\'s signature file, captured at completion. §112.161(a)(4), and one "
+				"of the standard GAP section failures when it is missing.",
+			),
+			"company": _field(
+				_STRING,
+				"The employing entity. Defaults to the Employee\'s own company, and a mismatch is "
+				"refused rather than reconciled.",
+			),
+			"notes": _field(
+				_STRING,
+				"Language delivered in, assessment result, who else was in the room — anything an "
+				"auditor will ask about in two years.",
+			),
+		},
+		required=("employee", "training_type", "completed_date", "regimes", "content_topics_covered"),
+		mutating=True,
+		title="Record a training",
+		available=_needs_doctype("Employee Training Record"),
+		requires="the Employee Training Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_trainings": _tool(
+		training.list_trainings,
+		"The training register: who was taught what, when, under which regimes, and "
+		"what has lapsed. Read-only.\n\n"
+		"`regime` IS THE AUDIT FILTER. 'Every NOP training record for the last five "
+		"years' and 'every WPS record for 2026' are the two questions an audit packet "
+		"is assembled from, and both are one call. Matching is by TAG, never by "
+		"substring — 'GlobalGAP' contains 'GAP', and a substring match would hand a "
+		"USDA GAP auditor evidence from a different scheme.\n\n"
+		"`status` AND `expiring_within_days` ARE COMPUTED AS OF TODAY from the expiry "
+		"date, not read off a stored column: a record last saved in March holds "
+		"March\'s answer, and filtering on it would report the lapsed set as current. "
+		"The same reason the compliance calendar reads dates rather than statuses.\n\n"
+		"IT REPORTS WHAT IS MISSING. `without_supervisor_review` is the FSMA "
+		"§112.161(b) gap — the element a GAP-only operation most often lacks and "
+		"which FDA cites even where the training itself was fine — and "
+		"`without_trainee_signature` is §112.161(a)(4). `by_regime` counts the "
+		"selection per tag, which is what tells you whether a packet will be empty "
+		"before you generate it.\n\n"
+		"Scoped to the companies the calling account may actually reach.",
+		{
+			"company": _COMPANY,
+			"employee": _field(
+				_STRING, "One person. Docname, employee number, name, or their login."
+			),
+			"regime": _field(
+				_STRING,
+				"FSMA, GAP, GlobalGAP, PrimusGFS, NOP, WPS, OR-OSHA or Other. The response also "
+				"returns what each one means and the rule behind it.",
+			),
+			"status": _field(
+				_STRING,
+				"Active, Expiring (inside 90 days) or Expired — as of TODAY. One-time training "
+				"with no expiry is always Active.",
+			),
+			"expiring_within_days": _field(
+				_INTEGER,
+				"Only training expiring inside this many days. 0 gives the already-lapsed and "
+				"anything expiring today.",
+			),
+			"unreviewed_only": _field(
+				_BOOLEAN,
+				"Only records with no §112.161(b) supervisor review. The worklist for closing "
+				"the gap FDA cites most.",
+			),
+			"from_date": _field(_STRING, "Earliest completion date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest completion date, YYYY-MM-DD."),
+			"limit": _field(_INTEGER, "Maximum records. Default 100, hard maximum 500."),
+		},
+		title="List trainings",
+		available=_needs_doctype("Employee Training Record"),
+		requires="the Employee Training Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_training": _tool(
+		training.get_training,
+		"One training record in full, with that person\'s whole training history "
+		"beside it. Read-only.\n\n"
+		"IT ANSWERS THE RETENTION QUESTION, which nothing else on the site does. A "
+		"record tagged NOP is a FIVE-year record (7 CFR 205.103(b)(4)); one tagged "
+		"OR-OSHA is three; FSMA and WPS are two (21 CFR 112.164(a)(1) and 40 CFR "
+		"170.309). Where a record carries several tags the LONGEST governs, because "
+		"destroying it at two years would destroy the five-year evidence. The "
+		"citation comes back with the number.\n\n"
+		"IT LISTS THE §112.161 ELEMENTS THIS RECORD LACKS, in the rule\'s own terms, "
+		"rather than fixing them: a signature added now would be a signature dated "
+		"now, and a record assembled before an inspection is what an inspector is "
+		"trained to spot.\n\n"
+		"`superseded_by` names later records of the same kind for the same person. "
+		"They do NOT make this one deletable — an auditor asking about last season "
+		"wants the row that was true last season.",
+		{
+			"name": _field(_STRING, "The Employee Training Record docname, e.g. ETR-2026-07-00003."),
+			"training": _field(_STRING, "Alias for name."),
+			"record": _field(_STRING, "Alias for name."),
+		},
+		title="Get a training record",
+		available=_needs_doctype("Employee Training Record"),
+		requires="the Employee Training Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"sign_training_supervisor_review": _tool(
+		training.sign_training_supervisor_review,
+		"MUTATING (default OFF). Record the FSMA §112.161(b) supervisor review on one "
+		"training record.\n\n"
+		"THIS IS THE GAP A GAP-ONLY OPERATION HAS. §112.161(b) requires worker "
+		"training records — among others — to be reviewed, dated and signed by a "
+		"supervisor or responsible party within a reasonable time after the record is "
+		"made. USDA GAP does not ask for it, so an operation with an otherwise "
+		"immaculate GAP binder fails on it, and FDA writes it up even where the "
+		"underlying training was fine. It is the single most common FSMA finding "
+		"against farms whose actual practice is sound.\n\n"
+		"A SEPARATE CALL FROM record_training, DELIBERATELY. The rule\'s own phrase is "
+		"\'after the record is made\' — a sequence, not a form field. A tool that took "
+		"both signatures at once would make simultaneous timestamps the default, and "
+		"simultaneous timestamps are the shape of a record an inspector reads as "
+		"assembled rather than kept. The result reports the LAG and says so when it "
+		"is long.\n\n"
+		"IT REFUSES a self-review, a supervisor from another entity, a review dated "
+		"before the training it reviews, and — without replace_reviewer=true — "
+		"overwriting a signature already on the record.",
+		{
+			"name": _field(_STRING, "The Employee Training Record docname."),
+			"training": _field(_STRING, "Alias for name."),
+			"record": _field(_STRING, "Alias for name."),
+			"supervisor": _field(
+				_STRING,
+				"Who reviewed it. Docname, employee number, name or login. Cannot be the trainee, "
+				"and cannot belong to another company.",
+			),
+			"reviewed_on": _field(
+				_STRING,
+				"When the review happened, YYYY-MM-DD HH:MM:SS. Defaults to now. Earlier than the "
+				"training itself is refused.",
+			),
+			"supervisor_signature": _field(
+				_STRING,
+				"The signature file, as a File docname or file_url — upload it through "
+				"stage_file_chunk first. Without it the review is recorded by name and date only, "
+				"and the result says so.",
+			),
+			"replace_reviewer": _field(
+				_BOOLEAN,
+				"Overwrite a review already on this record. Default false — replacing a signature "
+				"on a compliance record is a decision rather than a retry.",
+			),
+		},
+		required=("supervisor",),
+		mutating=True,
+		title="Sign a training supervisor review",
+		available=_needs_doctype("Employee Training Record"),
+		requires="the Employee Training Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

@@ -64,6 +64,7 @@ SECTION_ORDER = (
 	"policies",
 	"certifications",
 	"workforce",
+	"training",
 	"spray_records",
 	"water",
 	"traceability",
@@ -99,6 +100,14 @@ class AuditPacketType:
 	cert_types: tuple = ()
 	audit_types: tuple = ()
 	agencies: tuple = ()
+	#: Which `Employee Training Record.regimes` tags the training section pulls.
+	#: v0.19.0. Empty means EVERY record, including untagged ones, which is right
+	#: only for the two unscoped bundles (`Other`, `USDA_NIFA`) — an EPA packet
+	#: containing a worker's organic-handling training invites a question nobody
+	#: wanted to answer, exactly as a DOL packet containing a GlobalGAP
+	#: certificate would. Overridable per call: `generate_audit_packet` takes a
+	#: `regime` argument for the buyer who asks for one scheme by name.
+	training_regimes: tuple = ()
 
 	def describe(self) -> dict:
 		return {
@@ -112,6 +121,8 @@ class AuditPacketType:
 				"certificate_types": list(self.cert_types) or ["(every type)"],
 				"audit_types": list(self.audit_types) or ["(every type)"],
 				"agencies": list(self.agencies) or ["(every agency)"],
+				"training_regimes": list(self.training_regimes)
+				or ["(every regime, including untagged records)"],
 			},
 			"switch": "allow_generate_audit_packet",
 		}
@@ -151,6 +162,7 @@ register(
 			"policies",
 			"certifications",
 			"workforce",
+			"training",
 			"water",
 			"traceability",
 			"housing",
@@ -166,6 +178,10 @@ register(
 			"Housing",
 		),
 		audit_types=("FSMA", "FDA", "ODA"),
+		# Subpart C personnel training is a named record type under §112.30(b),
+		# and WPS training is pulled in beside it because a covered farm's
+		# pesticide handlers are the same crew and the inspector asks about both.
+		training_regimes=("FSMA", "WPS"),
 	)
 )
 
@@ -183,6 +199,7 @@ register(
 			"policies",
 			"certifications",
 			"workforce",
+			"training",
 			"water",
 			"traceability",
 			"spray_records",
@@ -198,6 +215,9 @@ register(
 		),
 		cert_types=("GAP", "GlobalGAP", "PrimusGFS", "Food Safety Training", "Water Test Certification"),
 		audit_types=("GAP", "GlobalGAP", "PrimusGFS", "Buyer Audit", "Internal Audit"),
+		# "Worker health & hygiene training log" is a named GAP record, and GAP
+		# inherits the WPS 12-month requirement rather than restating it.
+		training_regimes=("GAP", "WPS"),
 	)
 )
 
@@ -215,6 +235,7 @@ register(
 			"policies",
 			"certifications",
 			"workforce",
+			"training",
 			"water",
 			"traceability",
 			"housing",
@@ -223,6 +244,7 @@ register(
 		),
 		cert_types=("GlobalGAP", "GAP", "PrimusGFS", "Organic", "Food Safety Training"),
 		audit_types=("GlobalGAP", "GAP", "PrimusGFS", "Buyer Audit"),
+		training_regimes=("GlobalGAP", "GAP", "PrimusGFS", "WPS"),
 	)
 )
 
@@ -236,11 +258,16 @@ register(
 			"pesticide handler protection, and the 300A log. The inspection that "
 			"follows a complaint or an injury."
 		),
-		sections=("open_actions", "policies", "certifications", "workforce", "housing", "spray_records", "filings", "audits"),
+		sections=("open_actions", "policies", "certifications", "workforce", "training", "housing", "spray_records", "filings", "audits"),
 		policy_categories=("Worker Safety", "Worker Training", "Housing"),
 		cert_types=("First Aid / CPR", "Applicator License", "Food Safety Training"),
 		audit_types=("OSHA", "ODA"),
 		agencies=("OSHA", "DOL", "WA-L&I"),
+		# Heat illness (OAR 437-004-1131), field sanitation hygiene (-1110(9)),
+		# hazard communication (-9800), PPE (-1005(10)) and seasonal orientation
+		# (-0240) all land on the OR-OSHA tag; WPS handler training is pulled in
+		# because Oregon enforces it at OAR 437-004-6501 in the same inspection.
+		training_regimes=("OR-OSHA", "WPS"),
 	)
 )
 
@@ -254,8 +281,12 @@ register(
 			"licensing, and the housing an employer provided. What a wage claim or an "
 			"MSPA investigation asks for."
 		),
-		sections=("open_actions", "policies", "certifications", "workforce", "housing", "traceability", "filings", "audits"),
+		sections=("open_actions", "policies", "certifications", "workforce", "training", "housing", "traceability", "filings", "audits"),
 		policy_categories=("Worker Training", "Worker Safety", "Housing"),
+		# MSPA asks what the crew was told about the terms and conditions of
+		# employment, and an OR-OSHA-tagged safety orientation is the record that
+		# most often carries it.
+		training_regimes=("OR-OSHA",),
 		cert_types=("Farm Labor Contractor License", "Commercial Driver License"),
 		audit_types=("DOL", "OSHA"),
 		agencies=("DOL", "OR-BOLI", "IRS", "OR-DOR", "WA-L&I"),
@@ -272,9 +303,13 @@ register(
 			"pre-harvest intervals, and the drift conditions on the day. What a drift "
 			"complaint or a residue detection is investigated from."
 		),
-		sections=("open_actions", "policies", "certifications", "spray_records", "water", "workforce", "filings", "audits"),
+		sections=("open_actions", "policies", "certifications", "spray_records", "water", "workforce", "training", "filings", "audits"),
 		policy_categories=("Spray SOP", "Worker Training", "Water Testing"),
 		cert_types=("Applicator License",),
+		# 40 CFR 170.401/.501 worker and handler training, kept two years at the
+		# establishment per §170.309. This is the section a drift complaint is
+		# investigated from after the spray records themselves.
+		training_regimes=("WPS",),
 		audit_types=("EPA", "ODA"),
 		agencies=("EPA", "ODA"),
 	)
@@ -289,7 +324,7 @@ register(
 			"The compliance posture a grant application asserts and a programme review "
 			"verifies. Certifications held, procedures in force, filings made."
 		),
-		sections=("open_actions", "policies", "certifications", "filings", "audits", "workforce"),
+		sections=("open_actions", "policies", "certifications", "filings", "audits", "workforce", "training"),
 		agencies=("USDA", "ODA", "IRS"),
 	)
 )
@@ -527,6 +562,134 @@ def _workforce(spec: AuditPacketType, company: str, start: str, end: str) -> dic
 			f"{len(problems)} active employee(s) have an expired or unrecorded I-9. This is "
 			"disclosed in the packet rather than filtered out of it: an auditor who finds it "
 			"themselves asks a much harder question than one who was shown it."
+		)
+	return section
+
+
+def _training(spec: AuditPacketType, company: str, start: str, end: str, regime: str = "") -> dict:
+	"""What the crew was taught during the period, scoped to this audit's regimes.
+
+	v0.19.0. THE SECTION THAT EXISTS BECAUSE ONE AFTERNOON ANSWERS FOUR AUDITS.
+	A session covering hygiene, pesticide safety and heat satisfies GAP, WPS and
+	OR-OSHA at once, and the record carries all three tags — so this pulls the
+	subset THIS auditor is entitled to see rather than the whole register. An EPA
+	packet containing a worker's organic-handling training invites a question
+	nobody wanted to answer, exactly as a DOL packet containing a GlobalGAP
+	certificate would.
+
+	SCOPED BY `completed_date`, NOT BY EXPIRY. A record whose training happened
+	inside the period belongs in the packet for that period whether or not it has
+	since lapsed: an auditor asking about last season is asking what the crew had
+	been taught by then, and silently dropping a since-expired record would
+	overstate the position rather than understate it.
+
+	THE §112.161 GAPS ARE DISCLOSED IN THE PACKET. Unsigned records and records
+	with no supervisor review are counted and named, because "missing supervisor
+	sign-off on the §112.161(b) records" is a finding FDA writes up even where the
+	underlying training was fine — and an auditor who finds it themselves asks a
+	much harder question than one who was shown it.
+	"""
+	from . import training as training_records
+
+	if not compat.doctype_exists(training_records.DOCTYPE):
+		return _section(
+			"Worker training",
+			"What each person was taught, when, on what topics, and who signed for it.",
+			[],
+			("record", "person", "training", "completed", "expires", "regimes"),
+			absent=(
+				"This site has no Employee Training Record DocType — it ships with erpnext_mcp "
+				"from v0.19.0, so run `bench --site <site> migrate`. Until then this section is "
+				"ABSENT rather than empty, and an auditor should be told which: an empty "
+				"training table reads as a crew nobody trained."
+			),
+		)
+
+	wanted = [
+		regime_key
+		for regime_key in (
+			[training_records.canon(regime)] if regime else list(spec.training_regimes)
+		)
+		if regime_key
+	]
+	rows = []
+	seen = set()
+	for regime_key in wanted or [""]:
+		for row in training_records.for_regime(regime_key, company, start, end, limit=SECTION_CAP + 1):
+			if row["name"] in seen:
+				continue
+			seen.add(row["name"])
+			described = training_records.describe(row)
+			rows.append(
+				{
+					"record": described["name"],
+					"person": described["employee_name"] or described["employee"],
+					"training": described["training_type"],
+					"provider": described["provider"] or "(not recorded)",
+					"completed": described["completed_date"],
+					"activity_datetime": described["activity_datetime"],
+					"expires": described["expires_date"] or "(one-time)",
+					"regimes": ", ".join(described["regimes"]),
+					"topics": "; ".join(described["content_topics_covered"]) or "(not recorded)",
+					"trainee_signed": described["trainee_signed"],
+					"supervisor_reviewed": described["supervisor_reviewed"],
+					"supervisor_reviewed_on": described["supervisor_reviewed_on"],
+					"status_at_period_end": training_records.status_for(row.get("expires_date"), end),
+				}
+			)
+	rows.sort(key=lambda row: (str(row["completed"] or ""), str(row["record"])))
+
+	# An audit type with NO `training_regimes` — `Other` and `USDA_NIFA`, the two
+	# unscoped bundles — pulls every record INCLUDING untagged ones. That is right
+	# for a bundle whose whole purpose is "everything on file", and it is stated
+	# rather than implied, because "every tagged regime" would be a claim that
+	# quietly excluded the records most likely to need attention.
+	scope = ", ".join(wanted) if wanted else "every regime, including records carrying no tag"
+	section = _section(
+		"Worker training",
+		(
+			f"Training delivered during the period and tagged {scope}. One session can satisfy "
+			"several regimes at once — the record carries every tag it earned and this section "
+			"pulls the subset this audit is entitled to see. Scoped by the date the training "
+			"HAPPENED, not by whether it is still current today: an auditor asking about the "
+			"period is asking what the crew had been taught by then."
+		),
+		rows,
+		("record", "person", "training", "completed", "expires", "regimes", "supervisor_reviewed"),
+		absent=(
+			f"No training record tagged {scope} was completed during this period. That is a "
+			"statement about the period and the tags, not about whether anybody was trained — "
+			"an untagged record exists but appears in no packet."
+		),
+	)
+	section["regimes_pulled"] = wanted or ["(every tagged regime)"]
+	unsigned = [row["record"] for row in rows if not row["trainee_signed"]]
+	unreviewed = [row["record"] for row in rows if not row["supervisor_reviewed"]]
+	lapsed = [row["record"] for row in rows if row["status_at_period_end"] == "Expired"]
+	if unsigned:
+		section["without_trainee_signature"] = unsigned[:100]
+	if unreviewed:
+		section["without_supervisor_review"] = unreviewed[:100]
+	if lapsed:
+		section["expired_by_period_end"] = lapsed[:100]
+	problems = []
+	if unsigned:
+		problems.append(
+			f"{len(unsigned)} record(s) carry no trainee signature (FSMA §112.161(a)(4), and one "
+			"of the standard GAP section failures)"
+		)
+	if unreviewed:
+		problems.append(
+			f"{len(unreviewed)} record(s) have no supervisor review (FSMA §112.161(b) — the "
+			"element a GAP-only operation most often lacks, cited even where the training was fine)"
+		)
+	if lapsed:
+		problems.append(f"{len(lapsed)} record(s) had already expired by {end}")
+	if problems:
+		section["problem_note"] = (
+			"; ".join(problems)
+			+ ". Disclosed in the packet rather than filtered out of it: an auditor who finds "
+			"this themselves asks a much harder question than one who was shown it."
 		)
 	return section
 
@@ -938,6 +1101,7 @@ _BUILDERS = {
 	"policies": _policies,
 	"certifications": _certifications,
 	"workforce": _workforce,
+	"training": _training,
 	"spray_records": _spray_records,
 	"water": _water,
 	"traceability": _traceability,
@@ -1044,8 +1208,23 @@ def readiness(spec: AuditPacketType, company: str, start: str, end: str, today: 
 
 
 # ── assembly ────────────────────────────────────────────────────────────────
-def build(spec: AuditPacketType, company: str, start: str, end: str, allow_open_actions: bool = False) -> dict:
-	"""Assemble one packet. Reads only; writes nothing."""
+def build(
+	spec: AuditPacketType,
+	company: str,
+	start: str,
+	end: str,
+	allow_open_actions: bool = False,
+	regime: str = "",
+) -> dict:
+	"""Assemble one packet. Reads only; writes nothing.
+
+	`regime` (v0.19.0) narrows the training section to ONE regime tag, overriding
+	the audit type's own list. It exists for the buyer who asks for one scheme by
+	name — "send me your WPS training records for 2026" — and for the auditor
+	wearing a different hat from the one the packet is titled for, which in Oregon
+	is the ordinary case: the same ODA inspector runs a GAP audit one day and an
+	FDA-contracted FSMA inspection the next.
+	"""
 	sections = []
 	for key in SECTION_ORDER:
 		if key not in spec.sections:
@@ -1053,6 +1232,9 @@ def build(spec: AuditPacketType, company: str, start: str, end: str, allow_open_
 		if key == "open_actions" and not allow_open_actions:
 			# Only ever present on an overridden gate. On a clean packet there is
 			# nothing to disclose and a section saying "none" would be noise.
+			continue
+		if key == "training":
+			sections.append({"key": key, **_training(spec, company, start, end, regime)})
 			continue
 		sections.append({"key": key, **_BUILDERS[key](spec, company, start, end)})
 
@@ -1084,6 +1266,7 @@ def build(spec: AuditPacketType, company: str, start: str, end: str, allow_open_
 		"generator": "erpnext_mcp",
 		"generator_version": __version__,
 		"produced_over_open_actions": bool(allow_open_actions),
+		"training_regime_override": str(regime or "") or None,
 	}
 
 

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 206 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 214 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -6018,6 +6018,132 @@ falsy value dropped in transit would silently turn the first into the second.
 
 ---
 
+# Wave 8 — the training register (v0.19.0)
+
+Eleven compliance rules watched certificates, policies, cabins, water, filings
+and audits. None watched **training** — which is what WPS asks for every twelve
+months (40 CFR 170.401/.501), what Oregon's heat rule asks for annually before
+the first shift at 80 °F (OAR 437-004-1131), what FSMA Subpart C asks for on
+hiring and periodically (21 CFR 112.21–.30), and what a GAP auditor asks for by
+name with the signature attached. All of it lived in a binder, and the way an
+operation found out a handler card had lapsed was that somebody looked, or that
+an inspector did.
+
+**One record, many regimes.** A single session covering hygiene, pesticide safety
+and heat satisfies GAP, WPS and OR-OSHA at once — provided the trainer covered
+all three curricula. So `regimes` is a **tag list** on one record rather than
+three records, and every audit packet pulls the subset that audit is entitled to
+see. Matching is by **tag, never by substring**: `GlobalGAP` contains `GAP`, and a
+`LIKE '%GAP%'` filter would hand a USDA auditor evidence from a different scheme.
+
+**Retention is the longest tag.** NOP five years (7 CFR 205.103(b)(4)), OR-OSHA
+three, FSMA and WPS two (21 CFR 112.164(a)(1); 40 CFR 170.309). A record tagged
+GAP *and* NOP is a five-year record — destroying it at two would destroy the NOP
+evidence. `get_training` returns the number with its citation.
+
+## 199. `record_training`
+
+**MUTATING, default OFF.** One training event, tagged with every audit it
+answers.
+
+| Argument | Notes |
+| --- | --- |
+| `employee` | **Required.** Docname, employee number, name, or the linked login. |
+| `training_type` | **Required.** 'PSA Grower Training', 'WPS Handler Training', 'Heat Illness Prevention'. |
+| `completed_date` | **Required.** YYYY-MM-DD. A future date is refused — §112.161(a)(2). |
+| `regimes` | **Required.** One or more of FSMA, GAP, GlobalGAP, PrimusGFS, NOP, WPS, OR-OSHA, Other. |
+| `content_topics_covered` | **Required.** What was actually covered. |
+| `expires_date` | **Empty means one-time** and the calendar never asks for a renewal. |
+| `provider`, `training_source`, `completed_time`, `certificate_file`, `person_performed_signature`, `company`, `notes` | Optional. |
+
+```bash
+-d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+      "name":"record_training","arguments":{
+        "employee":"HR-EMP-00002",
+        "training_type":"WPS Handler Training",
+        "completed_date":"2026-07-21","completed_time":"08:15",
+        "regimes":["WPS","GAP"],
+        "content_topics_covered":"Label reading, PPE, REI, decontamination",
+        "expires_date":"2027-07-21",
+        "person_performed_signature":"/files/ben-signature.png"}}}'
+```
+
+**`content_topics_covered` is required and that is the point.** Oregon's heat rule
+names six topics that must be covered annually; a record claiming OR-OSHA without
+them is a record an inspector will disallow. "Heat, water, shade, symptoms,
+reporting, emergency response" is a curriculum; "safety meeting" is not.
+
+**A near-miss tag is refused, not corrected.** `"OSHA"` where the vocabulary says
+`"OR-OSHA"` would file the evidence where no packet looks for it, and nobody finds
+that out until an inspector does. Regulator spellings are accepted and
+canonicalised (`oregon osha`, `40 CFR 170`, `7 CFR 205`).
+
+**A renewal ADDS a record and never edits one.** Last year's card is the evidence
+about last year. The result names every earlier record it supersedes, so nobody
+deletes them to tidy up.
+
+## 200. `list_trainings`
+
+**Read-only.** The register, filtered the four ways an audit or a calendar asks:
+`regime`, `status`, `expiring_within_days`, `unreviewed_only` — plus `employee`,
+`company`, `from_date`/`to_date`.
+
+`status` and `expiring_within_days` are computed **as of today** from the expiry
+date rather than read off the stored column: a record last saved in March holds
+March's answer, and filtering on it would report the lapsed set as current.
+
+Returns `by_regime` counts, `expired`, `expiring`, `without_supervisor_review`
+(the FSMA §112.161(b) gap) and `without_trainee_signature` (§112.161(a)(4)).
+
+## 201. `get_training`
+
+**Read-only.** One record in full, with that person's whole training history, the
+retention period the tags demand with its citation, the §112.161 elements the
+record **lacks** in the rule's own terms, and `superseded_by`.
+
+The gaps are listed rather than fixed: a signature added now would be a signature
+dated now, and a record assembled before an inspection is what an inspector is
+trained to spot.
+
+## 202. `sign_training_supervisor_review`
+
+**MUTATING, default OFF.** Records the FSMA §112.161(b) supervisor review.
+
+**This is the gap a GAP-only operation has.** §112.161(b) requires worker training
+records to be reviewed, dated and signed by a supervisor or responsible party
+within a reasonable time after the record is made. USDA GAP does not ask for it,
+so an operation with an immaculate GAP binder fails on it — and FDA writes it up
+even where the underlying training was fine.
+
+**A separate call from `record_training`, deliberately.** The rule's phrase is
+"after the record is made" — a sequence, not a form field. A tool that took both
+signatures at once would make simultaneous timestamps the default, and
+simultaneous timestamps are the shape of a record an inspector reads as assembled
+rather than kept. The result reports the lag and says so when it is long.
+
+Refuses a self-review, a supervisor from another entity, a review dated before the
+training, and — without `replace_reviewer=true` — overwriting a signature already
+on the record.
+
+## The twelfth alert rule and the packet section
+
+`training_expiring` fires on the record's own `expires_date`: **Warning** at 90
+days (what arranging a retraining actually takes — trainer, crew, language, room),
+**Critical** at 30 (the next scheduled course may already be after the lapse) and
+**Critical** once lapsed. Training with **no** expiry raises nothing at all,
+because a renewal alert nobody can clear is how a calendar stops being read. The
+message carries the regimes and what actually stops being lawful — a handler whose
+WPS training lapsed cannot legally perform an application.
+
+`generate_audit_packet` gained a **worker training** section scoped to each audit
+type's own regimes (GAP → GAP + WPS; OSHA → OR-OSHA + WPS; EPA → WPS; FSMA → FSMA
++ WPS), plus a `regime` argument that narrows it further and is **part of the
+idempotence key** so a narrowed packet never silently overwrites a full one.
+`generate_compliance_packet` gained `regime`, which staples a training annex to an
+accounting packet over that packet's own period.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -6027,7 +6153,8 @@ Everything a tool needs is in two places:
    `assets`, `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`,
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
-   `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel` or `fieldwork` —
+   `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training` or
+   `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

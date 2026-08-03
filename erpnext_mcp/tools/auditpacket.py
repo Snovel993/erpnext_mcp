@@ -37,7 +37,7 @@ ceremony, and this tool says so in the result rather than pretending otherwise.
 
 import frappe
 
-from .. import audit_packets, compat
+from .. import audit_packets, compat, training
 from ..args import as_bool, as_date, as_str, resolve_company
 from ..errors import ToolError
 from ..render import docx as docx_render
@@ -99,6 +99,7 @@ _SECTION_DOCTYPES = {
 	"policies": ("Compliance Policy",),
 	"certifications": ("Certification",),
 	"workforce": ("Employee",),
+	"training": ("Employee Training Record",),
 	"spray_records": ("Spray Log",),
 	"water": ("Field",),
 	"traceability": ("Bucket Log Entry",),
@@ -128,6 +129,24 @@ def generate_audit_packet(args: dict) -> ToolResult:
 			f"period_end {end} is before period_start {start}. Nothing was created."
 		)
 
+	regime = as_str(args, "regime")
+	if regime:
+		canonical = training.canon(regime)
+		if not canonical:
+			raise ToolError(
+				f"regime {regime!r} is not one this app knows. The eight are: "
+				f"{', '.join(training.REGIMES)}. It narrows the TRAINING section to one "
+				"scheme's records and changes nothing else in the packet. Nothing was created."
+			)
+		if "training" not in spec.sections:
+			raise ToolError(
+				f"the {spec.key} packet has no training section, so a regime filter would "
+				"change nothing about it. Drop `regime`, or choose an audit type that carries "
+				f"one: {', '.join(sorted(key for key, value in audit_packets.TYPES.items() if 'training' in value.sections))}. "
+				"Nothing was created."
+			)
+		regime = canonical
+
 	output_format = (as_str(args, "output_format") or "pdf").strip().lower()
 	if output_format not in ("pdf", "docx"):
 		raise ToolError(
@@ -138,7 +157,7 @@ def generate_audit_packet(args: dict) -> ToolResult:
 
 	overwrite = as_bool(args, "overwrite", False)
 	allow_open = as_bool(args, "allow_open_actions", False)
-	title = _archive_title(spec, company, start, end)
+	title = _archive_title(spec, company, start, end, regime)
 
 	existing = frappe.db.get_value(GOVERNANCE_DOCUMENT, {"title": title, "company": company}, "name")
 	if existing and not overwrite:
@@ -154,7 +173,14 @@ def generate_audit_packet(args: dict) -> ToolResult:
 	if not readiness["ready"] and not allow_open:
 		_refuse(spec, readiness, start, end)
 
-	packet = audit_packets.build(spec, company, start, end, allow_open_actions=allow_open and bool(readiness["blockers"]))
+	packet = audit_packets.build(
+		spec,
+		company,
+		start,
+		end,
+		allow_open_actions=allow_open and bool(readiness["blockers"]),
+		regime=regime,
+	)
 
 	if as_bool(args, "dry_run", False):
 		return ToolResult(
@@ -269,6 +295,7 @@ def _refuse(spec, readiness: dict, start: str, end: str) -> None:
 
 def _plan(packet: dict, spec, company: str, start: str, end: str, title: str, output_format: str) -> dict:
 	return {
+		"training_regime": packet.get("training_regime_override"),
 		"audit_type": spec.key,
 		"title": spec.title,
 		"regulator": spec.regulator,
@@ -283,14 +310,20 @@ def _plan(packet: dict, spec, company: str, start: str, end: str, title: str, ou
 	}
 
 
-def _archive_title(spec, company: str, start: str, end: str) -> str:
+def _archive_title(spec, company: str, start: str, end: str, regime: str = "") -> str:
 	"""The Governance Document title, which is also the idempotence key.
 
-	Deterministic in (audit_type, company, period) and nothing else. A title
-	carrying the generation date would make every run a different document and
-	the overwrite check would never fire.
+	Deterministic in (audit_type, company, period, regime) and nothing else. A
+	title carrying the generation date would make every run a different document
+	and the overwrite check would never fire.
+
+	THE REGIME IS PART OF THE KEY (v0.19.0) because a WPS-narrowed GAP packet and
+	a full GAP packet are different documents with different contents. Filing the
+	second over the first would silently replace a buyer's evidence bundle with a
+	narrower one, and the operator would find out when the buyer did.
 	"""
-	return f"{spec.key} Audit Packet — {company} — {start} to {end}"
+	scoped = f" [{regime} training]" if regime else ""
+	return f"{spec.key} Audit Packet{scoped} — {company} — {start} to {end}"
 
 
 def _archive_notes(packet: dict, readiness: dict) -> str:
@@ -340,6 +373,8 @@ def _category() -> str:
 def _render(packet: dict, spec, company: str, start: str, end: str, output_format: str):
 	sections = list(audit_packets.document_sections(packet))
 	stem = f"{spec.key}-audit-packet-{_slug(company)}-{start}-to-{end}"
+	if packet.get("training_regime_override"):
+		stem = f"{stem}-{_slug(packet['training_regime_override'])}-training"
 	if output_format == "docx":
 		return _render_docx(packet, sections), f"{stem}.docx"
 	return _render_pdf(packet, sections), f"{stem}.pdf"

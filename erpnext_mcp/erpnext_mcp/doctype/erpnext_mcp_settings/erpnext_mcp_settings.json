@@ -245,6 +245,12 @@
   "allow_snooze_alert",
   "allow_dismiss_alert",
   "allow_dismiss_alert_bulk",
+  "training_section",
+  "allow_list_trainings",
+  "allow_get_training",
+  "training_col",
+  "allow_record_training",
+  "allow_sign_training_supervisor_review",
   "audit_packet_section",
   "allow_generate_audit_packet",
   "allow_list_audit_packet_types",
@@ -1873,6 +1879,44 @@
    "fieldname": "allow_dismiss_alert_bulk",
    "fieldtype": "Check",
    "label": "Dismiss Alerts in Bulk"
+  },
+  {
+   "fieldname": "training_section",
+   "fieldtype": "Section Break",
+   "label": "Worker Training Register"
+  },
+  {
+   "default": "1",
+   "description": "READ. The training register: who was taught what, when, under which regimes, and what has lapsed. Filters by regime the way an audit packet is assembled — 'every NOP record for the last five years', 'every WPS record for 2026' — and reports the FSMA §112.161 elements each record is missing, including the §112.161(b) supervisor review that a GAP-only operation most often lacks.",
+   "fieldname": "allow_list_trainings",
+   "fieldtype": "Check",
+   "label": "List Trainings"
+  },
+  {
+   "default": "1",
+   "description": "READ. One training record in full, with that person's whole training history and the retention period the tags demand — five years where any tag is NOP (7 CFR 205.103(b)(4)), three for OR-OSHA, two for FSMA and WPS. The longest tag governs, with the citation beside the number.",
+   "fieldname": "allow_get_training",
+   "fieldtype": "Check",
+   "label": "Get Training"
+  },
+  {
+   "fieldname": "training_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Files one training event tagged with every audit it answers — one afternoon can satisfy WPS, Oregon's heat rule, FSMA Subpart C and USDA GAP at once, so the record carries a tag list and appears in every packet it earned. Requires the topics actually covered, because a regime tag without them is a claim an inspector will disallow. Writes the §112.161 fields at the time: trainee signature, farm name, and a date-and-time activity stamp.",
+   "fieldname": "allow_record_training",
+   "fieldtype": "Check",
+   "label": "Record Training"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Records the FSMA §112.161(b) supervisor review on a training record — reviewed, dated and signed by a supervisor within a reasonable time after the record was made. This is the requirement USDA GAP does not ask for and FDA cites even where the training itself was fine. A separate act from recording the training, which is why it is a separate switch. Refuses a self-review, a supervisor from another entity, and a review dated before the training.",
+   "fieldname": "allow_sign_training_supervisor_review",
+   "fieldtype": "Check",
+   "label": "Sign Training Supervisor Review"
   },
   {
    "fieldname": "audit_packet_section",
