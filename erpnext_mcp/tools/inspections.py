@@ -321,6 +321,47 @@ def _attach_evidence(doc, fieldname: str, rows) -> None:
 		doc.append(fieldname, dict(row))
 
 
+def _link_evidence_files_to_parent(parent_doc, rows) -> None:
+	"""Make the File records point at the compliance record they belong to.
+
+	Farm Ops uploads Files as private, owned by the mobile user who took the
+	photo. Left that way, only the uploader can read them — an auditor opening
+	a Housing Inspection sees the child rows but the Preview refuses with
+	"Insufficient Permission" because the File itself is not attached to any
+	document Frappe knows to cascade permissions from.
+
+	Setting `attached_to_doctype` / `attached_to_name` is the Frappe idiom for
+	"this file belongs to that record" — Frappe's own File.has_permission then
+	answers "yes" for anyone who can read the parent, which is the correct
+	audience for evidence. Called AFTER the parent is inserted so we have a
+	real name to point at.
+	"""
+	if not (getattr(parent_doc, "name", None) and getattr(parent_doc, "doctype", None)):
+		return
+	for row in rows or []:
+		file_name = str((row.get("file") if isinstance(row, dict) else "") or "").strip()
+		if not file_name:
+			continue
+		try:
+			if not frappe.db.exists("File", file_name):
+				continue
+			frappe.db.set_value(
+				"File",
+				file_name,
+				{
+					"attached_to_doctype": parent_doc.doctype,
+					"attached_to_name": parent_doc.name,
+					# Kept private — the parent's permission is now the gate.
+				},
+				update_modified=False,
+			)
+		except Exception:
+			# One file that could not be linked must not block the whole
+			# completion — the row in the child table is still there and the
+			# link can be rebuilt with a repair pass.
+			continue
+
+
 def _register_writes(doc) -> list:
 	"""What the controller's write-back did, for the tool to report.
 
@@ -543,6 +584,9 @@ def build_housing_inspection(payload: dict, evidence: list) -> object:
 	doc.keep_as_draft = 1 if payload.get("keep_as_draft") else 0
 	_attach_evidence(doc, "photos", evidence)
 	doc.insert(ignore_permissions=True)
+	# v0.18.4+: without this, uploader-owned private Files are unreadable
+	# by anyone else — including the operator opening the record in Desk.
+	_link_evidence_files_to_parent(doc, evidence)
 	return doc
 
 
@@ -572,6 +616,7 @@ def build_detector_test(payload: dict, evidence: list) -> object:
 	doc.keep_as_draft = 1 if payload.get("keep_as_draft") else 0
 	_attach_evidence(doc, "photos", evidence)
 	doc.insert(ignore_permissions=True)
+	_link_evidence_files_to_parent(doc, evidence)  # v0.18.4+
 
 	if doc.replacement_needed and doc.workflow_state != records.DRAFT:
 		task = raise_replacement_task(doc)
@@ -664,6 +709,7 @@ def build_water_test(payload: dict, evidence: list) -> object:
 	doc.keep_as_draft = 1 if payload.get("keep_as_draft") else 0
 	_attach_evidence(doc, "sample_photos", evidence)
 	doc.insert(ignore_permissions=True)
+	_link_evidence_files_to_parent(doc, evidence)  # v0.18.4+
 	return doc
 
 

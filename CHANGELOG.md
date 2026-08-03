@@ -5,21 +5,31 @@ All notable changes to this project are documented here. Versions follow
 
 ## 0.18.4 — 2026-08-02
 
-**Chunk size ceiling for iOS uploads.** v0.18.3 unblocked the *permission* on
-the upload path, but the phone was already failing on the *next* constraint:
-Farm Ops iOS sends 512 KB raw chunks (~700 KB base64), the server capped chunks
-at 200 KB base64, so every iPhone photo hit 400 and iOS's SyncEngine marked
-seven queued completions Failed. The 200 KB cap was chosen for MCP tool callers
-composing arguments in a model's context window — not relevant to iOS. Cap now
-800 KB, MCP callers keep self-limiting to their own context. Full notes:
-[`RELEASES/v0.18.4.md`](RELEASES/v0.18.4.md).
+**Chunk size ceiling + evidence file permission cascade.** Two bugs bundled
+— v0.18.3 unblocked the upload permission, then Tim's phone tripped on the
+NEXT constraint (server-capped chunk size), and after that was fixed the
+Housing Inspection record appeared but Tim's admin account couldn't read the
+attached photos (uploader-owned private Files with no link to the parent
+record). Full notes: [`RELEASES/v0.18.4.md`](RELEASES/v0.18.4.md).
 
 ### Fixed
 
-- **`tools/uploads.py:MAX_CHUNK_BASE64`** — `200 * 1024` → `800 * 1024`. Comment
-  rewritten to explain the ceiling now accommodates iOS's shipped chunk size
-  with a margin. Total-file cap moves from ~90 MB to ~360 MB (600 chunks × 800
-  KB base64) — well beyond the size of any inspection photo.
+- **`tools/uploads.py:MAX_CHUNK_BASE64`** — `200 * 1024` → `800 * 1024`. Old
+  cap was set for MCP tool callers composing arguments in a model's context
+  window, not relevant to iOS. Farm Ops iOS sends 512 KB raw chunks (~700 KB
+  base64); the old ceiling rejected every iPhone photo and iOS's SyncEngine
+  marked seven queued completions Failed. Total-file cap moves from ~90 MB to
+  ~360 MB (600 chunks × 800 KB), plenty for compliance photos.
+- **`tools/inspections.py:_link_evidence_files_to_parent`** — new helper.
+  After a Housing Inspection / Detector Test / Water Test is inserted, sets
+  `File.attached_to_doctype` and `File.attached_to_name` on every evidence
+  File. Without this, uploader-owned private Files stay unlinked to the
+  compliance record — an auditor opening the record sees the child rows but
+  cannot preview the photos. `File.has_permission` doesn't traverse child-
+  table references; setting `attached_to_*` is Frappe's own idiom for "this
+  file belongs to that record" and cascades the parent's permission. Uploader
+  still owns the File, still marked private, but the parent record's read
+  permission is now the gate.
 
 ## 0.18.3 — 2026-08-02
 
