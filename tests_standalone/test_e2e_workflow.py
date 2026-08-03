@@ -1,0 +1,629 @@
+# SPDX-License-Identifier: MIT
+"""The whole workflow, built from nothing and walked end to end.
+
+TIM'S ASK, IN ONE SENTENCE: "make sure we can build out a full workflow from end
+to end via MCP." This is that test. It stands up a company, a camp, a worker and
+a credential from an empty site, then walks a housing inspection from the pool
+to a filed compliance record using ONLY the endpoints a phone can reach, and
+asserts the things that were broken at an actual iPhone on the night of
+2026-08-02.
+
+WHAT MAKES THIS DIFFERENT FROM `test_api_mobile.TheWholeFlowWorks`. That test
+proves the calls SUCCEED — the record is written, the state moves, the evidence
+count is two. Every bug shipped that week passed it. They were not failures of
+the happy path; they were failures of the things nobody looked at afterwards:
+
+    v0.18.2   the claim RESPONSE had `name: null`. The claim itself worked.
+    v0.18.3   the evidence UPLOAD was refused by a permission check inside a
+              path the tool had never run as a non-Administrator.
+    v0.18.4   the File was created, attached and counted — and unreadable by
+              anybody except the worker who took it, because nothing had ever
+              opened the record as somebody else.
+
+So this file asserts THE STATE OF THE SITE AFTERWARDS, not the return values. It
+opens the record. It walks the child table. It reads the File row's own
+permission fields. It runs the compliance sweep again and checks the alert the
+work was supposed to answer has actually gone.
+
+THE FIXTURES ARE BUILT, NOT SEEDED, AND THAT IS DELIBERATE. Every other suite
+here starts from `SeededTestCase`, which writes rows into the store directly
+because it is testing something downstream. This one calls `create_company`,
+`create_parcel`, `create_housing_unit`, `create_employee` and
+`create_mobile_user` — the real tools, through the real registry, with the kill
+switches an operator actually has to tick. A seeded fixture cannot catch an
+onboarding path that has drifted, and onboarding a new entity is a thing this
+system is asked to do far more often than it is asked to inspect a cabin.
+
+WHAT IT STILL DOES NOT PROVE, stated plainly so nobody reads more into a green
+run than is there: this is the in-memory double from `harness.py`, not a bench.
+It proves the app's own logic, argument translation, permission decisions and
+record-writing are coherent end to end. It does not prove MariaDB accepts the
+insert or that Frappe's own `File.has_permission` reads `attached_to_doctype`
+the way v0.18.4 assumes it does — that assumption is stated in
+`inspections._link_evidence_files_to_parent` and confirmed on the site. The
+FrappeTestCase suite in `erpnext_mcp/tests/` is where framework contracts live.
+"""
+
+import base64
+import hashlib
+import json
+import zlib
+
+import frappe
+
+from erpnext_mcp import roles
+from erpnext_mcp.api import files as files_api
+from erpnext_mcp.api import guard
+from erpnext_mcp.api import mobile as mobile_api
+
+from .fixtures import V12TestCase
+from .harness import ROLES, STORE
+
+COMPANY = "Test Farm LLC"
+ABBR = "TFL"
+PARCEL = "E2E Home Ranch"
+UNIT = "TEST-CABIN-01"
+WORKER = "e2e-worker@test.local"
+WORKER_NAME = "E2E Worker"
+EMPLOYEE = "EMP-E2E"
+
+#: Every switch this walk needs, on. An operator ticks each of these by hand;
+#: listing them here is also the shortest honest statement of what onboarding an
+#: entity and dispatching one inspection actually requires.
+SWITCHES = {
+	f"allow_{name}": 1
+	for name in (
+		"create_company",
+		"create_parcel",
+		"create_housing_unit",
+		"create_employee",
+		"create_mobile_user",
+		"revoke_mobile_user",
+		"generate_mobile_login_qr",
+		"create_farm_task",
+		"assign_farm_task",
+		"claim_farm_task",
+		"complete_farm_task",
+		"refresh_compliance_alerts",
+		"get_compliance_calendar",
+		"get_current_user_context",
+		"stage_file_chunk",
+		"commit_staged_file",
+		"list_housing_units",
+		"get_housing_unit",
+	)
+}
+
+#: The smallest real PNG: 1×1, opaque. Written out rather than pasted as a
+#: base64 blob so that what it IS can be read — an evidence path tested with
+#: `b"photo-bytes"` is a path that has never seen a file with a header.
+def one_pixel_png() -> bytes:
+	def chunk(kind: bytes, body: bytes) -> bytes:
+		return (
+			len(body).to_bytes(4, "big")
+			+ kind
+			+ body
+			+ zlib.crc32(kind + body).to_bytes(4, "big")
+		)
+
+	header = chunk(b"IHDR", (1).to_bytes(4, "big") + (1).to_bytes(4, "big") + bytes([8, 2, 0, 0, 0]))
+	pixels = chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff"))
+	return b"\x89PNG\r\n\x1a\n" + header + pixels + chunk(b"IEND", b"")
+
+
+def is_true(value) -> bool:
+	"""A Frappe Check, read the way Frappe means it.
+
+	`0`, `"0"`, `""`, `None` and `False` are all "no" on the wire, and only one
+	of them is falsy in Python. Getting this wrong reads every dismissed alert
+	as live, which is the failure mode that would make this whole file green
+	while asserting nothing.
+	"""
+	return str(value or "0").strip().lower() not in ("0", "", "false", "no", "none")
+
+
+class EndToEndWorkflow(V12TestCase):
+	"""One company, one cabin, one worker, one inspection — from an empty site."""
+
+	# ── setup: the whole fixture, through the real tools ────────────────────
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, public_url="https://umbrel.tail4a2b.ts.net", **SWITCHES)
+		self._roles_before = {user: list(held) for user, held in ROLES.items()}
+		self.addCleanup(self._restore_roles)
+		self.addCleanup(guard._BUCKETS.clear)
+		guard._BUCKETS.clear()
+		roles.install_roles()
+
+		self.company = self.a_company()
+		self.unit = self.a_cabin()
+		self.employee = an_employee_row()
+		self.enrol()
+
+	def _restore_roles(self):
+		ROLES.clear()
+		ROLES.update(self._roles_before)
+
+	# ── step 1: onboarding, through the tools an operator uses ──────────────
+	def a_company(self) -> str:
+		if frappe.db.exists("Company", COMPANY):
+			return COMPANY
+		return self.tool_data("create_company", {"company_name": COMPANY, "abbr": ABBR})["company"]
+
+	def a_cabin(self) -> str:
+		self.tool_data(
+			"create_parcel", {"owning_entity": COMPANY, "parcel_name": PARCEL, "acreage": 40.0}
+		)
+		return self.tool_data(
+			"create_housing_unit",
+			{
+				"parcel": PARCEL,
+				"unit_name": UNIT,
+				"unit_type": "Cabin",
+				"capacity": 4,
+				"fsma_worker_facility": True,
+			},
+		)["name"]
+
+	def enrol(self) -> None:
+		self.tool_data(
+			"create_mobile_user",
+			{
+				"email": WORKER,
+				"full_name": WORKER_NAME,
+				"role": "Farm Manager",
+				"entity_access": [COMPANY],
+			},
+		)
+
+	def be_the_worker(self):
+		"""Become the phone: the worker's session, on a request that looks like one."""
+		self.request({}, headers={}, remote_addr="100.64.0.11")
+		frappe.local.session.user = WORKER
+		return WORKER
+
+	def be_the_operator(self):
+		"""Back to Administrator, for the calls a phone is not allowed to make."""
+		frappe.local.session.user = "Administrator"
+		return "Administrator"
+
+	# ── the compliance rule that raises the work ────────────────────────────
+	def sweep(self, alert_type="housing_inspection_overdue") -> list:
+		"""Run the nightly compliance sweep and return this cabin's live alerts.
+
+		FILTERED BY RULE, because this cabin raises more than one. A brand-new
+		Housing Unit is both un-inspected and un-detector-tested, and a housing
+		inspection answers exactly one of those — taking `[0]` off an unfiltered
+		list would assert that recording an inspection cleared the DETECTOR
+		alert, which it must not.
+
+		`dismissed` is read through `is_true` rather than for truthiness: this
+		double stores a Check as the string `"0"`, which is a perfectly truthy
+		Python object and would report every dismissed alert as live.
+		"""
+		self.be_the_operator()
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		return [
+			row
+			for row in STORE.rows("Compliance Alert")
+			if row.get("source_doctype") == "Housing Unit"
+			and row.get("source_docname") == self.unit
+			and (alert_type is None or row.get("alert_type") == alert_type)
+			and not is_true(row.get("dismissed"))
+		]
+
+	def a_task_for_the_cabin(self, source_alert=None) -> str:
+		self.be_the_operator()
+		payload = {
+			"task_name": f"Habitability walk — {UNIT}",
+			"task_type": "Inspection",
+			"evidence_required": {"photos": True, "signature": True, "findings_text": True},
+			"company": COMPANY,
+			"creates_record": "Housing Inspection",
+			"location_doctype": "Housing Unit",
+			"location": self.unit,
+		}
+		if source_alert:
+			payload["source_alert"] = source_alert
+		return self.tool_data("create_farm_task", payload)["name"]
+
+	# ── step 2: the upload, in chunks, exactly as the phone sends it ────────
+	def upload(self, body: bytes, file_name: str, upload_id: str, chunk_size=None) -> dict:
+		"""Stage `body` in slices and finalise it. Returns the finalize response."""
+		chunk_size = chunk_size or max(1, len(body))
+		slices = [body[at : at + chunk_size] for at in range(0, len(body), chunk_size)] or [b""]
+		for index, piece in enumerate(slices):
+			staged = files_api.stage_file_chunk(
+				upload_id=upload_id,
+				file_name=file_name,
+				chunk_index=index,
+				chunk_count=len(slices),
+				total_bytes=len(body),
+				data=base64.b64encode(piece).decode("ascii"),
+			)
+			self.assertEqual(staged["chunk_index"], index)
+			self.assertEqual(staged["chunk_count"], len(slices))
+		self.assertTrue(staged["complete"], "the last chunk did not complete the upload")
+		return files_api.finalize_staged_file(
+			upload_id=upload_id,
+			file_name=file_name,
+			sha256=hashlib.sha256(body).hexdigest(),
+			total_bytes=len(body),
+		)
+
+	# ── readers for the assertions ──────────────────────────────────────────
+	def inspection(self, name: str) -> dict:
+		return dict(STORE.get_raw("Housing Inspection", name) or {})
+
+	def photo_rows(self, name: str) -> list:
+		return list(self.inspection(name).get("photos") or [])
+
+	def file_row(self, token: str) -> dict:
+		return dict(STORE.get_raw("File", token) or {})
+
+
+# ── 1. the walk ─────────────────────────────────────────────────────────────
+class TheWorkflowWalksEndToEnd(EndToEndWorkflow):
+	"""Pool → claim → start → upload → complete → Housing Inspection → alert clear.
+
+	One test, on purpose. Splitting it would either re-walk the whole flow per
+	assertion (slow, and every failure looks like six) or share state between
+	tests through the class (which unittest does not order or isolate). The
+	assertions carry their own messages so a failure names its own step.
+	"""
+
+	def test_the_whole_pipeline(self):
+		# ── the rule raises the work ────────────────────────────────────────
+		raised = self.sweep()
+		self.assertTrue(
+			raised,
+			f"{UNIT} has never been inspected and `housing_inspection_overdue` did not raise. "
+			"Nothing downstream in this test has anything to answer.",
+		)
+		alert = raised[0]["name"]
+
+		task = self.a_task_for_the_cabin(source_alert=alert)
+
+		# ── the pool ────────────────────────────────────────────────────────
+		self.be_the_worker()
+		context = mobile_api.get_current_user_context()
+		self.assertEqual(context["user"], WORKER)
+		self.assertEqual(context["default_company"], COMPANY)
+
+		pool = mobile_api.list_available_tasks()
+		self.assertIn(
+			task,
+			{row["name"] for row in pool["tasks"]},
+			"the inspection is Available and scoped to this worker's only entity, and it is not "
+			"in the pool the phone was shown",
+		)
+
+		# ── claim: the v0.18.2 regression check ─────────────────────────────
+		claimed = mobile_api.claim_task(task=task)
+		self.assertEqual(
+			claimed["name"],
+			task,
+			"claim_task answered with no `name`. iOS decodes it with `try c.decode(String.self)` "
+			"(FarmTask.swift:105) and throws — this is v0.18.2, which shipped.",
+		)
+		self.assertIsInstance(claimed["name"], str)
+		self.assertTrue(claimed["assignment"], "a claim with no assignment docname is not a claim")
+		self.assertTrue(claimed["claimed_at"])
+		assignment = claimed["assignment"]
+
+		# ── start ───────────────────────────────────────────────────────────
+		started = mobile_api.start_task(task=task, task_assignment=assignment)
+		self.assertEqual(started["state"], "In-Progress")
+		self.assertTrue(started["started_at"], "duration is counted from started_at and it is unset")
+		self.assertEqual(frappe.db.get_value("Farm Task", task, "state"), "In-Progress")
+
+		mine = mobile_api.list_my_tasks()
+		self.assertEqual({row["name"] for row in mine["tasks"]}, {task})
+
+		# ── the evidence, in more than one chunk ────────────────────────────
+		png = one_pixel_png()
+		photo = self.upload(png, "TEST-CABIN-01.png", "e2e-photo", chunk_size=16)
+		signature = self.upload(png, "TEST-CABIN-01-sig.png", "e2e-signature")
+
+		self.assertTrue(photo["file_token"], "finalize produced no File handle")
+		self.assertTrue(photo["sha256_verified"], "the hash the phone sent was not checked")
+		self.assertTrue(photo["is_private"], "evidence must never be committed public")
+		self.assertEqual(photo["total_bytes"], len(png))
+
+		# ── complete ────────────────────────────────────────────────────────
+		done = mobile_api.complete_task_via_mobile(
+			task=task,
+			task_assignment=assignment,
+			findings_text="Test finding",
+			completion_narrative="Walked the cabin end to end.",
+			actual_duration_minutes=18,
+			witness="Foreman",
+			latitude=45.6721,
+			longitude=-121.1787,
+			evidence_files=[
+				{
+					"file_token": photo["file_token"],
+					"file_name": "TEST-CABIN-01.png",
+					"sha256": hashlib.sha256(png).hexdigest(),
+					"kind": "photo",
+				},
+				{
+					"file_token": signature["file_token"],
+					"file_name": "TEST-CABIN-01-sig.png",
+					"sha256": hashlib.sha256(png).hexdigest(),
+					"kind": "signature",
+				},
+			],
+		)
+
+		produced = done["created_record_name"]
+		self.assertEqual(done["created_record_doctype"], "Housing Inspection")
+		self.assertTrue(produced, "the completion produced no compliance record")
+		self.assertEqual(done["evidence_filed"], 2)
+
+		# Findings were written, so the record branches to Corrective Action
+		# Required and the task waits for a person. That is the designed
+		# behaviour, not an incidental one — assert it rather than avoiding it
+		# by filing a clean pass.
+		self.assertTrue(done["corrective_action_opened"])
+		self.assertEqual(frappe.db.get_value("Farm Task", task, "state"), "Awaiting-Review")
+
+		# ── the assertions that are the whole point ─────────────────────────
+		record = self.inspection(produced)
+		self.assertTrue(record, f"{produced} was reported created and is not on the site")
+		self.assertEqual(record["unit"], self.unit)
+		self.assertEqual(record["source_task"], task)
+		self.assertEqual(record["findings"], "Test finding")
+
+		rows = self.photo_rows(produced)
+		self.assertEqual(
+			len(rows), 2, f"the inspection's `photos` child table holds {len(rows)} rows, not 2"
+		)
+		filed = {row.get("file") for row in rows}
+		self.assertIn(photo["file_token"], filed, "the photograph is not on the record it evidences")
+		self.assertIn(signature["file_token"], filed, "the signature is not on the record it attests")
+
+		# v0.18.4: the File must cascade its read permission off the parent, or
+		# only the worker who took it can ever open it.
+		for token in (photo["file_token"], signature["file_token"]):
+			row = self.file_row(token)
+			with self.subTest(file=token):
+				self.assertEqual(
+					row.get("attached_to_doctype"),
+					"Housing Inspection",
+					"the File is not attached to the record, so Frappe has nothing to cascade "
+					"read permission from and an auditor opening the inspection is refused — "
+					"this is v0.18.4, which shipped",
+				)
+				self.assertEqual(row.get("attached_to_name"), produced)
+				self.assertTrue(row.get("is_private"), "evidence went public")
+
+		# ── the alert the work answered clears itself ───────────────────────
+		still_open = {row["name"] for row in self.sweep()}
+		self.assertNotIn(
+			alert,
+			still_open,
+			"the inspection was recorded and `housing_inspection_overdue` still fires. An alert "
+			"only ever goes away because the condition stopped being true — if it is still true "
+			"the record did not move the register, which means the loop is open.",
+		)
+		self.assertTrue(
+			is_true(frappe.db.get_value("Compliance Alert", alert, "dismissed")),
+			"the alert was neither answered nor dismissed",
+		)
+		self.assertTrue(
+			is_true(frappe.db.get_value("Compliance Alert", alert, "auto_dismissed")),
+			"the alert was dismissed by hand rather than by the condition ceasing to be true. "
+			"That distinction is the entire architecture — see inspections.py's docstring.",
+		)
+
+
+# ── 2. the pieces the walk depends on, asserted where they can be isolated ──
+class ThePipelineRefusesWhatItShould(EndToEndWorkflow):
+	"""The walk proves the path works. These prove it is not just permissive."""
+
+	def setUp(self):
+		super().setUp()
+		self.task = self.a_task_for_the_cabin()
+
+	def test_a_completion_without_the_signature_the_contract_demands_is_refused(self):
+		"""The refusal the whole evidence contract exists for, on the real path."""
+		self.be_the_worker()
+		claimed = mobile_api.claim_task(task=self.task)
+		mobile_api.start_task(task=self.task, task_assignment=claimed["assignment"])
+		photo = self.upload(one_pixel_png(), "only-photo.png", "e2e-only-photo")
+
+		with self.assertRaises(frappe.ValidationError) as caught:
+			mobile_api.complete_task_via_mobile(
+				task=self.task,
+				task_assignment=claimed["assignment"],
+				findings_text="Test finding",
+				evidence_files=[{"file_token": photo["file_token"], "kind": "photo"}],
+			)
+		self.assertIn("signature", str(caught.exception))
+		self.assertEqual(
+			STORE.rows("Housing Inspection"),
+			[],
+			"a refused completion wrote a compliance record anyway",
+		)
+
+	def test_the_evidence_upload_runs_as_the_worker_and_not_as_an_operator(self):
+		"""v0.18.3. The staging path was written for the MCP System User and had
+		never been run by a field account, which is the only account that uses
+		it. `_assert_owner` binds the session to the upload — that only means
+		anything if the session IS the worker."""
+		self.be_the_worker()
+		finalized = self.upload(one_pixel_png(), "owned.png", "e2e-owned")
+		self.assertEqual(
+			STORE.get_raw("File", finalized["file_token"]).get("owner"),
+			WORKER,
+			"the evidence File is not owned by the worker who uploaded it",
+		)
+
+	def test_one_workers_staging_session_cannot_be_finalised_by_another(self):
+		"""Ownership is the separation between two phones, and it is free only
+		while the call actually runs as the caller."""
+		self.be_the_worker()
+		files_api.stage_file_chunk(
+			upload_id="e2e-theirs",
+			file_name="theirs.png",
+			chunk_index=0,
+			chunk_count=1,
+			total_bytes=4,
+			data=base64.b64encode(b"abcd").decode("ascii"),
+		)
+
+		self.tool_data(
+			"create_mobile_user",
+			{
+				"email": "e2e-other@test.local",
+				"full_name": "Somebody Else",
+				"role": "Field Worker",
+				"entity_access": [COMPANY],
+			},
+		)
+		self.request({}, headers={}, remote_addr="100.64.0.12")
+		frappe.local.session.user = "e2e-other@test.local"
+		with self.assertRaises(Exception):
+			files_api.finalize_staged_file(
+				upload_id="e2e-theirs",
+				file_name="theirs.png",
+				sha256=hashlib.sha256(b"abcd").hexdigest(),
+				total_bytes=4,
+			)
+
+	def test_a_worker_cannot_reach_another_entitys_cabin_through_any_of_this(self):
+		"""The scoping the whole mobile surface rests on, checked on the built
+		fixture rather than the seeded one."""
+		self.tool_data(
+			"create_company", {"company_name": "Other E2E LLC", "abbr": "OEL"}
+		)
+		outsider_task = self.tool_data(
+			"create_farm_task",
+			{
+				"task_name": "Not this worker's",
+				"task_type": "Inspection",
+				"evidence_required": {"photos": True},
+				"company": "Other E2E LLC",
+			},
+		)["name"]
+
+		self.be_the_worker()
+		pool = {row["name"] for row in mobile_api.list_available_tasks()["tasks"]}
+		self.assertNotIn(outsider_task, pool)
+		with self.assertRaises(frappe.ValidationError):
+			mobile_api.get_task(task=outsider_task)
+		with self.assertRaises(frappe.ValidationError):
+			mobile_api.claim_task(task=outsider_task)
+
+
+# ── 3. the same walk, filed as a clean pass ─────────────────────────────────
+class ACleanPassClosesTheLoopToo(EndToEndWorkflow):
+	"""The other half of the branch. A cabin that is FINE has to be recordable,
+	and `clean_pass` is the flag that makes an empty findings field an answer
+	rather than an omission — see `CompletionSubmission.swift:36-45`."""
+
+	def test_a_clean_walk_records_and_completes_rather_than_opening_an_action(self):
+		alert = self.sweep()[0]["name"]
+		task = self.a_task_for_the_cabin(source_alert=alert)
+
+		self.be_the_worker()
+		claimed = mobile_api.claim_task(task=task)
+		mobile_api.start_task(task=task, task_assignment=claimed["assignment"])
+		png = one_pixel_png()
+		photo = self.upload(png, "clean.png", "e2e-clean-photo")
+		signature = self.upload(png, "clean-sig.png", "e2e-clean-sig")
+
+		done = mobile_api.complete_task_via_mobile(
+			task=task,
+			task_assignment=claimed["assignment"],
+			findings_text="",
+			clean_pass=True,
+			completion_narrative="Nothing wrong.",
+			evidence_files=[
+				{"file_token": photo["file_token"], "kind": "photo"},
+				{"file_token": signature["file_token"], "kind": "signature"},
+			],
+		)
+		produced = done["created_record_name"]
+		self.assertTrue(produced)
+		self.assertFalse(
+			done["corrective_action_opened"],
+			"a clean pass opened a corrective action against a cabin that is fine",
+		)
+		self.assertEqual(frappe.db.get_value("Farm Task", task, "state"), "Completed")
+		self.assertEqual(self.inspection(produced)["workflow_state"], "Recorded")
+		self.assertNotIn(alert, {row["name"] for row in self.sweep()})
+
+		# The evidence still cascades — a clean pass is not a lesser record.
+		for token in (photo["file_token"], signature["file_token"]):
+			with self.subTest(file=token):
+				self.assertEqual(self.file_row(token).get("attached_to_name"), produced)
+
+
+# ── helpers ─────────────────────────────────────────────────────────────────
+def an_employee_row() -> str:
+	"""The worker's Employee record.
+
+	Seeded rather than built through `create_employee`: the HR tool requires a
+	date of joining, a company default holiday list and a naming series this
+	double does not carry, and an Employee is not what this file is testing.
+	What it IS testing needs the record to exist and to name `user_id`, because
+	`api/mobile._employee` refuses every call without it — which is itself a
+	failure mode worth stating, so the refusal has its own test below.
+	"""
+	STORE.seed(
+		"Employee",
+		[
+			{
+				"name": EMPLOYEE,
+				"employee_name": WORKER_NAME,
+				"user_id": WORKER,
+				"company": COMPANY,
+				"status": "Active",
+			}
+		],
+	)
+	return EMPLOYEE
+
+
+class TheOnboardingGapsSayWhatToDo(EndToEndWorkflow):
+	"""Every refusal on the way in has to name its own fix, because the person
+	reading it is an operator standing next to a worker holding a phone."""
+
+	def test_a_worker_with_no_employee_record_is_told_exactly_what_to_set(self):
+		STORE.tables["Employee"].pop(EMPLOYEE, None)
+		self.be_the_worker()
+		task = None
+		try:
+			task = self.a_task_for_the_cabin()
+		finally:
+			self.be_the_worker()
+		with self.assertRaises(frappe.ValidationError) as caught:
+			mobile_api.reject_task(task=task, reason="cannot reach it")
+		message = str(caught.exception)
+		self.assertIn("user_id", message)
+		self.assertIn("Employee", message)
+
+	def test_the_grant_is_what_opens_the_door_and_revoking_it_shuts_it(self):
+		self.be_the_worker()
+		self.assertEqual(mobile_api.get_current_user_context()["user"], WORKER)
+
+		self.be_the_operator()
+		self.tool_data("revoke_mobile_user", {"email": WORKER, "reason": "end of season"})
+
+		self.be_the_worker()
+		with self.assertRaises(frappe.PermissionError):
+			mobile_api.get_current_user_context()
+
+	def test_the_login_qr_the_worker_scans_carries_this_entity_and_no_secret_twice(self):
+		self.be_the_operator()
+		payload = self.tool_data("generate_mobile_login_qr", {"user": WORKER})["payload"]
+		self.assertEqual(payload["type"], "farm_ops_login")
+		self.assertTrue(payload["url"].startswith("https://"))
+		# The credential is in the QR by design; what must not happen is it also
+		# landing in the audit row that records the QR being made.
+		rows = [row for row in STORE.rows("MCP Action Log") if row.get("tool_name") == "generate_mobile_login_qr"]
+		self.assertTrue(rows)
+		blob = json.dumps(rows[-1], default=str)
+		self.assertNotIn(payload["api_secret"], blob)

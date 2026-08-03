@@ -160,6 +160,16 @@ def _report_failures(what: str, builder) -> None:
 		return
 	for failure in (report or {}).get("failed") or ():
 		print(f"erpnext_mcp: could not build {failure.get('name')} — {failure.get('reason')}")
+	# v0.18.5. A repair is the one thing this installer does to a document somebody
+	# else may have edited, so it says so by name. Reading "repaired the filters on
+	# Tasks in the Pool" in a migrate log is how an operator who had customised that
+	# card finds out, rather than wondering later why it counts what it counts.
+	repaired = (report or {}).get("repaired_filters") or ()
+	if repaired:
+		print(
+			f"erpnext_mcp: rewrote dict-shaped filters into list form on {len(repaired)} card(s)/"
+			f"chart(s) of {what}, which could not be counted otherwise: {', '.join(repaired)}"
+		)
 
 
 #: Doctypes whose contents are records an operator would want back, and what

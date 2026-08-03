@@ -107,6 +107,39 @@ DASHBOARD_NAME = "Compliance Command Center"
 MODULE = "ERPNext MCP"
 
 
+def card_filters(doctype: str, clauses: dict) -> str:
+	"""`filters_json` in the LIST format a Number Card can actually run.
+
+	v0.18.5. Frappe accepts either shape at `frappe.db.get_list` — `{"state":
+	"Available"}` and `[["Farm Task", "state", "=", "Available"]]` mean the same
+	thing there — so every card on this dashboard was written in the dict shape,
+	which is shorter and reads better, and every card RENDERED. What none of them
+	survived was the comparison arrow: `number_card.get_result` computes the
+	period-over-period difference by appending a date clause to the caller's own
+	filters —
+
+	    filters = frappe.parse_json(doc.filters_json)
+	    filters.append([doc.document_type, "creation", "<", to_date])
+
+	— and `dict` has no `.append`. Python resolves `{}.append` to nothing and
+	Frappe's own `__getattr__` shim turns that into `'NoneType' object is not
+	callable`, so the Farm Task Dispatch workspace answered Internal Server Error
+	on load rather than naming the card that could not be counted. A dict is a
+	valid filter to query WITH and an invalid filter to build ON, and only the
+	list shape is both.
+
+	Values follow Frappe's own dict convention: a bare value means `=`, and a
+	two-element `[operator, operand]` carries its own operator through.
+	"""
+	out = []
+	for field, value in clauses.items():
+		if isinstance(value, (list, tuple)) and len(value) == 2 and isinstance(value[0], str):
+			out.append([doctype, field, value[0], value[1]])
+		else:
+			out.append([doctype, field, "=", value])
+	return json.dumps(out)
+
+
 def _live_alert_filters(extra: dict | None = None) -> str:
 	"""JSON filters selecting alerts that are actually on the calendar.
 
@@ -118,7 +151,7 @@ def _live_alert_filters(extra: dict | None = None) -> str:
 	"""
 	filters = {"dismissed": 0}
 	filters.update(extra or {})
-	return json.dumps(filters)
+	return card_filters(ALERT_DOCTYPE, filters)
 
 
 #: The Number Cards, in the order they read across the top.
@@ -174,7 +207,7 @@ CARDS = (
 		"label": "Open Audit Events",
 		"document_type": "Audit Event",
 		"function": "Count",
-		"filters_json": json.dumps({"corrective_actions_closed": ["is", "not set"]}),
+		"filters_json": card_filters("Audit Event", {"corrective_actions_closed": ["is", "not set"]}),
 		"color": "#7575ff",
 		"why": "Audits whose findings have not all been closed. Not the same as audits that failed.",
 	},
@@ -210,9 +243,15 @@ CHARTS = (
 		"type": "Line",
 		# v0.18.3: Dashboard Chart's `filters_json` is mandatory even for a chart with
 		# no filters, and Frappe refuses to insert one where it is None. The three
-		# charts below were the ones after_migrate warned about every deploy —
-		# `"{}"` is the JSON-encoded empty dict Frappe accepts as "no filters".
-		"filters_json": "{}",
+		# charts below were the ones after_migrate warned about every deploy.
+		#
+		# v0.18.5 makes the empty value `"[]"` rather than v0.18.3's `"{}"`. Both
+		# parse to something falsy and both render today, but a TIMESERIES chart —
+		# which these two are — has its date range appended to the caller's own
+		# filters, and only one of the two shapes can be appended to. See
+		# `card_filters` for the Number Card version of the same crash, which is
+		# not latent and took the dispatch workspace down.
+		"filters_json": "[]",
 		"why": (
 			"Raised, not open — `first_seen` is never moved forward, so this is the shape of "
 			"how often the operation drifts out of compliance rather than of how fast it "
@@ -228,7 +267,7 @@ CHARTS = (
 		"timespan": "Last Year",
 		"timeseries": 1,
 		"type": "Bar",
-		"filters_json": "{}",
+		"filters_json": "[]",
 		"why": (
 			"The renewal calendar as a shape. Three certificates expiring in one month is a "
 			"week of somebody's life, and it is visible a year out."
@@ -242,7 +281,7 @@ CHARTS = (
 		"group_by_based_on": "agency",
 		"type": "Bar",
 		"number_of_groups": 11,
-		"filters_json": "{}",
+		"filters_json": "[]",
 		"why": "Which agencies this operation actually deals with, which is rarely the list anybody expects.",
 	},
 )
@@ -314,7 +353,7 @@ DISPATCH_NUMBER_CARDS = (
 		"label": "Tasks in the Pool",
 		"document_type": DISPATCH_DOCTYPE,
 		"function": "Count",
-		"filters_json": json.dumps({"state": "Available"}),
+		"filters_json": card_filters(DISPATCH_DOCTYPE, {"state": "Available"}),
 		"color": "#449cf0",
 		"why": "Work nobody has taken yet. The number a foreman is trying to get to zero.",
 	},
@@ -322,8 +361,9 @@ DISPATCH_NUMBER_CARDS = (
 		"label": "Open Critical Tasks",
 		"document_type": DISPATCH_DOCTYPE,
 		"function": "Count",
-		"filters_json": json.dumps(
-			{"urgency": "Critical", "state": ["not in", ["Completed", "Rejected", "Cancelled"]]}
+		"filters_json": card_filters(
+			DISPATCH_DOCTYPE,
+			{"urgency": "Critical", "state": ["not in", ["Completed", "Rejected", "Cancelled"]]},
 		),
 		"color": "#e24c4c",
 		"why": "Something has already stopped being lawful and nobody has finished dealing with it.",
@@ -332,7 +372,7 @@ DISPATCH_NUMBER_CARDS = (
 		"label": "Tasks Awaiting Review",
 		"document_type": DISPATCH_DOCTYPE,
 		"function": "Count",
-		"filters_json": json.dumps({"state": "Awaiting-Review"}),
+		"filters_json": card_filters(DISPATCH_DOCTYPE, {"state": "Awaiting-Review"}),
 		"color": "#f5a623",
 		"why": (
 			"Work that was DONE and found something. The register moved; what needs a person is "
@@ -343,7 +383,7 @@ DISPATCH_NUMBER_CARDS = (
 		"label": "Tasks Raised From Alerts",
 		"document_type": DISPATCH_DOCTYPE,
 		"function": "Count",
-		"filters_json": json.dumps({"source_alert": ["is", "set"]}),
+		"filters_json": card_filters(DISPATCH_DOCTYPE, {"source_alert": ["is", "set"]}),
 		"color": "#7575ff",
 		"why": "The compliance calendar turned into work somebody was actually sent to do.",
 	},
@@ -351,7 +391,7 @@ DISPATCH_NUMBER_CARDS = (
 		"label": "Tasks Raised By Hand",
 		"document_type": DISPATCH_DOCTYPE,
 		"function": "Count",
-		"filters_json": json.dumps({"source_alert": ["is", "not set"]}),
+		"filters_json": card_filters(DISPATCH_DOCTYPE, {"source_alert": ["is", "not set"]}),
 		"color": "#98d85b",
 		"why": "The operation's own work. Read against the card beside it, not on its own.",
 	},
@@ -366,7 +406,7 @@ DISPATCH_CHARTS = (
 		"group_by_type": "Count",
 		"group_by_based_on": "task_type",
 		"type": "Donut",
-		"filters_json": json.dumps({"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}),
+		"filters_json": card_filters(DISPATCH_DOCTYPE, {"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}),
 		"number_of_groups": 10,
 		"why": (
 			"What kind of work is outstanding. A board that is nine-tenths inspections is a "
@@ -380,7 +420,7 @@ DISPATCH_CHARTS = (
 		"group_by_type": "Count",
 		"group_by_based_on": "urgency",
 		"type": "Bar",
-		"filters_json": json.dumps({"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}),
+		"filters_json": card_filters(DISPATCH_DOCTYPE, {"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}),
 		"number_of_groups": 4,
 		"why": (
 			"The shape of the queue. If this is flat at Critical, the urgency scale has stopped "
@@ -412,12 +452,18 @@ def install_dispatch_board() -> dict:
 	left exactly as it is, including every column an operator has since
 	reordered, renamed or deleted. Re-running is a no-op.
 
-	WITH ONE REPAIR CLAUSE, ADDED IN v0.16.1. A Workspace that exists but is
-	EMPTY is filled in. v0.16.0 created the workspace with `content: "[]"`, which
-	renders a page with nothing on it — and the plain existence check would have
-	skipped that page forever on every site that took the bad release. An empty
-	page is not an arrangement somebody chose; a page with anything on it is, and
-	that one is still left alone.
+	WITH TWO REPAIR CLAUSES. The first, added in v0.16.1: a Workspace that exists
+	but is EMPTY is filled in. v0.16.0 created the workspace with `content: "[]"`,
+	which renders a page with nothing on it — and the plain existence check would
+	have skipped that page forever on every site that took the bad release. An
+	empty page is not an arrangement somebody chose; a page with anything on it
+	is, and that one is still left alone.
+
+	The second, added in v0.18.5: a card whose `filters_json` is DICT-SHAPED is
+	rewritten into the list shape. See `_repair_filters`. It is the same argument
+	as the first — every site that took v0.16.0 through v0.18.4 has five cards
+	that cannot be counted, and leaving them alone out of politeness leaves the
+	workspace answering Internal Server Error forever.
 	"""
 	report = {
 		"board": DISPATCH_BOARD_NAME,
@@ -433,6 +479,7 @@ def install_dispatch_board() -> dict:
 		"created_charts": [],
 		"existing_cards": [],
 		"existing_charts": [],
+		"repaired_filters": [],
 		"failed": [],
 		"available": dispatch_board_available(),
 	}
@@ -449,6 +496,8 @@ def install_dispatch_board() -> dict:
 		_build(CARD, "label", spec, report, "cards")
 	for spec in DISPATCH_CHARTS:
 		_build(CHART, "chart_name", spec, report, "charts")
+	_repair_filters(CARD, "label", DISPATCH_NUMBER_CARDS, report)
+	_repair_filters(CHART, "chart_name", DISPATCH_CHARTS, report)
 	_build_dispatch_workspace(report)
 	return report
 
@@ -753,8 +802,10 @@ def install_command_center() -> dict:
 	"""Build or repair the dashboard. Idempotent, and NEVER raises.
 
 	Anything that already exists is left exactly as it is, including every way an
-	operator has since edited it. Only genuinely missing pieces are created. See
-	the module docstring on why this is an installer rather than a fixture.
+	operator has since edited it — with the one exception `_repair_filters`
+	documents, which is a card that cannot be counted at all. Only genuinely
+	missing pieces are created. See the module docstring on why this is an
+	installer rather than a fixture.
 	"""
 	report = {
 		"dashboard": DASHBOARD_NAME,
@@ -763,6 +814,7 @@ def install_command_center() -> dict:
 		"created_charts": [],
 		"existing_cards": [],
 		"existing_charts": [],
+		"repaired_filters": [],
 		"failed": [],
 		"available": available(),
 	}
@@ -785,6 +837,8 @@ def install_command_center() -> dict:
 		_build(CARD, "label", spec, report, "cards")
 	for spec in CHARTS:
 		_build(CHART, "chart_name", spec, report, "charts")
+	_repair_filters(CARD, "label", CARDS, report)
+	_repair_filters(CHART, "chart_name", CHARTS, report)
 
 	_build_dashboard(report)
 	return report
@@ -828,6 +882,65 @@ def _build(doctype: str, key_field: str, spec: dict, report: dict, bucket: str) 
 		report[f"created_{kind}"].append(name)
 	except Exception as exc:
 		report["failed"].append({"name": name, "reason": f"{type(exc).__name__}: {exc}"})
+
+
+def _repair_filters(doctype: str, key_field: str, specs, report: dict) -> None:
+	"""Rewrite dict-shaped `filters_json` on cards and charts that already exist.
+
+	THE ONLY REASON THIS IS NOT A FIXTURE-SHAPED OVERWRITE. `_build` leaves an
+	existing document completely alone, on the argument the module docstring
+	makes: somebody who recoloured a card or changed what it counts did it on
+	purpose. That argument holds for every field on these documents except this
+	one, because a dict-shaped `filters_json` is not a preference — it is a card
+	that raises `TypeError` the moment Frappe tries to draw its comparison arrow,
+	and it takes the whole workspace's render down with it.
+
+	So the repair is as narrow as it can be and still work:
+
+	  * ONLY `filters_json`, and only when it parses to a `dict`. A list is either
+	    this app's own current output or an operator's, and both are fine.
+	  * THE OPERATOR'S OWN CLAUSES ARE CARRIED ACROSS, not replaced with the
+	    spec's. Somebody who changed a card to count `Awaiting-Review` instead of
+	    `Available` gets a working card counting `Awaiting-Review`. Replacing the
+	    filters with this app's would be the fixture behaviour, and it would
+	    silently undo their edit under cover of a bug fix.
+	  * `document_type` is read off THE DOCUMENT, not the spec, for the same
+	    reason — the list shape names the doctype in every clause, and the
+	    document knows which doctype it actually counts.
+
+	Never raises: a repair that cannot be made is reported and the migration
+	carries on, exactly like every other builder here.
+	"""
+	for spec in specs:
+		name = spec[key_field]
+		try:
+			if not frappe.db.exists(doctype, name):
+				continue
+			raw = frappe.db.get_value(doctype, name, "filters_json")
+			if not isinstance(raw, str) or not raw.strip():
+				continue
+			existing = json.loads(raw)
+			if not isinstance(existing, dict):
+				continue
+			document_type = frappe.db.get_value(doctype, name, "document_type") or spec.get(
+				"document_type"
+			)
+			if not document_type:
+				continue
+			frappe.db.set_value(doctype, name, "filters_json", card_filters(document_type, existing))
+			report["repaired_filters"].append(name)
+		except Exception as exc:
+			report["failed"].append(
+				{
+					"name": name,
+					"reason": (
+						f"its filters_json is dict-shaped and could not be rewritten into the list "
+						f"shape a Number Card can count: {type(exc).__name__}: {exc}. Until it is, "
+						"this card raises when Frappe draws its period-over-period arrow, and the "
+						"page it sits on answers Internal Server Error."
+					),
+				}
+			)
 
 
 def _build_dashboard(report: dict) -> None:

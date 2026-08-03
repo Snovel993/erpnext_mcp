@@ -3,6 +3,72 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.18.5 — 2026-08-02
+
+**The workflow walks in CI, not at the iPhone.** A prevention release. v0.18.2,
+v0.18.3 and v0.18.4 all shipped the same evening and every one of them was found
+by Tim holding a phone in the field, because the suite tested each side against
+itself and nothing tested the seam. This fixes one live crash and spends the rest
+of its weight making the next three bugs of that shape fail in
+`python3 -m unittest` instead. Full notes:
+[`RELEASES/v0.18.5.md`](RELEASES/v0.18.5.md).
+
+Suite: 3,474 tests with 1 failure → **3,514 passing**.
+
+### Fixed
+
+- **`dashboard.py` Number Card `filters_json`** — the Farm Task Dispatch
+  workspace answered Internal Server Error. Every card spec used Frappe's dict
+  filter shape, which is valid to query WITH and invalid to build ON:
+  `number_card.get_result` appends its comparison-arrow date clause to the
+  parsed filters, `frappe._dict` has no `.append`, and `_dict.__getattr__`
+  turns that into `TypeError: 'NoneType' object is not callable`. New
+  `card_filters()` emits the list shape and all four spec tuples go through it;
+  the three charts v0.18.3 gave `"{}"` are now `"[]"` for the same reason.
+- **`dashboard._repair_filters`** — new. Fixing the specs only fixes new sites;
+  `_build` leaves existing cards alone by design, so every site from v0.16.0
+  onward holds eleven broken ones. The repair rewrites dict-shaped
+  `filters_json` in place, **carrying the operator's own clauses across rather
+  than replacing them**, and never touches one already in the list shape.
+  `install.py` prints what it repaired, by name.
+- **`tools/inspections.py:_link_evidence_files_to_parent`** — v0.18.4's
+  permission cascade read `row["file"]` off the evidence rows, which covers the
+  child tables and nothing else. Two evidence Files are Attach fields:
+  `Housing Inspection.signature` (where `complete_farm_task` puts
+  `signature_file` — the attestation an auditor is most certain to open) and
+  `Water Test.lab_report` (the entire evidentiary content of a water test).
+  Both stayed readable only by the uploader. Evidence rows naming a `file_url`
+  rather than a docname were skipped for the same reason; `_file_docname` now
+  resolves either spelling.
+- **`tests_standalone/test_uploads.py`** — the suite's one pre-existing failure.
+  v0.18.4 raised `MAX_CHUNK_BASE64` to 800 KB and this assertion still had
+  `200 * 1024` typed into it. Now reads the constant.
+
+### Added
+
+- **`tests_standalone/test_ios_contract.py`** (26 tests) — a Python mirror of
+  each iOS `Codable`, run against the real response of all eleven mobile
+  methods, with the wire's own JSON encoding applied first. Distinguishes
+  STRICT fields (`try c.decode` — the whole row throws, which is what v0.18.2
+  did) from LENIENT ones (silently absent), and checks enum and timestamp drift.
+  Every mirror cites the Swift file and line it transcribes, is itself fed the
+  broken payload from the release that shipped it, and the suite fails if a
+  twelfth method is published with no mirror.
+- **`tests_standalone/test_e2e_workflow.py`** (9 tests) — Tim's ask. Builds a
+  company, camp, worker and credential from an empty site through the real
+  tools, then walks claim → start → chunked upload → complete → Housing
+  Inspection through the mobile endpoints alone. Asserts the **state of the site
+  afterwards**: the child table, each `File`'s `attached_to_doctype` /
+  `attached_to_name`, and that the answered alert is gone AND `auto_dismissed`
+  on the next sweep. Covers the clean-pass branch, the evidence-contract
+  refusal, upload-session ownership and cross-entity scoping.
+
+### Changed
+
+- `RELEASES/v0.18.5-spec.md` → `RELEASES/v0.18.6-spec.md`. It was a v0.18.3
+  planning doc by its own first line; its contract-test item shipped here, and
+  `record_training` is what remains.
+
 ## 0.18.4 — 2026-08-02
 
 **Chunk size ceiling + evidence file permission cascade.** Two bugs bundled

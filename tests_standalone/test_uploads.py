@@ -31,6 +31,7 @@ import importlib
 import json
 
 from erpnext_mcp import registry
+from erpnext_mcp.tools import uploads
 
 from .fixtures import MAIN, OTHER, V7TestCase, cash
 from .harness import STORE, frappe
@@ -299,7 +300,11 @@ class StagingRefusals(UploadTestCase):
 		self.assertIn("outside the 2 piece(s)", self.one(chunk_index=-1))
 
 	def test_an_oversized_piece_is_refused_with_the_remedy(self):
-		message = self.one(chunk_base64="A" * (200 * 1024 + 4))
+		# v0.18.5: read off the constant rather than restating it. v0.18.4 raised
+		# the ceiling from 200 KB to 800 KB for the iPhone and this test — which
+		# had the old number typed into it — went red on a change that was
+		# correct, which is the failure mode that teaches people to ignore a suite.
+		message = self.one(chunk_base64="A" * (uploads.MAX_CHUNK_BASE64 + 4))
 		self.assertIn("per-piece limit", message)
 		self.assertIn("no penalty for using more pieces", message)
 

@@ -27,6 +27,8 @@ reordered their cards would get it silently put back on every migrate — which 
 exactly why `test_hooks.py` forbids the `fixtures` hook by name.
 """
 
+import json
+
 from erpnext_mcp import audit_packets, dashboard, install
 
 from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
@@ -771,7 +773,82 @@ class TheCommandCenter(V12TestCase):
 			if spec["document_type"] != dashboard.ALERT_DOCTYPE:
 				continue
 			with self.subTest(card=spec["label"]):
-				self.assertIn('"dismissed": 0', spec["filters_json"])
+				clauses = json.loads(spec["filters_json"])
+				self.assertIn([dashboard.ALERT_DOCTYPE, "dismissed", "=", 0], clauses)
+
+	# ── v0.18.5: the shape a Number Card can actually be counted from ────────
+	def test_every_card_and_chart_filter_is_a_list_and_never_a_dict(self):
+		"""The v0.18.4 bug, asserted at the point it actually broke.
+
+		`number_card.get_result` appends a date clause to whatever `filters_json`
+		parses to, so a dict — which Frappe accepts everywhere else a filter is
+		read — raises `TypeError: 'NoneType' object is not callable` and takes the
+		whole workspace's render with it. A dict is a valid filter to query WITH
+		and an invalid one to build ON.
+		"""
+		specs = (
+			dashboard.CARDS
+			+ dashboard.CHARTS
+			+ dashboard.DISPATCH_NUMBER_CARDS
+			+ dashboard.DISPATCH_CHARTS
+		)
+		for spec in specs:
+			name = spec.get("label") or spec.get("chart_name")
+			with self.subTest(name=name):
+				clauses = json.loads(spec["filters_json"])
+				self.assertIsInstance(clauses, list, f"{name} filters_json is a {type(clauses).__name__}")
+				for clause in clauses:
+					self.assertIsInstance(clause, list, f"{name} has a non-list clause {clause!r}")
+					self.assertEqual(len(clause), 4, f"{name} clause {clause!r} is not [doctype, field, op, value]")
+					self.assertEqual(
+						clause[0],
+						spec["document_type"],
+						f"{name} clause {clause!r} names a doctype the card does not count",
+					)
+
+	def test_a_card_left_over_from_a_previous_release_has_its_filters_repaired(self):
+		"""Fixing the spec fixes new sites. Every site that already ran the old
+		one still holds the broken card, and `_build` leaves it alone forever."""
+		dashboard.install_command_center()
+		card = STORE.get_raw("Number Card", "Critical Compliance Alerts")
+		card["filters_json"] = json.dumps({"dismissed": 0, "severity": "Critical"})
+
+		report = dashboard.install_command_center()
+		self.assertIn("Critical Compliance Alerts", report["repaired_filters"])
+		repaired = json.loads(STORE.get_raw("Number Card", "Critical Compliance Alerts")["filters_json"])
+		self.assertEqual(
+			sorted(repaired),
+			sorted([[dashboard.ALERT_DOCTYPE, "dismissed", "=", 0], [dashboard.ALERT_DOCTYPE, "severity", "=", "Critical"]]),
+		)
+
+	def test_the_repair_carries_an_operators_own_clauses_across_rather_than_replacing_them(self):
+		"""Somebody who changed what a card counts changed it on purpose. The
+		repair makes their card work; it does not make it this app's card."""
+		dashboard.install_command_center()
+		card = STORE.get_raw("Number Card", "Warning Compliance Alerts")
+		card["filters_json"] = json.dumps({"severity": "Info", "category": "Housing"})
+
+		dashboard.install_command_center()
+		repaired = json.loads(STORE.get_raw("Number Card", "Warning Compliance Alerts")["filters_json"])
+		self.assertIn([dashboard.ALERT_DOCTYPE, "severity", "=", "Info"], repaired)
+		self.assertIn([dashboard.ALERT_DOCTYPE, "category", "=", "Housing"], repaired)
+		self.assertNotIn([dashboard.ALERT_DOCTYPE, "severity", "=", "Warning"], repaired)
+
+	def test_a_card_already_in_the_list_shape_is_not_touched(self):
+		"""The repair is narrow or it is a fixture wearing a bug fix as a coat."""
+		dashboard.install_command_center()
+		card = STORE.get_raw("Number Card", "Info Compliance Alerts")
+		mine = json.dumps([[dashboard.ALERT_DOCTYPE, "severity", "=", "Critical"]])
+		card["filters_json"] = mine
+
+		report = dashboard.install_command_center()
+		self.assertNotIn("Info Compliance Alerts", report["repaired_filters"])
+		self.assertEqual(STORE.get_raw("Number Card", "Info Compliance Alerts")["filters_json"], mine)
+
+	def test_a_fresh_install_needs_no_repairs_at_all(self):
+		"""If the specs are right, the repair clause is dead code on a new site."""
+		report = dashboard.install_command_center()
+		self.assertEqual(report["repaired_filters"], [])
 
 	def test_the_readiness_score_is_computed_rather_than_carded(self):
 		"""A Number Card can count one collection; a ratio of two needs code."""

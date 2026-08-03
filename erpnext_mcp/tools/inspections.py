@@ -321,7 +321,29 @@ def _attach_evidence(doc, fieldname: str, rows) -> None:
 		doc.append(fieldname, dict(row))
 
 
-def _link_evidence_files_to_parent(parent_doc, rows) -> None:
+def _file_docname(reference) -> str:
+	"""The File docname behind a docname or a file URL, or "".
+
+	Evidence arrives as EITHER — `normalise_evidence` accepts both and keeps
+	them in different keys, and an Attach field holds the URL rather than the
+	docname. A permission cascade that only understood one of the two spellings
+	would leave the other half of the evidence on a record unreadable, which is
+	the whole bug this exists to close.
+	"""
+	value = str(reference or "").strip()
+	if not value:
+		return ""
+	try:
+		if frappe.db.exists("File", value):
+			return value
+		if value.startswith("/") or value.startswith("http"):
+			return str(frappe.db.get_value("File", {"file_url": value}, "name") or "")
+	except Exception:  # pragma: no cover - a site that cannot read its own File table
+		return ""
+	return ""
+
+
+def _link_evidence_files_to_parent(parent_doc, rows, *attach_fields) -> None:
 	"""Make the File records point at the compliance record they belong to.
 
 	Farm Ops uploads Files as private, owned by the mobile user who took the
@@ -335,16 +357,41 @@ def _link_evidence_files_to_parent(parent_doc, rows) -> None:
 	answers "yes" for anyone who can read the parent, which is the correct
 	audience for evidence. Called AFTER the parent is inserted so we have a
 	real name to point at.
+
+	v0.18.5 EXTENDS IT TO THE ATTACH FIELDS, and to evidence rows that named a
+	URL rather than a docname. v0.18.4 walked `rows` and read only `row["file"]`,
+	which covers the child tables and nothing else. Two evidence files on these
+	doctypes do not live in a child table:
+
+	  * `Housing Inspection.signature` — the attestation. `complete_farm_task`
+	    puts `signature_file` there rather than in `photos`, so every completion
+	    filed through the MCP tool with a signature (as opposed to the app, which
+	    sends it as a Signature-typed evidence row) left the ONE file an auditor
+	    is most certain to open readable only by the person who uploaded it.
+	  * `Water Test.lab_report` — the laboratory's own PDF, which is the entire
+	    evidentiary content of a water test.
+
+	The failure was silent in exactly the way v0.18.4's was: the record renders,
+	the field shows a filename, and the Preview refuses.
 	"""
 	if not (getattr(parent_doc, "name", None) and getattr(parent_doc, "doctype", None)):
 		return
+
+	references = []
 	for row in rows or []:
-		file_name = str((row.get("file") if isinstance(row, dict) else "") or "").strip()
-		if not file_name:
+		if not isinstance(row, dict):
 			continue
+		references.append(row.get("file") or row.get("file_url"))
+	for fieldname in attach_fields:
+		references.append(parent_doc.get(fieldname))
+
+	seen = set()
+	for reference in references:
 		try:
-			if not frappe.db.exists("File", file_name):
+			file_name = _file_docname(reference)
+			if not file_name or file_name in seen:
 				continue
+			seen.add(file_name)
 			frappe.db.set_value(
 				"File",
 				file_name,
@@ -586,7 +633,9 @@ def build_housing_inspection(payload: dict, evidence: list) -> object:
 	doc.insert(ignore_permissions=True)
 	# v0.18.4+: without this, uploader-owned private Files are unreadable
 	# by anyone else — including the operator opening the record in Desk.
-	_link_evidence_files_to_parent(doc, evidence)
+	# v0.18.5 adds `signature`, which is an Attach rather than a child row and
+	# was therefore the one piece of evidence the v0.18.4 pass walked straight past.
+	_link_evidence_files_to_parent(doc, evidence, "signature")
 	return doc
 
 
@@ -709,7 +758,9 @@ def build_water_test(payload: dict, evidence: list) -> object:
 	doc.keep_as_draft = 1 if payload.get("keep_as_draft") else 0
 	_attach_evidence(doc, "sample_photos", evidence)
 	doc.insert(ignore_permissions=True)
-	_link_evidence_files_to_parent(doc, evidence)  # v0.18.4+
+	# `lab_report` is an Attach and is the entire evidentiary content of a water
+	# test — see `_link_evidence_files_to_parent` on why v0.18.4 missed it.
+	_link_evidence_files_to_parent(doc, evidence, "lab_report")  # v0.18.4+, v0.18.5
 	return doc
 
 
