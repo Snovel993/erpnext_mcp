@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Install / migrate / uninstall hooks.
 
-Six jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
-the fifth — the Farm Task Dispatch Kanban board — in v0.16.0, and the sixth —
-the six mobile roles — in v0.17.0.
+Seven jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
+the fifth — the Farm Task Dispatch Kanban board — in v0.16.0, the sixth —
+the six mobile roles — in v0.17.0, and the seventh — the compliance vocabulary
+and the training curricula — in v0.19.2.
 
 The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
@@ -59,7 +60,23 @@ outright to write a permission onto a doctype this app does not own. A role
 nobody holds changes nothing; a Custom DocPerm on somebody else's doctype could
 have taken HR Manager off Employee during a migration with nothing printed.
 
-None of the six raises. Every one of them runs inside `bench migrate`, where an
+The seventh arrived in v0.19.2 and is two seeders and a migration: the ten
+`Compliance Regime` rows, the ten common `Training Type` curricula, and the
+one-time conversion of `Employee Training Record.training_type` from free text
+into links to those curricula.
+
+IT IS NOT A FRAPPE `fixtures` ENTRY, AND THAT IS DELIBERATE — `test_hooks.py`
+forbids the word by name, for the reason the fourth job spells out: a fixture is
+imported by `bench migrate` with no ability to skip what a site already has, so
+an operator who corrected the regimes on a curriculum would get them silently
+corrected back on the next upgrade. Both seeders check before they write and
+leave an edited row exactly as it is, including one somebody deactivated. The
+regime list is seeded FROM `training.REGIMES`, which stays the single definition
+of what a regime is; the table exists so the Desk can offer a picker instead of a
+text box, and a picker is what stops somebody typing `OSHA` where the vocabulary
+says `OR-OSHA`.
+
+None of the seven raises. Every one of them runs inside `bench migrate`, where an
 exception aborts the migration for the whole bench — so a failure here is
 reported and the next job still runs. That is not defensive padding: v0.12.0
 shipped an `after_migrate` that died on a link validation and left operators with
@@ -72,7 +89,8 @@ the settings form, and there is no code path that makes it for them.
 
 import frappe
 
-from . import compliance_fields, dashboard, roles, settings
+from . import compliance_fields, dashboard, roles, settings, training
+from .patches import migrate_training_types
 from .tools import company
 
 
@@ -83,6 +101,7 @@ def after_install() -> None:
 	_command_center()
 	_dispatch_board()
 	_mobile_roles()
+	_compliance_vocabulary()
 	frappe.db.commit()
 
 
@@ -93,6 +112,7 @@ def after_migrate() -> None:
 	_command_center()
 	_dispatch_board()
 	_mobile_roles()
+	_compliance_vocabulary()
 
 
 def _compliance_fields() -> None:
@@ -134,6 +154,42 @@ def _mobile_roles() -> None:
 	the only way anybody would ever find out it did not happen.
 	"""
 	_report_failures("the mobile roles", roles.install_roles)
+
+
+def _compliance_vocabulary() -> None:
+	"""Seed the regimes and the curricula, then migrate free-text training types.
+
+	ORDER IS LOAD-BEARING, all three steps. A `Training Type` carries regimes as
+	links, so the regimes have to exist before any curriculum is written; and every
+	curriculum has to exist before a training record is re-linked to one, because a
+	link written to a master that is not there yet is a validation error inside a
+	migration.
+
+	The migration ALSO runs as a listed patch. Both, on purpose and for the same
+	reason `register_custom_party_types` is both: the patch entry records in the
+	Patch Log when the conversion first happened, and this hook catches a site that
+	upgraded straight across v0.19.2. It is idempotent, so the second run is a
+	no-op and prints nothing.
+	"""
+	for what, seeder in (
+		("the compliance regimes", training.seed_regimes),
+		("the common training types", training.seed_training_types),
+	):
+		try:
+			report = seeder()
+		except Exception as exc:  # pragma: no cover - the seeders swallow their own
+			print(f"erpnext_mcp: {what} were not seeded — {type(exc).__name__}: {exc}")
+			continue
+		for failure in report.get("failed") or ():
+			print(f"erpnext_mcp: could not seed {failure.get('name')} — {failure.get('reason')}")
+
+	try:
+		report = migrate_training_types.migrate_training_types()
+	except Exception as exc:  # pragma: no cover - the migration swallows its own
+		print(f"erpnext_mcp: training types were not migrated — {type(exc).__name__}: {exc}")
+		return
+	for line in migrate_training_types.report_lines(report):
+		print(line)
 
 
 def _report_failures(what: str, builder) -> None:
@@ -295,6 +351,13 @@ _PRECIOUS_DOCTYPES = (
 		"was tested, and nothing else on the site can answer",
 	),
 	(
+		"Training Type",
+		"the curriculum register — what each course is, which audits a session of "
+		"it answers, and how long a record of it has to be kept. The ten this app "
+		"seeds come back on a reinstall; a curriculum somebody added, and every "
+		"regime somebody corrected on one, does not",
+	),
+	(
 		"Mobile Access Grant",
 		"who was given a phone, what for, which entities they could see, when their "
 		"credential was issued — and, for every account that ended, WHO ended it and "
@@ -315,6 +378,12 @@ _REGENERATED_DOCTYPES = (
 	("Compliance Alert", "regenerated from operational state by the nightly sweep"),
 	("Staged File Upload Session", "half-finished uploads"),
 	("Staged File Chunk", "half-finished uploads"),
+	# Seeded from `training.REGIMES` on every migrate, so a reinstall restores the
+	# ten. A row an operator ADDED for a scheme this app does not model would not
+	# come back — but it carries nothing except its own name, and the records that
+	# referenced it are gone with their own doctypes anyway.
+	("Compliance Regime", "seeded from erpnext_mcp/training.py on every migrate"),
+	("Compliance Regime Link", "the regime tags on alerts and training types, rewritten by the sweep"),
 )
 
 

@@ -12,6 +12,7 @@
   "alert_type",
   "severity",
   "category",
+  "regime",
   "identity_col",
   "company",
   "source_doctype",
@@ -72,6 +73,13 @@
    "in_standard_filter": 1,
    "label": "Category",
    "options": "\nCertifications\nPolicies\nWorkforce\nHousing\nWater and Sanitation\nSpray and Pesticides\nFilings\nAudits\nOther"
+  },
+  {
+   "description": "Which audits this item matters for. Written by the rule that raised it, not typed: a lapsed WPS card is WPS evidence whoever happens to be looking. MULTI-SELECT because one alert genuinely matters to several — an untested block in spray rotation is an FSMA Subpart E finding AND an OR-OSHA one, and filing it under whichever came to mind first would hide it from the other packet. An alert tagged Internal is one the operation answers to itself: real work with a real due date and no external auditor, which is a claim somebody can correct rather than a silence.",
+   "fieldname": "regime",
+   "fieldtype": "Table MultiSelect",
+   "label": "Regimes",
+   "options": "Compliance Regime Link"
   },
   {
    "fieldname": "identity_col",
@@ -200,7 +208,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-07-31 12:00:00.000000",
+ "modified": "2026-08-03 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Compliance Alert",

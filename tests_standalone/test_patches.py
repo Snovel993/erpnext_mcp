@@ -26,7 +26,11 @@ import re
 import unittest
 
 from erpnext_mcp import install, settings
-from erpnext_mcp.patches import register_custom_party_types, set_default_tool_switches
+from erpnext_mcp.patches import (
+	migrate_training_types,
+	register_custom_party_types,
+	set_default_tool_switches,
+)
 from erpnext_mcp.tools import company
 
 from .harness import APP_DOCTYPES, INSTALLED_DOCTYPES, META, STORE, MCPTestCase, frappe
@@ -37,6 +41,7 @@ from .harness import APP_DOCTYPES, INSTALLED_DOCTYPES, META, STORE, MCPTestCase,
 PATCHES = (
 	("erpnext_mcp.patches.set_default_tool_switches", set_default_tool_switches),
 	("erpnext_mcp.patches.register_custom_party_types", register_custom_party_types),
+	("erpnext_mcp.patches.migrate_training_types", migrate_training_types),
 )
 
 

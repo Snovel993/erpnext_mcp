@@ -27,7 +27,7 @@ and your WPS training records for the same year"). See `_training_annex`.
 
 import frappe
 
-from .. import compat, packets, settings, training
+from .. import alerts, compat, packets, settings, training
 from ..errors import ToolError
 from ..result import ToolResult
 
@@ -105,15 +105,16 @@ def generate_compliance_packet(args: dict) -> ToolResult:
 	regime = str(args.get("regime") or "").strip()
 	if regime and not training.canon(regime):
 		raise ToolError(
-			f"regime {regime!r} is not one this app knows. The eight are: "
-			f"{', '.join(training.REGIMES)}."
+			f"regime {regime!r} is not one this app knows. {training.vocabulary_note()}"
 		)
 
 	filters = packets.validate_filters(spec, args.get("filters"))
 	result = spec.build(filters)
 	data = packets.envelope(spec, filters, result)
 	if regime:
-		data["training_evidence"] = _training_annex(training.canon(regime), filters)
+		canonical = training.canon(regime)
+		data["training_evidence"] = _training_annex(canonical, filters)
+		data["compliance_alerts"] = _alert_annex(canonical, filters)
 
 	worst = data["flag_summary"]["worst"]
 	summary = result.summary or f"generated {packet_type}"
@@ -187,6 +188,123 @@ def _training_annex(regime: str, filters: dict) -> dict:
 			f"No training record tagged {regime} falls in this period. That is a statement about "
 			"the period and the tag, not about whether anybody was trained — an untagged record "
 			"exists but appears in no packet."
+		)
+	return out
+
+
+def _alert_annex(regime: str, filters: dict) -> dict:
+	"""What the compliance calendar still has open for `regime`, as a second annex.
+
+	v0.19.2, AND IT IS THE SAME ARGUMENT AS `_training_annex` ONE STEP FURTHER. The
+	request that produces a regime-scoped packet is "send the reconciliation, and
+	your WPS records for the same year" — and the honest answer to the second half
+	is not only what the crew was taught but what the operation currently knows it
+	still owes. A packet that annexed the evidence and silently omitted the
+	outstanding items would be curating rather than answering.
+
+	OPEN MEANS OPEN. Dismissed items are excluded because a dismissal is somebody's
+	recorded judgement that the item did not need doing, and snoozed ones because a
+	snooze is "not this week" rather than an obligation. Both are still on the
+	calendar and neither is hidden from anybody who reads it there; what they are
+	not is a debt.
+
+	NOT SCOPED TO THE PERIOD, unlike the training annex, and the asymmetry is
+	deliberate. A training record is evidence ABOUT a period. An open alert is a
+	fact about TODAY — an expired licence is expired now whatever the reconciliation
+	covers — so filtering it by the packet's dates would produce a list of things
+	that were outstanding last March, which is a different and much less useful
+	document.
+	"""
+	company = str(filters.get("company") or "")
+	if not compat.doctype_exists(alerts.ALERT_DOCTYPE):
+		return {
+			"regime": regime,
+			"available": False,
+			"alerts": [],
+			"count": 0,
+			"note": (
+				"This site has no Compliance Alert DocType — it ships with erpnext_mcp, so run "
+				"`bench --site <site> migrate`. This annex is ABSENT rather than empty: an empty "
+				"list of open items reads as an operation that owes nothing."
+			),
+		}
+
+	alert_filters = {"dismissed": 0}
+	if company:
+		alert_filters["company"] = company
+	rows = [
+		dict(row)
+		for row in frappe.db.get_all(
+			alerts.ALERT_DOCTYPE,
+			filters=alert_filters,
+			fields=compat.existing_fields(
+				alerts.ALERT_DOCTYPE,
+				(
+					"name",
+					"alert_type",
+					"severity",
+					"category",
+					"company",
+					"alert_message",
+					"due_date",
+					"first_seen",
+					"snoozed_until",
+				),
+			),
+			order_by="due_date asc",
+			limit=packets.ROW_CAP * 2 + 1,
+		)
+		or []
+	]
+	tags = alerts.regimes_for_alerts([row.get("name") for row in rows])
+	today = frappe.utils.today()
+	found = []
+	for row in rows:
+		snoozed = str(row.get("snoozed_until") or "")
+		if snoozed and snoozed >= today:
+			continue
+		# By TOKEN, never substring — 'GlobalGAP' contains 'GAP'.
+		if not alerts.alert_matches_regime(tags.get(str(row.get("name")), []), regime):
+			continue
+		found.append(
+			{
+				"name": row.get("name"),
+				"alert_type": row.get("alert_type"),
+				"severity": row.get("severity"),
+				"category": row.get("category"),
+				"message": row.get("alert_message"),
+				"due_date": str(row.get("due_date") or "") or None,
+				"open_since": str(row.get("first_seen") or "") or None,
+			}
+		)
+
+	capped = found[: packets.ROW_CAP]
+	critical = [item["name"] for item in capped if item["severity"] == alerts.SEVERITY_CRITICAL]
+	overdue = [item["name"] for item in capped if item["due_date"] and item["due_date"] < today]
+	out = {
+		"regime": regime,
+		"regime_note": training.REGIME_NOTES.get(regime),
+		"available": True,
+		"company": company or None,
+		"as_of": today,
+		"count": len(capped),
+		"truncated": len(found) > packets.ROW_CAP,
+		"alerts": capped,
+		"critical": critical,
+		"overdue": overdue,
+		"note": (
+			f"Everything the compliance calendar currently has open for {regime}, as at {today}. "
+			"Snoozed and dismissed items are excluded: a snooze is 'not this week' and a "
+			"dismissal is somebody's recorded judgement that it did not need doing, and neither "
+			"is a debt. This is a fact about TODAY rather than about the packet's period — an "
+			"expired licence is expired now whatever the packet covers."
+		),
+	}
+	if not capped:
+		out["empty_note"] = (
+			f"Nothing is open for {regime}. If the site has just upgraded, that may mean the "
+			"sweep has not tagged its alerts yet rather than that there is nothing outstanding — "
+			"refresh_compliance_alerts settles it in one call."
 		)
 	return out
 

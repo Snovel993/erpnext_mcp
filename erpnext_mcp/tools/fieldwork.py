@@ -462,10 +462,22 @@ def list_compliance_calendar_for_me(args: dict) -> ToolResult:
 	if only:
 		entities = [_company_for(me, args)]
 
+	# CHECKED HERE, BEFORE THE LOOP, even though `get_compliance_calendar` checks
+	# it too. Inside the loop every exception becomes a named failure for one
+	# entity rather than an error — which is right for a broken register and
+	# exactly wrong for a typo in the argument, because a worker with three
+	# entities would get three "failures" and an empty calendar instead of being
+	# told the regime is not one this app knows.
+	compliance_calendar.validate_regime(args)
+
 	per_entity, alerts_out, failures = [], [], []
 	for company in entities:
 		inner = {"company": company}
-		for key in ("severity_min", "days_ahead", "category", "alert_type", "as_of", "limit"):
+		# `regime` (v0.19.2) forwards like every other filter rather than being
+		# reimplemented here — `get_compliance_calendar` refuses an unrecognised
+		# one by name, and a second copy of that check is a second thing to get
+		# out of step with the vocabulary.
+		for key in ("severity_min", "days_ahead", "category", "alert_type", "regime", "as_of", "limit"):
 			if args.get(key) is not None:
 				inner[key] = args.get(key)
 		try:

@@ -87,6 +87,7 @@ class EmployeeTrainingRecord(Document):
 
 	def validate(self):
 		self._require_the_two_facts()
+		self._resolve_the_training_type()
 		self._fill_from_the_employee()
 		self._check_the_dates()
 		self._normalise_the_tags()
@@ -114,6 +115,42 @@ class EmployeeTrainingRecord(Document):
 			)
 		if not self.completed_date:
 			frappe.throw(_("Completed date is required. A training with no date is not a record."))
+
+	def _resolve_the_training_type(self) -> None:
+		"""Point `training_type` at a real Training Type, creating one if it is new.
+
+		v0.19.2, AND IT RUNS IN `validate` RATHER THAN IN THE TOOL FOR ONE REASON:
+		Frappe validates Links AFTER `validate` and BEFORE the row is written. A
+		curriculum created here is therefore in place by the time the link is
+		checked, and a curriculum created in `record_training` would cover that one
+		caller and leave every other — the Desk form, a data import, a patch, the
+		iOS app — throwing a link error at somebody who typed the true name of a
+		course that genuinely happened.
+
+		AUTO-CREATION IS RIGHT HERE AND WRONG FOR REGIMES, which this file also
+		validates twenty lines down by REFUSING an unknown tag. The two are not
+		inconsistent. Regimes are a closed legal vocabulary and 'OSHA' for
+		'OR-OSHA' is a typo that files evidence where no packet looks. Curricula
+		are open: regulators rename them, operations invent their own, and a name
+		this site has not seen before is far more likely to be a real new course
+		than a mistake. The failure modes point opposite ways, so the answers do.
+
+		Matching is case- and whitespace-insensitive, so 'wps handler training'
+		does not become a second master beside 'WPS Handler Training' and split one
+		curriculum's history in two.
+		"""
+		if not str(self.training_type or "").strip():
+			return
+		try:
+			outcome = training.ensure_type(self.training_type)
+		except Exception:  # pragma: no cover - a site mid-migration
+			# The column is still Data on a site that has not migrated yet. Leaving
+			# the text as typed keeps the record filable, which matters more than
+			# the link: a training that happened and was recorded against a name is
+			# better evidence than a refusal.
+			return
+		if outcome.get("training_type"):
+			self.training_type = outcome["training_type"]
 
 	def _fill_from_the_employee(self) -> None:
 		"""Name, company and farm name, denormalised onto the record itself.

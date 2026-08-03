@@ -134,15 +134,21 @@ def generate_audit_packet(args: dict) -> ToolResult:
 		canonical = training.canon(regime)
 		if not canonical:
 			raise ToolError(
-				f"regime {regime!r} is not one this app knows. The eight are: "
-				f"{', '.join(training.REGIMES)}. It narrows the TRAINING section to one "
-				"scheme's records and changes nothing else in the packet. Nothing was created."
+				f"regime {regime!r} is not one this app knows. {training.vocabulary_note()} It "
+				"narrows the TRAINING and OPEN-ITEMS sections to one scheme and changes nothing "
+				"else in the packet. Nothing was created."
 			)
-		if "training" not in spec.sections:
+		# v0.19.2: `regime` scopes two sections now, so a packet type carrying
+		# EITHER is one the argument does something to. Refusing on the absence of
+		# `training` alone would have started refusing calls that are now
+		# meaningful.
+		scoped = [key for key in ("training", "alerts") if key in spec.sections]
+		if not scoped:
 			raise ToolError(
-				f"the {spec.key} packet has no training section, so a regime filter would "
-				"change nothing about it. Drop `regime`, or choose an audit type that carries "
-				f"one: {', '.join(sorted(key for key, value in audit_packets.TYPES.items() if 'training' in value.sections))}. "
+				f"the {spec.key} packet has neither a training nor an open-items section, so a "
+				"regime filter would change nothing about it. Drop `regime`, or choose an audit "
+				"type that carries one: "
+				f"{', '.join(sorted(key for key, value in audit_packets.TYPES.items() if {'training', 'alerts'} & set(value.sections)))}. "
 				"Nothing was created."
 			)
 		regime = canonical

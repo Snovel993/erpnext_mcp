@@ -3,6 +3,109 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.19.2 — 2026-08-03
+
+**Two facts the app already knew stop living only in comments.** A compliance
+alert now says which audit it is evidence for, so the calendar can be read one
+inspection at a time; and a training curriculum now says which audits it answers,
+so thirty records of one course stop being thirty chances to mistype the tag.
+Both close holes named in earlier releases' own docstrings — v0.19.1's debrief
+item 1, and the free-text `training_type` v0.19.0 argued for and flagged. Full
+notes: [`RELEASES/v0.19.2.md`](RELEASES/v0.19.2.md).
+
+Suite: 3,601 → **3,653 passing**. Tool surface unchanged at 214 / 95 read.
+
+### Added
+
+- **`Compliance Regime`, `Compliance Regime Link` and `Training Type` DocTypes.**
+  The first is a picker's table seeded from `erpnext_mcp/training.py`'s `REGIMES`
+  on every migrate — the tuple in code is still what decides what a regime *is*.
+  The second is the Table MultiSelect child behind two fields. The third is a
+  curriculum master anybody can add a row to.
+- **`Compliance Alert.regime`** — written by the sweep, never typed. Ten rules
+  carry a constant (an overdue cabin inspection is an OR-OSHA item whoever is
+  asking); `certification_expiring` and `training_expiring` tag each alert from
+  the RECORD, because an applicator licence is WPS evidence and a GlobalGAP
+  certificate is not. Multi-select because an untested block in spray rotation is
+  an FSMA Subpart E finding **and** an OR-OSHA one.
+- **`regime` on `get_compliance_calendar`, `list_compliance_calendar_for_me` and
+  `refresh_compliance_alerts`.** Matching is by TAG, never substring —
+  `GlobalGAP` contains `GAP`. An unrecognised value is **refused**: filtering on a
+  word nobody understood returns an empty calendar, and an empty compliance
+  calendar reads as a clean one.
+- **A narrowed sweep dismisses nothing.** `refresh_compliance_alerts(regime=...)`
+  runs only the rules that raise that audit's evidence; every other rule raises
+  nothing **and its alerts are untouched**, because a filtered sweep that cleared
+  the rules it did not run would empty most of the calendar and look like
+  progress. `rules_skipped` names each one.
+- **An open-items section on every audit packet**, scoped to the same regimes as
+  the training section and narrowed by the same `regime` argument. A disclosure
+  rather than a confession: the kairotic gate has already refused the packet over
+  any open corrective action from inside the period, so what is left is
+  forward-looking work from a list the operation's own records generated. It is
+  the one section not scoped to the period — an expired licence is expired now
+  whatever quarter the packet covers. `generate_compliance_packet` gained the
+  matching annex.
+- **Two regime tokens.** `OTCO` (Oregon Tilth Certified Organic — the certifier
+  that holds the file, as against NOP the rule it certifies) and `Internal` (the
+  operation's own standard: real work, real due date, nobody coming to inspect).
+  `Internal` is a tag rather than an absence because an untagged alert is
+  invisible to every regime filter, and silently invisible is the one thing a
+  compliance calendar must not be.
+- **Ten seeded curricula**, with their regimes and a retention **derived** from
+  the longest tag rather than stated — so a seed cannot contradict the doctrine
+  that the longest window governs. Seeded through the idempotent installer, not
+  as a Frappe `fixtures` entry, which `test_hooks.py` forbids by name: a fixture
+  cannot skip what a site already has, so an operator who corrected a curriculum
+  would get it corrected back on the next migrate.
+
+### Changed
+
+- **`Employee Training Record.training_type` is a Link to `Training Type`.** Still
+  not a Select — `record_training` accepts free text and CREATES the curriculum
+  the first time somebody files a course this site has not run, so nothing has to
+  be configured before a training can be filed. That happens in the controller's
+  `validate`, not in the tool, because Frappe checks Links after `validate`: doing
+  it only in the tool would leave the Desk form, a data import and the iOS app
+  throwing a link error at somebody who typed the true name of a real course.
+  The new curriculum takes the regimes its NAME implies, not the session's — the
+  record says what one afternoon covered, the curriculum says what the course
+  normally answers.
+- **`training.py`'s v0.19.0 argument against a regime doctype is reversed by
+  half, and the half that still holds is stated.** `Employee Training Record.regimes`
+  is still a delimited tag list. `REGIMES` is still the only definition, the master
+  is seeded from it, and `canon`/`parse`/`require`/`matches` are still the only
+  readers — child rows are converted at the boundary so nothing downstream knows
+  which shape a field used.
+- **Four places said "the eight are" against a list of ten.** They call
+  `training.vocabulary_note()` now; a count in prose is a second copy of a fact
+  the tuple already holds.
+
+### Migration
+
+- **`erpnext_mcp.patches.migrate_training_types`** — creates a `Training Type` for
+  every distinct free-text value, then re-links. Because the master names itself
+  from `training_type_name`, the docname **is** the text already stored, so the
+  ordinary record is not rewritten at all; only text needing normalising (spacing,
+  or a casing that would split one curriculum across two masters) is touched. It
+  **does not touch `regimes` on any existing record** — those carry what somebody
+  tagged them with at the time, and overwriting that with a heuristic would be
+  replacing evidence. Idempotent, listed in `patches.txt` **and** called from
+  `after_migrate`, so it runs at least twice on any real bench and is a no-op the
+  second time.
+- The `tilth` alias still resolves to **NOP**, not to the new `OTCO`. Records
+  written through it since v0.19.0 are stored as NOP, and repointing it would make
+  one word mean a different set of rows on the read path than it wrote on the
+  write path.
+
+### Upgrade note
+
+Alerts already on the site are **untagged until the next sweep** — at most an hour,
+or one `refresh_compliance_alerts` call. Until then a regime-filtered calendar
+returns fewer rows than it will, so the unfiltered calendar reports the untagged
+count and says so rather than letting a short list read as a short list of
+problems.
+
 ## 0.19.1 — 2026-08-03
 
 **Three items off the v0.19.0 debrief, one of which turned out not to exist.**

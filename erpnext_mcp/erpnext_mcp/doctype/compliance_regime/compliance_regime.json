@@ -1,0 +1,104 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:regime_name",
+ "creation": "2026-08-03 18:00:00.000000",
+ "description": "One audit an operation answers to, as a record the Desk can offer in a picker. Seeded from erpnext_mcp/training.py REGIMES on every migrate and never typed: the tuple in code is still what decides what a regime IS, and this table exists so a Table MultiSelect on Compliance Alert and Training Type has something to link to. A row added by hand is left alone by the seeder, which is how an operation with a scheme this app has never heard of records it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "regime_name",
+  "active",
+  "identity_col",
+  "retention_years",
+  "detail_section",
+  "description",
+  "retention_citation"
+ ],
+ "fields": [
+  {
+   "description": "The canonical spelling, and the docname. FSMA, GAP, GlobalGAP, PrimusGFS, NOP, OTCO, WPS, OR-OSHA, Internal, Other. Spelling is load-bearing rather than cosmetic: 'OSHA' where the vocabulary says 'OR-OSHA' is evidence filed where no packet looks for it, which is why erpnext_mcp/training.py refuses a near-miss instead of correcting it.",
+   "fieldname": "regime_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Regime",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "description": "Untick to keep a regime this operation no longer answers to out of new pickers. It does NOT retag anything: records already carrying it keep carrying it, because a GlobalGAP record from the year the operation held the certificate is still evidence about that year.",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "3",
+   "description": "Years a record carrying this tag has to be kept. Informational here — the authoritative answer is computed per record by training.retention_years, where the LONGEST tag on a record governs, because destroying a GAP-and-NOP record at two years would destroy the NOP evidence.",
+   "fieldname": "retention_years",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Retention (years)"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "What It Is"
+  },
+  {
+   "description": "The rule, in the words the rule uses, with its citation. What somebody choosing a tag reads so they are choosing against the regulation rather than against a guess.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "description": "Where the retention figure comes from. Kept beside the number because a retention period nobody can cite is a retention period somebody will shorten.",
+   "fieldname": "retention_citation",
+   "fieldtype": "Small Text",
+   "label": "Retention Citation"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Compliance Regime",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1
+  }
+ ],
+ "quick_entry": 1,
+ "search_fields": "description",
+ "sort_field": "regime_name",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

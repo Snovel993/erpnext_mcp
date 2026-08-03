@@ -55,11 +55,13 @@
    "read_only": 1
   },
   {
-   "description": "What the training was, in the words the certificate or the sign-in sheet uses: 'PSA Grower Training', 'WPS Handler Training', 'Heat Illness Prevention', 'OSHA 30', 'Applicator License Renewal'. Free text on purpose — a Select would have to be edited every time a regulator renames a curriculum, and an operator would then record the wrong one rather than the real one.",
+   "description": "What the training was: 'PSA Grower Training', 'WPS Handler Training', 'Heat Illness Prevention', 'OSHA 30', 'Applicator License Renewal'. A LINK from v0.19.2, and still not a Select — Training Type is a master anybody can add a row to, and record_training creates one from free text the first time somebody files a course this site has not run before, so nothing has to be configured first. What the link buys is that 'WPS Handler Training satisfies WPS' is stated once on the curriculum instead of being retyped on every record, which is where a near-miss like 'OSHA' for 'OR-OSHA' used to get in.",
    "fieldname": "training_type",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Training Type",
+   "options": "Training Type",
    "reqd": 1,
    "search_index": 1
   },
@@ -225,7 +227,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-03 12:00:00.000000",
+ "modified": "2026-08-03 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Employee Training Record",

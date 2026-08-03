@@ -1,0 +1,112 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:training_type_name",
+ "creation": "2026-08-03 18:00:00.000000",
+ "description": "One curriculum, and the audits it answers. v0.19.2 pulled this out of Employee Training Record.training_type, which was free text — deliberately, because a Select would have to be edited every time a regulator renames a course. This is neither: it is a master anybody can add a row to, and record_training creates one from free text on first use, so nothing has to be configured before a training can be filed. What it buys is that 'WPS Handler Training satisfies WPS' is stated ONCE, on the curriculum, instead of thirty records of it being thirty chances to mistype the tag.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "training_type_name",
+  "active",
+  "identity_col",
+  "retention_years",
+  "coverage_section",
+  "regimes",
+  "detail_section",
+  "description"
+ ],
+ "fields": [
+  {
+   "description": "What the training is, in the words the certificate or the sign-in sheet uses: 'PSA Grower Training', 'WPS Handler Training', 'Heat Illness Prevention', 'OSHA 30', 'Applicator License Renewal'. It is the docname, so an auditor reading a list of training records reads course names rather than serial numbers.",
+   "fieldname": "training_type_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Training Type",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "description": "Untick a curriculum this operation no longer runs. It does NOT touch the training records already filed against it — last season's evidence is still evidence about last season — and record_training will still accept it, saying so, rather than refusing a record for a course somebody genuinely attended.",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "2",
+   "description": "Years to keep a record of this training. Set from the LONGEST regime tagged below when the type is created — NOP is five years, OR-OSHA three, everything else two — because destroying a record at the shorter window would destroy the evidence for the longer regime. The authoritative answer for any one record is still computed from that record's own tags by training.retention_years; this is what the curriculum implies.",
+   "fieldname": "retention_years",
+   "fieldtype": "Int",
+   "label": "Retention (years)"
+  },
+  {
+   "fieldname": "coverage_section",
+   "fieldtype": "Section Break",
+   "label": "What It Satisfies"
+  },
+  {
+   "description": "Which audits a session of this course counts towards. One session covering hygiene, pesticide safety and heat can satisfy GAP, WPS and OR-OSHA at once — provided the trainer covered all three curricula — and stating that here is what stops every record of the course restating it. record_training still writes the regimes onto each record: the type says what the course NORMALLY answers, the record says what THAT afternoon actually covered, and an afternoon that ran short is allowed to say so.",
+   "fieldname": "regimes",
+   "fieldtype": "Table MultiSelect",
+   "label": "Regimes",
+   "options": "Compliance Regime Link"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "What the course is, who issues it, how often it has to be repeated, and the citation that says so. What somebody scheduling next season's training reads.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Training Type",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 1,
+ "search_fields": "description",
+ "sort_field": "training_type_name",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

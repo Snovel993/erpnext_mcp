@@ -56,6 +56,17 @@ attention devalues the word for the rules that meant it, so the two rules that
 can raise Critical do so only when the underlying thing has actually stopped
 being lawful, or is inside the window where starting late means missing it.
 
+v0.19.2 GAVE EVERY RULE A `regimes` TAG, AND IT IS THE FIRST THING ON A RULE THAT
+IS ABOUT THE READER RATHER THAN THE CONDITION. `framework` was already here and
+is prose — the citation, for somebody reading the rule. `regimes` is a key, for a
+filter: "everything OR-OSHA will ask about in October" is one afternoon's work
+and "everything" is not, and until now the only way to get the first was to know
+which of twelve rule names belonged to which agency. Ten of the twelve carry a
+constant, because an overdue cabin inspection is an OR-OSHA item whoever is
+asking. The two that fire on records of many kinds — certificates and training —
+tag each observation from the record itself, because an applicator licence is WPS
+evidence and a GlobalGAP certificate is not.
+
 READ-ONLY, ALL OF THEM. A rule returns Observations and writes nothing. That is
 what lets the whole rule set run in a dry run, and what lets each one be tested by
 calling it with a date rather than by running a sweep and inspecting the database
@@ -149,6 +160,80 @@ def _rows(doctype: str, filters: dict, fields, limit: int = 2000) -> list:
 	]
 
 
+# ── which audits an alert answers to ────────────────────────────────────────
+#
+# Every rule below carries `regimes`, and most of them carry a constant: an
+# overdue cabin inspection is an OR-OSHA item whoever is asking. Two cannot, and
+# both take their tags from the record instead — see `Observation.regimes`.
+#
+# WHAT `Internal` MEANS HERE. Six of the twelve answer to no outside agency: a
+# procedure overdue for its own review, a filing deadline, an audit's corrective
+# action, a detector nobody but this operation tests annually. Tagging those with
+# a regime they do not answer to would put them in a packet where they invite a
+# question; leaving them untagged would make them invisible to every regime
+# filter, which is worse. `Internal` is the honest third answer — real work, real
+# due date, nobody coming to inspect it — and it is a claim somebody can disagree
+# with, which "no tag" never is.
+
+#: What a certificate's TYPE says about the audit its expiry belongs to.
+#: Evaluated in order, first match wins, and the order is the whole content: an
+#: applicator licence is checked before the bare "OSHA" needle because "Applicator
+#: License" is WPS evidence, and `globalgap`/`primus` are checked before `gap`
+#: because "GlobalGAP" contains "GAP" and a USDA GAP packet must not be handed a
+#: different scheme's certificate. Same substring trap, same guard, as
+#: `training.TYPE_REGIME_HEURISTICS`.
+CERT_REGIME_HEURISTICS = (
+	(("wps", "worker protection"), ("WPS",)),
+	(("applicator", "pesticide"), ("WPS", "OR-OSHA")),
+	(("psa", "produce safety", "fsma"), ("FSMA",)),
+	(("osha", "first aid", "cpr"), ("OR-OSHA",)),
+	(("otco", "oregon tilth"), ("OTCO",)),
+	(("nop", "organic"), ("NOP",)),
+	(("globalgap", "global gap"), ("GlobalGAP",)),
+	(("primus",), ("PrimusGFS",)),
+	(("gap",), ("GAP",)),
+	(("water",), ("FSMA",)),
+	(("food safety",), ("FSMA", "GAP")),
+)
+
+
+def _certificate_regimes(row: dict) -> list:
+	"""Which audit one certificate's expiry is evidence for.
+
+	READS THE TYPE FIRST AND THE NAME ONLY AS A FALLBACK. `cert_type` is a Select
+	an operator chose from a closed list; `cert_name` is whatever was typed on the
+	day. A name that happens to contain "organic" on a certificate typed as an
+	applicator licence should not retag it, so the name is consulted only where
+	the type said nothing.
+
+	`Internal` where neither says anything — a licence this app has not modelled
+	is still a licence with a real expiry, and an alert nobody can filter to is
+	worse than one filed under "ours".
+	"""
+	for source in (row.get("cert_type"), row.get("cert_name")):
+		text = str(source or "").lower()
+		if not text:
+			continue
+		for needles, regimes in CERT_REGIME_HEURISTICS:
+			if any(needle in text for needle in needles):
+				return training_records.parse(regimes)
+	return ["Internal"]
+
+
+#: Every regime `_certificate_regimes` can produce, DERIVED from the table above
+#: rather than restated beside it. `Rule.regimes` on a per-row rule is the union
+#: of what it can emit — that is what `refresh_compliance_alerts(regime=...)`
+#: matches on when it decides which rules a one-regime sweep has to run — and a
+#: union typed by hand is a union that goes stale the first time a needle is
+#: added.
+CERT_REGIMES = tuple(
+	regime
+	for regime in training_records.REGIMES
+	if regime == "Internal"
+	or any(regime in produced for _needles, produced in CERT_REGIME_HEURISTICS)
+)
+
+
 # ── 1. certification_expiring ───────────────────────────────────────────────
 def _scan_certifications(context: dict) -> list:
 	today = context["today"]
@@ -221,6 +306,12 @@ def _scan_certifications(context: dict) -> list:
 					if str(row.get("cert_type") or "") in ("Applicator License", "Farm Labor Contractor License")
 					else "Certifications"
 				),
+				# PER ROW, not per rule. This one rule fires on eleven kinds of
+				# certificate and an applicator licence is WPS evidence while a
+				# GlobalGAP certificate is not — so the regime is a property of the
+				# certificate, and a constant on the rule would be wrong ten times
+				# out of eleven.
+				regimes=_certificate_regimes(row),
 			)
 		)
 	return out
@@ -248,6 +339,10 @@ register(
 			"is a renewal anybody can perform. Auto-dismisses on renewal, when the expiration "
 			"moves back outside the window."
 		),
+		# Per row: see `_certificate_regimes`. This is the UNION of what it can
+		# emit, which is what a one-regime sweep matches on to decide whether
+		# this rule has to run at all.
+		regimes=CERT_REGIMES,
 		scan=_scan_certifications,
 	)
 )
@@ -309,6 +404,10 @@ register(
 			"can meaningfully be reviewed. Auto-dismisses when the review date is moved "
 			"forward, which is what reviewing it looks like in the record."
 		),
+		# The three schemes that ask for an annual document review, plus FSMA
+		# 21 CFR 112's written-procedure requirement. An SOP nobody has read
+		# in three years is a finding in each of them.
+		regimes=("FSMA", "GAP", "GlobalGAP", "PrimusGFS"),
 		scan=_scan_policies,
 	)
 )
@@ -401,6 +500,10 @@ register(
 			"Ground dormant since last season raises nothing, and starts raising the day it "
 			"is sprayed again. Auto-dismisses the moment a water test is recorded."
 		),
+		# Subpart E is the rule; OR-OSHA is here because the water going through
+		# the sprayer is also the water in the field sanitation requirement, and
+		# an untested source is asked about by both inspectors.
+		regimes=("FSMA", "OR-OSHA"),
 		scan=_scan_water_tests,
 	)
 )
@@ -471,6 +574,10 @@ register(
 			"habitable. Never-inspected counts as overdue, which is the answer that gets "
 			"somebody to go and look. Auto-dismisses when an inspection is recorded."
 		),
+		# OAR 437-004-1120 is the habitability walk. FSMA Subpart L cares about
+		# worker FACILITIES rather than about the annual inspection cycle, so
+		# tagging it here would put a camp item in a produce-safety packet.
+		regimes=("OR-OSHA",),
 		scan=_scan_housing_inspections,
 	)
 )
@@ -548,6 +655,10 @@ register(
 			"same reason as the inspection rule. Auto-dismisses when both detector tests are "
 			"recorded inside a year."
 		),
+		# The fire code and OAR 437-004-1120 both reach it, and `Internal`
+		# because an annual detector test is work this operation does whether
+		# or not anybody is coming to look at it — which is most years.
+		regimes=("OR-OSHA", "Internal"),
 		scan=_scan_detectors,
 	)
 )
@@ -608,6 +719,10 @@ register(
 			"expired I-9 blocks nothing, and alerting on it would fill the calendar with "
 			"people who left. Auto-dismisses when the status moves off Expired."
 		),
+		# IRCA is federal immigration law, not one of the audit regimes this app
+		# models, and there is no I-9 packet to file it in. Tagged `Internal`
+		# rather than left bare so it is still reachable by a regime filter.
+		regimes=("Internal",),
 		scan=_scan_i9,
 	)
 )
@@ -684,6 +799,10 @@ register(
 			"takes once the bond and background check are counted, and escalates to Critical "
 			"at 30 when starting late means lapsing. Auto-dismisses on renewal."
 		),
+		# ORS 658.405 licensing is enforced by Oregon BOLI, which is not OR-OSHA
+		# and is not a scheme audit. Tagging it OR-OSHA would put it in a packet
+		# handed to an inspector with no jurisdiction over it.
+		regimes=("Internal",),
 		scan=_scan_flc,
 	)
 )
@@ -755,6 +874,10 @@ register(
 			"alert without anybody switching a reminder off. Escalates from Info to Warning "
 			"once the deadline has actually passed — at that point it is no longer a heads-up."
 		),
+		# The deadline belongs to whichever agency the filing went to, and that is
+		# on the filing rather than in this vocabulary. `Internal` is the honest
+		# tag: real work, real date, no audit packet asks for it by name.
+		regimes=("Internal",),
 		scan=_scan_filings,
 	)
 )
@@ -848,6 +971,10 @@ register(
 			"paperwork. One alert per audit rather than per action — five open items on one "
 			"audit are one conversation, not five problems."
 		),
+		# An open corrective action is the first thing each scheme's auditor asks
+		# about on the next visit — and it is the gate `generate_audit_packet`
+		# refuses an incomplete period on, in every packet type.
+		regimes=("GAP", "GlobalGAP", "PrimusGFS", "Internal"),
 		scan=_scan_corrective_actions,
 	)
 )
@@ -956,6 +1083,10 @@ register(
 			"nothing found says more about July's water stain than a checkbox does. Drafts raise "
 			"nothing — a draft is a note, not evidence."
 		),
+		# A finding on a cabin: OAR 437-004-1120 for the camp itself and FSMA
+		# Subpart L where the building is a worker facility. Both inspectors
+		# ask what was found and whether it was fixed.
+		regimes=("OR-OSHA", "FSMA"),
 		scan=_scan_camp_corrective_actions,
 	)
 )
@@ -1054,6 +1185,10 @@ register(
 			"that the water is safe; treating it as clean is how a compliance file becomes a "
 			"clean record of nothing."
 		),
+		# 21 CFR 112.44(b) is the criterion the sample failed. Narrower than the
+		# stale-test rule above on purpose: a laboratory result over the limit
+		# is a produce-safety fact, not a camp one.
+		regimes=("FSMA",),
 		scan=_scan_water_contamination,
 	)
 )
@@ -1154,6 +1289,18 @@ def _scan_training(context: dict) -> list:
 				due_date=str(expires),
 				company=str(row.get("company") or ""),
 				category="Workforce",
+				# COPIED FROM THE RECORD, which is the only honest source. The
+				# curriculum says what the course normally answers; the record says
+				# what THAT afternoon actually covered, and a heat session that ran
+				# out of time before the emergency-response topic did not satisfy
+				# OAR 437-004-1131 that day. Inheriting from the Training Type would
+				# produce an alert asserting evidence the record does not support.
+				#
+				# An untagged record produces an untagged alert — deliberately. The
+				# message already says so and tells the reader how to fix it, and
+				# inventing a tag so the row is not bare would make the calendar
+				# claim coverage the register does not have.
+				regimes=regimes,
 			)
 		)
 	return out
@@ -1225,6 +1372,10 @@ register(
 			"(trainer, crew, language, room); inside thirty, the next scheduled course may "
 			"already be after the lapse."
 		),
+		# Per row: copied off the training record, which can carry any tag in the
+		# vocabulary. So the union IS the vocabulary, taken from it directly so
+		# a regime added in a later release does not silently exclude this rule.
+		regimes=training_records.REGIMES,
 		scan=_scan_training,
 	)
 )

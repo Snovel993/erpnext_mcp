@@ -297,6 +297,12 @@ erpnext_mcp/                     repo root
                                  and the argument for putting them there at all
     alerts/base.py               Rule, Observation, the idempotent sweep
     alerts/rules.py              the twelve rules, each with its kairotic gate
+                                 and the regime(s) its alerts are evidence for
+    training.py                  THE regime vocabulary — REGIMES, canon, parse,
+                                 require, matches, retention — plus the seeders
+                                 for the Compliance Regime and Training Type
+                                 masters. Two storage shapes read it; nothing
+                                 else decides what a regime is
     audit_packets.py             the eight audit regimes and their sections
     dashboard.py                 the Compliance Command Center installer, the
                                  Farm Task Dispatch Kanban board and its
@@ -322,7 +328,10 @@ erpnext_mcp/                     repo root
                                  compliance five — Compliance Policy,
                                  Certification (+ Certification Renewal),
                                  Regulatory Filing, Audit Event (+ Audit
-                                 Corrective Action), Compliance Alert
+                                 Corrective Action), Compliance Alert.
+                                 v0.19.0 added Employee Training Record;
+                                 v0.19.2 added Compliance Regime (+ Compliance
+                                 Regime Link) and Training Type
 scripts/seed_related_parties.py  seeds the related-party register from a JSON
                                  file kept OUTSIDE this repository
 ```

@@ -61,6 +61,7 @@ from . import __version__, compat
 #: history (filings, audits) last.
 SECTION_ORDER = (
 	"open_actions",
+	"alerts",
 	"policies",
 	"certifications",
 	"workforce",
@@ -159,6 +160,7 @@ register(
 		),
 		sections=(
 			"open_actions",
+			"alerts",
 			"policies",
 			"certifications",
 			"workforce",
@@ -196,6 +198,7 @@ register(
 		),
 		sections=(
 			"open_actions",
+			"alerts",
 			"policies",
 			"certifications",
 			"workforce",
@@ -232,6 +235,7 @@ register(
 		),
 		sections=(
 			"open_actions",
+			"alerts",
 			"policies",
 			"certifications",
 			"workforce",
@@ -258,7 +262,7 @@ register(
 			"pesticide handler protection, and the 300A log. The inspection that "
 			"follows a complaint or an injury."
 		),
-		sections=("open_actions", "policies", "certifications", "workforce", "training", "housing", "spray_records", "filings", "audits"),
+		sections=("open_actions", "alerts", "policies", "certifications", "workforce", "training", "housing", "spray_records", "filings", "audits"),
 		policy_categories=("Worker Safety", "Worker Training", "Housing"),
 		cert_types=("First Aid / CPR", "Applicator License", "Food Safety Training"),
 		audit_types=("OSHA", "ODA"),
@@ -281,7 +285,7 @@ register(
 			"licensing, and the housing an employer provided. What a wage claim or an "
 			"MSPA investigation asks for."
 		),
-		sections=("open_actions", "policies", "certifications", "workforce", "training", "housing", "traceability", "filings", "audits"),
+		sections=("open_actions", "alerts", "policies", "certifications", "workforce", "training", "housing", "traceability", "filings", "audits"),
 		policy_categories=("Worker Training", "Worker Safety", "Housing"),
 		# MSPA asks what the crew was told about the terms and conditions of
 		# employment, and an OR-OSHA-tagged safety orientation is the record that
@@ -303,7 +307,7 @@ register(
 			"pre-harvest intervals, and the drift conditions on the day. What a drift "
 			"complaint or a residue detection is investigated from."
 		),
-		sections=("open_actions", "policies", "certifications", "spray_records", "water", "workforce", "training", "filings", "audits"),
+		sections=("open_actions", "alerts", "policies", "certifications", "spray_records", "water", "workforce", "training", "filings", "audits"),
 		policy_categories=("Spray SOP", "Worker Training", "Water Testing"),
 		cert_types=("Applicator License",),
 		# 40 CFR 170.401/.501 worker and handler training, kept two years at the
@@ -324,7 +328,7 @@ register(
 			"The compliance posture a grant application asserts and a programme review "
 			"verifies. Certifications held, procedures in force, filings made."
 		),
-		sections=("open_actions", "policies", "certifications", "filings", "audits", "workforce", "training"),
+		sections=("open_actions", "alerts", "policies", "certifications", "filings", "audits", "workforce", "training"),
 		agencies=("USDA", "ODA", "IRS"),
 	)
 )
@@ -1096,8 +1100,137 @@ def _open_actions_section(spec: AuditPacketType, company: str, start: str, end: 
 	)
 
 
+def _alerts(spec: AuditPacketType, company: str, start: str, end: str, regime: str = "") -> dict:
+	"""What the compliance calendar still has open, scoped to this audit's regimes.
+
+	v0.19.2, AND IT IS THE SECTION MOST LIKELY TO BE QUESTIONED, so the argument
+	for it goes here rather than in a release note.
+
+	A packet asserts a compliant period. Putting the operation's own list of
+	outstanding items into it looks, at first glance, like handing an auditor the
+	prosecution's case. It is the opposite, for the same reason
+	`_open_actions_section` exists and for the reason the readiness gate is a
+	refusal rather than a warning: THE GATE ALREADY REFUSED THE PACKET IF ANY
+	CORRECTIVE ACTION FROM INSIDE THE PERIOD IS STILL OPEN. So on an ordinary
+	packet this section is not a confession — it is the operation demonstrating
+	that it knows what it owes, on a system that generated the list from its own
+	records rather than from somebody's memory the night before. An auditor's
+	question is never "do you have open items"; it is "do you know what they are".
+
+	SCOPED TO THE PACKET'S REGIMES, which is what keeps it honest in the other
+	direction. An EPA inspector is entitled to the WPS items and has no business
+	with the camp's detector schedule, exactly as the certificate section does not
+	hand a DOL auditor a GlobalGAP certificate. An audit type with no
+	`training_regimes` — the two unscoped bundles — gets everything, and the
+	section says which it did.
+
+	SNOOZED AND DISMISSED ITEMS ARE EXCLUDED. A dismissal is somebody's recorded
+	judgement that an item did not need doing, and a snooze is "not this week";
+	neither is an open obligation, and listing them would turn a disclosure into a
+	diary. What IS included is everything currently live, whatever its severity.
+
+	IT IS THE ONLY SECTION NOT SCOPED TO THE PERIOD, and the asymmetry is the
+	point rather than an oversight. Every other section is EVIDENCE ABOUT A
+	PERIOD — what was sprayed, who was trained, which cabins were walked. An open
+	alert is a fact about TODAY: an expired licence is expired now, whatever
+	quarter the packet covers. Filtering it by the packet's dates would produce a
+	list of what was outstanding last March, which is a different document and a
+	much less useful one — and on a properly closed period it would be empty
+	every time, which reads as an operation with nothing outstanding.
+	"""
+	if not compat.doctype_exists("Compliance Alert"):
+		return _section(
+			"Compliance calendar — open items",
+			"What the operation's own alert engine still has open for this audit.",
+			[],
+			("alert", "severity", "what", "due_date", "open_since", "regimes"),
+			absent=(
+				"This site has no Compliance Alert DocType, so the section is ABSENT rather than "
+				"empty — an empty list of open items reads as an operation with none."
+			),
+		)
+
+	from . import alerts as alert_engine
+	from . import training as training_records
+
+	wanted = [
+		key
+		for key in ([training_records.canon(regime)] if regime else list(spec.training_regimes))
+		if key
+	]
+
+	filters = {"dismissed": 0}
+	if company:
+		filters["company"] = company
+	rows = _rows(
+		"Compliance Alert",
+		filters,
+		(
+			"name",
+			"alert_type",
+			"severity",
+			"category",
+			"company",
+			"source_doctype",
+			"source_docname",
+			"alert_message",
+			"due_date",
+			"first_seen",
+			"snoozed_until",
+		),
+		order_by="due_date asc",
+		limit=SECTION_CAP * 2 + 1,
+	)
+
+	tags = alert_engine.regimes_for_alerts([row.get("name") for row in rows])
+	today = frappe.utils.today()
+	out = []
+	for row in rows:
+		snoozed = str(row.get("snoozed_until") or "")
+		if snoozed and snoozed >= today:
+			continue
+		found = tags.get(str(row.get("name")), [])
+		# By TOKEN. `"GlobalGAP"` contains `"GAP"`, and a substring match would put
+		# another scheme's open findings in front of a USDA GAP auditor.
+		if wanted and not any(key in found for key in wanted):
+			continue
+		out.append(
+			{
+				"alert": row.get("name"),
+				"severity": row.get("severity"),
+				"category": row.get("category"),
+				"what": row.get("alert_message"),
+				"source": f"{row.get('source_doctype') or ''} {row.get('source_docname') or ''}".strip(),
+				"due_date": str(row.get("due_date") or "") or None,
+				"open_since": str(row.get("first_seen") or "") or None,
+				"regimes": ", ".join(found),
+			}
+		)
+
+	scope = ", ".join(wanted) if wanted else "every regime, including items carrying no tag"
+	section = _section(
+		"Compliance calendar — open items",
+		(
+			f"Everything this operation's own alert engine currently has open for {scope}, "
+			"generated from the state of the records rather than compiled by hand. The gate "
+			"this packet passed already refused it over any open corrective action from inside "
+			"the period, so what is here is forward-looking work rather than unfinished "
+			"remediation — an operation that knows what it owes."
+		),
+		out,
+		("alert", "severity", "what", "due_date", "open_since", "regimes"),
+		absent=(
+			f"Nothing is open on the compliance calendar for {scope} as at {today}. Snoozed and "
+			"dismissed items are excluded by design: neither is an open obligation."
+		),
+	)
+	section["regimes_pulled"] = wanted or ["(every tagged regime)"]
+	return section
+
+
 _BUILDERS = {
 	"open_actions": _open_actions_section,
+	"alerts": _alerts,
 	"policies": _policies,
 	"certifications": _certifications,
 	"workforce": _workforce,
@@ -1224,6 +1357,12 @@ def build(
 	wearing a different hat from the one the packet is titled for, which in Oregon
 	is the ordinary case: the same ODA inspector runs a GAP audit one day and an
 	FDA-contracted FSMA inspection the next.
+
+	v0.19.2 MADE `regime` NARROW THE OPEN-ITEMS SECTION TOO, and that is the whole
+	of the change: the two regime-aware sections now answer to the same argument.
+	Before it, a packet narrowed to WPS carried WPS training records beside a
+	calendar section listing the camp's detector schedule, which is the mismatch
+	the argument exists to prevent.
 	"""
 	sections = []
 	for key in SECTION_ORDER:
@@ -1233,8 +1372,11 @@ def build(
 			# Only ever present on an overridden gate. On a clean packet there is
 			# nothing to disclose and a section saying "none" would be noise.
 			continue
-		if key == "training":
-			sections.append({"key": key, **_training(spec, company, start, end, regime)})
+		if key in ("training", "alerts"):
+			# The two sections that are ABOUT regimes rather than merely scoped by
+			# one. Everything else takes the audit type's own filters and does not
+			# know `regime` exists.
+			sections.append({"key": key, **_BUILDERS[key](spec, company, start, end, regime)})
 			continue
 		sections.append({"key": key, **_BUILDERS[key](spec, company, start, end)})
 
@@ -1266,7 +1408,14 @@ def build(
 		"generator": "erpnext_mcp",
 		"generator_version": __version__,
 		"produced_over_open_actions": bool(allow_open_actions),
+		# KEPT UNDER ITS v0.19.0 NAME as well as the new one. It scopes two
+		# sections now rather than only the training register, so
+		# `training_regime_override` has become the narrower word for the wider
+		# thing — but it is on every packet produced since v0.19.0, and a key
+		# renamed is a key that silently reads as None in whatever was consuming
+		# it. The two always hold the same value.
 		"training_regime_override": str(regime or "") or None,
+		"regime_override": str(regime or "") or None,
 	}
 
 

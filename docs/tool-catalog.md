@@ -5149,12 +5149,22 @@ what is late, worst first, grouped by category.
 | `days_ahead` | Only alerts due within this many days. **Overdue alerts are always shown**, because they were due in the past |
 | `category` | Certifications, Policies, Workforce, Housing, Water and Sanitation, Spray and Pesticides, Filings, Audits, Other |
 | `alert_type` | One rule's alerts |
+| `regime` | **v0.19.2.** Only alerts that are evidence for ONE audit: FSMA, GAP, GlobalGAP, PrimusGFS, NOP, OTCO, WPS, OR-OSHA, Internal, Other |
 | `include_snoozed` / `include_dismissed` | Default false. Snoozed alerts are hidden and COUNTED |
 | `as_of` | Read the calendar as of a date |
 
 Categories are chosen so a whole group can be cleared in one afternoon: every
 housing item is one walk round the camp, every certificate is one trip to an
 agency website.
+
+`regime` is the other axis, and it is the one an inspection is read along:
+"everything OR-OSHA will ask about in October" is one afternoon's work and
+"everything" is not. Matching is by TAG, never by substring — `GlobalGAP`
+contains `GAP`, and a substring match would put another scheme's findings in
+front of a USDA GAP auditor. An unrecognised value is **refused**, because an
+empty compliance calendar reads as a clean one. `Internal` means the
+operation's own standard: real work with a real due date and no outside
+auditor.
 
 It reports which rules cannot run on this site at all, because **an empty
 category is not the same as a clean one.**
@@ -5206,6 +5216,13 @@ and its source record and from nothing that changes daily, so tonight's sweep
 finds and refreshes what last night's wrote — and a snooze somebody set last week
 survives. A dismissal a PERSON made is never reopened.
 
+**`regime` (v0.19.2) runs only the rules that raise one audit's evidence** — for
+the morning before an inspection, when re-scanning every block's water is a
+minute nobody has. A rule it skips raises nothing **and dismisses nothing**: a
+narrowed sweep that cleared the rules it did not run would empty most of the
+calendar and look like progress. `rules_skipped` names each one, `rules_run`
+excludes them, and the reported counts are about that regime only.
+
 ## 153. `snooze_alert`
 
 MUTATING (off). Hides one alert until a date. **Not a dismissal:** the condition
@@ -5254,6 +5271,7 @@ Returns the file_url and the counts — never the bytes.
 | --- | --- |
 | `audit_type` | FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA, Other |
 | `period_start` / `period_end` | A period that has not finished is refused |
+| `regime` | Narrow the **training** and **open-items** sections to one scheme. Part of the idempotence key |
 | `output_format` | `pdf` (default) or `docx` |
 | `output_path` | ALSO write it under the site's private/files |
 | `stage_via_chunks` | Checkpoint the assembly. Defaults on above 2 MB |
@@ -5276,7 +5294,17 @@ bridge says the bridge is not installed and the traceability has to be supplied
 separately; a silently omitted section reads as an operation with nothing to
 declare.
 
-Idempotent by (audit_type, company, period).
+**It carries the open compliance-calendar items (v0.19.2)**, scoped to the same
+regimes as the training section, and that is a disclosure rather than a
+confession: the gate above has already refused the packet if any corrective
+action from inside the period is open, so what is left is forward-looking work —
+an operation demonstrating that it knows what it owes, from a list its own
+records generated rather than somebody's memory the night before. It is the one
+section NOT scoped to the period, because an expired licence is expired now
+whatever quarter the packet covers. Snoozed and dismissed items are excluded:
+neither is an open obligation.
+
+Idempotent by (audit_type, company, period, regime).
 
 ### The Compliance Command Center
 
@@ -5997,7 +6025,10 @@ alternative, and hiding a spraying task from somebody because their title said
 calendar once with no company would return every entity on the site. An account
 with no Company User Permission is refused rather than shown everything under a
 name like that one, and an entity whose calendar could not be read is named in
-`failed_entities` rather than silently contributing nothing.
+`failed_entities` rather than silently contributing nothing. It forwards
+`regime` (v0.19.2) like every other filter, and validates it BEFORE the loop —
+inside it, every exception becomes a named per-entity failure, which is right for
+a broken register and exactly wrong for a mistyped argument.
 
 ## 196–198. `claim_task_via_mobile`, `start_task_via_mobile`, `complete_task_via_mobile`
 
@@ -6163,6 +6194,34 @@ type's own regimes (GAP → GAP + WPS; OSHA → OR-OSHA + WPS; EPA → WPS; FSMA
 idempotence key** so a narrowed packet never silently overwrites a full one.
 `generate_compliance_packet` gained `regime`, which staples a training annex to an
 accounting packet over that packet's own period.
+
+## v0.19.2 — regimes as records, curricula as records
+
+`Compliance Alert` gained a **`regime`** Table MultiSelect over a new
+`Compliance Regime` master, written by the sweep rather than typed: ten rules
+carry a constant (an overdue cabin inspection is an OR-OSHA item whoever is
+asking) and the two that fire on many kinds of thing — certificates and training
+— tag each alert from the RECORD, because an applicator licence is WPS evidence
+and a GlobalGAP certificate is not. `get_compliance_calendar`,
+`list_compliance_calendar_for_me` and `refresh_compliance_alerts` all take
+`regime`.
+
+The vocabulary did not move. `erpnext_mcp/training.py` still holds it, the master
+is seeded FROM it on every migrate, and `Employee Training Record.regimes` is
+still a delimited tag list — a child table and a comma-separated column that
+disagreed about whether a row carries WPS is the failure that module exists to
+prevent. Two tokens were added: **`OTCO`** (Oregon Tilth, the certifier that
+holds the organic file, as against NOP the rule) and **`Internal`** (the
+operation's own standard — real work, real due date, nobody coming to inspect).
+
+`Employee Training Record.training_type` became a **Link to `Training Type`**,
+migrated from the free text already in the column: the master names itself from
+that text, so the ordinary record is not rewritten at all. It is still not a
+Select — `record_training` creates a curriculum from free text the first time
+somebody files a course this site has not run, and says so in the result. The
+new curriculum takes the regimes its NAME implies rather than the session's,
+because the record says what one afternoon covered and the curriculum says what
+the course normally answers.
 
 ---
 

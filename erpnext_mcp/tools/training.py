@@ -159,11 +159,30 @@ def record_training(args: dict) -> ToolResult:
 		DOCTYPE, "training_source", as_str(args, "training_source") or "Internal", "training_source"
 	)
 
+	# v0.19.2. `training_type` is a Link now, and this accepts EITHER an existing
+	# Training Type or free text naming a course this site has not run before —
+	# which is auto-created rather than refused. The controller would do this
+	# anyway (link validation runs after `validate`, so it has to); doing it here
+	# as well is what lets the result SAY a master was created, instead of a
+	# curriculum quietly appearing on the site because somebody filed a training.
+	#
+	# THE NEW TYPE DOES NOT INHERIT THIS CALL'S `regimes`, and that is the whole
+	# distinction between the two records. This call says what ONE afternoon
+	# covered; the curriculum says what the course normally answers. A heat session
+	# that a crew leader also used to cover hygiene is tagged GAP on the record and
+	# should not make "Heat Illness Prevention" a GAP curriculum for every future
+	# session of it. So the type takes what its NAME implies, and somebody who
+	# disagrees corrects it once on the type rather than on thirty records.
+	try:
+		curriculum = training.ensure_type(as_str(args, "training_type", required=True))
+	except ValueError as exc:
+		raise ToolError(f"{exc} Nothing was created.") from None
+
 	doc = frappe.new_doc(DOCTYPE)
 	doc.employee = person
 	doc.employee_name = row.get("employee_name") or person
 	doc.company = company
-	doc.training_type = as_str(args, "training_type", required=True)
+	doc.training_type = curriculum["training_type"]
 	doc.training_source = source
 	doc.provider = as_str(args, "provider")
 	doc.completed_date = completed
@@ -188,6 +207,8 @@ def record_training(args: dict) -> ToolResult:
 		"fsma_112_161_gaps": gaps,
 		"supersedes": superseded,
 		"packets_that_will_pull_it": regimes,
+		"training_type_created": bool(curriculum.get("created")),
+		"training_type_regimes": curriculum.get("regimes") or [],
 		"note": (
 			f"Tagged for {', '.join(regimes)}, so generate_audit_packet pulls it into "
 			f"{'those packets' if len(regimes) > 1 else 'that packet'} and into no others. "
@@ -206,6 +227,23 @@ def record_training(args: dict) -> ToolResult:
 			"anyway — a training that happened and was recorded imperfectly is better evidence "
 			"than no record at all — but each one is a finding FDA writes up even where the "
 			"underlying activity was fine."
+		)
+	if curriculum.get("created"):
+		data["training_type_note"] = (
+			f"{curriculum['training_type']!r} was not a curriculum on this site, so it was created "
+			f"as a Training Type and tagged {', '.join(curriculum['regimes']) or '(nothing)'} from "
+			"its name. THAT GUESS IS ABOUT THE COURSE, NOT ABOUT THIS SESSION — this record "
+			f"carries {', '.join(regimes)}, which is what was actually covered, and nothing here "
+			"changed it. If the curriculum normally answers to something else, correct it once on "
+			"the Training Type and every future session inherits the correction."
+		)
+	elif curriculum.get("regimes") and set(curriculum["regimes"]) != set(regimes):
+		data["training_type_note"] = (
+			f"{curriculum['training_type']!r} normally answers to "
+			f"{', '.join(curriculum['regimes'])} and this session is tagged {', '.join(regimes)}. "
+			"Recorded as given: the curriculum says what the course covers and the record says "
+			"what this afternoon covered, and a session that ran short is entitled to say so. "
+			"Worth a second look if it was not deliberate."
 		)
 	if expires is None:
 		data["expiry_note"] = (
@@ -287,8 +325,7 @@ def list_trainings(args: dict) -> ToolResult:
 	regime = as_str(args, "regime")
 	if regime and not training.canon(regime):
 		raise ToolError(
-			f"regime {regime!r} is not one this app knows. The eight are: "
-			f"{', '.join(training.REGIMES)}."
+			f"regime {regime!r} is not one this app knows. {training.vocabulary_note()}"
 		)
 
 	rows = training.rows(filters, limit=max(limit * 4, limit))

@@ -156,7 +156,8 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 
 	def test_every_other_doctype_is_left_to_frappe_because_it_links_to_company(self):
 		"""The two scoped here are the ONLY two without a Link to Company. If a
-		later release adds a third, this fails and somebody has to decide."""
+		later release adds one that should have been scoped, this fails and
+		somebody has to decide."""
 		unscoped = []
 		for doctype in _app_doctypes():
 			meta = _meta(doctype)
@@ -169,16 +170,34 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 			]
 			if not links and doctype not in permissions.scoped_doctypes():
 				unscoped.append(doctype)
-		# These three carry no entity because they legitimately have none: a
-		# system log and two upload staging tables. `Mobile Access Grant` is NOT
-		# among them — it carries `preferred_company`, a Link to Company, so
-		# Frappe scopes it like everything else. That is worth knowing, because
-		# the audit that found this hole originally grepped for a field NAMED
-		# "company" and would have wrongly flagged the grant too; what matters is
-		# the field's TYPE, not its name.
+		# These carry no entity because they legitimately have none: a system log,
+		# two upload staging tables, and — from v0.19.2 — two site-wide VOCABULARY
+		# masters. `Mobile Access Grant` is NOT among them: it carries
+		# `preferred_company`, a Link to Company, so Frappe scopes it like
+		# everything else. That is worth knowing, because the audit that found this
+		# hole originally grepped for a field NAMED "company" and would have
+		# wrongly flagged the grant too; what matters is the field's TYPE, not its
+		# name.
+		#
+		# THE TWO v0.19.2 ADDITIONS ARE DELIBERATE AND ARE NOT A HOLE. A Compliance
+		# Regime is the word "WPS" and a Training Type is the course "OSHA 30";
+		# neither belongs to an entity, both are seeded identically on every site,
+		# and neither carries one fact about anybody's operation. Scoping them per
+		# company would mean a user of entity A being unable to READ THE NAME of
+		# the regime that entity B's records are tagged with — which would break
+		# every packet and every filter without protecting anything, since there is
+		# nothing on these rows to protect. The records that DO carry the operating
+		# facts — Employee Training Record, Compliance Alert — link to Company and
+		# are scoped by Frappe exactly as before.
 		self.assertEqual(
 			sorted(unscoped),
-			["MCP Action Log", "Staged File Chunk", "Staged File Upload Session"],
+			[
+				"Compliance Regime",
+				"MCP Action Log",
+				"Staged File Chunk",
+				"Staged File Upload Session",
+				"Training Type",
+			],
 		)
 
 

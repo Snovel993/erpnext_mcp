@@ -5709,6 +5709,17 @@ TOOLS = {
 				"Pesticides, Filings, Audits or Other.",
 			),
 			"alert_type": _field(_STRING, "One rule's alerts only. list_compliance_rules names them."),
+			"regime": _field(
+				_STRING,
+				"Only alerts that are evidence for ONE audit: FSMA, GAP, GlobalGAP, PrimusGFS, "
+				"NOP, OTCO, WPS, OR-OSHA, Internal or Other. This is how a calendar is read one "
+				"inspection at a time — 'everything OR-OSHA will ask about in October' is one "
+				"afternoon's work and 'everything' is not. Matching is by TAG, never by substring: "
+				"'GlobalGAP' contains 'GAP', and a substring match would put another scheme's "
+				"findings in front of a USDA GAP auditor. An unrecognised value is REFUSED rather "
+				"than ignored, because an empty compliance calendar reads as a clean one. "
+				"`Internal` means the operation's own standard — real work with no outside auditor.",
+			),
 			"include_snoozed": _field(_BOOLEAN, "Show snoozed alerts too. Default false."),
 			"include_dismissed": _field(_BOOLEAN, "Show dismissed alerts too. Default false."),
 			"as_of": _field(_STRING, "Read the calendar as of this date, YYYY-MM-DD. Defaults to today."),
@@ -5772,6 +5783,15 @@ TOOLS = {
 			"company": _COMPANY,
 			"as_of": _field(_STRING, "Evaluate every rule as of this date, YYYY-MM-DD. Defaults to today."),
 			"dry_run": _field(_BOOLEAN, "Report what would change and write nothing. Default false."),
+			"regime": _field(
+				_STRING,
+				"Run ONLY the rules that raise this audit's evidence: FSMA, GAP, GlobalGAP, "
+				"PrimusGFS, NOP, OTCO, WPS, OR-OSHA, Internal or Other. For the morning before an "
+				"inspection, when re-scanning every block's water is a minute nobody has. A rule "
+				"it skips raises nothing AND DISMISSES NOTHING — a narrowed sweep that cleared the "
+				"rules it did not run would empty most of the calendar and look like progress — so "
+				"the counts it reports are about that regime only. `rules_skipped` names each one.",
+			),
 		},
 		mutating=True,
 		idempotent=True,
@@ -5907,6 +5927,13 @@ TOOLS = {
 		"answers and in none it does not. `regime` narrows it further. Records with "
 		"no trainee signature or no §112.161(b) supervisor review are DISCLOSED in "
 		"the section rather than filtered out of it.\n\n"
+		"IT ALSO CARRIES THE OPEN COMPLIANCE-CALENDAR ITEMS (v0.19.2), scoped the "
+		"same way, and that is a disclosure rather than a confession: the gate above "
+		"has already refused the packet if any corrective action from inside the "
+		"period is open, so what is left is forward-looking work — an operation "
+		"demonstrating that it knows what it owes, from a list its own records "
+		"generated rather than somebody's memory the night before. Snoozed and "
+		"dismissed items are excluded; neither is an open obligation.\n\n"
 		"PDF by default; DOCX available. Supports dry_run.",
 		{
 			"audit_type": _field(
@@ -5915,9 +5942,9 @@ TOOLS = {
 			"company": _COMPANY,
 			"regime": _field(
 				_STRING,
-				"Narrow the WORKER TRAINING section to one scheme's records: FSMA, GAP, "
-				"GlobalGAP, PrimusGFS, NOP, WPS, OR-OSHA or Other. Every other section is "
-				"unchanged. Each audit type already pulls its own regimes — a GAP packet takes "
+				"Narrow the WORKER TRAINING and OPEN-ITEMS sections to one scheme: FSMA, GAP, "
+				"GlobalGAP, PrimusGFS, NOP, OTCO, WPS, OR-OSHA, Internal or Other. Every other "
+				"section is unchanged. Each audit type already pulls its own regimes — a GAP packet takes "
 				"GAP and WPS training, an OSHA packet takes OR-OSHA and WPS — so this is for "
 				"the buyer who asks for one scheme by name, and for the inspector wearing a "
 				"different hat from the packet's title, which in Oregon is the ordinary case: "
@@ -6858,6 +6885,12 @@ TOOLS = {
 			"days_ahead": _field(_INTEGER, "Only what is due inside this many days. Overdue is never hidden."),
 			"category": _field(_STRING, "One alert category."),
 			"alert_type": _field(_STRING, "One rule, e.g. 'certification_expiring'."),
+			"regime": _field(
+				_STRING,
+				"Only alerts that are evidence for one audit: FSMA, GAP, GlobalGAP, PrimusGFS, "
+				"NOP, OTCO, WPS, OR-OSHA, Internal or Other. Applied to every entity the caller "
+				"can see, and refused by name if it is not one this app knows.",
+			),
 			"as_of": _field(_STRING, "Evaluate as of this date, YYYY-MM-DD. Defaults to today."),
 			"user": _field(_STRING, "Only when the request carries no per-user credential."),
 			"limit": _LIMIT,
@@ -7342,7 +7375,11 @@ TOOLS = {
 				_STRING,
 				"What it was, in the words the certificate or sign-in sheet uses: 'PSA Grower "
 				"Training', 'WPS Handler Training', 'Heat Illness Prevention', 'OSHA 30', "
-				"'Applicator License Renewal'.",
+				"'Applicator License Renewal'. Accepts an existing Training Type OR free text: a "
+				"course this site has not run before is CREATED as a Training Type rather than "
+				"refused, tagged with the regimes its name implies, and the result says so. "
+				"Matching is case- and space-insensitive, so 'wps handler training' finds the "
+				"existing curriculum instead of splitting its history across two masters.",
 			),
 			"completed_date": _field(
 				_STRING,
@@ -7352,7 +7389,10 @@ TOOLS = {
 			"regimes": _field(
 				_STRING_ARRAY,
 				"Which audits this counts towards. One or more of FSMA, GAP, GlobalGAP, "
-				"PrimusGFS, NOP, WPS, OR-OSHA, Other. A comma-separated string is accepted too. "
+				"PrimusGFS, NOP, OTCO, WPS, OR-OSHA, Internal, Other. A comma-separated string is "
+				"accepted too. These describe THIS SESSION, not the curriculum: a heat session "
+				"that ran out of time before the emergency-response topic did not satisfy the "
+				"heat rule that day, and the record is entitled to say so. "
 				"REQUIRED: an untagged record appears in no packet. A near-miss ('OSHA' for "
 				"'OR-OSHA') is refused rather than corrected, because it would file the evidence "
 				"where nothing looks for it.",

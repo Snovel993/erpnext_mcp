@@ -10,6 +10,7 @@ indirection — a list is a thing somebody forgets to add to.
 from . import rules  # noqa: F401 - imported for its side effect: every rule registers itself
 from .base import (  # noqa: F401
 	ALERT_DOCTYPE,
+	REGIME_FIELD,
 	RULE_CAP,
 	RULES,
 	SEVERITY_CRITICAL,
@@ -19,10 +20,13 @@ from .base import (  # noqa: F401
 	Observation,
 	Rule,
 	alert_key,
+	alert_matches_regime,
 	days_since,
 	days_until,
 	names,
 	refresh_compliance_alerts,
+	regimes_for_alerts,
+	regimes_of,
 	register,
 	severity_at_least,
 	sweep,

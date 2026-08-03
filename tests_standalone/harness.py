@@ -968,6 +968,10 @@ APP_DOCTYPES = {
 	"Mobile Access Grant": "mobile_access_grant",
 	# ── v0.19.0: the training register ──────────────────────────────────────
 	"Employee Training Record": "employee_training_record",
+	# ── v0.19.2: the regime vocabulary and the curriculum master ─────────────
+	"Compliance Regime": "compliance_regime",
+	"Compliance Regime Link": "compliance_regime_link",
+	"Training Type": "training_type",
 }
 
 
@@ -1359,6 +1363,13 @@ CHILD_TABLES = {
 	("Housing Inspection", "photos"): "Farm Task Evidence",
 	("Detector Test", "photos"): "Farm Task Evidence",
 	("Water Test", "sample_photos"): "Farm Task Evidence",
+	# v0.19.2. Two Table MultiSelects over one child doctype, which is the same
+	# one-shape-many-parents case as Farm Task Evidence above. Modelling both is
+	# what makes `training.rows_for_parents` — which filters on `parenttype` —
+	# actually testable: a double that knew only the alert side would report every
+	# Training Type as untagged and call the packet filter a pass.
+	("Compliance Alert", "regime"): "Compliance Regime Link",
+	("Training Type", "regimes"): "Compliance Regime Link",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -2579,6 +2590,13 @@ CHILD_TABLE_SOURCES = {
 	# through `frappe.db.get_all` by `roles.py` exactly as they are on a site.
 	"Has Role": (("User", "roles"),),
 	"DocPerm": (("DocType", "permissions"),),
+	# v0.19.2. `training.rows_for_parents` queries this child doctype directly,
+	# filtering on `parenttype` — so both parents have to be flattened or the
+	# filter would be matching against half the table and passing.
+	"Compliance Regime Link": (
+		("Compliance Alert", "regime"),
+		("Training Type", "regimes"),
+	),
 }
 
 
@@ -3303,6 +3321,32 @@ def authenticated_user(headers: dict) -> str:
 	return "Guest"
 
 
+def seed_compliance_regimes() -> None:
+	"""Put the ten `Compliance Regime` rows on the fake site, as a migrate does.
+
+	v0.19.2. NOT A CONVENIENCE — IT IS WHAT A REAL SITE HAS. `install.after_migrate`
+	seeds this table on every migrate, so a bench that can insert a Compliance
+	Alert has already got it. Modelling that here is what stops the double from
+	being EASIER than a site: `Compliance Alert.regime` and `Training Type.regimes`
+	are Table MultiSelects over real Links, the double validates Links faithfully
+	(see `_validate_links`), and a suite that skipped the seed would have every
+	regime-tagged insert fail with `Could not find Regime` — a failure that says
+	nothing about the code and everything about the fixture.
+
+	The `Training Type` seeds are deliberately NOT here. Those are ten curricula an
+	operation is offered, not something the app needs to function: `ensure_type`
+	creates one from free text on demand, which is the path most tests exercise and
+	the one worth having under test. `TheTrainingTypeSeeder` covers the seeder
+	itself.
+	"""
+	from erpnext_mcp import training
+
+	try:
+		training.seed_regimes()
+	except Exception:  # pragma: no cover - a test that deliberately dropped the DocType
+		pass
+
+
 class MCPTestCase(unittest.TestCase):
 	"""Resets the fake site, and gives every test a configured-but-off server."""
 
@@ -3319,6 +3363,7 @@ class MCPTestCase(unittest.TestCase):
 		INSTALLED_DOCTYPES.update(set(ERPNEXT_SCHEMA) | set(APP_DOCTYPES))
 		frappe.local.request = None
 		frappe.local.session = FrappeDict(user="Administrator", data=FrappeDict())
+		seed_compliance_regimes()
 		self.configure()
 
 	def configure(self, **overrides):

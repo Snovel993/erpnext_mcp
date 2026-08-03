@@ -65,9 +65,13 @@ from dataclasses import dataclass
 
 import frappe
 
+from .. import training as regimes_vocabulary
 from ..compat import doctype_exists
 
 ALERT_DOCTYPE = "Compliance Alert"
+
+#: The Table MultiSelect on Compliance Alert that carries regime tags.
+REGIME_FIELD = "regime"
 
 SEVERITY_INFO = "Info"
 SEVERITY_WARNING = "Warning"
@@ -106,6 +110,19 @@ class Observation:
 	#: Overrides the rule's category. Used where one rule covers two kinds of
 	#: thing — a certificate that is a licence is Workforce, not Certifications.
 	category: str = ""
+	#: Overrides the rule's `regimes`, per observation. `None` means "the rule's",
+	#: which is the ordinary case; an EMPTY LIST is a deliberate "this one answers
+	#: to nothing", and the two are different answers.
+	#:
+	#: Two rules need this and neither could be served by a constant on the rule.
+	#: `certification_expiring` fires on certificates of eleven different types and
+	#: an applicator licence is WPS evidence while a GlobalGAP certificate is not,
+	#: so the regime is a property of the ROW. `training_expiring` copies the tags
+	#: off the training record itself, which is the only honest source: the record
+	#: says what that afternoon actually covered, and inheriting from the
+	#: curriculum would produce an alert claiming a session satisfied a regime it
+	#: ran out of time before reaching.
+	regimes: list = None
 
 
 @dataclass(frozen=True)
@@ -132,6 +149,19 @@ class Rule:
 	requires: tuple = ()
 	#: Framework(s) this rule serves, for the docs and the calendar readout.
 	framework: str = ""
+	#: Which audits an alert from this rule is evidence for, as canonical regime
+	#: tokens. v0.19.2, and it is what lets a calendar be read one audit at a time
+	#: — "everything OR-OSHA will ask about in October" is a different afternoon's
+	#: work from "everything", and before this the only way to get it was to know
+	#: which of twelve rule names belonged to which agency.
+	#:
+	#: `framework` above is PROSE and this is a KEY, which is why both exist: the
+	#: prose names the regulation with its citation for somebody reading the rule,
+	#: and the key is what a filter and a packet match on. A rule that answers to
+	#: no outside body carries `("Internal",)` rather than nothing, because an
+	#: untagged alert is invisible to every regime filter, and silently invisible
+	#: is the one thing a compliance calendar must not be.
+	regimes: tuple = ("Internal",)
 
 	def is_available(self) -> bool:
 		try:
@@ -153,6 +183,7 @@ class Rule:
 			"purpose": self.purpose,
 			"kairotic_gate": self.kairotic_gate,
 			"framework": self.framework,
+			"regimes": list(self.regimes),
 			"requires": list(self.requires),
 			"available": self.is_available(),
 		}
@@ -169,6 +200,19 @@ def register(rule: Rule) -> Rule:
 		raise RuntimeError(
 			f"compliance rule {rule.key!r} has no kairotic_gate. Say what state makes it ripe, "
 			"or it is a calendar reminder rather than a compliance rule."
+		)
+	# CHECKED AT IMPORT TIME, LIKE THE GATE ABOVE. A rule tagged 'OSHA' where the
+	# vocabulary says 'OR-OSHA' would raise alerts that no OR-OSHA filter and no
+	# OR-OSHA packet ever sees — evidence that is present, correct and invisible,
+	# which is the worst of the three ways to be wrong. Failing on import means it
+	# cannot ship; failing at sweep time would mean it ships and goes quiet.
+	unknown = [
+		tag for tag in (rule.regimes or ()) if not regimes_vocabulary.canon(tag)
+	]
+	if unknown:
+		raise RuntimeError(
+			f"compliance rule {rule.key!r} names regime(s) {', '.join(repr(tag) for tag in unknown)}, "
+			f"which are not in the vocabulary. {regimes_vocabulary.vocabulary_note()}"
 		)
 	RULES[rule.key] = rule
 	return rule
@@ -225,7 +269,9 @@ def days_since(today: str, target) -> int | None:
 
 
 # ── the sweep ───────────────────────────────────────────────────────────────
-def refresh_compliance_alerts(company: str = "", today: str = "", dry_run: bool = False) -> dict:
+def refresh_compliance_alerts(
+	company: str = "", today: str = "", dry_run: bool = False, regime: str = ""
+) -> dict:
 	"""Run every available rule and reconcile the Compliance Alert table to it.
 
 	This is the scheduler's entry point and the `refresh_compliance_alerts` tool's
@@ -246,11 +292,26 @@ def refresh_compliance_alerts(company: str = "", today: str = "", dry_run: bool 
 	its doctypes are absent auto-dismisses nothing, which is the only safe reading
 	— "farm_precision_ag was uninstalled this afternoon" is not evidence that
 	anybody performed a water test.
+
+	`regime` (v0.19.2) RUNS ONLY THE RULES THAT ANSWER TO ONE AUDIT. It is for the
+	morning before an inspection, when the question is "is the OR-OSHA picture
+	current" and re-scanning every block's water is a minute nobody has. A rule it
+	skips is skipped in the same sense as one whose doctypes are missing: it raises
+	nothing AND DISMISSES NOTHING, which is what makes a narrowed sweep safe. A
+	filtered run that auto-dismissed the rules it did not run would clear most of
+	the calendar and call it progress.
+
+	It matches on `Rule.regimes`, so the two per-row rules — certificates and
+	training — run whenever their UNION contains the regime, and then tag each
+	alert from the record. A WPS sweep therefore rescans every certificate and
+	keeps the applicator licences.
 	"""
 	today = today or frappe.utils.today()
+	wanted = regimes_vocabulary.canon(regime) if regime else ""
 	report = {
 		"today": today,
 		"company": company or None,
+		"regime": wanted or None,
 		"dry_run": bool(dry_run),
 		"created": 0,
 		"refreshed": 0,
@@ -277,6 +338,22 @@ def refresh_compliance_alerts(company: str = "", today: str = "", dry_run: bool 
 
 	for key in names():
 		rule = RULES[key]
+		if wanted and wanted not in regimes_vocabulary.parse(rule.regimes):
+			report["rules_skipped"].append(
+				{
+					"alert_type": key,
+					"title": rule.title,
+					"regimes": list(rule.regimes),
+					"reason": (
+						f"this rule does not raise {wanted} evidence, and the sweep was narrowed to "
+						f"{wanted}. It raised nothing AND DISMISSED NOTHING — the alerts it owns are "
+						"exactly as they were, because a narrowed sweep that cleared the rules it "
+						"did not run would empty most of the calendar and look like progress. Run "
+						"it without `regime` for the whole picture."
+					),
+				}
+			)
+			continue
 		if not rule.is_available():
 			report["rules_skipped"].append(
 				{
@@ -301,6 +378,10 @@ def refresh_compliance_alerts(company: str = "", today: str = "", dry_run: bool 
 		{entry["alert_type"] for entry in report["alerts"]}
 		| {key for key in names() if RULES[key].is_available()}
 		- {entry["alert_type"] for entry in report["rules_failed"]}
+		# A rule the `regime` filter skipped did not run, and saying it did would
+		# make a narrowed sweep read as a full one in the very report an operator
+		# checks to find out whether it was.
+		- {entry["alert_type"] for entry in report["rules_skipped"]}
 	)
 	return report
 
@@ -399,6 +480,34 @@ def _existing_alerts(alert_type: str, company: str) -> dict:
 	return {str(row["name"]): dict(row) for row in rows or []}
 
 
+def regimes_of(observation: Observation, rule: Rule) -> list:
+	"""What this one alert answers to: the observation's tags, else the rule's.
+
+	`None` on the observation means "whatever the rule says", which is the
+	ordinary case. An EMPTY LIST means the rule looked and found nothing — a
+	training record carrying no regime tag produces an alert carrying none either,
+	and inventing one so the row is not bare would be this app asserting evidence
+	the record does not support.
+	"""
+	source = rule.regimes if observation.regimes is None else observation.regimes
+	return regimes_vocabulary.parse(source)
+
+
+def _write_regimes(doc, observation: Observation, rule: Rule) -> None:
+	"""Set the alert's regime rows. Never raises.
+
+	Wrapped because this is the ONE part of an upsert that touches a doctype the
+	sweep cannot assume: a site mid-upgrade has `Compliance Alert` and not yet
+	`Compliance Regime Link`, and an alert that is raised with no tag is very much
+	better than a sweep that stops raising alerts. The tags come back on the next
+	run after the migrate, because the sweep refreshes every alert it observes.
+	"""
+	try:
+		regimes_vocabulary.set_rows(doc, REGIME_FIELD, regimes_of(observation, rule))
+	except Exception:  # pragma: no cover - a site mid-migration
+		pass
+
+
 def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry_run: bool) -> str:
 	"""Create, refresh or reopen one alert. Returns which of the three it was."""
 	category = observation.category or rule.category
@@ -417,6 +526,7 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 			doc.due_date = observation.due_date or None
 			doc.first_seen = today
 			doc.last_refreshed = frappe.utils.now()
+			_write_regimes(doc, observation, rule)
 			doc.insert(ignore_permissions=True)
 		return "created"
 
@@ -431,6 +541,12 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 	doc.alert_message = observation.message
 	doc.due_date = observation.due_date or None
 	doc.last_refreshed = frappe.utils.now()
+	# REWRITTEN ON EVERY REFRESH, not only on create. A rule retagged in a release
+	# has to reach the alerts already on the site, and the alternative — tags fixed
+	# at the moment an alert was first raised — would leave an operation's oldest
+	# and most chronic items permanently outside the filter that was built to find
+	# them. It is derived data; nothing a person set is stored here.
+	_write_regimes(doc, observation, rule)
 	# `first_seen` is deliberately not touched. An alert open four months is
 	# evidence of four months, and resetting it would make a chronic problem look
 	# new every morning — see the module docstring.
@@ -445,6 +561,29 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 		doc.dismissed_reason = None
 	doc.save(ignore_permissions=True)
 	return "reopened" if reopening else "refreshed"
+
+
+def regimes_for_alerts(names) -> dict:
+	"""`{alert docname: [regime tokens]}` for a batch of alerts, in one query.
+
+	The read side of `_write_regimes`. Every caller that filters a calendar by
+	regime goes through this rather than fetching child rows itself, so there is
+	one place that knows the alert's tags live on a child table — and one place to
+	change if they ever stop.
+	"""
+	return regimes_vocabulary.rows_for_parents(ALERT_DOCTYPE, names, REGIME_FIELD)
+
+
+def alert_matches_regime(tags, wanted: str) -> bool:
+	"""Does an alert carrying `tags` belong in a `wanted` packet? By TOKEN.
+
+	Substring matching is the bug this cannot be allowed to have: `"GlobalGAP"`
+	contains `"GAP"`, and a GAP filter that matched it would put a different
+	scheme's findings in front of a USDA auditor. Same rule, same reason, as
+	`training.matches`.
+	"""
+	target = regimes_vocabulary.canon(wanted)
+	return bool(target) and target in regimes_vocabulary.parse(tags)
 
 
 def _auto_dismiss(key: str) -> None:

@@ -38,6 +38,7 @@ would destroy the more valuable half of the record.
 import frappe
 
 from .. import alerts, compat, dashboard
+from .. import training as regimes_vocabulary
 from ..args import as_bool, as_choice, as_date, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
@@ -90,7 +91,68 @@ def _company(args: dict) -> str | None:
 	return resolve_company(as_str(args, "company"), required=False)
 
 
-def _describe(row: dict, today: str) -> dict:
+def validate_regime(args: dict) -> str:
+	"""Public name for `_wanted_regime`, so a wrapper can check before it loops.
+
+	`list_compliance_calendar_for_me` calls one calendar per entity inside a
+	try/except that turns any exception into a named per-entity failure — right
+	for a broken register, wrong for a mistyped argument. Checking here first is
+	what makes the difference between "your regime is not one this app knows" and
+	three failures with an empty calendar under them.
+	"""
+	return _wanted_regime(args)
+
+
+def _wanted_regime(args: dict) -> str:
+	"""The `regime` argument in canonical spelling, or "". Refuses a near-miss.
+
+	REFUSED RATHER THAN IGNORED. A filter nobody understood is a filter that
+	returns an empty calendar, and an empty compliance calendar reads as a clean
+	one — which is the single most expensive way for this tool to be wrong.
+	"""
+	regime = as_str(args, "regime")
+	if not regime:
+		return ""
+	found = regimes_vocabulary.canon(regime)
+	if not found:
+		raise ToolError(
+			f"regime {regime!r} is not one this app knows. "
+			f"{regimes_vocabulary.vocabulary_note()} Filtering on an unrecognised regime would "
+			"return an empty calendar, and an empty calendar reads as a clean one."
+		)
+	return found
+
+
+def _regimes_of(row: dict, rule, fetched: list = None) -> list:
+	"""Which audits one alert answers to, from whichever source actually has it.
+
+	Three sources, in descending order of how much they know, because the callers
+	of `_describe` arrive with three different shapes of row:
+
+	  1. `fetched` — the batch read of child rows a list view does once for five
+	     hundred alerts rather than five hundred times.
+	  2. the row itself, when it came from `doc.as_dict()` and therefore carries
+	     its own `regime` table. An empty list here is a real answer: this alert
+	     is tagged with nothing.
+	  3. the RULE's tags, for a site whose `Compliance Regime Link` DocType is not
+	     there at all — i.e. one that has not run `bench migrate` since v0.19.2.
+
+	The third is a fallback and NOT a default. Where the child table exists it is
+	authoritative, empty rows included: an alert with no tags is an alert tagged
+	with nothing, which is exactly what an untagged training record's alert should
+	say. Falling back to the rule in that case would be worse than useless on the
+	two rules that tag per row, since it would report the whole union — every
+	certificate alert claiming to be evidence for nine regimes at once.
+	"""
+	if fetched is not None:
+		return list(fetched)
+	own = row.get(alerts.REGIME_FIELD)
+	if own is not None:
+		return regimes_vocabulary.from_rows(own)
+	return list(rule.regimes) if rule else []
+
+
+def _describe(row: dict, today: str, regimes: list = None) -> dict:
 	due = str(row.get("due_date") or "") or None
 	snoozed = str(row.get("snoozed_until") or "") or None
 	remaining = None
@@ -106,6 +168,7 @@ def _describe(row: dict, today: str) -> dict:
 		"title": rule.title if rule else None,
 		"severity": row.get("severity") or "Warning",
 		"category": row.get("category") or "Other",
+		"regimes": _regimes_of(row, rule, regimes),
 		"company": row.get("company") or None,
 		"source_doctype": row.get("source_doctype") or None,
 		"source_docname": row.get("source_docname") or None,
@@ -184,6 +247,7 @@ def get_compliance_calendar(args: dict) -> ToolResult:
 	days_ahead = as_int(args, "days_ahead")
 	include_snoozed = as_bool(args, "include_snoozed", False)
 	include_dismissed = as_bool(args, "include_dismissed", False)
+	regime = _wanted_regime(args)
 
 	filters = {}
 	if company:
@@ -197,14 +261,41 @@ def get_compliance_calendar(args: dict) -> ToolResult:
 	if category:
 		filters["category"] = as_choice(ALERT, "category", category, "category")
 
+	limit = min(as_limit(args), CALENDAR_CAP)
 	rows = frappe.db.get_all(
 		ALERT,
 		filters=filters,
 		fields=compat.existing_fields(ALERT, _ALERT_FIELDS),
 		order_by="due_date asc",
-		limit=min(as_limit(args), CALENDAR_CAP),
+		# A regime filter runs in Python (see below), so the fetch has to be able
+		# to over-read: asking for `limit` rows and then discarding the ones that
+		# do not carry the regime would return fewer than the caller asked for and
+		# call it the whole answer. Bounded by the cap either way.
+		limit=min(limit * 4, CALENDAR_CAP) if regime else limit,
 	)
-	described = [_describe(dict(row), today) for row in rows]
+	# ONE batch read of the child rows, not one per alert. The tags are then
+	# matched by TOKEN rather than by substring, which is not fussiness: a `LIKE
+	# '%GAP%'` would match GlobalGAP and put another scheme's findings in front of
+	# a USDA GAP auditor. Same rule as `training.matches`, same reason.
+	#
+	# WHERE THE CHILD TABLE EXISTS, IT IS AUTHORITATIVE — an alert with no rows is
+	# an alert tagged with nothing, and saying so is the point. The rule-level
+	# fallback in `_regimes_of` is only for a site that has not migrated, where
+	# the column does not exist at all and `[]` would be a claim rather than a
+	# reading.
+	stored = compat.doctype_exists(regimes_vocabulary.REGIME_LINK_DOCTYPE)
+	tags = alerts.regimes_for_alerts([row.get("name") for row in rows or []]) if stored else {}
+	described = [
+		_describe(
+			dict(row),
+			today,
+			tags.get(str(row.get("name")), []) if stored else None,
+		)
+		for row in rows or []
+	]
+	if regime:
+		described = [alert for alert in described if regime in alert["regimes"]]
+	described = described[:limit]
 
 	horizon = None
 	if days_ahead is not None:
@@ -254,54 +345,82 @@ def get_compliance_calendar(args: dict) -> ToolResult:
 		if not rule.is_available()
 	]
 
-	return ToolResult(
-		data={
-			"company": company,
-			"as_of": today,
-			"severity_min": severity_min,
-			"days_ahead": days_ahead,
-			"horizon": horizon,
-			"alert_count": len(shown),
-			"by_severity": counts,
-			"overdue_count": len(overdue),
-			"overdue": [alert["name"] for alert in overdue],
-			"by_category": {
-				key: {
-					"count": len(group),
-					"worst": min(
-						(alert["severity"] for alert in group),
-						key=lambda severity: alerts.SEVERITY_ORDER.index(severity),
-					),
-					"alerts": group,
-				}
-				for key, group in sorted(
-					by_category.items(),
-					key=lambda item: min(
-						alerts.SEVERITY_ORDER.index(alert["severity"]) for alert in item[1]
-					),
-				)
-			},
-			"hidden_snoozed": hidden_snoozed,
-			"hidden_beyond_horizon": beyond_horizon,
-			"rules_unavailable_here": skipped,
-			"note": (
-				"Grouped by category because the categories are chosen so a whole group can be "
-				"cleared in one afternoon — every housing item is one walk round the camp, every "
-				"certificate is one trip to an agency website. Sorted Critical first inside each. "
-				+ (
-					f"{hidden_snoozed} snoozed alert(s) are hidden; pass include_snoozed=true. "
-					if hidden_snoozed
-					else ""
-				)
-				+ (
-					f"{len(skipped)} rule(s) cannot run on this site at all — see "
-					"`rules_unavailable_here`. An empty category is not the same as a clean one."
-					if skipped
-					else ""
-				)
-			).strip(),
+	by_regime: dict = {}
+	for alert in shown:
+		for tag in alert["regimes"] or ["(untagged)"]:
+			by_regime[tag] = by_regime.get(tag, 0) + 1
+
+	data = {
+		"company": company,
+		"as_of": today,
+		"severity_min": severity_min,
+		"days_ahead": days_ahead,
+		"horizon": horizon,
+		"regime": regime or None,
+		"by_regime": dict(sorted(by_regime.items())),
+		"alert_count": len(shown),
+		"by_severity": counts,
+		"overdue_count": len(overdue),
+		"overdue": [alert["name"] for alert in overdue],
+		"by_category": {
+			key: {
+				"count": len(group),
+				"worst": min(
+					(alert["severity"] for alert in group),
+					key=lambda severity: alerts.SEVERITY_ORDER.index(severity),
+				),
+				"alerts": group,
+			}
+			for key, group in sorted(
+				by_category.items(),
+				key=lambda item: min(
+					alerts.SEVERITY_ORDER.index(alert["severity"]) for alert in item[1]
+				),
+			)
 		},
-		summary=f"{len(shown)} alert(s) as of {today}: {headline}, {len(overdue)} overdue",
+		"hidden_snoozed": hidden_snoozed,
+		"hidden_beyond_horizon": beyond_horizon,
+		"rules_unavailable_here": skipped,
+		"note": (
+			"Grouped by category because the categories are chosen so a whole group can be "
+			"cleared in one afternoon — every housing item is one walk round the camp, every "
+			"certificate is one trip to an agency website. Sorted Critical first inside each. "
+			+ (
+				f"{hidden_snoozed} snoozed alert(s) are hidden; pass include_snoozed=true. "
+				if hidden_snoozed
+				else ""
+			)
+			+ (
+				f"{len(skipped)} rule(s) cannot run on this site at all — see "
+				"`rules_unavailable_here`. An empty category is not the same as a clean one."
+				if skipped
+				else ""
+			)
+		).strip(),
+	}
+	if regime:
+		data["regime_note"] = (
+			f"Narrowed to {regime}: only alerts this app has tagged as {regime} evidence are "
+			"here, and the counts above are of THAT subset rather than of the whole calendar. "
+			"Matching is by tag, never by substring — 'GlobalGAP' contains 'GAP', and a "
+			"substring match would put another scheme's findings in front of a USDA GAP "
+			"auditor. Drop `regime` for everything the operation owes anybody."
+		)
+	if not regime and by_regime.get("(untagged)"):
+		data["untagged_note"] = (
+			f"{by_regime['(untagged)']} alert(s) carry no regime tag and will therefore appear "
+			"in NO regime-filtered calendar and no audit packet. On a site that has just "
+			"upgraded this is expected until the next sweep runs — refresh_compliance_alerts "
+			"fixes it now. Otherwise it is a training record filed without regimes, which the "
+			"alert's own message names."
+		)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{len(shown)} alert(s)"
+			+ (f" tagged {regime}" if regime else "")
+			+ f" as of {today}: {headline}, {len(overdue)} overdue"
+		),
 	)
 
 
@@ -347,26 +466,41 @@ def refresh_compliance_alerts(args: dict) -> ToolResult:
 	company = _company(args)
 	today = as_date(args, "as_of") or frappe.utils.today()
 	dry_run = as_bool(args, "dry_run", False)
+	regime = _wanted_regime(args)
 
-	report = alerts.refresh_compliance_alerts(company=company or "", today=today, dry_run=dry_run)
+	report = alerts.refresh_compliance_alerts(
+		company=company or "", today=today, dry_run=dry_run, regime=regime
+	)
 	changed = report["created"] + report["refreshed"] + report["reopened"] + report["auto_dismissed"]
 
+	data = {
+		**report,
+		"note": (
+			"Every rule is a READ over operational and evidence records; the only rows "
+			"written are this app's own Compliance Alerts. Nothing was created twice: an "
+			"alert's docname is derived from its rule and its source record, so tonight's "
+			"sweep finds and refreshes what last night's wrote. `auto_dismissed` is the "
+			"count of conditions that RESOLVED — the water test was done, the licence was "
+			"renewed — and nobody had to switch those off. `reopened` is the count that came "
+			"back after resolving; a dismissal a PERSON made is never reopened by the sweep."
+		),
+	}
+	if regime:
+		data["regime_note"] = (
+			f"NARROWED TO {regime}: only the rules that raise {regime} evidence ran. Every other "
+			"rule raised nothing AND DISMISSED NOTHING — its alerts are exactly as they were, "
+			"because a filtered sweep that cleared the rules it did not run would empty most of "
+			"the calendar and look like progress. `rules_skipped` names each one. The counts "
+			f"above are therefore about the {regime} picture only; run it without `regime` before "
+			"treating them as the state of the whole operation."
+		)
 	return ToolResult(
-		data={
-			**report,
-			"note": (
-				"Every rule is a READ over operational and evidence records; the only rows "
-				"written are this app's own Compliance Alerts. Nothing was created twice: an "
-				"alert's docname is derived from its rule and its source record, so tonight's "
-				"sweep finds and refreshes what last night's wrote. `auto_dismissed` is the "
-				"count of conditions that RESOLVED — the water test was done, the licence was "
-				"renewed — and nobody had to switch those off. `reopened` is the count that came "
-				"back after resolving; a dismissal a PERSON made is never reopened by the sweep."
-			),
-		},
+		data=data,
 		summary=(
 			("dry run: would touch " if dry_run else "")
-			+ f"{changed} alert(s) — {report['created']} new, {report['refreshed']} refreshed, "
+			+ f"{changed} alert(s)"
+			+ (f" across the {regime} rules" if regime else "")
+			+ f" — {report['created']} new, {report['refreshed']} refreshed, "
 			f"{report['reopened']} reopened, {report['auto_dismissed']} auto-dismissed"
 		),
 		docstatus_delta="" if dry_run else "0 → 0 (alerts refreshed)",
