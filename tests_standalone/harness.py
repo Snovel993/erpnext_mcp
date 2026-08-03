@@ -647,6 +647,11 @@ ERPNEXT_SCHEMA = {
 	"Designation": ["name", "designation_name"],
 	"Employment Type": ["name", "employee_type_name"],
 	"Gender": ["name", "gender"],
+	# v0.19.3 added the three span columns Frappe HR's own Attendance carries. The
+	# shift-close bridge writes them — a worker who joined an hour late and left
+	# two hours early gets an Attendance row for THEIR span, not the shift's — and
+	# a fixture without the columns would have let `compat.has_field` drop the
+	# values silently and the suite would have called that a pass.
 	"Attendance": [
 		"name",
 		"employee",
@@ -655,6 +660,9 @@ ERPNEXT_SCHEMA = {
 		"status",
 		"department",
 		"company",
+		"in_time",
+		"out_time",
+		"working_hours",
 		"docstatus",
 	],
 	"Leave Allocation": [
@@ -972,6 +980,13 @@ APP_DOCTYPES = {
 	"Compliance Regime": "compliance_regime",
 	"Compliance Regime Link": "compliance_regime_link",
 	"Training Type": "training_type",
+	# ── v0.19.3: the shift, and the heat record anchored to it ──────────────
+	"Farm Shift": "farm_shift",
+	"Farm Shift Crew Member": "farm_shift_crew_member",
+	"Farm Shift Compliance Event": "farm_shift_compliance_event",
+	"Farm Shift Weather Reading": "farm_shift_weather_reading",
+	"Heat Exposure Event": "heat_exposure_event",
+	"Heat Acclimatization Worker": "heat_acclimatization_worker",
 }
 
 
@@ -1370,6 +1385,15 @@ CHILD_TABLES = {
 	# Training Type as untagged and call the packet filter a pass.
 	("Compliance Alert", "regime"): "Compliance Regime Link",
 	("Training Type", "regimes"): "Compliance Regime Link",
+	# v0.19.3. The crew envelope and the two timelines hanging off a shift, plus
+	# the acclimatization plan on a heat record. Modelling all four is what makes
+	# `shifts.crew_of` and the Attendance bridge testable at all: both read the
+	# child rows back through `frappe.db.get_all` with a `parent` filter rather
+	# than off the document in hand, because the bridge runs from a docname.
+	("Farm Shift", "crew"): "Farm Shift Crew Member",
+	("Farm Shift", "compliance_events"): "Farm Shift Compliance Event",
+	("Farm Shift", "weather_timeline"): "Farm Shift Weather Reading",
+	("Heat Exposure Event", "acclimatization_plan"): "Heat Acclimatization Worker",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1393,6 +1417,13 @@ REHYDRATED_CHILD_FIELDS = (
 	"evidence_files",
 	"photos",
 	"sample_photos",
+	# v0.19.3. `add_worker_to_shift` and `remove_worker_from_shift` re-read a
+	# shift, walk its crew rows and mutate one — which needs the rows to behave
+	# the same on the second read as on the first.
+	"crew",
+	"compliance_events",
+	"weather_timeline",
+	"acclimatization_plan",
 )
 
 
@@ -2597,6 +2628,15 @@ CHILD_TABLE_SOURCES = {
 		("Compliance Alert", "regime"),
 		("Training Type", "regimes"),
 	),
+	# v0.19.3. `shifts.crew_of`, `events_of` and `weather_of` all query the child
+	# doctype directly with a `parent` filter, because the Attendance bridge and
+	# the read tools work from a docname rather than from a document somebody
+	# already loaded. Without these the crew of every shift would come back empty
+	# and the bridge would silently write nothing while reporting success.
+	"Farm Shift Crew Member": (("Farm Shift", "crew"),),
+	"Farm Shift Compliance Event": (("Farm Shift", "compliance_events"),),
+	"Farm Shift Weather Reading": (("Farm Shift", "weather_timeline"),),
+	"Heat Acclimatization Worker": (("Heat Exposure Event", "acclimatization_plan"),),
 }
 
 

@@ -251,6 +251,18 @@
   "training_col",
   "allow_record_training",
   "allow_sign_training_supervisor_review",
+  "shift_section",
+  "allow_list_shifts",
+  "allow_get_shift",
+  "allow_list_heat_exposure_events",
+  "allow_get_heat_exposure_event",
+  "shift_col",
+  "allow_start_shift",
+  "allow_add_worker_to_shift",
+  "allow_remove_worker_from_shift",
+  "allow_log_shift_event",
+  "allow_end_shift",
+  "allow_create_heat_exposure_event",
   "audit_packet_section",
   "allow_generate_audit_packet",
   "allow_list_audit_packet_types",
@@ -1917,6 +1929,86 @@
    "fieldname": "allow_sign_training_supervisor_review",
    "fieldtype": "Check",
    "label": "Sign Training Supervisor Review"
+  },
+  {
+   "fieldname": "shift_section",
+   "fieldtype": "Section Break",
+   "label": "Crew Shifts and Heat Exposure"
+  },
+  {
+   "default": "1",
+   "description": "READ. The shift register: who was where, with which crew, for how long, and what is still open. `status` is computed from whether a shift has an end time rather than read off a stored column, because an OPEN shift is what the weather sweep walks. Reports every shift closed WITHOUT a supervisor signature — end_shift cannot produce one, so anything on that list was closed in the Desk, and FSMA §112.161(b) asks for a review dated and signed.",
+   "fieldname": "allow_list_shifts",
+   "fieldtype": "Check",
+   "label": "List Shifts"
+  },
+  {
+   "default": "1",
+   "description": "READ. One shift in full: the crew with each person's own joined_at and left_at, the compliance-event timeline, the weather timeline, and the heat record if one exists. This is the evidence chain an inspector is handed when they ask an operation to prove one shift complied.",
+   "fieldname": "allow_get_shift",
+   "fieldtype": "Check",
+   "label": "Get Shift"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every documented hot shift and what each one claims about OAR 437-004-1131 — water, shade, rest cycle, observation, training. Reports the shifts where heat illness signs were observed, which is what an investigation reads first, and the ones that do not confirm current heat training, which is a citation on the first hot morning.",
+   "fieldname": "allow_list_heat_exposure_events",
+   "fieldtype": "Check",
+   "label": "List Heat Exposure Events"
+  },
+  {
+   "default": "1",
+   "description": "READ. One heat record in full with the shift behind it, and the obligations the record does NOT claim were met, in the rule's own terms. Says so when the shift's event timeline is empty — the checkboxes are the assertion and the logged water breaks are the evidence for it.",
+   "fieldname": "allow_get_heat_exposure_event",
+   "fieldtype": "Check",
+   "label": "Get Heat Exposure Event"
+  },
+  {
+   "fieldname": "shift_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Forms a crew at a place and starts the exposure period every compliance question about it is asked against. THE FOREMAN FORMS THE CREW — there is no worker clock-in, because OAR 437-004-1131 puts the water, shade and observation obligations on a named responsible person and a crew of thirty each clocking themselves in is a shift with nobody responsible for the record. Per-worker attendance survives inside the crew envelope as joined_at and left_at on each row.",
+   "fieldname": "allow_start_shift",
+   "fieldtype": "Check",
+   "label": "Start Shift"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Rosters a late arrival or a transfer onto a shift already running. joined_at defaults to NOW rather than to the shift's start, which is the opposite of start_shift's default and right for the same reason — their Attendance record spans from when they actually arrived. Refuses a second row for somebody already on the crew, which would become two payroll days for one person.",
+   "fieldname": "allow_add_worker_to_shift",
+   "fieldtype": "Check",
+   "label": "Add Worker to Shift"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Ends one worker's time on a shift that continues without them. It SETS left_at and does not delete the row — the row is the only record that this person was on this shift at all, which is what a wage claim turns on and what says who was exposed before they were sent home.",
+   "fieldname": "allow_remove_worker_from_shift",
+   "fieldtype": "Check",
+   "label": "Remove Worker from Shift"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Records one thing the foreman did about the conditions, at the moment it happened — water break, shade break, rest cycle, supervisor observation, cool-down. THE TIMELINE IS THE EVIDENCE: Oregon's heat rule does not ask whether water was available in principle, it asks what happened during the shift, and a timeline written from memory in the evening is what an investigator discounts.",
+   "fieldname": "allow_log_shift_event",
+   "fieldtype": "Check",
+   "label": "Log Shift Event"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Closes a shift with the supervisor's signature and writes one Attendance record per crew member, each spanning that person's OWN joined_at to their own left_at. The signature is required: an unsigned close is an update statement setting a timestamp, and §112.161(b) asks for a review dated AND signed. The Attendance bridge never blocks the close — a site without Frappe HR or an archived employee is reported, not refused.",
+   "fieldname": "allow_end_shift",
+   "fieldtype": "Check",
+   "label": "End Shift"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Documents OAR 437-004-1131 for one shift, signed and submitted — the answer to 'prove the July 15 crew complied'. At most one per shift, because two records about one exposure period will disagree. Checks the training claim against the register AS OF THE DAY OF THE SHIFT and refuses a verified claim the register contradicts; refuses signs observed with no response and no explanation. Everything else is recorded with the gap stated.",
+   "fieldname": "allow_create_heat_exposure_event",
+   "fieldtype": "Check",
+   "label": "Create Heat Exposure Event"
   },
   {
    "fieldname": "audit_packet_section",

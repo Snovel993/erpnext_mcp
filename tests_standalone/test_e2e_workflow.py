@@ -51,7 +51,7 @@ import zlib
 
 import frappe
 
-from erpnext_mcp import roles
+from erpnext_mcp import audit_packets, compliance_fields, roles
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import guard
 from erpnext_mcp.api import mobile as mobile_api
@@ -99,6 +99,19 @@ SWITCHES = {
 		"get_training",
 		"sign_training_supervisor_review",
 		"generate_audit_packet",
+		# v0.19.3. The walk now ends on a SHIFT, because that is where the
+		# exposure-based regimes anchor: OAR 437-004-1131 asks whether a shift
+		# complied from start to finish, and a task completion cannot answer it.
+		"start_shift",
+		"add_worker_to_shift",
+		"remove_worker_from_shift",
+		"log_shift_event",
+		"end_shift",
+		"create_heat_exposure_event",
+		"get_shift",
+		"list_shifts",
+		"get_heat_exposure_event",
+		"get_attendance_summary",
 	)
 }
 
@@ -735,3 +748,274 @@ class OnboardingReachesTheAuditPacket(EndToEndWorkflow):
 			if row.get("alert_type") == "training_expiring" and not is_true(row.get("dismissed"))
 		]
 		self.assertEqual(live, [])
+
+
+class TheHotShiftReachesTheOSHAPacket(EndToEndWorkflow):
+	"""Onboard, train, form a crew, work the day, document the heat, close it.
+
+	THE JOIN THIS EXISTS FOR. `OnboardingReachesTheAuditPacket` proves a training
+	record written through the tools is found by the packet generator for the
+	regimes it was tagged. This proves the v0.19.3 half: that a SHIFT formed by a
+	foreman, with events logged against it and a heat record filed on top,
+	produces both a payroll row an HR report can count AND a section an Oregon
+	OSHA inspector is handed — from one afternoon, through the real tools, with
+	the kill switches an operator ticks.
+
+	Every seam here is one that only exists between releases. The training the
+	worker got in step 2 is what `create_heat_exposure_event` checks the crew
+	against in step 6, and it checks it AS OF THE DAY OF THE SHIFT. The crew rows
+	written in step 3 are what the Attendance bridge spans in step 7. The heat
+	record filed in step 6 is what the OSHA packet pulls in step 9. None of those
+	is visible from inside the module that owns either end.
+
+	It is ONE test, walked forward, for the same reason the other end-to-end walks
+	here are: splitting it would either re-walk the flow per assertion or share
+	state between tests, and both are worse than a long test whose failure line
+	names the step.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		# The Attendance bridge writes `Attendance.farm_shift`, a Custom Field this
+		# app installs on every migrate. Running the real installer rather than
+		# registering the column by hand is the whole point of an end-to-end walk:
+		# a fixture that hand-wrote the schema would prove the bridge works against
+		# a site that does not exist.
+		compliance_fields.install_compliance_fields(respect_switch=False)
+		# `get_attendance_summary` is gated on the hrms app rather than on the
+		# Attendance doctype, and step 8 is the assertion that farm_hr counts a
+		# shift-formed day exactly as it counts a hand-entered one. The app is
+		# declared and NOTHING ELSE is seeded: every Employee and every Attendance
+		# row in this walk is written by the tools under test.
+		if "hrms" not in STORE.installed_apps:
+			STORE.installed_apps.append("hrms")
+
+	def test_a_crew_shift_produces_payroll_rows_and_an_osha_section(self):
+		self.be_the_operator()
+		today = frappe.utils.today()
+
+		def at(hour: int, minute: int = 0) -> str:
+			return f"{today} {hour:02d}:{minute:02d}:00"
+
+		# 1. The foreman. The responsible party -1131 names, and the person
+		#    §112.161(b) asks to sign — through `create_employee`, so the tool an
+		#    operator actually uses is the tool this covers.
+		foreman = self.tool_data(
+			"create_employee",
+			{"employee_name": "Hot Day Foreman", "company": COMPANY, "date_of_joining": "2026-01-05"},
+		)["employee"]
+
+		# 2. Heat illness prevention training for the worker who will be on the
+		#    crew. -1131 requires it annually AND before work at a site where the
+		#    heat index will reach 80 °F, so this is the record step 6 checks.
+		training_record = self.tool_data(
+			"record_training",
+			{
+				"employee": self.employee,
+				"training_type": "Heat Illness Prevention",
+				"completed_date": str(frappe.utils.add_days(today, -20)),
+				"expires_date": str(frappe.utils.add_days(today, 345)),
+				"regimes": ["OR-OSHA"],
+				"content_topics_covered": (
+					"Heat index, water, shade, symptoms, reporting, emergency response"
+				),
+				"person_performed_signature": "/files/worker-signature.png",
+			},
+		)
+		self.assertEqual(training_record["regimes"], ["OR-OSHA"])
+
+		# 3. The shift. The foreman forms the crew; nobody clocks themselves in.
+		shift = self.tool_data(
+			"start_shift",
+			{
+				"foreman": foreman,
+				"location": "Block 7 North",
+				"shift_type": "Harvest",
+				"farm_location_gps": "45.52,-122.68",
+				"start_datetime": at(6),
+				"crew_employees": [self.employee],
+			},
+		)
+		self.assertEqual(shift["company"], COMPANY)
+		self.assertEqual(shift["status"], "Active")
+		self.assertEqual(shift["crew_size"], 1)
+		# Rostered at the beginning means present from the beginning.
+		self.assertEqual(shift["crew"][0]["joined_at"], at(6))
+
+		# 4. A late arrival, who joins when somebody says so rather than at the
+		#    shift's start — and leaves before the end. This is the person the
+		#    Attendance bridge has to get right.
+		late = self.tool_data(
+			"create_employee",
+			{"employee_name": "Late Picker", "company": COMPANY, "date_of_joining": "2026-06-01"},
+		)["employee"]
+		# Trained too, and the first draft of this test found out the hard way why
+		# that line has to be here: `create_heat_exposure_event` REFUSED the
+		# record at step 6 because one worker on the crew had no current heat
+		# training, naming them. That refusal is the point of the check — the same
+		# packet carries this record and the register, and a packet that
+		# contradicts itself is worse than one with a gap — and it is exactly the
+		# kind of seam that only shows up when the whole walk is run.
+		self.tool_data(
+			"record_training",
+			{
+				"employee": late,
+				"training_type": "Heat Illness Prevention",
+				"completed_date": str(frappe.utils.add_days(today, -5)),
+				"expires_date": str(frappe.utils.add_days(today, 360)),
+				"regimes": ["OR-OSHA"],
+				"content_topics_covered": (
+					"Heat index, water, shade, symptoms, reporting, emergency response"
+				),
+			},
+		)
+		self.tool_data(
+			"add_worker_to_shift", {"shift": shift["name"], "employee": late, "joined_at": at(9)}
+		)
+		self.tool_data(
+			"remove_worker_from_shift",
+			{"shift": shift["name"], "employee": late, "left_at": at(12)},
+		)
+
+		# 5. The timeline. THE EVIDENCE, as against the claim: Oregon's rule does
+		#    not ask whether water was available in principle.
+		for hour, kind in ((9, "Water Break"), (11, "Shade Break"), (13, "Rest Cycle")):
+			self.tool_data(
+				"log_shift_event",
+				{
+					"shift": shift["name"],
+					"event_type": kind,
+					"event_datetime": at(hour),
+					"description": f"{kind} called for the whole crew.",
+				},
+			)
+		self.tool_data(
+			"log_shift_event",
+			{
+				"shift": shift["name"],
+				"event_type": "Supervisor Observation",
+				"event_datetime": at(14),
+				"producer_record_doctype": "Employee Training Record",
+				"producer_record_name": training_record["name"],
+			},
+		)
+
+		# 6. The heat record, with `training_verified=1` — which is only accepted
+		#    because step 2 actually happened, and is checked AS OF THE DAY OF THE
+		#    SHIFT rather than as of today.
+		heat = self.tool_data(
+			"create_heat_exposure_event",
+			{
+				"farm_shift": shift["name"],
+				"max_temp_f": 96,
+				"max_heat_index_f": 101,
+				"threshold_crossed_at": at(10, 40),
+				"water_provided": True,
+				"shade_provided": True,
+				"mandatory_rest_taken": True,
+				"heat_illness_signs_observed": False,
+				"worker_reported_symptoms": False,
+				"emergency_response_activated": False,
+				"training_verified": True,
+				"supervisor_signature_file_token": "/files/foreman-signature.png",
+			},
+		)
+		self.assertTrue(heat["submitted"])
+		self.assertTrue(heat["training_verified"])
+		self.assertEqual(heat["obligation_gaps"], [])
+		self.assertEqual(heat["regulation_citation"], "OAR 437-004-1131")
+		self.assertIn(WORKER_NAME, heat["crew_training"]["with_current_training"])
+		self.assertEqual(heat["shift_timeline_events"], 4)
+
+		# 7. The close, and the payroll rows it writes. THE SPANS ARE PER PERSON:
+		#    the late picker worked three hours of a nine-hour shift, and a row
+		#    claiming nine would be wrong in the employer's favour.
+		closed = self.tool_data(
+			"end_shift",
+			{
+				"shift": shift["name"],
+				"end_datetime": at(15),
+				"supervisor_signature_file_token": "/files/foreman-signature.png",
+				"foreman_notes": "Hot from eleven. Crew held up.",
+			},
+		)
+		self.assertEqual(closed["status"], "Closed")
+		self.assertTrue(closed["supervisor_review_on"])
+		self.assertEqual(closed["attendance_created"], 2)
+
+		attendance = {
+			row["employee"]: row for row in STORE.rows("Attendance") if row.get("farm_shift")
+		}
+		self.assertEqual(set(attendance), {self.employee, late})
+		self.assertEqual(str(attendance[self.employee]["in_time"]), at(6))
+		self.assertEqual(str(attendance[self.employee]["out_time"]), at(15))
+		self.assertEqual(attendance[self.employee]["working_hours"], 9.0)
+		self.assertEqual(str(attendance[late]["in_time"]), at(9))
+		self.assertEqual(str(attendance[late]["out_time"]), at(12))
+		self.assertEqual(attendance[late]["working_hours"], 3.0)
+		for row in attendance.values():
+			self.assertEqual(int(row["docstatus"]), 1, "a draft row is not a fact about attendance")
+			self.assertEqual(row["farm_shift"], shift["name"])
+
+		# 8. And farm_hr counts the shift-formed day exactly as it counts a
+		#    hand-entered one, which is the whole reason the bridge exists.
+		summary = self.tool_data(
+			"get_attendance_summary", {"from_date": today, "to_date": today}
+		)
+		by_employee = {row["employee"]: row for row in summary["employees"]}
+		self.assertEqual(by_employee[self.employee]["counts"].get("Present"), 1)
+		self.assertEqual(by_employee[late]["counts"].get("Present"), 1)
+
+		# 9. THE JOIN. An Oregon OSHA inspector asking about this season is handed
+		#    a packet whose heat section carries this record — and the section is
+		#    NOT on the packets for the schemes that never ask about -1131.
+		period = {
+			"company": COMPANY,
+			"period_start": str(frappe.utils.add_days(today, -30)),
+			"period_end": today,
+			"dry_run": True,
+		}
+		osha = self.tool_data("generate_audit_packet", {**period, "audit_type": "OSHA"})
+		self.assertEqual(osha["section_counts"]["heat_exposure"], 1, osha["section_counts"])
+		# The training that made step 6 legal is in the same packet, under the
+		# OR-OSHA tag it was filed with — two records for one crew, from one day.
+		self.assertEqual(osha["section_counts"]["training"], 2)
+		# And the heat section discloses nothing, because this shift met every
+		# obligation. The other sections disclose plenty — an empty SOP library, an
+		# unrecorded I-9 — which is what a disclosure list is for.
+		self.assertEqual(
+			[entry for entry in osha["disclosures"] if entry["section"] == "heat_exposure"], []
+		)
+
+		# The section itself, built the way the renderer sees it. The tool's dry
+		# run returns counts rather than rows, and a count of one would be equally
+		# true of the wrong record.
+		section = audit_packets.build(
+			audit_packets.get("OSHA"), COMPANY, period["period_start"], period["period_end"]
+		)
+		heat_section = next(
+			entry for entry in section["sections"] if entry["key"] == "heat_exposure"
+		)
+		self.assertEqual(heat_section["rows"][0]["record"], heat["name"])
+		self.assertEqual(heat_section["rows"][0]["shift"], shift["name"])
+		self.assertTrue(heat_section["rows"][0]["training"])
+		self.assertNotIn("with_unmet_obligations", heat_section)
+
+		# A GAP auditor does not audit Oregon's heat rule, and a packet that
+		# handed them a heat register would invite a question nobody wanted to
+		# answer — exactly as a DOL packet containing a GlobalGAP certificate would.
+		gap = self.tool_data("generate_audit_packet", {**period, "audit_type": "GAP"})
+		self.assertNotIn("heat_exposure", gap["section_counts"])
+
+		# 10. And the evidence chain reads end to end from either direction.
+		read_back = self.tool_data("get_heat_exposure_event", {"name": heat["name"]})
+		self.assertEqual(read_back["shift"]["name"], shift["name"])
+		self.assertEqual(read_back["shift"]["compliance_event_count"], 4)
+		self.assertEqual(read_back["obligation_gaps"], [])
+		from_the_shift = self.tool_data("get_shift", {"name": shift["name"]})
+		self.assertEqual(from_the_shift["heat_exposure_event"]["name"], heat["name"])
+		# The row of the person who left early still says they were here, which is
+		# what a wage claim turns on.
+		left_row = next(row for row in from_the_shift["crew"] if row["employee"] == late)
+		self.assertTrue(left_row["left_early"])
+		self.assertEqual(left_row["present_until"], at(12))

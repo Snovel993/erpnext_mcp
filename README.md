@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **214 tools** — 95 read-only, 119 mutating.
+- **224 tools** — 99 read-only, 125 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -275,7 +275,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 214 tools
+## The 224 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -1295,6 +1295,55 @@ that audit is entitled to see.
 | `list_trainings` | The register filtered by regime, status, expiry window, person or period — which is how an audit packet is assembled. Reports `without_supervisor_review` (the FSMA §112.161(b) gap) and `without_trainee_signature` (§112.161(a)(4)). | Match a regime by substring. `GlobalGAP` contains `GAP`, and a `LIKE` filter would hand a USDA GAP auditor evidence from a different scheme — matching is by tag. Nor read `status` off the stored column: it is computed as of today, because a record last saved in March holds March's answer. |
 | `get_training` | One record in full, that person's whole training history, the retention period **with its citation**, and the §112.161 elements this record lacks in the rule's own terms. | Fix those gaps. A signature added now is a signature dated now, and a record assembled before an inspection is what an inspector is trained to spot. |
 | `sign_training_supervisor_review` | The FSMA §112.161(b) review — reviewed, dated and signed by a supervisor within a reasonable time after the record was made. **The requirement USDA GAP does not have and FDA cites most.** Reports the lag and flags it when long. | Accept a self-review, a supervisor from another entity, or a review dated before the training it reviews. Nor overwrite an existing signature without `replace_reviewer=true`. It is a **separate call** from `record_training` on purpose: simultaneous timestamps are the shape of a record an inspector reads as assembled rather than kept. |
+
+
+**Crew shifts and heat exposure** — the v0.19.3 surface, and an architectural
+move rather than another register. **Compliance anchors to a SHIFT, not to a
+task.** A task completion carries a point-in-time reading; a shift carries a
+timeline. Oregon OSHA does not ask what the temperature was when one job closed —
+it asks whether the July 15 shift complied with OAR 437-004-1131 from start to
+finish, and only a record spanning the exposure period can answer.
+
+**The foreman is the sole actor, and that is a compliance decision.** There is no
+clock-in tool here and there will not be one. -1131 puts the water, shade,
+rest-cycle and observation obligations on a *named* responsible person, and FSMA
+§112.161(b) asks that person to sign — so a crew of thirty each clocking
+themselves in is a shift with thirty people responsible for the record, which is
+a shift with nobody responsible for it. The observable failure is that nobody
+logged the water break because everybody assumed somebody else had.
+
+**Per-worker attendance survives inside the crew envelope.** Every crew row
+carries its own `joined_at` and `left_at`, and closing the shift writes one
+submitted `Attendance` per person for *their own* span — so farm_hr keeps one
+canonical answer to "when was Ana at work" without the shift stopping being one
+record.
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `start_shift` | Forms a crew at a place and starts the exposure period. Everybody rostered at the start joins at the **shift's** start, not at the moment the API call landed. `farm_location_gps` is the weather anchor v0.19.4 fetches against. | Roster a crew crossing entities — and it checks before writing anything, because a shift half-created and then refused leaves an open shift nobody meant to open. Nor take more than 60 names: past that it is a company roster, and every extra name is a wrong Attendance row when the shift closes. |
+| `add_worker_to_shift` | A late arrival or a transfer. `joined_at` defaults to **now**, which is the opposite of `start_shift`'s default and right for the same reason. | Put the same person on a crew twice. Two rows look deliberate on the form and become two Attendance days for one person on close. Nor add to a closed shift, whose payroll rows are already written. |
+| `remove_worker_from_shift` | Ends one worker's time on a shift that continues. **It sets `left_at`; it does not delete the row.** | Be called twice without an explicit time — a silent second call would move a departure that has already happened to now, and lengthen a day that has already ended. |
+| `log_shift_event` | Water break, shade break, rest cycle, supervisor observation, cool-down — at the moment it happened, with an optional photo and a pointer back at whatever produced it. **The timeline is the evidence; the heat record is only the claim.** | Refuse an event timestamped slightly outside the shift. A clock five minutes out is not a false record, and refusing would mean the break goes unlogged rather than logged approximately — it is kept and reported. |
+| `end_shift` | Closes it with the supervisor's signature and writes one Attendance per crew member for that person's own span, submitted. | Close without a signature. An unsigned close is an `UPDATE` setting a timestamp, and §112.161(b) asks for a review dated **and signed** — the shift stays open and nothing is written. Nor let the Attendance bridge block the close: a site with no Frappe HR or an archived employee is **reported**, because the signature is the compliance act and the payroll row is the convenience. |
+| `create_heat_exposure_event` | The OAR 437-004-1131 record for one shift, signed and submitted — water, shade, rest **taken** rather than offered, observation, training, acclimatization plan by name. | File a second record for one shift: two records about one exposure period will disagree, and the one an inspector finds is whichever was filed second. Nor claim verified training the register contradicts **as of the day of the shift** — the same packet carries both, and a packet that contradicts itself is worse than one with a gap. Nor accept signs observed with no response and no explanation. |
+| `list_shifts` / `get_shift` | The register, and one shift with its crew spans, its timeline, its weather and its heat record — **the evidence chain an inspector is handed.** | Read `status` off the stored column: it is computed from whether the shift has an end time, because an *open* shift is what the weather sweep walks. |
+| `list_heat_exposure_events` / `get_heat_exposure_event` | The heat register, and one record with the obligations it does **not** claim were met, in the rule's own terms. | Fix those gaps. A tick added now is a tick added now, and a record completed before an inspection is what an inspector is trained to spot. |
+
+The thirteenth compliance rule came with them. `supervisor_review_lapsed` watches
+a signature that was never put on a record — Warning at 14 days, Critical past
+30, auto-dismissed the moment somebody signs. Its clock runs from when the record
+was **made**, not from the activity date, because §112.161(b)'s own phrase is
+"after the records are made" and reading the activity date would raise a Critical
+on every season somebody backfilled. It walks a *table* of doctypes carrying the
+§112.161(b) columns, so the next one is a one-line addition rather than a rewrite.
+
+`Attendance` gains a `farm_shift` Custom Field — the fourth column this app
+grafts onto a doctype it did not create, declared beside the other three and
+argued for in [Compliance is not a module](#compliance-is-not-a-module).
+Without it a shift-formed day is indistinguishable from a hand-keyed one, so
+nobody reading the register can reach the conditions the person worked in — and
+the bridge, unable to tell its own rows from anybody else's, would pay somebody
+twice for one afternoon.
 
 
 ---

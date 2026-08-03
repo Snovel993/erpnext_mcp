@@ -29,9 +29,9 @@ using Shareholder, Employee or Supplier keep working exactly as they did; this
 adds options, it does not reclassify anything.
 
 The third is the v0.15.0 compliance fields, and it is the one that needs a
-sentence of defence. It adds Custom Fields to Spray Log, to Employee and to the
-BucketLog bridge — three doctypes this app did not create — which is the exact
-thing `hooks.py` promises it does not do. `compliance_fields.py` argues the case
+sentence of defence. It adds Custom Fields to Spray Log, to Employee, to the
+BucketLog bridge and — from v0.19.3 — to Attendance: four doctypes this app did
+not create, which is the exact thing `hooks.py` promises it does not do. `compliance_fields.py` argues the case
 at length; the short version is that compliance woven into the operational record
 is defensible under audit and a shadow log beside it is not, and you cannot weave
 anything into a doctype you refuse to touch. It is the only such exception in the
@@ -349,6 +349,23 @@ _PRECIOUS_DOCTYPES = (
 		"every agricultural water sample, what the laboratory said, and the report "
 		"itself. FSMA Subpart E asks whether the water that touched a harvested crop "
 		"was tested, and nothing else on the site can answer",
+	),
+	(
+		"Farm Shift",
+		"the shift register — who was on which crew, at which block, from when to "
+		"when, what the foreman did about the conditions hour by hour, and whose "
+		"signature closed it. It is the exposure period every OAR 437-004-1131 "
+		"question is asked against, and the per-worker joined/left spans inside it "
+		"are what a wage claim turns on. The Attendance rows a close wrote survive; "
+		"everything that explains them does not",
+	),
+	(
+		"Heat Exposure Event",
+		"the heat records — for each hot shift, whether water was provided at the "
+		"required rate, whether shade was in reach, whether the rest cycle was "
+		"taken, whether anybody showed signs and what was done about it, and the "
+		"supervisor's signature under all of it. The record a serious-injury "
+		"investigation is read from, and it exists nowhere else",
 	),
 	(
 		"Training Type",

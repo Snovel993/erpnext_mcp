@@ -1,0 +1,90 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 20:00:00.000000",
+ "description": "One worker on one shift, and the part of it they were actually present for. The row exists because a shift is a crew envelope and payroll is per person: 'the crew worked 06:00 to 15:00' is the compliance fact and 'Ana joined at 07:10 and left at 13:00' is the wage fact, and both have to be true at once. A worker who leaves early has left_at set; the row is never deleted, because deleting it would destroy the only record they were on the shift at all.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "role",
+  "crew_col",
+  "joined_at",
+  "left_at",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "Who. The Employee record rather than a typed name — a crew list an auditor cannot reconcile to the payroll register is a list of people who may not have been on the farm that day.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "description": "Their name at the time, denormalised for the same reason the foreman's is: an Employee archived three seasons later must not take the crew list with it.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "read_only": 1
+  },
+  {
+   "default": "Worker",
+   "description": "What they were on this shift. Trainee is the one that carries a legal consequence: OAR 437-004-1131(g) asks for an acclimatization plan for workers with under fourteen days on the job, and this is where the shift says which of the crew that was.",
+   "fieldname": "role",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Role",
+   "options": "Worker\nLead Worker\nTrainee"
+  },
+  {
+   "fieldname": "crew_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When this person started on the shift. Defaults to the shift's own start for everybody the foreman rostered at the beginning, and is the moment of the call for anybody added later. It is the left edge of the Attendance record the bridge writes when the shift closes.",
+   "fieldname": "joined_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Joined",
+   "reqd": 1
+  },
+  {
+   "description": "When they left, where they left before the shift ended. EMPTY MEANS THEY WERE THERE TO THE END — the Attendance bridge reads the shift's end for those, so an unset value is a statement rather than a gap. Set by remove_worker_from_shift, which does not delete the row.",
+   "fieldname": "left_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Left"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "Why they left early, what they were put on, whether they were struggling in the heat. 'Sent to the shop at 11:00, cramping' is a compliance fact about a heat shift and belongs on the person, not in the shift's general notes.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-03 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Shift Crew Member",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

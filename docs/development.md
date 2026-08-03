@@ -295,8 +295,16 @@ erpnext_mcp/                     repo root
                                  laboratory result is read
     compliance_fields.py         WHICH compliance columns go on WHOSE doctype,
                                  and the argument for putting them there at all
+    tools/training.py            the training register: what the crew was taught
+    tools/shifts.py              the crew shift: forming it, logging what the
+                                 foreman did about the conditions, and closing it
+                                 with a signature that writes the payroll rows
+    tools/heat.py                the OAR 437-004-1131 record for one shift
+    shifts.py                    what a shift IS — status, the child-table reads,
+                                 the -1131 thresholds, and the one-way bridge from
+                                 a closed shift into Frappe HR's Attendance
     alerts/base.py               Rule, Observation, the idempotent sweep
-    alerts/rules.py              the twelve rules, each with its kairotic gate
+    alerts/rules.py              the thirteen rules, each with its kairotic gate
                                  and the regime(s) its alerts are evidence for
     training.py                  THE regime vocabulary — REGIMES, canon, parse,
                                  require, matches, retention — plus the seeders
@@ -331,7 +339,11 @@ erpnext_mcp/                     repo root
                                  Corrective Action), Compliance Alert.
                                  v0.19.0 added Employee Training Record;
                                  v0.19.2 added Compliance Regime (+ Compliance
-                                 Regime Link) and Training Type
+                                 Regime Link) and Training Type; v0.19.3 added
+                                 Farm Shift (+ Farm Shift Crew Member, Farm
+                                 Shift Compliance Event and Farm Shift Weather
+                                 Reading) and Heat Exposure Event (+ Heat
+                                 Acclimatization Worker)
 scripts/seed_related_parties.py  seeds the related-party register from a JSON
                                  file kept OUTSIDE this repository
 ```

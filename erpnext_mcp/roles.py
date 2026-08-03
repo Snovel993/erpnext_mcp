@@ -239,6 +239,16 @@ COMPLIANCE_REGISTERS = (
 	# their own crew.
 	"Employee Training Record",
 )
+#: v0.19.3. The shift is where the crew was and the heat record is what the
+#: operation says it did about the conditions — a group of its own rather than a
+#: line in COMPLIANCE_REGISTERS, because the two halves belong to different
+#: people. FORMING A SHIFT IS OPERATIONAL and it is the Foreman's; a heat record
+#: is compliance evidence and a Compliance Officer reads it. Folding them into
+#: the register group would have given a Compliance Officer the power to form a
+#: crew, which is the same separation `_grant(READ, DISPATCH)` on that role
+#: already exists to keep: the person who decides a walk is required and the
+#: person who decides who walks it must not be the same account.
+SHIFTS = ("Farm Shift", "Heat Exposure Event")
 CALENDAR = ("Compliance Alert",)
 GROUND = ("Parcel", "Field", "Irrigation Zone")
 CAMP = ("Housing Unit", "Housing Assignment")
@@ -285,6 +295,12 @@ ROLE_SPECS = (
 			# Where the job is. A task at MC-Cabin-01 is not a task until the app
 			# can say which cabin that is.
 			*_grant(READ, CAMP, GROUND),
+			# v0.19.3. READ on the shift they are standing in, so the app can show
+			# a worker which crew they are on and what breaks have been called. NOT
+			# write: the foreman forms the crew and logs the events, which is the
+			# whole argument for a foreman-driven shift — a worker who could edit
+			# the crew list could edit their own hours.
+			*_grant(READ, SHIFTS),
 		),
 		cannot=(
 			"read the SOP library (Compliance Policy) — a task's instructions belong in its notes",
@@ -302,7 +318,13 @@ ROLE_SPECS = (
 		summary="You run the board: what needs doing, who is doing it, and what came back.",
 		companion_roles=("Employee",),
 		permissions=(
-			*_grant(FULL, DISPATCH, FIELD_RECORDS),
+			# v0.19.3. THE FOREMAN OWNS THE SHIFT, and this is the one register
+			# where that role has more than the Compliance Officer. -1131 puts the
+			# water, shade, rest-cycle and observation obligations on the named
+			# supervisor, so the account that forms the crew and logs what it did
+			# has to be theirs — anybody else's would be a record about a shift
+			# they were not standing on.
+			*_grant(FULL, DISPATCH, FIELD_RECORDS, SHIFTS),
 			*_grant(READ_WRITE, CALENDAR),
 			*_grant(READ, COMPLIANCE_REGISTERS, CAMP, GROUND),
 		),
@@ -329,10 +351,13 @@ ROLE_SPECS = (
 			# READ, deliberately. See the module docstring: the person who decides
 			# a walk is required and the person who decides who walks it must not
 			# be the same account.
-			*_grant(READ, DISPATCH, CAMP, GROUND, PAPER),
+			*_grant(READ, DISPATCH, CAMP, GROUND, PAPER, SHIFTS),
 		),
 		cannot=(
 			"dispatch anybody — Farm Task is read-only for this role, on purpose",
+			"form a crew shift or sign one off — the shift register is read-only here, "
+			"because OAR 437-004-1131 puts the obligations on the supervisor who was "
+			"standing on the block",
 			"edit parcels, leases or housing units",
 			"touch accounting",
 		),
@@ -346,7 +371,7 @@ ROLE_SPECS = (
 		summary="You run the operation: the work, the compliance behind it, and the ground it happens on.",
 		companion_roles=("Employee",),
 		permissions=(
-			*_grant(FULL, DISPATCH, FIELD_RECORDS, COMPLIANCE_REGISTERS, GROUND, CAMP, PROPERTY),
+			*_grant(FULL, DISPATCH, FIELD_RECORDS, COMPLIANCE_REGISTERS, GROUND, CAMP, PROPERTY, SHIFTS),
 			*_grant(READ_WRITE, CALENDAR),
 			*_grant(READ, PAPER),
 		),

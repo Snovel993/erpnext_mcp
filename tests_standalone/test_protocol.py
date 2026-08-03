@@ -198,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_fourteen_tools_ninety_five_read_one_hundred_nineteen_write(self):
+	def test_catalogue_is_two_hundred_twenty_four_tools_ninety_nine_read_one_hundred_twenty_five_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -316,10 +316,43 @@ class Catalogue(SeededTestCase):
 		The twelfth compliance rule (`training_expiring`) and the training section
 		on every audit packet came with them and are not tools, which is why the
 		catalogue grew by four and the release by considerably more.
+
+		v0.19.3 ADDED TEN — six writes and four reads — and they are one workflow
+		with one actor. Compliance anchors to a SHIFT rather than to a task,
+		because Oregon OSHA does not ask what the temperature was when one job
+		closed, it asks whether the July 15 shift complied with OAR 437-004-1131
+		from start to finish, and only a record spanning the exposure period can
+		answer that.
+
+		  * `start_shift` forms the crew at a place and starts the period.
+		    THE FOREMAN FORMS IT and there is deliberately no clock-in tool: the
+		    rule puts the water, shade, rest-cycle and observation obligations on
+		    a NAMED responsible person, and a crew of thirty each clocking
+		    themselves in is a shift with nobody responsible for the record;
+		  * `add_worker_to_shift` and `remove_worker_from_shift` amend it. The
+		    second SETS `left_at` rather than deleting the row, because the row is
+		    the only record that this person was on the shift at all — which is
+		    what a wage claim turns on;
+		  * `log_shift_event` records what the foreman did about the conditions,
+		    at the moment it happened. The timeline is the evidence; the heat
+		    record is only the claim;
+		  * `end_shift` closes it with a signature that is REQUIRED — an unsigned
+		    close is an UPDATE setting a timestamp, and §112.161(b) asks for a
+		    review dated AND signed — and writes one Attendance record per crew
+		    member for that person's OWN span;
+		  * `create_heat_exposure_event` is the -1131 record, one per shift,
+		    checked against the training register as of the day of the shift;
+		  * `list_shifts`, `get_shift`, `list_heat_exposure_events` and
+		    `get_heat_exposure_event` read it all back.
+
+		The thirteenth compliance rule (`supervisor_review_lapsed`), the
+		Attendance bridge and the four new doctypes came with them and are not
+		tools, which is again why the catalogue grew by ten and the release by
+		considerably more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 214)
-		self.assertEqual(len(registry.READ_TOOLS), 95)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 119)
+		self.assertEqual(len(registry.TOOLS), 224)
+		self.assertEqual(len(registry.READ_TOOLS), 99)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 125)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

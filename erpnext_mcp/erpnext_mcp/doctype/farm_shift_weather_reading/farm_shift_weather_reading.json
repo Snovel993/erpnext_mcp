@@ -1,0 +1,116 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 20:00:00.000000",
+ "description": "One weather reading during one shift. THE TABLE SHIPS EMPTY IN v0.19.3 AND THAT IS THE POINT — its shape is what the compliance-event snapshot fields denormalise from and what the Heat Exposure Event's maxima will be computed over, so fixing it now means v0.19.4 wires a fetch rather than migrating a schema under live records. v0.19.4 ports the Open-Meteo service already running in farm_app, walks every shift with no end_datetime every fifteen minutes, and backfills closed shifts from the archive API so a shift that ran before the service was switched on can still be documented.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "reading_datetime",
+  "temp_f",
+  "heat_index_f",
+  "humidity_pct",
+  "reading_col",
+  "wind_speed_mph",
+  "wind_direction_deg",
+  "precipitation_mm",
+  "provenance_section",
+  "source",
+  "provenance_col",
+  "fetched_at"
+ ],
+ "fields": [
+  {
+   "description": "The instant these conditions were true. Not the instant they were fetched — a backfilled reading from the archive API is a true statement about 14:15 last July whenever it was written, and conflating the two would make every backfilled shift look like it was documented after the fact.",
+   "fieldname": "reading_datetime",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "At",
+   "reqd": 1
+  },
+  {
+   "description": "Air temperature. What a person quotes, and not what Oregon's heat rule turns on — see heat_index_f.",
+   "fieldname": "temp_f",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Temp (°F)",
+   "precision": "1"
+  },
+  {
+   "description": "THE NUMBER THE RULE ACTUALLY USES. OAR 437-004-1131 engages at a heat index of 80 °F and adds obligations at 90 °F, and heat index is temperature and humidity together — 88 °F at 70% humidity is a 100 °F heat index and a shift somebody could be cited over while the thermometer reads comfortably.",
+   "fieldname": "heat_index_f",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Heat Index (°F)",
+   "precision": "1"
+  },
+  {
+   "description": "Relative humidity. Kept alongside the derived heat index rather than only the result, so a disputed index can be recomputed from what was actually observed.",
+   "fieldname": "humidity_pct",
+   "fieldtype": "Float",
+   "label": "Humidity (%)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "reading_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Wind speed. The spray shift's equivalent of heat index: nearly every pesticide label sets a maximum, and it is the first thing an Oregon Department of Agriculture drift investigation asks for.",
+   "fieldname": "wind_speed_mph",
+   "fieldtype": "Float",
+   "label": "Wind (mph)",
+   "precision": "1"
+  },
+  {
+   "description": "Wind direction in degrees. Direction is what turns a speed into a statement about where the spray went and which neighbouring property was downwind.",
+   "fieldname": "wind_direction_deg",
+   "fieldtype": "Float",
+   "label": "Wind Direction (°)",
+   "precision": "0"
+  },
+  {
+   "description": "Precipitation over the interval. Rain during a harvest shift is a food-safety fact under the Produce Safety Rule before it is a productivity one.",
+   "fieldname": "precipitation_mm",
+   "fieldtype": "Float",
+   "label": "Precipitation (mm)",
+   "precision": "2"
+  },
+  {
+   "fieldname": "provenance_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "description": "Where the number came from: 'Open-Meteo forecast API', 'Open-Meteo archive API', 'on-site station', 'foreman reading'. An auditor is entitled to know whether a temperature was measured at the block or modelled for the grid square, and a column that did not say would invite the question at the worst moment.",
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "label": "Source"
+  },
+  {
+   "fieldname": "provenance_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When this row was written. Together with reading_datetime it is what distinguishes a live fifteen-minute fetch from an archive backfill, honestly, on the face of the row.",
+   "fieldname": "fetched_at",
+   "fieldtype": "Datetime",
+   "label": "Fetched"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-03 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Shift Weather Reading",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

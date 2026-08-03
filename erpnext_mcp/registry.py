@@ -59,6 +59,7 @@ from .tools import (
 	fiscal,
 	funnel,
 	governance,
+	heat,
 	housing,
 	hr,
 	inspections,
@@ -75,6 +76,7 @@ from .tools import (
 	read,
 	realestate,
 	reports,
+	shifts,
 	tax,
 	trade,
 	training,
@@ -5705,7 +5707,7 @@ TOOLS = {
 			),
 			"category": _field(
 				_STRING,
-				"Certifications, Policies, Workforce, Housing, Water and Sanitation, Spray and "
+				"Certifications, Policies, Workforce, Records, Housing, Water and Sanitation, Spray and "
 				"Pesticides, Filings, Audits or Other.",
 			),
 			"alert_type": _field(_STRING, "One rule's alerts only. list_compliance_rules names them."),
@@ -5867,7 +5869,7 @@ TOOLS = {
 			"alert_type": _field(_STRING, "One rule's alerts. list_compliance_rules names them."),
 			"category": _field(
 				_STRING,
-				"Certifications, Policies, Workforce, Housing, Water and Sanitation, Spray and "
+				"Certifications, Policies, Workforce, Records, Housing, Water and Sanitation, Spray and "
 				"Pesticides, Filings, Audits or Other.",
 			),
 			"severity": _field(_STRING, "Critical, Warning or Info — EXACTLY this severity, not 'and worse'."),
@@ -7575,6 +7577,515 @@ TOOLS = {
 		title="Sign a training supervisor review",
 		available=_needs_doctype("Employee Training Record"),
 		requires="the Employee Training Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.19.3: the shift, and the heat record anchored to it ──────────────
+	"start_shift": _tool(
+		shifts.start_shift,
+		"MUTATING (default OFF). Form a crew at a place and start the exposure "
+		"period every compliance question about it is asked against.\n\n"
+		"THE SHIFT IS THE ANCHOR, and that is what this release is for. A task "
+		"completion carries a point-in-time reading; a shift carries a timeline. "
+		"Oregon OSHA does not ask what the temperature was when one job closed — it "
+		"asks whether the July 15 shift complied with OAR 437-004-1131 from start to "
+		"finish, and only a record spanning the exposure period can answer.\n\n"
+		"THE FOREMAN FORMS THE CREW. There is no clock-in tool here and there will "
+		"not be one: -1131 puts the water, shade, rest-cycle and observation "
+		"obligations on a NAMED responsible person, and FSMA §112.161(b) asks that "
+		"person to sign. A crew of thirty each clocking themselves in is a shift "
+		"with nobody responsible for the record, and the observable failure is that "
+		"nobody logged the water break because everybody assumed somebody else had.\n\n"
+		"PER-WORKER ATTENDANCE IS NOT LOST TO THIS. Every crew row carries its own "
+		"joined_at and left_at, and `end_shift` writes one Attendance record per "
+		"person for their OWN span — not the shift's.\n\n"
+		"`farm_location_gps` IS THE WEATHER ANCHOR. v0.19.4 asks Open-Meteo what the "
+		"conditions are at that place every fifteen minutes while the shift is open; "
+		"a shift with no coordinates gets no timeline, and the result says so.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager, and refuses a "
+		"foreman or a crew member whose company the calling account cannot see.",
+		{
+			"foreman": _field(
+				_STRING,
+				"The supervisor forming this crew and answerable for it. Docname, employee "
+				"number, name, or their login. NOT optional — a shift with nobody\'s name on it "
+				"answers neither -1131 nor §112.161(b).",
+			),
+			"location": _field(
+				_STRING,
+				"Where the work is: a block name, a camp name, a shop. Free text, because a "
+				"shift can be at a place this site has no record of and refusing until somebody "
+				"creates a master is how a compliance record stops being written.",
+			),
+			"shift_type": _field(
+				_STRING,
+				"Spray, Harvest, Prune, Irrigation, Housing Work, Detector Test Round, "
+				"Maintenance or General (the default). It is what decides which regime\'s "
+				"timeline matters — a Spray shift is read against wind speed and a Harvest "
+				"shift against heat index.",
+			),
+			"farm_location_gps": _field(
+				_STRING,
+				"Latitude,longitude or a place name — \'45.52,-122.68\'. The weather anchor. "
+				"Same spelling Farm Task Assignment has used since v0.19.1.",
+			),
+			"crew_employees": _field(
+				_STRING_ARRAY,
+				"Who is on the crew at the start. Docnames, employee numbers, names or logins; "
+				"a comma-separated string is accepted too, and so is a list of objects with "
+				"`employee`, `role` and `joined_at`. Their joined_at defaults to the SHIFT\'S "
+				"OWN START rather than to now — everybody rostered at the beginning was there "
+				"at the beginning, and stamping them with the moment the call landed would "
+				"shave minutes off every one of their days. Late arrivals go through "
+				"add_worker_to_shift. Maximum 60.",
+			),
+			"start_datetime": _field(
+				_STRING, "When the crew started, YYYY-MM-DD HH:MM:SS. Defaults to now."
+			),
+			"company": _field(
+				_STRING,
+				"The entity whose crew this is. Defaults to the foreman\'s own company, and a "
+				"mismatch is refused rather than reconciled.",
+			),
+		},
+		required=("foreman",),
+		mutating=True,
+		title="Start a crew shift",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"add_worker_to_shift": _tool(
+		shifts.add_worker_to_shift,
+		"MUTATING (default OFF). Roster somebody onto a shift already running — a "
+		"late arrival, or a transfer off another block.\n\n"
+		"`joined_at` DEFAULTS TO NOW, which is the opposite of start_shift\'s default "
+		"and right for the same reason: a worker rostered at the beginning was there "
+		"at the beginning, and a worker added mid-shift arrived when somebody said "
+		"so. Their Attendance record on close spans from here, not from the shift\'s "
+		"start.\n\n"
+		"REFUSES A SECOND ROW FOR SOMEBODY ALREADY ON THE CREW. Two rows look "
+		"deliberate on the form and become two Attendance days for one person when "
+		"the shift closes — somebody who left and came back is one row spanning "
+		"both. Also refuses a closed shift: the Attendance rows are already written, "
+		"so a crew row added afterwards would be a person with no payroll day.\n\n"
+		"Where the shift has already crossed the 80 °F heat index, the result says "
+		"so — somebody arriving mid-shift has had none of the morning\'s water breaks "
+		"and none of the crew\'s acclimatization, and OAR 437-004-1131(g) is about "
+		"exactly that person.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
+			"name": _field(_STRING, "Alias for shift."),
+			"employee": _field(
+				_STRING, "Who is joining. Docname, employee number, name or login."
+			),
+			"role": _field(
+				_STRING,
+				"Worker (the default), Lead Worker or Trainee. Trainee is the one that carries "
+				"a legal consequence — -1131(g) asks for an acclimatization plan for workers "
+				"with under fourteen days in the heat.",
+			),
+			"joined_at": _field(
+				_STRING, "When they started on the shift, YYYY-MM-DD HH:MM:SS. Defaults to now."
+			),
+			"notes": _field(
+				_STRING, "Anything about this person on this shift. Kept on their crew row."
+			),
+		},
+		required=("employee",),
+		mutating=True,
+		title="Add a worker to a shift",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"remove_worker_from_shift": _tool(
+		shifts.remove_worker_from_shift,
+		"MUTATING (default OFF). End one worker\'s time on a shift that continues "
+		"without them.\n\n"
+		"IT SETS `left_at`; IT DOES NOT DELETE THE ROW, and the difference is the "
+		"whole point. The row is the only record that this person was on this shift "
+		"at all — which is the record a wage claim turns on, and the record that "
+		"says who was exposed on a hot afternoon before they were sent home. The "
+		"name of the tool is the operational verb and the storage is the compliance "
+		"one.\n\n"
+		"Their Attendance record on close spans their joined_at to this left_at "
+		"rather than to the shift\'s end — a worker who arrived late and left early "
+		"did not work the whole day, and a row claiming they did is wrong in the "
+		"employer\'s favour, which is the direction that gets litigated.\n\n"
+		"Calling it twice on somebody who has already left is refused unless "
+		"`left_at` is given explicitly: a silent second call would move their "
+		"departure to now and lengthen a day that has already ended.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname."),
+			"name": _field(_STRING, "Alias for shift."),
+			"employee": _field(
+				_STRING, "Who is leaving. Docname, employee number, name or login."
+			),
+			"left_at": _field(
+				_STRING,
+				"When they left, YYYY-MM-DD HH:MM:SS. Defaults to now, and is REQUIRED to "
+				"correct a departure already recorded.",
+			),
+			"notes": _field(
+				_STRING,
+				"Why they left. \'Sent to the shop at 11:00, cramping\' is a compliance fact "
+				"about a heat shift and belongs on the person.",
+			),
+		},
+		required=("employee",),
+		mutating=True,
+		title="Remove a worker from a shift",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"log_shift_event": _tool(
+		shifts.log_shift_event,
+		"MUTATING (default OFF). Record one thing the foreman did about the "
+		"conditions, at the moment it happened.\n\n"
+		"THE TIMELINE IS THE EVIDENCE. Oregon\'s heat rule does not ask whether water "
+		"was available in principle — it asks what happened during the shift, and "
+		"four water breaks with timestamps answer that in a way an annual policy "
+		"document never can. `create_heat_exposure_event` is the claim; this is what "
+		"the claim rests on, and an inspector asks for the second.\n\n"
+		"LOGGED AT THE TIME. A timeline written from memory in the evening is what "
+		"an investigator discounts, which is why this is a separate call from the "
+		"close rather than a list argument on it.\n\n"
+		"`producer_record_doctype` and `producer_record_name` point back at whatever "
+		"documented the event — a Farm Task Assignment somebody closed, a Heat "
+		"Exposure Event. Plain strings rather than a link, because a producer can "
+		"belong to an app this site does not have and a link that refuses to save is "
+		"a compliance event that does not get logged.\n\n"
+		"An event timestamped outside the shift is KEPT AND REPORTED rather than "
+		"refused: a clock five minutes out is not a false record, and refusing would "
+		"mean the break goes unlogged rather than logged approximately.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname."),
+			"name": _field(_STRING, "Alias for shift."),
+			"event_type": _field(
+				_STRING,
+				"Water Break, Shade Break, Rest Cycle, Supervisor Observation, Heat Illness "
+				"Signs Check, Cool-Down, Threshold Crossed, Acclimatization Reminder or Other. "
+				"A closed vocabulary because a timeline is only readable if the rows are "
+				"comparable — four Water Breaks across a shift are a cadence, and four "
+				"free-text sentences are four sentences somebody has to read.",
+			),
+			"event_datetime": _field(
+				_STRING,
+				"When it happened, YYYY-MM-DD HH:MM:SS. Defaults to now, which is the right "
+				"answer when the call is made as it happens and the wrong one otherwise.",
+			),
+			"logged_by": _field(
+				_STRING,
+				"Who called it. Defaults to the shift\'s foreman, and is worth setting when it "
+				"was not — a lead worker calling a break at the far end of the block is the "
+				"ordinary case, and attributing it to the foreman would be wrong in exactly the "
+				"place an investigator looks.",
+			),
+			"description": _field(
+				_STRING,
+				"What actually happened. \'Cooler refilled, whole crew drank, two moved to the "
+				"shaded end\' is evidence; \'water break\' is already the type.",
+			),
+			"producer_record_doctype": _field(
+				_STRING, "The doctype of the record that documented this, e.g. \'Farm Task Assignment\'."
+			),
+			"producer_record_name": _field(
+				_STRING, "Its docname. Refused without the doctype — a name with nowhere to look it up."
+			),
+			"evidence_file_token": _field(
+				_STRING,
+				"A photograph or signature for this one event, as a File docname or file_url — "
+				"the cooler being refilled, the shade at 13:00. Upload it with stage_file_chunk "
+				"first. One pointing at nothing is refused.",
+			),
+			"weather_snapshot_temp_f": _field(
+				_NUMBER, "Air temperature at this instant, where somebody has one. v0.19.4 fills it."
+			),
+			"weather_snapshot_heat_index_f": _field(
+				_NUMBER,
+				"Heat index at this instant. THE NUMBER THE RULE TURNS ON — 88 °F at 70 % "
+				"humidity is a 100 °F index and a citation while the thermometer reads mild.",
+			),
+		},
+		required=("event_type",),
+		mutating=True,
+		title="Log a shift compliance event",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"end_shift": _tool(
+		shifts.end_shift,
+		"MUTATING (default OFF). Close a shift with the supervisor\'s signature, and "
+		"write the crew\'s payroll rows.\n\n"
+		"THE SIGNATURE IS REQUIRED AND IT IS WHY THIS IS A TOOL. An unsigned close is "
+		"an UPDATE setting a timestamp; the signature is what makes it the "
+		"attestation FSMA §112.161(b) asks for — a review that is dated AND SIGNED by "
+		"a supervisor or responsible party rather than merely recorded. Without one "
+		"the shift stays open and nothing is written.\n\n"
+		"IT WRITES ONE ATTENDANCE RECORD PER CREW MEMBER, each spanning that "
+		"person\'s own joined_at to their own left_at — or to the shift\'s end where "
+		"they stayed to it. Not the shift\'s span: a worker who arrived an hour late "
+		"and left two hours early worked six hours of a nine-hour shift, and a row "
+		"claiming nine is wrong in the employer\'s favour. So farm_hr keeps one "
+		"canonical answer to \'when was Ana at work\' and get_attendance_summary "
+		"counts a shift-formed day exactly as it counts a hand-entered one.\n\n"
+		"THE BRIDGE NEVER BLOCKS THE CLOSE. A site without Frappe HR, an employee "
+		"archived since the shift ran, a day somebody already keyed in by hand — "
+		"every one of those is REPORTED and none of them stops a signed shift being "
+		"closed. The signature is the compliance act; the payroll row is the "
+		"convenience.\n\n"
+		"WHAT IT DOES NOT REFUSE: a shift with obligations unmet or an empty event "
+		"timeline. A day where the shade trailer broke down and the crew went home "
+		"at eleven is a real shift with a real gap, and the result says so rather "
+		"than the tool refusing to record it.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname."),
+			"name": _field(_STRING, "Alias for shift."),
+			"supervisor_signature_file_token": _field(
+				_STRING,
+				"The foreman\'s signature, as a File docname or file_url. REQUIRED — upload it "
+				"with stage_file_chunk and commit_staged_file first. One pointing at nothing is "
+				"refused, because a signature that proves nothing is the one kind of missing "
+				"evidence nobody discovers until an auditor clicks it.",
+			),
+			"end_datetime": _field(
+				_STRING,
+				"When the crew finished, YYYY-MM-DD HH:MM:SS. Defaults to now. Earlier than the "
+				"start is refused, and so is one before a crew member\'s recorded departure.",
+			),
+			"foreman_notes": _field(
+				_STRING,
+				"What the foreman wants on the record: who was struggling in the heat, why a "
+				"block was left, what the crew was told. The part no structured field holds and "
+				"the part an investigator reads first.",
+			),
+			"reviewed_on": _field(
+				_STRING, "When the review happened, YYYY-MM-DD HH:MM:SS. Defaults to now."
+			),
+		},
+		required=("supervisor_signature_file_token",),
+		mutating=True,
+		title="End a crew shift",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_heat_exposure_event": _tool(
+		heat.create_heat_exposure_event,
+		"MUTATING (default OFF). Document OAR 437-004-1131 for one shift, signed and "
+		"submitted.\n\n"
+		"THIS IS THE ANSWER TO \'PROVE THE JULY 15 CREW COMPLIED\'. One record, "
+		"anchored to one shift, saying what was actually done — water at the "
+		"required rate, shade within reach, the rest cycle TAKEN rather than offered, "
+		"the crew observed, the training current — with the shift\'s crew list and "
+		"event timeline behind it as the evidence for every claim.\n\n"
+		"ONE PER SHIFT, and the second call is refused by name. Two records about one "
+		"exposure period will disagree, and the one an inspector finds will be "
+		"whichever was filed second.\n\n"
+		"IT CHECKS `training_verified` AGAINST THE TRAINING REGISTER, as of the DAY "
+		"OF THE SHIFT rather than today — a card that expired last week was current "
+		"in July. Claiming verified training for a crew with an untrained worker is "
+		"REFUSED, because the same audit packet carries both this record and the "
+		"register, and a packet that contradicts itself is worse than one with a "
+		"gap. Claiming false is accepted and the missing names are reported: a shift "
+		"that ran that way happened, and the record of it is what the operation "
+		"needs to have.\n\n"
+		"SIGNS OBSERVED WITH NO RESPONSE AND NO NOTES IS REFUSED. Signs seen and "
+		"nothing done is the sequence that kills people. There are legitimate "
+		"versions — the worker recovered in shade within minutes and declined "
+		"further help — and every one of them is a sentence somebody can write.\n\n"
+		"Everything else is RECORDED WITH THE GAP STATED. A day where the shade "
+		"trailer broke down is a real shift with a real gap, and a tool that would "
+		"not let it be recorded would produce either a false record or no record.",
+		{
+			"farm_shift": _field(
+				_STRING, "The Farm Shift this documents, e.g. SHIFT-2026-0001. Required and unique."
+			),
+			"shift": _field(_STRING, "Alias for farm_shift."),
+			"supervisor_signature_file_token": _field(
+				_STRING,
+				"The supervisor\'s signature, as a File docname or file_url. REQUIRED — "
+				"submitting is the attestation, and an unsigned heat record is a claim with "
+				"nobody behind it.",
+			),
+			"water_provided": _field(
+				_BOOLEAN,
+				"Drinking water at the rate the rule sets — one quart per worker per hour, "
+				"suitably cool, enough for the whole shift.",
+			),
+			"shade_provided": _field(
+				_BOOLEAN,
+				"Shade available AND ACCESSIBLE. Shade four hundred yards away at the end of "
+				"the block is shade nobody uses, which is why the rule speaks of proximity.",
+			),
+			"mandatory_rest_taken": _field(
+				_BOOLEAN,
+				"The preventative cool-down rest cycle was TAKEN, not offered. A crew declining "
+				"a break on a piece rate is the failure the requirement exists for.",
+			),
+			"heat_illness_signs_observed": _field(
+				_BOOLEAN,
+				"The supervisor SAW signs in somebody. Ticking it is not an admission of "
+				"failure — observing is the obligation and finding something is it working. "
+				"What it does is make emergency_response_activated mandatory.",
+			),
+			"worker_reported_symptoms": _field(
+				_BOOLEAN,
+				"A worker said they felt unwell. Separate from the supervisor\'s own "
+				"observation because they are different evidence — self-report is what the "
+				"two-way communication requirement is testing.",
+			),
+			"emergency_response_activated": _field(
+				_BOOLEAN,
+				"Moved to shade and cooled, somebody stayed with them, medical services called "
+				"where the signs warranted. Required whenever signs were observed, unless the "
+				"notes explain why not.",
+			),
+			"training_verified": _field(
+				_BOOLEAN,
+				"Every worker on the crew had current heat illness prevention training. Checked "
+				"against the register as of the day of the shift; a true claim the register "
+				"contradicts is refused.",
+			),
+			"max_temp_f": _field(_NUMBER, "Highest air temperature during the shift."),
+			"max_heat_index_f": _field(
+				_NUMBER,
+				"Highest heat index. THE NUMBER THE RULE TURNS ON — it engages at 80 °F index "
+				"and adds obligations at 90 °F, and an 88 °F day at 70 % humidity is a 100 °F "
+				"index. Entered by hand until v0.19.4 computes it from the shift\'s weather "
+				"timeline.",
+			),
+			"threshold_crossed_at": _field(
+				_STRING,
+				"When conditions first reached 80 °F, YYYY-MM-DD HH:MM:SS. The moment the "
+				"obligations START, so it is the clock every water break on the shift is read "
+				"against.",
+			),
+			"acclimatization_plan": _field(
+				_STRING_ARRAY,
+				"Workers with fewer than fourteen days in the heat, whom -1131(g) requires a "
+				"written plan for. NAMED individually rather than counted — these are the "
+				"people most likely to be hospitalised, and a plan for \'the new workers\' is "
+				"one an inspector cannot check. Somebody not on the shift\'s crew is refused.",
+			),
+			"event_date": _field(
+				_STRING, "The day, YYYY-MM-DD. Defaults to the shift\'s own start date."
+			),
+			"notes": _field(
+				_STRING,
+				"Everything the checkboxes cannot hold: who showed signs and what was done, who "
+				"had no current training and how the shift was adjusted for them. Where an "
+				"obligation was not met this is the record of what happened instead, and an "
+				"honest one is worth more under investigation than a row of ticks.",
+			),
+			"regulation_citation": _field(
+				_STRING, "Defaults to OAR 437-004-1131. A field rather than a constant, because Oregon renumbers."
+			),
+		},
+		required=("supervisor_signature_file_token",),
+		mutating=True,
+		title="Create a heat exposure event",
+		available=_needs_doctype("Heat Exposure Event"),
+		requires="the Heat Exposure Event DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_shifts": _tool(
+		shifts.list_shifts,
+		"The shift register: who was where, with which crew, for how long, and what "
+		"is still open. Read-only.\n\n"
+		"`status` IS COMPUTED from whether the shift has an end time rather than read "
+		"off a stored column — an OPEN shift is what the v0.19.4 weather sweep walks, "
+		"and a record last saved in March holding March\'s answer would drop a live "
+		"shift out of the fetch.\n\n"
+		"`closed_without_a_signature` IS THE ONE TO READ. end_shift cannot produce "
+		"one, so anything in that list was closed in the Desk or by an import — and "
+		"FSMA §112.161(b) asks for a review dated and signed. A signature added now "
+		"is dated now.\n\n"
+		"`employee` answers \'which shifts was Ana on\', walking the crew tables. "
+		"Scoped to the companies the calling account may actually reach.",
+		{
+			"company": _COMPANY,
+			"foreman": _field(_STRING, "One supervisor. Docname, employee number, name or login."),
+			"employee": _field(
+				_STRING, "Shifts this person was on the crew of, whether or not they led it."
+			),
+			"status": _field(_STRING, "Active, Closed or Cancelled — computed, not stored."),
+			"shift_type": _field(
+				_STRING, "Spray, Harvest, Prune, Irrigation, Housing Work, Detector Test Round, Maintenance or General."
+			),
+			"from_date": _field(_STRING, "Earliest shift start date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest shift start date, YYYY-MM-DD."),
+			"limit": _field(_INTEGER, "Maximum shifts. Default 100, hard maximum 500."),
+		},
+		title="List shifts",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_shift": _tool(
+		shifts.get_shift,
+		"One shift in full: the crew and their individual spans, the compliance-event "
+		"timeline, the weather timeline, and the heat record if one exists. "
+		"Read-only.\n\n"
+		"THIS IS THE EVIDENCE CHAIN AN INSPECTOR IS HANDED. \'Prove the July 15 shift "
+		"complied\' is answered by the Heat Exposure Event\'s claims plus this — who "
+		"was there and from when, what breaks were called and at what time, what the "
+		"conditions were, and whose signature is on the close.\n\n"
+		"Each crew row reports `present_until`, which is the honest reading of an "
+		"empty left_at: they were there to the end. It is computed rather than "
+		"written back, because writing it would destroy the distinction between "
+		"\'left at 13:00\' and \'stayed to the end\' the moment the end time changed.",
+		{
+			"name": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
+			"shift": _field(_STRING, "Alias for name."),
+		},
+		title="Get a shift",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_heat_exposure_events": _tool(
+		heat.list_heat_exposure_events,
+		"The heat register: every documented hot shift, what each one claims, and "
+		"where the claims stop. Read-only.\n\n"
+		"`with_signs_observed` IS THE FIRST THING AN INVESTIGATION READS, and a shift "
+		"on that list is one where the observation obligation was working rather "
+		"than failing — somebody looked and found something.\n\n"
+		"`without_verified_training` is the list that becomes a citation on the first "
+		"hot morning: OAR 437-004-1131 requires heat illness prevention training "
+		"annually AND before work at a site where the heat index will reach 80 °F.\n\n"
+		"`without_a_signature` should be empty — create_heat_exposure_event cannot "
+		"produce an unsigned record, so anything there was written in the Desk.\n\n"
+		"Scoped to the companies the calling account may actually reach.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Earliest event date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest event date, YYYY-MM-DD."),
+			"with_gaps_only": _field(
+				_BOOLEAN,
+				"Only records that do not claim every -1131 obligation was met. The worklist, "
+				"and the set an inspector would open first.",
+			),
+			"limit": _field(_INTEGER, "Maximum records. Default 100, hard maximum 500."),
+		},
+		title="List heat exposure events",
+		available=_needs_doctype("Heat Exposure Event"),
+		requires="the Heat Exposure Event DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_heat_exposure_event": _tool(
+		heat.get_heat_exposure_event,
+		"One heat record in full, with the shift behind it — crew, timeline, weather. "
+		"Read-only.\n\n"
+		"IT REPORTS THE OBLIGATIONS THE RECORD DOES NOT CLAIM WERE MET, in the rule\'s "
+		"own terms, rather than fixing them: a tick added now is a tick added now, "
+		"and a record completed before an inspection is what an inspector is trained "
+		"to spot.\n\n"
+		"WHERE THE SHIFT\'S EVENT TIMELINE IS EMPTY IT SAYS SO, and that is the gap "
+		"worth knowing about before an audit rather than during one. The checkboxes "
+		"on this record are an ASSERTION; the shift\'s logged water breaks, rest "
+		"cycles and observations are the EVIDENCE for it, and an inspector asks for "
+		"the second.",
+		{
+			"name": _field(_STRING, "The Heat Exposure Event docname, e.g. HEAT-2026-0001."),
+			"heat_exposure_event": _field(_STRING, "Alias for name."),
+			"record": _field(_STRING, "Alias for name."),
+		},
+		title="Get a heat exposure event",
+		available=_needs_doctype("Heat Exposure Event"),
+		requires="the Heat Exposure Event DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

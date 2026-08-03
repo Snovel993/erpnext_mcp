@@ -1403,6 +1403,26 @@ ALERT_TASK_MAP = {
 		"evidence": {"findings_text": True, "signature": True},
 		"what": "Arrange and deliver the retraining, then file it with record_training",
 	},
+	# v0.19.3. Fifteen minutes, and it is a real fifteen minutes: the work is a
+	# supervisor reading a record they were not present for and putting their name
+	# to it. `creates_record` is empty for the same reason the training entry's is
+	# — the record already exists, and what is missing is a signature on it, which
+	# `sign_training_supervisor_review` writes and no completion builder can
+	# invent. The evidence contract asks for the signature itself rather than a
+	# findings note, because a review with no signature is the gap this task was
+	# raised to close.
+	"supervisor_review_lapsed": {
+		"task_type": "Compliance-Audit",
+		"creates_record": "",
+		"skill": "hr_admin",
+		"dispatch": "Dispatched",
+		"minutes": 15,
+		"evidence": {"signature": True},
+		"what": (
+			"Read the record and sign the §112.161(b) supervisor review with "
+			"sign_training_supervisor_review"
+		),
+	},
 }
 
 #: Alert severity to task urgency. Deliberately NOT the identity mapping: a

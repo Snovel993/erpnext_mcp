@@ -1,0 +1,286 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-03 20:00:00.000000",
+ "description": "The OAR 437-004-1131 record for one shift on one hot day. ANCHORED TO A SHIFT, NOT TO A TASK, and that is the entire argument: Oregon's heat rule asks about an exposure period — was water provided at one gallon per worker per hour, was shade within 250 feet, was the rest cycle taken, did the supervisor observe for signs — and none of those is a question about a single job closing. One shift, at most one of these, so 'prove the July 15 crew complied' has exactly one answer with the shift's crew list, compliance-event timeline and weather timeline hanging off it. Submitting it is the supervisor's attestation, which is why the signature is required to submit rather than required to save: a half-filled draft on the morning of a heat wave is a record in progress, and a submitted one is somebody's name against a claim.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "farm_shift",
+  "event_date",
+  "identity_col",
+  "foreman",
+  "company",
+  "conditions_section",
+  "max_temp_f",
+  "max_heat_index_f",
+  "conditions_col",
+  "threshold_crossed_at",
+  "obligations_section",
+  "water_provided",
+  "shade_provided",
+  "mandatory_rest_taken",
+  "obligations_col",
+  "heat_illness_signs_observed",
+  "worker_reported_symptoms",
+  "emergency_response_activated",
+  "training_section",
+  "training_verified",
+  "acclimatization_plan",
+  "attestation_section",
+  "supervisor_signature",
+  "attestation_col",
+  "supervisor_signed_on",
+  "regulation_citation",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "HEAT-.YYYY.-.####",
+   "description": "The series a Heat Exposure Event is named from, expanded by the controller so a docname is the same shape on a bench and in the standalone suite — HEAT-2026-0001. The year is the year of the shift, not the year somebody filed the record.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "HEAT-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The shift this documents. REQUIRED AND UNIQUE — one shift has at most one heat record, because two records about one exposure period will disagree, and the one an inspector finds will be whichever was filed second. Everything the rule asks about the crew, the timeline and the conditions is reached through this link rather than copied.",
+   "fieldname": "farm_shift",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Farm Shift",
+   "options": "Farm Shift",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "description": "The day, taken from the shift's start. Denormalised because this is what a record is filed and found under — 'the July 15 heat record' is how anybody refers to it, and a date that had to be resolved through a link is a date nobody can filter a list view on.",
+   "fieldname": "event_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The responsible supervisor, from the shift. -1131 puts the obligations on a named person and this is that person's name on this record, rather than a lookup that would answer with whoever the shift's foreman is today.",
+   "fieldname": "foreman",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Foreman",
+   "options": "Employee",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The entity, from the shift. What scopes this record to a company, so a User Permission on Company reaches it.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "conditions_section",
+   "fieldtype": "Section Break",
+   "label": "Conditions"
+  },
+  {
+   "description": "The highest air temperature during the shift. Entered by hand in v0.19.3; computed from the shift's weather timeline once v0.19.4 fills it, at which point a manually entered figure that disagrees with the timeline is worth a second look rather than an overwrite — somebody standing in the block with a thermometer is not obviously wrong about a grid square.",
+   "fieldname": "max_temp_f",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Max Temp (°F)",
+   "precision": "1"
+  },
+  {
+   "description": "The highest heat index during the shift. THE NUMBER THE RULE TURNS ON: -1131 engages at 80 °F heat index and adds obligations at 90 °F, and heat index is temperature and humidity together — an 88 °F day at 70 % humidity is a 100 °F index and a citation while the thermometer reads mild.",
+   "fieldname": "max_heat_index_f",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Max Heat Index (°F)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "conditions_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When conditions first reached the 80 °F threshold. This is the moment the rule's obligations START, so it is the clock every water break and rest cycle on the shift is read against — a first break called four hours after the crossing is a different record from one called ten minutes after. Populated by the v0.19.4 threshold hook off the weather timeline; entered by hand until then.",
+   "fieldname": "threshold_crossed_at",
+   "fieldtype": "Datetime",
+   "label": "Threshold Crossed At"
+  },
+  {
+   "fieldname": "obligations_section",
+   "fieldtype": "Section Break",
+   "label": "What the Rule Asks"
+  },
+  {
+   "default": "0",
+   "description": "Drinking water was provided at the rate the rule sets — one quart per worker per hour, suitably cool, and enough of it for the whole shift. The first thing an inspector asks and the first thing a crew remembers.",
+   "fieldname": "water_provided",
+   "fieldtype": "Check",
+   "label": "Water Provided"
+  },
+  {
+   "default": "0",
+   "description": "Shade was available and accessible during the shift. 'Accessible' is doing work in that sentence: shade 400 yards away at the end of the block is shade nobody uses, which is why the rule speaks of proximity rather than existence.",
+   "fieldname": "shade_provided",
+   "fieldtype": "Check",
+   "label": "Shade Provided"
+  },
+  {
+   "default": "0",
+   "description": "The mandatory preventative cool-down rest cycle was actually taken. Not offered — taken. A crew that declined a break on a piece rate is the failure mode the rule exists for, and a record claiming this without matching Rest Cycle events on the shift timeline is a claim the timeline contradicts.",
+   "fieldname": "mandatory_rest_taken",
+   "fieldtype": "Check",
+   "label": "Mandatory Rest Taken"
+  },
+  {
+   "fieldname": "obligations_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "The supervisor SAW signs of heat illness in somebody. Ticking this is not an admission of failure — observing is the obligation and finding something is the observation working. What it does is make emergency_response_activated mandatory, because signs seen and nothing done is the sequence that kills people.",
+   "fieldname": "heat_illness_signs_observed",
+   "fieldtype": "Check",
+   "label": "Heat Illness Signs Observed"
+  },
+  {
+   "default": "0",
+   "description": "A worker said they felt unwell. Kept separate from the supervisor's own observation because they are different evidence — self-report is what the rule's two-way communication requirement is testing, and a shift with symptoms reported and none observed says something about the observation.",
+   "fieldname": "worker_reported_symptoms",
+   "fieldtype": "Check",
+   "label": "Worker Reported Symptoms"
+  },
+  {
+   "default": "0",
+   "description": "The emergency response was activated: the person was moved to shade and cooled, somebody stayed with them, and medical services were called where the signs warranted it. REQUIRED whenever signs were observed, unless the notes explain why not — and the explanation is what an investigator will read first.",
+   "fieldname": "emergency_response_activated",
+   "fieldtype": "Check",
+   "label": "Emergency Response Activated"
+  },
+  {
+   "fieldname": "training_section",
+   "fieldtype": "Section Break",
+   "label": "Training and Acclimatization"
+  },
+  {
+   "default": "0",
+   "description": "Every worker on this crew has current heat illness prevention training on file. -1131 requires it annually and BEFORE work at a site where the heat index will reach 80 °F, so an untrained worker on a hot shift is a citation the first hot morning rather than at the next inspection. Where somebody lacked it this stays 0 and the notes say who and what was done about it — a record that claimed otherwise would be contradicted by the training register in the same packet.",
+   "fieldname": "training_verified",
+   "fieldtype": "Check",
+   "label": "Training Verified"
+  },
+  {
+   "description": "Workers on this shift with fewer than fourteen days working in the heat, who -1131(g) requires a written acclimatization plan for. Named individually rather than counted: a plan for 'the new workers' is a plan an inspector cannot check, and these are the people most likely to be hospitalised.",
+   "fieldname": "acclimatization_plan",
+   "fieldtype": "Table MultiSelect",
+   "label": "Acclimatization Plan",
+   "options": "Heat Acclimatization Worker"
+  },
+  {
+   "fieldname": "attestation_section",
+   "fieldtype": "Section Break",
+   "label": "Attestation"
+  },
+  {
+   "description": "The supervisor's signature. REQUIRED TO SUBMIT — an unsigned heat record is a claim with nobody behind it, and this is the record a serious-injury investigation is read from. Uploaded through the staging pipeline and referenced here by docname or file URL.",
+   "fieldname": "supervisor_signature",
+   "fieldtype": "Attach",
+   "label": "Supervisor Signature"
+  },
+  {
+   "fieldname": "attestation_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When it was signed, written at submit rather than typed. A signature date somebody could set is a signature date somebody could set to the day of the shift, which is exactly the thing the timestamp is supposed to prove.",
+   "fieldname": "supervisor_signed_on",
+   "fieldtype": "Datetime",
+   "label": "Signed On",
+   "read_only": 1
+  },
+  {
+   "default": "OAR 437-004-1131",
+   "description": "The rule this record answers to, on the face of the record. Kept as a field rather than assumed in code because Oregon renumbers, and a packet built in three years should quote the citation that was current when the shift ran rather than the one current when the packet was printed.",
+   "fieldname": "regulation_citation",
+   "fieldtype": "Data",
+   "label": "Regulation"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Everything the checkboxes cannot hold: who showed signs and what was done, which worker had no current training and how the shift was adjusted for them, why an emergency response was not activated when signs were seen. Where an obligation was not met this is the record of what happened instead, and an honest one is worth more under investigation than a row of ticks.",
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-08-03 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Heat Exposure Event",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "farm_shift,event_date,foreman",
+ "sort_field": "event_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

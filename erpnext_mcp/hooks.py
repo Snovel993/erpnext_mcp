@@ -13,9 +13,9 @@ than in custom fields grafted onto it: a doctype of ours goes with the app, a
 field on theirs does not.
 
 v0.15.0 IS THE EXCEPTION TO THE PARAGRAPH ABOVE, AND IT IS DELIBERATE. The
-compliance framework adds Custom Fields to Spray Log, to Employee and to the
-BucketLog bridge — three doctypes this app did not create — through the
-`after_migrate` hook. It is the only such exception, it is behind a switch an
+compliance framework adds Custom Fields to Spray Log, to Employee, to the
+BucketLog bridge and — from v0.19.3 — to Attendance: four doctypes this app did
+not create, through the `after_migrate` hook. It is the only such exception, it is behind a switch an
 operator can turn off, and `compliance_fields.py` argues the case at length. The
 short version: compliance woven into the operational record is defensible under
 audit and a shadow log beside it is not, and you cannot weave anything into a

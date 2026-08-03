@@ -3,6 +3,124 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.19.3 — 2026-08-03
+
+**Compliance anchors to a shift, not to a task.** A task completion carries a
+point-in-time reading; a shift carries a timeline. Oregon OSHA does not ask what
+the temperature was when one job closed — it asks whether the July 15 shift
+complied with OAR 437-004-1131 from start to finish, and only a record spanning
+the exposure period can answer. Six new DocTypes, ten new tools, the thirteenth
+compliance rule, and a one-way bridge into Frappe HR. Full notes:
+[`RELEASES/v0.19.3.md`](RELEASES/v0.19.3.md).
+
+Suite: 3,653 → **3,734 passing**. Tool surface: 214 → **224** (99 read, 125
+mutating).
+
+### Added
+
+- **`Farm Shift`, `Farm Shift Crew Member`, `Farm Shift Compliance Event` and
+  `Farm Shift Weather Reading` DocTypes.** A crew, at a place, for a span, with a
+  timeline of what was done about the conditions. `status` is computed from two
+  facts in one order: no end time means **Active** whatever anybody ticked,
+  because an open shift is what the v0.19.4 weather sweep walks. Docnames are
+  `SHIFT-2026-0001`, keyed to the year the shift **started** — a night shift
+  beginning on 31 December belongs to the year it began.
+- **The foreman is the sole actor, and there is no clock-in tool.**
+  OAR 437-004-1131 puts the water, shade, rest-cycle and observation obligations
+  on a *named* responsible person, and FSMA §112.161(b) asks that person to sign.
+  A crew of thirty each clocking themselves in is a shift with thirty people
+  responsible for the record, which is a shift with nobody responsible for it.
+- **Per-worker attendance inside the crew envelope.** Every crew row carries its
+  own `joined_at` and `left_at`. `remove_worker_from_shift` **sets `left_at`; it
+  does not delete the row** — the row is the only record that this person was on
+  the shift at all, which is what a wage claim turns on.
+- **`Heat Exposure Event` DocType**, with `Heat Acclimatization Worker` behind
+  its plan. One per shift, submittable, signature required to submit. The
+  acclimatization plan NAMES the workers with under fourteen days in the heat per
+  -1131(g), because these are the people most likely to be hospitalised and a plan
+  for "the new workers" is one an inspector cannot check.
+- **Ten tools** — six mutating (default OFF), four read-only (default ON):
+  `start_shift`, `add_worker_to_shift`, `remove_worker_from_shift`,
+  `log_shift_event`, `end_shift`, `create_heat_exposure_event`, `list_shifts`,
+  `get_shift`, `list_heat_exposure_events`, `get_heat_exposure_event`. The guards
+  are `create_employee`'s, imported rather than restated: a shift is a personnel
+  record before it is a compliance record.
+- **The Attendance bridge.** Closing a shift writes one **submitted**
+  `Attendance` per crew member spanning **that person's own** `joined_at` to their
+  own `left_at`. Not the shift's span: a worker who arrived an hour late and left
+  two hours early worked six hours of a nine-hour shift, and a row claiming nine
+  is wrong in the employer's favour. Submitted rather than drafted because
+  `get_attendance_summary` counts `docstatus 1` only.
+- **`Attendance.farm_shift` Custom Field**, declared in `compliance_fields.py`
+  beside the v0.15.0 columns and reported by `before_uninstall`. Without it a
+  shift-formed day is indistinguishable from a hand-keyed one, and the bridge
+  cannot tell its own rows from anybody else's.
+- **`supervisor_review_lapsed`, the thirteenth compliance rule.** It watches a
+  signature that was never put on a record. Warning at 14 days, Critical past 30,
+  auto-dismissed the moment somebody signs. FSMA §112.161(b) is the most commonly
+  cited finding against farms whose actual practice is sound — USDA GAP does not
+  ask for a supervisor's review, so an immaculate GAP binder fails on the one
+  element its own auditor never mentioned. It walks a **table** of doctypes
+  carrying the §112.161(b) columns; one row today, and four more of this app's
+  doctypes are a one-line addition each.
+- **A heat exposure section on the OSHA audit packet.** On that packet alone: a
+  GAP auditor handed a heat register is being shown evidence for a scheme they do
+  not audit. Drafts excluded, gaps disclosed.
+- **`Records` as a `Compliance Alert.category`.** A supervisor review is not a
+  Workforce item once the rule reaches water tests and cabin walks.
+- **A `SHIFTS` role group.** Foreman and Farm Manager get **full**; Compliance
+  Officer gets **read**, because forming a shift is operational and signing one
+  off belongs to the supervisor who was standing on the block. Field Worker gets
+  read, so the app can show a worker which crew they are on.
+
+### Changed
+
+- **`Farm Shift Weather Reading` ships empty.** Its shape is what the
+  compliance-event snapshots denormalise from and what the heat record's maxima
+  will be computed over, so fixing it now means v0.19.4 wires a fetch rather than
+  migrating a schema under live compliance records. `start_shift` says so when a
+  shift has no `farm_location_gps`.
+- **`add_worker_to_shift` defaults `joined_at` to NOW; `start_shift` defaults it
+  to the SHIFT'S START.** Opposite defaults, and right for the same reason:
+  everybody rostered at the beginning was there at the beginning, and stamping
+  them with the moment the API call landed would shave minutes off every one of
+  their days.
+
+### Refused
+
+- **A close with no signature.** An unsigned close is an `UPDATE` setting a
+  timestamp; §112.161(b) asks for a review dated **and signed**. The shift stays
+  open and nothing is written.
+- **A second heat record for one shift.** Two records about one exposure period
+  will disagree, and the one an inspector finds will be whichever was filed
+  second. Refused before writing anything, naming the record that already exists.
+- **A `training_verified` claim the register contradicts**, checked **as of the
+  day of the shift** rather than as of today — a card that expired last week was
+  current in July. The same audit packet carries both this record and the
+  register, and a packet that contradicts itself is worse than one with a gap.
+  Claiming `false` is accepted and the missing names are reported.
+- **Heat illness signs observed, no emergency response, and no notes.** Signs
+  seen and nothing done is the sequence that kills people. There are legitimate
+  versions and every one of them is a sentence somebody can write — what is
+  refused is the silence.
+- **The same person on a crew twice**, an acclimatization plan naming somebody
+  off the crew, a shift ending before it started, and a crew row leaving before it
+  joined.
+
+### Not refused, and stated instead
+
+- **A shift with obligations unmet, or an empty event timeline.** A day where the
+  shade trailer broke down and the crew went home at eleven is a real shift with a
+  real gap, and a system that would not let it be recorded would produce either a
+  false record or no record.
+- **An event timestamped slightly outside the shift.** A clock five minutes out
+  is not a false record, and refusing would mean the break goes unlogged rather
+  than logged approximately.
+- **A failed Attendance write on close.** A site without Frappe HR, an employee
+  archived since the shift ran, a day already keyed in by hand: each is reported
+  and none refuses a signed shift. The signature is the compliance act and the
+  payroll row is the convenience.
+
 ## 0.19.2 — 2026-08-03
 
 **Two facts the app already knew stop living only in comments.** A compliance

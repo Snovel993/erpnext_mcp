@@ -1,0 +1,265 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-03 20:00:00.000000",
+ "description": "One period of time a crew was at a place, formed by the foreman who is answerable for it. THE SHIFT IS THE ANCHOR, and that is the whole of v0.19.3. A task completion carries a point-in-time reading; a shift carries a timeline. Oregon OSHA does not ask what the temperature was when one job closed — it asks whether the July 15 shift complied with OAR 437-004-1131 from start to finish, and only a record that spans the exposure period can answer. The foreman forms the crew, logs the water breaks, observes for heat illness signs and signs the record at the end, because the foreman is the party the rule makes responsible and the party FSMA §112.161(b) asks to review. Workers do not self-clock; per-worker attendance lives INSIDE the crew envelope as joined_at / left_at on each crew row, so payroll stays per-person accurate without the shift stopping being one thing.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "foreman",
+  "foreman_name",
+  "shift_type",
+  "status",
+  "identity_col",
+  "company",
+  "location",
+  "farm_location_gps",
+  "when_section",
+  "start_datetime",
+  "when_col",
+  "end_datetime",
+  "cancelled",
+  "cancellation_reason",
+  "crew_section",
+  "crew",
+  "events_section",
+  "compliance_events",
+  "weather_section",
+  "weather_timeline",
+  "closeout_section",
+  "supervisor_review_signature",
+  "closeout_col",
+  "supervisor_review_on",
+  "notes_section",
+  "foreman_notes"
+ ],
+ "fields": [
+  {
+   "default": "SHIFT-.YYYY.-.####",
+   "description": "The series a Farm Shift is named from. Expanded by the controller rather than by Frappe's naming_series hook, so a docname is the same shape on a bench and in the standalone suite — SHIFT-2026-0001. The year is the year the shift STARTED, which is the only reading that survives a night shift crossing midnight on 31 December.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "SHIFT-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The supervisor who formed this crew and is answerable for it. NOT derived and not optional: OAR 437-004-1131 puts the water, shade, rest-cycle and observation obligations on a named responsible person, and FSMA §112.161(b) asks that person to review and sign the record. A shift whose foreman is inferred at report time is a shift with nobody's name on it.",
+   "fieldname": "foreman",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Foreman",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Their name at the time, denormalised. An Employee renamed or archived three seasons later must not take the identity of the responsible party with it.",
+   "fieldname": "foreman_name",
+   "fieldtype": "Data",
+   "label": "Foreman Name",
+   "read_only": 1
+  },
+  {
+   "default": "General",
+   "description": "What the crew was doing, which is what decides which regime's timeline matters. A Spray shift is read against wind speed and the label; a Harvest shift against heat index and rest cycles; a Detector Test Round against the camp's own schedule. One vocabulary so a rule can key off it later without parsing prose.",
+   "fieldname": "shift_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Shift Type",
+   "options": "Spray\nHarvest\nPrune\nIrrigation\nHousing Work\nDetector Test Round\nMaintenance\nGeneral"
+  },
+  {
+   "default": "Active",
+   "description": "COMPUTED, never chosen. Active while end_datetime is empty, Cancelled where the shift was called off, Closed once the foreman ended it. It is derived on every save and it is derived from one fact — whether there is an end time — so it cannot disagree with the record it summarises.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nClosed\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The entity whose crew this was. Filled from the foreman, and it is what scopes a shift to a company — a User Permission on Company reaches this doctype because this column links to one.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Where the work happened, in the words the crew uses: a block name, a camp name, a shop. Free text on purpose — a shift can be at a place this site has no record of, and refusing to record the shift until somebody creates the master is how a compliance record stops being written.",
+   "fieldname": "location",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Location"
+  },
+  {
+   "description": "Latitude,longitude or a place name, in the same spelling Farm Task Assignment uses since v0.19.1. THIS IS THE WEATHER ANCHOR: v0.19.4 walks every open shift every fifteen minutes and asks Open-Meteo what the conditions are HERE, and a shift with no coordinates gets no timeline. 'Latitude 45.52, longitude -122.68' and '45.52,-122.68' are both accepted; a block name is accepted and resolved later.",
+   "fieldname": "farm_location_gps",
+   "fieldtype": "Data",
+   "label": "Farm Location (GPS)"
+  },
+  {
+   "fieldname": "when_section",
+   "fieldtype": "Section Break",
+   "label": "When"
+  },
+  {
+   "description": "When the crew started. This is the beginning of the exposure period every compliance question about the shift is asked against, and it is what a crew row's joined_at defaults to.",
+   "fieldname": "start_datetime",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Start",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "when_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When the foreman ended it. EMPTY MEANS THE SHIFT IS STILL OPEN, which is the flag the v0.19.4 weather fetch walks. Setting it closes the shift, stops the fetch, and — through the Attendance bridge — writes one Attendance record per crew member for the span they were actually present.",
+   "fieldname": "end_datetime",
+   "fieldtype": "Datetime",
+   "label": "End",
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "The shift was called off rather than worked. Ticked on a shift that was formed and then abandoned — weather turned, the crew was sent home before starting. A cancelled shift still keeps its crew rows, because 'they were rostered and sent home' is a fact somebody may need to answer a wage question with.",
+   "fieldname": "cancelled",
+   "fieldtype": "Check",
+   "label": "Cancelled"
+  },
+  {
+   "depends_on": "cancelled",
+   "description": "Why it was called off. Required once cancelled is ticked: 'crew stood down at 06:40, heat index already 94 °F' is a record, and a bare Cancelled flag is a gap somebody will be asked about.",
+   "fieldname": "cancellation_reason",
+   "fieldtype": "Small Text",
+   "label": "Cancellation Reason"
+  },
+  {
+   "fieldname": "crew_section",
+   "fieldtype": "Section Break",
+   "label": "Crew"
+  },
+  {
+   "description": "Who was on this shift, and for what part of it. THE CREW IS AN ENVELOPE, NOT A HEADCOUNT — every row carries joined_at and left_at, so a worker who arrived an hour late and left two hours early has an accurate span inside a shift that ran all day. A worker who leaves is never deleted from this table; their left_at is set. Deleting the row would destroy the only record that they were here at all.",
+   "fieldname": "crew",
+   "fieldtype": "Table",
+   "label": "Crew",
+   "options": "Farm Shift Crew Member"
+  },
+  {
+   "fieldname": "events_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance Events"
+  },
+  {
+   "description": "What the foreman did about the conditions, as it happened: water breaks called, shade used, rest cycles enforced, crew observed for heat illness signs, thresholds crossed. This is the evidence half of OAR 437-004-1131 — the rule does not ask whether water was available in principle, it asks what happened during the shift, and a timeline of logged events answers that in a way an annual policy document never can.",
+   "fieldname": "compliance_events",
+   "fieldtype": "Table",
+   "label": "Compliance Events",
+   "options": "Farm Shift Compliance Event"
+  },
+  {
+   "fieldname": "weather_section",
+   "fieldtype": "Section Break",
+   "label": "Weather Timeline"
+  },
+  {
+   "description": "Conditions across the exposure period, one reading per interval. EMPTY IN v0.19.3 AND THAT IS DELIBERATE — the table ships now so the shape is fixed and the compliance event rows have somewhere to denormalise a snapshot from; v0.19.4 ports the Open-Meteo service and wires the scheduled fifteen-minute fetch for open shifts plus archive backfill for closed ones. A point-in-time temperature is a data point; this is a defence.",
+   "fieldname": "weather_timeline",
+   "fieldtype": "Table",
+   "label": "Weather Timeline",
+   "options": "Farm Shift Weather Reading"
+  },
+  {
+   "fieldname": "closeout_section",
+   "fieldtype": "Section Break",
+   "label": "Close-out"
+  },
+  {
+   "description": "The foreman's signature, captured when the shift is ended. REQUIRED TO CLOSE A SHIFT: FSMA §112.161(b) asks for a supervisor's review, dated and signed, and a shift record closed by an unsigned API call is a record with nobody attesting to it. Uploaded through the staging pipeline and referenced here — the bytes do not travel through a tool argument.",
+   "fieldname": "supervisor_review_signature",
+   "fieldtype": "Attach",
+   "label": "Supervisor Review Signature"
+  },
+  {
+   "fieldname": "closeout_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When the review happened. Written by end_shift at the moment the signature is taken, so the review's timestamp is the close-out's timestamp rather than a date somebody typed later.",
+   "fieldname": "supervisor_review_on",
+   "fieldtype": "Datetime",
+   "label": "Supervisor Reviewed On",
+   "search_index": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "What the foreman wants on the record: who was struggling in the heat, why a block was left, what the crew was told at the start. The part of a shift that no structured field will ever hold, and the part an investigator reads first.",
+   "fieldname": "foreman_notes",
+   "fieldtype": "Text",
+   "label": "Foreman Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Shift",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "foreman_name,location,shift_type,start_datetime",
+ "sort_field": "start_datetime",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "location",
+ "track_changes": 1
+}

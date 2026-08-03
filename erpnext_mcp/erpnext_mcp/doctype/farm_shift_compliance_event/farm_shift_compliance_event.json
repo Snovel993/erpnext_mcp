@@ -1,0 +1,122 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 20:00:00.000000",
+ "description": "One thing the foreman did about the conditions, at the moment it happened. Oregon's heat rule does not ask whether water was available in principle — it asks what happened during the shift, and the answer is a timeline: water break at 09:15, shade break at 11:40, crew observed at 13:05, threshold crossed at 12:20. Each row can point back at the record that produced it and carries the weather at that instant, denormalised, so an auditor reading the shift does not have to join three tables to find out how hot it was when the break was called.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "event_type",
+  "event_datetime",
+  "logged_by",
+  "event_col",
+  "weather_snapshot_temp_f",
+  "weather_snapshot_heat_index_f",
+  "detail_section",
+  "description",
+  "producer_section",
+  "producer_record_doctype",
+  "producer_col",
+  "producer_record_name",
+  "evidence_file"
+ ],
+ "fields": [
+  {
+   "default": "Water Break",
+   "description": "What happened. A closed vocabulary because a timeline is only readable if the rows are comparable — 'Water Break' four times across a shift is evidence of a cadence, and four free-text descriptions of the same thing are four sentences somebody has to read. Threshold Crossed is the one nobody logs by hand: v0.19.4 writes it when a weather reading first reaches 80 °F.",
+   "fieldname": "event_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Event",
+   "options": "Water Break\nShade Break\nRest Cycle\nSupervisor Observation\nHeat Illness Signs Check\nCool-Down\nThreshold Crossed\nAcclimatization Reminder\nOther",
+   "reqd": 1
+  },
+  {
+   "description": "When. To the minute, because the question a rest-cycle obligation is read against is one of interval — an hour between water breaks and three hours between them are different shifts, and only the timestamps say which this was.",
+   "fieldname": "event_datetime",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "At",
+   "reqd": 1
+  },
+  {
+   "description": "Who logged it. Usually the foreman, and not assumed to be: a lead worker calling a break while the foreman is at the far end of the block is the ordinary case, and a record that silently attributed it to the foreman would be wrong in exactly the place an investigator looks.",
+   "fieldname": "logged_by",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Logged By",
+   "options": "Employee"
+  },
+  {
+   "fieldname": "event_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The air temperature at this instant, copied off the shift's weather timeline. DENORMALISED ON PURPOSE — an audit reads the event row, and a reader who has to reconstruct which of ninety timeline readings was current at 09:15 will not do it. Empty until v0.19.4 populates the timeline; a manual figure is accepted and kept.",
+   "fieldname": "weather_snapshot_temp_f",
+   "fieldtype": "Float",
+   "label": "Temp at Event (°F)",
+   "precision": "1"
+  },
+  {
+   "description": "The heat index at this instant. The number OAR 437-004-1131 actually turns on — 80 °F heat index rather than 80 °F air temperature — which is why both are kept and neither is derived from the other here.",
+   "fieldname": "weather_snapshot_heat_index_f",
+   "fieldtype": "Float",
+   "label": "Heat Index at Event (°F)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What actually happened, in the foreman's words. 'Cooler refilled, whole crew drank, two workers moved to the shaded end' is evidence; 'water break' is already in the type field.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "producer_section",
+   "fieldtype": "Section Break",
+   "label": "Produced By"
+  },
+  {
+   "description": "The doctype of the record that documented this event, where one did — 'Farm Task Assignment' for a break somebody closed a dispatched job against, 'Heat Exposure Event' for the aggregate record. Plain Data rather than a Dynamic Link, deliberately: a producer can be a doctype from an app that is not on this site, and a link that refuses to save is a compliance event that does not get logged.",
+   "fieldname": "producer_record_doctype",
+   "fieldtype": "Data",
+   "label": "Producer Doctype"
+  },
+  {
+   "fieldname": "producer_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The docname of that record. Kept beside the doctype rather than inside a single 'Doctype: name' string so a packet builder can follow it without parsing.",
+   "fieldname": "producer_record_name",
+   "fieldtype": "Data",
+   "label": "Producer Record"
+  },
+  {
+   "description": "A photograph or signature for this one event — the cooler being refilled, the shade structure at 13:00, the crew signing a break sheet. Optional, and worth having on exactly the events somebody will later be asked to prove happened.",
+   "fieldname": "evidence_file",
+   "fieldtype": "Attach",
+   "label": "Evidence"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-03 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Shift Compliance Event",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

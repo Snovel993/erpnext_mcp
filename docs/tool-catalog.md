@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 214 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 224 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 95 read tools are **on** by default and can be switched off individually. A
+All 99 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -5147,7 +5147,7 @@ what is late, worst first, grouped by category.
 | --- | --- |
 | `severity_min` | `Critical`, `Warning` or `Info` — this severity and worse |
 | `days_ahead` | Only alerts due within this many days. **Overdue alerts are always shown**, because they were due in the past |
-| `category` | Certifications, Policies, Workforce, Housing, Water and Sanitation, Spray and Pesticides, Filings, Audits, Other |
+| `category` | Certifications, Policies, Workforce, Records, Housing, Water and Sanitation, Spray and Pesticides, Filings, Audits, Other |
 | `alert_type` | One rule's alerts |
 | `regime` | **v0.19.2.** Only alerts that are evidence for ONE audit: FSMA, GAP, GlobalGAP, PrimusGFS, NOP, OTCO, WPS, OR-OSHA, Internal, Other |
 | `include_snoozed` / `include_dismissed` | Default false. Snoozed alerts are hidden and COUNTED |
@@ -6195,6 +6195,232 @@ idempotence key** so a narrowed packet never silently overwrites a full one.
 `generate_compliance_packet` gained `regime`, which staples a training annex to an
 accounting packet over that packet's own period.
 
+# Crew shift and heat exposure tools
+
+*v0.19.3. Ten tools that are one workflow with one actor.*
+
+**Compliance anchors to a shift, not to a task.** A task completion carries a
+point-in-time reading; a shift carries a timeline. Oregon OSHA does not ask what
+the temperature was when one job closed — it asks whether the July 15 shift
+complied with OAR 437-004-1131 from start to finish, and only a record spanning
+the exposure period can answer.
+
+**The foreman is the sole actor and there is no clock-in tool.** -1131 puts the
+water, shade, rest-cycle and observation obligations on a **named** responsible
+person, and FSMA §112.161(b) asks that person to sign. A crew of thirty each
+clocking themselves in is a shift with thirty people responsible for the record,
+which is a shift with nobody responsible for it — and the observable failure is
+that nobody logged the water break because everybody assumed somebody else had.
+
+**Per-worker attendance is not lost to this.** Every crew row carries its own
+`joined_at` and `left_at`; `remove_worker_from_shift` sets the second rather than
+deleting the row; and `end_shift` writes one submitted `Attendance` per person for
+**their own** span. The bridge runs one way only — a shift is formed by a foreman
+naming a crew, a location and a type, and an attendance row carries none of those,
+so deriving shifts from attendance would invent all three on a record an inspector
+reads.
+
+## 203. `start_shift`
+
+**MUTATING, default OFF.** Form a crew at a place and start the exposure period.
+
+| Argument | Notes |
+| --- | --- |
+| `foreman` | **Required.** Docname, employee number, name, or the linked login. |
+| `location` | Block, camp or facility. Free text — a shift can be at a place this site has no master for. |
+| `shift_type` | Spray / Harvest / Prune / Irrigation / Housing Work / Detector Test Round / Maintenance / General. |
+| `farm_location_gps` | `"45.52,-122.68"`. **The weather anchor** — v0.19.4 fetches conditions here every 15 minutes while the shift is open. |
+| `crew_employees` | Who is on it at the start. Max 60. Their `joined_at` defaults to the **shift's** start, not to now. |
+| `start_datetime`, `company` | Optional. |
+
+```bash
+-d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+      "name":"start_shift","arguments":{
+        "foreman":"HR-EMP-00001",
+        "location":"Block 7 North","shift_type":"Harvest",
+        "farm_location_gps":"45.52,-122.68",
+        "crew_employees":["HR-EMP-00002","HR-EMP-00004"]}}}'
+```
+
+**`joined_at` defaults differ between this and `add_worker_to_shift`, on purpose.**
+Everybody rostered at the beginning was there at the beginning, so stamping them
+with the moment the API call landed would shave minutes off every one of their
+days. A worker added mid-shift arrived when somebody said so, so that one defaults
+to now.
+
+## 204. `add_worker_to_shift`
+
+**MUTATING, default OFF.** A late arrival, or a transfer off another block.
+`joined_at` defaults to now. Refuses a second row for somebody already on the crew
+— two rows look deliberate on the form and become two Attendance days for one
+person when the shift closes. Refuses a closed shift: the payroll rows are already
+written.
+
+## 205. `remove_worker_from_shift`
+
+**MUTATING, default OFF.** **It sets `left_at`; it does not delete the row.** The
+row is the only record that this person was on this shift at all — which is what a
+wage claim turns on, and what says who was exposed on a hot afternoon before they
+were sent home. Calling it twice without an explicit `left_at` is refused, because
+a silent second call would move a departure that has already happened to now.
+
+## 206. `log_shift_event`
+
+**MUTATING, default OFF.** One thing the foreman did about the conditions, at the
+moment it happened.
+
+| Argument | Notes |
+| --- | --- |
+| `shift` | **Required.** SHIFT-2026-0001. |
+| `event_type` | **Required.** Water Break / Shade Break / Rest Cycle / Supervisor Observation / Heat Illness Signs Check / Cool-Down / Threshold Crossed / Acclimatization Reminder / Other. |
+| `event_datetime` | Defaults to now — the right answer when the call is made as it happens. |
+| `logged_by` | Defaults to the foreman. Worth setting when a lead worker called it. |
+| `description`, `producer_record_doctype`, `producer_record_name`, `evidence_file_token` | Optional. |
+| `weather_snapshot_temp_f`, `weather_snapshot_heat_index_f` | Denormalised for audit convenience. v0.19.4 fills them. |
+
+**The timeline is the evidence.** Oregon's heat rule does not ask whether water
+was available in principle; it asks what happened during the shift, and four
+water breaks with timestamps answer that in a way an annual policy document never
+can. `create_heat_exposure_event` is the claim; this is what the claim rests on,
+and an inspector asks for the second.
+
+An event timestamped outside the shift is **kept and reported** rather than
+refused: a clock five minutes out is not a false record, and refusing would mean
+the break goes unlogged rather than logged approximately.
+
+## 207. `end_shift`
+
+**MUTATING, default OFF.** Close the shift with a signature, and write the crew's
+payroll rows.
+
+| Argument | Notes |
+| --- | --- |
+| `shift` | **Required.** |
+| `supervisor_signature_file_token` | **Required.** File docname or file_url. One pointing at nothing is refused. |
+| `end_datetime` | Defaults to now. Before the start, or before a crew member's recorded departure, is refused. |
+| `foreman_notes`, `reviewed_on` | Optional. |
+
+**The signature is required and it is why this is a tool.** An unsigned close is
+an UPDATE setting a timestamp; the signature is what makes it the attestation
+§112.161(b) asks for — a review that is dated **and signed**. Without one the
+shift stays open and nothing is written.
+
+**One Attendance per crew member, for that person's own span.** A worker who
+arrived an hour late and left two hours early worked six hours of a nine-hour
+shift, and a row claiming nine is wrong in the employer's favour — which is the
+direction that gets litigated. Rows are **submitted**, because
+`get_attendance_summary` counts `docstatus 1` only.
+
+**The bridge never blocks the close.** A site without Frappe HR, an employee
+archived since the shift ran, a day somebody already keyed in by hand — every one
+is reported in `attendance` and none stops a signed shift closing. The signature
+is the compliance act; the payroll row is the convenience.
+
+## 208. `create_heat_exposure_event`
+
+**MUTATING, default OFF.** The OAR 437-004-1131 record for one shift, signed and
+submitted.
+
+| Argument | Notes |
+| --- | --- |
+| `farm_shift` | **Required and unique.** One shift has at most one heat record. |
+| `supervisor_signature_file_token` | **Required.** Submitting is the attestation. |
+| `water_provided`, `shade_provided`, `mandatory_rest_taken` | What the rule asks. Rest **taken**, not offered. |
+| `heat_illness_signs_observed`, `worker_reported_symptoms`, `emergency_response_activated` | Signs observed with no response and no notes is refused. |
+| `training_verified` | Checked against the training register **as of the day of the shift**. |
+| `max_temp_f`, `max_heat_index_f`, `threshold_crossed_at` | Manual until v0.19.4 computes them from the weather timeline. |
+| `acclimatization_plan` | Employees with under 14 days in the heat, per -1131(g). Somebody not on the crew is refused. |
+| `event_date`, `notes`, `regulation_citation` | Optional. |
+
+```bash
+-d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+      "name":"create_heat_exposure_event","arguments":{
+        "farm_shift":"SHIFT-2026-0001",
+        "max_temp_f":96,"max_heat_index_f":101,
+        "water_provided":true,"shade_provided":true,"mandatory_rest_taken":true,
+        "heat_illness_signs_observed":false,"worker_reported_symptoms":false,
+        "emergency_response_activated":false,"training_verified":true,
+        "supervisor_signature_file_token":"FILE-00042"}}}'
+```
+
+**A verified-training claim the register contradicts is refused.** The same audit
+packet carries both this record and the training register, and a packet that
+contradicts itself is worse than a packet with a gap. Claiming `false` is accepted
+and the missing names are reported: a shift that ran with an untrained worker
+happened, and the record of it is what the operation needs to have.
+
+**Signs seen and nothing done is the sequence that kills people.** There are
+legitimate versions — the worker recovered in shade within minutes and declined
+further help — and every one of them is a sentence somebody can write. What is
+refused is the silence.
+
+**Everything else is recorded with the gap stated.** A day where the shade trailer
+broke down and the crew went home at eleven is a real shift with a real gap, and a
+tool that would not let it be recorded would produce either a false record or no
+record.
+
+## 209. `list_shifts`
+
+**Read-only.** `company`, `foreman`, `employee` (walks the crew tables),
+`status`, `shift_type`, `from_date`/`to_date`, `limit`.
+
+`status` is **computed** from whether the shift has an end time rather than read
+off a stored column — an open shift is what the v0.19.4 weather sweep walks, and a
+record last saved in March holding March's answer would drop a live shift out of
+the fetch.
+
+`closed_without_a_signature` is the one to read. `end_shift` cannot produce one,
+so anything on that list was closed in the Desk or by an import.
+
+## 210. `get_shift`
+
+**Read-only.** The crew with each person's own span, the compliance-event
+timeline, the weather timeline, and the heat record if one exists. **This is the
+evidence chain an inspector is handed.**
+
+Each crew row reports `present_until`, the honest reading of an empty `left_at`:
+they were there to the end. Computed rather than written back, because writing it
+would destroy the distinction between "left at 13:00" and "stayed to the end" the
+moment the end time changed.
+
+## 211. `list_heat_exposure_events`
+
+**Read-only.** `company`, `from_date`/`to_date`, `with_gaps_only`, `limit`.
+Returns `with_signs_observed` (what an investigation reads first — and a shift on
+that list is one where the observation obligation was **working**),
+`without_verified_training` (a citation on the first hot morning) and
+`without_a_signature` (which should be empty).
+
+## 212. `get_heat_exposure_event`
+
+**Read-only.** One record in full with the shift behind it, and the obligations it
+does **not** claim were met, in the rule's own terms. Where the shift's event
+timeline is empty it says so — the checkboxes here are the **assertion** and the
+shift's logged water breaks are the **evidence** for it.
+
+## The thirteenth alert rule, and the Attendance bridge
+
+`supervisor_review_lapsed` watches a signature that was never put on a record —
+the work was done, the record was written, and the second pair of eyes
+§112.161(b) asks for never arrived. **Warning** at 14 days (one clear miss of the
+weekly review cadence "reasonable time" is read against for records generated
+daily), **Critical** past 30 (no reading of "reasonable" covers it, and a batch
+signed the week before an inspection is the finding rather than the fix). It
+auto-dismisses the moment somebody signs.
+
+The clock runs from when the record was **made**, not from the activity date: a
+training delivered in March and recorded yesterday has a one-day-old record, and
+reading the activity date would raise a Critical on every season somebody
+backfilled. It walks a **table** of doctypes carrying the §112.161(b) columns —
+one row in v0.19.3, and Housing Inspection, Water Test, Heat Exposure Event and
+Farm Task Assignment are each a one-line addition the day they grow them.
+
+`Attendance` gains a **`farm_shift`** Custom Field, installed alongside the
+v0.15.0 compliance fields and reported by `before_uninstall`. Without it a
+shift-formed day is indistinguishable from a hand-keyed one, so nobody reading the
+register can reach the conditions the person worked in — and the bridge, unable to
+tell its own rows from anybody else's, would pay somebody twice for one afternoon.
+
 ## v0.19.2 — regimes as records, curricula as records
 
 `Compliance Alert` gained a **`regime`** Table MultiSelect over a new
@@ -6234,8 +6460,8 @@ Everything a tool needs is in two places:
    `assets`, `notes`, `opening`, `reports`, `files`, `collab`, `hr`, `trade`,
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
-   `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training` or
-   `fieldwork` —
+   `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
+   `shifts`, `heat` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

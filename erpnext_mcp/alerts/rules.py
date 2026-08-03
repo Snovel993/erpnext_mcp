@@ -1,5 +1,17 @@
 # SPDX-License-Identifier: MIT
-"""The twelve compliance rules, and the state that makes each one ripe.
+"""The thirteen compliance rules, and the state that makes each one ripe.
+
+v0.19.3 ADDED THE THIRTEENTH, AND IT WATCHES A SIGNATURE THAT WAS NEVER PUT ON A
+RECORD. `supervisor_review_lapsed` is a different shape of absence from all
+twelve above it: the work was done, the record was written, and the second pair
+of eyes FSMA §112.161(b) asks for never arrived. That is the most commonly cited
+finding against farms whose actual practice is sound — USDA GAP does not ask for
+a supervisor's review, so an operation with an immaculate GAP binder has every
+training delivered, every trainee signature and no review on any of it, and
+finds out from an FDA-contracted inspector. It is written to walk a TABLE of
+doctypes carrying the §112.161(b) columns rather than to know about training,
+because the requirement reaches every activity record under the part and this app
+already ships four more that will grow the columns.
 
 v0.19.0 ADDED THE TWELFTH, AND IT IS THE FIRST ONE ABOUT A PERSON RATHER THAN A
 DOCUMENT. Rules 1 and 7 watch certificates — things an agency issued to the
@@ -75,6 +87,8 @@ afterwards.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import frappe
 
 from .. import compat
@@ -131,6 +145,19 @@ FILING_RESPONSE_DAYS = 30
 #: A corrective action past due by more than this has stopped being late and
 #: become a finding of its own. Most schemes give 28 days for a Major.
 ACTION_OVERDUE_GRACE_DAYS = 0
+
+#: FSMA §112.161(b) asks for a supervisor review "within a reasonable time after
+#: the records are made". The rule states no number, and the practice it is read
+#: against for records generated daily is WEEKLY review — so a fortnight is one
+#: clear miss of that cadence: two Fridays gone, and the afternoon still recent
+#: enough for the supervisor to remember what they are signing off.
+REVIEW_WARNING_DAYS = 14
+
+#: Past a month there is no longer a reading of "reasonable time" that covers it.
+#: Thirty days is also the point at which a batch of signatures added at once
+#: starts to look like what it is — a record assembled rather than kept, which is
+#: the finding rather than the fix.
+REVIEW_CRITICAL_DAYS = 30
 
 #: Housing unit types nobody sleeps in, which therefore need no habitability
 #: inspection. Imported rather than restated so the two definitions cannot drift.
@@ -1377,5 +1404,254 @@ register(
 		# a regime added in a later release does not silently exclude this rule.
 		regimes=training_records.REGIMES,
 		scan=_scan_training,
+	)
+)
+
+
+# ── 13. supervisor_review_lapsed ────────────────────────────────────────────
+#
+# THE THIRTEENTH RULE WATCHES A SIGNATURE THAT WAS NEVER PUT ON A RECORD, which
+# is a different kind of absence from every rule above it. Rules 1-9 fire because
+# nobody went and looked. Rules 10 and 11 fire because somebody looked and found
+# something. Rule 12 fires because a qualification ran out. This one fires because
+# the work was done, the record was written, and the second pair of eyes the rule
+# asks for never arrived.
+#
+# FSMA 21 CFR 112.161(b) is one sentence and it is the most commonly cited finding
+# against farms whose actual practice is fine: records required under Subpart C
+# and others must be "reviewed, dated, and signed, within a reasonable time after
+# the records are made, by a supervisor or responsible party." USDA GAP does not
+# ask for it. So an operation with an immaculate GAP binder — every training
+# delivered, every signature from every trainee, every certificate current —
+# fails on the one element its own auditor never mentioned, and finds out from an
+# FDA-contracted inspector.
+#
+# WHY IT IS BUILT AS A TABLE RATHER THAN AS A TRAINING RULE. §112.161(b) is not
+# about training. It reaches every activity record the rule covers, and this app
+# already ships several that will carry the same two columns: Housing Inspection,
+# Water Test, Detector Test, Heat Exposure Event, Farm Task Assignment. In
+# v0.19.3 only Employee Training Record has them, so the table has one row — and
+# the rule is written to walk a table anyway, because the alternative is
+# discovering in v0.19.3.1 that the training-shaped version has to be rewritten
+# to add the second doctype. A doctype whose columns are absent is skipped by
+# name rather than crashing the sweep, which is what makes adding the next row
+# a one-line change on a live site.
+#
+# WHY THE CLOCK RUNS FROM `creation` AND NOT FROM THE ACTIVITY DATE. The rule's
+# own words are "after the records are made". A training delivered last March and
+# recorded yesterday has a record that is one day old, and the supervisor has not
+# been late reviewing it — the operation was late WRITING it, which is a
+# §112.161(a)(2) problem and a different finding. Reading the activity date here
+# would raise a Critical review alert the moment anybody backfilled a season, and
+# a calendar full of alerts nobody can act on is a calendar nobody reads.
+
+
+@dataclass(frozen=True)
+class ReviewTarget:
+	"""One doctype carrying the §112.161(b) universal review columns.
+
+	`what` is the phrase the alert uses for the record — "worker training record"
+	rather than "Employee Training Record" — because the message is read on a
+	phone by somebody who has to decide whether to walk over and sign something,
+	and a doctype name is not what they call it.
+
+	`activity_field` is NOT what the clock runs on; see the note above. It is
+	carried so the message can say what the record was about, which is the
+	difference between "a record from 3 April" and "a record".
+	"""
+
+	doctype: str
+	what: str
+	subject_field: str
+	activity_field: str
+	reviewed_by_field: str = "supervisor_reviewed_by"
+	reviewed_on_field: str = "supervisor_reviewed_on"
+	#: Extra columns the message wants. Kept per target because a training record
+	#: is described by its curriculum and a water test by its source.
+	detail_fields: tuple = ()
+	#: What the message says this record is evidence FOR, in one clause.
+	stakes: str = ""
+
+
+#: v0.19.3 ships one. The four commented candidates are the doctypes this app
+#: already has that §112.161 reaches, and each is a one-row addition the day it
+#: grows the two columns — which is the whole reason this is a table.
+REVIEW_TARGETS = (
+	ReviewTarget(
+		doctype=training_records.DOCTYPE,
+		what="worker training record",
+		subject_field="employee_name",
+		activity_field="completed_date",
+		detail_fields=("training_type", "employee", "regimes"),
+		stakes=(
+			"Worker training records are named in §112.161(b) explicitly, and this is the "
+			"element a GAP-only operation most often lacks — FDA writes it up even where "
+			"the training itself was fine"
+		),
+	),
+	# Candidates, each waiting only on the two columns:
+	#   Housing Inspection  — §112.161 does not reach it, but OAR 437-004-1120 asks
+	#                         the same question of a habitability walk
+	#   Water Test          — §112.161(b) reaches Subpart E records directly
+	#   Heat Exposure Event — carries its own signature today; the review is the
+	#                         second pair of eyes on top of the foreman's
+	#   Farm Task Assignment — the completion record for everything dispatched
+)
+
+
+def _review_lag(target: ReviewTarget, row: dict, today: str) -> int | None:
+	"""Days since the record was MADE, or None where it has already been reviewed.
+
+	A record with a review date and no reviewer counts as unreviewed here, which
+	is the same reading `EmployeeTrainingRecord._check_the_review` refuses on
+	save: a review date with nobody attached is what an auditor is trained to
+	disbelieve, and treating it as satisfied would hide exactly that record.
+	"""
+	if str(row.get(target.reviewed_by_field) or "").strip() and str(
+		row.get(target.reviewed_on_field) or ""
+	).strip():
+		return None
+	return days_since(today, str(row.get("creation") or "")[:10])
+
+
+def _scan_supervisor_reviews(context: dict) -> list:
+	"""Activity records old enough that nobody has reviewed them in time.
+
+	KAIROTIC BECAUSE THE GATE IS THE AGE OF AN UNSIGNED RECORD, not a date. A
+	record written this morning raises nothing however many times the sweep runs;
+	the same record raises Warning a fortnight later and Critical after a month;
+	and it goes away by itself the moment somebody signs it, because a reviewed
+	record is not observed and an unobserved alert is auto-dismissed. Nobody has
+	to remember to clear it, which is the property that makes the calendar
+	readable at all.
+
+	FOURTEEN DAYS IS THE FLOOR AND IT IS A LEAD TIME LIKE EVERY OTHER NUMBER IN
+	THIS FILE. The rule's phrase is "within a reasonable time", and the practice
+	it is read against for records generated daily is weekly review. A fortnight
+	is one clear miss of that cadence — long enough that a supervisor who reviews
+	on Fridays has had two Fridays, short enough that the record is still fresh
+	enough for somebody to remember the afternoon they are signing off.
+	"""
+	today = context["today"]
+	out = []
+	for target in REVIEW_TARGETS:
+		if not compat.doctype_exists(target.doctype):
+			continue
+		if not compat.has_field(target.doctype, target.reviewed_by_field):
+			# The doctype is here and the columns are not, which on a site
+			# mid-upgrade is the ordinary state for an hour. Skipped rather than
+			# reported as unreviewed: every record would qualify, the rule would
+			# hit its cap, and the calendar would fill with one migration.
+			continue
+		fields = (
+			"name",
+			"creation",
+			"company",
+			target.subject_field,
+			target.activity_field,
+			target.reviewed_by_field,
+			target.reviewed_on_field,
+		) + tuple(target.detail_fields)
+		for row in _rows(target.doctype, _company_filter({}, context.get("company") or ""), fields):
+			age = _review_lag(target, row, today)
+			if age is None or age < REVIEW_WARNING_DAYS:
+				continue
+
+			who = row.get(target.subject_field) or row.get("name")
+			what = row.get("training_type") or target.what
+			activity = str(row.get(target.activity_field) or "") or None
+			# Copied off the record where the record carries tags, so a review
+			# alert lands in the same packet as the record it is about. An
+			# untagged record produces an untagged alert, for the reason
+			# `training_expiring` gives: inventing a tag would make the calendar
+			# claim coverage the register does not have.
+			regimes = training_records.parse(row.get("regimes")) if "regimes" in row else None
+
+			if age > REVIEW_CRITICAL_DAYS:
+				severity = SEVERITY_CRITICAL
+				message = (
+					f"The {target.what} for {who} ({what}"
+					+ (f", {activity}" if activity else "")
+					+ f") has been on file {age} days with no supervisor review. FSMA "
+					"§112.161(b) requires it to be reviewed, dated and signed by a supervisor "
+					"or responsible party WITHIN A REASONABLE TIME after the record is made, "
+					f"and past {REVIEW_CRITICAL_DAYS} days there is no longer a reading of "
+					"'reasonable' that covers it — a signature added now is dated now, and a "
+					"batch of them signed the week before an inspection is the finding rather "
+					f"than the fix. {target.stakes}."
+				)
+			else:
+				severity = SEVERITY_WARNING
+				message = (
+					f"The {target.what} for {who} ({what}"
+					+ (f", {activity}" if activity else "")
+					+ f") has been on file {age} days with no supervisor review. FSMA "
+					"§112.161(b) asks for a review, dated and signed, within a reasonable time "
+					"after the record is made — weekly is the cadence it is read against for "
+					"records generated daily, so this has missed two. "
+					"sign_training_supervisor_review closes it in one call."
+				)
+
+			out.append(
+				Observation(
+					source_doctype=target.doctype,
+					source_docname=row["name"],
+					message=message,
+					severity=severity,
+					# The date it BECAME overdue, not the date it was written. A
+					# calendar sorted on due date should put the record that went
+					# past its review window first, and that is fourteen days
+					# after it was made.
+					due_date=str(
+						frappe.utils.add_days(str(row.get("creation") or "")[:10], REVIEW_WARNING_DAYS)
+					),
+					company=str(row.get("company") or ""),
+					category="Records",
+					regimes=regimes,
+				)
+			)
+	return out
+
+
+register(
+	Rule(
+		key="supervisor_review_lapsed",
+		title="An activity record has been on file for a fortnight with nobody's review on it",
+		category="Records",
+		requires=(training_records.DOCTYPE,),
+		framework=(
+			"FDA FSMA 21 CFR 112.161(b) — records required under this part must be reviewed, "
+			"dated and signed, within a reasonable time after the records are made, by a "
+			"supervisor or responsible party; 21 CFR 112.161(a)(2) on records created at the "
+			"time of the activity"
+		),
+		purpose=(
+			"The single most common FSMA finding against farms whose actual practice is "
+			"sound. USDA GAP does not ask for a supervisor's review, so an operation with an "
+			"immaculate GAP binder has every training delivered, every trainee signature, "
+			"every certificate current — and no second pair of eyes on any of it. Nothing on "
+			"this site could see that gap: the record exists, it is complete by GAP's "
+			"reckoning, and only the empty review column says otherwise."
+		),
+		kairotic_gate=(
+			"Fires on the AGE OF AN UNSIGNED RECORD, counted from when the record was MADE "
+			"rather than from when the activity happened — §112.161(b)'s own clock is 'after "
+			"the records are made', and reading the activity date would raise a Critical on "
+			"every record of a season somebody backfilled. A record written this morning "
+			"raises nothing however often the sweep runs; at fourteen days it raises Warning, "
+			"past thirty Critical, and it disappears by itself the moment somebody signs it. "
+			"Fourteen days is one clear miss of the weekly review cadence the phrase "
+			"'reasonable time' is read against for records generated daily — two Fridays gone, "
+			"and the afternoon still recent enough for the supervisor to remember what they "
+			"are signing off."
+		),
+		# §112.161 is FSMA and only FSMA. The other regimes ask for the record and
+		# none of them asks for this signature, which is exactly why the gap
+		# exists — so tagging it more widely would put it in packets whose
+		# auditors never raise it and dilute the one that does. When the table
+		# grows a target under OAR 437-004-1120 or Subpart E, the observation
+		# carries the record's own tags and this constant becomes the union.
+		regimes=("FSMA",),
+		scan=_scan_supervisor_reviews,
 	)
 )

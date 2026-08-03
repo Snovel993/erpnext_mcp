@@ -10,7 +10,10 @@ reason: a doctype of ours goes with the app, a field on theirs does not.
 
 Sprint 7 adds fields to Spray Log, to Employee and to Bucket Log Entry — three
 doctypes belonging to other apps — and it does so **on purpose**, because the
-alternative is worse in a way that matters more than the promise.
+alternative is worse in a way that matters more than the promise. v0.19.3 adds a
+fourth target, `Attendance`, for the same reason and with the same argument: the
+shift-close bridge writes payroll rows, and a row that cannot say which shift it
+came from is a row nobody can reach the working conditions through.
 
 WHY. Compliance is a lens on operational data, not a duplicate set of records.
 Every spray IS an EPA and Worker Protection Standard record; every hire IS an
@@ -469,6 +472,45 @@ _BUCKET_FIELDS = (
 )
 
 
+# ── Attendance — hrms ───────────────────────────────────────────────────────
+#
+# ONE COLUMN, AND IT IS A BRIDGE RATHER THAN A COMPLIANCE FACT IN ITSELF. v0.19.3
+# makes the Farm Shift the anchor for exposure-based compliance, and closing a
+# shift writes one submitted Attendance per crew member for the span that person
+# was actually present. Without a column pointing back at the shift those rows
+# are indistinguishable from a hand-keyed day, with two consequences: nobody
+# reading an attendance register can get from a day to the water breaks, the
+# weather and the supervisor's signature that describe it; and the bridge cannot
+# tell its own rows from somebody else's, so re-closing an amended shift would
+# duplicate them.
+#
+# It sits here rather than in `shifts.py` because this file is where every column
+# this app grafts onto another app's doctype is declared, and — the part that
+# matters — where `before_uninstall` goes looking to warn that removing the app
+# drops it.
+_ATTENDANCE_FIELDS = (
+	ComplianceField(
+		fieldname="farm_shift",
+		label="Farm Shift",
+		fieldtype="Link",
+		options="Farm Shift",
+		framework="OAR 437-004-1131; FSMA 21 CFR 112.161(b); ORS 653 wage records",
+		why=(
+			"An attendance row says somebody was at work. The shift says what the "
+			"conditions were, what breaks were called, who supervised and who signed. "
+			"A heat-illness investigation and a wage claim both start from the day and "
+			"need the second, and this link is the only way from one to the other."
+		),
+		operational=(
+			"Payroll reconciliation. A shift-formed day and a hand-keyed day look "
+			"identical without it, so nobody can tell which rows a re-closed shift "
+			"already wrote — and the bridge, unable to tell either, would pay somebody "
+			"twice for one afternoon."
+		),
+	),
+)
+
+
 #: Every doctype this installer knows about, in the order it reports them.
 #:
 #: The last two are `verify` targets: Housing Unit and Field are this app's own
@@ -518,6 +560,24 @@ TARGETS = (
 			"The BucketLog bridge doctype is not on this site. The columns are audited "
 			"rather than assumed because the bridge is written by whichever version of "
 			"the iPad app is in the field this season."
+		),
+	),
+	Target(
+		doctype="Attendance",
+		owner_app="hrms",
+		purpose=(
+			"The one-way bridge from a closed Farm Shift to the payroll register. A shift "
+			"close writes one submitted Attendance per crew member for that person's own "
+			"span, and this column is what says which shift it came from — so farm_hr has "
+			"one canonical answer to 'when was Ana at work' and an investigator reading "
+			"that day can get to the conditions she worked in."
+		),
+		fields=_ATTENDANCE_FIELDS,
+		absent_note=(
+			"No HR app on this site, so there is no Attendance register to extend. The "
+			"shift's own crew table still carries every joined_at and left_at — nothing "
+			"about the compliance record depends on the bridge. Install Frappe HR and "
+			"re-run `bench migrate`, and the next shift close writes the rows."
 		),
 	),
 	Target(

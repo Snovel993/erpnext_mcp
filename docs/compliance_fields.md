@@ -137,6 +137,25 @@ Harvest chain of custody: bucket → picker → crew → block → bin → shipm
 | `bin_id` | Data | no | FSMA Subpart S — commingling / transformation event | A bin is where buckets from several pickers become one lot. It is the transformation event the rule asks to be recorded. | What actually goes on the truck. The bin is the physical unit the packing house receives and pays against. |
 | `shipment_id` | Data | no | FSMA Subpart S — shipping event; buyer traceback exercises | The shipping event closes the chain. A buyer's mock recall is timed, and an operation that cannot answer in four hours fails the audit. | Getting paid. The shipment is what the invoice is raised against, and an unlinked bin is fruit that left the farm with no receivable behind it. |
 
+### `Attendance` — hrms
+
+The one-way bridge from a closed Farm Shift to the payroll register. A shift close writes one submitted Attendance per crew member for that person's own span, and this column is what says which shift it came from — so farm_hr has one canonical answer to 'when was Ana at work' and an investigator reading that day can get to the conditions she worked in.
+
+**One column, and it is a bridge rather than a compliance fact in itself.** v0.19.3
+makes the Farm Shift the anchor for exposure-based compliance. Without a column
+pointing back at the shift, a shift-formed attendance day is indistinguishable
+from a hand-keyed one — so nobody reading the register can reach the water
+breaks, the weather and the supervisor's signature that describe it, and the
+bridge cannot tell its own rows from somebody else's.
+
+The bridge runs **one way only**. A shift is formed by a foreman naming a crew, a
+location and a type; an attendance row carries none of those, so deriving shifts
+from attendance would invent all three on a record an inspector reads.
+
+| Field | Type | Required | Framework | Why the regulator wants it | What breaks in the WORK without it |
+| --- | --- | --- | --- | --- | --- |
+| `farm_shift` | Link | no | OAR 437-004-1131; FSMA 21 CFR 112.161(b); ORS 653 wage records | An attendance row says somebody was at work. The shift says what the conditions were, what breaks were called, who supervised and who signed. A heat-illness investigation and a wage claim both start from the day and need the second, and this link is the only way from one to the other. | Payroll reconciliation. A shift-formed day and a hand-keyed day look identical without it, so nobody can tell which rows a re-closed shift already wrote — and the bridge, unable to tell either, would pay somebody twice for one afternoon. |
+
 ### `Housing Unit` — erpnext_mcp
 
 FSMA Produce Safety Rule Subpart L worker facilities, and the habitability and detector-test dates Oregon's agricultural labor housing rules turn on. Shipped as declared fields in v0.12.0, verified here.

@@ -66,6 +66,7 @@ SECTION_ORDER = (
 	"certifications",
 	"workforce",
 	"training",
+	"heat_exposure",
 	"spray_records",
 	"water",
 	"traceability",
@@ -262,7 +263,7 @@ register(
 			"pesticide handler protection, and the 300A log. The inspection that "
 			"follows a complaint or an injury."
 		),
-		sections=("open_actions", "alerts", "policies", "certifications", "workforce", "training", "housing", "spray_records", "filings", "audits"),
+		sections=("open_actions", "alerts", "policies", "certifications", "workforce", "training", "heat_exposure", "housing", "spray_records", "filings", "audits"),
 		policy_categories=("Worker Safety", "Worker Training", "Housing"),
 		cert_types=("First Aid / CPR", "Applicator License", "Food Safety Training"),
 		audit_types=("OSHA", "ODA"),
@@ -695,6 +696,109 @@ def _training(spec: AuditPacketType, company: str, start: str, end: str, regime:
 			+ ". Disclosed in the packet rather than filtered out of it: an auditor who finds "
 			"this themselves asks a much harder question than one who was shown it."
 		)
+	return section
+
+
+def _heat_exposure(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
+	"""Every documented hot shift in the period, and what each one claims.
+
+	v0.19.3, AND IT IS ON THE OSHA PACKET ALONE. OAR 437-004-1131 is Oregon OSHA's
+	rule and nobody else asks about it: a GAP auditor handed a heat register is
+	being shown evidence for a scheme they do not audit, which invites a question
+	nobody wanted to answer, exactly as a DOL packet containing a GlobalGAP
+	certificate would.
+
+	SCOPED BY `event_date`, which is the day of the shift. A record filed a week
+	later about a shift inside the period belongs in the packet for that period —
+	the question is when the crew was exposed, not when somebody typed it in.
+
+	DRAFTS ARE EXCLUDED. Submitting the record is the supervisor's attestation, so
+	a draft is a page of ticks nobody has signed, and presenting one as evidence
+	would be misleading in exactly the direction that matters.
+
+	THE GAPS ARE DISCLOSED IN THE PACKET rather than left to be found. A record
+	that does not claim shade was provided is on the face of the section, because
+	an inspector who finds it themselves asks a much harder question than one who
+	was shown it — and the shift behind each record carries the timeline that
+	either supports the ticks or does not.
+	"""
+	from . import shifts as shift_records
+
+	if not compat.doctype_exists(shift_records.HEAT_DOCTYPE):
+		return _section(
+			"Heat exposure (OAR 437-004-1131)",
+			"What was done about the heat, per shift.",
+			[],
+			("record", "shift", "date", "max_heat_index_f", "water", "shade", "rest", "training"),
+			absent=(
+				"This site has no Heat Exposure Event DocType — it ships with erpnext_mcp from "
+				"v0.19.3, so run `bench --site <site> migrate`. Until then this section is ABSENT "
+				"rather than empty, and an inspector should be told which: an empty heat table "
+				"reads as a season nobody documented."
+			),
+		)
+
+	rows = []
+	for row in _rows(
+		shift_records.HEAT_DOCTYPE,
+		_company_filter(company),
+		shift_records.HEAT_FIELDS,
+		order_by="event_date asc",
+	):
+		date = str(row.get("event_date") or "")
+		if date and not (start <= date <= end):
+			continue
+		if int(row.get("docstatus") or 0) != 1:
+			continue
+		described = shift_records.describe_heat_event(row, with_plan=False)
+		rows.append(
+			{
+				"record": row["name"],
+				"shift": described["farm_shift"],
+				"date": date or None,
+				"max_heat_index_f": described["max_heat_index_f"],
+				"water": described["water_provided"],
+				"shade": described["shade_provided"],
+				"rest": described["mandatory_rest_taken"],
+				"training": described["training_verified"],
+				"signs_observed": described["heat_illness_signs_observed"],
+				"emergency_response": described["emergency_response_activated"],
+				"signed": described["supervisor_signed"],
+				"gaps": len(shift_records.heat_gaps(described)),
+			}
+		)
+
+	section = _section(
+		"Heat exposure (OAR 437-004-1131)",
+		(
+			"One record per documented hot shift: water at the required rate, shade within "
+			"reach, the rest cycle TAKEN rather than offered, the crew observed for signs, and "
+			"the training current. Each one points at a Farm Shift whose crew list and "
+			"compliance-event timeline are the evidence behind the claims — the ticks are the "
+			"assertion and the timeline is what supports them. Drafts are excluded: submitting "
+			"the record is the supervisor's attestation, and an unsigned page of ticks is not "
+			"evidence that anybody attested to anything."
+		),
+		rows,
+		("record", "shift", "date", "max_heat_index_f", "water", "shade", "rest", "training"),
+		absent=(
+			"No Heat Exposure Event was filed for this company in this period. That is the right "
+			"answer for a season that never reached an 80 °F heat index and a gap for one that "
+			"did — and Oregon OSHA asks about the second."
+		),
+	)
+	incomplete = [row["record"] for row in rows if row["gaps"]]
+	incidents = [row["record"] for row in rows if row["signs_observed"]]
+	if incomplete:
+		section["with_unmet_obligations"] = incomplete
+		section["problem_note"] = (
+			f"{len(incomplete)} of {len(rows)} record(s) do not claim every -1131 obligation was "
+			"met. They are on the face of this packet rather than left to be found: an inspector "
+			"who finds a gap themselves asks a much harder question than one who was shown it, "
+			"and the notes on each record say what happened instead."
+		)
+	if incidents:
+		section["with_signs_observed"] = incidents
 	return section
 
 
@@ -1235,6 +1339,7 @@ _BUILDERS = {
 	"certifications": _certifications,
 	"workforce": _workforce,
 	"training": _training,
+	"heat_exposure": _heat_exposure,
 	"spray_records": _spray_records,
 	"water": _water,
 	"traceability": _traceability,

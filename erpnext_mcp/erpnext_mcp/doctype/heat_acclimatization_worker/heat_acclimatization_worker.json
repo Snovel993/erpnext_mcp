@@ -1,0 +1,35 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 20:00:00.000000",
+ "description": "One worker on a heat record's acclimatization plan. OAR 437-004-1131(g) asks for a written plan for employees with fewer than fourteen days working in the heat — the crew most likely to be hospitalised, and the crew a headcount will not identify. The child table exists so the plan NAMES them: 'four unacclimatized workers' is a number an inspector cannot check and 'these four, by Employee record' is one they can.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee"
+ ],
+ "fields": [
+  {
+   "description": "The worker the plan covers. A Link, so the plan can be reconciled to the crew list on the shift and to the training register — the three questions an inspector asks about a new worker in the heat are who they are, how long they have been doing it, and what they were taught.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-03 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Heat Acclimatization Worker",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
