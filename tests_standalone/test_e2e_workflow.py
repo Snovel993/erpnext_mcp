@@ -112,6 +112,15 @@ SWITCHES = {
 		"list_shifts",
 		"get_heat_exposure_event",
 		"get_attendance_summary",
+		# v0.19.4. The conditions the shift is read against. The scheduled sweep
+		# needs no switch — it is a cron rather than a tool — but the two hands on
+		# it do, and `get_weather_timeline` is how the walk reads back what the
+		# sweep wrote without going through the whole shift.
+		"fetch_weather_now",
+		"backfill_weather_for_shift",
+		"list_shifts_missing_weather",
+		"get_weather_timeline",
+		"get_weather_settings",
 	)
 }
 
@@ -1019,3 +1028,308 @@ class TheHotShiftReachesTheOSHAPacket(EndToEndWorkflow):
 		left_row = next(row for row in from_the_shift["crew"] if row["employee"] == late)
 		self.assertTrue(left_row["left_early"])
 		self.assertEqual(left_row["present_until"], at(12))
+
+
+class TheWeatherTimelineDocumentsTheShiftItself(EndToEndWorkflow):
+	"""v0.19.4. The half of the evidence nobody could produce before.
+
+	`TheHotShiftReachesTheOSHAPacket` walks the same afternoon with the maxima
+	TYPED IN — 96 °F and a 101 °F heat index, because until this release that was
+	the only way they could get onto the record, and "about ninety-five" written
+	from memory in the evening is what an investigator discounts.
+
+	This walks it with nobody typing a temperature at all. The scheduled sweep
+	documents the open shift, a reading over the threshold logs its own
+	compliance event, the foreman files the heat record and its maxima compute
+	off the timeline, and the whole thing lands in the packet an Oregon OSHA
+	inspector is handed.
+
+	THE ASSERTION THAT MATTERS IS THE ONE ABOUT WHAT IS NOT WRITTEN. The sweep
+	sees 82 °F and does NOT create a Heat Exposure Event. That record says which
+	crew was exposed, what water was provided, whether the rest cycle was taken
+	and whether anybody showed signs, and it carries a signature — five
+	judgements by the person who was standing there. A machine filing one from a
+	temperature would be producing an attestation with nobody behind it, in the
+	one place where having nobody behind it is the whole failure. The sweep
+	surfaces; the foreman decides.
+
+	The far end is faked, because the alternative is a test that fails when a
+	free public API is slow. Everything on THIS side of the HTTP call is real:
+	the settings single, the cache, the threshold arithmetic, the child-table
+	append, the controller that computes the maxima, and the packet builder.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		compliance_fields.install_compliance_fields(respect_switch=False)
+		if "hrms" not in STORE.installed_apps:
+			STORE.installed_apps.append("hrms")
+
+		from erpnext_mcp.services import weather
+
+		from .test_weather import FakeOpenMeteo
+
+		weather.reset_cache()
+		self.addCleanup(weather.reset_cache)
+		self.api = FakeOpenMeteo()
+		self._install_fake_open_meteo()
+
+	def _install_fake_open_meteo(self):
+		"""A `requests` module the fake answers, restored afterwards.
+
+		`services/weather._get_json` imports `requests` inside the function, so a
+		bench somehow missing it loses weather and nothing else — which means the
+		import has to be satisfied at call time. Installing a module exercises the
+		real import statement rather than replacing the function that runs it.
+		"""
+		import sys
+		import types as _types
+
+		module = _types.ModuleType("requests")
+		module.get = self.api.get
+		previous = sys.modules.get("requests")
+		sys.modules["requests"] = module
+
+		def restore():
+			if previous is None:
+				sys.modules.pop("requests", None)
+			else:
+				sys.modules["requests"] = previous
+
+		self.addCleanup(restore)
+
+	def test_the_sweep_documents_the_shift_and_the_foreman_files_the_record(self):
+		from erpnext_mcp.services import weather
+
+		self.be_the_operator()
+		today = frappe.utils.today()
+
+		def at(hour: int, minute: int = 0) -> str:
+			return f"{today} {hour:02d}:{minute:02d}:00"
+
+		# 1. The foreman, and the crew member's heat training. Same two steps as
+		#    the typed-maxima walk, because `create_heat_exposure_event` still
+		#    checks the register as of the day of the shift and a claim it
+		#    contradicts is still refused.
+		foreman = self.tool_data(
+			"create_employee",
+			{"employee_name": "Sweep Foreman", "company": COMPANY, "date_of_joining": "2026-01-05"},
+		)["employee"]
+		self.tool_data(
+			"record_training",
+			{
+				"employee": self.employee,
+				"training_type": "Heat Illness Prevention",
+				"completed_date": str(frappe.utils.add_days(today, -20)),
+				"expires_date": str(frappe.utils.add_days(today, 345)),
+				"regimes": ["OR-OSHA"],
+				"content_topics_covered": (
+					"Heat index, water, shade, symptoms, reporting, emergency response"
+				),
+				"person_performed_signature": "/files/worker-signature.png",
+			},
+		)
+
+		# 2. The shift. `farm_location_gps` is the weather anchor, and a shift
+		#    without it gets no timeline however hot the day is.
+		shift = self.tool_data(
+			"start_shift",
+			{
+				"foreman": foreman,
+				"location": "Block 7 North",
+				"shift_type": "Harvest",
+				"farm_location_gps": "45.52,-122.68",
+				"start_datetime": at(6),
+				"crew_employees": [self.employee],
+			},
+		)
+		self.assertEqual(shift["weather_reading_count"], 0)
+
+		# 3. THE SCHEDULED SWEEP, called the way the cron calls it: bare, with no
+		#    arguments and no operator in the loop. 82 °F at 30 % humidity — over
+		#    the shipped 80 °F air-temperature threshold and under the heat-index
+		#    one, which is the ordinary Oregon August morning and the case a rule
+		#    keyed only on heat index would miss.
+		self.api.set_current(temp=82.0, humidity=30.0, when=at(10, 45))
+		self.assertEqual(weather.sweep_open_shifts(), 1)
+
+		timeline = self.tool_data("get_weather_timeline", {"shift": shift["name"]})
+		self.assertEqual(timeline["count"], 1)
+		self.assertEqual(timeline["readings"][0]["temp_f"], 82.0)
+		self.assertEqual(timeline["readings"][0]["source"], weather.SOURCE_CURRENT)
+		self.assertEqual(timeline["first_crossing"], at(10, 45))
+
+		# 4. The crossing logged ITSELF, because it is arithmetic over a stored
+		#    reading and needs nobody's judgement. `logged_by` is empty: nobody
+		#    logged it, and naming the foreman would put their identity against an
+		#    observation they did not make.
+		with_events = self.tool_data("get_shift", {"name": shift["name"]})
+		crossings = [
+			row
+			for row in with_events["compliance_events"]
+			if row["event_type"] == weather.THRESHOLD_EVENT
+		]
+		self.assertEqual(len(crossings), 1, with_events["compliance_events"])
+		self.assertIsNone(crossings[0]["logged_by"])
+		self.assertEqual(crossings[0]["temp_f"], 82.0)
+
+		# 5. AND NO HEAT EXPOSURE EVENT EXISTS. This is the line the release
+		#    draws, asserted rather than described.
+		self.assertEqual(STORE.rows("Heat Exposure Event"), [])
+
+		# 6. The foreman's own timeline, logged as things happened. The snapshot
+		#    on each row is filled from the reading current at its instant, which
+		#    is why an auditor reading the event does not have to reconstruct
+		#    which of the day's readings was in force.
+		self.tool_data(
+			"log_shift_event",
+			{
+				"shift": shift["name"],
+				"event_type": "Water Break",
+				"event_datetime": at(11),
+				"description": "Cooler refilled, whole crew drank.",
+			},
+		)
+		water = next(
+			row
+			for row in self.tool_data("get_shift", {"name": shift["name"]})["compliance_events"]
+			if row["event_type"] == "Water Break"
+		)
+		self.assertEqual(water["temp_f"], 82.0)
+
+		# 7. THE FOREMAN DECIDES IT IS A RECORD, and files it with no maxima at
+		#    all — the fields that used to be typed from memory. They compute off
+		#    the timeline, and `threshold_crossed_at` is the EARLIEST crossing
+		#    because that is where -1131's obligations start running from.
+		heat = self.tool_data(
+			"create_heat_exposure_event",
+			{
+				"farm_shift": shift["name"],
+				"water_provided": True,
+				"shade_provided": True,
+				"mandatory_rest_taken": True,
+				"heat_illness_signs_observed": False,
+				"worker_reported_symptoms": False,
+				"emergency_response_activated": False,
+				"training_verified": True,
+				"supervisor_signature_file_token": "/files/foreman-signature.png",
+			},
+		)
+		self.assertEqual(heat["max_temp_f"], 82.0)
+		self.assertEqual(heat["max_heat_index_f"], weather.heat_index_f(82.0, 30.0))
+		self.assertEqual(str(heat["threshold_crossed_at"]), at(10, 45))
+		self.assertTrue(heat["submitted"])
+		self.assertEqual(heat["obligation_gaps"], [])
+
+		# 8. The close. The shift stops being swept the moment it has an end time,
+		#    which is the same fact `status` is derived from.
+		closed = self.tool_data(
+			"end_shift",
+			{
+				"shift": shift["name"],
+				"end_datetime": at(15),
+				"supervisor_signature_file_token": "/files/foreman-signature.png",
+			},
+		)
+		self.assertEqual(closed["status"], "Closed")
+		self.assertEqual(closed["attendance_created"], 1)
+		self.assertEqual(weather.sweep_open_shifts(), 0)
+
+		# 9. And the packet an Oregon OSHA inspector is handed carries the record
+		#    whose numbers nobody typed.
+		period = {
+			"company": COMPANY,
+			"period_start": str(frappe.utils.add_days(today, -30)),
+			"period_end": today,
+			"dry_run": True,
+		}
+		osha = self.tool_data("generate_audit_packet", {**period, "audit_type": "OSHA"})
+		self.assertEqual(osha["section_counts"]["heat_exposure"], 1, osha["section_counts"])
+		section = audit_packets.build(
+			audit_packets.get("OSHA"), COMPANY, period["period_start"], period["period_end"]
+		)
+		heat_section = next(
+			entry for entry in section["sections"] if entry["key"] == "heat_exposure"
+		)
+		self.assertEqual(heat_section["rows"][0]["record"], heat["name"])
+		self.assertEqual(heat_section["rows"][0]["shift"], shift["name"])
+
+	def test_a_shift_that_ran_before_the_service_was_on_is_backfilled(self):
+		"""THE OTHER HALF, and the one every site has on the day it upgrades: a
+		season of closed shifts with an empty weather table. A shift with no
+		timeline is not one that was compliant or non-compliant — it is one
+		nobody can say anything about, and Open-Meteo still knows what the
+		weather was that day.
+		"""
+		from erpnext_mcp.services import weather
+
+		self.be_the_operator()
+		today = frappe.utils.today()
+
+		def at(hour: int, minute: int = 0) -> str:
+			return f"{today} {hour:02d}:{minute:02d}:00"
+
+		foreman = self.tool_data(
+			"create_employee",
+			{"employee_name": "Backfill Foreman", "company": COMPANY, "date_of_joining": "2026-01-05"},
+		)["employee"]
+		shift = self.tool_data(
+			"start_shift",
+			{
+				"foreman": foreman,
+				"location": "Block 3",
+				"shift_type": "Harvest",
+				"farm_location_gps": "45.52,-122.68",
+				"start_datetime": at(6),
+				"crew_employees": [self.employee],
+			},
+		)
+		self.tool_data(
+			"end_shift",
+			{
+				"shift": shift["name"],
+				"end_datetime": at(15),
+				"supervisor_signature_file_token": "/files/foreman-signature.png",
+			},
+		)
+
+		# The worklist finds it, and says why: a nine-hour shift with no readings
+		# is thinner than one reading per hour by nine.
+		worklist = self.tool_data("list_shifts_missing_weather", {"company": COMPANY})
+		entry = next(row for row in worklist["shifts"] if row["name"] == shift["name"])
+		self.assertEqual(entry["weather_reading_count"], 0)
+		self.assertEqual(entry["readings_expected"], 9)
+
+		self.api.set_archive(hours=24, temp=91.0, humidity=45.0, start_hour=0, day=today)
+		report = self.tool_data("backfill_weather_for_shift", {"shift": shift["name"]})
+		# Ten readings — 06:00 through 15:00 inclusive — and fourteen dropped for
+		# falling outside the shift's own period. The archive answers by whole
+		# days, and a morning shift must not acquire a timeline running to
+		# midnight.
+		self.assertEqual(report["added"], 10)
+		self.assertEqual(report["outside_the_shift_period"], 14)
+		self.assertEqual(report["source"], weather.SOURCE_ARCHIVE)
+
+		# NO COMPLIANCE EVENT, however hot the archive says it was. A Threshold
+		# Crossed row on a closed and signed shift would be an observation nobody
+		# made, sitting beside water breaks somebody did.
+		self.assertEqual(report["readings_at_or_above_the_heat_threshold"], 10)
+		read_back = self.tool_data("get_shift", {"name": shift["name"]})
+		self.assertEqual(
+			[
+				row
+				for row in read_back["compliance_events"]
+				if row["event_type"] == weather.THRESHOLD_EVENT
+			],
+			[],
+		)
+
+		# Running it again adds nothing. A reading is immutable evidence and is
+		# only ever appended.
+		again = self.tool_data("backfill_weather_for_shift", {"shift": shift["name"]})
+		self.assertEqual(again["added"], 0)
+		self.assertEqual(again["skipped_as_duplicate"], 10)
+
+		# And the worklist no longer names it.
+		after = self.tool_data("list_shifts_missing_weather", {"company": COMPANY})
+		self.assertNotIn(shift["name"], [row["name"] for row in after["shifts"]])

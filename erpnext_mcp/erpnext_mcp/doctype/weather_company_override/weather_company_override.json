@@ -1,0 +1,61 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 22:00:00.000000",
+ "description": "One entity's own thresholds, where the shipped ones are wrong for it. OAR 437-004-1131 sets a floor and not a ceiling: a camp crew working in full PPE, a variety picked in September under black shade cloth, or an operation whose insurer asked for a lower trigger are all reasons to engage earlier than 80 °F, and an operator who cannot express that either runs the whole site at the wrong number or turns the alerting off. EVERY FIELD IS NULLABLE AND NULL MEANS THE PARENT — a row that exists to lower the wind limit must not silently reset the heat limit to zero, which is what a non-null default on the other two columns would do.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "heat_threshold_temp_f",
+  "heat_threshold_heat_index_f",
+  "wind_threshold_mph_spray_block"
+ ],
+ "fields": [
+  {
+   "description": "The entity these thresholds belong to. One row per company — a second row for the same company is refused, because two answers to 'what is this company's heat threshold' is one answer nobody can defend under audit.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "Air temperature this entity's Threshold Crossed events fire at. EMPTY FALLS BACK TO THE PARENT — it is not zero, and a blank here means 'this company has no opinion about air temperature' rather than 'every reading crosses'.",
+   "fieldname": "heat_threshold_temp_f",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Heat Threshold — Temp (°F)",
+   "precision": "1"
+  },
+  {
+   "description": "Heat index this entity's Threshold Crossed events fire at. The number the rule actually turns on. Empty falls back to the parent.",
+   "fieldname": "heat_threshold_heat_index_f",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Heat Threshold — Heat Index (°F)",
+   "precision": "1"
+  },
+  {
+   "description": "Wind speed at which a Spray shift on this entity gets a Threshold Crossed event. Pesticide labels differ by product and an operation spraying a drift-restricted material near a school buffer has a lower number than the WPS default. Empty falls back to the parent.",
+   "fieldname": "wind_threshold_mph_spray_block",
+   "fieldtype": "Float",
+   "label": "Wind Threshold — Spray Block (mph)",
+   "precision": "1"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-03 22:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Weather Company Override",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

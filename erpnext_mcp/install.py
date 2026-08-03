@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: MIT
 """Install / migrate / uninstall hooks.
 
-Seven jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
+Eight jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
 the fifth — the Farm Task Dispatch Kanban board — in v0.16.0, the sixth —
-the six mobile roles — in v0.17.0, and the seventh — the compliance vocabulary
-and the training curricula — in v0.19.2.
+the six mobile roles — in v0.17.0, the seventh — the compliance vocabulary
+and the training curricula — in v0.19.2, and the eighth — the Weather Settings
+defaults — in v0.19.4.
 
 The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
@@ -76,7 +77,15 @@ of what a regime is; the table exists so the Desk can offer a picker instead of 
 text box, and a picker is what stops somebody typing `OSHA` where the vocabulary
 says `OR-OSHA`.
 
-None of the seven raises. Every one of them runs inside `bench migrate`, where an
+The eighth arrived in v0.19.4 and is the first job's problem on a second Single.
+`Weather Settings` ships an HTTP timeout, a cache lifetime and three compliance
+thresholds as declared defaults, and until somebody saves the form none of them
+has a row in `tabSingles` — so a timeout reads None, becomes zero, and fails every
+connection immediately with nothing in a log to say why. It is the same function
+as the first job with a doctype argument, so it inherits the same contract: it
+fills blanks and never overwrites a choice, including a deliberate "off".
+
+None of the eight raises. Every one of them runs inside `bench migrate`, where an
 exception aborts the migration for the whole bench — so a failure here is
 reported and the next job still runs. That is not defensive padding: v0.12.0
 shipped an `after_migrate` that died on a link validation and left operators with
@@ -96,6 +105,7 @@ from .tools import company
 
 def after_install() -> None:
 	settings.seed_defaults()
+	_weather_settings()
 	company.ensure_party_types()
 	_compliance_fields()
 	_command_center()
@@ -107,12 +117,51 @@ def after_install() -> None:
 
 def after_migrate() -> None:
 	settings.seed_defaults()
+	_weather_settings()
 	company.ensure_party_types()
 	_compliance_fields()
 	_command_center()
 	_dispatch_board()
 	_mobile_roles()
 	_compliance_vocabulary()
+
+
+def _weather_settings() -> None:
+	"""Make Weather Settings' declared defaults true in the database.
+
+	v0.19.4, and the eighth job. Exactly the first job's problem on a second
+	Single: a Frappe Single stores one row per field somebody has saved, so
+	straight after `bench install-app` `http_timeout_seconds` has no row and reads
+	None — which becomes a timeout of ZERO one `int()` later, and a timeout of zero
+	is not "no timeout" to `requests`, it is a connection that fails immediately,
+	every time, with nothing in a log to say why. `services/weather._setting` falls
+	back to the meta default and then to its own constants for exactly this
+	reason, but a belt that never gets a brace is a belt somebody eventually
+	removes.
+
+	IDEMPOTENT AND IT NEVER OVERWRITES A CHOICE, including a deliberate "off": it
+	only fills fields with no stored value, which is the same contract as the
+	first job because it is the same function.
+
+	NOT A FRAPPE `fixtures` ENTRY — `test_hooks.py` forbids the word by name. A
+	fixture is imported by `bench migrate` with no ability to skip what a site
+	already has, so an operator who lowered their heat threshold to 75 °F would
+	get it silently raised back to 80 on the next upgrade, and the first anybody
+	would know is a hot afternoon that logged nothing.
+
+	Skipped silently on a site whose doctype has not migrated yet — the same
+	`bench migrate` that runs this creates it, so the next run finds it.
+	"""
+	try:
+		from .services import weather
+
+		if not frappe.db.exists("DocType", weather.SETTINGS_DOCTYPE):
+			return
+		settings.seed_defaults(weather.SETTINGS_DOCTYPE)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(
+			f"erpnext_mcp: Weather Settings defaults were not seeded — {type(exc).__name__}: {exc}"
+		)
 
 
 def _compliance_fields() -> None:
@@ -353,7 +402,8 @@ _PRECIOUS_DOCTYPES = (
 	(
 		"Farm Shift",
 		"the shift register — who was on which crew, at which block, from when to "
-		"when, what the foreman did about the conditions hour by hour, and whose "
+		"when, what the foreman did about the conditions hour by hour, WHAT THOSE "
+		"CONDITIONS ACTUALLY WERE every fifteen minutes, and whose "
 		"signature closed it. It is the exposure period every OAR 437-004-1131 "
 		"question is asked against, and the per-worker joined/left spans inside it "
 		"are what a wage claim turns on. The Attendance rows a close wrote survive; "
@@ -401,6 +451,18 @@ _REGENERATED_DOCTYPES = (
 	# referenced it are gone with their own doctypes anyway.
 	("Compliance Regime", "seeded from erpnext_mcp/training.py on every migrate"),
 	("Compliance Regime Link", "the regime tags on alerts and training types, rewritten by the sweep"),
+	# v0.19.4. A Single whose every field is reseeded from its own declared
+	# defaults on the next migrate, so a reinstall restores a working
+	# configuration rather than an empty one. The per-company threshold override
+	# rows are the exception and are deliberately not warned about: they are a
+	# handful of numbers an operator typed and can retype, and the readings they
+	# governed go with `Farm Shift` — which IS on the precious list, and whose
+	# entry is where the loss of a weather timeline is actually spelled out.
+	("Weather Settings", "reseeded from its own declared defaults on every migrate"),
+	(
+		"Weather Company Override",
+		"per-company threshold rows on Weather Settings — a few numbers, retypable",
+	),
 )
 
 

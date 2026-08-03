@@ -1,0 +1,158 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 22:00:00.000000",
+ "description": "Where the weather comes from, how often it is asked for, and the numbers a reading is read against. A SEPARATE SINGLE FROM ERPNext MCP Settings, deliberately: that document is the MCP endpoint's own control panel and this one is an operational configuration a farm manager should be able to open without being handed the tool switches and the bearer token. `enabled` is the kill switch for the whole weather surface — off, the scheduled sweep returns immediately, the two mutating tools refuse by name, and nothing on this site makes an outbound request.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "fetch_interval_minutes",
+  "cadence_col",
+  "cache_ttl_seconds",
+  "http_timeout_seconds",
+  "threshold_section",
+  "heat_threshold_temp_f",
+  "heat_threshold_heat_index_f",
+  "threshold_col",
+  "wind_threshold_mph_spray_block",
+  "override_section",
+  "per_company_overrides",
+  "endpoint_section",
+  "open_meteo_base_url_current",
+  "open_meteo_base_url_archive",
+  "open_meteo_base_url_geocoding"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "description": "The master switch for everything weather. Off means the scheduled sweep returns without a query, fetch_weather_now and backfill_weather_for_shift refuse and say why, and this site makes no outbound request to anybody. Ships ON, because a shift with no timeline is the failure this release exists to fix and a switch that has to be found before anything works is a support call rather than a safeguard.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "default": "15",
+   "description": "How old the most recent reading on an open shift must be before the sweep fetches another. THE CRON RUNS EVERY FIFTEEN MINUTES WHATEVER THIS SAYS — a Frappe cron expression is a static string in hooks.py and cannot be rewritten from a form — so this is a floor rather than a clock. Raising it to 60 gets one reading an hour; lowering it below 15 changes nothing, because the sweep cannot run more often than it is scheduled to. Raising it is the change most operations actually want.",
+   "fieldname": "fetch_interval_minutes",
+   "fieldtype": "Int",
+   "label": "Fetch Interval (minutes)"
+  },
+  {
+   "fieldname": "cadence_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "300",
+   "description": "How long a fetched reading is reused for the same place before Open-Meteo is asked again. Two shifts on adjacent blocks round to the same coordinates and would otherwise be two identical requests a second apart. Open-Meteo is free and has no API key, which is a reason to be more careful with it rather than less: the only thing standing between this app and a rate limit is this number.",
+   "fieldname": "cache_ttl_seconds",
+   "fieldtype": "Int",
+   "label": "Cache TTL (seconds)"
+  },
+  {
+   "default": "10",
+   "description": "How long one HTTP call may take before it is abandoned. Ten seconds, because the caller is a scheduled job sharing a worker with the rest of the site's background work and a weather service that hung would hold that worker for as long as the far end felt like holding it.",
+   "fieldname": "http_timeout_seconds",
+   "fieldtype": "Int",
+   "label": "HTTP Timeout (seconds)"
+  },
+  {
+   "fieldname": "threshold_section",
+   "fieldtype": "Section Break",
+   "label": "Thresholds"
+  },
+  {
+   "default": "80",
+   "description": "Air temperature at which a reading writes a Threshold Crossed compliance event onto the shift. OAR 437-004-1131's own number. A FIELD RATHER THAN A CONSTANT because Oregon has changed it before and will again, and a threshold that lives in code is a threshold that needs a release.",
+   "fieldname": "heat_threshold_temp_f",
+   "fieldtype": "Float",
+   "label": "Heat Threshold — Temp (°F)",
+   "precision": "1"
+  },
+  {
+   "default": "80",
+   "description": "Heat index at which a reading writes a Threshold Crossed event. THE NUMBER THE RULE ACTUALLY TURNS ON — heat index is temperature and humidity together, and 88 °F at 70% humidity is a 100 °F heat index and a shift somebody could be cited over while the thermometer reads comfortably.",
+   "fieldname": "heat_threshold_heat_index_f",
+   "fieldtype": "Float",
+   "label": "Heat Threshold — Heat Index (°F)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "threshold_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "15",
+   "description": "Wind speed at which a reading on a SPRAY shift writes a Threshold Crossed event. Nearly every pesticide label sets a maximum and it is the first thing an Oregon Department of Agriculture drift investigation asks for. It fires on Spray shifts only: fifteen miles an hour during a prune is weather, and during an application it is a decision somebody has to make.",
+   "fieldname": "wind_threshold_mph_spray_block",
+   "fieldtype": "Float",
+   "label": "Wind Threshold — Spray Block (mph)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "override_section",
+   "fieldtype": "Section Break",
+   "label": "Per-Company Overrides"
+  },
+  {
+   "description": "Entities whose thresholds differ from the three above. Empty is the ordinary case. Every column on a row is nullable and null falls back to the parent, so a row that exists to lower one entity's wind limit leaves its heat limits alone. One row per company — a second is refused, because two answers to 'what is this company's threshold' is one nobody can defend.",
+   "fieldname": "per_company_overrides",
+   "fieldtype": "Table",
+   "label": "Per-Company Overrides",
+   "options": "Weather Company Override"
+  },
+  {
+   "fieldname": "endpoint_section",
+   "fieldtype": "Section Break",
+   "label": "Open-Meteo Endpoints"
+  },
+  {
+   "default": "https://api.open-meteo.com/v1/forecast",
+   "description": "Current conditions and forecast. Configurable because an operation running a self-hosted Open-Meteo, or a mirror inside a network that does not reach the public internet, is a real deployment — and because an endpoint hard-coded in a release is an endpoint nobody can move when the far end does.",
+   "fieldname": "open_meteo_base_url_current",
+   "fieldtype": "Data",
+   "label": "Current / Forecast URL"
+  },
+  {
+   "default": "https://archive-api.open-meteo.com/v1/archive",
+   "description": "The historical reanalysis, which is what backfill_weather_for_shift reads. A DIFFERENT HOST from the forecast API and not an accident of Open-Meteo's naming — the archive is a distinct dataset with its own lag, and a shift that ended this morning may not be in it yet.",
+   "fieldname": "open_meteo_base_url_archive",
+   "fieldtype": "Data",
+   "label": "Archive URL"
+  },
+  {
+   "default": "https://geocoding-api.open-meteo.com/v1/search",
+   "description": "Turns a place name into coordinates, for the shifts whose farm_location_gps is 'Milton-Freewater, OR' rather than a pair of numbers. Resolved once per distinct string and cached, because a block name does not move.",
+   "fieldname": "open_meteo_base_url_geocoding",
+   "fieldtype": "Data",
+   "label": "Geocoding URL"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-03 22:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Weather Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

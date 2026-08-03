@@ -189,19 +189,26 @@ def effective_user() -> str:
 	return FALLBACK_USER
 
 
-def seed_defaults() -> None:
+def seed_defaults(doctype: str = SETTINGS_DOCTYPE) -> None:
 	"""Write every unset field's declared default into `tabSingles`.
 
 	Idempotent, and safe to run on every migrate: it only fills in fields that
 	have no stored value, so an operator's choices are never overwritten. This
 	is what makes "read tools default ON" true in the database rather than only
 	in the DocType JSON.
+
+	TAKES A DOCTYPE FROM v0.19.4, because there are now two Singles that need it.
+	`Weather Settings` has the same problem for the same reason — a fresh install
+	stores no rows, so `http_timeout_seconds` reads None and becomes a timeout of
+	zero one `int()` later, which fails every connection immediately and silently.
+	The default is a parameter rather than a second copy of this function, so the
+	one place that knows how a Frappe Single hides its defaults stays one place.
 	"""
-	doc = frappe.get_doc(SETTINGS_DOCTYPE)
-	present = set(stored_fieldnames())
+	doc = frappe.get_doc(doctype)
+	present = set(stored_fieldnames(doctype))
 	changed = False
-	for field in frappe.get_meta(SETTINGS_DOCTYPE).fields:
-		if field.fieldtype in ("Section Break", "Column Break", "HTML", "Tab Break"):
+	for field in frappe.get_meta(doctype).fields:
+		if field.fieldtype in ("Section Break", "Column Break", "HTML", "Tab Break", "Table"):
 			continue
 		if field.fieldname in present or field.default in (None, ""):
 			continue
@@ -212,7 +219,7 @@ def seed_defaults() -> None:
 		doc.save()
 
 
-def stored_fieldnames() -> set:
+def stored_fieldnames(doctype: str = SETTINGS_DOCTYPE) -> set:
 	"""Which of this Single's fields actually have a row in `tabSingles`.
 
 	NEVER query `tabSingles` with `frappe.db.get_value` / `get_values` and no
@@ -229,7 +236,7 @@ def stored_fieldnames() -> set:
 	with no ORDER BY at all, so there is no default to get wrong — which is the
 	real reason to prefer it over passing `order_by=None` to the generic helper.
 	"""
-	return set(frappe.db.get_singles_dict(SETTINGS_DOCTYPE) or {})
+	return set(frappe.db.get_singles_dict(doctype) or {})
 
 
 def as_bool(value) -> bool:

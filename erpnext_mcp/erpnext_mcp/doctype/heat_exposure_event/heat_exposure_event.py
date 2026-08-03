@@ -66,6 +66,7 @@ class HeatExposureEvent(Document):
 	def validate(self):
 		self._require_the_shift()
 		self._fill_from_the_shift()
+		self._fill_from_the_weather_timeline()
 		self._refuse_a_second_record_for_the_shift()
 		if not str(self.regulation_citation or "").strip():
 			self.regulation_citation = shifts.CITATION
@@ -104,6 +105,80 @@ class HeatExposureEvent(Document):
 			self.company = row.get("company")
 		if not self.event_date:
 			self.event_date = str(row.get("start_datetime") or "")[:10] or None
+
+	def _fill_from_the_weather_timeline(self) -> None:
+		"""The maxima and the first crossing, computed off the shift's own readings.
+
+		v0.19.4, and it is the reason the timeline was worth building. Before the
+		fetch existed a foreman filled these three fields in from memory or from
+		the truck thermometer, and "about ninety-five" is what an investigator
+		discounts. Computed from the shift's own timeline they are arithmetic over
+		stored evidence, and the evidence is one click away on the shift behind
+		this record.
+
+		MANUAL ENTRY ALWAYS WINS. A field somebody typed is never recomputed, and
+		this is not deference for its own sake: an on-site reading at the block
+		beats a modelled figure for a grid square measured in kilometres, and the
+		foreman who wrote 103 °F on a record they are about to sign is asserting
+		something they saw. The computed value fills a BLANK; it never corrects an
+		answer.
+
+		`threshold_crossed_at` IS THE EARLIEST CROSSING AND NOT THE HOTTEST
+		MOMENT. Every obligation -1131 adds runs from the instant the shift passed
+		the threshold, so the exposure period starts at the first reading over it;
+		the peak is what `max_heat_index_f` is for. Read against this company's
+		own thresholds, so an entity that set a lower trigger gets the earlier
+		time its own policy implies.
+		"""
+		if not self.farm_shift:
+			return
+		try:
+			readings = shifts.weather_of(self.farm_shift)
+		except Exception:  # pragma: no cover - a site mid-migrate
+			return
+		if not readings:
+			return
+
+		def peak(fieldname):
+			values = []
+			for row in readings:
+				value = row.get(fieldname)
+				if value in (None, ""):
+					continue
+				try:
+					values.append(float(value))
+				except (TypeError, ValueError):
+					continue
+			return max(values) if values else None
+
+		if self.max_temp_f in (None, ""):
+			self.max_temp_f = peak("temp_f")
+		if self.max_heat_index_f in (None, ""):
+			self.max_heat_index_f = peak("heat_index_f")
+		if self.threshold_crossed_at in (None, ""):
+			self.threshold_crossed_at = self._first_crossing(readings)
+
+	def _first_crossing(self, readings: list):
+		from erpnext_mcp.services import weather
+
+		limits = weather.thresholds_for(str(self.company or ""))
+		for row in sorted(readings, key=lambda entry: str(entry.get("reading_datetime") or "")):
+			when = str(row.get("reading_datetime") or "")
+			if not when:
+				continue
+			for fieldname, limit in (
+				("temp_f", limits["heat_threshold_temp_f"]),
+				("heat_index_f", limits["heat_threshold_heat_index_f"]),
+			):
+				value = row.get(fieldname)
+				if value in (None, ""):
+					continue
+				try:
+					if float(value) >= limit:
+						return when
+				except (TypeError, ValueError):
+					continue
+		return None
 
 	def _refuse_a_second_record_for_the_shift(self) -> None:
 		existing = frappe.db.get_all(

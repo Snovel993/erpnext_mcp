@@ -987,6 +987,9 @@ APP_DOCTYPES = {
 	"Farm Shift Weather Reading": "farm_shift_weather_reading",
 	"Heat Exposure Event": "heat_exposure_event",
 	"Heat Acclimatization Worker": "heat_acclimatization_worker",
+	# ── v0.19.4: what the conditions were, and the numbers they are read against ─
+	"Weather Settings": "weather_settings",
+	"Weather Company Override": "weather_company_override",
 }
 
 
@@ -1394,6 +1397,12 @@ CHILD_TABLES = {
 	("Farm Shift", "compliance_events"): "Farm Shift Compliance Event",
 	("Farm Shift", "weather_timeline"): "Farm Shift Weather Reading",
 	("Heat Exposure Event", "acclimatization_plan"): "Heat Acclimatization Worker",
+	# v0.19.4. `thresholds_for` reads the override rows back through
+	# `frappe.db.get_all` with a `parent` filter rather than off the Single in
+	# hand, because it is called from the sweep with only a company name — so the
+	# double has to store them as child rows or the per-company threshold is
+	# untestable and would look like it worked.
+	("Weather Settings", "per_company_overrides"): "Weather Company Override",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1424,6 +1433,9 @@ REHYDRATED_CHILD_FIELDS = (
 	"compliance_events",
 	"weather_timeline",
 	"acclimatization_plan",
+	# v0.19.4. The Weather Settings form re-reads its own override rows and the
+	# controller walks them looking for two rows naming one company.
+	"per_company_overrides",
 )
 
 

@@ -3,6 +3,116 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.19.4 — 2026-08-03
+
+**What the shift was actually like.** v0.19.3 shipped `Farm Shift Weather Reading`
+with nothing writing to it, so that wiring a fetch would mean writing a service
+rather than migrating a schema under live compliance records. This is the fetch. A
+foreman's logged water break says what was **done**; nothing on the shift said what
+it was done **about**, and OAR 437-004-1131 is a rule about conditions. Full notes:
+[`RELEASES/v0.19.4.md`](RELEASES/v0.19.4.md).
+
+Suite: 3,734 → **3,835 passing**. Tool surface: 224 → **229** (102 read, 127
+mutating).
+
+### Added
+
+- **`erpnext_mcp/services/weather.py`**, in a new `services/` package whose premise
+  is one property: a module in here talks to somebody else's server. Ported in
+  **shape** rather than in code from `farm_app/app/utils/weather.py` — that module
+  is the Flask side's agronomy surface (soil temperature, chill hours, growing
+  degree days, evapotranspiration) and none of its functions is what a shift needs.
+  What carried over is the idiom: one `requests.get` with an explicit timeout, a
+  normalised dict out, an error path that returns rather than throws.
+- **A fifteen-minute scheduled sweep** — the app's first `cron` entry and its fifth
+  scheduled job. It walks every Farm Shift with no `end_datetime` and a
+  `farm_location_gps`, asks Open-Meteo what the conditions are there, and appends a
+  reading. Fifteen minutes rather than hourly because -1131 asks what the conditions
+  were across an exposure period, and nine readings on a nine-hour shift is a sketch
+  where thirty-six is a timeline.
+- **`Weather Settings` Single and `Weather Company Override` child table.** The kill
+  switch, the cadence, the cache lifetime, the HTTP timeout, three thresholds and
+  three configurable Open-Meteo endpoints — plus per-entity threshold overrides where
+  the shipped numbers are wrong for a crop or a camp. **Every override column is
+  nullable and null means the parent**, so a row that exists to lower one entity's
+  wind limit leaves its heat limits alone. The controller refuses a non-positive
+  timeout, a non-`http(s)` URL, a negative threshold and two rows for one company.
+- **`Threshold Crossed` compliance events, logged automatically.** A reading at or
+  above threshold writes one — **once per shift, not once per reading**, or a hot
+  afternoon buries the water breaks under thirty-six identical rows. It carries no
+  `logged_by`: nobody logged it, and naming the foreman would put their identity
+  against an observation they did not make. Wind fires on **Spray** shifts only.
+- **Five tools** — two mutating (default OFF), three read (default on):
+  `fetch_weather_now`, `backfill_weather_for_shift`, `list_shifts_missing_weather`,
+  `get_weather_timeline`, `get_weather_settings`. The guards are the shift tools',
+  imported rather than restated.
+- **Historical backfill.** `backfill_weather_for_shift` reconstructs a closed
+  shift's timeline from Open-Meteo's archive at that API's own hourly granularity,
+  filtered to the shift's own period, idempotent to the minute, never editing a
+  reading. Every site that installs this has a season of shifts with an empty weather
+  table, and a shift with no timeline is not one that was compliant or non-compliant
+  — it is one nobody can say anything about.
+- **`list_shifts_missing_weather`**, the worklist: closed shifts carrying fewer than
+  one reading per hour of their own length. Shifts with no coordinates are reported
+  separately, because no amount of backfilling documents one.
+
+### Changed
+
+- **Compliance event weather snapshots fill themselves in**, from the reading
+  current at the event's own instant — the last one at or before it, within half an
+  hour. **Earlier beats later**: the reading current at 09:15 is the conditions the
+  foreman was standing in when they called the break. Past thirty minutes nothing is
+  copied, because a temperature from an hour away is not evidence about this moment.
+- **Heat Exposure Event maxima compute off the shift's timeline.** `max_temp_f`,
+  `max_heat_index_f`, and `threshold_crossed_at` — the **earliest** crossing rather
+  than the hottest moment, because every obligation runs from the instant the shift
+  passed the threshold.
+- **Manual entry always wins** in both of the above. An on-site reading beats a
+  modelled figure for a grid square measured in kilometres; the computed value fills
+  a blank and never corrects an answer.
+- **`settings.seed_defaults` takes a doctype**, so the eighth install job can seed
+  `Weather Settings` through the one place that knows how a Frappe Single hides its
+  declared defaults. On a fresh install `http_timeout_seconds` has no row, reads
+  `None`, and becomes a timeout of zero one `int()` later — a connection that fails
+  immediately, every time, with nothing in a log to say why.
+
+### Notes
+
+- **The heat index is computed, not read off the API.** Open-Meteo returns
+  `apparent_temperature`, which folds in wind and radiation and is a wind-chill
+  figure in winter. The NWS heat index is temperature and humidity, and it is what
+  the rule turns on: **88 °F at 70 % humidity is a 100 °F heat index** — the worked
+  example in the doctype's own field description, and now a test. Both inputs are
+  stored beside the result so a disputed index can be recomputed from the observation.
+- **Nothing here ever creates a Heat Exposure Event.** That record says which crew
+  was exposed, what water was provided, whether the rest cycle was *taken*, whether
+  anybody showed signs and what was done — five judgements by the person who was
+  standing there, under their signature. **The sweep surfaces the condition; the
+  foreman decides whether it is a record.**
+- **The backfill writes no compliance events.** A `Threshold Crossed` row dated last
+  July on a closed and signed shift would be an observation nobody made, sitting
+  beside water breaks somebody did. The crossings are counted and reported instead.
+- **The cron is the ceiling and `fetch_interval_minutes` is the floor.** A Frappe
+  cron expression cannot be rewritten from a form, so the setting is honoured by
+  skipping a shift whose newest reading is younger than it — raising it gets readings
+  less often, which is the change operations ask for; lowering it below fifteen
+  changes nothing.
+- **Open-Meteo needs no API key, which is a reason to be more careful with it.**
+  Cache by coordinate rounded to four decimals (~11 m, the same block), skip a shift
+  read within the interval, and treat a 429 or 5xx as an instruction: exponential
+  backoff per coordinate, doubling, capped at an hour. Nothing raises — a failed
+  fetch is a missing reading, and a shift with a gap is an infinitely better outcome
+  than a scheduler that stopped.
+- **No `update_weather_settings` tool, deliberately.** Three outbound URLs and three
+  numbers deciding whether a hot afternoon is logged at all; a model that could raise
+  the heat threshold past anything Oregon produces would leave a site that behaves
+  normally and never says anything is wrong. The Desk form is the write surface.
+- **Both new hooks are controllers, not `doc_events`.** `hooks.py` promises this app
+  installs no document hooks and `test_hooks.py` forbids the key by name — because
+  that hook is how an app changes a doctype it does not own. `Farm Shift` and `Heat
+  Exposure Event` are this app's, so the rules live in their controllers, where they
+  also run on a Desk edit.
+
 ## 0.19.3 — 2026-08-03
 
 **Compliance anchors to a shift, not to a task.** A task completion carries a

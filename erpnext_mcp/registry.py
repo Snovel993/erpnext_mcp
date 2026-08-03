@@ -81,6 +81,7 @@ from .tools import (
 	trade,
 	training,
 	uploads,
+	weather,
 	workflow,
 )
 
@@ -8086,6 +8087,142 @@ TOOLS = {
 		title="Get a heat exposure event",
 		available=_needs_doctype("Heat Exposure Event"),
 		requires="the Heat Exposure Event DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.19.4: the weather timeline the shift is read against ─────────────
+	"fetch_weather_now": _tool(
+		weather.fetch_weather_now,
+		"MUTATING (default OFF). Append one Open-Meteo reading to an OPEN shift "
+		"right now, bypassing the cache.\n\n"
+		"FOR THE MOMENT THE SCHEDULE IS TOO SLOW FOR. A cron documents every open "
+		"shift every fifteen minutes, which is right for a whole day and wrong for "
+		"a foreman watching a crew struggle at eleven who wants the conditions ON "
+		"THE RECORD before deciding anything.\n\n"
+		"IT LOGS A `Threshold Crossed` COMPLIANCE EVENT WHERE THE READING CROSSES, "
+		"once per shift rather than once per reading — a nine-hour afternoon above "
+		"eighty degrees would otherwise bury the water breaks under thirty-six "
+		"identical rows. It NEVER creates a Heat Exposure Event: that record says "
+		"which crew was exposed, what water was provided, whether the rest cycle "
+		"was taken and whether anybody showed signs, and it carries a signature. "
+		"Those are judgements by the person who was standing there, and "
+		"create_heat_exposure_event is where a person writes them.\n\n"
+		"REFUSES A CLOSED SHIFT — a `current` reading filed against a crew who went "
+		"home is true about the place and false about the shift. Use "
+		"backfill_weather_for_shift. Refuses a shift with no farm_location_gps, "
+		"because there is no place to ask about.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager, the shift's "
+		"own company in the calling account's scope, and `enabled` ticked on "
+		"Weather Settings.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
+			"name": _field(_STRING, "Alias for shift."),
+		},
+		mutating=True,
+		title="Fetch weather now",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"backfill_weather_for_shift": _tool(
+		weather.backfill_weather_for_shift,
+		"MUTATING (default OFF). Reconstruct a CLOSED shift's weather timeline from "
+		"Open-Meteo's historical archive.\n\n"
+		"EVERY SITE THAT INSTALLS THIS HAS A SEASON OF SHIFTS WITH AN EMPTY WEATHER "
+		"TABLE, and a shift with no timeline is not a shift that was compliant or "
+		"non-compliant — it is one nobody can say anything about. Open-Meteo still "
+		"knows what the weather was that day.\n\n"
+		"IDEMPOTENT, AND IT REPORTS THE NUMBERS: every reading is matched against "
+		"the minute already on the timeline, so a second run adds nothing and says "
+		"what it skipped. A reading is never edited, so running this over a shift "
+		"that was ALSO swept live keeps the live readings and fills the gaps.\n\n"
+		"HOURLY, NOT FIFTEEN-MINUTE. That is the archive's own granularity, and "
+		"every row says so in its `source` column so a reconstruction is never read "
+		"as something contemporaneous.\n\n"
+		"IT WRITES NO COMPLIANCE EVENTS. A Threshold Crossed row dated last July on "
+		"a closed and signed shift would be an observation nobody made, sitting "
+		"beside water breaks somebody did. The crossings are COUNTED and reported "
+		"for a human to read.\n\n"
+		"Refuses an open shift (the archive is a reanalysis of hours that have "
+		"already happened) and one with no coordinates.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
+			"name": _field(_STRING, "Alias for shift."),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Backfill weather for a shift",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_shifts_missing_weather": _tool(
+		weather.list_shifts_missing_weather,
+		"Closed shifts whose weather timeline is thinner than their own length — "
+		"the worklist for backfill_weather_for_shift. Read-only.\n\n"
+		"THE TEST IS ONE READING PER HOUR OF SHIFT, which is the archive's own "
+		"granularity: a fully backfilled shift never appears here and a live-swept "
+		"one clears the bar four times over. It is a heuristic and says so — a "
+		"shift swept for its first two hours and then missed has readings and is "
+		"still missing most of its timeline, and this is what finds it.\n\n"
+		"SHIFTS WITH NO `farm_location_gps` ARE REPORTED SEPARATELY, because no "
+		"amount of backfilling will document one and the fix is a different action: "
+		"put coordinates on the shift first. Scoped to the companies the calling "
+		"account may actually reach.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Earliest shift start date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest shift start date, YYYY-MM-DD."),
+			"limit": _field(_INTEGER, "Maximum shifts. Default 100, hard maximum 500."),
+		},
+		title="List shifts missing weather",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_weather_timeline": _tool(
+		weather.get_weather_timeline,
+		"One shift's conditions across its exposure period, with the extremes and "
+		"the times it was at or above threshold. Read-only.\n\n"
+		"THE ANSWER TO 'HOW HOT WAS IT WHEN THE BREAK WAS CALLED' without reading "
+		"the whole shift. `get_shift` returns the timeline beside the crew, the "
+		"events and the heat record, which is right for an audit and too much for a "
+		"question about one hour.\n\n"
+		"`from_datetime` and `to_datetime` window it. `first_crossing` is the "
+		"instant OAR 437-004-1131's obligations start running from, and the shift's "
+		"own compliance events are what say whether they happened.\n\n"
+		"IT SAYS WHERE EACH READING CAME FROM. A live fifteen-minute timeline and "
+		"one reconstructed from the hourly archive are different kinds of evidence, "
+		"and a MIXED timeline is called out by name.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
+			"name": _field(_STRING, "Alias for shift."),
+			"from_datetime": _field(
+				_STRING, "Earliest reading, YYYY-MM-DD HH:MM:SS. Optional."
+			),
+			"to_datetime": _field(_STRING, "Latest reading, YYYY-MM-DD HH:MM:SS. Optional."),
+		},
+		title="Get a shift's weather timeline",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_weather_settings": _tool(
+		weather.get_weather_settings,
+		"What this site fetches, how often, and the thresholds a reading is read "
+		"against — including the per-company overrides. Read-only.\n\n"
+		"THERE IS NO WRITE COUNTERPART AND THERE WILL NOT BE ONE. The three URLs "
+		"here are outbound endpoints and the three thresholds decide whether a hot "
+		"afternoon is logged at all; a tool that could change either would be one "
+		"sentence away from pointing this site's weather somewhere else, or from "
+		"raising the heat threshold past anything Oregon produces so that no shift "
+		"ever crosses it — producing a site that behaves normally and never says "
+		"anything is wrong. An operator edits Weather Settings in the Desk.\n\n"
+		"IT REPORTS OVERRIDES BY COMPANY, because 'the threshold is 80' is false on "
+		"a site where one entity set 75, and it answers WHY nothing is being "
+		"fetched — so it works even when the kill switch is off.\n\n"
+		"THE CRON IS THE CEILING AND `fetch_interval_minutes` IS THE FLOOR: a "
+		"Frappe cron expression cannot be rewritten from a form, so raising the "
+		"setting gets readings less often and lowering it below fifteen changes "
+		"nothing.",
+		{},
+		title="Get weather settings",
+		available=_needs_doctype("Weather Settings"),
+		requires="the Weather Settings DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

@@ -49,7 +49,14 @@ from .harness import frappe  # noqa: F401 - installs the frappe double before er
 #:   "metadata"   plain values Frappe reads as configuration. Nothing to resolve.
 #:   "app_list"   a list of app names.
 #:   "path"       ONE dotted path to a callable.
-#:   "path_map"   a dict of lists of dotted paths — `scheduler_events`.
+#:   "path_map"   a dict of lists of dotted paths — `scheduler_events`. FROM
+#:                v0.19.4 one of its values is itself a dict, because Frappe's
+#:                `cron` key is `{expression: [paths]}` rather than a bare list.
+#:                The walker below descends into it; a walker that did not would
+#:                iterate the cron EXPRESSION one character at a time and report
+#:                every character as a path that fails to resolve, which is the
+#:                same class of mistake as conflating `path_map` with `path_dict`
+#:                and is the reason both are spelled out here.
 #:   "path_dict"  a dict of ONE dotted path each, keyed by doctype — the two
 #:                permission hooks. A DIFFERENT SHAPE from `path_map`, and
 #:                conflating them is not cosmetic: the resolver iterates a
@@ -124,6 +131,15 @@ def dotted_paths() -> list:
 				out.append((name, entry))
 		elif shape in ("path_map", "jinja"):
 			for group, entries in (value or {}).items():
+				if isinstance(entries, dict):
+					# Frappe's `cron` key: {expression: [paths]}. One level deeper
+					# than every other interval, and a walker that treated it like
+					# a list would walk the expression string character by
+					# character. v0.19.4.
+					for expression, nested in entries.items():
+						for entry in nested or []:
+							out.append((f"{name}.{group}[{expression}]", entry))
+					continue
 				for entry in entries:
 					out.append((f"{name}.{group}", entry))
 		elif shape == "path_dict":
@@ -270,18 +286,21 @@ class TheJinjaMethod(unittest.TestCase):
 
 class TheScheduledJobs(unittest.TestCase):
 	def test_every_scheduled_job_resolves(self):
-		self.assertEqual(sorted(hooks.scheduler_events), ["daily", "hourly", "weekly"])
-		for interval, paths in hooks.scheduler_events.items():
-			for path in paths:
-				with self.subTest(interval=interval, path=path):
-					self.assertTrue(callable(resolve(path)))
+		self.assertEqual(sorted(hooks.scheduler_events), ["cron", "daily", "hourly", "weekly"])
+		for hook, path in dotted_paths():
+			if not hook.startswith("scheduler_events"):
+				continue
+			with self.subTest(hook=hook, path=path):
+				self.assertTrue(callable(resolve(path)))
 
-	def test_they_are_these_four_and_nothing_else(self):
-		"""Four jobs. Three write only this app's own doctypes or nothing at all;
+	def test_they_are_these_five_and_nothing_else(self):
+		"""Five jobs. Three write only this app's own doctypes or nothing at all;
 		the fourth writes two credential fields on Frappe's User and had to argue
-		for it — see hooks.py and tools/mobile.sweep_idle_grants.
+		for it — see hooks.py and tools/mobile.sweep_idle_grants — and the fifth
+		makes an outbound request to somebody else's server, which is a bar none
+		of the others had to clear.
 
-		Asserted as an exact mapping rather than a membership check, so a third
+		Asserted as an exact mapping rather than a membership check, so a sixth
 		job fails here and has to be argued for. Every scheduled job is code that
 		runs on somebody's site with nobody watching, which is the same reason
 		`KNOWN_HOOKS` refuses an unexamined hook key.
@@ -290,10 +309,16 @@ class TheScheduledJobs(unittest.TestCase):
 		The short version: the sweep is what makes a completed task's alert go
 		away, and nightly meant a worker saw the phone asking them to walk a cabin
 		they had already walked, all day.
+
+		The weather sweep arrived in v0.19.4 as the only `cron` entry, at fifteen
+		minutes, because OAR 437-004-1131 asks what the conditions were across an
+		exposure period: nine readings on a nine-hour shift is a sketch and
+		thirty-six is a timeline.
 		"""
 		self.assertEqual(
 			hooks.scheduler_events,
 			{
+				"cron": {"*/15 * * * *": ["erpnext_mcp.services.weather.sweep_open_shifts"]},
 				"hourly": ["erpnext_mcp.alerts.sweep"],
 				"daily": [
 					"erpnext_mcp.tools.uploads.collect_expired_sessions",
@@ -302,6 +327,28 @@ class TheScheduledJobs(unittest.TestCase):
 				"weekly": ["erpnext_mcp.drift.scan"],
 			},
 		)
+
+	def test_the_weather_sweep_never_raises_and_takes_no_arguments(self):
+		"""Same contract as the other four, and it needs it more than any of them.
+
+		It is the only job that talks to a third party, so its failure modes
+		include ones this app cannot influence — a slow link out of a farm office,
+		a rate limit, a captive portal answering 200 with a login page. None of
+		those may take a scheduler tick down, and none of them is a reason the
+		other jobs in that tick do not run.
+		"""
+		import inspect
+
+		from erpnext_mcp.services import weather
+
+		from .harness import INSTALLED_DOCTYPES
+
+		self.assertEqual(list(inspect.signature(weather.sweep_open_shifts).parameters), [])
+		INSTALLED_DOCTYPES.discard("Weather Settings")
+		try:
+			self.assertEqual(weather.sweep_open_shifts(), 0)
+		finally:
+			INSTALLED_DOCTYPES.add("Weather Settings")
 
 	def test_the_sweep_is_a_full_reconciliation_so_the_cadence_is_only_tuning(self):
 		"""Running it twice must produce what running it once does — that is what

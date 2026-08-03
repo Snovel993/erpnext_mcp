@@ -343,7 +343,13 @@ erpnext_mcp/                     repo root
                                  Farm Shift (+ Farm Shift Crew Member, Farm
                                  Shift Compliance Event and Farm Shift Weather
                                  Reading) and Heat Exposure Event (+ Heat
-                                 Acclimatization Worker)
+                                 Acclimatization Worker); v0.19.4 added Weather
+                                 Settings (+ Weather Company Override)
+    services/weather.py          v0.19.4. Open-Meteo, the fifteen-minute sweep
+                                 over open shifts, and the threshold arithmetic.
+                                 THE ONLY PACKAGE THAT TALKS TO SOMEBODY ELSE'S
+                                 SERVER — everything in it has a timeout, backs
+                                 off on a 429, and never raises into its caller
 scripts/seed_related_parties.py  seeds the related-party register from a JSON
                                  file kept OUTSIDE this repository
 ```

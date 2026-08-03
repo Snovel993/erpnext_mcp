@@ -29,7 +29,7 @@ it acts on `/api/method/erpnext_mcp.api.*` and nothing else, it never overrides
 an identity Frappe already established, it grants no permission of any kind, and
 it cannot raise. See the note above the declaration, and `api/fallback_auth.py`.
 
-THERE ARE EXACTLY FOUR SCHEDULED JOBS, and the count is in this docstring
+THERE ARE EXACTLY FIVE SCHEDULED JOBS, and the count is in this docstring
 because it is a number somebody should have to change on purpose. Every one of
 them runs on somebody's site with nobody watching, so each has had to clear the
 same two bars: it writes only this app's own doctypes (or nothing at all), and
@@ -111,6 +111,32 @@ rather than an increment: every run rebuilds the whole picture and every alert i
 keyed, so running it twice in a minute produces exactly what running it once
 does. That property is what makes the cadence a tuning decision rather than a
 correctness one.
+
+THE FIFTH ARRIVED IN v0.19.4 AND IS THE FIRST JOB ON THIS APP'S SCHEDULE THAT
+TALKS TO SOMEBODY ELSE'S SERVER. `services.weather.sweep_open_shifts` asks
+Open-Meteo what the conditions are at every open shift's coordinates and appends
+a `Farm Shift Weather Reading`. It writes only this app's own doctypes — the
+shift's two child tables and nothing else — and it never raises, but it carries a
+third obligation the other four do not: it must not be a nuisance to a free
+service that asks nobody for an API key. So it caches by rounded coordinate,
+skips any shift read within `fetch_interval_minutes`, and treats a 429 as an
+instruction rather than a suggestion — exponential backoff per coordinate, capped
+at an hour, during which no request goes out for that place at all.
+
+IT IS THE ONLY `cron` ENTRY, and the reason it is not `hourly` is the rule it
+serves. OAR 437-004-1131 asks what the conditions were across an exposure period;
+an hourly reading on a nine-hour shift is nine data points and a fifteen-minute
+one is thirty-six, and the difference between those two is the difference between
+a sketch and a timeline. A cron expression cannot be changed from a form, which
+is why `fetch_interval_minutes` exists on Weather Settings: the schedule is the
+ceiling and the setting is the floor, so an operator can ask for LESS often and
+gets exactly that.
+
+IT IS ALSO SAFE TO RUN AT ANY CADENCE, for three independent reasons rather than
+the alert sweep's one — the interval check skips a shift just read, the cache
+answers the request that would have gone out, and `append_readings` refuses a
+second row for a minute already on the timeline. A reading is immutable evidence
+and is only ever appended; nothing in this app edits one.
 """
 
 app_name = "erpnext_mcp"
@@ -140,6 +166,17 @@ after_migrate = "erpnext_mcp.install.after_migrate"
 #: hands each entry to `frappe.get_attr` exactly as `jinja` does, so the colon
 #: that took a site down in v0.14.0 would take it down from here too.
 scheduler_events = {
+	#: v0.19.4. The weather sweep, and the only entry that is not one of Frappe's
+	#: named intervals. `hourly` would be the tidier declaration and the wrong
+	#: record: -1131 asks what the conditions were across an exposure period, and
+	#: nine readings on a nine-hour shift is a sketch where thirty-six is a
+	#: timeline. See the docstring above for why the cadence is the ceiling and
+	#: `Weather Settings.fetch_interval_minutes` is the floor.
+	"cron": {
+		"*/15 * * * *": [
+			"erpnext_mcp.services.weather.sweep_open_shifts",
+		],
+	},
 	"hourly": [
 		"erpnext_mcp.alerts.sweep",
 	],

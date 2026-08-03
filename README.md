@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **224 tools** — 99 read-only, 125 mutating.
+- **229 tools** — 102 read-only, 127 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -275,7 +275,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 224 tools
+## The 229 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -1345,6 +1345,57 @@ nobody reading the register can reach the conditions the person worked in — an
 the bridge, unable to tell its own rows from anybody else's, would pay somebody
 twice for one afternoon.
 
+**The weather timeline** — the v0.19.4 surface, and the half of a shift's
+evidence nobody could produce before. A foreman's logged water break says what
+was *done*; the timeline says what it was done *about*, and OAR 437-004-1131 is a
+rule about conditions.
+
+**The mechanism is mostly a schedule.** A `*/15 * * * *` cron walks every shift
+with no `end_datetime` and a `farm_location_gps`, asks Open-Meteo what the
+conditions are there, and appends a reading. Fifteen minutes rather than hourly
+because nine readings on a nine-hour shift is a sketch and thirty-six is a
+timeline. Open-Meteo needs no API key, which is a reason to be *more* careful
+with it: the service caches by coordinate, skips a shift read within
+`fetch_interval_minutes`, and treats a 429 as an instruction — exponential
+backoff per coordinate, capped at an hour. Nothing raises. A failed fetch is a
+missing reading, and a shift with a gap is an infinitely better outcome than a
+scheduler that stopped.
+
+**The heat index is computed, not read off the API.** Open-Meteo returns
+`apparent_temperature`, which folds in wind and radiation and is a wind-chill
+figure in winter. The NWS heat index is temperature and humidity, and it is what
+the rule turns on: **88 °F at 70 % humidity is a 100 °F heat index**, and a shift
+documented against the other number would look compliant while somebody was being
+cooked. Both inputs are stored beside the result, so a disputed index can be
+recomputed from the observation.
+
+**A crossing logs an event. It never files a heat record.** A reading at or above
+threshold writes one `Threshold Crossed` compliance event — once per shift, not
+once per reading, or a hot afternoon buries the water breaks under thirty-six
+identical rows. It does **not** create a Heat Exposure Event. That record says
+which crew was exposed, what water was provided, whether the rest cycle was
+*taken*, whether anybody showed signs and what was done — five judgements by the
+person who was standing there, under their signature. **The sweep surfaces the
+condition; the foreman decides whether it is a record.**
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `fetch_weather_now` | Appends one reading to an **open** shift immediately, bypassing the cache — for the foreman who wants the conditions on the record now rather than in eleven minutes. | Touch a closed shift. A `current` reading filed against a crew who went home is true about the place and false about the shift. Nor create a heat record, however hot the reading is. |
+| `backfill_weather_for_shift` | Reconstructs a **closed** shift's timeline from the archive API, at that API's own hourly granularity, filtered to the shift's own period. Idempotent by the minute, and it never edits a reading — so a shift also swept live keeps its live rows and gets the gaps filled. | Write a compliance event. A `Threshold Crossed` row dated last July on a signed shift would be an observation nobody made, sitting beside water breaks somebody did — the crossings are **counted and reported** instead. Nor backfill an open shift: the archive is a reanalysis of hours that have already happened. |
+| `list_shifts_missing_weather` | The worklist: closed shifts carrying fewer than one reading per hour of their own length. Shifts with **no coordinates** are listed separately, because no amount of backfilling documents one. | Pretend the heuristic is a proof. A shift swept for two hours and then missed has readings and is still missing most of its timeline. |
+| `get_weather_timeline` | One shift's conditions with the extremes and `first_crossing` — the instant -1131's obligations start running from — without returning the whole shift. Calls out a **mixed** timeline by name. | Let a reconstruction pass for something contemporaneous. Every row says where it came from. |
+| `get_weather_settings` | The kill switch, the cadence, the three thresholds and the **per-company overrides** — because "the threshold is 80" is false on a site where one entity set 75. Works even when weather is switched off, because it is the tool somebody calls to find out why nothing is being fetched. | Write any of it. There is deliberately no `update_weather_settings`: those are three outbound URLs and three numbers deciding whether a hot afternoon is logged at all, and a tool that could raise the heat threshold past anything Oregon produces would leave a site that behaves normally and never says anything is wrong. The Desk form is the write surface. |
+
+Three things now fill themselves in, and **manual entry always wins** in all
+three. A compliance event's weather snapshot comes from the reading current at
+its own instant — the last one at or before it, within half an hour, because
+*earlier beats later*: that is the conditions the foreman was standing in when
+they called the break. A Heat Exposure Event's `max_temp_f`, `max_heat_index_f`
+and `threshold_crossed_at` compute off the shift's timeline, with
+`threshold_crossed_at` being the **earliest** crossing rather than the hottest
+moment. An on-site reading beats a modelled figure for a grid square measured in
+kilometres, so a computed value fills a blank and never corrects an answer.
+
 
 ---
 
@@ -1776,7 +1827,7 @@ sends it as `Authorization: token <api_key>:<api_secret>` **alongside**
 **API secrets do not expire, and this app does not pretend otherwise.** Frappe
 has no expiry on one, and this app installs no scheduled job to add one — such a
 job would rewrite another app's User records on a timer with nobody watching,
-and `hooks.py` declares exactly two scheduled jobs and argues for both.
+and `hooks.py` declares exactly five scheduled jobs and argues for every one.
 `token_expires_on` is a **review date**: `list_mobile_users` flags an overdue
 grant loudly, `get_current_user_context` reports it to the phone, and
 `revoke_api_token` is what actually ends access. Calling a reminder an expiry

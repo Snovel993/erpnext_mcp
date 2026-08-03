@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 224 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 229 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 99 read tools are **on** by default and can be switched off individually. A
+All 102 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -6448,6 +6448,112 @@ somebody files a course this site has not run, and says so in the result. The
 new curriculum takes the regimes its NAME implies rather than the session's,
 because the record says what one afternoon covered and the curriculum says what
 the course normally answers.
+
+---
+
+# The weather timeline (v0.19.4)
+
+v0.19.3 shipped `Farm Shift Weather Reading` with nothing writing to it, so that
+fixing the shape first meant v0.19.4 could wire a fetch instead of migrating a
+schema under live compliance records. This is the fetch.
+
+**The mechanism is mostly a schedule.** `services/weather.sweep_open_shifts` runs
+on a `*/15 * * * *` cron, walks every Farm Shift with no `end_datetime` and a
+`farm_location_gps`, asks Open-Meteo what the conditions are there, and appends a
+reading. Fifteen minutes rather than hourly because OAR 437-004-1131 asks what the
+conditions were across an exposure period, and nine readings on a nine-hour shift
+is a sketch where thirty-six is a timeline.
+
+**The heat index is computed, not read off the API.** Open-Meteo returns
+`apparent_temperature`, which folds in wind and radiation and is a wind-chill
+figure in winter. The NWS heat index is temperature and humidity, and it is what
+the rule turns on: 88 °F at 70 % humidity is a **100 °F heat index**, and a shift
+documented against apparent temperature would look compliant while somebody was
+being cooked. Both inputs are stored beside the result so a disputed index can be
+recomputed from the observation.
+
+**A crossing logs an event. It never files a heat record.** A reading at or above
+the threshold writes one `Threshold Crossed` compliance event — once per shift,
+not once per reading, or a hot afternoon buries the water breaks under thirty-six
+identical rows. It does **not** create a Heat Exposure Event, and that is the line
+this release draws: that record says which crew was exposed, what water was
+provided, whether the rest cycle was taken and whether anybody showed signs, and
+it carries a signature. Those are five judgements by the person who was standing
+there. The sweep surfaces the condition; the foreman decides whether it is a
+record.
+
+**Three things now fill themselves in.** A compliance event's
+`weather_snapshot_temp_f` / `weather_snapshot_heat_index_f` come from the reading
+current at its own instant (the last one at or before it, within half an hour —
+earlier beats later, because that is the conditions the foreman was standing in).
+A Heat Exposure Event's `max_temp_f`, `max_heat_index_f` and `threshold_crossed_at`
+compute off the shift's timeline. **Manual entry always wins** in both cases: an
+on-site reading beats a modelled figure for a grid square measured in kilometres,
+and the computed value fills a blank rather than correcting an answer.
+
+**Open-Meteo needs no API key, which is a reason to be more careful with it.** The
+service caches by coordinate rounded to four decimals, skips any shift read within
+`fetch_interval_minutes`, and treats a 429 or a 5xx as an instruction — exponential
+backoff per coordinate, doubling, capped at an hour, during which no request goes
+out for that place at all. Nothing raises: a failed fetch is a missing reading, and
+a shift with a gap in its timeline is an infinitely better outcome than a scheduler
+that stopped.
+
+## 213. `fetch_weather_now`
+
+**MUTATING (default OFF).** `shift`. Appends one reading to an **open** shift
+immediately, bypassing the cache — for the foreman who wants the conditions on the
+record now rather than in eleven minutes. Logs a `Threshold Crossed` event where
+the reading crosses. Refuses a closed shift (a `current` reading filed against a
+crew who went home is true about the place and false about the shift) and one with
+no coordinates.
+
+## 214. `backfill_weather_for_shift`
+
+**MUTATING (default OFF).** `shift`. Reconstructs a **closed** shift's timeline
+from the archive API, at that API's own **hourly** granularity, filtered to the
+shift's own period so a six-hour morning does not acquire a timeline running to
+midnight. Idempotent: every reading is matched against the minute already present,
+and a reading is never edited — so running it over a shift that was also swept live
+keeps the live readings and fills the gaps. Returns `added`, `skipped_as_duplicate`
+and `failed`.
+
+It writes **no** compliance events, and that is the one judgement call in the tool:
+a `Threshold Crossed` row dated last July on a closed and signed shift would be an
+observation nobody made, sitting beside water breaks somebody did. The crossings
+are counted and reported instead, which is also the sentence that tells a foreman
+whether the shift needed a heat record at all.
+
+## 215. `list_shifts_missing_weather`
+
+**Read-only.** `company`, `from_date`/`to_date`, `limit`. Closed shifts carrying
+fewer than **one reading per hour** of their own length — the archive's granularity,
+so a fully backfilled shift never appears and a live-swept one clears it four times
+over. Shifts with **no `farm_location_gps`** are reported separately: no amount of
+backfilling documents one, and the fix is a different action.
+
+## 216. `get_weather_timeline`
+
+**Read-only.** `shift`, optional `from_datetime`/`to_datetime`. The readings, the
+extremes, the count at or above threshold and `first_crossing` — the instant
+-1131's obligations start running from. Reports the `sources` present, and calls
+out a **mixed** timeline by name: live fifteen-minute readings and an hourly
+archive reconstruction are both true and are not equally strong.
+
+## 217. `get_weather_settings`
+
+**Read-only.** No arguments. The kill switch, the cadence, the three thresholds and
+the per-company overrides — because "the threshold is 80" is false on a site where
+one entity set 75. It works even when weather is switched **off**, because it is
+the tool somebody calls to find out why nothing is being fetched.
+
+**There is no `update_weather_settings`, and there will not be one.** Those are
+three outbound URLs and three numbers that decide whether a hot afternoon is logged
+at all. A tool that could write them would be one sentence away from pointing this
+site's weather somewhere else, or from raising the heat threshold past anything
+Oregon produces — leaving a site that behaves normally and never says anything is
+wrong. The Desk form is the write surface, where a person types the number and
+Frappe's version trail records who did.
 
 ---
 

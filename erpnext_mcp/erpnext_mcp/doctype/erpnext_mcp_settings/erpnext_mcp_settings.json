@@ -263,6 +263,13 @@
   "allow_log_shift_event",
   "allow_end_shift",
   "allow_create_heat_exposure_event",
+  "weather_section",
+  "allow_get_weather_timeline",
+  "allow_list_shifts_missing_weather",
+  "allow_get_weather_settings",
+  "weather_col",
+  "allow_fetch_weather_now",
+  "allow_backfill_weather_for_shift",
   "audit_packet_section",
   "allow_generate_audit_packet",
   "allow_list_audit_packet_types",
@@ -2009,6 +2016,51 @@
    "fieldname": "allow_create_heat_exposure_event",
    "fieldtype": "Check",
    "label": "Create Heat Exposure Event"
+  },
+  {
+   "fieldname": "weather_section",
+   "fieldtype": "Section Break",
+   "label": "Weather Timeline"
+  },
+  {
+   "default": "1",
+   "description": "READ. One shift's conditions across its exposure period, with the extremes and the instant it first reached threshold — the answer to 'how hot was it when the break was called' without reading the whole shift. Says where each reading came from, and calls out a timeline that mixes live fifteen-minute readings with an hourly archive reconstruction, because the two are not equally strong evidence.",
+   "fieldname": "allow_get_weather_timeline",
+   "fieldtype": "Check",
+   "label": "Get Weather Timeline"
+  },
+  {
+   "default": "1",
+   "description": "READ. Closed shifts carrying fewer than one weather reading per hour of their own length — the worklist for the backfill. Shifts with no farm_location_gps are listed separately, because no amount of backfilling documents one and the fix is a different action.",
+   "fieldname": "allow_list_shifts_missing_weather",
+   "fieldtype": "Check",
+   "label": "List Shifts Missing Weather"
+  },
+  {
+   "default": "1",
+   "description": "READ. What this site fetches, how often, the three thresholds a reading is read against and the per-company overrides — because 'the threshold is 80' is false on a site where one entity set 75. There is deliberately NO write counterpart: those are outbound URLs and the numbers that decide whether a hot afternoon gets logged at all, and an operator edits them in the Desk.",
+   "fieldname": "allow_get_weather_settings",
+   "fieldtype": "Check",
+   "label": "Get Weather Settings"
+  },
+  {
+   "fieldname": "weather_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Appends one Open-Meteo reading to an OPEN shift immediately, bypassing the cache — for the foreman who wants the conditions on the record now rather than in eleven minutes. Logs a Threshold Crossed compliance event where the reading crosses, ONCE PER SHIFT rather than once per reading. It never creates a Heat Exposure Event: which crew was exposed and whether the rest cycle was taken are judgements by the person who was there.",
+   "fieldname": "allow_fetch_weather_now",
+   "fieldtype": "Check",
+   "label": "Fetch Weather Now"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Reconstructs a CLOSED shift's timeline from Open-Meteo's historical archive, at the archive's own hourly granularity, so a shift that ran before the service was switched on can still be documented. Idempotent — every reading is matched against the minute already present, and a reading is never edited. It writes no compliance events: a Threshold Crossed row dated last July on a signed shift would be an observation nobody made.",
+   "fieldname": "allow_backfill_weather_for_shift",
+   "fieldtype": "Check",
+   "label": "Backfill Weather for a Shift"
   },
   {
    "fieldname": "audit_packet_section",

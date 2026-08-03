@@ -42,6 +42,50 @@ from frappe.model.document import Document
 
 from erpnext_mcp import shifts
 
+#: How far from a compliance event a weather reading may be and still describe
+#: it. Half an hour, because the sweep writes one reading every fifteen minutes
+#: and the archive writes one an hour: thirty minutes reaches the neighbouring
+#: live reading in every direction and reaches an hourly backfill in one. Past it
+#: the honest answer is a blank column — a temperature from an hour away is not
+#: evidence about this moment, and a snapshot nobody can defend is worse than
+#: none, because it is the number an inspector will quote back.
+WEATHER_SNAPSHOT_WINDOW_SECONDS = 30 * 60
+
+
+def _nearest_reading(timeline: list, when: str):
+	"""The reading that was current at `when`, preferring earlier over later.
+
+	`timeline` is already sorted by `reading_datetime`. Walks it once: the last
+	reading at or before the instant wins outright, and the first one after it is
+	the fallback for an event logged before the shift's first fetch landed. Both
+	are bounded by `WEATHER_SNAPSHOT_WINDOW_SECONDS`.
+	"""
+	before = None
+	after = None
+	for row in timeline:
+		stamp = str(row.get("reading_datetime") or "")
+		if stamp <= str(when):
+			before = row
+		else:
+			after = row
+			break
+	for candidate in (before, after):
+		if candidate is None:
+			continue
+		try:
+			gap = abs(
+				float(
+					frappe.utils.time_diff_in_seconds(
+						str(when), str(candidate.get("reading_datetime"))
+					)
+				)
+			)
+		except Exception:
+			continue
+		if gap <= WEATHER_SNAPSHOT_WINDOW_SECONDS:
+			return candidate
+	return None
+
 
 class FarmShift(Document):
 	def autoname(self):
@@ -60,6 +104,7 @@ class FarmShift(Document):
 		self._check_the_period()
 		self._check_the_crew()
 		self._check_the_cancellation()
+		self._denormalise_the_weather()
 		self.status = shifts.status_for(self.end_datetime, self.cancelled)
 
 	# ── the parts ───────────────────────────────────────────────────────────
@@ -157,6 +202,64 @@ class FarmShift(Document):
 					title=_("On the Crew Twice"),
 				)
 			seen[row.employee] = True
+
+	def _denormalise_the_weather(self) -> None:
+		"""Copy the conditions at each compliance event's own instant onto its row.
+
+		v0.19.4. THE SNAPSHOT IS A READING CONVENIENCE AND AN AUDIT NECESSITY. An
+		inspector reads the event row — "water break at 09:15" — and a reader who
+		has to work out which of ninety timeline readings was current at 09:15
+		will not do it. So the row carries the number, denormalised, and the
+		timeline behind it is what proves the number.
+
+		EARLIER BEATS LATER, WITHIN HALF AN HOUR. The reading that was current at
+		09:15 is the most recent one taken AT OR BEFORE 09:15 — that is the
+		conditions the foreman was standing in when they called the break. A
+		reading taken afterwards is used only when there is nothing before, which
+		is the ordinary case for an event logged in the first minutes of a shift,
+		and it is still the closest true statement available. Past thirty minutes
+		nothing is copied at all: a temperature from an hour away is not evidence
+		about this moment, and a blank column is honest where a stale one is not.
+
+		IT NEVER OVERWRITES A VALUE SOMEBODY ENTERED. A foreman with a thermometer
+		at the block knows something Open-Meteo's grid square does not, and a
+		manual figure is the better evidence of the two. `log_shift_event` accepts
+		both snapshot fields as arguments precisely so that can be recorded.
+
+		THIS IS A CONTROLLER AND NOT A `doc_events` HOOK, deliberately. `hooks.py`
+		promises this app installs no document hooks and `test_hooks.py` forbids
+		the key by name, because a hook is how an app changes the behaviour of a
+		doctype it does not own. Farm Shift IS this app's own doctype, so the rule
+		belongs in its controller — where it also runs on a Desk edit, which a
+		child-table hook would not reliably do.
+		"""
+		events = self.get("compliance_events") or []
+		readings = self.get("weather_timeline") or []
+		if not events or not readings:
+			return
+		timeline = sorted(
+			(
+				row
+				for row in readings
+				if str(row.get("reading_datetime") or "").strip()
+			),
+			key=lambda row: str(row.get("reading_datetime")),
+		)
+		if not timeline:
+			return
+		for event in events:
+			when = str(event.get("event_datetime") or "").strip()
+			if not when:
+				continue
+			if event.get("weather_snapshot_temp_f") not in (None, "") or event.get(
+				"weather_snapshot_heat_index_f"
+			) not in (None, ""):
+				continue
+			match = _nearest_reading(timeline, when)
+			if match is None:
+				continue
+			event.weather_snapshot_temp_f = match.get("temp_f")
+			event.weather_snapshot_heat_index_f = match.get("heat_index_f")
 
 	def _check_the_cancellation(self) -> None:
 		if frappe.utils.cint(self.cancelled) and not str(self.cancellation_reason or "").strip():

@@ -349,10 +349,35 @@ class Catalogue(SeededTestCase):
 		Attendance bridge and the four new doctypes came with them and are not
 		tools, which is again why the catalogue grew by ten and the release by
 		considerably more.
+
+		v0.19.4 ADDED FIVE — two writes and three reads — and they are the hands
+		to a mechanism that is mostly a schedule. A fifteen-minute cron documents
+		every open shift without anybody asking, because a timeline is only
+		evidence if it was written while things were happening. What the cron
+		cannot do is the rest:
+
+		  * `fetch_weather_now` is for the foreman standing in a block on a day
+		    that turned, who wants the conditions on the record this minute
+		    rather than in eleven. It bypasses the cache, which is the point;
+		  * `backfill_weather_for_shift` documents every shift that ran before
+		    the service was switched on, from Open-Meteo's archive, idempotently
+		    and at the archive's own hourly granularity;
+		  * `list_shifts_missing_weather` is the worklist for the second one;
+		  * `get_weather_timeline` answers 'how hot was it when the break was
+		    called' without returning the whole shift;
+		  * `get_weather_settings` reads the thresholds back — and there is no
+		    write counterpart on purpose, because a model that could raise the
+		    heat threshold past anything Oregon produces would leave a site that
+		    behaves normally and never says anything is wrong.
+
+		The Threshold Crossed events, the Heat Exposure Event maxima computed off
+		the timeline, the compliance-event snapshots and the Weather Settings
+		doctype came with them and are not tools — which is why the catalogue grew
+		by five and the release by considerably more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 224)
-		self.assertEqual(len(registry.READ_TOOLS), 99)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 125)
+		self.assertEqual(len(registry.TOOLS), 229)
+		self.assertEqual(len(registry.READ_TOOLS), 102)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 127)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
