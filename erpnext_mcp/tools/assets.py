@@ -44,7 +44,7 @@ import datetime
 
 import frappe
 
-from .. import compat
+from .. import compat, kpi
 from ..args import as_bool, as_date, as_float, as_int, as_str, resolve_account, resolve_company, resolve_cost_center
 from ..errors import ToolError
 from ..result import ToolResult
@@ -470,6 +470,8 @@ def create_asset(args: dict) -> ToolResult:
 			"was created."
 		)
 
+	capex = _capex_argument(args, purchase_amount)
+
 	item, item_created = _resolve_item(item_code, asset_category, args)
 
 	doc = frappe.new_doc("Asset")
@@ -495,6 +497,11 @@ def create_asset(args: dict) -> ToolResult:
 	location = as_str(args, "location")
 	if location and compat.has_field("Asset", "location"):
 		doc.location = location
+	# v0.19.5. The maintenance/growth split, onto whichever of the four columns
+	# this site's migrate has actually created.
+	for fieldname, value in (capex.get("write") or {}).items():
+		if compat.has_field("Asset", fieldname):
+			doc.set(fieldname, value)
 	doc.insert()
 
 	profile = _insert_profile(
@@ -542,6 +549,14 @@ def create_asset(args: dict) -> ToolResult:
 		"per_period_amount": schedule[0]["amount"] if schedule else None,
 		"final_period_ends": schedule[-1]["period_end"] if schedule else None,
 		"cost_center_allocation": allocation,
+		# v0.19.5. Echoed rather than left to be read back off the Asset, because
+		# the split is what a Sustainable CF/Acre figure is computed from and the
+		# caller that just made the classification is the one best placed to notice
+		# it landed wrong.
+		"capex_type": capex.get("capex_type"),
+		"maintenance_portion": capex.get("maintenance_portion"),
+		"growth_portion": capex.get("growth_portion"),
+		"capex_justification": capex.get("capex_justification"),
 		"linked_note": note.get("name") or None,
 		"note_tenor_months": note.get("tenor_months") or None,
 		"erpnext_depreciation_disabled": True,
@@ -564,6 +579,90 @@ def create_asset(args: dict) -> ToolResult:
 		f"{useful_life_months} months across {_allocation_text(allocation)}",
 		docstatus_delta="none → 0 (draft)",
 	)
+
+
+def _capex_argument(args: dict, purchase_amount: float) -> dict:
+	"""The maintenance/growth classification, refused now rather than absent later.
+
+	v0.19.5, AND IT IS A GATE RATHER THAN A DEFAULT, which is the whole decision.
+	The obvious kindness would be to assume Maintenance when nobody says — most
+	farm purchases are — and it is the wrong kindness in the one direction that
+	matters. Sustainable CF/Acre subtracts maintenance capex; an unclassified
+	purchase silently read as maintenance makes the number LOWER, which is safe,
+	but an operation that never has to answer the question stops distinguishing
+	the two at all, and then the growth spending disappears into the maintenance
+	line and the replacement budget is built on it. The question is cheap at the
+	moment of purchase — the person raising it knows why they are buying the thing
+	— and unanswerable eighteen months later from an invoice.
+
+	IT ONLY BITES ONCE THE COLUMN EXISTS. The four fields arrive on the `bench
+	migrate` that installs v0.19.5, and a tool that refused every asset for want of
+	a field the site does not have yet would take asset creation down for the
+	length of an upgrade. `kpi.capex_installed()` is that check.
+
+	The JUSTIFICATION is required for Growth and Mixed and not for Maintenance,
+	and the asymmetry is on purpose: classifying a purchase as growth takes it out
+	of the maintenance figure and RAISES sustainable cash flow. That is the one
+	direction in which a misclassification flatters the operation, so it is the one
+	that has to carry a sentence.
+	"""
+	if not kpi.capex_installed():
+		return {"write": {}, "installed": False, "capex_type": None}
+
+	raw = as_str(args, "capex_type")
+	if not raw:
+		raise ToolError(
+			"capex_type is required: one of "
+			+ ", ".join(kpi.CAPEX_TYPES)
+			+ ". MAINTENANCE replaces productive capacity that wore out (the failed "
+			"irrigation pump, the worn-out tractor, a replant in kind); GROWTH adds capacity "
+			"that was never there (a new block, a new zone, a second sprayer); MIXED is split "
+			"across maintenance_portion and growth_portion, which must sum to purchase_amount. "
+			"There is no default, and that is deliberate — Sustainable CF/Acre subtracts "
+			"maintenance capex, so an unclassified purchase quietly read as maintenance would "
+			"let growth spending disappear into the line the replacement budget is built on. "
+			"The question is cheap now, while somebody knows why this is being bought, and "
+			"unanswerable in eighteen months from an invoice. Nothing was created."
+		)
+
+	capex_type = next((option for option in kpi.CAPEX_TYPES if option.lower() == raw.lower()), "")
+	if not capex_type:
+		raise ToolError(
+			f"capex_type must be one of: {', '.join(kpi.CAPEX_TYPES)}. Got {raw!r}. Nothing was created."
+		)
+
+	split = kpi.split_for(
+		capex_type,
+		purchase_amount,
+		args.get("maintenance_portion"),
+		args.get("growth_portion"),
+	)
+	if split["error"]:
+		raise ToolError(f"{split['error']} Nothing was created.")
+
+	justification = as_str(args, "capex_justification")
+	if capex_type in (kpi.CAPEX_GROWTH, kpi.CAPEX_MIXED) and not justification:
+		raise ToolError(
+			f"capex_justification is required for a {capex_type} purchase: WHAT CAPACITY DOES "
+			"THIS ADD? Classifying spend as growth takes it out of the maintenance figure and "
+			"raises sustainable cash flow per acre — the one direction in which a "
+			"misclassification flatters the operation, which is why it is the one that has to "
+			"carry a sentence. Nothing was created."
+		)
+
+	return {
+		"installed": True,
+		"capex_type": capex_type,
+		"maintenance_portion": split["maintenance"],
+		"growth_portion": split["growth"],
+		"capex_justification": justification or None,
+		"write": {
+			kpi.CAPEX_TYPE_FIELD: capex_type,
+			kpi.MAINTENANCE_PORTION_FIELD: split["maintenance"],
+			kpi.GROWTH_PORTION_FIELD: split["growth"],
+			kpi.CAPEX_JUSTIFICATION_FIELD: justification,
+		},
+	}
 
 
 def _validated_method(method: str) -> str:

@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **229 tools** — 102 read-only, 127 mutating.
+- **235 tools** — 104 read-only, 131 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -275,7 +275,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 229 tools
+## The 235 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -290,7 +290,7 @@ mutating tool ships OFF — so a write tool you cannot see is one nobody has tic
 yet. Tick it in **ERPNext MCP Settings**; the refusal message names the exact
 switch if you call the tool anyway.
 
-### Read-only — 95, all ON by default, each individually switchable
+### Read-only — 104, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
 
@@ -1398,6 +1398,68 @@ kilometres, so a computed value fills a blank and never corrects an answer.
 
 
 ---
+
+**Sustainable CF/Acre** — the v0.19.5 surface, and the first tools in this run
+that no regulator asked for.
+
+$$\text{Sustainable CF/Acre} = \frac{\text{Normalized OCF} - \text{Maintenance Capex}}{\text{Productive Acres}}$$
+
+**Headline operating cash flow lies in two directions at once.** It is *flattered*
+by money that came in and will not come in again — an insurance recovery, a
+settlement, a gain on a tractor sale that landed in the operating section — and it
+is flattered *again* by maintenance that was not done. A farm running its
+irrigation to failure to make a year look good is destroying the thing the year
+was earned with, and the headline number goes **up** while it happens.
+
+**The output is itemized, and that is the release.** A single number here is
+worthless, because the number's whole claim is that it has been adjusted — and an
+adjusted number nobody can inspect is indistinguishable from an arranged one.
+Every buyer, lender and auditor who reads it will test it one add-back at a time,
+so `get_sustainable_cf_per_acre` returns each approved adjustment with its
+justification and the name that signed it, each maintenance-capex asset with its
+purchase date and portion, and each productive block with the days it was in
+service. The figure is the **last** key in the payload, not the only one.
+
+**AI proposes, human approves**, and they are two tools with two switches.
+Finding a non-recurring item scattered through a ledger nobody reads line by line
+is worth a great deal and is something a model is good at; deciding that a
+hailstorm in a region that hails every third year is non-recurring is a judgement
+somebody defends across a table. `create_normalization_adjustment` makes a
+**Draft** and cannot be argued into making anything else.
+
+**Maintenance capex is actual spend, never a percentage of revenue.** The common
+shortcut destroys the only interesting signal — an operation that spent nothing on
+replacement did not have a cheap year, it borrowed the year from the orchard — so
+`Asset` gains `capex_type` (Maintenance / Growth / Mixed) and `create_asset`
+requires it, at the moment the person raising the purchase knows why they are
+buying the thing. Assets with no classification are **excluded and counted**, in
+neither direction.
+
+**The denominator is what is productive, not what is owned.** `Field` gains
+`productive_from_date`, `productive_through_date` and `pre_yield_end_date`. Fallow
+ground and pre-yield plantings are out and counted separately — pre-yield acres
+are next year's denominator — and a block that came into bearing in February is
+weighted for the part of the period it was actually earning. A block with **no**
+productive-from date is excluded and named, never assumed: assuming it puts acres
+in the denominator that may be a three-year-old planting, which makes the figure
+*look* conservative while turning a data gap into a number somebody acts on.
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_normalization_adjustment` | Proposes one add-back or subtraction with the sentence saying why it will not recur. `amount` is always positive; the sign lives in `direction`. | Make it count. It creates a **Draft**, always. Nor accept a justification under forty characters — the floor is not a quality bar, it is a floor under "one-time". |
+| `approve_normalization_adjustment` | The human half: status to Approved, signature attached, `approved_on` **written rather than taken as input**. | Approve unsigned — there is no such path. Nor approve a second adjustment for the same company, period and category: two approved rows are two answers to one question. A correction **supersedes**. |
+| `reject_normalization_adjustment` | Refuses one on the record with the reason attached, and the rejection is **kept** — a refusal with a reason teaches the next proposal. | Reject something already approved. It has been counted, and rewriting a decision is not recording one. |
+| `backfill_asset_capex_type` | Classifies unclassified Assets in bulk on one sentence of heuristic: everything bought before the operation started tracking is generally maintenance. **Dry-run by default**, idempotent. | Overwrite a classification somebody made, or take `Mixed` as a bulk default — a split is a judgement about one invoice, and applying one to a hundred assets would be inventing a hundred splits. |
+| `list_normalization_adjustments` | The register, and `counted_in_the_kpi` says which rows actually move the number. `awaiting_a_decision` is the one worth reading at quarter end. | Hide what did not count. Drafts, rejections and superseded rows are all there. |
+| `get_sustainable_cf_per_acre` | The figure with every ingredient itemized, plus `computation_warnings` — undated blocks, unclassified assets, a period with no approved adjustments at all. | Return zero where there are no productive acres. It returns **null**: a division nobody performed is not an answer, and a zero would be read as one. |
+
+Raw OCF is computed from `GL Entry` **by the direct method** rather than read off
+ERPNext's Cash Flow report — cash and bank movement per submitted voucher,
+apportioned by the accounts on the other side, with a mixed voucher split
+proportionally. A report's output cannot be traced back to rows, and the whole
+argument here is that it has to be. Full notes:
+**[docs/kpi_sustainable_cf_per_acre.md](docs/kpi_sustainable_cf_per_acre.md)**.
+
 
 ## Compliance packets
 

@@ -47,6 +47,7 @@ import unittest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCTYPE_DIR = os.path.join(REPO_ROOT, "erpnext_mcp", "erpnext_mcp", "doctype")
+REPORT_DIR = os.path.join(REPO_ROOT, "erpnext_mcp", "erpnext_mcp", "report")
 
 #: A real directory standing in for the site folder, so `frappe.get_site_path`
 #: answers with somewhere a tool can genuinely write. The report generators take
@@ -788,6 +789,11 @@ ERPNEXT_SCHEMA = {
 		"number_of_groups",
 		"is_public",
 		"module",
+		# v0.19.5. A chart whose source is a REPORT rather than a doctype needs
+		# both of these, and the double did not have them because nothing before
+		# the KPI chart drew anything it could not get by counting rows.
+		"report_name",
+		"use_report_chart",
 	],
 	"Dashboard Chart Link": ["name", "chart"],
 	"Number Card": [
@@ -990,7 +996,14 @@ APP_DOCTYPES = {
 	# ── v0.19.4: what the conditions were, and the numbers they are read against ─
 	"Weather Settings": "weather_settings",
 	"Weather Company Override": "weather_company_override",
+	# ── v0.19.5: the judgement behind a normalized cash flow figure ──────────
+	"Normalization Adjustment": "normalization_adjustment",
 }
+
+#: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
+#: are built from each one's own JSON at `Store.reset` — see `_seed_app_reports`
+#: for why a migrated site already has them and the double had to catch up.
+APP_REPORTS = ("sustainable_cf_per_acre_by_quarter",)
 
 
 def _load_app_doctype(folder: str) -> dict:
@@ -2163,6 +2176,7 @@ class Store:
 		self.committed = 0
 		self.rolled_back = 0
 		self._seed_doctypes()
+		self._seed_app_reports()
 		self._seed_roles()
 		# Rows written since the last commit, so a rollback can discard exactly
 		# those — which is what the audit-survives-rollback tests need to see.
@@ -2178,6 +2192,45 @@ class Store:
 		# the state to restore is the one the transaction opened with, not the one
 		# the second write found.
 		self.before_images: dict[tuple[str, str], dict | None] = {}
+
+	def _seed_app_reports(self):
+		"""A Report row per standard report this app ships. v0.19.5.
+
+		A REAL BENCH ALREADY HAS THESE by the time `after_migrate` runs: Frappe
+		imports an app's `<module>/report/<name>/<name>.json` during the sync phase
+		of `bench migrate`, which is before any `after_migrate` hook fires. The
+		double did not, and the first thing that noticed was the KPI dashboard chart
+		— whose source is a Report — printing "could not build" on every clean
+		migrate in the suite. That was the fixture being wrong about a migrated
+		site, not the installer being noisy, and the two tests asserting a clean
+		migrate says nothing at all were right to fail.
+
+		Read off the shipped JSON for the same reason `_seed_doctypes` is: a
+		hardcoded row here would be a second declaration of the report, and the two
+		would disagree the first time somebody renamed one.
+		"""
+		rows = {}
+		for folder in APP_REPORTS:
+			path = os.path.join(REPORT_DIR, folder, f"{folder}.json")
+			try:
+				with open(path) as handle:
+					payload = json.load(handle)
+			except OSError:  # pragma: no cover - a checkout missing the file
+				continue
+			rows[payload["name"]] = {
+				"name": payload["name"],
+				"report_name": payload.get("report_name") or payload["name"],
+				"ref_doctype": payload.get("ref_doctype") or "",
+				"report_type": payload.get("report_type") or "Script Report",
+				"module": payload.get("module") or "ERPNext MCP",
+				"is_standard": payload.get("is_standard") or "Yes",
+				"disabled": int(payload.get("disabled") or 0),
+				"prepared_report": int(payload.get("prepared_report") or 0),
+				"add_total_row": int(payload.get("add_total_row") or 0),
+				"json": "",
+				"query": "",
+			}
+		self.tables.setdefault("Report", {}).update(rows)
 
 	def _seed_roles(self):
 		"""The stock roles a Frappe site ships with. v0.17.0.

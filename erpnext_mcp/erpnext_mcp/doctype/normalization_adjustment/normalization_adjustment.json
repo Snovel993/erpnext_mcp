@@ -1,0 +1,252 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-03 22:00:00.000000",
+ "description": "One add-back to or subtraction from operating cash flow, for one company and one period, with the sentence that says why it will not recur and the signature of the person who accepted that sentence. THE JUSTIFICATION IS THE RECORD. A normalization is a judgement — somebody has decided that money which really did move through the operating section should not be read as operating earning power — and every buyer, lender and auditor who ever reads a Sustainable CF/Acre figure will test that judgement one adjustment at a time. An amount with no defence is worse than no adjustment at all, because it makes the whole normalized figure look arranged. ONLY AN APPROVED ROW COUNTS. A draft is somebody's proposal, including an AI's, and the KPI reads past it; approval is a compliance act with a name and a timestamp behind it. Corrections SUPERSEDE rather than duplicate, because two approved adjustments for the same period and category are two answers to one question and the one a reader finds will be whichever sorted first.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "category",
+  "identity_col",
+  "fiscal_year",
+  "period_start",
+  "period_end",
+  "amount_section",
+  "amount",
+  "direction",
+  "amount_col",
+  "status",
+  "justification_section",
+  "justification",
+  "supporting_document",
+  "approval_section",
+  "approved_by",
+  "approved_on",
+  "approval_col",
+  "approver_signature",
+  "rejection_reason",
+  "supersession_section",
+  "superseded_by"
+ ],
+ "fields": [
+  {
+   "default": "NADJ-.YYYY.-.####",
+   "description": "The series a Normalization Adjustment is named from, expanded by the controller so a docname is the same shape on a bench and in the standalone suite — NADJ-2026-0001. The year is the year the PERIOD starts in, not the year somebody keyed the adjustment: a Q4 adjustment written up in January belongs to the year it is about, and a series keyed off today() would file it under the following year for ever.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "NADJ-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The entity whose operating cash flow this adjusts. REQUIRED, and it is what scopes the record — a User Permission on Company reaches it, and the KPI never sums across entities. OM Family Office, Highland LLC and Constancy Farms have different lenders asking different questions, and an adjustment that leaked between them would flatter one set of books with another's insurance claim.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What kind of non-recurring item this is. THE CATEGORY IS HALF THE UNIQUENESS RULE: one approved adjustment per company per period per category, because an operation can legitimately have both an insurance recovery and a litigation settlement in one quarter, and cannot legitimately have two different answers about the insurance.",
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "\nInsurance-Proceeds\nLitigation-Settlement\nWeather-Event-Loss\nAsset-Sale-Gain\nWorking-Capital-Timing\nDiscontinued-Operation\nRestructuring\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The year the period falls in. Required because a normalization is defended inside a closed year — an adjustment nobody can tie to a filed set of books is an adjustment nobody can check against one.",
+   "fieldname": "fiscal_year",
+   "fieldtype": "Link",
+   "label": "Fiscal Year",
+   "options": "Fiscal Year",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "First day the adjustment covers, inclusive. Usually a quarter or month start. The KPI reads adjustments whose period falls INSIDE the window being computed, so a quarterly adjustment is picked up by the quarter and by the year, and never by two quarters at once.",
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period Start",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Last day the adjustment covers, inclusive. Must be on or after period_start and must fall inside the fiscal year named above — a period straddling two years cannot be normalized against either year's cash flow statement.",
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period End",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "amount_section",
+   "fieldtype": "Section Break",
+   "label": "The Adjustment"
+  },
+  {
+   "description": "ALWAYS POSITIVE. The sign lives in `direction`, and keeping the two apart is deliberate: a negative amount with a direction of Subtract is a double negative nobody reads correctly at eleven at night, and it is exactly how a normalization ends up moving the number the wrong way in a lender's pack.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "reqd": 1
+  },
+  {
+   "description": "Which way this moves normalized OCF. Add-back where cash the operation really spent should not be read as recurring (a hailstorm clean-up, a one-off legal bill); Subtract where cash the operation really received should not be read as earning power (an insurance recovery, a gain on selling a tractor that landed in the operating section).",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Direction",
+   "options": "\nAdd-back to OCF\nSubtract from OCF",
+   "reqd": 1
+  },
+  {
+   "fieldname": "amount_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "Draft",
+   "description": "Where this proposal has got to. ONLY `Approved` COUNTS IN THE KPI. Draft and Pending Approval are somebody's suggestion — including an AI's, which is the ordinary case — and Rejected is the record that the suggestion was looked at and refused, which is worth keeping for exactly the reason a rejected insurance claim is worth keeping. Superseded is what a correction leaves behind.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nPending Approval\nApproved\nRejected\nSuperseded",
+   "search_index": 1
+  },
+  {
+   "fieldname": "justification_section",
+   "fieldtype": "Section Break",
+   "label": "Why This Is Not Recurring"
+  },
+  {
+   "description": "The defence, in the words of the person making it. REQUIRED, AND LONG ENOUGH TO BE AN ARGUMENT — forty characters is not a quality bar, it is a floor under 'one-time' and 'per Tim', which are the two things that get typed when the field is optional. What it has to answer is the question every buyer asks: why will this not happen again? A hailstorm in a region that hails every third year is not non-recurring, and the sentence is where that gets settled before the number reaches a lender.",
+   "fieldname": "justification",
+   "fieldtype": "Small Text",
+   "label": "Justification",
+   "reqd": 1
+  },
+  {
+   "description": "The paper behind the sentence: the insurance claim determination, the settlement agreement, the board minute authorising the restructuring. Optional because it does not always exist on the day, and the single most persuasive thing in the record when it does.",
+   "fieldname": "supporting_document",
+   "fieldtype": "Attach",
+   "label": "Supporting Document"
+  },
+  {
+   "fieldname": "approval_section",
+   "fieldtype": "Section Break",
+   "label": "Approval"
+  },
+  {
+   "description": "The person who accepted the justification. Written when the status goes to Approved and never taken as input on a draft — an approver named in advance is a name somebody typed, not a decision somebody made.",
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "When it was approved, written at approval rather than typed. An approval date somebody can set is an approval date somebody can set to before the quarter closed, which is exactly the thing the timestamp exists to prove.",
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approval_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The approver's signature. REQUIRED FOR `Approved` — the whole argument for this doctype is that a normalization is a judgement with somebody's name against it, and a status set with no signature is the status without the name. Uploaded through the staging pipeline and referenced here by File docname or file URL.",
+   "fieldname": "approver_signature",
+   "fieldtype": "Attach",
+   "label": "Approver Signature"
+  },
+  {
+   "description": "Why it was refused. REQUIRED FOR `Rejected`, and it is the more useful half of the register: a rejected normalization with a reason teaches the next proposal, and one without reads as an argument somebody lost rather than a claim that failed.",
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason"
+  },
+  {
+   "fieldname": "supersession_section",
+   "fieldtype": "Section Break",
+   "label": "Supersession"
+  },
+  {
+   "description": "The corrected adjustment that replaces this one. A CORRECTION SUPERSEDES RATHER THAN DUPLICATES: two approved adjustments for one company, period and category are two answers to one question, and the one a reader finds will be whichever sorted first. Pointing the old row here takes it out of the KPI and leaves the trail of what was believed before.",
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "Normalization Adjustment",
+   "search_index": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 22:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Normalization Adjustment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "company,period_start,period_end,category,status",
+ "sort_field": "period_start",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

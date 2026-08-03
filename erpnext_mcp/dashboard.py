@@ -61,7 +61,7 @@ import json
 
 import frappe
 
-from . import compat
+from . import compat, kpi
 from .alerts import ALERT_DOCTYPE, SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
 
 DASHBOARD = "Dashboard"
@@ -798,6 +798,111 @@ def available() -> bool:
 		return False
 
 
+#: v0.19.5. The KPI chart, and the only chart in this file whose source is a
+#: REPORT rather than a count over a doctype.
+#:
+#: IT HAS TO BE. Sustainable CF/Acre is not a number of rows and is not a sum of
+#: a column: it is (normalized operating cash flow - maintenance capex) divided by
+#: acres weighted by how many days of the quarter each block was productive. A
+#: `Group By` or `Count` chart cannot express any of the three terms, let alone
+#: the ratio. `report/sustainable_cf_per_acre_by_quarter` runs the same
+#: `services.sustainable_cf_per_acre.compute` every tool and every packet runs,
+#: which is what stops the chart and the tool ever disagreeing about the figure.
+#:
+#: PER COMPANY IS NOT A CHART PROPERTY HERE. The report takes `company` as a
+#: filter and the chart carries none, so it opens on the site's company and an
+#: operator picks the entity — which is the honest shape for a multi-entity
+#: family office where OM Family Office, Highland LLC and Constancy Farms have
+#: different lenders asking different questions. A chart per company, installed
+#: at migrate time, would be a chart per company as the entities stood on the day
+#: somebody upgraded.
+KPI_REPORT_NAME = "Sustainable CF Per Acre by Quarter"
+KPI_CHART_NAME = "Sustainable CF/Acre by Quarter"
+
+KPI_CHARTS = (
+	{
+		"chart_name": KPI_CHART_NAME,
+		"chart_type": "Report",
+		"report_name": KPI_REPORT_NAME,
+		"use_report_chart": 0,
+		"type": "Line",
+		"is_public": 1,
+		"filters_json": "{}",
+		"why": (
+			"The trend is the whole point and a single quarter is not one. A farm that "
+			"deferred its maintenance shows a good quarter and a falling line, and only the "
+			"second of those is the truth about the operation."
+		),
+	},
+)
+
+
+def kpi_chart_available() -> bool:
+	"""Whether this site can hold the KPI chart: the chart doctype and the report."""
+	try:
+		return bool(compat.doctype_exists(CHART) and compat.doctype_exists("Report"))
+	except Exception:
+		return False
+
+
+def install_kpi_charts() -> dict:
+	"""Install the Sustainable CF/Acre chart. Idempotent, and NEVER raises.
+
+	Same contract as `install_command_center`: a chart that already exists is left
+	exactly as somebody has since edited it, and only a genuinely missing one is
+	created. See the module docstring on why these are installers rather than
+	Frappe `fixtures` — a fixture is imported by `bench migrate` with no ability
+	to skip what a site already has.
+
+	THE REPORT IS CHECKED FOR BY NAME rather than assumed. It ships as a standard
+	Script Report in this app's own module, so `bench migrate` creates it — but it
+	is created by the SAME migrate that runs this, and on the first pass the row
+	may not be there yet. A chart pointing at a report that does not exist renders
+	an error where a missing chart renders nothing, so the missing case is
+	reported and the next migrate builds it.
+	"""
+	report = {
+		"chart": KPI_CHART_NAME,
+		"report": KPI_REPORT_NAME,
+		"created_charts": [],
+		"existing_charts": [],
+		"failed": [],
+		"available": kpi_chart_available(),
+	}
+	if not report["available"]:
+		report["note"] = (
+			"this site does not have both the Dashboard Chart and Report doctypes, so there is "
+			"nothing to build the KPI chart out of. Every figure behind it is still readable "
+			"through get_sustainable_cf_per_acre, which returns more than the chart draws."
+		)
+		return report
+	if not compat.doctype_exists(kpi.DOCTYPE):
+		report["available"] = False
+		report["note"] = (
+			f"this site has no {kpi.DOCTYPE} DocType yet — it ships with erpnext_mcp and arrives "
+			"with `bench migrate`. The chart is built on the migrate that creates it."
+		)
+		return report
+	if not frappe.db.exists("Report", KPI_REPORT_NAME):
+		report["failed"].append(
+			{
+				"name": KPI_CHART_NAME,
+				"reason": (
+					f"the {KPI_REPORT_NAME!r} Report is not on this site yet. It ships as a "
+					"standard Script Report in this app's module and is created by the same "
+					"`bench migrate` that runs this, so the next migrate builds the chart. "
+					"Nothing was created: a chart pointing at a report that does not exist "
+					"renders an error, where a missing chart renders nothing."
+				),
+			}
+		)
+		return report
+
+	for spec in KPI_CHARTS:
+		_build(CHART, "chart_name", spec, report, "charts")
+	return report
+
+
 def install_command_center() -> dict:
 	"""Build or repair the dashboard. Idempotent, and NEVER raises.
 
@@ -851,7 +956,11 @@ def _build(doctype: str, key_field: str, spec: dict, report: dict, bucket: str) 
 		if frappe.db.exists(doctype, name):
 			report[f"existing_{kind}"].append(name)
 			return
-		if not compat.doctype_exists(spec.get("document_type") or ""):
+		# v0.19.5: a chart whose source is a REPORT names no `document_type`, and
+		# there is nothing to check it against. The report's own existence is
+		# checked by `install_kpi_charts` before it gets here, because a missing
+		# report and a missing doctype are different sentences.
+		if spec.get("document_type") and not compat.doctype_exists(spec["document_type"]):
 			report["failed"].append(
 				{
 					"name": name,

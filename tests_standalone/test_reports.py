@@ -6,17 +6,29 @@ from .harness import STORE
 
 
 class ListReports(V2TestCase):
+	"""Five fixture reports plus the one this app ships.
+
+	v0.19.5 added `Sustainable CF Per Acre by Quarter`, a standard Script Report
+	in this app's own module, and the fixture seeds it from its shipped JSON the
+	way a real `bench migrate` does. So every count here is one higher than it was
+	and the app's own report is a legitimate member of the list — which is the
+	point: `list_reports` is how somebody finds it.
+	"""
+
 	def test_lists_every_report_with_its_type(self):
 		data = self.tool_data("list_reports")
-		self.assertEqual(data["count"], 5)
+		self.assertEqual(data["count"], 6)
 		by_name = {row["name"]: row for row in data["reports"]}
 		self.assertEqual(by_name["Cash Movement"]["report_type"], "Query Report")
 		self.assertEqual(by_name["Open Purchase Orders"]["report_type"], "Report Builder")
+		self.assertEqual(
+			by_name["Sustainable CF Per Acre by Quarter"]["report_type"], "Script Report"
+		)
 
 	def test_counts_by_report_type(self):
 		data = self.tool_data("list_reports")
 		self.assertEqual(data["by_report_type"]["Query Report"], 2)
-		self.assertEqual(data["by_report_type"]["Script Report"], 1)
+		self.assertEqual(data["by_report_type"]["Script Report"], 2)
 
 	def test_filters_by_module(self):
 		data = self.tool_data("list_reports", {"module": "Buying"})
@@ -25,7 +37,10 @@ class ListReports(V2TestCase):
 	def test_filters_by_is_standard_in_words_or_boolean(self):
 		words = self.tool_data("list_reports", {"is_standard": "Yes"})
 		flag = self.tool_data("list_reports", {"is_standard": True})
-		self.assertEqual([row["name"] for row in words["reports"]], ["Accounts Receivable Summary"])
+		self.assertEqual(
+			[row["name"] for row in words["reports"]],
+			["Accounts Receivable Summary", "Sustainable CF Per Acre by Quarter"],
+		)
 		self.assertEqual(words["reports"], flag["reports"])
 
 	def test_a_nonsense_is_standard_is_refused(self):

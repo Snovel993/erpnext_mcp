@@ -3,6 +3,106 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.19.5 — 2026-08-03
+
+**What the year actually earned per acre.** The first release in the v0.19.x run
+that no regulator asked for. Sustainable CF/Acre is (normalized operating cash
+flow − maintenance capex) ÷ productive acres, and it exists because headline OCF
+lies in two directions at once: it is flattered by money that will not come in
+again, and flattered **again** by maintenance that was not done. Full notes:
+[`RELEASES/v0.19.5.md`](RELEASES/v0.19.5.md).
+
+Suite: 3,835 → **3,895 passing**. Tool surface: 229 → **235** (104 read, 131
+mutating).
+
+### Added
+
+- **`Normalization Adjustment` DocType.** One add-back to or subtraction from
+  operating cash flow, for one company and one period, with the sentence saying
+  why it will not recur and the signature of whoever accepted that sentence. The
+  justification carries a **forty-character floor** — not a quality bar, but a
+  floor under "one-time" and "per Tim", which are what gets typed when a field is
+  merely required and both of which an auditor reads as an admission that nobody
+  thought about it. **Only `Approved` counts**; drafts, rejections and superseded
+  rows are all in the register and none of them moves the number. Deliberately
+  **not submittable**: this workflow has two terminal states that are not the same
+  thing, plus a third a correction produces years later, and `docstatus` cannot
+  hold that. One approved adjustment per company, period and category — a
+  correction **supersedes** rather than duplicates.
+- **Four Custom Fields on ERPNext's `Asset`** — `capex_type`,
+  `maintenance_portion`, `growth_portion`, `capex_justification` — the fifth
+  doctype this app grafts a column onto, and the first target in
+  `compliance_fields.py` that is not about a regulator. Maintenance capex replaces
+  what wore out; growth capex buys capacity that was never there, and an operation
+  that cannot tell them apart funds the second out of the first. **`capex_type` is
+  not `reqd`** — Frappe enforces `reqd` on save rather than retroactively, so it
+  would leave every existing Asset readable and unsaveable. The gate is in
+  `create_asset` instead, and it does not engage until the column exists.
+- **Three declared fields on `Field`** — `productive_from_date`,
+  `productive_through_date`, `pre_yield_end_date`. Declared rather than Custom,
+  because `Field` is this app's own doctype. Nothing already carried these dates:
+  there is no `PlantingSeason` junction in this app, and `planting_year` is not the
+  same fact — a block planted in 2019 may have come into bearing in 2022 or 2023
+  depending on variety and rootstock.
+- **`erpnext_mcp/services/sustainable_cf_per_acre.py`**, computing raw operating
+  cash flow from `GL Entry` by the **direct method** rather than reading ERPNext's
+  Cash Flow report. Cash and bank movement per submitted voucher, apportioned to
+  operating / investing / financing by the accounts on the other side, with a
+  mixed voucher split proportionally. A report's output cannot be traced back to
+  rows, and the whole argument of this release is that the figure has to be
+  inspectable.
+- **Six tools** — `create_normalization_adjustment` (creates a **Draft**, always),
+  `approve_normalization_adjustment` (signature required, timestamp written rather
+  than taken), `reject_normalization_adjustment` (the rejection is kept),
+  `backfill_asset_capex_type` (dry-run by default, never overwrites, idempotent),
+  `list_normalization_adjustments` and `get_sustainable_cf_per_acre`. The role gate
+  is **Accounts Manager / Farm Manager / System Manager** — deliberately not the HR
+  list, because an HR User who can file a training record has no business moving
+  the number a lender reads.
+- **`Sustainable CF Per Acre by Quarter`**, a standard Script Report, and the
+  `Sustainable CF/Acre by Quarter` Dashboard Chart over it, installed idempotently
+  on every migrate. The components travel with the figure in columns rather than in
+  a tooltip: the interesting question about a quarter where the number fell is
+  always *which of the three moved*.
+- **`docs/kpi_sustainable_cf_per_acre.md`** — the formula, where each input comes
+  from, the approval workflow, and the audit-defensibility argument for itemized
+  output.
+
+### Changed
+
+- **`create_asset` now requires `capex_type`** once the column exists, with no
+  default. An unclassified purchase quietly read as maintenance would let growth
+  spending disappear into the line the replacement budget is built on. Mixed must
+  split to the invoice within a cent; Growth and Mixed additionally require a
+  `capex_justification`, because classifying spend as growth *raises* sustainable
+  cash flow and that is the one direction a misclassification flatters the
+  operation.
+- **`create_field` and `update_field`** take and report the three productive
+  dates.
+- **`before_uninstall`** names `Normalization Adjustment` among the records that
+  go with the app. Losing it does not lose a number — it loses the *defence* of
+  every Sustainable CF/Acre figure ever quoted from the site.
+
+### Notes
+
+- **The KPI output is itemized and that is not presentation.** Every buyer, lender
+  and auditor who reads a normalized figure tests it one add-back at a time, so
+  `get_sustainable_cf_per_acre` returns each adjustment with its justification and
+  signature, each maintenance-capex asset with its portion, and each productive
+  block with its days in service. The figure is the last key rather than the only
+  one.
+- **A block with no `productive_from_date` is excluded and named.** Assuming it is
+  productive puts acres in the denominator that may be a three-year-old planting —
+  which makes the figure *look* conservative while turning a data gap into a number
+  somebody acts on.
+- **Maintenance capex is actual spend, never a percentage of revenue.** The
+  shortcut destroys the only interesting signal: an operation that spent nothing on
+  replacement borrowed the year from the orchard, and a percentage formula reports
+  a well-maintained farm every time.
+- **After migrating**: run `backfill_asset_capex_type` with a cutoff date, then
+  fill in `productive_from_date` on the blocks. `computation_warnings` is the
+  worklist for the second.
+
 ## 0.19.4 — 2026-08-03
 
 **What the shift was actually like.** v0.19.3 shipped `Farm Shift Weather Reading`

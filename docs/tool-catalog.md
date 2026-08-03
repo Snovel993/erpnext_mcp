@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 229 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 235 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 102 read tools are **on** by default and can be switched off individually. A
+All 104 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -6555,6 +6555,141 @@ Oregon produces — leaving a site that behaves normally and never says anything
 wrong. The Desk form is the write surface, where a person types the number and
 Frappe's version trail records who did.
 
+## v0.19.5 — what the year actually earned per acre
+
+**The first release in this run that no regulator asked for.** Everything from
+v0.19.0 onward answered somebody with a citation; this answers a lender, a buyer
+and the person deciding whether a good year was earned or borrowed.
+
+$$\text{Sustainable CF/Acre} = \frac{\text{Normalized OCF} - \text{Maintenance Capex}}{\text{Productive Acres}}$$
+
+**Headline operating cash flow lies in two directions at once.** It is *flattered*
+by money that came in and will not come in again — an insurance recovery, a
+settlement, a gain on a tractor sale that landed in the operating section — and it
+is flattered *again* by maintenance that was not done. A farm running its
+irrigation to failure to make a year look good is destroying the thing the year
+was earned with, and the headline number goes **up** while it happens.
+
+**The output is itemized and that is not a convenience.** A single number here is
+worthless, because the number's whole claim is that it has been adjusted, and an
+adjusted number nobody can inspect is indistinguishable from an arranged one.
+`get_sustainable_cf_per_acre` returns every approved adjustment with its
+justification and the name behind it, every maintenance-capex asset with its
+purchase date and portion, and every productive block with the days it was in
+service. The figure is the last key in the payload rather than the only one.
+
+**AI proposes, human approves**, and the two are separate tools with separate
+switches. Finding a non-recurring item scattered through a ledger nobody reads
+line by line is worth a great deal and is something a model is good at; deciding
+that a hailstorm in a region that hails every third year is non-recurring is a
+judgement somebody defends across a table.
+
+**Maintenance capex is actual spend, never a percentage of revenue.** The common
+shortcut destroys the only interesting signal: an operation that spent nothing on
+replacement did not have a cheap year, it borrowed the year from the orchard, and
+a formula substituting 3 % of revenue reports a well-maintained farm every time —
+including in the years it matters. Assets with no `capex_type` are **excluded and
+counted**, in neither direction.
+
+**The denominator is what is productive, not what is owned.** Fallow ground and
+pre-yield plantings are out and counted separately, and a block that came into
+bearing in February is weighted for the part of the period it was actually
+earning — inclusive days at both ends, because `period_end` is an inclusive date
+everywhere else in this app.
+
+**Raw OCF is computed from GL Entry by the direct method**, not read off
+ERPNext's Cash Flow report. Cash and bank movement per submitted voucher,
+apportioned to operating / investing / financing by the accounts on the other
+side, with a mixed voucher split proportionally rather than assigned to whichever
+line is biggest. A report's output cannot be traced back to rows, and the whole
+argument of this KPI is that it has to be.
+
+## 218. `create_normalization_adjustment`
+
+**MUTATING (default OFF).** `company`, `fiscal_year`, `period_start`,
+`period_end`, `amount`, `direction`, `category`, `justification`, optional
+`supporting_document_file_token`. **Creates a `Draft`, always** — a draft does not
+count towards the KPI and nothing in this tool can make it count.
+
+`amount` is **always positive**; the sign lives in `direction`. A negative amount
+beside a `Subtract from OCF` is a double negative, and a double negative is how an
+adjustment ends up moving the number the wrong way in a pack somebody is borrowing
+against.
+
+`justification` has a **forty-character floor**. Not a quality bar — no character
+count is one — but a floor under "one-time" and "per Tim", which are what gets
+written when the field is merely required and which an auditor reads as an
+admission that nobody thought about it.
+
+## 219. `approve_normalization_adjustment`
+
+**MUTATING (default OFF).** `name`, `approver_signature_file_token`, optional
+`approver_employee`. Status to `Approved`, signature attached, `approved_on`
+**written rather than taken as input** — an approval date somebody can set is one
+they can set to before the quarter closed.
+
+**There is no unsigned path through this tool.** The whole argument for the record
+is that a normalization is a judgement with somebody's name against it. Refused
+where another approved adjustment already covers the same company, period and
+category: two approved adjustments are two answers to one question, and the one a
+reader finds will be whichever sorted first. A correction **supersedes**.
+
+`approver_employee` defaults to the Employee linked to the acting user, and is
+empty where the app runs as a service principal — which is the ordinary
+configuration and is not a failure. The signature is the identity that matters.
+
+## 220. `reject_normalization_adjustment`
+
+**MUTATING (default OFF).** `name`, `rejection_reason`. The rejection is **kept**
+rather than deleted, for the same reason a rejected insurance claim is kept: a
+refusal with a reason teaches the next proposal, and a register with only its
+successes in it says nothing about how hard the successes were to get.
+
+An already-approved adjustment **cannot** be rejected. It has been counted, and
+rewriting a decision is not the same as recording one — supersede it instead.
+
+## 221. `backfill_asset_capex_type`
+
+**MUTATING (default OFF).** `default_capex_type` (`Maintenance` by default),
+optional `cutoff_purchase_date`, `company`, `dry_run` (**default TRUE**).
+Classifies Assets that have **no** `capex_type`, never one somebody made, so a
+second run finds nothing to do.
+
+The heuristic is one sentence: *everything bought before the operation started
+tracking is generally maintenance, because it is the existing productive plant
+carrying on.* `Mixed` is refused as a bulk default — a split is a judgement about
+one invoice, and applying one to a hundred assets would be inventing a hundred
+splits.
+
+**A starting position, not an answer**, and the result says so. The new block
+planted in year six was growth and will read as maintenance until somebody fixes
+it on the Asset, which *understates* the KPI; a register of nulls *overstates* it,
+because unclassified purchases are excluded entirely.
+
+## 222. `list_normalization_adjustments`
+
+**Read-only.** `company`, `fiscal_year`, `status`, `limit`. The register, scoped
+to the companies the caller may see. `counted_in_the_kpi` is the list that
+matters — only `Approved` rows move the number. `awaiting_a_decision` is the other
+one worth reading at quarter end: a proposal nobody has decided is not a neutral
+state, it is a figure that will change after the pack goes out.
+
+## 223. `get_sustainable_cf_per_acre`
+
+**Read-only.** `company`, `period_start`, `period_end`. Returns `raw_ocf` (with
+its sourcing note and the investing and financing sections beside it),
+`normalization_adjustments` itemized with justifications, `normalized_ocf`,
+`maintenance_capex` itemized per asset with the unclassified count and amount
+called out, `productive_acres` itemized per block with days in service, the
+figure, and `computation_warnings`.
+
+`sustainable_cf_per_acre` is **null, not zero**, where there are no productive
+acres: a division nobody performed is not an answer, and a zero would be read as
+one. **Read `computation_warnings` before quoting the figure** — undated blocks,
+unclassified assets and a period with no approved adjustments at all are each a
+sentence there rather than a silence.
+
+
 ---
 
 # Adding a tool
@@ -6567,7 +6702,7 @@ Everything a tool needs is in two places:
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
-   `shifts`, `heat` or `fieldwork` —
+   `shifts`, `heat`, `kpi` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

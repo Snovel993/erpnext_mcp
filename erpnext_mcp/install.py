@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: MIT
 """Install / migrate / uninstall hooks.
 
-Eight jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
+Nine jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
 the fifth — the Farm Task Dispatch Kanban board — in v0.16.0, the sixth —
 the six mobile roles — in v0.17.0, the seventh — the compliance vocabulary
-and the training curricula — in v0.19.2, and the eighth — the Weather Settings
-defaults — in v0.19.4.
+and the training curricula — in v0.19.2, the eighth — the Weather Settings
+defaults — in v0.19.4, and the ninth — the Sustainable CF/Acre dashboard chart
+— in v0.19.5.
 
 The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
@@ -112,6 +113,7 @@ def after_install() -> None:
 	_dispatch_board()
 	_mobile_roles()
 	_compliance_vocabulary()
+	_kpi_charts()
 	frappe.db.commit()
 
 
@@ -124,6 +126,7 @@ def after_migrate() -> None:
 	_dispatch_board()
 	_mobile_roles()
 	_compliance_vocabulary()
+	_kpi_charts()
 
 
 def _weather_settings() -> None:
@@ -191,6 +194,20 @@ def _command_center() -> None:
 def _dispatch_board() -> None:
 	"""Build or repair the Farm Task Dispatch Kanban board and its workspace."""
 	_report_failures("the Farm Task Dispatch board", dashboard.install_dispatch_board)
+
+
+def _kpi_charts() -> None:
+	"""Build the Sustainable CF/Acre chart. v0.19.5, and the ninth job.
+
+	Reported through the same printer as the two dashboard builders, and it has
+	one failure mode worth printing: the chart's source is a standard Script
+	Report created by the SAME `bench migrate` that runs this, so a first pass may
+	find the Report row not yet written. That lands in `failed` with the sentence
+	saying the next migrate builds it, which is a far better outcome than a chart
+	pointing at a report that does not exist — a missing chart renders nothing, and
+	a broken one renders an error.
+	"""
+	_report_failures("the Sustainable CF/Acre chart", dashboard.install_kpi_charts)
 
 
 def _mobile_roles() -> None:
@@ -416,6 +433,15 @@ _PRECIOUS_DOCTYPES = (
 		"taken, whether anybody showed signs and what was done about it, and the "
 		"supervisor's signature under all of it. The record a serious-injury "
 		"investigation is read from, and it exists nowhere else",
+	),
+	(
+		"Normalization Adjustment",
+		"the normalization register — every add-back and subtraction on operating "
+		"cash flow with the sentence saying why it will not recur and the signature "
+		"of whoever accepted that sentence. Losing it does not lose a number, it "
+		"loses the DEFENCE of every Sustainable CF/Acre figure ever quoted from this "
+		"site, and an adjusted figure nobody can inspect is indistinguishable from "
+		"an arranged one",
 	),
 	(
 		"Training Type",

@@ -252,10 +252,13 @@ class MigrateThreeTimes(V12TestCase):
 		for _ in range(3):
 			install.after_migrate()
 			counts.append(len(custom_fields()))
-		# Five on Employee plus the v0.19.3 Attendance bridge column. Spray Log and
-		# Bucket Log Entry are genuinely absent from the fixture site, so they add
-		# nothing here and are reported as skipped instead.
-		self.assertEqual(counts[0], 6, "the five Employee fields and the Attendance bridge")
+		# Five on Employee, the v0.19.3 Attendance bridge column, and the four
+		# v0.19.5 capex columns on ERPNext's Asset. Spray Log and Bucket Log Entry
+		# are genuinely absent from the fixture site, so they add nothing here and
+		# are reported as skipped instead.
+		self.assertEqual(
+			counts[0], 10, "five Employee fields, the Attendance bridge and four Asset capex columns"
+		)
 		self.assertEqual(counts, [counts[0]] * 3, f"custom fields multiplied across migrations: {counts}")
 
 	def test_three_migrations_leave_no_duplicate_fieldname_on_any_doctype(self):

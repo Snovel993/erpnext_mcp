@@ -156,6 +156,39 @@ from attendance would invent all three on a record an inspector reads.
 | --- | --- | --- | --- | --- | --- |
 | `farm_shift` | Link | no | OAR 437-004-1131; FSMA 21 CFR 112.161(b); ORS 653 wage records | An attendance row says somebody was at work. The shift says what the conditions were, what breaks were called, who supervised and who signed. A heat-illness investigation and a wage claim both start from the day and need the second, and this link is the only way from one to the other. | Payroll reconciliation. A shift-formed day and a hand-keyed day look identical without it, so nobody can tell which rows a re-closed shift already wrote — and the bridge, unable to tell either, would pay somebody twice for one afternoon. |
 
+### `Asset` — erpnext
+
+The maintenance-versus-growth split every sustainable cash flow figure is read through. Maintenance capex replaces what wore out and growth capex buys capacity that was never there; an operation that cannot tell them apart cannot say whether a good year was earned or borrowed from the orchard.
+
+**The first target in this file that is not about a regulator, and it belongs
+here anyway.** Maintenance capex replaces productive capacity that wore out;
+growth capex buys capacity that was never there. Sustainable CF/Acre is what is
+left after the first is funded, and an operation that cannot tell them apart
+reports expansion spending as if it were keeping the orchard whole.
+
+**Why not a profile DocType beside the Asset.** v0.7.0 put the cost split in an
+`Asset Cost Profile` precisely so this app would touch nobody else's schema, and
+the same move fails here. The maintenance/growth call is made ONCE, by the person
+raising the purchase, at the moment they know why they are buying the thing — the
+old pump failed, or the new block needs a pump it never had. A profile row
+written afterwards by somebody reconciling the quarter is a person reconstructing
+an intention from an invoice, and they will get it wrong in the direction that
+makes the quarter look better.
+
+**`capex_type` is not `reqd`, deliberately.** Frappe enforces `reqd` on save
+rather than retroactively, so marking it required would leave every existing
+Asset readable and unsaveable — editing a location on a tractor bought in 2019
+would demand a classification nobody present can make. The gate is in
+`create_asset` instead, where the person raising the purchase is standing, and
+`backfill_asset_capex_type` classifies the history in bulk.
+
+| Field | Type | Required | Framework | Why the regulator wants it | What breaks in the WORK without it |
+| --- | --- | --- | --- | --- | --- |
+| `capex_type` | Select | no | Managerial accounting — Sustainable CF/Acre (v0.19.5); lender maintenance-capex covenants | Maintenance capex replaces productive capacity that wore out; growth capex adds capacity that was never there. Sustainable cash flow is what is left after the first is funded, and an operation that cannot tell them apart reports growth spending as if it were keeping the orchard whole. | The replacement budget. 'What we spend to stay where we are' and 'what we spend to get bigger' are two different plans, and an operation that cannot separate them funds the second out of the first — which is deferred maintenance with a better name. |
+| `maintenance_portion` | Currency | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | A single purchase is often both — a bigger tractor replacing a smaller one is the old machine's capacity as maintenance and the difference as growth. Recording only the total forces the whole amount into one bucket and the KPI reads whichever the person picked. | What a replacement reserve is sized against. The maintenance half of a mixed purchase is the recurring number; the growth half happens once. |
+| `growth_portion` | Currency | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | The other half of the split, stored rather than derived. A portion computed as 'the total minus the other one' cannot disagree with the total, which sounds like a virtue and means a transposed figure is silently absorbed instead of refused. | What the expansion actually cost, separable from what keeping the existing ground going cost. It is the number a return-on-new-planting calculation starts from. |
+| `capex_justification` | Small Text | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | Required for Growth and Mixed by `create_asset`: what capacity does this add? Classifying a purchase as growth takes it out of the maintenance figure, which raises sustainable cash flow — the one direction in which a misclassification flatters the operation, and therefore the one that needs a sentence behind it. | The reason the purchase was made, in the words of whoever made it, on the record it was made against. It is what next year's planning reads to find out whether the new capacity did what it was bought to do. |
+
 ### `Housing Unit` — erpnext_mcp
 
 FSMA Produce Safety Rule Subpart L worker facilities, and the habitability and detector-test dates Oregon's agricultural labor housing rules turn on. Shipped as declared fields in v0.12.0, verified here.
@@ -174,15 +207,27 @@ worse than the problem it would hide.
 
 ### `Field` — erpnext_mcp
 
-Food safety zoning and the agricultural water and spray dates the Produce Safety Rule turns on. Shipped as declared fields in v0.12.0, verified here.
+Food safety zoning, the agricultural water and spray dates the Produce Safety Rule turns on, and — from v0.19.5 — the dates that say when this block was actually earning. Shipped as declared fields in v0.12.0 and v0.19.5, verified here.
 
 **Verified, not added.** These are declared fields of a DocType this app ships.
 A missing one means the DocType did not migrate, and the installer reports it
 rather than papering over it with a Custom Field — two columns and no error is
 worse than the problem it would hide.
 
+**The three v0.19.5 dates are the denominator of every per-acre metric.** What is
+PRODUCTIVE, not what is owned: fallow ground has acreage, a cost centre and a
+water right and earns nothing, and a perennial in its pre-yield years is capital
+under construction wearing the costume of an orchard. A block with no
+`productive_from_date` is EXCLUDED from the denominator and reported, never
+assumed productive — assuming it would put acres in the denominator that may be a
+three-year-old planting, which makes the figure look conservative while quietly
+turning a data gap into a number somebody acts on.
+
 | Field | Type | Required | Framework | Why the regulator wants it | What breaks in the WORK without it |
 | --- | --- | --- | --- | --- | --- |
+| `productive_from_date` | Date | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | The denominator of every per-acre metric is what is PRODUCTIVE, not what is owned. Without this date a pre-yield block counts as earning ground and every per-acre figure is understated by however much of the farm is still coming into bearing. | When a block starts being budgeted as a crop rather than as capital under construction. It is what a picking plan, a bin forecast and a crew estimate all key off. |
+| `productive_through_date` | Date | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | A block pulled in July earned for half the year. Null means still productive, which is the ordinary case; a date means the acreage stops counting from it, pro-rated. | Whether to send a crew there next season, and whether the water and spray programme still applies to it. |
+| `pre_yield_end_date` | Date | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | Perennials spend their first years as capital rather than as crop — cherry is commonly three or four. Recorded separately from `productive_from_date` so a block still in its pre-yield years is COUNTED and reported rather than merely absent: those acres are next year's denominator, and a reader who cannot see them coming cannot read the trend. | When the block moves onto the picking plan, and when the establishment budget stops. Both are planned years ahead off this date. |
 | `food_safety_zone` | Data | no | FSMA Produce Safety Rule 21 CFR 112; GAP / GlobalGAP zoning | Zoning is how a hazard assessment is expressed on the ground — which ground is adjacent to a dairy, a road, a wildlife corridor. | Which blocks get walked for animal intrusion before a pick, and which can be picked at all after a flood event. |
 | `last_spray_date` | Date | no | EPA WPS 40 CFR 170.407 REI; FIFRA label PHI | The date the REI and PHI windows are counted from. | Whether a crew can enter this block today. It is read before every pick and every thinning pass. |
 

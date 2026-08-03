@@ -23,6 +23,11 @@
   "planting_year",
   "planting_density_per_acre",
   "condition",
+  "productive_section",
+  "productive_from_date",
+  "productive_through_date",
+  "productive_col",
+  "pre_yield_end_date",
   "compliance_section",
   "last_spray_date",
   "water_test_last_date",
@@ -166,6 +171,36 @@
    "in_standard_filter": 1,
    "label": "Condition",
    "options": "\nExcellent\nGood\nFair\nPoor\nFallow"
+  },
+  {
+   "fieldname": "productive_section",
+   "fieldtype": "Section Break",
+   "label": "Productive Life"
+  },
+  {
+   "description": "The first day this block was productive in its current planting cycle — past the pre-yield years for a perennial. THE DENOMINATOR OF EVERY PER-ACRE METRIC IS WHAT IS PRODUCTIVE, NOT WHAT IS OWNED: a block still coming into bearing has acreage, a cost centre and a water right and earns nothing, and counting it flatters nothing while understating every per-acre figure the operation is judged on. Empty means unknown rather than zero, and a block with no date is EXCLUDED from the denominator with a warning rather than assumed productive — see get_sustainable_cf_per_acre.",
+   "fieldname": "productive_from_date",
+   "fieldtype": "Date",
+   "label": "Productive From",
+   "search_index": 1
+  },
+  {
+   "description": "The last day it was productive, if it has been pulled, retired or put back into transition. NULL MEANS STILL PRODUCTIVE, which is the ordinary case and is why this is not defaulted — a date here stops the acreage counting from it, pro-rated, so a block pulled in July earns for half the year rather than for none of it or all of it.",
+   "fieldname": "productive_through_date",
+   "fieldtype": "Date",
+   "label": "Productive Through",
+   "search_index": 1
+  },
+  {
+   "fieldname": "productive_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When a perennial stops being capital under construction and becomes a crop — commonly year three or four for cherry, and it varies by variety and rootstock. Kept separate from Productive From so a block still inside its pre-yield years is COUNTED AND REPORTED rather than merely absent: those acres are next year's denominator, and a reader who cannot see them coming cannot read the trend.",
+   "fieldname": "pre_yield_end_date",
+   "fieldtype": "Date",
+   "label": "Pre-Yield End"
   },
   {
    "description": "Food safety and worker protection facts about this ground. They are here rather than in a compliance register because they are the same facts the operation runs on: 'when was this block last sprayed' is a re-entry-interval question before it is a WPS report, and a block with no hygiene station is a block a crew cannot legally be sent to.",
@@ -326,7 +361,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-07-30 13:00:00.000000",
+ "modified": "2026-08-03 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Field",

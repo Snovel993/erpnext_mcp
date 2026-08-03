@@ -121,6 +121,15 @@ SWITCHES = {
 		"list_shifts_missing_weather",
 		"get_weather_timeline",
 		"get_weather_settings",
+		# v0.19.5. The walk now also ends on a NUMBER, because the last thing an
+		# operation does with a season is say what it earned per acre — and the
+		# figure is only defensible if the ingredients are on the record.
+		"create_field",
+		"create_asset",
+		"create_normalization_adjustment",
+		"approve_normalization_adjustment",
+		"list_normalization_adjustments",
+		"get_sustainable_cf_per_acre",
 	)
 }
 
@@ -1333,3 +1342,264 @@ class TheWeatherTimelineDocumentsTheShiftItself(EndToEndWorkflow):
 		# And the worklist no longer names it.
 		after = self.tool_data("list_shifts_missing_weather", {"company": COMPANY})
 		self.assertNotIn(shift["name"], [row["name"] for row in after["shifts"]])
+
+
+# ── 8. the season becomes a number ──────────────────────────────────────────
+class TheSeasonReachesAPerAcreFigure(EndToEndWorkflow):
+	"""Company → fiscal year → block with productive dates → a classified purchase
+	→ a normalization proposed and approved → Sustainable CF/Acre, itemized.
+
+	v0.19.5, AND IT IS THE FIRST WALK IN THIS FILE THAT ENDS SOMEWHERE OTHER THAN
+	A COMPLIANCE RECORD. Everything above it answers somebody with a citation. This
+	answers the question an owner, a lender and a buyer ask about the same season:
+	what did the ground actually earn, after the non-recurring items are taken back
+	out and after replacing what wore out is paid for?
+
+	ONE TEST, on purpose, for the same reason `TheWorkflowWalksEndToEnd` is one
+	test: the claim is that the pieces connect, and a claim about connection cannot
+	be made by six tests that each re-walk the flow.
+
+	The assertion that matters most is the last one. The figure is checked, and so
+	is every ingredient — because the whole argument of the release is that a
+	normalized number nobody can inspect is indistinguishable from an arranged one,
+	and a test that asserted only the figure would be asserting the half that is
+	worth least.
+	"""
+
+	def test_the_walk_ends_in_a_defensible_figure(self):
+		self.be_the_operator()
+
+		# The year the books close in, which the site already has: a fiscal year
+		# names itself, so there cannot be a second 2026 and the walk uses the
+		# one that is there. A normalization is refused outside a fiscal year for
+		# the same reason ERPNext refuses a posting outside one — it is defended
+		# INSIDE a closed set of books — and the refusal is proved further down by
+		# the period check rather than by making a duplicate year here.
+		self.assertTrue(frappe.db.exists("Fiscal Year", "2026"))
+		outside = self.tool_error(
+			"create_normalization_adjustment",
+			{
+				"company": COMPANY,
+				"fiscal_year": "2026",
+				"period_start": "2025-12-01",
+				"period_end": "2026-03-31",
+				"amount": 1,
+				"direction": "Add-back to OCF",
+				"category": "Other",
+				"justification": "x" * 60,
+			},
+		)
+		self.assertIn("straddling two", outside)
+
+		# The block, with the dates that put it in the denominator. Productive
+		# from the first of the year, so a Q1 window weights it in full — and
+		# `pre_yield_end_date` is on the record beside it, which is what makes the
+		# transition auditable rather than inferred from a planting year.
+		block = self.tool_data(
+			"create_field",
+			{
+				"parcel": PARCEL,
+				"field_name": "E2E Block 1",
+				"acreage": 40.0,
+				"variety": "Bing",
+				"planting_year": 2019,
+				"productive_from_date": "2026-01-01",
+				"pre_yield_end_date": "2025-12-31",
+			},
+		)
+		self.assertEqual(block["productive_from_date"], "2026-01-01")
+
+		# The season's cash, by the direct method: a sale in and a cost out,
+		# against Income and Expense, which is what makes both operating.
+		abbr = ABBR
+		STORE.seed(
+			"Account",
+			[
+				{
+					"name": f"1100 - Cash - {abbr}",
+					"account_name": "Cash",
+					"account_number": "1100",
+					"root_type": "Asset",
+					"account_type": "Cash",
+					"is_group": 0,
+					"company": COMPANY,
+				},
+				{
+					"name": f"4100 - Sales - {abbr}",
+					"account_name": "Sales",
+					"account_number": "4100",
+					"root_type": "Income",
+					"account_type": "",
+					"is_group": 0,
+					"company": COMPANY,
+				},
+				{
+					"name": f"5100 - Supplies - {abbr}",
+					"account_name": "Supplies",
+					"account_number": "5100",
+					"root_type": "Expense",
+					"account_type": "",
+					"is_group": 0,
+					"company": COMPANY,
+				},
+			],
+		)
+		STORE.seed(
+			"GL Entry",
+			[
+				{
+					"name": "E2E-GL-1",
+					"account": f"1100 - Cash - {abbr}",
+					"posting_date": "2026-02-01",
+					"debit": 140000,
+					"credit": 0,
+					"company": COMPANY,
+					"is_cancelled": 0,
+					"voucher_type": "Journal Entry",
+					"voucher_no": "E2E-JV-1",
+				},
+				{
+					"name": "E2E-GL-2",
+					"account": f"4100 - Sales - {abbr}",
+					"posting_date": "2026-02-01",
+					"debit": 0,
+					"credit": 140000,
+					"company": COMPANY,
+					"is_cancelled": 0,
+					"voucher_type": "Journal Entry",
+					"voucher_no": "E2E-JV-1",
+				},
+				{
+					"name": "E2E-GL-3",
+					"account": f"5100 - Supplies - {abbr}",
+					"posting_date": "2026-02-15",
+					"debit": 40000,
+					"credit": 0,
+					"company": COMPANY,
+					"is_cancelled": 0,
+					"voucher_type": "Journal Entry",
+					"voucher_no": "E2E-JV-2",
+				},
+				{
+					"name": "E2E-GL-4",
+					"account": f"1100 - Cash - {abbr}",
+					"posting_date": "2026-02-15",
+					"debit": 0,
+					"credit": 40000,
+					"company": COMPANY,
+					"is_cancelled": 0,
+					"voucher_type": "Journal Entry",
+					"voucher_no": "E2E-JV-2",
+				},
+			],
+		)
+
+		# The replacement pump, classified AT THE MOMENT OF PURCHASE by the person
+		# who knows the old one failed. Seeded rather than raised through
+		# `create_asset` because ERPNext's Asset needs an Asset Category carrying
+		# three accounts, and that scaffolding is exercised in test_assets.py —
+		# what this walk is about is the classification travelling into the figure.
+		compliance_fields.install_compliance_fields(respect_switch=False)
+		STORE.seed(
+			"Asset",
+			[
+				{
+					"name": "E2E-PUMP",
+					"asset_name": "Irrigation pump — replacement",
+					"company": COMPANY,
+					"purchase_date": "2026-02-10",
+					"gross_purchase_amount": 30000,
+					"docstatus": 1,
+					"capex_type": "Maintenance",
+					"maintenance_portion": 30000,
+					"growth_portion": 0,
+				}
+			],
+		)
+
+		# The hailstorm. Proposed as a DRAFT — and the walk proves it does not
+		# count in that state, which is the whole compliance posture of the
+		# release rather than a detail of it.
+		why = (
+			"Hail on 2026-04-11 destroyed the frost fans on blocks 3 and 4; the replacement "
+			"was a single insured event and the last hail loss on this ground was 2011."
+		)
+		draft = self.tool_data(
+			"create_normalization_adjustment",
+			{
+				"company": COMPANY,
+				"fiscal_year": "2026",
+				"period_start": "2026-01-01",
+				"period_end": "2026-03-31",
+				"amount": 20000,
+				"direction": "Add-back to OCF",
+				"category": "Weather-Event-Loss",
+				"justification": why,
+			},
+		)
+		self.assertEqual(draft["status"], "Draft")
+
+		before = self.tool_data(
+			"get_sustainable_cf_per_acre",
+			{"company": COMPANY, "period_start": "2026-01-01", "period_end": "2026-03-31"},
+		)
+		self.assertEqual(before["normalization_adjustments"], [])
+		self.assertEqual(before["normalized_ocf"], 100000.0)
+
+		# The accountant signs. THIS is the act that moves the number, and it
+		# cannot happen without a signature.
+		unsigned = self.tool_error(
+			"approve_normalization_adjustment", {"name": draft["name"]}
+		)
+		self.assertIn("approver_signature_file_token is required", unsigned)
+
+		# A file URL rather than a staged upload, and that is the realistic path
+		# here: the staging pipeline is the PHONE's, gated on an enrolled Farm Ops
+		# credential, and the person signing off a normalization is an accountant
+		# at a desk. `shifts.file_reference` accepts either spelling for exactly
+		# this reason — a docname is checked and a URL is taken as given.
+		approved = self.tool_data(
+			"approve_normalization_adjustment",
+			{
+				"name": draft["name"],
+				"approver_signature_file_token": "/files/e2e-approval-signature.png",
+			},
+		)
+		self.assertEqual(approved["status"], "Approved")
+		self.assertTrue(approved["approved_on"])
+
+		# And the figure. (100k raw + 20k add-back - 30k maintenance capex) ÷ 40
+		# acres = 2,250 per acre.
+		data = self.tool_data(
+			"get_sustainable_cf_per_acre",
+			{"company": COMPANY, "period_start": "2026-01-01", "period_end": "2026-03-31"},
+		)
+		self.assertEqual(data["raw_ocf"]["value"], 100000.0)
+		self.assertEqual(data["normalized_ocf"], 120000.0)
+		self.assertEqual(data["maintenance_capex"]["total"], 30000.0)
+		self.assertEqual(data["productive_acres"]["time_weighted"], 40.0)
+		self.assertEqual(data["sustainable_cf_per_acre"], 2250.0)
+
+		# EVERY INGREDIENT IS ON THE PLATE, which is the claim the release makes
+		# and the half a test asserting only the figure would leave unasserted.
+		adjustment = data["normalization_adjustments"][0]
+		self.assertEqual(adjustment["name"], draft["name"])
+		self.assertEqual(adjustment["justification"], why)
+		self.assertEqual(adjustment["signed_effect_on_ocf"], 20000.0)
+		self.assertTrue(adjustment["has_approver_signature"])
+
+		capex = data["maintenance_capex"]["itemized"][0]
+		self.assertEqual(capex["asset"], "E2E-PUMP")
+		self.assertEqual(capex["capex_type"], "Maintenance")
+		self.assertEqual(capex["maintenance_portion"], 30000.0)
+		self.assertEqual(capex["purchase_date"], "2026-02-10")
+
+		acres = data["productive_acres"]["itemized"][0]
+		self.assertEqual(acres["field"], block["name"])
+		self.assertEqual(acres["days_productive_in_period"], 90)
+		self.assertEqual(acres["time_weighted_acres"], 40.0)
+
+		# The register agrees with the figure about what counted.
+		register = self.tool_data("list_normalization_adjustments", {"company": COMPANY})
+		self.assertEqual(register["counted_in_the_kpi"], [draft["name"]])
+		self.assertEqual(register["awaiting_a_decision"], [])

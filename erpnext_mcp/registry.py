@@ -64,6 +64,7 @@ from .tools import (
 	hr,
 	inspections,
 	investment_report,
+	kpi,
 	meta,
 	mobile,
 	mutate,
@@ -2891,6 +2892,39 @@ TOOLS = {
 				_BOOLEAN, "false to refuse rather than create a fixed-asset Item. Default true."
 			),
 			"notes": _field(_STRING, "Anything about this asset worth keeping with its profile."),
+			# v0.19.5. The maintenance/growth call, made HERE because this is where
+			# the person who knows why the thing is being bought is standing. See
+			# `assets._capex_argument` for why there is no default.
+			"capex_type": _field(
+				_STRING,
+				"REQUIRED once this site has migrated v0.19.5. 'Maintenance' replaces "
+				"productive capacity that wore out (a failed irrigation pump, a worn-out "
+				"tractor, a replant in kind); 'Growth' adds capacity that was never there "
+				"(a new block, a new zone, a second sprayer); 'Mixed' splits across the two "
+				"portion fields. There is NO DEFAULT, deliberately: Sustainable CF/Acre "
+				"subtracts maintenance capex, so an unclassified purchase quietly read as "
+				"maintenance would let growth spending disappear into the line the "
+				"replacement budget is built on.",
+			),
+			"maintenance_portion": _field(
+				_NUMBER,
+				"For Mixed only: how much of the purchase replaces existing capacity. With "
+				"growth_portion it must equal purchase_amount within a cent. Defaulted from "
+				"the total for Maintenance and to 0 for Growth.",
+			),
+			"growth_portion": _field(
+				_NUMBER,
+				"For Mixed only: how much buys capacity that was not there. Defaulted from "
+				"the total for Growth and to 0 for Maintenance.",
+			),
+			"capex_justification": _field(
+				_STRING,
+				"REQUIRED for Growth and Mixed: what capacity does this add? Classifying "
+				"spend as growth takes it out of the maintenance figure and RAISES "
+				"sustainable cash flow per acre — the one direction in which a "
+				"misclassification flatters the operation, which is why it is the one that "
+				"has to carry a sentence.",
+			),
 		},
 		required=(
 			"asset_name",
@@ -4303,6 +4337,27 @@ TOOLS = {
 			"condition": _field(_STRING, "Excellent, Good, Fair, Poor or Fallow."),
 			"block_number": _field(_STRING, "The legacy block id, free text ('3A', 'N-12')."),
 			"external_farm_app_id": _field(_STRING, "The Farm App's own id for this block."),
+			# v0.19.5. The dates that decide whether this block is in the per-acre
+			# denominator at all. Written at creation because a block planted today
+			# is a block whose pre-yield window is known today, and reconstructing
+			# them three years later means reconstructing them from a planting year.
+			"productive_from_date": _field(
+				_STRING,
+				"First day this block is productive in its current planting cycle, YYYY-MM-DD "
+				"— past the pre-yield years for a perennial. A block with no date is EXCLUDED "
+				"from the Sustainable CF/Acre denominator and reported, never assumed "
+				"productive.",
+			),
+			"productive_through_date": _field(
+				_STRING,
+				"Last day it was productive, YYYY-MM-DD, if it has been pulled or retired. "
+				"Leave empty for a block still in production.",
+			),
+			"pre_yield_end_date": _field(
+				_STRING,
+				"When a perennial stops being capital under construction and becomes a crop, "
+				"YYYY-MM-DD. Commonly year three or four for cherry.",
+			),
 			"last_spray_date": _field(_STRING, "Last application on this block, YYYY-MM-DD."),
 			"water_test_last_date": _field(_STRING, "Agricultural water test date, YYYY-MM-DD."),
 			"wildlife_intrusion_last_report": _field(
@@ -4346,6 +4401,13 @@ TOOLS = {
 			"condition": _field(_STRING, "New condition. Empty string clears it."),
 			"block_number": _field(_STRING, "New block number."),
 			"external_farm_app_id": _field(_STRING, "New Farm App id. Empty string clears it."),
+			"productive_from_date": _field(
+				_STRING, "New productive-from date, YYYY-MM-DD. The Sustainable CF/Acre denominator."
+			),
+			"productive_through_date": _field(
+				_STRING, "New productive-through date, YYYY-MM-DD. Empty means still productive."
+			),
+			"pre_yield_end_date": _field(_STRING, "New pre-yield end date, YYYY-MM-DD."),
 			"last_spray_date": _field(_STRING, "New last spray date, YYYY-MM-DD."),
 			"water_test_last_date": _field(_STRING, "New water test date, YYYY-MM-DD."),
 			"wildlife_intrusion_last_report": _field(_STRING, "New intrusion report date, YYYY-MM-DD."),
@@ -8223,6 +8285,228 @@ TOOLS = {
 		title="Get weather settings",
 		available=_needs_doctype("Weather Settings"),
 		requires="the Weather Settings DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.19.5: Sustainable CF/Acre ────────────────────────────────────────
+	#
+	# Four mutating and two read. The split between the first two mutating tools
+	# is the whole compliance posture: `create_normalization_adjustment` produces
+	# a DRAFT and can produce nothing else, and `approve_…` is a separate switch
+	# that takes a signature. Finding a non-recurring item in a ledger nobody
+	# reads line by line is worth a great deal and is something a model is good
+	# at; deciding that it will not recur is a judgement with a lender on the
+	# other end of it.
+	"create_normalization_adjustment": _tool(
+		kpi.create_normalization_adjustment,
+		"MUTATING (default OFF). Propose one add-back to or subtraction from "
+		"operating cash flow for a company and a period, with the sentence that "
+		"says why it will not recur. CREATES A DRAFT, ALWAYS — a draft does NOT "
+		"count towards Sustainable CF/Acre and nothing here can make it count.\n\n"
+		"THAT SPLIT IS THE POINT. Insurance recoveries, litigation settlements, "
+		"weather-event losses and quarter-end working-capital timing are scattered "
+		"through a ledger nobody reads line by line, and finding them is genuinely "
+		"useful. Deciding that a hailstorm in a region that hails every third year "
+		"is non-recurring is a judgement somebody has to defend across a table, "
+		"and approve_normalization_adjustment is where that happens.\n\n"
+		"`amount` IS ALWAYS POSITIVE; the sign lives in `direction`. A negative "
+		"amount beside a Subtract is a double negative, and a double negative is "
+		"how an adjustment moves the number the wrong way in a lender's pack.\n\n"
+		"`justification` HAS A FORTY-CHARACTER FLOOR. Not a quality bar — no "
+		"character count is one — but a floor under 'one-time', which is what gets "
+		"written when the field is merely required and which an auditor reads as an "
+		"admission that nobody thought about it.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "Fiscal Year docname, e.g. '2026'. The period must fall inside it."),
+			"period_start": _field(_STRING, "First day the adjustment covers, YYYY-MM-DD. Usually a quarter or month start."),
+			"period_end": _field(_STRING, "Last day it covers, inclusive, YYYY-MM-DD."),
+			"amount": _field(_NUMBER, "The size of the adjustment. ALWAYS POSITIVE — direction carries the sign."),
+			"direction": _field(
+				_STRING,
+				"'Add-back to OCF' where cash the operation really spent should not be read as "
+				"recurring, or 'Subtract from OCF' where cash it really received should not be "
+				"read as earning power.",
+			),
+			"category": _field(
+				_STRING,
+				"One of Insurance-Proceeds, Litigation-Settlement, Weather-Event-Loss, "
+				"Asset-Sale-Gain, Working-Capital-Timing, Discontinued-Operation, Restructuring, "
+				"Other. One approved adjustment per company, period and category.",
+			),
+			"justification": _field(
+				_STRING,
+				"Why this will not recur, in at least 40 characters. The question it has to "
+				"answer is the one every buyer asks.",
+			),
+			"supporting_document_file_token": _field(
+				_STRING,
+				"Optional File docname or file_url for the paper behind the sentence — the "
+				"insurance determination, the settlement agreement, the board minute.",
+			),
+		},
+		required=(
+			"company",
+			"fiscal_year",
+			"period_start",
+			"period_end",
+			"amount",
+			"direction",
+			"category",
+			"justification",
+		),
+		mutating=True,
+		title="Propose a normalization adjustment",
+		available=_needs_doctype("Normalization Adjustment"),
+		requires="the Normalization Adjustment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"approve_normalization_adjustment": _tool(
+		kpi.approve_normalization_adjustment,
+		"MUTATING (default OFF). Accept a proposed normalization: status to "
+		"Approved, the approver's signature attached, and an approval timestamp "
+		"WRITTEN RATHER THAN TAKEN AS INPUT.\n\n"
+		"THE SIGNATURE IS WHAT APPROVAL MEANS. The whole argument for this record "
+		"is that a normalization is a judgement with somebody's name against it, "
+		"and every buyer and lender who reads the resulting figure tests the "
+		"adjustments one at a time — an unsigned add-back is the one they stop at. "
+		"There is no unsigned path through this tool.\n\n"
+		"REFUSED WHERE ANOTHER APPROVED ADJUSTMENT ALREADY COVERS THE SAME "
+		"COMPANY, PERIOD AND CATEGORY: two approved adjustments are two answers to "
+		"one question and the one a reader finds will be whichever sorted first. A "
+		"correction SUPERSEDES rather than duplicates.\n\n"
+		"`approver_employee` defaults to the Employee linked to the acting user, "
+		"and is empty where the app runs as a service principal — which is the "
+		"ordinary configuration and is not a failure.",
+		{
+			"name": _field(_STRING, "The adjustment's docname, e.g. NADJ-2026-0001."),
+			"approver_signature_file_token": _field(
+				_STRING, "File docname or file_url for the approver's signature. REQUIRED."
+			),
+			"approver_employee": _field(
+				_STRING, "Employee docname, number, name or login. Defaults to the acting user's Employee."
+			),
+		},
+		required=("name", "approver_signature_file_token"),
+		mutating=True,
+		title="Approve a normalization adjustment",
+		available=_needs_doctype("Normalization Adjustment"),
+		requires="the Normalization Adjustment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"reject_normalization_adjustment": _tool(
+		kpi.reject_normalization_adjustment,
+		"MUTATING (default OFF). Refuse a proposed normalization, on the record, "
+		"with the reason attached.\n\n"
+		"THE REJECTION IS KEPT rather than deleted, for the same reason a rejected "
+		"insurance claim is kept: a refusal with a reason teaches the next "
+		"proposal, and a register with only its successes in it says nothing about "
+		"how hard the successes were to get.\n\n"
+		"AN ALREADY-APPROVED ADJUSTMENT CANNOT BE REJECTED. It has been counted, "
+		"and rejecting it now would rewrite a decision rather than record one — "
+		"supersede it instead.",
+		{
+			"name": _field(_STRING, "The adjustment's docname, e.g. NADJ-2026-0001."),
+			"rejection_reason": _field(_STRING, "Why the justification was not accepted. REQUIRED."),
+		},
+		required=("name", "rejection_reason"),
+		mutating=True,
+		title="Reject a normalization adjustment",
+		available=_needs_doctype("Normalization Adjustment"),
+		requires="the Normalization Adjustment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"backfill_asset_capex_type": _tool(
+		kpi.backfill_asset_capex_type,
+		"MUTATING (default OFF). Classify Assets that have no `capex_type` in "
+		"bulk. DRY RUN BY DEFAULT — it reports what it would do and writes "
+		"nothing until `dry_run=false`.\n\n"
+		"THE HEURISTIC, IN ONE SENTENCE: everything bought before the operation "
+		"started tracking is generally MAINTENANCE, because it is the existing "
+		"productive plant carrying on. That is the whole of the rule.\n\n"
+		"IT NEVER OVERWRITES A CLASSIFICATION SOMEBODY MADE, only fills in nulls, "
+		"so a second run finds nothing to do. `cutoff_purchase_date` restricts it "
+		"to assets bought before a date — which is how 'everything before we "
+		"started tracking' is actually expressed.\n\n"
+		"A STARTING POSITION, NOT AN ANSWER. The new block planted in year six was "
+		"growth and will be recorded as maintenance until somebody fixes it on the "
+		"Asset. That understates Sustainable CF/Acre; a register of nulls "
+		"overstates it, because unclassified purchases are excluded entirely. "
+		"Mixed is refused as a bulk default: a split is a judgement about one "
+		"invoice.",
+		{
+			"default_capex_type": _field(
+				_STRING, "Maintenance (the default) or Growth. Mixed is refused — see above."
+			),
+			"cutoff_purchase_date": _field(
+				_STRING, "Only classify assets purchased BEFORE this date, YYYY-MM-DD. Optional."
+			),
+			"company": _COMPANY,
+			"dry_run": _field(
+				_BOOLEAN, "Default TRUE. Report what would change and write nothing."
+			),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Backfill Asset capex classification",
+		available=_needs_doctype("Asset"),
+		requires="ERPNext's Asset DocType, plus the v0.19.5 capex columns (run `bench migrate`)",
+	),
+	"list_normalization_adjustments": _tool(
+		kpi.list_normalization_adjustments,
+		"The normalization register: every adjustment proposed, approved, refused "
+		"or superseded, with its justification and who signed it. Read-only.\n\n"
+		"`counted_in_the_kpi` IS THE LIST THAT MATTERS — only Approved rows move "
+		"Sustainable CF/Acre. Drafts, pending proposals, rejections and superseded "
+		"rows are all in the register and none of them changes the number.\n\n"
+		"`awaiting_a_decision` is the other one worth reading at quarter end: a "
+		"proposal nobody has decided is not a neutral state, it is a figure that "
+		"will change after the pack goes out.\n\n"
+		"Scoped to the companies the caller may see.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "Fiscal Year docname, e.g. '2026'. Optional."),
+			"status": _field(
+				_STRING, "Draft, Pending Approval, Approved, Rejected or Superseded. Optional."
+			),
+			"limit": _LIMIT,
+		},
+		title="List normalization adjustments",
+		available=_needs_doctype("Normalization Adjustment"),
+		requires="the Normalization Adjustment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_sustainable_cf_per_acre": _tool(
+		kpi.get_sustainable_cf_per_acre,
+		"Sustainable CF/Acre for one company over one period — (normalized "
+		"operating cash flow minus maintenance capex) divided by productive acres — "
+		"WITH EVERY "
+		"INGREDIENT ITEMIZED. Read-only.\n\n"
+		"THE COMPONENTS ARE NOT OPTIONAL EXTRAS. A normalized figure nobody can "
+		"inspect is indistinguishable from an arranged one, and every buyer, "
+		"lender and auditor who reads this number will test it one add-back at a "
+		"time. So the payload carries each approved adjustment with its "
+		"justification and signature, each maintenance-capex asset with its "
+		"purchase date and portion, and each productive field with the days it was "
+		"in service.\n\n"
+		"RAW OCF IS COMPUTED FROM GL ENTRY BY THE DIRECT METHOD — cash and bank "
+		"movement per submitted voucher, apportioned to operating / investing / "
+		"financing by the accounts on the other side — rather than read off "
+		"ERPNext's Cash Flow report, so it can be traced back to rows.\n\n"
+		"MAINTENANCE CAPEX IS ACTUAL SPEND, NEVER A PERCENTAGE OF REVENUE. Under-"
+		"investment is the signal the metric exists to show, and a percentage "
+		"formula reports a well-maintained farm every time, including in the years "
+		"it matters. Assets with no `capex_type` are EXCLUDED and counted, not "
+		"guessed at in either direction.\n\n"
+		"THE DENOMINATOR IS WHAT IS PRODUCTIVE, NOT WHAT IS OWNED: fallow ground "
+		"and pre-yield plantings are out and counted separately, and a block that "
+		"came into bearing in February is weighted for the part of the period it "
+		"was actually earning.\n\n"
+		"`sustainable_cf_per_acre` is null — not zero — where there are no "
+		"productive acres. Read `computation_warnings` before quoting the figure.",
+		{
+			"company": _COMPANY,
+			"period_start": _field(_STRING, "First day of the period, YYYY-MM-DD."),
+			"period_end": _field(_STRING, "Last day of the period, inclusive, YYYY-MM-DD."),
+		},
+		required=("period_start", "period_end"),
+		title="Sustainable CF/Acre",
+		available=_needs_doctype("Normalization Adjustment"),
+		requires="the Normalization Adjustment DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

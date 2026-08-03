@@ -198,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_twenty_four_tools_ninety_nine_read_one_hundred_twenty_five_write(self):
+	def test_catalogue_is_two_hundred_thirty_five_tools_one_hundred_four_read_one_hundred_thirty_one_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -374,10 +374,44 @@ class Catalogue(SeededTestCase):
 		the timeline, the compliance-event snapshots and the Weather Settings
 		doctype came with them and are not tools — which is why the catalogue grew
 		by five and the release by considerably more.
+
+		v0.19.5 ADDED SIX — four writes and two reads — and they are the first
+		tools in this run that no regulator asked for. Sustainable CF/Acre is
+		(normalized operating cash flow − maintenance capex) ÷ productive acres,
+		and it exists because headline OCF lies in two directions at once: it is
+		flattered by money that will not come in again, and flattered AGAIN by
+		maintenance that was not done.
+
+		  * `create_normalization_adjustment` proposes one add-back or
+		    subtraction and CREATES A DRAFT, always. Nothing in it can make the
+		    adjustment count. That is the whole compliance posture: finding a
+		    non-recurring item in a ledger nobody reads line by line is worth a
+		    great deal and is something a model is good at, and deciding that it
+		    will not recur is a judgement with a lender on the other end of it;
+		  * `approve_normalization_adjustment` is the human half, with a
+		    signature that has no bypass and an approval timestamp WRITTEN rather
+		    than taken as input — an approval date somebody can set is one they
+		    can set to before the quarter closed;
+		  * `reject_normalization_adjustment` refuses one on the record with the
+		    reason attached, and the rejection is KEPT, because a register with
+		    only its successes in it says nothing about how hard they were to get;
+		  * `backfill_asset_capex_type` classifies the history in bulk, dry-run by
+		    default, never overwriting a classification somebody made — so a
+		    second run finds nothing to do;
+		  * `list_normalization_adjustments` reads the register and says which
+		    rows actually count;
+		  * `get_sustainable_cf_per_acre` returns the KPI WITH EVERY INGREDIENT
+		    ITEMIZED, because a normalized figure nobody can inspect is
+		    indistinguishable from an arranged one.
+
+		The doctype, the four Asset capex columns, the three Field productive-date
+		columns, the direct-method cash flow service and the quarterly dashboard
+		chart came with them and are not tools — which is why the catalogue grew
+		by six and the release by considerably more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 229)
-		self.assertEqual(len(registry.READ_TOOLS), 102)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 127)
+		self.assertEqual(len(registry.TOOLS), 235)
+		self.assertEqual(len(registry.READ_TOOLS), 104)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 131)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

@@ -318,6 +318,14 @@
   "fieldwork_read_col",
   "allow_get_task_with_evidence_contract",
   "allow_list_compliance_calendar_for_me",
+  "kpi_read_section",
+  "allow_get_sustainable_cf_per_acre",
+  "allow_list_normalization_adjustments",
+  "kpi_write_section",
+  "allow_create_normalization_adjustment",
+  "allow_approve_normalization_adjustment",
+  "allow_reject_normalization_adjustment",
+  "allow_backfill_asset_capex_type",
   "mobile_write_section",
   "allow_create_mobile_user",
   "allow_create_employee",
@@ -2369,6 +2377,58 @@
    "fieldname": "allow_list_compliance_calendar_for_me",
    "fieldtype": "Check",
    "label": "My Compliance Calendar"
+  },
+  {
+   "fieldname": "kpi_read_section",
+   "fieldtype": "Section Break",
+   "label": "Sustainable CF/Acre"
+  },
+  {
+   "default": "1",
+   "description": "READ. (Normalized operating cash flow − maintenance capex) ÷ productive acres, for one company over one period, WITH EVERY INGREDIENT ITEMIZED. The components are not extras: a normalized figure nobody can inspect is indistinguishable from an arranged one, and every buyer and lender who reads this number tests it one add-back at a time. Raw OCF is computed from GL Entry by the direct method so it traces back to rows; maintenance capex is actual spend and never a percentage of revenue; the denominator is what was PRODUCTIVE, time-weighted, not what is owned.",
+   "fieldname": "allow_get_sustainable_cf_per_acre",
+   "fieldtype": "Check",
+   "label": "Get Sustainable CF Per Acre"
+  },
+  {
+   "default": "1",
+   "description": "READ. The normalization register — every adjustment proposed, approved, refused or superseded, with its justification and who signed it. Only Approved rows move the KPI, and the tool says which those are; the others are kept because a rejection with a reason teaches the next proposal.",
+   "fieldname": "allow_list_normalization_adjustments",
+   "fieldtype": "Check",
+   "label": "List Normalization Adjustments"
+  },
+  {
+   "fieldname": "kpi_write_section",
+   "fieldtype": "Section Break",
+   "label": "Normalization and Capex Classification"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Proposes one add-back to or subtraction from operating cash flow. CREATES A DRAFT, ALWAYS — a draft does not count towards Sustainable CF/Acre and nothing in this tool can make it count. That split is deliberate: finding a non-recurring item in a ledger nobody reads line by line is worth a great deal, and deciding that it will not recur is a judgement somebody has to defend across a table.",
+   "fieldname": "allow_create_normalization_adjustment",
+   "fieldtype": "Check",
+   "label": "Create Normalization Adjustment"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. THE HUMAN HALF. Sets an adjustment to Approved with the approver's signature attached and an approval timestamp written rather than taken as input. There is no unsigned path through it — the whole argument for the record is that a normalization is a judgement with somebody's name against it. Refused where another approved adjustment already covers the same company, period and category.",
+   "fieldname": "allow_approve_normalization_adjustment",
+   "fieldtype": "Check",
+   "label": "Approve Normalization Adjustment"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Refuses a proposed normalization on the record, with the reason attached. The rejection is kept rather than deleted, for the same reason a rejected insurance claim is kept. An already-approved adjustment cannot be rejected — it has been counted, and rewriting a decision is not the same as recording one.",
+   "fieldname": "allow_reject_normalization_adjustment",
+   "fieldtype": "Check",
+   "label": "Reject Normalization Adjustment"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Classifies Assets with no capex_type in bulk, dry-run by default. The heuristic is one sentence — everything bought before the operation started tracking is generally maintenance, because it is the existing productive plant carrying on — and it never overwrites a classification somebody made, so a second run finds nothing to do. A starting position rather than an answer, and it says so.",
+   "fieldname": "allow_backfill_asset_capex_type",
+   "fieldtype": "Check",
+   "label": "Backfill Asset Capex Type"
   },
   {
    "fieldname": "mobile_write_section",

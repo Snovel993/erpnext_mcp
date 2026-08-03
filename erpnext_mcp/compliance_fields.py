@@ -511,6 +511,117 @@ _ATTENDANCE_FIELDS = (
 )
 
 
+# ── Asset — ERPNext ─────────────────────────────────────────────────────────
+#
+# v0.19.5, AND THE FIRST TARGET IN THIS FILE THAT IS NOT ABOUT A REGULATOR. The
+# framework line on each field below says so plainly: this is managerial
+# accounting, and it is here rather than in a doctype of ours for exactly the
+# argument the module docstring makes about Spray Log.
+#
+# WHY NOT AN `Asset Capex Profile` BESIDE THE ASSET. v0.7.0 put the cost split in
+# an `Asset Cost Profile` precisely so this app would touch nobody else's schema,
+# and the obvious move would be to put `capex_type` there too. It fails the test
+# this file is built on. The maintenance/growth call is made ONCE, by the person
+# raising the purchase, at the moment they know why they are buying the thing —
+# the old pump failed, or the new block needs a pump it never had. A profile row
+# written afterwards by somebody reconciling the quarter is a person reconstructing
+# an intention from an invoice, and they will get it wrong in the direction that
+# makes the quarter look better. Six months later nobody alive can say which it
+# was.
+#
+# And it breaks operations, not only reporting. `capex_type` is what a replacement
+# budget is built from: an operation that cannot separate "what we spend to stay
+# where we are" from "what we spend to get bigger" cannot plan either one, and the
+# first thing that happens is that growth is funded out of the maintenance the
+# orchard needed.
+#
+# `capex_type` IS NOT `reqd`, AND THAT IS DELIBERATE. Frappe enforces `reqd` on
+# save rather than retroactively, so marking it required would leave every
+# existing Asset readable and unsaveable — a farm with two hundred assets would
+# find that editing a location on a tractor bought in 2019 now demands a capex
+# classification nobody present can make. The gate is in `create_asset` instead,
+# where the person raising the purchase is standing, and `backfill_asset_capex_type`
+# is how the history gets classified in bulk.
+_ASSET_FIELDS = (
+	ComplianceField(
+		fieldname="capex_type",
+		label="Capex Type",
+		fieldtype="Select",
+		options="\nMaintenance\nGrowth\nMixed",
+		framework="Managerial accounting — Sustainable CF/Acre (v0.19.5); lender maintenance-capex covenants",
+		why=(
+			"Maintenance capex replaces productive capacity that wore out; growth capex "
+			"adds capacity that was never there. Sustainable cash flow is what is left "
+			"after the first is funded, and an operation that cannot tell them apart "
+			"reports growth spending as if it were keeping the orchard whole."
+		),
+		operational=(
+			"The replacement budget. 'What we spend to stay where we are' and 'what we "
+			"spend to get bigger' are two different plans, and an operation that cannot "
+			"separate them funds the second out of the first — which is deferred "
+			"maintenance with a better name."
+		),
+		description=(
+			"Maintenance replaces existing productive capacity (a failed irrigation pump, "
+			"a worn-out tractor, a replant in kind). Growth adds capacity that was not "
+			"there (a new block, a new zone, a second sprayer). Mixed is split across the "
+			"two portion fields, which must sum to the gross purchase amount."
+		),
+	),
+	ComplianceField(
+		fieldname="maintenance_portion",
+		label="Maintenance Portion",
+		fieldtype="Currency",
+		framework="Managerial accounting — Sustainable CF/Acre (v0.19.5)",
+		why=(
+			"A single purchase is often both — a bigger tractor replacing a smaller one "
+			"is the old machine's capacity as maintenance and the difference as growth. "
+			"Recording only the total forces the whole amount into one bucket and the "
+			"KPI reads whichever the person picked."
+		),
+		operational=(
+			"What a replacement reserve is sized against. The maintenance half of a mixed "
+			"purchase is the recurring number; the growth half happens once."
+		),
+	),
+	ComplianceField(
+		fieldname="growth_portion",
+		label="Growth Portion",
+		fieldtype="Currency",
+		framework="Managerial accounting — Sustainable CF/Acre (v0.19.5)",
+		why=(
+			"The other half of the split, stored rather than derived. A portion computed "
+			"as 'the total minus the other one' cannot disagree with the total, which "
+			"sounds like a virtue and means a transposed figure is silently absorbed "
+			"instead of refused."
+		),
+		operational=(
+			"What the expansion actually cost, separable from what keeping the existing "
+			"ground going cost. It is the number a return-on-new-planting calculation "
+			"starts from."
+		),
+	),
+	ComplianceField(
+		fieldname="capex_justification",
+		label="Capex Justification",
+		fieldtype="Small Text",
+		framework="Managerial accounting — Sustainable CF/Acre (v0.19.5)",
+		why=(
+			"Required for Growth and Mixed by `create_asset`: what capacity does this "
+			"add? Classifying a purchase as growth takes it out of the maintenance "
+			"figure, which raises sustainable cash flow — the one direction in which "
+			"a misclassification flatters the operation, and therefore the one that "
+			"needs a sentence behind it."
+		),
+		operational=(
+			"The reason the purchase was made, in the words of whoever made it, on the "
+			"record it was made against. It is what next year's planning reads to find "
+			"out whether the new capacity did what it was bought to do."
+		),
+	),
+)
+
+
 #: Every doctype this installer knows about, in the order it reports them.
 #:
 #: The last two are `verify` targets: Housing Unit and Field are this app's own
@@ -581,6 +692,23 @@ TARGETS = (
 		),
 	),
 	Target(
+		doctype="Asset",
+		owner_app="erpnext",
+		purpose=(
+			"The maintenance-versus-growth split every sustainable cash flow figure is "
+			"read through. Maintenance capex replaces what wore out and growth capex buys "
+			"capacity that was never there; an operation that cannot tell them apart "
+			"cannot say whether a good year was earned or borrowed from the orchard."
+		),
+		fields=_ASSET_FIELDS,
+		absent_note=(
+			"This site has no Asset doctype, which means ERPNext's asset module is not "
+			"present. get_sustainable_cf_per_acre still computes — it reports a "
+			"maintenance capex of zero and says why in its warnings, which is the honest "
+			"answer for a site that records no fixed assets at all."
+		),
+	),
+	Target(
 		doctype="Housing Unit",
 		owner_app="erpnext_mcp",
 		mode="verify",
@@ -642,10 +770,62 @@ TARGETS = (
 		owner_app="erpnext_mcp",
 		mode="verify",
 		purpose=(
-			"Food safety zoning and the agricultural water and spray dates the Produce "
-			"Safety Rule turns on. Shipped as declared fields in v0.12.0, verified here."
+			"Food safety zoning, the agricultural water and spray dates the Produce "
+			"Safety Rule turns on, and — from v0.19.5 — the dates that say when this "
+			"block was actually earning. Shipped as declared fields in v0.12.0 and "
+			"v0.19.5, verified here."
 		),
 		fields=(
+			ComplianceField(
+				fieldname="productive_from_date",
+				label="Productive From",
+				fieldtype="Date",
+				framework="Managerial accounting — Sustainable CF/Acre (v0.19.5)",
+				why=(
+					"The denominator of every per-acre metric is what is PRODUCTIVE, not "
+					"what is owned. Without this date a pre-yield block counts as earning "
+					"ground and every per-acre figure is understated by however much of the "
+					"farm is still coming into bearing."
+				),
+				operational=(
+					"When a block starts being budgeted as a crop rather than as capital "
+					"under construction. It is what a picking plan, a bin forecast and a "
+					"crew estimate all key off."
+				),
+			),
+			ComplianceField(
+				fieldname="productive_through_date",
+				label="Productive Through",
+				fieldtype="Date",
+				framework="Managerial accounting — Sustainable CF/Acre (v0.19.5)",
+				why=(
+					"A block pulled in July earned for half the year. Null means still "
+					"productive, which is the ordinary case; a date means the acreage stops "
+					"counting from it, pro-rated."
+				),
+				operational=(
+					"Whether to send a crew there next season, and whether the water and "
+					"spray programme still applies to it."
+				),
+			),
+			ComplianceField(
+				fieldname="pre_yield_end_date",
+				label="Pre-Yield End",
+				fieldtype="Date",
+				framework="Managerial accounting — Sustainable CF/Acre (v0.19.5)",
+				why=(
+					"Perennials spend their first years as capital rather than as crop — "
+					"cherry is commonly three or four. Recorded separately from "
+					"`productive_from_date` so a block still in its pre-yield years is "
+					"COUNTED and reported rather than merely absent: those acres are next "
+					"year's denominator, and a reader who cannot see them coming cannot "
+					"read the trend."
+				),
+				operational=(
+					"When the block moves onto the picking plan, and when the establishment "
+					"budget stops. Both are planned years ahead off this date."
+				),
+			),
 			ComplianceField(
 				fieldname="food_safety_zone",
 				label="Food Safety Zone",

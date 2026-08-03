@@ -77,6 +77,9 @@ _FIELD_FIELDS = (
 	"planting_year",
 	"planting_density_per_acre",
 	"condition",
+	"productive_from_date",
+	"productive_through_date",
+	"pre_yield_end_date",
 	"block_number",
 	"external_farm_app_id",
 	"cost_center",
@@ -313,6 +316,9 @@ def _describe_field(row: dict, observed: dict | None = None) -> dict:
 		"planting_density_per_acre": int(row.get("planting_density_per_acre") or 0) or None,
 		"tree_count_estimate": _tree_count(row),
 		"condition": row.get("condition") or None,
+		"productive_from_date": _date_str(row.get("productive_from_date")),
+		"productive_through_date": _date_str(row.get("productive_through_date")),
+		"pre_yield_end_date": _date_str(row.get("pre_yield_end_date")),
 		"block_number": row.get("block_number") or None,
 		"external_farm_app_id": row.get("external_farm_app_id") or None,
 		"cost_center": row.get("cost_center") or None,
@@ -590,7 +596,18 @@ def create_field(args: dict) -> ToolResult:
 	if condition:
 		doc.condition = as_choice(FIELD, "condition", condition, "condition")
 
-	for date_key in ("last_spray_date", "water_test_last_date", "wildlife_intrusion_last_report"):
+	for date_key in (
+		"last_spray_date",
+		"water_test_last_date",
+		"wildlife_intrusion_last_report",
+		# v0.19.5. The dates that decide whether this block is in the per-acre
+		# denominator at all. Written on creation because a block planted today is a
+		# block whose pre-yield window is known today, and filling them in three
+		# years later means reconstructing them from a planting year.
+		"productive_from_date",
+		"productive_through_date",
+		"pre_yield_end_date",
+	):
 		doc.set(date_key, as_date(args, date_key))
 	for check_key in ("food_safety_zone", "worker_hygiene_station_present"):
 		value = as_bool(args, check_key)
@@ -699,7 +716,14 @@ def update_field(args: dict) -> ToolResult:
 					f"Farm App id {uuid!r} is already on {claimed!r}. Nothing was changed."
 				)
 		_stage(changes, doc, "external_farm_app_id", uuid)
-	for key in ("last_spray_date", "water_test_last_date", "wildlife_intrusion_last_report"):
+	for key in (
+		"last_spray_date",
+		"water_test_last_date",
+		"wildlife_intrusion_last_report",
+		"productive_from_date",
+		"productive_through_date",
+		"pre_yield_end_date",
+	):
 		if key in args:
 			_stage(changes, doc, key, as_date(args, key) or "")
 	for key in ("food_safety_zone", "worker_hygiene_station_present"):
@@ -712,7 +736,8 @@ def update_field(args: dict) -> ToolResult:
 			"nothing to change. Pass at least one of: acreage, crop, variety, rootstock, "
 			"planting_year, planting_density_per_acre, condition, block_number, "
 			"external_farm_app_id, last_spray_date, water_test_last_date, "
-			"wildlife_intrusion_last_report, food_safety_zone, worker_hygiene_station_present, "
+			"wildlife_intrusion_last_report, productive_from_date, productive_through_date, "
+			"pre_yield_end_date, food_safety_zone, worker_hygiene_station_present, "
 			"notes."
 		)
 
