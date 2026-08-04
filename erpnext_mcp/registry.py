@@ -42,6 +42,7 @@ from .render import qr
 from .result import ToolResult
 from .tools import (
 	accounts,
+	asset_tags,
 	assets,
 	auditpacket,
 	banking,
@@ -9972,6 +9973,199 @@ TOOLS = {
 		title="Propose a template from a regulation (not implemented)",
 		available=_needs_doctype("Inspection Template"),
 		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.24.0: Universal Asset Tags ──────────────────────────────────────
+	"list_assets": _tool(
+		asset_tags.list_assets,
+		"The asset register: every tagged asset with its type, location, company "
+		"and scan status. Filters by company, asset_type, location and retirement "
+		"status. Default excludes retired assets — pass retired=true to include "
+		"them. Read-only.",
+		{
+			"company": _field(_STRING, "Only assets belonging to this company."),
+			"asset_type": _field(
+				_STRING,
+				"Housing Unit, Irrigation Zone, Irrigation Valve, Sprayer, Tractor, Block, "
+				"Water Source, Storage, Cold Storage or General.",
+			),
+			"location": _field(_STRING, "Only assets at this location (parent asset docname)."),
+			"retired": _field(_BOOLEAN, "true to include retired assets; default false."),
+			"limit": _field(_INTEGER, "Maximum assets returned. Default 100, hard maximum 500."),
+		},
+		title="List assets",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_asset_detail": _tool(
+		asset_tags.get_asset_detail,
+		"One asset in full: current state, open tasks, history timeline from "
+		"every doctype that references it (Farm Tasks, Inspections, Water Tests, "
+		"Compliance Alerts). Also lists child assets (assets whose location is "
+		"this one). Read-only.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname, e.g. 'MC-Valve-05'."),
+			"company": _field(_STRING, "Narrow to one company."),
+			"limit": _field(_INTEGER, "Maximum history events. Default 100."),
+		},
+		required=("asset_name",),
+		title="Get asset detail",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_asset_history": _tool(
+		asset_tags.get_asset_history,
+		"Chronological history of all events, tasks, inspections and compliance "
+		"alerts for one asset, pulled from every doctype that references it. "
+		"Read-only.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname."),
+			"company": _field(_STRING, "Narrow to one company."),
+			"limit": _field(_INTEGER, "Maximum events returned. Default 100."),
+		},
+		required=("asset_name",),
+		title="Get asset history",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"scan_asset": _tool(
+		asset_tags.scan_asset,
+		"MUTATING. Record that somebody scanned this asset's QR or NFC tag. "
+		"Updates last_scan_at and last_scan_by. If GPS coordinates are provided, "
+		"updates the asset's position. Returns the full asset detail plus open "
+		"tasks and due compliance items — everything the scanner screen needs.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname (from the QR/NFC tag)."),
+			"scanned_by": _field(_STRING, "The User who scanned. Defaults to the session user."),
+			"gps_lat": _field(_NUMBER, "Latitude from the scanner's GPS fix."),
+			"gps_lon": _field(_NUMBER, "Longitude from the scanner's GPS fix."),
+		},
+		required=("asset_name",),
+		mutating=True,
+		title="Scan an asset tag",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"register_asset": _tool(
+		asset_tags.register_asset,
+		"MUTATING (default OFF). Register a new asset with its tag ID, type and "
+		"location. The docname IS the printable tag ID — 'MC-Valve-05' on the "
+		"label and 'MC-Valve-05' in the database are the same string.\n\n"
+		"REFUSES: a duplicate name (two tags with the same string would resolve "
+		"to the same record); a location that does not exist in Asset Register.",
+		{
+			"name": _field(_STRING, "The tag ID that will be printed on the label, e.g. 'MC-Valve-05'."),
+			"asset_type": _field(
+				_STRING,
+				"Housing Unit, Irrigation Zone, Irrigation Valve, Sprayer, Tractor, Block, "
+				"Water Source, Storage, Cold Storage or General.",
+			),
+			"company": _field(_STRING, "The company that owns this asset."),
+			"location": _field(_STRING, "Parent asset docname for tree structure."),
+			"description": _field(_STRING, "What this asset is, in words."),
+			"nfc_uid": _field(_STRING, "The UID of an NFC tag, if one is attached."),
+			"gps_latitude": _field(_NUMBER, "Where it is."),
+			"gps_longitude": _field(_NUMBER, "Where it is."),
+		},
+		required=("name", "asset_type", "company"),
+		mutating=True,
+		title="Register a new asset",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_registered_asset": _tool(
+		asset_tags.update_registered_asset,
+		"MUTATING (default OFF). Update an asset's fields. Cannot rename — the "
+		"docname IS the tag ID and changing it would orphan every printed label.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname."),
+			"company": _field(_STRING, "Narrow to one company."),
+			"asset_type": _field(_STRING, "New asset type."),
+			"location": _field(_STRING, "New parent asset docname, or empty to clear."),
+			"description": _field(_STRING, "New description."),
+			"nfc_uid": _field(_STRING, "New NFC UID."),
+			"gps_latitude": _field(_NUMBER, "New latitude."),
+			"gps_longitude": _field(_NUMBER, "New longitude."),
+			"current_state": _field(_OBJECT, "Type-specific state as JSON."),
+		},
+		required=("asset_name",),
+		mutating=True,
+		title="Update an asset",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"retire_asset": _tool(
+		asset_tags.retire_asset,
+		"MUTATING (default OFF). Soft-retire an asset: sets retired_at and "
+		"preserves all history. A retired asset keeps its tag and its records "
+		"but drops out of active lists and compliance alerts. There is no delete.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname."),
+			"company": _field(_STRING, "Narrow to one company."),
+			"reason": _field(_STRING, "Why it was retired."),
+			"retired_at": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+		},
+		required=("asset_name",),
+		mutating=True,
+		title="Retire an asset",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"bulk_create_assets": _tool(
+		asset_tags.bulk_create_assets,
+		"MUTATING (default OFF). Bulk registration for initial rollout: up to "
+		"500 assets in one call. Each item needs name and asset_type. Skips "
+		"duplicates and reports them as errors rather than failing the whole batch.",
+		{
+			"company": _field(_STRING, "The company that owns all these assets."),
+			"assets": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"name": _field(_STRING, "The tag ID."),
+						"asset_type": _field(_STRING, "The asset type."),
+						"location": _field(_STRING, "Parent asset docname."),
+						"description": _field(_STRING, "What it is."),
+						"nfc_uid": _field(_STRING, "NFC tag UID."),
+						"gps_latitude": _field(_NUMBER, "Latitude."),
+						"gps_longitude": _field(_NUMBER, "Longitude."),
+					},
+					"required": ["name", "asset_type"],
+				},
+				"description": "List of asset objects to register.",
+			},
+		},
+		required=("company", "assets"),
+		mutating=True,
+		title="Bulk register assets",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"generate_asset_qr": _tool(
+		asset_tags.generate_asset_qr,
+		"Generate a QR code image for one asset's tag. Returns the PNG as "
+		"base64, or the raw matrix. The QR encodes the asset's scan URL.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname."),
+			"format": _field(_STRING, "'png' (default) for a base64 PNG, or 'matrix' for the raw 0/1 grid."),
+		},
+		required=("asset_name",),
+		title="Generate asset QR code",
+		available=_qr_available,
+		requires=qr.REQUIRES,
+	),
+	"generate_asset_qr_sheet": _tool(
+		asset_tags.generate_asset_qr_sheet,
+		"Bulk QR sheet: one QR per asset, up to 100, for printing on Avery "
+		"labels. Returns base64 PNGs for each.",
+		{
+			"asset_names": _field(_STRING_ARRAY, "List of Asset Register docnames."),
+			"template": _field(_STRING, "Label template, e.g. 'avery_5160'. Default avery_5160."),
+		},
+		required=("asset_names",),
+		title="Generate QR label sheet",
+		available=_qr_available,
+		requires=qr.REQUIRES,
 	),
 }
 

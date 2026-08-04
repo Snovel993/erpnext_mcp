@@ -371,6 +371,31 @@ class FinalizedFileModel(Codable):
 		return payload
 
 
+# ── v0.24.0: Universal Asset Tags ──────────────────────────────────────────
+class ScanAssetModel(Codable):
+	"""`AssetScanResponse` — what the phone shows after scanning a tag."""
+
+	SWIFT = "AssetScanResponse.swift"
+	STRICT = (("name", str, 5), ("scan_recorded", bool, 6))
+	LENIENT = (
+		("asset_type", str, 8),
+		("company", str, 9),
+		("description", str, 12),
+	)
+
+
+class AssetDetailModel(Codable):
+	"""`AssetDetailResponse` — the full detail screen behind an asset tag."""
+
+	SWIFT = "AssetDetailResponse.swift"
+	STRICT = (("name", str, 5),)
+	LENIENT = (
+		("asset_type", str, 8),
+		("company", str, 9),
+		("description", str, 12),
+	)
+
+
 # ── the wire ────────────────────────────────────────────────────────────────
 def on_the_wire(value):
 	"""What `frappe.as_json` would put on the phone's socket.
@@ -525,6 +550,30 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		FinalizedFileModel.decode(finalized, "finalize_staged_file")
 		self.assertTrue(finalized["file_token"])
 
+	def test_13_scan_asset(self):
+		self.configure(enabled=1, allow_scan_asset=1, allow_register_asset=1)
+		self.tool_data("register_asset", {
+			"name": "MC-Valve-05",
+			"asset_type": "Irrigation Valve",
+			"company": MAIN,
+		})
+		self.be()
+		row = self.wire("scan_asset", asset_name="MC-Valve-05")
+		ScanAssetModel.decode(row, "scan_asset")
+		self.assertTrue(row["scan_recorded"])
+
+	def test_14_get_asset_detail(self):
+		self.configure(enabled=1, allow_get_asset_detail=1, allow_register_asset=1)
+		self.tool_data("register_asset", {
+			"name": "MC-Valve-05",
+			"asset_type": "Irrigation Valve",
+			"company": MAIN,
+		})
+		self.be()
+		row = self.wire("get_asset_detail", asset_name="MC-Valve-05")
+		AssetDetailModel.decode(row, "get_asset_detail")
+		self.assertEqual(row["name"], "MC-Valve-05")
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -621,6 +670,8 @@ class TheContractIsComplete(ContractTestCase):
 		"report_field_task": "test_10",
 		"stage_file_chunk": "test_11",
 		"finalize_staged_file": "test_12",
+		"scan_asset": "test_13",
+		"get_asset_detail": "test_14",
 	}
 
 	def _published(self, module):

@@ -369,7 +369,19 @@
   "allow_approve_compliance_rule",
   "allow_update_compliance_rule",
   "allow_deactivate_compliance_rule",
-  "allow_propose_compliance_rule"
+  "allow_propose_compliance_rule",
+  "asset_tag_section",
+  "allow_list_assets",
+  "allow_get_asset_detail",
+  "allow_get_asset_history",
+  "allow_generate_asset_qr",
+  "allow_generate_asset_qr_sheet",
+  "asset_tag_col",
+  "allow_scan_asset",
+  "allow_register_asset",
+  "allow_update_registered_asset",
+  "allow_retire_asset",
+  "allow_bulk_create_assets"
  ],
  "fields": [
   {
@@ -2745,12 +2757,92 @@
    "fieldname": "allow_propose_compliance_rule",
    "fieldtype": "Check",
    "label": "Propose Compliance Rule (not implemented)"
+  },
+  {
+   "fieldname": "asset_tag_section",
+   "fieldtype": "Section Break",
+   "label": "Universal Asset Tags"
+  },
+  {
+   "default": "1",
+   "description": "READ. The asset register with type, location, scan status and retirement status.",
+   "fieldname": "allow_list_assets",
+   "fieldtype": "Check",
+   "label": "List Assets"
+  },
+  {
+   "default": "1",
+   "description": "READ. One asset in full: current state, open tasks, history timeline from every doctype that references it, and child assets.",
+   "fieldname": "allow_get_asset_detail",
+   "fieldtype": "Check",
+   "label": "Get Asset Detail"
+  },
+  {
+   "default": "1",
+   "description": "READ. Chronological history of all events, tasks, inspections and compliance alerts for one asset.",
+   "fieldname": "allow_get_asset_history",
+   "fieldtype": "Check",
+   "label": "Get Asset History"
+  },
+  {
+   "default": "1",
+   "description": "READ. Generate a QR code image for one asset's tag ID.",
+   "fieldname": "allow_generate_asset_qr",
+   "fieldtype": "Check",
+   "label": "Generate Asset QR"
+  },
+  {
+   "default": "1",
+   "description": "READ. Bulk QR sheet for printing on Avery labels.",
+   "fieldname": "allow_generate_asset_qr_sheet",
+   "fieldtype": "Check",
+   "label": "Generate Asset QR Sheet"
+  },
+  {
+   "fieldname": "asset_tag_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record a scan event on an asset — updates last_scan_at, last_scan_by, and optionally the GPS position.",
+   "fieldname": "allow_scan_asset",
+   "fieldtype": "Check",
+   "label": "Scan Asset"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register a new asset with its tag ID, type and location.",
+   "fieldname": "allow_register_asset",
+   "fieldtype": "Check",
+   "label": "Register Asset"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Update an asset's fields. Cannot rename — the docname IS the tag ID.",
+   "fieldname": "allow_update_registered_asset",
+   "fieldtype": "Check",
+   "label": "Update Registered Asset"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Soft-retire an asset. Preserves all history; the asset drops out of active lists and compliance alerts.",
+   "fieldname": "allow_retire_asset",
+   "fieldtype": "Check",
+   "label": "Retire Asset"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Bulk registration for initial rollout — up to 500 assets in one call.",
+   "fieldname": "allow_bulk_create_assets",
+   "fieldtype": "Check",
+   "label": "Bulk Create Assets"
   }
  ],
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-03 21:00:00.000000",
+ "modified": "2026-08-04 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

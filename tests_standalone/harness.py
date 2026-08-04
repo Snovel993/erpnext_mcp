@@ -1010,6 +1010,8 @@ APP_DOCTYPES = {
 	# v0.22.0. The rule DEFINITIONS, which the sweep now reads instead of the
 	# dict `alerts/rules.py` used to populate at import time.
 	"Compliance Rule": "compliance_rule",
+	# v0.24.0. Universal Asset Tags — one durable ID per reportable asset.
+	"Asset Register": "asset_register",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

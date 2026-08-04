@@ -3,6 +3,31 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.24.0 — 2026-08-04
+
+**Universal Asset Tags: scan it, see its history, log what happened.** Every
+reportable asset on the farm — a valve, a sprayer, a cabin, a cold storage
+unit — gets a durable ID tag (QR and optional NFC). A worker scans the tag and
+sees what it is, what has happened to it, and what is due. The tag is the
+docname, and the docname is the printable ID.
+
+**New DocType: Asset Register.** Docname IS the tag ID (set-by-user naming, no
+rename). Fields: asset_type (10 types), company, location (self-referential
+Link for tree structure), description, retired_at, qr_url (auto-built),
+nfc_uid, GPS coordinates, current_state (JSON), last_scan_at, last_scan_by.
+
+**10 new MCP tools** — 5 read-only (list_assets, get_asset_detail,
+get_asset_history, generate_asset_qr, generate_asset_qr_sheet), 5 mutating
+(scan_asset, register_asset, update_registered_asset, retire_asset,
+bulk_create_assets). Cross-doctype history timeline pulls from Farm Task,
+Housing Inspection, Detector Test, Water Test, Inspection Session, and
+Compliance Alert. Retirement is soft — sets retired_at, preserves history.
+
+**New mobile API endpoints:** scan_asset (POST, mutating), get_asset_detail
+(POST/GET, read-only).
+
+Tool count: **267** (118 read, 149 mutating).
+
 ## 0.23.0 — 2026-08-04
 
 **Field-Initiated Tasks: every worker becomes a compliance sensor.** Workers in

@@ -200,6 +200,8 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"reject_task",
 		"report_field_task",
 		"list_compliance_alerts",
+		"scan_asset",
+		"get_asset_detail",
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 

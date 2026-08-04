@@ -1,0 +1,200 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-04 12:00:00.000000",
+ "description": "One reportable, actionable asset on the farm: a valve, a sprayer, a tractor, a cabin, a cold storage unit. Its durable ID tag (QR and optional NFC) lets a worker scan it, see its history, and log state changes or compliance tasks — all attached to this specific asset rather than to a location or a spreadsheet row. The docname IS the printable ID, e.g. MC-Valve-05 or HL-Sprayer-02, so a label and a record are the same string.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "asset_type",
+  "company",
+  "location",
+  "identity_col",
+  "description",
+  "retired_at",
+  "tag_section",
+  "qr_url",
+  "tag_col",
+  "nfc_uid",
+  "position_section",
+  "gps_latitude",
+  "position_col",
+  "gps_longitude",
+  "state_section",
+  "current_state",
+  "scan_section",
+  "last_scan_at",
+  "scan_col",
+  "last_scan_by"
+ ],
+ "fields": [
+  {
+   "description": "What kind of asset this is. The type determines what state fields make sense (a valve is open or closed, a sprayer is full or empty) and which inspection templates apply.",
+   "fieldname": "asset_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Asset Type",
+   "options": "\nHousing Unit\nIrrigation Zone\nIrrigation Valve\nSprayer\nTractor\nBlock\nWater Source\nStorage\nCold Storage\nGeneral",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The company that owns this asset.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The parent asset for tree structure — a valve belongs to a zone, a zone belongs to a block. Any Asset Register record can be a parent, so the hierarchy is as deep or shallow as the operation needs.",
+   "fieldname": "location",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Location (Parent Asset)",
+   "options": "Asset Register",
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What this asset is, in words. The label on the ground, the model number, whatever helps a worker standing in front of it confirm they scanned the right tag.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "description": "When this asset was removed from service. A retired asset keeps its history and its tag but no longer appears in active lists or generates compliance alerts.",
+   "fieldname": "retired_at",
+   "fieldtype": "Date",
+   "label": "Retired At"
+  },
+  {
+   "fieldname": "tag_section",
+   "fieldtype": "Section Break",
+   "label": "Tag"
+  },
+  {
+   "description": "The URL the QR code encodes — auto-generated from the asset name. A scanner pointed at the tag resolves here.",
+   "fieldname": "qr_url",
+   "fieldtype": "Data",
+   "label": "QR URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tag_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The UID of an NFC tag physically attached to this asset. Optional — QR is the baseline transport, NFC is the fast path for assets that justify the tag cost.",
+   "fieldname": "nfc_uid",
+   "fieldtype": "Data",
+   "label": "NFC UID"
+  },
+  {
+   "fieldname": "position_section",
+   "fieldtype": "Section Break",
+   "label": "Position"
+  },
+  {
+   "description": "Where this asset is, as a latitude. Written at registration and updated on every scan that carries a fix.",
+   "fieldname": "gps_latitude",
+   "fieldtype": "Float",
+   "label": "GPS Latitude",
+   "precision": "7"
+  },
+  {
+   "fieldname": "position_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Where this asset is, as a longitude. Written at registration and updated on every scan that carries a fix.",
+   "fieldname": "gps_longitude",
+   "fieldtype": "Float",
+   "label": "GPS Longitude",
+   "precision": "7"
+  },
+  {
+   "fieldname": "state_section",
+   "fieldtype": "Section Break",
+   "label": "State"
+  },
+  {
+   "description": "Type-specific state as JSON — a valve's open/closed, a sprayer's full/empty, a cabin's occupied/vacant. Read and written by state-change actions (v0.25.0); stored here so a scan shows what the asset is doing right now.",
+   "fieldname": "current_state",
+   "fieldtype": "JSON",
+   "label": "Current State"
+  },
+  {
+   "fieldname": "scan_section",
+   "fieldtype": "Section Break",
+   "label": "Last Scan"
+  },
+  {
+   "description": "When this asset was last scanned by anybody.",
+   "fieldname": "last_scan_at",
+   "fieldtype": "Datetime",
+   "label": "Last Scan At"
+  },
+  {
+   "fieldname": "scan_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Who last scanned this asset.",
+   "fieldname": "last_scan_by",
+   "fieldtype": "Link",
+   "label": "Last Scan By",
+   "options": "User"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-04 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Asset Register",
+ "naming_rule": "Set by user",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "asset_type,company,location,description",
+ "sort_field": "name",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

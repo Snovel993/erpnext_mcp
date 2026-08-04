@@ -52,7 +52,7 @@ from __future__ import annotations
 import frappe
 
 from ..errors import ToolError
-from ..tools import dispatch, fieldwork
+from ..tools import asset_tags, dispatch, fieldwork
 from ..tools import mobile as mobile_tools
 from . import guard, shape
 
@@ -516,3 +516,36 @@ def list_compliance_alerts(user: str, company=None) -> dict:
 		"critical": len([row for row in rows if row.get("severity") == "Critical"]),
 		"overdue": len([row for row in rows if row.get("overdue")]),
 	}
+
+
+# ── 12. scan_asset ────────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("scan_asset", mutating=True, limit=guard.WRITE_LIMIT)
+def scan_asset(user: str, asset_name=None, gps_lat=None, gps_lon=None) -> dict:
+	"""Record a scan event on an asset tag. Returns asset detail + open tasks."""
+	guard.require_scope(user)
+	asset_name = str(asset_name or "").strip()
+	if not asset_name:
+		frappe.throw("asset_name is required.", frappe.ValidationError)
+
+	result = asset_tags.scan_asset({
+		"asset_name": asset_name,
+		"scanned_by": user,
+		"gps_lat": gps_lat,
+		"gps_lon": gps_lon,
+	})
+	return result.data
+
+
+# ── 13. get_asset_detail ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_asset_detail", limit=guard.READ_LIMIT)
+def get_asset_detail(user: str, asset_name=None) -> dict:
+	"""Asset detail screen data: current state, open tasks, history."""
+	guard.require_scope(user)
+	asset_name = str(asset_name or "").strip()
+	if not asset_name:
+		frappe.throw("asset_name is required.", frappe.ValidationError)
+
+	result = asset_tags.get_asset_detail({"asset_name": asset_name})
+	return result.data

@@ -536,9 +536,9 @@ class Catalogue(SeededTestCase):
 		rules into records came with them and are not tools, which is why the
 		catalogue grew by seven and the release by a great deal more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 257)
-		self.assertEqual(len(registry.READ_TOOLS), 113)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 144)
+		self.assertEqual(len(registry.TOOLS), 267)
+		self.assertEqual(len(registry.READ_TOOLS), 118)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 149)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
