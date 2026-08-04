@@ -51,8 +51,7 @@ import json
 
 import frappe
 
-from erpnext_mcp.api import fallback_auth
-from erpnext_mcp.api import guard
+from erpnext_mcp.api import fallback_auth, guard
 from erpnext_mcp.api import mobile as mobile_api
 
 from .fixtures import MAIN, OTHER

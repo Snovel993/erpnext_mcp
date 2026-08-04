@@ -51,9 +51,7 @@ class Field(Document):
 			frappe.throw(_("Parcel is required — a block with no ground is not a field."))
 
 		parcel = (
-			frappe.db.get_value(
-				"Parcel", self.parcel, ["name", "owning_entity", "acreage"], as_dict=True
-			)
+			frappe.db.get_value("Parcel", self.parcel, ["name", "owning_entity", "acreage"], as_dict=True)
 			or {}
 		)
 		self.owning_entity = parcel.get("owning_entity") or self.owning_entity

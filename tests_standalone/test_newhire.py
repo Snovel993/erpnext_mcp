@@ -101,9 +101,7 @@ class ItDoesTheWholeThing(NewHireTestCase):
 
 	def test_the_employee_is_linked_to_the_login(self):
 		data = self.hire(email="ana@example.test")
-		self.assertEqual(
-			frappe.db.get_value("Employee", data["employee"], "user_id"), "ana@example.test"
-		)
+		self.assertEqual(frappe.db.get_value("Employee", data["employee"], "user_id"), "ana@example.test")
 
 	def test_first_day_tasks_are_opt_in(self):
 		self.assertEqual(self.hire()["tasks"], [])
@@ -246,7 +244,7 @@ class ItDoesNotDuplicateAPerson(NewHireTestCase):
 		second = self.hire(employee=first["employee"])
 		self.assertEqual(second["employee"], first["employee"])
 		self.assertEqual(
-			[row for row in second["steps"] if row["step"] == "employee"][0]["action"], "reused"
+			next(row for row in second["steps"] if row["step"] == "employee")["action"], "reused"
 		)
 
 	def test_an_employee_docname_that_does_not_exist_is_refused(self):
@@ -300,9 +298,7 @@ class APartialRunSaysWhichPartRan(NewHireTestCase):
 		step that would have needed it."""
 		STORE.installed_apps.remove("hrms")
 		try:
-			message = self.tool_error(
-				"onboard_employee", {"full_name": "Ana Ramos", "company": MAIN}
-			)
+			message = self.tool_error("onboard_employee", {"full_name": "Ana Ramos", "company": MAIN})
 		finally:
 			STORE.installed_apps.append("hrms")
 		self.assertIn("Employee", message)

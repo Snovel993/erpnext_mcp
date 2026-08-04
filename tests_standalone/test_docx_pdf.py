@@ -80,11 +80,7 @@ class DocxPdfTestCase(V7TestCase):
 		return data["name"]
 
 	def attachments(self, name):
-		return sorted(
-			row["file_name"]
-			for row in STORE.rows("File")
-			if row.get("attached_to_name") == name
-		)
+		return sorted(row["file_name"] for row in STORE.rows("File") if row.get("attached_to_name") == name)
 
 	# -- the substituted converter --------------------------------------------
 	def with_converter(self, pdf=FAKE_PDF, via="libreoffice", error=None):
@@ -165,18 +161,14 @@ class RoundTrip(DocxPdfTestCase):
 		self.with_converter()
 		name = self.an_entry()
 		data = self.tool_data("regenerate_governance_document_pdf", {"governance_document": name})
-		self.assertEqual(
-			STORE.get_raw("Governance Document", name)["attached_file"], data["file_url"]
-		)
+		self.assertEqual(STORE.get_raw("Governance Document", name)["attached_file"], data["file_url"])
 		self.assertEqual(data["attached_file_now"], data["file_url"])
 
 	def test_it_is_readable_back_through_the_governance_reader(self):
 		self.with_converter()
 		name = self.an_entry()
 		self.tool_data("regenerate_governance_document_pdf", {"governance_document": name})
-		read = self.tool_data(
-			"get_governance_document_content", {"name": name, "file": "q2-2026.pdf"}
-		)
+		read = self.tool_data("get_governance_document_content", {"name": name, "file": "q2-2026.pdf"})
 		self.assertEqual(read["content"]["file_name"], "q2-2026.pdf")
 		self.assertEqual(read["content"]["file_size"], len(FAKE_PDF))
 
@@ -195,9 +187,7 @@ class Refusals(DocxPdfTestCase):
 	def test_an_entry_with_no_docx_is_refused(self):
 		self.with_converter()
 		name = self.an_entry(docx_names=(), pdf_names=("already.pdf",))
-		message = self.tool_error(
-			"regenerate_governance_document_pdf", {"governance_document": name}
-		)
+		message = self.tool_error("regenerate_governance_document_pdf", {"governance_document": name})
 		self.assertIn("has no .docx attachment", message)
 		self.assertIn("already.pdf", message)
 
@@ -214,9 +204,7 @@ class Refusals(DocxPdfTestCase):
 		right half the time is worse than asking."""
 		self.with_converter()
 		name = self.an_entry(docx_names=("original.docx", "amendment.docx"))
-		message = self.tool_error(
-			"regenerate_governance_document_pdf", {"governance_document": name}
-		)
+		message = self.tool_error("regenerate_governance_document_pdf", {"governance_document": name})
 		self.assertIn("has 2 .docx attachments", message)
 		self.assertIn("source_docx_file", message)
 
@@ -241,9 +229,7 @@ class Refusals(DocxPdfTestCase):
 	def test_an_existing_pdf_is_refused_without_overwrite(self):
 		self.with_converter()
 		name = self.an_entry(pdf_names=("q2-2026.pdf",))
-		message = self.tool_error(
-			"regenerate_governance_document_pdf", {"governance_document": name}
-		)
+		message = self.tool_error("regenerate_governance_document_pdf", {"governance_document": name})
 		self.assertIn("already has 1 PDF attachment(s)", message)
 		self.assertIn("overwrite=true", message)
 		self.assertIn("the .docx is kept either way", message)
@@ -257,18 +243,14 @@ class Refusals(DocxPdfTestCase):
 
 	def test_an_entry_that_does_not_exist_is_refused_by_name(self):
 		self.with_converter()
-		message = self.tool_error(
-			"regenerate_governance_document_pdf", {"governance_document": "GD-NOPE"}
-		)
+		message = self.tool_error("regenerate_governance_document_pdf", {"governance_document": "GD-NOPE"})
 		self.assertIn("no Governance Document named 'GD-NOPE'", message)
 		self.assertIn("list_governance_documents", message)
 
 	def test_a_conversion_that_fails_leaves_the_archive_alone(self):
 		self.with_converter(error="LibreOffice exited 1: could not load document")
 		name = self.an_entry()
-		message = self.tool_error(
-			"regenerate_governance_document_pdf", {"governance_document": name}
-		)
+		message = self.tool_error("regenerate_governance_document_pdf", {"governance_document": name})
 		self.assertIn("could not load document", message)
 		self.assertIn("no attachment was removed", message.lower())
 		self.assertEqual(self.attachments(name), ["q2-2026.docx"])
@@ -316,18 +298,14 @@ class Overwrite(DocxPdfTestCase):
 			{"governance_document": name, "overwrite": True},
 		)
 		self.assertEqual(data["removed"], [])
-		self.assertEqual(
-			self.attachments(name), ["board-minutes.pdf", "q2-2026.docx", "q2-2026.pdf"]
-		)
+		self.assertEqual(self.attachments(name), ["board-minutes.pdf", "q2-2026.docx", "q2-2026.pdf"])
 
 
 class MissingConverter(DocxPdfTestCase):
 	def test_a_host_with_no_converter_is_refused_with_the_package_to_install(self):
 		self.without_converter()
 		name = self.an_entry()
-		message = self.tool_error(
-			"regenerate_governance_document_pdf", {"governance_document": name}
-		)
+		message = self.tool_error("regenerate_governance_document_pdf", {"governance_document": name})
 		self.assertIn("cannot convert a .docx", message)
 		self.assertIn("libreoffice-headless", message)
 		self.assertIn("docx2pdf", message)
@@ -413,9 +391,7 @@ class SwitchAndShape(DocxPdfTestCase):
 		self.with_converter()
 		name = self.an_entry()
 		STORE.denied_permissions.add(("Governance Document", "write"))
-		message = self.tool_error(
-			"regenerate_governance_document_pdf", {"governance_document": name}
-		)
+		message = self.tool_error("regenerate_governance_document_pdf", {"governance_document": name})
 		self.assertIn("not permitted to write", message)
 		self.assertIn("docs/security.md", message)
 
@@ -441,9 +417,7 @@ class TheConverterItself(unittest.TestCase):
 		self.assertLessEqual(convert.TIMEOUT_SECONDS, 300)
 
 
-@unittest.skipUnless(
-	convert.available()["ready"], "needs LibreOffice headless or docx2pdf on this host"
-)
+@unittest.skipUnless(convert.available()["ready"], "needs LibreOffice headless or docx2pdf on this host")
 class TheRealConversion(unittest.TestCase):
 	"""The end-to-end conversion, where a converter is actually installed.
 

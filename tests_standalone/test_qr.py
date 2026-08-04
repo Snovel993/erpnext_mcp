@@ -67,9 +67,7 @@ class TheEncoderContract(unittest.TestCase):
 
 	def test_more_error_correction_needs_at_least_as_many_modules(self):
 		"""A sanity check on the borrowed half that does not re-derive it."""
-		self.assertGreaterEqual(
-			len(qr.qr_matrix(PAYLOAD, error="H")), len(qr.qr_matrix(PAYLOAD, error="L"))
-		)
+		self.assertGreaterEqual(len(qr.qr_matrix(PAYLOAD, error="H")), len(qr.qr_matrix(PAYLOAD, error="L")))
 
 
 class TheMatrix(unittest.TestCase):

@@ -60,7 +60,9 @@ class Certification(Document):
 		window = int(self.renewal_window_days or 0)
 		if window < 0:
 			frappe.throw(
-				_("Renewal Window cannot be negative — it is how many days BEFORE expiry the renewal has to start."),
+				_(
+					"Renewal Window cannot be negative — it is how many days BEFORE expiry the renewal has to start."
+				),
 				title=_("Negative Renewal Window"),
 			)
 

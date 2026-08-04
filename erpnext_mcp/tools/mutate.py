@@ -1031,8 +1031,7 @@ def update_journal_entry_party(args: dict) -> ToolResult:
 			"so the trial balance after this call is arithmetically identical to the one before "
 			"it. What changed is who the line is attributed to"
 			+ (
-				f", in both the voucher and the {updated_gl} GL Entry row(s) every ageing report "
-				"reads."
+				f", in both the voucher and the {updated_gl} GL Entry row(s) every ageing report reads."
 				if updated_gl
 				else (
 					" on the voucher ONLY — see the warning."
@@ -1160,9 +1159,7 @@ def _is_round_off_line(doc, line) -> bool:
 	company = str(doc.get("company") or "")
 	if company:
 		nominated = [
-			str(
-				frappe.db.get_value("Company", company, field) or ""
-			)
+			str(frappe.db.get_value("Company", company, field) or "")
 			for field in ("round_off_account", "write_off_account")
 			if compat.has_field("Company", field)
 		]
@@ -1326,9 +1323,7 @@ def gl_link_for_line(name: str, lines: list, line_index: int, gl_rows: list | No
 	twins = [
 		index
 		for index, other in enumerate(lines, start=1)
-		if index != line_index
-		and str(other.get("account") or "") == account
-		and _amounts(other) == signature
+		if index != line_index and str(other.get("account") or "") == account and _amounts(other) == signature
 	]
 	if twins:
 		return {
@@ -1574,7 +1569,7 @@ def _validated_vouchers(raw) -> list[dict]:
 			raise ToolError(
 				f"payment_entries[{index}] uses payment_doctype; on ERPNext's Bank Transaction "
 				"Payments table the field is called payment_document. Resend it under that name, "
-				f"e.g. {{\"payment_document\": {str(entry['payment_doctype'])!r}, \"payment_entry\": "
+				f'e.g. {{"payment_document": {str(entry["payment_doctype"])!r}, "payment_entry": '
 				'"PE-0001", "allocated_amount": 250.00}. Nothing was changed.'
 			)
 		if not doctype or not docname:

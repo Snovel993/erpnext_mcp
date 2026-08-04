@@ -448,7 +448,9 @@ class DeleteAccount(ChartToolsTestCase):
 		data = self.tool_data("delete_account", {"name": CASH_CLEARING, "company": MAIN})
 		self.assertEqual(data["deleted"], CASH_CLEARING)
 		self.assertFalse(frappe.db.exists("Account", CASH_CLEARING))
-		self.assertEqual(sorted(data["checks_passed"]), ["bank_accounts", "children", "company_defaults", "gl_entries"])
+		self.assertEqual(
+			sorted(data["checks_passed"]), ["bank_accounts", "children", "company_defaults", "gl_entries"]
+		)
 		self.assertEqual(data["checks_skipped"], [])
 
 	def test_the_number_is_free_afterwards(self):

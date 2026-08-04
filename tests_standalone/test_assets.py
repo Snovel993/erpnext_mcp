@@ -174,7 +174,10 @@ class CreateAsset(AssetTestCase):
 		payload = self.create()
 		payload.pop("cost_center_allocation")
 		data = self.tool_data("create_asset", payload)
-		self.assertEqual(data["cost_center_allocation"], [{"cost_center": MAIN_CC, "percentage": 100.0, "bbch_stage": None, "note": None}])
+		self.assertEqual(
+			data["cost_center_allocation"],
+			[{"cost_center": MAIN_CC, "percentage": 100.0, "bbch_stage": None, "note": None}],
+		)
 
 	def test_an_unknown_asset_category_is_refused_with_what_the_site_has(self):
 		message = self.tool_error("create_asset", self.create(asset_category="Spaceships"))
@@ -337,7 +340,9 @@ class LinkAssetToNote(AssetTestCase):
 		)
 		self.assertEqual(data["delta_months"], -48)
 		self.assertFalse(data["tenor_enforced"])
-		self.assertEqual(frappe.db.get_value("Asset Cost Profile", self.asset, "linked_note"), "ACC-JV-2026-00001")
+		self.assertEqual(
+			frappe.db.get_value("Asset Cost Profile", self.asset, "linked_note"), "ACC-JV-2026-00001"
+		)
 
 	def test_a_maturity_date_is_turned_into_a_tenor(self):
 		data = self.tool_data(
@@ -390,7 +395,11 @@ class RunDepreciationCycle(AssetTestCase):
 		entry = frappe.get_doc("Journal Entry", data["journal_entries"][0])
 		self.assertEqual(int(entry.docstatus or 0), 0)
 		self.assertEqual(str(entry.posting_date), "2026-01-31")
-		debits = {line["account"] + "|" + line["cost_center"]: line["debit"] for line in entry.accounts if line.get("debit")}
+		debits = {
+			line["account"] + "|" + line["cost_center"]: line["debit"]
+			for line in entry.accounts
+			if line.get("debit")
+		}
 		self.assertEqual(
 			debits,
 			{

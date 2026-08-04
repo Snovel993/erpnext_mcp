@@ -181,9 +181,7 @@ class TheInstaller(V12TestCase):
 		)
 		report = compliance_fields.install_compliance_fields()
 		self.assertIn("Spray Log.epa_reg_number", report["existing"])
-		self.assertNotIn(
-			"epa_reg_number", {row["fieldname"] for row in custom_fields("Spray Log")}
-		)
+		self.assertNotIn("epa_reg_number", {row["fieldname"] for row in custom_fields("Spray Log")})
 
 	def test_the_switch_off_means_nothing_is_added_anywhere(self):
 		"""Shipping ON is not the same as being unswitchable."""
@@ -433,9 +431,7 @@ class TheDocumentation(unittest.TestCase):
 	def test_no_documented_field_has_been_removed_from_the_table(self):
 		"""The other direction. A file describing a column that no longer exists
 		sends somebody looking for it on their own site."""
-		declared = {
-			f"`{spec.fieldname}`" for target in compliance_fields.TARGETS for spec in target.fields
-		}
+		declared = {f"`{spec.fieldname}`" for target in compliance_fields.TARGETS for spec in target.fields}
 		documented = set()
 		for line in self.text.splitlines():
 			if not line.startswith("| `"):

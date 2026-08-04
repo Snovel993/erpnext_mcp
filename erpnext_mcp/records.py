@@ -143,16 +143,16 @@ def advance_date(doctype: str, name: str, fieldname: str, value) -> dict:
 def result_is_detection(result) -> bool | None:
 	"""Did this laboratory result find something? None when it cannot be read.
 
-	Laboratories say the same thing eight ways — "Absent", "<1 MPN/100mL", "0",
-	"Present", "12", "Positive" — and a compliance decision cannot depend on which
-	one a technician typed. So both dialects are read:
+	    Laboratories say the same thing eight ways — "Absent", "<1 MPN/100mL", "0",
+	    "Present", "12", "Positive" — and a compliance decision cannot depend on which
+	    one a technician typed. So both dialects are read:
 
-      * WORDS first, because "Present" and "Absent" are unambiguous;
-      * NUMBERS second, where any count above zero is a detection.
+	  * WORDS first, because "Present" and "Absent" are unambiguous;
+	  * NUMBERS second, where any count above zero is a detection.
 
-    Anything that reads as neither returns None, which callers report as
-    "unreadable" rather than silently treating as clean. A result nobody can
-    interpret is not a clean result.
+	Anything that reads as neither returns None, which callers report as
+	"unreadable" rather than silently treating as clean. A result nobody can
+	interpret is not a clean result.
 	"""
 	text = str(result or "").strip().lower()
 	if not text:

@@ -129,11 +129,7 @@ class Catalogue(SeededTestCase):
 		names = sorted(tool["name"] for tool in body["result"]["tools"])
 		expected = sorted(
 			[name for name in registry.READ_TOOLS if registry.is_available(name)]
-			+ [
-				name
-				for name in registry.DEFAULT_ON_MUTATING_TOOLS
-				if registry.is_available(name)
-			]
+			+ [name for name in registry.DEFAULT_ON_MUTATING_TOOLS if registry.is_available(name)]
 		)
 		self.assertEqual(names, expected)
 		self.assertEqual(
@@ -198,7 +194,9 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_thirty_eight_tools_one_hundred_six_read_one_hundred_thirty_two_write(self):
+	def test_catalogue_is_two_hundred_thirty_eight_tools_one_hundred_six_read_one_hundred_thirty_two_write(
+		self,
+	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.

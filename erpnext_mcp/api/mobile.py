@@ -284,7 +284,8 @@ def claim_task(user: str, task=None) -> dict:
 	task_row = {
 		key: value
 		for key, value in result.data.items()
-		if key not in (
+		if key
+		not in (
 			"assignment",
 			"concurrent_claims",
 			"claims_remaining",

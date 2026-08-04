@@ -265,9 +265,7 @@ def dispatch(request: Request) -> Response:
 			if anticipated:
 				logger.info("farmops-api %s %s user=%s: %s", anticipated, path, user, exc)
 			else:
-				logger.error(
-					"farmops-api 500 %s user=%s\n%s", path, user, traceback.format_exc()
-				)
+				logger.error("farmops-api 500 %s user=%s\n%s", path, user, traceback.format_exc())
 			return _failure(
 				session.status_hint(anticipated or 500),
 				_message_for(exc, anticipated),

@@ -234,7 +234,7 @@ def fetch_weather_now(args: dict) -> ToolResult:
 		)
 	elif report["crossed"]:
 		data["note"] = (
-			f"Reading appended, and it is at or above a threshold. "
+			"Reading appended, and it is at or above a threshold. "
 			+ (
 				"A Threshold Crossed event is now on this shift's timeline. "
 				if report["event_logged"]
@@ -317,8 +317,7 @@ def backfill_weather_for_shift(args: dict) -> ToolResult:
 	start = str(row.get("start_datetime") or "").strip()
 	if not start:
 		raise ToolError(
-			f"{row['name']} has no start_datetime, so there is no period to fetch. Nothing was "
-			"changed."
+			f"{row['name']} has no start_datetime, so there is no period to fetch. Nothing was changed."
 		)
 	place = _place_of(row)
 
@@ -355,11 +354,7 @@ def backfill_weather_for_shift(args: dict) -> ToolResult:
 
 	report = weather.append_readings(row["name"], within)
 	limits = weather.thresholds_for(str(row.get("company") or ""))
-	crossings = [
-		reading
-		for reading in within
-		if weather._heat_crossing(reading, limits)
-	]
+	crossings = [reading for reading in within if weather._heat_crossing(reading, limits)]
 
 	timeline = shifts.weather_of(row["name"])
 	data = {
@@ -458,11 +453,9 @@ def list_shifts_missing_weather(args: dict) -> ToolResult:
 	thin, no_place, complete = [], [], 0
 	for row in found:
 		name = str(row.get("name") or "")
-		hours = shifts.hours_between(
-			str(row.get("start_datetime") or ""), str(row.get("end_datetime") or "")
-		)
+		hours = shifts.hours_between(str(row.get("start_datetime") or ""), str(row.get("end_datetime") or ""))
 		readings = shifts.weather_of(name)
-		expected = max(1, int(round((hours or 0) * READINGS_PER_HOUR)))
+		expected = max(1, round((hours or 0) * READINGS_PER_HOUR))
 		entry = {
 			"name": name,
 			"company": row.get("company"),
@@ -556,9 +549,7 @@ def get_weather_timeline(args: dict) -> ToolResult:
 	from_dt = as_str(args, "from_datetime")
 	to_dt = as_str(args, "to_datetime")
 	if from_dt:
-		readings = [
-			entry for entry in readings if str(entry.get("reading_datetime") or "") >= from_dt
-		]
+		readings = [entry for entry in readings if str(entry.get("reading_datetime") or "") >= from_dt]
 	if to_dt:
 		readings = [entry for entry in readings if str(entry.get("reading_datetime") or "") <= to_dt]
 	truncated = len(readings) > TIMELINE_CAP
@@ -720,8 +711,7 @@ def get_weather_settings(args: dict) -> ToolResult:
 		)
 	else:
 		data["note"] = (
-			f"{len(open_now)} open shift(s) with coordinates are being documented every fifteen "
-			"minutes."
+			f"{len(open_now)} open shift(s) with coordinates are being documented every fifteen minutes."
 		)
 	return ToolResult(
 		data=data,

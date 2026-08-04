@@ -47,7 +47,8 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat, roles as role_lib
+from .. import compat
+from .. import roles as role_lib
 
 ALERT = "Compliance Alert"
 FARM_TASK = "Farm Task"
@@ -72,7 +73,7 @@ _SEVERITY_TO_URGENCY = {"Critical": "Critical", "Warning": "High", "Info": "Norm
 
 
 # ── tasks ───────────────────────────────────────────────────────────────────
-def task(row: dict, assignment: dict = None) -> dict:
+def task(row: dict, assignment: dict | None = None) -> dict:
 	"""One Farm Task in the shape `FarmOpsKit.FarmTask` decodes."""
 	row = dict(row or {})
 	live = dict(assignment or {})
@@ -113,7 +114,7 @@ def task(row: dict, assignment: dict = None) -> dict:
 	return out
 
 
-def tasks(rows: list, assignments: dict = None) -> list:
+def tasks(rows: list, assignments: dict | None = None) -> list:
 	"""A list of tasks, each carrying its live assignment where there is one."""
 	by_task = assignments or {}
 	return [task(row, by_task.get(str(row.get("name")))) for row in rows or [] if isinstance(row, dict)]

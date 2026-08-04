@@ -104,9 +104,7 @@ def generate_compliance_packet(args: dict) -> ToolResult:
 
 	regime = str(args.get("regime") or "").strip()
 	if regime and not training.canon(regime):
-		raise ToolError(
-			f"regime {regime!r} is not one this app knows. {training.vocabulary_note()}"
-		)
+		raise ToolError(f"regime {regime!r} is not one this app knows. {training.vocabulary_note()}")
 
 	filters = packets.validate_filters(spec, args.get("filters"))
 	result = spec.build(filters)

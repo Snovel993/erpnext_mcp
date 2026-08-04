@@ -482,9 +482,7 @@ class WaterTestStale(AlertTestCase):
 	def test_performing_the_water_test_auto_dismisses_it(self):
 		block = self.a_block(sprayed_days_ago=11, tested_days_ago=118)
 		self.assertFires(self.RULE)
-		self.tool_data(
-			"update_field", {"field": block["name"], "water_test_last_date": days_from_today(-1)}
-		)
+		self.tool_data("update_field", {"field": block["name"], "water_test_last_date": days_from_today(-1)})
 		self.assertAutoDismissed(self.RULE)
 
 
@@ -781,13 +779,13 @@ class ComingOffTheCalendar(AlertTestCase):
 		self.assertEqual(later["alert_count"], 1)
 
 	def test_a_snooze_in_the_past_is_refused(self):
-		message = self.tool_error(
-			"snooze_alert", {"alert": self.alert, "until_date": days_from_today(-1)}
-		)
+		message = self.tool_error("snooze_alert", {"alert": self.alert, "until_date": days_from_today(-1)})
 		self.assertIn("not in the future", message)
 
 	def test_a_dismissal_needs_a_reason_that_is_a_sentence(self):
-		self.assertIn("real explanation", self.tool_error("dismiss_alert", {"alert": self.alert, "reason": "no"}))
+		self.assertIn(
+			"real explanation", self.tool_error("dismiss_alert", {"alert": self.alert, "reason": "no"})
+		)
 
 	def test_a_dismissal_keeps_the_row_and_records_who_and_why(self):
 		"""The record that somebody looked at this and decided is itself
@@ -863,9 +861,7 @@ class BulkDismissal(AlertTestCase):
 
 	def test_it_refuses_with_no_filter_at_all(self):
 		"""'Dismiss the entire compliance calendar' is never what anybody means."""
-		message = self.tool_error(
-			"dismiss_alert_bulk", {"reason": "handled in the June walk-through"}
-		)
+		message = self.tool_error("dismiss_alert_bulk", {"reason": "handled in the June walk-through"})
 		self.assertIn("entire compliance calendar", message)
 
 	def test_the_first_call_writes_nothing_even_without_dry_run(self):
@@ -950,7 +946,9 @@ class TheCalendar(AlertTestCase):
 	def test_severity_min_filters_to_that_severity_and_worse(self):
 		data = self.tool_data("get_compliance_calendar", {"severity_min": "Warning"})
 		self.assertEqual(
-			sorted({alert["severity"] for group in data["by_category"].values() for alert in group["alerts"]}),
+			sorted(
+				{alert["severity"] for group in data["by_category"].values() for alert in group["alerts"]}
+			),
 			["Critical", "Warning"],
 		)
 
@@ -977,7 +975,9 @@ class TheCalendar(AlertTestCase):
 		self.a_certificate("Other Cert", company=OTHER, expires_in_days=5)
 		self.sweep()
 		data = self.tool_data("get_compliance_calendar", {"company": OTHER})
-		names = [alert["source_docname"] for group in data["by_category"].values() for alert in group["alerts"]]
+		names = [
+			alert["source_docname"] for group in data["by_category"].values() for alert in group["alerts"]
+		]
 		self.assertEqual(names, ["Other Cert"])
 
 	def test_an_alerts_age_is_reported_from_when_it_was_first_seen(self):
@@ -1017,9 +1017,7 @@ class TheReadinessScore(AlertTestCase):
 		one at 100% because the work got done."""
 		for name in ("Cert A", "Cert B"):
 			alert = next(
-				row["name"]
-				for row in STORE.rows("Compliance Alert")
-				if row["source_docname"] == name
+				row["name"] for row in STORE.rows("Compliance Alert") if row["source_docname"] == name
 			)
 			self.tool_data(
 				"dismiss_alert",

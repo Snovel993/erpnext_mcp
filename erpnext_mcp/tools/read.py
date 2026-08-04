@@ -415,10 +415,9 @@ def investigate_je_gl_link(args: dict) -> ToolResult:
 		matched = []
 		for row in link["rows"]:
 			claimed.add(row.get("name"))
-			disagrees = (
-				str(row.get("party_type") or "") != str(line.get("party_type") or "")
-				or str(row.get("party") or "") != str(line.get("party") or "")
-			)
+			disagrees = str(row.get("party_type") or "") != str(line.get("party_type") or "") or str(
+				row.get("party") or ""
+			) != str(line.get("party") or "")
 			if disagrees:
 				disagreements.append(index)
 			matched.append(
@@ -1167,7 +1166,17 @@ def _lines_by_entry(names: list) -> dict:
 		filters={"parent": ("in", names)},
 		fields=compat.existing_fields(
 			"Journal Entry Account",
-			("name", "parent", "idx", "account", "debit", "credit", "party_type", "party", "reference_detail_no"),
+			(
+				"name",
+				"parent",
+				"idx",
+				"account",
+				"debit",
+				"credit",
+				"party_type",
+				"party",
+				"reference_detail_no",
+			),
 		),
 		order_by="parent asc, idx asc",
 		limit=DRIFT_SCAN_CAP * 20,
@@ -1190,7 +1199,18 @@ def _gl_by_entry(names: list) -> dict:
 		filters=filters,
 		fields=compat.existing_fields(
 			"GL Entry",
-			("name", "voucher_no", "account", "debit", "credit", "party_type", "party", "voucher_detail_no", "posting_date", "cost_center"),
+			(
+				"name",
+				"voucher_no",
+				"account",
+				"debit",
+				"credit",
+				"party_type",
+				"party",
+				"voucher_detail_no",
+				"posting_date",
+				"cost_center",
+			),
 		),
 		order_by="voucher_no asc, name asc",
 		limit=DRIFT_SCAN_CAP * 20,

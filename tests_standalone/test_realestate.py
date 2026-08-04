@@ -269,9 +269,7 @@ class UpdateParcel(RealEstateTestCase):
 	def test_a_duplicate_assessor_id_is_refused_on_update_too(self):
 		self.a_parcel()
 		self.a_parcel("40-Acre", parcel_id="1N-13E-8-1300")
-		message = self.tool_error(
-			"update_parcel", {"parcel": "40-Acre", "parcel_id": "1N-13E-8-1200"}
-		)
+		message = self.tool_error("update_parcel", {"parcel": "40-Acre", "parcel_id": "1N-13E-8-1200"})
 		self.assertIn("already on", message)
 		self.assertIn("Nothing was changed", message)
 
@@ -467,9 +465,7 @@ class LinkParcelToAsset(RealEstateTestCase):
 	def test_a_dry_run_writes_nothing_and_shows_the_comparison(self):
 		self.a_parcel(appraised_value=1115000)
 		asset = self.an_asset()
-		data = self.tool_data(
-			"link_parcel_to_asset", {"parcel": "Red Camp", "asset": asset, "dry_run": True}
-		)
+		data = self.tool_data("link_parcel_to_asset", {"parcel": "Red Camp", "asset": asset, "dry_run": True})
 		self.assertTrue(data["dry_run"])
 		self.assertEqual(data["asset_summary"]["appraisal_over_book"], 875000.0)
 		self.assertIsNone(self.tool_data("get_parcel", {"parcel": "Red Camp"})["related_asset"])
@@ -502,9 +498,7 @@ class CreateLease(RealEstateTestCase):
 		self.assertIsNone(data["annualised_rent"])
 
 	def test_an_inbound_lease_is_recorded_the_same_way(self):
-		data = self.a_lease(
-			"Taken In", direction="Inbound", lessor="Highland Ltd Liability Co.", lessee=MAIN
-		)
+		data = self.a_lease("Taken In", direction="Inbound", lessor="Highland Ltd Liability Co.", lessee=MAIN)
 		self.assertEqual(data["direction"], "Inbound")
 		self.assertEqual(data["direction_check"]["verdict"], "consistent")
 
@@ -672,9 +666,7 @@ class CreateLease(RealEstateTestCase):
 class UpdateLease(RealEstateTestCase):
 	def test_it_changes_the_status_and_echoes_the_change(self):
 		self.a_lease()
-		data = self.tool_data(
-			"update_lease", {"lease": "Mill Creek Ground Lease 2025", "status": "Expired"}
-		)
+		data = self.tool_data("update_lease", {"lease": "Mill Creek Ground Lease 2025", "status": "Expired"})
 		self.assertEqual(data["status"], "Expired")
 		self.assertEqual(data["changes"]["status"], ["Active", "Expired"])
 
@@ -735,9 +727,7 @@ class UpdateLease(RealEstateTestCase):
 
 	def test_a_rent_change_says_it_restates_nothing_already_booked(self):
 		self.a_lease()
-		data = self.tool_data(
-			"update_lease", {"lease": "Mill Creek Ground Lease 2025", "rent_amount": 1800}
-		)
+		data = self.tool_data("update_lease", {"lease": "Mill Creek Ground Lease 2025", "rent_amount": 1800})
 		self.assertEqual(data["annualised_rent"], 21600.0)
 		self.assertIn("does not restate anything already booked", data["note"])
 
@@ -767,9 +757,7 @@ class ListLeases(RealEstateTestCase):
 	def test_a_crop_share_is_listed_rather_than_counted_as_zero(self):
 		self.a_portfolio()
 		data = self.tool_data("list_leases", {"owning_entity": MAIN})
-		self.assertEqual(
-			[row["rent_frequency"] for row in data["rent_not_annualisable"]], ["Crop Share"]
-		)
+		self.assertEqual([row["rent_frequency"] for row in data["rent_not_annualisable"]], ["Crop Share"])
 
 	def test_an_expired_lease_is_left_alone_and_reported(self):
 		"""Nothing here flips a status on a calendar. A test that the record is
@@ -778,9 +766,7 @@ class ListLeases(RealEstateTestCase):
 		data = self.tool_data("list_leases", {"owning_entity": MAIN})
 		self.assertEqual(data["active_past_expiration"], [f"Ran out - {MAIN_ABBR}"])
 		self.assertIn("NOTHING HERE CHANGED IT", data["warning"])
-		self.assertEqual(
-			self.tool_data("get_lease", {"lease": "Ran out"})["status"], "Active"
-		)
+		self.assertEqual(self.tool_data("get_lease", {"lease": "Ran out"})["status"], "Active")
 
 	def test_expiring_soon_uses_the_window_it_is_given(self):
 		self.a_lease("Soon", expiration_date="2026-08-15")
@@ -795,9 +781,7 @@ class ListLeases(RealEstateTestCase):
 		self.assertEqual(data["expiring_soon"][0]["counterparty_name"], "Cooper Family Orchards")
 
 	def test_a_negative_window_is_refused(self):
-		message = self.tool_error(
-			"list_leases", {"owning_entity": MAIN, "expiring_within_days": -1}
-		)
+		message = self.tool_error("list_leases", {"owning_entity": MAIN, "expiring_within_days": -1})
 		self.assertIn("zero or more days", message)
 
 	def test_active_on_filters_by_the_dates_on_the_record(self):
@@ -1151,7 +1135,9 @@ class ConveyanceRelinks(ConveyParcelTestCase):
 		)
 		data = self.convey()
 		self.assertEqual(data["migrated_fields"], 1)
-		self.assertEqual(STORE.get_raw("Field", "Yellow Camp Block 3 - MC")["parcel"], f"Mill Creek - {OTHER_ABBR}")
+		self.assertEqual(
+			STORE.get_raw("Field", "Yellow Camp Block 3 - MC")["parcel"], f"Mill Creek - {OTHER_ABBR}"
+		)
 
 	def test_their_docnames_do_not_change(self):
 		"""They are suffixed with the PARCEL's key, which the conveyance keeps —
@@ -1213,7 +1199,9 @@ class ConveyanceAttachments(ConveyParcelTestCase):
 		data = self.convey()
 		self.assertEqual(data["migrated_attachments"], 1)
 		self.assertEqual(
-			self.tool_data("list_attachments", {"doctype": "Parcel", "name": f"Mill Creek - {OTHER_ABBR}"})["count"],
+			self.tool_data("list_attachments", {"doctype": "Parcel", "name": f"Mill Creek - {OTHER_ABBR}"})[
+				"count"
+			],
 			1,
 		)
 
@@ -1222,9 +1210,7 @@ class ConveyanceAttachments(ConveyParcelTestCase):
 		self.attach()
 		self.convey()
 		orphans = [
-			row
-			for row in STORE.rows("File")
-			if row.get("attached_to_name") == f"Mill Creek - {MAIN_ABBR}"
+			row for row in STORE.rows("File") if row.get("attached_to_name") == f"Mill Creek - {MAIN_ABBR}"
 		]
 		self.assertEqual(orphans, [])
 
@@ -1527,6 +1513,7 @@ class ConveyanceSwitch(ConveyParcelTestCase):
 		"""The refusal that sends somebody here has to keep sending them here."""
 		self.a_parcel()
 		message = self.tool_error(
-			"update_parcel", {"parcel": f"Mill Creek - {MAIN_ABBR}", "owning_entity": OTHER, "county": "Hood River"}
+			"update_parcel",
+			{"parcel": f"Mill Creek - {MAIN_ABBR}", "owning_entity": OTHER, "county": "Hood River"},
 		)
 		self.assertIn("conveyance", message)

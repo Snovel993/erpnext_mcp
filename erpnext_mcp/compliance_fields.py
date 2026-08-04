@@ -1111,10 +1111,6 @@ def describe() -> dict:
 			for target in TARGETS
 		],
 		"field_count": sum(len(target.fields) for target in TARGETS),
-		"required_field_count": sum(
-			1 for target in TARGETS for spec in target.fields if spec.reqd
-		),
-		"frameworks": sorted(
-			{spec.framework for target in TARGETS for spec in target.fields}
-		),
+		"required_field_count": sum(1 for target in TARGETS for spec in target.fields if spec.reqd),
+		"frameworks": sorted({spec.framework for target in TARGETS for spec in target.fields}),
 	}

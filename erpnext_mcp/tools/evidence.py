@@ -235,7 +235,11 @@ def _resolve_holder(holder: str) -> tuple:
 	if not holder:
 		return None, None
 	try:
-		for doctype, title_field in ((RELATED_PARTY, "party_name"), (FAMILY, "family_member_name"), (EMPLOYEE, "employee_name")):
+		for doctype, title_field in (
+			(RELATED_PARTY, "party_name"),
+			(FAMILY, "family_member_name"),
+			(EMPLOYEE, "employee_name"),
+		):
 			if not compat.doctype_exists(doctype):
 				continue
 			if frappe.db.exists(doctype, holder):
@@ -312,9 +316,7 @@ def _policy_notes(policy: dict) -> list:
 			"expect an annual review."
 		)
 	if policy["review_overdue"]:
-		out.append(
-			f"Overdue for review since {policy['review_due_date']}, and still in force."
-		)
+		out.append(f"Overdue for review since {policy['review_due_date']}, and still in force.")
 	if policy["status"] == "Draft":
 		out.append(
 			"Status is Draft: written but not adopted. It will not be produced in an audit "
@@ -381,7 +383,14 @@ def get_compliance_policy(args: dict) -> ToolResult:
 	"""One procedure in full, with its version chain and every audit that cited it."""
 	_require(POLICY)
 	company = _entity(args)
-	row = _row(POLICY, as_str(args, "policy", required=True), _POLICY_FIELDS, "policy", "list_compliance_policies", company or "")
+	row = _row(
+		POLICY,
+		as_str(args, "policy", required=True),
+		_POLICY_FIELDS,
+		"policy",
+		"list_compliance_policies",
+		company or "",
+	)
 	described = _describe_policy(row)
 
 	chain = _policy_chain(row["name"])
@@ -435,9 +444,7 @@ def _policy_chain(name: str) -> list:
 	ordered = [*reversed(backwards), name, *forwards]
 	out = []
 	for entry in ordered:
-		row = frappe.db.get_value(
-			POLICY, entry, compat.existing_fields(POLICY, _POLICY_FIELDS), as_dict=True
-		)
+		row = frappe.db.get_value(POLICY, entry, compat.existing_fields(POLICY, _POLICY_FIELDS), as_dict=True)
 		if not row:
 			continue
 		described = _describe_policy(dict(row))
@@ -550,7 +557,14 @@ def update_compliance_policy(args: dict) -> ToolResult:
 	"""Change a procedure. Cannot re-key it and cannot rewrite its chain."""
 	_require(POLICY)
 	company = _entity(args)
-	row = _row(POLICY, as_str(args, "policy", required=True), _POLICY_FIELDS, "policy", "list_compliance_policies", company or "")
+	row = _row(
+		POLICY,
+		as_str(args, "policy", required=True),
+		_POLICY_FIELDS,
+		"policy",
+		"list_compliance_policies",
+		company or "",
+	)
 
 	if as_str(args, "policy_name"):
 		raise ToolError(
@@ -611,7 +625,14 @@ def supersede_compliance_policy(args: dict) -> ToolResult:
 	"""
 	_require(POLICY)
 	company = _entity(args)
-	old = _row(POLICY, as_str(args, "policy", required=True), _POLICY_FIELDS, "policy", "list_compliance_policies", company or "")
+	old = _row(
+		POLICY,
+		as_str(args, "policy", required=True),
+		_POLICY_FIELDS,
+		"policy",
+		"list_compliance_policies",
+		company or "",
+	)
 	new = _row(
 		POLICY,
 		as_str(args, "superseded_by", required=True),
@@ -623,9 +644,7 @@ def supersede_compliance_policy(args: dict) -> ToolResult:
 	reason = _reason(args)
 
 	if old["name"] == new["name"]:
-		raise ToolError(
-			f"{old['name']} cannot supersede itself. Nothing was changed."
-		)
+		raise ToolError(f"{old['name']} cannot supersede itself. Nothing was changed.")
 	if old.get("superseded_by"):
 		raise ToolError(
 			f"{old['name']} was already superseded by {old['superseded_by']}. A procedure has "
@@ -633,9 +652,7 @@ def supersede_compliance_policy(args: dict) -> ToolResult:
 			"wrong, correct it in the Desk where both ends are visible. Nothing was changed."
 		)
 	if new.get("supersedes") and new["supersedes"] != old["name"]:
-		raise ToolError(
-			f"{new['name']} already supersedes {new['supersedes']}. Nothing was changed."
-		)
+		raise ToolError(f"{new['name']} already supersedes {new['supersedes']}. Nothing was changed.")
 
 	old_effective = _date(old.get("effective_date"))
 	new_effective = _date(new.get("effective_date"))
@@ -779,8 +796,7 @@ def _cert_notes(cert: dict) -> list:
 		)
 	if not cert["has_certificate"]:
 		out.append(
-			"No certificate attached. An auditor asks to see the certificate, not a record "
-			"saying one exists."
+			"No certificate attached. An auditor asks to see the certificate, not a record saying one exists."
 		)
 	if cert["status"] == "Active" and cert["expired"]:
 		out.append(
@@ -947,7 +963,9 @@ def create_certification(args: dict) -> ToolResult:
 	if window is not None:
 		doc.renewal_window_days = window
 
-	doc.cert_type = as_choice(CERTIFICATION, "cert_type", as_str(args, "cert_type", required=True), "cert_type")
+	doc.cert_type = as_choice(
+		CERTIFICATION, "cert_type", as_str(args, "cert_type", required=True), "cert_type"
+	)
 	status = as_str(args, "status")
 	if status:
 		doc.status = as_choice(CERTIFICATION, "status", status, "status")
@@ -979,9 +997,7 @@ def update_certification(args: dict) -> ToolResult:
 	)
 
 	if as_str(args, "cert_name"):
-		raise ToolError(
-			"cert_name cannot be changed: it is the docname. Nothing was changed."
-		)
+		raise ToolError("cert_name cannot be changed: it is the docname. Nothing was changed.")
 
 	wanted_expiry = as_date(args, "expiration_date") if "expiration_date" in args else None
 	current_expiry = _date(row.get("expiration_date"))
@@ -1266,7 +1282,14 @@ def get_regulatory_filing(args: dict) -> ToolResult:
 	"""One filing with its response and both attached documents."""
 	_require(FILING)
 	company = _entity(args)
-	row = _row(FILING, as_str(args, "filing", required=True), _FILING_FIELDS, "filing", "list_regulatory_filings", company or "")
+	row = _row(
+		FILING,
+		as_str(args, "filing", required=True),
+		_FILING_FIELDS,
+		"filing",
+		"list_regulatory_filings",
+		company or "",
+	)
 	described = _describe_filing(row)
 	return ToolResult(
 		data={**described, "compliance_notes": _filing_notes(described)},
@@ -1327,7 +1350,14 @@ def update_regulatory_filing(args: dict) -> ToolResult:
 	"""Record the response, the docket number, the documents, the status."""
 	_require(FILING)
 	company = _entity(args)
-	row = _row(FILING, as_str(args, "filing", required=True), _FILING_FIELDS, "filing", "list_regulatory_filings", company or "")
+	row = _row(
+		FILING,
+		as_str(args, "filing", required=True),
+		_FILING_FIELDS,
+		"filing",
+		"list_regulatory_filings",
+		company or "",
+	)
 
 	if as_str(args, "filing_name"):
 		raise ToolError("filing_name cannot be changed: it is the docname. Nothing was changed.")
@@ -1514,8 +1544,7 @@ def list_audit_events(args: dict) -> ToolResult:
 			),
 		},
 		summary=(
-			f"{len(audits)} audit(s), {open_actions} open corrective action(s), "
-			f"{overdue_actions} overdue"
+			f"{len(audits)} audit(s), {open_actions} open corrective action(s), {overdue_actions} overdue"
 		),
 	)
 
@@ -1524,7 +1553,14 @@ def get_audit_event(args: dict) -> ToolResult:
 	"""One audit in full: scope, findings, and every action with its deadline."""
 	_require(AUDIT)
 	company = _entity(args)
-	row = _row(AUDIT, as_str(args, "audit", required=True), _AUDIT_FIELDS, "audit", "list_audit_events", company or "")
+	row = _row(
+		AUDIT,
+		as_str(args, "audit", required=True),
+		_AUDIT_FIELDS,
+		"audit",
+		"list_audit_events",
+		company or "",
+	)
 	today = frappe.utils.today()
 	actions = _audit_actions(row["name"], today)
 	described = _describe_audit(row, actions, today)
@@ -1607,9 +1643,7 @@ def create_audit_event(args: dict) -> ToolResult:
 	audit_name = as_str(args, "audit_name", required=True)
 
 	if frappe.db.exists(AUDIT, audit_name):
-		raise ToolError(
-			f"there is already an Audit Event called {audit_name!r}. Nothing was created."
-		)
+		raise ToolError(f"there is already an Audit Event called {audit_name!r}. Nothing was created.")
 
 	doc = frappe.new_doc(AUDIT)
 	doc.audit_name = audit_name
@@ -1671,7 +1705,14 @@ def update_audit_event(args: dict) -> ToolResult:
 	"""
 	_require(AUDIT)
 	company = _entity(args)
-	row = _row(AUDIT, as_str(args, "audit", required=True), _AUDIT_FIELDS, "audit", "list_audit_events", company or "")
+	row = _row(
+		AUDIT,
+		as_str(args, "audit", required=True),
+		_AUDIT_FIELDS,
+		"audit",
+		"list_audit_events",
+		company or "",
+	)
 
 	if as_str(args, "audit_name"):
 		raise ToolError("audit_name cannot be changed: it is the docname. Nothing was changed.")
@@ -1771,7 +1812,14 @@ def close_audit_event(args: dict) -> ToolResult:
 	"""Declare an audit finished. REFUSES while any corrective action is open."""
 	_require(AUDIT)
 	company = _entity(args)
-	row = _row(AUDIT, as_str(args, "audit", required=True), _AUDIT_FIELDS, "audit", "list_audit_events", company or "")
+	row = _row(
+		AUDIT,
+		as_str(args, "audit", required=True),
+		_AUDIT_FIELDS,
+		"audit",
+		"list_audit_events",
+		company or "",
+	)
 	today = frappe.utils.today()
 	actions = _audit_actions(row["name"], today)
 	open_actions = [action for action in actions if action["open"]]
@@ -1842,9 +1890,7 @@ def close_audit_event(args: dict) -> ToolResult:
 				+ "generate_audit_packet will now include the period covering it; while an "
 				"action was open it refused."
 			),
-			"next_step": (
-				"The audit_action_overdue alert on this record auto-dismisses on the next sweep."
-			),
+			"next_step": ("The audit_action_overdue alert on this record auto-dismisses on the next sweep."),
 		},
 		summary=f"closed audit {row['name']} on {closure_date} — {closure_note}",
 		docstatus_delta="0 → 0 (updated)",

@@ -146,9 +146,7 @@ def set_opening_balance(args: dict) -> ToolResult:
 		"posting_date": posting_date,
 		"opening_equity_account": equity_account,
 		"opening_equity_resolved_by": equity_source,
-		"opening_equity_side": (
-			None if plug is None else ("credit" if difference > 0 else "debit")
-		),
+		"opening_equity_side": (None if plug is None else ("credit" if difference > 0 else "debit")),
 		"opening_equity_amount": None if plug is None else abs(difference),
 		"entries": [
 			{
@@ -609,9 +607,7 @@ def _validate_entry_account(docname: str, company: str, index: int, container: s
 		frappe.db.get_value(
 			"Account",
 			docname,
-			compat.existing_fields(
-				"Account", ("name", "company", "is_group", "root_type", "disabled")
-			),
+			compat.existing_fields("Account", ("name", "company", "is_group", "root_type", "disabled")),
 			as_dict=True,
 		)
 		or {}
@@ -628,8 +624,7 @@ def _validate_entry_account(docname: str, company: str, index: int, container: s
 		)
 	if int(account.get("disabled") or 0):
 		raise ToolError(
-			f"{container}[{index}]: {docname!r} is disabled, so nothing can post to it. Nothing was "
-			"created."
+			f"{container}[{index}]: {docname!r} is disabled, so nothing can post to it. Nothing was created."
 		)
 
 
@@ -716,9 +711,7 @@ def _leaf_equity_accounts(company: str) -> list[dict]:
 		limit=500,
 	)
 	return [
-		dict(row)
-		for row in rows
-		if not int(row.get("is_group") or 0) and not int(row.get("disabled") or 0)
+		dict(row) for row in rows if not int(row.get("is_group") or 0) and not int(row.get("disabled") or 0)
 	]
 
 
@@ -727,9 +720,7 @@ def _validate_equity_account(docname: str, company: str, label: str) -> None:
 		frappe.db.get_value(
 			"Account",
 			docname,
-			compat.existing_fields(
-				"Account", ("name", "company", "is_group", "root_type", "disabled")
-			),
+			compat.existing_fields("Account", ("name", "company", "is_group", "root_type", "disabled")),
 			as_dict=True,
 		)
 		or {}

@@ -138,9 +138,7 @@ class EvidenceIsMandatory(DispatchTestCase):
 	"""There is no path to a task somebody can close with a tick in a box."""
 
 	def test_a_task_with_no_contract_is_refused(self):
-		message = self.tool_error(
-			"create_farm_task", {"task_name": "Walk it", "task_type": "Inspection"}
-		)
+		message = self.tool_error("create_farm_task", {"task_name": "Walk it", "task_type": "Inspection"})
 		self.assertIn("evidence_required is required", message)
 		self.assertIn("tick in a box", message)
 		self.assertIn("Nothing was created", message)
@@ -450,9 +448,7 @@ class TheLoopCloses(DispatchTestCase):
 			location_doctype="Housing Unit",
 			location=unit,
 		)
-		done = self.complete(
-			task, signature_file="", record_data={"co_detector_result": "Fail"}
-		)
+		done = self.complete(task, signature_file="", record_data={"co_detector_result": "Fail"})
 		self.assertEqual(done["final_state"], "Awaiting-Review")
 		test = STORE.get_raw("Detector Test", done["produced_record"])
 		self.assertEqual(test["co_detector_result"], "Fail")
@@ -746,9 +742,7 @@ class TheBoard(DispatchTestCase):
 		task = self.claimed()
 		self.complete(task)
 		self.assertEqual(self.tool_data("list_dispatch_board", {})["count"], 0)
-		self.assertEqual(
-			self.tool_data("list_dispatch_board", {"include_closed": True})["count"], 1
-		)
+		self.assertEqual(self.tool_data("list_dispatch_board", {"include_closed": True})["count"], 1)
 
 	def test_a_state_filter_that_is_not_a_state_is_refused(self):
 		message = self.tool_error("list_dispatch_board", {"state_filter": "Nearly Done"})
@@ -854,9 +848,7 @@ class TheKanbanBoard(DispatchTestCase):
 		report = dashboard.install_dispatch_board()
 		self.assertEqual(report["board_name"], "Farm Task Dispatch")
 		self.assertTrue(frappe.db.exists("Kanban Board", "Farm Task Dispatch"))
-		self.assertEqual(
-			report["route"], "/app/farm-task/view/kanban/Farm Task Dispatch"
-		)
+		self.assertEqual(report["route"], "/app/farm-task/view/kanban/Farm Task Dispatch")
 
 	def test_a_site_without_the_kanban_doctype_is_told_rather_than_broken(self):
 		from .harness import INSTALLED_DOCTYPES
@@ -1006,9 +998,7 @@ class MigrateSaysWhatItCouldNotBuild(DispatchTestCase):
 		somebody has to remember to wire up."""
 		from erpnext_mcp import dashboard as dashboard_module
 
-		self.assertEqual(
-			dashboard_module.install_command_center.__module__, "erpnext_mcp.dashboard"
-		)
+		self.assertEqual(dashboard_module.install_command_center.__module__, "erpnext_mcp.dashboard")
 		output = self.migrate_output()
 		self.assertNotIn("could not build", output)
 
@@ -1118,7 +1108,9 @@ class TheWorkspaceHasSomethingOnIt(DispatchTestCase):
 	def test_a_page_somebody_arranged_is_never_touched(self):
 		dashboard.install_dispatch_board()
 		workspace = frappe.get_doc("Workspace", "Farm Task Dispatch")
-		workspace.content = json.dumps([{"id": "mine", "type": "header", "data": {"text": "Mine", "col": 12}}])
+		workspace.content = json.dumps(
+			[{"id": "mine", "type": "header", "data": {"text": "Mine", "col": 12}}]
+		)
 		workspace.save(ignore_permissions=True)
 
 		report = dashboard.install_dispatch_board()
@@ -1179,9 +1171,7 @@ class GeneratingFromAlerts(DispatchTestCase):
 
 	def test_a_dry_run_writes_nothing_and_says_what_it_would_do(self):
 		self.a_camp_with_alerts(units=1)
-		report = self.tool_data(
-			"generate_tasks_from_compliance_alerts", {"company": MAIN, "dry_run": True}
-		)
+		report = self.tool_data("generate_tasks_from_compliance_alerts", {"company": MAIN, "dry_run": True})
 		self.assertEqual(report["created_count"], 2)
 		self.assertFalse(STORE.rows("Farm Task"))
 		self.assertIn("DRY RUN", report["note"])
@@ -1219,9 +1209,7 @@ class GeneratingFromAlerts(DispatchTestCase):
 		report = self.tool_data("generate_tasks_from_compliance_alerts", {"company": MAIN})
 		for entry in report["created"]:
 			with self.subTest(alert=entry["alert"]):
-				self.assertEqual(
-					STORE.get_raw("Farm Task", entry["task"])["source_alert"], entry["alert"]
-				)
+				self.assertEqual(STORE.get_raw("Farm Task", entry["task"])["source_alert"], entry["alert"])
 
 	def test_an_alert_type_filter_narrows_it(self):
 		self.a_camp_with_alerts(units=2)

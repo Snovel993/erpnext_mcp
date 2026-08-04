@@ -725,9 +725,21 @@ class SetCompanyDefaultsV8(DimensionToolsTestCase):
 
 	#: (docname, name, number, root_type, account_type)
 	EXTRA_ACCOUNTS = (
-		("1900 - Construction in Progress", "Construction in Progress", "1900", "Asset", "Capital Work in Progress"),
+		(
+			"1900 - Construction in Progress",
+			"Construction in Progress",
+			"1900",
+			"Asset",
+			"Capital Work in Progress",
+		),
 		("1910 - Barn Extension", "Barn Extension", "1910", "Asset", "Fixed Asset"),
-		("2200 - Stock Received Not Billed", "Stock Received Not Billed", "2200", "Liability", "Stock Received But Not Billed"),
+		(
+			"2200 - Stock Received Not Billed",
+			"Stock Received Not Billed",
+			"2200",
+			"Liability",
+			"Stock Received But Not Billed",
+		),
 		("2400 - Advances From Customers", "Advances From Customers", "2400", "Liability", "Receivable"),
 		("5900 - Gain Loss on Disposal", "Gain Loss on Disposal", "5900", "Expense", ""),
 		("5910 - Stock Adjustment", "Stock Adjustment", "5910", "Expense", "Stock Adjustment"),

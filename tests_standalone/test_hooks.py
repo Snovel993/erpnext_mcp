@@ -330,9 +330,7 @@ class TheScheduledJobs(unittest.TestCase):
 			{
 				"cron": {
 					"*/15 * * * *": ["erpnext_mcp.services.weather.sweep_open_shifts"],
-					"0 2 * * *": [
-						"erpnext_mcp.services.windowed_reports.recompute_kpi_history_incremental"
-					],
+					"0 2 * * *": ["erpnext_mcp.services.windowed_reports.recompute_kpi_history_incremental"],
 				},
 				"hourly": ["erpnext_mcp.alerts.sweep"],
 				"daily": [

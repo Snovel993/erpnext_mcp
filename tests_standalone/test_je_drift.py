@@ -149,9 +149,7 @@ class FindingDrift(DriftTestCase):
 		)["name"]
 		self.tool_data("submit_journal_entry", {"name": name})
 		post_journal_entry_gl(name)
-		equity_row = next(
-			row for row in self.gl_rows(name) if row.get("account") == MEMBER_DISTRIBUTIONS
-		)
+		equity_row = next(row for row in self.gl_rows(name) if row.get("account") == MEMBER_DISTRIBUTIONS)
 		equity_row.update({"party_type": None, "party": None})
 		data = self.tool_data("find_drifted_je_attributions", RANGE)
 		self.assertEqual(data["drifted"][0]["line_index"], 2)
@@ -302,9 +300,7 @@ class TheAccJv73Damage(DriftTestCase):
 
 	def test_the_equity_account_is_not_special(self):
 		"""It looked like an Equity quirk on the day. It was not."""
-		self.assertEqual(
-			STORE.get_raw("Account", MEMBER_DISTRIBUTIONS)["root_type"], "Equity"
-		)
+		self.assertEqual(STORE.get_raw("Account", MEMBER_DISTRIBUTIONS)["root_type"], "Equity")
 		row = self.tool_data("find_drifted_je_attributions", RANGE)["drifted"][0]
 		self.assertEqual(row["gl_entry"], self.gl_rows(self.name)[0]["name"])
 
@@ -350,9 +346,7 @@ class TheAccJv73Damage(DriftTestCase):
 			},
 		)
 		self.assertIn("clean second scan", result["next_step"])
-		self.assertEqual(
-			self.tool_data("find_drifted_je_attributions", RANGE)["drifted_line_count"], 0
-		)
+		self.assertEqual(self.tool_data("find_drifted_je_attributions", RANGE)["drifted_line_count"], 0)
 
 
 # ── the v0.15.0 idempotence fix ─────────────────────────────────────────────
@@ -502,7 +496,9 @@ class RepairingABatch(DriftTestCase):
 		"""Each item is a different voucher. A run that stopped half way would
 		leave the ledger in a state neither report describes."""
 		repairs = list(self.found["repair_input"])
-		repairs.insert(1, {"journal_entry": "ACC-JV-NOPE", "line_index": 1, "party_type": "Family", "party": ALEX})
+		repairs.insert(
+			1, {"journal_entry": "ACC-JV-NOPE", "line_index": 1, "party_type": "Family", "party": ALEX}
+		)
 		data = self.tool_data(
 			"repair_drifted_je_attributions",
 			{"repairs": repairs, "reason": "repairing v0.13.0 attribution drift", "dry_run": False},
@@ -556,7 +552,14 @@ class RepairingABatch(DriftTestCase):
 		message = self.tool_error(
 			"repair_drifted_je_attributions",
 			{
-				"repairs": [{"journal_entry": self.names[0], "line_index": "first", "party_type": "Family", "party": ALEX}],
+				"repairs": [
+					{
+						"journal_entry": self.names[0],
+						"line_index": "first",
+						"party_type": "Family",
+						"party": ALEX,
+					}
+				],
 				"reason": "repairing v0.13.0 attribution drift",
 			},
 		)

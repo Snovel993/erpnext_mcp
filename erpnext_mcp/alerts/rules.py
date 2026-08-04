@@ -256,8 +256,7 @@ def _certificate_regimes(row: dict) -> list:
 CERT_REGIMES = tuple(
 	regime
 	for regime in training_records.REGIMES
-	if regime == "Internal"
-	or any(regime in produced for _needles, produced in CERT_REGIME_HEURISTICS)
+	if regime == "Internal" or any(regime in produced for _needles, produced in CERT_REGIME_HEURISTICS)
 )
 
 
@@ -330,7 +329,8 @@ def _scan_certifications(context: dict) -> list:
 				company=str(row.get("company") or ""),
 				category=(
 					"Workforce"
-					if str(row.get("cert_type") or "") in ("Applicator License", "Farm Labor Contractor License")
+					if str(row.get("cert_type") or "")
+					in ("Applicator License", "Farm Labor Contractor License")
 					else "Certifications"
 				),
 				# PER ROW, not per rule. This one rule fires on eleven kinds of
@@ -382,7 +382,16 @@ def _scan_policies(context: dict) -> list:
 	for row in _rows(
 		"Compliance Policy",
 		_company_filter({}, context.get("company") or ""),
-		("name", "policy_name", "category", "status", "company", "version", "review_due_date", "policy_owner"),
+		(
+			"name",
+			"policy_name",
+			"category",
+			"status",
+			"company",
+			"version",
+			"review_due_date",
+			"policy_owner",
+		),
 	):
 		if str(row.get("status") or "Active") != "Active":
 			# Draft was never adopted; Superseded and Retired are history. Only a
@@ -401,8 +410,7 @@ def _scan_policies(context: dict) -> list:
 					+ (f" ({row['version']})" if row.get("version") else "")
 					+ f" was due for review on {row['review_due_date']}, {overdue} day(s) ago, and is "
 					"still in force. GAP and GlobalGAP both expect an annual review; a procedure "
-					"nobody has read in years is a finding whether or not it is still correct."
-					+ owner
+					"nobody has read in years is a finding whether or not it is still correct." + owner
 				),
 				severity=SEVERITY_WARNING,
 				due_date=str(row["review_due_date"]),
@@ -481,13 +489,13 @@ def _scan_water_tests(context: dict) -> list:
 			continue
 
 		if tested is None:
-			detail = (
-				"has NO agricultural water test on record at all"
-			)
+			detail = "has NO agricultural water test on record at all"
 			due = ""
 		else:
 			detail = f"was last water-tested {tested} days ago, on {row['water_test_last_date']}"
-			due = str(frappe.utils.add_days(frappe.utils.getdate(row["water_test_last_date"]), WATER_TEST_DAYS))
+			due = str(
+				frappe.utils.add_days(frappe.utils.getdate(row["water_test_last_date"]), WATER_TEST_DAYS)
+			)
 
 		out.append(
 			Observation(
@@ -543,7 +551,15 @@ def _scan_housing_inspections(context: dict) -> list:
 	for row in _rows(
 		"Housing Unit",
 		_company_filter({}, context.get("company") or "", "owning_entity"),
-		("name", "unit_name", "unit_type", "parcel", "owning_entity", "condition", "last_habitability_inspection"),
+		(
+			"name",
+			"unit_name",
+			"unit_type",
+			"parcel",
+			"owning_entity",
+			"condition",
+			"last_habitability_inspection",
+		),
 	):
 		if str(row.get("unit_type") or "") in NON_RESIDENTIAL_TYPES:
 			continue
@@ -864,9 +880,7 @@ def _scan_filings(context: dict) -> list:
 		if remaining is None or remaining > FILING_RESPONSE_DAYS:
 			continue
 		docket = f" under docket {row['docket_number']}" if row.get("docket_number") else ""
-		when = (
-			f"was due {abs(remaining)} day(s) ago" if remaining < 0 else f"is due in {remaining} day(s)"
-		)
+		when = f"was due {abs(remaining)} day(s) ago" if remaining < 0 else f"is due in {remaining} day(s)"
 		out.append(
 			Observation(
 				source_doctype="Regulatory Filing",
@@ -951,7 +965,9 @@ def _scan_corrective_actions(context: dict) -> list:
 		worst = max(overdue, key=lambda entry: entry[2])
 		severity = (
 			SEVERITY_CRITICAL
-			if any(str(action.get("severity") or "") in ("Major", "Critical") for _i, action, _l, _d in overdue)
+			if any(
+				str(action.get("severity") or "") in ("Major", "Critical") for _i, action, _l, _d in overdue
+			)
 			else SEVERITY_WARNING
 		)
 		out.append(
@@ -1294,17 +1310,14 @@ def _scan_training(context: dict) -> list:
 				f"{what} for {who} expires in {remaining} day(s), on {expires}. Inside "
 				f"{training_records.CRITICAL_WINDOW_DAYS} days, booking a course is no longer "
 				"reliably enough to avoid the lapse — courses run on a published schedule and "
-				"the next one may be after the date."
-				+ _training_consequence(regimes)
-				+ coverage
+				"the next one may be after the date." + _training_consequence(regimes) + coverage
 			)
 		else:
 			severity = SEVERITY_WARNING
 			message = (
 				f"{what} for {who} expires in {remaining} day(s), on {expires}, which is inside "
 				f"the {training_records.EXPIRING_WINDOW_DAYS}-day window a retraining actually "
-				"takes to arrange — trainer, crew, language, and a room."
-				+ coverage
+				"takes to arrange — trainer, crew, language, and a room." + coverage
 			)
 
 		out.append(
@@ -1507,9 +1520,10 @@ def _review_lag(target: ReviewTarget, row: dict, today: str) -> int | None:
 	save: a review date with nobody attached is what an auditor is trained to
 	disbelieve, and treating it as satisfied would hide exactly that record.
 	"""
-	if str(row.get(target.reviewed_by_field) or "").strip() and str(
-		row.get(target.reviewed_on_field) or ""
-	).strip():
+	if (
+		str(row.get(target.reviewed_by_field) or "").strip()
+		and str(row.get(target.reviewed_on_field) or "").strip()
+	):
 		return None
 	return days_since(today, str(row.get("creation") or "")[:10])
 
@@ -1551,7 +1565,8 @@ def _scan_supervisor_reviews(context: dict) -> list:
 			target.activity_field,
 			target.reviewed_by_field,
 			target.reviewed_on_field,
-		) + tuple(target.detail_fields)
+			*target.detail_fields,
+		)
 		for row in _rows(target.doctype, _company_filter({}, context.get("company") or ""), fields):
 			age = _review_lag(target, row, today)
 			if age is None or age < REVIEW_WARNING_DAYS:

@@ -963,11 +963,11 @@ GENDERS = ("Female", "Male", "Non-Conforming", "Prefer not to say")
 
 
 def _hr_masters() -> None:
-	STORE.seed("Department", [{"name": name, "department_name": name, "company": MAIN} for name in DEPARTMENTS])
-	STORE.seed("Designation", [{"name": name, "designation_name": name} for name in DESIGNATIONS])
 	STORE.seed(
-		"Employment Type", [{"name": name, "employee_type_name": name} for name in EMPLOYMENT_TYPES]
+		"Department", [{"name": name, "department_name": name, "company": MAIN} for name in DEPARTMENTS]
 	)
+	STORE.seed("Designation", [{"name": name, "designation_name": name} for name in DESIGNATIONS])
+	STORE.seed("Employment Type", [{"name": name, "employee_type_name": name} for name in EMPLOYMENT_TYPES])
 	STORE.seed("Gender", [{"name": name, "gender": name} for name in GENDERS])
 
 
@@ -1190,9 +1190,7 @@ def _equity_chart() -> None:
 		[
 			_account(EQUITY_ROOT, "Equity", "", "Equity", "", is_group=1, parent=""),
 			_account(MEMBER_CAPITAL, "Member Capital", "3100", "Equity", "", parent=EQUITY_ROOT),
-			_account(
-				MEMBER_DISTRIBUTIONS, "Member Distributions", "3200", "Equity", "", parent=EQUITY_ROOT
-			),
+			_account(MEMBER_DISTRIBUTIONS, "Member Distributions", "3200", "Equity", "", parent=EQUITY_ROOT),
 			_account(
 				ACCUMULATED_DEPRECIATION,
 				"Accumulated Depreciation",
@@ -1366,9 +1364,7 @@ def seed_v8() -> None:
 	STORE.seed(
 		"Account",
 		[
-			_account(
-				OPENING_EQUITY, "Opening Balance Equity", "3300", "Equity", "", parent=EQUITY_ROOT
-			),
+			_account(OPENING_EQUITY, "Opening Balance Equity", "3300", "Equity", "", parent=EQUITY_ROOT),
 			_account(NOTES_PAYABLE, "Notes Payable", "2310", "Liability", "", parent=LIABILITIES_ROOT),
 			_account(CREDIT_CARD, "Credit Card", "2150", "Liability", "", parent=LIABILITIES_ROOT),
 			_account(INTEREST_EXPENSE, "Interest Expense", "5300", "Expense", "", parent=EXPENSES_ROOT),
@@ -1468,7 +1464,12 @@ def _suppliers() -> None:
 	STORE.seed(
 		"Supplier",
 		[
-			{"name": SORREN, "supplier_name": SORREN, "supplier_type": "Company", "supplier_group": "Services"},
+			{
+				"name": SORREN,
+				"supplier_name": SORREN,
+				"supplier_type": "Company",
+				"supplier_group": "Services",
+			},
 			{"name": MITCHELL, "supplier_name": MITCHELL, "supplier_type": "Individual"},
 			{
 				"name": FRIEND_REAGAN,

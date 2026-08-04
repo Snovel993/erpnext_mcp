@@ -189,9 +189,7 @@ def generate_1099_prefill(args: dict) -> ToolResult:
 	# so a caller sending `threshold: null` would silently get a nothing-excluded
 	# run rather than the statutory floor.
 	raw_threshold = args.get("threshold")
-	threshold = (
-		DEFAULT_THRESHOLD if raw_threshold in (None, "") else as_float(raw_threshold, "threshold")
-	)
+	threshold = DEFAULT_THRESHOLD if raw_threshold in (None, "") else as_float(raw_threshold, "threshold")
 	if threshold < 0:
 		raise ToolError(f"threshold must be zero or more, got {threshold}")
 
@@ -232,9 +230,7 @@ def generate_1099_prefill(args: dict) -> ToolResult:
 	payer = _payer(company, args)
 	workbook = _workbook(company, tax_year, threshold, payer, forms, below, exempt_above, ledger)
 	workbook_bytes = workbook.render()
-	form_documents = (
-		[(row, _form_pdf(payer, row, tax_year)) for row in forms] if include_forms else []
-	)
+	form_documents = [(row, _form_pdf(payer, row, tax_year)) for row in forms] if include_forms else []
 
 	summary_rows = [_public_row(row) for row in forms]
 	data = {
@@ -325,9 +321,7 @@ def generate_1099_prefill(args: dict) -> ToolResult:
 			}
 		)
 		if output_dir:
-			written.append(
-				artifacts.write_output(os.path.join(output_dir, file_name), payload, overwrite)
-			)
+			written.append(artifacts.write_output(os.path.join(output_dir, file_name), payload, overwrite))
 
 	data["governance_document"] = archive.name
 	data["workbook"] = artifacts.describe_attachment(attachment, workbook_bytes)
@@ -492,7 +486,8 @@ def _aggregate(rows) -> dict:
 			figures["by_cost_center"].get(cost_center, 0.0) + amount, 2
 		)
 		account = figures["by_account"].setdefault(
-			row.get("account"), {"debit": 0.0, "credit": 0.0, "counted": 0.0, "payable": row.get("account") in payable}
+			row.get("account"),
+			{"debit": 0.0, "credit": 0.0, "counted": 0.0, "payable": row.get("account") in payable},
 		)
 		account["debit"] = round(account["debit"] + debit, 2)
 		account["credit"] = round(account["credit"] + credit, 2)
@@ -533,9 +528,7 @@ def _classify(company: str, party: str, figures: dict) -> dict:
 		"related_party": related.get("name") if related else None,
 		"relationship": related.get("relationship_to_company") if related else None,
 		"party_type": related.get("party_type") if related else None,
-		"disclosable": bool(
-			related and related.get("relationship_to_company") in DISCLOSABLE_RELATIONSHIPS
-		),
+		"disclosable": bool(related and related.get("relationship_to_company") in DISCLOSABLE_RELATIONSHIPS),
 		"tin_type": (related.get("tax_id_type") if related else None) or "None",
 		"tin_last4": (related.get("tax_id_last4") if related else None) or "",
 		"address": (related.get("address") if related else None) or "",
@@ -807,9 +800,7 @@ def _workbook(company, tax_year, threshold, payer, forms, below, exempt_above, l
 				"An opening balance is a starting position, not money that moved this year.",
 			]
 		)
-	workbook.add(
-		Sheet(title="Excluded", headers=["Name", "Amount", "Why", "Detail"], rows=excluded_rows)
-	)
+	workbook.add(Sheet(title="Excluded", headers=["Name", "Amount", "Why", "Detail"], rows=excluded_rows))
 
 	workbook.add(
 		Sheet(
@@ -915,12 +906,14 @@ def _form_pdf(payer: dict, row: dict, tax_year: int) -> bytes:
 		last = row["last_payment"] or "the end of it"
 		document.heading("How this figure was reached")
 		document.paragraph(
-			f"{row['voucher_count']} voucher(s) between {first} and {last}, summed from the "
-			"general ledger."
+			f"{row['voucher_count']} voucher(s) between {first} and {last}, summed from the general ledger."
 		)
 		document.table(
 			["Cost centre", "Amount"],
-			[[cost_center, f"{amount:,.2f}"] for cost_center, amount in sorted(row["by_cost_center"].items())],
+			[
+				[cost_center, f"{amount:,.2f}"]
+				for cost_center, amount in sorted(row["by_cost_center"].items())
+			],
 			align=("l", "r"),
 		)
 		document.spacer(4)

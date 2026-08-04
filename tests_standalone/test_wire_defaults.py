@@ -22,6 +22,8 @@ chart, rather than the shared one, because the point of the tool is what it does
 with a chart's shape and each test wants a different shape.
 """
 
+from typing import ClassVar
+
 from .fixtures import MAIN, SeededTestCase
 from .harness import STORE
 
@@ -196,7 +198,9 @@ class RefusesToGuess(WireTestCase):
 		`account_type`, so a default_receivable_account pointed at a plain Asset
 		posts fine and stops ageing correctly a quarter later."""
 		chart = [
-			row if row[0] != "Debtors" else ("Marketable Securities", "1310", "Asset", "", 0, "Current Assets")
+			row
+			if row[0] != "Debtors"
+			else ("Marketable Securities", "1310", "Asset", "", 0, "Current Assets")
 			for row in STANDARD_CHART
 		]
 		self.seed_company(chart=chart)
@@ -240,9 +244,7 @@ class RefusesToGuess(WireTestCase):
 	def test_strict_refuses_the_whole_call_and_writes_nothing(self):
 		chart = [row for row in STANDARD_CHART if row[0] not in ("Sales", "Income")]
 		self.seed_company(chart=chart)
-		message = self.tool_error(
-			"bulk_wire_default_accounts", {"company": WIRED, "strict": True}
-		)
+		message = self.tool_error("bulk_wire_default_accounts", {"company": WIRED, "strict": True})
 		self.assertIn("strict=true and 1 field(s) could not be resolved", message)
 		self.assertIn("default_income_account", message)
 		self.assertIsNone(self.company_row().get("default_payable_account"))
@@ -263,9 +265,7 @@ class RefusesToGuess(WireTestCase):
 
 class Overrides(WireTestCase):
 	def test_an_override_pins_a_different_account(self):
-		chart = STANDARD_CHART + [
-			("Payroll Checking", "1112", "Asset", "Bank", 0, "Bank Accounts"),
-		]
+		chart = [*STANDARD_CHART, ("Payroll Checking", "1112", "Asset", "Bank", 0, "Bank Accounts")]
 		self.seed_company(chart=chart)
 		data = self.wire(overrides={"default_bank_account": "1112"})
 		self.assertEqual(data["defaults_now"]["default_bank_account"], docname("Payroll Checking", chart))
@@ -305,16 +305,14 @@ class Overrides(WireTestCase):
 		self.seed_company()
 		self.assertIn(
 			"must be an object",
-			self.tool_error(
-				"bulk_wire_default_accounts", {"company": WIRED, "overrides": "1310"}
-			),
+			self.tool_error("bulk_wire_default_accounts", {"company": WIRED, "overrides": "1310"}),
 		)
 
 
 class Strategies(WireTestCase):
 	#: A chart somebody wrote by hand: right account types, numbers that mean
 	#: nothing to ERPNext's template.
-	CUSTOM_CHART = [
+	CUSTOM_CHART: ClassVar[list[tuple]] = [
 		("Assets", "", "Asset", "", 1, None),
 		("Operating Bank", "A-10", "Asset", "Bank", 0, "Assets"),
 		("Petty Cash", "A-20", "Asset", "Cash", 0, "Assets"),
@@ -335,9 +333,7 @@ class Strategies(WireTestCase):
 			data["defaults_now"]["default_receivable_account"],
 			docname("Customer Balances", self.CUSTOM_CHART),
 		)
-		self.assertEqual(
-			data["picked_by"]["default_receivable_account"], "account_type Receivable"
-		)
+		self.assertEqual(data["picked_by"]["default_receivable_account"], "account_type Receivable")
 
 	def test_account_type_strategy_skips_the_numbers_entirely(self):
 		self.seed_company()
@@ -355,7 +351,7 @@ class Strategies(WireTestCase):
 
 	def test_an_account_named_write_off_is_found_without_the_number(self):
 		"""An account literally called 'Write Off' is evidence, not a guess."""
-		chart = self.CUSTOM_CHART + [("Write Off", "E-95", "Expense", "", 0, "Costs")]
+		chart = [*self.CUSTOM_CHART, ("Write Off", "E-95", "Expense", "", 0, "Costs")]
 		self.seed_company(chart=chart, chart_template="Farm Chart")
 		data = self.wire()
 		self.assertEqual(data["defaults_now"]["write_off_account"], docname("Write Off", chart))
@@ -363,9 +359,7 @@ class Strategies(WireTestCase):
 
 	def test_an_unknown_strategy_is_refused_with_the_known_ones(self):
 		self.seed_company()
-		message = self.tool_error(
-			"bulk_wire_default_accounts", {"company": WIRED, "strategy": "vibes"}
-		)
+		message = self.tool_error("bulk_wire_default_accounts", {"company": WIRED, "strategy": "vibes"})
 		self.assertIn("unknown strategy 'vibes'", message)
 		self.assertIn("standard_with_numbers", message)
 		self.assertIn("account_type", message)
@@ -375,9 +369,7 @@ class Determinism(WireTestCase):
 	def test_two_candidates_of_the_same_type_pick_the_same_one_every_time(self):
 		"""Otherwise 'idempotent' would be a lie the second time somebody called
 		this, and the company's default would wander between runs."""
-		chart = STANDARD_CHART + [
-			("Second Checking", "1112", "Asset", "Bank", 0, "Bank Accounts"),
-		]
+		chart = [*STANDARD_CHART, ("Second Checking", "1112", "Asset", "Bank", 0, "Bank Accounts")]
 		self.seed_company(chart=chart)
 		first = self.wire(strategy="account_type")["defaults_now"]["default_bank_account"]
 		second = self.wire(strategy="account_type")["defaults_now"]["default_bank_account"]

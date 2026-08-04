@@ -251,7 +251,10 @@ class Parsing(unittest.TestCase):
 
 	def test_an_unclosed_ring_is_refused(self):
 		message = self.error(
-			{"type": "Polygon", "coordinates": [[[-121.18, 45.6], [-121.176, 45.6], [-121.176, 45.603], [-121.18, 45.605]]]}
+			{
+				"type": "Polygon",
+				"coordinates": [[[-121.18, 45.6], [-121.176, 45.6], [-121.176, 45.603], [-121.18, 45.605]]],
+			}
 		)
 		self.assertIn("not closed", message)
 		self.assertIn("does not enclose anything", message)
@@ -264,7 +267,10 @@ class Parsing(unittest.TestCase):
 
 	def test_coordinates_off_earth_are_refused_with_the_likely_cause(self):
 		message = self.error(
-			{"type": "Polygon", "coordinates": [[[45.6, -121.18], [45.6, -121.17], [45.61, -121.17], [45.6, -121.18]]]}
+			{
+				"type": "Polygon",
+				"coordinates": [[[45.6, -121.18], [45.6, -121.17], [45.61, -121.17], [45.6, -121.18]]],
+			}
 		)
 		self.assertIn("not on Earth", message)
 		self.assertIn("wrong way round", message)
@@ -544,9 +550,7 @@ class FindFieldsContainingPoint(GeoTestCase):
 				]
 			],
 		}
-		self.tool_data(
-			"set_field_boundary", {"field": "L Block", "boundary_geojson": json.dumps(l_shape)}
-		)
+		self.tool_data("set_field_boundary", {"field": "L Block", "boundary_geojson": json.dumps(l_shape)})
 		# In the bounding box of the L, but in the notch that the L excludes.
 		notch = {"lat": 45.6025, "lon": -121.1665}
 		data = self.tool_data("find_fields_containing_point", notch)
@@ -627,9 +631,7 @@ class FindFieldsByH3Cell(GeoTestCase):
 
 	def test_a_cell_somewhere_else_finds_nothing(self):
 		elsewhere = geo.cell_for_point(OUTSIDE_POINT["lat"], OUTSIDE_POINT["lon"], 9)
-		self.assertEqual(
-			self.tool_data("find_fields_by_h3_cell", {"cell": elsewhere})["match_count"], 0
-		)
+		self.assertEqual(self.tool_data("find_fields_by_h3_cell", {"cell": elsewhere})["match_count"], 0)
 
 	def test_an_invalid_cell_is_refused(self):
 		self.assertIn(
@@ -758,11 +760,7 @@ class ImportFieldBoundaries(GeoTestCase):
 	def test_a_repeated_block_in_one_collection_is_refused_for_the_second(self):
 		data = self.tool_data(
 			"import_field_boundary_geojson",
-			{
-				"feature_collection": self.collection(
-					self.feature("Block One"), self.feature("Block One")
-				)
-			},
+			{"feature_collection": self.collection(self.feature("Block One"), self.feature("Block One"))},
 		)
 		self.assertEqual(data["would_set"], 1)
 		self.assertIn("appears twice", data["results"][1]["reason"])

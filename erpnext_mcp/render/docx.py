@@ -34,7 +34,9 @@ CONTENT_WIDTH_TWIPS = PAGE_WIDTH_TWIPS - 2 * MARGIN_TWIPS
 def escape(text) -> str:
 	out = str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 	return "".join(
-		char for char in out if char in "\t\n\r" or 0x20 <= ord(char) <= 0xD7FF or 0xE000 <= ord(char) <= 0xFFFD
+		char
+		for char in out
+		if char in "\t\n\r" or 0x20 <= ord(char) <= 0xD7FF or 0xE000 <= ord(char) <= 0xFFFD
 	)
 
 
@@ -133,7 +135,9 @@ class DocxDocument:
 		self._body.append(self._paragraph_xml(text, style=style, bold=bold, align=align, indent=indent))
 
 	@staticmethod
-	def _paragraph_xml(text: str, style: str = "", bold: bool = False, align: str = "", indent: int = 0) -> str:
+	def _paragraph_xml(
+		text: str, style: str = "", bold: bool = False, align: str = "", indent: int = 0
+	) -> str:
 		properties = []
 		if style:
 			properties.append(f'<w:pStyle w:val="{style}"/>')
@@ -186,7 +190,7 @@ class DocxDocument:
 	def _core_xml(self) -> str:
 		return (
 			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-			'<cp:coreProperties '
+			"<cp:coreProperties "
 			'xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
 			'xmlns:dc="http://purl.org/dc/elements/1.1/">'
 			f"<dc:title>{escape(self.title)}</dc:title>"

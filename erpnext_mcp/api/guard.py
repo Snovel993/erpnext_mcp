@@ -282,7 +282,7 @@ def require_scope(user: str) -> list:
 	return companies
 
 
-def require_company(user: str, company, allowed: list = None) -> str:
+def require_company(user: str, company, allowed: list | None = None) -> str:
 	"""One company argument, validated against what the caller may actually see.
 
 	Returns "" when nothing was asked for, which every caller reads as "all of
@@ -295,9 +295,7 @@ def require_company(user: str, company, allowed: list = None) -> str:
 		return ""
 	allowed = allowed if allowed is not None else accessible_companies(user)
 	if wanted not in allowed:
-		raise frappe.PermissionError(
-			f"{wanted} is not one of this account's entities. Nothing was read."
-		)
+		raise frappe.PermissionError(f"{wanted} is not one of this account's entities. Nothing was read.")
 	return wanted
 
 

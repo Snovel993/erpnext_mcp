@@ -232,9 +232,7 @@ class InvestigateJeGlLink(V12TestCase):
 	def test_an_operator_can_switch_it_off_and_it_vanishes_from_the_catalogue(self):
 		self.configure(enabled=1, allow_investigate_je_gl_link=0)
 		body, _status = self.call("tools/list")
-		self.assertNotIn(
-			"investigate_je_gl_link", [tool["name"] for tool in body["result"]["tools"]]
-		)
+		self.assertNotIn("investigate_je_gl_link", [tool["name"] for tool in body["result"]["tools"]])
 		self.assertIn(
 			"allow_investigate_je_gl_link",
 			self.tool_error("investigate_je_gl_link", {"journal_entry": "x"}),

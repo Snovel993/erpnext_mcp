@@ -277,9 +277,7 @@ class TheDocumentCheckAgrees(PermissionsTestCase):
 		)
 
 	def test_the_company_a_document_belongs_to_is_followed_through_its_link(self):
-		self.assertEqual(
-			permissions.document_company("Housing Assignment", {"unit": "MC-Cabin-01"}), MAIN
-		)
+		self.assertEqual(permissions.document_company("Housing Assignment", {"unit": "MC-Cabin-01"}), MAIN)
 		self.assertEqual(permissions.document_company("Housing Assignment", {"unit": ""}), "")
 
 

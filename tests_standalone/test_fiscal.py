@@ -132,9 +132,7 @@ class CreateFiscalYearRefusals(FiscalYearTestCase):
 		self.assertIn("is before year_start_date", message)
 
 	def test_a_range_that_is_not_exactly_one_year_names_the_date_it_wanted(self):
-		message = self.tool_error(
-			"create_fiscal_year", self.payload(year_end_date="2024-06-30")
-		)
+		message = self.tool_error("create_fiscal_year", self.payload(year_end_date="2024-06-30"))
 		self.assertIn("has to end 2024-12-31", message)
 		self.assertIn("is_short_year", message)
 		self.assertFalse(frappe.db.exists("Fiscal Year", "2024"))
@@ -149,9 +147,7 @@ class CreateFiscalYearRefusals(FiscalYearTestCase):
 		— there is no 29th — so the last day is the 27th. That clamp is the only
 		reason this arithmetic is worth its own test, and getting it wrong produces
 		a refusal naming a date that does not exist."""
-		data = self.create(
-			year_name="2020-21", year_start_date="2020-02-29", year_end_date="2021-02-27"
-		)
+		data = self.create(year_name="2020-21", year_start_date="2020-02-29", year_end_date="2021-02-27")
 		self.assertEqual(data["year_end_date"], "2021-02-27")
 		self.assertEqual(data["expected_end_date_for_a_full_year"], "2021-02-27")
 
@@ -163,9 +159,7 @@ class CreateFiscalYearRefusals(FiscalYearTestCase):
 		self.assertIn("cannot be one day long", message)
 
 	def test_a_company_this_site_does_not_have_is_refused(self):
-		message = self.tool_error(
-			"create_fiscal_year", self.payload(companies=["Nonesuch Holdings"])
-		)
+		message = self.tool_error("create_fiscal_year", self.payload(companies=["Nonesuch Holdings"]))
 		self.assertIn("no Company named", message)
 
 	def test_an_empty_company_entry_is_refused(self):
@@ -296,9 +290,7 @@ class UpdateFiscalYear(FiscalYearTestCase):
 			{"year_name": "2026", "new_year_end_date": "2027-06-30", "is_short_year": True},
 		)
 		self.assertEqual(data["year_end_date"], "2027-06-30")
-		self.assertEqual(
-			sorted(data["changes"]), ["is_short_year", "year_end_date"]
-		)
+		self.assertEqual(sorted(data["changes"]), ["is_short_year", "year_end_date"])
 
 	def test_a_move_that_would_orphan_postings_is_refused_with_the_count(self):
 		"""The fixture posts to 2026 through the year. Shrinking it to January
@@ -313,9 +305,7 @@ class UpdateFiscalYear(FiscalYearTestCase):
 		)
 		self.assertIn("outside any fiscal year", message)
 		self.assertIn("GL Entry row(s)", message)
-		self.assertEqual(
-			str(frappe.db.get_value("Fiscal Year", "2026", "year_end_date")), "2026-12-31"
-		)
+		self.assertEqual(str(frappe.db.get_value("Fiscal Year", "2026", "year_end_date")), "2026-12-31")
 
 	def test_a_year_with_no_postings_can_be_moved_freely(self):
 		self.create()
@@ -340,9 +330,7 @@ class UpdateFiscalYear(FiscalYearTestCase):
 		self.assertIn("cannot be renamed", message)
 
 	def test_it_cannot_change_the_companies(self):
-		message = self.tool_error(
-			"update_fiscal_year", {"year_name": "2026", "companies": [OTHER]}
-		)
+		message = self.tool_error("update_fiscal_year", {"year_name": "2026", "companies": [OTHER]})
 		self.assertIn("cannot change which companies", message)
 
 	def test_asking_for_nothing_is_refused(self):
@@ -409,9 +397,7 @@ class BookingIntoAYearThatDidNotExist(FiscalYearTestCase):
 			},
 		)
 		self.assertEqual(data["opening_equity_account"], OPENING_EQUITY)
-		self.assertEqual(
-			str(frappe.get_doc("Journal Entry", data["name"]).get("posting_date")), "2023-03-20"
-		)
+		self.assertEqual(str(frappe.get_doc("Journal Entry", data["name"]).get("posting_date")), "2023-03-20")
 
 
 class FiscalYearAudit(FiscalYearTestCase):

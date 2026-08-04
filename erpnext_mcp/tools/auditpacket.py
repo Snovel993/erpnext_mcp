@@ -125,9 +125,7 @@ def generate_audit_packet(args: dict) -> ToolResult:
 	start = as_date(args, "period_start", required=True)
 	end = as_date(args, "period_end", required=True)
 	if end < start:
-		raise ToolError(
-			f"period_end {end} is before period_start {start}. Nothing was created."
-		)
+		raise ToolError(f"period_end {end} is before period_start {start}. Nothing was created.")
 
 	regime = as_str(args, "regime")
 	if regime:
@@ -279,9 +277,7 @@ def _refuse(spec, readiness: dict, start: str, end: str) -> None:
 	for blocker in readiness["blockers"]:
 		lines.append(blocker["detail"])
 		for action in blocker.get("actions") or ():
-			overdue = (
-				f", {action['days_overdue']} day(s) overdue" if action.get("days_overdue") else ""
-			)
+			overdue = f", {action['days_overdue']} day(s) overdue" if action.get("days_overdue") else ""
 			lines.append(
 				f"    {action['audit']} action {action['index']} ({action['severity']}, due "
 				f"{action['due_date'] or 'no deadline'}{overdue}): "
@@ -361,7 +357,7 @@ def _file_governance_document(title: str, company: str, start: str, end: str, pa
 
 
 def _category() -> str:
-	""""Audit Packet" where the site's doctype offers it, "Other" where it does not.
+	""" "Audit Packet" where the site's doctype offers it, "Other" where it does not.
 
 	A site running an older migration has a Governance Document whose category
 	Select predates v0.15.0, and refusing to file the packet over a label would be
@@ -491,4 +487,3 @@ def _stage(content: bytes, spec, company: str, start: str, end: str, args: dict)
 			"existed."
 		),
 	}
-

@@ -114,6 +114,7 @@ GRANT = "Mobile Access Grant"
 #: is required and would be surprised to find missing.
 HR_ROLES = ("System Manager", "HR Manager", "HR User", "Farm Manager")
 
+
 def _farm_ops_roles() -> frozenset:
 	"""The roles that make a login worth linking to an Employee.
 
@@ -205,9 +206,7 @@ def require_hr_role() -> str:
 	"""
 	actor = security.caller_identity() or str(getattr(frappe.session, "user", "") or "")
 	if not actor or actor == "Guest":
-		raise ToolError(
-			"this call has no identity to attribute a personnel change to. Nothing was changed."
-		)
+		raise ToolError("this call has no identity to attribute a personnel change to. Nothing was changed.")
 	held = set(frappe.get_roles(actor) or []) or set(roles.all_roles_of(actor) or [])
 	if not held & set(HR_ROLES):
 		raise ToolError(
@@ -426,8 +425,7 @@ def linkage_state(user: str) -> dict:
 	grant = {}
 	if compat.doctype_exists(GRANT):
 		grant = (
-			frappe.db.get_value(GRANT, {"user": user}, ["name", "state", "mobile_role"], as_dict=True)
-			or {}
+			frappe.db.get_value(GRANT, {"user": user}, ["name", "state", "mobile_role"], as_dict=True) or {}
 		)
 	farm_ops = sorted(held & _farm_ops_roles())
 	return {
@@ -502,8 +500,7 @@ def create_employee(args: dict) -> ToolResult:
 		"company": company,
 		"first_name": as_str(args, "first_name") or (tokens[0] if tokens else employee_name),
 		"last_name": as_str(args, "last_name") or (tokens[-1] if len(tokens) > 1 else ""),
-		"date_of_joining": _clean("date_of_joining", args.get("date_of_joining"))
-		or frappe.utils.today(),
+		"date_of_joining": _clean("date_of_joining", args.get("date_of_joining")) or frappe.utils.today(),
 		"status": _clean("status", args.get("status") or DEFAULT_STATUS, "status"),
 	}
 	optional = (
@@ -585,12 +582,17 @@ def _refuse_a_second_record(employee_name: str, company: str, user_id: str, args
 	"""
 	if as_bool(args, "allow_duplicate_name", False):
 		return
-	existing = frappe.db.get_all(
-		EMPLOYEE,
-		filters={"employee_name": employee_name, "company": company},
-		fields=["name", "status", "user_id"] if compat.has_field(EMPLOYEE, "user_id") else ["name", "status"],
-		limit=5,
-	) or []
+	existing = (
+		frappe.db.get_all(
+			EMPLOYEE,
+			filters={"employee_name": employee_name, "company": company},
+			fields=["name", "status", "user_id"]
+			if compat.has_field(EMPLOYEE, "user_id")
+			else ["name", "status"],
+			limit=5,
+		)
+		or []
+	)
 	if not existing:
 		return
 	row = existing[0]
@@ -600,11 +602,7 @@ def _refuse_a_second_record(employee_name: str, company: str, user_id: str, args
 		+ (f", login {row['user_id']}" if row.get("user_id") else ", no login")
 		+ "). Two Employee records for one person puts them on the dispatch board twice and in "
 		"the payroll register once, and is far easier to make than to find. Use update_employee "
-		+ (
-			f"or link_employee_to_user on {row['name']}"
-			if user_id
-			else f"on {row['name']}"
-		)
+		+ (f"or link_employee_to_user on {row['name']}" if user_id else f"on {row['name']}")
 		+ ", or pass allow_duplicate_name=true if this really is a different person with the "
 		"same name. Nothing was created."
 	)
@@ -668,12 +666,15 @@ def update_employee(args: dict) -> ToolResult:
 	actor = require_hr_role()
 
 	name = resolve_employee(as_str(args, "name") or as_str(args, "employee", required=True))
-	current = frappe.db.get_value(
-		EMPLOYEE,
-		name,
-		compat.existing_fields(EMPLOYEE, ["employee_name", "company", "user_id", *WRITABLE]),
-		as_dict=True,
-	) or {}
+	current = (
+		frappe.db.get_value(
+			EMPLOYEE,
+			name,
+			compat.existing_fields(EMPLOYEE, ["employee_name", "company", "user_id", *WRITABLE]),
+			as_dict=True,
+		)
+		or {}
+	)
 	require_company_scope(actor, str(current.get("company") or ""))
 
 	wanted = {key: args[key] for key in WRITABLE if key in args}
@@ -778,9 +779,12 @@ def link_employee_to_user(args: dict) -> ToolResult:
 			"Nothing was changed."
 		)
 
-	row = frappe.db.get_value(
-		EMPLOYEE, employee, ["employee_name", "company", "user_id", "status"], as_dict=True
-	) or {}
+	row = (
+		frappe.db.get_value(
+			EMPLOYEE, employee, ["employee_name", "company", "user_id", "status"], as_dict=True
+		)
+		or {}
+	)
 	require_company_scope(actor, str(row.get("company") or ""))
 
 	already = str(row.get("user_id") or "")

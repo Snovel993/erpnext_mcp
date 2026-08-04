@@ -94,7 +94,10 @@ class QuarterArgument(DocumentTestCase):
 		from erpnext_mcp.tools.investment_report import parse_quarter
 
 		self.assertEqual(
-			[(parse_quarter(f"2025-Q{n}")["start"], parse_quarter(f"2025-Q{n}")["end"]) for n in (1, 2, 3, 4)],
+			[
+				(parse_quarter(f"2025-Q{n}")["start"], parse_quarter(f"2025-Q{n}")["end"])
+				for n in (1, 2, 3, 4)
+			],
 			[
 				("2025-01-01", "2025-03-31"),
 				("2025-04-01", "2025-06-30"),
@@ -516,16 +519,12 @@ class PrefillArithmetic(DocumentTestCase):
 		self.assertIn("W-2 territory", data["excluded"]["note"])
 
 	def test_the_cost_centre_breakdown_adds_up_to_the_total(self):
-		row = next(
-			item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == SORREN
-		)
+		row = next(item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == SORREN)
 		self.assertEqual(sum(row["by_cost_center"].values()), row["total_payments"])
 		self.assertEqual(row["by_cost_center"][cost_center("Operations")], 12180.0)
 
 	def test_first_and_last_payment_dates_bound_the_activity(self):
-		row = next(
-			item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == SORREN
-		)
+		row = next(item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == SORREN)
 		self.assertEqual((row["first_payment"], row["last_payment"]), ("2025-03-31", "2025-12-31"))
 		self.assertEqual(row["voucher_count"], 4)
 
@@ -551,16 +550,12 @@ class PrefillClassification(DocumentTestCase):
 		when incorporated, and Friend & Reagan PC is exactly the case it fails."""
 		self.assertEqual(self.verdicts()[FRIEND_REAGAN], "borderline")
 		row = next(
-			item
-			for item in self.prefill(dry_run=True)["recipients"]
-			if item["recipient"] == FRIEND_REAGAN
+			item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == FRIEND_REAGAN
 		)
 		self.assertIn("EVEN IF the firm is incorporated", row["reason"])
 
 	def test_a_vendor_with_nothing_recorded_is_borderline_with_the_remedy(self):
-		row = next(
-			item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == COOPER
-		)
+		row = next(item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == COOPER)
 		self.assertEqual(row["classification"], "borderline")
 		self.assertIn("Register it, or read the W-9", row["reason"])
 
@@ -580,9 +575,7 @@ class PrefillClassification(DocumentTestCase):
 				"address": "3555 Upper Three Mile Rd, The Dalles OR 97058",
 			},
 		)
-		row = next(
-			item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == COOPER
-		)
+		row = next(item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == COOPER)
 		self.assertEqual(row["classification"], "reportable")
 		self.assertEqual(row["tin_type"], "EIN")
 		self.assertEqual(row["tin_last4"], "4411")
@@ -658,9 +651,7 @@ class PrefillClassification(DocumentTestCase):
 			"Employee",
 			[{"name": "HR-EMP-00001", "employee_name": MITCHELL, "company": MAIN, "status": "Active"}],
 		)
-		row = next(
-			item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == MITCHELL
-		)
+		row = next(item for item in self.prefill(dry_run=True)["recipients"] if item["recipient"] == MITCHELL)
 		self.assertTrue(row["possible_employee"])
 
 
@@ -728,9 +719,7 @@ class PrefillOutput(DocumentTestCase):
 	def test_the_workbook_is_a_readable_spreadsheet_with_the_four_sheets(self):
 		payload = self.stored(self.prefill()["workbook"])
 		archive = zipfile.ZipFile(io.BytesIO(payload))
-		self.assertEqual(
-			len([name for name in archive.namelist() if name.startswith("xl/worksheets/")]), 4
-		)
+		self.assertEqual(len([name for name in archive.namelist() if name.startswith("xl/worksheets/")]), 4)
 		sheet = archive.read("xl/worksheets/sheet1.xml").decode()
 		self.assertIn(SORREN, sheet)
 		self.assertIn("<v>24360.0</v>", sheet)
@@ -833,9 +822,7 @@ class OutputPath(DocumentTestCase):
 
 		data = self.report(output_path="reports/q2.pdf")
 		with open(data["written_to_disk"][0]["path"], "rb") as handle:
-			self.assertEqual(
-				hashlib.sha256(handle.read()).hexdigest(), data["written_to_disk"][0]["sha256"]
-			)
+			self.assertEqual(hashlib.sha256(handle.read()).hexdigest(), data["written_to_disk"][0]["sha256"])
 
 	def test_an_absolute_path_outside_the_site_is_refused(self):
 		message = self.report_error(output_path="/etc/erpnext-mcp-report.pdf")

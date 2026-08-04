@@ -204,16 +204,12 @@ class UpdateCapTableEntry(GovernanceTestCase):
 		self.assertEqual(data["ownership_percentage"], 50.0)
 
 	def test_it_cannot_retire_a_member(self):
-		message = self.tool_error(
-			"update_cap_table_entry", {"member": MEMBER_ONE, "retired": True}
-		)
+		message = self.tool_error("update_cap_table_entry", {"member": MEMBER_ONE, "retired": True})
 		self.assertIn("close_cap_table_entry", message)
 		self.assertIn("Nothing was changed", message)
 
 	def test_it_cannot_re_key_a_member(self):
-		message = self.tool_error(
-			"update_cap_table_entry", {"member": MEMBER_ONE, "member_id": "Member-99"}
-		)
+		message = self.tool_error("update_cap_table_entry", {"member": MEMBER_ONE, "member_id": "Member-99"})
 		self.assertIn("every posting", message)
 
 	def test_nothing_to_change_is_refused_rather_than_reported_as_success(self):
@@ -221,9 +217,7 @@ class UpdateCapTableEntry(GovernanceTestCase):
 		self.assertIn("nothing to change", message)
 
 	def test_an_unregistered_member_is_refused_with_the_known_ones(self):
-		message = self.tool_error(
-			"update_cap_table_entry", {"member": "Member-42", "legal_entity_name": "X"}
-		)
+		message = self.tool_error("update_cap_table_entry", {"member": "Member-42", "legal_entity_name": "X"})
 		self.assertIn(MEMBER_ONE, message)
 
 
@@ -232,7 +226,9 @@ class ListCapTable(GovernanceTestCase):
 	def setUp(self):
 		super().setUp()
 		self.a_member(MEMBER_ONE, ownership_percentage=60)
-		self.a_member(MEMBER_TWO, legal_entity_name="A. Example", entity_type="Individual", ownership_percentage=40)
+		self.a_member(
+			MEMBER_TWO, legal_entity_name="A. Example", entity_type="Individual", ownership_percentage=40
+		)
 
 	def test_it_lists_every_member_with_the_ownership_total(self):
 		data = self.tool_data("list_cap_table", {"company": MAIN})
@@ -244,7 +240,11 @@ class ListCapTable(GovernanceTestCase):
 	def test_a_retired_member_is_still_listed_by_default(self):
 		self.tool_data(
 			"close_cap_table_entry",
-			{"member": MEMBER_TWO, "withdrawal_date": "2026-03-31", "notes": "Bought out, see resolution 2026-03."},
+			{
+				"member": MEMBER_TWO,
+				"withdrawal_date": "2026-03-31",
+				"notes": "Bought out, see resolution 2026-03.",
+			},
 		)
 		data = self.tool_data("list_cap_table", {"company": MAIN})
 		self.assertEqual(data["count"], 2)
@@ -254,7 +254,11 @@ class ListCapTable(GovernanceTestCase):
 	def test_retired_members_can_be_left_out_when_asked(self):
 		self.tool_data(
 			"close_cap_table_entry",
-			{"member": MEMBER_TWO, "withdrawal_date": "2026-03-31", "notes": "Bought out, see resolution 2026-03."},
+			{
+				"member": MEMBER_TWO,
+				"withdrawal_date": "2026-03-31",
+				"notes": "Bought out, see resolution 2026-03.",
+			},
 		)
 		data = self.tool_data("list_cap_table", {"company": MAIN, "include_retired": False})
 		self.assertEqual(data["count"], 1)
@@ -263,7 +267,11 @@ class ListCapTable(GovernanceTestCase):
 	def test_it_warns_when_active_ownership_does_not_total_a_hundred(self):
 		self.tool_data(
 			"close_cap_table_entry",
-			{"member": MEMBER_TWO, "withdrawal_date": "2026-03-31", "notes": "Bought out, see resolution 2026-03."},
+			{
+				"member": MEMBER_TWO,
+				"withdrawal_date": "2026-03-31",
+				"notes": "Bought out, see resolution 2026-03.",
+			},
 		)
 		data = self.tool_data("list_cap_table", {"company": MAIN})
 		self.assertFalse(data["ownership_balances"])
@@ -300,14 +308,22 @@ class CloseCapTableEntry(GovernanceTestCase):
 		before = len(STORE.rows("Journal Entry"))
 		self.tool_data(
 			"close_cap_table_entry",
-			{"member": MEMBER_ONE, "withdrawal_date": "2026-06-30", "notes": "Bought out under the agreement."},
+			{
+				"member": MEMBER_ONE,
+				"withdrawal_date": "2026-06-30",
+				"notes": "Bought out under the agreement.",
+			},
 		)
 		self.assertEqual(len(STORE.rows("Journal Entry")), before)
 
 	def test_retiring_twice_is_refused(self):
 		self.tool_data(
 			"close_cap_table_entry",
-			{"member": MEMBER_ONE, "withdrawal_date": "2026-06-30", "notes": "Bought out under the agreement."},
+			{
+				"member": MEMBER_ONE,
+				"withdrawal_date": "2026-06-30",
+				"notes": "Bought out under the agreement.",
+			},
 		)
 		message = self.tool_error(
 			"close_cap_table_entry",
@@ -370,7 +386,9 @@ class RecordMemberEvent(GovernanceTestCase):
 	def test_a_distribution_uses_the_distributions_account_the_other_way_round(self):
 		data = self.tool_data(
 			"record_member_event",
-			self.contribution(event_type="Distribution", amount=4000, narrative="Quarterly distribution, Q1 2026."),
+			self.contribution(
+				event_type="Distribution", amount=4000, narrative="Quarterly distribution, Q1 2026."
+			),
 		)
 		entry = self.journal_entry(data["offset_je"])
 		debits = {line["account"]: line["debit"] for line in entry.accounts if line.get("debit")}
@@ -390,14 +408,18 @@ class RecordMemberEvent(GovernanceTestCase):
 		)
 		entry = self.journal_entry(data["offset_je"])
 		self.assertEqual({line["account"] for line in entry.accounts}, {MEMBER_CAPITAL})
-		by_member = {line["member"]: (line.get("debit") or 0, line.get("credit") or 0) for line in entry.accounts}
+		by_member = {
+			line["member"]: (line.get("debit") or 0, line.get("credit") or 0) for line in entry.accounts
+		}
 		self.assertEqual(by_member[MEMBER_ONE], (10000.0, 0))
 		self.assertEqual(by_member[MEMBER_TWO], (0, 10000.0))
 
 	def test_a_transfer_without_a_counterparty_is_refused(self):
 		message = self.tool_error(
 			"record_member_event",
-			self.contribution(event_type="Transfer", amount=10000, narrative="Transfer with nobody to transfer to."),
+			self.contribution(
+				event_type="Transfer", amount=10000, narrative="Transfer with nobody to transfer to."
+			),
 		)
 		self.assertIn("counterparty_member is required", message)
 
@@ -433,9 +455,7 @@ class RecordMemberEvent(GovernanceTestCase):
 		self.assertEqual(len(STORE.rows("Journal Entry")), before)
 
 	def test_an_existing_journal_entry_can_be_linked_instead(self):
-		data = self.tool_data(
-			"record_member_event", self.contribution(offset_je="ACC-JV-2026-00001")
-		)
+		data = self.tool_data("record_member_event", self.contribution(offset_je="ACC-JV-2026-00001"))
 		self.assertFalse(data["journal_entry_created"])
 		self.assertEqual(data["offset_je"], "ACC-JV-2026-00001")
 
@@ -478,9 +498,7 @@ class RecordMemberEvent(GovernanceTestCase):
 		self.assertIn("capital_account", message)
 
 	def test_a_named_capital_account_settles_the_ambiguity(self):
-		data = self.tool_data(
-			"record_member_event", self.contribution(capital_account="3100")
-		)
+		data = self.tool_data("record_member_event", self.contribution(capital_account="3100"))
 		self.assertEqual(data["accounts_used"]["capital_account"], MEMBER_CAPITAL)
 		self.assertEqual(data["accounts_used"]["resolved_by"], "argument")
 
@@ -767,9 +785,7 @@ class GovernanceDocuments(GovernanceTestCase):
 	def test_the_list_can_be_narrowed_to_one_category(self):
 		self.attach()
 		self.attach(category="Board Resolution", title="Resolution 2026-03", file_name="res.pdf")
-		data = self.tool_data(
-			"list_governance_documents", {"company": MAIN, "category": "Board Resolution"}
-		)
+		data = self.tool_data("list_governance_documents", {"company": MAIN, "category": "Board Resolution"})
 		self.assertEqual(data["count"], 1)
 
 	def test_a_document_with_no_attachment_reports_that_rather_than_failing(self):

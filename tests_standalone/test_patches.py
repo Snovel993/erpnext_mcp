@@ -93,9 +93,7 @@ class PatchesTxt(unittest.TestCase):
 		after `bench migrate` has created it. In `pre_model_sync` this patch
 		would fail exactly the way v0.12.0 did."""
 		sections = patches_txt()
-		self.assertIn(
-			"erpnext_mcp.patches.register_custom_party_types", sections.get("post_model_sync", [])
-		)
+		self.assertIn("erpnext_mcp.patches.register_custom_party_types", sections.get("post_model_sync", []))
 		self.assertNotIn(
 			"erpnext_mcp.patches.register_custom_party_types", sections.get("pre_model_sync", [])
 		)
@@ -232,7 +230,7 @@ class EveryLinkTargetExists(unittest.TestCase):
 	def test_every_link_option_names_a_doctype_that_exists(self):
 		for doctype, folder in sorted(APP_DOCTYPES.items()):
 			meta = META.get(doctype)
-			for field in (meta.fields if meta else []):
+			for field in meta.fields if meta else []:
 				if field.get("fieldtype") != "Link":
 					continue
 				target = str(field.get("options") or "")
@@ -248,7 +246,7 @@ class EveryLinkTargetExists(unittest.TestCase):
 		for doctype in sorted(APP_DOCTYPES):
 			meta = META.get(doctype)
 			fieldnames = {field.get("fieldname") for field in (meta.fields if meta else [])}
-			for field in (meta.fields if meta else []):
+			for field in meta.fields if meta else []:
 				if field.get("fieldtype") != "Dynamic Link":
 					continue
 				with self.subTest(doctype=doctype, field=field.get("fieldname")):

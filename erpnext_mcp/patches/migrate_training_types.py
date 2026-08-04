@@ -111,14 +111,10 @@ def migrate_training_types() -> dict:
 		try:
 			outcome = training.ensure_type(text)
 		except Exception as exc:
-			report["failed"].append(
-				{"training_type": text, "reason": f"{type(exc).__name__}: {exc}"}
-			)
+			report["failed"].append({"training_type": text, "reason": f"{type(exc).__name__}: {exc}"})
 			continue
 		resolved[folded] = outcome["training_type"]
-		report["types_created" if outcome["created"] else "types_present"].append(
-			outcome["training_type"]
-		)
+		report["types_created" if outcome["created"] else "types_present"].append(outcome["training_type"])
 
 	# ── 3. re-link only where the stored text is not already the docname ──────
 	for row in rows:
@@ -130,9 +126,7 @@ def migrate_training_types() -> dict:
 		if not target or target == stored:
 			continue
 		try:
-			frappe.db.set_value(
-				training.DOCTYPE, row["name"], "training_type", target, update_modified=False
-			)
+			frappe.db.set_value(training.DOCTYPE, row["name"], "training_type", target, update_modified=False)
 		except Exception as exc:
 			report["failed"].append({"record": row["name"], "reason": f"{type(exc).__name__}: {exc}"})
 			continue

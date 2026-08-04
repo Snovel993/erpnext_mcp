@@ -296,9 +296,7 @@ def parcel_row(parcel: str, company: str = "") -> dict:
 	if frappe.db.exists(PARCEL, parcel):
 		row = frappe.db.get_value(PARCEL, parcel, fields, as_dict=True)
 		if company and row and row.get("owning_entity") != company:
-			raise ToolError(
-				f"Parcel {parcel!r} belongs to {row.get('owning_entity')!r}, not {company!r}"
-			)
+			raise ToolError(f"Parcel {parcel!r} belongs to {row.get('owning_entity')!r}, not {company!r}")
 		return dict(row)
 
 	filters = {"parcel_name": parcel}
@@ -352,9 +350,7 @@ def _check_link(doctype: str, value: str, company: str, company_field: str, labe
 		raise ToolError(f"no {doctype} named {value!r}. Nothing was created.")
 	owner = frappe.db.get_value(doctype, value, company_field)
 	if owner and company and owner != company:
-		raise ToolError(
-			f"{label} {value!r} belongs to {owner!r}, not {company!r}. Nothing was created."
-		)
+		raise ToolError(f"{label} {value!r} belongs to {owner!r}, not {company!r}. Nothing was created.")
 	return value
 
 
@@ -452,9 +448,7 @@ def create_parcel(args: dict) -> ToolResult:
 			"told apart. Nothing was created."
 		)
 	if parcel_id:
-		collision = frappe.db.get_value(
-			PARCEL, {"parcel_id": parcel_id, "owning_entity": company}, "name"
-		)
+		collision = frappe.db.get_value(PARCEL, {"parcel_id": parcel_id, "owning_entity": company}, "name")
 		if collision:
 			raise ToolError(
 				f"parcel id {parcel_id!r} is already on {collision!r} for {company}. That number "
@@ -467,9 +461,7 @@ def create_parcel(args: dict) -> ToolResult:
 	if acreage < 0:
 		raise ToolError(f"acreage must be zero or more, got {acreage}. Nothing was created.")
 	if appraised_value < 0:
-		raise ToolError(
-			f"appraised_value must be zero or more, got {appraised_value}. Nothing was created."
-		)
+		raise ToolError(f"appraised_value must be zero or more, got {appraised_value}. Nothing was created.")
 
 	use_type = as_str(args, "use_type")
 	if use_type:
@@ -520,16 +512,13 @@ def create_parcel(args: dict) -> ToolResult:
 		"Appraised value is what it is worth; the Fixed Asset, if there is one, carries what "
 		"was paid. They are different numbers on purpose and nothing here reconciles them."
 	)
-	data["next_step"] = (
-		"Record leases over this ground with create_lease. "
-		+ (
-			"Link the Fixed Asset that carries it with link_parcel_to_asset."
-			if not related_asset
-			else "File the appraisal in the archive with attach_governance_document and point "
-			"appraisal_document at it."
-			if not appraisal_document
-			else "The register entry is complete."
-		)
+	data["next_step"] = "Record leases over this ground with create_lease. " + (
+		"Link the Fixed Asset that carries it with link_parcel_to_asset."
+		if not related_asset
+		else "File the appraisal in the archive with attach_governance_document and point "
+		"appraisal_document at it."
+		if not appraisal_document
+		else "The register entry is complete."
 	)
 	warnings = []
 	if appraised_value and not appraised_as_of:
@@ -653,9 +642,7 @@ def update_parcel(args: dict) -> ToolResult:
 	if "appraisal_document" in args:
 		requested = as_str(args, "appraisal_document")
 		if requested:
-			requested = _check_link(
-				GOVERNANCE_DOCUMENT, requested, company, "company", "appraisal_document"
-			)
+			requested = _check_link(GOVERNANCE_DOCUMENT, requested, company, "company", "appraisal_document")
 		if requested != str(entry.get("appraisal_document") or ""):
 			updates["appraisal_document"] = requested or None
 			changes["appraisal_document"] = [entry.get("appraisal_document") or "", requested]
@@ -717,9 +704,7 @@ def list_parcels(args: dict) -> ToolResult:
 		filters["title_holder"] = title_holder
 
 	fields = compat.existing_fields(PARCEL, _PARCEL_FIELDS)
-	rows = frappe.db.get_all(
-		PARCEL, filters=filters, fields=fields, order_by="parcel_name asc", limit=limit
-	)
+	rows = frappe.db.get_all(PARCEL, filters=filters, fields=fields, order_by="parcel_name asc", limit=limit)
 	parcels = [_describe_parcel(dict(row)) for row in rows]
 
 	linked = as_bool(args, "linked_to_asset")
@@ -740,9 +725,7 @@ def list_parcels(args: dict) -> ToolResult:
 	dated = [parcel["appraised_as_of"] for parcel in parcels if parcel["appraised_as_of"]]
 	unvalued = [parcel["name"] for parcel in parcels if not parcel["appraised_value"]]
 	unsupported = [
-		parcel["name"]
-		for parcel in parcels
-		if parcel["appraised_value"] and not parcel["appraisal_document"]
+		parcel["name"] for parcel in parcels if parcel["appraised_value"] and not parcel["appraisal_document"]
 	]
 
 	total_count = frappe.db.count(PARCEL, {"owning_entity": company})
@@ -778,8 +761,7 @@ def list_parcels(args: dict) -> ToolResult:
 		)
 	return ToolResult(
 		data,
-		f"{len(parcels)} parcel(s) for {company}: {total_acreage} acres, "
-		f"{total_value:,.2f} appraised",
+		f"{len(parcels)} parcel(s) for {company}: {total_acreage} acres, {total_value:,.2f} appraised",
 	)
 
 
@@ -855,8 +837,7 @@ def create_lease(args: dict) -> ToolResult:
 		)
 	if lessor.strip().lower() == lessee.strip().lower():
 		raise ToolError(
-			f"lessor and lessee are both {lessor!r}. A party cannot lease from itself. Nothing "
-			"was created."
+			f"lessor and lessee are both {lessor!r}. A party cannot lease from itself. Nothing was created."
 		)
 	if expiration_date and expiration_date < effective_date:
 		raise ToolError(
@@ -1331,9 +1312,7 @@ def link_parcel_to_asset(args: dict) -> ToolResult:
 
 	current = str(entry.get("related_asset") or "")
 	if current and current == asset_name:
-		raise ToolError(
-			f"{entry['name']} is already linked to Asset {current}. Nothing was changed."
-		)
+		raise ToolError(f"{entry['name']} is already linked to Asset {current}. Nothing was changed.")
 	if current and not replace:
 		raise ToolError(
 			f"{entry['name']} is already linked to Asset {current}. Pass replace=true to point "
@@ -1604,7 +1583,9 @@ def convey_parcel(args: dict) -> ToolResult:
 		new_doc.save()
 
 	after = dict(
-		frappe.db.get_value(PARCEL, new_doc.name, compat.existing_fields(PARCEL, _PARCEL_FIELDS), as_dict=True)
+		frappe.db.get_value(
+			PARCEL, new_doc.name, compat.existing_fields(PARCEL, _PARCEL_FIELDS), as_dict=True
+		)
 		or {}
 	)
 	data = {
@@ -1818,15 +1799,12 @@ def _conveyed_appraisal_document(source: dict, target_company: str) -> dict:
 	current = str(source.get("appraisal_document") or "")
 	if not current:
 		return {"value": None, "status": "n/a", "warning": None}
-	if not compat.doctype_exists(GOVERNANCE_DOCUMENT) or not frappe.db.exists(
-		GOVERNANCE_DOCUMENT, current
-	):
+	if not compat.doctype_exists(GOVERNANCE_DOCUMENT) or not frappe.db.exists(GOVERNANCE_DOCUMENT, current):
 		return {
 			"value": None,
 			"status": "unlinked_needs_reattach",
 			"warning": (
-				f"appraisal_document {current!r} is no longer in the archive, so nothing was "
-				"carried across."
+				f"appraisal_document {current!r} is no longer in the archive, so nothing was carried across."
 			),
 		}
 	owner = str(frappe.db.get_value(GOVERNANCE_DOCUMENT, current, "company") or "")
@@ -1858,7 +1836,11 @@ def _referring_records(parcel_name: str) -> dict:
 			continue
 		names = (
 			frappe.db.get_all(
-				doctype, filters={fieldname: parcel_name}, pluck="name", order_by="name asc", limit=REGISTER_CAP
+				doctype,
+				filters={fieldname: parcel_name},
+				pluck="name",
+				order_by="name asc",
+				limit=REGISTER_CAP,
 			)
 			or []
 		)
@@ -1922,5 +1904,3 @@ def _relink_detail(referrers: dict) -> str:
 	"""The relink counts as one readable line: "Lease: 1, Housing Unit: 29"."""
 	parts = [f"{doctype}: {len(names)}" for doctype, names in sorted(referrers.items()) if names]
 	return ", ".join(parts) or "nothing pointed at it"
-
-

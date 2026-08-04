@@ -27,12 +27,8 @@ class ListReports(V2TestCase):
 		by_name = {row["name"]: row for row in data["reports"]}
 		self.assertEqual(by_name["Cash Movement"]["report_type"], "Query Report")
 		self.assertEqual(by_name["Open Purchase Orders"]["report_type"], "Report Builder")
-		self.assertEqual(
-			by_name["Sustainable CF Per Acre by Quarter"]["report_type"], "Script Report"
-		)
-		self.assertEqual(
-			by_name["Sustainable CF Per Acre TTM Monthly"]["report_type"], "Script Report"
-		)
+		self.assertEqual(by_name["Sustainable CF Per Acre by Quarter"]["report_type"], "Script Report")
+		self.assertEqual(by_name["Sustainable CF Per Acre TTM Monthly"]["report_type"], "Script Report")
 
 	def test_counts_by_report_type(self):
 		data = self.tool_data("list_reports")

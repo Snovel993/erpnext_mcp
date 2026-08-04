@@ -47,9 +47,7 @@ from .harness import STORE
 
 FUNNEL = "https://umbrel.tail4a2b.ts.net"
 
-READS_ON = {
-	f"allow_{name}": 1 for name in ("list_mobile_users", "get_current_user_context")
-}
+READS_ON = {f"allow_{name}": 1 for name in ("list_mobile_users", "get_current_user_context")}
 WRITES_ON = {
 	f"allow_{name}": 1
 	for name in (
@@ -175,9 +173,7 @@ class CreatingAnAccount(MobileTestCase):
 		data = self.make()
 		self.assertTrue(data["api_secret"])
 		self.assertIn("ONLY TIME", data["secret_note"])
-		self.assertEqual(
-			data["auth_header"], f"Authorization: token {data['api_key']}:{data['api_secret']}"
-		)
+		self.assertEqual(data["auth_header"], f"Authorization: token {data['api_key']}:{data['api_secret']}")
 
 	def test_the_grant_never_holds_the_secret(self):
 		"""A credential in a readable column leaks with the first CSV export
@@ -203,7 +199,9 @@ class CreatingAnAccount(MobileTestCase):
 
 	def test_the_phone_role_is_reported_as_having_no_desk(self):
 		self.assertFalse(self.make()["desk_access"])
-		self.assertTrue(self.make(email="fran@example.test", role="Foreman", update_existing=True)["desk_access"])
+		self.assertTrue(
+			self.make(email="fran@example.test", role="Foreman", update_existing=True)["desk_access"]
+		)
 
 	def test_it_assigns_the_owning_apps_role_where_the_site_has_one(self):
 		"""A Field Worker needs to read their own Employee record, and Employee
@@ -334,9 +332,7 @@ class EntityScopingIsMandatory(MobileTestCase):
 		allowed = roles.companies_for(WORKER)
 		self.assertEqual(allowed, [MAIN])
 		self.assertNotIn(OTHER, allowed)
-		self.assertEqual(
-			[row["for_value"] for row in self.company_permissions()], [MAIN]
-		)
+		self.assertEqual([row["for_value"] for row in self.company_permissions()], [MAIN])
 
 	def test_the_result_spells_out_what_is_invisible(self):
 		data = self.make(entity_access=[MAIN])
@@ -584,9 +580,7 @@ class TheLoginCard(MobileTestCase):
 		"""Encoding a live credential for an http:// URL puts it on the wire in the
 		clear at every call, forever."""
 		self.make()
-		message = self.tool_error(
-			"generate_mobile_login_qr", {"user": WORKER, "url": "http://umbrel.local"}
-		)
+		message = self.tool_error("generate_mobile_login_qr", {"user": WORKER, "url": "http://umbrel.local"})
 		self.assertIn("not HTTPS", message)
 		self.assertIn("Nothing was written", message)
 
@@ -652,9 +646,7 @@ class TheLoginCard(MobileTestCase):
 class Revocation(MobileTestCase):
 	def test_it_disables_the_login_and_destroys_the_credential(self):
 		self.make()
-		data = self.tool_data(
-			"revoke_mobile_user", {"email": WORKER, "reason": "left at the end of harvest"}
-		)
+		data = self.tool_data("revoke_mobile_user", {"email": WORKER, "reason": "left at the end of harvest"})
 		self.assertTrue(data["login_disabled"])
 		self.assertTrue(data["token_revoked"])
 		self.assertEqual(int(STORE.get_raw("User", WORKER)["enabled"]), 0)
@@ -664,9 +656,7 @@ class Revocation(MobileTestCase):
 		self.make()
 		for reason in ("", "x", "gone"):
 			with self.subTest(reason=reason):
-				message = self.tool_error(
-					"revoke_mobile_user", {"email": WORKER, "reason": reason}
-				)
+				message = self.tool_error("revoke_mobile_user", {"email": WORKER, "reason": reason})
 				self.assertIn("reason is required", message)
 				self.assertIn("Nothing was changed", message)
 
@@ -674,9 +664,7 @@ class Revocation(MobileTestCase):
 		"""Frappe keeps the access and none of the story. Six months later this is
 		the only thing on the row that cannot be reconstructed."""
 		self.make()
-		self.tool_data(
-			"revoke_mobile_user", {"email": WORKER, "reason": "phone lost in the orchard"}
-		)
+		self.tool_data("revoke_mobile_user", {"email": WORKER, "reason": "phone lost in the orchard"})
 		row = STORE.get_raw("Mobile Access Grant", WORKER)
 		self.assertEqual(row["state"], "Revoked")
 		self.assertEqual(row["revocation_reason"], "phone lost in the orchard")
@@ -691,9 +679,7 @@ class Revocation(MobileTestCase):
 
 	def test_the_entity_permissions_stay_by_default_and_go_when_asked(self):
 		self.make(entity_access=[MAIN, OTHER])
-		data = self.tool_data(
-			"revoke_mobile_user", {"email": WORKER, "reason": "end of season"}
-		)
+		data = self.tool_data("revoke_mobile_user", {"email": WORKER, "reason": "end of season"})
 		self.assertTrue(data["user_permissions_kept"])
 		self.assertEqual(len(self.company_permissions()), 2)
 
@@ -737,9 +723,7 @@ class TheRoster(MobileTestCase):
 
 	def test_it_returns_the_role_catalogue_so_a_client_needs_no_second_call(self):
 		data = self.roster()
-		self.assertEqual(
-			[entry["role"] for entry in data["roles"]], list(roles.ROLE_NAMES)
-		)
+		self.assertEqual([entry["role"] for entry in data["roles"]], list(roles.ROLE_NAMES))
 		self.assertTrue(all(entry["cannot"] for entry in data["roles"]))
 
 	def test_drift_between_the_grant_and_the_live_permissions_is_reported(self):
@@ -762,9 +746,7 @@ class TheRoster(MobileTestCase):
 		frappe.db.set_value("Mobile Access Grant", WORKER, "token_expires_on", "2020-01-01")
 		entry = self.roster()["users"][0]
 		self.assertTrue(entry["token_review_overdue"])
-		self.assertTrue(
-			any("do not expire on their own" in line for line in entry["concerns"])
-		)
+		self.assertTrue(any("do not expire on their own" in line for line in entry["concerns"]))
 
 	def test_a_grant_whose_role_is_not_on_the_account_is_flagged(self):
 		self.make()
@@ -808,9 +790,7 @@ class TheEndpointUrl(MobileTestCase):
 		self.assertEqual(mobile._endpoint_url({}), FUNNEL)
 
 	def test_an_explicit_url_wins_over_both(self):
-		self.assertEqual(
-			mobile._endpoint_url({"url": "https://other.ts.net/"}), "https://other.ts.net"
-		)
+		self.assertEqual(mobile._endpoint_url({"url": "https://other.ts.net/"}), "https://other.ts.net")
 
 	def test_with_nothing_configured_it_falls_back_to_the_site(self):
 		self.configure(enabled=1, public_url="", **ALL_ON)

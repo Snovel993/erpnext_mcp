@@ -66,7 +66,9 @@ class WaterTest(Document):
 
 	def validate(self):
 		if not self.source:
-			frappe.throw(_("Irrigation Zone is required — a sample from nowhere in particular is not evidence."))
+			frappe.throw(
+				_("Irrigation Zone is required — a sample from nowhere in particular is not evidence.")
+			)
 		if not self.test_date:
 			frappe.throw(_("Test Date is required."))
 		if str(self.test_date) > frappe.utils.today():
@@ -84,7 +86,8 @@ class WaterTest(Document):
 		self.tester_name = str(self.tester_name or "").strip() or self.tester
 
 		zone = (
-			frappe.db.get_value("Irrigation Zone", self.source, ["field", "owning_entity"], as_dict=True) or {}
+			frappe.db.get_value("Irrigation Zone", self.source, ["field", "owning_entity"], as_dict=True)
+			or {}
 		)
 		self.block = self.block or zone.get("field")
 		self.company = self.company or zone.get("owning_entity")

@@ -288,9 +288,7 @@ class SupersedingAPolicy(EvidenceTestCase):
 		"""That would leave a period with two procedures in force and no way to
 		tell which the crew was working to."""
 		self.a_policy("Earlier SOP", version="v1", effective_date="2025-01-01")
-		message = self.tool_error(
-			"supersede_compliance_policy", self.supersede(superseded_by="Earlier SOP")
-		)
+		message = self.tool_error("supersede_compliance_policy", self.supersede(superseded_by="Earlier SOP"))
 		self.assertIn("before", message)
 		self.assertIn("Nothing was changed", message)
 
@@ -334,7 +332,9 @@ class Certifications(EvidenceTestCase):
 	def test_a_holder_in_no_register_is_not_an_error(self):
 		"""An applicator licence held by a contractor on nobody's payroll is
 		exactly what the fallback is for."""
-		data = self.a_certificate("Applicator — R. Mendez", cert_type="Applicator License", holder="R. Mendez")
+		data = self.a_certificate(
+			"Applicator — R. Mendez", cert_type="Applicator License", holder="R. Mendez"
+		)
 		got = self.tool_data("get_certification", {"certification": data["name"]})
 		self.assertIsNone(got["holder_doctype"])
 		self.assertEqual(got["holder"], "R. Mendez")
@@ -351,7 +351,9 @@ class Certifications(EvidenceTestCase):
 		"""The order somebody works them in."""
 		self.a_certificate("Later", expiration_date="2028-01-01")
 		self.a_certificate("Sooner", expiration_date="2026-09-01")
-		names = [row["name"] for row in self.tool_data("list_certifications", {"company": MAIN})["certifications"]]
+		names = [
+			row["name"] for row in self.tool_data("list_certifications", {"company": MAIN})["certifications"]
+		]
 		self.assertEqual(names[0], "Sooner")
 
 
@@ -420,9 +422,7 @@ class RenewingACertificate(EvidenceTestCase):
 		self.tool_data(
 			"update_certification", {"certification": "GlobalGAP 2026", "expiration_date": "2026-08-01"}
 		)
-		self.assertEqual(
-			STORE.get_raw("Certification", "GlobalGAP 2026")["expiration_date"], "2026-08-01"
-		)
+		self.assertEqual(STORE.get_raw("Certification", "GlobalGAP 2026")["expiration_date"], "2026-08-01")
 
 	def test_a_lapse_is_reported_and_not_hidden(self):
 		"""Renewing late does not close a gap that already happened."""
@@ -598,7 +598,9 @@ class Audits(EvidenceTestCase):
 		self.assertEqual(data["corrective_actions"][0]["days_overdue"], 25)
 
 	def test_an_action_not_yet_due_is_not_overdue(self):
-		self.an_audit(actions=[{"finding": "Repaint the bin numbers", "severity": "Minor", "due_date": "2026-12-01"}])
+		self.an_audit(
+			actions=[{"finding": "Repaint the bin numbers", "severity": "Minor", "due_date": "2026-12-01"}]
+		)
 		data = self.tool_data("get_audit_event", {"audit": "PrimusGFS 2026"})
 		self.assertFalse(data["corrective_actions"][0]["overdue"])
 
@@ -785,17 +787,14 @@ class CompanyScoping(EvidenceTestCase):
 
 	def test_a_record_on_another_company_is_refused_by_name(self):
 		self.a_policy(company=OTHER)
-		message = self.tool_error(
-			"get_compliance_policy", {"policy": "Harvest Hygiene SOP", "company": MAIN}
-		)
+		message = self.tool_error("get_compliance_policy", {"policy": "Harvest Hygiene SOP", "company": MAIN})
 		self.assertIn(OTHER, message)
 
 	def test_a_listing_is_scoped_to_the_company_asked_for(self):
 		self.a_certificate("Main Cert", company=MAIN)
 		self.a_certificate("Other Cert", company=OTHER)
 		names = [
-			row["name"]
-			for row in self.tool_data("list_certifications", {"company": MAIN})["certifications"]
+			row["name"] for row in self.tool_data("list_certifications", {"company": MAIN})["certifications"]
 		]
 		self.assertEqual(names, ["Main Cert"])
 

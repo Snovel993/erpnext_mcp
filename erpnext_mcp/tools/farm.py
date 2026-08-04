@@ -205,8 +205,7 @@ def field_row(field: str, parcel: str = "", company: str = "") -> dict:
 	if len(matches) > 1:
 		names = ", ".join(sorted(str(match.get("name")) for match in matches))
 		raise ToolError(
-			f"{field!r} matches {len(matches)} fields: {names}. Pass the docname, or set parcel "
-			"to narrow it."
+			f"{field!r} matches {len(matches)} fields: {names}. Pass the docname, or set parcel to narrow it."
 		)
 	scope = f" on {parcel}" if parcel else ""
 	raise ToolError(f"no Field called {field!r}{scope}. list_fields has the register.")
@@ -222,9 +221,7 @@ def zone_row(zone: str, field: str = "", company: str = "") -> dict:
 	if frappe.db.exists(IRRIGATION_ZONE, zone):
 		row = dict(frappe.db.get_value(IRRIGATION_ZONE, zone, fields, as_dict=True) or {})
 		if company and row.get("owning_entity") and row["owning_entity"] != company:
-			raise ToolError(
-				f"Irrigation Zone {zone!r} belongs to {row['owning_entity']!r}, not {company!r}"
-			)
+			raise ToolError(f"Irrigation Zone {zone!r} belongs to {row['owning_entity']!r}, not {company!r}")
 		return row
 
 	filters = {"zone_name": zone}
@@ -238,8 +235,7 @@ def zone_row(zone: str, field: str = "", company: str = "") -> dict:
 	if len(matches) > 1:
 		names = ", ".join(sorted(str(match.get("name")) for match in matches))
 		raise ToolError(
-			f"{zone!r} matches {len(matches)} zones: {names}. Pass the docname, or set field to "
-			"narrow it."
+			f"{zone!r} matches {len(matches)} zones: {names}. Pass the docname, or set field to narrow it."
 		)
 	scope = f" on {field}" if field else ""
 	raise ToolError(f"no Irrigation Zone called {zone!r}{scope}. list_irrigation_zones has the register.")
@@ -541,9 +537,7 @@ def get_field(args: dict) -> ToolResult:
 			"zone_count": len(zones),
 			"zone_acreage": zone_acres,
 			"unzoned_acreage": round(max(0.0, described["acreage"] - zone_acres), 3),
-			"water_rights": sorted(
-				{zone["water_right_id"] for zone in zones if zone["water_right_id"]}
-			),
+			"water_rights": sorted({zone["water_right_id"] for zone in zones if zone["water_right_id"]}),
 			"zones": zones,
 		},
 		summary=(
@@ -658,11 +652,12 @@ def _field_warnings(described: dict, parcel: str) -> list:
 	if remaining:
 		used = sum(
 			float(row.get("acreage") or 0)
-			for row in frappe.db.get_all(FIELD, filters={"parcel": parcel}, fields=["acreage"], limit=REGISTER_CAP)
+			for row in frappe.db.get_all(
+				FIELD, filters={"parcel": parcel}, fields=["acreage"], limit=REGISTER_CAP
+			)
 		)
 		out.append(
-			f"{parcel} is {round(float(remaining), 2)} acres and its blocks now total "
-			f"{round(used, 2)}."
+			f"{parcel} is {round(float(remaining), 2)} acres and its blocks now total {round(used, 2)}."
 		)
 	return out
 
@@ -712,9 +707,7 @@ def update_field(args: dict) -> ToolResult:
 				FIELD, {"external_farm_app_id": uuid, "name": ("!=", row["name"])}, "name"
 			)
 			if claimed:
-				raise ToolError(
-					f"Farm App id {uuid!r} is already on {claimed!r}. Nothing was changed."
-				)
+				raise ToolError(f"Farm App id {uuid!r} is already on {claimed!r}. Nothing was changed.")
 		_stage(changes, doc, "external_farm_app_id", uuid)
 	for key in (
 		"last_spray_date",
@@ -893,9 +886,7 @@ def get_irrigation_zone(args: dict) -> ToolResult:
 			"zones_on_this_field": len(siblings),
 			"field_acreage_zoned": zoned,
 			"share_of_field": (
-				round(described["area_acres"] / float(block["acreage"]), 3)
-				if block.get("acreage")
-				else None
+				round(described["area_acres"] / float(block["acreage"]), 3) if block.get("acreage") else None
 			),
 			"compliance_notes": notes,
 		},
@@ -997,9 +988,7 @@ def update_irrigation_zone(args: dict) -> ToolResult:
 	row = zone_row(as_str(args, "zone", required=True), "", company or "")
 
 	if as_str(args, "zone_name"):
-		raise ToolError(
-			"zone_name cannot be changed: the docname is built from it. Nothing was changed."
-		)
+		raise ToolError("zone_name cannot be changed: the docname is built from it. Nothing was changed.")
 	if as_str(args, "field"):
 		raise ToolError(
 			"a zone cannot move between blocks — pipe does not move. Register the zone where the "
@@ -1265,9 +1254,7 @@ def import_farm_app_fields(args: dict) -> ToolResult:
 	# the second run has to work out which half.
 	plan, seen_names, seen_uuids = [], set(), set()
 	for index, record in enumerate(records, start=1):
-		plan.append(
-			_plan_import(record, index, default_parcel, company or "", seen_names, seen_uuids)
-		)
+		plan.append(_plan_import(record, index, default_parcel, company or "", seen_names, seen_uuids))
 
 	fresh = [entry for entry in plan if entry["action"] == "create"]
 	skipped = [entry for entry in plan if entry["action"] != "create"]
@@ -1437,8 +1424,7 @@ def set_field_boundary(args: dict) -> ToolResult:
 	# against one. Said out loud rather than left as a silent gap: a caller who
 	# assumes it was checked is a caller who will be surprised in Sprint 7.
 	warnings.append(
-		"A parcel has no boundary in this release, so nothing checked that this block sits "
-		"inside its parcel."
+		"A parcel has no boundary in this release, so nothing checked that this block sits inside its parcel."
 	)
 
 	zones_outside = _zones_outside(row["name"], shape)
@@ -1462,8 +1448,7 @@ def set_field_boundary(args: dict) -> ToolResult:
 		},
 		"boundary_bbox_geojson": derived["boundary_bbox_geojson"],
 		"h3_cell_counts": {
-			resolution: len(cells)
-			for resolution, cells in sorted(json.loads(derived["h3_cells"]).items())
+			resolution: len(cells) for resolution, cells in sorted(json.loads(derived["h3_cells"]).items())
 		},
 		"h3_resolutions": list(geo.H3_RESOLUTIONS),
 		"zones_outside_boundary": zones_outside,
@@ -1474,9 +1459,7 @@ def set_field_boundary(args: dict) -> ToolResult:
 	if dry_run:
 		return ToolResult(
 			data=data,
-			summary=(
-				f"dry run: would set a {derived['area_computed_acres']}-acre boundary on {row['name']}"
-			),
+			summary=(f"dry run: would set a {derived['area_computed_acres']}-acre boundary on {row['name']}"),
 		)
 
 	doc = frappe.get_doc(FIELD, row["name"])
@@ -1500,12 +1483,15 @@ def _zones_outside(field: str, shape) -> list:
 	if not compat.doctype_exists(IRRIGATION_ZONE):
 		return []
 	out = []
-	for row in frappe.db.get_all(
-		IRRIGATION_ZONE,
-		filters={"field": field, "boundary_geojson": ("is", "set")},
-		fields=["name", "boundary_geojson"],
-		limit=REGISTER_CAP,
-	) or []:
+	for row in (
+		frappe.db.get_all(
+			IRRIGATION_ZONE,
+			filters={"field": field, "boundary_geojson": ("is", "set")},
+			fields=["name", "boundary_geojson"],
+			limit=REGISTER_CAP,
+		)
+		or []
+	):
 		zone_shape = geo.stored_shape(row.get("boundary_geojson"))
 		if zone_shape is not None and not geo.covers_shape(shape, zone_shape):
 			out.append(row["name"])
@@ -1577,8 +1563,7 @@ def set_zone_boundary(args: dict) -> ToolResult:
 		},
 		"boundary_bbox_geojson": derived["boundary_bbox_geojson"],
 		"h3_cell_counts": {
-			resolution: len(cells)
-			for resolution, cells in sorted(json.loads(derived["h3_cells"]).items())
+			resolution: len(cells) for resolution, cells in sorted(json.loads(derived["h3_cells"]).items())
 		},
 		"boundary_contained_in_field": contained,
 		"warnings": warnings,
@@ -1909,8 +1894,7 @@ def _plan_boundary(feature, index: int, default_parcel: str, company: str, seen:
 	entry["replaces_existing"] = bool(str(row.get("boundary_geojson") or "").strip())
 	if verdict == "warn":
 		entry["warning"] = (
-			f"area differs from the recorded acreage by {round(ratio * 100, 1)}%; both figures "
-			"are kept."
+			f"area differs from the recorded acreage by {round(ratio * 100, 1)}%; both figures are kept."
 		)
 	entry["_derived"] = derived
 	return entry

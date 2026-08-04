@@ -81,7 +81,9 @@ class FarmTaskAssignment(Document):
 			frappe.throw(_("Task is required."))
 		self.assigned_to = str(self.assigned_to or "").strip()
 		if not self.assigned_to:
-			frappe.throw(_("Assigned To is required — an assignment with no name on it is not an assignment."))
+			frappe.throw(
+				_("Assigned To is required — an assignment with no name on it is not an assignment.")
+			)
 		self.assigned_to_name = str(self.assigned_to_name or "").strip() or self.assigned_to
 
 		self.state = str(self.state or CLAIMED).strip() or CLAIMED

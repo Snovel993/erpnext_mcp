@@ -47,6 +47,7 @@ SEVEN CLAIMS.
 import base64
 import hashlib
 import json
+from typing import ClassVar
 
 import frappe
 
@@ -177,7 +178,9 @@ class MobileAPITestCase(V12TestCase):
 		return self.tool_data("create_farm_task", payload)["name"]
 
 	def audit_rows(self, method=None):
-		rows = [row for row in STORE.rows("MCP Action Log") if str(row.get("tool_name", "")).startswith("mobile:")]
+		rows = [
+			row for row in STORE.rows("MCP Action Log") if str(row.get("tool_name", "")).startswith("mobile:")
+		]
 		if method:
 			rows = [row for row in rows if row["tool_name"] == f"mobile:{method}"]
 		return rows
@@ -186,7 +189,7 @@ class MobileAPITestCase(V12TestCase):
 # ── 1. the surface is closed ────────────────────────────────────────────────
 class TheSurfaceIsClosed(MobileAPITestCase):
 	#: Exactly what `MobileAPI.swift` names, and nothing else.
-	MOBILE = {
+	MOBILE: ClassVar[set[str]] = {
 		"get_current_user_context",
 		"list_my_tasks",
 		"list_available_tasks",
@@ -197,7 +200,7 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"reject_task",
 		"list_compliance_alerts",
 	}
-	FILES = {"stage_file_chunk", "finalize_staged_file"}
+	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 
 	def _whitelisted(self, module):
 		return {
@@ -568,7 +571,7 @@ class EveryCallIsAudited(MobileAPITestCase):
 		self.a_camp()
 		task = self.a_task()
 		self.be()
-		
+
 		try:
 			mobile_api.complete_task_via_mobile(task=task, clean_pass=True, latitude=45.67, longitude=-121.17)
 		except Exception:
@@ -621,7 +624,7 @@ def parse_login_qr(raw: str, allow_insecure_http: bool = False) -> dict:
 	try:
 		payload = json.loads(raw)
 	except (ValueError, TypeError):
-		raise ValueError("notJSON")
+		raise ValueError("notJSON") from None
 	if not isinstance(payload, dict):
 		raise ValueError("notJSON")
 
@@ -863,8 +866,12 @@ class TheWholeFlowWorks(MobileAPITestCase):
 		self.be()
 		payload = base64.b64encode(b"north-wall").decode()
 		files_api.stage_file_chunk(
-			upload_id="u9", file_name="north-wall.jpg", chunk_index=0, chunk_count=1,
-			total_bytes=10, data=payload,
+			upload_id="u9",
+			file_name="north-wall.jpg",
+			chunk_index=0,
+			chunk_count=1,
+			total_bytes=10,
+			data=payload,
 		)
 		with self.assertRaises(frappe.ValidationError) as caught:
 			files_api.finalize_staged_file(
@@ -876,14 +883,20 @@ class TheWholeFlowWorks(MobileAPITestCase):
 		self.enrol(email=OUTSIDER, name="Ben Ortiz", entities=[MAIN])
 		self.be()
 		files_api.stage_file_chunk(
-			upload_id="shared-id", file_name="mine.jpg", chunk_index=0, chunk_count=1,
-			total_bytes=3, data=base64.b64encode(b"abc").decode(),
+			upload_id="shared-id",
+			file_name="mine.jpg",
+			chunk_index=0,
+			chunk_count=1,
+			total_bytes=3,
+			data=base64.b64encode(b"abc").decode(),
 		)
 		self.be(OUTSIDER)
 		with self.assertRaises(frappe.ValidationError) as caught:
 			files_api.finalize_staged_file(
-				upload_id="shared-id", file_name="mine.jpg",
-				sha256=hashlib.sha256(b"abc").hexdigest(), total_bytes=3,
+				upload_id="shared-id",
+				file_name="mine.jpg",
+				sha256=hashlib.sha256(b"abc").hexdigest(),
+				total_bytes=3,
 			)
 		self.assertIn("belongs to", str(caught.exception))
 
@@ -927,9 +940,7 @@ class TheHandsetsFixReachesTheRecord(MobileAPITestCase):
 		"""A worker who typed a name did so where the fix was absent or wrong.
 		Overwriting it with whatever the GPS settled on outside would replace a
 		fact with a guess."""
-		row = self._complete(
-			farm_location_gps="MC-Cabin-01", latitude=45.6721, longitude=-121.1787
-		)
+		row = self._complete(farm_location_gps="MC-Cabin-01", latitude=45.6721, longitude=-121.1787)
 		self.assertEqual(row["farm_location_gps"], "MC-Cabin-01")
 
 	def test_a_malformed_pair_is_dropped_rather_than_failing_the_completion(self):

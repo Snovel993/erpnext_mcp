@@ -141,9 +141,7 @@ class FindingTheEquityAccount(OpeningBalanceTestCase):
 		self.assertEqual(data["opening_equity_resolved_by"], "account name match")
 
 	def test_an_explicit_account_wins(self):
-		data = self.tool_data(
-			"set_opening_balance", self.payload(opening_equity_account=MEMBER_CAPITAL)
-		)
+		data = self.tool_data("set_opening_balance", self.payload(opening_equity_account=MEMBER_CAPITAL))
 		self.assertEqual(data["opening_equity_account"], MEMBER_CAPITAL)
 		self.assertEqual(data["opening_equity_resolved_by"], "argument")
 
@@ -412,11 +410,9 @@ class TheOpeningEntryCanActuallyBePosted(OpeningBalanceTestCase):
 		"""The plug is built by this app, not by the caller, so it is the line
 		most likely to be the one nobody filled in."""
 		data = self.tool_data("set_opening_balance", self.payload())
-		plug = [
-			line
-			for line in self.entry(data["name"]).get("accounts")
-			if line["account"] == OPENING_EQUITY
-		][0]
+		plug = next(
+			line for line in self.entry(data["name"]).get("accounts") if line["account"] == OPENING_EQUITY
+		)
 		self.assertEqual(float(plug["credit_in_account_currency"]), 52650.0)
 
 	def test_it_submits(self):
@@ -521,12 +517,8 @@ class PostOpeningBalanceJournalEntry(OpeningBalanceTestCase):
 		data = self.tool_data("post_opening_balance_journal_entry", self.payload())
 		for line in self.entry(data["name"]).get("accounts"):
 			with self.subTest(account=line["account"]):
-				self.assertEqual(
-					float(line["debit"]), float(line["debit_in_account_currency"])
-				)
-				self.assertEqual(
-					float(line["credit"]), float(line["credit_in_account_currency"])
-				)
+				self.assertEqual(float(line["debit"]), float(line["debit_in_account_currency"]))
+				self.assertEqual(float(line["credit"]), float(line["credit_in_account_currency"]))
 
 	def test_a_cost_center_and_a_dimension_are_carried_onto_the_line(self):
 		data = self.tool_data(
@@ -610,9 +602,7 @@ class PostOpeningBalanceJournalEntry(OpeningBalanceTestCase):
 	# -- the refusals --------------------------------------------------------
 	def test_an_unbalanced_entry_with_no_offset_account_is_refused(self):
 		before = frappe.db.count("Journal Entry")
-		message = self.tool_error(
-			"post_opening_balance_journal_entry", self.payload(self.unbalanced())
-		)
+		message = self.tool_error("post_opening_balance_journal_entry", self.payload(self.unbalanced()))
 		self.assertIn("out by 1552650.0", message)
 		self.assertIn("offset_account", message)
 		self.assertIn("3300", message)
@@ -719,9 +709,7 @@ class PostOpeningBalanceJournalEntry(OpeningBalanceTestCase):
 		self.assertIn("non-empty list", message)
 
 	def test_a_placeholder_remark_is_refused(self):
-		message = self.tool_error(
-			"post_opening_balance_journal_entry", self.payload(user_remark="opening")
-		)
+		message = self.tool_error("post_opening_balance_journal_entry", self.payload(user_remark="opening"))
 		self.assertIn("real explanation", message)
 
 	def test_the_remark_lands_on_the_entry(self):

@@ -45,7 +45,16 @@ import datetime
 import frappe
 
 from .. import compat, kpi
-from ..args import as_bool, as_date, as_float, as_int, as_str, resolve_account, resolve_company, resolve_cost_center
+from ..args import (
+	as_bool,
+	as_date,
+	as_float,
+	as_int,
+	as_str,
+	resolve_account,
+	resolve_company,
+	resolve_cost_center,
+)
 from ..errors import ToolError
 from ..result import ToolResult
 from . import mutate
@@ -159,9 +168,7 @@ def resolve_asset(asset: str, company: str = "") -> str:
 	if frappe.db.exists("Asset", asset):
 		found = frappe.db.get_value("Asset", asset, ["name", "company"], as_dict=True)
 		if company and found and found.get("company") != company:
-			raise ToolError(
-				f"Asset {asset!r} belongs to company {found.get('company')!r}, not {company!r}"
-			)
+			raise ToolError(f"Asset {asset!r} belongs to company {found.get('company')!r}, not {company!r}")
 		return asset
 	filters = {"asset_name": asset}
 	if company:
@@ -230,9 +237,7 @@ def _validated_allocation(raw, company: str) -> list[dict]:
 	out, seen, total = [], set(), 0.0
 	for index, entry in enumerate(raw, start=1):
 		if not isinstance(entry, dict):
-			raise ToolError(
-				f"cost_center_allocation[{index}] must be an object, got {type(entry).__name__}"
-			)
+			raise ToolError(f"cost_center_allocation[{index}] must be an object, got {type(entry).__name__}")
 		unknown = sorted(set(entry) - {"cost_center", "percentage", "bbch_stage", "note"})
 		if unknown:
 			raise ToolError(
@@ -668,7 +673,9 @@ def _capex_argument(args: dict, purchase_amount: float) -> dict:
 def _validated_method(method: str) -> str:
 	options = [
 		line.strip()
-		for line in str((compat.field_meta(PROFILE, "depreciation_method") or {}).get("options") or "").split("\n")
+		for line in str((compat.field_meta(PROFILE, "depreciation_method") or {}).get("options") or "").split(
+			"\n"
+		)
 		if line.strip()
 	]
 	for option in options or ("Straight Line",):
@@ -697,7 +704,10 @@ def _resolve_item(item_code: str, asset_category: str, args: dict) -> tuple:
 	create_if_missing = as_bool(args, "create_item_if_missing", True)
 	if frappe.db.exists("Item", item_code):
 		row = frappe.db.get_value(
-			"Item", item_code, compat.existing_fields("Item", ("name", "is_fixed_asset", "asset_category")), as_dict=True
+			"Item",
+			item_code,
+			compat.existing_fields("Item", ("name", "is_fixed_asset", "asset_category")),
+			as_dict=True,
 		)
 		if compat.has_field("Item", "is_fixed_asset") and not int(row.get("is_fixed_asset") or 0):
 			raise ToolError(
@@ -889,8 +899,7 @@ def update_asset_allocation(args: dict) -> ToolResult:
 
 def _allocation_key(rows: list[dict]):
 	return sorted(
-		(row["cost_center"], round(float(row["percentage"]), 4), row.get("bbch_stage") or "")
-		for row in rows
+		(row["cost_center"], round(float(row["percentage"]), 4), row.get("bbch_stage") or "") for row in rows
 	)
 
 
@@ -899,7 +908,9 @@ def _same_allocation(before: list[dict], after: list[dict]) -> bool:
 
 
 def _allocation_text(rows: list[dict]) -> str:
-	return ", ".join(f"{row['cost_center']} {round(float(row['percentage']), 4)}%" for row in rows) or "<none>"
+	return (
+		", ".join(f"{row['cost_center']} {round(float(row['percentage']), 4)}%" for row in rows) or "<none>"
+	)
 
 
 # ── 62. link_asset_to_note ──────────────────────────────────────────────────
@@ -912,9 +923,7 @@ def link_asset_to_note(args: dict) -> ToolResult:
 	enforce = as_bool(args, "enforce_tenor", True)
 
 	note_ref = as_str(args, "note_doc_ref") or as_str(args, "linked_note", required=True)
-	note = _note_terms(
-		{**args, "linked_note": note_ref}, str(profile.get("depreciation_start_date") or "")
-	)
+	note = _note_terms({**args, "linked_note": note_ref}, str(profile.get("depreciation_start_date") or ""))
 	if not note:  # pragma: no cover - note_doc_ref is required above
 		raise ToolError("note_doc_ref is required. Nothing was changed.")
 
@@ -1085,8 +1094,7 @@ def run_depreciation_cycle(args: dict) -> ToolResult:
 	return ToolResult(
 		data,
 		f"{verb} {len(planned)} depreciation period(s) totalling {total} for {company} "
-		f"through {period_end}"
-		+ (f"; {len(skipped)} asset(s) skipped" if skipped else ""),
+		f"through {period_end}" + (f"; {len(skipped)} asset(s) skipped" if skipped else ""),
 		docstatus_delta="" if dry_run else "none → 0 (draft)",
 	)
 
@@ -1163,7 +1171,7 @@ def _depreciation_lines(amount: float, allocation: list[dict], accounts: dict, p
 		"cost_center": allocation[0]["cost_center"],
 		"user_remark": f"Accumulated depreciation {profile['asset']}",
 	}
-	return debits + [credit]
+	return [*debits, credit]
 
 
 def _post_period(profile: dict, period: dict, raw_lines: list[dict], accounts: dict):
@@ -1258,10 +1266,7 @@ def depreciation_note_alignment_check(args: dict) -> ToolResult:
 			"depreciation start date, so an asset not yet in service reads its full life."
 		),
 	}
-	summary = (
-		f"{len(assets)} financed asset(s) checked for {company} as of {as_of}: "
-		f"{len(diverged)} diverged"
-	)
+	summary = f"{len(assets)} financed asset(s) checked for {company} as of {as_of}: {len(diverged)} diverged"
 	return ToolResult(data, summary)
 
 

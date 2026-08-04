@@ -68,7 +68,7 @@ class Route:
 	differently from the method it reaches.
 	"""
 
-	__slots__ = ("path", "handler", "mutating")
+	__slots__ = ("handler", "mutating", "path")
 
 	def __init__(self, prefix, handler):
 		self.path = f"{prefix}/{handler.farm_ops_method}"
@@ -123,8 +123,7 @@ def accepted_arguments(handler) -> set:
 		name
 		for name, parameter in parameters.items()
 		if name != "user"
-		and parameter.kind
-		in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+		and parameter.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
 	}
 
 
@@ -139,7 +138,5 @@ def bind(route, body: dict) -> dict:
 	"""
 	accepted = accepted_arguments(route.handler)
 	return {
-		key: value
-		for key, value in (body or {}).items()
-		if key in accepted and key != fallback_auth.BODY_KEY
+		key: value for key, value in (body or {}).items() if key in accepted and key != fallback_auth.BODY_KEY
 	}

@@ -465,9 +465,7 @@ def heat_gaps(described: dict) -> list:
 			"thing a crew remembers"
 		)
 	if not described.get("shade_provided"):
-		gaps.append(
-			f"{CITATION}(e) — the record does not claim shade was available and accessible"
-		)
+		gaps.append(f"{CITATION}(e) — the record does not claim shade was available and accessible")
 	if not described.get("mandatory_rest_taken"):
 		gaps.append(
 			f"{CITATION}(h) — the record does not claim the preventative cool-down rest cycle "
@@ -599,9 +597,7 @@ def bridge_to_attendance(shift: dict, crew: list) -> dict:
 				}
 			)
 		except Exception as exc:  # pragma: no cover - a half-migrated HR app
-			report["failed"].append(
-				{"employee": employee, "error": f"{type(exc).__name__}: {exc}"}
-			)
+			report["failed"].append({"employee": employee, "error": f"{type(exc).__name__}: {exc}"})
 
 	if not has_shift_field:
 		report["link_note"] = (

@@ -64,7 +64,9 @@ def escape(text) -> str:
 	out = str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 	out = out.replace('"', "&quot;")
 	return "".join(
-		char for char in out if char in "\t\n\r" or 0x20 <= ord(char) <= 0xD7FF or 0xE000 <= ord(char) <= 0xFFFD
+		char
+		for char in out
+		if char in "\t\n\r" or 0x20 <= ord(char) <= 0xD7FF or 0xE000 <= ord(char) <= 0xFFFD
 	)
 
 
@@ -203,7 +205,7 @@ class XlsxWorkbook:
 	def _core_xml(self) -> str:
 		return (
 			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-			'<cp:coreProperties '
+			"<cp:coreProperties "
 			'xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
 			'xmlns:dc="http://purl.org/dc/elements/1.1/">'
 			f"<dc:title>{escape(self.title)}</dc:title>"

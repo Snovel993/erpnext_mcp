@@ -201,8 +201,7 @@ def _validate_tax_id(tax_id_type: str, tax_id_last4: str, tail: str) -> tuple[st
 		)
 	if len(digits) != 4:
 		raise ToolError(
-			f"tax_id_last4 must be exactly four digits. Got {tax_id_last4!r} ({len(digits)} "
-			f"digits). {tail}"
+			f"tax_id_last4 must be exactly four digits. Got {tax_id_last4!r} ({len(digits)} digits). {tail}"
 		)
 	return tax_id_type, digits
 
@@ -253,9 +252,7 @@ def create_related_party(args: dict) -> ToolResult:
 		_check_link("Supplier", supplier, "", "", "supplier")
 	governing_document = as_str(args, "governing_document")
 	if governing_document:
-		_check_link(
-			GOVERNANCE_DOCUMENT, governing_document, company, "company", "governing_document"
-		)
+		_check_link(GOVERNANCE_DOCUMENT, governing_document, company, "company", "governing_document")
 
 	doc = frappe.new_doc(RELATED_PARTY)
 	doc.party_name = party_name
@@ -329,14 +326,15 @@ def update_related_party(args: dict) -> ToolResult:
 	# A docname is unambiguous, so a `company` argument beside one is a GUARD
 	# rather than a filter — and the guard's refusal should be the one that
 	# explains why the key cannot be edited. A bare name still gets narrowed.
-	entry = party_row(
-		requested, "" if frappe.db.exists(RELATED_PARTY, requested) else requested_company
-	)
+	entry = party_row(requested, "" if frappe.db.exists(RELATED_PARTY, requested) else requested_company)
 	company = entry["company"]
 
 	for field, why in (
 		("party_name", "the docname is built from it"),
-		("relationship_to_company", "the docname is built from it, and a change of role is a new relationship"),
+		(
+			"relationship_to_company",
+			"the docname is built from it, and a change of role is a new relationship",
+		),
 		("company", "a party related to a different company is a different entry"),
 	):
 		if field in args and as_str(args, field) not in ("", str(entry.get(field) or "")):
@@ -758,9 +756,7 @@ def _party_postings(member: str) -> dict:
 	"""
 	if not compat.doctype_exists("GL Entry"):
 		return {"posting_count": 0, "first_posting": None, "last_posting": None, "companies": []}
-	fields = compat.existing_fields(
-		"GL Entry", ("name", "posting_date", "company", "debit", "credit")
-	)
+	fields = compat.existing_fields("GL Entry", ("name", "posting_date", "company", "debit", "credit"))
 	rows = frappe.db.get_all(
 		"GL Entry",
 		filters={"party_type": FAMILY, "party": member, "is_cancelled": 0},
@@ -910,7 +906,10 @@ def update_family_member(args: dict) -> ToolResult:
 	if "relationship" in args:
 		value = as_str(args, "relationship")
 		_stage_family(
-			changes, doc, "relationship", as_choice(FAMILY, "relationship", value, "relationship") if value else ""
+			changes,
+			doc,
+			"relationship",
+			as_choice(FAMILY, "relationship", value, "relationship") if value else "",
 		)
 	if "related_to" in args:
 		related_to = as_str(args, "related_to")
@@ -926,17 +925,14 @@ def update_family_member(args: dict) -> ToolResult:
 	if "related_party" in args:
 		related_party = as_str(args, "related_party")
 		if related_party and not frappe.db.exists(RELATED_PARTY, related_party):
-			raise ToolError(
-				f"no Related Party called {related_party!r}. Nothing was changed."
-			)
+			raise ToolError(f"no Related Party called {related_party!r}. Nothing was changed.")
 		_stage_family(changes, doc, "related_party", related_party)
 	if "active" in args:
 		_stage_family(changes, doc, "active", 1 if as_bool(args, "active") else 0)
 
 	if not changes:
 		raise ToolError(
-			"nothing to change. Pass at least one of: relationship, related_to, related_party, "
-			"active, notes."
+			"nothing to change. Pass at least one of: relationship, related_to, related_party, active, notes."
 		)
 
 	doc.save()
@@ -1018,18 +1014,14 @@ def list_family_members(args: dict) -> ToolResult:
 
 	unassigned = [member["name"] for member in members if not member["related_to"]]
 	unresolved = [
-		member["name"]
-		for member in members
-		if member["related_to"] and not member["related_to_doctype"]
+		member["name"] for member in members if member["related_to"] and not member["related_to_doctype"]
 	]
 	data = {
 		"member_count": len(members),
 		"active_count": len([member for member in members if member["active"]]),
 		"by_relationship": dict(sorted(by_relationship.items())),
 		"with_related_party": [member["name"] for member in members if member["has_related_party"]],
-		"without_related_party": [
-			member["name"] for member in members if not member["has_related_party"]
-		],
+		"without_related_party": [member["name"] for member in members if not member["has_related_party"]],
 		"without_relationship": [member["name"] for member in members if not member["relationship"]],
 		"without_related_to": unassigned,
 		"related_to_free_text": unresolved,
@@ -1157,10 +1149,7 @@ def get_family_member(args: dict) -> ToolResult:
 			**postings,
 			"compliance_notes": notes,
 		},
-		summary=(
-			f"{_chain_sentence(chain) or row['name']}, "
-			f"{postings['posting_count']} posting(s)"
-		),
+		summary=(f"{_chain_sentence(chain) or row['name']}, {postings['posting_count']} posting(s)"),
 	)
 
 

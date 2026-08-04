@@ -133,9 +133,7 @@ def create_bank_account(args: dict) -> ToolResult:
 
 	gl_account = _validated_gl_account(args, company, is_company_account)
 
-	duplicate = frappe.db.get_value(
-		BANK_ACCOUNT, {"account_name": account_name, "company": company}, "name"
-	)
+	duplicate = frappe.db.get_value(BANK_ACCOUNT, {"account_name": account_name, "company": company}, "name")
 	if duplicate:
 		raise ToolError(
 			f"{company} already has a Bank Account called {account_name!r} ({duplicate}). Two "
@@ -320,9 +318,7 @@ def _validated_gl_account(args: dict, company: str, is_company_account: bool) ->
 
 
 def _accounts_sharing_gl_account(gl_account: str) -> list:
-	return sorted(
-		frappe.db.get_all(BANK_ACCOUNT, filters={"account": gl_account}, pluck="name", limit=10)
-	)
+	return sorted(frappe.db.get_all(BANK_ACCOUNT, filters={"account": gl_account}, pluck="name", limit=10))
 
 
 def _resolve_bank(bank_name: str) -> tuple:

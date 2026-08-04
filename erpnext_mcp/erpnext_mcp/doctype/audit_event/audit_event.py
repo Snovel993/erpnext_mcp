@@ -97,9 +97,9 @@ class AuditEvent(Document):
 		if self.corrective_actions_closed and self.audit_date:
 			if str(self.corrective_actions_closed) < str(self.audit_date):
 				frappe.throw(
-					_(
-						"The closure date {0} is before the audit date {1}."
-					).format(self.corrective_actions_closed, self.audit_date),
+					_("The closure date {0} is before the audit date {1}.").format(
+						self.corrective_actions_closed, self.audit_date
+					),
 					title=_("Closed Before The Audit"),
 				)
 

@@ -263,7 +263,19 @@ register(
 			"pesticide handler protection, and the 300A log. The inspection that "
 			"follows a complaint or an injury."
 		),
-		sections=("open_actions", "alerts", "policies", "certifications", "workforce", "training", "heat_exposure", "housing", "spray_records", "filings", "audits"),
+		sections=(
+			"open_actions",
+			"alerts",
+			"policies",
+			"certifications",
+			"workforce",
+			"training",
+			"heat_exposure",
+			"housing",
+			"spray_records",
+			"filings",
+			"audits",
+		),
 		policy_categories=("Worker Safety", "Worker Training", "Housing"),
 		cert_types=("First Aid / CPR", "Applicator License", "Food Safety Training"),
 		audit_types=("OSHA", "ODA"),
@@ -286,7 +298,18 @@ register(
 			"licensing, and the housing an employer provided. What a wage claim or an "
 			"MSPA investigation asks for."
 		),
-		sections=("open_actions", "alerts", "policies", "certifications", "workforce", "training", "housing", "traceability", "filings", "audits"),
+		sections=(
+			"open_actions",
+			"alerts",
+			"policies",
+			"certifications",
+			"workforce",
+			"training",
+			"housing",
+			"traceability",
+			"filings",
+			"audits",
+		),
 		policy_categories=("Worker Training", "Worker Safety", "Housing"),
 		# MSPA asks what the crew was told about the terms and conditions of
 		# employment, and an OR-OSHA-tagged safety orientation is the record that
@@ -308,7 +331,18 @@ register(
 			"pre-harvest intervals, and the drift conditions on the day. What a drift "
 			"complaint or a residue detection is investigated from."
 		),
-		sections=("open_actions", "alerts", "policies", "certifications", "spray_records", "water", "workforce", "training", "filings", "audits"),
+		sections=(
+			"open_actions",
+			"alerts",
+			"policies",
+			"certifications",
+			"spray_records",
+			"water",
+			"workforce",
+			"training",
+			"filings",
+			"audits",
+		),
 		policy_categories=("Spray SOP", "Worker Training", "Water Testing"),
 		cert_types=("Applicator License",),
 		# 40 CFR 170.401/.501 worker and handler training, kept two years at the
@@ -329,7 +363,16 @@ register(
 			"The compliance posture a grant application asserts and a programme review "
 			"verifies. Certifications held, procedures in force, filings made."
 		),
-		sections=("open_actions", "alerts", "policies", "certifications", "filings", "audits", "workforce", "training"),
+		sections=(
+			"open_actions",
+			"alerts",
+			"policies",
+			"certifications",
+			"filings",
+			"audits",
+			"workforce",
+			"training",
+		),
 		agencies=("USDA", "ODA", "IRS"),
 	)
 )
@@ -409,7 +452,18 @@ def _policies(spec: AuditPacketType, company: str, start: str, end: str) -> dict
 	for row in _rows(
 		"Compliance Policy",
 		filters,
-		("name", "policy_name", "category", "version", "status", "effective_date", "review_due_date", "policy_owner", "superseded_by", "attached_document"),
+		(
+			"name",
+			"policy_name",
+			"category",
+			"version",
+			"status",
+			"effective_date",
+			"review_due_date",
+			"policy_owner",
+			"superseded_by",
+			"attached_document",
+		),
 		order_by="category asc, policy_name asc",
 	):
 		if spec.policy_categories and str(row.get("category") or "") not in spec.policy_categories:
@@ -452,7 +506,18 @@ def _certifications(spec: AuditPacketType, company: str, start: str, end: str) -
 	for row in _rows(
 		"Certification",
 		_company_filter(company),
-		("name", "cert_name", "cert_type", "status", "holder", "issuing_body", "issued_date", "expiration_date", "certificate_number", "attached_certificate"),
+		(
+			"name",
+			"cert_name",
+			"cert_type",
+			"status",
+			"holder",
+			"issuing_body",
+			"issued_date",
+			"expiration_date",
+			"certificate_number",
+			"attached_certificate",
+		),
 		order_by="expiration_date desc",
 	):
 		if spec.cert_types and str(row.get("cert_type") or "") not in spec.cert_types:
@@ -535,7 +600,18 @@ def _workforce(spec: AuditPacketType, company: str, start: str, end: str) -> dic
 	for row in _rows(
 		"Employee",
 		filters,
-		("name", "employee_name", "company", "status", "date_of_joining", "i9_status", "w4_status", "jurisdiction", "flc_license_status", "flc_license_expiration"),
+		(
+			"name",
+			"employee_name",
+			"company",
+			"status",
+			"date_of_joining",
+			"i9_status",
+			"w4_status",
+			"jurisdiction",
+			"flc_license_status",
+			"flc_license_expiration",
+		),
 		order_by="employee_name asc",
 	):
 		rows.append(
@@ -612,9 +688,7 @@ def _training(spec: AuditPacketType, company: str, start: str, end: str, regime:
 
 	wanted = [
 		regime_key
-		for regime_key in (
-			[training_records.canon(regime)] if regime else list(spec.training_regimes)
-		)
+		for regime_key in ([training_records.canon(regime)] if regime else list(spec.training_regimes))
 		if regime_key
 	]
 	rows = []
@@ -868,7 +942,11 @@ def _spray_records(spec: AuditPacketType, company: str, start: str, end: str) ->
 		rows,
 		("spray", "date", "block", "product", "applicator_name", "epa_reg_number", "rei_hours", "phi_hours"),
 	)
-	incomplete = [row["spray"] for row in rows if row["applicator_name"] == "(unrecorded)" or row["epa_reg_number"] == "(unrecorded)"]
+	incomplete = [
+		row["spray"]
+		for row in rows
+		if row["applicator_name"] == "(unrecorded)" or row["epa_reg_number"] == "(unrecorded)"
+	]
 	if incomplete:
 		section["incomplete_records"] = incomplete
 		section["problem_note"] = (
@@ -885,7 +963,17 @@ def _water(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 	for row in _rows(
 		"Field",
 		_company_filter(company, "owning_entity"),
-		("name", "field_name", "owning_entity", "crop", "condition", "water_test_last_date", "last_spray_date", "food_safety_zone", "worker_hygiene_station_present"),
+		(
+			"name",
+			"field_name",
+			"owning_entity",
+			"crop",
+			"condition",
+			"water_test_last_date",
+			"last_spray_date",
+			"food_safety_zone",
+			"worker_hygiene_station_present",
+		),
 		order_by="field_name asc",
 	):
 		tested = str(row.get("water_test_last_date") or "")
@@ -896,7 +984,9 @@ def _water(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 				"condition": row.get("condition"),
 				"water_test_last_date": tested or None,
 				"tested_within_period": bool(tested and start <= tested <= end),
-				"current_at_period_end": bool(tested and tested >= str(frappe.utils.add_days(frappe.utils.getdate(end), -90))),
+				"current_at_period_end": bool(
+					tested and tested >= str(frappe.utils.add_days(frappe.utils.getdate(end), -90))
+				),
 				"last_spray_date": str(row.get("last_spray_date") or "") or None,
 				"worker_hygiene_station": compat.checked(row.get("worker_hygiene_station_present")),
 			}
@@ -904,7 +994,16 @@ def _water(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 	for row in _rows(
 		"Irrigation Zone",
 		_company_filter(company, "owning_entity"),
-		("name", "zone_name", "field", "water_source", "water_right_id", "water_test_last_date", "water_source_class", "chlorination_active"),
+		(
+			"name",
+			"zone_name",
+			"field",
+			"water_source",
+			"water_right_id",
+			"water_test_last_date",
+			"water_source_class",
+			"chlorination_active",
+		),
 		order_by="zone_name asc",
 	):
 		tested = str(row.get("water_test_last_date") or "")
@@ -915,7 +1014,9 @@ def _water(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 				"condition": row.get("water_source_class"),
 				"water_test_last_date": tested or None,
 				"tested_within_period": bool(tested and start <= tested <= end),
-				"current_at_period_end": bool(tested and tested >= str(frappe.utils.add_days(frappe.utils.getdate(end), -90))),
+				"current_at_period_end": bool(
+					tested and tested >= str(frappe.utils.add_days(frappe.utils.getdate(end), -90))
+				),
 				"last_spray_date": None,
 				"worker_hygiene_station": compat.checked(row.get("chlorination_active")),
 			}
@@ -929,7 +1030,13 @@ def _water(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 			"packet about last season."
 		),
 		rows,
-		("block", "water_test_last_date", "tested_within_period", "current_at_period_end", "worker_hygiene_station"),
+		(
+			"block",
+			"water_test_last_date",
+			"tested_within_period",
+			"current_at_period_end",
+			"worker_hygiene_station",
+		),
 		absent="No Field or Irrigation Zone records exist for this company.",
 	)
 	stale = [row["block"] for row in rows if not row["current_at_period_end"]]
@@ -963,7 +1070,16 @@ def _traceability(spec: AuditPacketType, company: str, start: str, end: str) -> 
 	for row in _rows(
 		doctype,
 		filters,
-		("name", date_field or "creation", "picker_id", "crew_id", "block_id", "bin_id", "shipment_id", "disposition"),
+		(
+			"name",
+			date_field or "creation",
+			"picker_id",
+			"crew_id",
+			"block_id",
+			"bin_id",
+			"shipment_id",
+			"disposition",
+		),
 		order_by=f"{date_field} asc" if date_field else "creation asc",
 	):
 		rows.append(
@@ -989,9 +1105,7 @@ def _traceability(spec: AuditPacketType, company: str, start: str, end: str) -> 
 		("entry", "date", "picker_id", "crew_id", "block_id", "bin_id", "shipment_id"),
 	)
 	broken = [
-		row["entry"]
-		for row in rows
-		if "(unlinked)" in (row["block_id"], row["bin_id"], row["shipment_id"])
+		row["entry"] for row in rows if "(unlinked)" in (row["block_id"], row["bin_id"], row["shipment_id"])
 	]
 	if broken:
 		section["chain_breaks"] = broken[:100]
@@ -1008,7 +1122,20 @@ def _housing(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 	for row in _rows(
 		"Housing Unit",
 		_company_filter(company, "owning_entity"),
-		("name", "unit_name", "unit_type", "parcel", "capacity", "condition", "fsma_worker_facility", "or_housing_law_compliant", "max_occupants_per_or_law", "last_habitability_inspection", "smoke_detector_last_test", "co_detector_last_test"),
+		(
+			"name",
+			"unit_name",
+			"unit_type",
+			"parcel",
+			"capacity",
+			"condition",
+			"fsma_worker_facility",
+			"or_housing_law_compliant",
+			"max_occupants_per_or_law",
+			"last_habitability_inspection",
+			"smoke_detector_last_test",
+			"co_detector_last_test",
+		),
 		order_by="parcel asc, unit_name asc",
 	):
 		units.append(
@@ -1028,7 +1155,17 @@ def _housing(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 	assignments = _rows(
 		"Housing Assignment",
 		{"assigned_date": ("<=", end)},
-		("name", "unit", "employee", "employee_name", "assigned_date", "end_date", "housing_deduction_from_wages", "deposit_paid", "deposit_returned"),
+		(
+			"name",
+			"unit",
+			"employee",
+			"employee_name",
+			"assigned_date",
+			"end_date",
+			"housing_deduction_from_wages",
+			"deposit_paid",
+			"deposit_returned",
+		),
 		order_by="assigned_date asc",
 	)
 	occupancy = []
@@ -1075,7 +1212,18 @@ def _filings(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 	for row in _rows(
 		"Regulatory Filing",
 		_company_filter(company),
-		("name", "filing_name", "agency", "filing_type", "status", "period_covered", "submission_date", "docket_number", "response_received_date", "attached_filing"),
+		(
+			"name",
+			"filing_name",
+			"agency",
+			"filing_type",
+			"status",
+			"period_covered",
+			"submission_date",
+			"docket_number",
+			"response_received_date",
+			"attached_filing",
+		),
 		order_by="submission_date asc",
 	):
 		if spec.agencies and str(row.get("agency") or "") not in spec.agencies:
@@ -1119,7 +1267,16 @@ def _audits(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 	for row in _rows(
 		"Audit Event",
 		_company_filter(company),
-		("name", "audit_name", "audit_type", "auditor", "audit_date", "result", "corrective_actions_closed", "attached_report"),
+		(
+			"name",
+			"audit_name",
+			"audit_type",
+			"auditor",
+			"audit_date",
+			"result",
+			"corrective_actions_closed",
+			"attached_report",
+		),
 		order_by="audit_date asc",
 	):
 		if spec.audit_types and str(row.get("audit_type") or "") not in spec.audit_types:
@@ -1258,9 +1415,7 @@ def _alerts(spec: AuditPacketType, company: str, start: str, end: str, regime: s
 	from . import training as training_records
 
 	wanted = [
-		key
-		for key in ([training_records.canon(regime)] if regime else list(spec.training_regimes))
-		if key
+		key for key in ([training_records.canon(regime)] if regime else list(spec.training_regimes)) if key
 	]
 
 	filters = {"dismissed": 0}
@@ -1576,10 +1731,7 @@ def document_sections(packet: dict):
 			"table",
 			(
 				[column.replace("_", " ").title() for column in columns],
-				[
-					[_cell(row.get(column)) for column in columns]
-					for row in section["rows"]
-				],
+				[[_cell(row.get(column)) for column in columns] for row in section["rows"]],
 				tuple("l" for _ in columns),
 			),
 		)

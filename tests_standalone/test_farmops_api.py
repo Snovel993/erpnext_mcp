@@ -55,17 +55,18 @@ EIGHT CLAIMS.
 """
 
 import json
+from typing import ClassVar
 
 import frappe
 from werkzeug.test import Client
 from werkzeug.wrappers import Response
 
 from erpnext_mcp import audit
-from erpnext_mcp.api import fallback_auth
+from erpnext_mcp.api import fallback_auth, guard
 from erpnext_mcp.api import files as files_api
-from erpnext_mcp.api import guard
 from erpnext_mcp.api import mobile as mobile_api
-from erpnext_mcp.farmops_api import PREFIX, ROUTES, app as farmops_app
+from erpnext_mcp.farmops_api import PREFIX, ROUTES
+from erpnext_mcp.farmops_api import app as farmops_app
 from erpnext_mcp.farmops_api import routes as farmops_routes
 from erpnext_mcp.farmops_api import session as farmops_session
 
@@ -143,7 +144,7 @@ class FarmOpsAPITestCase(MobileAPITestCase):
 
 # ── 1. the surface is closed ────────────────────────────────────────────────
 class TheSurfaceIsClosed(FarmOpsAPITestCase):
-	EXPECTED = {
+	EXPECTED: ClassVar[set[str]] = {
 		"/mobile/get_current_user_context",
 		"/mobile/list_my_tasks",
 		"/mobile/list_available_tasks",
@@ -301,9 +302,7 @@ class TheDoorStaysShut(FarmOpsAPITestCase):
 			self._refused(credential=False),
 			self._refused(token="not-a-pair"),
 			self._refused(credential={"api_key": "nope", "api_secret": "x" * 56}),
-			self._refused(
-				credential={"api_key": self.credential["api_key"], "api_secret": "w" * 56}
-			),
+			self._refused(credential={"api_key": self.credential["api_key"], "api_secret": "w" * 56}),
 		}
 		self.assertEqual(len(messages), 1, messages)
 
@@ -350,9 +349,7 @@ class TheSevenGatesStillRun(FarmOpsAPITestCase):
 		set_roles("casual@example.test", ["Field Worker"])
 		frappe.db.set_value("User", "casual@example.test", "api_key", "casualkey")
 		STORE.passwords[("User", "casual@example.test", "api_secret")] = "c" * 56
-		status, _ = self.refusal(
-			MY_TASKS, credential={"api_key": "casualkey", "api_secret": "c" * 56}
-		)
+		status, _ = self.refusal(MY_TASKS, credential={"api_key": "casualkey", "api_secret": "c" * 56})
 		self.assertEqual(status, 403)
 
 	def test_a_grant_that_is_no_longer_active_closes_this_door_on_the_next_call(self):
@@ -384,9 +381,7 @@ class TheSevenGatesStillRun(FarmOpsAPITestCase):
 		"""The reason the grant gate exists, re-run against the new entry point."""
 		frappe.db.set_value("User", "Administrator", "api_key", "adminkey")
 		STORE.passwords[("User", "Administrator", "api_secret")] = "a" * 56
-		status, _ = self.refusal(
-			MY_TASKS, credential={"api_key": "adminkey", "api_secret": "a" * 56}
-		)
+		status, _ = self.refusal(MY_TASKS, credential={"api_key": "adminkey", "api_secret": "a" * 56})
 		self.assertEqual(status, 403)
 
 	def test_a_company_the_caller_cannot_reach_is_refused_not_quietly_emptied(self):
@@ -418,9 +413,7 @@ class TheSevenGatesStillRun(FarmOpsAPITestCase):
 		mine = self.a_task()
 		theirs = self.a_task(company=OTHER, task_name="Somebody else's walk")
 		self.assertEqual(self.refusal(f"{PREFIX}/mobile/get_task", {"task": theirs})[0], 404)
-		self.assertEqual(
-			self.refusal(f"{PREFIX}/mobile/get_task", {"task": "FT-NOPE"})[0], 404
-		)
+		self.assertEqual(self.refusal(f"{PREFIX}/mobile/get_task", {"task": "FT-NOPE"})[0], 404)
 		self.assertTrue(self.message(f"{PREFIX}/mobile/get_task", {"task": mine}))
 
 
@@ -518,9 +511,7 @@ class TheRefusalReachesThePhone(FarmOpsAPITestCase):
 	def test_the_sentence_survives_the_envelope_the_shipped_app_decodes(self):
 		self.a_camp()
 		task = self.a_task()
-		_, body = self.refusal(
-			f"{PREFIX}/mobile/reject_task", {"task": task, "reason": "   "}
-		)
+		_, body = self.refusal(f"{PREFIX}/mobile/reject_task", {"task": task, "reason": "   "})
 		self.assertIn("A reason is required", self._server_message(body)[0])
 
 	def test_the_same_sentence_is_in_all_three_places_the_app_looks(self):
@@ -661,9 +652,7 @@ class TheArgumentFilter(FarmOpsAPITestCase):
 		for refused in ("cancel", "record_data", "worker_id", "user"):
 			for route in ROUTES:
 				with self.subTest(argument=refused, path=route.path):
-					self.assertNotIn(
-						refused, farmops_routes.accepted_arguments(route.handler)
-					)
+					self.assertNotIn(refused, farmops_routes.accepted_arguments(route.handler))
 
 	def test_a_body_naming_another_user_is_answered_as_the_caller(self):
 		"""An account that can name somebody else in a request body is not
@@ -821,9 +810,7 @@ class TheOldPathIsUntouched(FarmOpsAPITestCase):
 
 	def test_the_shared_verifier_answers_the_same_for_both_doors(self):
 		self.assertEqual(
-			fallback_auth.verify_credential(
-				self.credential["api_key"], self.credential["api_secret"]
-			),
+			fallback_auth.verify_credential(self.credential["api_key"], self.credential["api_secret"]),
 			WORKER,
 		)
 		self.assertEqual(fallback_auth.verify_credential("nope", "x" * 56), "")

@@ -138,7 +138,9 @@ class FarmTask(Document):
 			frappe.throw(_("Estimated Duration cannot be negative."))
 
 		self.evidence_required = json.dumps(parse_evidence_required(self.evidence_required))
-		self.creates_record_data = json.dumps(parse_json_object(self.creates_record_data, "Creates Record Data"))
+		self.creates_record_data = json.dumps(
+			parse_json_object(self.creates_record_data, "Creates Record Data")
+		)
 
 		self.assigned_to = str(self.assigned_to or "").strip()
 		self.assigned_to_name = str(self.assigned_to_name or "").strip() or self.assigned_to

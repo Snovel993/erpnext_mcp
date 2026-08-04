@@ -657,7 +657,9 @@ def build_detector_test(payload: dict, evidence: list) -> object:
 	doc.test_date = payload.get("test_date") or frappe.utils.today()
 	doc.tester = payload.get("tester") or ""
 	doc.tester_name = payload.get("tester_name") or payload.get("tester") or ""
-	doc.smoke_detector_result = _detector_result(payload.get("smoke_detector_result"), "smoke_detector_result")
+	doc.smoke_detector_result = _detector_result(
+		payload.get("smoke_detector_result"), "smoke_detector_result"
+	)
 	doc.co_detector_result = _detector_result(payload.get("co_detector_result"), "co_detector_result")
 	doc.replacement_needed = 1 if payload.get("replacement_needed") else 0
 	doc.findings = payload.get("findings") or ""
@@ -982,7 +984,9 @@ def update_water_test(args: dict) -> ToolResult:
 
 
 # ── the shared update ───────────────────────────────────────────────────────
-def _update(doctype: str, args: dict, texts: tuple, choices: tuple = (), checks: tuple = (), dates: tuple = ()) -> ToolResult:
+def _update(
+	doctype: str, args: dict, texts: tuple, choices: tuple = (), checks: tuple = (), dates: tuple = ()
+) -> ToolResult:
 	"""Change one record, echoing every change as before → after.
 
 	The closure fields are common to all three, so they are handled here rather
@@ -1020,10 +1024,24 @@ def _update(doctype: str, args: dict, texts: tuple, choices: tuple = (), checks:
 		changes[spec.photo_field] = {"before": "", "after": f"+{len(evidence)} file(s)"}
 
 	if not changes:
-		fields = ", ".join(sorted(set(texts + choices + checks + dates + ("corrective_action_closed", "closure_note", "keep_as_draft", spec.photo_field))))
+		fields = ", ".join(
+			sorted(
+				set(
+					texts
+					+ choices
+					+ checks
+					+ dates
+					+ ("corrective_action_closed", "closure_note", "keep_as_draft", spec.photo_field)
+				)
+			)
+		)
 		raise ToolError(f"nothing to change. Pass at least one of: {fields}.")
 
-	was = str(doc.get_doc_before_save().workflow_state if doc.get_doc_before_save() else row.get("workflow_state") or "")
+	was = str(
+		doc.get_doc_before_save().workflow_state
+		if doc.get_doc_before_save()
+		else row.get("workflow_state") or ""
+	)
 	doc.save(ignore_permissions=True)
 	writes = _register_writes(doc)
 

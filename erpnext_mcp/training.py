@@ -462,16 +462,48 @@ TYPE_REGIME_HEURISTICS = (
 #: RETENTION is derived (`retention_years`), so the seed cannot contradict the
 #: doctrine that the longest tag on a record governs.
 SEED_TRAINING_TYPES = (
-	("PSA Grower Training", ("FSMA",), "The Produce Safety Alliance grower course. FSMA §112.22(c) wants at least one supervisor to have completed it; the certificate does not expire."),
-	("WPS Handler Training", ("WPS",), "40 CFR 170.501 handler training, every twelve months. A handler whose card has lapsed cannot lawfully perform an application."),
-	("WPS Worker Training", ("WPS",), "40 CFR 170.401 worker training, every twelve months, for anybody entering a treated area."),
-	("Heat Illness Prevention", ("OR-OSHA",), "OAR 437-004-1131, annually and BEFORE work at any site where the heat index will reach 80 °F. Six named topics must be covered."),
+	(
+		"PSA Grower Training",
+		("FSMA",),
+		"The Produce Safety Alliance grower course. FSMA §112.22(c) wants at least one supervisor to have completed it; the certificate does not expire.",
+	),
+	(
+		"WPS Handler Training",
+		("WPS",),
+		"40 CFR 170.501 handler training, every twelve months. A handler whose card has lapsed cannot lawfully perform an application.",
+	),
+	(
+		"WPS Worker Training",
+		("WPS",),
+		"40 CFR 170.401 worker training, every twelve months, for anybody entering a treated area.",
+	),
+	(
+		"Heat Illness Prevention",
+		("OR-OSHA",),
+		"OAR 437-004-1131, annually and BEFORE work at any site where the heat index will reach 80 °F. Six named topics must be covered.",
+	),
 	("OSHA 10", ("OR-OSHA",), "The ten-hour general safety course."),
 	("OSHA 30", ("OR-OSHA",), "The thirty-hour supervisor safety course."),
-	("Hazard Communication", ("OR-OSHA", "WPS"), "OAR 437-004-9800 — chemical hazards, labels and safety data sheets. Overlaps the WPS pesticide-safety curriculum, so one session tagged for both is one session."),
-	("Applicator License Renewal", ("WPS", "OR-OSHA"), "ODA pesticide applicator licence recertification credits under ORS 634."),
-	("NOP Handler Training", ("NOP",), "7 CFR 205.201 — handling of approved organic inputs, as written into the Organic System Plan the certifier inspects against."),
-	("Food Safety Refresher", ("GAP", "FSMA"), "Annual worker health and hygiene. USDA GAP asks for it by name and FSMA Subpart C asks for it periodically, so one session answers both."),
+	(
+		"Hazard Communication",
+		("OR-OSHA", "WPS"),
+		"OAR 437-004-9800 — chemical hazards, labels and safety data sheets. Overlaps the WPS pesticide-safety curriculum, so one session tagged for both is one session.",
+	),
+	(
+		"Applicator License Renewal",
+		("WPS", "OR-OSHA"),
+		"ODA pesticide applicator licence recertification credits under ORS 634.",
+	),
+	(
+		"NOP Handler Training",
+		("NOP",),
+		"7 CFR 205.201 — handling of approved organic inputs, as written into the Organic System Plan the certifier inspects against.",
+	),
+	(
+		"Food Safety Refresher",
+		("GAP", "FSMA"),
+		"Annual worker health and hygiene. USDA GAP asks for it by name and FSMA Subpart C asks for it periodically, so one session answers both.",
+	),
 )
 
 
@@ -803,9 +835,7 @@ def fsma_161_gaps(described: dict) -> list:
 	if not described.get("farm_name"):
 		gaps.append("§112.161(a)(1)(i) — no farm name recorded on the record itself")
 	if not described.get("trainee_signed"):
-		gaps.append(
-			"§112.161(a)(4) — not signed or initialled by the person who performed the activity"
-		)
+		gaps.append("§112.161(a)(4) — not signed or initialled by the person who performed the activity")
 	if not described.get("supervisor_reviewed"):
 		gaps.append(
 			"§112.161(b) — not reviewed, dated and signed by a supervisor. Worker training "

@@ -100,6 +100,7 @@ def _select_value(doctype: str, fieldname: str, wanted: str):
 			return option
 	return None
 
+
 #: The dashboard's name, and therefore its route: Frappe slugifies this into
 #: `/app/compliance-command-center`.
 DASHBOARD_NAME = "Compliance Command Center"
@@ -375,8 +376,7 @@ DISPATCH_NUMBER_CARDS = (
 		"filters_json": card_filters(DISPATCH_DOCTYPE, {"state": "Awaiting-Review"}),
 		"color": "#f5a623",
 		"why": (
-			"Work that was DONE and found something. The register moved; what needs a person is "
-			"the finding."
+			"Work that was DONE and found something. The register moved; what needs a person is the finding."
 		),
 	},
 	{
@@ -406,7 +406,9 @@ DISPATCH_CHARTS = (
 		"group_by_type": "Count",
 		"group_by_based_on": "task_type",
 		"type": "Donut",
-		"filters_json": card_filters(DISPATCH_DOCTYPE, {"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}),
+		"filters_json": card_filters(
+			DISPATCH_DOCTYPE, {"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}
+		),
 		"number_of_groups": 10,
 		"why": (
 			"What kind of work is outstanding. A board that is nine-tenths inspections is a "
@@ -420,7 +422,9 @@ DISPATCH_CHARTS = (
 		"group_by_type": "Count",
 		"group_by_based_on": "urgency",
 		"type": "Bar",
-		"filters_json": card_filters(DISPATCH_DOCTYPE, {"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}),
+		"filters_json": card_filters(
+			DISPATCH_DOCTYPE, {"state": ["not in", ["Completed", "Rejected", "Cancelled"]]}
+		),
 		"number_of_groups": 4,
 		"why": (
 			"The shape of the queue. If this is flat at Critical, the urgency scale has stopped "
@@ -1084,9 +1088,7 @@ def _repair_filters(doctype: str, key_field: str, specs, report: dict) -> None:
 			existing = json.loads(raw)
 			if not isinstance(existing, dict):
 				continue
-			document_type = frappe.db.get_value(doctype, name, "document_type") or spec.get(
-				"document_type"
-			)
+			document_type = frappe.db.get_value(doctype, name, "document_type") or spec.get("document_type")
 			if not document_type:
 				continue
 			frappe.db.set_value(doctype, name, "filters_json", card_filters(document_type, existing))

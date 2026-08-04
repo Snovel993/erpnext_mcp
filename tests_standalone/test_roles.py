@@ -48,11 +48,7 @@ CUSTOM = roles.CUSTOM_DOCPERM
 
 def custom_perms(doctype: str) -> dict:
 	"""{role: row} for every Custom DocPerm on one doctype."""
-	return {
-		str(row.get("role")): row
-		for row in STORE.rows(CUSTOM)
-		if str(row.get("parent")) == doctype
-	}
+	return {str(row.get("role")): row for row in STORE.rows(CUSTOM) if str(row.get("parent")) == doctype}
 
 
 class RolesTestCase(SeededTestCase):
@@ -121,9 +117,7 @@ class TheInstaller(RolesTestCase):
 		finally:
 			INSTALLED_DOCTYPES.add("Farm Task")
 		self.assertIn("Farm Task", report["skipped_doctypes"])
-		self.assertNotIn(
-			"Farm Task", [str(entry["name"]) for entry in report["failed"]]
-		)
+		self.assertNotIn("Farm Task", [str(entry["name"]) for entry in report["failed"]])
 
 	def test_after_migrate_installs_them_and_prints_nothing(self):
 		"""The hook path, end to end. A clean migrate says nothing at all."""
@@ -257,9 +251,7 @@ class TheCustomDocPermTrap(RolesTestCase):
 		self.install()
 		for row in STORE.rows(CUSTOM):
 			with self.subTest(doctype=row.get("parent")):
-				self.assertEqual(
-					frappe.db.get_value("DocType", row["parent"], "module"), roles.OWNED_MODULE
-				)
+				self.assertEqual(frappe.db.get_value("DocType", row["parent"], "module"), roles.OWNED_MODULE)
 
 
 class WhatEachRoleMay(RolesTestCase):
@@ -375,9 +367,7 @@ class TheSplit(RolesTestCase):
 		"""
 		names = (MAIN, OTHER, "Constancy Farms", "Highland", "Orchard Meadow", "LLC")
 		for spec in roles.ROLE_SPECS:
-			text = " ".join(
-				[spec.name, spec.description, spec.summary, *spec.cannot, *spec.companion_roles]
-			)
+			text = " ".join([spec.name, spec.description, spec.summary, *spec.cannot, *spec.companion_roles])
 			for company in names:
 				with self.subTest(role=spec.name, company=company):
 					self.assertNotIn(company, text)
@@ -452,9 +442,7 @@ class TheCatalogue(RolesTestCase):
 		self.install()
 		described = roles.describe_role(spec)
 		self.assertTrue(described["installed"])
-		self.assertIn(
-			"Farm Task", [perm["doctype"] for perm in described["permissions"]]
-		)
+		self.assertIn("Farm Task", [perm["doctype"] for perm in described["permissions"]])
 
 	def test_roles_of_reports_only_this_apps_roles(self):
 		"""A Farm Manager who is also a System Manager is a fact about the site's
@@ -473,9 +461,7 @@ class TheCatalogue(RolesTestCase):
 		user.append("roles", {"role": "System Manager"})
 		user.save()
 		self.assertEqual(roles.roles_of("foreman@example.test"), ["Foreman"])
-		self.assertEqual(
-			roles.all_roles_of("foreman@example.test"), ["Foreman", "System Manager"]
-		)
+		self.assertEqual(roles.all_roles_of("foreman@example.test"), ["Foreman", "System Manager"])
 
 	def test_spec_for_is_exact_and_does_not_guess(self):
 		self.assertIsNotNone(roles.spec_for("Field Worker"))

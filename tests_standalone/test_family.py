@@ -107,9 +107,9 @@ class CreateFamilyMember(FamilyTestCase):
 	def test_the_fixture_member_counts_as_a_duplicate(self):
 		"""ALEX is seeded because the v12 GL rows name him — proof the fixture and
 		the tool are looking at the same register."""
-		self.assertIn("already on the family register", self.tool_error(
-			"create_family_member", {"family_name": ALEX}
-		))
+		self.assertIn(
+			"already on the family register", self.tool_error("create_family_member", {"family_name": ALEX})
+		)
 
 	def test_a_missing_name_is_refused(self):
 		self.assertIn("family_name is required", self.tool_error("create_family_member", {}))
@@ -136,9 +136,7 @@ class CreateFamilyMember(FamilyTestCase):
 
 	def test_the_switch_is_off_by_default(self):
 		self.configure(enabled=1)
-		self.assertIn(
-			"switched off", self.tool_error("create_family_member", {"family_name": "Somebody"})
-		)
+		self.assertIn("switched off", self.tool_error("create_family_member", {"family_name": "Somebody"}))
 
 	def test_it_is_audited(self):
 		self.a_member()
@@ -166,17 +164,13 @@ class UpdateFamilyMember(FamilyTestCase):
 
 	def test_it_retires_somebody_without_deleting_them(self):
 		before = len(STORE.rows("Family"))
-		data = self.tool_data(
-			"update_family_member", {"family_name": "Marguerite Bramwell", "active": False}
-		)
+		data = self.tool_data("update_family_member", {"family_name": "Marguerite Bramwell", "active": False})
 		self.assertFalse(data["active"])
 		self.assertEqual(len(STORE.rows("Family")), before)
 
 	def test_retiring_somebody_says_how_many_postings_would_have_been_orphaned(self):
 		"""Which is the argument for the flag existing rather than a delete."""
-		data = self.tool_data(
-			"update_family_member", {"family_name": "Marguerite Bramwell", "active": False}
-		)
+		data = self.tool_data("update_family_member", {"family_name": "Marguerite Bramwell", "active": False})
 		self.assertTrue(any("orphan" in warning for warning in data["warnings"]))
 
 	def test_renaming_is_refused_because_postings_point_at_the_docname(self):
@@ -211,9 +205,7 @@ class UpdateFamilyMember(FamilyTestCase):
 		self.configure(enabled=1)
 		self.assertIn(
 			"switched off",
-			self.tool_error(
-				"update_family_member", {"family_name": "Marguerite Bramwell", "active": False}
-			),
+			self.tool_error("update_family_member", {"family_name": "Marguerite Bramwell", "active": False}),
 		)
 
 
@@ -243,9 +235,7 @@ class ListFamilyMembers(FamilyTestCase):
 
 	def test_linking_one_moves_them_between_the_two_lists(self):
 		party = self.a_related_party()["name"]
-		self.tool_data(
-			"update_family_member", {"family_name": "Marguerite Bramwell", "related_party": party}
-		)
+		self.tool_data("update_family_member", {"family_name": "Marguerite Bramwell", "related_party": party})
 		data = self.tool_data("list_family_members")
 		self.assertEqual(data["with_related_party"], ["Marguerite Bramwell"])
 		self.assertNotIn("Marguerite Bramwell", data["without_related_party"])
@@ -347,9 +337,7 @@ class GetFamilyMember(FamilyTestCase):
 		self.assertTrue(any("postings keep resolving" in note for note in notes))
 
 	def test_an_unknown_member_is_refused_with_the_register_named(self):
-		self.assertIn(
-			"list_family_members", self.tool_error("get_family_member", {"family_name": "Nobody"})
-		)
+		self.assertIn("list_family_members", self.tool_error("get_family_member", {"family_name": "Nobody"}))
 
 
 # ── the loop this release closes ────────────────────────────────────────────
@@ -407,9 +395,7 @@ class EndToEnd(FamilyTestCase):
 		"""Adding a way to create members must not change what the pre-fill does
 		with them. Family stays excluded and stays counted."""
 		self.configure(enabled=1, **ALL_ON, allow_generate_1099_prefill=1)
-		data = self.tool_data(
-			"generate_1099_prefill", {"company": MAIN, "tax_year": 2025, "dry_run": True}
-		)
+		data = self.tool_data("generate_1099_prefill", {"company": MAIN, "tax_year": 2025, "dry_run": True})
 		self.assertEqual(data["excluded"]["family_party_postings"], 2)
 		self.assertNotIn(ALEX, [row["recipient"] for row in data["recipients"]])
 
@@ -438,7 +424,14 @@ class RelationshipVocabulary(FamilyTestCase):
 		seeded under v0.12.x has to read back unchanged."""
 		STORE.seed(
 			"Family",
-			[{"name": "Legacy Child", "family_member_name": "Legacy Child", "relationship": "Child", "active": 1}],
+			[
+				{
+					"name": "Legacy Child",
+					"family_member_name": "Legacy Child",
+					"relationship": "Child",
+					"active": 1,
+				}
+			],
 		)
 		data = self.tool_data("get_family_member", {"family_name": "Legacy Child"})
 		self.assertEqual(data["relationship"], "Child")
@@ -448,9 +441,7 @@ class RelationshipVocabulary(FamilyTestCase):
 
 	def test_it_can_be_changed_from_child_to_son(self):
 		self.a_member("Antony Polehn", relationship="Child")
-		data = self.tool_data(
-			"update_family_member", {"family_name": "Antony Polehn", "relationship": "Son"}
-		)
+		data = self.tool_data("update_family_member", {"family_name": "Antony Polehn", "relationship": "Son"})
 		self.assertEqual(data["changed"]["relationship"], ["Child", "Son"])
 
 	def test_something_that_is_not_a_relationship_is_still_refused_with_the_new_list(self):
@@ -543,9 +534,7 @@ class RelatedTo(FamilyTestCase):
 	def test_update_clears_it_with_an_empty_string(self):
 		self.a_member("Tim Polehn", relationship="Parent")
 		self.a_member("Alexander Polehn", relationship="Son", related_to="Tim Polehn")
-		data = self.tool_data(
-			"update_family_member", {"family_name": "Alexander Polehn", "related_to": ""}
-		)
+		data = self.tool_data("update_family_member", {"family_name": "Alexander Polehn", "related_to": ""})
 		self.assertIsNone(data["related_to"])
 
 	def test_update_refuses_a_self_reference(self):
@@ -564,14 +553,23 @@ class RelatedTo(FamilyTestCase):
 
 	def test_it_is_named_in_the_nothing_to_change_refusal(self):
 		self.a_member("Alexander Polehn")
-		self.assertIn("related_to", self.tool_error("update_family_member", {"family_name": "Alexander Polehn"}))
+		self.assertIn(
+			"related_to", self.tool_error("update_family_member", {"family_name": "Alexander Polehn"})
+		)
 
 	def test_a_pre_migration_record_with_no_related_to_column_loads(self):
 		"""Records written before the field existed carry no value at all, and the
 		read path has to treat that as "unassigned" rather than as an error."""
 		STORE.seed(
 			"Family",
-			[{"name": "Seeded Before", "family_member_name": "Seeded Before", "relationship": "Child", "active": 1}],
+			[
+				{
+					"name": "Seeded Before",
+					"family_member_name": "Seeded Before",
+					"relationship": "Child",
+					"active": 1,
+				}
+			],
 		)
 		data = self.tool_data("get_family_member", {"family_name": "Seeded Before"})
 		self.assertIsNone(data["related_to"])
@@ -687,9 +685,7 @@ class TheChainUpward(FamilyTestCase):
 		for index, name in enumerate(names):
 			self.a_member(name, relationship="Parent")
 			if index:
-				self.tool_data(
-					"update_family_member", {"family_name": names[index - 1], "related_to": name}
-				)
+				self.tool_data("update_family_member", {"family_name": names[index - 1], "related_to": name})
 		data = self.tool_data("get_family_member", {"family_name": names[0]})
 		self.assertIn("depth limit", data["relationship_chain"][-1]["chain_ends_because"])
 

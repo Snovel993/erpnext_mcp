@@ -30,6 +30,7 @@ import unittest
 
 from .harness import DOCTYPE_DIR, frappe
 
+
 #: Frappe's own scrub: a DocType's folder and module are its name lowercased with
 #: spaces and hyphens as underscores. Reproduced rather than imported so this
 #: test fails on a name the app got wrong rather than agreeing with it.

@@ -122,9 +122,7 @@ def one_year_end(start: str) -> str:
 
 def _validate_range(start: str, end: str, is_short_year: bool, verb: str) -> None:
 	if end < start:
-		raise ToolError(
-			f"year_end_date {end} is before year_start_date {start}. Nothing was {verb}."
-		)
+		raise ToolError(f"year_end_date {end} is before year_start_date {start}. Nothing was {verb}.")
 	if end == start:
 		raise ToolError(f"a fiscal year cannot be one day long ({start}). Nothing was {verb}.")
 	if is_short_year:
@@ -176,9 +174,7 @@ def _conflicts(start: str, end: str, companies: list[str], exclude: str = "") ->
 	resolving dates through them on several versions, and a range nobody can
 	explain is worse than one that has to be renamed.
 	"""
-	fields = compat.existing_fields(
-		FISCAL_YEAR, ("name", "year_start_date", "year_end_date", "disabled")
-	)
+	fields = compat.existing_fields(FISCAL_YEAR, ("name", "year_start_date", "year_end_date", "disabled"))
 	found = []
 	for row in frappe.db.get_all(FISCAL_YEAR, fields=fields, order_by="year_start_date asc", limit=500):
 		if row["name"] == exclude:
@@ -285,11 +281,7 @@ def create_fiscal_year(args: dict) -> ToolResult:
 			"A Fiscal Year is a permission for a date, not a posting. Nothing was booked and no "
 			"balance moved — what changed is that ERPNext will now accept a posting_date between "
 			f"{start} and {end}"
-			+ (
-				" for every company on this site."
-				if not companies
-				else f" for {', '.join(companies)}."
-			)
+			+ (" for every company on this site." if not companies else f" for {', '.join(companies)}.")
 		),
 		"next_step": (
 			"Historical events for this period can now be booked. set_opening_balance is the tool "
@@ -393,9 +385,7 @@ def update_fiscal_year(args: dict) -> ToolResult:
 		changes["is_short_year"] = [bool(int(row.get("is_short_year") or 0)), bool(is_short_year)]
 	if disabled is not None and bool(int(row.get("disabled") or 0)) != bool(disabled):
 		if not compat.has_field(FISCAL_YEAR, "disabled"):
-			raise ToolError(
-				"this site's Fiscal Year doctype has no `disabled` field. Nothing was changed."
-			)
+			raise ToolError("this site's Fiscal Year doctype has no `disabled` field. Nothing was changed.")
 		doc.disabled = 1 if disabled else 0
 		changes["disabled"] = [bool(int(row.get("disabled") or 0)), bool(disabled)]
 

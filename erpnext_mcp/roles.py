@@ -341,10 +341,7 @@ ROLE_SPECS = (
 			"The compliance framework end to end: policies, certificates, filings, audits "
 			"and the alert calendar, for the companies their User Permissions name."
 		),
-		summary=(
-			"You keep the registers an audit asks for, and you can build the packet that "
-			"answers it."
-		),
+		summary=("You keep the registers an audit asks for, and you can build the packet that answers it."),
 		permissions=(
 			*_grant(FULL, COMPLIANCE_REGISTERS, FIELD_RECORDS),
 			*_grant(READ_WRITE, CALENDAR),
@@ -594,7 +591,18 @@ def _mirror_standard_perms(doctype: str, report: dict) -> None:
 		payload = {
 			key: value
 			for key, value in dict(row).items()
-			if key not in ("name", "creation", "modified", "owner", "modified_by", "idx", "doctype", "parentfield", "parenttype")
+			if key
+			not in (
+				"name",
+				"creation",
+				"modified",
+				"owner",
+				"modified_by",
+				"idx",
+				"doctype",
+				"parentfield",
+				"parenttype",
+			)
 		}
 		payload.update({"doctype": CUSTOM_DOCPERM, "parent": doctype})
 		doc = frappe.get_doc(payload)

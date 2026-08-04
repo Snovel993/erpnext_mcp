@@ -131,8 +131,7 @@ def parse_quarter(text: str) -> dict:
 		number, year = int(raw[1]), int(raw[2:]) if raw[2:].isdigit() else None
 	if year is None or number not in QUARTERS:
 		raise ToolError(
-			f"quarter must look like '2026-Q2' — a four-digit year, a hyphen, Q, and 1 to 4. "
-			f"Got {text!r}."
+			f"quarter must look like '2026-Q2' — a four-digit year, a hyphen, Q, and 1 to 4. Got {text!r}."
 		)
 	if year < 1980 or year > 2200:
 		raise ToolError(f"quarter names an implausible year: {year}. Got {text!r}.")
@@ -203,7 +202,12 @@ def _balance(accounts, as_of: str) -> dict:
 	)[0] or {}
 	debit = _money(row.get("debit"))
 	credit = _money(row.get("credit"))
-	return {"balance": _money(debit - credit), "debit": debit, "credit": credit, "entries": int(row.get("entries") or 0)}
+	return {
+		"balance": _money(debit - credit),
+		"debit": debit,
+		"credit": credit,
+		"entries": int(row.get("entries") or 0),
+	}
 
 
 def _activity(accounts, start: str, end: str) -> list[dict]:
@@ -211,7 +215,17 @@ def _activity(accounts, start: str, end: str) -> list[dict]:
 		return []
 	fields = compat.existing_fields(
 		"GL Entry",
-		("name", "posting_date", "account", "debit", "credit", "voucher_type", "voucher_no", "cost_center", "party"),
+		(
+			"name",
+			"posting_date",
+			"account",
+			"debit",
+			"credit",
+			"voucher_type",
+			"voucher_no",
+			"cost_center",
+			"party",
+		),
 	)
 	rows = frappe.db.get_all(
 		"GL Entry",
@@ -270,7 +284,17 @@ def _unreconciled(company: str, start: str, end: str) -> dict:
 	amounts = compat.bank_transaction_amount_fields()
 	fields = compat.existing_fields(
 		"Bank Transaction",
-		("name", "date", "status", "bank_account", "description", "unallocated_amount", "deposit", "withdrawal", "amount"),
+		(
+			"name",
+			"date",
+			"status",
+			"bank_account",
+			"description",
+			"unallocated_amount",
+			"deposit",
+			"withdrawal",
+			"amount",
+		),
 	)
 	rows = frappe.db.get_all(
 		"Bank Transaction",
@@ -385,8 +409,7 @@ def _preconditions(company: str, quarter: dict, accounts: dict) -> dict:
 			"met": not outstanding,
 			"detail": (
 				(
-					f"{reconciliation['checked']} bank transaction(s) in the quarter, all "
-					"reconciled."
+					f"{reconciliation['checked']} bank transaction(s) in the quarter, all reconciled."
 					if reconciliation["applicable"]
 					else "this site has no Bank Transaction doctype, so there is nothing "
 					"outstanding to reconcile."
@@ -470,15 +493,12 @@ def _performance(opening: float, closing: float, args: dict) -> dict:
 	# prints it unconditionally, and a key that exists only when a figure was
 	# computed is a KeyError waiting for the first report generated without a
 	# benchmark — which is the ordinary case.
-	contribution_note = (
-		"Return is measured as closing minus opening minus net contributions. "
-		+ (
-			"net_contributions was not supplied and is treated as zero, which is right only if "
-			"no money entered or left the account this quarter — check that before relying on "
-			"the return figure."
-			if not net_contributions
-			else "net_contributions was supplied by the caller."
-		)
+	contribution_note = "Return is measured as closing minus opening minus net contributions. " + (
+		"net_contributions was not supplied and is treated as zero, which is right only if "
+		"no money entered or left the account this quarter — check that before relying on "
+		"the return figure."
+		if not net_contributions
+		else "net_contributions was supplied by the caller."
 	)
 
 	raw_benchmark = args.get("benchmark_rate_percent")
@@ -568,7 +588,11 @@ def _holdings(args: dict, closing: float) -> dict:
 		if not isinstance(item, dict):
 			raise ToolError(f"holdings[{index}] is not an object. Nothing was created.")
 		market_value = _money(item.get("market_value"))
-		if not market_value and item.get("quantity") not in (None, "") and item.get("price") not in (None, ""):
+		if (
+			not market_value
+			and item.get("quantity") not in (None, "")
+			and item.get("price") not in (None, "")
+		):
 			market_value = _money(
 				as_float(item.get("quantity"), "quantity") * as_float(item.get("price"), "price")
 			)
@@ -755,9 +779,7 @@ def generate_quarterly_investment_report(args: dict) -> ToolResult:
 		as_str(args, "output_path"), _file_name(company, quarter, output_format)
 	)
 
-	payload = (
-		_render_pdf(report) if output_format == "pdf" else _render_docx(report)
-	)
+	payload = _render_pdf(report) if output_format == "pdf" else _render_docx(report)
 	archive = _archive(company, quarter, args, closing["balance"])
 	file_name = _file_name(company, quarter, output_format)
 	attachment = artifacts.attach_bytes(
@@ -1037,7 +1059,10 @@ def _sections(report: dict):
 		"table",
 		(
 			["Precondition", "Met", "Detail"],
-			[[check["check"], "yes" if check["met"] else "NO", check["detail"]] for check in report["preconditions"]],
+			[
+				[check["check"], "yes" if check["met"] else "NO", check["detail"]]
+				for check in report["preconditions"]
+			],
 			("l", "c", "l"),
 		),
 	)

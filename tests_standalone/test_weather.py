@@ -513,9 +513,7 @@ class ResolvingAPlace(WeatherTestCase):
 		self.assertEqual(self.api.calls, [])
 
 	def test_the_spelling_the_doctype_documents_is_accepted(self):
-		self.assertEqual(
-			weather.resolve_location("Latitude 45.52, longitude -122.68"), (45.52, -122.68)
-		)
+		self.assertEqual(weather.resolve_location("Latitude 45.52, longitude -122.68"), (45.52, -122.68))
 		self.assertEqual(self.api.calls, [])
 
 	def test_a_place_name_costs_one_geocoding_call_and_is_then_cached(self):
@@ -819,9 +817,7 @@ class TheBackfill(WeatherTestCase):
 		shift = self._closed()
 		self.api.set_archive(hours=4, start_hour=7)
 		self.tool_data("backfill_weather_for_shift", {"shift": shift})
-		self.assertTrue(
-			all(row["source"] == weather.SOURCE_ARCHIVE for row in self.readings(shift))
-		)
+		self.assertTrue(all(row["source"] == weather.SOURCE_ARCHIVE for row in self.readings(shift)))
 
 	def test_readings_outside_the_shifts_own_period_are_dropped(self):
 		"""The archive answers by whole days. A six-hour morning shift must not

@@ -316,9 +316,7 @@ def _leaf_equity_accounts(company: str) -> list[dict]:
 		limit=500,
 	)
 	return [
-		dict(row)
-		for row in rows
-		if not int(row.get("is_group") or 0) and not int(row.get("disabled") or 0)
+		dict(row) for row in rows if not int(row.get("is_group") or 0) and not int(row.get("disabled") or 0)
 	]
 
 
@@ -395,9 +393,7 @@ def create_cap_table_entry(args: dict) -> ToolResult:
 	if ownership_percentage < 0 or ownership_percentage > 100:
 		raise ToolError(f"ownership_percentage must be between 0 and 100, got {ownership_percentage}")
 
-	existing = frappe.db.get_value(
-		CAP_TABLE, {"member_id": member_id, "company": company}, "name"
-	)
+	existing = frappe.db.get_value(CAP_TABLE, {"member_id": member_id, "company": company}, "name")
 	if existing:
 		raise ToolError(
 			f"member {member_id!r} is already registered for {company} as {existing!r}. One entry "
@@ -446,7 +442,11 @@ def create_cap_table_entry(args: dict) -> ToolResult:
 
 	total = _active_ownership_total(company)
 	data = {
-		**_describe_entry(frappe.db.get_value(CAP_TABLE, doc.name, compat.existing_fields(CAP_TABLE, _CAP_TABLE_FIELDS), as_dict=True)),
+		**_describe_entry(
+			frappe.db.get_value(
+				CAP_TABLE, doc.name, compat.existing_fields(CAP_TABLE, _CAP_TABLE_FIELDS), as_dict=True
+			)
+		),
 		"member_dimension_doctype": dimension_doctype or None,
 		"active_ownership_total": total,
 		"note": dimension_note,
@@ -667,7 +667,10 @@ def close_cap_table_entry(args: dict) -> ToolResult:
 		**_describe_entry(
 			dict(
 				frappe.db.get_value(
-					CAP_TABLE, entry["name"], compat.existing_fields(CAP_TABLE, _CAP_TABLE_FIELDS), as_dict=True
+					CAP_TABLE,
+					entry["name"],
+					compat.existing_fields(CAP_TABLE, _CAP_TABLE_FIELDS),
+					as_dict=True,
 				)
 			)
 		),
@@ -756,8 +759,7 @@ def record_member_event(args: dict) -> ToolResult:
 		je_company = frappe.db.get_value("Journal Entry", offset_je, "company")
 		if je_company != company:
 			raise ToolError(
-				f"Journal Entry {offset_je} belongs to {je_company!r}, not {company!r}. "
-				"Nothing was created."
+				f"Journal Entry {offset_je} belongs to {je_company!r}, not {company!r}. Nothing was created."
 			)
 
 	created_je = None
@@ -842,7 +844,10 @@ def _post_member_event(
 			else _match_equity_account(company, _CAPITAL_KEYWORDS, "member capital")
 		)
 
-	accounts_used = {"capital_account": capital_account, "resolved_by": "argument" if explicit_capital else "name match"}
+	accounts_used = {
+		"capital_account": capital_account,
+		"resolved_by": "argument" if explicit_capital else "name match",
+	}
 
 	if event_type in PAIRED_EVENTS:
 		counter_value = _dimension_value_for(counterparty, dimension)
@@ -1322,11 +1327,12 @@ def get_governance_document_content(args: dict) -> ToolResult:
 	compat.require_doctype(GOVERNANCE_DOCUMENT, "It ships with erpnext_mcp.")
 	name = as_str(args, "name", required=True)
 	if not frappe.db.exists(GOVERNANCE_DOCUMENT, name):
-		raise ToolError(
-			f"no Governance Document named {name!r}. list_governance_documents has the names."
-		)
+		raise ToolError(f"no Governance Document named {name!r}. list_governance_documents has the names.")
 	row = frappe.db.get_value(
-		GOVERNANCE_DOCUMENT, name, compat.existing_fields(GOVERNANCE_DOCUMENT, _GOVERNANCE_FIELDS), as_dict=True
+		GOVERNANCE_DOCUMENT,
+		name,
+		compat.existing_fields(GOVERNANCE_DOCUMENT, _GOVERNANCE_FIELDS),
+		as_dict=True,
 	)
 
 	attachments = frappe.db.get_all(
@@ -1355,9 +1361,10 @@ def get_governance_document_content(args: dict) -> ToolResult:
 	requested = as_str(args, "file")
 	if not attachments:
 		metadata["content"] = None
-		metadata["note"] = (
-			"This entry has no attached file"
-			+ (f"; the document is recorded as living at {row.get('attached_file')}." if row.get("attached_file") else ".")
+		metadata["note"] = "This entry has no attached file" + (
+			f"; the document is recorded as living at {row.get('attached_file')}."
+			if row.get("attached_file")
+			else "."
 		)
 		return ToolResult(metadata, f"governance document {name} ({row.get('title')}): no attachment")
 
@@ -1431,7 +1438,9 @@ def regenerate_governance_document_pdf(args: dict) -> ToolResult:
 	row = frappe.db.get_value(
 		GOVERNANCE_DOCUMENT,
 		name,
-		compat.existing_fields(GOVERNANCE_DOCUMENT, ("name", "title", "company", "category", "attached_file")),
+		compat.existing_fields(
+			GOVERNANCE_DOCUMENT, ("name", "title", "company", "category", "attached_file")
+		),
 		as_dict=True,
 	)
 	if not row:
@@ -1450,9 +1459,7 @@ def regenerate_governance_document_pdf(args: dict) -> ToolResult:
 	clash = next(
 		(row for row in attachments if str(row.get("file_name") or "").lower() == pdf_name.lower()), None
 	)
-	existing_pdfs = [
-		row for row in attachments if str(row.get("file_name") or "").lower().endswith(".pdf")
-	]
+	existing_pdfs = [row for row in attachments if str(row.get("file_name") or "").lower().endswith(".pdf")]
 	if existing_pdfs and not overwrite:
 		raise ToolError(
 			f"Governance Document {name} already has {len(existing_pdfs)} PDF attachment(s): "
@@ -1464,9 +1471,7 @@ def regenerate_governance_document_pdf(args: dict) -> ToolResult:
 
 	route = convert.available()
 	if not route["ready"]:
-		raise ToolError(
-			f"this container cannot convert a .docx: {route['detail']} {tail}"
-		)
+		raise ToolError(f"this container cannot convert a .docx: {route['detail']} {tail}")
 
 	plan = {
 		"governance_document": name,
@@ -1499,8 +1504,7 @@ def regenerate_governance_document_pdf(args: dict) -> ToolResult:
 					+ " The .docx is kept either way."
 				),
 			},
-			f"dry run: would convert {source.get('file_name')} on {name} to {pdf_name} "
-			f"via {route['via']}",
+			f"dry run: would convert {source.get('file_name')} on {name} to {pdf_name} via {route['via']}",
 		)
 
 	content = files.read_file_bytes(source["name"])
@@ -1569,7 +1573,9 @@ def _governance_attachments(name: str) -> list:
 		for row in frappe.db.get_all(
 			"File",
 			filters={"attached_to_doctype": GOVERNANCE_DOCUMENT, "attached_to_name": name},
-			fields=compat.existing_fields("File", ("name", "file_name", "file_url", "file_size", "is_private")),
+			fields=compat.existing_fields(
+				"File", ("name", "file_name", "file_url", "file_size", "is_private")
+			),
 			order_by="creation asc",
 			limit=200,
 		)
@@ -1593,11 +1599,7 @@ def _source_docx(attachments: list, requested: str, name: str, tail: str) -> dic
 	docx = [row for row in attachments if str(row.get("file_name") or "").lower().endswith(".docx")]
 	if requested:
 		chosen = next(
-			(
-				row
-				for row in attachments
-				if requested in (row.get("name"), row.get("file_name"))
-			),
+			(row for row in attachments if requested in (row.get("name"), row.get("file_name"))),
 			None,
 		)
 		if chosen is None:

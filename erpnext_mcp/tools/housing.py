@@ -162,8 +162,7 @@ def unit_row(unit: str, company: str = "") -> dict:
 	if len(matches) > 1:
 		names = ", ".join(sorted(str(match.get("name")) for match in matches))
 		raise ToolError(
-			f"{unit!r} matches {len(matches)} units: {names}. Pass the docname, or set parcel to "
-			"narrow it."
+			f"{unit!r} matches {len(matches)} units: {names}. Pass the docname, or set parcel to narrow it."
 		)
 	raise ToolError(f"no Housing Unit called {unit!r}. list_housing_units has the register.")
 
@@ -638,7 +637,11 @@ def list_housing_assignments(args: dict) -> ToolResult:
 			"currently_assigned": len([entry for entry in assignments if entry["current"]]),
 			"distinct_units": len({entry["unit"] for entry in assignments}),
 			"distinct_people": len(
-				{entry["employee"] or entry["employee_name"] for entry in assignments if entry["employee_name"]}
+				{
+					entry["employee"] or entry["employee_name"]
+					for entry in assignments
+					if entry["employee_name"]
+				}
 			),
 			"with_wage_deduction": [entry["name"] for entry in deducted],
 			"deposits_outstanding": round(
@@ -1013,8 +1016,7 @@ def get_employee_housing_history(args: dict) -> ToolResult:
 	lines = []
 	for entry in assignments:
 		lines.append(
-			f"{name} assigned {entry['unit']} {entry['assigned_date']} → "
-			+ (entry["end_date"] or "present")
+			f"{name} assigned {entry['unit']} {entry['assigned_date']} → " + (entry["end_date"] or "present")
 		)
 	if not current:
 		lines.append(f"{name} is currently unassigned.")
@@ -1030,13 +1032,9 @@ def get_employee_housing_history(args: dict) -> ToolResult:
 			"last_assigned": assignments[-1]["assigned_date"],
 			"deposits_paid": round(sum(entry["deposit_paid"] for entry in assignments), 2),
 			"deposits_returned": round(sum(entry["deposit_returned"] for entry in assignments), 2),
-			"deposits_outstanding": round(
-				sum(entry["deposit_outstanding"] for entry in assignments), 2
-			),
+			"deposits_outstanding": round(sum(entry["deposit_outstanding"] for entry in assignments), 2),
 			"wage_deduction_taken": [
-				entry["name"]
-				for entry in assignments
-				if entry["housing_deduction_from_wages"] == "Yes"
+				entry["name"] for entry in assignments if entry["housing_deduction_from_wages"] == "Yes"
 			],
 			"assignments": assignments,
 			"readout": lines,

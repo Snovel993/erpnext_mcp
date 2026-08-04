@@ -71,6 +71,7 @@ def reset_site_files() -> None:
 		shutil.rmtree(path, ignore_errors=True)
 		os.makedirs(path, exist_ok=True)
 
+
 if REPO_ROOT not in sys.path:
 	sys.path.insert(0, REPO_ROOT)
 
@@ -2010,14 +2011,10 @@ class JournalEntryDocument(Document):
 			debit = float(row.get("debit") or 0)
 			credit = float(row.get("credit") or 0)
 			if not debit and not credit:
-				raise ValidationError(
-					f"Row {row.get('idx')}: Both Debit and Credit values cannot be zero"
-				)
+				raise ValidationError(f"Row {row.get('idx')}: Both Debit and Credit values cannot be zero")
 			rate = float(row.get("exchange_rate") or 0) or 1.0
 			row["debit_in_account_currency"] = round(float(row.get("debit_in_account_currency") or 0), 2)
-			row["credit_in_account_currency"] = round(
-				float(row.get("credit_in_account_currency") or 0), 2
-			)
+			row["credit_in_account_currency"] = round(float(row.get("credit_in_account_currency") or 0), 2)
 			row["exchange_rate"] = rate
 			row["debit"] = round(row["debit_in_account_currency"] * rate, 2)
 			row["credit"] = round(row["credit_in_account_currency"] * rate, 2)
@@ -3046,9 +3043,7 @@ def _build_frappe() -> types.ModuleType:
 		"""
 		if getattr(STORE, "mail_fails", False):
 			raise ValidationError("no outgoing email account")
-		STORE.emails.append(
-			{"recipients": list(recipients or []), "subject": subject, "message": message}
-		)
+		STORE.emails.append({"recipients": list(recipients or []), "subject": subject, "message": message})
 
 	def get_traceback(with_context=False):
 		return traceback.format_exc()

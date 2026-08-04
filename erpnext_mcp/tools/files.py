@@ -228,7 +228,12 @@ def attach_file_to_document(args: dict) -> ToolResult:
 		)
 
 	checks = check_attachable(
-		doctype, name, file_name, allow_cancelled=allow_cancelled, company=company, tail="Nothing was attached."
+		doctype,
+		name,
+		file_name,
+		allow_cancelled=allow_cancelled,
+		company=company,
+		tail="Nothing was attached.",
 	)
 	parent = checks["parent"]
 	company_field, parent_company = checks["company_field"], checks["parent_company"]

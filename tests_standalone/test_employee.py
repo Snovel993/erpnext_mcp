@@ -432,9 +432,7 @@ class Updating(EmployeeTestCase):
 
 	def test_it_changes_what_it_was_asked_to(self):
 		self.change(designation="Picker", department="Operations")
-		row = frappe.db.get_value(
-			"Employee", self.employee, ["designation", "department"], as_dict=True
-		)
+		row = frappe.db.get_value("Employee", self.employee, ["designation", "department"], as_dict=True)
 		self.assertEqual(row["designation"], "Picker")
 		self.assertEqual(row["department"], "Operations")
 
@@ -446,7 +444,7 @@ class Updating(EmployeeTestCase):
 
 	def test_it_reports_each_change_with_the_previous_value(self):
 		data = self.change(status="Suspended")
-		entry = [row for row in data["changed"] if row["field"] == "status"][0]
+		entry = next(row for row in data["changed"] if row["field"] == "status")
 		self.assertEqual(entry["from"], "Active")
 		self.assertEqual(entry["to"], "Suspended")
 
@@ -571,9 +569,7 @@ class Linking(EmployeeTestCase):
 		user = self.enrolled()["user"]
 		self.link(user)
 		other = self.create(employee_name="Beto Cruz")["employee"]
-		message = self.tool_error(
-			"link_employee_to_user", {"employee_name": other, "user_id": user}
-		)
+		message = self.tool_error("link_employee_to_user", {"employee_name": other, "user_id": user})
 		self.assertIn(self.employee, message)
 		self.assertIn("one-to-one", message)
 
@@ -686,7 +682,7 @@ class OnboardingEndToEnd(EmployeeTestCase):
 		second = self.tool_data("onboard_employee", {"full_name": "Beto Cruz", "company": MAIN})
 		self.assertEqual(second["employee"], first["employee"])
 		self.assertEqual(
-			[row for row in second["steps"] if row["step"] == "employee"][0]["action"], "reused"
+			next(row for row in second["steps"] if row["step"] == "employee")["action"], "reused"
 		)
 
 	def test_the_next_step_names_one_thing(self):

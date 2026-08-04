@@ -477,9 +477,7 @@ class TheCloseIsAnAttestation(ShiftTestCase):
 	def test_closing_twice_is_refused_before_a_second_set_of_payroll_rows(self):
 		shift = self.start()["name"]
 		self.close(shift)
-		message = self.tool_error(
-			"end_shift", {"shift": shift, "supervisor_signature_file_token": SIGNATURE}
-		)
+		message = self.tool_error("end_shift", {"shift": shift, "supervisor_signature_file_token": SIGNATURE})
 		self.assertIn("already closed", message)
 		self.assertIn("second set of Attendance rows", message)
 
@@ -547,9 +545,7 @@ class TheAttendanceBridge(ShiftTestCase):
 		that gets litigated."""
 		shift = self.start(crew_employees=[WORKER])["name"]
 		self.tool_data("add_worker_to_shift", {"shift": shift, "employee": CREW[0], "joined_at": at(7)})
-		self.tool_data(
-			"remove_worker_from_shift", {"shift": shift, "employee": CREW[0], "left_at": at(9)}
-		)
+		self.tool_data("remove_worker_from_shift", {"shift": shift, "employee": CREW[0], "left_at": at(9)})
 		self.close(shift)
 
 		rows = {row["employee"]: row for row in self.attendance()}
@@ -618,9 +614,7 @@ class TheHeatRecord(ShiftTestCase):
 
 	def test_an_unsigned_record_is_refused(self):
 		shift = self.start()["name"]
-		message = self.tool_error(
-			"create_heat_exposure_event", {"farm_shift": shift, "water_provided": True}
-		)
+		message = self.tool_error("create_heat_exposure_event", {"farm_shift": shift, "water_provided": True})
 		self.assertIn("supervisor_signature_file_token is required", message)
 		self.assertIn("nobody behind it", message)
 		self.assertEqual(STORE.rows(shifts.HEAT_DOCTYPE), [])
@@ -630,9 +624,7 @@ class TheHeatRecord(ShiftTestCase):
 		refused is the silence, not the combination — there are legitimate
 		versions and every one of them is a sentence somebody can write."""
 		shift = self.start()["name"]
-		message = self.heat_error(
-			shift, heat_illness_signs_observed=True, emergency_response_activated=False
-		)
+		message = self.heat_error(shift, heat_illness_signs_observed=True, emergency_response_activated=False)
 		self.assertIn("SIGNS SEEN AND NOTHING DONE", message)
 		self.assertIn("Nothing was created", message)
 
@@ -649,9 +641,7 @@ class TheHeatRecord(ShiftTestCase):
 
 	def test_signs_observed_with_a_response_needs_no_explanation(self):
 		shift = self.start()["name"]
-		data = self.heat(
-			shift, heat_illness_signs_observed=True, emergency_response_activated=True
-		)
+		data = self.heat(shift, heat_illness_signs_observed=True, emergency_response_activated=True)
 		self.assertTrue(data["emergency_response_activated"])
 
 	def test_an_unmet_obligation_is_recorded_with_the_gap_stated(self):
@@ -768,9 +758,7 @@ class TheSupervisorReviewRule(ShiftTestCase):
 				"content_topics_covered": "Hygiene, illness reporting, handwashing",
 			},
 		)
-		STORE.tables["Employee Training Record"][data["name"]]["creation"] = (
-			f"{days_out(-age_days)} 09:00:00"
-		)
+		STORE.tables["Employee Training Record"][data["name"]]["creation"] = f"{days_out(-age_days)} 09:00:00"
 		return data["name"]
 
 	def test_a_record_a_fortnight_old_with_no_review_raises_a_warning(self):
@@ -805,9 +793,7 @@ class TheSupervisorReviewRule(ShiftTestCase):
 		something that already happened."""
 		name = self.a_training(20)
 		self.assertEqual(len(self.sweep()), 1)
-		self.tool_data(
-			"sign_training_supervisor_review", {"name": name, "supervisor": FOREMAN}
-		)
+		self.tool_data("sign_training_supervisor_review", {"name": name, "supervisor": FOREMAN})
 		self.assertEqual(self.sweep(), [])
 		dismissed = [
 			row
@@ -843,9 +829,7 @@ class TheSupervisorReviewRule(ShiftTestCase):
 		columns."""
 		self.assertEqual(len(alert_rules.REVIEW_TARGETS), 1)
 		self.assertEqual(alert_rules.REVIEW_TARGETS[0].doctype, "Employee Training Record")
-		self.assertEqual(
-			alert_rules.REVIEW_TARGETS[0].reviewed_by_field, "supervisor_reviewed_by"
-		)
+		self.assertEqual(alert_rules.REVIEW_TARGETS[0].reviewed_by_field, "supervisor_reviewed_by")
 
 
 # ── 8 ───────────────────────────────────────────────────────────────────────
@@ -929,10 +913,7 @@ class TheGuards(ShiftTestCase):
 	def test_every_mutating_tool_ships_off_and_every_read_ships_on(self):
 		from .harness import _load_app_doctype
 
-		by_name = {
-			field["fieldname"]: field
-			for field in _load_app_doctype("erpnext_mcp_settings")["fields"]
-		}
+		by_name = {field["fieldname"]: field for field in _load_app_doctype("erpnext_mcp_settings")["fields"]}
 		for name, _arguments in self.TOOLS:
 			with self.subTest(tool=name):
 				self.assertEqual(

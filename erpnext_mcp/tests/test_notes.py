@@ -203,9 +203,7 @@ class NotePayableContract(V8IntegrationTestCase):
 		self.assertEqual(entry.docstatus, 0)
 		self.assertEqual(float(entry.total_debit), 1100.0)
 		self.assertEqual(data["principal_outstanding_after"], 119000.0)
-		self.assertEqual(
-			len(frappe.get_doc("Note Payable", note["name"]).get("payment_events")), 1
-		)
+		self.assertEqual(len(frappe.get_doc("Note Payable", note["name"]).get("payment_events")), 1)
 
 	def test_closing_writes_no_journal_entry_at_all(self):
 		note = self.a_note()
@@ -283,8 +281,7 @@ class FiscalYearContract(V8IntegrationTestCase):
 			if frappe.db.exists("Fiscal Year", str(candidate)):
 				continue
 			clash = any(
-				str(row.year_start_date) <= end and start <= str(row.year_end_date)
-				for row in existing
+				str(row.year_start_date) <= end and start <= str(row.year_end_date) for row in existing
 			)
 			if not clash:
 				return str(candidate)
@@ -374,7 +371,9 @@ class FiscalYearContract(V8IntegrationTestCase):
 			},
 		)
 		self.assertEqual(data["docstatus"], 0)
-		self.assertEqual(str(frappe.db.get_value("Journal Entry", data["name"], "posting_date")), f"{year}-06-15")
+		self.assertEqual(
+			str(frappe.db.get_value("Journal Entry", data["name"], "posting_date")), f"{year}-06-15"
+		)
 
 	def test_disabling_and_re_enabling_round_trips(self):
 		year = self.free_year()
@@ -444,17 +443,13 @@ class NewRootAccountContract(V8IntegrationTestCase):
 				"account_name": f"{PREFIX} Root {number}",
 				"root_type": "Expense",
 				"is_group": True,
-				"children": [
-					{"account_number": f"{number}1", "account_name": f"{PREFIX} Leaf {number}"}
-				],
+				"children": [{"account_number": f"{number}1", "account_name": f"{PREFIX} Leaf {number}"}],
 			}
 		]
 
 	def free_number(self):
 		for candidate in range(99000, 99100):
-			if not frappe.db.exists(
-				"Account", {"company": self.company, "account_number": str(candidate)}
-			):
+			if not frappe.db.exists("Account", {"company": self.company, "account_number": str(candidate)}):
 				return str(candidate)
 		self.skipTest("no free account number in the 99xxx range on this site")
 
@@ -508,9 +503,7 @@ class DeleteAccountContract(V8IntegrationTestCase):
 			self.skipTest(f"site has no Expense group account for {self.company}")
 		number = None
 		for candidate in range(99500, 99600):
-			if not frappe.db.exists(
-				"Account", {"company": self.company, "account_number": str(candidate)}
-			):
+			if not frappe.db.exists("Account", {"company": self.company, "account_number": str(candidate)}):
 				number = str(candidate)
 				break
 		if number is None:
@@ -537,9 +530,7 @@ class DeleteAccountContract(V8IntegrationTestCase):
 	def test_an_account_with_history_is_refused_and_survives(self):
 		"""Discovered rather than created: an account this site has actually posted
 		to is the case that matters, and creating one would mean posting."""
-		account = frappe.db.get_value(
-			"GL Entry", {"company": self.company, "is_cancelled": 0}, "account"
-		)
+		account = frappe.db.get_value("GL Entry", {"company": self.company, "is_cancelled": 0}, "account")
 		if not account:
 			self.skipTest(f"site has no GL entries for {self.company}")
 		result = self.tool("delete_account", {"name": account, "company": self.company})

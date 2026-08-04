@@ -117,9 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument("--site", default="", help="the Frappe site; defaults to currentsite.txt")
 	parser.add_argument("--sites-path", default="", help="the bench's sites directory")
 	parser.add_argument("--company", default="", help="default company for records that omit one")
-	parser.add_argument(
-		"--apply", action="store_true", help="actually write; without it nothing is created"
-	)
+	parser.add_argument("--apply", action="store_true", help="actually write; without it nothing is created")
 	parser.add_argument("--verbose", action="store_true", help="print each record as it is considered")
 	return parser
 
@@ -182,9 +180,7 @@ def find_site(sites_path: str, explicit: str = "") -> str:
 			name = handle.read().strip()
 		if name:
 			return name
-	raise PlanError(
-		f"no --site given and {current} is missing or empty. Pass --site <site>."
-	)
+	raise PlanError(f"no --site given and {current} is missing or empty. Pass --site <site>.")
 
 
 def log_dirs(sites_path: str, site: str) -> list[str]:
@@ -239,8 +235,7 @@ def load_plan(path: str) -> list[dict]:
 		payload = payload.get("parties")
 	if not isinstance(payload, list):
 		raise PlanError(
-			f"{path} must hold a JSON list of party records, or an object with a `parties` key "
-			"holding one."
+			f"{path} must hold a JSON list of party records, or an object with a `parties` key holding one."
 		)
 	if not payload:
 		raise PlanError(f"{path} holds no records. Nothing to do.")
@@ -273,9 +268,7 @@ def validate(record, index: int, default_company: str = "") -> dict:
 	if missing:
 		raise PlanError(f"{where} is missing required field(s): {', '.join(missing)}")
 	if not str(out.get("company") or "").strip():
-		raise PlanError(
-			f"{where} has no company, and no --company default was given"
-		)
+		raise PlanError(f"{where} has no company, and no --company default was given")
 
 	digits = str(out.get("tax_id_last4") or "").replace("-", "").replace(" ", "")
 	if digits:
@@ -288,9 +281,7 @@ def validate(record, index: int, default_company: str = "") -> dict:
 				"W-9, not in this file and not on the site."
 			)
 		if len(digits) != 4:
-			raise PlanError(
-				f"{where}: tax_id_last4 must be exactly four digits, got {out['tax_id_last4']!r}"
-			)
+			raise PlanError(f"{where}: tax_id_last4 must be exactly four digits, got {out['tax_id_last4']!r}")
 		out["tax_id_last4"] = digits
 
 	if out.get("end_date") and out["end_date"] < out["effective_date"]:
@@ -341,7 +332,9 @@ def seed(frappe, records: list[dict], apply_changes: bool, verbose: bool = False
 		if existing:
 			skipped.append((record["party_name"], record["relationship_to_company"], existing))
 			if verbose:
-				print(f"  exists:  {record['party_name']} as {record['relationship_to_company']} → {existing}")
+				print(
+					f"  exists:  {record['party_name']} as {record['relationship_to_company']} → {existing}"
+				)
 			continue
 		if verbose:
 			print(f"  create:  {record['party_name']} as {record['relationship_to_company']}")
@@ -369,7 +362,9 @@ def main(argv=None) -> int:
 	print(f"site:       {site}")
 	print(f"sites path: {sites_path}")
 	print(f"plan:       {len(records)} record(s) from {args.input}")
-	print(f"mode:       {'APPLY — records will be created' if args.apply else 'DRY RUN — nothing will be written'}")
+	print(
+		f"mode:       {'APPLY — records will be created' if args.apply else 'DRY RUN — nothing will be written'}"
+	)
 
 	frappe = None
 	try:

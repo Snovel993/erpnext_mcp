@@ -140,17 +140,13 @@ SWITCHES = {
 	)
 }
 
+
 #: The smallest real PNG: 1×1, opaque. Written out rather than pasted as a
 #: base64 blob so that what it IS can be read — an evidence path tested with
 #: `b"photo-bytes"` is a path that has never seen a file with a header.
 def one_pixel_png() -> bytes:
 	def chunk(kind: bytes, body: bytes) -> bytes:
-		return (
-			len(body).to_bytes(4, "big")
-			+ kind
-			+ body
-			+ zlib.crc32(kind + body).to_bytes(4, "big")
-		)
+		return len(body).to_bytes(4, "big") + kind + body + zlib.crc32(kind + body).to_bytes(4, "big")
 
 	header = chunk(b"IHDR", (1).to_bytes(4, "big") + (1).to_bytes(4, "big") + bytes([8, 2, 0, 0, 0]))
 	pixels = chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff"))
@@ -197,9 +193,7 @@ class EndToEndWorkflow(V12TestCase):
 		return self.tool_data("create_company", {"company_name": COMPANY, "abbr": ABBR})["company"]
 
 	def a_cabin(self) -> str:
-		self.tool_data(
-			"create_parcel", {"owning_entity": COMPANY, "parcel_name": PARCEL, "acreage": 40.0}
-		)
+		self.tool_data("create_parcel", {"owning_entity": COMPANY, "parcel_name": PARCEL, "acreage": 40.0})
 		return self.tool_data(
 			"create_housing_unit",
 			{
@@ -422,9 +416,7 @@ class TheWorkflowWalksEndToEnd(EndToEndWorkflow):
 		self.assertEqual(record["findings"], "Test finding")
 
 		rows = self.photo_rows(produced)
-		self.assertEqual(
-			len(rows), 2, f"the inspection's `photos` child table holds {len(rows)} rows, not 2"
-		)
+		self.assertEqual(len(rows), 2, f"the inspection's `photos` child table holds {len(rows)} rows, not 2")
 		filed = {row.get("file") for row in rows}
 		self.assertIn(photo["file_token"], filed, "the photograph is not on the record it evidences")
 		self.assertIn(signature["file_token"], filed, "the signature is not on the record it attests")
@@ -541,9 +533,7 @@ class ThePipelineRefusesWhatItShould(EndToEndWorkflow):
 	def test_a_worker_cannot_reach_another_entitys_cabin_through_any_of_this(self):
 		"""The scoping the whole mobile surface rests on, checked on the built
 		fixture rather than the seeded one."""
-		self.tool_data(
-			"create_company", {"company_name": "Other E2E LLC", "abbr": "OEL"}
-		)
+		self.tool_data("create_company", {"company_name": "Other E2E LLC", "abbr": "OEL"})
 		outsider_task = self.tool_data(
 			"create_farm_task",
 			{
@@ -669,7 +659,9 @@ class TheOnboardingGapsSayWhatToDo(EndToEndWorkflow):
 		self.assertTrue(payload["url"].startswith("https://"))
 		# The credential is in the QR by design; what must not happen is it also
 		# landing in the audit row that records the QR being made.
-		rows = [row for row in STORE.rows("MCP Action Log") if row.get("tool_name") == "generate_mobile_login_qr"]
+		rows = [
+			row for row in STORE.rows("MCP Action Log") if row.get("tool_name") == "generate_mobile_login_qr"
+		]
 		self.assertTrue(rows)
 		blob = json.dumps(rows[-1], default=str)
 		self.assertNotIn(payload["api_secret"], blob)
@@ -749,17 +741,13 @@ class OnboardingReachesTheAuditPacket(EndToEndWorkflow):
 		}
 		for audit_type in ("GAP", "EPA"):
 			with self.subTest(audit_type=audit_type):
-				packet = self.tool_data(
-					"generate_audit_packet", {**period, "audit_type": audit_type}
-				)
+				packet = self.tool_data("generate_audit_packet", {**period, "audit_type": audit_type})
 				self.assertEqual(packet["section_counts"]["training"], 1, packet["section_counts"])
 
 		# A record tagged WPS and GAP is not organic-handling evidence, and a
 		# packet that pulled it into an NOP-shaped section would be the quiet
 		# wrong-evidence bug this whole tagging scheme exists to prevent.
-		narrowed = self.tool_data(
-			"generate_audit_packet", {**period, "audit_type": "GAP", "regime": "NOP"}
-		)
+		narrowed = self.tool_data("generate_audit_packet", {**period, "audit_type": "GAP", "regime": "NOP"})
 		self.assertEqual(narrowed["section_counts"]["training"], 0)
 		self.assertEqual(narrowed["training_regime"], "NOP")
 
@@ -894,9 +882,7 @@ class TheHotShiftReachesTheOSHAPacket(EndToEndWorkflow):
 				),
 			},
 		)
-		self.tool_data(
-			"add_worker_to_shift", {"shift": shift["name"], "employee": late, "joined_at": at(9)}
-		)
+		self.tool_data("add_worker_to_shift", {"shift": shift["name"], "employee": late, "joined_at": at(9)})
 		self.tool_data(
 			"remove_worker_from_shift",
 			{"shift": shift["name"], "employee": late, "left_at": at(12)},
@@ -968,9 +954,7 @@ class TheHotShiftReachesTheOSHAPacket(EndToEndWorkflow):
 		self.assertTrue(closed["supervisor_review_on"])
 		self.assertEqual(closed["attendance_created"], 2)
 
-		attendance = {
-			row["employee"]: row for row in STORE.rows("Attendance") if row.get("farm_shift")
-		}
+		attendance = {row["employee"]: row for row in STORE.rows("Attendance") if row.get("farm_shift")}
 		self.assertEqual(set(attendance), {self.employee, late})
 		self.assertEqual(str(attendance[self.employee]["in_time"]), at(6))
 		self.assertEqual(str(attendance[self.employee]["out_time"]), at(15))
@@ -984,9 +968,7 @@ class TheHotShiftReachesTheOSHAPacket(EndToEndWorkflow):
 
 		# 8. And farm_hr counts the shift-formed day exactly as it counts a
 		#    hand-entered one, which is the whole reason the bridge exists.
-		summary = self.tool_data(
-			"get_attendance_summary", {"from_date": today, "to_date": today}
-		)
+		summary = self.tool_data("get_attendance_summary", {"from_date": today, "to_date": today})
 		by_employee = {row["employee"]: row for row in summary["employees"]}
 		self.assertEqual(by_employee[self.employee]["counts"].get("Present"), 1)
 		self.assertEqual(by_employee[late]["counts"].get("Present"), 1)
@@ -1008,9 +990,7 @@ class TheHotShiftReachesTheOSHAPacket(EndToEndWorkflow):
 		# And the heat section discloses nothing, because this shift met every
 		# obligation. The other sections disclose plenty — an empty SOP library, an
 		# unrecorded I-9 — which is what a disclosure list is for.
-		self.assertEqual(
-			[entry for entry in osha["disclosures"] if entry["section"] == "heat_exposure"], []
-		)
+		self.assertEqual([entry for entry in osha["disclosures"] if entry["section"] == "heat_exposure"], [])
 
 		# The section itself, built the way the renderer sees it. The tool's dry
 		# run returns counts rather than rows, and a count of one would be equally
@@ -1018,9 +998,7 @@ class TheHotShiftReachesTheOSHAPacket(EndToEndWorkflow):
 		section = audit_packets.build(
 			audit_packets.get("OSHA"), COMPANY, period["period_start"], period["period_end"]
 		)
-		heat_section = next(
-			entry for entry in section["sections"] if entry["key"] == "heat_exposure"
-		)
+		heat_section = next(entry for entry in section["sections"] if entry["key"] == "heat_exposure")
 		self.assertEqual(heat_section["rows"][0]["record"], heat["name"])
 		self.assertEqual(heat_section["rows"][0]["shift"], shift["name"])
 		self.assertTrue(heat_section["rows"][0]["training"])
@@ -1181,9 +1159,7 @@ class TheWeatherTimelineDocumentsTheShiftItself(EndToEndWorkflow):
 		#    observation they did not make.
 		with_events = self.tool_data("get_shift", {"name": shift["name"]})
 		crossings = [
-			row
-			for row in with_events["compliance_events"]
-			if row["event_type"] == weather.THRESHOLD_EVENT
+			row for row in with_events["compliance_events"] if row["event_type"] == weather.THRESHOLD_EVENT
 		]
 		self.assertEqual(len(crossings), 1, with_events["compliance_events"])
 		self.assertIsNone(crossings[0]["logged_by"])
@@ -1264,9 +1240,7 @@ class TheWeatherTimelineDocumentsTheShiftItself(EndToEndWorkflow):
 		section = audit_packets.build(
 			audit_packets.get("OSHA"), COMPANY, period["period_start"], period["period_end"]
 		)
-		heat_section = next(
-			entry for entry in section["sections"] if entry["key"] == "heat_exposure"
-		)
+		heat_section = next(entry for entry in section["sections"] if entry["key"] == "heat_exposure")
 		self.assertEqual(heat_section["rows"][0]["record"], heat["name"])
 		self.assertEqual(heat_section["rows"][0]["shift"], shift["name"])
 
@@ -1332,11 +1306,7 @@ class TheWeatherTimelineDocumentsTheShiftItself(EndToEndWorkflow):
 		self.assertEqual(report["readings_at_or_above_the_heat_threshold"], 10)
 		read_back = self.tool_data("get_shift", {"name": shift["name"]})
 		self.assertEqual(
-			[
-				row
-				for row in read_back["compliance_events"]
-				if row["event_type"] == weather.THRESHOLD_EVENT
-			],
+			[row for row in read_back["compliance_events"] if row["event_type"] == weather.THRESHOLD_EVENT],
 			[],
 		)
 
@@ -1555,9 +1525,7 @@ class TheSeasonReachesAPerAcreFigure(EndToEndWorkflow):
 
 		# The accountant signs. THIS is the act that moves the number, and it
 		# cannot happen without a signature.
-		unsigned = self.tool_error(
-			"approve_normalization_adjustment", {"name": draft["name"]}
-		)
+		unsigned = self.tool_error("approve_normalization_adjustment", {"name": draft["name"]})
 		self.assertIn("approver_signature_file_token is required", unsigned)
 
 		# A file URL rather than a staged upload, and that is the realistic path

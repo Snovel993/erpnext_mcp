@@ -187,9 +187,7 @@ class CreateField(FarmTestCase):
 	def test_a_duplicate_name_on_one_parcel_is_refused(self):
 		self.a_parcel()
 		self.a_field()
-		error = self.tool_error(
-			"create_field", {"parcel": "Mill Creek", "field_name": "Yellow Camp Block 3"}
-		)
+		error = self.tool_error("create_field", {"parcel": "Mill Creek", "field_name": "Yellow Camp Block 3"})
 		self.assertIn("already has a block", error)
 		self.assertIn("Nothing was created", error)
 
@@ -211,12 +209,8 @@ class CreateField(FarmTestCase):
 
 	def test_missing_required_arguments_are_refused_by_name(self):
 		self.a_parcel()
-		self.assertIn(
-			"field_name is required", self.tool_error("create_field", {"parcel": "Mill Creek"})
-		)
-		self.assertIn(
-			"parcel is required", self.tool_error("create_field", {"field_name": "Block 1"})
-		)
+		self.assertIn("field_name is required", self.tool_error("create_field", {"parcel": "Mill Creek"}))
+		self.assertIn("parcel is required", self.tool_error("create_field", {"field_name": "Block 1"}))
 
 	def test_a_condition_outside_the_list_is_refused_with_the_list(self):
 		self.a_parcel()
@@ -328,9 +322,7 @@ class UpdateField(FarmTestCase):
 		self.a_field()
 
 	def test_it_changes_the_condition_and_echoes_before_and_after(self):
-		data = self.tool_data(
-			"update_field", {"field": "Yellow Camp Block 3", "condition": "Fair"}
-		)
+		data = self.tool_data("update_field", {"field": "Yellow Camp Block 3", "condition": "Fair"})
 		self.assertEqual(data["changed"]["condition"], ["Good", "Fair"])
 		self.assertEqual(data["condition"], "Fair")
 
@@ -347,9 +339,7 @@ class UpdateField(FarmTestCase):
 		self.assertTrue(data["worker_hygiene_station_present"])
 
 	def test_renaming_a_block_is_refused_because_zones_point_at_the_docname(self):
-		error = self.tool_error(
-			"update_field", {"field": "Yellow Camp Block 3", "field_name": "Block Three"}
-		)
+		error = self.tool_error("update_field", {"field": "Yellow Camp Block 3", "field_name": "Block Three"})
 		self.assertIn("docname", error)
 		self.assertIn("irrigation zone", error)
 
@@ -359,9 +349,7 @@ class UpdateField(FarmTestCase):
 		self.assertIn("Ground does not move", error)
 
 	def test_setting_the_cost_center_here_is_refused_and_names_the_right_tool(self):
-		error = self.tool_error(
-			"update_field", {"field": "Yellow Camp Block 3", "cost_center": "Main"}
-		)
+		error = self.tool_error("update_field", {"field": "Yellow Camp Block 3", "cost_center": "Main"})
 		self.assertIn("link_field_to_cost_center", error)
 
 	def test_a_claimed_farm_app_id_is_refused_on_update_too(self):
@@ -377,9 +365,7 @@ class UpdateField(FarmTestCase):
 		self.assertIn("wildlife_intrusion_last_report", error)
 
 	def test_an_unknown_field_is_refused(self):
-		self.assertIn(
-			"no Field called", self.tool_error("update_field", {"field": "Nowhere", "acreage": 1})
-		)
+		self.assertIn("no Field called", self.tool_error("update_field", {"field": "Nowhere", "acreage": 1}))
 
 
 # ── list_fields and get_field ───────────────────────────────────────────────
@@ -408,9 +394,7 @@ class ListFields(FarmTestCase):
 		"""A hardcoded list is wrong the first time somebody plants something
 		new; what is already in the ground cannot be."""
 		self.a_field("Block C", acreage=1, variety="Skeena")
-		self.assertEqual(
-			self.tool_data("list_fields")["known_varieties"], ["Bing", "Rainier", "Skeena"]
-		)
+		self.assertEqual(self.tool_data("list_fields")["known_varieties"], ["Bing", "Rainier", "Skeena"])
 
 	def test_it_filters_by_variety(self):
 		data = self.tool_data("list_fields", {"variety": "Bing"})
@@ -537,9 +521,7 @@ class CreateIrrigationZone(FarmTestCase):
 	def test_a_duplicate_zone_name_on_one_parcel_is_refused(self):
 		self.a_zone()
 		self.a_field("Block 9")
-		error = self.tool_error(
-			"create_irrigation_zone", {"field": "Block 9", "zone_name": "YC3-Zone2"}
-		)
+		error = self.tool_error("create_irrigation_zone", {"field": "Block 9", "zone_name": "YC3-Zone2"})
 		self.assertIn("unique within a parcel", error)
 
 	def test_a_duplicate_zone_number_on_one_block_is_refused(self):
@@ -554,9 +536,7 @@ class CreateIrrigationZone(FarmTestCase):
 	def test_the_same_zone_number_on_a_different_block_is_fine(self):
 		self.a_zone("Z1", zone_number=3, area_sq_ft=1000)
 		self.a_field("Block 9", acreage=5)
-		self.assertEqual(
-			self.a_zone("Z9", field="Block 9", zone_number=3, area_sq_ft=1000)["zone_number"], 3
-		)
+		self.assertEqual(self.a_zone("Z9", field="Block 9", zone_number=3, area_sq_ft=1000)["zone_number"], 3)
 
 	def test_zones_summing_past_the_block_are_refused_with_both_figures(self):
 		self.a_zone("Z1", zone_number=1, area_sq_ft=43560 * 10)
@@ -614,9 +594,7 @@ class CreateIrrigationZone(FarmTestCase):
 		self.configure(enabled=1, allow_create_parcel=1, allow_create_field=1)
 		self.assertIn(
 			"switched off",
-			self.tool_error(
-				"create_irrigation_zone", {"field": "Yellow Camp Block 3", "zone_name": "Z1"}
-			),
+			self.tool_error("create_irrigation_zone", {"field": "Yellow Camp Block 3", "zone_name": "Z1"}),
 		)
 
 
@@ -632,9 +610,7 @@ class UpdateIrrigationZone(FarmTestCase):
 		self.assertEqual(data["water_test_last_date"], "2026-04-01")
 
 	def test_it_recomputes_the_acres_when_the_square_feet_change(self):
-		data = self.tool_data(
-			"update_irrigation_zone", {"zone": "YC3-Zone2", "area_sq_ft": 43560}
-		)
+		data = self.tool_data("update_irrigation_zone", {"zone": "YC3-Zone2", "area_sq_ft": 43560})
 		self.assertEqual(data["area_acres"], 1.0)
 
 	def test_renaming_a_zone_is_refused(self):
@@ -660,9 +636,7 @@ class UpdateIrrigationZone(FarmTestCase):
 		self.assertIn("already", error)
 
 	def test_a_call_that_changes_nothing_is_refused(self):
-		self.assertIn(
-			"nothing to change", self.tool_error("update_irrigation_zone", {"zone": "YC3-Zone2"})
-		)
+		self.assertIn("nothing to change", self.tool_error("update_irrigation_zone", {"zone": "YC3-Zone2"}))
 
 
 class ListIrrigationZones(FarmTestCase):
@@ -688,25 +662,17 @@ class ListIrrigationZones(FarmTestCase):
 		self.assertEqual(data["total_flow_gpm"], 80.0)
 
 	def test_it_counts_by_water_source(self):
-		self.assertEqual(
-			self.tool_data("list_irrigation_zones")["by_water_source"], {"creek": 1, "well": 1}
-		)
+		self.assertEqual(self.tool_data("list_irrigation_zones")["by_water_source"], {"creek": 1, "well": 1})
 
 	def test_it_names_the_zones_with_no_water_test(self):
-		self.assertEqual(
-			self.tool_data("list_irrigation_zones")["without_water_test"], ["Z1 - MC"]
-		)
+		self.assertEqual(self.tool_data("list_irrigation_zones")["without_water_test"], ["Z1 - MC"])
 
 	def test_it_names_surface_water_zones_with_no_water_right(self):
 		self.a_zone("Z3", zone_number=3, water_source="pond", area_sq_ft=1000)
-		self.assertIn(
-			"Z3 - MC", self.tool_data("list_irrigation_zones")["surface_water_without_a_right"]
-		)
+		self.assertIn("Z3 - MC", self.tool_data("list_irrigation_zones")["surface_water_without_a_right"])
 
 	def test_a_well_with_no_right_is_not_on_that_list(self):
-		self.assertNotIn(
-			"Z1 - MC", self.tool_data("list_irrigation_zones")["surface_water_without_a_right"]
-		)
+		self.assertNotIn("Z1 - MC", self.tool_data("list_irrigation_zones")["surface_water_without_a_right"])
 
 	def test_it_filters_by_block(self):
 		self.a_field("Block 9", acreage=5)
@@ -745,9 +711,7 @@ class GetIrrigationZone(FarmTestCase):
 		self.assertTrue(any("Oregon" in note for note in notes))
 
 	def test_an_unknown_zone_is_refused_with_the_register_named(self):
-		self.assertIn(
-			"list_irrigation_zones", self.tool_error("get_irrigation_zone", {"zone": "Nowhere"})
-		)
+		self.assertIn("list_irrigation_zones", self.tool_error("get_irrigation_zone", {"zone": "Nowhere"}))
 
 
 # ── link_field_to_cost_center ───────────────────────────────────────────────
@@ -895,9 +859,7 @@ class ParcelFieldSummary(FarmTestCase):
 
 	def test_it_reports_the_oldest_planting(self):
 		self.assertEqual(
-			self.tool_data("get_parcel_field_summary", {"parcel": "Mill Creek"})[
-				"oldest_planting_year"
-			],
+			self.tool_data("get_parcel_field_summary", {"parcel": "Mill Creek"})["oldest_planting_year"],
 			1998,
 		)
 
@@ -928,9 +890,7 @@ class ParcelFieldSummary(FarmTestCase):
 		self.assertEqual(data["abbr"], "MC")
 
 	def test_an_unknown_parcel_is_refused(self):
-		self.assertIn(
-			"no Parcel called", self.tool_error("get_parcel_field_summary", {"parcel": "Nowhere"})
-		)
+		self.assertIn("no Parcel called", self.tool_error("get_parcel_field_summary", {"parcel": "Nowhere"}))
 
 
 # ── import_farm_app_fields ──────────────────────────────────────────────────
@@ -967,17 +927,13 @@ class ImportFarmAppFields(FarmTestCase):
 		self.assertEqual(STORE.rows("Field"), [])
 
 	def test_apply_creates_the_fields(self):
-		data = self.tool_data(
-			"import_farm_app_fields", {"records": self.records(), "apply": True}
-		)
+		data = self.tool_data("import_farm_app_fields", {"records": self.records(), "apply": True})
 		self.assertTrue(data["applied"])
 		self.assertEqual(sorted(data["created"]), ["Block One - MC", "Block Two - MC"])
 
 	def test_the_farm_app_id_is_carried_across_which_is_the_whole_point(self):
 		self.tool_data("import_farm_app_fields", {"records": self.records(), "apply": True})
-		self.assertEqual(
-			STORE.get_raw("Field", "Block One - MC")["external_farm_app_id"], "uuid-1"
-		)
+		self.assertEqual(STORE.get_raw("Field", "Block One - MC")["external_farm_app_id"], "uuid-1")
 
 	def test_it_defaults_the_crop_to_cherry(self):
 		self.tool_data("import_farm_app_fields", {"records": self.records(), "apply": True})
@@ -1064,9 +1020,7 @@ class ImportFarmAppFields(FarmTestCase):
 
 	def test_the_same_batch_can_be_re_run_safely(self):
 		self.tool_data("import_farm_app_fields", {"records": self.records(), "apply": True})
-		data = self.tool_data(
-			"import_farm_app_fields", {"records": self.records(), "apply": True}
-		)
+		data = self.tool_data("import_farm_app_fields", {"records": self.records(), "apply": True})
 		self.assertEqual(data["created"], [])
 		self.assertEqual(data["already_present"], 2)
 
@@ -1137,9 +1091,7 @@ class WovenNotShadow(FarmTestCase):
 
 	def test_last_spray_date_answers_re_entry_before_it_answers_a_wps_report(self):
 		field = "Yellow Camp Block 3 - MC"
-		self.assertEqual(
-			self.tool_data("get_field", {"field": field})["last_spray_date"], "2026-05-15"
-		)
+		self.assertEqual(self.tool_data("get_field", {"field": field})["last_spray_date"], "2026-05-15")
 		self.blank("Field", field, "last_spray_date")
 		# OPERATIONAL: "when can the crew go back in" has no answer.
 		self.assertIsNone(self.tool_data("get_field", {"field": field})["last_spray_date"])
@@ -1157,9 +1109,7 @@ class WovenNotShadow(FarmTestCase):
 		summary = self.tool_data("get_parcel_field_summary", {"parcel": "Mill Creek"})
 		self.assertEqual(summary["blocks_without_hygiene_station"], [field])
 		# OPERATIONAL: the same absence is what says a crew cannot be sent there.
-		self.assertFalse(
-			self.tool_data("get_field", {"field": field})["worker_hygiene_station_present"]
-		)
+		self.assertFalse(self.tool_data("get_field", {"field": field})["worker_hygiene_station_present"])
 
 	def test_a_zone_water_test_gates_both_the_irrigation_set_and_subpart_e(self):
 		zone = "YC3-Zone2 - MC"
@@ -1175,15 +1125,11 @@ class WovenNotShadow(FarmTestCase):
 		zone = "YC3-Zone2 - MC"
 		STORE.tables["Irrigation Zone"][zone]["water_source"] = "creek"
 		STORE.tables["Irrigation Zone"][zone]["water_right_id"] = "S-54321"
-		self.assertEqual(
-			self.tool_data("list_irrigation_zones")["surface_water_without_a_right"], []
-		)
+		self.assertEqual(self.tool_data("list_irrigation_zones")["surface_water_without_a_right"], [])
 		self.assertEqual(self.tool_data("list_irrigation_zones")["water_rights"], ["S-54321"])
 		STORE.tables["Irrigation Zone"][zone]["water_right_id"] = ""
 		# REGULATORY: no right on file for a surface diversion.
-		self.assertEqual(
-			self.tool_data("list_irrigation_zones")["surface_water_without_a_right"], [zone]
-		)
+		self.assertEqual(self.tool_data("list_irrigation_zones")["surface_water_without_a_right"], [zone])
 		# OPERATIONAL: the water rights roll-up for the block is now empty, so
 		# nobody can say how much water this ground is entitled to.
 		self.assertEqual(

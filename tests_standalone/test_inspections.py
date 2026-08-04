@@ -108,7 +108,12 @@ class RecordTestCase(V12TestCase):
 			)
 		return self.tool_data(
 			"create_field" if False else "create_irrigation_zone",
-			{"field": "Yellow Camp Block 3", "zone_name": zone_name, "zone_number": 2, "water_source": "creek"},
+			{
+				"field": "Yellow Camp Block 3",
+				"zone_name": zone_name,
+				"zone_number": 2,
+				"water_source": "creek",
+			},
 		)["name"]
 
 	def unit_dates(self, unit):
@@ -331,7 +336,9 @@ class WaterTests(RecordTestCase):
 
 	def test_a_missing_lab_report_is_named_because_it_is_the_irreplaceable_part(self):
 		zone = self.a_zone()
-		data = self.tool_data("create_water_test", {"source": zone, "test_date": TODAY, "coliform_result": "Absent"})
+		data = self.tool_data(
+			"create_water_test", {"source": zone, "test_date": TODAY, "coliform_result": "Absent"}
+		)
 		self.assertIn("transcription", data["missing_lab_report"])
 
 
@@ -501,9 +508,7 @@ class DoingTheWorkDismissesTheAlert(RecordTestCase):
 	def test_a_walk_auto_dismisses_housing_inspection_overdue(self):
 		unit = self.a_camp()
 		first = self.sweep(today=TODAY)
-		self.assertIn(
-			"housing_inspection_overdue", {entry["alert_type"] for entry in first["alerts"]}
-		)
+		self.assertIn("housing_inspection_overdue", {entry["alert_type"] for entry in first["alerts"]})
 		self.tool_data("create_housing_inspection", {"unit": unit, "inspection_date": TODAY})
 		second = self.sweep(today=TODAY)
 		dismissed = [

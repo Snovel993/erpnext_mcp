@@ -295,9 +295,7 @@ class EveryAuditType(PacketTestCase):
 
 	def test_the_epa_packet_carries_the_spray_sop_and_the_applicator_licence(self):
 		sections = self._sections(self.generate("EPA"))
-		self.assertIn(
-			"Spray Drift Management SOP", [row["policy"] for row in sections["policies"]["rows"]]
-		)
+		self.assertIn("Spray Drift Management SOP", [row["policy"] for row in sections["policies"]["rows"]])
 		self.assertIn(
 			"Applicator — R. Mendez", [row["certificate"] for row in sections["certifications"]["rows"]]
 		)
@@ -321,9 +319,7 @@ class EveryAuditType(PacketTestCase):
 class TheKairoticGate(PacketTestCase):
 	def test_it_refuses_a_period_whose_corrective_actions_are_still_open(self):
 		self.a_full_operation(close_the_audit=False)
-		message = self.tool_error(
-			"generate_audit_packet", {"audit_type": "GAP", "company": MAIN, **PERIOD}
-		)
+		message = self.tool_error("generate_audit_packet", {"audit_type": "GAP", "company": MAIN, **PERIOD})
 		self.assertIn("not closed", message)
 		self.assertIn("Hand wash station", message)
 		self.assertIn("Nothing was created", message)
@@ -398,9 +394,7 @@ class FilingThePacket(PacketTestCase):
 		"""Two packets for one audit period, differing in whatever changed in
 		between, is a question nobody wants to be asked."""
 		self.generate("GAP")
-		message = self.tool_error(
-			"generate_audit_packet", {"audit_type": "GAP", "company": MAIN, **PERIOD}
-		)
+		message = self.tool_error("generate_audit_packet", {"audit_type": "GAP", "company": MAIN, **PERIOD})
 		self.assertIn("already filed", message)
 		self.assertIn("overwrite=true", message)
 
@@ -428,9 +422,7 @@ class FilingThePacket(PacketTestCase):
 		self.assertTrue(data["attachment"]["is_private"])
 
 	def test_an_unknown_audit_type_is_refused_with_the_list(self):
-		message = self.tool_error(
-			"generate_audit_packet", {"audit_type": "SOX", "company": MAIN, **PERIOD}
-		)
+		message = self.tool_error("generate_audit_packet", {"audit_type": "SOX", "company": MAIN, **PERIOD})
 		self.assertIn("FSMA", message)
 		self.assertIn("list_audit_packet_types", message)
 
@@ -450,9 +442,7 @@ class FilingThePacket(PacketTestCase):
 
 	def test_it_is_scoped_to_one_company(self):
 		self.generate("GAP")
-		other = self.tool_data(
-			"generate_audit_packet", {"audit_type": "GAP", "company": OTHER, **PERIOD}
-		)
+		other = self.tool_data("generate_audit_packet", {"audit_type": "GAP", "company": OTHER, **PERIOD})
 		self.assertEqual(other["packet"]["section_counts"]["policies"], 0)
 
 
@@ -501,9 +491,7 @@ class EmptySectionsExplainThemselves(PacketTestCase):
 	def test_traceability_says_the_bucketlog_bridge_is_not_installed(self):
 		self.a_full_operation()
 		section = next(
-			entry
-			for entry in self.generate("FSMA")["packet"]["sections"]
-			if entry["key"] == "traceability"
+			entry for entry in self.generate("FSMA")["packet"]["sections"] if entry["key"] == "traceability"
 		)
 		self.assertEqual(section["row_count"], 0)
 		self.assertIn("BucketLog bridge is not installed", section["empty_note"])
@@ -512,9 +500,7 @@ class EmptySectionsExplainThemselves(PacketTestCase):
 	def test_spray_records_say_farm_precision_ag_is_not_installed(self):
 		self.a_full_operation()
 		section = next(
-			entry
-			for entry in self.generate("EPA")["packet"]["sections"]
-			if entry["key"] == "spray_records"
+			entry for entry in self.generate("EPA")["packet"]["sections"] if entry["key"] == "spray_records"
 		)
 		self.assertIn("farm_precision_ag is not installed", section["empty_note"])
 
@@ -523,9 +509,7 @@ class EmptySectionsExplainThemselves(PacketTestCase):
 		install_hrms()
 		self.a_full_operation()
 		section = next(
-			entry
-			for entry in self.generate("DOL")["packet"]["sections"]
-			if entry["key"] == "workforce"
+			entry for entry in self.generate("DOL")["packet"]["sections"] if entry["key"] == "workforce"
 		)
 		self.assertIn("install_compliance_fields", section["empty_note"])
 		self.assertIn("ABSENT rather than empty", section["empty_note"])
@@ -533,16 +517,18 @@ class EmptySectionsExplainThemselves(PacketTestCase):
 	def test_workforce_reports_the_i9_problems_it_finds_rather_than_filtering_them(self):
 		"""An auditor who finds it themselves asks a much harder question."""
 		install_hrms()
-		for fieldname, fieldtype in (("i9_status", "Select"), ("w4_status", "Select"), ("jurisdiction", "Data")):
+		for fieldname, fieldtype in (
+			("i9_status", "Select"),
+			("w4_status", "Select"),
+			("jurisdiction", "Data"),
+		):
 			add_field("Employee", fieldname, fieldtype=fieldtype)
 		row = STORE.get_raw("Employee", "HR-EMP-00001")
 		row["i9_status"] = "Expired"
 		row["company"] = MAIN
 		self.a_full_operation()
 		section = next(
-			entry
-			for entry in self.generate("DOL")["packet"]["sections"]
-			if entry["key"] == "workforce"
+			entry for entry in self.generate("DOL")["packet"]["sections"] if entry["key"] == "workforce"
 		)
 		self.assertIn("HR-EMP-00001", section["employees_without_a_verified_i9"])
 		self.assertIn("filtered out of it", section["problem_note"])
@@ -638,9 +624,7 @@ class TheEvidenceIsTheOperationalRecord(PacketTestCase):
 			},
 		)
 		section = next(
-			entry
-			for entry in self.generate("GAP")["packet"]["sections"]
-			if entry["key"] == "certifications"
+			entry for entry in self.generate("GAP")["packet"]["sections"] if entry["key"] == "certifications"
 		)
 		self.assertIn("Lapsed Cert", section["coverage_gaps"])
 
@@ -656,9 +640,7 @@ class TheEvidenceIsTheOperationalRecord(PacketTestCase):
 			},
 		)
 		section = next(
-			entry
-			for entry in self.generate("GAP")["packet"]["sections"]
-			if entry["key"] == "certifications"
+			entry for entry in self.generate("GAP")["packet"]["sections"] if entry["key"] == "certifications"
 		)
 		self.assertNotIn("Ancient Cert", [row["certificate"] for row in section["rows"]])
 
@@ -787,10 +769,7 @@ class TheCommandCenter(V12TestCase):
 		and an invalid one to build ON.
 		"""
 		specs = (
-			dashboard.CARDS
-			+ dashboard.CHARTS
-			+ dashboard.DISPATCH_NUMBER_CARDS
-			+ dashboard.DISPATCH_CHARTS
+			dashboard.CARDS + dashboard.CHARTS + dashboard.DISPATCH_NUMBER_CARDS + dashboard.DISPATCH_CHARTS
 		)
 		for spec in specs:
 			name = spec.get("label") or spec.get("chart_name")
@@ -799,7 +778,9 @@ class TheCommandCenter(V12TestCase):
 				self.assertIsInstance(clauses, list, f"{name} filters_json is a {type(clauses).__name__}")
 				for clause in clauses:
 					self.assertIsInstance(clause, list, f"{name} has a non-list clause {clause!r}")
-					self.assertEqual(len(clause), 4, f"{name} clause {clause!r} is not [doctype, field, op, value]")
+					self.assertEqual(
+						len(clause), 4, f"{name} clause {clause!r} is not [doctype, field, op, value]"
+					)
 					self.assertEqual(
 						clause[0],
 						spec["document_type"],
@@ -818,7 +799,12 @@ class TheCommandCenter(V12TestCase):
 		repaired = json.loads(STORE.get_raw("Number Card", "Critical Compliance Alerts")["filters_json"])
 		self.assertEqual(
 			sorted(repaired),
-			sorted([[dashboard.ALERT_DOCTYPE, "dismissed", "=", 0], [dashboard.ALERT_DOCTYPE, "severity", "=", "Critical"]]),
+			sorted(
+				[
+					[dashboard.ALERT_DOCTYPE, "dismissed", "=", 0],
+					[dashboard.ALERT_DOCTYPE, "severity", "=", "Critical"],
+				]
+			),
 		)
 
 	def test_the_repair_carries_an_operators_own_clauses_across_rather_than_replacing_them(self):

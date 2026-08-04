@@ -1543,8 +1543,16 @@ def _company_accounts(company: str) -> list:
 	"""
 	fields = compat.existing_fields(
 		"Account",
-		("name", "account_number", "account_name", "root_type", "account_type", "is_group",
-		 "disabled", "parent_account"),
+		(
+			"name",
+			"account_number",
+			"account_name",
+			"root_type",
+			"account_type",
+			"is_group",
+			"disabled",
+			"parent_account",
+		),
 	)
 	rows = frappe.db.get_all("Account", filters={"company": company}, fields=fields, limit=2000)
 	return [dict(row) for row in rows or []]
@@ -1688,7 +1696,10 @@ def _pick_cost_center(field: str, company: str) -> dict:
 	current = compat.company_default_cost_center(company)
 	if current:
 		try:
-			return {"account": _resolve_company_default(field, current, company), "picked_by": "the company's default cost center"}
+			return {
+				"account": _resolve_company_default(field, current, company),
+				"picked_by": "the company's default cost center",
+			}
 		except ToolError:
 			pass
 	rows = frappe.db.get_all(
@@ -1702,7 +1713,10 @@ def _pick_cost_center(field: str, company: str) -> dict:
 		key=lambda row: (str(row.get("cost_center_number") or "~"), row["name"]),
 	):
 		try:
-			return {"account": _resolve_company_default(field, row["name"], company), "picked_by": "the first leaf cost center"}
+			return {
+				"account": _resolve_company_default(field, row["name"], company),
+				"picked_by": "the first leaf cost center",
+			}
 		except ToolError:
 			continue
 	return {

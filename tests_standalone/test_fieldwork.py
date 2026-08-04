@@ -231,9 +231,7 @@ class MyTasksAndThePool(FieldworkTestCase):
 		unit = self.a_camp()
 		second = self.a_camp("MC-Cabin-02")
 		self.a_task(location_doctype="Housing Unit", location=unit)
-		self.a_task(
-			task_name="Walk — MC-Cabin-02", location_doctype="Housing Unit", location=second
-		)
+		self.a_task(task_name="Walk — MC-Cabin-02", location_doctype="Housing Unit", location=second)
 		data = self.worker_data("list_available_for_me", {"location_filter": unit})
 		self.assertEqual(data["count"], 1)
 		self.assertEqual(data["location_filter"], unit)
@@ -324,9 +322,7 @@ class TheEvidenceChecklist(FieldworkTestCase):
 	def test_a_task_at_an_entity_the_worker_cannot_see_is_refused(self):
 		self.a_task()
 		task = self.a_task(task_name="Other company walk", company=OTHER)
-		message = self.worker_error(
-			"get_task_with_evidence_contract", {"task_name": task["name"]}
-		)
+		message = self.worker_error("get_task_with_evidence_contract", {"task_name": task["name"]})
 		self.assertIn(OTHER, message)
 		self.assertIn("Nothing was returned", message)
 
@@ -334,9 +330,7 @@ class TheEvidenceChecklist(FieldworkTestCase):
 		self.configure(enabled=1, allow_create_farm_task=1)
 		task = self.a_task()
 		self.assertFalse(
-			self.as_worker(
-				"get_task_with_evidence_contract", {"task_name": task["name"]}
-			).get("isError")
+			self.as_worker("get_task_with_evidence_contract", {"task_name": task["name"]}).get("isError")
 		)
 
 
@@ -377,9 +371,7 @@ class TheRulesAreUnchanged(FieldworkTestCase):
 		task = self.a_task(evidence_required={"findings_text": True})
 		self.worker_data("claim_task_via_mobile", {"task_name": task["name"]})
 		self.worker_data("start_task_via_mobile", {"task_name": task["name"]})
-		data = self.worker_data(
-			"complete_task_via_mobile", {"task_name": task["name"], "findings_text": ""}
-		)
+		data = self.worker_data("complete_task_via_mobile", {"task_name": task["name"], "findings_text": ""})
 		self.assertIn(data["final_state"], ("Completed", "Awaiting-Review"))
 
 	def test_leaving_findings_out_entirely_is_still_refused(self):
@@ -419,9 +411,7 @@ class TheRulesAreUnchanged(FieldworkTestCase):
 		task = self.a_task()
 		self.worker_data("claim_task_via_mobile", {"task_name": task["name"]})
 		self.worker_data("start_task_via_mobile", {"task_name": task["name"]})
-		self.assertTrue(
-			self.as_worker("start_task_via_mobile", {"task_name": task["name"]})["isError"]
-		)
+		self.assertTrue(self.as_worker("start_task_via_mobile", {"task_name": task["name"]})["isError"])
 
 	def test_the_three_writes_are_off_out_of_the_box(self):
 		self.configure(enabled=1, allow_create_farm_task=1)

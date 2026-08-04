@@ -112,8 +112,7 @@ class ERPNextMCPSettings(Document):
 		live = [
 			name
 			for name in registry.MUTATING_TOOLS
-			if name not in registry.DEFAULT_ON_MUTATING_TOOLS
-			and settings.as_bool(self.get(f"allow_{name}"))
+			if name not in registry.DEFAULT_ON_MUTATING_TOOLS and settings.as_bool(self.get(f"allow_{name}"))
 		]
 		if not (settings.as_bool(self.enabled) and live):
 			return

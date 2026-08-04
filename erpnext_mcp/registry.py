@@ -138,7 +138,6 @@ def _needs_doctype(*doctypes: str):
 	return predicate
 
 
-
 def _qr_available() -> bool:
 	"""Predicate: can this bench draw a QR code at all?
 
@@ -807,7 +806,9 @@ TOOLS = {
 							'Optional accounting dimensions for this line, e.g. {"member": "Member-01"}. '
 							"Each key must be a field on Journal Entry Account and each value must exist.",
 						),
-						"narrative": _field(_STRING, "Optional per-line remark. The event's own explanation is user_remark."),
+						"narrative": _field(
+							_STRING, "Optional per-line remark. The event's own explanation is user_remark."
+						),
 					},
 					"required": ["account", "dr_or_cr", "amount"],
 					"additionalProperties": False,
@@ -2011,8 +2012,7 @@ TOOLS = {
 			"session_id": _field(_STRING, "The upload to commit, as given to stage_file_chunk."),
 			"file_name": _field(
 				_STRING,
-				"Filename for the File this creates, with its extension — e.g. "
-				"'2026-appraisal.pdf'.",
+				"Filename for the File this creates, with its extension — e.g. '2026-appraisal.pdf'.",
 			),
 			"attach_to_doctype": _field(
 				_STRING, "DocType of the document to attach it to. Give with attach_to_name."
@@ -2539,7 +2539,9 @@ TOOLS = {
 				"against the doctype's own option list.",
 			),
 			"admission_date": _field(_STRING, "When this member was admitted, YYYY-MM-DD."),
-			"ownership_percentage": _field(_NUMBER, "0-100. The response says whether active members now total 100."),
+			"ownership_percentage": _field(
+				_NUMBER, "0-100. The response says whether active members now total 100."
+			),
 			"member_cost_center": _field(
 				_STRING,
 				"Optional, and only for sites whose convention also gives each member a "
@@ -2649,7 +2651,9 @@ TOOLS = {
 				_STRING,
 				"Contribution, Distribution, Admission, Withdrawal, Transfer or Reallocation.",
 			),
-			"effective_date": _field(_STRING, "When it took effect, YYYY-MM-DD. Also the entry's posting date."),
+			"effective_date": _field(
+				_STRING, "When it took effect, YYYY-MM-DD. Also the entry's posting date."
+			),
 			"amount": _field(
 				_NUMBER,
 				"Positive. A distribution is its own event type, not a negative "
@@ -2661,7 +2665,8 @@ TOOLS = {
 				"transfer, the member the interest moves FROM.",
 			),
 			"counterparty_member": _field(
-				_STRING, "For a Transfer or Reallocation: the member the interest moves TO. Required for those."
+				_STRING,
+				"For a Transfer or Reallocation: the member the interest moves TO. Required for those.",
 			),
 			"narrative": _field(
 				_STRING,
@@ -2750,7 +2755,9 @@ TOOLS = {
 			"file_content": _field(
 				_STRING, "The document's bytes, base64-encoded, with no data: prefix. Needs file_name."
 			),
-			"file_name": _field(_STRING, "Filename for the uploaded content, e.g. 'operating-agreement-2020.pdf'."),
+			"file_name": _field(
+				_STRING, "Filename for the uploaded content, e.g. 'operating-agreement-2020.pdf'."
+			),
 			"file_url": _field(
 				_STRING, "Where the document already lives, instead of uploading it. Not with file_content."
 			),
@@ -2879,8 +2886,12 @@ TOOLS = {
 				"Which DocType the note lives in. Worked out from the name where it is a "
 				"Notes Payable, a Loan or a Journal Entry.",
 			),
-			"note_tenor_months": _field(_INTEGER, "The note's term in months, if the note document does not record it."),
-			"note_maturity_date": _field(_STRING, "The note's maturity, YYYY-MM-DD, as an alternative to the tenor."),
+			"note_tenor_months": _field(
+				_INTEGER, "The note's term in months, if the note document does not record it."
+			),
+			"note_maturity_date": _field(
+				_STRING, "The note's maturity, YYYY-MM-DD, as an alternative to the tenor."
+			),
 			"depreciation_expense_account": _field(
 				_STRING, "Override the Asset Category's depreciation expense account for this asset."
 			),
@@ -2959,7 +2970,9 @@ TOOLS = {
 					"properties": {
 						"cost_center": _field(_STRING, "A leaf Cost Center: docname, number or name."),
 						"percentage": _field(_NUMBER, "Share of use, above 0 and at most 100."),
-						"bbch_stage": _field(_STRING, "Optional BBCH Stage dimension value for this row's line."),
+						"bbch_stage": _field(
+							_STRING, "Optional BBCH Stage dimension value for this row's line."
+						),
 						"note": _field(_STRING, "The usage evidence behind the number."),
 					},
 					"required": ["cost_center", "percentage"],
@@ -3206,8 +3219,12 @@ TOOLS = {
 			"company": _COMPANY,
 			"payment_date": _field(_STRING, "YYYY-MM-DD. The Journal Entry's posting date."),
 			"total_amount": _field(_NUMBER, "The whole payment that left the bank. Positive."),
-			"principal_split": _field(_NUMBER, "How much of it reduces the note. Derived if only interest is given."),
-			"interest_split": _field(_NUMBER, "How much of it is interest. Derived if only principal is given."),
+			"principal_split": _field(
+				_NUMBER, "How much of it reduces the note. Derived if only interest is given."
+			),
+			"interest_split": _field(
+				_NUMBER, "How much of it is interest. Derived if only principal is given."
+			),
 			"offset_bank_account": _field(
 				_STRING,
 				"Where the money came from: a Bank Account record (preferred — the journal "
@@ -3376,9 +3393,7 @@ TOOLS = {
 			"appraised_value": _field(_NUMBER, "Fee simple market value from the latest appraisal."),
 			"appraised_as_of": _field(_STRING, "The appraisal's effective date, YYYY-MM-DD."),
 			"appraiser": _field(_STRING, "Who signed it, and their designation."),
-			"appraisal_document": _field(
-				_STRING, "The Governance Document holding the appraisal report."
-			),
+			"appraisal_document": _field(_STRING, "The Governance Document holding the appraisal report."),
 			"related_asset": _field(
 				_STRING, "The Fixed Asset carrying it, if it is already on the balance sheet."
 			),
@@ -3514,7 +3529,9 @@ TOOLS = {
 				"holder is kept only if it belongs to the receiving entity — one registered "
 				"against the entity the ground just left is dropped and said so.",
 			),
-			"dry_run": _field(_BOOLEAN, "Report the full plan and every refusal without writing. Default false."),
+			"dry_run": _field(
+				_BOOLEAN, "Report the full plan and every refusal without writing. Default false."
+			),
 		},
 		required=("parcel", "target_company", "effective_date", "reason"),
 		mutating=True,
@@ -3545,8 +3562,7 @@ TOOLS = {
 			"status": _field(_STRING, "Active, Expired or Terminated."),
 			"direction": _field(
 				_STRING,
-				"Outbound (we are the lessor, collecting rent) or Inbound (we are the "
-				"lessee, paying it).",
+				"Outbound (we are the lessor, collecting rent) or Inbound (we are the lessee, paying it).",
 			),
 			"parcel": _field(_STRING, "Only leases over this parcel."),
 			"counterparty": _field(_STRING, "Only leases with this Related Party on the other side."),
@@ -3554,9 +3570,7 @@ TOOLS = {
 				_STRING,
 				"Only leases in force on this date, by the dates on the record. YYYY-MM-DD.",
 			),
-			"expiring_within_days": _field(
-				_INTEGER, "Window for expiring_soon. Default 90."
-			),
+			"expiring_within_days": _field(_INTEGER, "Window for expiring_soon. Default 90."),
 			"limit": _field(_INTEGER, "Maximum leases returned. Default 100, hard maximum 500."),
 		},
 		title="List leases",
@@ -3631,7 +3645,8 @@ TOOLS = {
 				_STRING, "Where the executed lease already lives. Not with file_content."
 			),
 			"file_content": _field(
-				_STRING, "The executed lease, base64, no data: prefix. Ceiling 8 MB. Not with lease_document_url."
+				_STRING,
+				"The executed lease, base64, no data: prefix. Ceiling 8 MB. Not with lease_document_url.",
 			),
 			"file_name": _field(_STRING, "Filename to store it as. Required with file_content."),
 			"notes": _field(_STRING, "Anything the fields cannot hold."),
@@ -3756,8 +3771,7 @@ TOOLS = {
 			),
 			"party_type": _field(
 				_STRING,
-				"What they ARE: Individual, Trust, LLC, Corporation, Partnership, Family "
-				"Member or Other.",
+				"What they ARE: Individual, Trust, LLC, Corporation, Partnership, Family Member or Other.",
 			),
 			"relationship_to_company": _field(
 				_STRING,
@@ -3865,9 +3879,7 @@ TOOLS = {
 				"The accounts holding the portfolio. Omit to match them by name on this "
 				"company's chart — the result lists exactly which were included.",
 			),
-			"cash_clearing_account": _field(
-				_STRING, "The clearing account. Omit to match it by name."
-			),
+			"cash_clearing_account": _field(_STRING, "The clearing account. Omit to match it by name."),
 			"holdings": _field(
 				{"type": "array", "items": _OBJECT},
 				"The custodian's positions at quarter end: objects with symbol, description, "
@@ -3881,9 +3893,7 @@ TOOLS = {
 			),
 			"manager_fee_percent": _field(_NUMBER, "The manager's annual rate. Default 1.00."),
 			"custody_fee_percent": _field(_NUMBER, "The custodian's annual rate. Default 1.00."),
-			"performance_fee_percent": _field(
-				_NUMBER, "Share of the gain over benchmark. Default 20."
-			),
+			"performance_fee_percent": _field(_NUMBER, "Share of the gain over benchmark. Default 20."),
 			"high_water_mark": _field(
 				_NUMBER,
 				"The high-water mark. Closing assets at or below it earn no performance fee "
@@ -3948,9 +3958,7 @@ TOOLS = {
 				"storage is refused. Omit it — the attachments are the durable copies.",
 			),
 			"overwrite": _field(_BOOLEAN, "Replace existing files at output_path. Default false."),
-			"payer_address": _field(
-				_STRING, "The payer's address as it should print on the forms."
-			),
+			"payer_address": _field(_STRING, "The payer's address as it should print on the forms."),
 			"include_forms": _field(
 				_BOOLEAN, "Produce the per-recipient PDFs. Default true; false gives the workbook alone."
 			),
@@ -4008,8 +4016,7 @@ TOOLS = {
 			"default_currency": _field(_STRING, "ISO code. Default 'USD'."),
 			"fiscal_year_start_month": _field(
 				_STRING,
-				"1-12, or a month name. 4 (April) for a farm year, 1 for a calendar year. "
-				"Default 1.",
+				"1-12, or a month name. 4 (April) for a farm year, 1 for a calendar year. Default 1.",
 			),
 			"tax_id": _field(_STRING, "EIN or equivalent. Only the last four are ever echoed back."),
 			"parent_company": _field(
@@ -4268,7 +4275,9 @@ TOOLS = {
 			"crop": _field(_STRING, "Only this crop."),
 			"variety": _field(_STRING, "Only this variety."),
 			"condition": _field(_STRING, "Excellent, Good, Fair, Poor or Fallow."),
-			"food_safety_zone": _field(_BOOLEAN, "true for only covered-produce blocks, false for only the rest."),
+			"food_safety_zone": _field(
+				_BOOLEAN, "true for only covered-produce blocks, false for only the rest."
+			),
 			"linked_to_cost_center": _field(
 				_BOOLEAN, "true for only blocks with a cost center, false for only those without."
 			),
@@ -4363,7 +4372,9 @@ TOOLS = {
 			"wildlife_intrusion_last_report": _field(
 				_STRING, "Last recorded animal intrusion, YYYY-MM-DD (FSMA Subpart I)."
 			),
-			"food_safety_zone": _field(_BOOLEAN, "Grows produce eaten raw, so inside the Produce Safety Rule."),
+			"food_safety_zone": _field(
+				_BOOLEAN, "Grows produce eaten raw, so inside the Produce Safety Rule."
+			),
 			"worker_hygiene_station_present": _field(
 				_BOOLEAN, "Toilets and handwashing within a quarter mile (FSMA Subpart L, WPS)."
 			),
@@ -4538,7 +4549,9 @@ TOOLS = {
 			"water_source": _field(_STRING, "well, creek, municipal, pond, shared or other."),
 			"sprinkler_type": _field(_STRING, "drip, micro, impact, gun or sub-surface."),
 			"water_source_class": _field(_STRING, "I, II, III or IV."),
-			"chlorination_active": _field(_BOOLEAN, "true for only chlorinated zones, false for only the rest."),
+			"chlorination_active": _field(
+				_BOOLEAN, "true for only chlorinated zones, false for only the rest."
+			),
 			"limit": _field(_INTEGER, "Maximum zones returned. Default 100, hard maximum 500."),
 		},
 		title="List irrigation zones",
@@ -4591,7 +4604,9 @@ TOOLS = {
 			"flow_rate_gpm": _field(_NUMBER, "Design flow in gallons per minute."),
 			"sprinkler_type": _field(_STRING, "drip, micro, impact, gun or sub-surface."),
 			"area_sq_ft": _field(_NUMBER, "Irrigated area in square feet."),
-			"water_test_last_date": _field(_STRING, "Last agricultural water test, YYYY-MM-DD (FSMA Subpart E)."),
+			"water_test_last_date": _field(
+				_STRING, "Last agricultural water test, YYYY-MM-DD (FSMA Subpart E)."
+			),
 			"water_source_class": _field(_STRING, "FSMA water quality class: I, II, III or IV."),
 			"chlorination_active": _field(_BOOLEAN, "Running a chlorination or antimicrobial treatment."),
 			"notes": _field(_STRING, "Anything the fields cannot hold."),
@@ -4885,7 +4900,9 @@ TOOLS = {
 			"fsma_worker_facility": _field(
 				_BOOLEAN, "Subject to FSMA Produce Safety Rule Subpart L worker facility requirements."
 			),
-			"or_housing_law_compliant": _field(_STRING, "Yes, No, Unknown or Not Applicable. Default Unknown."),
+			"or_housing_law_compliant": _field(
+				_STRING, "Yes, No, Unknown or Not Applicable. Default Unknown."
+			),
 			"max_occupants_per_or_law": _field(
 				_INTEGER, "Override the computed occupancy limit. Omit to compute it from square footage."
 			),
@@ -4993,9 +5010,7 @@ TOOLS = {
 				"The Employee id, or their name where an HR app can resolve it. Free text on a "
 				"site with no HR app.",
 			),
-			"employee_name": _field(
-				_STRING, "The person's name. Required when no employee id is given."
-			),
+			"employee_name": _field(_STRING, "The person's name. Required when no employee id is given."),
 			"assigned_date": _field(_STRING, "The date they moved in, YYYY-MM-DD."),
 			"end_date": _field(
 				_STRING, "The date they moved out, if it is already known. Blank means current."
@@ -5075,9 +5090,7 @@ TOOLS = {
 		"a closing line when they are currently unassigned. Read-only.\n\n"
 		"MATCHES ON THE EMPLOYEE ID FIRST, then on the name, because a site with no "
 		"HR app records the name and a site with one records the id.",
-		{
-			"employee": _field(_STRING, "The Employee id, or the person's name as the roster has it.")
-		},
+		{"employee": _field(_STRING, "The Employee id, or the person's name as the roster has it.")},
 		required=("employee",),
 		title="Employee housing history",
 		available=_needs_doctype("Housing Assignment"),
@@ -5131,8 +5144,7 @@ TOOLS = {
 		{
 			"dry_run": _field(
 				_BOOLEAN,
-				"Report what would be added, including the backlog counts, and write nothing. "
-				"Default false.",
+				"Report what would be added, including the backlog counts, and write nothing. Default false.",
 			)
 		},
 		mutating=True,
@@ -5305,7 +5317,9 @@ TOOLS = {
 				"License, Commercial Driver License, Food Safety Training, First Aid / CPR, "
 				"Water Test Certification or Other.",
 			),
-			"status": _field(_STRING, "Active, Expired, Suspended, Revoked, Superseded or Not Yet Effective."),
+			"status": _field(
+				_STRING, "Active, Expired, Suspended, Revoked, Superseded or Not Yet Effective."
+			),
 			"holder": _field(_STRING, "Only certificates held by this person or company."),
 			"expiring_only": _field(_BOOLEAN, "Only ones inside their renewal window. Default false."),
 			"limit": _LIMIT,
@@ -5371,11 +5385,11 @@ TOOLS = {
 			"expiration_date": _field(
 				_STRING, "The date it stops being a defence. The most load-bearing column here."
 			),
-			"renewal_window_days": _field(
-				_INTEGER, "How long the issuing body actually takes. Default 90."
-			),
+			"renewal_window_days": _field(_INTEGER, "How long the issuing body actually takes. Default 90."),
 			"certificate_number": _field(_STRING, "The number printed on it."),
-			"status": _field(_STRING, "Active, Expired, Suspended, Revoked, Superseded or Not Yet Effective."),
+			"status": _field(
+				_STRING, "Active, Expired, Suspended, Revoked, Superseded or Not Yet Effective."
+			),
 			"attached_certificate": _field(_STRING, "file_url of the certificate itself."),
 			"notes": _field(_STRING, "Anything the fields cannot hold."),
 		},
@@ -5432,13 +5446,17 @@ TOOLS = {
 		"lapsed. Supports dry_run.",
 		{
 			"certification": _field(_STRING, "The Certification docname."),
-			"new_expiration": _field(_STRING, "The new expiration date, YYYY-MM-DD. Must be later than the current one."),
+			"new_expiration": _field(
+				_STRING, "The new expiration date, YYYY-MM-DD. Must be later than the current one."
+			),
 			"what_was_done": _field(
 				_STRING,
 				"What was actually done to renew it. The part nobody can reconstruct from the "
 				"dates; must be a real sentence.",
 			),
-			"renewed_on": _field(_STRING, "When the renewal happened. Defaults to today; a future date is refused."),
+			"renewed_on": _field(
+				_STRING, "When the renewal happened. Defaults to today; a future date is refused."
+			),
 			"renewed_by": _field(_STRING, "Who did it. Defaults to the calling user."),
 			"certificate_number": _field(_STRING, "New certificate number, where a renewal issues one."),
 			"attached_certificate": _field(_STRING, "file_url of the new certificate."),
@@ -5519,9 +5537,13 @@ TOOLS = {
 				_STRING, "Draft, Submitted, Accepted, Rejected, Amended or Withdrawn. Default Submitted."
 			),
 			"submission_date": _field(_STRING, "When it actually went, YYYY-MM-DD."),
-			"docket_number": _field(_STRING, "The agency's own reference — docket, confirmation, certified mail number."),
+			"docket_number": _field(
+				_STRING, "The agency's own reference — docket, confirmation, certified mail number."
+			),
 			"response_due_date": _field(_STRING, "When a response is expected or required by."),
-			"response_received_date": _field(_STRING, "When they answered. Setting this dismisses the response alert."),
+			"response_received_date": _field(
+				_STRING, "When they answered. Setting this dismisses the response alert."
+			),
 			"response": _field(_STRING, "What the agency said, in their words where possible."),
 			"attached_filing": _field(_STRING, "file_url of the filing AS SUBMITTED — not the working copy."),
 			"attached_response": _field(_STRING, "file_url of their reply."),
@@ -5634,8 +5656,7 @@ TOOLS = {
 			),
 			"scope": _field(
 				_STRING,
-				"What they actually looked at. An audit of the packing house is not evidence "
-				"about the camp.",
+				"What they actually looked at. An audit of the packing house is not evidence about the camp.",
 			),
 			"findings": _field(_STRING, "The findings as written, in full."),
 			"corrective_actions": _field(
@@ -5902,8 +5923,7 @@ TOOLS = {
 			"alert": _field(_STRING, "The Compliance Alert docname."),
 			"reason": _field(
 				_STRING,
-				"Why this does not need doing. Must be a real explanation, not a word — see the "
-				"description.",
+				"Why this does not need doing. Must be a real explanation, not a word — see the description.",
 			),
 		},
 		required=("alert", "reason"),
@@ -5926,16 +5946,16 @@ TOOLS = {
 		"REFUSES A CALL WITH NO FILTER at all. Capped at 200 alerts per run: a filter "
 		"matching more than that is a filter worth reading again.",
 		{
-			"reason": _field(
-				_STRING, "Written onto every alert this touches. Must be a real explanation."
-			),
+			"reason": _field(_STRING, "Written onto every alert this touches. Must be a real explanation."),
 			"alert_type": _field(_STRING, "One rule's alerts. list_compliance_rules names them."),
 			"category": _field(
 				_STRING,
 				"Certifications, Policies, Workforce, Records, Housing, Water and Sanitation, Spray and "
 				"Pesticides, Filings, Audits or Other.",
 			),
-			"severity": _field(_STRING, "Critical, Warning or Info — EXACTLY this severity, not 'and worse'."),
+			"severity": _field(
+				_STRING, "Critical, Warning or Info — EXACTLY this severity, not 'and worse'."
+			),
 			"source_doctype": _field(_STRING, "Only alerts whose source is this doctype."),
 			"company": _COMPANY,
 			"dry_run": _field(
@@ -6001,9 +6021,7 @@ TOOLS = {
 		"dismissed items are excluded; neither is an open obligation.\n\n"
 		"PDF by default; DOCX available. Supports dry_run.",
 		{
-			"audit_type": _field(
-				_STRING, "FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA or Other."
-			),
+			"audit_type": _field(_STRING, "FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, USDA_NIFA or Other."),
 			"company": _COMPANY,
 			"regime": _field(
 				_STRING,
@@ -6146,7 +6164,9 @@ TOOLS = {
 			"worker_id": _field(
 				_STRING, "Employee id. Adds this worker's claim count and whether they may claim."
 			),
-			"location": _field(_STRING, "Only tasks at this place (a Housing Unit, Field, Zone or Parcel docname)."),
+			"location": _field(
+				_STRING, "Only tasks at this place (a Housing Unit, Field, Zone or Parcel docname)."
+			),
 			"skill": _field(_STRING, "Only tasks needing this skill, e.g. 'camp_maintenance'."),
 			"task_type": _field(
 				_STRING,
@@ -6199,9 +6219,7 @@ TOOLS = {
 				"One state or a comma-separated list: Draft, Available, Claimed, In-Progress, "
 				"Awaiting-Review, Completed, Rejected, Cancelled.",
 			),
-			"include_closed": _field(
-				_BOOLEAN, "Include Completed, Rejected and Cancelled. Default false."
-			),
+			"include_closed": _field(_BOOLEAN, "Include Completed, Rejected and Cancelled. Default false."),
 			"task_type": _field(_STRING, "Only this task type."),
 			"urgency": _field(_STRING, "Only this urgency."),
 			"assigned_to": _field(_STRING, "Only tasks with this Employee id on them."),
@@ -6231,11 +6249,11 @@ TOOLS = {
 		"what skill it needs, how urgent it is, whether it is dispatched or "
 		"self-picked, and what record completing it produces.\n\n"
 		"`evidence_required` IS MANDATORY AND IS THE POINT OF THE WHOLE DOCTYPE. It "
-		'is JSON: {\"photos\": true, \"signature\": true, \"findings_text\": true, '
-		'\"witness\": false}. A task that requires no evidence is a task that gets '
+		'is JSON: {"photos": true, "signature": true, "findings_text": true, '
+		'"witness": false}. A task that requires no evidence is a task that gets '
 		"closed with a tick in a box, and a tick in a box is what an auditor is "
 		"trained to disbelieve. An empty contract is refused; so is a misspelt key, "
-		"because `{\"photo\": true}` asks for nothing and looks like it asks for "
+		'because `{"photo": true}` asks for nothing and looks like it asks for '
 		"something.\n\n"
 		"REFUSES: a `creates_record` naming a DocType this site does not have — a "
 		"task promising a record nobody can write is a promise that fails in front "
@@ -6244,7 +6262,9 @@ TOOLS = {
 		"Tasks are named FT-YYYY-MM-<seq>, so the same annual walk can be raised "
 		"every year without colliding with its own history.",
 		{
-			"task_name": _field(_STRING, "What a foreman calls it out loud: 'Habitability walk — MC-Cabin-01'."),
+			"task_name": _field(
+				_STRING, "What a foreman calls it out loud: 'Habitability walk — MC-Cabin-01'."
+			),
 			"task_type": _field(
 				_STRING,
 				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
@@ -6252,7 +6272,7 @@ TOOLS = {
 			),
 			"evidence_required": _field(
 				_OBJECT,
-				'JSON object. Keys: photos, signature, findings_text, witness. REQUIRED — at '
+				"JSON object. Keys: photos, signature, findings_text, witness. REQUIRED — at "
 				"least one must be true.",
 			),
 			"location_doctype": _field(
@@ -6278,9 +6298,7 @@ TOOLS = {
 			"source_workorder": _field(_STRING, "A work order in another system this task answers."),
 			"assigned_to": _field(_STRING, "Dispatch it to this Employee id straight away."),
 			"assigned_to_name": _field(_STRING, "Their name, where no HR app can resolve it."),
-			"draft": _field(
-				_BOOLEAN, "Hold it in Draft rather than publishing to the pool. Default false."
-			),
+			"draft": _field(_BOOLEAN, "Hold it in Draft rather than publishing to the pool. Default false."),
 			"notes": _field(_STRING, "Instructions: where the key is, which breaker, who to ask."),
 		},
 		required=("task_name", "task_type", "evidence_required"),
@@ -6525,7 +6543,9 @@ TOOLS = {
 		"that would re-raise an alert about work which has since been done.",
 		{
 			"unit": _field(_STRING, "The Housing Unit that was walked."),
-			"inspection_date": _field(_STRING, "The day somebody was stood in it, YYYY-MM-DD. Defaults to today."),
+			"inspection_date": _field(
+				_STRING, "The day somebody was stood in it, YYYY-MM-DD. Defaults to today."
+			),
 			"inspector": _field(_STRING, "The Employee id of whoever walked it."),
 			"inspector_name": _field(_STRING, "Their name, where no HR app can resolve it."),
 			"findings": _field(
@@ -6564,7 +6584,9 @@ TOOLS = {
 		{
 			"record": _field(_STRING, "The Housing Inspection docname."),
 			"housing_inspection": _field(_STRING, "Alias for record."),
-			"findings": _field(_STRING, "New findings. An empty string clears them and returns it to Recorded."),
+			"findings": _field(
+				_STRING, "New findings. An empty string clears them and returns it to Recorded."
+			),
 			"corrective_action": _field(_STRING, "What is being done about it."),
 			"corrective_action_closed": _field(_STRING, "The day it was fixed, YYYY-MM-DD."),
 			"closure_note": _field(_STRING, "What was done. Required with a closure date."),
@@ -6753,8 +6775,8 @@ TOOLS = {
 			"source_task": _field(_STRING, "The Farm Task this came from, if any."),
 			"farm_location_gps": _field(
 				_STRING,
-				"WHERE the sample was drawn — \"45.5152,-122.6784\" or a place name like "
-				"\"North standpipe\". The zone says which water; §112.161(a)(1)(i) also asks "
+				'WHERE the sample was drawn — "45.5152,-122.6784" or a place name like '
+				'"North standpipe". The zone says which water; §112.161(a)(1)(i) also asks '
 				"where somebody stood. Optional.",
 			),
 			"keep_as_draft": _field(
@@ -6790,7 +6812,8 @@ TOOLS = {
 			"findings": _field(_STRING, "New findings."),
 			"corrective_action_closed": _field(_STRING, "The day the water was dealt with, YYYY-MM-DD."),
 			"closure_note": _field(
-				_STRING, "What was done — treated, source switched, line flushed. Required with a closure date."
+				_STRING,
+				"What was done — treated, source switched, line flushed. Required with a closure date.",
 			),
 			"test_date": _field(_STRING, "Correct the sample date, YYYY-MM-DD."),
 			"sample_photos": _field(
@@ -6875,9 +6898,7 @@ TOOLS = {
 		{
 			"state_filter": _field(_STRING, "Claimed, In-Progress, Completed or Rejected."),
 			"include_finished": _field(_BOOLEAN, "Include completed and rejected. Default false."),
-			"company": _field(
-				_STRING, "One of the caller's entities. Defaults to their preferred one."
-			),
+			"company": _field(_STRING, "One of the caller's entities. Defaults to their preferred one."),
 			"user": _field(_STRING, "Only when the request carries no per-user credential."),
 			"limit": _LIMIT,
 		},
@@ -6947,7 +6968,9 @@ TOOLS = {
 		{
 			"company": _field(_STRING, "Just this one entity, instead of all of the caller's."),
 			"severity_min": _field(_STRING, "Info, Warning or Critical. Default Info."),
-			"days_ahead": _field(_INTEGER, "Only what is due inside this many days. Overdue is never hidden."),
+			"days_ahead": _field(
+				_INTEGER, "Only what is due inside this many days. Overdue is never hidden."
+			),
 			"category": _field(_STRING, "One alert category."),
 			"alert_type": _field(_STRING, "One rule, e.g. 'certification_expiring'."),
 			"regime": _field(
@@ -7206,8 +7229,7 @@ TOOLS = {
 			"employment_type": _field(_STRING, "Must be an Employment Type on this site."),
 			"status": _field(
 				_STRING,
-				"Active, Inactive, Suspended or Left. The mobile methods answer for Active "
-				"employees.",
+				"Active, Inactive, Suspended or Left. The mobile methods answer for Active employees.",
 			),
 			"user_id": _field(
 				_STRING,
@@ -7269,8 +7291,7 @@ TOOLS = {
 			),
 			"allow_unenrolled_user": _field(
 				_BOOLEAN,
-				"Link an account that has no Farm Ops role and no Mobile Access Grant yet. "
-				"Default false.",
+				"Link an account that has no Farm Ops role and no Mobile Access Grant yet. Default false.",
 			),
 		},
 		required=("user_id",),
@@ -7424,7 +7445,7 @@ TOOLS = {
 		"as assembled rather than kept. Whatever is still missing is REPORTED rather "
 		"than refused: a training that happened and was recorded imperfectly is "
 		"better evidence than no record at all.\n\n"
-		"A renewal ADDS a record and never edits one — last year\'s card is the "
+		"A renewal ADDS a record and never edits one — last year's card is the "
 		"evidence about last year — and the result names every earlier record it "
 		"supersedes so nobody deletes them to tidy up.\n\n"
 		"Requires System Manager, HR Manager, HR User or Farm Manager on the account "
@@ -7475,9 +7496,7 @@ TOOLS = {
 			"provider": _field(
 				_STRING, "The instructor or organisation: 'Produce Safety Alliance', 'OSU Extension'."
 			),
-			"training_source": _field(
-				_STRING, "Internal (default), External, Contractor or Online-Course."
-			),
+			"training_source": _field(_STRING, "Internal (default), External, Contractor or Online-Course."),
 			"completed_time": _field(
 				_STRING,
 				"Time of day, HH:MM. Optional, and worth having: §112.161(a)(1)(v) asks for date "
@@ -7490,12 +7509,12 @@ TOOLS = {
 			),
 			"person_performed_signature": _field(
 				_STRING,
-				"The TRAINEE\'s signature file, captured at completion. §112.161(a)(4), and one "
+				"The TRAINEE's signature file, captured at completion. §112.161(a)(4), and one "
 				"of the standard GAP section failures when it is missing.",
 			),
 			"company": _field(
 				_STRING,
-				"The employing entity. Defaults to the Employee\'s own company, and a mismatch is "
+				"The employing entity. Defaults to the Employee's own company, and a mismatch is "
 				"refused rather than reconciled.",
 			),
 			"notes": _field(
@@ -7521,7 +7540,7 @@ TOOLS = {
 		"USDA GAP auditor evidence from a different scheme.\n\n"
 		"`status` AND `expiring_within_days` ARE COMPUTED AS OF TODAY from the expiry "
 		"date, not read off a stored column: a record last saved in March holds "
-		"March\'s answer, and filtering on it would report the lapsed set as current. "
+		"March's answer, and filtering on it would report the lapsed set as current. "
 		"The same reason the compliance calendar reads dates rather than statuses.\n\n"
 		"IT REPORTS WHAT IS MISSING. `without_supervisor_review` is the FSMA "
 		"§112.161(b) gap — the element a GAP-only operation most often lacks and "
@@ -7532,9 +7551,7 @@ TOOLS = {
 		"Scoped to the companies the calling account may actually reach.",
 		{
 			"company": _COMPANY,
-			"employee": _field(
-				_STRING, "One person. Docname, employee number, name, or their login."
-			),
+			"employee": _field(_STRING, "One person. Docname, employee number, name, or their login."),
 			"regime": _field(
 				_STRING,
 				"FSMA, GAP, GlobalGAP, PrimusGFS, NOP, WPS, OR-OSHA or Other. The response also "
@@ -7565,7 +7582,7 @@ TOOLS = {
 	),
 	"get_training": _tool(
 		training.get_training,
-		"One training record in full, with that person\'s whole training history "
+		"One training record in full, with that person's whole training history "
 		"beside it. Read-only.\n\n"
 		"IT ANSWERS THE RETENTION QUESTION, which nothing else on the site does. A "
 		"record tagged NOP is a FIVE-year record (7 CFR 205.103(b)(4)); one tagged "
@@ -7573,7 +7590,7 @@ TOOLS = {
 		"170.309). Where a record carries several tags the LONGEST governs, because "
 		"destroying it at two years would destroy the five-year evidence. The "
 		"citation comes back with the number.\n\n"
-		"IT LISTS THE §112.161 ELEMENTS THIS RECORD LACKS, in the rule\'s own terms, "
+		"IT LISTS THE §112.161 ELEMENTS THIS RECORD LACKS, in the rule's own terms, "
 		"rather than fixing them: a signature added now would be a signature dated "
 		"now, and a record assembled before an inspection is what an inspector is "
 		"trained to spot.\n\n"
@@ -7600,8 +7617,8 @@ TOOLS = {
 		"immaculate GAP binder fails on it, and FDA writes it up even where the "
 		"underlying training was fine. It is the single most common FSMA finding "
 		"against farms whose actual practice is sound.\n\n"
-		"A SEPARATE CALL FROM record_training, DELIBERATELY. The rule\'s own phrase is "
-		"\'after the record is made\' — a sequence, not a form field. A tool that took "
+		"A SEPARATE CALL FROM record_training, DELIBERATELY. The rule's own phrase is "
+		"'after the record is made' — a sequence, not a form field. A tool that took "
 		"both signatures at once would make simultaneous timestamps the default, and "
 		"simultaneous timestamps are the shape of a record an inspector reads as "
 		"assembled rather than kept. The result reports the LAG and says so when it "
@@ -7669,7 +7686,7 @@ TOOLS = {
 			"foreman": _field(
 				_STRING,
 				"The supervisor forming this crew and answerable for it. Docname, employee "
-				"number, name, or their login. NOT optional — a shift with nobody\'s name on it "
+				"number, name, or their login. NOT optional — a shift with nobody's name on it "
 				"answers neither -1131 nor §112.161(b).",
 			),
 			"location": _field(
@@ -7681,31 +7698,29 @@ TOOLS = {
 			"shift_type": _field(
 				_STRING,
 				"Spray, Harvest, Prune, Irrigation, Housing Work, Detector Test Round, "
-				"Maintenance or General (the default). It is what decides which regime\'s "
+				"Maintenance or General (the default). It is what decides which regime's "
 				"timeline matters — a Spray shift is read against wind speed and a Harvest "
 				"shift against heat index.",
 			),
 			"farm_location_gps": _field(
 				_STRING,
-				"Latitude,longitude or a place name — \'45.52,-122.68\'. The weather anchor. "
+				"Latitude,longitude or a place name — '45.52,-122.68'. The weather anchor. "
 				"Same spelling Farm Task Assignment has used since v0.19.1.",
 			),
 			"crew_employees": _field(
 				_STRING_ARRAY,
 				"Who is on the crew at the start. Docnames, employee numbers, names or logins; "
 				"a comma-separated string is accepted too, and so is a list of objects with "
-				"`employee`, `role` and `joined_at`. Their joined_at defaults to the SHIFT\'S "
+				"`employee`, `role` and `joined_at`. Their joined_at defaults to the SHIFT'S "
 				"OWN START rather than to now — everybody rostered at the beginning was there "
 				"at the beginning, and stamping them with the moment the call landed would "
 				"shave minutes off every one of their days. Late arrivals go through "
 				"add_worker_to_shift. Maximum 60.",
 			),
-			"start_datetime": _field(
-				_STRING, "When the crew started, YYYY-MM-DD HH:MM:SS. Defaults to now."
-			),
+			"start_datetime": _field(_STRING, "When the crew started, YYYY-MM-DD HH:MM:SS. Defaults to now."),
 			"company": _field(
 				_STRING,
-				"The entity whose crew this is. Defaults to the foreman\'s own company, and a "
+				"The entity whose crew this is. Defaults to the foreman's own company, and a "
 				"mismatch is refused rather than reconciled.",
 			),
 		},
@@ -7719,10 +7734,10 @@ TOOLS = {
 		shifts.add_worker_to_shift,
 		"MUTATING (default OFF). Roster somebody onto a shift already running — a "
 		"late arrival, or a transfer off another block.\n\n"
-		"`joined_at` DEFAULTS TO NOW, which is the opposite of start_shift\'s default "
+		"`joined_at` DEFAULTS TO NOW, which is the opposite of start_shift's default "
 		"and right for the same reason: a worker rostered at the beginning was there "
 		"at the beginning, and a worker added mid-shift arrived when somebody said "
-		"so. Their Attendance record on close spans from here, not from the shift\'s "
+		"so. Their Attendance record on close spans from here, not from the shift's "
 		"start.\n\n"
 		"REFUSES A SECOND ROW FOR SOMEBODY ALREADY ON THE CREW. Two rows look "
 		"deliberate on the form and become two Attendance days for one person when "
@@ -7730,15 +7745,13 @@ TOOLS = {
 		"both. Also refuses a closed shift: the Attendance rows are already written, "
 		"so a crew row added afterwards would be a person with no payroll day.\n\n"
 		"Where the shift has already crossed the 80 °F heat index, the result says "
-		"so — somebody arriving mid-shift has had none of the morning\'s water breaks "
-		"and none of the crew\'s acclimatization, and OAR 437-004-1131(g) is about "
+		"so — somebody arriving mid-shift has had none of the morning's water breaks "
+		"and none of the crew's acclimatization, and OAR 437-004-1131(g) is about "
 		"exactly that person.",
 		{
 			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
 			"name": _field(_STRING, "Alias for shift."),
-			"employee": _field(
-				_STRING, "Who is joining. Docname, employee number, name or login."
-			),
+			"employee": _field(_STRING, "Who is joining. Docname, employee number, name or login."),
 			"role": _field(
 				_STRING,
 				"Worker (the default), Lead Worker or Trainee. Trainee is the one that carries "
@@ -7748,9 +7761,7 @@ TOOLS = {
 			"joined_at": _field(
 				_STRING, "When they started on the shift, YYYY-MM-DD HH:MM:SS. Defaults to now."
 			),
-			"notes": _field(
-				_STRING, "Anything about this person on this shift. Kept on their crew row."
-			),
+			"notes": _field(_STRING, "Anything about this person on this shift. Kept on their crew row."),
 		},
 		required=("employee",),
 		mutating=True,
@@ -7760,7 +7771,7 @@ TOOLS = {
 	),
 	"remove_worker_from_shift": _tool(
 		shifts.remove_worker_from_shift,
-		"MUTATING (default OFF). End one worker\'s time on a shift that continues "
+		"MUTATING (default OFF). End one worker's time on a shift that continues "
 		"without them.\n\n"
 		"IT SETS `left_at`; IT DOES NOT DELETE THE ROW, and the difference is the "
 		"whole point. The row is the only record that this person was on this shift "
@@ -7769,18 +7780,16 @@ TOOLS = {
 		"name of the tool is the operational verb and the storage is the compliance "
 		"one.\n\n"
 		"Their Attendance record on close spans their joined_at to this left_at "
-		"rather than to the shift\'s end — a worker who arrived late and left early "
+		"rather than to the shift's end — a worker who arrived late and left early "
 		"did not work the whole day, and a row claiming they did is wrong in the "
-		"employer\'s favour, which is the direction that gets litigated.\n\n"
+		"employer's favour, which is the direction that gets litigated.\n\n"
 		"Calling it twice on somebody who has already left is refused unless "
 		"`left_at` is given explicitly: a silent second call would move their "
 		"departure to now and lengthen a day that has already ended.",
 		{
 			"shift": _field(_STRING, "The Farm Shift docname."),
 			"name": _field(_STRING, "Alias for shift."),
-			"employee": _field(
-				_STRING, "Who is leaving. Docname, employee number, name or login."
-			),
+			"employee": _field(_STRING, "Who is leaving. Docname, employee number, name or login."),
 			"left_at": _field(
 				_STRING,
 				"When they left, YYYY-MM-DD HH:MM:SS. Defaults to now, and is REQUIRED to "
@@ -7788,7 +7797,7 @@ TOOLS = {
 			),
 			"notes": _field(
 				_STRING,
-				"Why they left. \'Sent to the shop at 11:00, cramping\' is a compliance fact "
+				"Why they left. 'Sent to the shop at 11:00, cramping' is a compliance fact "
 				"about a heat shift and belongs on the person.",
 			),
 		},
@@ -7802,7 +7811,7 @@ TOOLS = {
 		shifts.log_shift_event,
 		"MUTATING (default OFF). Record one thing the foreman did about the "
 		"conditions, at the moment it happened.\n\n"
-		"THE TIMELINE IS THE EVIDENCE. Oregon\'s heat rule does not ask whether water "
+		"THE TIMELINE IS THE EVIDENCE. Oregon's heat rule does not ask whether water "
 		"was available in principle — it asks what happened during the shift, and "
 		"four water breaks with timestamps answer that in a way an annual policy "
 		"document never can. `create_heat_exposure_event` is the claim; this is what "
@@ -7836,18 +7845,18 @@ TOOLS = {
 			),
 			"logged_by": _field(
 				_STRING,
-				"Who called it. Defaults to the shift\'s foreman, and is worth setting when it "
+				"Who called it. Defaults to the shift's foreman, and is worth setting when it "
 				"was not — a lead worker calling a break at the far end of the block is the "
 				"ordinary case, and attributing it to the foreman would be wrong in exactly the "
 				"place an investigator looks.",
 			),
 			"description": _field(
 				_STRING,
-				"What actually happened. \'Cooler refilled, whole crew drank, two moved to the "
-				"shaded end\' is evidence; \'water break\' is already the type.",
+				"What actually happened. 'Cooler refilled, whole crew drank, two moved to the "
+				"shaded end' is evidence; 'water break' is already the type.",
 			),
 			"producer_record_doctype": _field(
-				_STRING, "The doctype of the record that documented this, e.g. \'Farm Task Assignment\'."
+				_STRING, "The doctype of the record that documented this, e.g. 'Farm Task Assignment'."
 			),
 			"producer_record_name": _field(
 				_STRING, "Its docname. Refused without the doctype — a name with nowhere to look it up."
@@ -7875,19 +7884,19 @@ TOOLS = {
 	),
 	"end_shift": _tool(
 		shifts.end_shift,
-		"MUTATING (default OFF). Close a shift with the supervisor\'s signature, and "
-		"write the crew\'s payroll rows.\n\n"
+		"MUTATING (default OFF). Close a shift with the supervisor's signature, and "
+		"write the crew's payroll rows.\n\n"
 		"THE SIGNATURE IS REQUIRED AND IT IS WHY THIS IS A TOOL. An unsigned close is "
 		"an UPDATE setting a timestamp; the signature is what makes it the "
 		"attestation FSMA §112.161(b) asks for — a review that is dated AND SIGNED by "
 		"a supervisor or responsible party rather than merely recorded. Without one "
 		"the shift stays open and nothing is written.\n\n"
 		"IT WRITES ONE ATTENDANCE RECORD PER CREW MEMBER, each spanning that "
-		"person\'s own joined_at to their own left_at — or to the shift\'s end where "
-		"they stayed to it. Not the shift\'s span: a worker who arrived an hour late "
+		"person's own joined_at to their own left_at — or to the shift's end where "
+		"they stayed to it. Not the shift's span: a worker who arrived an hour late "
 		"and left two hours early worked six hours of a nine-hour shift, and a row "
-		"claiming nine is wrong in the employer\'s favour. So farm_hr keeps one "
-		"canonical answer to \'when was Ana at work\' and get_attendance_summary "
+		"claiming nine is wrong in the employer's favour. So farm_hr keeps one "
+		"canonical answer to 'when was Ana at work' and get_attendance_summary "
 		"counts a shift-formed day exactly as it counts a hand-entered one.\n\n"
 		"THE BRIDGE NEVER BLOCKS THE CLOSE. A site without Frappe HR, an employee "
 		"archived since the shift ran, a day somebody already keyed in by hand — "
@@ -7903,7 +7912,7 @@ TOOLS = {
 			"name": _field(_STRING, "Alias for shift."),
 			"supervisor_signature_file_token": _field(
 				_STRING,
-				"The foreman\'s signature, as a File docname or file_url. REQUIRED — upload it "
+				"The foreman's signature, as a File docname or file_url. REQUIRED — upload it "
 				"with stage_file_chunk and commit_staged_file first. One pointing at nothing is "
 				"refused, because a signature that proves nothing is the one kind of missing "
 				"evidence nobody discovers until an auditor clicks it.",
@@ -7911,7 +7920,7 @@ TOOLS = {
 			"end_datetime": _field(
 				_STRING,
 				"When the crew finished, YYYY-MM-DD HH:MM:SS. Defaults to now. Earlier than the "
-				"start is refused, and so is one before a crew member\'s recorded departure.",
+				"start is refused, and so is one before a crew member's recorded departure.",
 			),
 			"foreman_notes": _field(
 				_STRING,
@@ -7919,9 +7928,7 @@ TOOLS = {
 				"block was left, what the crew was told. The part no structured field holds and "
 				"the part an investigator reads first.",
 			),
-			"reviewed_on": _field(
-				_STRING, "When the review happened, YYYY-MM-DD HH:MM:SS. Defaults to now."
-			),
+			"reviewed_on": _field(_STRING, "When the review happened, YYYY-MM-DD HH:MM:SS. Defaults to now."),
 		},
 		required=("supervisor_signature_file_token",),
 		mutating=True,
@@ -7933,10 +7940,10 @@ TOOLS = {
 		heat.create_heat_exposure_event,
 		"MUTATING (default OFF). Document OAR 437-004-1131 for one shift, signed and "
 		"submitted.\n\n"
-		"THIS IS THE ANSWER TO \'PROVE THE JULY 15 CREW COMPLIED\'. One record, "
+		"THIS IS THE ANSWER TO 'PROVE THE JULY 15 CREW COMPLIED'. One record, "
 		"anchored to one shift, saying what was actually done — water at the "
 		"required rate, shade within reach, the rest cycle TAKEN rather than offered, "
-		"the crew observed, the training current — with the shift\'s crew list and "
+		"the crew observed, the training current — with the shift's crew list and "
 		"event timeline behind it as the evidence for every claim.\n\n"
 		"ONE PER SHIFT, and the second call is refused by name. Two records about one "
 		"exposure period will disagree, and the one an inspector finds will be "
@@ -7963,7 +7970,7 @@ TOOLS = {
 			"shift": _field(_STRING, "Alias for farm_shift."),
 			"supervisor_signature_file_token": _field(
 				_STRING,
-				"The supervisor\'s signature, as a File docname or file_url. REQUIRED — "
+				"The supervisor's signature, as a File docname or file_url. REQUIRED — "
 				"submitting is the attestation, and an unsigned heat record is a claim with "
 				"nobody behind it.",
 			),
@@ -7990,7 +7997,7 @@ TOOLS = {
 			),
 			"worker_reported_symptoms": _field(
 				_BOOLEAN,
-				"A worker said they felt unwell. Separate from the supervisor\'s own "
+				"A worker said they felt unwell. Separate from the supervisor's own "
 				"observation because they are different evidence — self-report is what the "
 				"two-way communication requirement is testing.",
 			),
@@ -8011,7 +8018,7 @@ TOOLS = {
 				_NUMBER,
 				"Highest heat index. THE NUMBER THE RULE TURNS ON — it engages at 80 °F index "
 				"and adds obligations at 90 °F, and an 88 °F day at 70 % humidity is a 100 °F "
-				"index. Entered by hand until v0.19.4 computes it from the shift\'s weather "
+				"index. Entered by hand until v0.19.4 computes it from the shift's weather "
 				"timeline.",
 			),
 			"threshold_crossed_at": _field(
@@ -8024,12 +8031,10 @@ TOOLS = {
 				_STRING_ARRAY,
 				"Workers with fewer than fourteen days in the heat, whom -1131(g) requires a "
 				"written plan for. NAMED individually rather than counted — these are the "
-				"people most likely to be hospitalised, and a plan for \'the new workers\' is "
-				"one an inspector cannot check. Somebody not on the shift\'s crew is refused.",
+				"people most likely to be hospitalised, and a plan for 'the new workers' is "
+				"one an inspector cannot check. Somebody not on the shift's crew is refused.",
 			),
-			"event_date": _field(
-				_STRING, "The day, YYYY-MM-DD. Defaults to the shift\'s own start date."
-			),
+			"event_date": _field(_STRING, "The day, YYYY-MM-DD. Defaults to the shift's own start date."),
 			"notes": _field(
 				_STRING,
 				"Everything the checkboxes cannot hold: who showed signs and what was done, who "
@@ -8038,7 +8043,8 @@ TOOLS = {
 				"honest one is worth more under investigation than a row of ticks.",
 			),
 			"regulation_citation": _field(
-				_STRING, "Defaults to OAR 437-004-1131. A field rather than a constant, because Oregon renumbers."
+				_STRING,
+				"Defaults to OAR 437-004-1131. A field rather than a constant, because Oregon renumbers.",
 			),
 		},
 		required=("supervisor_signature_file_token",),
@@ -8053,23 +8059,22 @@ TOOLS = {
 		"is still open. Read-only.\n\n"
 		"`status` IS COMPUTED from whether the shift has an end time rather than read "
 		"off a stored column — an OPEN shift is what the v0.19.4 weather sweep walks, "
-		"and a record last saved in March holding March\'s answer would drop a live "
+		"and a record last saved in March holding March's answer would drop a live "
 		"shift out of the fetch.\n\n"
 		"`closed_without_a_signature` IS THE ONE TO READ. end_shift cannot produce "
 		"one, so anything in that list was closed in the Desk or by an import — and "
 		"FSMA §112.161(b) asks for a review dated and signed. A signature added now "
 		"is dated now.\n\n"
-		"`employee` answers \'which shifts was Ana on\', walking the crew tables. "
+		"`employee` answers 'which shifts was Ana on', walking the crew tables. "
 		"Scoped to the companies the calling account may actually reach.",
 		{
 			"company": _COMPANY,
 			"foreman": _field(_STRING, "One supervisor. Docname, employee number, name or login."),
-			"employee": _field(
-				_STRING, "Shifts this person was on the crew of, whether or not they led it."
-			),
+			"employee": _field(_STRING, "Shifts this person was on the crew of, whether or not they led it."),
 			"status": _field(_STRING, "Active, Closed or Cancelled — computed, not stored."),
 			"shift_type": _field(
-				_STRING, "Spray, Harvest, Prune, Irrigation, Housing Work, Detector Test Round, Maintenance or General."
+				_STRING,
+				"Spray, Harvest, Prune, Irrigation, Housing Work, Detector Test Round, Maintenance or General.",
 			),
 			"from_date": _field(_STRING, "Earliest shift start date, YYYY-MM-DD."),
 			"to_date": _field(_STRING, "Latest shift start date, YYYY-MM-DD."),
@@ -8084,14 +8089,14 @@ TOOLS = {
 		"One shift in full: the crew and their individual spans, the compliance-event "
 		"timeline, the weather timeline, and the heat record if one exists. "
 		"Read-only.\n\n"
-		"THIS IS THE EVIDENCE CHAIN AN INSPECTOR IS HANDED. \'Prove the July 15 shift "
-		"complied\' is answered by the Heat Exposure Event\'s claims plus this — who "
+		"THIS IS THE EVIDENCE CHAIN AN INSPECTOR IS HANDED. 'Prove the July 15 shift "
+		"complied' is answered by the Heat Exposure Event's claims plus this — who "
 		"was there and from when, what breaks were called and at what time, what the "
 		"conditions were, and whose signature is on the close.\n\n"
 		"Each crew row reports `present_until`, which is the honest reading of an "
 		"empty left_at: they were there to the end. It is computed rather than "
 		"written back, because writing it would destroy the distinction between "
-		"\'left at 13:00\' and \'stayed to the end\' the moment the end time changed.",
+		"'left at 13:00' and 'stayed to the end' the moment the end time changed.",
 		{
 			"name": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
 			"shift": _field(_STRING, "Alias for name."),
@@ -8132,13 +8137,13 @@ TOOLS = {
 		heat.get_heat_exposure_event,
 		"One heat record in full, with the shift behind it — crew, timeline, weather. "
 		"Read-only.\n\n"
-		"IT REPORTS THE OBLIGATIONS THE RECORD DOES NOT CLAIM WERE MET, in the rule\'s "
+		"IT REPORTS THE OBLIGATIONS THE RECORD DOES NOT CLAIM WERE MET, in the rule's "
 		"own terms, rather than fixing them: a tick added now is a tick added now, "
 		"and a record completed before an inspection is what an inspector is trained "
 		"to spot.\n\n"
-		"WHERE THE SHIFT\'S EVENT TIMELINE IS EMPTY IT SAYS SO, and that is the gap "
+		"WHERE THE SHIFT'S EVENT TIMELINE IS EMPTY IT SAYS SO, and that is the gap "
 		"worth knowing about before an audit rather than during one. The checkboxes "
-		"on this record are an ASSERTION; the shift\'s logged water breaks, rest "
+		"on this record are an ASSERTION; the shift's logged water breaks, rest "
 		"cycles and observations are the EVIDENCE for it, and an inspector asks for "
 		"the second.",
 		{
@@ -8254,9 +8259,7 @@ TOOLS = {
 		{
 			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
 			"name": _field(_STRING, "Alias for shift."),
-			"from_datetime": _field(
-				_STRING, "Earliest reading, YYYY-MM-DD HH:MM:SS. Optional."
-			),
+			"from_datetime": _field(_STRING, "Earliest reading, YYYY-MM-DD HH:MM:SS. Optional."),
 			"to_datetime": _field(_STRING, "Latest reading, YYYY-MM-DD HH:MM:SS. Optional."),
 		},
 		title="Get a shift's weather timeline",
@@ -8316,10 +8319,16 @@ TOOLS = {
 		"admission that nobody thought about it.",
 		{
 			"company": _COMPANY,
-			"fiscal_year": _field(_STRING, "Fiscal Year docname, e.g. '2026'. The period must fall inside it."),
-			"period_start": _field(_STRING, "First day the adjustment covers, YYYY-MM-DD. Usually a quarter or month start."),
+			"fiscal_year": _field(
+				_STRING, "Fiscal Year docname, e.g. '2026'. The period must fall inside it."
+			),
+			"period_start": _field(
+				_STRING, "First day the adjustment covers, YYYY-MM-DD. Usually a quarter or month start."
+			),
 			"period_end": _field(_STRING, "Last day it covers, inclusive, YYYY-MM-DD."),
-			"amount": _field(_NUMBER, "The size of the adjustment. ALWAYS POSITIVE — direction carries the sign."),
+			"amount": _field(
+				_NUMBER, "The size of the adjustment. ALWAYS POSITIVE — direction carries the sign."
+			),
 			"direction": _field(
 				_STRING,
 				"'Add-back to OCF' where cash the operation really spent should not be read as "
@@ -8437,9 +8446,7 @@ TOOLS = {
 				_STRING, "Only classify assets purchased BEFORE this date, YYYY-MM-DD. Optional."
 			),
 			"company": _COMPANY,
-			"dry_run": _field(
-				_BOOLEAN, "Default TRUE. Report what would change and write nothing."
-			),
+			"dry_run": _field(_BOOLEAN, "Default TRUE. Report what would change and write nothing."),
 		},
 		mutating=True,
 		idempotent=True,
@@ -8461,9 +8468,7 @@ TOOLS = {
 		{
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "Fiscal Year docname, e.g. '2026'. Optional."),
-			"status": _field(
-				_STRING, "Draft, Pending Approval, Approved, Rejected or Superseded. Optional."
-			),
+			"status": _field(_STRING, "Draft, Pending Approval, Approved, Rejected or Superseded. Optional."),
 			"limit": _LIMIT,
 		},
 		title="List normalization adjustments",
@@ -8656,12 +8661,8 @@ TOOLS = {
 				_STRING, "'sustainable_cf_per_acre', 'ocf' or 'revenue'. Optional — omit for all."
 			),
 			"company": _COMPANY,
-			"computation_step": _field(
-				_STRING, "Daily, Weekly, Monthly, Quarterly or Yearly. Optional."
-			),
-			"window_type": _field(
-				_STRING, "Snapshot, TTM, MTD, QTD, YTD or Custom. Optional."
-			),
+			"computation_step": _field(_STRING, "Daily, Weekly, Monthly, Quarterly or Yearly. Optional."),
+			"window_type": _field(_STRING, "Snapshot, TTM, MTD, QTD, YTD or Custom. Optional."),
 			"from_date": _field(_STRING, "Earliest `as_of` to return, YYYY-MM-DD. Optional."),
 			"to_date": _field(_STRING, "Latest `as_of` to return, YYYY-MM-DD. Optional."),
 			"limit": _LIMIT,
@@ -8692,13 +8693,9 @@ TOOLS = {
 		"and a series holding two definitions of one KPI is a line with an "
 		"unmarked join in it.",
 		{
-			"kpi_key": _field(
-				_STRING, "'sustainable_cf_per_acre', 'ocf' or 'revenue'. REQUIRED."
-			),
+			"kpi_key": _field(_STRING, "'sustainable_cf_per_acre', 'ocf' or 'revenue'. REQUIRED."),
 			"company": _COMPANY,
-			"back_years": _field(
-				_INTEGER, "How many years of history to build. Default 5, maximum 10."
-			),
+			"back_years": _field(_INTEGER, "How many years of history to build. Default 5, maximum 10."),
 			"force": _field(
 				_BOOLEAN,
 				"Default FALSE, which fills only what is missing. TRUE deletes the series "
@@ -8735,8 +8732,7 @@ TOOLS = {
 			),
 			"keep_user_permissions": _field(
 				_BOOLEAN,
-				"Keep the Company User Permissions as evidence of what this account could see. "
-				"Default true.",
+				"Keep the Company User Permissions as evidence of what this account could see. Default true.",
 			),
 		},
 		required=("email", "reason"),
@@ -8904,21 +8900,20 @@ TOOLS = {
 			),
 			"signature_file": _field(_STRING, "The signature capture's file URL or File docname."),
 			"completion_narrative": _field(_STRING, "What the worker did, in their words."),
-			"findings_text": _field(
-				_STRING, "What was WRONG. An empty string records that nothing was."
-			),
+			"findings_text": _field(_STRING, "What was WRONG. An empty string records that nothing was."),
 			"witness": _field(_STRING, "Somebody else who was there, where the contract asks."),
 			"farm_location_gps": _field(
 				_STRING,
-				"WHERE the work was done — \"45.5152,-122.6784\" or a place name like "
-				"\"MC-Cabin-01\". FSMA §112.161(a)(1)(i) asks an activity record for the farm's "
+				'WHERE the work was done — "45.5152,-122.6784" or a place name like '
+				'"MC-Cabin-01". FSMA §112.161(a)(1)(i) asks an activity record for the farm\'s '
 				"name AND its location; this is the second half. Optional, and only written "
 				"when given — an empty value leaves any location already on the assignment alone.",
 			),
 			"actual_duration_minutes": _field(_INTEGER, "Minutes spent."),
 			"completed_at": _field(_STRING, "Override the clock-out time. Defaults to now."),
 			"record_data": _field(
-				_OBJECT, "Extra fields for the compliance record — laboratory results, a detector's pass/fail."
+				_OBJECT,
+				"Extra fields for the compliance record — laboratory results, a detector's pass/fail.",
 			),
 			"user": _field(_STRING, "Only when the request carries no per-user credential."),
 		},

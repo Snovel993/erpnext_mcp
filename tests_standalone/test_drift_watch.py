@@ -107,9 +107,7 @@ class ItFindsAndReports(DriftWatchTestCase):
 	def test_a_configured_address_wins_and_may_be_a_list(self):
 		self.configure(enabled=1, drift_report_email="books@example.test, tim@example.test")
 		drift.notify(self.report())
-		self.assertEqual(
-			STORE.emails[0]["recipients"], ["books@example.test", "tim@example.test"]
-		)
+		self.assertEqual(STORE.emails[0]["recipients"], ["books@example.test", "tim@example.test"])
 
 	def test_administrator_is_not_emailed_as_a_person(self):
 		"""It is a shared login, not somebody's inbox."""

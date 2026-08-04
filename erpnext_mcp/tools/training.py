@@ -99,11 +99,7 @@ def _readable_companies(actor: str) -> list:
 
 
 def _resolve_record(args: dict) -> dict:
-	name = (
-		as_str(args, "name")
-		or as_str(args, "training")
-		or as_str(args, "record", required=True)
-	).strip()
+	name = (as_str(args, "name") or as_str(args, "training") or as_str(args, "record", required=True)).strip()
 	if not frappe.db.exists(DOCTYPE, name):
 		raise ToolError(
 			f"no {DOCTYPE} called {name!r} on this site. list_trainings has the register; a "
@@ -123,10 +119,7 @@ def record_training(args: dict) -> ToolResult:
 	actor = employee_tool.require_hr_role()
 
 	person = employee_tool.resolve_employee(as_str(args, "employee", required=True))
-	row = (
-		frappe.db.get_value("Employee", person, ["employee_name", "company", "status"], as_dict=True)
-		or {}
-	)
+	row = frappe.db.get_value("Employee", person, ["employee_name", "company", "status"], as_dict=True) or {}
 	company = resolve_company(as_str(args, "company") or str(row.get("company") or ""), required=True)
 	employee_tool.require_company_scope(actor, company)
 	if row.get("company") and str(row["company"]) != company:
@@ -324,9 +317,7 @@ def list_trainings(args: dict) -> ToolResult:
 
 	regime = as_str(args, "regime")
 	if regime and not training.canon(regime):
-		raise ToolError(
-			f"regime {regime!r} is not one this app knows. {training.vocabulary_note()}"
-		)
+		raise ToolError(f"regime {regime!r} is not one this app knows. {training.vocabulary_note()}")
 
 	rows = training.rows(filters, limit=max(limit * 4, limit))
 	described = [training.describe(row, today) for row in rows]
@@ -356,7 +347,9 @@ def list_trainings(args: dict) -> ToolResult:
 		except (TypeError, ValueError):
 			raise ToolError(f"expiring_within_days must be a whole number of days, got {within!r}.") from None
 		if days < 0:
-			raise ToolError("expiring_within_days cannot be negative — use status='Expired' for lapsed training.")
+			raise ToolError(
+				"expiring_within_days cannot be negative — use status='Expired' for lapsed training."
+			)
 		described = [
 			row
 			for row in described
@@ -444,11 +437,7 @@ def get_training(args: dict) -> ToolResult:
 		}
 		for entry in training.rows({"employee": row.get("employee")}, limit=100)
 	]
-	same_training = [
-		entry
-		for entry in history
-		if entry["name"] != row.get("name")
-	]
+	same_training = [entry for entry in history if entry["name"] != row.get("name")]
 	later = [
 		entry["name"]
 		for entry in same_training

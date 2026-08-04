@@ -91,7 +91,8 @@ from .. import compat
 from ..args import as_bool, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
-from . import dispatch, employee as employee_tool, files, mobile
+from . import dispatch, files, mobile
+from . import employee as employee_tool
 from .housing import EMPLOYEE, hr_installed
 
 #: The paperwork this tool knows how to file, and what each is called on the
@@ -301,9 +302,7 @@ def _paperwork(args: dict, employee: str, report: dict) -> None:
 	"""
 	documents = args.get("documents") or {}
 	if isinstance(documents, list):
-		documents = {
-			str(entry.get("kind") or ""): entry for entry in documents if isinstance(entry, dict)
-		}
+		documents = {str(entry.get("kind") or ""): entry for entry in documents if isinstance(entry, dict)}
 	if not isinstance(documents, dict):
 		raise ToolError(
 			'documents must be an object like {"i9": {"file_name": "...", "file_content": "<base64>"}} '
@@ -319,7 +318,9 @@ def _paperwork(args: dict, employee: str, report: dict) -> None:
 				f"record ({employee}) and any earlier document stand."
 			)
 		if isinstance(payload, str):
-			payload = {"file_url": payload} if payload.startswith(("/", "http")) else {"file_content": payload}
+			payload = (
+				{"file_url": payload} if payload.startswith(("/", "http")) else {"file_content": payload}
+			)
 		if not isinstance(payload, dict):
 			raise ToolError(f"documents[{kind!r}] must be an object naming a file.")
 
@@ -511,7 +512,9 @@ def _first_day(args: dict, employee: str, full_name: str, company: str, report: 
 		try:
 			result = dispatch.create_farm_task(payload)
 		except Exception as exc:
-			report["skipped"].append({"step": f"task:{spec['key']}", "reason": f"{type(exc).__name__}: {exc}"})
+			report["skipped"].append(
+				{"step": f"task:{spec['key']}", "reason": f"{type(exc).__name__}: {exc}"}
+			)
 			continue
 		report["tasks"].append({"key": spec["key"], "task": result.data.get("name")})
 		report["steps"].append({"step": f"task:{spec['key']}", "action": "created"})

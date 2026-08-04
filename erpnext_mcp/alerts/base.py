@@ -206,9 +206,7 @@ def register(rule: Rule) -> Rule:
 	# OR-OSHA packet ever sees — evidence that is present, correct and invisible,
 	# which is the worst of the three ways to be wrong. Failing on import means it
 	# cannot ship; failing at sweep time would mean it ships and goes quiet.
-	unknown = [
-		tag for tag in (rule.regimes or ()) if not regimes_vocabulary.canon(tag)
-	]
+	unknown = [tag for tag in (rule.regimes or ()) if not regimes_vocabulary.canon(tag)]
 	if unknown:
 		raise RuntimeError(
 			f"compliance rule {rule.key!r} names regime(s) {', '.join(repr(tag) for tag in unknown)}, "

@@ -76,4 +76,8 @@ class Lease(Document):
 				)
 			)
 		if float(self.rent_amount or 0) < 0:
-			frappe.throw(_("Rent Amount cannot be negative. Rent flowing the other way is a lease in the other direction."))
+			frappe.throw(
+				_(
+					"Rent Amount cannot be negative. Rent flowing the other way is a lease in the other direction."
+				)
+			)

@@ -154,9 +154,7 @@ class BankAccountRefusals(BankAccountTestCase):
 		self.assertIn("is disabled", message)
 
 	def test_an_account_in_another_company_is_refused(self):
-		message = self.tool_error(
-			"create_bank_account", self.payload(company=OTHER, account=BANK_SAVINGS)
-		)
+		message = self.tool_error("create_bank_account", self.payload(company=OTHER, account=BANK_SAVINGS))
 		self.assertIn("belongs to company", message)
 
 	def test_a_duplicate_account_name_in_the_same_company_is_refused(self):
@@ -186,9 +184,7 @@ class BankAccountRefusals(BankAccountTestCase):
 		self.assertIn("reserves for unsaved documents", message)
 
 	def test_a_party_on_a_company_account_is_a_contradiction(self):
-		message = self.tool_error(
-			"create_bank_account", self.payload(party_type="Supplier", party="Anyone")
-		)
+		message = self.tool_error("create_bank_account", self.payload(party_type="Supplier", party="Anyone"))
 		self.assertIn("says the opposite", message)
 
 	def test_a_party_without_its_type_is_refused(self):

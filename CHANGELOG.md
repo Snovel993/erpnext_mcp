@@ -3,6 +3,39 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.19.7 — 2026-08-03
+
+**A green board.** A maintenance pass with no behaviour changes: the
+SPDX-header check and the `ruff` job had both been failing since before
+v0.19.5, and a permanently red board teaches contributors that red is normal.
+Tool surface unchanged at **238** (106 read, 132 mutating); suite unchanged at
+**3,984 passing**. Full notes:
+[`RELEASES/v0.19.7.md`](RELEASES/v0.19.7.md).
+
+### Fixed
+
+- **SPDX headers on 21 files.** Every empty `doctype/*/__init__.py` package
+  marker added between v0.19.2 and v0.19.6 now carries
+  `# SPDX-License-Identifier: MIT`. Files missing the header: 21 → **0**.
+- **64 ruff findings → 0**, at ruff 0.16.1. Eighteen auto-fixed; the rest
+  reviewed a rule at a time. Implicit `Optional` annotations made explicit
+  (`RUF013`, 14 sites), test-class constants annotated `ClassVar` (`RUF012`,
+  5), single-element slices become `next(...)` (`RUF015`, 4), concatenation
+  becomes unpacking (`RUF005`, 5), a redundant `int(round(...))` cast dropped
+  (`RUF046`), a re-raise given `from None` (`B904`), plus unsorted imports,
+  three stale `noqa` directives, an unused import and two `TimeoutError`
+  aliases. **No fix changed a value, a branch or a payload.**
+- **138 unformatted files → 0.** `ruff format` applied repo-wide, in its own
+  commit so no future behavioural diff has a formatting sweep hidden inside it.
+
+### Changed
+
+- **`RUF001`/`RUF002`/`RUF003` ignored in `pyproject.toml`,** with the reasoning
+  recorded beside them. All sixteen flagged characters are deliberate typography
+  in operator-facing prose — an EN DASH in a range (`1–30`, `§112.21–.30`), a
+  MULTIPLICATION SIGN in a dimension (`8.5×11`), a MINUS SIGN in arithmetic.
+  Rewriting them to ASCII would make the text worse.
+
 ## 0.19.6 — 2026-08-03
 
 **The window standard.** Every financial report in this app now defaults to a

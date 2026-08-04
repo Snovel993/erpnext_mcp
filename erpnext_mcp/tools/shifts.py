@@ -102,8 +102,7 @@ def _resolve_shift(args: dict, key: str = "shift") -> dict:
 			"looks like SHIFT-2026-0001. Nothing was changed."
 		)
 	return dict(
-		frappe.db.get_value(DOCTYPE, name, compat.existing_fields(DOCTYPE, shifts.FIELDS), as_dict=True)
-		or {}
+		frappe.db.get_value(DOCTYPE, name, compat.existing_fields(DOCTYPE, shifts.FIELDS), as_dict=True) or {}
 	)
 
 
@@ -207,10 +206,7 @@ def start_shift(args: dict) -> ToolResult:
 	actor = employee_tool.require_hr_role()
 
 	foreman = employee_tool.resolve_employee(as_str(args, "foreman", required=True))
-	row = (
-		frappe.db.get_value("Employee", foreman, ["employee_name", "company", "status"], as_dict=True)
-		or {}
-	)
+	row = frappe.db.get_value("Employee", foreman, ["employee_name", "company", "status"], as_dict=True) or {}
 	company = resolve_company(as_str(args, "company") or str(row.get("company") or ""), required=True)
 	employee_tool.require_company_scope(actor, company)
 	if row.get("company") and str(row["company"]) != company:
@@ -243,9 +239,7 @@ def start_shift(args: dict) -> ToolResult:
 	doc.company = company
 	doc.location = as_str(args, "location")
 	doc.farm_location_gps = as_str(args, "farm_location_gps")
-	doc.shift_type = as_choice(
-		DOCTYPE, "shift_type", as_str(args, "shift_type") or "General", "shift_type"
-	)
+	doc.shift_type = as_choice(DOCTYPE, "shift_type", as_str(args, "shift_type") or "General", "shift_type")
 	doc.start_datetime = start
 	for entry in crew:
 		doc.append(
@@ -312,9 +306,7 @@ def add_worker_to_shift(args: dict) -> ToolResult:
 		)
 
 	person = employee_tool.resolve_employee(as_str(args, "employee", required=True))
-	theirs = (
-		frappe.db.get_value("Employee", person, ["employee_name", "company"], as_dict=True) or {}
-	)
+	theirs = frappe.db.get_value("Employee", person, ["employee_name", "company"], as_dict=True) or {}
 	if theirs.get("company") and str(theirs["company"]) != str(row.get("company") or ""):
 		raise ToolError(
 			f"{person} ({theirs.get('employee_name')}) is employed by {theirs['company']} and this "
@@ -342,9 +334,7 @@ def add_worker_to_shift(args: dict) -> ToolResult:
 		{
 			"employee": person,
 			"employee_name": theirs.get("employee_name") or person,
-			"role": as_choice(
-				shifts.CREW_DOCTYPE, "role", as_str(args, "role") or "Worker", "role"
-			),
+			"role": as_choice(shifts.CREW_DOCTYPE, "role", as_str(args, "role") or "Worker", "role"),
 			"joined_at": joined,
 			"notes": as_str(args, "notes"),
 		},
@@ -410,8 +400,7 @@ def remove_worker_from_shift(args: dict) -> ToolResult:
 			break
 	if target is None:
 		raise ToolError(
-			f"{person} is not on the crew of {row['name']}. get_shift lists who is. Nothing was "
-			"changed."
+			f"{person} is not on the crew of {row['name']}. get_shift lists who is. Nothing was changed."
 		)
 	if target.get("left_at") and not str(args.get("left_at") or "").strip():
 		raise ToolError(
@@ -524,9 +513,7 @@ def log_shift_event(args: dict) -> ToolResult:
 	doc.save(ignore_permissions=True)
 
 	described = shifts.describe(dict(doc.as_dict()), with_children=True)
-	same_type = [
-		entry for entry in described["compliance_events"] if entry["event_type"] == event_type
-	]
+	same_type = [entry for entry in described["compliance_events"] if entry["event_type"] == event_type]
 	data = {
 		**described,
 		"actor": actor,
@@ -608,11 +595,7 @@ def end_shift(args: dict) -> ToolResult:
 		)
 
 	crew_before = shifts.crew_of(row["name"])
-	late = [
-		entry
-		for entry in crew_before
-		if entry.get("left_at") and str(entry["left_at"]) > str(end)
-	]
+	late = [entry for entry in crew_before if entry.get("left_at") and str(entry["left_at"]) > str(end)]
 	if late:
 		names = ", ".join(str(entry.get("employee_name") or entry.get("employee")) for entry in late)
 		raise ToolError(
@@ -738,18 +721,14 @@ def list_shifts(args: dict) -> ToolResult:
 		described = [
 			entry
 			for entry in described
-			if any(
-				str(crew.get("employee")) == person for crew in shifts.crew_of(entry["name"])
-			)
+			if any(str(crew.get("employee")) == person for crew in shifts.crew_of(entry["name"]))
 		]
 
 	truncated = len(described) > limit
 	described = described[:limit]
 	open_now = [entry["name"] for entry in described if entry["open"]]
 	unsigned = [
-		entry["name"]
-		for entry in described
-		if not entry["open"] and not entry["supervisor_reviewed"]
+		entry["name"] for entry in described if not entry["open"] and not entry["supervisor_reviewed"]
 	]
 
 	data = {
@@ -800,9 +779,7 @@ def get_shift(args: dict) -> ToolResult:
 
 	data = {
 		**described,
-		"heat_exposure_event": (
-			shifts.describe_heat_event(heat[0]) if heat else None
-		),
+		"heat_exposure_event": (shifts.describe_heat_event(heat[0]) if heat else None),
 		"crew_note": _crew_note(described),
 	}
 	if not described["weather_timeline"]:

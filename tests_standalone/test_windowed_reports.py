@@ -225,8 +225,9 @@ class TheBoundaryIsOneRule(WindowTestCase):
 		ever — which is the shape nobody notices and everybody inherits."""
 		start = windows.window_start("2026-07-31", 12)
 		self.assertEqual(start.isoformat(), "2025-08-01")
-		self.assertEqual(windows.add_months(start, 12) - datetime.timedelta(days=1),
-			datetime.date(2026, 7, 31))
+		self.assertEqual(
+			windows.add_months(start, 12) - datetime.timedelta(days=1), datetime.date(2026, 7, 31)
+		)
 
 	def test_month_arithmetic_clamps_rather_than_rolling(self):
 		"""31 January plus a month is 28 February. Rolling into March is how a
@@ -282,9 +283,7 @@ class TheBoundaryIsOneRule(WindowTestCase):
 		self.assertIn("TTM", message)
 
 	def test_an_unregistered_report_is_refused_with_the_ones_there_are(self):
-		message = self.tool_error(
-			"get_windowed_report", {"report_name": "ebitda_per_acre", "company": MAIN}
-		)
+		message = self.tool_error("get_windowed_report", {"report_name": "ebitda_per_acre", "company": MAIN})
 		self.assertIn("ebitda_per_acre", message)
 		self.assertIn("sustainable_cf_per_acre", message)
 
@@ -369,7 +368,9 @@ class TheMerge(WindowTestCase):
 			"_test_weighted", lambda *a: {}, weighted_keys=("productive_acres.time_weighted",)
 		)
 		buckets = [
-			self.a_bucket(f"2026-{m:02d}-01", f"2026-{m:02d}-28", 30, productive_acres={"time_weighted": 100.0})
+			self.a_bucket(
+				f"2026-{m:02d}-01", f"2026-{m:02d}-28", 30, productive_acres={"time_weighted": 100.0}
+			)
 			for m in range(1, 7)
 		] + [
 			self.a_bucket(f"2026-{m:02d}-01", f"2026-{m:02d}-28", 30, productive_acres={"time_weighted": 0.0})
@@ -382,11 +383,15 @@ class TheMerge(WindowTestCase):
 		entry = windows.register("_test_lists", lambda *a: {}, list_keys=("maintenance_capex.itemized",))
 		buckets = [
 			self.a_bucket(
-				"2026-01-01", "2026-01-31", 31,
+				"2026-01-01",
+				"2026-01-31",
+				31,
 				maintenance_capex={"itemized": [{"asset": "ACC-ASSET-001", "maintenance_portion": 500}]},
 			),
 			self.a_bucket(
-				"2026-02-01", "2026-02-28", 28,
+				"2026-02-01",
+				"2026-02-28",
+				28,
 				maintenance_capex={
 					"itemized": [
 						{"asset": "ACC-ASSET-001", "maintenance_portion": 500},
@@ -512,9 +517,7 @@ class TheHistory(WindowTestCase):
 		distrusts. A short series that says it is short is one they can act on."""
 		self.a_field("Block 1 - MC", 100.0)
 		self.a_sale("2015-01-05", 1000)
-		report = windows.run(
-			"sustainable_cf_per_acre", MAIN, as_of=AS_OF, live_computation_cap=3
-		)
+		report = windows.run("sustainable_cf_per_acre", MAIN, as_of=AS_OF, live_computation_cap=3)
 		self.assertEqual(report["historical_averages"]["computed_live"], 3)
 		self.assertLess(report["historical_averages"]["prior_ttm_count"], 60)
 		self.assertTrue(
@@ -919,9 +922,7 @@ class TheGuards(WindowTestCase):
 			"User Permission",
 			[{"name": "UP-KPI-1", "user": "Administrator", "allow": "Company", "for_value": MAIN}],
 		)
-		message = self.tool_error(
-			"get_windowed_report", {"report_name": "revenue", "company": OTHER}
-		)
+		message = self.tool_error("get_windowed_report", {"report_name": "revenue", "company": OTHER})
 		self.assertIn(OTHER, message)
 
 	def test_a_recompute_is_scoped_to_the_companies_the_caller_may_see(self):
@@ -1113,6 +1114,4 @@ class TheChart(WindowTestCase):
 		report = dashboard.install_kpi_charts()
 		failed = [row["name"] for row in report["failed"]]
 		self.assertEqual(failed, [dashboard.KPI_CHART_NAME])
-		self.assertIn(
-			dashboard.KPI_TTM_CHART_NAME, report["created_charts"] + report["existing_charts"]
-		)
+		self.assertIn(dashboard.KPI_TTM_CHART_NAME, report["created_charts"] + report["existing_charts"])

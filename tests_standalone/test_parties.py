@@ -152,7 +152,11 @@ class CreateRelatedParty(PartyTestCase):
 	def test_a_governing_document_from_another_company_is_refused(self):
 		archive = self.tool_data(
 			"attach_governance_document",
-			{"company": MAIN, "title": "OML Operating Agreement 2020-06-15", "category": "Operating Agreement"},
+			{
+				"company": MAIN,
+				"title": "OML Operating Agreement 2020-06-15",
+				"category": "Operating Agreement",
+			},
 		)
 		message = self.tool_error(
 			"create_related_party",
@@ -322,8 +326,12 @@ class TaxIdentity(PartyTestCase):
 		import frappe
 
 		frappe.db.set_value("Supplier", COOPER, "tax_id", "93-1234567")
-		self.a_party("Cooper Family Orchards", relationship="Vendor", party_type="Partnership", supplier=COOPER)
-		data = self.tool_data("get_related_party", {"party": f"Cooper Family Orchards - Vendor - {MAIN_ABBR}"})
+		self.a_party(
+			"Cooper Family Orchards", relationship="Vendor", party_type="Partnership", supplier=COOPER
+		)
+		data = self.tool_data(
+			"get_related_party", {"party": f"Cooper Family Orchards - Vendor - {MAIN_ABBR}"}
+		)
 		self.assertEqual(data["supplier_detail"]["tax_id"], "on file")
 		self.assertNotIn("93-1234567", str(data))
 
@@ -461,9 +469,7 @@ class ListRelatedParties(PartyTestCase):
 
 	def test_filtering_by_relationship(self):
 		self.a_register()
-		data = self.tool_data(
-			"list_related_parties", {"company": MAIN, "relationship_to_company": "Manager"}
-		)
+		data = self.tool_data("list_related_parties", {"company": MAIN, "relationship_to_company": "Manager"})
 		self.assertEqual([party["party_name"] for party in data["parties"]], ["Tim Polehn"])
 
 	def test_an_empty_register_answers_rather_than_refusing(self):

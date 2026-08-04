@@ -357,9 +357,7 @@ def create_farm_task(args: dict) -> ToolResult:
 	source_alert = as_str(args, "source_alert")
 	if source_alert:
 		if not compat.doctype_exists(ALERT) or not frappe.db.exists(ALERT, source_alert):
-			raise ToolError(
-				f"no Compliance Alert called {source_alert!r} on this site. Nothing was created."
-			)
+			raise ToolError(f"no Compliance Alert called {source_alert!r} on this site. Nothing was created.")
 		existing = frappe.db.get_value(FARM_TASK, {"source_alert": source_alert}, "name")
 		if existing:
 			raise ToolError(
@@ -386,7 +384,9 @@ def create_farm_task(args: dict) -> ToolResult:
 	doc.source_alert = source_alert or None
 	doc.source_workorder = as_str(args, "source_workorder")
 	doc.creates_record = creates_record
-	doc.creates_record_data = json.dumps(parse_json_object(args.get("creates_record_data"), "creates_record_data"))
+	doc.creates_record_data = json.dumps(
+		parse_json_object(args.get("creates_record_data"), "creates_record_data")
+	)
 	doc.notes = as_str(args, "notes")
 	doc.evidence_required = json.dumps(_evidence_argument(args))
 	doc.state = DRAFT if draft else AVAILABLE
@@ -494,9 +494,7 @@ def assign_farm_task(args: dict) -> ToolResult:
 			or {}
 		)
 		if current.get("assigned_to") == worker:
-			raise ToolError(
-				f"{row['name']} is already held by {worker_name}. Nothing was changed."
-			)
+			raise ToolError(f"{row['name']} is already held by {worker_name}. Nothing was changed.")
 		if not as_bool(args, "reassign", False):
 			raise ToolError(
 				f"{row['name']} is held by {current.get('assigned_to_name') or current.get('assigned_to')} "
@@ -560,7 +558,9 @@ def claim_farm_task(args: dict) -> ToolResult:
 				"first. Nothing was changed."
 			)
 		if row["state"] in TERMINAL_STATES:
-			raise ToolError(f"{row['name']} is {row['state']}. There is nothing to claim. Nothing was changed.")
+			raise ToolError(
+				f"{row['name']} is {row['state']}. There is nothing to claim. Nothing was changed."
+			)
 		held = frappe.db.get_value(FARM_TASK, row["name"], "assigned_to_name") or "somebody else"
 		raise ToolError(
 			f"{row['name']} is {row['state']} and held by {held}. Two people stood in front of the "
@@ -668,8 +668,7 @@ def complete_farm_task(args: dict) -> ToolResult:
 		)
 	if assignment.get("state") not in (CLAIMED, IN_PROGRESS):
 		raise ToolError(
-			f"{assignment['name']} is {assignment.get('state')} and cannot be completed. Nothing was "
-			"changed."
+			f"{assignment['name']} is {assignment.get('state')} and cannot be completed. Nothing was changed."
 		)
 
 	contract = evidence_contract(task.get("evidence_required"))
@@ -831,7 +830,9 @@ def clean_pass_flag(args: dict):
 	)
 
 
-def _unmet_evidence(contract: dict, evidence: list, signature: str, findings_given: bool, witness: str) -> list:
+def _unmet_evidence(
+	contract: dict, evidence: list, signature: str, findings_given: bool, witness: str
+) -> list:
 	"""Which of the task's evidence requirements this submission does not meet."""
 	unmet = []
 	types = {str(row.get("evidence_type") or "") for row in evidence}
@@ -970,8 +971,7 @@ def reject_farm_task(args: dict) -> ToolResult:
 		)
 	if assignment.get("state") not in (CLAIMED, IN_PROGRESS):
 		raise ToolError(
-			f"{assignment['name']} is {assignment.get('state')} and cannot be rejected. Nothing was "
-			"changed."
+			f"{assignment['name']} is {assignment.get('state')} and cannot be rejected. Nothing was changed."
 		)
 
 	reason = as_str(args, "reason") or as_str(args, "rejection_reason")
@@ -1071,7 +1071,8 @@ def list_available_tasks(args: dict) -> ToolResult:
 			)
 	return ToolResult(
 		data=data,
-		summary=f"{len(tasks)} task(s) in the pool" + (f"; {worker} may claim {data.get('claims_remaining')}" if worker else ""),
+		summary=f"{len(tasks)} task(s) in the pool"
+		+ (f"; {worker} may claim {data.get('claims_remaining')}" if worker else ""),
 	)
 
 
@@ -1108,12 +1109,15 @@ def list_dispatched_tasks(args: dict) -> ToolResult:
 	task_names = sorted({entry["task"] for entry in assignments if entry.get("task")})
 	tasks = {}
 	if task_names:
-		for row in frappe.db.get_all(
-			FARM_TASK,
-			filters={"name": ("in", task_names)},
-			fields=compat.existing_fields(FARM_TASK, _TASK_FIELDS),
-			limit=BOARD_CAP,
-		) or []:
+		for row in (
+			frappe.db.get_all(
+				FARM_TASK,
+				filters={"name": ("in", task_names)},
+				fields=compat.existing_fields(FARM_TASK, _TASK_FIELDS),
+				limit=BOARD_CAP,
+			)
+			or []
+		):
 			tasks[row["name"]] = _describe_task(dict(row))
 	for entry in assignments:
 		entry["task_detail"] = tasks.get(entry.get("task"))
@@ -1195,8 +1199,7 @@ def list_dispatch_board(args: dict) -> ToolResult:
 			),
 		},
 		summary=(
-			f"{len(tasks)} task(s) on the board: {len(unassigned)} in the pool, "
-			f"{len(critical)} open Critical"
+			f"{len(tasks)} task(s) on the board: {len(unassigned)} in the pool, {len(critical)} open Critical"
 		),
 	)
 
@@ -1245,8 +1248,7 @@ def get_farm_task(args: dict) -> ToolResult:
 	return ToolResult(
 		data=described,
 		summary=(
-			f"{row['name']} — {described['task_name']} ({described['state']}, "
-			f"{len(history)} assignment(s))"
+			f"{row['name']} — {described['task_name']} ({described['state']}, {len(history)} assignment(s))"
 		),
 	)
 
@@ -1419,8 +1421,7 @@ ALERT_TASK_MAP = {
 		"minutes": 15,
 		"evidence": {"signature": True},
 		"what": (
-			"Read the record and sign the §112.161(b) supervisor review with "
-			"sign_training_supervisor_review"
+			"Read the record and sign the §112.161(b) supervisor review with sign_training_supervisor_review"
 		),
 	},
 }

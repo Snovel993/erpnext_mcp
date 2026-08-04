@@ -107,9 +107,7 @@ class CreateHousingUnit(HousingTestCase):
 
 	def test_a_duplicate_unit_name_on_one_parcel_is_refused(self):
 		self.a_camp()
-		error = self.tool_error(
-			"create_housing_unit", {"parcel": "Mill Creek", "unit_name": "MC-Cabin-01"}
-		)
+		error = self.tool_error("create_housing_unit", {"parcel": "Mill Creek", "unit_name": "MC-Cabin-01"})
 		self.assertIn("already has a unit", error)
 		self.assertIn("Nothing was created", error)
 
@@ -125,9 +123,7 @@ class CreateHousingUnit(HousingTestCase):
 		"""A cabin with a fixed bunk layout gets the number somebody worked out."""
 		self.a_parcel()
 		self.assertEqual(
-			self.a_unit(square_footage=384, max_occupants_per_or_law=4)[
-				"max_occupants_per_or_law"
-			],
+			self.a_unit(square_footage=384, max_occupants_per_or_law=4)["max_occupants_per_or_law"],
 			4,
 		)
 
@@ -261,9 +257,7 @@ class UpdateHousingUnit(HousingTestCase):
 		self.a_camp()
 
 	def test_it_changes_the_condition(self):
-		data = self.tool_data(
-			"update_housing_unit", {"unit": "MC-Cabin-01", "condition": "Needs Repair"}
-		)
+		data = self.tool_data("update_housing_unit", {"unit": "MC-Cabin-01", "condition": "Needs Repair"})
 		self.assertEqual(data["changed"]["condition"], ["Fair", "Needs Repair"])
 
 	def test_it_records_a_habitability_inspection(self):
@@ -326,9 +320,7 @@ class CreateHousingAssignment(HousingTestCase):
 	def test_the_sequence_runs_within_the_month(self):
 		self.a_unit("MC-Cabin-02")
 		self.an_assignment("MC-Cabin-01", "Antony")
-		self.assertEqual(
-			self.an_assignment("MC-Cabin-02", "Alex")["name"], "HA-2026-06-00002"
-		)
+		self.assertEqual(self.an_assignment("MC-Cabin-02", "Alex")["name"], "HA-2026-06-00002")
 
 	def test_a_different_month_starts_its_own_sequence(self):
 		self.a_unit("MC-Cabin-02")
@@ -393,9 +385,7 @@ class CreateHousingAssignment(HousingTestCase):
 	def test_a_missing_assigned_date_is_refused(self):
 		self.assertIn(
 			"assigned_date is required",
-			self.tool_error(
-				"create_housing_assignment", {"unit": "MC-Cabin-01", "employee": "Antony"}
-			),
+			self.tool_error("create_housing_assignment", {"unit": "MC-Cabin-01", "employee": "Antony"}),
 		)
 
 	def test_the_switch_is_off_by_default(self):
@@ -599,9 +589,7 @@ class EndHousingAssignment(HousingTestCase):
 	def test_it_never_deletes_the_record(self):
 		"""'The record is the audit trail' is only true if the record is there."""
 		before = len(STORE.rows("Housing Assignment"))
-		self.tool_data(
-			"end_housing_assignment", {"assignment": self.assignment, "end_date": "2026-07-15"}
-		)
+		self.tool_data("end_housing_assignment", {"assignment": self.assignment, "end_date": "2026-07-15"})
 		self.assertEqual(len(STORE.rows("Housing Assignment")), before)
 		self.assertTrue(STORE.get_raw("Housing Assignment", self.assignment))
 
@@ -627,9 +615,7 @@ class EndHousingAssignment(HousingTestCase):
 		self.assertIn("refund of money nobody took", error)
 
 	def test_ending_an_assignment_that_already_ended_is_refused(self):
-		self.tool_data(
-			"end_housing_assignment", {"assignment": self.assignment, "end_date": "2026-07-15"}
-		)
+		self.tool_data("end_housing_assignment", {"assignment": self.assignment, "end_date": "2026-07-15"})
 		error = self.tool_error(
 			"end_housing_assignment", {"assignment": self.assignment, "end_date": "2026-08-01"}
 		)
@@ -656,9 +642,7 @@ class EndHousingAssignment(HousingTestCase):
 			"end_housing_assignment",
 			{"assignment": self.assignment, "end_date": "2026-07-15", "notes": "Left for the season"},
 		)
-		self.assertIn(
-			"Left for the season", STORE.get_raw("Housing Assignment", self.assignment)["notes"]
-		)
+		self.assertIn("Left for the season", STORE.get_raw("Housing Assignment", self.assignment)["notes"])
 
 	def test_an_unknown_assignment_is_refused_with_the_register_named(self):
 		self.assertIn(
@@ -667,9 +651,7 @@ class EndHousingAssignment(HousingTestCase):
 		)
 
 	def test_the_unit_is_free_again_afterwards(self):
-		self.tool_data(
-			"end_housing_assignment", {"assignment": self.assignment, "end_date": "2026-07-15"}
-		)
+		self.tool_data("end_housing_assignment", {"assignment": self.assignment, "end_date": "2026-07-15"})
 		data = self.an_assignment(employee="Alex", assigned_date="2026-07-16")
 		self.assertFalse(data["multi_occupancy"])
 
@@ -716,9 +698,7 @@ class ListHousingUnits(HousingTestCase):
 			"update_housing_unit",
 			{"unit": "MC-Cabin-01", "last_habitability_inspection": "2026-06-15"},
 		)
-		self.assertNotIn(
-			"MC-Cabin-01 - MC", self.tool_data("list_housing_units")["overdue_inspections"]
-		)
+		self.assertNotIn("MC-Cabin-01 - MC", self.tool_data("list_housing_units")["overdue_inspections"])
 
 	def test_an_inspection_older_than_a_year_is_overdue_again(self):
 		self.tool_data(
@@ -729,9 +709,7 @@ class ListHousingUnits(HousingTestCase):
 
 	def test_it_names_the_uninhabitable_units(self):
 		self.tool_data("update_housing_unit", {"unit": "MC-Cabin-02", "condition": "Uninhabitable"})
-		self.assertEqual(
-			self.tool_data("list_housing_units")["uninhabitable"], ["MC-Cabin-02 - MC"]
-		)
+		self.assertEqual(self.tool_data("list_housing_units")["uninhabitable"], ["MC-Cabin-02 - MC"])
 
 	def test_it_filters_by_unit_type(self):
 		data = self.tool_data("list_housing_units", {"unit_type": "Cabin"})
@@ -787,9 +765,7 @@ class GetHousingUnit(HousingTestCase):
 		self.assertTrue(any("Subpart L" in note for note in notes))
 
 	def test_an_unknown_unit_is_refused_with_the_register_named(self):
-		self.assertIn(
-			"list_housing_units", self.tool_error("get_housing_unit", {"unit": "Nowhere"})
-		)
+		self.assertIn("list_housing_units", self.tool_error("get_housing_unit", {"unit": "Nowhere"}))
 
 
 class ListHousingAssignments(HousingTestCase):
@@ -821,15 +797,11 @@ class ListHousingAssignments(HousingTestCase):
 		self.assertEqual(self.tool_data("list_housing_assignments")["deposits_outstanding"], 100.0)
 
 	def test_it_filters_by_unit(self):
-		data = self.tool_data(
-			"list_housing_assignments", {"unit": "MC-Cabin-01", "current_only": False}
-		)
+		data = self.tool_data("list_housing_assignments", {"unit": "MC-Cabin-01", "current_only": False})
 		self.assertEqual(data["assignment_count"], 1)
 
 	def test_it_filters_by_employee(self):
-		data = self.tool_data(
-			"list_housing_assignments", {"employee": "Alex", "current_only": False}
-		)
+		data = self.tool_data("list_housing_assignments", {"employee": "Alex", "current_only": False})
 		self.assertEqual(data["assignment_count"], 1)
 
 
@@ -967,9 +939,7 @@ class WovenNotShadow(HousingTestCase):
 			),
 		)
 		# REGULATORY: the unit appears on the register's uninhabitable list.
-		self.assertEqual(
-			self.tool_data("list_housing_units")["uninhabitable"], ["MC-Cabin-01 - MC"]
-		)
+		self.assertEqual(self.tool_data("list_housing_units")["uninhabitable"], ["MC-Cabin-01 - MC"])
 
 	def test_the_habitability_inspection_gates_a_walk_and_an_audit_line(self):
 		self.assertEqual(self.tool_data("get_housing_capacity")["overdue_inspection_count"], 0)
@@ -992,17 +962,13 @@ class WovenNotShadow(HousingTestCase):
 
 	def test_the_lawful_occupancy_limits_a_bed_count_and_defends_a_filing(self):
 		self.assertFalse(
-			self.tool_data("get_housing_unit", {"unit": "MC-Cabin-01"})[
-				"capacity_over_lawful_occupancy"
-			]
+			self.tool_data("get_housing_unit", {"unit": "MC-Cabin-01"})["capacity_over_lawful_occupancy"]
 		)
 		self.tool_data("update_housing_unit", {"unit": "MC-Cabin-01", "capacity": 12})
 		data = self.tool_data("get_housing_unit", {"unit": "MC-Cabin-01"})
 		# REGULATORY: the unit lands on the over-occupancy list.
 		self.assertTrue(data["capacity_over_lawful_occupancy"])
-		self.assertIn(
-			"MC-Cabin-01 - MC", self.tool_data("list_housing_units")["over_lawful_occupancy"]
-		)
+		self.assertIn("MC-Cabin-01 - MC", self.tool_data("list_housing_units")["over_lawful_occupancy"])
 		# OPERATIONAL: the same figure is the one a camp manager fills beds to.
 		self.assertTrue(any("over-filled" in note for note in data["compliance_notes"]))
 
@@ -1012,16 +978,12 @@ class WovenNotShadow(HousingTestCase):
 		its defence."""
 		self.an_assignment("MC-Cabin-01", "Antony")
 		# OPERATIONAL: who is in the cabin tonight.
-		self.assertEqual(
-			self.tool_data("list_housing_units")["units"][0]["occupants"], ["Antony"]
-		)
+		self.assertEqual(self.tool_data("list_housing_units")["units"][0]["occupants"], ["Antony"])
 		# REGULATORY: the same row is what a Section 119 exclusion is defended
 		# with, and it survives the person leaving.
 		name = self.tool_data("list_housing_assignments")["assignments"][0]["name"]
 		self.tool_data("end_housing_assignment", {"assignment": name, "end_date": "2026-07-15"})
-		self.assertEqual(
-			self.tool_data("list_housing_units")["units"][0]["occupants"], []
-		)
+		self.assertEqual(self.tool_data("list_housing_units")["units"][0]["occupants"], [])
 		history = self.tool_data("get_employee_housing_history", {"employee": "Antony"})
 		self.assertEqual(history["assignment_count"], 1)
 

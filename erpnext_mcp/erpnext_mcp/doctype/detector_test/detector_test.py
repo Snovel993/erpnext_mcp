@@ -87,7 +87,9 @@ class DetectorTest(Document):
 		if faults:
 			self.replacement_needed = 1
 		self.workflow_state = branch_state(
-			"; ".join(faults) or str(self.findings or "").strip() or ("replacement needed" if int(self.replacement_needed or 0) else ""),
+			"; ".join(faults)
+			or str(self.findings or "").strip()
+			or ("replacement needed" if int(self.replacement_needed or 0) else ""),
 			bool(int(self.keep_as_draft or 0)),
 		)
 

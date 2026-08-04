@@ -150,9 +150,7 @@ class RoundTrip(UploadTestCase):
 	def test_the_staging_is_gone_once_the_file_exists(self):
 		content = a_file(40_000)
 		self.stage_all("gone", content, chunk_size=9_000)
-		data = self.tool_data(
-			"commit_staged_file", {"session_id": "gone", "file_name": "x.pdf"}
-		)
+		data = self.tool_data("commit_staged_file", {"session_id": "gone", "file_name": "x.pdf"})
 		self.assertEqual(data["chunks_cleared"], 5)
 		self.assertEqual(self.chunk_rows(), [])
 		self.assertEqual(self.sessions(), [])
@@ -177,9 +175,7 @@ class RoundTrip(UploadTestCase):
 					"chunk_base64": pieces[index],
 				},
 			)
-		data = self.tool_data(
-			"commit_staged_file", {"session_id": "backwards", "file_name": "b.bin"}
-		)
+		data = self.tool_data("commit_staged_file", {"session_id": "backwards", "file_name": "b.bin"})
 		self.assertEqual(self.stored_bytes(data["file"]), content)
 
 	def test_a_file_can_land_unattached(self):
@@ -399,9 +395,7 @@ class CommitRefusals(UploadTestCase):
 	def test_a_gap_is_refused_and_named(self):
 		"""'skip chunk 5 of 10' — the case from the spec."""
 		self.staged(skip=(5,))
-		message = self.tool_error(
-			"commit_staged_file", {"session_id": "s", "file_name": "x.pdf"}
-		)
+		message = self.tool_error("commit_staged_file", {"session_id": "s", "file_name": "x.pdf"})
 		self.assertIn("missing piece(s) 5 of 10", message)
 		self.assertIn("worse than no file", message)
 
@@ -415,25 +409,19 @@ class CommitRefusals(UploadTestCase):
 
 	def test_a_wrong_sha256_is_refused_and_points_at_the_per_piece_hashes(self):
 		self.staged(expected_sha256=hashlib.sha256(b"not this file").hexdigest())
-		message = self.tool_error(
-			"commit_staged_file", {"session_id": "s", "file_name": "x.pdf"}
-		)
+		message = self.tool_error("commit_staged_file", {"session_id": "s", "file_name": "x.pdf"})
 		self.assertIn("are not the bytes that were sent", message)
 		self.assertIn("hash of its own content", message)
 		self.assertEqual(len(self.chunk_rows()), 10)
 
 	def test_a_wrong_size_is_refused(self):
 		self.staged(expected_size=9_999)
-		message = self.tool_error(
-			"commit_staged_file", {"session_id": "s", "file_name": "x.pdf"}
-		)
+		message = self.tool_error("commit_staged_file", {"session_id": "s", "file_name": "x.pdf"})
 		self.assertIn("declared as 9999 bytes", message)
 		self.assertIn("assemble to 10000", message)
 
 	def test_a_session_nobody_staged_is_refused_with_where_to_look(self):
-		message = self.tool_error(
-			"commit_staged_file", {"session_id": "never", "file_name": "x.pdf"}
-		)
+		message = self.tool_error("commit_staged_file", {"session_id": "never", "file_name": "x.pdf"})
 		self.assertIn("no staged upload called 'never'", message)
 		self.assertIn("list_staged_uploads", message)
 
@@ -518,9 +506,7 @@ class CommitRefusals(UploadTestCase):
 class DryRun(UploadTestCase):
 	def test_it_assembles_and_checks_without_writing_or_clearing(self):
 		content = a_file(5_000)
-		self.stage_all(
-			"d", content, chunk_size=1_000, expected_sha256=hashlib.sha256(content).hexdigest()
-		)
+		self.stage_all("d", content, chunk_size=1_000, expected_sha256=hashlib.sha256(content).hexdigest())
 		data = self.tool_data(
 			"commit_staged_file", {"session_id": "d", "file_name": "d.pdf", "dry_run": True}
 		)
@@ -537,17 +523,13 @@ class DryRun(UploadTestCase):
 		)
 		self.assertIn(
 			"are not the bytes that were sent",
-			self.tool_error(
-				"commit_staged_file", {"session_id": "d", "file_name": "d.pdf", "dry_run": True}
-			),
+			self.tool_error("commit_staged_file", {"session_id": "d", "file_name": "d.pdf", "dry_run": True}),
 		)
 
 	def test_a_dry_run_can_be_followed_by_a_real_commit(self):
 		content = a_file(3_000)
 		self.stage_all("d", content, chunk_size=1_000)
-		self.tool_data(
-			"commit_staged_file", {"session_id": "d", "file_name": "d.pdf", "dry_run": True}
-		)
+		self.tool_data("commit_staged_file", {"session_id": "d", "file_name": "d.pdf", "dry_run": True})
 		data = self.tool_data("commit_staged_file", {"session_id": "d", "file_name": "d.pdf"})
 		self.assertEqual(self.stored_bytes(data["file"]), content)
 
@@ -635,12 +617,12 @@ class GovernanceFlow(UploadTestCase):
 
 	def test_it_can_supersede_an_earlier_entry(self):
 		first = self.tool_data("commit_staged_file", self.commit())["governance_document"]["name"]
-		payload = self.commit(
-			session_id="gov3", title="Operating Agreement 2027", supersedes=first
-		)
+		payload = self.commit(session_id="gov3", title="Operating Agreement 2027", supersedes=first)
 		data = self.tool_data("commit_staged_file", payload)
 		self.assertEqual(data["governance_document"]["supersedes"], first)
-		self.assertEqual(STORE.get_raw("Governance Document", first)["superseded_by"], data["governance_document"]["name"])
+		self.assertEqual(
+			STORE.get_raw("Governance Document", first)["superseded_by"], data["governance_document"]["name"]
+		)
 
 
 class Cancellation(UploadTestCase):
@@ -721,9 +703,7 @@ class SessionIsolation(UploadTestCase):
 	def test_another_user_cannot_commit_a_session(self):
 		self.stage_all("mine", a_file(2_000), chunk_size=1_000)
 		self.as_other_user()
-		message = self.tool_error(
-			"commit_staged_file", {"session_id": "mine", "file_name": "x.bin"}
-		)
+		message = self.tool_error("commit_staged_file", {"session_id": "mine", "file_name": "x.bin"})
 		self.assertIn("belongs to Administrator", message)
 		self.assertEqual(STORE.rows("File"), [])
 
@@ -761,8 +741,7 @@ class WorkerRestart(UploadTestCase):
 		from erpnext_mcp.tools import uploads
 
 		fresh = importlib.reload(uploads)
-		for name in ("stage_file_chunk", "commit_staged_file", "cancel_staged_upload",
-					 "list_staged_uploads"):
+		for name in ("stage_file_chunk", "commit_staged_file", "cancel_staged_upload", "list_staged_uploads"):
 			registry.TOOLS[name]["handler"] = getattr(fresh, name)
 		return fresh
 
@@ -793,9 +772,7 @@ class WorkerRestart(UploadTestCase):
 					"chunk_base64": pieces[index],
 				},
 			)
-		data = self.tool_data(
-			"commit_staged_file", {"session_id": "long", "file_name": "long.bin"}
-		)
+		data = self.tool_data("commit_staged_file", {"session_id": "long", "file_name": "long.bin"})
 		self.assertEqual(data["chunks_assembled"], 5)
 		self.assertEqual(self.stored_bytes(data["file"]), content)
 
@@ -841,9 +818,7 @@ class ListStagedUploads(UploadTestCase):
 	def test_somebody_without_the_role_sees_only_their_own(self):
 		self.stage_all("mine", a_file(1_000), chunk_size=1_000)
 		STORE.seed("User", [{"name": "nobody@example.test", "enabled": 1}])
-		self.configure(
-			enabled=1, require_user_context=1, mcp_system_user="nobody@example.test", **ALL_ON
-		)
+		self.configure(enabled=1, require_user_context=1, mcp_system_user="nobody@example.test", **ALL_ON)
 		data = self.tool_data("list_staged_uploads", {})
 		self.assertEqual(data["uploads"], [])
 		self.assertIn("nobody@example.test", data["scope"])

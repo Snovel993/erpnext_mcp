@@ -283,9 +283,7 @@ class TheFormatRenders(PrintTestCase):
 		self.a_payment(references=False)
 		STORE.get_raw("Payment Entry", "PE-0001")["remarks"] = ""
 		self.tool_data("create_check_print_format", {"company": MAIN})
-		self.assertEqual(
-			self.render().count("No invoice references on this payment."), 2
-		)
+		self.assertEqual(self.render().count("No invoice references on this payment."), 2)
 
 	def test_the_memo_carries_the_remark(self):
 		self.a_payment()
@@ -357,9 +355,7 @@ class TheTool(PrintTestCase):
 		self.assertEqual(len(STORE.rows("Print Format")), 2)
 
 	def test_a_custom_name_is_used_as_given(self):
-		data = self.tool_data(
-			"create_check_print_format", {"company": MAIN, "format_name": "Payroll Checks"}
-		)
+		data = self.tool_data("create_check_print_format", {"company": MAIN, "format_name": "Payroll Checks"})
 		self.assertEqual(data["print_format"], "Payroll Checks")
 
 	def test_a_re_run_reports_unchanged_and_writes_nothing(self):
@@ -371,9 +367,7 @@ class TheTool(PrintTestCase):
 
 	def test_changing_the_payee_field_updates_the_format(self):
 		self.tool_data("create_check_print_format", {"company": MAIN})
-		data = self.tool_data(
-			"create_check_print_format", {"company": MAIN, "payee_field": "party"}
-		)
+		data = self.tool_data("create_check_print_format", {"company": MAIN, "payee_field": "party"})
 		self.assertEqual(data["action"], "updated")
 		self.assertIn("doc.party or", STORE.get_raw("Print Format", FORMAT)["html"])
 
@@ -391,9 +385,7 @@ class TheTool(PrintTestCase):
 
 class ToolRefusals(PrintTestCase):
 	def test_a_company_that_does_not_exist_is_refused(self):
-		self.assertIn(
-			"Nowhere", self.tool_error("create_check_print_format", {"company": "Nowhere Ltd"})
-		)
+		self.assertIn("Nowhere", self.tool_error("create_check_print_format", {"company": "Nowhere Ltd"}))
 
 	def test_a_payee_field_this_site_lacks_is_refused_rather_than_printing_blank(self):
 		message = self.tool_error(

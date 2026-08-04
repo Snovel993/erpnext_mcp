@@ -267,9 +267,7 @@ class XlsxStructure(MCPTestCase):
 
 	def test_two_sheets_that_truncate_to_the_same_name_are_refused(self):
 		"""Excel refuses to open such a workbook, so this refuses to write one."""
-		workbook = XlsxWorkbook(
-			Sheet(title="A" * 31 + "first"), Sheet(title="A" * 31 + "second")
-		)
+		workbook = XlsxWorkbook(Sheet(title="A" * 31 + "first"), Sheet(title="A" * 31 + "second"))
 		with self.assertRaises(ValueError) as caught:
 			workbook.render()
 		self.assertIn("31-character", str(caught.exception))

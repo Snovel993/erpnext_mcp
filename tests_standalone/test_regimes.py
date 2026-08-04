@@ -301,8 +301,7 @@ class AlertsCarryTheirRegimes(RegimeTestCase):
 		self.a_certificate("CDL-0001", "Commercial Driver License")
 		self.sweep()
 		found = [
-			row for row in self.live_alerts("certification_expiring")
-			if row["source_docname"] == "CDL-0001"
+			row for row in self.live_alerts("certification_expiring") if row["source_docname"] == "CDL-0001"
 		]
 		self.assertEqual(self.tags_on(found[0]["name"]), ["Internal"])
 

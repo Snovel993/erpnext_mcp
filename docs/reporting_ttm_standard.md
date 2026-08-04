@@ -107,10 +107,15 @@ components dict with a value key, then register it:
 
 ```python
 windows.register(
-    "revenue", revenue,
-    kpi_key="revenue", label="Revenue", value_key="total",
-    sum_keys=("total",), list_keys=("by_account",),
-    bucket_additive=True, unit="currency",
+	"revenue",
+	revenue,
+	kpi_key="revenue",
+	label="Revenue",
+	value_key="total",
+	sum_keys=("total",),
+	list_keys=("by_account",),
+	bucket_additive=True,
+	unit="currency",
 )
 ```
 

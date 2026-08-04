@@ -52,7 +52,5 @@ class MemberEvent(Document):
 			company = frappe.db.get_value("Cap Table Entry", member, "company")
 			if company and company != self.company:
 				frappe.throw(
-					_("Cap Table Entry {0} belongs to {1}, not {2}.").format(
-						member, company, self.company
-					)
+					_("Cap Table Entry {0} belongs to {1}, not {2}.").format(member, company, self.company)
 				)

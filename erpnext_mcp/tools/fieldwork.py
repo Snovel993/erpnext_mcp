@@ -503,7 +503,9 @@ def list_compliance_calendar_for_me(args: dict) -> ToolResult:
 				"count": int(data.get("alert_count") or 0),
 				"by_severity": data.get("by_severity"),
 				"overdue": int(data.get("overdue_count") or 0),
-				"by_category": {key: group.get("count") for key, group in (data.get("by_category") or {}).items()},
+				"by_category": {
+					key: group.get("count") for key, group in (data.get("by_category") or {}).items()
+				},
 				"summary": result.summary,
 			}
 		)

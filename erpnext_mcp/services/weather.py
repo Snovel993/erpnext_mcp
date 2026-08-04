@@ -270,9 +270,7 @@ def thresholds_for(company: str = "") -> dict:
 	out = {
 		"heat_threshold_temp_f": float(_number("heat_threshold_temp_f", float, floor=0.0)),
 		"heat_threshold_heat_index_f": float(_number("heat_threshold_heat_index_f", float, floor=0.0)),
-		"wind_threshold_mph_spray_block": float(
-			_number("wind_threshold_mph_spray_block", float, floor=0.0)
-		),
+		"wind_threshold_mph_spray_block": float(_number("wind_threshold_mph_spray_block", float, floor=0.0)),
 		"company": company or None,
 		"overridden": [],
 	}
@@ -1142,9 +1140,7 @@ def sweep_open_shifts() -> int:
 				# coordinates are nonsense, an employee archived mid-shift, a
 				# validation this app did not anticipate — none of them is a
 				# reason the other twelve crews go undocumented today.
-				_log(
-					f"weather sweep skipped {shift.get('name')}: {type(exc).__name__}: {exc}"
-				)
+				_log(f"weather sweep skipped {shift.get('name')}: {type(exc).__name__}: {exc}")
 		return written
 	except Exception:
 		_log(f"the weather sweep failed before it started: {compat.traceback_text()}")

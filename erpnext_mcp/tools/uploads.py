@@ -161,7 +161,9 @@ def stage_file_chunk(args: dict) -> ToolResult:
 	session = _open_session(session_id, total_chunks, expected_sha256, expected_size)
 	existing = _chunk_row(session.name, chunk_index)
 
-	staged_after = int(session.staged_bytes or 0) + len(content) - int((existing or {}).get("chunk_bytes") or 0)
+	staged_after = (
+		int(session.staged_bytes or 0) + len(content) - int((existing or {}).get("chunk_bytes") or 0)
+	)
 	if staged_after > MAX_TOTAL_BYTES:
 		raise ToolError(
 			f"staging this piece would take the upload to {files.human_size(staged_after)}, over "
@@ -314,9 +316,7 @@ def commit_staged_file(args: dict) -> ToolResult:
 		)
 
 	if as_governance:
-		result = governance.file_governance_document(
-			args, content=content, file_name=file_name, tail=tail
-		)
+		result = governance.file_governance_document(args, content=content, file_name=file_name, tail=tail)
 		created = result.data
 		attachment_name = (created.get("attachment") or {}).get("name")
 		attached_doctype, attached_name = governance.GOVERNANCE_DOCUMENT, created.get("name")
@@ -347,8 +347,7 @@ def commit_staged_file(args: dict) -> ToolResult:
 			f"The {total_chunks} staged piece(s) and the session were deleted — the File is the "
 			"record now, and staging that outlives the file it built is just rubbish on the site."
 			+ (
-				" The file is PRIVATE: reading it back requires read permission on the document "
-				"it hangs off."
+				" The file is PRIVATE: reading it back requires read permission on the document it hangs off."
 				if is_private
 				else " The file is PUBLIC: anyone who can guess the URL can read it."
 			)
@@ -391,9 +390,7 @@ def cancel_staged_upload(args: dict) -> ToolResult:
 		"chunks_cleared": cleared,
 		"bytes_discarded": staged_bytes,
 		"size_human": files.human_size(staged_bytes),
-		"note": (
-			"Nothing was committed and no File was created. The session id is free to use again."
-		),
+		"note": ("Nothing was committed and no File was created. The session id is free to use again."),
 	}
 	return ToolResult(
 		data,
@@ -683,8 +680,16 @@ def _require_session(session_id: str, tail: str) -> dict:
 		{"session_id": session_id},
 		compat.existing_fields(
 			SESSION_DOCTYPE,
-			("name", "session_id", "total_chunks", "chunks_received", "staged_bytes",
-			 "expected_sha256", "expected_size", "owner"),
+			(
+				"name",
+				"session_id",
+				"total_chunks",
+				"chunks_received",
+				"staged_bytes",
+				"expected_sha256",
+				"expected_size",
+				"owner",
+			),
 		),
 		as_dict=True,
 	)

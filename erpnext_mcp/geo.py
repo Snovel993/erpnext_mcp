@@ -103,9 +103,7 @@ def available() -> bool:
 
 def requires_sentence() -> str:
 	missing = [
-		name
-		for name, present in (("shapely>=2.0", HAVE_SHAPELY), ("h3>=4.0.0", HAVE_H3))
-		if not present
+		name for name, present in (("shapely>=2.0", HAVE_SHAPELY), ("h3>=4.0.0", HAVE_H3)) if not present
 	]
 	return (
 		f"the Python package(s) {', '.join(missing)}, which this app declares as dependencies — "
@@ -403,8 +401,7 @@ def check_coordinates_look_like_degrees(geometry: dict, label: str) -> list:
 		)
 	if all(abs(value) < 0.01 for value in lons + lats):
 		notes.append(
-			f"{label} sits at [0, 0] in the Gulf of Guinea, which is what an unset coordinate "
-			"looks like."
+			f"{label} sits at [0, 0] in the Gulf of Guinea, which is what an unset coordinate looks like."
 		)
 	return notes
 

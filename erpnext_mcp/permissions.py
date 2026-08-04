@@ -104,15 +104,15 @@ def companies_for(user: str) -> list:
 
 
 # ── the query conditions ────────────────────────────────────────────────────
-def housing_assignment_query(user: str = None) -> str:
+def housing_assignment_query(user: str | None = None) -> str:
 	return _condition(HOUSING_ASSIGNMENT, user)
 
 
-def family_query(user: str = None) -> str:
+def family_query(user: str | None = None) -> str:
 	return _condition(FAMILY, user)
 
 
-def _condition(doctype: str, user: str = None) -> str:
+def _condition(doctype: str, user: str | None = None) -> str:
 	"""SQL restricting `doctype` to the caller's entities, or "" for unrestricted.
 
 	NEVER RAISES. A `permission_query_conditions` hook that throws does not fail
@@ -131,11 +131,7 @@ def _condition(doctype: str, user: str = None) -> str:
 		companies = companies_for(user)
 		if not companies:
 			return ""
-		routes = [
-			route
-			for route in ROUTES.get(doctype, ())
-			if doctype_exists(route[1])
-		]
+		routes = [route for route in ROUTES.get(doctype, ()) if doctype_exists(route[1])]
 		if not routes:
 			return ""
 		allowed = ", ".join(frappe.db.escape(name) for name in companies)
@@ -169,15 +165,15 @@ def _condition(doctype: str, user: str = None) -> str:
 
 
 # ── the single-document check ───────────────────────────────────────────────
-def housing_assignment_has_permission(doc, ptype: str = None, user: str = None) -> bool:
+def housing_assignment_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
 	return _allowed(HOUSING_ASSIGNMENT, doc, user)
 
 
-def family_has_permission(doc, ptype: str = None, user: str = None) -> bool:
+def family_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
 	return _allowed(FAMILY, doc, user)
 
 
-def _allowed(doctype: str, doc, user: str = None) -> bool:
+def _allowed(doctype: str, doc, user: str | None = None) -> bool:
 	"""Whether one document is inside the caller's entities.
 
 	The query condition covers lists; this covers `frappe.get_doc` and the form

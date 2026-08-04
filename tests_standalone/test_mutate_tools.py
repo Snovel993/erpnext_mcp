@@ -919,9 +919,7 @@ class BulkSubmitJournalEntries(SeededTestCase):
 		self.assertEqual(data["submitted"], 1)
 
 	def test_a_batch_larger_than_the_limit_is_refused_before_anything_posts(self):
-		message = self.tool_error(
-			"bulk_submit_journal_entries", {"names": [f"JE-{n}" for n in range(501)]}
-		)
+		message = self.tool_error("bulk_submit_journal_entries", {"names": [f"JE-{n}" for n in range(501)]})
 		self.assertIn("the limit is 500", message)
 		self.assertIn("Nothing was submitted", message)
 
@@ -1663,9 +1661,7 @@ class UpdateJournalEntryParty(V12TestCase):
 	def test_the_1099_prefill_still_excludes_a_family_attribution(self):
 		"""Attributing a transfer correctly does not make it reportable. A
 		transfer to a relative is not compensation for services."""
-		before = self.tool_data(
-			"generate_1099_prefill", {"company": MAIN, "tax_year": 2025, "dry_run": True}
-		)
+		before = self.tool_data("generate_1099_prefill", {"company": MAIN, "tax_year": 2025, "dry_run": True})
 		name = self.a_posted_entry()
 		self.tool_data(
 			"update_journal_entry_party",
@@ -1677,9 +1673,7 @@ class UpdateJournalEntryParty(V12TestCase):
 				"reason": "receipt establishes the attribution",
 			},
 		)
-		after = self.tool_data(
-			"generate_1099_prefill", {"company": MAIN, "tax_year": 2025, "dry_run": True}
-		)
+		after = self.tool_data("generate_1099_prefill", {"company": MAIN, "tax_year": 2025, "dry_run": True})
 		self.assertEqual(
 			[row["recipient"] for row in after["recipients"]],
 			[row["recipient"] for row in before["recipients"]],

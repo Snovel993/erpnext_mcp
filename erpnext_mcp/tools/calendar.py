@@ -123,7 +123,7 @@ def _wanted_regime(args: dict) -> str:
 	return found
 
 
-def _regimes_of(row: dict, rule, fetched: list = None) -> list:
+def _regimes_of(row: dict, rule, fetched: list | None = None) -> list:
 	"""Which audits one alert answers to, from whichever source actually has it.
 
 	Three sources, in descending order of how much they know, because the callers
@@ -152,7 +152,7 @@ def _regimes_of(row: dict, rule, fetched: list = None) -> list:
 	return list(rule.regimes) if rule else []
 
 
-def _describe(row: dict, today: str, regimes: list = None) -> dict:
+def _describe(row: dict, today: str, regimes: list | None = None) -> dict:
 	due = str(row.get("due_date") or "") or None
 	snoozed = str(row.get("snoozed_until") or "") or None
 	remaining = None
@@ -340,9 +340,7 @@ def get_compliance_calendar(args: dict) -> ToolResult:
 	headline = ", ".join(readout) or "nothing due"
 
 	skipped = [
-		rule.describe()
-		for rule in (alerts.RULES[key] for key in alerts.names())
-		if not rule.is_available()
+		rule.describe() for rule in (alerts.RULES[key] for key in alerts.names()) if not rule.is_available()
 	]
 
 	by_regime: dict = {}
@@ -373,9 +371,7 @@ def get_compliance_calendar(args: dict) -> ToolResult:
 			}
 			for key, group in sorted(
 				by_category.items(),
-				key=lambda item: min(
-					alerts.SEVERITY_ORDER.index(alert["severity"]) for alert in item[1]
-				),
+				key=lambda item: min(alerts.SEVERITY_ORDER.index(alert["severity"]) for alert in item[1]),
 			)
 		},
 		"hidden_snoozed": hidden_snoozed,
@@ -556,8 +552,7 @@ def snooze_alert(args: dict) -> ToolResult:
 				"need doing, dismiss_alert is the honest answer and it records why."
 			),
 		},
-		summary=f"snoozed {row['name']} until {until} ({days} day(s))"
-		+ (f" — {reason}" if reason else ""),
+		summary=f"snoozed {row['name']} until {until} ({days} day(s))" + (f" — {reason}" if reason else ""),
 		docstatus_delta="0 → 0 (updated)",
 	)
 
@@ -583,9 +578,7 @@ def dismiss_alert(args: dict) -> ToolResult:
 			if frappe.utils.cint(row.get("auto_dismissed"))
 			else f"by {row.get('dismissed_by') or 'somebody'} on {row.get('dismissed_on')}"
 		)
-		raise ToolError(
-			f"{row['name']} was already dismissed {how}. Nothing was changed."
-		)
+		raise ToolError(f"{row['name']} was already dismissed {how}. Nothing was changed.")
 
 	doc = frappe.get_doc(ALERT, row["name"])
 	doc.dismissed = 1
@@ -738,9 +731,7 @@ def dismiss_alert_bulk(args: dict) -> ToolResult:
 		)
 
 	if not matched:
-		raise ToolError(
-			"no alert matches that filter, so there is nothing to dismiss. Nothing was changed."
-		)
+		raise ToolError("no alert matches that filter, so there is nothing to dismiss. Nothing was changed.")
 
 	dismissed, failed = [], []
 	for alert in matched:

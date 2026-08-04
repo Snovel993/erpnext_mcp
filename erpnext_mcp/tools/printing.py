@@ -49,8 +49,8 @@ import frappe
 from .. import compat
 from ..args import as_bool, as_str, resolve_company
 from ..errors import ToolError
-from ..result import ToolResult
 from ..render.checks import amount_in_words
+from ..result import ToolResult
 
 PRINT_FORMAT = "Print Format"
 CHECK_DOCTYPE = "Payment Entry"
@@ -210,7 +210,10 @@ def create_check_print_format(args: dict) -> ToolResult:
 	company = resolve_company(as_str(args, "company"), required=True)
 	row = (
 		frappe.db.get_value(
-			"Company", company, compat.existing_fields("Company", ("name", "abbr", "default_currency")), as_dict=True
+			"Company",
+			company,
+			compat.existing_fields("Company", ("name", "abbr", "default_currency")),
+			as_dict=True,
 		)
 		or {}
 	)
@@ -238,8 +241,10 @@ def create_check_print_format(args: dict) -> ToolResult:
 	if existing:
 		_assert_replaceable(existing, format_name)
 
-	action = "unchanged" if existing and str(existing.get("html") or "") == html else (
-		"updated" if existing else "created"
+	action = (
+		"unchanged"
+		if existing and str(existing.get("html") or "") == html
+		else ("updated" if existing else "created")
 	)
 	currency = str(row.get("default_currency") or "").strip().upper()
 
@@ -328,8 +333,7 @@ def create_check_print_format(args: dict) -> ToolResult:
 	return ToolResult(
 		data,
 		f"{action} Print Format {doc.name!r} for {company}: Payment Entry on US laser check "
-		f"stock, payee from {payee_field}"
-		+ (", with a signature image" if signature_image_url else ""),
+		f"stock, payee from {payee_field}" + (", with a signature image" if signature_image_url else ""),
 		docstatus_delta="none → 0 (created)" if action == "created" else "",
 	)
 
@@ -340,9 +344,7 @@ def build_check_html(payee_field: str = DEFAULT_PAYEE_FIELD, signature_image_url
 	Token replacement rather than `str.format`, because the template is Jinja and
 	Jinja's `{{ }}` and `{% %}` are exactly what `format` would try to interpret.
 	"""
-	signature = (
-		f'<img src="{_escape(signature_image_url)}" alt="signature">' if signature_image_url else ""
-	)
+	signature = f'<img src="{_escape(signature_image_url)}" alt="signature">' if signature_image_url else ""
 	return CHECK_TEMPLATE.replace("__PAYEE_FIELD__", payee_field).replace("__SIGNATURE__", signature)
 
 
@@ -410,4 +412,4 @@ def _assert_replaceable(existing: dict, format_name: str) -> None:
 #: Exported so the tests can check the words the check actually carries against
 #: the same function the template calls, rather than against a second copy of the
 #: rule that could drift from it.
-__all__ = ("create_check_print_format", "build_check_html", "amount_in_words", "CHECK_TEMPLATE")
+__all__ = ("CHECK_TEMPLATE", "amount_in_words", "build_check_html", "create_check_print_format")

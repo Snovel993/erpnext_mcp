@@ -64,9 +64,9 @@ class HousingAssignment(Document):
 
 		if self.end_date and self.end_date < self.assigned_date:
 			frappe.throw(
-				_("End Date {0} is before the Assigned Date {1}. Nobody moved out before they moved in.").format(
-					self.end_date, self.assigned_date
-				)
+				_(
+					"End Date {0} is before the Assigned Date {1}. Nobody moved out before they moved in."
+				).format(self.end_date, self.assigned_date)
 			)
 
 		paid = float(self.deposit_paid or 0)

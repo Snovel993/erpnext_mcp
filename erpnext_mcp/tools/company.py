@@ -362,9 +362,7 @@ def list_companies(args: dict) -> ToolResult:
 		"party_types": _party_type_status(),
 	}
 	if truncated:
-		data["note"] = (
-			f"more than {limit} companies on this site; raise limit to see the rest."
-		)
+		data["note"] = f"more than {limit} companies on this site; raise limit to see the rest."
 	posted = [row for row in companies if row["gl_entry_count"]]
 	return ToolResult(
 		data=data,
@@ -441,9 +439,7 @@ def create_company(args: dict) -> ToolResult:
 	dry_run = as_bool(args, "dry_run", False)
 
 	if frappe.db.exists("Company", company_name):
-		raise ToolError(
-			f"a Company called {company_name!r} is already on this site. Nothing was created."
-		)
+		raise ToolError(f"a Company called {company_name!r} is already on this site. Nothing was created.")
 	if not abbr.replace("-", "").replace(" ", "").isalnum():
 		raise ToolError(
 			f"abbr {abbr!r} has to be letters and digits — it becomes the tail of every account "
@@ -480,9 +476,7 @@ def create_company(args: dict) -> ToolResult:
 			"created."
 		)
 	if compat.doctype_exists("Currency") and not frappe.db.exists("Currency", currency):
-		raise ToolError(
-			f"no Currency called {currency!r} on this site. Nothing was created."
-		)
+		raise ToolError(f"no Currency called {currency!r} on this site. Nothing was created.")
 
 	available_charts = chart_templates(country)
 	if available_charts is not None and chart not in available_charts:
@@ -698,9 +692,7 @@ def update_company(args: dict) -> ToolResult:
 
 	if "tax_id" in args:
 		if not compat.has_field("Company", "tax_id"):
-			raise ToolError(
-				"this ERPNext's Company has no tax_id field. Nothing was changed."
-			)
+			raise ToolError("this ERPNext's Company has no tax_id field. Nothing was changed.")
 		_stage(changes, unchanged, row, "tax_id", as_str(args, "tax_id"))
 
 	if "notes" in args:
@@ -723,8 +715,7 @@ def update_company(args: dict) -> ToolResult:
 		doc.save(ignore_permissions=True)
 
 	reported = {
-		field: [_redact(field, before), _redact(field, after)]
-		for field, (before, after) in changes.items()
+		field: [_redact(field, before), _redact(field, after)] for field, (before, after) in changes.items()
 	}
 	return ToolResult(
 		data={
@@ -818,8 +809,7 @@ def register_party_types(args: dict) -> ToolResult:
 		data=data,
 		summary=(
 			f"party types: {len(created)} {'would be ' if dry_run else ''}registered, "
-			f"{len(existing)} already there"
-			+ (f", {len(skipped)} skipped" if skipped else "")
+			f"{len(existing)} already there" + (f", {len(skipped)} skipped" if skipped else "")
 		),
 		docstatus_delta="none → 0 (created)" if created and not dry_run else "",
 	)
@@ -867,9 +857,7 @@ def ensure_party_types() -> dict:
 	"""
 	out = {"created": [], "existing": [], "skipped": {}}
 	if not compat.doctype_exists(PARTY_TYPE):
-		out["skipped"] = {
-			name: "this site has no Party Type DocType at all" for name in CUSTOM_PARTY_TYPES
-		}
+		out["skipped"] = {name: "this site has no Party Type DocType at all" for name in CUSTOM_PARTY_TYPES}
 		return out
 
 	for name, spec in sorted(CUSTOM_PARTY_TYPES.items()):

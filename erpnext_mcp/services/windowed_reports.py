@@ -778,7 +778,9 @@ def compute_snapshot(
 		if cached:
 			return {
 				"value": cached.get("value"),
-				"period_start": iso(cached["period_start"]) if cached.get("period_start") else iso(period_start),
+				"period_start": iso(cached["period_start"])
+				if cached.get("period_start")
+				else iso(period_start),
 				"period_end": iso(cached["period_end"]) if cached.get("period_end") else iso(period_end),
 				"components": _loads(cached.get("components_json"), {}),
 				"computation_warnings": _loads(cached.get("computation_warnings_json"), []),
@@ -800,9 +802,7 @@ def compute_snapshot(
 		"source_version": _version(),
 	}
 	if use_cache:
-		cache_write(
-			kpi_key, company, computation_step, window_type, window_months, as_of, snapshot
-		)
+		cache_write(kpi_key, company, computation_step, window_type, window_months, as_of, snapshot)
 	return snapshot
 
 
@@ -1013,9 +1013,7 @@ def compute_windowed(
 		raise ValueError(f"window_type must be one of {', '.join(WINDOW_TYPES)}; got {window_type!r}.")
 	computation_step = str(computation_step or STEP_MONTHLY)
 	if computation_step not in STEPS:
-		raise ValueError(
-			f"computation_step must be one of {', '.join(STEPS)}; got {computation_step!r}."
-		)
+		raise ValueError(f"computation_step must be one of {', '.join(STEPS)}; got {computation_step!r}.")
 	if computation_step == STEP_DAILY and not entry.get("allow_daily", False):
 		warnings.append(
 			f"{entry['label']} is not marked `allow_daily`, and a Daily step was asked for anyway. "
@@ -1078,8 +1076,7 @@ def compute_windowed(
 	# has to cover it too. A reader told "year to date" who assumes 1 January on a
 	# July-year operation is out by six months and has no way to find out.
 	if anchor_month != 1 and (
-		computation_step in (STEP_QUARTERLY, STEP_YEARLY)
-		or window_type in (WINDOW_QTD, WINDOW_YTD)
+		computation_step in (STEP_QUARTERLY, STEP_YEARLY) or window_type in (WINDOW_QTD, WINDOW_YTD)
 	):
 		warnings.append(
 			f"{company}'s fiscal year opens in month {anchor_month}, so the {window_type} / "
@@ -1110,9 +1107,7 @@ def compute_windowed(
 		win_end = period_end
 
 	if entry["bucket_additive"] and window_type not in TO_DATE_WINDOWS:
-		window_snapshot = compute_bucketed(
-			entry, company, win_start, win_end, computation_step, anchor_month
-		)
+		window_snapshot = compute_bucketed(entry, company, win_start, win_end, computation_step, anchor_month)
 		if use_cache:
 			cache_write(
 				entry["kpi_key"],
@@ -1259,9 +1254,7 @@ def compute_windowed(
 	averages["requested_entries"] = wanted
 	averages["computed_live"] = computed_live
 	averages["lookback_years"] = historical_lookback_years
-	averages["series_step"] = (
-		window_type if window_type in TO_DATE_WINDOWS else computation_step
-	)
+	averages["series_step"] = window_type if window_type in TO_DATE_WINDOWS else computation_step
 	out["historical_averages"] = averages
 
 	if truncated_at:
@@ -1415,9 +1408,7 @@ def _sweep_one(entry: dict, company: str, lookback_years: int = DEFAULT_LOOKBACK
 			# Everything at or before the newest cached snapshot is either present
 			# or deliberately gone (invalidated), and the invalidated ones come
 			# back through the same loop on the run after the gap reaches the top.
-			existing = cache_read(
-				entry["kpi_key"], company, step, window_type, window_months, boundary
-			)
+			existing = cache_read(entry["kpi_key"], company, step, window_type, window_months, boundary)
 			if existing:
 				continue
 		start = window_start(boundary, window_months)

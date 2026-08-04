@@ -50,9 +50,7 @@ class AssetCostProfile(Document):
 			cost_center = row.get("cost_center")
 			if cost_center in seen:
 				frappe.throw(
-					_("Cost center {0} appears twice. Combine the rows into one share.").format(
-						cost_center
-					)
+					_("Cost center {0} appears twice. Combine the rows into one share.").format(cost_center)
 				)
 			seen.add(cost_center)
 			if float(row.get("percentage") or 0) <= 0:
@@ -76,7 +74,7 @@ class AssetCostProfile(Document):
 			frappe.throw(_("Salvage Value cannot be negative."))
 		if float(self.salvage_value or 0) > float(self.gross_purchase_amount or 0):
 			frappe.throw(
-				_("Salvage Value {0} is more than the asset cost {1}; there would be nothing to depreciate.").format(
-					self.salvage_value, self.gross_purchase_amount
-				)
+				_(
+					"Salvage Value {0} is more than the asset cost {1}; there would be nothing to depreciate."
+				).format(self.salvage_value, self.gross_purchase_amount)
 			)

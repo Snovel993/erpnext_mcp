@@ -364,7 +364,7 @@ def _clear_token(user: str) -> bool:
 	return had
 
 
-def _endpoint_url(args: dict = None) -> str:
+def _endpoint_url(args: dict | None = None) -> str:
 	"""The base URL a phone should call. The operator's public_url wins.
 
 	`frappe.utils.get_url()` is correct for the server and useless to a phone
@@ -552,8 +552,7 @@ def create_mobile_user(args: dict) -> ToolResult:
 		data=data,
 		summary=(
 			f"{'created' if not existed else 'updated'} {email} as {spec.name} "
-			f"scoped to {len(entities)} entity/entities"
-			+ ("; token issued" if token else "; no token")
+			f"scoped to {len(entities)} entity/entities" + ("; token issued" if token else "; no token")
 		),
 	)
 
@@ -675,9 +674,7 @@ def list_mobile_users(args: dict) -> ToolResult:
 				"enforcement. Re-issue with generate_api_token or end it with revoke_api_token."
 			)
 		if row.get("mobile_role") and row["mobile_role"] not in entry["roles_held"]:
-			concerns.append(
-				f"the grant says {row['mobile_role']} but the account does not hold that role."
-			)
+			concerns.append(f"the grant says {row['mobile_role']} but the account does not hold that role.")
 		entry["concerns"] = concerns
 		users.append(entry)
 
@@ -1055,8 +1052,7 @@ def generate_mobile_login_qr(args: dict) -> ToolResult:
 	"""
 	if not qr.available():
 		raise ToolError(
-			"this site has no QR encoder, so the login card cannot be drawn. It needs "
-			+ qr.REQUIRES
+			"this site has no QR encoder, so the login card cannot be drawn. It needs " + qr.REQUIRES
 		)
 
 	email = (as_str(args, "user", required=True) or "").strip().lower()

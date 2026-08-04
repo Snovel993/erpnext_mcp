@@ -132,11 +132,7 @@ def get_compliance_field_map(args: dict) -> ToolResult:
 			),
 			"note": (
 				f"{len(present)} of {described['field_count']} field(s) are on this site. "
-				+ (
-					f"{len(missing)} are missing — run install_compliance_fields. "
-					if missing
-					else ""
-				)
+				+ (f"{len(missing)} are missing — run install_compliance_fields. " if missing else "")
 				+ (
 					f"{len(absent)} target doctype(s) are not installed here at all, which is not "
 					"a fault: a site without farm_precision_ag has no spray records to make "

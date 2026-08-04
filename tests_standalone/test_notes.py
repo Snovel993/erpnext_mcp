@@ -200,9 +200,7 @@ class CreateNoteRefusals(NoteTestCase):
 		self.assertIn("has to be Liability", message)
 
 	def test_an_interest_account_that_is_not_an_expense_is_refused(self):
-		message = self.tool_error(
-			"create_note_payable", self.payload(interest_expense_account=NOTES_PAYABLE)
-		)
+		message = self.tool_error("create_note_payable", self.payload(interest_expense_account=NOTES_PAYABLE))
 		self.assertIn("has to be Expense", message)
 
 	def test_it_cannot_be_created_already_closed(self):
@@ -228,9 +226,7 @@ class NoteSecuredOnAnAsset(NoteTestCase):
 		# months from either end, so mid-month the two sides legitimately differ
 		# by one and the check says so. That is the existing tool's arithmetic,
 		# not something the link changed.
-		report = self.tool_data(
-			"depreciation_note_alignment_check", {"company": MAIN, "as_of": "2026-07-01"}
-		)
+		report = self.tool_data("depreciation_note_alignment_check", {"company": MAIN, "as_of": "2026-07-01"})
 		self.assertEqual(report["checked"], 1)
 		self.assertEqual(report["diverged_count"], 0)
 		self.assertEqual(report["assets"][0]["linked_note"], SORTER_DOC)

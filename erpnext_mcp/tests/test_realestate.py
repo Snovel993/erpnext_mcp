@@ -398,9 +398,7 @@ class ConveyanceSchemaMigrated(RealEstateIntegrationTestCase):
 
 	def test_it_is_a_child_table_and_belongs_to_this_app(self):
 		self.assertTrue(frappe.db.get_value("DocType", "Parcel Conveyance Event", "istable"))
-		self.assertEqual(
-			frappe.db.get_value("DocType", "Parcel Conveyance Event", "module"), "ERPNext MCP"
-		)
+		self.assertEqual(frappe.db.get_value("DocType", "Parcel Conveyance Event", "module"), "ERPNext MCP")
 
 	def test_the_parcel_carries_the_table(self):
 		field = frappe.get_meta("Parcel").get_field("conveyance_events")

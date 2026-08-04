@@ -476,9 +476,7 @@ def approve_normalization_adjustment(args: dict) -> ToolResult:
 	# figure, and a components list that no longer produces the number above it is
 	# worse than a missing one. It never raises: an approval is a compliance act
 	# and losing one to housekeeping would be indefensible.
-	invalidated = windows.invalidate_overlapping(
-		company, row.get("period_start"), row.get("period_end")
-	)
+	invalidated = windows.invalidate_overlapping(company, row.get("period_start"), row.get("period_end"))
 
 	described = kpi_module.describe(dict(doc.as_dict()))
 	data = {
@@ -510,7 +508,11 @@ def approve_normalization_adjustment(args: dict) -> ToolResult:
 		summary=(
 			f"approved {doc.name} — {described['direction']} of {described['amount']} for "
 			f"{company}, signed by {employee or actor}"
-			+ (f"; {invalidated['deleted']} cached snapshot(s) invalidated" if invalidated.get("deleted") else "")
+			+ (
+				f"; {invalidated['deleted']} cached snapshot(s) invalidated"
+				if invalidated.get("deleted")
+				else ""
+			)
 		),
 		docstatus_delta=f"{row.get('status') or kpi_module.STATUS_DRAFT} → {kpi_module.STATUS_APPROVED}",
 	)
@@ -840,9 +842,7 @@ def _legacy_point_in_time(actor: str, company: str, period_start: str, period_en
 def _window_args(args: dict) -> dict:
 	"""The five window arguments, validated once for every tool that takes them."""
 	window_type = as_str(args, "window_type") or windows.WINDOW_TTM
-	matched = next(
-		(option for option in windows.WINDOW_TYPES if option.lower() == window_type.lower()), ""
-	)
+	matched = next((option for option in windows.WINDOW_TYPES if option.lower() == window_type.lower()), "")
 	if not matched:
 		raise ToolError(
 			f"window_type must be one of {', '.join(windows.WINDOW_TYPES)}; got {window_type!r}. "
@@ -1193,7 +1193,9 @@ def recompute_kpi_history(args: dict) -> ToolResult:
 		companies = [company]
 	else:
 		allowed = shift_tools._readable_companies(actor)
-		companies = list(allowed) if allowed else (frappe.db.get_all("Company", pluck="name", limit=200) or [])
+		companies = (
+			list(allowed) if allowed else (frappe.db.get_all("Company", pluck="name", limit=200) or [])
+		)
 
 	cleared = 0
 	written = 0

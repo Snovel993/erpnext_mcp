@@ -353,9 +353,7 @@ class OneAfternoonAnswersFourAudits(TrainingTestCase):
 	def packet(self, audit_type: str, regime: str = "") -> dict:
 		spec = audit_packets.TYPES[audit_type]
 		built = audit_packets.build(spec, MAIN, days_out(-30), frappe.utils.today(), regime=regime)
-		return next(
-			section for section in built["sections"] if section["key"] == "training"
-		)
+		return next(section for section in built["sections"] if section["key"] == "training")
 
 	def test_a_gap_and_wps_record_lands_in_both_the_gap_and_the_epa_packet(self):
 		record = self.record(
@@ -517,9 +515,7 @@ class TheGuards(TrainingTestCase):
 	def test_every_write_leaves_an_audit_row(self):
 		record = self.record()
 		self.assertAudited("record_training", "Success")
-		self.tool_data(
-			"sign_training_supervisor_review", {"name": record["name"], "supervisor": SUPERVISOR}
-		)
+		self.tool_data("sign_training_supervisor_review", {"name": record["name"], "supervisor": SUPERVISOR})
 		self.assertAudited("sign_training_supervisor_review", "Success")
 
 	def test_a_refused_write_is_audited_too(self):
@@ -536,9 +532,7 @@ class TheSupervisorReview(TrainingTestCase):
 		self.assertFalse(data["supervisor_reviewed"])
 		self.assertIsNone(data["supervisor_reviewed_by"])
 		self.assertIsNone(data["supervisor_reviewed_on"])
-		self.assertIn(
-			"§112.161(b)", " ".join(data["fsma_112_161_gaps"])
-		)
+		self.assertIn("§112.161(b)", " ".join(data["fsma_112_161_gaps"]))
 		self.assertIn("sign_training_supervisor_review", data["next_step"])
 
 	def test_signing_it_populates_all_three_fields(self):
@@ -598,9 +592,7 @@ class TheSupervisorReview(TrainingTestCase):
 
 	def test_replacing_an_existing_signature_needs_saying_so(self):
 		record = self.record()
-		self.tool_data(
-			"sign_training_supervisor_review", {"name": record["name"], "supervisor": SUPERVISOR}
-		)
+		self.tool_data("sign_training_supervisor_review", {"name": record["name"], "supervisor": SUPERVISOR})
 		third = self.an_employee_at(MAIN, "Cara Third", "HR-EMP-THIRD")
 		message = self.tool_error(
 			"sign_training_supervisor_review", {"name": record["name"], "supervisor": third}
@@ -687,9 +679,7 @@ class ReadingTheRegister(TrainingTestCase):
 		self.assertNotIn(self.psa, self.names(expiring_within_days=3650))
 
 	def test_unreviewed_only_is_the_worklist_for_the_gap_fda_cites_most(self):
-		self.tool_data(
-			"sign_training_supervisor_review", {"name": self.psa, "supervisor": SUPERVISOR}
-		)
+		self.tool_data("sign_training_supervisor_review", {"name": self.psa, "supervisor": SUPERVISOR})
 		self.assertEqual(sorted(self.names(unreviewed_only=True)), sorted([self.wps, self.heat]))
 
 	def test_it_filters_to_one_person(self):

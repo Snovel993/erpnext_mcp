@@ -74,11 +74,7 @@ def _nearest_reading(timeline: list, when: str):
 			continue
 		try:
 			gap = abs(
-				float(
-					frappe.utils.time_diff_in_seconds(
-						str(when), str(candidate.get("reading_datetime"))
-					)
-				)
+				float(frappe.utils.time_diff_in_seconds(str(when), str(candidate.get("reading_datetime"))))
 			)
 		except Exception:
 			continue
@@ -121,15 +117,14 @@ class FarmShift(Document):
 			)
 		if not self.start_datetime:
 			frappe.throw(
-				_("A shift needs a start time. It is the left edge of the exposure period every "
-				  "compliance question about this shift is asked against.")
+				_(
+					"A shift needs a start time. It is the left edge of the exposure period every "
+					"compliance question about this shift is asked against."
+				)
 			)
 
 	def _fill_from_the_foreman(self) -> None:
-		row = (
-			frappe.db.get_value("Employee", self.foreman, ["employee_name", "company"], as_dict=True)
-			or {}
-		)
+		row = frappe.db.get_value("Employee", self.foreman, ["employee_name", "company"], as_dict=True) or {}
 		if not str(self.foreman_name or "").strip():
 			self.foreman_name = row.get("employee_name") or self.foreman
 		if not self.company:
@@ -159,8 +154,12 @@ class FarmShift(Document):
 		seen = {}
 		for row in self.crew or []:
 			if not row.get("employee"):
-				frappe.throw(_("Every crew row needs an Employee. A name with no record behind it "
-							   "cannot be reconciled to a payroll register."))
+				frappe.throw(
+					_(
+						"Every crew row needs an Employee. A name with no record behind it "
+						"cannot be reconciled to a payroll register."
+					)
+				)
 			if not row.get("joined_at"):
 				row.joined_at = self.start_datetime
 			if not row.get("employee_name"):
@@ -238,11 +237,7 @@ class FarmShift(Document):
 		if not events or not readings:
 			return
 		timeline = sorted(
-			(
-				row
-				for row in readings
-				if str(row.get("reading_datetime") or "").strip()
-			),
+			(row for row in readings if str(row.get("reading_datetime") or "").strip()),
 			key=lambda row: str(row.get("reading_datetime")),
 		)
 		if not timeline:

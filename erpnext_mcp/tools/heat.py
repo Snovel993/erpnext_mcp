@@ -257,9 +257,7 @@ def create_heat_exposure_event(args: dict) -> ToolResult:
 			"checked_as_of": event_date,
 			"available": status.get("available", True),
 			"with_current_training": [entry["employee_name"] for entry in status.get("trained") or []],
-			"without_current_training": [
-				entry["employee_name"] for entry in status.get("untrained") or []
-			],
+			"without_current_training": [entry["employee_name"] for entry in status.get("untrained") or []],
 		},
 		"shift_timeline_events": len(events),
 		"obligation_gaps": gaps,
@@ -325,9 +323,7 @@ def _acclimatization_argument(raw, crew: list, shift_name: str) -> list:
 	if isinstance(raw, str):
 		raw = [part.strip() for part in raw.split(",") if part.strip()]
 	if not isinstance(raw, (list, tuple)):
-		raise ToolError(
-			f"acclimatization_plan must be a list of employees. Got {type(raw).__name__}."
-		)
+		raise ToolError(f"acclimatization_plan must be a list of employees. Got {type(raw).__name__}.")
 	on_crew = {str(entry.get("employee")) for entry in crew or []}
 	out = []
 	for entry in raw:

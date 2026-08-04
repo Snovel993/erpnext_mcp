@@ -55,9 +55,7 @@ class HousingUnit(Document):
 		if not self.parcel:
 			frappe.throw(_("Parcel is required — a building stands on ground somebody owns."))
 
-		self.owning_entity = (
-			frappe.db.get_value("Parcel", self.parcel, "owning_entity") or self.owning_entity
-		)
+		self.owning_entity = frappe.db.get_value("Parcel", self.parcel, "owning_entity") or self.owning_entity
 
 		duplicate = frappe.db.get_value(
 			"Housing Unit",

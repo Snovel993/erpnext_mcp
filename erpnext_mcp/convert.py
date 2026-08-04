@@ -181,7 +181,7 @@ def _run_soffice(binary: str, source: str, workdir: str) -> None:
 		source,
 	]
 	try:
-		completed = subprocess.run(  # noqa: S603 - a list, no shell, a path we created
+		completed = subprocess.run(
 			command,
 			capture_output=True,
 			timeout=TIMEOUT_SECONDS,
@@ -197,9 +197,7 @@ def _run_soffice(binary: str, source: str, workdir: str) -> None:
 		raise ConversionError(f"could not run {binary}: {type(exc).__name__}: {exc}") from None
 	if completed.returncode != 0:
 		detail = (completed.stderr or completed.stdout or b"").decode("utf-8", "replace").strip()
-		raise ConversionError(
-			f"LibreOffice exited {completed.returncode}: {detail[:400] or '<no output>'}"
-		)
+		raise ConversionError(f"LibreOffice exited {completed.returncode}: {detail[:400] or '<no output>'}")
 
 
 def _run_docx2pdf(source: str, target: str) -> None:

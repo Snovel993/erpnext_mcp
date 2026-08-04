@@ -50,6 +50,7 @@ from the release that shipped it and asserts the mirror refuses it.
 """
 
 import json
+from typing import ClassVar
 
 import frappe
 
@@ -58,7 +59,7 @@ from erpnext_mcp.api import mobile as mobile_api
 
 from .fixtures import MAIN
 from .harness import STORE
-from .test_api_mobile import WORKER, MobileAPITestCase
+from .test_api_mobile import MobileAPITestCase
 
 #: Frappe's own timestamp renderings, from `FrappeDate.formatters` +
 #: `ISO8601DateFormatter` in `LenientDecoding.swift:70-85`. A date the app cannot
@@ -195,7 +196,7 @@ class Codable:
 			raise ContractError(
 				f"{where} emitted {key}={value!r}, which is not a case of the Swift enum at "
 				f"{cls.SWIFT}:{line} ({', '.join(sorted(allowed))}). It decodes to `.unknown`, "
-				f"which the app renders as \"Unrecognized\" — the state machine has moved and "
+				f'which the app renders as "Unrecognized" — the state machine has moved and '
 				f"the fielded build has not."
 			)
 
@@ -255,7 +256,20 @@ class FarmTaskModel(Codable):
 	)
 	DATES = (("claimed_at", 126), ("started_at", 127))
 	ENUMS = (
-		("state", {"Draft", "Available", "Claimed", "In-Progress", "Awaiting-Review", "Completed", "Rejected", "Cancelled"}, 109),
+		(
+			"state",
+			{
+				"Draft",
+				"Available",
+				"Claimed",
+				"In-Progress",
+				"Awaiting-Review",
+				"Completed",
+				"Rejected",
+				"Cancelled",
+			},
+			109,
+		),
 		("urgency", {"Low", "Normal", "High", "Critical"}, 110),
 		("dispatch_mode", {"Dispatched", "Self-pick", "Either"}, 111),
 	)
@@ -350,8 +364,8 @@ class FinalizedFileModel(Codable):
 		if not (payload.get("file_token") or payload.get("file_url")):
 			raise ContractError(
 				f"{method} returned neither `file_token` nor `file_url`. "
-				f"{cls.SWIFT}:39 throws `FrappeError.decoding(\"Upload finalize returned no "
-				f"file handle.\")` on exactly this, and the evidence a worker has already "
+				f'{cls.SWIFT}:39 throws `FrappeError.decoding("Upload finalize returned no '
+				f'file handle.")` on exactly this, and the evidence a worker has already '
 				f"captured cannot be attached to anything."
 			)
 		return payload
@@ -585,7 +599,7 @@ class TheContractIsComplete(ContractTestCase):
 	"""
 
 	#: Method name → the test that decodes it, by number.
-	COVERED = {
+	COVERED: ClassVar[dict[str, str]] = {
 		"get_current_user_context": "test_01",
 		"list_my_tasks": "test_02",
 		"list_available_tasks": "test_03",
@@ -627,8 +641,7 @@ class TheContractIsComplete(ContractTestCase):
 			with self.subTest(method=method):
 				self.assertTrue(
 					any(name.startswith(prefix) for name in names),
-					f"{method} claims to be covered by {prefix}_*, which is not in "
-					f"EveryMobileMethodDecodes.",
+					f"{method} claims to be covered by {prefix}_*, which is not in EveryMobileMethodDecodes.",
 				)
 
 	def test_every_swift_file_a_mirror_names_is_on_disk(self):
@@ -708,7 +721,7 @@ class TheScreensHaveSomethingToShow(ContractTestCase):
 		EvidenceContractModel.decode(contract, "get_task", ".evidence_required")
 
 	def test_the_completion_tells_the_worker_what_their_work_produced(self):
-		""""Housing Inspection HI-… created" closes the loop; "Done" does not."""
+		""" "Housing Inspection HI-… created" closes the loop; "Done" does not."""
 		claimed = mobile_api.claim_task(task=self.task)
 		mobile_api.start_task(task=self.task)
 		_staged, photo = self.upload("photo", "FT_photo.jpg")

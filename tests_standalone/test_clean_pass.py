@@ -36,7 +36,7 @@ import frappe
 from erpnext_mcp.tools import dispatch
 
 from .harness import STORE
-from .test_dispatch import A_PHOTO, DispatchTestCase, WALK
+from .test_dispatch import A_PHOTO, WALK, DispatchTestCase
 
 #: `WALK` demands photos, a signature AND findings text. That third requirement
 #: is the shape that makes the original rule unsatisfiable, and the reason the

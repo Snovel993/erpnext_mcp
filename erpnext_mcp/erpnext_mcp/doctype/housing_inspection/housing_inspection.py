@@ -57,7 +57,9 @@ class HousingInspection(Document):
 
 	def validate(self):
 		if not self.unit:
-			frappe.throw(_("Housing Unit is required — an inspection of nothing in particular is not evidence."))
+			frappe.throw(
+				_("Housing Unit is required — an inspection of nothing in particular is not evidence.")
+			)
 		if not self.inspection_date:
 			frappe.throw(_("Inspection Date is required."))
 		if str(self.inspection_date) > frappe.utils.today():

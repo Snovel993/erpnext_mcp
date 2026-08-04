@@ -162,9 +162,7 @@ def _weather_settings() -> None:
 			return
 		settings.seed_defaults(weather.SETTINGS_DOCTYPE)
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
-		print(
-			f"erpnext_mcp: Weather Settings defaults were not seeded — {type(exc).__name__}: {exc}"
-		)
+		print(f"erpnext_mcp: Weather Settings defaults were not seeded — {type(exc).__name__}: {exc}")
 
 
 def _compliance_fields() -> None:
@@ -180,10 +178,7 @@ def _compliance_fields() -> None:
 		print(f"erpnext_mcp: compliance fields were not installed — {type(exc).__name__}: {exc}")
 		return
 	for failure in report.get("failed") or ():
-		print(
-			f"erpnext_mcp: could not add {failure['doctype']}.{failure['fieldname']} — "
-			f"{failure['reason']}"
-		)
+		print(f"erpnext_mcp: could not add {failure['doctype']}.{failure['fieldname']} — {failure['reason']}")
 
 
 def _command_center() -> None:
@@ -329,8 +324,7 @@ _PRECIOUS_DOCTYPES = (
 	),
 	(
 		"Lease",
-		"the lease register, in both directions, including rent terms that exist in "
-		"no other digital form",
+		"the lease register, in both directions, including rent terms that exist in no other digital form",
 	),
 	(
 		"Related Party",
@@ -536,8 +530,7 @@ def before_uninstall() -> None:
 	if losses:
 		lines = "\n".join(f"  {count:>6}  {doctype} — {what}" for doctype, count, what in losses)
 		exports = "\n".join(
-			f"  bench --site <site> backup --only-doctype '{doctype}'"
-			for doctype, _count, _what in losses
+			f"  bench --site <site> backup --only-doctype '{doctype}'" for doctype, _count, _what in losses
 		)
 		print(
 			"\nerpnext_mcp: uninstalling will drop these records permanently:\n"

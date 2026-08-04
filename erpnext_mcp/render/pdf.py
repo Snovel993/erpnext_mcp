@@ -433,7 +433,9 @@ class PdfDocument:
 	def _compose(self, number: int, total: int, ops: list[str]) -> str:
 		"""One page's content stream, with its footer drawn last."""
 		body = list(ops)
-		body.append(f"0.50 w {MARGIN:.2f} {FOOTER_RULE_Y:.2f} m {PAGE_WIDTH - MARGIN:.2f} {FOOTER_RULE_Y:.2f} l S")
+		body.append(
+			f"0.50 w {MARGIN:.2f} {FOOTER_RULE_Y:.2f} m {PAGE_WIDTH - MARGIN:.2f} {FOOTER_RULE_Y:.2f} l S"
+		)
 		if self.footer:
 			body.append(
 				f"BT /{FONT_REGULAR} {SIZE_SMALL:.2f} Tf 1 0 0 1 {MARGIN:.2f} {FOOTER_BASELINE:.2f} Tm "
@@ -460,24 +462,26 @@ def _assemble(streams: list[str], title: str, author: str, subject: str, produce
 
 	objects: list[bytes] = []
 	objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
-	objects.append(
-		f"<< /Type /Pages /Kids [{kids}] /Count {count} >>".encode("ascii")
-	)
+	objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {count} >>".encode("ascii"))
 	for font_key in (FONT_REGULAR, FONT_BOLD, FONT_ITALIC):
 		objects.append(
 			f"<< /Type /Font /Subtype /Type1 /BaseFont /{_FONT_NAMES[font_key]} "
 			"/Encoding /WinAnsiEncoding >>".encode("ascii")
 		)
-	info = b"<< " + b" ".join(
-		part
-		for part in (
-			b"/Title (" + encode(escape(title)) + b")" if title else b"",
-			b"/Author (" + encode(escape(author)) + b")" if author else b"",
-			b"/Subject (" + encode(escape(subject)) + b")" if subject else b"",
-			b"/Producer (" + encode(escape(producer)) + b")" if producer else b"",
+	info = (
+		b"<< "
+		+ b" ".join(
+			part
+			for part in (
+				b"/Title (" + encode(escape(title)) + b")" if title else b"",
+				b"/Author (" + encode(escape(author)) + b")" if author else b"",
+				b"/Subject (" + encode(escape(subject)) + b")" if subject else b"",
+				b"/Producer (" + encode(escape(producer)) + b")" if producer else b"",
+			)
+			if part
 		)
-		if part
-	) + b" >>"
+		+ b" >>"
+	)
 	objects.append(info)
 
 	for index, stream in enumerate(streams):
@@ -490,7 +494,9 @@ def _assemble(streams: list[str], title: str, author: str, subject: str, produce
 			).encode("ascii")
 		)
 		payload = encode(stream)
-		objects.append(b"<< /Length " + str(len(payload)).encode("ascii") + b" >>\nstream\n" + payload + b"\nendstream")
+		objects.append(
+			b"<< /Length " + str(len(payload)).encode("ascii") + b" >>\nstream\n" + payload + b"\nendstream"
+		)
 
 	out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
 	offsets = [0]

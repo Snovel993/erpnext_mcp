@@ -160,10 +160,7 @@ class EmployeeTrainingRecord(Document):
 		paging through last season's logs is entitled to the name that was on the
 		gate then. So it is snapshotted, once, and never rewritten on later saves.
 		"""
-		row = (
-			frappe.db.get_value("Employee", self.employee, ["employee_name", "company"], as_dict=True)
-			or {}
-		)
+		row = frappe.db.get_value("Employee", self.employee, ["employee_name", "company"], as_dict=True) or {}
 		if not str(self.employee_name or "").strip():
 			self.employee_name = row.get("employee_name") or self.employee
 		if not self.company:

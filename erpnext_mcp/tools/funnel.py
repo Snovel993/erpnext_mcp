@@ -238,7 +238,7 @@ def _tls_report(host: str, port: int, timeout: int) -> dict:
 				),
 			}
 		)
-	except socket.timeout:
+	except TimeoutError:
 		report["error"] = f"timed out after {timeout}s"
 		report["diagnosis"] = (
 			"nothing answered. Either Funnel is not enabled for this node, or this container "
@@ -303,7 +303,7 @@ def _http_report(endpoint: str, authenticate: bool, timeout: int) -> dict:
 			}
 		)
 		report.update(_read_rpc(payload))
-	except socket.timeout:
+	except TimeoutError:
 		report["error"] = f"timed out after {timeout}s"
 	except Exception as exc:
 		report["error"] = f"{type(exc).__name__}: {exc}"
@@ -312,7 +312,7 @@ def _http_report(endpoint: str, authenticate: bool, timeout: int) -> dict:
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
-	def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+	def redirect_request(self, req, fp, code, msg, headers, newurl):
 		return None
 
 
@@ -532,7 +532,7 @@ def _read_serve_config(parsed: dict) -> dict:
 		if host:
 			out["funnel_urls"].append(f"https://{host.strip('.')}" + ("" if port == "443" else f":{port}"))
 
-	for port in (parsed.get("TCP") or {}):
+	for port in parsed.get("TCP") or {}:
 		if str(port).isdigit():
 			out["serve_ports"].append(int(port))
 
@@ -597,7 +597,7 @@ def _run(binary: str, argv: list, timeout: int) -> dict:
 	"""
 	command = [binary, *argv]
 	try:
-		completed = subprocess.run(  # noqa: S603 - fixed argv, no shell, no caller input
+		completed = subprocess.run(
 			command,
 			capture_output=True,
 			text=True,

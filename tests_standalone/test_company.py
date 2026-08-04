@@ -170,9 +170,7 @@ class CreateCompany(CompanyTestCase):
 		self.assertEqual(data["fiscal_year"]["year_end_date"], "2027-03-31")
 
 	def test_a_month_name_is_accepted_as_well_as_a_number(self):
-		self.assertEqual(
-			self.a_company(fiscal_year_start_month="April")["fiscal_year_start_month"], 4
-		)
+		self.assertEqual(self.a_company(fiscal_year_start_month="April")["fiscal_year_start_month"], 4)
 
 	def test_a_start_month_before_today_in_the_year_keeps_this_year(self):
 		"""Today in the fixture is 2026-07-24; an April year that started in
@@ -201,9 +199,7 @@ class CreateCompany(CompanyTestCase):
 		self.assertIn("Nothing was created", error)
 
 	def test_a_duplicate_abbreviation_is_refused_and_says_why_it_matters(self):
-		error = self.tool_error(
-			"create_company", {"company_name": "Something Else LLC", "abbr": MAIN_ABBR}
-		)
+		error = self.tool_error("create_company", {"company_name": "Something Else LLC", "abbr": MAIN_ABBR})
 		self.assertIn(MAIN, error)
 		self.assertIn("docname", error)
 		self.assertFalse(STORE.get_raw("Company", "Something Else LLC"))
@@ -261,9 +257,7 @@ class CreateCompany(CompanyTestCase):
 
 	def test_missing_required_arguments_are_refused(self):
 		self.assertIn("company_name is required", self.tool_error("create_company", {"abbr": "XX"}))
-		self.assertIn(
-			"abbr is required", self.tool_error("create_company", {"company_name": "No Abbr LLC"})
-		)
+		self.assertIn("abbr is required", self.tool_error("create_company", {"company_name": "No Abbr LLC"}))
 
 	def test_dry_run_reports_the_plan_and_writes_nothing(self):
 		data = self.tool_data(
@@ -343,9 +337,7 @@ class UpdateCompany(CompanyTestCase):
 		"""The refusal has to be about the ledger, not about the field — a
 		blanket no would block a legitimate first-day correction."""
 		self.a_company()
-		data = self.tool_data(
-			"update_company", {"company": "Constancy Farms LLC", "default_currency": "CAD"}
-		)
+		data = self.tool_data("update_company", {"company": "Constancy Farms LLC", "default_currency": "CAD"})
 		self.assertEqual(data["changed"]["default_currency"], ["USD", "CAD"])
 
 	def test_an_unknown_currency_is_still_refused_on_a_clean_company(self):
@@ -566,9 +558,7 @@ class MultiCompanyScoping(CompanyTestCase):
 
 	def test_both_new_companies_exist_alongside_the_fixture_pair(self):
 		names = [row["company"] for row in self.tool_data("list_companies")["companies"]]
-		self.assertEqual(
-			sorted(names), sorted([MAIN, OTHER, "Constancy Farms LLC", "Highland Holdings LLC"])
-		)
+		self.assertEqual(sorted(names), sorted([MAIN, OTHER, "Constancy Farms LLC", "Highland Holdings LLC"]))
 
 	def test_each_company_reports_its_own_abbreviation(self):
 		rows = {row["company"]: row for row in self.tool_data("list_companies")["companies"]}
@@ -601,9 +591,7 @@ class MultiCompanyScoping(CompanyTestCase):
 		"""`resolve_company` only infers on a single-company site, and this is
 		the tool most likely to be called without one."""
 		self.configure(enabled=1, **ALL_ON)
-		error = self.tool_error(
-			"set_company_defaults", {"defaults": {"round_off_account": "6900"}}
-		)
+		error = self.tool_error("set_company_defaults", {"defaults": {"round_off_account": "6900"}})
 		self.assertIn("company is required", error)
 
 	def test_set_company_defaults_names_the_companies_it_could_have_meant(self):

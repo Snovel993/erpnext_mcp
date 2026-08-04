@@ -88,9 +88,7 @@ class TheUrlAllowlist(FunnelTestCase):
 		)
 
 	def test_a_host_that_is_neither_is_refused(self):
-		message = self.tool_error(
-			"validate_public_endpoint", {"url": "https://internal.example.com"}
-		)
+		message = self.tool_error("validate_public_endpoint", {"url": "https://internal.example.com"})
 		self.assertIn("short allowlist and not an argument", message)
 		self.assertIn("Nothing was sent", message)
 
@@ -101,18 +99,14 @@ class TheUrlAllowlist(FunnelTestCase):
 	def test_a_url_carrying_a_path_is_refused_as_a_forgery_primitive(self):
 		"""The tool appends the MCP path itself. One that fetched an arbitrary path
 		from inside the network would be a request-forgery primitive."""
-		message = self.tool_error(
-			"validate_public_endpoint", {"url": "https://umbrel.tail4a2b.ts.net/admin"}
-		)
+		message = self.tool_error("validate_public_endpoint", {"url": "https://umbrel.tail4a2b.ts.net/admin"})
 		self.assertIn("carries a path", message)
 		self.assertIn("request-forgery", message)
 
 	def test_a_url_carrying_a_query_is_refused_too(self):
 		self.assertIn(
 			"carries a path",
-			self.tool_error(
-				"validate_public_endpoint", {"url": "https://umbrel.tail4a2b.ts.net?x=1"}
-			),
+			self.tool_error("validate_public_endpoint", {"url": "https://umbrel.tail4a2b.ts.net?x=1"}),
 		)
 
 	def test_a_site_with_nothing_configured_and_no_url_says_what_to_fill_in(self):
@@ -332,11 +326,7 @@ class TheLocalConfig(FunnelTestCase):
 	def test_a_web_handler_shows_what_the_port_forwards_to(self):
 		parsed = {
 			"AllowFunnel": {"umbrel.tail4a2b.ts.net:443": True},
-			"Web": {
-				"umbrel.tail4a2b.ts.net:443": {
-					"Handlers": {"/": {"Proxy": "http://127.0.0.1:8000"}}
-				}
-			},
+			"Web": {"umbrel.tail4a2b.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8000"}}}},
 		}
 		read = funnel._read_serve_config(parsed)
 		self.assertEqual(read["web_handlers"][0]["proxy"], "http://127.0.0.1:8000")
@@ -362,9 +352,7 @@ def _fake_run(binary, argv, timeout):
 					"AllowFunnel": {"umbrel.tail4a2b.ts.net:443": True},
 					"TCP": {"443": {"HTTPS": True}},
 					"Web": {
-						"umbrel.tail4a2b.ts.net:443": {
-							"Handlers": {"/": {"Proxy": "http://127.0.0.1:8000"}}
-						}
+						"umbrel.tail4a2b.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8000"}}}
 					},
 				}
 			),
@@ -402,9 +390,7 @@ class NoMutation(SeededTestCase):
 
 	def test_there_are_exactly_two_of_them(self):
 		names = sorted(
-			name
-			for name, spec in registry.TOOLS.items()
-			if spec["handler"].__module__.endswith(".funnel")
+			name for name, spec in registry.TOOLS.items() if spec["handler"].__module__.endswith(".funnel")
 		)
 		self.assertEqual(names, ["get_tailscale_funnel_config", "validate_public_endpoint"])
 

@@ -125,9 +125,7 @@ def note_payable(note: str, company: str = "") -> dict:
 	if frappe.db.exists(NOTE, note):
 		row = frappe.db.get_value(NOTE, note, fields, as_dict=True)
 		if company and row and row.get("borrower") != company:
-			raise ToolError(
-				f"Note Payable {note!r} is owed by {row.get('borrower')!r}, not {company!r}"
-			)
+			raise ToolError(f"Note Payable {note!r} is owed by {row.get('borrower')!r}, not {company!r}")
 		return dict(row)
 
 	filters = {"note_name": note}
@@ -271,9 +269,7 @@ def create_note_payable(args: dict) -> ToolResult:
 		else principal_original
 	)
 	if outstanding < 0:
-		raise ToolError(
-			f"principal_outstanding cannot be negative, got {outstanding}. Nothing was created."
-		)
+		raise ToolError(f"principal_outstanding cannot be negative, got {outstanding}. Nothing was created.")
 	if interest_rate < 0 or interest_rate > 100:
 		raise ToolError(f"interest_rate is an annual percentage between 0 and 100, got {interest_rate}")
 
@@ -365,7 +361,9 @@ def create_note_payable(args: dict) -> ToolResult:
 			}
 		).data
 
-	row = _describe(dict(frappe.db.get_value(NOTE, doc.name, compat.existing_fields(NOTE, _NOTE_FIELDS), as_dict=True)))
+	row = _describe(
+		dict(frappe.db.get_value(NOTE, doc.name, compat.existing_fields(NOTE, _NOTE_FIELDS), as_dict=True))
+	)
 	data = {
 		**row,
 		"asset_link": asset_link,
@@ -454,7 +452,12 @@ def record_loan_payment(args: dict) -> ToolResult:
 		)
 
 	notes_payable_account = _payment_account(
-		args, note, "notes_payable_account", "linked_gl_account", company, ("Liability",),
+		args,
+		note,
+		"notes_payable_account",
+		"linked_gl_account",
+		company,
+		("Liability",),
 		forbidden_types=("Payable", "Receivable"),
 		missing=(
 			"this note has no linked_gl_account and no notes_payable_account was passed, so "
@@ -465,7 +468,12 @@ def record_loan_payment(args: dict) -> ToolResult:
 	interest_account = ""
 	if interest:
 		interest_account = _payment_account(
-			args, note, "interest_expense_account", "interest_expense_account", company, ("Expense",),
+			args,
+			note,
+			"interest_expense_account",
+			"interest_expense_account",
+			company,
+			("Expense",),
 			missing=(
 				"this payment has an interest component and the note has no "
 				"interest_expense_account, so there is no expense account to debit. Set one on "
@@ -718,8 +726,7 @@ def list_notes_payable(args: dict) -> ToolResult:
 	}
 	return ToolResult(
 		data,
-		f"{len(notes)} note(s) payable for {company}: {len(active)} active, "
-		f"{total_outstanding} outstanding",
+		f"{len(notes)} note(s) payable for {company}: {len(active)} active, {total_outstanding} outstanding",
 	)
 
 
@@ -777,9 +784,7 @@ def close_note_payable(args: dict) -> ToolResult:
 	disposition = matched[0]
 
 	if str(note.get("status") or "") in CLOSED_STATUSES:
-		raise ToolError(
-			f"Note Payable {note['name']} is already {note['status']}. Nothing was changed."
-		)
+		raise ToolError(f"Note Payable {note['name']} is already {note['status']}. Nothing was changed.")
 	origination = str(note.get("origination_date") or "")
 	if origination and disposition_date < origination:
 		raise ToolError(
@@ -848,7 +853,9 @@ def close_note_payable(args: dict) -> ToolResult:
 	)
 	doc.save()
 
-	after = dict(frappe.db.get_value(NOTE, note["name"], compat.existing_fields(NOTE, _NOTE_FIELDS), as_dict=True))
+	after = dict(
+		frappe.db.get_value(NOTE, note["name"], compat.existing_fields(NOTE, _NOTE_FIELDS), as_dict=True)
+	)
 	data = {
 		**_describe(after),
 		"disposition": disposition,
@@ -886,8 +893,7 @@ def close_note_payable(args: dict) -> ToolResult:
 	return ToolResult(
 		data,
 		f"closed Note Payable {note['name']} as {disposition} on {disposition_date} "
-		f"({outstanding} outstanding at close)"
-		+ (f", superseded by {successor}" if successor else ""),
+		f"({outstanding} outstanding at close)" + (f", superseded by {successor}" if successor else ""),
 		docstatus_delta="",
 	)
 
