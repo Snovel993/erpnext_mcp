@@ -1007,6 +1007,9 @@ APP_DOCTYPES = {
 	"Inspection Session": "inspection_session",
 	"Inspection Session Evidence": "inspection_session_evidence",
 	"Inspection Session Section Submission": "inspection_session_section_submission",
+	# v0.22.0. The rule DEFINITIONS, which the sweep now reads instead of the
+	# dict `alerts/rules.py` used to populate at import time.
+	"Compliance Rule": "compliance_rule",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -2702,6 +2705,13 @@ CHILD_TABLE_SOURCES = {
 		# template's regimes would come back empty and every regime-filtered
 		# listing would silently answer "none".
 		("Inspection Template", "regimes"),
+		# v0.22.0. A fourth parent, and the same reason a fourth time:
+		# `compliance_rules.regimes_of` reads the child doctype directly with a
+		# `parenttype` filter, so a rule's regimes would come back empty — and a
+		# rule with no regimes is invisible to `refresh_compliance_alerts(regime=…)`
+		# and to every regime-filtered packet, which is the one failure a
+		# compliance calendar must not have quietly.
+		("Compliance Rule", "regimes"),
 	),
 	# v0.19.3. `shifts.crew_of`, `events_of` and `weather_of` all query the child
 	# doctype directly with a `parent` filter, because the Attendance bridge and

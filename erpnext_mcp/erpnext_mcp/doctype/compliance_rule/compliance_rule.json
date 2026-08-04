@@ -1,0 +1,492 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-04 09:00:00.000000",
+ "description": "One compliance rule, defined as DATA rather than as code: what it scans, what state makes it ripe, which regulation it answers to, and what it says when it fires. A RULE IS A RECORD ANYBODY CAN EDIT — a threshold moves, a citation is renumbered, an operator turns one off for a season, and none of it is a code release. WHAT DOES NOT MOVE IS THE ENGINE: evaluation is deterministic, reads the current state of the target records, and involves no model at sweep time. AI belongs at authoring time, behind a human approval, which is what `authored_by`, `ai_source_citation`, `human_approved_by` and `human_approved_on` are for — an auditor asking 'who decided this and when' reads the answer off the row. RULES ARE VERSIONED BY COPY, exactly as Inspection Templates are: an edit writes a NEW row at version+1 and points the old row's `superseded_by` at it, so a sweep already running against v1 sees a definition that cannot change underneath it, and an alert raised last April can still be read against the rule that raised it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "rule_id",
+  "title",
+  "category",
+  "identity_col",
+  "enabled",
+  "version",
+  "superseded_by",
+  "active_row_flag",
+  "scan_section",
+  "target_doctype",
+  "requires_doctypes",
+  "requires_fields",
+  "scan_col",
+  "builtin_scanner",
+  "custom_python",
+  "cadence_section",
+  "date_field",
+  "cadence_days",
+  "window_field",
+  "missing_date_behaviour",
+  "due_date_mode",
+  "cadence_col",
+  "threshold_critical_days",
+  "threshold_warning_days",
+  "severity_critical",
+  "severity_warning",
+  "severity_expired",
+  "scope_section",
+  "scope_filters_json",
+  "extra_parameters_json",
+  "message_section",
+  "message_template",
+  "regimes_from_field",
+  "producer_section",
+  "producer_task_template",
+  "producer_farm_task_type",
+  "producer_col",
+  "producer_skill_required",
+  "evidence_contract_json",
+  "regime_section",
+  "regimes",
+  "regulation_citations",
+  "regime_col",
+  "retention_years",
+  "audit_packet_types",
+  "gate_section",
+  "kairotic_gate_description",
+  "purpose",
+  "provenance_section",
+  "authored_by",
+  "ai_source_citation",
+  "provenance_col",
+  "human_approved_by",
+  "human_approved_on",
+  "approver_employee",
+  "approver_signature"
+ ],
+ "fields": [
+  {
+   "default": "CRULE-.YYYY.-.####",
+   "description": "The series a Compliance Rule is named from, expanded by the controller rather than by Frappe's naming_series hook so a docname is the same shape on a bench and in the standalone suite — CRULE-2026-0001. The year is the year the rule was authored, which is also the year an auditor asking 'when did you start looking for this' is after.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "CRULE-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The stable key this rule's alerts are filed under — `certification_expiring`, `training_expiring`. IT IS THE FIRST SEGMENT OF EVERY ALERT DOCNAME (`<rule_id>:<source_doctype>:<source_name>`), so it must never change on a live rule: changing it orphans every alert already raised, together with every snooze and every human dismissal somebody set on them. DELIBERATELY NOT UNIQUE AT THE SCHEMA LEVEL, because a rule is versioned by copy and v1 and v2 share a rule_id by construction. What may not exist twice is an ENABLED, unsuperseded row — enforced in the controller, and reflected on `active_row_flag`.",
+   "fieldname": "rule_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Rule ID",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What the rule says, in the words somebody reads on a phone at seven in the morning — 'A certificate or licence is inside its renewal window', not 'rule 1'.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "default": "Records",
+   "description": "Which shelf of the compliance calendar this rule's alerts land on. The calendar groups by it, and a category nobody uses is a group nobody opens.",
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Audits\nCertifications\nFilings\nHousing\nPolicies\nRecords\nWater and Sanitation\nWorkforce",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "Whether the sweep runs this rule. OFF IS NOT DELETED: an inactive rule raises nothing AND DISMISSES NOTHING, so the alerts it already owns stay exactly as they were — the same reading a rule skipped for a missing DocType gets, and for the same reason. A rule cannot be enabled until `human_approved_by` and `human_approved_on` are filled in; a new rule is therefore authored in Draft and approved before it can ever fire.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "1",
+   "description": "Which version of this rule this row is. An edit through update_compliance_rule writes v+1 as a NEW row and never touches this one, so a sweep already walking v1 finishes against the definition it started with.",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Version",
+   "read_only": 1
+  },
+  {
+   "description": "The row that replaced this one. A soft supersede: this row is disabled, never deleted, so the definition an alert was raised under is still on the site in full.",
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "Compliance Rule",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "Computed, never typed: 1 when this row is the one the sweep will run for its rule_id — enabled and not superseded. It is the column the 'one live row per rule_id' constraint is read off, and the one an index can answer 'what is the rule set tonight' from without joining.",
+   "fieldname": "active_row_flag",
+   "fieldtype": "Check",
+   "label": "Active Row",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "scan_section",
+   "fieldtype": "Section Break",
+   "label": "What it scans"
+  },
+  {
+   "description": "The DocType whose rows this rule walks. Required for a declarative rule; a rule that delegates to a shipped scanner or to custom_python still names it, because it is what an operator reads to know what the rule is about and what `requires_doctypes` defaults to.",
+   "fieldname": "target_doctype",
+   "fieldtype": "Link",
+   "label": "Target DocType",
+   "options": "DocType",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Comma-separated DocTypes that must exist on the site for this rule to run at all. Defaults to `target_doctype`. A rule whose DocTypes are absent is SKIPPED, and skipping raises nothing and dismisses nothing — an absent DocType is not evidence that anybody did the work.",
+   "fieldname": "requires_doctypes",
+   "fieldtype": "Small Text",
+   "label": "Requires DocTypes"
+  },
+  {
+   "description": "Comma-separated fields that must exist on `target_doctype` for this rule to run — `i9_status`, `flc_license_expiration`. A compliance field this app installs on demand is absent on a site that has not run install_compliance_fields, and a rule that scanned for it anyway would report every employee as clean. The rule is skipped by name instead, which says what the fix is.",
+   "fieldname": "requires_fields",
+   "fieldtype": "Small Text",
+   "label": "Requires Fields"
+  },
+  {
+   "fieldname": "scan_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The name of a scanner that SHIPS WITH THIS APP, for the rules whose gate is a join no set of declarative fields can express — a finding superseded by a later clean record, a child table walked and reduced to its worst row, two date fields that only matter together. The record still owns everything an operator would change: the thresholds, the scope, the citations, the regimes, the message where the scanner uses one, and the switch. Only the SHAPE of the scan is code, and it is code that was reviewed, tested and shipped rather than typed into a text field. list_compliance_rules names the scanners this site has.",
+   "fieldname": "builtin_scanner",
+   "fieldtype": "Data",
+   "label": "Built-in Scanner",
+   "search_index": 1
+  },
+  {
+   "description": "THE ESCAPE HATCH, AND IT IS MEANT TO STAY SMALL. A short restricted-Python program, evaluated by this app's own AST interpreter — never `exec`, never `eval` — which is handed `frappe` (read-only helpers), `today`, the rule's thresholds and a small standard library, and returns a list of observations. `import`, `open`, `exec`, `eval`, `while`, `def`, `class`, `lambda` and every dunder attribute are refused, the step count is bounded and the wall clock is bounded. Prefer the declarative fields: every rule that needs this is a primitive this framework has not grown yet, and an AI-proposed rule with this field filled in is flagged for extra review precisely because a text field that runs is the one part of a data-defined rule that is not merely data.",
+   "fieldname": "custom_python",
+   "fieldtype": "Code",
+   "label": "Custom Python",
+   "options": "Python"
+  },
+  {
+   "fieldname": "cadence_section",
+   "fieldtype": "Section Break",
+   "label": "The cadence"
+  },
+  {
+   "description": "The field on `target_doctype` the clock runs from — `expiration_date`, `last_habitability_inspection`, `review_due_date`. LEAVE IT EMPTY FOR A RULE WITH NO CLOCK: a rule whose whole condition is a scope filter (an I-9 recorded as Expired) fires on every matching row at `severity_expired`, which is the honest reading — the row is already past due by the only measure the rule has.",
+   "fieldname": "date_field",
+   "fieldtype": "Data",
+   "label": "Date Field"
+  },
+  {
+   "default": "0",
+   "description": "How often the activity must recur, in days. The due date is `date_field + cadence_days`, so 365 on a last-inspection date means the annual walk and 0 means the date field IS the deadline (an expiry, a review date). It is the real interval the thing takes in the world, not a reminder preference.",
+   "fieldname": "cadence_days",
+   "fieldtype": "Int",
+   "label": "Cadence (days)"
+  },
+  {
+   "description": "A field on the row carrying ITS OWN lead time in days, used in place of `threshold_warning_days` where it is set — `renewal_window_days` on a certificate, because the turnaround an issuing body actually takes is a property of the certificate and not of the rule. Empty means every row uses the rule's threshold.",
+   "fieldname": "window_field",
+   "fieldtype": "Data",
+   "label": "Per-row Window Field"
+  },
+  {
+   "default": "Skip",
+   "description": "What a row with NO date in `date_field` means. `Skip` is right for an expiry — a training with no expiry does not lapse, and a renewal alert nobody can clear is how a calendar stops being read. `Raise` is right for a cadence — a cabin nobody has ever inspected is the most overdue cabin there is, and answering 'no date, no alert' would hide exactly the unit somebody needs to walk.",
+   "fieldname": "missing_date_behaviour",
+   "fieldtype": "Select",
+   "label": "When the date is missing",
+   "options": "Skip\nRaise"
+  },
+  {
+   "default": "From Anchor",
+   "description": "What due date the alert carries. `From Anchor` is `date_field + cadence_days`, and is blank where the row has no date. `Today` is for a rule with no clock, whose condition is true now. `None` leaves it empty. The calendar sorts on it, so a rule that set the wrong one sorts wrongly rather than failing.",
+   "fieldname": "due_date_mode",
+   "fieldtype": "Select",
+   "label": "Due Date",
+   "options": "From Anchor\nToday\nNone"
+  },
+  {
+   "fieldname": "cadence_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "30",
+   "description": "Fire at `severity_critical` when this many days or fewer remain. NEGATIVE MEANS THE BAND NEVER FIRES — a rule that only has anything to say once the date has passed sets -1 here, and the row is then reached only by `severity_expired`. Whatever number is here should be the real lead time past which starting late means missing it, and somebody should be able to say where it came from.",
+   "fieldname": "threshold_critical_days",
+   "fieldtype": "Int",
+   "label": "Critical Within (days)"
+  },
+  {
+   "default": "90",
+   "description": "Fire at `severity_warning` when this many days or fewer remain and the critical band was not reached. It is also the window OUTSIDE which the rule says nothing at all: a certificate 200 days out raises nothing however often the sweep runs. Negative means the band never fires. Overridden per row by `window_field` where that is set.",
+   "fieldname": "threshold_warning_days",
+   "fieldtype": "Int",
+   "label": "Warning Within (days)"
+  },
+  {
+   "default": "Critical",
+   "description": "The severity of the critical band. Critical means something is blocked TODAY — a person cannot lawfully work, a block cannot lawfully be entered. A rule that raises Critical for something merely needing attention devalues the word for the rules that meant it.",
+   "fieldname": "severity_critical",
+   "fieldtype": "Select",
+   "label": "Critical Band Severity",
+   "options": "Critical\nWarning\nInfo"
+  },
+  {
+   "default": "Warning",
+   "description": "The severity of the warning band. Warning means it needs doing this month; Info is context, and is the right answer for a deadline that has not yet passed on something nobody is blocked by.",
+   "fieldname": "severity_warning",
+   "fieldtype": "Select",
+   "label": "Warning Band Severity",
+   "options": "Critical\nWarning\nInfo"
+  },
+  {
+   "default": "Critical",
+   "description": "The severity once the due date has PASSED — and, for a rule with no `date_field`, the severity every matching row raises. Separate from the bands because the two are different facts: a licence expiring in a fortnight and a licence that expired last month are not the same conversation, and a framework that raised both at one severity would make the second unfindable.",
+   "fieldname": "severity_expired",
+   "fieldtype": "Select",
+   "label": "Once Past Due",
+   "options": "Critical\nWarning\nInfo"
+  },
+  {
+   "fieldname": "scope_section",
+   "fieldtype": "Section Break",
+   "label": "Scope"
+  },
+  {
+   "description": "A JSON list of filters, ALL of which must hold for a row to be considered — `[{\"field\": \"status\", \"op\": \"eq\", \"value\": \"Active\", \"default\": \"Active\"}]`. Operators: eq, ne, gt, lt, gte, lte, in, nin, isnull, isnotnull, contains, ncontains. `default` is the value an EMPTY column is read as, which is how 'a policy with no status counts as Active' is said without a line of code — and getting it wrong is how a filter silently excludes every row that never had the field set. A filter naming a field this site has not got is skipped and reported in the sweep's warnings rather than refusing the whole rule. Empty list means every row of the target doctype.",
+   "fieldname": "scope_filters_json",
+   "fieldtype": "Long Text",
+   "label": "Scope Filters (JSON)"
+  },
+  {
+   "description": "A JSON object of NAMED INTERVALS a built-in scanner reads by name — {\"spray_season_days\": 120}. It exists because two of the shipped rules carry a second interval that `cadence_days` cannot hold: `water_test_stale` needs both the 90-day testing cadence and the 120-day spray season that gates it, and `audit_action_overdue` needs the grace period before a late action becomes a finding. Deliberately NOT a general-purpose configuration bag — every key in it is documented on the rule that reads it, and a key nothing reads is a setting somebody will one day change expecting something to happen.",
+   "fieldname": "extra_parameters_json",
+   "fieldtype": "Long Text",
+   "label": "Extra Parameters (JSON)"
+  },
+  {
+   "fieldname": "message_section",
+   "fieldtype": "Section Break",
+   "label": "What it says"
+  },
+  {
+   "description": "The alert's text, as a Jinja template rendered in a SANDBOX WITH NO FRAPPE IN IT — the row is available as `row` and by field name, plus `days_remaining`, `days_overdue`, `due_date`, `today`, `subject`, `regimes`, and the rule's own thresholds. The message is what somebody reads on a phone and decides on, so it should say what is true, what it costs, and what closes it. A message that only says 'expires soon' makes the reader open the record to learn anything, which is the work the alert existed to save.",
+   "fieldname": "message_template",
+   "fieldtype": "Small Text",
+   "label": "Message Template"
+  },
+  {
+   "description": "A field on the row carrying ITS OWN regime tags, copied onto each alert in place of the rule's — `regimes` on a training record, because the record says what that afternoon actually covered and the curriculum does not. An untagged row produces an untagged alert, deliberately: inventing a tag so the row is not bare would make the calendar claim coverage the register does not have.",
+   "fieldname": "regimes_from_field",
+   "fieldtype": "Data",
+   "label": "Per-row Regimes Field"
+  },
+  {
+   "fieldname": "producer_section",
+   "fieldtype": "Section Break",
+   "label": "What it asks somebody to do"
+  },
+  {
+   "description": "An Inspection Template this rule's work is done through, where the answer to the alert is a multi-section visit rather than one task. Set it and the dispatch side raises a session from this template instead of a bare Farm Task.",
+   "fieldname": "producer_task_template",
+   "fieldtype": "Link",
+   "label": "Producer Template",
+   "options": "Inspection Template"
+  },
+  {
+   "description": "The Farm Task type raised for this rule where no template is set — 'Inspection', 'Repair'. Same free-text vocabulary Farm Task.task_type uses, so the board filters without translation.",
+   "fieldname": "producer_farm_task_type",
+   "fieldtype": "Data",
+   "label": "Producer Task Type"
+  },
+  {
+   "fieldname": "producer_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The crew skill the producer task needs — 'camp_maintenance', 'applicator'. Same vocabulary Farm Task.skill_required uses.",
+   "fieldname": "producer_skill_required",
+   "fieldtype": "Data",
+   "label": "Producer Skill"
+  },
+  {
+   "description": "What the producer task's completion must submit, as a JSON object using the same vocabulary an Inspection Template section does — `photos`, `signature`, `findings_text`, `witness`, `checklist_items`, `measurements`. A key outside it asks for nothing and looks like it asks for something, so it is refused here.",
+   "fieldname": "evidence_contract_json",
+   "fieldtype": "Long Text",
+   "label": "Evidence Contract (JSON)"
+  },
+  {
+   "fieldname": "regime_section",
+   "fieldtype": "Section Break",
+   "label": "What it answers to"
+  },
+  {
+   "description": "The audits an alert from this rule is evidence for. Same vocabulary as every other regime tag in this app, picked rather than typed, so nobody writes OSHA where the vocabulary says OR-OSHA. A rule answering to no outside body carries `Internal` rather than nothing — an untagged alert is invisible to every regime filter, and silently invisible is the one thing a compliance calendar must not be.",
+   "fieldname": "regimes",
+   "fieldtype": "Table MultiSelect",
+   "label": "Regimes",
+   "options": "Compliance Regime Link"
+  },
+  {
+   "description": "The regulations this rule enforces, with their citations — 'OAR 437-004-1120; 29 CFR 1910.142; FSMA Subpart L'. THE FIELD AN AUDITOR ASKS ABOUT, and the one that changes most often: when OR-OSHA renumbered heat illness from -1130 to -1131 this is the only thing that needed to move, and moving it is an edit rather than a release.",
+   "fieldname": "regulation_citations",
+   "fieldtype": "Small Text",
+   "label": "Regulation Citations"
+  },
+  {
+   "fieldname": "regime_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "How long the records this rule watches must be kept, in years — 2 for WPS, 3 for OR-OSHA, 5 for NOP. 0 means the rule states no window of its own. It is carried on the rule because the retention obligation and the rule that produces the record come from the same paragraph of the same regulation.",
+   "fieldname": "retention_years",
+   "fieldtype": "Int",
+   "label": "Retention (years)"
+  },
+  {
+   "description": "A JSON list of audit packet types whose readout includes this rule's alerts — [\"FSMA\", \"OSHA\"]. Validated against the packet types this app ships, because a packet name nobody generates is a claim that an alert reaches a document it never reaches. Empty means the alert is reachable by regime alone.",
+   "fieldname": "audit_packet_types",
+   "fieldtype": "Small Text",
+   "label": "Audit Packet Types (JSON)"
+  },
+  {
+   "fieldname": "gate_section",
+   "fieldtype": "Section Break",
+   "label": "The kairotic gate"
+  },
+  {
+   "description": "REQUIRED, AND IT IS PROSE. The sentence explaining what state makes this rule ripe rather than what date makes it due — and, just as importantly, what makes it stay quiet. A rule whose author cannot write that sentence has written a calendar reminder, which belongs in somebody's phone rather than in a compliance system. It is also the paragraph an auditor is read when they ask why an alert fired, so it should be true rather than aspirational.",
+   "fieldname": "kairotic_gate_description",
+   "fieldtype": "Long Text",
+   "label": "Kairotic Gate",
+   "reqd": 1
+  },
+  {
+   "description": "What goes wrong in the world when this condition is true and nobody acts — not what the paperwork looks like. It is what makes somebody read the alert rather than dismiss it.",
+   "fieldname": "purpose",
+   "fieldtype": "Small Text",
+   "label": "Purpose"
+  },
+  {
+   "fieldname": "provenance_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "default": "Operator",
+   "description": "Who wrote this rule. `System` is one this app shipped; `Operator` is one somebody here authored; `AI-proposed` is one a model drafted from a regulation and A HUMAN HAS NOT NECESSARILY READ YET. The distinction is the whole audit story: at runtime every rule executes the same deterministic path, and the only thing that differs is who is answerable for the definition.",
+   "fieldname": "authored_by",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Authored By",
+   "options": "System\nOperator\nAI-proposed"
+  },
+  {
+   "description": "Where an AI-proposed rule was read from — the URL and section of the regulation. It is what turns 'a model suggested this' into something a human can check, and a proposal without it is a claim with no source.",
+   "fieldname": "ai_source_citation",
+   "fieldtype": "Small Text",
+   "label": "AI Source Citation"
+  },
+  {
+   "fieldname": "provenance_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The person who read this rule and accepted it. REQUIRED BEFORE `enabled` CAN BE SET — a rule that could fire without a name against it would make the calendar an assertion nobody signed, which is the exact failure the Configurable Compliance Framework exists to prevent.",
+   "fieldname": "human_approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User",
+   "search_index": 1
+  },
+  {
+   "description": "When they accepted it. Required alongside the approver, for the same reason a review date with nobody attached is one an auditor is trained to disbelieve.",
+   "fieldname": "human_approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On"
+  },
+  {
+   "description": "The approver as an Employee, where the site keeps a payroll register and the approval belongs to somebody on it. Optional: a rule approved by an administrator who is not an employee is still approved.",
+   "fieldname": "approver_employee",
+   "fieldtype": "Link",
+   "label": "Approver (Employee)",
+   "options": "Employee"
+  },
+  {
+   "description": "The approver's signature, as a File. Optional, and it is the difference between a record of an approval and evidence of one — a scheme that asks for signed rule sets gets a signed rule set without anybody keeping a parallel binder.",
+   "fieldname": "approver_signature",
+   "fieldtype": "Attach",
+   "label": "Approver Signature"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-04 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Compliance Rule",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "rule_id,title,category,version",
+ "sort_field": "rule_id",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

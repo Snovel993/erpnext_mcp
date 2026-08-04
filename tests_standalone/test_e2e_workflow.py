@@ -99,6 +99,16 @@ SWITCHES = {
 		"get_training",
 		"sign_training_supervisor_review",
 		"generate_audit_packet",
+		"list_compliance_rules",
+		# v0.22.0. The walk now also starts from a rule NOBODY WROTE IN PYTHON,
+		# because that is the claim the release makes and the only way to test a
+		# claim about authoring is to author something.
+		"get_compliance_rule",
+		"test_compliance_rule",
+		"create_compliance_rule",
+		"approve_compliance_rule",
+		"update_compliance_rule",
+		"deactivate_compliance_rule",
 		# v0.19.3. The walk now ends on a SHIFT, because that is where the
 		# exposure-based regimes anchor: OAR 437-004-1131 asks whether a shift
 		# complied from start to finish, and a task completion cannot answer it.
@@ -774,6 +784,231 @@ class OnboardingReachesTheAuditPacket(EndToEndWorkflow):
 			if row.get("alert_type") == "training_expiring" and not is_true(row.get("dismissed"))
 		]
 		self.assertEqual(live, [])
+
+
+class AnAuthoredRuleReachesTheCalendarAndThePacket(EndToEndWorkflow):
+	"""author → approve → sweep → the alert exists → it is in the packet by regime.
+
+	v0.22.0, AND IT IS THE SEAM THE WHOLE RELEASE STANDS OR FALLS ON.
+	`test_compliance_rule_engine.py` proves the engine evaluates a rule record
+	correctly, and that the thirteen migrated rules say what they always said.
+	What neither that nor anything else proves is that a rule NOBODY WROTE IN
+	PYTHON — authored through MCP by somebody who has never seen this repository
+	— comes out the far end as a real alert on a real calendar, tagged with a
+	real regime, in the packet a real auditor is handed.
+
+	That is the entire claim of the Configurable Compliance Framework, stated as
+	a walk: a regulation changes, somebody writes a rule, a human approves it,
+	and the operation is watching for it tonight. No release. No deploy. No
+	engineer.
+
+	It walks the REFUSALS on the way past, because the gate is as much of the
+	claim as the capability. A rule that could fire before anybody approved it
+	would make the calendar an assertion nobody signed, and that is the first
+	thing an auditor is entitled to ask about the moment a model can propose
+	rules.
+	"""
+
+	def test_a_rule_authored_through_mcp_fires_tonight_and_lands_in_the_packet(self):
+		self.be_the_operator()
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+
+		# ── 1. The regulation this operation has decided to watch for. ──────
+		#     A cabin's occupancy limit has to be posted in it — real under OAR
+		#     437-004-1120 — and nothing in the shipped thirteen looks for it.
+		#     Before v0.22.0 that sentence ended "so it needs a release".
+		authored = self.tool_data(
+			"create_compliance_rule",
+			{
+				"rule_id": "cabin_capacity_unposted",
+				"title": "A cabin in use has no posted occupancy limit",
+				"category": "Housing",
+				"target_doctype": "Housing Unit",
+				"date_field": "",
+				"severity_expired": "Warning",
+				"threshold_critical_days": -1,
+				"threshold_warning_days": -1,
+				"due_date_mode": "Today",
+				"scope_filters": [
+					{"field": "unit_type", "op": "eq", "value": "Cabin"},
+					{"field": "capacity", "op": "gt", "value": 0},
+					{"field": "condition", "op": "ne", "value": "Uninhabitable", "default": ""},
+				],
+				"message_template": (
+					"{{ name }} sleeps up to {{ capacity }} and the occupancy limit is not "
+					"recorded as posted in the unit. OAR 437-004-1120 expects it where the "
+					"people it protects can read it."
+				),
+				"regimes": ["OR-OSHA"],
+				"regulation_citations": "OAR 437-004-1120(3)(b)",
+				"kairotic_gate_description": (
+					"Fires on a cabin that can actually be slept in — a shower block raises "
+					"nothing, and a unit marked Uninhabitable raises nothing because there is "
+					"nobody in it to protect. It goes quiet when the limit is posted."
+				),
+				"purpose": "The people it protects cannot read a limit that is not on the wall.",
+				"producer_farm_task_type": "Inspection",
+				"producer_skill_required": "camp_maintenance",
+				"audit_packet_types": ["OSHA"],
+			},
+		)
+		self.assertEqual(authored["shape"], "declarative", "an authored rule should need no code")
+		self.assertFalse(authored["enabled"])
+
+		# ── 2. It is a DRAFT, so it is firing nothing. ──────────────────────
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		self.assertEqual(self._alerts_of("cabin_capacity_unposted"), [])
+		# The packet as it stands with the rule unapproved. Step 7 compares
+		# against this, because a count is only evidence next to the count it
+		# was before.
+		packet_before = self._osha_packet()["section_counts"]["alerts"]
+
+		# ── 3. …but it can be tried out, without writing anything. ──────────
+		before = len(STORE.rows("Compliance Alert"))
+		tried = self.tool_data("test_compliance_rule", {"name": "cabin_capacity_unposted"})
+		self.assertEqual(tried["observed"], 1, tried["observations"])
+		self.assertEqual(
+			tried["observations"][0]["would_be_alert"],
+			f"cabin_capacity_unposted:Housing Unit:{self.unit}",
+		)
+		self.assertIn("sleeps up to 4", tried["observations"][0]["message"])
+		self.assertEqual(
+			len(STORE.rows("Compliance Alert")),
+			before,
+			"test_compliance_rule wrote something. It is a dry run and it must not.",
+		)
+
+		# ── 4. A HUMAN APPROVES IT. There is no other way to turn it on. ────
+		approved = self.tool_data(
+			"approve_compliance_rule",
+			{"name": "cabin_capacity_unposted", "approver": "Administrator"},
+		)
+		self.assertTrue(approved["enabled"])
+		self.assertEqual(approved["human_approved_by"], "Administrator")
+		self.assertTrue(approved["human_approved_on"])
+		self.assertEqual(approved["authored_by"], "Operator")
+
+		# ── 5. Tonight's sweep is watching for it. ──────────────────────────
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		raised = self._alerts_of("cabin_capacity_unposted")
+		self.assertEqual(len(raised), 1, "the approved rule did not fire on the cabin it describes")
+		alert = raised[0]
+		self.assertEqual(alert["name"], f"cabin_capacity_unposted:Housing Unit:{self.unit}")
+		self.assertEqual(alert["severity"], "Warning")
+		self.assertEqual(alert["category"], "Housing")
+		self.assertEqual(alert["company"], COMPANY)
+		self.assertIn("OAR 437-004-1120", str(alert["alert_message"]))
+
+		# ── 6. It is on the calendar the operator reads, under its regime. ──
+		calendar = self.tool_data("get_compliance_calendar", {"company": COMPANY, "regime": "OR-OSHA"})
+		listed = [
+			row
+			for group in calendar["by_category"].values()
+			for row in group["alerts"]
+			if row["alert_type"] == "cabin_capacity_unposted"
+		]
+		self.assertEqual(len(listed), 1, "the alert is not reachable through the OR-OSHA calendar")
+		self.assertEqual(listed[0]["regimes"], ["OR-OSHA"])
+
+		# THE NEGATIVE HALF, and it is the one that matters: a rule tagged
+		# OR-OSHA must not appear in an FSMA-narrowed calendar. Matching by
+		# token rather than by substring is what stops one agency's finding
+		# being handed to an inspector with no jurisdiction over it.
+		fsma = self.tool_data("get_compliance_calendar", {"company": COMPANY, "regime": "FSMA"})
+		self.assertNotIn(
+			"cabin_capacity_unposted",
+			{row["alert_type"] for group in fsma["by_category"].values() for row in group["alerts"]},
+		)
+
+		# ── 7. AND IT IS IN THE PACKET. The knock-at-the-door test. ─────────
+		#     Compared against the count taken while the rule was still a draft,
+		#     because "the packet has three alerts in it" says nothing on its own
+		#     — what is being asserted is that approving a rule an operator wrote
+		#     put one more thing in front of the auditor.
+		self.assertEqual(
+			self._osha_packet()["section_counts"]["alerts"],
+			packet_before + 1,
+			"the alert an authored rule raised never reached the packet an auditor is handed, "
+			"which is the only place any of this was ever going.",
+		)
+
+		# ── 8. The register says who wrote it, who approved it, and when. ───
+		read_back = self.tool_data("get_compliance_rule", {"name": "cabin_capacity_unposted"})
+		self.assertEqual(read_back["regulation_citations"], "OAR 437-004-1120(3)(b)")
+		self.assertEqual(read_back["definition"]["producer_skill_required"], "camp_maintenance")
+		self.assertEqual(read_back["version"], 1)
+		self.assertEqual(read_back["authored_by"], "Operator")
+
+		# ── 9. A severity moves. The old definition stays readable. ─────────
+		superseded = self.tool_data(
+			"update_compliance_rule",
+			{
+				"name": "cabin_capacity_unposted",
+				"severity_expired": "Critical",
+				"reason": "the county inspector cited us for this in March",
+			},
+		)
+		self.assertEqual(superseded["version"], 2)
+		self.assertEqual(superseded["changes"]["severity_expired"]["before"], "Warning")
+		old = self.tool_data("get_compliance_rule", {"name": superseded["supersedes"]})
+		self.assertEqual(old["version"], 1)
+		self.assertEqual(old["definition"]["severity_expired"], "Warning")
+
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		self.assertEqual(self._alerts_of("cabin_capacity_unposted")[0]["severity"], "Critical")
+
+		# ── 10. Switched off, the alert STAYS. Off is not dismissed. ────────
+		self.tool_data(
+			"deactivate_compliance_rule",
+			{
+				"name": "cabin_capacity_unposted",
+				"reason": "the limits went up in every cabin last week and we are re-checking",
+			},
+		)
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		self.assertEqual(
+			len(self._alerts_of("cabin_capacity_unposted")),
+			1,
+			"switching a rule off dismissed its alerts. Switching a rule off is not evidence "
+			"that anybody did the work.",
+		)
+
+		# ── 11. And the whole of it is in the audit log. ────────────────────
+		logged = {
+			row.get("tool_name")
+			for row in STORE.rows("MCP Action Log")
+			if str(row.get("tool_name") or "").endswith("_compliance_rule")
+		}
+		self.assertEqual(
+			logged,
+			{
+				"create_compliance_rule",
+				"test_compliance_rule",
+				"approve_compliance_rule",
+				"get_compliance_rule",
+				"update_compliance_rule",
+				"deactivate_compliance_rule",
+			},
+		)
+
+	def _alerts_of(self, alert_type: str) -> list:
+		return [
+			dict(row)
+			for row in STORE.rows("Compliance Alert")
+			if row.get("alert_type") == alert_type and not is_true(row.get("dismissed"))
+		]
+
+	def _osha_packet(self) -> dict:
+		return self.tool_data(
+			"generate_audit_packet",
+			{
+				"company": COMPANY,
+				"audit_type": "OSHA",
+				"period_start": str(frappe.utils.add_days(frappe.utils.today(), -30)),
+				"period_end": frappe.utils.today(),
+				"dry_run": True,
+			},
+		)
 
 
 class TheHotShiftReachesTheOSHAPacket(EndToEndWorkflow):

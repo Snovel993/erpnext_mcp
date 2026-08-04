@@ -3,6 +3,103 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.22.0 — 2026-08-04
+
+**The rules themselves are data.** A compliance rule used to be a Python
+function, so moving a threshold, correcting a citation or switching a rule off
+for a season was a code change, a release and a deploy — and regulations do not
+move on a release cadence. OR-OSHA renumbered heat illness from -1130 to -1131;
+OTCO added a Fraud Prevention Plan requirement; the FDA re-phased FSMA Produce
+Safety. Each of those is now an **edit to a record**. A `Compliance Rule` carries
+its thresholds, scope, citations, regimes, message and switch; the sweep reads
+them; **no model runs in the trigger path**, which is what keeps every alert
+traceable to a row, a citation, an approver and the field that crossed a
+threshold. Tool surface **249 → 256** (113 read, 143 mutating); suite **4,121 →
+4,187 passing**. **Behaviour drift: zero** — the thirteen shipped rules produce
+byte-identical alerts, asserted row by row. Full notes:
+[`RELEASES/v0.22.0.md`](RELEASES/v0.22.0.md).
+
+### Added
+
+- **`Compliance Rule` doctype** (`CRULE-2026-0001`). Target doctype, cadence
+  anchor, thresholds and per-band severities, scope filters, Jinja message,
+  regimes, regulation citations, retention window, producer task, kairotic gate,
+  and the provenance trio `authored_by` / `human_approved_by` /
+  `human_approved_on`. No new child tables — `Compliance Regime Link` is reused,
+  and the filter, contract and packet lists are JSON blobs validated at authoring
+  time.
+- **A declarative rule engine** (`alerts/engine.py`). Query the target, apply the
+  scope filters, measure the anchor against the cadence and the thresholds, pick
+  the band, render the message. Deterministic, bounded, identical every time for
+  identical data.
+- **Seven tools.** `create_compliance_rule`, `approve_compliance_rule`,
+  `update_compliance_rule`, `deactivate_compliance_rule` and the
+  declared-but-inert `propose_compliance_rule` (five mutating, all shipping OFF);
+  `get_compliance_rule` and `test_compliance_rule` (two read).
+  `list_compliance_rules` was **retrofitted, not replaced** — it reads the
+  records and takes `regime` / `category` / `target_doctype` / `shape` /
+  `active`, and every key it returned before means what it always meant.
+- **`test_compliance_rule`**, the read between authoring and approving. It runs a
+  rule down **the same code path the sweep takes** — a dry run with its own
+  second implementation is one that can disagree with the real one — and reports
+  what it *would* raise, with the docname each alert would take, writing nothing.
+- **A restricted-Python sandbox** (`alerts/sandbox.py`) for `custom_python`: an
+  AST interpreter, never `exec`, never `eval`. Refuses `import`, `exec`, `eval`,
+  `open`, **every underscore-prefixed attribute**, `while`, `def`/`class`/
+  `lambda` and `try`, each with a sentence saying why. Bounded at 200,000 node
+  visits and 5 seconds. `frappe.get_doc` hands back a plain dict, because a
+  Document has `.save()` on it.
+- **`docs/configurable_compliance_framework.md`** — how to author a rule, when
+  not to use `custom_python`, the provenance model, and the ranked list of
+  primitives that would shrink the built-in surface.
+
+### Changed
+
+- **The thirteen shipped rules are now records**, seeded on install and after
+  every migrate. **Six migrated pure-declarative** (`policy_review_overdue`,
+  `housing_inspection_overdue`, `i9_expired`, `flc_license_expiring`,
+  `filing_response_due`, `training_expiring`); **seven keep a shipped scanner**
+  for a join no declarative field expresses yet — supersession by a later clean
+  record, a child table folded to its worst row, two dates that only matter
+  together. **Zero use `custom_python`**, which is the honest measure of an
+  escape hatch. Every built-in still carries its thresholds, scope, citations and
+  switch on the record; only the shape of the join is code.
+- **`alerts/base.py` reads the rule set from records** and falls back to the
+  shipped definitions on a site that has not migrated yet — **saying so** in
+  `engine_notes`. A compliance calendar that quietly emptied itself for the
+  length of an upgrade would be the worst failure this app could have. The sweep,
+  the reconciliation, the idempotent docnames and the auto-dismissal are
+  unchanged.
+- **Rules are versioned by copy**, exactly as Inspection Templates are.
+  `update_compliance_rule` writes v+1 and points the old row's `superseded_by` at
+  it; the old row is disabled, never edited, never deleted. A sweep that started
+  against v1 finishes against v1.
+- **`Compliance Rule` is granted to System Manager, Compliance Officer and Farm
+  Manager only.** A Foreman reads the calendar and cannot rewrite what fills it;
+  a Field Worker cannot see it at all — the dispatch separation this app already
+  keeps, moved one layer up.
+
+### Guarantees
+
+- **`enabled` is refused without an approver AND a date.** `create_compliance_rule`
+  always writes a Draft whatever the caller asked for, so "a model wrote a rule
+  and it started firing" is a sentence that cannot be true about this app.
+- **One live row per `rule_id`**, enforced in the controller and materialised as
+  the indexed `active_row_flag`.
+- **Deactivating dismisses nothing.** The alerts a rule raised stay exactly as
+  they were — switching a rule off is not evidence that anybody did the work.
+  There is no delete.
+- **Scope filters are evaluated in Python with a documented `default`**, because
+  in SQL `status != 'Active'` excludes every row whose status was never set — and
+  a policy with no status is in force, a filing with no status is neither Draft
+  nor Withdrawn, a cabin with no condition is not Uninhabitable.
+- **Message templates render in a Jinja sandbox with no framework in it** —
+  deliberately not `frappe.render_template`, whose environment would be a second
+  undocumented escape hatch beside the one this release sandboxed.
+- **The seeder is not a Frappe `fixtures` entry.** It checks by `rule_id` across
+  every row before writing, so an operator's edit, a disabled rule and a
+  superseded version all survive every future migrate.
+
 ## 0.21.0 — 2026-08-03
 
 **The shape of a visit is data.** A worker walks into a cabin once and does

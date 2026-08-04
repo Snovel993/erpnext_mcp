@@ -118,6 +118,7 @@ def after_install() -> None:
 	_kpi_charts()
 	_completion_signatures()
 	_inspection_templates()
+	_compliance_rules()
 	frappe.db.commit()
 
 
@@ -133,6 +134,7 @@ def after_migrate() -> None:
 	_kpi_charts()
 	_completion_signatures()
 	_inspection_templates()
+	_compliance_rules()
 
 
 def _weather_settings() -> None:
@@ -316,6 +318,53 @@ def _inspection_templates() -> None:
 		return
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not seed template {failure.get('name')} — {failure.get('reason')}")
+
+
+def _compliance_rules() -> None:
+	"""Migrate the thirteen shipped rules into Compliance Rule records. v0.22.0.
+
+	THE TWELFTH JOB, AND THE ONE WITH THE MOST TO GET WRONG. Until this release
+	the compliance rules were Python functions and a threshold was a code change;
+	after it they are records, and this is what puts them there on the migrate
+	that installs the DocType.
+
+	IT ONLY EVER CREATES WHAT IS NOT THERE, checked by `rule_id` across every row
+	rather than only the live ones — the same contract as `_inspection_templates`
+	above and the same reason `test_hooks.py` forbids the word `fixtures` by name.
+	An operator who moved the annual housing walk from 365 days to 300 keeps 300.
+	One who switched off a rule their operation does not run keeps it switched
+	off. One who superseded a seeded rule with their own version 2 does not get
+	version 1 seeded back beside it every migrate — which would put two live
+	definitions of one rule_id on the site and make the sweep's choice between
+	them arbitrary.
+
+	THE RULES ARRIVE ENABLED, and that is deliberate against this app's usual
+	instinct. Everything mutating here ships off; a migrated rule does not,
+	because it was ALREADY RUNNING — as Python — the night before, and seeding it
+	disabled would silently switch the whole compliance calendar off during an
+	upgrade. Of the two ways to be wrong on a migrate, a calendar that keeps
+	saying what it said yesterday is much the better one.
+
+	Runs on install AND after every migrate, so a site upgrading from any earlier
+	version gets the thirteen on its next migrate rather than needing a bespoke
+	patch. Until it does, the sweep runs the shipped definitions and says so in
+	its report — the calendar never goes blank.
+	"""
+	try:
+		from . import compliance_rules
+
+		report = compliance_rules.seed_compliance_rules()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the compliance rules were not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['created'])} compliance rule(s) as records — "
+			"thresholds, citations, scope and message are now editable with "
+			"update_compliance_rule, with no code release. list_compliance_rules has the register."
+		)
+	for failure in report.get("failed") or ():
+		print(f"erpnext_mcp: could not seed rule {failure.get('name')} — {failure.get('reason')}")
 
 
 def _report_failures(what: str, builder) -> None:

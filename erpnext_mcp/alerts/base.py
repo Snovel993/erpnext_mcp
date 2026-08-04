@@ -123,6 +123,13 @@ class Observation:
 	#: curriculum would produce an alert claiming a session satisfied a regime it
 	#: ran out of time before reaching.
 	regimes: list = None
+	#: v0.22.0. Anything the engine noticed while computing this observation that
+	#: a reader should know: a scope filter skipped because this site has not got
+	#: the column, a message template that would not render, an operation the
+	#: `custom_python` sandbox refused. NOT AN ERROR — the observation is still
+	#: true and the alert is still raised. It rides on the observation because
+	#: what it is about is this row, and the sweep report gathers them per rule.
+	computation_warnings: list = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +170,23 @@ class Rule:
 	#: is the one thing a compliance calendar must not be.
 	regimes: tuple = ("Internal",)
 
+	# ── v0.22.0: where this definition came from ────────────────────────────
+	#: The Compliance Rule docname this Rule was assembled from, or "" when it
+	#: is one of the definitions shipped in `rules.py` — which is what a site
+	#: mid-migrate runs. A reader asking "which row raised this" needs the
+	#: answer to be a docname or an honest blank, never a guess.
+	record: str = ""
+	#: Which version of that record. Carried so a sweep report, and an operator
+	#: reading it a month later, can say which definition was in force.
+	version: int = 1
+	#: `declarative`, `builtin_scanner` or `custom_python`. It is the single most
+	#: useful thing to know about a rule after what it does, because it says who
+	#: can change it and what changing it costs.
+	shape: str = "declarative"
+	#: `System`, `Operator` or `AI-proposed`. Provenance, not behaviour: all
+	#: three execute the identical deterministic path.
+	authored_by: str = ""
+
 	def is_available(self) -> bool:
 		try:
 			return all(doctype_exists(doctype) for doctype in self.requires)
@@ -186,10 +210,25 @@ class Rule:
 			"regimes": list(self.regimes),
 			"requires": list(self.requires),
 			"available": self.is_available(),
+			# v0.22.0, ADDITIVE ONLY. Every key above meant the same thing in
+			# v0.21.0 and still does — this app's own iOS build and anybody
+			# else's client read that shape, and a rule list that changed shape
+			# under them would be a breaking change wearing a feature's clothes.
+			"record": self.record or None,
+			"version": self.version,
+			"shape": self.shape,
+			"authored_by": self.authored_by or None,
+			"editable": bool(self.record),
 		}
 
 
-#: key → Rule. Populated by `register` at import time.
+#: key → Rule, as SHIPPED. Populated by `register` at import time.
+#:
+#: v0.22.0 CHANGED WHAT THIS IS FOR. It used to be the rule set the sweep ran.
+#: It is now the DEFINITIONS the seeder writes into Compliance Rule records —
+#: and the fallback the sweep runs on a site that has the app and has not yet
+#: migrated the DocType, so a compliance calendar does not go blank for the
+#: length of an upgrade. `rule_map()` is what the sweep actually asks.
 RULES: dict = {}
 
 
@@ -216,8 +255,45 @@ def register(rule: Rule) -> Rule:
 	return rule
 
 
+def rule_map() -> dict:
+	"""`{rule_id: Rule}` — THE RULE SET THE SWEEP RUNS, resolved from records.
+
+	v0.22.0. Every caller that used to read `RULES` directly reads this instead,
+	and the difference is the whole release: the definitions now come from
+	Compliance Rule rows an operator can edit, version and approve, rather than
+	from a dict populated at import time by a code release.
+
+	It falls back to `RULES` — the shipped definitions — on a site whose DocType
+	is absent or whose rule table is empty, which is the upgrade window and
+	nothing else. That fallback is why installing v0.22.0 cannot empty a
+	compliance calendar even for the minutes between the app landing and the
+	migrate finishing.
+	"""
+	return resolve_rules()[0]
+
+
+def resolve_rules() -> tuple:
+	"""(rules, notes). `notes` says so when the shipped fallback was used.
+
+	Split from `rule_map` because the SWEEP has somewhere to put the sentence
+	and a bare lookup does not. A fallback nobody is told about is a fallback
+	that becomes permanent.
+	"""
+	try:
+		from .engine import rule_set
+
+		return rule_set()
+	except Exception as exc:  # pragma: no cover - a site whose engine cannot import
+		return dict(RULES), [
+			f"the rule engine could not read this site's Compliance Rule records "
+			f"({type(exc).__name__}: {exc}), so the sweep ran the definitions that ship with "
+			"erpnext_mcp. Nothing was lost and nothing was wrongly dismissed; the site's own "
+			"edits to those rules were simply not seen."
+		]
+
+
 def names() -> list:
-	return sorted(RULES)
+	return sorted(rule_map())
 
 
 def alert_key(rule_key: str, source_doctype: str, source_docname: str) -> str:
@@ -306,6 +382,12 @@ def refresh_compliance_alerts(
 	"""
 	today = today or frappe.utils.today()
 	wanted = regimes_vocabulary.canon(regime) if regime else ""
+	# ONE RESOLUTION PER SWEEP, and everything below reads this dict. Resolving
+	# per rule would mean a rule superseded halfway through a sweep changed
+	# definition mid-run, which is exactly the race versioning-by-copy exists to
+	# make impossible — so the snapshot is taken here, once, and held.
+	rules, engine_notes = resolve_rules()
+	rule_names = sorted(rules)
 	report = {
 		"today": today,
 		"company": company or None,
@@ -320,6 +402,8 @@ def refresh_compliance_alerts(
 		"rules_failed": [],
 		"alerts": [],
 	}
+	if engine_notes:
+		report["engine_notes"] = list(engine_notes)
 
 	if not doctype_exists(ALERT_DOCTYPE):
 		report["rules_skipped"] = [
@@ -330,12 +414,12 @@ def refresh_compliance_alerts(
 					"run `bench --site <site> migrate`"
 				),
 			}
-			for key in names()
+			for key in rule_names
 		]
 		return report
 
-	for key in names():
-		rule = RULES[key]
+	for key in rule_names:
+		rule = rules[key]
 		if wanted and wanted not in regimes_vocabulary.parse(rule.regimes):
 			report["rules_skipped"].append(
 				{
@@ -374,7 +458,7 @@ def refresh_compliance_alerts(
 
 	report["rules_run"] = sorted(
 		{entry["alert_type"] for entry in report["alerts"]}
-		| {key for key in names() if RULES[key].is_available()}
+		| {key for key in rule_names if rules[key].is_available()}
 		- {entry["alert_type"] for entry in report["rules_failed"]}
 		# A rule the `regime` filter skipped did not run, and saying it did would
 		# make a narrowed sweep read as a full one in the very report an operator
@@ -401,6 +485,19 @@ def _run_rule(rule: Rule, context: dict, report: dict, dry_run: bool) -> None:
 			}
 		)
 		observations = observations[:RULE_CAP]
+
+	# v0.22.0. A rule that scanned unscoped because this site has not got a column,
+	# or whose message template would not render, produced TRUE observations that
+	# are nonetheless worth a sentence — and a warning nobody surfaces is a
+	# warning that is not one. Gathered per rule rather than per observation
+	# because the fix is always to the rule.
+	warnings = sorted(
+		{warning for observation in observations for warning in (observation.computation_warnings or ())}
+	)
+	if warnings:
+		report.setdefault("rules_warned", []).append(
+			{"alert_type": rule.key, "title": rule.title, "warnings": warnings}
+		)
 
 	observed = {}
 	for observation in observations:

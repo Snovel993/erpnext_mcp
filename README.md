@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **249 tools** — 111 read-only, 138 mutating.
+- **256 tools** — 113 read-only, 143 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -42,6 +42,15 @@ site at call time.
   installed idempotently on migrate. The role says what KIND of work somebody
   does; a Frappe User Permission on Company says WHOSE — see [Multi-entity
   scoping and the six mobile roles](#multi-entity-scoping-and-the-six-mobile-roles).
+- **Compliance rules are data, added in v0.22.0.** A rule that watches for an
+  expiring certificate or an uninspected cabin is a `Compliance Rule` record —
+  its thresholds, scope, citations, regimes and message are fields somebody
+  edits, so a renumbered regulation is an afternoon rather than a release. The
+  runtime stays deterministic: no model runs in the trigger path, every rule
+  needs a named human approver before it can fire, and edits supersede rather
+  than overwrite so an alert from April is still readable against the definition
+  that raised it. See
+  [docs/configurable_compliance_framework.md](docs/configurable_compliance_framework.md).
 - MIT. Three runtime dependencies beyond Frappe/ERPNext (`shapely` and `h3` for
   field boundaries, `segno` for the mobile login QR), and the app still loads
   without any of them — each missing one costs its own tools BY NAME, with the

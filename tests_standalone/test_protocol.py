@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_forty_nine_tools_one_hundred_eleven_read_one_hundred_thirty_eight_write(
+	def test_catalogue_is_two_hundred_fifty_six_tools_one_hundred_thirteen_read_one_hundred_forty_three_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -492,10 +492,53 @@ class Catalogue(SeededTestCase):
 		rule engine's bundling — several overdue things at one cabin become ONE
 		visit rather than three trips — came with them and are not tools, which is
 		why the catalogue grew by ten and the release by considerably more.
+
+		v0.22.0 ADDED SEVEN — two reads and five writes — and the release is the
+		same claim as v0.21.0's, made about the thing underneath it: THE RULES
+		THEMSELVES ARE DATA. A compliance rule used to be a Python function, so
+		moving a threshold, correcting a citation or switching a rule off for a
+		season was a code change, a release and a deploy. Regulations do not move
+		on a release cadence — OR-OSHA renumbered heat illness from -1130 to
+		-1131 — and now neither does this.
+
+		  * `create_compliance_rule` authors one. It arrives as a DRAFT and fires
+		    nothing, because the approval gate is not a default anybody can pass
+		    past;
+		  * `approve_compliance_rule` is the only way a rule can be enabled — the
+		    DocType refuses `enabled` without an approver and a date — so "a model
+		    wrote a rule and it started firing" is a sentence that cannot be true
+		    about this app;
+		  * `update_compliance_rule` changes one by SUPERSEDING it, exactly as a
+		    template is superseded: a new row at version+1, the old one disabled
+		    and pointing at it, never edited. A sweep that started against v1
+		    finishes against v1, and an alert from April is still explicable in
+		    November;
+		  * `deactivate_compliance_rule` switches one off with a reason and
+		    DISMISSES NOTHING — every alert it raised stays exactly as it was,
+		    because switching a rule off is not evidence that anybody did the
+		    work. There is deliberately no delete;
+		  * `test_compliance_rule` is the read between authoring and approving:
+		    it runs the rule down the same code path the sweep takes and reports
+		    what it WOULD raise, writing nothing;
+		  * `get_compliance_rule` reads one definition in full, including a
+		    superseded one — which is how the rule an old alert was raised under
+		    stays inspectable;
+		  * `propose_compliance_rule` is DECLARED AND REFUSES, for the same
+		    reasons and on the same terms as v0.21.0's template proposer. AI
+		    belongs at authoring time behind a human approval and never in the
+		    trigger path, and a surface an operator cannot see in the settings
+		    form is a surface nobody can refuse.
+
+		`list_compliance_rules` was RETROFITTED rather than replaced: it now reads
+		the records and takes filters, and every key it returned before means what
+		it always meant. The Compliance Rule DocType, the declarative evaluator,
+		the restricted-Python sandbox and the migration of the thirteen shipped
+		rules into records came with them and are not tools, which is why the
+		catalogue grew by seven and the release by a great deal more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 249)
-		self.assertEqual(len(registry.READ_TOOLS), 111)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 138)
+		self.assertEqual(len(registry.TOOLS), 256)
+		self.assertEqual(len(registry.READ_TOOLS), 113)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 143)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

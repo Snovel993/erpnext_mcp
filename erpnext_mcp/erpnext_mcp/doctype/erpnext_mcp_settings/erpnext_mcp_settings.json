@@ -359,7 +359,16 @@
   "allow_deactivate_inspection_template",
   "allow_start_inspection_session",
   "allow_submit_inspection_session",
-  "allow_propose_inspection_template_from_regulation"
+  "allow_propose_inspection_template_from_regulation",
+  "compliance_rule_section",
+  "allow_get_compliance_rule",
+  "allow_test_compliance_rule",
+  "compliance_rule_write_col",
+  "allow_create_compliance_rule",
+  "allow_approve_compliance_rule",
+  "allow_update_compliance_rule",
+  "allow_deactivate_compliance_rule",
+  "allow_propose_compliance_rule"
  ],
  "fields": [
   {
@@ -2669,6 +2678,65 @@
    "fieldname": "allow_propose_inspection_template_from_regulation",
    "fieldtype": "Check",
    "label": "Propose Template From Regulation (not implemented)"
+  },
+  {
+   "fieldname": "compliance_rule_section",
+   "fieldtype": "Section Break",
+   "label": "Compliance rules (v0.22.0 — the rule definitions themselves)"
+  },
+  {
+   "default": "1",
+   "description": "READ. One compliance rule in full: the condition it evaluates, its thresholds and scope filters, the regulation it cites, the kairotic gate saying what makes it ripe, and who approved it and when. Accepts a rule_id, which resolves to whichever version is live, or a docname, which is one exact version — including a superseded one, so the definition an older alert was raised under stays readable.",
+   "fieldname": "allow_get_compliance_rule",
+   "fieldtype": "Check",
+   "label": "Get Compliance Rule"
+  },
+  {
+   "default": "1",
+   "description": "READ. Runs ONE rule against the data as it stands and reports every observation it WOULD make, with the alert docname each one would take, writing nothing. The tool to call between authoring a rule and approving it: a rule that observes four hundred rows is a rule whose condition is wrong, and finding that out here costs nothing.",
+   "fieldname": "allow_test_compliance_rule",
+   "fieldtype": "Check",
+   "label": "Test Compliance Rule (dry run)"
+  },
+  {
+   "fieldname": "compliance_rule_write_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Authors a new compliance rule — a condition the nightly sweep evaluates against this site's records — with no code release. It arrives as a DRAFT and fires nothing until it is approved. Runtime stays deterministic: a rule is a declarative expression over record state, and there is no model in the trigger path. Refuses a duplicate rule_id, a target DocType this site has not got, a rule with no kairotic gate, a malformed scope filter, and any custom_python the sandbox would not run.",
+   "fieldname": "allow_create_compliance_rule",
+   "fieldtype": "Check",
+   "label": "Create Compliance Rule"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, AND IT IS THE GATE. A rule cannot be enabled any other way — the DocType refuses `enabled` without an approver and a date — so there is no path by which a rule, least of all one a model proposed, starts firing without a person having put their name to it. An auditor asking who decided the site should watch for this reads the answer off the rule itself.",
+   "fieldname": "allow_approve_compliance_rule",
+   "fieldtype": "Check",
+   "label": "Approve Compliance Rule"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Changes a rule by SUPERSEDING it — a new row at version+1, the old one disabled and pointing at it. The old row is never edited, which is why an alert from April is still explicable in November and why a sweep that started against v1 finishes against v1. The result carries a field-by-field before → after, so the audit log records what the rule said before and not merely what was asked for.",
+   "fieldname": "allow_update_compliance_rule",
+   "fieldtype": "Check",
+   "label": "Supersede Compliance Rule"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Stops a rule firing, and records why. It DISMISSES NOTHING — every alert it already raised stays on the calendar exactly as it was, because switching a rule off is not evidence that anybody did the work. There is deliberately no delete: the rule stays on the site, disabled, with the reason on the record.",
+   "fieldname": "allow_deactivate_compliance_rule",
+   "fieldtype": "Check",
+   "label": "Deactivate Compliance Rule"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, DECLARED AND NOT IMPLEMENTED IN v0.22.0 — every call refuses. It is the surface an AI rule proposer will occupy: read a regulation, draft a Compliance Rule with its citation and thresholds, mark it AI-proposed, and leave it DISABLED for a human to check against the regulation and approve. Declared now so the shape is fixed before anything fills it, and inert now because at runtime this app is deterministic — AI belongs at authoring time behind a human approval, never in the trigger path.",
+   "fieldname": "allow_propose_compliance_rule",
+   "fieldtype": "Check",
+   "label": "Propose Compliance Rule (not implemented)"
   }
  ],
  "index_web_pages_for_search": 0,

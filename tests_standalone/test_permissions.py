@@ -200,10 +200,28 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# sessions were worked from — which breaks every packet that prints a
 		# session's provenance while protecting nothing, because there is nothing
 		# on the row to protect.
+		#
+		# THE v0.22.0 ADDITION IS THE STRONGEST CASE OF THE FOUR. A Compliance
+		# Rule is the DEFINITION of a condition — "a certificate inside its
+		# renewal window is worth knowing about" — and it is a statement about a
+		# regulation rather than about an operation. It names no cabin, no
+		# worker, no certificate and no date. The rows that carry those are the
+		# Compliance ALERTS the rule raises, and every one of them links to
+		# Company and is scoped by Frappe exactly as before.
+		#
+		# Scoping the rule itself would also be actively wrong rather than merely
+		# unnecessary: one rule raises alerts across every entity on the site, so
+		# a per-company rule row would mean either duplicating all thirteen per
+		# entity — thirteen places to update when OR-OSHA renumbers a citation —
+		# or having a rule owned by one entity silently governing another's
+		# records. Per-company narrowing is available and belongs where it can be
+		# read: a `scope_filters` entry on the rule, which says so on the record
+		# an auditor is looking at.
 		self.assertEqual(
 			sorted(unscoped),
 			[
 				"Compliance Regime",
+				"Compliance Rule",
 				"Inspection Template",
 				"MCP Action Log",
 				"Staged File Chunk",

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 249 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 256 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 111 read tools are **on** by default and can be switched off individually. A
+All 113 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -5176,19 +5176,36 @@ plus the framework it serves and whether it can run here. A rule listed as
 unavailable raises nothing AND dismisses nothing: an absent DocType is not
 evidence that anybody did the work.
 
-The nine, and what makes each one fire:
+**Since v0.22.0 these are records, not code.** Each rule is a Compliance Rule
+document whose thresholds, scope, citations, regimes and message an operator can
+edit without a release. `editable` says whether this site has migrated yet;
+`shape` says how much of each rule is data. Filters: `regime`, `category`,
+`target_doctype`, `shape`, `active`, `limit`.
 
-| Rule | Fires when | Silent when |
-| --- | --- | --- |
-| `certification_expiring` | inside the lead time the certificate's OWN issuing body takes; Critical inside 30 days | 200 days out; superseded; revoked |
-| `policy_review_overdue` | a procedure IN FORCE is past the review date IT committed to | a draft; a superseded or retired version |
-| `water_test_stale` | a block **in active spray rotation** has no test inside 90 days | fallow ground; a block nobody has sprayed this season |
-| `housing_inspection_overdue` | a cabin somebody can be ASSIGNED to has no walk inside a year | a shower block; a unit already Uninhabitable |
-| `housing_detector_test_stale` | a **FSMA worker facility** has an untested smoke or CO detector | a shed on the same parcel |
-| `i9_expired` | an ACTIVE employee's I-9 has expired | Pending (the lawful 3-day window); a former employee |
-| `flc_license_expiring` | a crew boss's licence is inside 90 days; Critical inside 30 | an employee with no licence |
-| `filing_response_due` | a SUBMITTED filing has no response and the deadline is near | a draft; a filing that was answered |
-| `audit_action_overdue` | an action is past the deadline the SCHEME set | an action with no due date; a closed audit |
+The thirteen, what makes each one fire, and how each one migrated:
+
+| Rule | Shape | Fires when | Silent when |
+| --- | --- | --- | --- |
+| `certification_expiring` | built-in | inside the lead time the certificate's OWN issuing body takes; Critical inside 30 days | 200 days out; superseded; revoked |
+| `policy_review_overdue` | declarative | a procedure IN FORCE is past the review date IT committed to | a draft; a superseded or retired version |
+| `water_test_stale` | built-in | a block **in active spray rotation** has no test inside 90 days | fallow ground; a block nobody has sprayed this season |
+| `housing_inspection_overdue` | declarative | a cabin somebody can be ASSIGNED to has no walk inside a year | a shower block; a unit already Uninhabitable |
+| `housing_detector_test_stale` | built-in | a **FSMA worker facility** has an untested smoke or CO detector | a shed on the same parcel |
+| `i9_expired` | declarative | an ACTIVE employee's I-9 has expired | Pending (the lawful 3-day window); a former employee |
+| `flc_license_expiring` | declarative | a crew boss's licence is inside 90 days; Critical inside 30 | an employee with no licence |
+| `filing_response_due` | declarative | a SUBMITTED filing has no response and the deadline is near | a draft; a filing that was answered |
+| `audit_action_overdue` | built-in | an action is past the deadline the SCHEME set | an action with no due date; a closed audit |
+| `housing_corrective_action_open` | built-in | a camp finding is open AND unsuperseded | a later CLEAN record for the same unit; a closed action |
+| `water_test_contamination` | built-in | a sample came back dirty and is still the latest word on that zone | a later clean sample from the same source |
+| `training_expiring` | declarative | a worker's training is inside the 90-day window a retraining takes to arrange; Critical inside 30 | training with no expiry at all |
+| `supervisor_review_lapsed` | built-in | an activity record has been on file a fortnight with nobody's §112.161(b) review | a record signed and dated by a supervisor |
+
+**Declarative** means the whole rule is on its record. **Built-in** means every
+tunable is on the record and only the SHAPE of the join is shipped code — a
+finding superseded by a later clean record, a child table reduced to its worst
+row, two date fields that only matter together. There is a third shape,
+`custom_python`, and no shipped rule uses it. `docs/configurable_compliance_framework.md`
+argues each one and names the primitive that would shrink the list.
 
 ## 151. `get_audit_readiness`
 
@@ -7073,6 +7090,112 @@ Phase 2 of the Configurable Compliance Framework wires it.
 Until then, author templates with `create_inspection_template`. A template is a
 record and writing one takes one call.
 
+## 238. `get_compliance_rule`
+
+Read-only. One rule in full: the condition it evaluates, the thresholds and scope
+filters it evaluates it against, the regulation it cites, the regimes it answers
+to, the kairotic gate saying what makes it ripe, and **who approved it and
+when**.
+
+Takes a docname (one exact version) or a `rule_id` such as `training_expiring`,
+which resolves to whichever version is live — what somebody asking about a rule
+today means. Pass the docname of a **superseded** row to read the definition an
+older alert was raised under; those rows are never edited and never deleted,
+which is the whole point of versioning by copy.
+
+## 239. `test_compliance_rule`
+
+Read-only. Runs ONE rule against the data as it stands and reports every
+observation it WOULD make — with the alert docname each would take — writing
+nothing.
+
+**The tool to call between authoring a rule and approving it.** It takes the same
+code path the nightly sweep takes, deliberately: a dry run with its own second
+implementation is a dry run that can disagree with the real one.
+
+What to look for: a rule that observes four hundred rows is a rule whose
+condition is wrong — almost always a field that is empty everywhere rather than
+stale on a few. `computation_warnings` names anything the engine worked around,
+such as a scope filter on a column this site has not got.
+
+## 240. `create_compliance_rule`
+
+**MUTATING (default off).** Authors a new compliance rule — a condition the
+nightly sweep evaluates against this site's records — with no code release. It
+arrives as a **Draft** and fires nothing until `approve_compliance_rule` turns it
+on.
+
+The runtime stays deterministic and there is no model in it: a rule is a
+declarative expression over record state — query `target_doctype`, apply
+`scope_filters`, measure `date_field` against `cadence_days` and the thresholds,
+render `message_template`. That is what lets every alert be traced to a rule, a
+citation, an approver, and the specific field that crossed a threshold.
+
+Refuses a duplicate `rule_id` (two rules sharing one collide on the alert
+docname); a `rule_id` with a colon or a space (the docname is
+`<rule_id>:<doctype>:<name>`); a `target_doctype` this site has not got; no
+kairotic gate; a malformed scope filter or unknown operator; and any
+`custom_python` the sandbox would not run.
+
+## 241. `approve_compliance_rule`
+
+**MUTATING (default off).** Accepts a rule and turns it on, recording who
+accepted it and when **on the record itself**.
+
+This is the gate, and there is no way round it: the DocType refuses `enabled`
+without an approver and a date. So no rule — least of all one a model proposed —
+starts firing without a person having put their name to it. Also reactivates a
+rule that was disabled. Optionally attaches the approver's signature as a File.
+
+## 242. `update_compliance_rule`
+
+**MUTATING (default off).** Changes a rule by **superseding** it: a new record at
+version+1, the old one disabled and pointing at it. The old row is never edited.
+
+That is why an alert from April is still explicable in November, and why a sweep
+that started against v1 finishes against v1. Arguments left out mean unchanged.
+The new version inherits the old one's approval — a threshold moved is not a new
+rule, and forcing re-approval on every tuning edit trains people to click through
+approvals. A rule that was off stays off.
+
+The result carries a field-by-field before → after, so the MCP Action Log row
+records what the rule said **before** rather than only what was asked for.
+
+**The most common edit this exists for**: when OR-OSHA renumbered heat illness
+from -1130 to -1131, `regulation_citations` was the only thing that had to move.
+
+## 243. `deactivate_compliance_rule`
+
+**MUTATING (default off).** Stops a rule firing, and records why.
+
+**It dismisses nothing.** Every alert the rule already raised stays on the
+calendar exactly as it was, and the next sweep will not touch it — the same
+reading a rule skipped for a missing DocType gets, and for the same reason:
+switching a rule off is not evidence that anybody did the work. The result says
+how many are left standing.
+
+There is deliberately no delete. The rule stays on the site, disabled, with the
+reason on the record — so the operator who asks next season why the calendar
+stopped mentioning the thing that then went wrong gets an answer from the record
+rather than from somebody's memory.
+
+## 244. `propose_compliance_rule`
+
+**MUTATING, declared and not implemented in v0.22.0 — every call refuses.**
+
+It is the surface an AI rule proposer will occupy: read a regulation, draft a
+Compliance Rule with its target doctype, thresholds, scope, citation and kairotic
+gate, mark it `AI-proposed` with the URL and section it was read from, and leave
+it **disabled** for a human to check against the regulation and approve.
+
+Declared now so the shape is fixed before anything fills it; inert now because
+the architecture is explicit about where AI is allowed to be — at authoring time,
+behind a human approval, never in the trigger path. Phase 2 of the Configurable
+Compliance Framework wires it.
+
+Until then, author rules with `create_compliance_rule` and check them with
+`test_compliance_rule` before approving.
+
 ---
 
 # Adding a tool
@@ -7085,7 +7208,7 @@ Everything a tool needs is in two places:
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
-   `shifts`, `heat`, `kpi`, `visits`, `sessions` or `fieldwork` —
+   `shifts`, `heat`, `kpi`, `visits`, `sessions`, `rules` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

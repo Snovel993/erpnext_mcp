@@ -95,6 +95,7 @@ from .. import compat
 from .. import training as training_records
 from ..records import CORRECTIVE_ACTION_REQUIRED, RECORDED
 from .base import (
+	RULES,
 	SEVERITY_CRITICAL,
 	SEVERITY_INFO,
 	SEVERITY_WARNING,
@@ -187,6 +188,107 @@ def _rows(doctype: str, filters: dict, fields, limit: int = 2000) -> list:
 	]
 
 
+# ── v0.22.0: reading the numbers off the record ─────────────────────────────
+#
+# EVERY INTERVAL BELOW IS STILL DECLARED IN THIS FILE, and every one of them is
+# now only the FALLBACK. The number the sweep actually uses comes off the
+# Compliance Rule row, so an operation whose annual habitability walk is
+# contracted at ten months rather than twelve changes a record instead of
+# waiting for a release. The constants stay because they are the shipped
+# defaults, because they are what the seeder writes, and because a site
+# mid-migrate runs these functions with no record behind them at all — and a
+# scanner that answered `None` in that window would raise nothing and dismiss
+# everything.
+#
+# `context["rule"]` is the row, put there by `engine._builtin_scan`. It is absent
+# when these functions run as the shipped fallback, which is why every read
+# below goes through a helper with a fallback rather than through `row[...]`.
+
+
+def _rule_of(context: dict) -> dict:
+	return context.get("rule") or {}
+
+
+def _extra(context: dict) -> dict:
+	"""`extra_parameters_json` — the named intervals one scanner happens to need.
+
+	A rule with TWO intervals — the water cadence and the spray season that gates
+	it — has one that maps onto `cadence_days` and one that maps onto nothing.
+	Rather than grow a column per scanner, the second lives in a small JSON
+	object the scanner reads by name. It is deliberately not a general-purpose
+	config bag: every key in it is documented on the rule that reads it.
+	"""
+	from ..compliance_rules import as_object
+
+	try:
+		return as_object(_rule_of(context).get("extra_parameters_json"), "extra_parameters")
+	except ValueError:
+		return {}
+
+
+def _interval(context: dict, key: str, fallback: int) -> int:
+	"""One tuned interval, off the row where there is one, else the constant."""
+	rule = _rule_of(context)
+	value = rule.get(key) if key in rule else _extra(context).get(key)
+	if value in (None, ""):
+		return fallback
+	try:
+		return int(value)
+	except (TypeError, ValueError):
+		return fallback
+
+
+def _severity_of(context: dict, key: str, fallback: str) -> str:
+	value = str(_rule_of(context).get(key) or "").strip()
+	return value if value in (SEVERITY_CRITICAL, SEVERITY_WARNING, SEVERITY_INFO) else fallback
+
+
+def _scoped(context: dict, row: dict) -> bool:
+	"""Does this row pass the scope filters an OPERATOR added to the rule?
+
+	The shipped rules seed with an empty filter list: the scoping a built-in
+	scanner does is part of its shape and stays in code, which is the whole
+	distinction between a built-in rule and a declarative one. This is the door
+	left open on top of it — somebody who wants `housing_inspection_overdue`
+	scoped to one company's camp adds a filter and gets it, without any of the
+	thirteen shipped scanners having to grow a company argument.
+
+	The row's own keys are the present-fields set, because the row was fetched
+	with `compat.existing_fields` and therefore already reflects what this site
+	has. A filter on a column that is not there is skipped rather than failing
+	the row — see `compliance_rules.row_matches`.
+	"""
+	from ..compliance_rules import parse_filters, row_matches
+
+	raw = _rule_of(context).get("scope_filters_json")
+	if not str(raw or "").strip() or str(raw).strip() in ("[]", "{}"):
+		return True
+	try:
+		filters = parse_filters(raw)
+	except ValueError:
+		return True
+	matched, _warnings = row_matches(row, filters, set(row.keys()))
+	return matched
+
+
+#: `builtin_scanner` name → the function. A Compliance Rule naming one of these
+#: delegates the SHAPE of its scan to reviewed, shipped, tested code while
+#: keeping every tunable on the record. The controller refuses a name that is
+#: not in here, because a rule pointing at a scanner that does not exist raises
+#: nothing, for ever, quietly.
+SCANNERS: dict = {}
+
+#: rule key → the Compliance Rule fields that rule migrates to. Written beside
+#: each `register(...)` below so the definition and its migration cannot drift,
+#: and read by `compliance_rules.seed_specs()`.
+SHAPES: dict = {}
+
+
+def shape(key: str, **fields) -> None:
+	"""Declare how one shipped rule becomes a Compliance Rule record."""
+	SHAPES[key] = fields
+
+
 # ── which audits an alert answers to ────────────────────────────────────────
 #
 # Every rule below carries `regimes`, and most of them carry a constant: an
@@ -263,6 +365,12 @@ CERT_REGIMES = tuple(
 # ── 1. certification_expiring ───────────────────────────────────────────────
 def _scan_certifications(context: dict) -> list:
 	today = context["today"]
+	critical_days = _interval(context, "threshold_critical_days", CERT_CRITICAL_DAYS)
+	default_window = _interval(context, "threshold_warning_days", CERT_DEFAULT_WINDOW_DAYS)
+	window_field = str(_rule_of(context).get("window_field") or "renewal_window_days")
+	expired_severity = _severity_of(context, "severity_expired", SEVERITY_CRITICAL)
+	critical_severity = _severity_of(context, "severity_critical", SEVERITY_CRITICAL)
+	warning_severity = _severity_of(context, "severity_warning", SEVERITY_WARNING)
 	out = []
 	for row in _rows(
 		"Certification",
@@ -285,11 +393,13 @@ def _scan_certifications(context: dict) -> list:
 			# not coming back. Neither is a renewal task, and alerting on them would
 			# put permanent rows on a calendar nothing can ever clear.
 			continue
+		if not _scoped(context, row):
+			continue
 		expires = row.get("expiration_date")
 		remaining = days_until(today, expires)
 		if remaining is None:
 			continue
-		window = int(row.get("renewal_window_days") or 0) or CERT_DEFAULT_WINDOW_DAYS
+		window = int(row.get(window_field) or 0) or default_window
 		if remaining > window:
 			# Not ripe. The renewal cannot usefully be started yet and the agency
 			# would not accept it.
@@ -298,21 +408,21 @@ def _scan_certifications(context: dict) -> list:
 		what = f"{row.get('cert_type') or 'Certificate'} {row['name']}"
 		holder = f" held by {row['holder']}" if row.get("holder") else ""
 		if remaining < 0:
-			severity = SEVERITY_CRITICAL
+			severity = expired_severity
 			message = (
 				f"{what}{holder} EXPIRED {abs(remaining)} day(s) ago, on {expires}. It is not a "
 				"defence and has not been one since that date"
 				+ (f". Renewals go through {row['issuing_body']}." if row.get("issuing_body") else ".")
 			)
-		elif remaining <= CERT_CRITICAL_DAYS:
-			severity = SEVERITY_CRITICAL
+		elif remaining <= critical_days:
+			severity = critical_severity
 			message = (
-				f"{what}{holder} expires in {remaining} day(s), on {expires}. Inside {CERT_CRITICAL_DAYS} "
+				f"{what}{holder} expires in {remaining} day(s), on {expires}. Inside {critical_days} "
 				"days a renewal started now may not come back before the lapse"
 				+ (f" — {row['issuing_body']} issues it." if row.get("issuing_body") else ".")
 			)
 		else:
-			severity = SEVERITY_WARNING
+			severity = warning_severity
 			message = (
 				f"{what}{holder} expires in {remaining} day(s), on {expires}, which is inside its "
 				f"{window}-day renewal window. That window is the lead time the issuing body "
@@ -372,6 +482,34 @@ register(
 		regimes=CERT_REGIMES,
 		scan=_scan_certifications,
 	)
+)
+
+# BUILT-IN, AND HERE IS THE PRIMITIVE THAT WOULD MAKE IT DECLARATIVE. Three
+# things keep it out of the declarative engine, and only one of them is hard:
+#   * the renewal window is PER ROW (`renewal_window_days`) — already a
+#     declarative primitive, `window_field`, added for this rule;
+#   * the CATEGORY is per row (an applicator licence is Workforce, a GlobalGAP
+#     certificate is Certifications) — wants a `category_from_field`;
+#   * the REGIMES are derived from the certificate's TYPE through an eleven-row
+#     heuristic table, and that table is the hard one. `regimes_from_field`
+#     copies tags off a column; there is no column here, only a name to read.
+# A `regime_heuristics_json` primitive — ordered (needles → regimes) pairs, which
+# is what the table already is — would finish the job and take this rule
+# declarative. That is the v0.22.1 candidate with the best ratio in the set.
+shape(
+	"certification_expiring",
+	target_doctype="Certification",
+	builtin_scanner="certification_expiring",
+	date_field="expiration_date",
+	cadence_days=0,
+	window_field="renewal_window_days",
+	threshold_critical_days=CERT_CRITICAL_DAYS,
+	threshold_warning_days=CERT_DEFAULT_WINDOW_DAYS,
+	severity_critical=SEVERITY_CRITICAL,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_CRITICAL,
+	audit_packet_types=["GAP", "GlobalGAP", "FSMA"],
+	retention_years=3,
 )
 
 
@@ -447,6 +585,37 @@ register(
 	)
 )
 
+# PURE DECLARATIVE. The gate is one date on one row against one threshold, and
+# the scope is one status with a documented default — `or "Active"` in the
+# Python above, `"default": "Active"` on the filter here, and the two mean the
+# same thing: a policy nobody set a status on is in force.
+#
+# `threshold_warning_days = 0` is what makes it fire ON the review date rather
+# than the day after; `threshold_critical_days = -1` is how a rule says "this
+# band never fires", which is right here because a procedure a fortnight overdue
+# for review is not blocking anything today.
+shape(
+	"policy_review_overdue",
+	target_doctype="Compliance Policy",
+	date_field="review_due_date",
+	cadence_days=0,
+	threshold_critical_days=-1,
+	threshold_warning_days=0,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_WARNING,
+	missing_date_behaviour="Skip",
+	scope_filters=[{"field": "status", "op": "eq", "value": "Active", "default": "Active"}],
+	message_template=(
+		"{{ name }}{% if version %} ({{ version }}){% endif %} was due for review on "
+		"{{ review_due_date }}, {{ days_overdue }} day(s) ago, and is still in force. GAP and "
+		"GlobalGAP both expect an annual review; a procedure nobody has read in years is a "
+		"finding whether or not it is still correct."
+		"{% if policy_owner %} {{ policy_owner }} owns it.{% endif %}"
+	),
+	audit_packet_types=["GAP", "GlobalGAP", "FSMA"],
+	retention_years=3,
+)
+
 
 # ── 3. water_test_stale ─────────────────────────────────────────────────────
 def _scan_water_tests(context: dict) -> list:
@@ -461,6 +630,9 @@ def _scan_water_tests(context: dict) -> list:
 	last spray.
 	"""
 	today = context["today"]
+	test_days = _interval(context, "cadence_days", WATER_TEST_DAYS)
+	season_days = _interval(context, "spray_season_days", SPRAY_SEASON_DAYS)
+	severity = _severity_of(context, "severity_expired", SEVERITY_CRITICAL)
 	out = []
 	for row in _rows(
 		"Field",
@@ -477,15 +649,17 @@ def _scan_water_tests(context: dict) -> list:
 	):
 		if str(row.get("condition") or "") == "Fallow":
 			continue
+		if not _scoped(context, row):
+			continue
 		sprayed = days_since(today, row.get("last_spray_date"))
-		if sprayed is None or sprayed > SPRAY_SEASON_DAYS:
+		if sprayed is None or sprayed > season_days:
 			# Not in rotation. Nothing is being applied to this ground, so no
 			# agricultural water is contacting a crop on it, so Subpart E is not
 			# engaged and there is nothing to be alarmed about.
 			continue
 
 		tested = days_since(today, row.get("water_test_last_date"))
-		if tested is not None and tested <= WATER_TEST_DAYS:
+		if tested is not None and tested <= test_days:
 			continue
 
 		if tested is None:
@@ -493,9 +667,7 @@ def _scan_water_tests(context: dict) -> list:
 			due = ""
 		else:
 			detail = f"was last water-tested {tested} days ago, on {row['water_test_last_date']}"
-			due = str(
-				frappe.utils.add_days(frappe.utils.getdate(row["water_test_last_date"]), WATER_TEST_DAYS)
-			)
+			due = str(frappe.utils.add_days(frappe.utils.getdate(row["water_test_last_date"]), test_days))
 
 		out.append(
 			Observation(
@@ -503,12 +675,12 @@ def _scan_water_tests(context: dict) -> list:
 				source_docname=row["name"],
 				message=(
 					f"{row['name']} was sprayed {sprayed} day(s) ago and {detail}. FSMA Produce "
-					f"Safety Rule Subpart E wants agricultural water tested within {WATER_TEST_DAYS} "
+					f"Safety Rule Subpart E wants agricultural water tested within {test_days} "
 					"days, and the water going through the sprayer onto a crop being harvested is "
 					"agricultural water. This block is in active rotation, so the next application "
 					"is not defensible until the test is done."
 				),
-				severity=SEVERITY_CRITICAL,
+				severity=severity,
 				due_date=due,
 				company=str(row.get("owning_entity") or ""),
 			)
@@ -541,6 +713,33 @@ register(
 		regimes=("FSMA", "OR-OSHA"),
 		scan=_scan_water_tests,
 	)
+)
+
+# BUILT-IN, AND THE REASON IS TWO DATES THAT ONLY MATTER TOGETHER. The
+# declarative engine has ONE cadence anchor: it computes days remaining against
+# one field and bands the answer. This rule's gate is a CONJUNCTION over two
+# independent fields — the block was sprayed inside the season AND its water was
+# tested outside the cadence — and the whole kairotic claim is that neither half
+# fires on its own. Ground nobody is spraying raises nothing however stale its
+# water; a block sprayed yesterday raises nothing if its water is current.
+#
+# The primitive that would fix it is a second anchor: `gate_date_field` +
+# `gate_within_days`, meaning "only consider rows whose <field> is inside <n>
+# days". That is a small, well-shaped addition and it would take this rule
+# declarative on its own. It is the second-best v0.22.1 candidate.
+shape(
+	"water_test_stale",
+	target_doctype="Field",
+	builtin_scanner="water_test_stale",
+	date_field="water_test_last_date",
+	cadence_days=WATER_TEST_DAYS,
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_expired=SEVERITY_CRITICAL,
+	missing_date_behaviour="Raise",
+	extra_parameters={"spray_season_days": SPRAY_SEASON_DAYS},
+	audit_packet_types=["FSMA", "OSHA"],
+	retention_years=2,
 )
 
 
@@ -625,10 +824,52 @@ register(
 	)
 )
 
+# PURE DECLARATIVE, AND IT IS THE RULE THAT PAID FOR TWO PRIMITIVES.
+#
+# `missing_date_behaviour = Raise` exists because of this rule. A cabin nobody
+# has ever inspected is the most overdue cabin in the camp, and every naive
+# date-driven engine answers "no date, no alert" — which hides exactly the unit
+# somebody needs to walk. The opposite reading is right for an expiry (a
+# training with no expiry does not lapse), so it had to be a choice on the
+# record rather than a convention in the engine.
+#
+# Both scope filters carry a `default`, and both defaults are load-bearing. In
+# SQL, `condition != 'Uninhabitable'` EXCLUDES every row whose condition was
+# never set — which is most of them on a new camp — and the rule would go quiet
+# on the units nobody has touched. Read in Python against a default of "", they
+# pass, which is what the legacy `str(row.get("condition") or "")` did.
+shape(
+	"housing_inspection_overdue",
+	target_doctype="Housing Unit",
+	date_field="last_habitability_inspection",
+	cadence_days=INSPECTION_DAYS,
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_expired=SEVERITY_WARNING,
+	missing_date_behaviour="Raise",
+	scope_filters=[
+		{"field": "unit_type", "op": "nin", "value": list(NON_RESIDENTIAL_TYPES), "default": ""},
+		{"field": "condition", "op": "ne", "value": "Uninhabitable", "default": ""},
+	],
+	message_template=(
+		"{{ name }}{% if parcel %} on {{ parcel }}{% endif %} "
+		"{%- if days_since_anchor is none %} has never had a habitability inspection recorded"
+		"{%- else %} was last inspected {{ days_since_anchor }} days ago, on "
+		"{{ last_habitability_inspection }}{% endif %}. Oregon's agricultural labor housing rules "
+		"and 29 CFR 1910.142 expect an annual walk, and this unit can currently be assigned to "
+		"somebody who will sleep in it tonight."
+	),
+	producer_task_template=None,
+	audit_packet_types=["OSHA"],
+	retention_years=3,
+)
+
 
 # ── 5. housing_detector_test_stale ──────────────────────────────────────────
 def _scan_detectors(context: dict) -> list:
 	today = context["today"]
+	detector_days = _interval(context, "cadence_days", DETECTOR_DAYS)
+	severity = _severity_of(context, "severity_expired", SEVERITY_WARNING)
 	out = []
 	for row in _rows(
 		"Housing Unit",
@@ -654,13 +895,15 @@ def _scan_detectors(context: dict) -> list:
 			# and inside the camp's inspected estate. A shed on the same parcel is
 			# not a bunkhouse and does not need a detector test on record.
 			continue
+		if not _scoped(context, row):
+			continue
 
 		stale = []
 		for label, fieldname in (("smoke", "smoke_detector_last_test"), ("CO", "co_detector_last_test")):
 			since = days_since(today, row.get(fieldname))
 			if since is None:
 				stale.append(f"no {label} detector test has ever been recorded")
-			elif since > DETECTOR_DAYS:
+			elif since > detector_days:
 				stale.append(f"the {label} detector was last tested {since} days ago, on {row[fieldname]}")
 		if not stale:
 			continue
@@ -675,7 +918,7 @@ def _scan_detectors(context: dict) -> list:
 					+ ". A detector nobody has tested inside a year is a detector nobody knows "
 					"works, and a camp cabin with a propane heater is exactly where that matters."
 				),
-				severity=SEVERITY_WARNING,
+				severity=severity,
 				due_date="",
 				company=str(row.get("owning_entity") or ""),
 			)
@@ -704,6 +947,32 @@ register(
 		regimes=("OR-OSHA", "Internal"),
 		scan=_scan_detectors,
 	)
+)
+
+# BUILT-IN, AND THE REASON IS TWO ANCHORS OF THE SAME KIND. A cabin has a smoke
+# detector and a CO detector, they are tested independently, EITHER being stale
+# fires the rule, and the message has to name which — "the CO detector was last
+# tested 400 days ago" is a different errand from "no smoke detector test has
+# ever been recorded", and an alert that said only "a detector is overdue" would
+# send somebody to test the wrong one.
+#
+# The primitive is a plural `date_fields` with a per-field label, folding to
+# "worst remaining" for the severity and enumerating the stale ones for the
+# message. It is more machinery than the other two candidates and it buys one
+# rule, so it is the third of the three rather than the first.
+shape(
+	"housing_detector_test_stale",
+	target_doctype="Housing Unit",
+	builtin_scanner="housing_detector_test_stale",
+	date_field="smoke_detector_last_test",
+	cadence_days=DETECTOR_DAYS,
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_expired=SEVERITY_WARNING,
+	missing_date_behaviour="Raise",
+	due_date_mode="None",
+	audit_packet_types=["OSHA", "FSMA"],
+	retention_years=3,
 )
 
 
@@ -768,6 +1037,47 @@ register(
 		regimes=("Internal",),
 		scan=_scan_i9,
 	)
+)
+
+# PURE DECLARATIVE, AND IT IS THE RULE WITH NO CLOCK AT ALL. There is no date to
+# count down to: an I-9 is either recorded as Expired or it is not, and the
+# moment it is, the person cannot lawfully be put on a crew. `date_field` empty
+# therefore means "every matching row raises, at `severity_expired`" — which
+# reads oddly until you notice it is the truth: past due by the only measure the
+# rule has.
+#
+# `requires_fields` exists for this rule. `i9_status` is a compliance column this
+# app installs on demand, and a site that has not run `install_compliance_fields`
+# has no column to read. A rule that scanned anyway would report every employee
+# as clean, which is the single most dangerous wrong answer in the file — so it
+# returns an EMPTY SCAN instead, which still auto-dismisses stale alerts, rather
+# than a failure, which would not.
+shape(
+	"i9_expired",
+	target_doctype="Employee",
+	date_field="",
+	requires_fields="i9_status",
+	severity_expired=SEVERITY_CRITICAL,
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	due_date_mode="Today",
+	scope_filters=[
+		{"field": "i9_status", "op": "eq", "value": "Expired"},
+		# Only people who are still employed. A former employee's expired I-9
+		# blocks nothing, and alerting on it fills the calendar with leavers. The
+		# default matters: a site whose Employee has no `status` column at all
+		# gets the filter skipped (see `row_matches`), which is the legacy
+		# `if compat.has_field(...)` guard said as data.
+		{"field": "status", "op": "eq", "value": "Active", "default": "Active"},
+	],
+	message_template=(
+		"{{ employee_name or name }} has an EXPIRED I-9. Employment eligibility has to be "
+		"re-verified when a work authorisation document expires, and until it is this person "
+		"cannot lawfully be put on a crew tomorrow. ICE penalties under 8 USC 1324a are assessed "
+		"per form."
+	),
+	audit_packet_types=["DOL"],
+	retention_years=3,
 )
 
 
@@ -850,6 +1160,48 @@ register(
 	)
 )
 
+# PURE DECLARATIVE. Three bands, three sentences, one date — the shape the
+# declarative engine was designed around, and the one that made it worth
+# building. Ninety days is what an Oregon renewal actually takes once the bond
+# and the background check are counted; thirty is where starting late means
+# lapsing. Both are now numbers on a record, which is the point: an operation
+# whose contractor's bonding agent is slower changes 90 to 120 and does not wait
+# for a release.
+shape(
+	"flc_license_expiring",
+	target_doctype="Employee",
+	date_field="flc_license_expiration",
+	cadence_days=0,
+	requires_fields="flc_license_expiration",
+	threshold_critical_days=CERT_CRITICAL_DAYS,
+	threshold_warning_days=CERT_DEFAULT_WINDOW_DAYS,
+	severity_critical=SEVERITY_CRITICAL,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_CRITICAL,
+	missing_date_behaviour="Skip",
+	scope_filters=[{"field": "status", "op": "eq", "value": "Active", "default": "Active"}],
+	message_template=(
+		"{%- set who = employee_name or name -%}"
+		"{%- if days_remaining < 0 -%}"
+		"{{ who }}'s farm labor contractor licence EXPIRED {{ days_overdue }} day(s) ago, on "
+		"{{ flc_license_expiration }}. They cannot lawfully recruit, supervise or transport "
+		"agricultural workers, and under MSPA and ORS 658.405 using an unlicensed contractor is "
+		"the grower's violation as well as theirs — take them off the crew schedule."
+		"{%- elif days_remaining <= threshold_critical_days -%}"
+		"{{ who }}'s farm labor contractor licence expires in {{ days_remaining }} day(s), on "
+		"{{ flc_license_expiration }}. Renewal needs a bond and a background check and does not "
+		"turn round in a week — a crew boss whose licence lapses mid-harvest is a crew with "
+		"nobody who can lawfully supervise it."
+		"{%- else -%}"
+		"{{ who }}'s farm labor contractor licence expires in {{ days_remaining }} day(s), on "
+		"{{ flc_license_expiration }}. Start the renewal: the bond and background check are the "
+		"long pole."
+		"{%- endif -%}"
+	),
+	audit_packet_types=["DOL"],
+	retention_years=3,
+)
+
 
 # ── 8. filing_response_due ──────────────────────────────────────────────────
 def _scan_filings(context: dict) -> list:
@@ -923,6 +1275,42 @@ register(
 	)
 )
 
+# PURE DECLARATIVE, AND IT IS WHY THE SEVERITY OF EACH BAND IS ITSELF A FIELD.
+# This rule escalates from Info to Warning as the deadline passes — the only one
+# of the thirteen that does — and an engine with a hardcoded Critical/Warning
+# ladder could not express it. `severity_warning = Info` says "the band before
+# the deadline is context, not a problem"; `severity_expired = Warning` says
+# "once it has passed it is". Two fields, one honest escalation.
+#
+# The `isnull` filter on `response_received_date` IS the auto-dismissal: record
+# the agency's answer and the rule stops observing the filing, so the sweep
+# takes the alert off without anybody switching a reminder off.
+shape(
+	"filing_response_due",
+	target_doctype="Regulatory Filing",
+	date_field="response_due_date",
+	cadence_days=0,
+	threshold_critical_days=-1,
+	threshold_warning_days=FILING_RESPONSE_DAYS,
+	severity_warning=SEVERITY_INFO,
+	severity_expired=SEVERITY_WARNING,
+	missing_date_behaviour="Skip",
+	scope_filters=[
+		{"field": "response_received_date", "op": "isnull"},
+		{"field": "status", "op": "nin", "value": ["Draft", "Withdrawn"], "default": ""},
+	],
+	message_template=(
+		"A response to {{ name }} ({{ agency or 'the agency' }}, {{ filing_type or 'filing' }}"
+		"{%- if docket_number %} under docket {{ docket_number }}{% endif %}) "
+		"{% if days_remaining < 0 %}was due {{ days_overdue }} day(s) ago"
+		"{% else %}is due in {{ days_remaining }} day(s){% endif %}, on {{ response_due_date }}, "
+		"and none has been recorded. Chasing a docket before the deadline is a different "
+		"conversation from chasing it after."
+	),
+	audit_packet_types=["Other"],
+	retention_years=3,
+)
+
 
 # ── 9. audit_action_overdue ─────────────────────────────────────────────────
 def _scan_corrective_actions(context: dict) -> list:
@@ -934,6 +1322,9 @@ def _scan_corrective_actions(context: dict) -> list:
 	and which is worst.
 	"""
 	today = context["today"]
+	grace_days = _interval(context, "grace_days", ACTION_OVERDUE_GRACE_DAYS)
+	worst_severity = _severity_of(context, "severity_critical", SEVERITY_CRITICAL)
+	ordinary_severity = _severity_of(context, "severity_warning", SEVERITY_WARNING)
 	out = []
 	audits = _rows(
 		"Audit Event",
@@ -942,6 +1333,8 @@ def _scan_corrective_actions(context: dict) -> list:
 	)
 	for row in audits:
 		if row.get("corrective_actions_closed"):
+			continue
+		if not _scoped(context, row):
 			continue
 		try:
 			doc = frappe.get_doc("Audit Event", row["name"])
@@ -954,7 +1347,7 @@ def _scan_corrective_actions(context: dict) -> list:
 			if not due:
 				continue
 			late = days_since(today, due)
-			if late is None or late < ACTION_OVERDUE_GRACE_DAYS:
+			if late is None or late < grace_days:
 				continue
 			overdue.append((index, action, late, due))
 			if not worst_due or due < worst_due:
@@ -964,11 +1357,11 @@ def _scan_corrective_actions(context: dict) -> list:
 
 		worst = max(overdue, key=lambda entry: entry[2])
 		severity = (
-			SEVERITY_CRITICAL
+			worst_severity
 			if any(
 				str(action.get("severity") or "") in ("Major", "Critical") for _i, action, _l, _d in overdue
 			)
-			else SEVERITY_WARNING
+			else ordinary_severity
 		)
 		out.append(
 			Observation(
@@ -1022,6 +1415,34 @@ register(
 	)
 )
 
+# BUILT-IN, AND THE REASON IS A CHILD TABLE REDUCED TO ONE ROW. The declarative
+# engine walks the rows of ONE doctype and asks a question of each. This rule
+# walks an Audit Event's corrective-action CHILD ROWS, keeps the overdue ones,
+# picks the worst, takes its severity from the worst finding's own severity, and
+# raises ONE alert per audit rather than one per action — because five open items
+# on one PrimusGFS audit are one conversation with one auditor, and five rows on
+# the calendar would look like five problems.
+#
+# Every part of that is an aggregation, and an aggregation is not a filter. The
+# primitive would be a whole second engine — group-by, fold, pick — which is a
+# fair description of "write it in Python". This one stays built-in on purpose;
+# it is not a gap in the vocabulary, it is a different shape of question.
+shape(
+	"audit_action_overdue",
+	target_doctype="Audit Event",
+	builtin_scanner="audit_action_overdue",
+	date_field="",
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_critical=SEVERITY_CRITICAL,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_WARNING,
+	due_date_mode="None",
+	extra_parameters={"grace_days": ACTION_OVERDUE_GRACE_DAYS},
+	audit_packet_types=["GAP", "GlobalGAP", "FSMA", "OSHA"],
+	retention_years=3,
+)
+
 
 # ── 10. housing_corrective_action_open ──────────────────────────────────────
 #: The two camp records a finding can come out of, and how to describe one. Both
@@ -1066,6 +1487,8 @@ def _scan_camp_corrective_actions(context: dict) -> list:
 
 		for row in rows:
 			if str(row.get("corrective_action_closed") or "").strip():
+				continue
+			if not _scoped(context, row):
 				continue
 			found_on = str(row.get(date_field) or "")
 			later = [date for date in clean.get(str(row.get("unit") or ""), ()) if date > found_on]
@@ -1134,6 +1557,35 @@ register(
 	)
 )
 
+# BUILT-IN, AND THE REASON IS SUPERSESSION — the one gate in the whole engine
+# that is a question about OTHER ROWS. Whether a July water stain is still true
+# depends on whether a September inspection of the SAME UNIT came back clean.
+# There is no filter on the finding's own row that can answer that, and there is
+# no threshold either: the condition stops being true because a different record
+# was written.
+#
+# It also walks TWO doctypes under one rule_id, deliberately — a cabin with a
+# water stain and a cabin with a dead CO detector are the same conversation with
+# the same person on the same walk round the camp.
+#
+# A declarative primitive for this would be `superseded_by_later_clean`:
+# (doctype, subject_field, date_field, clean_state). That is expressible and
+# worth doing — it would take this rule AND water_test_contamination declarative
+# together, which is the best two-for-one in the set after the regime heuristics.
+shape(
+	"housing_corrective_action_open",
+	target_doctype="Housing Inspection",
+	builtin_scanner="housing_corrective_action_open",
+	requires_doctypes="Housing Inspection",
+	date_field="inspection_date",
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_expired=SEVERITY_CRITICAL,
+	due_date_mode="None",
+	audit_packet_types=["OSHA", "FSMA"],
+	retention_years=3,
+)
+
 
 # ── 11. water_test_contamination ────────────────────────────────────────────
 def _scan_water_contamination(context: dict) -> list:
@@ -1172,9 +1624,12 @@ def _scan_water_contamination(context: dict) -> list:
 	):
 		clean.setdefault(str(row.get("source") or ""), []).append(str(row.get("test_date") or ""))
 
+	severity = _severity_of(context, "severity_expired", SEVERITY_CRITICAL)
 	out = []
 	for row in rows:
 		if str(row.get("corrective_action_closed") or "").strip():
+			continue
+		if not _scoped(context, row):
 			continue
 		sampled = str(row.get("test_date") or "")
 		if [date for date in clean.get(str(row.get("source") or ""), ()) if date > sampled]:
@@ -1199,7 +1654,7 @@ def _scan_water_contamination(context: dict) -> list:
 					"defensible until the source is treated or switched and a clean sample comes "
 					"back."
 				),
-				severity=SEVERITY_CRITICAL,
+				severity=severity,
 				due_date="",
 				company=str(row.get("company") or ""),
 				category="Water and Sanitation",
@@ -1234,6 +1689,23 @@ register(
 		regimes=("FSMA",),
 		scan=_scan_water_contamination,
 	)
+)
+
+# BUILT-IN, SAME REASON AS THE CAMP RULE ABOVE and it would be fixed by the same
+# primitive. The gate is "is this result still the LATEST word on that zone" —
+# a question about other rows of the same doctype, which no filter on this row
+# can answer. `superseded_by_later_clean` takes both rules declarative at once.
+shape(
+	"water_test_contamination",
+	target_doctype="Water Test",
+	builtin_scanner="water_test_contamination",
+	date_field="test_date",
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_expired=SEVERITY_CRITICAL,
+	due_date_mode="None",
+	audit_packet_types=["FSMA"],
+	retention_years=2,
 )
 
 
@@ -1420,6 +1892,78 @@ register(
 	)
 )
 
+# PURE DECLARATIVE, AND IT IS THE ONE THAT PROVES THE MESSAGE TEMPLATE IS WORTH
+# HAVING. This rule's text is three branches, a per-regime consequence clause and
+# a coverage clause, and it is the alert somebody actually reads on a phone at
+# seven in the morning — "WPS handler training expires in 12 days and he cannot
+# lawfully spray after that" is a different decision from "expires in 12 days".
+# All of it is now a template on a record, which means an operation can say the
+# consequence in their own words, in their crew's language, without a release.
+#
+# `regimes_from_field` exists for this rule. The tags are copied off the TRAINING
+# RECORD rather than off the rule, because the record says what that afternoon
+# actually covered — a heat session that ran out of time before the
+# emergency-response topic did not satisfy OAR 437-004-1131 that day, and
+# inheriting from the curriculum would produce an alert asserting evidence the
+# record does not support. An untagged record produces an untagged alert, and the
+# message says so and says how to fix it.
+shape(
+	"training_expiring",
+	target_doctype=training_records.DOCTYPE,
+	date_field="expires_date",
+	cadence_days=0,
+	threshold_critical_days=training_records.CRITICAL_WINDOW_DAYS,
+	threshold_warning_days=training_records.EXPIRING_WINDOW_DAYS,
+	severity_critical=SEVERITY_CRITICAL,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_CRITICAL,
+	# Training with NO expiry — a new-hire orientation, a PSA grower certificate —
+	# is skipped entirely, because a renewal alert nobody can clear is how a
+	# calendar stops being read. That is `Skip`, and it is the opposite of the
+	# housing rule's `Raise`, which is exactly why it is a field.
+	missing_date_behaviour="Skip",
+	regimes_from_field="regimes",
+	category="Workforce",
+	message_template=(
+		"{%- set who = employee_name or employee or 'somebody' -%}"
+		"{%- set what = training_type or 'Training' -%}"
+		"{%- set consequence %}"
+		"{%- if 'WPS' in regimes %} A handler whose WPS training is more than twelve months old "
+		"cannot lawfully perform an application (40 CFR 170.501; Oregon OAR 437-004-6501), so "
+		"this takes somebody off the sprayer rather than merely off a list."
+		"{%- elif 'OR-OSHA' in regimes %} Oregon's heat rule (OAR 437-004-1131) requires the "
+		"training annually BEFORE work at any site where the heat index will reach 80 °F, so a "
+		"lapse is a citation the first hot morning rather than at the next inspection."
+		"{%- elif 'FSMA' in regimes %} FSMA Subpart C (§112.21–.30) requires training on hiring "
+		"and periodically thereafter, and a covered farm with lapsed worker training has no "
+		"answer to the first question of a produce safety inspection."
+		"{%- elif 'NOP' in regimes %} Organic handling training is part of the Organic System "
+		"Plan the certifier inspects against (7 CFR 205.201), and OSP-practice divergence is the "
+		"noncompliance Oregon Tilth writes most often."
+		"{%- endif %}{% endset -%}"
+		"{%- set coverage %}"
+		"{%- if regimes %} It is the operation's evidence for {{ regimes|join(', ') }}."
+		"{%- else %} It carries NO regime tag, so no audit packet will pull it — tag it with "
+		"record_training so the evidence counts for something."
+		"{%- endif %}{% endset -%}"
+		"{%- if days_remaining < 0 -%}"
+		"{{ what }} for {{ who }} EXPIRED {{ days_overdue }} day(s) ago, on {{ expires_date }}."
+		"{{ consequence }}{{ coverage }}"
+		"{%- elif days_remaining <= threshold_critical_days -%}"
+		"{{ what }} for {{ who }} expires in {{ days_remaining }} day(s), on {{ expires_date }}. "
+		"Inside {{ threshold_critical_days }} days, booking a course is no longer reliably enough "
+		"to avoid the lapse — courses run on a published schedule and the next one may be after "
+		"the date.{{ consequence }}{{ coverage }}"
+		"{%- else -%}"
+		"{{ what }} for {{ who }} expires in {{ days_remaining }} day(s), on {{ expires_date }}, "
+		"which is inside the {{ threshold_warning_days }}-day window a retraining actually takes "
+		"to arrange — trainer, crew, language, and a room.{{ coverage }}"
+		"{%- endif -%}"
+	),
+	audit_packet_types=["FSMA", "GAP", "OSHA", "DOL"],
+	retention_years=2,
+)
+
 
 # ── 13. supervisor_review_lapsed ────────────────────────────────────────────
 #
@@ -1547,6 +2091,10 @@ def _scan_supervisor_reviews(context: dict) -> list:
 	enough for somebody to remember the afternoon they are signing off.
 	"""
 	today = context["today"]
+	warning_days = _interval(context, "threshold_warning_days", REVIEW_WARNING_DAYS)
+	critical_days = _interval(context, "threshold_critical_days", REVIEW_CRITICAL_DAYS)
+	critical_severity = _severity_of(context, "severity_critical", SEVERITY_CRITICAL)
+	warning_severity = _severity_of(context, "severity_warning", SEVERITY_WARNING)
 	out = []
 	for target in REVIEW_TARGETS:
 		if not compat.doctype_exists(target.doctype):
@@ -1569,7 +2117,9 @@ def _scan_supervisor_reviews(context: dict) -> list:
 		)
 		for row in _rows(target.doctype, _company_filter({}, context.get("company") or ""), fields):
 			age = _review_lag(target, row, today)
-			if age is None or age < REVIEW_WARNING_DAYS:
+			if age is None or age < warning_days:
+				continue
+			if not _scoped(context, row):
 				continue
 
 			who = row.get(target.subject_field) or row.get("name")
@@ -1582,21 +2132,21 @@ def _scan_supervisor_reviews(context: dict) -> list:
 			# claim coverage the register does not have.
 			regimes = training_records.parse(row.get("regimes")) if "regimes" in row else None
 
-			if age > REVIEW_CRITICAL_DAYS:
-				severity = SEVERITY_CRITICAL
+			if age > critical_days:
+				severity = critical_severity
 				message = (
 					f"The {target.what} for {who} ({what}"
 					+ (f", {activity}" if activity else "")
 					+ f") has been on file {age} days with no supervisor review. FSMA "
 					"§112.161(b) requires it to be reviewed, dated and signed by a supervisor "
 					"or responsible party WITHIN A REASONABLE TIME after the record is made, "
-					f"and past {REVIEW_CRITICAL_DAYS} days there is no longer a reading of "
+					f"and past {critical_days} days there is no longer a reading of "
 					"'reasonable' that covers it — a signature added now is dated now, and a "
 					"batch of them signed the week before an inspection is the finding rather "
 					f"than the fix. {target.stakes}."
 				)
 			else:
-				severity = SEVERITY_WARNING
+				severity = warning_severity
 				message = (
 					f"The {target.what} for {who} ({what}"
 					+ (f", {activity}" if activity else "")
@@ -1617,9 +2167,7 @@ def _scan_supervisor_reviews(context: dict) -> list:
 					# calendar sorted on due date should put the record that went
 					# past its review window first, and that is fourteen days
 					# after it was made.
-					due_date=str(
-						frappe.utils.add_days(str(row.get("creation") or "")[:10], REVIEW_WARNING_DAYS)
-					),
+					due_date=str(frappe.utils.add_days(str(row.get("creation") or "")[:10], warning_days)),
 					company=str(row.get("company") or ""),
 					category="Records",
 					regimes=regimes,
@@ -1670,3 +2218,56 @@ register(
 		scan=_scan_supervisor_reviews,
 	)
 )
+
+# BUILT-IN, AND THERE ARE THREE REASONS RATHER THAN ONE.
+#
+#   1. IT WALKS A TABLE OF DOCTYPES, not one. `REVIEW_TARGETS` is the list of
+#      records carrying the §112.161(b) review columns, and it is written to grow
+#      — Housing Inspection, Water Test, Heat Exposure Event and Farm Task
+#      Assignment are all one row away. `target_doctype` is singular by design.
+#   2. THE CONDITION IS AN `OR` OF TWO NULLS. A record counts as unreviewed when
+#      the reviewer is missing OR the review date is missing — a date with
+#      nobody attached is what an auditor is trained to disbelieve. Scope filters
+#      are ANDed, deliberately, because an OR-of-filters is a query language and
+#      a query language in a text field is the thing `custom_python` already is.
+#   3. THE CLOCK RUNS ON `creation`, NOT ON THE ACTIVITY DATE. §112.161(b)'s own
+#      words are "after the records are made", and reading the activity date
+#      would raise a Critical on every record of a season somebody backfilled.
+#      `creation` is a framework column rather than a doctype field, so it is
+#      outside what `date_field` can name today.
+#
+# NOTE THE INVERTED SENSE OF THE THRESHOLDS ON THIS ROW. Everywhere else they are
+# days REMAINING; here they are days ELAPSED since the record was made, because
+# the thing being measured is an absence getting older rather than a deadline
+# approaching. That is the strongest single argument for this rule staying
+# built-in: a number on a record that means the opposite of what the same number
+# means on the other twelve is a number somebody will eventually misread.
+shape(
+	"supervisor_review_lapsed",
+	target_doctype=training_records.DOCTYPE,
+	builtin_scanner="supervisor_review_lapsed",
+	date_field="creation",
+	threshold_warning_days=REVIEW_WARNING_DAYS,
+	threshold_critical_days=REVIEW_CRITICAL_DAYS,
+	severity_critical=SEVERITY_CRITICAL,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_WARNING,
+	category="Records",
+	audit_packet_types=["FSMA"],
+	retention_years=2,
+)
+
+
+# ── the scanner registry ────────────────────────────────────────────────────
+#
+# EVERY SHIPPED RULE'S SCAN IS AVAILABLE AS A NAMED SCANNER, not only the seven
+# that migrate as built-ins. Two reasons, and the second is the load-bearing one:
+#
+#   * an operator who does not like a declarative rewrite of a rule can point
+#     their row's `builtin_scanner` at the original and get the shipped
+#     behaviour back, exactly, without a release;
+#   * the backward-compatibility test in `test_compliance_rule_engine.py` runs
+#     each declarative rule AND its legacy scanner over one fixed database and
+#     asserts the two produce byte-identical alerts. That test is only possible
+#     because both implementations are reachable by name from here.
+SCANNERS.update({key: RULES[key].scan for key in RULES})

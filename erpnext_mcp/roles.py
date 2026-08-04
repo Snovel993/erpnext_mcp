@@ -250,6 +250,21 @@ COMPLIANCE_REGISTERS = (
 #: person who decides who walks it must not be the same account.
 SHIFTS = ("Farm Shift", "Heat Exposure Event")
 CALENDAR = ("Compliance Alert",)
+#: v0.22.0. THE RULE DEFINITIONS, AND THEY ARE A GROUP OF THEIR OWN BECAUSE THEY
+#: ARE A DIFFERENT KIND OF THING FROM THE CALENDAR. A Compliance Alert is an
+#: observation about this operation on this day; a Compliance Rule is the
+#: DEFINITION that produced it, and editing one changes what the whole site
+#: watches from tonight onwards. So it is granted to the two roles whose job is
+#: the compliance framework — Compliance Officer and Farm Manager — and to
+#: nobody else. A Foreman reads the calendar and cannot rewrite what fills it; a
+#: Field Worker cannot see it at all.
+#:
+#: That is the same separation `_grant(READ, DISPATCH)` on the Compliance Officer
+#: already exists to keep, pointed one layer up: the person who decides a walk is
+#: required and the person who decides who walks it must not be the same account,
+#: and the person who can silently redefine "required" must be fewer people
+#: still.
+RULE_DEFINITIONS = ("Compliance Rule",)
 GROUND = ("Parcel", "Field", "Irrigation Zone")
 CAMP = ("Housing Unit", "Housing Assignment")
 HOLDING = ("Cap Table Entry", "Member Event", "Note Payable", "Asset Cost Profile")
@@ -343,7 +358,7 @@ ROLE_SPECS = (
 		),
 		summary=("You keep the registers an audit asks for, and you can build the packet that answers it."),
 		permissions=(
-			*_grant(FULL, COMPLIANCE_REGISTERS, FIELD_RECORDS),
+			*_grant(FULL, COMPLIANCE_REGISTERS, FIELD_RECORDS, RULE_DEFINITIONS),
 			*_grant(READ_WRITE, CALENDAR),
 			# READ, deliberately. See the module docstring: the person who decides
 			# a walk is required and the person who decides who walks it must not
@@ -368,7 +383,17 @@ ROLE_SPECS = (
 		summary="You run the operation: the work, the compliance behind it, and the ground it happens on.",
 		companion_roles=("Employee",),
 		permissions=(
-			*_grant(FULL, DISPATCH, FIELD_RECORDS, COMPLIANCE_REGISTERS, GROUND, CAMP, PROPERTY, SHIFTS),
+			*_grant(
+				FULL,
+				DISPATCH,
+				FIELD_RECORDS,
+				COMPLIANCE_REGISTERS,
+				GROUND,
+				CAMP,
+				PROPERTY,
+				SHIFTS,
+				RULE_DEFINITIONS,
+			),
 			*_grant(READ_WRITE, CALENDAR),
 			*_grant(READ, PAPER),
 		),

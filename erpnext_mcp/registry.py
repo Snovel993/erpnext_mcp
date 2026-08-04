@@ -77,6 +77,7 @@ from .tools import (
 	read,
 	realestate,
 	reports,
+	rules,
 	sessions,
 	shifts,
 	tax,
@@ -5824,9 +5825,415 @@ TOOLS = {
 		"what ripeness means for it — plus the compliance framework it serves and "
 		"whether it can run on this site at all. Read-only.\n\n"
 		"A rule listed as unavailable raises nothing AND dismisses nothing: an absent "
-		"DocType is not evidence that anybody did the work.",
-		{},
+		"DocType is not evidence that anybody did the work.\n\n"
+		"SINCE v0.22.0 THESE ARE RECORDS, NOT CODE. Each rule is a Compliance Rule "
+		"document whose thresholds, scope, citations, regimes and message an "
+		"operator can edit without a release — `editable` says whether this site "
+		"has migrated yet. `shape` says how much of a rule is data: `declarative` "
+		"is entirely on the record; `builtin_scanner` keeps every tunable on the "
+		"record and delegates the shape of its join to reviewed, shipped code; "
+		"`custom_python` is a program in a sandbox. Use get_compliance_rule for one "
+		"rule's whole definition and update_compliance_rule to change it.",
+		{
+			"regime": _field(
+				_STRING,
+				"Only rules that raise evidence for one audit: OR-OSHA, FSMA, WPS, GAP, "
+				"GlobalGAP, PrimusGFS, NOP, OTCO, Internal. Matched by TOKEN, never by "
+				"substring — 'GlobalGAP' contains 'GAP'.",
+			),
+			"category": _field(
+				_STRING,
+				"Audits, Certifications, Filings, Housing, Policies, Records, Water and "
+				"Sanitation or Workforce.",
+			),
+			"target_doctype": _field(_STRING, "Only rules that scan one DocType, e.g. 'Employee'."),
+			"shape": _field(_STRING, "declarative, builtin_scanner or custom_python."),
+			"active": _field(
+				_BOOLEAN,
+				"True for only the rules the sweep is running; false for only the ones "
+				"somebody has turned off. Omit for both — a rule that is off is still part "
+				"of the register, and why it is off is on the record.",
+			),
+			"limit": _field(_INTEGER, "Rows to return."),
+		},
 		title="List compliance rules",
+	),
+	"get_compliance_rule": _tool(
+		rules.get_compliance_rule,
+		"One compliance rule in full: the condition it evaluates, the thresholds "
+		"and scope filters it evaluates it against, the regulation it cites, the "
+		"regimes it answers to, the kairotic gate saying what makes it ripe, and "
+		"WHO APPROVED IT AND WHEN. Read-only.\n\n"
+		"Accepts a docname (one exact version) or a rule_id such as "
+		"`training_expiring`, which resolves to whichever version is live — which "
+		"is what somebody asking about a rule today means. Pass the docname of a "
+		"superseded row to read the definition an older alert was raised under; "
+		"those rows are never edited and never deleted, which is the point of "
+		"versioning by copy.",
+		{
+			"name": _field(_STRING, "Compliance Rule docname, or the rule_id."),
+			"rule": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		title="Compliance rule detail",
+		available=_needs_doctype("Compliance Rule"),
+		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"test_compliance_rule": _tool(
+		rules.test_compliance_rule,
+		"Run ONE rule against the data as it stands right now and report every "
+		"observation it WOULD make — with the alert docname each one would take — "
+		"writing absolutely nothing. Read-only.\n\n"
+		"THE TOOL TO CALL BETWEEN AUTHORING A RULE AND APPROVING IT. It takes the "
+		"same code path the nightly sweep takes, deliberately: a dry run with its "
+		"own second implementation is a dry run that can disagree with the real "
+		"one, which is the single property a dry run must not have.\n\n"
+		"WHAT TO LOOK FOR IN THE ANSWER. A rule that observes four hundred rows is "
+		"a rule whose condition is wrong — almost always a field that is empty "
+		"everywhere rather than stale on a few — and finding that out here costs "
+		"nothing, while finding it out after approval fills a calendar nobody then "
+		"reads. `computation_warnings` names anything the engine had to work "
+		"around, such as a scope filter on a column this site has not got.",
+		{
+			"name": _field(_STRING, "Compliance Rule docname, or the rule_id."),
+			"rule": _field(_STRING, "Alias for name."),
+			"as_of": _field(_STRING, "YYYY-MM-DD to evaluate against. Defaults to today."),
+			"company": _COMPANY,
+			"dry_run": _field(
+				_BOOLEAN,
+				"Always true. Present so the intent is explicit in the call; passing false "
+				"is refused rather than quietly writing alerts.",
+			),
+		},
+		required=("name",),
+		title="Test a compliance rule (dry run)",
+		available=_needs_doctype("Compliance Rule"),
+		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_compliance_rule": _tool(
+		rules.create_compliance_rule,
+		"MUTATING. Author a new compliance rule — a condition the nightly sweep "
+		"will evaluate against this site's records — WITHOUT a code release. It is "
+		"created as a DRAFT and fires nothing until approve_compliance_rule turns "
+		"it on.\n\n"
+		"THE RUNTIME IS DETERMINISTIC AND THERE IS NO MODEL IN IT. A rule is a "
+		"declarative expression over record state: query `target_doctype`, apply "
+		"`scope_filters`, measure `date_field` against `cadence_days` and the "
+		"thresholds, render `message_template`. That is what lets every alert be "
+		"traced to a rule, a citation, an approver and the specific field that "
+		"crossed a threshold.\n\n"
+		"PREFER THE DECLARATIVE FIELDS. `custom_python` exists for conditions the "
+		"primitives do not reach, runs in a restricted interpreter with no imports, "
+		"no filesystem and no network, and is bounded in steps and wall clock. None "
+		"of the thirteen rules this app ships uses it. If you find yourself "
+		"reaching for it, say what shape of question the rule asks — that shape "
+		"probably wants to be a field.\n\n"
+		"WHAT IT REFUSES: a rule_id that is already taken (two rules sharing one "
+		"would collide on the alert docname); a rule_id with a colon or a space in "
+		"it (the docname is `<rule_id>:<doctype>:<name>`); a target_doctype this "
+		"site has not got (it would scan nothing, for ever, quietly); no kairotic "
+		"gate (that is a calendar reminder, not a compliance rule); a malformed "
+		"scope filter or an unknown operator; and any custom_python the sandbox "
+		"would not run.",
+		{
+			"rule_id": _field(
+				_STRING,
+				"The stable key its alerts are filed under, lower_snake_case — "
+				"`heat_training_lapsed`. It becomes the first segment of every alert docname "
+				"and must never change afterwards.",
+			),
+			"title": _field(_STRING, "What the rule says, in the words somebody reads on a phone."),
+			"category": _field(
+				_STRING,
+				"Audits, Certifications, Filings, Housing, Policies, Records, Water and "
+				"Sanitation or Workforce.",
+			),
+			"target_doctype": _field(_STRING, "The DocType whose rows this rule walks."),
+			"kairotic_gate_description": _field(
+				_STRING,
+				"REQUIRED. What STATE makes this rule ripe — and what keeps it quiet. It is "
+				"the paragraph an auditor is read when they ask why an alert fired.",
+			),
+			"date_field": _field(
+				_STRING,
+				"The field the clock runs from. LEAVE EMPTY for a rule with no clock, whose "
+				"whole condition is a scope filter; every matching row then raises at "
+				"`severity_expired`.",
+			),
+			"cadence_days": _field(
+				_INTEGER,
+				"How often the activity must recur. The due date is date_field + this, so 365 "
+				"on a last-inspection date is the annual walk and 0 means the date field IS "
+				"the deadline.",
+			),
+			"threshold_critical_days": _field(
+				_INTEGER,
+				"Fire critical at this many days remaining or fewer. NEGATIVE means the band "
+				"never fires, which is how a rule says it has nothing to say until the date "
+				"has passed.",
+			),
+			"threshold_warning_days": _field(
+				_INTEGER,
+				"Fire warning at this many days remaining or fewer. Also the OUTER window: "
+				"outside it the rule says nothing at all.",
+			),
+			"severity_critical": _field(_STRING, "Critical, Warning or Info. Default Critical."),
+			"severity_warning": _field(_STRING, "Critical, Warning or Info. Default Warning."),
+			"severity_expired": _field(
+				_STRING,
+				"What a row raises once the date has PASSED — and, for a rule with no "
+				"date_field, what every matching row raises. Default Critical.",
+			),
+			"missing_date_behaviour": _field(
+				_STRING,
+				"Skip or Raise. Skip is right for an expiry (a training with no expiry does "
+				"not lapse); Raise is right for a cadence (a cabin nobody has ever inspected "
+				"is the most overdue cabin there is).",
+			),
+			"due_date_mode": _field(_STRING, "'From Anchor' (default), 'Today' or 'None'."),
+			"window_field": _field(
+				_STRING,
+				"A field on the row carrying its own lead time in days, used instead of "
+				"threshold_warning_days where set — `renewal_window_days` on a certificate.",
+			),
+			"scope_filters": _field(
+				{"type": "array", "items": _OBJECT},
+				'ANDed filters: [{"field", "op", "value", "default"}]. Ops: eq, ne, gt, lt, '
+				"gte, lte, in, nin, isnull, isnotnull, contains, ncontains. `default` is what "
+				"an EMPTY column is read as, and it matters more than it looks: in SQL "
+				"`status != 'Active'` excludes every row whose status was never set.",
+			),
+			"message_template": _field(
+				_STRING,
+				"Jinja, rendered in a sandbox with no framework in it. The row is available "
+				"by field name, plus days_remaining, days_overdue, days_since_anchor, "
+				"due_date, today, regimes and the thresholds.",
+			),
+			"regimes": _field(_STRING_ARRAY, "The audits it answers: OR-OSHA, FSMA, WPS, NOP …"),
+			"regimes_from_field": _field(
+				_STRING,
+				"A field on the row carrying its OWN regime tags, copied onto each alert "
+				"instead of the rule's — `regimes` on a training record, because the record "
+				"says what that afternoon actually covered.",
+			),
+			"regulation_citations": _field(
+				_STRING,
+				"The regulations this rule enforces, comma-separated. The field an auditor asks about.",
+			),
+			"requires_doctypes": _field(
+				_STRING,
+				"Comma-separated DocTypes that must exist for the rule to run. Defaults to the target.",
+			),
+			"requires_fields": _field(
+				_STRING,
+				"Comma-separated fields that must exist on the target — `i9_status`. A rule "
+				"whose column is absent scans nothing rather than reporting everybody clean.",
+			),
+			"producer_task_template": _field(_STRING, "An Inspection Template the work is done through."),
+			"producer_farm_task_type": _field(_STRING, "The Farm Task type raised where no template is set."),
+			"producer_skill_required": _field(_STRING, "The crew skill the producer task needs."),
+			"evidence_contract": _field(
+				_OBJECT,
+				"What the producer task's completion must submit: photos, signature, "
+				"findings_text, witness, checklist_items, measurements.",
+			),
+			"retention_years": _field(
+				_INTEGER, "The regulatory retention window for the records it watches."
+			),
+			"audit_packet_types": _field(
+				_STRING_ARRAY,
+				"Which audit packets carry this rule's alerts: FSMA, GAP, GlobalGAP, OSHA, DOL …",
+			),
+			"custom_python": _field(
+				_STRING,
+				"THE ESCAPE HATCH. A restricted program returning observations. No imports, "
+				"no exec/eval/open, no dunder attributes, no while, no def/class/lambda, "
+				"bounded in steps and seconds. Prefer the fields above.",
+			),
+			"extra_parameters": _field(
+				_OBJECT, 'Named intervals a built-in scanner reads, e.g. {"spray_season_days": 120}.'
+			),
+			"purpose": _field(_STRING, "What goes wrong in the world if nobody acts on this."),
+			"authored_by": _field(_STRING, "System, Operator (default) or AI-proposed."),
+			"ai_source_citation": _field(_STRING, "If AI-proposed: the URL and section it was read from."),
+		},
+		required=("rule_id", "title", "target_doctype", "kairotic_gate_description"),
+		mutating=True,
+		title="Create a compliance rule",
+		available=_needs_doctype("Compliance Rule"),
+		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"approve_compliance_rule": _tool(
+		rules.approve_compliance_rule,
+		"MUTATING. Accept a compliance rule and turn it on, recording WHO accepted "
+		"it and WHEN on the record itself.\n\n"
+		"THIS IS THE GATE, AND IT IS THE POINT OF THE WHOLE PROVENANCE MODEL. A "
+		"rule cannot be enabled any other way: the DocType refuses `enabled` "
+		"without an approver and a date. So there is no path by which a rule — "
+		"least of all one a model proposed — starts firing without a person having "
+		"put their name to it, and an auditor asking 'who decided the site should "
+		"watch for this, and when' reads the answer off the rule rather than out of "
+		"a log they have no access to.\n\n"
+		"Also reactivates a rule that was previously disabled. Optionally attaches "
+		"the approver's signature as a File, for schemes that ask for signed rule "
+		"sets.",
+		{
+			"name": _field(_STRING, "Compliance Rule docname, or the rule_id."),
+			"rule": _field(_STRING, "Alias for name."),
+			"approver": _field(
+				_STRING,
+				"The User accepting the rule. Defaults to whoever the request authenticated "
+				"as, which is the honest answer where the caller is a person.",
+			),
+			"approver_employee": _field(_STRING, "The approver as an Employee, where the site keeps one."),
+			"approver_signature_file_token": _field(
+				_STRING,
+				"A File docname holding the approver's signature. Refused if it points at "
+				"nothing — evidence pointing at nothing satisfies a contract and proves "
+				"nothing until an auditor clicks it.",
+			),
+		},
+		required=("name",),
+		mutating=True,
+		title="Approve a compliance rule",
+		available=_needs_doctype("Compliance Rule"),
+		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_compliance_rule": _tool(
+		rules.update_compliance_rule,
+		"MUTATING. Change a rule by SUPERSEDING it: a new record is written at "
+		"version+1 with the changes, the old one is disabled and points at the new "
+		"one. The old row is never edited.\n\n"
+		"THAT IS WHY AN ALERT FROM APRIL IS STILL EXPLICABLE IN NOVEMBER. The "
+		"definition that raised it is still on this site in full, with its "
+		"thresholds and its citation as they were. It is also why there is no "
+		"window in which a running sweep's definitions change underneath it — a "
+		"sweep that started against v1 finishes against v1.\n\n"
+		"ARGUMENTS LEFT OUT MEAN UNCHANGED, which is what somebody moving one "
+		"threshold means. The new version inherits the old one's approval: a "
+		"threshold moved is not a new rule, and forcing a re-approval on every "
+		"tuning edit would train people to click through approvals, which is worse "
+		"than not having the gate. A rule that was OFF stays off.\n\n"
+		"The result carries a field-by-field before → after, so the MCP Action Log "
+		"row for this call records what the rule said BEFORE and not merely what "
+		"was asked for.",
+		{
+			"name": _field(
+				_STRING, "Compliance Rule docname, or the rule_id (resolves to the live version)."
+			),
+			"rule": _field(_STRING, "Alias for name."),
+			"reason": _field(
+				_STRING,
+				"Why it is changing. At least a sentence — a threshold moved with nothing "
+				"beside it is a change nobody can explain to the auditor who asks why the "
+				"calendar looks different from last year's.",
+			),
+			"title": _field(_STRING, "Rename it."),
+			"category": _field(_STRING, "Move it to another shelf of the calendar."),
+			"target_doctype": _field(_STRING, "Change what it scans."),
+			"date_field": _field(_STRING, "Change the cadence anchor."),
+			"cadence_days": _field(_INTEGER, "Change how often the activity must recur."),
+			"threshold_critical_days": _field(_INTEGER, "Change the critical band. Negative disables it."),
+			"threshold_warning_days": _field(_INTEGER, "Change the warning band and the outer window."),
+			"severity_critical": _field(_STRING, "Critical, Warning or Info."),
+			"severity_warning": _field(_STRING, "Critical, Warning or Info."),
+			"severity_expired": _field(_STRING, "Critical, Warning or Info."),
+			"missing_date_behaviour": _field(_STRING, "Skip or Raise."),
+			"due_date_mode": _field(_STRING, "'From Anchor', 'Today' or 'None'."),
+			"window_field": _field(_STRING, "Change the per-row lead-time field."),
+			"scope_filters": _field(
+				{"type": "array", "items": _OBJECT},
+				"Replace the whole filter list. Passing it replaces rather than merges, "
+				"because a filter list edited one entry at a time by index is one somebody "
+				"reorders by accident.",
+			),
+			"message_template": _field(_STRING, "Replace the Jinja message."),
+			"regimes": _field(_STRING_ARRAY, "Replace the regime tags."),
+			"regimes_from_field": _field(_STRING, "Change the per-row regimes field."),
+			"regulation_citations": _field(
+				_STRING,
+				"Replace the citations. THE MOST COMMON EDIT THIS TOOL EXISTS FOR: when "
+				"OR-OSHA renumbered heat illness from -1130 to -1131, this was the only "
+				"thing that needed to move.",
+			),
+			"requires_doctypes": _field(_STRING, "Change the DocTypes the rule needs."),
+			"requires_fields": _field(_STRING, "Change the fields the rule needs."),
+			"producer_task_template": _field(
+				_STRING, "Change the Inspection Template the work is done through."
+			),
+			"producer_farm_task_type": _field(_STRING, "Change the Farm Task type raised."),
+			"producer_skill_required": _field(_STRING, "Change the crew skill."),
+			"evidence_contract": _field(_OBJECT, "Replace the producer task's evidence contract."),
+			"retention_years": _field(_INTEGER, "Change the retention window."),
+			"audit_packet_types": _field(_STRING_ARRAY, "Replace the packet list."),
+			"custom_python": _field(
+				_STRING, "Replace the program. Vetted by the sandbox before anything is written."
+			),
+			"extra_parameters": _field(_OBJECT, "Replace the named intervals a built-in scanner reads."),
+			"purpose": _field(_STRING, "Replace the purpose."),
+			"ai_source_citation": _field(_STRING, "Replace the AI source citation."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Supersede a compliance rule",
+		available=_needs_doctype("Compliance Rule"),
+		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"deactivate_compliance_rule": _tool(
+		rules.deactivate_compliance_rule,
+		"MUTATING. Stop a compliance rule firing, and say why.\n\n"
+		"IT DISMISSES NOTHING. Every alert the rule already raised stays on the "
+		"calendar exactly as it was, and the next sweep will not touch it — the "
+		"same reading a rule skipped for a missing DocType gets, and for the same "
+		"reason: switching a rule off is not evidence that anybody did the work. "
+		"The result says how many are left standing.\n\n"
+		"There is deliberately no delete. The rule stays on the site, disabled, "
+		"with the reason appended to its purpose — so the operator who asks next "
+		"season why the calendar stopped mentioning the thing that then went wrong "
+		"gets an answer from the record rather than from somebody's memory. "
+		"approve_compliance_rule turns it back on.",
+		{
+			"name": _field(_STRING, "Compliance Rule docname, or the rule_id."),
+			"rule": _field(_STRING, "Alias for name."),
+			"reason": _field(
+				_STRING,
+				"Why it is being switched off. At least a sentence — this is the hardest "
+				"change in the app to explain a year later.",
+			),
+		},
+		required=("name", "reason"),
+		mutating=True,
+		title="Deactivate a compliance rule",
+		available=_needs_doctype("Compliance Rule"),
+		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"propose_compliance_rule": _tool(
+		rules.propose_compliance_rule,
+		"MUTATING, DECLARED AND NOT IMPLEMENTED IN v0.22.0 — every call refuses "
+		"with the sentence saying so.\n\n"
+		"It is the surface an AI rule proposer will occupy: read a regulation, "
+		"draft a Compliance Rule with its target doctype, thresholds, scope, "
+		"citation and kairotic gate, mark it `AI-proposed` with the URL and section "
+		"it was read from, and leave it DISABLED for a human to check against the "
+		"regulation and approve.\n\n"
+		"It is declared now so the shape is fixed before anything fills it, and it "
+		"is inert now because the architecture is explicit about where AI is "
+		"allowed to be: at AUTHORING TIME, behind a human approval, never in the "
+		"trigger path. At runtime this app evaluates declarative expressions "
+		"against record state and nothing else, which is what lets every alert be "
+		"traced to a rule, a citation, an approver and a field that crossed a "
+		"threshold. Phase 2 of the Configurable Compliance Framework wires it.\n\n"
+		"Until then, author rules with create_compliance_rule and check them with "
+		"test_compliance_rule before approving.",
+		{
+			"regulation_text": _field(_STRING, "The regulation's text."),
+			"regulation_url": _field(_STRING, "Where it was read from — the citation on the draft."),
+			"target_doctype": _field(_STRING, "What the drafted rule should scan, where it is known."),
+		},
+		mutating=True,
+		title="Propose a compliance rule from a regulation (not implemented)",
+		available=_needs_doctype("Compliance Rule"),
+		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"get_audit_readiness": _tool(
 		calendar.get_audit_readiness,

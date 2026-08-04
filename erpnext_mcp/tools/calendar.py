@@ -37,7 +37,7 @@ would destroy the more valuable half of the record.
 
 import frappe
 
-from .. import alerts, compat, dashboard
+from .. import alerts, compat, compliance_rules, dashboard
 from .. import training as regimes_vocabulary
 from ..args import as_bool, as_choice, as_date, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
@@ -339,9 +339,7 @@ def get_compliance_calendar(args: dict) -> ToolResult:
 			readout.append(f"{len(group)} {severity}")
 	headline = ", ".join(readout) or "nothing due"
 
-	skipped = [
-		rule.describe() for rule in (alerts.RULES[key] for key in alerts.names()) if not rule.is_available()
-	]
+	skipped = [rule.describe() for rule in alerts.rule_map().values() if not rule.is_available()]
 
 	by_regime: dict = {}
 	for alert in shown:
@@ -422,31 +420,101 @@ def get_compliance_calendar(args: dict) -> ToolResult:
 
 # ── list_compliance_rules ───────────────────────────────────────────────────
 def list_compliance_rules(args: dict) -> ToolResult:
-	"""Every rule, with the state that makes it fire rather than the date."""
-	described = alerts.describe()
+	"""Every rule, with the state that makes it fire rather than the date.
+
+	v0.22.0 RETROFIT, AND THE RETURN SHAPE IS UNCHANGED. Every key this returned
+	in v0.21.0 — `rule_count`, `available_here`, `by_category`, `rules`,
+	`unavailable_here`, `note`, and on each rule `alert_type`, `title`,
+	`category`, `purpose`, `kairotic_gate`, `framework`, `regimes`, `requires`,
+	`available` — means exactly what it always meant. This app's own iOS build
+	reads that shape, and so does anybody else's client; a list that changed
+	shape under them would be a breaking change wearing a feature's clothes.
+	What is new is additive: the filters, and the provenance fields that say
+	which record a rule lives on, which version it is, what shape it is and
+	whether it can be edited.
+	"""
+	from . import rules as rule_tools
+
+	if compat.doctype_exists(compliance_rules.DOCTYPE) and compliance_rules.rule_rows(
+		include_inactive=True, limit=1
+	):
+		listing = rule_tools.rule_list(args)
+		described, filtered = listing["rules"], listing["filtered"]
+		editable = True
+	else:
+		# The upgrade window: the app is here and the DocType is not yet. The
+		# shipped definitions are what the sweep is running, so they are what
+		# this reports — saying so, rather than answering with an empty register
+		# and letting somebody conclude the site has no compliance rules.
+		described = _filtered_shipped(args)
+		filtered = described != alerts.describe()
+		editable = False
+
 	available = [rule for rule in described if rule["available"]]
 	unavailable = [rule for rule in described if not rule["available"]]
 	by_category: dict = {}
+	by_shape: dict = {}
 	for rule in described:
 		by_category[rule["category"]] = by_category.get(rule["category"], 0) + 1
+		by_shape[rule.get("shape") or "declarative"] = by_shape.get(rule.get("shape") or "declarative", 0) + 1
 
+	data = {
+		"rule_count": len(described),
+		"available_here": len(available),
+		"by_category": dict(sorted(by_category.items())),
+		"rules": described,
+		"unavailable_here": unavailable,
+		"note": (
+			"Every rule carries a `kairotic_gate`: the state that makes it ripe. None of "
+			"them fires on a date alone — a rule that did would fire on fallow ground and on "
+			"ground tested last week, and would be ignored by the third month. A rule listed "
+			"under `unavailable_here` is missing a DocType, and raises nothing AND dismisses "
+			"nothing: an absent DocType is not evidence that anybody did the work."
+		),
+		# v0.22.0 additions.
+		"by_shape": dict(sorted(by_shape.items())),
+		"editable": editable,
+		"filtered": filtered,
+	}
+	if editable:
+		data["editable_note"] = (
+			"These rules are RECORDS on this site. A threshold, a citation, a scope or a message "
+			"is changed with update_compliance_rule — which supersedes rather than overwrites, so "
+			"the definition an alert was raised under stays readable — and nothing here needs a "
+			"code release. `by_shape` says how much of each rule is data: a `declarative` rule is "
+			"entirely on its record; a `builtin_scanner` rule keeps every tunable on the record "
+			"and delegates the shape of its join to reviewed, shipped code; a `custom_python` rule "
+			"is a program in a sandbox, and there are none of those shipped."
+		)
+	else:
+		data["editable_note"] = (
+			"This site has no Compliance Rule DocType yet, so these are the definitions that ship "
+			"with erpnext_mcp and the sweep is running them. Behaviour is identical either way — "
+			"the shipped definitions ARE what gets seeded. Run `bench --site <site> migrate` and "
+			"they become records you can edit."
+		)
 	return ToolResult(
-		data={
-			"rule_count": len(described),
-			"available_here": len(available),
-			"by_category": dict(sorted(by_category.items())),
-			"rules": described,
-			"unavailable_here": unavailable,
-			"note": (
-				"Every rule carries a `kairotic_gate`: the state that makes it ripe. None of "
-				"them fires on a date alone — a rule that did would fire on fallow ground and on "
-				"ground tested last week, and would be ignored by the third month. A rule listed "
-				"under `unavailable_here` is missing a DocType, and raises nothing AND dismisses "
-				"nothing: an absent DocType is not evidence that anybody did the work."
-			),
-		},
-		summary=f"{len(described)} compliance rule(s), {len(available)} runnable on this site",
+		data=data,
+		summary=(
+			f"{len(described)} compliance rule(s), {len(available)} runnable on this site"
+			+ (" (filtered)" if filtered else "")
+		),
 	)
+
+
+def _filtered_shipped(args: dict) -> list:
+	"""The shipped rule set, with whichever filters can be answered without records."""
+	described = alerts.describe()
+	category = as_str(args, "category")
+	if category:
+		described = [rule for rule in described if str(rule["category"] or "") == category]
+	regime = _wanted_regime(args)
+	if regime:
+		described = [rule for rule in described if regimes_vocabulary.matches(rule["regimes"], regime)]
+	shape = as_str(args, "shape")
+	if shape:
+		described = [rule for rule in described if rule.get("shape") == shape]
+	return described
 
 
 # ── refresh_compliance_alerts ───────────────────────────────────────────────

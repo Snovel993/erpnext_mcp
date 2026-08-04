@@ -28,16 +28,25 @@ from .base import (  # noqa: F401
 	regimes_for_alerts,
 	regimes_of,
 	register,
+	resolve_rules,
+	rule_map,
 	severity_at_least,
 	sweep,
 )
 
 
 def get(key: str):
-	"""One rule by its alert_type, or None."""
-	return RULES.get(str(key or "").strip())
+	"""One rule by its alert_type, or None.
+
+	v0.22.0: reads the LIVE rule set — the site's own Compliance Rule records
+	where they exist, the shipped definitions where they do not — rather than
+	the import-time dict. A rule an operator edited has to be the rule a caller
+	asking about it gets back.
+	"""
+	return rule_map().get(str(key or "").strip())
 
 
 def describe() -> list:
 	"""Every rule, with its kairotic gate. The docs and the calendar both read this."""
-	return [RULES[key].describe() for key in names()]
+	live = rule_map()
+	return [live[key].describe() for key in sorted(live)]
