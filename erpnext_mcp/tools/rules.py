@@ -73,11 +73,13 @@ _TEXT_FIELDS = (
 	"severity_critical",
 	"severity_warning",
 	"severity_expired",
+	"default_severity",
 	"message_template",
 	"regimes_from_field",
 	"producer_task_template",
 	"producer_farm_task_type",
 	"producer_skill_required",
+	"producer_assigned_to_expression",
 	"regulation_citations",
 	"kairotic_gate_description",
 	"purpose",
@@ -105,6 +107,7 @@ _BLOB_FIELDS = (
 	("date_fields", "date_fields_json"),
 	("superseded_by_later_clean", "superseded_by_later_clean_json"),
 	("gate_related_table", "gate_related_table_json"),
+	("latest_child_field_threshold", "latest_child_field_threshold_json"),
 	("regime_heuristics", "regime_heuristics_json"),
 	("category_heuristics", "category_heuristics_json"),
 )
@@ -547,6 +550,27 @@ def _spec_from_args(args: dict, required: bool, current: dict | None = None) -> 
 				"a shipped scanner. Nothing was written."
 			) from None
 
+	# v0.22.5. Same door, same sandbox, same reason as `custom_python` above: an
+	# assignee expression that will not run is a producer task that lands on
+	# nobody, discovered on the afternoon somebody needed it.
+	expression = str(spec.get("producer_assigned_to_expression") or "").strip()
+	if expression:
+		if str(spec.get("producer_skill_required") or "").strip():
+			raise ToolError(
+				"this rule names both producer_skill_required and "
+				"producer_assigned_to_expression. A skill is a POOL and an assignee is a PERSON, "
+				"and a task that is both is a task whose holder depends on which one the "
+				"dispatcher read first. Pass one of them as an empty string. Nothing was written."
+			)
+		try:
+			sandbox.check(expression)
+		except sandbox.SandboxError as exc:
+			raise ToolError(
+				f"the sandbox refused producer_assigned_to_expression: {exc}\n\nIt is ONE "
+				"expression over the alert's source row — `row.foreman` — under exactly the rules "
+				"custom_python runs under. Nothing was written."
+			) from None
+
 	parsers = {
 		"scope_filters": compliance_rules.parse_filters,
 		"evidence_contract": compliance_rules.parse_contract,
@@ -556,6 +580,7 @@ def _spec_from_args(args: dict, required: bool, current: dict | None = None) -> 
 		"date_fields": compliance_rules.parse_date_fields,
 		"superseded_by_later_clean": compliance_rules.parse_supersession,
 		"gate_related_table": compliance_rules.parse_gate_table,
+		"latest_child_field_threshold": compliance_rules.parse_latest_child_threshold,
 		"regime_heuristics": lambda raw, label: compliance_rules.parse_heuristics(raw, label, "regimes"),
 		"category_heuristics": lambda raw, label: compliance_rules.parse_heuristics(raw, label, "category"),
 	}

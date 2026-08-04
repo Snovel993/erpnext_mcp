@@ -20,9 +20,15 @@ auto-dismisses what it did not observe. Only *where the rule set comes from*
 changed.
 
 **v0.22.1 added the four primitives v0.22.0's §5 named**, and five of the seven
-rules that still carried a shipped scanner became data. The split is now
-**11 declarative / 2 built-in-permanent / 0 `custom_python`**, and the two that
-did not move are argued in §5 as permanent rather than as backlog.
+rules that still carried a shipped scanner became data. The two that did not move
+are argued in §5 as permanent rather than as backlog.
+
+**v0.22.5 is the first release where the vocabulary was used to write a rule
+nobody had written in Python first.** `shift_heat_threshold_crossed` fires on a
+weather reading rather than on a date, and the three fields it needed —
+`latest_child_field_threshold_json`, `date_field_role: State` with
+`default_severity`, and `producer_assigned_to_expression` — are all additive. The
+split is now **12 declarative / 2 built-in-permanent / 0 `custom_python`**.
 
 ---
 
@@ -58,15 +64,20 @@ existing rule, and flag any proposal carrying `custom_python` for extra review.
 
 | Shape | What is on the record | What is code | Shipped rules |
 | --- | --- | --- | --- |
-| **declarative** | everything | nothing rule-specific | **11** |
+| **declarative** | everything | nothing rule-specific | **12** |
 | **builtin_scanner** | every tunable — thresholds, scope, citations, regimes, the switch | the *shape of the join* | **2** |
 | **custom_python** | everything, including a restricted program | the interpreter that runs it | **0** |
 
-That `0` is the important number, and it means more at 11/2/0 than it did at
+That `0` is the important number, and it means more at 12/2/0 than it did at
 6/7/0. `custom_python` is an escape hatch for rules an operator or a proposer
 writes that the primitives do not reach — and a framework that needed a program
-for eleven of its own thirteen rules would be a framework whose vocabulary does
+for twelve of its own fourteen rules would be a framework whose vocabulary does
 not reach its own problem domain.
+
+**The twelfth was never Python at all.** v0.22.5's `shift_heat_threshold_crossed`
+was authored as a record, in this vocabulary, with nothing to fall back to — which
+is the first evidence that the framework can absorb a NEW obligation rather than
+only the thirteen it was reverse-engineered from.
 
 **The right response to reaching for `custom_python` is to say what shape of
 question the rule asks, and turn that shape into a field.** §5 is the record of
@@ -90,7 +101,8 @@ anchor          = row[date_field]                      (empty date_field → no 
 if anchor is missing → missing_date_behaviour: Skip, or Raise at severity_expired
 due             = anchor + cadence_days                (cadence 0 → the anchor IS the deadline)
 days_remaining  = due - today
-severity        = severity_expired   if days_remaining < 0 or there is no clock
+severity        = default_severity   if date_field_role is State (no clock at all)
+                  severity_expired   if days_remaining < 0 or there is no clock
                   severity_critical  if days_remaining <= threshold_critical_days
                   severity_warning   if days_remaining <= threshold_warning_days (or window_field)
                   otherwise: say nothing
@@ -104,6 +116,9 @@ message         = render(message_template, row + computed context)
 | `rule_id` | The stable key alerts are filed under. **First segment of every alert docname** — never change it on a live rule. |
 | `target_doctype` | The DocType whose rows the rule walks. |
 | `date_field` | The cadence anchor. **Leave empty** for a rule with no clock; every matching row then raises at `severity_expired`. |
+| `date_field_role` | `Clock` (default), `Timestamp`, or `State` (v0.22.5 — the rule fires on a data state and the date is read for the message only). |
+| `default_severity` | What a `State` rule raises at. Ignored on the other two roles. |
+| `producer_assigned_to_expression` | v0.22.5. Sends the producer task to one named person rather than into a skill pool. Exclusive with `producer_skill_required`. |
 | `cadence_days` | How often the activity must recur. 365 on a last-inspection date is the annual walk; 0 means the date field *is* the deadline. |
 | `threshold_critical_days` / `threshold_warning_days` | Fire at this many days remaining or fewer. **Negative means the band never fires.** The warning threshold is also the outer window: outside it the rule says nothing. |
 | `severity_critical` / `severity_warning` / `severity_expired` | The severity of each band. Separate fields because `filing_response_due` escalates Info → Warning as the deadline passes, and a fixed ladder could not express it. |
@@ -301,6 +316,160 @@ with the same person on the same walk round the camp:
 detector test" reads like the errand it is and "Detector Test" reads like a
 table. A doctype in the list that a site has not got is skipped, not fatal.
 
+### v0.22.5's primitive: firing on a data state
+
+Every primitive above still ends at a **clock**. The gate decides whether a row
+is worth asking about; the clock decides what it raises. v0.22.5 is the release
+where a rule can have no clock at all.
+
+#### `latest_child_field_threshold_json` — the newest child row, and a number on it
+
+A sibling of `gate_related_table_json` rather than an extension of it, and **the
+difference is the fold**. `gate_related_table_json` folds a related doctype to one
+*value* per subject — the maximum date — and asks how old it is. This one folds to
+one *row* per subject, the latest, and then asks about its other columns.
+
+A maximum over dates cannot answer "and what was the temperature on that row",
+because the answer is not a maximum of anything: the 85 °F reading at noon says
+nothing about compliance at four o'clock if a 72 °F reading was written at half
+past three. Extending the existing primitive would have meant one field whose fold
+changed depending on which of its keys were set, which is the kind of thing that
+reads fine and is impossible to reason about six months later.
+
+```json
+{
+  "child_doctype": "Farm Shift Weather Reading",
+  "parent_field": "parent",
+  "parentfield": "weather_timeline",
+  "subject_key": "name",
+  "order_by": "reading_datetime",
+  "context_key": "latest_weather",
+  "match": "any",
+  "conditions": [
+    {"field": "temp_f", "op": "gte", "threshold": 80,
+     "threshold_source": "weather.heat_threshold_temp_f"},
+    {"field": "heat_index_f", "op": "gte", "threshold": 80,
+     "threshold_source": "weather.heat_threshold_heat_index_f"}
+  ]
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `child_doctype` | Where the rows live — a child table's own doctype |
+| `parent_field` | The column on the child naming the scanned row. `parent` by default |
+| `parentfield` | Which child table of the parent, where the doctype hangs off more than one. Without it a rule about a weather timeline can start answering questions about a crew list |
+| `subject_key` | The column on the **scanned** row the children name. `name` |
+| `order_by` | The column "latest" is measured on. **Required** — without it the rule reads whichever row the database handed back first, which is an answer that changes when somebody adds an index |
+| `context_key` | What the message template calls the row |
+| `match` | `any` (an OR over the conditions, the default) or `all` |
+| `conditions` | `{field, op, threshold, threshold_source}`. Ops are `gte`, `gt`, `lte`, `lt`, `eq`, `ne` |
+| `scope_filters` | Which child rows count at all, in the rule's own filter vocabulary |
+
+**`threshold_source` is the interesting key, and it is a closed registry.** It
+names one of a handful of settings this app already resolves per company:
+
+| Source | Number |
+| --- | --- |
+| `weather.heat_threshold_temp_f` | The ambient heat threshold on Weather Settings, per company (default 80 °F) |
+| `weather.heat_threshold_heat_index_f` | The heat-index threshold, per company (default 80 °F) |
+| `weather.wind_threshold_mph_spray_block` | The spray-block wind threshold, per company |
+
+It is closed because "read a number from somewhere" is one sentence away from
+"read anything from anywhere". What it buys is that the alert layer and the
+**v0.19.4 shift sweep read the same number**: an entity that decided its own heat
+threshold is 75 sets it once, and a literal on the rule would make the two layers
+disagree about the same afternoon on the same shift, invisibly, until somebody
+compared two records. The literal `threshold` stays on the condition as the floor
+the setting falls back to — a site whose Weather Settings have not migrated gets
+the regulation's number rather than nothing.
+
+Three behaviours worth stating because they are all the *safe* direction and none
+of them is obvious:
+
+- **A subject with no child row is gated out.** A shift whose weather timeline is
+  empty is not a cool shift; it is a shift nobody has a reading for, and raising
+  off no reading would be this app asserting a fact it does not have.
+- **A child row whose field is empty does not satisfy its condition**, so
+  `match: "all"` fails on it. A reading with no temperature is not a cool reading.
+- **The comparison is numeric only**, and this is the one place `_passes` is
+  *not* reused. `_passes` falls back to a lexical comparison when a side is not a
+  number, which is right for a scope filter full of ISO dates and exactly wrong on
+  a thermometer: a reading somebody typed as `"warm"` sorts after `"80"`.
+
+The index is built **once per sweep**, capped at `SCAN_CAP`, and folded in Python
+— the same shape as the supersession index and for the same reason. Twelve open
+shifts each carrying a reading every fifteen minutes is one query, not twelve.
+
+#### `date_field_role: "State"` and `default_severity` — a rule with no clock
+
+`default_severity` alone is not enough, and the reason is a database fact rather
+than a design preference. `threshold_critical_days` and `threshold_warning_days`
+are **Int columns**, so "no threshold" and "a threshold of zero" are one value —
+and zero is a real setting meaning "fire on the due date itself". A shift that
+started this morning is zero days from its own start, so a rule read as a clock
+says *Critical* about a crew who are merely at work. Nothing the engine can read
+off the numbers distinguishes the two cases. The rule has to say which it is.
+
+So `State` is a third `date_field_role`:
+
+| Role | The date is | The severity is |
+| --- | --- | --- |
+| `Clock` | a deadline; its distance picks the band | `severity_critical` / `severity_warning` / `severity_expired` |
+| `Timestamp` | when the thing was found; bands nothing | `severity_expired`, on every matching row |
+| `State` | read for the message only | `default_severity`, on every row the gates let through |
+
+v0.22.1 refused a third role value deliberately, and **this is not the one it
+refused**. What it refused was a role that inverted the *sign* of every threshold
+beside it — a number meaning days elapsed where the same number on twelve other
+rules means days remaining, which is a number somebody will eventually misread.
+`State` reads no thresholds at all, so there is no number left to misread. The
+band it reports is the word `state` rather than a reused `expired`, because an
+alert saying "expired" about a condition with no expiry is a word an auditor
+would be right to query.
+
+`State` also outranks the per-row window, which is the one thing that outranks
+everything on a clock. A shift is not less hot for having a short lead time.
+
+#### `producer_assigned_to_expression` — a person, not a pool
+
+Until v0.22.5 a producer task routed one of two ways: through an Inspection
+Template (claimed out of the pool by whoever holds the template's skill) or as a
+plain Farm Task with a `skill_required` and a `dispatch_mode`. Both are **pools**.
+
+Some obligations are not a pool's. OAR 437-004-1131 asks what the supervisor did
+about the heat, and the only person who can answer is the one who was standing
+there. So the rule may carry an expression over the alert's source row:
+
+```json
+"producer_assigned_to_expression": "row.foreman"
+```
+
+It is evaluated in the same sandbox as `custom_python` — same grammar, same
+refusals, same budget — and vetted on save rather than on the afternoon somebody
+needed the task. Where it resolves, the task is inserted `Claimed`, with
+`dispatch_mode` = `Dispatched`, an open Farm Task Assignment, and **no skill**.
+
+**The two routings are exclusive and both doors refuse the combination.** A skill
+is a pool and an assignee is a person; a task carrying both is a task whose holder
+depends on which one the dispatcher read first, and the failure is silent in the
+worst direction — the foreman who was standing in the heat never sees it, and
+somebody with the skill closes it from a desk.
+
+An expression that names nobody, or names somebody payroll has never heard of,
+puts the task back on skill routing and says so in `routing_notes`. It is never
+left as `Dispatched` with nobody on it: that is a task sitting in Available which
+no worker is allowed to claim — visible, urgent and unreachable.
+
+The same release also made the producer path read the **record** where
+`ALERT_TASK_MAP` has nothing to say. Since v0.22.0 every rule had carried
+`producer_farm_task_type`, `producer_skill_required` and `evidence_contract` —
+seeded *from* that table, so the two could not disagree — and nothing read them
+back. A rule authored after the framework shipped therefore had a producer recipe
+on its record and landed in `skipped_unmapped` anyway. The table is still
+consulted first, which is what keeps the thirteen shipped rules producing exactly
+the tasks they always did.
+
 #### One more operator, and the trap it exists for
 
 `istrue` / `isfalse` joined the scope-filter vocabulary in v0.22.1, and they are
@@ -407,7 +576,7 @@ breaks.
 Both are good libraries, and neither is on this bench. `pyproject.toml` has three
 runtime dependencies, each argued for and each imported defensively so a bench
 missing one loses a named feature rather than the app. Adding a fourth for a
-field that ships **used by zero of the thirteen rules** would be the tail wagging
+field that ships **used by zero of the shipped rules** would be the tail wagging
 the dog. The subset actually needed here is small and closed — read some rows,
 compare some dates, build some observations — and an interpreter for that subset
 has no supply chain and refuses by construction rather than by configuration.
@@ -614,7 +783,7 @@ rule and when" is answerable without leaving the app.
 
 ## 7. Migration and idempotency
 
-The thirteen shipped rules are seeded into records by `install._compliance_rules()`
+The fourteen shipped rules are seeded into records by `install._compliance_rules()`
 on install and after **every** migrate.
 
 **It is a seeder, not a Frappe `fixtures` entry**, and `test_hooks.py` forbids
@@ -752,6 +921,100 @@ update_compliance_rule({
 That writes v2, disables v1, and leaves v1 fully readable — so an alert raised
 under the old citation still shows the citation it was raised under.
 
+### A second worked example: the rule that fires on the weather
+
+`shift_heat_threshold_crossed` ships seeded and enabled in v0.22.5, and it is the
+first rule this app has ever shipped that was **authored as a record**. There is
+no Python behind it and there never was, which is why it is worth reading in
+full: it is what the vocabulary looks like when nothing is being migrated into it.
+
+```jsonc
+create_compliance_rule({
+  "rule_id": "shift_heat_threshold_crossed",
+  "title": "An open shift's latest weather reading has crossed OR-OSHA's heat threshold",
+  "category": "Workforce",
+  "target_doctype": "Farm Shift",
+  "requires_doctypes": "Farm Shift, Farm Shift Weather Reading",
+
+  // NO CLOCK. The shift's start is read for the message and bands nothing.
+  "date_field": "start_datetime",
+  "date_field_role": "State",
+  "default_severity": "Warning",
+  "due_date_mode": "None",
+  "threshold_critical_days": -1,       // belt and braces: never bands, even if
+  "threshold_warning_days": -1,        // somebody edits the role back to Clock
+
+  // ONLY OPEN SHIFTS. `end_datetime` is the fact and `status` is the summary of
+  // it, which is why the v0.19.4 sweep filters on the first — the `default` on
+  // the second keeps an imported row that never set the column.
+  "scope_filters": [
+    {"field": "end_datetime", "op": "isnull"},
+    {"field": "status", "op": "eq", "value": "Active", "default": "Active"}
+  ],
+
+  "latest_child_field_threshold": {
+    "child_doctype": "Farm Shift Weather Reading",
+    "parent_field": "parent",
+    "parentfield": "weather_timeline",
+    "order_by": "reading_datetime",
+    "context_key": "latest_weather",
+    "match": "any",
+    "conditions": [
+      {"field": "temp_f", "op": "gte", "threshold": 80,
+       "threshold_source": "weather.heat_threshold_temp_f"},
+      {"field": "heat_index_f", "op": "gte", "threshold": 80,
+       "threshold_source": "weather.heat_threshold_heat_index_f"}
+    ]
+  },
+
+  "message_template":
+    "Heat threshold crossed on {{ row.name }} at {{ row.location }} — latest reading "
+    "{{ latest_weather.temp_f }}°F ({{ latest_weather.heat_index_f }}°F heat index) at "
+    "{{ latest_weather.reading_datetime }}. Document water/shade/rest breaks per "
+    "OAR 437-004-1131.",
+
+  // THE FOREMAN, BY NAME. Not a skill pool — the record is a judgement by the
+  // person who was standing there, and it carries their signature.
+  "producer_farm_task_type": "Compliance-Audit",
+  "producer_assigned_to_expression": "row.foreman",
+  "evidence_contract": {"findings_text": true, "signature": true},
+  "extra_parameters": {
+    "producer_task_what": "Document the water, shade and rest cycle the crew took"
+  },
+
+  "regimes": ["OR-OSHA"],
+  "regulation_citations": "OAR 437-004-1131 heat illness prevention",
+  "retention_years": 3,
+  "audit_packet_types": ["OSHA"],
+  "kairotic_gate_description":
+    "Fires on a WEATHER FACT, not a date. When the latest reading on an open shift is at "
+    "or above the OR-OSHA heat threshold — currently 80°F on the ambient thermometer or "
+    "heat index — the foreman gets a task to document the water, shade and rest cycle "
+    "their crew took. Not a compliance decision by the app; the record is the foreman's, "
+    "signed by the foreman, and this alert is what makes sure it exists. Silences by "
+    "itself when the shift closes."
+})
+```
+
+**Two systems observing the same fact at different cadences.** The v0.19.4
+weather sweep runs every fifteen minutes, appends a reading and logs a *Threshold
+Crossed* compliance event **on the shift** — the operational log, unchanged. The
+rule sweep runs on its own schedule, reads the same open shift and the same
+latest reading, raises an **alert**, and turns the alert into a task. The first
+captures the fact; the second translates the fact into a required response.
+
+They cannot collide, and not because either defers to the other: the shift's
+event dedupes on the shift, the alert dedupes on `rule_id` plus the shift's
+docname, and the task dedupes on the alert it answers. Run them in either order,
+or twice, and there is one of each.
+
+**And it goes quiet through no new mechanism at all.** The temperature drops and
+the gate stops matching; the shift closes and the scope filters stop matching. In
+both cases the rule observes nothing, and the sweep auto-dismisses what it did not
+observe — exactly what happens when a certificate is renewed. The task the
+foreman was given stays: a shift that closed is not evidence that anybody wrote
+down the water and the shade.
+
 ---
 
 ## 9. What is deliberately NOT operator-editable
@@ -773,7 +1036,8 @@ The rule *definitions* are data. The rule *engine* stays code.
 | Version | What |
 | --- | --- |
 | v0.22.0 | Compliance Rule doctype, declarative engine, sandbox, migration of the thirteen, seven tools. **6 / 7 / 0.** |
-| **v0.22.1** (this) | The four primitives §5 named, plus `date_field_role`, `target_doctypes_json`, `category_heuristics_json` and the `istrue` filter operator. Five rules migrated; the remaining two argued as permanent. **11 / 2 / 0.** No new tools — the surface stays at 256. |
+| v0.22.1 | The four primitives §5 named, plus `date_field_role`, `target_doctypes_json`, `category_heuristics_json` and the `istrue` filter operator. Five rules migrated; the remaining two argued as permanent. **11 / 2 / 0.** No new tools — the surface stays at 256. |
+| **v0.22.5** (this) | `latest_child_field_threshold_json`, `date_field_role: State` + `default_severity`, and `producer_assigned_to_expression`. One new rule — `shift_heat_threshold_crossed`, the first this app ships that is only data — and the producer path now reads the record where `ALERT_TASK_MAP` has nothing to say. **12 / 2 / 0.** No new tools — the surface stays at 256. |
 | v0.23.5 | `propose_compliance_rule` wired: AI reads a regulation, drafts a rule with `authored_by = AI-proposed`, `enabled = 0` and an `ai_source_citation`; a review queue in Desk. |
 | v0.24.5 | Regulation Feed doctype + scheduled re-evaluation: registered sources are re-read, and regulations that moved produce change proposals. |
 

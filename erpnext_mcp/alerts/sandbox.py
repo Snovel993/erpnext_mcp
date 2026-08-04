@@ -329,6 +329,43 @@ def run(
 	return _Interpreter(names, timeout=timeout, max_steps=max_steps).execute(tree)
 
 
+#: The name `evaluate` assigns its answer to. Never in `names`, so a caller
+#: cannot shadow it and an expression cannot read a previous call's answer.
+RESULT_NAME = "answer"
+
+
+def evaluate(
+	source: str, names: dict, timeout: float = DEFAULT_TIMEOUT_SECONDS, max_steps: int = DEFAULT_MAX_STEPS
+):
+	"""Evaluate ONE expression against `names` and return its value.
+
+	`run` is for a program that produces observations; this is for the case where
+	the answer is a VALUE — `producer_assigned_to_expression`, which turns the row
+	an alert is about into the person the work belongs to.
+
+	WRITTEN AS AN ASSIGNMENT RATHER THAN PARSED IN `eval` MODE, deliberately.
+	`check` is the one place the grammar is enforced, and it parses in `exec`
+	mode; an expression compiled down a second path would be an expression the
+	checker had never seen the tree of. Wrapping it in `answer = (...)` means the
+	tree that is vetted is exactly the tree that runs, with the same refusals, the
+	same step budget and the same clock.
+
+	An empty expression is None rather than an error: "this rule has no assignee
+	expression" is the ordinary case for twelve of the fourteen shipped rules.
+	"""
+	text = str(source or "").strip()
+	if not text:
+		return None
+	tree = check(f"{RESULT_NAME} = ({text})")
+	interpreter = _Interpreter(
+		{key: value for key, value in (names or {}).items() if key != RESULT_NAME},
+		timeout=timeout,
+		max_steps=max_steps,
+	)
+	interpreter.execute(tree)
+	return interpreter.scope.get(RESULT_NAME)
+
+
 class _Interpreter:
 	def __init__(self, names: dict, timeout: float, max_steps: int):
 		self.scope = dict(names or {})

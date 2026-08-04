@@ -168,6 +168,12 @@ SWITCHES = {
 		"create_detector_test",
 		"create_housing_inspection",
 		"create_irrigation_zone",
+		# v0.22.5. The walk now also ends on a TASK ON ONE PERSON'S OWN LIST: the
+		# weather sweep captures the fact, the rule sweep translates the fact into
+		# a required response, and the response is the foreman's rather than a
+		# pool's.
+		"list_dispatched_tasks",
+		"list_available_tasks",
 	)
 }
 
@@ -1499,6 +1505,172 @@ class TheWeatherTimelineDocumentsTheShiftItself(EndToEndWorkflow):
 		heat_section = next(entry for entry in section["sections"] if entry["key"] == "heat_exposure")
 		self.assertEqual(heat_section["rows"][0]["record"], heat["name"])
 		self.assertEqual(heat_section["rows"][0]["shift"], shift["name"])
+
+	def test_the_hot_afternoon_reaches_the_foremans_own_task_list_and_then_goes_quiet(self):
+		"""v0.22.5. TWO SYSTEMS OBSERVING THE SAME FACT AT DIFFERENT CADENCES.
+
+		The walk above ends where v0.19.4 ended: the sweep writes a reading, the
+		reading logs a Threshold Crossed event ON THE SHIFT, and a human decides
+		what to do about it. That event is the operational log and it stays exactly
+		as it was.
+
+		What this adds is the layer above it. `shift_heat_threshold_crossed` reads
+		the same open shift and the same latest reading, raises an ALERT, and turns
+		the alert into a task assigned by name to the foreman who called the crew —
+		because the record OAR 437-004-1131 asks for is a judgement by the person
+		who was standing there, and the only thing an app can honestly do is make
+		sure somebody is asked for it.
+
+		THE TWO CANNOT COLLIDE. The shift's own event dedupes on the shift; the
+		alert dedupes on rule_id plus the shift's docname; the task dedupes on the
+		alert it answers. Running the weather sweep and the rule sweep in either
+		order, or twice, produces one of each — which is asserted here rather than
+		argued, because "both paths are idempotent" is the kind of claim that is
+		true until somebody adds a third path.
+
+		And it goes quiet by itself, through no new mechanism at all: the shift
+		closes, the scope filters stop matching it, the rule observes nothing, and
+		the sweep auto-dismisses what it did not observe. Exactly what happens when
+		a certificate is renewed.
+		"""
+		from erpnext_mcp.services import weather
+
+		self.be_the_operator()
+		today = frappe.utils.today()
+
+		def at(hour: int, minute: int = 0) -> str:
+			return f"{today} {hour:02d}:{minute:02d}:00"
+
+		compliance_rules.seed_compliance_rules()
+
+		foreman = self.tool_data(
+			"create_employee",
+			{"employee_name": "Heat Rule Foreman", "company": COMPANY, "date_of_joining": "2026-01-05"},
+		)["employee"]
+		shift = self.tool_data(
+			"start_shift",
+			{
+				"foreman": foreman,
+				"location": "Block 9 South",
+				"shift_type": "Harvest",
+				"farm_location_gps": "45.52,-122.68",
+				"start_datetime": at(6),
+				"crew_employees": [self.employee],
+			},
+		)["name"]
+
+		# 1. Nothing yet. A shift with an empty timeline is not a cool shift, and
+		#    the rule says nothing about it rather than guessing in either
+		#    direction.
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		self.assertEqual(self._heat_alerts(), [])
+
+		# 2. THE WEATHER SWEEP, bare, on the cron's own signature. 88 °F: over the
+		#    shipped threshold on the thermometer alone.
+		self.api.set_current(temp=88.0, humidity=35.0, when=at(10, 45))
+		self.assertEqual(weather.sweep_open_shifts(), 1)
+
+		# The v0.19.4 behaviour is UNCHANGED: the crossing is logged on the shift.
+		crossings = [
+			row
+			for row in self.tool_data("get_shift", {"name": shift})["compliance_events"]
+			if row["event_type"] == weather.THRESHOLD_EVENT
+		]
+		self.assertEqual(len(crossings), 1)
+
+		# 3. THE RULE SWEEP, which is a different job on a different schedule
+		#    reading the same rows.
+		report = self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		self.assertIn("shift_heat_threshold_crossed", report["rules_run"])
+		alerts_raised = self._heat_alerts()
+		self.assertEqual(len(alerts_raised), 1, alerts_raised)
+		self.assertEqual(alerts_raised[0]["severity"], "Warning")
+		self.assertEqual(alerts_raised[0]["source_docname"], shift)
+		self.assertIn("88.0°F", str(alerts_raised[0]["alert_message"]))
+		self.assertIn("OAR 437-004-1131", str(alerts_raised[0]["alert_message"]))
+
+		# 4. And the alert becomes work with ONE NAME ON IT. Not a skill, not a
+		#    pool: `producer_assigned_to_expression` is `row.foreman`, and the row
+		#    is the shift.
+		raised = self.tool_data(
+			"generate_tasks_from_compliance_alerts",
+			{"company": COMPANY, "alert_types": ["shift_heat_threshold_crossed"]},
+		)
+		self.assertEqual(len(raised["created"]), 1, raised)
+		entry = raised["created"][0]
+		self.assertEqual(entry["assigned_to"], foreman)
+		self.assertEqual(entry["dispatch_mode"], "Dispatched")
+		self.assertEqual(entry["skill_required"], "")
+		self.assertIn("Document the water, shade and rest cycle", entry["task_name"])
+
+		held = self.tool_data("list_dispatched_tasks", {"assigned_to": foreman})
+		self.assertEqual([row["task"] for row in held["assignments"]], [entry["task"]])
+		self.assertEqual(
+			self.tool_data("list_available_tasks", {"company": COMPANY})["tasks"],
+			[],
+			"a task with a named holder must not also be sitting in the pool",
+		)
+
+		# 5. Both sweeps again, in the other order. Neither writes a second
+		#    anything.
+		self.assertEqual(weather.sweep_open_shifts(), 0)
+		self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		self.tool_data(
+			"generate_tasks_from_compliance_alerts",
+			{"company": COMPANY, "alert_types": ["shift_heat_threshold_crossed"]},
+		)
+		self.assertEqual(len(self._heat_alerts()), 1)
+		self.assertEqual(len(crossings), 1)
+		self.assertEqual(
+			len(
+				[
+					row
+					for row in STORE.rows("Farm Task")
+					if row.get("source_alert") == alerts_raised[0]["name"]
+				]
+			),
+			1,
+		)
+
+		# 6. The foreman closes the shift. The obligation was an OPEN shift on a
+		#    hot day; a closed one is a completed obligation, and the alert takes
+		#    itself off with nobody having to remember it.
+		self.tool_data(
+			"end_shift",
+			{
+				"shift": shift,
+				"end_datetime": at(15),
+				"supervisor_signature_file_token": "/files/foreman-signature.png",
+			},
+		)
+		dismissal = self.tool_data("refresh_compliance_alerts", {"company": COMPANY})
+		self.assertGreaterEqual(dismissal["auto_dismissed"], 1)
+		self.assertEqual(self._heat_alerts(), [])
+
+		# AUTO-dismissed, not dismissed by a person, and the difference is legible
+		# six months later: no reason, nobody's name, and the same key would come
+		# back if the condition did.
+		row = next(
+			row
+			for row in STORE.rows("Compliance Alert")
+			if row["alert_type"] == "shift_heat_threshold_crossed"
+		)
+		self.assertTrue(is_true(row["auto_dismissed"]))
+		self.assertIsNone(row.get("dismissed_reason"))
+
+		# 7. And the task the foreman was given is STILL THERE, held by them.
+		#    A shift that closed is not evidence that anybody wrote down the water
+		#    and the shade — that is what the task is for, and dismissing the alert
+		#    must not quietly take the errand with it.
+		still_held = self.tool_data("list_dispatched_tasks", {"assigned_to": foreman})
+		self.assertEqual([row["task"] for row in still_held["assignments"]], [entry["task"]])
+
+	def _heat_alerts(self) -> list:
+		return [
+			dict(row)
+			for row in STORE.rows("Compliance Alert")
+			if row.get("alert_type") == "shift_heat_threshold_crossed" and not is_true(row.get("dismissed"))
+		]
 
 	def test_a_shift_that_ran_before_the_service_was_on_is_backfilled(self):
 		"""THE OTHER HALF, and the one every site has on the day it upgrades: a

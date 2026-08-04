@@ -6130,6 +6130,42 @@ TOOLS = {
 				'["Applicator License"]}, "then_category": "Workforce"}, {"default_category": '
 				'"Certifications"}]',
 			),
+			# ── v0.22.5: firing on a data state rather than on a date ───────────
+			"latest_child_field_threshold": _field(
+				_OBJECT,
+				"THE NEWEST CHILD ROW OF EACH SCANNED RECORD, AND A NUMBER READ OFF IT. Sibling "
+				"of gate_related_table rather than an extension of it: that one folds a related "
+				"doctype to one VALUE per subject (the maximum date) and asks how old it is; this "
+				"folds to one ROW, the latest, and asks about its other columns — which a maximum "
+				'cannot answer. {"child_doctype": "Farm Shift Weather Reading", "parent_field": '
+				'"parent", "parentfield": "weather_timeline", "order_by": "reading_datetime", '
+				'"context_key": "latest_weather", "match": "any", "conditions": [{"field": '
+				'"temp_f", "op": "gte", "threshold": 80, "threshold_source": '
+				'"weather.heat_threshold_temp_f"}]}. `threshold_source` reads the number from a '
+				"per-company setting instead of the literal, so the alert layer and the "
+				"operational sweep cannot disagree about what hot means on the same afternoon. "
+				"Ops: gte, gt, lte, lt, eq, ne. `match` is any (OR, default) or all (AND). The "
+				"whole latest row goes into the message template under `context_key`. A SUBJECT "
+				"WITH NO CHILD ROW IS GATED OUT — a shift with an empty timeline is not a cool "
+				"shift, it is a shift nobody has a reading for.",
+			),
+			"default_severity": _field(
+				_STRING,
+				"Critical, Warning (default) or Info — what a rule whose date_field_role is "
+				"'State' raises at. A state-driven rule has no band to be in and no expiry to be "
+				"past, so none of the three band severities applies to it.",
+			),
+			"producer_assigned_to_expression": _field(
+				_STRING,
+				"A safe expression over the alert's SOURCE ROW producing an Employee — "
+				"`row.foreman`. Where it is set the producer task is assigned to that person "
+				"directly and dispatch_mode is Dispatched; where it is empty the task routes by "
+				"skill exactly as before. THE TWO ARE EXCLUSIVE and passing both is refused: a "
+				"skill is a pool and an assignee is a person, and a task that is both is a task "
+				"whose holder depends on which one the dispatcher read first. Evaluated under "
+				"the same sandbox as custom_python, and vetted here rather than on the afternoon "
+				"somebody needed the task.",
+			),
 			"purpose": _field(_STRING, "What goes wrong in the world if nobody acts on this."),
 			"authored_by": _field(_STRING, "System, Operator (default) or AI-proposed."),
 			"ai_source_citation": _field(_STRING, "If AI-proposed: the URL and section it was read from."),
@@ -6266,9 +6302,26 @@ TOOLS = {
 			"date_fields": _field(
 				{"type": "array", "items": _OBJECT}, "Replace the whole list of plural anchors."
 			),
-			"date_field_role": _field(_STRING, "'Clock' or 'Timestamp'."),
+			"date_field_role": _field(_STRING, "'Clock', 'Timestamp' or 'State' (v0.22.5)."),
 			"target_doctypes": _field(
 				{"type": "array", "items": _OBJECT}, "Replace the additional target doctypes."
+			),
+			# ── v0.22.5 ────────────────────────────────────────────────────────
+			"latest_child_field_threshold": _field(
+				_OBJECT,
+				"Replace the latest-child threshold gate. See create_compliance_rule for the "
+				"shape. THE LIKELY EDIT ON THIS GROUP is a threshold, and the likely RIGHT place "
+				"for it is not here at all: a heat threshold belongs on Weather Settings, per "
+				"company, where the shift sweep already reads it — leave `threshold_source` set "
+				"and change the number there, or the two layers will disagree about the same "
+				"afternoon.",
+			),
+			"default_severity": _field(_STRING, "Critical, Warning or Info — what a 'State' rule raises at."),
+			"producer_assigned_to_expression": _field(
+				_STRING,
+				"Change who the producer task goes to, as an expression over the source row. "
+				"Pass an empty string to go back to skill routing. Exclusive with "
+				"producer_skill_required.",
 			),
 			"regime_heuristics": _field(
 				{"type": "array", "items": _OBJECT},

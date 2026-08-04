@@ -1584,6 +1584,117 @@ ALERT_TASK_MAP = {
 	},
 }
 
+
+def _recipe_for(alert_type: str) -> dict | None:
+	"""The shape of work one alert type becomes: the table first, then the RECORD.
+
+	v0.22.5, AND IT IS THE HALF OF THE CCF'S PRODUCER STORY THAT WAS MISSING. Since
+	v0.22.0 every Compliance Rule has carried `producer_farm_task_type`,
+	`producer_skill_required` and `evidence_contract` — seeded FROM this table, so
+	the two could not disagree — but nothing read them back. A rule authored after
+	the framework shipped therefore had a producer recipe on its record and landed
+	in `skipped_unmapped` anyway, which is a framework that lets you define a rule
+	and not the work it asks for.
+
+	`ALERT_TASK_MAP` STAYS FIRST, and that ordering is the backward-compatibility
+	guarantee: the thirteen shipped rules produce exactly the tasks they produced
+	in v0.22.1, out of the same reviewed table, whatever a site has since edited
+	onto their records. The record is consulted only where the table has nothing to
+	say — which is precisely the case the table cannot cover, because the rule did
+	not exist when it was written.
+
+	Returns None where the record has no producer definition either, and None
+	still means "reported by name, not turned into a generic task".
+	"""
+	recipe = ALERT_TASK_MAP.get(alert_type)
+	if recipe is not None:
+		return recipe
+
+	try:
+		from .. import compliance_rules
+
+		name = compliance_rules.resolve(alert_type)
+		row = compliance_rules.rule_row(name) if name else {}
+	except Exception:  # pragma: no cover - a site mid-migrate
+		return None
+	if not row:
+		return None
+
+	task_type = str(row.get("producer_farm_task_type") or "").strip()
+	evidence = compliance_rules._quietly(
+		compliance_rules.parse_contract, row.get("evidence_contract_json"), {}
+	)
+	if not (task_type and evidence):
+		# A TASK WITH NO EVIDENCE CONTRACT IS A TASK SOMEBODY CLOSES WITH A TICK,
+		# and a tick in a box is what an auditor is trained to disbelieve. Both
+		# halves are required before an alert becomes work, exactly as they are for
+		# every entry in the table above.
+		return None
+
+	extra = compliance_rules._quietly(compliance_rules.as_object, row.get("extra_parameters_json"), {})
+	expression = str(row.get("producer_assigned_to_expression") or "").strip()
+	return {
+		"task_type": task_type,
+		"creates_record": "",
+		"skill": str(row.get("producer_skill_required") or "").strip(),
+		# ROUTED BY NAME WHERE THERE IS A NAME TO ROUTE TO. `Dispatched` is this
+		# app's existing word for "somebody has to be SENT to this by name" — the
+		# same mode a licence renewal and an I-9 re-verification take — and a
+		# fourth dispatch_mode meaning the same thing would be a second vocabulary
+		# for one idea, on the enum the iOS build switches on.
+		"dispatch": DISPATCH_DISPATCHED if expression else "Self-pick",
+		"minutes": int(extra.get("producer_task_minutes") or 0),
+		"evidence": dict(evidence),
+		"what": str(extra.get("producer_task_what") or "").strip() or str(row.get("title") or alert_type),
+		"assigned_to_expression": expression,
+	}
+
+
+def _assignee_from_expression(recipe: dict, row: dict, notes: list) -> str:
+	"""The Employee a rule's `producer_assigned_to_expression` names, or "".
+
+	NEVER RAISES AND NEVER GUESSES. An expression that will not run, or that names
+	somebody payroll has never heard of, leaves the task on its skill routing and
+	says so on the report — because the alternative is a task assigned to a string
+	nobody holds, which is a task that is on nobody's list AND out of the pool.
+	"""
+	expression = str(recipe.get("assigned_to_expression") or "").strip()
+	if not expression:
+		return ""
+	doctype = str(row.get("source_doctype") or "")
+	docname = str(row.get("source_docname") or "")
+	if not (doctype and docname):
+		return ""
+	try:
+		source = dict(frappe.get_doc(doctype, docname).as_dict())
+	except Exception:
+		notes.append(f"{doctype} {docname} could not be read, so the assignee expression was not evaluated.")
+		return ""
+	try:
+		from ..alerts import sandbox
+
+		answer = sandbox.evaluate(
+			expression, {"row": source, "alert": dict(row), "today": frappe.utils.today()}
+		)
+	except Exception as exc:
+		notes.append(f"the assignee expression {expression!r} did not run ({exc}); the task routes by skill.")
+		return ""
+	employee = str(answer or "").strip()
+	if not employee:
+		notes.append(
+			f"the assignee expression {expression!r} produced nothing on {doctype} {docname} — the "
+			"column it reads is empty on that record — so the task routes by skill."
+		)
+		return ""
+	if compat.doctype_exists("Employee") and not frappe.db.exists("Employee", employee):
+		notes.append(
+			f"the assignee expression produced {employee!r}, which is not an Employee on this site. "
+			"The task routes by skill rather than to a name nobody holds."
+		)
+		return ""
+	return employee
+
+
 #: Alert severity to task urgency. Deliberately NOT the identity mapping: a
 #: Critical alert is a statement that something has stopped being lawful, and a
 #: board where every item is Critical is a board nobody reads. High is the top of
@@ -1681,7 +1792,7 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 				{"alert": row["name"], "alert_type": alert_type, "task": answered[row["name"]]}
 			)
 			continue
-		recipe = ALERT_TASK_MAP.get(alert_type)
+		recipe = _recipe_for(alert_type)
 		if recipe is None:
 			report["skipped_unmapped"].append(
 				{
@@ -1690,7 +1801,9 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 					"reason": (
 						f"no task recipe for {alert_type!r}. A generic task with a made-up evidence "
 						"contract is worse than no task: it produces a compliance record nobody can "
-						"rely on. Add it to ALERT_TASK_MAP, or raise the task by hand with "
+						"rely on. Fill in the producer fields on the Compliance Rule with "
+						"update_compliance_rule — producer_farm_task_type and evidence_contract at "
+						"minimum — add it to ALERT_TASK_MAP, or raise the task by hand with "
 						"create_farm_task."
 					),
 				}
@@ -1819,7 +1932,7 @@ def _bundle_into_sessions(rows: list, answered: dict, report: dict, dry_run: boo
 		wanted = set()
 		coverable = True
 		for row in alerts_here:
-			recipe = ALERT_TASK_MAP.get(str(row.get("alert_type") or ""))
+			recipe = _recipe_for(str(row.get("alert_type") or ""))
 			produced = str((recipe or {}).get("creates_record") or "").strip()
 			if not produced:
 				coverable = False
@@ -1959,6 +2072,11 @@ def _already_answered(alert_names: list) -> dict:
 
 def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 	subject = str(row.get("source_docname") or "")
+	# v0.22.5. Resolved BEFORE the dry-run return, so a dry run reports the person
+	# the task would land on. A dry run that could not answer "who gets this" would
+	# be a dry run of the half of the decision nobody is worried about.
+	routing_notes: list = []
+	assignee = _assignee_from_expression(recipe, row, routing_notes)
 	entry = {
 		"alert": row["name"],
 		"alert_type": row["alert_type"],
@@ -1966,14 +2084,21 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 		"task_name": f"{recipe['what']} — {subject}" if subject else recipe["what"],
 		"task_type": recipe["task_type"],
 		"urgency": SEVERITY_URGENCY.get(str(row.get("severity") or ""), "Normal"),
-		"dispatch_mode": recipe["dispatch"],
-		"skill_required": recipe["skill"],
+		"dispatch_mode": recipe["dispatch"] if assignee else _pool_dispatch(recipe),
+		# EITHER/OR, ENFORCED HERE AS WELL AS AT AUTHORING TIME. The controller
+		# refuses a rule carrying both, and this is the second door: a task with a
+		# named holder AND a skill would show up in the pool listing beside the
+		# person already holding it.
+		"skill_required": "" if assignee else recipe["skill"],
+		"assigned_to": assignee or None,
 		"creates_record": recipe["creates_record"] or None,
 		"location_doctype": str(row.get("source_doctype") or "") or None,
 		"location": subject or None,
 		"evidence_required": dict(recipe["evidence"]),
 		"task": None,
 	}
+	if routing_notes:
+		entry["routing_notes"] = routing_notes
 	if dry_run:
 		return entry
 
@@ -1982,13 +2107,21 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 	doc.task_type = recipe["task_type"]
 	doc.state = AVAILABLE
 	doc.urgency = entry["urgency"]
-	doc.dispatch_mode = recipe["dispatch"]
+	doc.dispatch_mode = entry["dispatch_mode"]
 	doc.company = row.get("company") or None
-	doc.skill_required = recipe["skill"]
+	doc.skill_required = entry["skill_required"]
 	doc.estimated_duration_minutes = int(recipe.get("minutes") or 0)
 	doc.source_alert = row["name"]
 	doc.evidence_required = json.dumps(recipe["evidence"])
 	doc.notes = str(row.get("alert_message") or "")
+	if assignee:
+		doc.assigned_to = assignee
+		doc.assigned_to_name = _worker_name(assignee, "")
+		# CLAIMED rather than Available, exactly as `create_farm_task` does when
+		# somebody is sent by name: the task is already held, so nobody else can
+		# pick it up and it appears on that person's own list rather than in a pool
+		# they would have to go looking in.
+		doc.state = CLAIMED
 
 	# A location only where the register the alert points at is one a worker can
 	# be sent to. An alert about a Certification points at a certificate, which
@@ -2013,10 +2146,25 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 				f"One {row.get('source_doctype')} can have several, so this app will not guess."
 			).strip()
 	doc.insert(ignore_permissions=True)
+	if assignee:
+		entry["assignment"] = _open_assignment(doc, assignee, doc.assigned_to_name, dispatched=True)
 	entry["task"] = doc.name
 	entry["location"] = doc.location
 	entry["creates_record"] = doc.creates_record or None
 	return entry
+
+
+def _pool_dispatch(recipe: dict) -> str:
+	"""What a task falls back to when its named assignee could not be resolved.
+
+	NEVER `Dispatched` WITH NOBODY ON IT. That combination is a task that sits in
+	Available which no worker is allowed to claim — visible, urgent, and
+	unreachable, which is the worst of the three ways for dispatch to fail.
+	"""
+	mode = str(recipe.get("dispatch") or "Either")
+	if mode == DISPATCH_DISPATCHED and recipe.get("assigned_to_expression"):
+		return "Self-pick" if recipe.get("skill") else "Either"
+	return mode
 
 
 #: The registers an alert's source record can be a PLACE in. An alert about a

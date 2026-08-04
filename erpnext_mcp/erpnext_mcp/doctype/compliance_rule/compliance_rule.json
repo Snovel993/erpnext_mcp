@@ -37,12 +37,14 @@
   "gate_within_days",
   "gate_scope",
   "gate_related_table_json",
+  "latest_child_field_threshold_json",
   "cadence_col",
   "threshold_critical_days",
   "threshold_warning_days",
   "severity_critical",
   "severity_warning",
   "severity_expired",
+  "default_severity",
   "scope_section",
   "scope_filters_json",
   "extra_parameters_json",
@@ -57,6 +59,7 @@
   "producer_farm_task_type",
   "producer_col",
   "producer_skill_required",
+  "producer_assigned_to_expression",
   "evidence_contract_json",
   "regime_section",
   "regimes",
@@ -220,11 +223,11 @@
   },
   {
    "default": "Clock",
-   "description": "Whether `date_field` is a DEADLINE or a TIMESTAMP. `Clock` is every cadence and expiry rule: how far away the date is decides the severity band. `Timestamp` says the date is WHEN THE THING WAS FOUND — a corrective action is not more or less open for being three weeks old — so it is read for the message and for the supersession test and bands nothing: every matching row raises at `severity_expired`, and a row with no date raises too, because a finding nobody dated is still a finding.",
+   "description": "Clock: the date is a DEADLINE and how far away it is decides the band. Timestamp: the date is WHEN THE THING WAS FOUND — read for the message, bands nothing, every matching row raises at Once Past Due. State (v0.22.5): the rule fires on a DATA STATE and not on any distance from a date — the gates decide, the date is read for the message only, and the severity is State-driven Severity.",
    "fieldname": "date_field_role",
    "fieldtype": "Select",
    "label": "Date Field Role",
-   "options": "Clock\nTimestamp"
+   "options": "Clock\nTimestamp\nState"
   },
   {
    "description": "SEVERAL anchors of the same kind, where EITHER being stale fires the rule and the message must name which — `[{\"field\": \"smoke_detector_last_test\", \"label\": \"smoke\"}, {\"field\": \"co_detector_last_test\", \"label\": \"CO\"}]`. Each is measured against the same `cadence_days`; the severity is folded to the worst of them; the message gets `stale_dates` (one entry per field that is actually stale, with its label, its date and its age) and `first_stale_label`. 'The CO detector was last tested 400 days ago' is a different errand from 'no smoke detector test has ever been recorded', and an alert saying only 'a detector is overdue' sends somebody to test the wrong one. Overrides `date_field` when set.",
@@ -288,6 +291,12 @@
    "label": "Gate Related Table (JSON)"
   },
   {
+   "fieldname": "latest_child_field_threshold_json",
+   "fieldtype": "Long Text",
+   "label": "Latest Child Row Threshold (JSON)",
+   "description": "v0.22.5. The newest child row of each scanned record, and a number read off it. {\"child_doctype\", \"parent_field\", \"order_by\", \"context_key\", \"match\", \"conditions\": [{\"field\", \"op\", \"threshold\", \"threshold_source\"}], \"scope_filters\"}. A subject with no child row is gated OUT: a shift with an empty weather timeline is not a cool shift, it is a shift nobody has a reading for."
+  },
+  {
    "fieldname": "cadence_col",
    "fieldtype": "Column Break",
    "label": ""
@@ -329,6 +338,15 @@
    "fieldtype": "Select",
    "label": "Once Past Due",
    "options": "Critical\nWarning\nInfo"
+  },
+  {
+   "fieldname": "default_severity",
+   "fieldtype": "Select",
+   "label": "State-driven Severity",
+   "options": "Critical\nWarning\nInfo",
+   "default": "Warning",
+   "depends_on": "eval:doc.date_field_role=='State'",
+   "description": "v0.22.5. What a Date Field Role of State raises at. A state-driven rule has no band to be in and no expiry to be past, so none of the three band severities applies."
   },
   {
    "fieldname": "scope_section",
@@ -410,6 +428,12 @@
    "fieldname": "producer_skill_required",
    "fieldtype": "Data",
    "label": "Producer Skill"
+  },
+  {
+   "fieldname": "producer_assigned_to_expression",
+   "fieldtype": "Data",
+   "label": "Producer Assignee Expression",
+   "description": "v0.22.5. A safe expression over the alert's source row producing an Employee — `row.foreman`. Where it is set, the producer task is assigned to that person directly and dispatch_mode is Dispatched; where it is empty, the task routes by skill as before. The two are exclusive: a task with a named holder is not in a pool."
   },
   {
    "description": "What the producer task's completion must submit, as a JSON object using the same vocabulary an Inspection Template section does — `photos`, `signature`, `findings_text`, `witness`, `checklist_items`, `measurements`. A key outside it asks for nothing and looks like it asks for something, so it is refused here.",

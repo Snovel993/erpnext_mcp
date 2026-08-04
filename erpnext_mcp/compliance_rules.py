@@ -98,12 +98,69 @@ DUE_NONE = "None"
 DATE_ROLE_CLOCK = "Clock"
 DATE_ROLE_TIMESTAMP = "Timestamp"
 
+#: v0.22.5. The third role, and the one that made `default_severity` necessary.
+#:
+#: `State` says the rule fires on a DATA STATE rather than on any distance from a
+#: date. Its gates decide whether it fires; the date field is read for the
+#: message and bands nothing; and the severity is `default_severity` rather than
+#: any of the three band severities, because a rule with no clock has no band to
+#: be in and no expiry to be past.
+#:
+#: IT IS A THIRD VALUE AND NOT A FOURTH THRESHOLD, and the distinction is the
+#: whole reason this field exists rather than a convention. `threshold_*_days`
+#: are Int columns, so "no threshold" and "a threshold of zero" are one value in
+#: the database — and zero is a real setting meaning "fire on the due date
+#: itself". Nothing the engine can read off the numbers distinguishes a rule with
+#: no clock from a rule whose clock is tight, so the rule has to SAY so.
+#:
+#: v0.22.1 refused a third `date_field_role` value deliberately, and this is not
+#: the one it refused. What it refused was a role that inverted the SIGN of every
+#: threshold beside it — a number meaning days elapsed where the same number on
+#: twelve other rules means days remaining. `State` reads no thresholds at all,
+#: so there is no number left to misread.
+DATE_ROLE_STATE = "State"
+
 #: v0.22.1. Where `gate_date_field` is read from. `Direct` is a column on the
 #: row being scanned; `Latest Related` is the newest date on another doctype
 #: that points back at it, which is what "when was this block last sprayed"
 #: looks like on a site keeping a spray log rather than a column.
 GATE_DIRECT = "Direct"
 GATE_LATEST_RELATED = "Latest Related"
+
+#: v0.22.5. The comparisons a threshold condition may make. Deliberately a
+#: SHORTER list than `FILTER_OPS`: a threshold is a number read against a number,
+#: and `contains` on a temperature is a question nobody meant to ask.
+THRESHOLD_OPS = ("gte", "gt", "lte", "lt", "eq", "ne")
+
+#: v0.22.5. Where a threshold condition may read its NUMBER from, instead of
+#: carrying a literal on the rule.
+#:
+#: A CLOSED REGISTRY, and it is closed for the same reason `custom_python` runs
+#: in an interpreter this app wrote: "read a number from somewhere" is one
+#: sentence away from "read anything from anywhere". Each key names one setting
+#: this app already resolves per company, and nothing else is reachable.
+#:
+#: THE POINT IS THE PER-COMPANY OVERRIDE. OR-OSHA's heat threshold is 80 °F, and
+#: an entity that has decided its own is 75 sets it once on Weather Settings —
+#: where the v0.19.4 shift sweep already reads it. A literal on the rule would
+#: make the alert layer and the operational layer disagree about what "hot" means
+#: on the same afternoon, on the same shift, and the disagreement would be
+#: invisible until somebody compared two records.
+THRESHOLD_SOURCES = {
+	"weather.heat_threshold_temp_f": (
+		"the ambient-temperature heat threshold on Weather Settings, per company (default 80 °F)"
+	),
+	"weather.heat_threshold_heat_index_f": (
+		"the heat-index threshold on Weather Settings, per company (default 80 °F)"
+	),
+	"weather.wind_threshold_mph_spray_block": (
+		"the spray-block wind threshold on Weather Settings, per company (default 10 mph)"
+	),
+}
+
+#: What `latest_child_field_threshold.match` may say.
+MATCH_ANY = "any"
+MATCH_ALL = "all"
 
 #: What `authored_by` may say. `System` is a rule this app shipped and seeded.
 AUTHOR_SYSTEM = "System"
@@ -123,6 +180,18 @@ CATEGORIES = (
 )
 
 SEVERITIES = ("Critical", "Warning", "Info")
+
+#: v0.22.5. What a `State` rule raises at when its record says nothing.
+#:
+#: WARNING RATHER THAN CRITICAL, deliberately. A state-driven rule fires the
+#: moment a condition becomes true, which for the shipped one is the first
+#: reading at or above the threshold — and a threshold cross is a heads-up, not
+#: a finding that something has stopped being lawful. Critical belongs to
+#: sustained exposure and to worker-reported symptoms, which are different rules
+#: watching different facts. A default of Critical would put every hot afternoon
+#: at the top of a board where "Critical" is supposed to mean somebody stops what
+#: they are doing.
+SEVERITY_DEFAULT = "Warning"
 
 #: The scope-filter operators, and what each one means when the column is EMPTY.
 #: That last column is the whole reason filters are evaluated in Python rather
@@ -200,6 +269,7 @@ RULE_FIELDS = (
 	"gate_within_days",
 	"gate_scope",
 	"gate_related_table_json",
+	"latest_child_field_threshold_json",
 	"superseded_by_later_clean_json",
 	"regime_heuristics_json",
 	"category_heuristics_json",
@@ -208,6 +278,7 @@ RULE_FIELDS = (
 	"severity_critical",
 	"severity_warning",
 	"severity_expired",
+	"default_severity",
 	"scope_filters_json",
 	"extra_parameters_json",
 	"message_template",
@@ -215,6 +286,7 @@ RULE_FIELDS = (
 	"producer_task_template",
 	"producer_farm_task_type",
 	"producer_skill_required",
+	"producer_assigned_to_expression",
 	"evidence_contract_json",
 	"regulation_citations",
 	"retention_years",
@@ -454,6 +526,165 @@ def parse_gate_table(raw, label: str = "gate_related_table") -> dict:
 		out[key] = value
 	out["scope_filters"] = parse_filters(config.get("scope_filters"), f"{label}.scope_filters")
 	return out
+
+
+# ── v0.22.5: the gate about the LATEST ROW of a child table ─────────────────
+def parse_latest_child_threshold(raw, label: str = "latest_child_field_threshold") -> dict:
+	"""The newest child row of each scanned record, and a number read off it.
+
+	SIBLING OF `gate_related_table`, NOT AN EXTENSION OF IT, and the difference is
+	the fold rather than the syntax. `gate_related_table` folds a related doctype
+	to ONE VALUE PER SUBJECT — the maximum date — and asks how old it is. This one
+	folds to ONE ROW per subject, the latest, and then asks a question about its
+	OTHER columns. A maximum over dates cannot answer "and what was the
+	temperature on that row", because the answer is not a maximum of anything: the
+	85 °F reading at noon says nothing about compliance at four o'clock if a 72 °F
+	reading was written at half past three.
+
+	It is also what puts the whole row into the message template, under
+	`context_key`. An alert that says a threshold was crossed and cannot say WHAT
+	the reading was is an alert somebody has to go and look up before they can act
+	on it.
+
+	  child_doctype     where the rows live — a child table's own doctype
+	  parent_field      the column on the child naming the scanned row. `parent`
+	                    by default, which is what a child table uses.
+	  parentfield       which child table of the parent, where the doctype is used
+	                    as more than one. Optional; narrows nothing when empty.
+	  subject_key       the column on the SCANNED row the children name. `name`.
+	  order_by          the column "latest" is measured on. REQUIRED — without it
+	                    there is no latest and the rule would read whichever row
+	                    the database handed back first, which is a rule whose
+	                    answer changes when somebody adds an index.
+	  context_key       what the message template calls the row. `latest_child`.
+	  match             `any` (the default, an OR over the conditions) or `all`.
+	  conditions        [{field, op, threshold | threshold_source}]
+	  scope_filters     which child rows count at all, in the rule's own filter
+	                    vocabulary.
+
+	A SUBJECT WITH NO CHILD ROW IS GATED OUT, the same direction `gate_date_field`
+	takes and for the same reason. A shift whose weather timeline is empty is not
+	a shift that is cool; it is a shift nobody has a reading for, and raising a
+	heat alert off no reading would be this app asserting a fact it does not have.
+	"""
+	config = as_object(raw, label)
+	if not config:
+		return {}
+
+	child = str(config.get("child_doctype") or "").strip()
+	if not child:
+		raise ValueError(
+			f"{label} names no `child_doctype`, so there are no rows to find the latest of. It is "
+			"the doctype the child rows are — `Farm Shift Weather Reading`, not `Farm Shift`."
+		)
+	order_by = str(config.get("order_by") or "").strip()
+	if not order_by:
+		raise ValueError(
+			f"{label} names no `order_by`, so there is no LATEST row — the rule would read whichever "
+			"of a shift's thirty readings the database handed back first, and that is an answer that "
+			"changes when somebody adds an index. Name the column time runs on."
+		)
+
+	raw_conditions = config.get("conditions")
+	if raw_conditions in (None, "", []) and "field" in config:
+		# The flat single-condition shape, because most gates are one comparison
+		# and making somebody write a one-element list for it is a paper cut on
+		# the commonest case.
+		raw_conditions = [
+			{
+				"field": config.get("field"),
+				"op": config.get("op"),
+				"threshold": config.get("threshold"),
+				"threshold_source": config.get("threshold_source"),
+			}
+		]
+	conditions = []
+	for index, entry in enumerate(as_list(raw_conditions, f"{label}.conditions")):
+		if not isinstance(entry, dict):
+			raise ValueError(
+				f'{label}.conditions[{index}] must be an object like {{"field": "temp_f", "op": '
+				f'"gte", "threshold": 80}}, got {type(entry).__name__}.'
+			)
+		field = str(entry.get("field") or "").strip()
+		if not field:
+			raise ValueError(f"{label}.conditions[{index}] names no `field`.")
+		op = str(entry.get("op") or "gte").strip().lower()
+		if op not in THRESHOLD_OPS:
+			raise ValueError(
+				f"{label}.conditions[{index}] uses operator {op!r}, which is not one of: "
+				f"{', '.join(THRESHOLD_OPS)}. A threshold is a number read against a number."
+			)
+		source = str(entry.get("threshold_source") or "").strip()
+		if source and source not in THRESHOLD_SOURCES:
+			raise ValueError(
+				f"{label}.conditions[{index}] reads its number from {source!r}, which is not a "
+				f"setting this app resolves. The sources are: {', '.join(sorted(THRESHOLD_SOURCES))}."
+			)
+		has_literal = entry.get("threshold") not in (None, "")
+		if not (source or has_literal):
+			raise ValueError(
+				f"{label}.conditions[{index}] names neither `threshold` nor `threshold_source`, so "
+				"there is no number to compare against. A condition with no number matches nothing "
+				"and looks like it matches something."
+			)
+		threshold = None
+		if has_literal:
+			try:
+				threshold = float(entry["threshold"])
+			except (TypeError, ValueError):
+				raise ValueError(
+					f"{label}.conditions[{index}] has a `threshold` of {entry['threshold']!r}, which "
+					"is not a number."
+				) from None
+		conditions.append({"field": field, "op": op, "threshold": threshold, "threshold_source": source})
+	if not conditions:
+		raise ValueError(
+			f"{label} lists no `conditions`. A gate that tests nothing gates NOTHING IN — every row "
+			"with a child record would fire, which on an open-shift rule is every crew on the farm."
+		)
+
+	match = str(config.get("match") or MATCH_ANY).strip().lower()
+	if match not in (MATCH_ANY, MATCH_ALL):
+		raise ValueError(
+			f"{label}.match is {match!r}; it is {MATCH_ANY!r} (an OR over the conditions, the "
+			f"default) or {MATCH_ALL!r} (an AND)."
+		)
+
+	return {
+		"child_doctype": child,
+		"parent_field": str(config.get("parent_field") or "parent").strip() or "parent",
+		"parentfield": str(config.get("parentfield") or "").strip(),
+		"subject_key": str(config.get("subject_key") or "name").strip() or "name",
+		"order_by": order_by,
+		"context_key": str(config.get("context_key") or "latest_child").strip() or "latest_child",
+		"match": match,
+		"conditions": conditions,
+		"scope_filters": parse_filters(config.get("scope_filters"), f"{label}.scope_filters"),
+	}
+
+
+def threshold_from_source(source: str, company: str = ""):
+	"""One number out of `THRESHOLD_SOURCES`, for one company. None where unreadable.
+
+	LAZILY IMPORTED, because the settings this reaches live in a service that
+	imports the shift tools, and this module is imported by the DocType
+	controller. None on failure rather than a raise: a rule whose threshold could
+	not be read falls back to the literal on the condition, which is the number
+	the regulation says — and a sweep that died because a Single had not migrated
+	would take the whole calendar with it.
+	"""
+	key = str(source or "").strip()
+	if key not in THRESHOLD_SOURCES:
+		return None
+	namespace, _, fieldname = key.partition(".")
+	if namespace != "weather":
+		return None  # pragma: no cover - the registry has one namespace today
+	try:
+		from .services import weather
+
+		return float(weather.thresholds_for(str(company or ""))[fieldname])
+	except Exception:
+		return None
 
 
 #: The two outcome vocabularies `parse_heuristics` understands, and the key each
@@ -727,6 +958,40 @@ def _passes(value, op: str, wanted) -> bool:
 	return False  # pragma: no cover - parse_filters refused everything else
 
 
+def passes_threshold(value, op: str, threshold) -> bool:
+	"""One numeric comparison, for `latest_child_field_threshold`. NUMBERS ONLY.
+
+	Separate from `_passes` and deliberately narrower. `_passes` compares
+	numerically where both sides are numbers and falls back to a LEXICAL
+	comparison otherwise, which is right for its callers — the values reaching an
+	ordering comparison in a scope filter are overwhelmingly ISO dates, and ISO
+	dates sort correctly as strings.
+
+	IT IS EXACTLY WRONG ON A THERMOMETER. A reading whose column somebody filled
+	in as "warm", or that an import wrote as "n/a", is lexically greater than
+	"80" — and would raise a heat alert off a word. A value that is not a number
+	answers False here, which leaves the row alone: this app does not know how hot
+	it was, and not knowing is not the same as knowing it was hot.
+	"""
+	try:
+		left, right = float(value), float(threshold)
+	except (TypeError, ValueError):
+		return False
+	if op == "gte":
+		return left >= right
+	if op == "gt":
+		return left > right
+	if op == "lte":
+		return left <= right
+	if op == "lt":
+		return left < right
+	if op == "eq":
+		return left == right
+	if op == "ne":
+		return left != right
+	return False  # pragma: no cover - parse_latest_child_threshold refused everything else
+
+
 def _comparable(left, right):
 	"""Both sides as numbers where both are numeric, else both as text.
 
@@ -888,6 +1153,14 @@ def describe(row: dict, with_definition: bool = False) -> dict:
 		"human_approved_by": row.get("human_approved_by"),
 		"human_approved_on": str(row.get("human_approved_on") or "") or None,
 		"retention_years": int(row.get("retention_years") or 0) or None,
+		# v0.22.5, and both are here rather than only in `definition` because both
+		# change what somebody reading a LIST of rules should expect. `state_driven`
+		# says this rule's alerts do not move with the calendar; the expression says
+		# its producer task lands on one named person rather than in a skill pool.
+		"date_field_role": row.get("date_field_role") or DATE_ROLE_CLOCK,
+		"state_driven": str(row.get("date_field_role") or "") == DATE_ROLE_STATE,
+		"default_severity": row.get("default_severity") or SEVERITY_DEFAULT,
+		"producer_assigned_to_expression": str(row.get("producer_assigned_to_expression") or "") or None,
 	}
 	if with_definition:
 		out["definition"] = {
@@ -916,6 +1189,11 @@ def describe(row: dict, with_definition: bool = False) -> dict:
 			"gate_within_days": int(row.get("gate_within_days") or 0),
 			"gate_scope": row.get("gate_scope") or GATE_DIRECT,
 			"gate_related_table": _quietly(parse_gate_table, row.get("gate_related_table_json"), {}),
+			# v0.22.5.
+			"latest_child_field_threshold": _quietly(
+				parse_latest_child_threshold, row.get("latest_child_field_threshold_json"), {}
+			),
+			"default_severity": row.get("default_severity") or SEVERITY_DEFAULT,
 			"regime_heuristics": _quietly(
 				lambda raw: parse_heuristics(raw, "regime_heuristics", "regimes"),
 				row.get("regime_heuristics_json"),
@@ -932,6 +1210,7 @@ def describe(row: dict, with_definition: bool = False) -> dict:
 			"producer_task_template": row.get("producer_task_template"),
 			"producer_farm_task_type": row.get("producer_farm_task_type"),
 			"producer_skill_required": row.get("producer_skill_required"),
+			"producer_assigned_to_expression": row.get("producer_assigned_to_expression"),
 			"evidence_contract": _quietly(parse_contract, row.get("evidence_contract_json"), {}),
 			"audit_packet_types": _quietly(parse_packet_types, row.get("audit_packet_types")),
 			"ai_source_citation": row.get("ai_source_citation"),
@@ -978,11 +1257,13 @@ RULE_DEFAULTS = {
 	"severity_critical": "Critical",
 	"severity_warning": "Warning",
 	"severity_expired": "Critical",
+	"default_severity": SEVERITY_DEFAULT,
 	"message_template": "",
 	"regimes_from_field": "",
 	"producer_task_template": None,
 	"producer_farm_task_type": "",
 	"producer_skill_required": "",
+	"producer_assigned_to_expression": "",
 	"regulation_citations": "",
 	"retention_years": 0,
 	"kairotic_gate_description": "",
@@ -1006,6 +1287,11 @@ _PRIMITIVE_BLOBS = (
 	("date_fields", "date_fields_json", parse_date_fields),
 	("superseded_by_later_clean", "superseded_by_later_clean_json", parse_supersession),
 	("gate_related_table", "gate_related_table_json", parse_gate_table),
+	(
+		"latest_child_field_threshold",
+		"latest_child_field_threshold_json",
+		parse_latest_child_threshold,
+	),
 	(
 		"regime_heuristics",
 		"regime_heuristics_json",
@@ -1109,6 +1395,118 @@ def seed_specs() -> list:
 	return out
 
 
+# ── v0.22.5: rules that are ONLY records ────────────────────────────────────
+#: Rules this app seeds that have NO shipped Python scanner behind them.
+#:
+#: THE FIRST OF THEM, AND THAT IS THE POINT OF THE RELEASE. Every rule up to now
+#: existed as a `Rule` object in `alerts/rules.py` first and became a record
+#: second, because every one of them predates the framework. This one was
+#: authored as a record, in the vocabulary, and there is nothing to fall back to.
+#: A site that has the app and has not yet migrated the Compliance Rule DocType
+#: therefore does not run it — which is correct and is said out loud rather than
+#: papered over: the fallback rule set is the DEFINITIONS OF v0.21.0, and a rule
+#: invented afterwards is not one of them.
+#:
+#: It also means this list is the shape an AI-proposed rule will arrive in when
+#: `propose_compliance_rule` is wired: a dict of declarative fields, a citation,
+#: a kairotic gate, and nothing executable anywhere in it.
+def declarative_seed_specs() -> list:
+	from .services import weather
+
+	return [
+		{
+			"rule_id": "shift_heat_threshold_crossed",
+			"title": "An open shift's latest weather reading has crossed OR-OSHA's heat threshold",
+			"category": "Workforce",
+			"target_doctype": "Farm Shift",
+			"requires_doctypes": "Farm Shift, Farm Shift Weather Reading",
+			# THE SHIFT'S OWN START, read for the message and for nothing else. The
+			# role below is what says so.
+			"date_field": "start_datetime",
+			"date_field_role": DATE_ROLE_STATE,
+			"default_severity": "Warning",
+			"due_date_mode": DUE_NONE,
+			# Belt and braces against a site that edits the role back to Clock: a
+			# negative threshold is the documented way to say "this band never
+			# fires", so even misread the rule cannot start banding on a date.
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"scope_filters": [
+				# `end_datetime` IS THE FACT AND `status` IS THE SUMMARY OF IT, which
+				# is why v0.19.4's own sweep filters on the first. Both are here
+				# because both are true of an open shift and ANDing them is strictly
+				# narrower — but the status filter carries a `default` of Active, so
+				# a shift written by an import that never set the column is still
+				# read as open rather than silently dropped off the hot-day list.
+				{"field": "end_datetime", "op": "isnull"},
+				{"field": "status", "op": "eq", "value": "Active", "default": "Active"},
+			],
+			"latest_child_field_threshold": {
+				"child_doctype": "Farm Shift Weather Reading",
+				"parent_field": "parent",
+				"parentfield": "weather_timeline",
+				"subject_key": "name",
+				"order_by": "reading_datetime",
+				"context_key": "latest_weather",
+				"match": MATCH_ANY,
+				"conditions": [
+					{
+						"field": "temp_f",
+						"op": "gte",
+						"threshold": weather.DEFAULTS["heat_threshold_temp_f"],
+						"threshold_source": "weather.heat_threshold_temp_f",
+					},
+					{
+						"field": "heat_index_f",
+						"op": "gte",
+						"threshold": weather.DEFAULTS["heat_threshold_heat_index_f"],
+						"threshold_source": "weather.heat_threshold_heat_index_f",
+					},
+				],
+			},
+			"message_template": (
+				"Heat threshold crossed on {{ row.name }} at {{ row.location }} — latest reading "
+				"{{ latest_weather.temp_f }}°F ({{ latest_weather.heat_index_f }}°F heat index) at "
+				"{{ latest_weather.reading_datetime }}. Document water/shade/rest breaks per "
+				"OAR 437-004-1131."
+			),
+			"regimes": ["OR-OSHA"],
+			"regulation_citations": "OAR 437-004-1131 heat illness prevention",
+			"retention_years": 3,
+			"audit_packet_types": ["OSHA"],
+			# NO Inspection Template and NO skill. The assignee is not a pool; it is
+			# the one person who was standing there.
+			"producer_task_template": None,
+			"producer_farm_task_type": "Compliance-Audit",
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "row.foreman",
+			"extra_parameters": {
+				"producer_task_what": "Document the water, shade and rest cycle the crew took"
+			},
+			"evidence_contract": {"findings_text": True, "signature": True},
+			"purpose": (
+				"OR-OSHA -1131 does not ask whether it was hot; it asks what the operation DID about "
+				"it, shift by shift. The weather timeline already proves the conditions. What an "
+				"inspection turns on is whether somebody wrote down the water, the shade and the "
+				"rest cycle while the crew was still in the field — and the person who can write "
+				"that is the foreman who called them."
+			),
+			"kairotic_gate_description": (
+				"Fires on a WEATHER FACT, not a date. When the latest reading on an open shift is at "
+				"or above the OR-OSHA heat threshold — currently 80°F on the ambient thermometer or "
+				"heat index — the foreman gets a task to document the water, shade and rest cycle "
+				"their crew took. Not a compliance decision by the app; the record is the foreman's, "
+				"signed by the foreman, and this alert is what makes sure it exists. Silences by "
+				"itself when the shift closes: an open shift on a hot day is a compliance "
+				"obligation, a closed shift on the same hot day is a completed one."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		}
+	]
+
+
 def seed_compliance_rules(approver: str = "") -> dict:
 	"""One Compliance Rule per shipped rule. Idempotent, and never raises.
 
@@ -1133,7 +1531,12 @@ def seed_compliance_rules(approver: str = "") -> dict:
 		return report
 	approver = approver or _seed_approver()
 	stamped = frappe.utils.now()
-	for spec in seed_specs():
+	try:
+		specs = seed_specs() + declarative_seed_specs()
+	except Exception as exc:  # pragma: no cover - a site mid-import
+		report["failed"].append({"name": "declarative_seed_specs", "reason": f"{type(exc).__name__}: {exc}"})
+		specs = seed_specs()
+	for spec in specs:
 		rule_id = spec["rule_id"]
 		try:
 			if frappe.db.exists(DOCTYPE, {"rule_id": rule_id}):

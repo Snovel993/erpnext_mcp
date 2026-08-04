@@ -214,11 +214,18 @@ def preview(row: dict, context: dict) -> dict:
 #   2. THE GATE DATE      is this row's condition RIPE — is anybody spraying
 #                         this block? A row nothing is happening to raises
 #                         nothing however stale its other dates.
-#   3. SUPERSESSION       is this finding STILL the latest word on its subject?
-#                         The only gate that reads other rows, and therefore the
-#                         one worth running last of the three, on the smallest
-#                         set of candidates the first two leave.
-#   4. THE CLOCK          how far past due, and therefore which severity.
+#   3. THE LATEST CHILD   v0.22.5, and it sits here for the same reason as 2: it
+#                         is a claim about whether the condition EXISTS at all,
+#                         and it is the cheaper of the two questions about other
+#                         rows because its index is keyed on the candidate.
+#   4. SUPERSESSION       is this finding STILL the latest word on its subject?
+#                         The one gate that reads other rows to decide whether a
+#                         TRUE thing has stopped mattering, and therefore the one
+#                         worth running last, on the smallest set of candidates
+#                         the first three leave.
+#   5. THE CLOCK          how far past due, and therefore which severity — or,
+#                         on a `State` rule, nothing at all: the gates above have
+#                         already decided, and the severity is `default_severity`.
 #
 # A different order would not merely be slower. Running supersession before the
 # scope filters would mean a rule narrowed to one company reading another's
@@ -314,6 +321,7 @@ def _definition(row: dict, warnings: list) -> dict:
 		"severity_critical": str(row.get("severity_critical") or SEVERITY_CRITICAL),
 		"severity_warning": str(row.get("severity_warning") or SEVERITY_WARNING),
 		"severity_expired": str(row.get("severity_expired") or SEVERITY_CRITICAL),
+		"default_severity": str(row.get("default_severity") or compliance_rules.SEVERITY_DEFAULT),
 		"regimes_field": str(row.get("regimes_from_field") or "").strip(),
 		"rule_regimes": list(regimes_vocabulary.parse(row.get("regimes")) or []),
 		"template": str(row.get("message_template") or ""),
@@ -322,6 +330,12 @@ def _definition(row: dict, warnings: list) -> dict:
 		"gate_scope": str(row.get("gate_scope") or compliance_rules.GATE_DIRECT),
 		"gate_table": blob(
 			compliance_rules.parse_gate_table, row.get("gate_related_table_json"), "gate_related_table", {}
+		),
+		"latest_child": blob(
+			compliance_rules.parse_latest_child_threshold,
+			row.get("latest_child_field_threshold_json"),
+			"latest_child_field_threshold",
+			{},
 		),
 		"supersession": blob(
 			compliance_rules.parse_supersession,
@@ -362,16 +376,25 @@ def _scan_one_target(
 	rows = frappe.db.get_all(doctype, filters=db_filters, fields=selected, limit=SCAN_CAP)
 
 	supersession = settings["supersession"]
-	# BOTH INDEXES ARE BUILT ONCE PER TARGET, NOT ONCE PER CANDIDATE. A camp with
+	# EVERY INDEX IS BUILT ONCE PER TARGET, NOT ONCE PER CANDIDATE. A camp with
 	# fifty cabins and four years of history is two queries, not four hundred —
 	# and this is the reason the primitive is a field rather than a `custom_python`
-	# program, where the obvious way to write it is the per-row query.
+	# program, where the obvious way to write it is the per-row query. v0.22.5's
+	# child-row index is the same shape and matters more, not less: twelve open
+	# shifts each carrying a reading every fifteen minutes is one query and not
+	# twelve, and it is the query that would otherwise run every sweep of the day.
 	clean = _clean_index(doctype, date_field, supersession, company, warnings) if supersession else {}
 	gate_index = (
 		_gate_index(settings["gate_table"], company, warnings)
 		if settings["gate_scope"] == compliance_rules.GATE_LATEST_RELATED and settings["gate_table"]
 		else {}
 	)
+	child_config = settings["latest_child"]
+	child_index = _latest_child_index(child_config, company, warnings) if child_config else {}
+	# Per-company thresholds, resolved once per company that actually appears
+	# rather than once per candidate. `thresholds_for` is a cached-Single read, but
+	# a rule scanning two thousand rows would still make two thousand of them.
+	threshold_cache: dict = {}
 
 	out = []
 	for candidate in rows or []:
@@ -385,6 +408,12 @@ def _scan_one_target(
 
 		gate_date, gate_since, gated_in = _gate(candidate, settings, gate_index, today)
 		if not gated_in:
+			continue
+
+		child_row, crossed, child_ok = _child_gate(
+			candidate, child_config, child_index, company_field, threshold_cache
+		)
+		if not child_ok:
 			continue
 
 		if supersession and _superseded(candidate, supersession, clean, date_field):
@@ -403,6 +432,11 @@ def _scan_one_target(
 			settings["severity_warning"],
 			settings["severity_expired"],
 			forced=(settings["date_role"] == compliance_rules.DATE_ROLE_TIMESTAMP),
+			state_severity=(
+				settings["default_severity"]
+				if settings["date_role"] == compliance_rules.DATE_ROLE_STATE
+				else ""
+			),
 		)
 		if severity is None:
 			continue
@@ -414,10 +448,22 @@ def _scan_one_target(
 
 		regimes = _regimes_of(candidate, settings)
 		category = _category_of(candidate, settings)
+		child_context = {}
+		if child_config:
+			# UNDER ITS OWN NAME AND UNDER A GENERIC ONE. `latest_weather` is what
+			# the shipped rule's template reads and is what makes the sentence
+			# readable; `latest_child` is what a template written against the
+			# primitive rather than against this rule can rely on.
+			child_context = {
+				child_config["context_key"]: child_row,
+				"latest_child": child_row,
+				"crossed_conditions": crossed,
+			}
 		rendered = render_message(
 			settings["template"],
 			candidate,
 			{
+				**child_context,
 				"today": today,
 				"days_remaining": dates["days_remaining"],
 				"days_overdue": (None if dates["days_remaining"] is None else -dates["days_remaining"]),
@@ -526,6 +572,142 @@ def _gate_index(table: dict, company: str, warnings: list) -> dict:
 	return out
 
 
+# ── v0.22.5: the gate about the LATEST ROW of a child table ─────────────────
+#
+# Standard child columns are selected BY HAND rather than through
+# `compat.existing_fields`, and this is not a shortcut. `parent`, `parenttype`
+# and `parentfield` are real columns on every child table and are NOT in
+# `frappe.get_meta(...).fields` — Frappe keeps them among the standard fields
+# every DocType gets for free. Passing them through `has_field` would drop them
+# from the SELECT, and a child index with no `parent` column is an index keyed on
+# nothing: every row would fold onto one empty subject and the rule would fire on
+# whichever shift happened to sort last, on every shift, for ever.
+_CHILD_STANDARD_FIELDS = ("name", "parent", "parenttype", "parentfield", "idx", "creation", "modified")
+
+
+def _latest_child_index(config: dict, company: str, warnings: list) -> dict:
+	"""subject → the NEWEST child row for it, whole. One query.
+
+	FOLDED TO A ROW, not to a value, which is the difference between this and
+	`_gate_index`. A maximum over `reading_datetime` says when the last reading
+	was; it cannot say what the temperature on it was, and that is the entire
+	question this primitive exists to ask.
+	"""
+	doctype = config["child_doctype"]
+	if not compat.doctype_exists(doctype):
+		warnings.append(
+			f"the latest-child gate reads {doctype}, which this site has not got, so every row was "
+			"gated OUT and the rule raised nothing. That is the safe direction for a gate — but it "
+			"is not the same as a clean operation, and this note is how you can tell them apart."
+		)
+		return {}
+
+	wanted = [config["parent_field"], config["order_by"]]
+	wanted.extend(entry["field"] for entry in config["conditions"])
+	wanted.extend(entry["field"] for entry in config["scope_filters"])
+	if config["parentfield"]:
+		wanted.append("parentfield")
+	fields = ["name"]
+	for fieldname in dict.fromkeys(wanted):
+		if fieldname in fields:
+			continue
+		if fieldname in _CHILD_STANDARD_FIELDS or compat.has_field(doctype, fieldname):
+			fields.append(fieldname)
+
+	for fieldname in (config["parent_field"], config["order_by"]):
+		if fieldname not in fields:
+			warnings.append(
+				f"the latest-child gate names {doctype}.{fieldname}, which this site has not got, so "
+				"no row could be read as the latest and the rule raised nothing."
+			)
+			return {}
+
+	# Scoped to the sweep's company where the child doctype carries one, the same
+	# as every other index here. Most child tables do not — a weather reading
+	# belongs to a shift and the shift belongs to an entity — and in that case the
+	# subject key does the scoping, because the candidates were already narrowed.
+	db_filters = {}
+	company_field = compat.first_field(doctype, *_COMPANY_FIELDS)
+	if company and company_field:
+		db_filters[company_field] = company
+	if config["parentfield"] and "parentfield" in fields:
+		# A child DOCTYPE can hang off more than one table on more than one parent.
+		# Without this the gate would read another table's rows as if they were
+		# this one's, which is how a rule about a weather timeline starts answering
+		# questions about a crew list.
+		db_filters["parentfield"] = config["parentfield"]
+	rows = frappe.db.get_all(doctype, filters=db_filters, fields=fields, limit=SCAN_CAP)
+
+	present = set(fields)
+	out: dict = {}
+	for entry in rows or []:
+		entry = dict(entry)
+		matched, _filter_warnings = compliance_rules.row_matches(entry, config["scope_filters"], present)
+		if not matched:
+			continue
+		subject = str(entry.get(config["parent_field"]) or "")
+		order = str(entry.get(config["order_by"]) or "").strip()
+		if not (subject and order):
+			# A row with no ordering value cannot be the latest of anything, and
+			# guessing would make the answer depend on insertion order.
+			continue
+		held = out.get(subject)
+		if held is None or order > str(held.get(config["order_by"]) or ""):
+			out[subject] = entry
+	return out
+
+
+def _child_gate(candidate: dict, config: dict, index: dict, company_field: str, cache: dict) -> tuple:
+	"""(latest row, which conditions crossed, passes) for one scanned record.
+
+	A SUBJECT WITH NO CHILD ROW IS GATED OUT. See `parse_latest_child_threshold`:
+	a shift whose weather timeline is empty is not a cool shift, it is a shift
+	nobody has a reading for, and an alert raised off no reading would be this app
+	asserting a fact it does not have.
+	"""
+	if not config:
+		return {}, [], True
+	row = index.get(str(candidate.get(config["subject_key"]) or ""))
+	if not row:
+		return {}, [], False
+
+	company = str(candidate.get(company_field) or "") if company_field else ""
+	if company not in cache:
+		cache[company] = {
+			source: compliance_rules.threshold_from_source(source, company)
+			for source in {
+				entry["threshold_source"] for entry in config["conditions"] if entry["threshold_source"]
+			}
+		}
+	resolved = cache[company]
+
+	crossed = []
+	for entry in config["conditions"]:
+		# THE SETTING WINS AND THE LITERAL IS THE FLOOR IT FALLS BACK TO. The
+		# literal on the rule is what the regulation says; the setting is what this
+		# entity decided, per company, in the one place the v0.19.4 shift sweep
+		# already reads it. A site that has not migrated Weather Settings gets the
+		# regulation's number rather than nothing — which is the difference between
+		# a rule that is conservative and a rule that is silent.
+		limit = resolved.get(entry["threshold_source"]) if entry["threshold_source"] else None
+		if limit is None:
+			limit = entry["threshold"]
+		if limit is None:
+			continue
+		value = row.get(entry["field"])
+		if value in (None, ""):
+			# A reading with no temperature is not a cool reading. The condition is
+			# not met, and `match: all` therefore fails on it — which is the safe
+			# direction on a gate that turns into somebody's afternoon.
+			continue
+		if compliance_rules.passes_threshold(value, entry["op"], limit):
+			crossed.append({"field": entry["field"], "op": entry["op"], "threshold": limit, "value": value})
+
+	if config["match"] == compliance_rules.MATCH_ALL:
+		return row, crossed, len(crossed) == len(config["conditions"])
+	return row, crossed, bool(crossed)
+
+
 # ── primitive 1: superseded by a later clean record ─────────────────────────
 def _clean_index(doctype: str, date_field: str, config: dict, company: str, warnings: list) -> dict:
 	"""subject → every date on which a CLEAN record was written for it.
@@ -600,10 +782,19 @@ def _clock(candidate: dict, settings: dict, date_field: str, doctype: str, today
 	  SEVERAL          `date_fields_json`: each measured against the same cadence,
 	                   the severity folded to the WORST of them, and the message
 	                   handed the ones that are actually stale so it can name them.
+
+	v0.22.5's `State` role runs through the same code as `Timestamp` HERE and
+	diverges in `_band`, which is the honest split: both say the date is read
+	rather than measured, so neither may skip a row for a missing one. What they
+	disagree about is what the row then raises at, and that is a severity question
+	rather than a date question.
 	"""
 	cadence = settings["cadence"]
 	plural = settings["date_fields"]
-	timestamp = settings["date_role"] == compliance_rules.DATE_ROLE_TIMESTAMP
+	timestamp = settings["date_role"] in (
+		compliance_rules.DATE_ROLE_TIMESTAMP,
+		compliance_rules.DATE_ROLE_STATE,
+	)
 
 	if plural:
 		per_field = []
@@ -659,6 +850,11 @@ def _clock(candidate: dict, settings: dict, date_field: str, doctype: str, today
 				settings["severity_critical"],
 				settings["severity_warning"],
 				settings["severity_expired"],
+				state_severity=(
+					settings["default_severity"]
+					if settings["date_role"] == compliance_rules.DATE_ROLE_STATE
+					else ""
+				),
 			)
 			entry["stale"] = severity is not None
 		anchor = next((entry["date"] for entry in per_field if entry["stale"] and entry["date"]), "")
@@ -763,6 +959,7 @@ def _band(
 	severity_warning: str,
 	severity_expired: str,
 	forced: bool = False,
+	state_severity: str = "",
 ):
 	"""(severity, band, window) — what this row raises, or (None, "", window).
 
@@ -775,6 +972,14 @@ def _band(
 	`forced` is `date_field_role = Timestamp`: the date says when the thing was
 	FOUND, so there is no band to be in and every row that got this far raises.
 
+	`state_severity` is v0.22.5's `date_field_role = State`, and it is checked
+	FIRST and returns before anything else is read. A state-driven rule fires on
+	its gates and on nothing else, so the thresholds beside it — including the
+	per-row window, which is the one thing that outranks everything on a clock —
+	must not be able to silence it. The band it reports is `state`, which is a
+	third word rather than a reused one: an alert that says `expired` about a
+	condition with no expiry is a word an auditor would be right to query.
+
 	THE OUTER WINDOW IS CHECKED BEFORE THE CRITICAL BAND, and v0.22.1 moved it
 	there. It changes nothing for a rule whose window is wider than its critical
 	threshold, which is every rule with a fixed pair. It matters the moment the
@@ -783,6 +988,8 @@ def _band(
 	rule's default threshold says thirty. The window is the claim about when the
 	work can usefully start, and nothing inside the rule outranks it.
 	"""
+	if state_severity:
+		return state_severity, "state", 0
 	window = warning_days
 	if window_field:
 		try:

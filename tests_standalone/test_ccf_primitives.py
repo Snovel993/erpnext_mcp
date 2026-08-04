@@ -1235,7 +1235,9 @@ class TheUpgradeFromV0220(PrimitiveTestCase):
 		self.a_v0220_site()
 		self.run_the_patch()
 		self.assertEqual(self.run_the_patch()["migrated"], [])
-		self.assertEqual(len(compliance_rules.rule_rows()), 13)
+		# Fourteen since v0.22.5, which seeds one rule that never had a scanner —
+		# the patch has nothing to say about it and leaves it exactly alone.
+		self.assertEqual(len(compliance_rules.rule_rows()), 14)
 
 	def test_an_operator_edited_threshold_survives_the_migration(self):
 		"""The question the patch exists to answer well. A site that contracted its

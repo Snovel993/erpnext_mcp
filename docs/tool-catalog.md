@@ -5575,6 +5575,24 @@ Each rule maps to the shape of the work it actually is:
 | `housing_corrective_action_open` | Repair | Dispatched | photos, findings |
 | `certification_expiring`, `policy_review_overdue`, `filing_response_due`, `audit_action_overdue` | Compliance-Audit | Dispatched | findings |
 | `i9_expired`, `flc_license_expiring` | Compliance-Audit | Dispatched | findings (+ signature for I-9) |
+| `shift_heat_threshold_crossed` | Compliance-Audit | Dispatched **to the shift's own foreman** | findings, signature |
+
+**Since v0.22.5 a rule that is not in this table can still become work.** Where
+the table has nothing to say, the recipe is read off the Compliance Rule record
+itself — `producer_farm_task_type`, `producer_skill_required`,
+`evidence_contract`, and `producer_assigned_to_expression`. The table is still
+consulted FIRST, which is the backward-compatibility guarantee: the thirteen
+rules above produce exactly the tasks they always did. The record is read only
+for rules the table could not cover, because they did not exist when it was
+written.
+
+Where a rule carries `producer_assigned_to_expression`, the task is assigned to
+the person it names and **carries no skill**: a skill is a pool and an assignee
+is a person, and a task that is both is a task whose holder depends on which one
+the dispatcher read first. An expression that names nobody, or names somebody
+payroll has never heard of, puts the task back in the pool and says so in
+`routing_notes` — never `Dispatched` with nobody on it, which is a task sitting
+in Available that no worker is allowed to claim.
 
 Urgency follows severity — Critical → **High**, Warning → Normal, Info → Low.
 Deliberately not the identity mapping: a board where everything is Critical is a
@@ -7143,10 +7161,20 @@ gate (`gate_date_field` / `gate_within_days`), several anchors of the same kind
 with per-field labels (`date_fields`), an ordered lookup reading regimes or a
 category off a name (`regime_heuristics`, `category_heuristics`), a date that is
 a timestamp rather than a deadline (`date_field_role`), and one rule walking two
-kinds of record (`target_doctypes`). Eleven of the thirteen shipped rules are now
-fully declarative and none uses `custom_python` —
-`docs/configurable_compliance_framework.md` §4 has the table of questions that
-are already fields.
+kinds of record (`target_doctypes`).
+
+**Since v0.22.5** it also covers a rule that fires on a **data state** rather than
+on any distance from a date: `latest_child_field_threshold` folds a child table
+to the newest row per record and reads a number off it — against a literal, or
+against a per-company setting via `threshold_source`, so the alert layer and the
+operational sweep cannot disagree about what "hot" means on the same afternoon.
+`date_field_role: "State"` says the rule has no clock, `default_severity` says
+what it raises at instead, and `producer_assigned_to_expression` sends the
+producer task to one named person (`row.foreman`) rather than into a skill pool.
+
+Twelve of the fourteen shipped rules are now fully declarative and none uses
+`custom_python` — `docs/configurable_compliance_framework.md` §4 has the table of
+questions that are already fields.
 
 ## 241. `approve_compliance_rule`
 

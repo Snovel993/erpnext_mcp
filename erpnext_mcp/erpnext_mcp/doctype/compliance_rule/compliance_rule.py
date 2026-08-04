@@ -49,6 +49,20 @@ from erpnext_mcp import compliance_rules, shifts
 from erpnext_mcp.alerts import sandbox
 
 
+def _select_options(doctype: str, fieldname: str) -> list:
+	"""The values a Select field will accept on THIS site, or an empty list.
+
+	Empty means "could not read the meta", and the caller treats that as "do not
+	refuse" — a rule that could not be saved because a doctype's meta would not
+	build would be a worse failure than a task type nobody checked.
+	"""
+	try:
+		field = frappe.get_meta(doctype).get_field(fieldname)
+		return [line.strip() for line in str(getattr(field, "options", "") or "").split("\n") if line.strip()]
+	except Exception:  # pragma: no cover - a site whose meta cannot be built
+		return []
+
+
 class ComplianceRule(Document):
 	def autoname(self):
 		"""CRULE-YYYY-0001, where YYYY is the year the rule was authored."""
@@ -60,6 +74,7 @@ class ComplianceRule(Document):
 		self._check_the_key()
 		self._check_the_blobs()
 		self._check_the_program()
+		self._check_the_producer()
 		self._check_the_approval()
 		self._refuse_a_second_live_row()
 
@@ -74,6 +89,7 @@ class ComplianceRule(Document):
 			"regimes_from_field",
 			"producer_farm_task_type",
 			"producer_skill_required",
+			"producer_assigned_to_expression",
 		):
 			self.set(fieldname, str(self.get(fieldname) or "").strip())
 		if not self.category:
@@ -86,6 +102,7 @@ class ComplianceRule(Document):
 			("severity_critical", "Critical"),
 			("severity_warning", "Warning"),
 			("severity_expired", "Critical"),
+			("default_severity", compliance_rules.SEVERITY_DEFAULT),
 		):
 			if not self.get(fieldname):
 				self.set(fieldname, fallback)
@@ -141,6 +158,14 @@ class ComplianceRule(Document):
 			("scope_filters_json", compliance_rules.parse_filters, "scope_filters"),
 			("evidence_contract_json", compliance_rules.parse_contract, "evidence_contract"),
 			("audit_packet_types", compliance_rules.parse_packet_types, "audit_packet_types"),
+			# v0.22.5. Refused at the same door as the other three, and by the same
+			# parser the seeder and the MCP tools use, so a malformed blob cannot be
+			# accepted through one and refused at another.
+			(
+				"latest_child_field_threshold_json",
+				compliance_rules.parse_latest_child_threshold,
+				"latest_child_field_threshold",
+			),
 		):
 			try:
 				parsed = parser(self.get(fieldname), label)
@@ -185,6 +210,69 @@ class ComplianceRule(Document):
 				).format(exc),
 				title=_("The sandbox refused this program"),
 			)
+
+	# ── the producer task ───────────────────────────────────────────────────
+	def _check_the_producer(self) -> None:
+		"""v0.22.5. What the rule asks somebody to do, and WHICH somebody.
+
+		THE TWO ROUTINGS ARE EXCLUSIVE, and that is a statement about dispatch
+		rather than a tidiness rule. A skill is a POOL — anybody holding it may
+		pick the task up — and an assignee is a PERSON. A task carrying both would
+		be a task whose holder depends on which of the two the dispatcher happened
+		to read first, and the failure is silent in the worst direction: the
+		foreman who was standing in the heat never sees the task, and somebody with
+		the skill closes it from a desk.
+		"""
+		expression = str(self.producer_assigned_to_expression or "").strip()
+		if expression:
+			if str(self.producer_skill_required or "").strip():
+				frappe.throw(
+					_(
+						"This rule names both a producer skill ({0}) and an assignee expression "
+						"({1}). A skill is a POOL and an assignee is a PERSON, and a task that is "
+						"both is a task whose holder depends on which one the dispatcher read "
+						"first. Clear whichever is not the routing you meant."
+					).format(self.producer_skill_required, expression),
+					title=_("Two routings"),
+				)
+			if str(self.producer_task_template or "").strip():
+				frappe.throw(
+					_(
+						"This rule names both an Inspection Template ({0}) and an assignee "
+						"expression. A templated visit is claimed out of the pool by whoever holds "
+						"the template's skill; there is nowhere on it for a named holder to go."
+					).format(self.producer_task_template),
+					title=_("Two routings"),
+				)
+			try:
+				sandbox.check(expression)
+			except sandbox.SandboxError as exc:
+				frappe.throw(
+					_(
+						"producer_assigned_to_expression was refused by the sandbox: {0}\n\nIt is "
+						"one expression over the alert's source row — `row.foreman` — evaluated "
+						"under exactly the rules custom_python runs under. Refused HERE, rather "
+						"than the first hot afternoon somebody needed the task."
+					).format(exc),
+					title=_("The sandbox refused this expression"),
+				)
+
+		# The rule's task type has to be one the Farm Task doctype will accept. A
+		# phrase nobody's Select holds is a producer task that fails at the moment
+		# an alert becomes work, which is the moment the whole framework exists for.
+		task_type = str(self.producer_farm_task_type or "").strip()
+		if task_type and frappe.db.exists("DocType", "Farm Task"):
+			options = _select_options("Farm Task", "task_type")
+			if options and task_type not in options:
+				frappe.throw(
+					_(
+						"producer_farm_task_type is {0!r}, which is not one of the Farm Task types: "
+						"{1}. This field is the SELECT VALUE the producer task is filed under, not "
+						"the sentence describing the errand — that goes in the message template and "
+						"in extra_parameters.producer_task_what."
+					).format(task_type, ", ".join(options)),
+					title=_("No such Farm Task type"),
+				)
 
 	# ── the approval ────────────────────────────────────────────────────────
 	def _check_the_approval(self) -> None:

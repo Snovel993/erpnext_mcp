@@ -3,6 +3,90 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.22.5 — 2026-08-04
+
+**A rule that fires on the weather.** Every rule this app had ever shipped fired
+on a distance from a date. `shift_heat_threshold_crossed` fires because the
+latest row of one shift's weather timeline says 82 °F, and goes quiet because the
+next row says 75 or because somebody closed the shift. It is also **the first
+rule this app ships that was authored as a record** — there is no Python behind
+it and there never was, which is the first evidence the vocabulary can absorb a
+new obligation rather than only the thirteen it was reverse-engineered from. The
+split is now **12 declarative / 2 built-in-permanent / 0 `custom_python`**. Tool
+surface **unchanged at 256**; suite **4,277 → 4,330 passing**. **Behaviour drift:
+zero** — the thirteen pre-existing rules produce identical rows. Full notes:
+[`RELEASES/v0.22.5.md`](RELEASES/v0.22.5.md).
+
+### Added
+
+- **`latest_child_field_threshold_json`** — a sibling of `gate_related_table_json`
+  rather than an extension of it. That one folds a related doctype to one *value*
+  per subject (the maximum date); this folds to one *row*, the latest, and reads
+  a number off its other columns — which a maximum cannot answer, because the
+  85 °F reading at noon says nothing about four o'clock if a 72 °F reading was
+  written at half past three. The whole row goes into the message template under
+  `context_key`. Indexed once per sweep, capped at `SCAN_CAP`, folded in Python.
+- **`threshold_source`** — a **closed registry** letting a condition read its
+  number from a per-company setting instead of a literal on the rule. The three
+  entries are the Weather Settings heat and wind thresholds, which the v0.19.4
+  shift sweep already reads: a literal would make the alert layer and the
+  operational layer disagree about the same afternoon on the same shift,
+  invisibly. The literal stays on the condition as the floor the setting falls
+  back to.
+- **`date_field_role: "State"` + `default_severity`** — a rule with no clock.
+  `default_severity` alone is *not* enough: `threshold_*_days` are Int columns, so
+  "no threshold" and "a threshold of zero" are one value, and zero is a real
+  setting meaning "fire on the due date itself". A shift that started this morning
+  is zero days from its own start, so a rule read as a clock says Critical about a
+  crew who are merely at work. The rule has to say which it is.
+- **`producer_assigned_to_expression`** — a safe expression over the alert's
+  source row (`row.foreman`) producing an Employee. The producer task is assigned
+  to that person, `dispatch_mode` = Dispatched, state Claimed, with an open
+  assignment and **no skill**. Exclusive with `producer_skill_required` at both
+  doors: a skill is a pool and an assignee is a person.
+- **`sandbox.evaluate`** — one expression, one value, same grammar and refusals
+  and budget as `sandbox.run`. Written as an assignment rather than parsed in
+  `eval` mode so the tree that is vetted is exactly the tree that runs.
+- **`shift_heat_threshold_crossed`** — seeded, enabled, OR-OSHA, three-year
+  retention, in the OSHA packet. Fires on an open Farm Shift whose latest weather
+  reading is at or above the heat threshold; the producer task goes to
+  `shift.foreman` and asks for findings text and their signature. The app
+  surfaces the trigger; the foreman makes the compliance decision.
+
+### Changed
+
+- **The producer path now reads the Compliance Rule record** where
+  `ALERT_TASK_MAP` has nothing to say. Since v0.22.0 every rule had carried
+  `producer_farm_task_type`, `producer_skill_required` and `evidence_contract` —
+  seeded *from* that table — and nothing read them back, so a rule authored after
+  the framework shipped landed in `skipped_unmapped` anyway. The table is still
+  consulted **first**, which is what keeps the thirteen shipped rules producing
+  exactly the tasks they always did. Both a task type and an evidence contract are
+  still required before an alert becomes work.
+- `create_compliance_rule`, `update_compliance_rule`, `test_compliance_rule`,
+  `get_compliance_rule` and `list_compliance_rules` accept and report the three
+  new fields. **No new tools** — the surface stays at 256 / 113 / 143.
+
+### Fixed
+
+- Nothing was broken. Three notes on directions chosen where both were available:
+  a subject with no child row is **gated out** (a shift with an empty timeline is
+  not a cool shift); a child row whose field is empty does not satisfy its
+  condition; and the threshold comparison is **numeric only**, unlike
+  `scope_filters`, because a reading somebody typed as `"warm"` sorts after
+  `"80"`.
+
+### Auto-dismissal, unchanged
+
+The alert goes quiet through **no new mechanism**. The temperature drops and the
+gate stops matching; the shift closes and the scope filters stop matching. In
+both cases the rule observes nothing and the sweep auto-dismisses what it did not
+observe — exactly what happens when a certificate is renewed. The task the
+foreman was given stays: a shift that closed is not evidence that anybody wrote
+down the water and the shade.
+
+---
+
 ## 0.22.1 — 2026-08-04
 
 **The vocabulary reaches its own problem domain.** v0.22.0 shipped six
