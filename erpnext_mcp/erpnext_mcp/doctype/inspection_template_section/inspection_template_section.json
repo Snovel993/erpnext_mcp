@@ -1,0 +1,124 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 23:00:00.000000",
+ "description": "One part of one templated visit: a habitability walk, a detector test, an empty-refrigerator photograph. THE SECTION IS WHAT DECIDES WHICH COMPLIANCE RECORD GETS WRITTEN, so a template is not a checklist somebody prints — it is the definition of what a submission produces. A section naming `produces_record_doctype` writes that record when the session is submitted; a section leaving it blank gathers evidence and writes nothing, which is the honest shape for a winterization checklist nobody regulates and everybody needs. `renderer_hint` and the two JSON blobs are the whole of what the handset needs to draw the form, which is why a new template needs no app release.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_name",
+  "order_index",
+  "required",
+  "detail_col",
+  "produces_record_doctype",
+  "renderer_hint",
+  "description_section",
+  "section_description",
+  "contract_section",
+  "evidence_contract_json",
+  "produces_record_data_json",
+  "field_prompts_json"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "description": "What this part of the visit is, in the words the worker sees on the phone. 'Refrigerator empty check' is a section; 'Step 4' is a heading. It is also the KEY a submission names — submit_inspection_session matches on it — so two sections of one template may not share a name.",
+   "fieldname": "section_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Section",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "description": "The order the sections are worked in, filled in by the controller when nothing sets it. It is a real ordering and not decoration: a close-down that tests the detectors before the heater is switched off tests them in a cabin that is still occupied.",
+   "fieldname": "order_index",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Order"
+  },
+  {
+   "columns": 1,
+   "default": "1",
+   "description": "Whether the session can be submitted without this section. A REQUIRED section that is missing is refused — that is the evidence contract, one layer up from the Farm Task's. An OPTIONAL section is how a template that covers more than is due today stays usable: the Water Test section of a Cabin Opening is skipped on a cabin whose water was sampled last month, and its produced_record_link stays empty rather than a Water Test being invented.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required"
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Which compliance record submitting this section creates — 'Housing Inspection', 'Detector Test', 'Water Test'. BLANK IS A REAL ANSWER AND THE COMMONEST ONE ON A CLOSE-DOWN: a photograph of an emptied refrigerator is evidence nobody regulates as its own record, and inventing a doctype to hold it would be table sprawl in exchange for nothing. The records this names are created SEPARATELY, at their own cadences, exactly as they would be if the worker had done three visits — the session is the visit, not the record.",
+   "fieldname": "produces_record_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Produces Record",
+   "options": "DocType",
+   "search_index": 1
+  },
+  {
+   "default": "checklist",
+   "description": "Which widget the handset draws for this section. A HINT AND NOT A CONTRACT: a client that does not know one of these values falls back to a freeform form and the submission is still valid, which is what lets a template using a renderer added later reach a phone that has not been updated. The refusal lives in the evidence contract, never here.",
+   "fieldname": "renderer_hint",
+   "fieldtype": "Select",
+   "label": "Renderer",
+   "options": "photo\nsignature\nchecklist\nfreeform\ngps\ntimestamp\nmulti-photo\nmeasurement\nattachment"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What the worker is actually being asked to do, and what 'done' looks like. Read on the phone under the section heading.",
+   "fieldname": "section_description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "contract_section",
+   "fieldtype": "Section Break",
+   "label": "Contract"
+  },
+  {
+   "description": "What this section's submission must carry, as a JSON object: {\"photos\": true, \"signature\": true, \"checklist_items\": [\"fridge_empty\", \"heater_off\"]}. The same vocabulary Farm Task.evidence_required uses, plus `checklist_items` and `measurements`, so one reader understands both. A submission short of it is REFUSED — that is the point of writing it down.",
+   "fieldname": "evidence_contract_json",
+   "fieldtype": "Code",
+   "label": "Evidence Contract",
+   "options": "JSON"
+  },
+  {
+   "description": "Fields prefilled onto the compliance record this section produces, as a JSON object — the exact parallel of Farm Task.creates_record_data, and the same idiom for the same reason. It is where a Water Test section names the Irrigation Zone the sample comes from, which the session's location cannot supply: a session happens at a cabin and a water test is about a water source, and one cabin can draw from several. WHAT THE WORKER SENDS WINS: the submission's own `record_data` is layered over this, because the template states what is usually true and the submission states what happened.",
+   "fieldname": "produces_record_data_json",
+   "fieldtype": "Code",
+   "label": "Produced Record Defaults",
+   "options": "JSON"
+  },
+  {
+   "description": "Per-field labels, units, placeholder text and help — a JSON object the handset renders and the backend never interprets. It is here so that changing what a worker READS is a template edit rather than an app release, which is the whole templates-as-data claim stated as one field.",
+   "fieldname": "field_prompts_json",
+   "fieldtype": "Code",
+   "label": "Field Prompts",
+   "options": "JSON"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-03 23:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Inspection Template Section",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

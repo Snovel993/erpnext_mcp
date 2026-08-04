@@ -137,6 +137,19 @@ SWITCHES = {
 		"get_windowed_report",
 		"list_financial_kpi_history",
 		"recompute_kpi_history",
+		# v0.21.0. The walk now also ends on ONE VISIT rather than on N trips:
+		# a cabin that is overdue for a habitability walk AND a detector test is
+		# one afternoon's work, and the records it produces are still separate
+		# because the regulators asking for them are.
+		"generate_tasks_from_compliance_alerts",
+		"list_inspection_templates",
+		"get_inspection_template",
+		"list_inspection_sessions",
+		"get_inspection_session",
+		"start_inspection_session",
+		"submit_inspection_session",
+		"list_housing_inspections",
+		"list_detector_tests",
 	)
 }
 
@@ -1812,3 +1825,202 @@ class TheYearReachesARollingFigure(EndToEndWorkflow):
 		)
 		self.assertEqual(legacy["sustainable_cf_per_acre"], 8850.0)
 		self.assertIn("DEPRECATED CALL SHAPE", legacy["computation_warnings"][0])
+
+
+# ── 10. v0.21.0: one walk, three sections, the records still separate ───────
+class OneVisitReachesTheOSHAPacketAsOneVisit(EndToEndWorkflow):
+	"""The whole v0.21.0 claim, walked from an empty site to an audit packet.
+
+	THE JOIN THIS EXISTS FOR. `test_inspection_templates` proves each part in
+	isolation: the seeder writes four templates, the matcher bundles by set
+	inclusion, the submitter writes the compliance records, the packet grows a
+	section. What none of those proves is that the CHAIN holds — that a cabin
+	which is genuinely overdue for two different things raises two genuinely
+	different alerts, that the rule engine picks the template covering both
+	rather than one of the four, that the records it writes actually move the
+	registers those two alerts read, that the alerts then go away by themselves,
+	and that an auditor asking "which visit produced this Housing Inspection"
+	gets an answer from the packet rather than from somebody's memory.
+
+	Every one of those is a seam between two subsystems, and every bug this
+	project has shipped has lived in a seam.
+
+	WHY IT ASSERTS **TWO** COMPLIANCE RECORDS FROM **THREE** SECTIONS, and why
+	that is the correct number rather than a shortfall: a Detector Test carries
+	a smoke result AND a CO result, both required fields. Testing them as two
+	sections is right for the worker — they walk to one detector and then to the
+	other — but filing two Detector Test records for one cabin on one day would
+	mean each of them asserting something it was never told about the other
+	detector. Two contradictory compliance records is precisely the failure this
+	app exists to prevent, so the two sections produce ONE record between them
+	and both submissions link it. The unit's smoke AND CO dates both move, which
+	is what the alert was actually asking about.
+	"""
+
+	def test_one_afternoon_produces_the_separate_records_and_says_it_was_one_afternoon(self):
+		from erpnext_mcp import sessions as session_records
+
+		self.be_the_operator()
+
+		# ── 1. The templates arrive on migrate, as data. Nobody shipped code. ──
+		seeded = session_records.seed_inspection_templates()
+		self.assertIn("Mid-season Habitability", seeded["created"])
+		self.assertFalse(seeded["failed"])
+
+		catalogue = self.tool_data("list_inspection_templates", {"applies_to_asset_type": "Housing Unit"})
+		self.assertEqual(len(catalogue["live_templates"]), 3)
+
+		# ── 2. A brand-new cabin is overdue for two DIFFERENT things. ─────────
+		live = self.sweep(alert_type=None)
+		self.assertEqual(
+			sorted({row["alert_type"] for row in live}),
+			["housing_detector_test_stale", "housing_inspection_overdue"],
+		)
+
+		# ── 3. The rule engine bundles them into ONE trip, deterministically. ─
+		report = self.tool_data("generate_tasks_from_compliance_alerts", {"company": COMPANY})
+		self.assertEqual(report["session_count"], 1)
+		self.assertEqual(report["alerts_bundled_into_sessions"], 2)
+		self.assertEqual(report["created_count"], 0, "two alerts at one cabin should not be two tasks")
+
+		bundle = report["sessions"][0]
+		self.assertEqual(bundle["template_name"], "Mid-season Habitability")
+		self.assertEqual(bundle["covers"], ["Detector Test", "Housing Inspection"])
+		self.assertEqual(bundle["extra_sections"], [], "the tightest-fitting template should win")
+		self.assertEqual(bundle["location"], self.unit)
+
+		# One card on the board, not two — and the session is the form behind it.
+		self.assertEqual(len(STORE.rows("Farm Task")), 1)
+		self.assertEqual(
+			frappe.db.get_value("Farm Task", bundle["task"], "inspection_session"), bundle["session"]
+		)
+
+		# ── 4. The evidence goes up in chunks, as the phone sends it. ─────────
+		self.be_the_worker()
+		photo = self.upload(one_pixel_png(), "north-wall.png", "e2e-session-photo")["file_token"]
+		signature = self.upload(one_pixel_png(), "signature.png", "e2e-session-sig")["file_token"]
+		self.be_the_operator()
+
+		# ── 5. One submission. One signature. Three sections. ─────────────────
+		# THE SESSION THE RULE ENGINE ALREADY RAISED is the one that gets filed —
+		# not a second one started beside it. It was created before anybody had
+		# claimed the task, so it names nobody; the handset filing it does.
+		session = self.tool_data("get_inspection_session", {"name": bundle["session"]})
+		self.assertEqual(session["template_version"], 1)
+		self.assertEqual(session["state"], "Draft")
+		self.assertIsNone(session["worker"])
+		self.assertEqual(sorted(session["source_alerts"]), sorted(bundle["alerts"]))
+
+		today = frappe.utils.today()
+		submitted = self.tool_data(
+			"submit_inspection_session",
+			{
+				"name": session["name"],
+				"record_date": today,
+				"worker": self.employee,
+				"visit_id": "E2E-VISIT-01",
+				"section_submissions": [
+					{
+						"section_name": "Habitability walk",
+						"evidence_file_tokens": [photo],
+						"signature_file": signature,
+						"notes": "",
+					},
+					{
+						"section_name": "Smoke Detector Test",
+						"checklist_values": {"smoke_alarm_sounds": True},
+						"record_data": {"smoke_detector_result": "Pass"},
+						"signature_file": signature,
+						"notes": "",
+					},
+					{
+						"section_name": "CO Detector Test",
+						"checklist_values": {"co_alarm_sounds": True},
+						"record_data": {"co_detector_result": "Pass"},
+						"signature_file": signature,
+						"notes": "",
+					},
+				],
+			},
+		)
+		self.assertEqual(submitted["state"], "Submitted")
+		self.assertEqual(len(submitted["section_submissions"]), 3)
+
+		# ── 6. TWO compliance records from three sections. See the docstring. ─
+		produced = {entry["doctype"]: entry["record"] for entry in submitted["produced"]}
+		self.assertEqual(sorted(produced), ["Detector Test", "Housing Inspection"])
+		self.assertEqual(len(STORE.rows("Housing Inspection")), 1)
+		self.assertEqual(len(STORE.rows("Detector Test")), 1)
+
+		detector = dict(STORE.get_raw("Detector Test", produced["Detector Test"]) or {})
+		self.assertEqual(detector["smoke_detector_result"], "Pass")
+		self.assertEqual(detector["co_detector_result"], "Pass")
+
+		# Both detector sections point at the one record: the trail from either
+		# side of the walk is intact.
+		links = {row["section_name"]: row["produced_record_link"] for row in submitted["section_submissions"]}
+		self.assertEqual(links["Smoke Detector Test"], links["CO Detector Test"])
+		self.assertNotEqual(links["Habitability walk"], links["Smoke Detector Test"])
+
+		# ── 7. The SAME photograph is on both records. That is the tray. ──────
+		walk_photos = {row.get("file") for row in self.photo_rows(produced["Housing Inspection"])}
+		detector_photos = {row.get("file") for row in (detector.get("photos") or [])}
+		self.assertIn(photo, walk_photos)
+		self.assertIn(
+			signature, walk_photos | {self.inspection(produced["Housing Inspection"]).get("signature")}
+		)
+		self.assertIn(signature, detector_photos)
+
+		# ── 8. The registers moved — all three dates, from one visit. ─────────
+		unit = frappe.db.get_value(
+			"Housing Unit",
+			self.unit,
+			["last_habitability_inspection", "smoke_detector_last_test", "co_detector_last_test"],
+			as_dict=True,
+		)
+		self.assertEqual(str(unit["last_habitability_inspection"]), today)
+		self.assertEqual(str(unit["smoke_detector_last_test"]), today)
+		self.assertEqual(str(unit["co_detector_last_test"]), today)
+
+		# ── 9. So both alerts go away BY THEMSELVES on the next sweep. ────────
+		self.assertEqual(self.sweep(alert_type=None), [])
+
+		# ── 10. And the auditor's question is answerable from the packet. ─────
+		built = self.tool_data(
+			"generate_audit_packet",
+			{
+				"audit_type": "OSHA",
+				"company": COMPANY,
+				"period_start": str(frappe.utils.add_days(today, -30)),
+				"period_end": today,
+				"regime": "OR-OSHA",
+				"allow_open_actions": True,
+			},
+		)
+		packet = built["packet"]
+		visits = next(section for section in packet["sections"] if section["key"] == "sessions")
+		self.assertEqual(visits["row_count"], 1)
+
+		row = visits["rows"][0]
+		self.assertEqual(row["session"], session["name"])
+		self.assertEqual(row["template"], "Mid-season Habitability")
+		self.assertEqual(row["template_version"], 1)
+		self.assertEqual(row["location"], self.unit)
+		self.assertEqual(row["record_count"], 2)
+		self.assertEqual(row["date"], today)
+		# Distinct FILES, not evidence rows: one signature filed against three
+		# sections is one photograph, and reporting three would overstate the
+		# evidence in a document somebody signs.
+		self.assertEqual(row["evidence_files"], 2)
+
+		# The records themselves are STILL in the section that reads their own
+		# register. This section adds no record to the packet; it adds the
+		# sentence joining the ones already in it.
+		housing = next(section for section in packet["sections"] if section["key"] == "housing")
+		self.assertEqual(housing["rows"][0]["last_habitability_inspection"], today)
+
+		# ── 11. And the read tools answer the same question the other way. ────
+		listed = self.tool_data("list_inspection_sessions", {"company": COMPANY})
+		self.assertEqual(listed["count"], 1)
+		self.assertEqual(listed["compliance_records_produced"], 2)
+		self.assertEqual(listed["sessions"][0]["visit_id"], "E2E-VISIT-01")

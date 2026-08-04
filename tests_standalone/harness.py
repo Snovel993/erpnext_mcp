@@ -1001,6 +1001,12 @@ APP_DOCTYPES = {
 	"Normalization Adjustment": "normalization_adjustment",
 	# ── v0.19.6: the precomputed history every windowed report reads from ────
 	"Financial KPI History": "financial_kpi_history",
+	# ── v0.21.0: the visit as a shape of data, and one worker's execution of it ─
+	"Inspection Template": "inspection_template",
+	"Inspection Template Section": "inspection_template_section",
+	"Inspection Session": "inspection_session",
+	"Inspection Session Evidence": "inspection_session_evidence",
+	"Inspection Session Section Submission": "inspection_session_section_submission",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -2691,6 +2697,11 @@ CHILD_TABLE_SOURCES = {
 	"Compliance Regime Link": (
 		("Compliance Alert", "regime"),
 		("Training Type", "regimes"),
+		# v0.21.0. A third parent, and the same reason: `sessions.regimes_of`
+		# reads the child doctype directly with a `parenttype` filter, so a
+		# template's regimes would come back empty and every regime-filtered
+		# listing would silently answer "none".
+		("Inspection Template", "regimes"),
 	),
 	# v0.19.3. `shifts.crew_of`, `events_of` and `weather_of` all query the child
 	# doctype directly with a `parent` filter, because the Attendance bridge and
@@ -2701,6 +2712,14 @@ CHILD_TABLE_SOURCES = {
 	"Farm Shift Compliance Event": (("Farm Shift", "compliance_events"),),
 	"Farm Shift Weather Reading": (("Farm Shift", "weather_timeline"),),
 	"Heat Acclimatization Worker": (("Heat Exposure Event", "acclimatization_plan"),),
+	# v0.21.0. All three are queried directly with a `parent` filter, because a
+	# template is read from a docname rather than from a document somebody
+	# already loaded — `sessions.sections_of` is called by the rule engine's
+	# matcher, by the audit packet and by every read tool. Without these, every
+	# template would look sectionless and the matcher would silently never match.
+	"Inspection Template Section": (("Inspection Template", "sections"),),
+	"Inspection Session Evidence": (("Inspection Session", "evidence_files"),),
+	"Inspection Session Section Submission": (("Inspection Session", "section_submissions"),),
 }
 
 

@@ -1,0 +1,89 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 23:00:00.000000",
+ "description": "One file in a visit's shared evidence tray, and which section it was captured for. THE TRAY IS THE POINT: a worker walking one cabin photographs it once, and the same File is filed against the Housing Inspection, the Detector Test and the Water Test the session produces. Frappe lets one File be referenced by several parents (v0.18.4 made the permission cascade honour it), so the tray is a list of references and not a list of copies — three records that show the same photograph are showing the same photograph, which is what an auditor comparing timestamps is entitled to find.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "evidence_type",
+  "file",
+  "evidence_col",
+  "file_url",
+  "section_name",
+  "captured_on",
+  "detail_section",
+  "caption"
+ ],
+ "fields": [
+  {
+   "default": "Photo",
+   "description": "What this is. Same vocabulary as Farm Task Evidence, deliberately — a session's tray and a completion's evidence are the same kind of thing and a second spelling of 'Signature' would be a second thing to check against a contract.",
+   "fieldname": "evidence_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Type",
+   "options": "Photo\nSignature\nDocument\nLab Report\nVideo\nOther",
+   "reqd": 1
+  },
+  {
+   "description": "The File record. Uploaded through stage_file_chunk / commit_staged_file like every other piece of evidence in this app, so a photograph taken in a cabin with no signal gets there in pieces.",
+   "fieldname": "file",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "File",
+   "options": "File"
+  },
+  {
+   "fieldname": "evidence_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Where the bytes are, copied off the File when the row is written — the same reason Farm Task Evidence keeps it: a packet generator resolving every File would be a query per photograph.",
+   "fieldname": "file_url",
+   "fieldtype": "Data",
+   "label": "File URL"
+  },
+  {
+   "description": "Which section of the template this file was captured for. BLANK MEANS THE WHOLE VISIT — a signature given once at the end belongs to every section, and forcing it to name one would make the other records look unsigned.",
+   "fieldname": "section_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Section",
+   "search_index": 1
+  },
+  {
+   "description": "When the evidence was captured, which is not always when it was uploaded.",
+   "fieldname": "captured_on",
+   "fieldtype": "Datetime",
+   "label": "Captured"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What it shows. 'Refrigerator, door open, shelves bare' is evidence; 'IMG_4471' is a filename.",
+   "fieldname": "caption",
+   "fieldtype": "Small Text",
+   "label": "Caption"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-03 23:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Inspection Session Evidence",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

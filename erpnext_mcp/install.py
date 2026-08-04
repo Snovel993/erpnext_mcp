@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: MIT
 """Install / migrate / uninstall hooks.
 
-Nine jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
+Eleven jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
 the fifth — the Farm Task Dispatch Kanban board — in v0.16.0, the sixth —
 the six mobile roles — in v0.17.0, the seventh — the compliance vocabulary
 and the training curricula — in v0.19.2, the eighth — the Weather Settings
 defaults — in v0.19.4, and the ninth — the Sustainable CF/Acre dashboard charts
-— in v0.19.5, which v0.19.6 turned into two charts rather than a tenth job.
+— in v0.19.5, which v0.19.6 turned into two charts rather than a tenth job. The
+tenth — signing the completions filed before v0.20.1 — arrived in v0.20.1, and
+the eleventh — the four seeded Inspection Templates — in v0.21.0.
 
 The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
@@ -115,6 +117,7 @@ def after_install() -> None:
 	_compliance_vocabulary()
 	_kpi_charts()
 	_completion_signatures()
+	_inspection_templates()
 	frappe.db.commit()
 
 
@@ -129,6 +132,7 @@ def after_migrate() -> None:
 	_compliance_vocabulary()
 	_kpi_charts()
 	_completion_signatures()
+	_inspection_templates()
 
 
 def _weather_settings() -> None:
@@ -285,6 +289,33 @@ def _completion_signatures() -> None:
 		return
 	for line in backfill_completion_signatures.report_lines(report):
 		print(line)
+
+
+def _inspection_templates() -> None:
+	"""Seed the four shapes of visit. v0.21.0, and the eleventh job.
+
+	IT ONLY EVER CREATES WHAT IS NOT THERE, checked by template name across every
+	row rather than only the live ones — which is the whole difference between
+	this and a Frappe `fixtures` entry, and `test_hooks.py` forbids that word by
+	name for exactly this reason. An operator who added a section to their
+	close-down keeps it. One who deactivated a template the operation does not run
+	keeps it deactivated. One who superseded a seeded template with their own
+	version 2 does not get version 1 seeded back beside it every migrate — which
+	would put two live templates with one name on the site and make the sweep's
+	choice between them arbitrary.
+
+	Runs on install AND after every migrate, so a site upgrading from any earlier
+	version gets the four on its next migrate rather than needing a bespoke patch.
+	"""
+	try:
+		from . import sessions
+
+		report = sessions.seed_inspection_templates()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the inspection templates were not seeded — {type(exc).__name__}: {exc}")
+		return
+	for failure in report.get("failed") or ():
+		print(f"erpnext_mcp: could not seed template {failure.get('name')} — {failure.get('reason')}")
 
 
 def _report_failures(what: str, builder) -> None:
@@ -477,6 +508,25 @@ _PRECIOUS_DOCTYPES = (
 		"it answers, and how long a record of it has to be kept. The ten this app "
 		"seeds come back on a reinstall; a curriculum somebody added, and every "
 		"regime somebody corrected on one, does not",
+	),
+	(
+		"Inspection Session",
+		"every templated visit: who went to which cabin on which afternoon, which "
+		"version of which template they worked from, what they ticked in each "
+		"section, and which Housing Inspection and Detector Test came out of it. "
+		"The compliance records themselves are warned about separately and go "
+		"either way; what dies with this is the CHAIN OF CUSTODY between them — "
+		"that those three records are one walk with one signature rather than "
+		"three claims filed a minute apart",
+	),
+	(
+		"Inspection Template",
+		"the visit register — what a Cabin Opening consists of, what evidence each "
+		"section demands, which regulation each answers, and every superseded "
+		"version of each. The four this app seeds come back on a reinstall; a "
+		"template somebody wrote, and every edit anybody made to a seeded one, "
+		"does not — and without the version a session was worked from, that "
+		"session can no longer be read against what the worker was actually shown",
 	),
 	(
 		"Mobile Access Grant",

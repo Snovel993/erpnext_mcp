@@ -71,6 +71,7 @@ SECTION_ORDER = (
 	"water",
 	"traceability",
 	"housing",
+	"sessions",
 	"filings",
 	"audits",
 )
@@ -169,6 +170,7 @@ register(
 			"water",
 			"traceability",
 			"housing",
+			"sessions",
 			"spray_records",
 			"audits",
 		),
@@ -205,6 +207,7 @@ register(
 			"workforce",
 			"training",
 			"water",
+			"sessions",
 			"traceability",
 			"spray_records",
 			"audits",
@@ -244,6 +247,7 @@ register(
 			"water",
 			"traceability",
 			"housing",
+			"sessions",
 			"spray_records",
 			"audits",
 		),
@@ -272,6 +276,7 @@ register(
 			"training",
 			"heat_exposure",
 			"housing",
+			"sessions",
 			"spray_records",
 			"filings",
 			"audits",
@@ -306,6 +311,7 @@ register(
 			"workforce",
 			"training",
 			"housing",
+			"sessions",
 			"traceability",
 			"filings",
 			"audits",
@@ -338,6 +344,7 @@ register(
 			"certifications",
 			"spray_records",
 			"water",
+			"sessions",
 			"workforce",
 			"training",
 			"filings",
@@ -1206,6 +1213,208 @@ def _housing(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 	return section
 
 
+def _sessions(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
+	"""Which visit produced which record. v0.21.0, and the chain of custody.
+
+	THIS SECTION ADDS NO RECORD TO THE PACKET. Every compliance record a session
+	produced is already in the packet, in the section that reads its own register
+	— a Housing Inspection is in `housing` whether a session wrote it or a camp
+	manager typed it, which is the point of producing the records separately in
+	the first place.
+
+	What was missing is the SENTENCE JOINING THEM. Three Housing Inspections, two
+	Detector Tests and a Water Test filed within a minute of each other read, to
+	an auditor, either as one afternoon's work or as somebody catching up on
+	paperwork, and nothing in the register said which. This section says which:
+	*these three records were captured in a single Cabin Opening session on
+	2026-04-15 by Ana Ramos, foreman Miguel Torres, worked from version 2 of the
+	template, evidence timestamped and signed*.
+
+	SCOPED TO SUBMITTED SESSIONS IN THE PERIOD. A session started and never
+	submitted produced nothing, and listing it beside the ones that did would put
+	an abandoned visit in an audit packet with nothing to say it was abandoned.
+	`open_sessions_in_period` counts them instead, which is the honest version of
+	the same fact.
+	"""
+	from . import sessions as session_records
+
+	if not compat.doctype_exists(session_records.SESSION_DOCTYPE):
+		return _section(
+			"Visits that produced these records",
+			"The chain of custody between one worker's afternoon and the records it produced.",
+			[],
+			("session", "date", "template", "location", "worker", "records"),
+			absent=(
+				"This site has no Inspection Session DocType — run `bench migrate`. Every "
+				"compliance record in this packet was filed one at a time, which is the pre-v0.21.0 "
+				"shape and is complete evidence; what is absent is only the statement of which "
+				"records were captured on the same visit."
+			),
+		)
+
+	filters = dict(_company_filter(company))
+	filters["state"] = ("in", [session_records.STATE_SUBMITTED, session_records.STATE_REVIEWED])
+	filters["submitted_at"] = ("between", [start, f"{end} 23:59:59"])
+	rows = _rows(
+		session_records.SESSION_DOCTYPE,
+		filters,
+		(
+			"name",
+			"template",
+			"template_version",
+			"state",
+			"location",
+			"location_doctype",
+			"worker",
+			"worker_name",
+			"foreman",
+			"foreman_name",
+			"visit_id",
+			"farm_task",
+			"started_at",
+			"submitted_at",
+		),
+		order_by="submitted_at asc",
+	)
+
+	names = [str(row["name"]) for row in rows]
+	produced = _produced_by_session(names)
+	evidence = _session_evidence_counts(names)
+	titles = _template_titles({str(row.get("template") or "") for row in rows})
+
+	visits = []
+	for row in rows:
+		made = produced.get(str(row["name"])) or []
+		visits.append(
+			{
+				"session": row["name"],
+				"date": str(row.get("submitted_at") or "")[:10] or None,
+				"template": titles.get(str(row.get("template") or ""), row.get("template")),
+				"template_version": int(row.get("template_version") or 0) or None,
+				"location": row.get("location"),
+				"location_doctype": row.get("location_doctype"),
+				"worker": row.get("worker_name") or row.get("worker"),
+				"foreman": row.get("foreman_name") or row.get("foreman"),
+				"records": ", ".join(sorted(made)) or "(evidence only)",
+				"record_count": len(made),
+				"evidence_files": evidence.get(str(row["name"]), 0),
+				"started_at": str(row.get("started_at") or "") or None,
+				"farm_task": row.get("farm_task") or None,
+			}
+		)
+
+	section = _section(
+		"Visits that produced these records",
+		(
+			"Which afternoon produced which record. Every compliance record listed elsewhere in "
+			"this packet appears there on its own merits; this says which of them were captured "
+			"on ONE visit, by whom, from which version of which template, with evidence shared "
+			"between them. A photograph on the Housing Inspection and a photograph on the "
+			"Detector Test from the same session are the SAME photograph, not two of the same wall."
+		),
+		visits,
+		("session", "date", "template", "location", "worker", "foreman", "records"),
+		absent=(
+			"No templated visits were submitted in this period. Every compliance record in this "
+			"packet was filed one at a time, which is complete evidence — what is absent is only "
+			"the statement that several of them came from one trip."
+		),
+	)
+	section["records_captured_in_sessions"] = sum(entry["record_count"] for entry in visits)
+	try:
+		open_now = frappe.db.count(
+			session_records.SESSION_DOCTYPE,
+			{
+				**_company_filter(company),
+				"state": ("in", list(session_records.OPEN_SESSION_STATES)),
+				"started_at": ("between", [start, f"{end} 23:59:59"]),
+			},
+		)
+	except Exception:
+		open_now = 0
+	if open_now:
+		section["open_sessions_in_period"] = open_now
+		section["problem_note"] = (
+			f"{open_now} visit(s) were started in this period and never submitted, so they "
+			"produced no compliance record and are not listed above. That is disclosed rather "
+			"than left to be discovered: an abandoned visit is not evidence of anything, and a "
+			"place whose work was started and dropped is a place whose alerts are still open."
+		)
+	return section
+
+
+def _produced_by_session(names: list) -> dict:
+	"""session docname → the doctypes its sections actually produced."""
+	from . import sessions as session_records
+
+	if not (names and compat.doctype_exists(session_records.SUBMISSION_DOCTYPE)):
+		return {}
+	# NOT through `_rows`: it filters the field list against the doctype's own
+	# declared fields, and `parent` is a framework column rather than a declared
+	# one — it would be dropped, and every row would come back without the key
+	# this groups on.
+	rows = frappe.db.get_all(
+		session_records.SUBMISSION_DOCTYPE,
+		filters={"parent": ("in", names), "parenttype": session_records.SESSION_DOCTYPE},
+		fields=["parent", "produces_record_doctype", "produced_record_link"],
+		order_by="idx asc",
+		limit=SECTION_CAP * 8,
+	)
+	out = {}
+	for row in rows or []:
+		link = str(row.get("produced_record_link") or "").strip()
+		if not link:
+			continue
+		# By record and not by row: two sections that produced ONE Detector Test
+		# are one Detector Test, and counting them twice would tell an auditor
+		# there is a record they cannot find.
+		out.setdefault(str(row["parent"]), set()).add(link)
+	return {name: sorted(links) for name, links in out.items()}
+
+
+def _session_evidence_counts(names: list) -> dict:
+	"""session docname → how many DISTINCT files its tray holds.
+
+	Distinct files rather than rows, for the reason `list_visits` counts them the
+	same way: one signature filed against three sections is one photograph, and
+	reporting three would overstate the evidence in an audit packet.
+	"""
+	from . import sessions as session_records
+
+	if not (names and compat.doctype_exists(session_records.EVIDENCE_DOCTYPE)):
+		return {}
+	rows = frappe.db.get_all(
+		session_records.EVIDENCE_DOCTYPE,
+		filters={"parent": ("in", names), "parenttype": session_records.SESSION_DOCTYPE},
+		fields=["parent", "file", "file_url"],
+		order_by="idx asc",
+		limit=SECTION_CAP * 8,
+	)
+	seen = {}
+	for row in rows or []:
+		reference = str(row.get("file") or row.get("file_url") or "")
+		if reference:
+			seen.setdefault(str(row["parent"]), set()).add(reference)
+	return {name: len(files) for name, files in seen.items()}
+
+
+def _template_titles(names: set) -> dict:
+	"""template docname → its human name, so a packet reads 'Cabin Opening'."""
+	from . import sessions as session_records
+
+	names = {name for name in names if name}
+	if not (names and compat.doctype_exists(session_records.TEMPLATE_DOCTYPE)):
+		return {}
+	rows = _rows(
+		session_records.TEMPLATE_DOCTYPE,
+		{"name": ("in", sorted(names))},
+		("name", "template_name"),
+		order_by="name asc",
+		limit=SECTION_CAP,
+	)
+	return {str(row["name"]): row.get("template_name") or row["name"] for row in rows}
+
+
 def _filings(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 	"""Filings submitted during the period."""
 	rows = []
@@ -1499,6 +1708,7 @@ _BUILDERS = {
 	"water": _water,
 	"traceability": _traceability,
 	"housing": _housing,
+	"sessions": _sessions,
 	"filings": _filings,
 	"audits": _audits,
 }

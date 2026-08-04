@@ -347,7 +347,19 @@
   "fieldwork_write_col",
   "allow_complete_task_via_mobile",
   "visit_section",
-  "allow_list_visits"
+  "allow_list_visits",
+  "inspection_session_section",
+  "allow_list_inspection_templates",
+  "allow_get_inspection_template",
+  "allow_list_inspection_sessions",
+  "allow_get_inspection_session",
+  "inspection_session_write_col",
+  "allow_create_inspection_template",
+  "allow_update_inspection_template",
+  "allow_deactivate_inspection_template",
+  "allow_start_inspection_session",
+  "allow_submit_inspection_session",
+  "allow_propose_inspection_template_from_regulation"
  ],
  "fields": [
   {
@@ -2577,6 +2589,86 @@
    "fieldname": "allow_list_visits",
    "fieldtype": "Check",
    "label": "List Visits"
+  },
+  {
+   "fieldname": "inspection_session_section",
+   "fieldtype": "Section Break",
+   "label": "Inspection templates and sessions"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every Inspection Template on this site — the shapes of multi-section visit a worker can be sent on — with what each produces, which regimes it answers and which version is live. Superseded and deactivated templates are listed too, because the sessions worked from them are still readable.",
+   "fieldname": "allow_list_inspection_templates",
+   "fieldtype": "Check",
+   "label": "List Inspection Templates"
+  },
+  {
+   "default": "1",
+   "description": "READ. One template in full: every section in working order with its evidence contract, its renderer hint, the compliance record it produces and the field prompts a client draws the form from. This is what a handset renders a sectioned visit from.",
+   "fieldname": "allow_get_inspection_template",
+   "fieldtype": "Check",
+   "label": "Inspection Template Detail"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every templated visit — who went, where, from which template and which pinned version, and which compliance records the trip produced. The chain of custody an auditor follows backwards from a Housing Inspection to the afternoon that produced it.",
+   "fieldname": "allow_list_inspection_sessions",
+   "fieldtype": "Check",
+   "label": "List Inspection Sessions"
+  },
+  {
+   "default": "1",
+   "description": "READ. One visit in full: the pinned template version with all its sections, every section submission with what was ticked and measured, the shared evidence tray, and the compliance record each section produced.",
+   "fieldname": "allow_get_inspection_session",
+   "fieldtype": "Check",
+   "label": "Inspection Session Detail"
+  },
+  {
+   "fieldname": "inspection_session_write_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Authors a new Inspection Template, live immediately — it reaches the handset on the next fetch and the rule engine can match it on the next sweep, with no app release. Templates are DATA: adding one is adding a record. Refuses a template with no sections, two sections sharing a name, a second live template with a name one already holds, and any evidence-contract key outside the vocabulary.",
+   "fieldname": "allow_create_inspection_template",
+   "fieldtype": "Check",
+   "label": "Create Inspection Template"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Changes a template by SUPERSEDING it — a new row at version+1, the old one deactivated and pointing at it. The old row is never edited, which is why a session worked in April is still readable in November and why a session started against v1 while v2 is being authored is unaffected.",
+   "fieldname": "allow_update_inspection_template",
+   "fieldtype": "Check",
+   "label": "Supersede Inspection Template"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Stops new sessions starting from a template, and records why. It destroys nothing — every session already worked from it stays readable and every compliance record they produced stays in the register and in the audit packet. There is deliberately no delete.",
+   "fieldname": "allow_deactivate_inspection_template",
+   "fieldtype": "Check",
+   "label": "Deactivate Inspection Template"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Opens one visit against one template at one place and pins the template version it will be read against. Writes NO compliance record and moves no register — a started session has dismissed nothing.",
+   "fieldname": "allow_start_inspection_session",
+   "fieldtype": "Check",
+   "label": "Start Inspection Session"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, AND THE ONE WITH TEETH. Files every section of a visit and writes the compliance records the sections promise — separately, at their own cadences, with the visit's shared evidence attached to each. Refuses a missing required section, a section the pinned template version does not have, and any section short of its evidence contract; nothing is written if any of those refuses, because half a visit is a set of records that look complete and are not.",
+   "fieldname": "allow_submit_inspection_session",
+   "fieldtype": "Check",
+   "label": "Submit Inspection Session"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, DECLARED AND NOT IMPLEMENTED IN v0.21.0 — every call refuses. It is the surface an AI template proposer will occupy: read a regulation, draft a template, leave it inactive for a human to enable. Declared now so the shape is fixed before anything fills it, and inert now because at runtime this app is deterministic — AI belongs at authoring time behind a human approval, never in the trigger path.",
+   "fieldname": "allow_propose_inspection_template_from_regulation",
+   "fieldtype": "Check",
+   "label": "Propose Template From Regulation (not implemented)"
   }
  ],
  "index_web_pages_for_search": 0,

@@ -293,6 +293,14 @@ erpnext_mcp/                     repo root
     records.py                   what those three share: the findings branch,
                                  the forward-only register write-back, and how a
                                  laboratory result is read
+    tools/sessions.py            templated inspection sessions: authoring a
+                                 template, working one, and the submission that
+                                 writes the compliance records it promised
+    sessions.py                  what a template IS — the section vocabulary, the
+                                 evidence contract, the four seeded templates, the
+                                 deterministic matcher the rule engine calls, and
+                                 the merge rule that stops two sections filing two
+                                 contradictory Detector Tests
     compliance_fields.py         WHICH compliance columns go on WHOSE doctype,
                                  and the argument for putting them there at all
     tools/training.py            the training register: what the crew was taught

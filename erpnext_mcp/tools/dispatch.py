@@ -61,7 +61,7 @@ import json
 
 import frappe
 
-from .. import alerts, compat, completions, records
+from .. import alerts, compat, completions, records, sessions
 from ..args import as_bool, as_choice, as_int, as_limit, as_str, resolve_company
 from ..erpnext_mcp.doctype.farm_task.farm_task import (
 	AVAILABLE,
@@ -1660,13 +1660,22 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 		"dry_run": dry_run,
 		"alerts_considered": len(rows),
 		"created": [],
+		"sessions": [],
 		"skipped_already_answered": [],
 		"skipped_unmapped": [],
 		"failed": [],
 	}
 
+	# v0.21.0. Before anything is raised one-alert-at-a-time, look for the places
+	# where SEVERAL different things are overdue at once and one template covers
+	# all of them. Those become one visit rather than N trips. Everything this
+	# does not bundle falls through to the unchanged per-alert path below.
+	bundled = _bundle_into_sessions(rows, answered, report, dry_run)
+
 	for row in rows:
 		alert_type = str(row.get("alert_type") or "")
+		if row["name"] in bundled:
+			continue
 		if row["name"] in answered:
 			report["skipped_already_answered"].append(
 				{"alert": row["name"], "alert_type": alert_type, "task": answered[row["name"]]}
@@ -1698,6 +1707,8 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 	for entry in report["created"]:
 		by_type[entry["alert_type"]] = by_type.get(entry["alert_type"], 0) + 1
 	report["created_count"] = len(report["created"])
+	report["session_count"] = len(report["sessions"])
+	report["alerts_bundled_into_sessions"] = sum(len(entry["alerts"]) for entry in report["sessions"])
 	report["by_alert_type"] = dict(sorted(by_type.items()))
 	report["kanban_route"] = "/app/farm-task/view/kanban/Farm Task Dispatch"
 	report["note"] = (
@@ -1707,6 +1718,17 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 		f"{len(report['skipped_unmapped'])} have no recipe. Re-running is safe: a task carries the "
 		"alert that produced it, so this finds what it raised last time and skips it."
 	)
+	if report["sessions"]:
+		report["session_note"] = (
+			f"{report['alerts_bundled_into_sessions']} alert(s) at "
+			f"{len(report['sessions'])} place(s) became ONE templated visit each instead of one "
+			"task apiece. A worker walks into a cabin once and does everything it needs; the "
+			"compliance records still come out separately, at their own cadences, because those "
+			"are different regulators asking on different schedules. The bundling is deterministic "
+			"— a template matched when its sections produce a superset of the records the pending "
+			"alerts asked for — and it is idempotent, because the session records which alerts it "
+			"answers."
+		)
 	if over_cap:
 		report["capped"] = (
 			f"More than {limit} open alerts matched. The first {limit} were considered; run again "
@@ -1722,6 +1744,185 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 		),
 		docstatus_delta="" if dry_run or not report["created"] else "none → 0 (created)",
 	)
+
+
+def _bundle_into_sessions(rows: list, answered: dict, report: dict, dry_run: bool) -> set:
+	"""One templated visit per place where a template covers everything overdue.
+
+	THE RULE, IN FULL, BECAUSE AN AUDITOR WILL ASK WHY THREE THINGS BECAME ONE JOB:
+
+	  1. Alerts are grouped by the PLACE they point at — `(source_doctype,
+	     source_docname)` — and only where the source doctype is a register
+	     somebody can be sent to. An alert about a certificate is not about a
+	     place and is never bundled.
+	  2. A place qualifies only with **two or more alerts of DIFFERENT types**.
+	     One alert is one task; that path is unchanged and is the common case.
+	  3. Each alert type is translated into the compliance record answering it
+	     would produce, through `ALERT_TASK_MAP` — the same table the per-alert
+	     path uses, so the two cannot disagree about what a habitability alert
+	     asks for. An alert type whose recipe produces NO record (a licence
+	     renewal, a policy review) cannot be covered by a section and takes the
+	     place out of the running: bundling it would produce a visit that silently
+	     answers three of four overdue things.
+	  4. `sessions.match_template` picks the template whose sections produce a
+	     SUPERSET of those records — tightest fit first, ties broken by docname so
+	     the choice is the same on every run and every site.
+	  5. No match is a first-class answer and leaves every alert at that place on
+	     the ordinary per-alert path.
+
+	IDEMPOTENT, and by a different mechanism from the per-alert path. A task
+	carries one `source_alert`; a session answers several, so it stores them all
+	and `sessions.alerts_answered_by_open_sessions` reads them back — whole
+	docnames split on newlines, never a substring match. A second sweep finds the
+	session and raises nothing. Once the session is SUBMITTED its records have
+	moved the registers, the alerts dismiss themselves on the next sweep, and none
+	of this is reached at all.
+
+	NEVER RAISES PAST ONE PLACE. A template that could not be matched or a session
+	that could not be created lands in `failed` for that location and the alerts
+	fall through to the per-alert path, which is strictly better than losing them.
+	"""
+	if not compat.doctype_exists(sessions.SESSION_DOCTYPE):
+		return set()
+
+	places = {}
+	for row in rows:
+		doctype = str(row.get("source_doctype") or "")
+		docname = str(row.get("source_docname") or "")
+		if not (docname and doctype in sessions.MATCHABLE_ASSET_TYPES):
+			continue
+		places.setdefault((doctype, docname), []).append(row)
+
+	already = sessions.alerts_answered_by_open_sessions()
+	bundled = set()
+	for (doctype, docname), alerts_here in sorted(places.items()):
+		if len({str(row.get("alert_type") or "") for row in alerts_here}) < 2:
+			continue
+		if any(row["name"] in already or row["name"] in answered for row in alerts_here):
+			# Something at this place is already answered — by a session from a
+			# previous sweep, or by a plain task somebody raised. Bundling the
+			# rest would produce a second job overlapping the first.
+			for row in alerts_here:
+				entry = already.get(row["name"])
+				if entry:
+					bundled.add(row["name"])
+					report["skipped_already_answered"].append(
+						{
+							"alert": row["name"],
+							"alert_type": row.get("alert_type"),
+							"task": entry.get("task"),
+							"session": entry.get("session"),
+						}
+					)
+			continue
+
+		wanted = set()
+		coverable = True
+		for row in alerts_here:
+			recipe = ALERT_TASK_MAP.get(str(row.get("alert_type") or ""))
+			produced = str((recipe or {}).get("creates_record") or "").strip()
+			if not produced:
+				coverable = False
+				break
+			wanted.add(produced)
+		if not (coverable and wanted):
+			continue
+
+		match = sessions.match_template(doctype, wanted)
+		if not match:
+			continue
+
+		entry = {
+			"location": docname,
+			"location_doctype": doctype,
+			"template": match["template"],
+			"template_name": match["template_name"],
+			"template_version": match["version"],
+			"covers": match["covers"],
+			"extra_sections": match["extra_sections"],
+			"alerts": [row["name"] for row in alerts_here],
+			"alert_types": sorted({str(row.get("alert_type") or "") for row in alerts_here}),
+			"session": None,
+			"task": None,
+		}
+		if not dry_run:
+			try:
+				entry.update(_session_from_alerts(match, doctype, docname, alerts_here))
+			except Exception as exc:
+				report["failed"].append(
+					{
+						"location": docname,
+						"template": match["template"],
+						"error": f"{type(exc).__name__}: {exc}",
+					}
+				)
+				continue
+		report["sessions"].append(entry)
+		bundled.update(row["name"] for row in alerts_here)
+	return bundled
+
+
+def _session_from_alerts(match: dict, doctype: str, docname: str, alerts_here: list) -> dict:
+	"""One Farm Task carrying one Inspection Session, for a place with several alerts.
+
+	THE FARM TASK IS STILL THE DISPATCH ATOM. It is the card on the Kanban board,
+	the thing a worker claims, the thing that counts against the concurrent-claim
+	limit. The session is the sectioned form behind that one card and never a
+	second kind of card beside it — a board with two kinds of item on it is a
+	board somebody has to be taught to read.
+
+	`source_alert` carries the FIRST alert only, because the column holds one and
+	the per-alert idempotency check reads it. The session carries all of them, and
+	that is what `_bundle_into_sessions` checks on the next sweep.
+	"""
+	severity_order = {alerts.SEVERITY_CRITICAL: 0, alerts.SEVERITY_WARNING: 1, alerts.SEVERITY_INFO: 2}
+	lead = sorted(
+		alerts_here,
+		key=lambda row: (severity_order.get(str(row.get("severity") or ""), 3), str(row["name"])),
+	)[0]
+	company = next((row.get("company") for row in alerts_here if row.get("company")), None)
+
+	session = frappe.new_doc(sessions.SESSION_DOCTYPE)
+	session.template = match["template"]
+	session.location = docname
+	session.location_doctype = doctype
+	session.company = company
+	session.state = sessions.STATE_DRAFT
+	session.source_alerts = "\n".join(sorted(row["name"] for row in alerts_here))
+	session.notes = "\n".join(
+		f"{row.get('alert_type')}: {row.get('alert_message') or ''}".strip() for row in alerts_here
+	)[:1000]
+	session.insert(ignore_permissions=True)
+
+	task = frappe.new_doc(FARM_TASK)
+	task.task_name = f"{match['template_name']} — {docname}"[:140]
+	task.task_type = "Inspection"
+	task.state = AVAILABLE
+	task.urgency = SEVERITY_URGENCY.get(str(lead.get("severity") or ""), "Normal")
+	task.dispatch_mode = "Self-pick"
+	task.company = company
+	task.location_doctype = doctype
+	task.location = docname
+	task.skill_required = match["skill_required"] or None
+	task.estimated_duration_minutes = match["estimated_duration_minutes"] or 0
+	task.source_alert = lead["name"]
+	task.inspection_session = session.name
+	# The contract on the CARD is the floor; the real one is per section on the
+	# template, checked by submit_inspection_session. Stating something here
+	# rather than nothing keeps the task doctype's promise — there is no path to
+	# a task somebody can close by saying they did it.
+	task.evidence_required = json.dumps({"photos": True, "findings_text": True})
+	task.notes = (
+		f"One visit covering {len(alerts_here)} overdue item(s) at {docname}: "
+		+ ", ".join(sorted({str(row.get("alert_type") or "") for row in alerts_here}))
+		+ f". Worked from the template {match['template_name']} v{match['version']}, which has "
+		f"{match['section_count']} section(s) and produces {', '.join(match['produces'])}. "
+		"Submit it with submit_inspection_session — the compliance records come out separately, "
+		"at their own cadences, from the one walk."
+	)
+	task.insert(ignore_permissions=True)
+	frappe.db.set_value(sessions.SESSION_DOCTYPE, session.name, "farm_task", task.name)
+	return {"session": session.name, "task": task.name, "lead_alert": lead["name"]}
 
 
 def _alert_types(args: dict) -> set:

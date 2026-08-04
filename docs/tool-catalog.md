@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 239 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 249 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 107 read tools are **on** by default and can be switched off individually. A
+All 111 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -6870,6 +6870,211 @@ offline when the trip started.
 
 ---
 
+# Templated inspection sessions (v0.21.0)
+
+A worker does not go to a task. They walk into MC-Cabin-01, do everything the
+cabin needs, and walk out. Compliance sees three regulated cadences that must
+stay separate — a Housing Inspection is annual under 29 CFR 1910.142, a Detector
+Test is on the fire code's cycle, a Water Test is Subpart E's ninety days — and a
+merged record would be due on three schedules at once.
+
+**The UX is grouped; the records stay separate.** An *Inspection Session* is the
+afternoon. The records it produces are the register, produced exactly as they
+would have been from three separate trips: same doctypes, same registers
+advanced, same alerts dismissed, same audit-packet rows. What changes is that the
+photographs and the signature are captured once, and an auditor holding a Housing
+Inspection can ask which visit produced it.
+
+## Templates are data
+
+An *Inspection Template* is a Frappe record. It says which sections a visit
+consists of, what evidence each section needs, which renderer draws it and which
+compliance record it produces. `create_inspection_template` writes one and it is
+live: it reaches the handset on the next fetch, the rule engine can match it on
+the next sweep, and no code, no DocType JSON and no app build was involved.
+
+Four ship seeded, on install and on every migrate, and an edited one is never
+overwritten: **Pre-season Cabin Opening**, **Mid-season Habitability**,
+**Post-harvest Cabin Close-down** and **Spray Day Inspection**.
+
+## The runtime is deterministic
+
+`generate_tasks_from_compliance_alerts` bundles by set inclusion and nothing
+else. Alerts are grouped by the place they point at; a place with **two or more
+alerts of different types** is a candidate; each alert type is translated into
+the compliance record it would produce through the same `ALERT_TASK_MAP` the
+per-alert path uses; and a template matches when its sections produce a
+**superset** of those records. Ties break on (extra sections, total sections,
+docname), so the choice is the same on every run and every site.
+
+No match is a first-class answer and the common one. One alert at a place is one
+task, unchanged.
+
+## Versions are pinned, and edits supersede
+
+`update_inspection_template` does not edit the row. It writes a **new** row at
+version+1, deactivates the old one and points it at the new one. A session links
+the row it was worked from, so April's session is still readable in November
+against the sections the worker actually saw — and a session started against v1
+while v2 is being authored is untouched, because v2 is a different document.
+
+## 228. `list_inspection_templates`
+
+Every template with what it produces, which regimes it answers and which version
+is live. Filter by `applies_to_asset_type`, `active` or `regime` — matched by
+token, never substring, so a GlobalGAP template never answers a GAP question.
+
+Superseded and inactive templates are listed too: the sessions worked from them
+are still readable, and an auditor asking what last October's close-down looked
+like is asking about one of those. `live_templates` is the set a new session can
+start from.
+
+## 229. `get_inspection_template`
+
+One template in full — every section in working order with its evidence
+contract, renderer hint, produced-record doctype and field prompts.
+
+**This is what a client renders a sectioned form from.** `renderer_hint` is a
+hint and not a contract: a client that does not know one falls back to a freeform
+form and the submission is still valid, which is what lets a template using a
+renderer added later reach a handset nobody has updated. The refusal lives in the
+evidence contract, never in the renderer.
+
+Takes a docname (one exact version) or a template name (whichever is live).
+
+## 230. `list_inspection_sessions`
+
+Every templated visit — who went, where, from which template and pinned version,
+and which compliance records the trip produced. Filter by company, location,
+worker, template, state, `visit_id` or date range.
+
+## 231. `get_inspection_session`
+
+One visit in full: the pinned template version with all its sections, every
+section submission with what was ticked and measured, the shared evidence tray,
+and the compliance record each section produced.
+
+## 232. `create_inspection_template`
+
+**MUTATING.** Authors a template, live immediately.
+
+Each section names `produces_record_doctype` — `Housing Inspection`, `Detector
+Test`, `Water Test` — or leaves it empty, which is a real and common answer:
+nobody regulates a photograph of an emptied refrigerator as its own document. A
+section naming a doctype this app cannot build is refused **here**, at authoring
+time, rather than at submission time while somebody is standing in a cabin.
+
+Refuses a template with no sections (that is a name), two sections sharing a name
+(the name is the key a submission matches on), a second **live** template with a
+name one already holds, and any evidence-contract key outside the vocabulary —
+`photos`, `signature`, `findings_text`, `witness`, `checklist_items`,
+`measurements` — because `{"photo": true}` asks for nothing and looks like it
+asks for something.
+
+```json
+{"template_name": "Pre-harvest Block Walk",
+ "description": "The walk a block gets before the first pick.",
+ "applies_to_asset_type": "Field",
+ "skill_required": "food_safety",
+ "regimes": ["FSMA", "GAP"],
+ "sections": [
+   {"section_name": "Animal intrusion check",
+    "produces_record_doctype": "",
+    "renderer_hint": "multi-photo",
+    "required": true,
+    "evidence_contract": {"photos": true, "findings_text": true}}]}
+```
+
+## 233. `update_inspection_template`
+
+**MUTATING.** Supersedes rather than edits — see above. Arguments left out mean
+unchanged; passing `sections` replaces the whole list, because a section list
+edited one entry at a time by index is a section list somebody reorders by
+accident.
+
+## 234. `deactivate_inspection_template`
+
+**MUTATING.** Stops new sessions starting from a template and records why. It
+destroys nothing: every session already worked from it stays readable, every
+compliance record those sessions produced stays in the register and in the audit
+packet. There is deliberately no delete.
+
+## 235. `start_inspection_session`
+
+**MUTATING.** Opens one visit at one place and pins the template version.
+
+**It writes no compliance record and moves no register.** A started session has
+dismissed nothing — the records are created by `submit_inspection_session` and
+not before, exactly as a Draft Housing Inspection writes nothing to the camp
+register.
+
+## 236. `submit_inspection_session`
+
+**MUTATING, and the one with teeth.** In order: sections are read off the version
+the session **pinned**; a submission naming a section that version does not have
+is refused; a **required** section that is missing is refused by name; each
+submitted section is checked against its own evidence contract and the shortfalls
+are named.
+
+**Nothing is written if any of those refuses.** Half a visit is a set of
+compliance records that look complete and are not, which is worse than no records
+at all — an auditor reading them has no way to know the detector was never
+tested.
+
+**Two sections producing the same record for the same subject produce one
+record.** A Detector Test carries both a smoke result and a CO result, and both
+are required fields, so testing them as two sections — the right shape for a
+worker who walks to one detector and then the other — must not file two records
+that each assert something they were never told about the other. Both section
+submissions link the one record; the trail from either is intact.
+
+An **optional** section may be skipped and its produced-record link stays empty.
+That is how a template covering more than is due today stays usable, and the skip
+is recorded as something somebody said, because an empty space is not.
+
+```json
+{"name": "INSPS-2026-0001",
+ "section_submissions": [
+   {"section_name": "Habitability walk",
+    "evidence_file_tokens": ["1a2b3c"],
+    "signature_file": "9f8e7d",
+    "notes": ""},
+   {"section_name": "Smoke Detector Test",
+    "checklist_values": {"smoke_alarm_sounds": true},
+    "record_data": {"smoke_detector_result": "Pass"},
+    "notes": ""},
+   {"section_name": "CO Detector Test",
+    "checklist_values": {"co_alarm_sounds": true},
+    "record_data": {"co_detector_result": "Pass"},
+    "notes": ""}]}
+```
+
+`notes` as an **empty string** records that nothing was wrong; leaving it out
+records that nobody was asked, and the two are different answers. `record_data`
+names fields on the produced compliance record — it is where a Water Test section
+names the Irrigation Zone, which a session at a cabin cannot supply, because one
+cabin can draw from several sources and this app will not guess.
+
+A record whose findings are alarming is still filed: it routes itself to
+Corrective Action Required and raises its own Critical alert, exactly as it would
+from a single-task completion.
+
+## 237. `propose_inspection_template_from_regulation`
+
+**MUTATING, declared and not implemented in v0.21.0 — every call refuses.**
+
+It is the surface an AI template proposer will occupy: read a regulation, draft a
+template with its sections, contracts and citations, leave it **inactive** for a
+human to read and enable. It is declared now so the shape is fixed before
+anything fills it, and inert now because at runtime this app is deterministic —
+AI belongs at authoring time behind a human approval, never in the trigger path.
+Phase 2 of the Configurable Compliance Framework wires it.
+
+Until then, author templates with `create_inspection_template`. A template is a
+record and writing one takes one call.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -6880,7 +7085,7 @@ Everything a tool needs is in two places:
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
-   `shifts`, `heat`, `kpi`, `visits` or `fieldwork` —
+   `shifts`, `heat`, `kpi`, `visits`, `sessions` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

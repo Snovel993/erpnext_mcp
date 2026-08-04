@@ -77,6 +77,7 @@ from .tools import (
 	read,
 	realestate,
 	reports,
+	sessions,
 	shifts,
 	tax,
 	trade,
@@ -8991,6 +8992,373 @@ TOOLS = {
 		title="List visits",
 		available=_needs_doctype("Farm Task Assignment"),
 		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.21.0: templated inspection sessions ─────────────────────────────
+	#
+	# TEMPLATES ARE DATA. Every tool in this block exists so that the shape of a
+	# visit — which sections, what evidence, which compliance records — is a ROW
+	# an operator writes rather than a release somebody ships. A new template is
+	# live on the next fetch, on the handset and in the rule engine, with no app
+	# update. What it does NOT do is merge the compliance records: a Cabin
+	# Opening still produces a Housing Inspection, a Detector Test and a Water
+	# Test, separately, at their own cadences, because those are three regulators
+	# asking three questions on three schedules.
+	"list_inspection_templates": _tool(
+		sessions.list_inspection_templates,
+		"Every Inspection Template on this site — the shapes of multi-section "
+		"visit a worker can be sent on — with what each one produces, which "
+		"regimes it answers and which version is live. Read-only.\n\n"
+		"A TEMPLATE IS DATA, NOT CODE. It defines the sections of one trip to one "
+		"place: a habitability walk, a detector test, an emptied-refrigerator "
+		"photograph. Adding one is adding a record, not shipping a release.\n\n"
+		"SUPERSEDED AND INACTIVE TEMPLATES ARE LISTED TOO, because the sessions "
+		"worked from them are still readable and an auditor asking what last "
+		"October's close-down looked like is asking about one of those. "
+		"`live_templates` is the set a new session can start from.",
+		{
+			"applies_to_asset_type": _field(
+				_STRING,
+				"Only templates for this kind of asset: Housing Unit, Field, Irrigation Zone, "
+				"Sprayer, Cabin or General.",
+			),
+			"active": _field(_BOOLEAN, "Only active (true) or only deactivated (false) templates."),
+			"regime": _field(
+				_STRING,
+				"Only templates answering this audit — OR-OSHA, FSMA, WPS, NOP … Matched by "
+				"token, never by substring, so a GlobalGAP template never answers a GAP question.",
+			),
+			"limit": _LIMIT,
+		},
+		title="List inspection templates",
+		available=_needs_doctype("Inspection Template"),
+		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_inspection_template": _tool(
+		sessions.get_inspection_template,
+		"One Inspection Template in full: every section in working order, with "
+		"its evidence contract, its renderer hint, the compliance record it "
+		"produces and the field prompts a client draws it from. Read-only.\n\n"
+		"THIS IS WHAT A CLIENT RENDERS A SECTIONED FORM FROM. `renderer_hint` is "
+		"a hint and not a contract — a client that does not know one falls back "
+		"to a freeform form and the submission is still valid, which is what "
+		"lets a template using a renderer added later reach a handset nobody has "
+		"updated. The refusal lives in the evidence contract, never in the "
+		"renderer.\n\n"
+		"Accepts a docname (one exact version) or a template NAME (whichever "
+		"version is live).",
+		{
+			"name": _field(
+				_STRING,
+				"Template docname (e.g. 'INSPT-2026-0001') or template name (e.g. "
+				"'Mid-season Habitability'). A docname names one exact version; a name resolves "
+				"to the live one.",
+			),
+			"template": _field(_STRING, "Alias for name."),
+		},
+		title="Inspection template detail",
+		available=_needs_doctype("Inspection Template"),
+		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_inspection_sessions": _tool(
+		sessions.list_inspection_sessions,
+		"Every templated visit — who went, where, from which template and "
+		"version, and which compliance records the trip produced. Read-only.\n\n"
+		"A SESSION IS THE AFTERNOON; THE RECORDS ARE THE REGISTER. This answers "
+		"'which visit produced this Housing Inspection', which is the chain of "
+		"custody an auditor follows backwards: one walk, one signature, one set "
+		"of photographs, three records at three cadences.\n\n"
+		"Scoped to the companies the calling account may actually reach.",
+		{
+			"company": _COMPANY,
+			"location": _field(_STRING, "Visits to this place — the asset's docname."),
+			"worker": _field(_STRING, "Whose visits. An Employee docname."),
+			"template": _field(_STRING, "Sessions worked from this template docname."),
+			"state": _field(_STRING, "Draft, In Progress, Submitted, Reviewed or Superseded. Omit for all."),
+			"visit_id": _field(_STRING, "The handset's trip identifier, shared with list_visits."),
+			"from_date": _field(_STRING, "Earliest start date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest start date, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List inspection sessions",
+		available=_needs_doctype("Inspection Session"),
+		requires="the Inspection Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_inspection_session": _tool(
+		sessions.get_inspection_session,
+		"One visit in full: the template version it was PINNED to with all its "
+		"sections, every section submission with what was ticked and measured, "
+		"the shared evidence tray, and the compliance record each section "
+		"produced. Read-only.\n\n"
+		"THE PINNED VERSION IS THE POINT. A template edited afterwards does not "
+		"change how this session reads — the version worked from is a different "
+		"document and was never touched — so this is a self-contained account of "
+		"what the worker was actually shown and what they actually filed.",
+		{
+			"name": _field(_STRING, "Inspection Session docname, e.g. 'INSPS-2026-0001'."),
+			"session": _field(_STRING, "Alias for name."),
+		},
+		title="Inspection session detail",
+		available=_needs_doctype("Inspection Session"),
+		requires="the Inspection Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_inspection_template": _tool(
+		sessions.create_inspection_template,
+		"MUTATING. Author a new Inspection Template — the shape of one "
+		"multi-section visit — and it is live immediately: it reaches the "
+		"handset on the next fetch and the rule engine can match it on the next "
+		"sweep, with no app release and no DocType edit.\n\n"
+		"EACH SECTION SAYS WHAT IT PRODUCES. A section naming "
+		"`produces_record_doctype` writes that compliance record when the session "
+		"is submitted; leaving it empty is a real and common answer — nobody "
+		"regulates a photograph of an emptied refrigerator as its own document. "
+		"This app can build a Housing Inspection, a Detector Test and a Water "
+		"Test; a section naming anything else is refused at submission, so it is "
+		"refused here instead, while the person who can fix the typo is present.\n\n"
+		"WHAT IT REFUSES: a template with no sections (that is a name); two "
+		"sections sharing a name (the name is the key a submission matches on); "
+		"a second LIVE template with a name one already holds (two answers to one "
+		"question); an evidence-contract key outside the vocabulary — `photos`, "
+		"`signature`, `findings_text`, `witness`, `checklist_items`, "
+		'`measurements` — because `{"photo": true}` asks for nothing and looks '
+		"like it asks for something.",
+		{
+			"template_name": _field(
+				_STRING, "What the visit is called, e.g. 'Post-harvest Cabin Close-down'."
+			),
+			"description": _field(
+				_STRING,
+				"What the visit is for and when it is done. Required — a template with "
+				"sections and no statement of purpose is a form somebody has to reverse-engineer.",
+			),
+			"applies_to_asset_type": _field(
+				_STRING,
+				"Housing Unit, Field, Irrigation Zone, Sprayer, Cabin or General. The first "
+				"three name registers on this site and are ENFORCED against a session's location; "
+				"the last three are labels and are not, and are never matched automatically by "
+				"the rule engine.",
+			),
+			"sections": _field(
+				{"type": "array", "items": _OBJECT},
+				'Ordered list of {"section_name", "section_description", '
+				'"produces_record_doctype", "renderer_hint", "required", "evidence_contract", '
+				'"produces_record_data", "field_prompts"}. At least one.',
+			),
+			"skill_required": _field(_STRING, "The crew skill, e.g. 'camp_maintenance'."),
+			"estimated_duration_minutes": _field(_INTEGER, "The WHOLE visit, not the sum of the parts."),
+			"cadence_trigger_expression": _field(
+				_STRING,
+				"Prose for a reader saying when this template should fire. NOT parsed — matching "
+				"is deterministic on what the sections produce against what the pending alerts "
+				"ask for.",
+			),
+			"regulation_citations": _field(
+				_STRING, "The regulations this visit is evidence for, comma-separated."
+			),
+			"regimes": _field(_STRING_ARRAY, "The audits it answers: OR-OSHA, FSMA, WPS, NOP …"),
+		},
+		required=("template_name", "description", "sections"),
+		mutating=True,
+		title="Create an inspection template",
+		available=_needs_doctype("Inspection Template"),
+		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_inspection_template": _tool(
+		sessions.update_inspection_template,
+		"MUTATING. Change a template by SUPERSEDING it: a new record is written "
+		"at version+1 with the changes, the old one is deactivated and points at "
+		"the new one. The old row is never edited.\n\n"
+		"THAT IS WHY A SESSION FROM APRIL IS STILL READABLE IN NOVEMBER. A "
+		"session links the row it was worked from, so the sections the worker "
+		"actually saw are still on this site in full. It is also why there is no "
+		"window in which a running session's definition changes underneath it — "
+		"a session started against v1 while this call creates v2 sees v1 all the "
+		"way to submission.\n\n"
+		"ARGUMENTS LEFT OUT MEAN UNCHANGED. Pass `sections` only when changing "
+		"them; passing it replaces the whole list, because a section list edited "
+		"one entry at a time by index is a section list somebody reorders by "
+		"accident.",
+		{
+			"name": _field(
+				_STRING,
+				"Template docname, or the template NAME (which resolves to the live version).",
+			),
+			"template": _field(_STRING, "Alias for name."),
+			"template_name": _field(_STRING, "Rename the template."),
+			"description": _field(_STRING, "Replace the description."),
+			"applies_to_asset_type": _field(_STRING, "Change what it applies to."),
+			"sections": _field({"type": "array", "items": _OBJECT}, "Replace the whole section list."),
+			"skill_required": _field(_STRING, "Change the crew skill."),
+			"estimated_duration_minutes": _field(_INTEGER, "Change the estimate."),
+			"cadence_trigger_expression": _field(_STRING, "Change the trigger prose."),
+			"regulation_citations": _field(_STRING, "Change the citations."),
+			"regimes": _field(_STRING_ARRAY, "Replace the regime tags."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Supersede an inspection template",
+		available=_needs_doctype("Inspection Template"),
+		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"deactivate_inspection_template": _tool(
+		sessions.deactivate_inspection_template,
+		"MUTATING. Stop new sessions starting from a template, and say why.\n\n"
+		"IT DESTROYS NOTHING. Every session already worked from it stays "
+		"readable, with its pinned version and its sections as they were; every "
+		"compliance record those sessions produced stays in the register, still "
+		"dismissing the alerts it dismissed and still in the audit packet. "
+		"Deactivating hides a template from NEW work — that is the whole "
+		"difference between it and deleting, and it is why there is no delete.\n\n"
+		"The reason is required and is appended to the template's description, so "
+		"the operator who asks next season why the close-down form vanished gets "
+		"an answer from the record rather than from somebody's memory.",
+		{
+			"name": _field(_STRING, "Template docname, or the live template's name."),
+			"template": _field(_STRING, "Alias for name."),
+			"reason": _field(
+				_STRING,
+				"Why it is being withdrawn. At least a sentence — a change nobody can "
+				"explain is a change somebody reverses.",
+			),
+		},
+		required=("name", "reason"),
+		mutating=True,
+		title="Deactivate an inspection template",
+		available=_needs_doctype("Inspection Template"),
+		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"start_inspection_session": _tool(
+		sessions.start_inspection_session,
+		"MUTATING. Open one visit against one template at one place, and PIN the "
+		"template version it will be read against.\n\n"
+		"IT WRITES NO COMPLIANCE RECORD AND MOVES NO REGISTER. A session that has "
+		"been started and not submitted has dismissed nothing — the records are "
+		"created by submit_inspection_session and not before, exactly as a Draft "
+		"Housing Inspection writes nothing to the camp register.\n\n"
+		"Accepts a template docname (one exact version) or a template name "
+		"(whichever version is live, which is what somebody starting a visit "
+		"today means). A template that is deactivated or superseded is refused: "
+		"new work does not start from one, and everything already worked from it "
+		"stays fully readable.",
+		{
+			"template": _field(_STRING, "Template docname or the live template's name."),
+			"location": _field(_STRING, "WHERE the visit is — the asset's docname, e.g. 'MC-Cabin-01'."),
+			"location_doctype": _field(
+				_STRING,
+				"Which register the place is in. Inferred from the template where its "
+				"`applies_to_asset_type` names one.",
+			),
+			"worker": _field(_STRING, "The Employee doing the work."),
+			"foreman": _field(_STRING, "The Employee who sent them."),
+			"company": _COMPANY,
+			"visit_id": _field(
+				_STRING,
+				"The handset's trip identifier, shared with every task assignment closed on the "
+				"same walk — v0.20.1's visit_id.",
+			),
+			"farm_task": _field(
+				_STRING,
+				"The Farm Task this session is. The task stays the dispatch atom — one card, one "
+				"claim — and the session is the sectioned form behind it.",
+			),
+			"farm_location_gps": _field(_STRING, 'Coordinates, e.g. "45.5152,-122.6784".'),
+			"in_progress": _field(
+				_BOOLEAN,
+				"Default true — somebody is there. False opens it as a Draft, for a foreman "
+				"preparing a visit before the shift is assigned.",
+			),
+			"notes": _field(_STRING, "Anything worth saying about the visit."),
+		},
+		required=("template", "location"),
+		mutating=True,
+		title="Start an inspection session",
+		available=_needs_doctype("Inspection Session"),
+		requires="the Inspection Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"submit_inspection_session": _tool(
+		sessions.submit_inspection_session,
+		"MUTATING. File every section of one visit and WRITE THE COMPLIANCE "
+		"RECORDS the sections promise — separately, at their own cadences, with "
+		"the visit's shared evidence attached to each.\n\n"
+		"THIS IS THE TOOL WITH TEETH, and the order is: sections are read off the "
+		"version the session PINNED, not off whatever the template says now; a "
+		"submission naming a section that version does not have is refused; a "
+		"REQUIRED section that is missing is refused, by name; each submitted "
+		"section is checked against its own evidence contract and the shortfalls "
+		"are named. NOTHING IS WRITTEN IF ANY OF THOSE REFUSES — half a visit is "
+		"a set of records that LOOK complete and are not, which is worse than no "
+		"records at all.\n\n"
+		"TWO SECTIONS PRODUCING THE SAME RECORD FOR THE SAME SUBJECT PRODUCE ONE "
+		"RECORD. A Detector Test carries both a smoke result and a CO result, so "
+		"testing them as two sections — the right shape for a worker who walks to "
+		"one and then the other — must not file two records that each assert "
+		"something they were never told about the other detector. Both section "
+		"submissions link the one record; the trail from either is intact.\n\n"
+		"AN OPTIONAL SECTION MAY BE SKIPPED and its produced-record link stays "
+		"empty. That is how a template covering more than is due today stays "
+		"usable — and the skip is recorded as something somebody said, because an "
+		"empty space is not.\n\n"
+		"A record whose findings are alarming is still filed: it routes itself to "
+		"Corrective Action Required and raises its own Critical alert, exactly as "
+		"it would from a single-task completion. Doing the work and finding a "
+		"problem are two different facts and both are true.",
+		{
+			"name": _field(_STRING, "Inspection Session docname."),
+			"session": _field(_STRING, "Alias for name."),
+			"section_submissions": _field(
+				{"type": "array", "items": _OBJECT},
+				'One object per section: {"section_name", "evidence_file_tokens": [File '
+				'docnames], "signature_file", "checklist_values": {...}, "measurements": {...}, '
+				'"record_data": {...}, "notes", "witness", "skipped"}. `notes` as an EMPTY STRING '
+				"records that nothing was wrong; leaving it out records that nobody was asked, "
+				"and the two are different answers. `record_data` names fields on the produced "
+				"compliance record — it is where a Water Test section names the Irrigation Zone, "
+				"which a session at a cabin cannot supply.",
+			),
+			"record_date": _field(
+				_STRING,
+				"The date the produced compliance records carry, YYYY-MM-DD. Defaults to today. "
+				"A walk done in March and filed in July happened in March.",
+			),
+			"worker": _field(
+				_STRING,
+				"Who did it, where the session does not already say. A session the rule engine "
+				"raised was created before anybody had claimed the task, so it names nobody and "
+				"the handset filing it does. It only ever FILLS A BLANK — a session that already "
+				"names a worker is never re-attributed by whoever pressed submit.",
+			),
+			"foreman": _field(_STRING, "Who sent them, where the session does not already say."),
+			"visit_id": _field(
+				_STRING, "The handset's trip identifier, where the session does not already carry one."
+			),
+		},
+		required=("name", "section_submissions"),
+		mutating=True,
+		title="Submit an inspection session",
+		available=_needs_doctype("Inspection Session"),
+		requires="the Inspection Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"propose_inspection_template_from_regulation": _tool(
+		sessions.propose_inspection_template_from_regulation,
+		"MUTATING, DECLARED AND NOT IMPLEMENTED IN v0.21.0 — every call refuses "
+		"with the sentence saying so.\n\n"
+		"It is the surface an AI template proposer will occupy: read a "
+		"regulation, draft an Inspection Template with its sections, contracts "
+		"and citations, and leave it INACTIVE for a human to read and enable. It "
+		"is declared now so the shape is fixed before anything fills it, and it "
+		"is inert now because at runtime this app is deterministic — AI belongs "
+		"at authoring time behind a human approval, never in the trigger path. "
+		"Phase 2 of the Configurable Compliance Framework wires it.\n\n"
+		"Until then, author templates with create_inspection_template. A template "
+		"is a record and writing one takes one call.",
+		{
+			"regulation_text": _field(_STRING, "The regulation's text."),
+			"regulation_url": _field(_STRING, "Where it was read from — the citation on the draft."),
+			"applies_to_asset_type": _field(_STRING, "What the drafted template should apply to."),
+		},
+		mutating=True,
+		title="Propose a template from a regulation (not implemented)",
+		available=_needs_doctype("Inspection Template"),
+		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 

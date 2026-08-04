@@ -1,0 +1,274 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-03 23:00:00.000000",
+ "description": "One worker's execution of one template at one place: the visit, as it actually happened. A WORKER DOES NOT GO TO A TASK, THEY GO SOMEWHERE — they walk into MC-Cabin-01, do everything the cabin needs, and walk out. This is the record of that afternoon, and it is what turns three compliance records filed within a minute of each other into one traceable account of a single walk with one signature and one set of photographs. THE COMPLIANCE RECORDS ARE STILL SEPARATE, and that is not a compromise: a Housing Inspection is annual under 29 CFR 1910.142, a Detector Test is quarterly under the fire code, a Water Test is bi-annual under Subpart E, and a merged record would be due on three schedules at once. The session pins the template VERSION it was worked from, so a template edited afterwards does not retroactively change what this afternoon is read to have been.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "template",
+  "template_version",
+  "state",
+  "identity_col",
+  "company",
+  "location_doctype",
+  "location",
+  "farm_location_gps",
+  "people_section",
+  "worker",
+  "worker_name",
+  "people_col",
+  "foreman",
+  "foreman_name",
+  "timing_section",
+  "started_at",
+  "submitted_at",
+  "timing_col",
+  "visit_id",
+  "farm_task",
+  "source_alerts",
+  "evidence_section",
+  "evidence_files",
+  "submission_section",
+  "section_submissions",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "INSPS-.YYYY.-.####",
+   "description": "The series an Inspection Session is named from, expanded by the controller so a docname is the same shape on a bench and in the standalone suite — INSPS-2026-0001. The year is the year the session STARTED, which is the only reading that survives a visit begun on 31 December.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "INSPS-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The Inspection Template row this session was worked from. A LINK TO THE EXACT VERSION ROW, not to a name — because templates are versioned by copy, this docname is already the pinned version and `template_version` merely states it in a form a reader does not have to open a second document for.",
+   "fieldname": "template",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Template",
+   "options": "Inspection Template",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The template's `version` as it stood when this session was created. Written once, never updated. It is the answer to 'was this worker looking at the same form we are' — and on a site where somebody edits a template between a session being started and being submitted, it is the ONLY answer.",
+   "fieldname": "template_version",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Template Version",
+   "read_only": 1
+  },
+  {
+   "default": "Draft",
+   "description": "Where this visit has got to. Draft is created-not-started; In Progress is somebody is there; Submitted is the sections are in and the compliance records have been written; Reviewed is a second pair of eyes has read them; Superseded is a corrected session replaced this one. THE COMPLIANCE RECORDS ARE WRITTEN ON THE MOVE TO SUBMITTED and not before — a Draft session writes nothing to any register and dismisses no alert, exactly as a Draft inspection does.",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "State",
+   "options": "Draft\nIn Progress\nSubmitted\nReviewed\nSuperseded",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "Which register the place is in — Housing Unit, Field, Irrigation Zone. Checked against the template's `applies_to_asset_type` where that names a real DocType, so a cabin template cannot be started against a block.",
+   "fieldname": "location_doctype",
+   "fieldtype": "Link",
+   "label": "Location DocType",
+   "options": "DocType",
+   "search_index": 1
+  },
+  {
+   "description": "WHERE the visit happened — the asset's docname. The cabin, the block, the zone. Required, because a session that does not say where it was is not evidence of anything, and it is what the produced compliance records take as their subject.",
+   "fieldname": "location",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Location",
+   "options": "location_doctype",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Coordinates, where the handset had them — '45.5152,-122.6784'. FSMA §112.161(a)(1)(i) asks an activity record for the farm's name AND its location; the location field says which cabin, this says where the cabin is.",
+   "fieldname": "farm_location_gps",
+   "fieldtype": "Data",
+   "label": "GPS"
+  },
+  {
+   "fieldname": "people_section",
+   "fieldtype": "Section Break",
+   "label": "Who was there"
+  },
+  {
+   "description": "The Employee who did the work. Copied onto every compliance record the session produces, which is what makes one name answer for the whole afternoon instead of three records each having to be told separately.",
+   "fieldname": "worker",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Worker",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "fieldname": "worker_name",
+   "fieldtype": "Data",
+   "label": "Worker Name"
+  },
+  {
+   "fieldname": "people_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The Employee who sent them, where somebody did. Not the same fact as the worker and worth keeping separately: 'who did this' and 'who is answerable for it having been done' are two questions an inspection asks.",
+   "fieldname": "foreman",
+   "fieldtype": "Link",
+   "label": "Foreman",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "fieldname": "foreman_name",
+   "fieldtype": "Data",
+   "label": "Foreman Name"
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "When"
+  },
+  {
+   "description": "When the worker arrived. Written when the session is created, because the session is created at the moment somebody starts it.",
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started"
+  },
+  {
+   "description": "When the sections were submitted and the compliance records written. Empty until then, which is what distinguishes a visit somebody is part-way through from one they abandoned.",
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Submitted"
+  },
+  {
+   "fieldname": "timing_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The trip identifier the handset minted when the worker arrived, shared with every Farm Task Assignment closed on the same visit — v0.20.1's `visit_id`. It is how a session and the plain completions filed on the same walk are read as one trip by list_visits.",
+   "fieldname": "visit_id",
+   "fieldtype": "Data",
+   "label": "Visit",
+   "search_index": 1
+  },
+  {
+   "description": "The Farm Task that dispatched this session, where one did. THE TASK IS STILL THE DISPATCH ATOM — it is what appears on the Kanban board, what a worker claims, what the concurrent-claim limit counts. The session is the multi-section form behind that one card, not a second kind of card beside it.",
+   "fieldname": "farm_task",
+   "fieldtype": "Link",
+   "label": "Farm Task",
+   "options": "Farm Task",
+   "search_index": 1
+  },
+  {
+   "description": "The Compliance Alert docnames this session answers, one per line, written by the rule engine when it bundles several overdue things at one place into a single visit. It is what makes that bundling IDEMPOTENT: a second sweep finds the session already answering these alerts and raises nothing. Read by splitting on newlines and comparing whole docnames — never by substring, which is how a packet ends up holding a different record's evidence.",
+   "fieldname": "source_alerts",
+   "fieldtype": "Small Text",
+   "label": "Source Alerts",
+   "read_only": 1
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence tray"
+  },
+  {
+   "description": "Every file captured on this visit, once. The SHARED TRAY: a photograph taken for the habitability walk is the same File the detector test attaches, and the signature given at the end is the same File on all of them. Photographing a cabin three times because the paperwork wanted three records is the thing this replaces.",
+   "fieldname": "evidence_files",
+   "fieldtype": "Table",
+   "label": "Evidence",
+   "options": "Inspection Session Evidence"
+  },
+  {
+   "fieldname": "submission_section",
+   "fieldtype": "Section Break",
+   "label": "Sections submitted"
+  },
+  {
+   "description": "What was submitted for each section, and which compliance record each one produced. Written by submit_inspection_session; the produced-record links are the chain of custody an auditor follows backwards from the register.",
+   "fieldname": "section_submissions",
+   "fieldtype": "Table",
+   "label": "Section Submissions",
+   "options": "Inspection Session Section Submission"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 23:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Inspection Session",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "template,location,state",
+ "sort_field": "started_at",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "location",
+ "track_changes": 1
+}

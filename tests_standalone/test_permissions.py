@@ -189,10 +189,22 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# nothing on these rows to protect. The records that DO carry the operating
 		# facts — Employee Training Record, Compliance Alert — link to Company and
 		# are scoped by Frappe exactly as before.
+		#
+		# THE v0.21.0 ADDITION IS THE SAME ARGUMENT A THIRD TIME. An Inspection
+		# Template is the SHAPE of a visit — "a close-down is these six sections" —
+		# and carries no fact about anybody's operation: not a cabin, not a
+		# worker, not a date. The record that carries those is the Inspection
+		# SESSION, which links to Company and is scoped by Frappe exactly as
+		# everything else. Scoping the template would mean a user of entity A
+		# being unable to read the definition of the form that entity B's
+		# sessions were worked from — which breaks every packet that prints a
+		# session's provenance while protecting nothing, because there is nothing
+		# on the row to protect.
 		self.assertEqual(
 			sorted(unscoped),
 			[
 				"Compliance Regime",
+				"Inspection Template",
 				"MCP Action Log",
 				"Staged File Chunk",
 				"Staged File Upload Session",

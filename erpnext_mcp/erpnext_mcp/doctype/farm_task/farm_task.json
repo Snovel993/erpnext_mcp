@@ -26,6 +26,7 @@
   "source_section",
   "source_alert",
   "source_workorder",
+  "inspection_session",
   "evidence_section",
   "evidence_required",
   "record_section",
@@ -175,6 +176,14 @@
    "fieldname": "source_workorder",
    "fieldtype": "Data",
    "label": "Source Work Order"
+  },
+  {
+   "description": "The Inspection Session this task is, where it is one. v0.21.0. A task carrying it is a MULTI-SECTION VISIT — one card on the board, one claim, one trip, and a sectioned form behind it that produces several compliance records. Blank is the ordinary case and means exactly what it always meant: one task, one piece of work, one record. THE TASK IS STILL THE DISPATCH ATOM either way — it is what a worker claims, what the concurrent-claim limit counts, and what the Kanban board shows. The session is the form behind the card, never a second kind of card beside it.",
+   "fieldname": "inspection_session",
+   "fieldtype": "Link",
+   "label": "Inspection Session",
+   "options": "Inspection Session",
+   "search_index": 1
   },
   {
    "fieldname": "evidence_section",

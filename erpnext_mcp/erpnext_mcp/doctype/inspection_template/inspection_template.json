@@ -1,0 +1,207 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-03 23:00:00.000000",
+ "description": "One shape of visit, defined as DATA rather than as code: which sections a worker works through in one trip to one place, what evidence each one needs, and which compliance record each one produces. A TEMPLATE IS A RECORD ANYBODY CAN ADD — create_inspection_template writes one and it reaches the handset on the next fetch, with no app release and no doctype edit, which is the whole claim. WHAT IT DOES NOT DO IS MERGE THE COMPLIANCE RECORDS: a Cabin Opening produces a Housing Inspection, two Detector Tests and a Water Test, separately, at their own cadences, because those are four regulators asking four questions and a merged record answers none of them. The session is the worker's afternoon; the records are the register. TEMPLATES ARE VERSIONED BY COPY — an edit writes a NEW row at version+1 and points the old row's `superseded_by` at it, so a session submitted last April can still be read against the template it was actually worked from.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "template_name",
+  "applies_to_asset_type",
+  "identity_col",
+  "active",
+  "version",
+  "superseded_by",
+  "description_section",
+  "description",
+  "work_section",
+  "skill_required",
+  "estimated_duration_minutes",
+  "work_col",
+  "cadence_trigger_expression",
+  "sections_section",
+  "sections",
+  "regime_section",
+  "regulation_citations",
+  "regimes"
+ ],
+ "fields": [
+  {
+   "default": "INSPT-.YYYY.-.####",
+   "description": "The series an Inspection Template is named from, expanded by the controller rather than by Frappe's naming_series hook so a docname is the same shape on a bench and in the standalone suite — INSPT-2026-0001. The year is the year the template was authored, which is also the year an auditor asking 'when did you start doing it this way' is looking for.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "INSPT-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "What this visit is called, in the words a foreman uses — 'Post-harvest Cabin Close-down', not 'template 3'. DELIBERATELY NOT UNIQUE AT THE SCHEMA LEVEL, because a template is versioned by copy and version 1 and version 2 of one template share a name by definition. What IS enforced, in the controller, is that only ONE LIVE row may hold a given name: a second active, unsuperseded template called 'Mid-season Habitability' is two answers to one question, and the one a worker gets would be whichever sorted first.",
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Template Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "General",
+   "description": "What kind of thing this template can be attached to. Where the value names a DocType this site has — Housing Unit, Field, Irrigation Zone — a session's `location_doctype` MUST match it, which is what stops a cabin template being started against a sprayer. Where it does not — Sprayer, Cabin, General — the value is a label for the operator and nothing is enforced, because refusing a location on the strength of a word this app has no register behind would be a refusal it cannot justify.",
+   "fieldname": "applies_to_asset_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Applies To",
+   "options": "Housing Unit\nField\nIrrigation Zone\nSprayer\nCabin\nGeneral",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "1",
+   "description": "Whether new sessions may be started from this template. Turning it off HIDES IT WITHOUT DESTROYING ANYTHING: every session ever worked from it stays readable, and every compliance record it produced stays in the register and in the audit packet. A template is deactivated when the operation stops doing it that way, and the sessions are the record that it used to.",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "default": "1",
+   "description": "Which version of this template this row is. A session PINS it at creation, so a template edited in July does not retroactively change how April's session is read — the number on the session and the number here are how a reader knows whether they are looking at the same document the worker was.",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Version",
+   "read_only": 1
+  },
+  {
+   "description": "The row that replaced this one. Set by update_inspection_template, which writes a NEW record at version+1 rather than editing this one — so the version a session was worked from is still on the site, in full, with its sections as they were. A soft supersede: this row is deactivated, never deleted.",
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "Inspection Template",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What this visit is for and when it is done — the paragraph a foreman reads when deciding whether this is the template for today. REQUIRED, because a template with sections and no statement of purpose is a form somebody has to reverse-engineer.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "work_section",
+   "fieldtype": "Section Break",
+   "label": "The work"
+  },
+  {
+   "description": "The crew skill this visit needs, copied onto any Farm Task raised for it — 'camp_maintenance', 'applicator'. Same free-text vocabulary Farm Task.skill_required uses, so the pool filter matches without translation.",
+   "fieldname": "skill_required",
+   "fieldtype": "Data",
+   "label": "Skill Required",
+   "search_index": 1
+  },
+  {
+   "description": "How long the whole visit takes, in minutes — all sections, one trip. It is what makes 'MC-Cabin-01: 3 tasks, ~90 min combined' answerable before somebody sets off, and it is deliberately the WHOLE visit rather than the sum of the parts, because walking in once is most of the saving.",
+   "fieldname": "estimated_duration_minutes",
+   "fieldtype": "Int",
+   "label": "Estimated Duration (minutes)"
+  },
+  {
+   "fieldname": "work_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When the rule engine should raise this template instead of separate tasks, written as the alert types that must ALL be pending at one place — 'housing_inspection_overdue AND housing_detector_test_stale'. PROSE FOR A READER, NOT A LANGUAGE THE ENGINE PARSES: matching is done deterministically on the sections' `produces_record_doctype` against the records the pending alerts ask for, so a template whose sections cover the pending alerts matches whether or not anybody wrote this sentence. Leaving it empty means the template is spawnable by hand only.",
+   "fieldname": "cadence_trigger_expression",
+   "fieldtype": "Small Text",
+   "label": "Cadence Trigger"
+  },
+  {
+   "fieldname": "sections_section",
+   "fieldtype": "Section Break",
+   "label": "Sections"
+  },
+  {
+   "description": "The parts of the visit, in the order they are worked. AT LEAST ONE IS REQUIRED — a template with no sections is a name.",
+   "fieldname": "sections",
+   "fieldtype": "Table",
+   "label": "Sections",
+   "options": "Inspection Template Section",
+   "reqd": 1
+  },
+  {
+   "fieldname": "regime_section",
+   "fieldtype": "Section Break",
+   "label": "What it answers"
+  },
+  {
+   "description": "The regulations this visit is evidence for, comma-separated — 'OAR 437-004-1120; 29 CFR 1910.142; FSMA Subpart L'. The field an auditor asks about, and the reason a template is a compliance artefact rather than a convenience: it states, before anybody works it, which rule the afternoon is answering.",
+   "fieldname": "regulation_citations",
+   "fieldtype": "Small Text",
+   "label": "Regulation Citations"
+  },
+  {
+   "description": "The audits this template's output belongs to. Same vocabulary as every other regime tag in this app — seeded from erpnext_mcp/training.py, picked rather than typed, so nobody writes OSHA where the vocabulary says OR-OSHA.",
+   "fieldname": "regimes",
+   "fieldtype": "Table MultiSelect",
+   "label": "Regimes",
+   "options": "Compliance Regime Link"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 23:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Inspection Template",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "template_name,applies_to_asset_type,version",
+ "sort_field": "template_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "template_name",
+ "track_changes": 1
+}

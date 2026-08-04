@@ -1,0 +1,123 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-03 23:00:00.000000",
+ "description": "One section of one session, as the worker actually submitted it — when, what they ticked, what they measured, what they said, which files answered it, and WHICH COMPLIANCE RECORD IT PRODUCED. That last column is the whole chain of custody: an auditor holding a Housing Inspection can ask which visit produced it, and this row is the answer, with the same signature and the same photographs as the two other records that came out of the same walk. A row whose `produced_record_link` is empty either produced nothing by design (an evidence-only section) or was skipped, and `skipped` says which.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_name",
+  "submitted_at",
+  "skipped",
+  "record_col",
+  "produces_record_doctype",
+  "produced_record_link",
+  "detail_section",
+  "notes",
+  "data_section",
+  "checklist_values_json",
+  "measurements_json",
+  "evidence_files_json"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "description": "The template section this answers, by name. Matched against Inspection Template Section.section_name on the version the session pinned — NOT against whatever the template says today, which is the entire reason the version is pinned.",
+   "fieldname": "section_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Section",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "columns": 2,
+   "description": "When this section was submitted. Per section rather than per session because a close-down that took a morning has sections an hour apart, and an auditor reading a timestamp wants the one for the thing they are looking at.",
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Submitted"
+  },
+  {
+   "columns": 1,
+   "default": "0",
+   "description": "The worker said this section did not apply. Only ever true on an OPTIONAL section — a required one that is missing is refused rather than recorded as skipped. It is a row rather than an absence on purpose: 'the water was sampled last month so I did not sample it again' is a statement somebody made, and an empty space is not.",
+   "fieldname": "skipped",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Skipped"
+  },
+  {
+   "fieldname": "record_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What the section was supposed to produce, copied off the pinned template version at submission. Kept beside the link so a reader can tell 'produced nothing because it produces nothing' from 'produced nothing because something went wrong'.",
+   "fieldname": "produces_record_doctype",
+   "fieldtype": "Link",
+   "label": "Produces Record",
+   "options": "DocType"
+  },
+  {
+   "description": "The compliance record this section actually created — the Housing Inspection docname, the Detector Test docname. THE LINK POINTS OUT OF THE SESSION AND INTO THE REGISTER, which is the direction that matters: the register is what the alert engine reads and what the audit packet is built from, and the session is the story of how those records came to exist on one afternoon.",
+   "fieldname": "produced_record_link",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Produced Record",
+   "search_index": 1
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What the worker wrote about this section. Passed through to the compliance record's `findings` where the section produces one — an empty string is a positive statement that nothing was wrong, and the distinction is preserved all the way down.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "data_section",
+   "fieldtype": "Section Break",
+   "label": "Submitted values"
+  },
+  {
+   "description": "What was ticked, as a JSON object keyed by the contract's `checklist_items`.",
+   "fieldname": "checklist_values_json",
+   "fieldtype": "Code",
+   "label": "Checklist",
+   "options": "JSON"
+  },
+  {
+   "description": "What was measured, as a JSON object — a chlorine reading, a water temperature. Kept as submitted rather than coerced: a laboratory value transcribed into a float has already lost whether it was '<1'.",
+   "fieldname": "measurements_json",
+   "fieldtype": "Code",
+   "label": "Measurements",
+   "options": "JSON"
+  },
+  {
+   "description": "The File docnames from the session's shared tray that answered this section, as a JSON list. The SAME docname may appear on several sections and that is the tray working — one photograph, three records.",
+   "fieldname": "evidence_files_json",
+   "fieldtype": "Code",
+   "label": "Evidence Files",
+   "options": "JSON"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-03 23:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Inspection Session Section Submission",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

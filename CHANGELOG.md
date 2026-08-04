@@ -3,6 +3,92 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.21.0 — 2026-08-03
+
+**The shape of a visit is data.** A worker walks into a cabin once and does
+everything it needs; the register still gets a Housing Inspection, a Detector
+Test and a Water Test, separately, at their own cadences, because those are
+different regulators asking on different schedules. What defines that visit is
+now a **row an operator writes** rather than a release somebody ships: an
+Inspection Template says which sections a trip consists of, what evidence each
+needs and which compliance record each produces, and `create_inspection_template`
+makes one live on the next fetch — no code, no DocType edit, no TestFlight build.
+Tool surface **239 → 249** (111 read, 138 mutating); suite **4,055 → 4,121
+passing**. Backend only; the iOS sectioned-form renderer is v0.21.1. Full notes:
+[`RELEASES/v0.21.0.md`](RELEASES/v0.21.0.md).
+
+### Added
+
+- **Five doctypes.** `Inspection Template` (`INSPT-2026-0001`) and its
+  `Inspection Template Section` child define the shape; `Inspection Session`
+  (`INSPS-2026-0001`) records one worker's execution of it at one place, with
+  `Inspection Session Evidence` as the visit's **shared tray** — one photograph,
+  filed by reference against every record it answers — and `Inspection Session
+  Section Submission` carrying what was ticked, what was measured and **which
+  compliance record each section produced**.
+- **`Farm Task.inspection_session`**, nullable. A task carrying it is a
+  multi-section visit. **The task is still the dispatch atom** — one card, one
+  claim, one entry against the concurrent-claim limit — and the session is the
+  form behind that card, never a second kind of card beside it.
+- **Ten tools**: `create_inspection_template`, `update_inspection_template`,
+  `deactivate_inspection_template`, `start_inspection_session`,
+  `submit_inspection_session` and the declared-but-inert
+  `propose_inspection_template_from_regulation` (six mutating, all shipping OFF);
+  `list_inspection_templates`, `get_inspection_template`,
+  `list_inspection_sessions` and `get_inspection_session` (four read).
+- **Templates are VERSIONED BY COPY.** `update_inspection_template` writes a NEW
+  row at version+1 and never edits the old one, which it deactivates and points
+  at the new one. That is what makes a session from April readable in November,
+  and it is why a session started against v1 **while v2 is being authored** is
+  unaffected: v2 is a different document and v1 is never touched. A session pins
+  the row, and the row is the version.
+- **Four seeded templates**, on install and every migrate: Pre-season Cabin
+  Opening, Mid-season Habitability, Post-harvest Cabin Close-down, Spray Day
+  Inspection. Idempotent and checked by name across every row, so an operator who
+  edited, deactivated or superseded one keeps their decision. **Not a Frappe
+  `fixtures` entry**, and `test_hooks.py` still forbids the word.
+- **A `sessions` section on every audit packet** that already carries housing or
+  water. It adds no record — the records are already there in their own sections
+  — it adds the sentence joining them: *these were captured in a single Cabin
+  Opening session on 2026-04-15 by Ana Ramos, foreman Miguel Torres, worked from
+  version 2 of the template, evidence timestamped and signed.* Counted by
+  **record** rather than by submission, and by **distinct file** rather than by
+  evidence row.
+
+### Changed
+
+- **`generate_tasks_from_compliance_alerts` bundles.** Where a place has two or
+  more pending alerts of different types and an active template's sections
+  produce a **superset** of the records those alerts ask for, it raises ONE Farm
+  Task carrying an Inspection Session instead of N tasks. Matching is set
+  inclusion, tie-broken by `(extra sections, total sections, docname)` — **no
+  model, no interpretation, nothing probabilistic in the trigger path**. No match
+  is a first-class answer and leaves every alert on the unchanged per-alert path;
+  a site with no templates behaves exactly as v0.20.1 did. Idempotent by a
+  different mechanism from the per-alert path: a session records every alert it
+  answers, read back as whole docnames split on newlines, never as a substring.
+- **Two sections producing the same record for the same subject produce ONE
+  record.** A Detector Test carries a smoke result AND a CO result, both required
+  — so filing two Detector Tests for one cabin on one day would mean each
+  asserting something it was never told about the other detector, and two
+  compliance records that disagree is the failure this app exists to prevent.
+  Both section submissions link the one record, so the trail from either side of
+  the walk is intact, and both of the unit's detector dates move.
+
+### Not in this release
+
+- **No iOS changes.** Every template shipped here is renderable from
+  `get_inspection_template` alone; `renderer_hint` is a hint, and a client that
+  does not know one falls back to a freeform form with the submission still
+  valid. The sectioned-form renderer is v0.21.1.
+- **No `Spray Record` doctype**, so the Spray Day template's product-and-rate
+  section produces no standalone record and captures the product, EPA number,
+  rate, REI and PHI as findings and measurements. A section pointing at a doctype
+  a site does not have is refused **at authoring time**, rather than at
+  submission time while somebody is standing beside a sprayer. The day the
+  doctype ships, one `update_inspection_template` call points the section at it
+  and every session worked before then stays readable against its own version.
+
 ## 0.20.1 — 2026-08-03
 
 **The acknowledgement that never arrived.** A worker's iPad drained its offline

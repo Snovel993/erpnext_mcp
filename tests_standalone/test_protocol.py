@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_thirty_eight_tools_one_hundred_six_read_one_hundred_thirty_two_write(
+	def test_catalogue_is_two_hundred_forty_nine_tools_one_hundred_eleven_read_one_hundred_thirty_eight_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -456,10 +456,46 @@ class Catalogue(SeededTestCase):
 		already calling it. The two new columns on Farm Task Assignment
 		(`completion_signature`, `visit_id`) and the backfill patch came with it
 		and are not tools either.
+
+		v0.21.0 ADDED TEN — four reads and six writes — and the whole of the
+		release is one claim: THE SHAPE OF A VISIT IS DATA. An Inspection Template
+		says which sections a worker works through in one trip to one place, what
+		evidence each needs and which compliance record each produces, and it is a
+		ROW. Adding one is not a release.
+
+		  * `create_inspection_template` authors one, live on the next fetch;
+		  * `update_inspection_template` changes one by SUPERSEDING it — a new row
+		    at version+1, the old one deactivated and pointing at it, never
+		    edited. That is what makes a session from April readable in November,
+		    and why a session started against v1 while v2 is being authored is
+		    unaffected;
+		  * `deactivate_inspection_template` withdraws one with a reason and
+		    destroys nothing. There is deliberately no delete;
+		  * `start_inspection_session` opens one visit and PINS the version;
+		  * `submit_inspection_session` is the one with teeth: it files every
+		    section against the pinned version's contract and writes the
+		    compliance records the sections promise — separately, at their own
+		    cadences, from one walk with one signature;
+		  * `list_inspection_templates`, `get_inspection_template`,
+		    `list_inspection_sessions` and `get_inspection_session` read it all
+		    back. The second is what a handset renders a sectioned form from,
+		    which is why a new template needs no app update;
+		  * `propose_inspection_template_from_regulation` is DECLARED AND REFUSES.
+		    It is the surface an AI template proposer will occupy, reserved now so
+		    the shape is fixed before anything fills it, and inert now because at
+		    runtime this app is deterministic. It counts as a tool because it has
+		    a switch, a schema and a catalogue entry — everything a tool has
+		    except an implementation — and a surface an operator cannot see in the
+		    settings form is a surface nobody can refuse.
+
+		The five doctypes, the Farm Task link, the four seeded templates and the
+		rule engine's bundling — several overdue things at one cabin become ONE
+		visit rather than three trips — came with them and are not tools, which is
+		why the catalogue grew by ten and the release by considerably more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 239)
-		self.assertEqual(len(registry.READ_TOOLS), 107)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 132)
+		self.assertEqual(len(registry.TOOLS), 249)
+		self.assertEqual(len(registry.READ_TOOLS), 111)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 138)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
