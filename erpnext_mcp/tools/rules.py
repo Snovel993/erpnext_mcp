@@ -64,9 +64,12 @@ _TEXT_FIELDS = (
 	"builtin_scanner",
 	"custom_python",
 	"date_field",
+	"date_field_role",
 	"window_field",
 	"missing_date_behaviour",
 	"due_date_mode",
+	"gate_date_field",
+	"gate_scope",
 	"severity_critical",
 	"severity_warning",
 	"severity_expired",
@@ -86,13 +89,24 @@ _INT_FIELDS = (
 	"threshold_critical_days",
 	"threshold_warning_days",
 	"retention_years",
+	"gate_within_days",
 )
 
+#: v0.22.1's primitives are read here under the same names `build_rule` and the
+#: DocType use, and validated by the same parsers — so a rule authored through
+#: MCP and one this app seeds are the same shape of record, and a malformed blob
+#: is refused at whichever door it arrives at.
 _BLOB_FIELDS = (
 	("scope_filters", "scope_filters_json"),
 	("evidence_contract", "evidence_contract_json"),
 	("extra_parameters", "extra_parameters_json"),
 	("audit_packet_types", "audit_packet_types"),
+	("target_doctypes", "target_doctypes_json"),
+	("date_fields", "date_fields_json"),
+	("superseded_by_later_clean", "superseded_by_later_clean_json"),
+	("gate_related_table", "gate_related_table_json"),
+	("regime_heuristics", "regime_heuristics_json"),
+	("category_heuristics", "category_heuristics_json"),
 )
 
 
@@ -140,8 +154,10 @@ def _shape_note(shape: str) -> str:
 	if shape == compliance_rules.SHAPE_BUILTIN:
 		return (
 			"This rule's SHAPE is a scanner that ships with the app — a join no set of "
-			"declarative fields expresses yet, such as a finding superseded by a later clean "
-			"record. Everything an operator would change is still on this record: the "
+			"declarative fields expresses, and since v0.22.1 that is two rules rather than "
+			"seven: an aggregation over a child table, and a walk over a table of doctypes on "
+			"an elapsed-days clock. Both are permanent rather than pending. Everything an "
+			"operator would change is still on this record: the "
 			"thresholds, the scope filters, the citations, the regimes and the switch. Only the "
 			"shape of the scan is code, and it is code that was reviewed and shipped rather than "
 			"typed into a field."
@@ -531,22 +547,23 @@ def _spec_from_args(args: dict, required: bool, current: dict | None = None) -> 
 				"a shipped scanner. Nothing was written."
 			) from None
 
-	for argument, label in (
-		("scope_filters", "scope_filters"),
-		("evidence_contract", "evidence_contract"),
-		("audit_packet_types", "audit_packet_types"),
-		("extra_parameters", "extra_parameters"),
-	):
+	parsers = {
+		"scope_filters": compliance_rules.parse_filters,
+		"evidence_contract": compliance_rules.parse_contract,
+		"audit_packet_types": compliance_rules.parse_packet_types,
+		"extra_parameters": compliance_rules.as_object,
+		"target_doctypes": compliance_rules.parse_target_doctypes,
+		"date_fields": compliance_rules.parse_date_fields,
+		"superseded_by_later_clean": compliance_rules.parse_supersession,
+		"gate_related_table": compliance_rules.parse_gate_table,
+		"regime_heuristics": lambda raw, label: compliance_rules.parse_heuristics(raw, label, "regimes"),
+		"category_heuristics": lambda raw, label: compliance_rules.parse_heuristics(raw, label, "category"),
+	}
+	for argument, parser in parsers.items():
 		if argument not in spec:
 			continue
-		parser = {
-			"scope_filters": compliance_rules.parse_filters,
-			"evidence_contract": compliance_rules.parse_contract,
-			"audit_packet_types": compliance_rules.parse_packet_types,
-			"extra_parameters": compliance_rules.as_object,
-		}[argument]
 		try:
-			parser(spec[argument], label)
+			parser(spec[argument], argument)
 		except ValueError as exc:
 			raise ToolError(f"{exc} Nothing was written.") from None
 	return spec

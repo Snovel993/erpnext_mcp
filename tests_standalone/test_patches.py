@@ -28,6 +28,7 @@ import unittest
 from erpnext_mcp import install, settings
 from erpnext_mcp.patches import (
 	backfill_completion_signatures,
+	migrate_declarative_rules,
 	migrate_training_types,
 	register_custom_party_types,
 	set_default_tool_switches,
@@ -44,6 +45,7 @@ PATCHES = (
 	("erpnext_mcp.patches.register_custom_party_types", register_custom_party_types),
 	("erpnext_mcp.patches.migrate_training_types", migrate_training_types),
 	("erpnext_mcp.patches.backfill_completion_signatures", backfill_completion_signatures),
+	("erpnext_mcp.patches.migrate_declarative_rules", migrate_declarative_rules),
 )
 
 

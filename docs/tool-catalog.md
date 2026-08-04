@@ -7137,6 +7137,17 @@ docname); a `rule_id` with a colon or a space (the docname is
 kairotic gate; a malformed scope filter or unknown operator; and any
 `custom_python` the sandbox would not run.
 
+**Since v0.22.1** the declarative vocabulary also covers a finding superseded by
+a later clean record (`superseded_by_later_clean`), a second date used only as a
+gate (`gate_date_field` / `gate_within_days`), several anchors of the same kind
+with per-field labels (`date_fields`), an ordered lookup reading regimes or a
+category off a name (`regime_heuristics`, `category_heuristics`), a date that is
+a timestamp rather than a deadline (`date_field_role`), and one rule walking two
+kinds of record (`target_doctypes`). Eleven of the thirteen shipped rules are now
+fully declarative and none uses `custom_python` —
+`docs/configurable_compliance_framework.md` §4 has the table of questions that
+are already fields.
+
 ## 241. `approve_compliance_rule`
 
 **MUTATING (default off).** Accepts a rule and turns it on, recording who

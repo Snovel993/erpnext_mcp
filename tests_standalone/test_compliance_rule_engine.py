@@ -243,13 +243,16 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		self.assertEqual(len(report["created"]), 13)
 		self.assertEqual(len(compliance_rules.rule_rows()), 13)
 
-	def test_the_shapes_are_six_declarative_seven_builtin_and_no_custom_python(self):
+	def test_the_shapes_are_eleven_declarative_two_builtin_and_no_custom_python(self):
 		"""The split is a claim the release makes, so it is asserted rather than described.
 
-		`custom_python` shipping UNUSED is the deliberate part. It is an escape
-		hatch for rules an operator or a proposer writes; a framework that needed
-		it for its own rules would be a framework whose primitives do not reach
-		its own problem domain.
+		v0.22.0 shipped 6/7/0 and named the four primitives that would move five of
+		the seven. v0.22.1 added them, and this is the number that says so.
+
+		`custom_python` shipping UNUSED is the deliberate part, and it is more
+		pointed at 11/2/0 than it was at 6/7/0: a framework that needed a program
+		for eleven of its own thirteen rules would be a framework whose primitives
+		do not reach its own problem domain.
 		"""
 		self.seed_rules()
 		shapes = {}
@@ -258,16 +261,41 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		self.assertEqual(
 			sorted(shapes.get(compliance_rules.SHAPE_DECLARATIVE, [])),
 			[
+				"certification_expiring",
 				"filing_response_due",
 				"flc_license_expiring",
+				"housing_corrective_action_open",
+				"housing_detector_test_stale",
 				"housing_inspection_overdue",
 				"i9_expired",
 				"policy_review_overdue",
 				"training_expiring",
+				"water_test_contamination",
+				"water_test_stale",
 			],
 		)
-		self.assertEqual(len(shapes.get(compliance_rules.SHAPE_BUILTIN, [])), 7)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])
+
+	def test_the_two_that_stay_built_in_are_named_and_argued(self):
+		"""PERMANENT, not a backlog. Both are a different SHAPE of question.
+
+		`audit_action_overdue` walks a child table, keeps the overdue rows, picks
+		the worst and raises ONE alert per audit — an aggregation, and an
+		aggregation is not a filter. `supervisor_review_lapsed` walks a TABLE of
+		doctypes, needs an OR of two nulls, runs its clock on `creation`, and its
+		thresholds mean days ELAPSED rather than days remaining — a number that
+		means the opposite of what the same number means on the other twelve.
+
+		Saying "these two do not belong in a rule record" is part of the design,
+		so it is asserted rather than left as prose somebody can quietly widen.
+		"""
+		self.seed_rules()
+		builtin = sorted(
+			row["rule_id"]
+			for row in compliance_rules.rule_rows()
+			if compliance_rules.shape_of(row) == compliance_rules.SHAPE_BUILTIN
+		)
+		self.assertEqual(builtin, ["audit_action_overdue", "supervisor_review_lapsed"])
 
 	def test_every_migrated_rule_keeps_its_kairotic_gate_and_its_citation_verbatim(self):
 		"""The two fields an auditor reads. Neither may be paraphrased by a migration."""
@@ -292,8 +320,22 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 	def test_a_built_in_rule_still_carries_its_thresholds_on_the_record(self):
 		"""'Built-in' means the SHAPE is code, not that the numbers are."""
 		self.seed_rules()
+		row = self.rule_named("supervisor_review_lapsed")
+		self.assertEqual(row["builtin_scanner"], "supervisor_review_lapsed")
+		self.assertEqual(int(row["threshold_critical_days"]), 30)
+		self.assertEqual(int(row["threshold_warning_days"]), 14)
+
+	def test_the_rule_that_was_built_in_yesterday_keeps_every_number_it_had(self):
+		"""Migrating a rule to declarative must not move a single tunable.
+
+		`certification_expiring` was the built-in the v0.22.0 notes argued hardest
+		about. It is data now, and the numbers on the record are the ones the
+		scanner read the night before — same critical threshold, same default
+		window, same per-row window field.
+		"""
+		self.seed_rules()
 		row = self.rule_named("certification_expiring")
-		self.assertEqual(row["builtin_scanner"], "certification_expiring")
+		self.assertEqual(row["builtin_scanner"], "")
 		self.assertEqual(int(row["threshold_critical_days"]), 30)
 		self.assertEqual(int(row["threshold_warning_days"]), 90)
 		self.assertEqual(row["window_field"], "renewal_window_days")

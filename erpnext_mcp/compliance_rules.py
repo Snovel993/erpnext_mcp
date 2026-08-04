@@ -30,15 +30,19 @@ WHAT MOVED, AND WHAT DELIBERATELY DID NOT:
 
 THREE SHAPES OF RULE, AND THE SPLIT IS THE INTERESTING PART:
 
-  DECLARATIVE     the record says everything: target doctype, date field,
-                  cadence, thresholds, scope filters, message template. Six of
-                  the thirteen shipped rules are this, and a seventh is one
-                  primitive away.
+  DECLARATIVE     the record says everything: target doctype, date field(s),
+                  cadence, thresholds, scope filters, gates, supersession,
+                  heuristics, message template. ELEVEN of the thirteen shipped
+                  rules are this since v0.22.1, which added the four primitives
+                  v0.22.0's notes said the built-ins were waiting for.
   BUILT-IN        the record still owns every tunable, but the SHAPE of the
-                  scan — a finding superseded by a later clean record, a child
-                  table reduced to its worst row, two date fields that only
-                  matter together — is a named scanner that ships with the app,
-                  reviewed and tested. Seven of the thirteen.
+                  scan is a named scanner that ships with the app, reviewed and
+                  tested. TWO of the thirteen, and both are PERMANENT rather
+                  than pending: `audit_action_overdue` folds a child table to
+                  its worst row, which is an aggregation rather than a filter,
+                  and `supervisor_review_lapsed` walks a table of doctypes on a
+                  clock that measures days ELAPSED where every other rule's
+                  thresholds mean days REMAINING.
   CUSTOM PYTHON   a restricted program in a field. ZERO of the thirteen use it.
                   It exists for the rule an operator or an AI proposer writes
                   that the primitives do not reach yet, and every use of it is
@@ -82,6 +86,25 @@ DUE_FROM_ANCHOR = "From Anchor"
 DUE_TODAY = "Today"
 DUE_NONE = "None"
 
+#: v0.22.1. What `date_field_role` may say, and it is the smallest of the new
+#: fields and the one that unlocked the two supersession rules.
+#:
+#: `Clock` is every rule up to now: the date is a DEADLINE, and how far away it
+#: is decides the severity band. `Timestamp` says the date is WHEN THE THING WAS
+#: FOUND — a finding is not more or less true for being three weeks old, so the
+#: date is read for the message and for the supersession test and bands nothing.
+#: Every matching row raises `severity_expired`, and a row with no date raises
+#: too, because a corrective action nobody dated is still open.
+DATE_ROLE_CLOCK = "Clock"
+DATE_ROLE_TIMESTAMP = "Timestamp"
+
+#: v0.22.1. Where `gate_date_field` is read from. `Direct` is a column on the
+#: row being scanned; `Latest Related` is the newest date on another doctype
+#: that points back at it, which is what "when was this block last sprayed"
+#: looks like on a site keeping a spray log rather than a column.
+GATE_DIRECT = "Direct"
+GATE_LATEST_RELATED = "Latest Related"
+
 #: What `authored_by` may say. `System` is a rule this app shipped and seeded.
 AUTHOR_SYSTEM = "System"
 AUTHOR_OPERATOR = "Operator"
@@ -118,12 +141,14 @@ FILTER_OPS = {
 	"nin": "not one of a list",
 	"isnull": "the column is empty (value is ignored)",
 	"isnotnull": "the column has something in it (value is ignored)",
+	"istrue": "a CHECK BOX is ticked (value is ignored) — never `isnotnull`, because a Check read back before the database layer holds the string '0', which every truthiness test calls true",
+	"isfalse": "a check box is not ticked (value is ignored)",
 	"contains": "the value appears in the column, case-insensitively",
 	"ncontains": "the value does not appear in the column",
 }
 
 #: Ops that take no `value`.
-_NULLARY_OPS = ("isnull", "isnotnull")
+_NULLARY_OPS = ("isnull", "isnotnull", "istrue", "isfalse")
 
 #: Ops whose `value` must be a list.
 _LIST_OPS = ("in", "nin")
@@ -163,11 +188,21 @@ RULE_FIELDS = (
 	"requires_fields",
 	"builtin_scanner",
 	"custom_python",
+	"target_doctypes_json",
 	"date_field",
+	"date_field_role",
+	"date_fields_json",
 	"cadence_days",
 	"window_field",
 	"missing_date_behaviour",
 	"due_date_mode",
+	"gate_date_field",
+	"gate_within_days",
+	"gate_scope",
+	"gate_related_table_json",
+	"superseded_by_later_clean_json",
+	"regime_heuristics_json",
+	"category_heuristics_json",
 	"threshold_critical_days",
 	"threshold_warning_days",
 	"severity_critical",
@@ -270,6 +305,313 @@ def parse_filters(raw, label: str = "scope_filters") -> list:
 	return out
 
 
+# ── v0.22.1: the primitives that took five scanners declarative ─────────────
+#
+# Each parser below refuses AT AUTHORING TIME for the same reason `parse_filters`
+# does: every one of these blobs asks for nothing when it is wrong and looks like
+# it asks for something, and finding that out from a quiet calendar three weeks
+# later is the failure this app is written against.
+
+
+def parse_target_doctypes(raw, label: str = "target_doctypes") -> list:
+	"""The doctypes one rule walks, where it walks more than one.
+
+	`target_doctype` is singular by design and stays the default. This exists
+	because ONE shipped rule is genuinely about two record types —
+	`housing_corrective_action_open` reads Housing Inspection and Detector Test —
+	and splitting it into two rule_ids would split one afternoon's walk round the
+	camp across two alert types and change every alert docname on every site.
+
+	Each entry: `doctype` (required), `date_field` (defaults to the rule's), and
+	`label`, which is the fragment the message template says instead of the
+	doctype name — "the habitability inspection" reads like the errand it is and
+	"Housing Inspection" reads like a table.
+	"""
+	out = []
+	for index, entry in enumerate(as_list(raw, label)):
+		if isinstance(entry, str):
+			entry = {"doctype": entry}
+		if not isinstance(entry, dict):
+			raise ValueError(
+				f'{label}[{index}] must be an object like {{"doctype": "Detector Test", '
+				f'"date_field": "test_date", "label": "the detector test"}}, got {type(entry).__name__}.'
+			)
+		doctype = str(entry.get("doctype") or "").strip()
+		if not doctype:
+			raise ValueError(f"{label}[{index}] names no `doctype`.")
+		out.append(
+			{
+				"doctype": doctype,
+				"date_field": str(entry.get("date_field") or "").strip(),
+				"label": str(entry.get("label") or "").strip(),
+			}
+		)
+	return out
+
+
+def parse_date_fields(raw, label: str = "date_fields") -> list:
+	"""Several anchors of the SAME kind, where either being stale fires the rule.
+
+	`housing_detector_test_stale` is the case: a cabin has a smoke detector and a
+	CO detector, they are tested independently, and an alert saying only "a
+	detector is overdue" sends somebody to test the wrong one. So each entry
+	carries a `label`, and the message enumerates the stale ones by name.
+
+	The label is a FRAGMENT, not a sentence — "smoke" and "CO", because the
+	template around it supplies "detector". A rule whose labels read as sentences
+	produces a message that reads as a list.
+	"""
+	out = []
+	for index, entry in enumerate(as_list(raw, label)):
+		if isinstance(entry, str):
+			entry = {"field": entry}
+		if not isinstance(entry, dict):
+			raise ValueError(
+				f'{label}[{index}] must be an object like {{"field": "co_detector_last_test", '
+				f'"label": "CO"}}, got {type(entry).__name__}.'
+			)
+		field = str(entry.get("field") or "").strip()
+		if not field:
+			raise ValueError(f"{label}[{index}] names no `field`.")
+		out.append({"field": field, "label": str(entry.get("label") or field).strip()})
+	return out
+
+
+def parse_supersession(raw, label: str = "superseded_by_later_clean") -> dict:
+	"""The one gate in the engine that is a question about OTHER rows.
+
+	A finding stops being true when a LATER CLEAN RECORD FOR THE SAME SUBJECT
+	supersedes it: a cabin re-inspected in September with nothing found says more
+	about July's water stain than a checkbox does, and it requires nobody to
+	remember a field. No filter on the finding's own row can answer that.
+
+	  subject_field             what the two records have in common (`unit`, `source`)
+	  date_field                the date "later" is measured on; defaults to the target's
+	  doctype                   where to look for the clean record; defaults to the target
+	  clean_state_field         the column that says a record found nothing
+	  clean_state_values        the values of it that count as clean
+	  unreadable_counts_as_dirty  default TRUE: a record whose state is empty or
+	                            unreadable does NOT supersede. A result nobody can
+	                            interpret is not evidence that the water is safe,
+	                            and treating it as clean is how a compliance file
+	                            becomes a clean record of nothing.
+	"""
+	config = as_object(raw, label)
+	if not config:
+		return {}
+	subject = str(config.get("subject_field") or "").strip()
+	if not subject:
+		raise ValueError(
+			f"{label} names no `subject_field`, so there is nothing for a later record to be "
+			"'about the same thing' as. It is the column the finding and the clean record share — "
+			"`unit` on a camp record, `source` on a water test."
+		)
+	state_field = str(config.get("clean_state_field") or "").strip()
+	if not state_field:
+		raise ValueError(f"{label} names no `clean_state_field`, so no record can be read as clean.")
+	values = [
+		str(entry or "").strip()
+		for entry in as_list(config.get("clean_state_values"), f"{label}.clean_state_values")
+	]
+	values = [entry for entry in values if entry]
+	if not values:
+		raise ValueError(
+			f"{label} lists no `clean_state_values`. With none, NOTHING supersedes and the rule can "
+			"only ever be silenced by hand — which is the behaviour this primitive exists to remove."
+		)
+	return {
+		"doctype": str(config.get("doctype") or "").strip(),
+		"subject_field": subject,
+		"date_field": str(config.get("date_field") or "").strip(),
+		"clean_state_field": state_field,
+		"clean_state_values": values,
+		"unreadable_counts_as_dirty": bool(config.get("unreadable_counts_as_dirty", True)),
+	}
+
+
+def parse_gate_table(raw, label: str = "gate_related_table") -> dict:
+	"""Where a `Latest Related` gate date is read from.
+
+	`{doctype, subject_field, date_field, scope_filters}` — the newest `date_field`
+	on a row of `doctype` whose `subject_field` points back at the row being
+	scanned. `scope_filters` narrows which of those rows count, in the same
+	vocabulary as the rule's own filters.
+
+	`subject_key` is the column on the SCANNED row that the related rows name,
+	and it defaults to `name`, which is what a Link column holds.
+	"""
+	config = as_object(raw, label)
+	if not config:
+		return {}
+	out = {"subject_key": str(config.get("subject_key") or "name").strip() or "name"}
+	for key in ("doctype", "subject_field", "date_field"):
+		value = str(config.get(key) or "").strip()
+		if not value:
+			raise ValueError(
+				f"{label} names no `{key}`. A related-table gate needs all three of doctype, "
+				"subject_field and date_field, or it reads nothing and silences the rule entirely."
+			)
+		out[key] = value
+	out["scope_filters"] = parse_filters(config.get("scope_filters"), f"{label}.scope_filters")
+	return out
+
+
+#: The two outcome vocabularies `parse_heuristics` understands, and the key each
+#: one's default is written under.
+HEURISTIC_OUTCOMES = {
+	"regimes": ("then_regimes", "default_regimes"),
+	"category": ("then_category", "default_category"),
+}
+
+#: The matchers a heuristic entry may use. `if_field_contains` is a substring
+#: read of a name; `if_field_in` is exact membership of a closed list.
+HEURISTIC_MATCHERS = ("if_field_contains", "if_field_in")
+
+
+def parse_heuristics(raw, label: str, outcome: str = "regimes") -> list:
+	"""An ORDERED lookup table, as data. First match wins, and the order is the content.
+
+	`regimes_from_field` copies tags off a column. This is for the case where
+	there is no column — only a NAME TO READ. A certificate's regimes come from
+	its type through an ordered eleven-row needle table, and the ordering is the
+	whole content: `globalgap` must be checked before `gap`, because "GlobalGAP"
+	contains "GAP" and a USDA GAP packet must not be handed another scheme's
+	certificate.
+
+	THE FIELD ORDER IS THE OUTER LOOP. Where entries name more than one field,
+	every entry is tried against the first-named field before ANY entry is tried
+	against the second. That is not an implementation detail: a certificate typed
+	"Food Safety Certificate" and named "WPS refresher" is a food-safety
+	certificate, and a table that scanned entry-first would retag it from a word
+	somebody typed on the day. The type is consulted first and the name is the
+	fallback, exactly as the Python it replaces did.
+
+	```json
+	[
+	  {"if_field_contains": {"field": ["cert_type", "cert_name"], "value": ["wps", "worker protection"]},
+	   "then_regimes": ["WPS"]},
+	  {"if_field_contains": {"field": ["cert_type", "cert_name"], "value": "globalgap"},
+	   "then_regimes": ["GlobalGAP"]},
+	  {"default_regimes": ["Internal"]}
+	]
+	```
+	"""
+	if outcome not in HEURISTIC_OUTCOMES:
+		raise ValueError(
+			f"{label}: unknown outcome {outcome!r}."
+		)  # pragma: no cover - callers pass constants
+	then_key, default_key = HEURISTIC_OUTCOMES[outcome]
+	out = []
+	for index, entry in enumerate(as_list(raw, label)):
+		if not isinstance(entry, dict):
+			raise ValueError(
+				f'{label}[{index}] must be an object like {{"if_field_contains": {{"field": "cert_type", '
+				f'"value": "wps"}}, "{then_key}": [...]}}, got {type(entry).__name__}.'
+			)
+		if default_key in entry:
+			out.append({default_key: _heuristic_outcome(entry[default_key], outcome, label, index)})
+			continue
+		matcher = next((key for key in HEURISTIC_MATCHERS if key in entry), "")
+		if not matcher:
+			raise ValueError(
+				f"{label}[{index}] has no matcher and no {default_key}. Each entry either tests "
+				f"something ({', '.join(HEURISTIC_MATCHERS)}) or is the fallback."
+			)
+		test = entry[matcher]
+		if not isinstance(test, dict):
+			raise ValueError(f"{label}[{index}].{matcher} must be an object with `field` and `value`.")
+		fields = test.get("field")
+		fields = [fields] if isinstance(fields, str) else list(fields or [])
+		fields = [str(field or "").strip() for field in fields]
+		fields = [field for field in fields if field]
+		if not fields:
+			raise ValueError(f"{label}[{index}].{matcher} names no `field`.")
+		values = test.get("value")
+		values = [values] if isinstance(values, (str, int, float)) else list(values or [])
+		values = [str(value or "").strip() for value in values]
+		values = [value for value in values if value]
+		if not values:
+			raise ValueError(
+				f"{label}[{index}].{matcher} names no `value`. An entry that matches on nothing "
+				"matches EVERYTHING that reaches it, which is a fallback wearing a test's clothes."
+			)
+		if then_key not in entry:
+			raise ValueError(f"{label}[{index}] tests something but says no `{then_key}`.")
+		# NORMALISED INTO THE VOCABULARY IT WAS WRITTEN IN, not into an internal
+		# shape. Every one of these parsers has to accept its own output, because
+		# the column is parsed on save, stored, and parsed again on every sweep —
+		# a parser whose output it cannot read is a rule that validates once and
+		# then quietly stops matching anything, which is the worst failure
+		# available to a compliance rule. It also means an operator reading the
+		# stored JSON reads the same words the documentation uses.
+		out.append(
+			{
+				matcher: {
+					"field": fields,
+					"value": values,
+					"case_insensitive": bool(test.get("case_insensitive", True)),
+				},
+				then_key: _heuristic_outcome(entry[then_key], outcome, label, index),
+			}
+		)
+	return out
+
+
+def _heuristic_outcome(value, outcome: str, label: str, index: int):
+	if outcome == "category":
+		text = str(value or "").strip()
+		if text and text not in CATEGORIES:
+			raise ValueError(
+				f"{label}[{index}] produces category {text!r}, which is not one of: "
+				f"{', '.join(CATEGORIES)}. A category nothing groups by puts the alert in a "
+				"section of the calendar nobody opens."
+			)
+		return text
+	values = [value] if isinstance(value, str) else list(value or [])
+	try:
+		return regimes_vocabulary.require(values, f"{label}[{index}]")
+	except ValueError as exc:
+		raise ValueError(str(exc)) from None
+
+
+def match_heuristics(entries: list, row: dict, outcome: str = "regimes"):
+	"""Evaluate a parsed heuristic table against one row. See `parse_heuristics`."""
+	then_key, default_key = HEURISTIC_OUTCOMES[outcome]
+	tests = []
+	for entry in entries:
+		matcher = next((key for key in HEURISTIC_MATCHERS if key in entry), "")
+		if matcher:
+			tests.append((matcher, entry[matcher], entry.get(then_key)))
+	order: list = []
+	for _matcher, test, _outcome in tests:
+		for field in test["field"]:
+			if field not in order:
+				order.append(field)
+	# THE FIELD ORDER IS THE OUTER LOOP. See `parse_heuristics`: the whole table
+	# is tried against the type before any of it is tried against the name.
+	for field in order:
+		for matcher, test, produced in tests:
+			if field in test["field"] and _heuristic_hit(matcher, test, row.get(field)):
+				return produced
+	for entry in entries:
+		if default_key in entry:
+			return entry[default_key]
+	return None
+
+
+def _heuristic_hit(matcher: str, test: dict, value) -> bool:
+	text = str(value if value is not None else "")
+	needles = list(test["value"])
+	if test.get("case_insensitive", True):
+		text = text.lower()
+		needles = [needle.lower() for needle in needles]
+	if not text:
+		return False
+	if matcher == "if_field_in":
+		return text in needles
+	return any(needle in text for needle in needles)
+
+
 def parse_contract(raw, label: str = "evidence_contract") -> dict:
 	"""An evidence contract, refusing any key outside the shared vocabulary."""
 	contract = as_object(raw, label)
@@ -346,6 +688,16 @@ def _passes(value, op: str, wanted) -> bool:
 		return not str(value or "").strip()
 	if op == "isnotnull":
 		return bool(str(value or "").strip())
+	# CHECK BOXES GO THROUGH `compat.checked` AND NOTHING ELSE. A Check field read
+	# back before it has been through the database layer carries the STRING "0",
+	# which `isnotnull` — and every other truthiness test — calls true. On the rule
+	# that uses this the wrong answer is "this shed is a worker facility", which
+	# puts a building nobody sleeps in on the camp's inspection list and, worse,
+	# would have put a real bunkhouse off it had the sense been the other way.
+	if op == "istrue":
+		return compat.checked(value)
+	if op == "isfalse":
+		return not compat.checked(value)
 
 	text = str(value if value is not None else "")
 	if op == "eq":
@@ -540,6 +892,7 @@ def describe(row: dict, with_definition: bool = False) -> dict:
 	if with_definition:
 		out["definition"] = {
 			"date_field": row.get("date_field"),
+			"date_field_role": row.get("date_field_role") or DATE_ROLE_CLOCK,
 			"cadence_days": int(row.get("cadence_days") or 0),
 			"window_field": row.get("window_field"),
 			"missing_date_behaviour": row.get("missing_date_behaviour") or ON_MISSING_SKIP,
@@ -551,6 +904,26 @@ def describe(row: dict, with_definition: bool = False) -> dict:
 			"severity_expired": row.get("severity_expired") or "Critical",
 			"scope_filters": _quietly(parse_filters, row.get("scope_filters_json")),
 			"extra_parameters": _quietly(as_object, row.get("extra_parameters_json"), {}),
+			# v0.22.1's primitives. NULLABLE AND ADDITIVE: a rule that uses none of
+			# them reports empties here, and every key `get_compliance_rule` returned
+			# before still means what it meant.
+			"target_doctypes": _quietly(parse_target_doctypes, row.get("target_doctypes_json")),
+			"date_fields": _quietly(parse_date_fields, row.get("date_fields_json")),
+			"superseded_by_later_clean": _quietly(
+				parse_supersession, row.get("superseded_by_later_clean_json"), {}
+			),
+			"gate_date_field": row.get("gate_date_field"),
+			"gate_within_days": int(row.get("gate_within_days") or 0),
+			"gate_scope": row.get("gate_scope") or GATE_DIRECT,
+			"gate_related_table": _quietly(parse_gate_table, row.get("gate_related_table_json"), {}),
+			"regime_heuristics": _quietly(
+				lambda raw: parse_heuristics(raw, "regime_heuristics", "regimes"),
+				row.get("regime_heuristics_json"),
+			),
+			"category_heuristics": _quietly(
+				lambda raw: parse_heuristics(raw, "category_heuristics", "category"),
+				row.get("category_heuristics_json"),
+			),
 			"message_template": row.get("message_template"),
 			"regimes_from_field": row.get("regimes_from_field"),
 			"builtin_scanner": row.get("builtin_scanner"),
@@ -592,10 +965,14 @@ RULE_DEFAULTS = {
 	"builtin_scanner": "",
 	"custom_python": "",
 	"date_field": "",
+	"date_field_role": DATE_ROLE_CLOCK,
 	"cadence_days": 0,
 	"window_field": "",
 	"missing_date_behaviour": ON_MISSING_SKIP,
 	"due_date_mode": DUE_FROM_ANCHOR,
+	"gate_date_field": "",
+	"gate_within_days": 0,
+	"gate_scope": GATE_DIRECT,
 	"threshold_critical_days": 30,
 	"threshold_warning_days": 90,
 	"severity_critical": "Critical",
@@ -617,6 +994,29 @@ RULE_DEFAULTS = {
 	"approver_employee": None,
 	"approver_signature": "",
 }
+
+
+#: v0.22.1's four primitives (and the two helpers they needed), as
+#: (spec key, column, parser). One table so the seeder, `create_compliance_rule`,
+#: `update_compliance_rule`, the controller and `describe` cannot drift into
+#: validating different things — the drift that would let a malformed blob
+#: through one door and be refused at another.
+_PRIMITIVE_BLOBS = (
+	("target_doctypes", "target_doctypes_json", parse_target_doctypes),
+	("date_fields", "date_fields_json", parse_date_fields),
+	("superseded_by_later_clean", "superseded_by_later_clean_json", parse_supersession),
+	("gate_related_table", "gate_related_table_json", parse_gate_table),
+	(
+		"regime_heuristics",
+		"regime_heuristics_json",
+		lambda raw, label="regime_heuristics": parse_heuristics(raw, label, "regimes"),
+	),
+	(
+		"category_heuristics",
+		"category_heuristics_json",
+		lambda raw, label="category_heuristics": parse_heuristics(raw, label, "category"),
+	),
+)
 
 
 def build_rule(spec: dict):
@@ -646,6 +1046,12 @@ def build_rule(spec: dict):
 	doc.audit_packet_types = json.dumps(
 		parse_packet_types(spec.get("audit_packet_types", spec.get("audit_packet_types_json")))
 	)
+	# v0.22.1. Each of these is written as `[]` / `{}` rather than left NULL where
+	# the spec is silent, so a rule that does not use a primitive says so in the
+	# same shape as one that does — an operator reading two rules side by side
+	# should not have to know that a blank column and an empty list are one thing.
+	for argument, column, parser in _PRIMITIVE_BLOBS:
+		doc.set(column, json.dumps(parser(spec.get(argument, spec.get(column)))))
 	for regime in regimes_vocabulary.to_rows(spec.get("regimes") or []):
 		doc.append("regimes", dict(regime))
 	return doc

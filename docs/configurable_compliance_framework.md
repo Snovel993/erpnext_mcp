@@ -19,6 +19,11 @@ keys each alert on the rule and the record and nothing that moves daily, still
 auto-dismisses what it did not observe. Only *where the rule set comes from*
 changed.
 
+**v0.22.1 added the four primitives v0.22.0's §5 named**, and five of the seven
+rules that still carried a shipped scanner became data. The split is now
+**11 declarative / 2 built-in-permanent / 0 `custom_python`**, and the two that
+did not move are argued in §5 as permanent rather than as backlog.
+
 ---
 
 ## 1. The non-negotiable: the runtime is deterministic
@@ -53,18 +58,25 @@ existing rule, and flag any proposal carrying `custom_python` for extra review.
 
 | Shape | What is on the record | What is code | Shipped rules |
 | --- | --- | --- | --- |
-| **declarative** | everything | nothing rule-specific | 6 |
-| **builtin_scanner** | every tunable — thresholds, scope, citations, regimes, message where used, the switch | the *shape of the join* | 7 |
+| **declarative** | everything | nothing rule-specific | **11** |
+| **builtin_scanner** | every tunable — thresholds, scope, citations, regimes, the switch | the *shape of the join* | **2** |
 | **custom_python** | everything, including a restricted program | the interpreter that runs it | **0** |
 
-That `0` is the important number. `custom_python` is an escape hatch for rules an
-operator or a proposer writes that the primitives do not reach — and a framework
-that needed it for its own thirteen rules would be a framework whose vocabulary
-does not reach its own problem domain.
+That `0` is the important number, and it means more at 11/2/0 than it did at
+6/7/0. `custom_python` is an escape hatch for rules an operator or a proposer
+writes that the primitives do not reach — and a framework that needed a program
+for eleven of its own thirteen rules would be a framework whose vocabulary does
+not reach its own problem domain.
 
 **The right response to reaching for `custom_python` is to say what shape of
-question the rule asks, and turn that shape into a field.** §5 does exactly that
-for the seven built-ins.
+question the rule asks, and turn that shape into a field.** §5 is the record of
+doing exactly that: v0.22.0 named four primitives its built-ins were waiting for,
+v0.22.1 built them, and five rules moved.
+
+The two that remain built-in are **permanent**, not pending. Both ask a different
+*shape* of question — an aggregation, and a walk over a table of doctypes with
+its clock on `creation` — and §5 says why turning either into a field would make
+the vocabulary worse rather than wider.
 
 ---
 
@@ -102,6 +114,201 @@ message         = render(message_template, row + computed context)
 | `message_template` | Jinja, rendered in a sandbox with **no framework in it**. |
 | `regimes` / `regimes_from_field` | The audits the alert answers to, from the rule or copied off the row. |
 | `requires_doctypes` / `requires_fields` | What must exist for the rule to run at all. |
+
+### v0.22.1's primitives
+
+Four field groups, plus two small helpers each of them turned out to need. Every
+one is **nullable and additive**: a rule that uses none of them is exactly the
+rule v0.22.0 could already express, and `get_compliance_rule` reports empties for
+the ones a rule does not use rather than nulls — an operator reading two rules
+side by side should not have to know that a blank column and an empty list are
+one thing.
+
+**The order the gates run in is part of the contract**, and it is worth stating
+because these primitives are the first ones that compose:
+
+```
+1. scope_filters          define the population — cheapest, purely local
+2. gate_date_field        is this row's condition RIPE at all?
+3. superseded_by_later_clean   is this finding still the LATEST word?
+4. the clock              how far past due, and therefore which severity
+```
+
+A different order would not merely be slower. Running supersession before the
+scope filters would mean a rule narrowed to one company reading another's records
+to decide what it can see, which is the kind of thing nobody notices until an
+auditor asks why an alert went quiet.
+
+#### 1. `superseded_by_later_clean_json` — the gate about *other rows*
+
+A finding stops being true when a **later clean record for the same subject**
+supersedes it. A cabin re-inspected in September with nothing found says more
+about July's water stain than a checkbox does, and it requires nobody to remember
+a field. No filter on the finding's own row can answer a question about other
+rows.
+
+```json
+{
+  "subject_field": "unit",
+  "clean_state_field": "workflow_state",
+  "clean_state_values": ["Recorded"],
+  "unreadable_counts_as_dirty": true
+}
+```
+
+`doctype` and `date_field` default to the target's, which is what lets one rule
+walking two doctypes supersede each on its own date column. Dates are compared as
+text — correct for the ISO strings every date column here holds.
+
+`unreadable_counts_as_dirty` defaults to **true** and should stay there: a record
+whose state is empty or unreadable does **not** supersede. A result nobody can
+interpret is not evidence that the water is safe, and treating it as clean is how
+a compliance file becomes a clean record of nothing.
+
+The index is built **once per sweep** and folded to a per-subject list, not
+queried per candidate. A camp with fifty cabins and four years of history is two
+queries, not four hundred — and that is a reason this is a field rather than a
+`custom_python` program, where the obvious way to write it is the per-row query.
+
+#### 2. `regime_heuristics_json` — an ordered lookup on a *name*
+
+`regimes_from_field` copies tags off a column. This is for the case where there
+is no column, only a **name to read**: a certificate's audits come from its TYPE
+through an ordered table.
+
+```json
+[
+  {"if_field_contains": {"field": ["cert_type", "cert_name"], "value": ["wps", "worker protection"]},
+   "then_regimes": ["WPS"]},
+  {"if_field_contains": {"field": ["cert_type", "cert_name"], "value": ["globalgap", "global gap"]},
+   "then_regimes": ["GlobalGAP"]},
+  {"if_field_contains": {"field": ["cert_type", "cert_name"], "value": ["gap"]},
+   "then_regimes": ["GAP"]},
+  {"default_regimes": ["Internal"]}
+]
+```
+
+**First match wins, and the order is the whole content.** `globalgap` is checked
+before `gap` because "GlobalGAP" contains "GAP", and a USDA GAP packet must not
+be handed another scheme's certificate.
+
+**Where entries name several fields, the field order is the OUTER loop**: the
+whole table is tried against `cert_type` before any of it is tried against
+`cert_name`. That is not an implementation detail. A certificate typed "Food
+Safety Training" and named "WPS refresher" is a food-safety certificate, and a
+table that scanned entry-first would retag it from a word somebody typed on the
+day.
+
+Matchers are `if_field_contains` (substring) and `if_field_in` (exact membership
+of a closed list), each taking `case_insensitive` — true by default, and worth
+turning off when the column is a Select rather than free text.
+
+The heuristics say what an **alert** is. The rule's own `regimes` stays the
+**union** of what the table can emit, because that is what
+`refresh_compliance_alerts(regime=…)` matches on to decide whether the rule has
+to run at all. Two different questions, both answered.
+
+`category_heuristics_json` is the same shape producing the alert's **category**,
+for the same reason: one rule fires on eleven kinds of certificate, an applicator
+licence is a Workforce item and a GlobalGAP certificate is a Certifications one,
+and a constant on the rule would file most of them under the wrong heading.
+
+#### 3. `gate_date_field` + `gate_within_days` — a second date, used only as a gate
+
+The declarative engine has **one** cadence anchor. Some rules are a *conjunction*
+over two independent dates: a block raises a water-test alert when it was sprayed
+inside the season **and** its water was tested outside the cadence, and neither
+half fires alone. Ground nobody is spraying raises nothing however stale its
+water.
+
+```jsonc
+"gate_date_field": "last_spray_date",
+"gate_within_days": 120,
+"gate_scope": "Direct"
+```
+
+**A row whose gate date is empty is gated OUT**, and that asymmetry with
+`missing_date_behaviour` is deliberate: no inspection ever recorded is the most
+overdue cabin there is; no spray ever recorded is the *least* urgent block there
+is. The gate is a claim that the condition matters now, and no date is no claim.
+
+`gate_scope: "Latest Related"` reads the newest date off **another doctype**
+pointing back at the row, for a site keeping a spray *log* rather than a spray
+*column*:
+
+```json
+{
+  "doctype": "Farm Task",
+  "subject_field": "field",
+  "date_field": "completed_on",
+  "subject_key": "name",
+  "scope_filters": [{"field": "task_type", "op": "eq", "value": "Spray"}]
+}
+```
+
+Read once per sweep and folded to a per-subject maximum, same as the supersession
+index.
+
+#### 4. `date_fields_json` — several anchors of the same kind
+
+A cabin has a smoke detector and a CO detector, tested independently. **Either**
+being stale fires, and the message must name which.
+
+```json
+[
+  {"field": "smoke_detector_last_test", "label": "smoke"},
+  {"field": "co_detector_last_test", "label": "CO"}
+]
+```
+
+Each is measured against the same `cadence_days`; the severity folds to the worst
+of them; the template is handed `stale_dates` — only the fields that actually
+reached a band, each with its `label`, `date`, `days_since` and `days_remaining`
+— plus `first_stale_label`.
+
+"The CO detector was last tested 400 days ago" is a different errand from "no
+smoke detector test has ever been recorded", and an alert saying only "a detector
+is overdue" sends somebody to test the wrong one.
+
+The labels are **fragments**, not sentences — "smoke", "CO" — because the
+template around them supplies "detector". A label that reads as a sentence
+produces a message that reads as a list.
+
+#### The two helpers the four needed
+
+**`date_field_role`** (`Clock`, the default, or `Timestamp`). A finding's date is
+*when the thing was found*, not a deadline. Left as a clock, a corrective action
+recorded today has zero days remaining, reaches no band on a rule whose
+thresholds are negative, and silently stops firing on exactly the day somebody
+needs to see it. `Timestamp` reads the date for the message and for the
+supersession test, bands nothing, and raises every matching row at
+`severity_expired` — including one with no date at all, because a finding nobody
+dated is still a finding.
+
+**`target_doctypes_json`**. `target_doctype` is singular by design and stays the
+default. One shipped rule is genuinely about two record types, because a cabin
+with a water stain and a cabin with a dead CO detector are the same conversation
+with the same person on the same walk round the camp:
+
+```json
+[
+  {"doctype": "Housing Inspection", "date_field": "inspection_date", "label": "the habitability inspection"},
+  {"doctype": "Detector Test", "date_field": "test_date", "label": "the detector test"}
+]
+```
+
+`label` is the fragment the message says instead of the doctype name — "the
+detector test" reads like the errand it is and "Detector Test" reads like a
+table. A doctype in the list that a site has not got is skipped, not fatal.
+
+#### One more operator, and the trap it exists for
+
+`istrue` / `isfalse` joined the scope-filter vocabulary in v0.22.1, and they are
+the **only** correct way to filter on a Check box. A Check read back before it has
+been through the database layer carries the *string* `"0"`, which `isnotnull` —
+and every other truthiness test — calls true. On the rule that needed it, the
+wrong answer is "this shed is a worker facility", which puts a building nobody
+sleeps in on the camp's inspection list.
 
 ### Scope filters, and why `default` is load-bearing
 
@@ -205,6 +412,43 @@ the dog. The subset actually needed here is small and closed — read some rows,
 compare some dates, build some observations — and an interpreter for that subset
 has no supply chain and refuses by construction rather than by configuration.
 
+### When to reach for `custom_python`
+
+**You probably don't.** That was already the intention in v0.22.0, when the
+answer rested on six declarative rules and a promise about four primitives. It
+now rests on eleven and the primitives themselves, so it is worth saying plainly:
+
+Before this field, check whether the question is one of these:
+
+| The question your rule asks | The field that already asks it |
+| --- | --- |
+| is this date past due, and by how much? | `date_field` + `cadence_days` + the thresholds |
+| …for **several** dates at once, naming which? | `date_fields_json` |
+| only for rows matching some columns? | `scope_filters_json` |
+| …including a **check box**? | `istrue` / `isfalse` — never `isnotnull` |
+| only when a **second** date is recent? | `gate_date_field` + `gate_within_days` |
+| …read off **another doctype**? | `gate_scope: Latest Related` |
+| is this finding still the latest word on its subject? | `superseded_by_later_clean_json` |
+| which audit / which category is **this row**? | `regime_heuristics_json`, `category_heuristics_json`, `regimes_from_field` |
+| is the date a deadline, or a timestamp? | `date_field_role` |
+| does one rule cover two kinds of record? | `target_doctypes_json` |
+| what does the alert actually *say*? | `message_template` |
+
+**The remaining honest uses are narrow**, and every one of them is a request for
+the next primitive rather than a home for a program:
+
+- an **aggregation** — group rows, fold to the worst, raise one alert per group.
+  That is `audit_action_overdue`, and §5 argues it should stay code rather than
+  become either a field or a program.
+- arithmetic across **three or more** columns that no threshold expresses.
+- a lookup against something structural this app models in Python and not in a
+  column.
+
+If you are reaching for it for anything else, say in one sentence what *shape* of
+question your rule asks. If that sentence fits in the table above, the answer is
+a field. If it does not, **file it** — the table above is exactly the list of
+sentences somebody filed against earlier versions of this document.
+
 ### The rule of thumb
 
 > If you can say in one sentence what *shape* of question your rule asks, that
@@ -212,80 +456,72 @@ has no supply chain and refuses by construction rather than by configuration.
 
 ---
 
-## 5. The seven built-ins, and the primitive each one is waiting for
+## 5. The migration of the five, and the two that stay
 
-These are ranked by what a new primitive would buy. This section is the v0.22.1
-backlog.
+This section was v0.22.0's backlog. It is now v0.22.1's changelog, and it ends
+with a shorter list than it started with.
 
-### Best value: `superseded_by_later_clean` — takes **two** rules declarative
+### What moved, and what each rule cost
 
-`housing_corrective_action_open` and `water_test_contamination` share one gate:
-**is this finding still true?** It stops being true when a *later clean record
-for the same subject* supersedes it — a cabin re-inspected in September with
-nothing found says more about July's water stain than a checkbox does.
+| Rule | Primitive it was waiting for | Also needed |
+| --- | --- | --- |
+| `housing_corrective_action_open` | `superseded_by_later_clean_json` | `target_doctypes_json`, `date_field_role` |
+| `water_test_contamination` | `superseded_by_later_clean_json` | `date_field_role` |
+| `certification_expiring` | `regime_heuristics_json` | `category_heuristics_json`, a band-order fix |
+| `water_test_stale` | `gate_date_field` + `gate_within_days` | — |
+| `housing_detector_test_stale` | `date_fields_json` | the `istrue` filter operator |
 
-No filter on the finding's own row can answer a question about *other rows*. The
-primitive is four values: `(doctype, subject_field, date_field, clean_state)`.
-One field group, two rules.
+**The hardest was `housing_corrective_action_open`**, and not because of
+supersession — that was the primitive the backlog ranked first and it landed
+cleanly enough to take `water_test_contamination` with it for free, which is the
+two-for-one v0.22.0 predicted. It was hard because of the two things nobody had
+written down:
 
-### Second: `regime_heuristics_json` — takes `certification_expiring` declarative
+- it walks **two doctypes** under one `rule_id`, and `target_doctype` is singular
+  by design. Splitting it into two rules would have split one walk round the camp
+  across two alert types and changed every alert docname on every site;
+- `inspection_date` is a **timestamp, not a deadline**. As a clock, a finding
+  recorded today has zero days remaining, reaches no band with this rule's
+  negative thresholds, and stops firing on exactly the day somebody needs to see
+  it. That bug does not show up on a fixture dated last month, which is what
+  makes it worth naming here.
 
-Three things keep it built-in, and only one is hard:
+The band-order fix `certification_expiring` needed is the same kind of thing.
+`_band` used to check the critical threshold before the outer window, which is
+indistinguishable from the shipped scanner until the **per-row** window is
+narrower than the rule's critical threshold — a certificate whose issuing body
+turns renewals round in ten days. The window is the claim about when the work can
+usefully start, and nothing inside the rule outranks it. The window is now checked
+first, which is what the Python always did.
 
-- the renewal window is per row → **already solved** by `window_field`;
-- the category is per row (an applicator licence is Workforce, a GlobalGAP
-  certificate is Certifications) → wants `category_from_field`;
-- the **regimes are derived from the certificate's TYPE** through an ordered
-  eleven-row needle table. `regimes_from_field` copies tags off a column; here
-  there is no column, only a name to read.
-
-`regime_heuristics_json` is that table as data: ordered `(needles → regimes)`
-pairs, first match wins. The ordering is the whole content — `globalgap` must be
-checked before `gap`, because "GlobalGAP" contains "GAP" and a USDA GAP packet
-must not be handed another scheme's certificate.
-
-### Third: `gate_date_field` + `gate_within_days` — takes `water_test_stale` declarative
-
-The declarative engine has **one** cadence anchor. This rule's gate is a
-conjunction over two independent fields: the block was sprayed inside the season
-**and** its water was tested outside the cadence. Neither half fires alone —
-ground nobody is spraying raises nothing however stale its water.
-
-The primitive is a second anchor used only as a gate: "only consider rows whose
-`<field>` is inside `<n>` days".
-
-### Fourth: plural `date_fields` — takes `housing_detector_test_stale` declarative
-
-A cabin has a smoke detector and a CO detector, tested independently; **either**
-being stale fires, and the message must name which. "The CO detector was last
-tested 400 days ago" is a different errand from "no smoke detector test has ever
-been recorded", and an alert saying only "a detector is overdue" sends somebody
-to test the wrong one.
-
-Needs per-field labels, a fold to worst-remaining for the severity, and an
-enumeration for the message. More machinery, and it buys one rule.
-
-### Probably never: `audit_action_overdue`
+### `audit_action_overdue` stays built-in. Permanently.
 
 It walks an Audit Event's corrective-action **child rows**, keeps the overdue
-ones, picks the worst, takes its severity from the worst finding's own severity,
-and raises **one alert per audit** rather than one per action — five open items
-on one PrimusGFS audit are one conversation with one auditor, and five rows would
-look like five problems.
+ones, picks the worst, takes its severity from that finding's own severity, and
+raises **one alert per audit** rather than one per action — five open items on one
+PrimusGFS audit are one conversation with one auditor, and five rows would look
+like five problems.
 
 Every part of that is an aggregation, and an aggregation is not a filter. The
 primitive would be a second engine: group-by, fold, pick. That is a fair
-description of "write it in Python". This is not a gap in the vocabulary; it is a
-different shape of question.
+description of "write it in Python", and building it as a field group would give
+the vocabulary a shape nothing else in it has, for one rule.
 
-### Probably never: `supervisor_review_lapsed`
+This is not a gap in the vocabulary. It is a different kind of question, and the
+honest answer is a reviewed, tested, shipped scanner with every tunable still on
+the record.
+
+### `supervisor_review_lapsed` stays built-in. Permanently.
 
 Three reasons, any one of which is enough:
 
 1. **It walks a table of doctypes, not one.** `REVIEW_TARGETS` is the list of
    records carrying the §112.161(b) review columns, written to grow — Housing
    Inspection, Water Test, Heat Exposure Event and Farm Task Assignment are each
-   one row away. `target_doctype` is singular by design.
+   one row away. v0.22.1's `target_doctypes_json` reaches *two* related camp
+   records with one shared shape; this is a registry of unrelated ones with
+   different columns, and stretching the field to cover it would make the field
+   worse for the rule it was built for.
 2. **The condition is an `OR` of two nulls.** A record is unreviewed when the
    reviewer is missing *or* the date is missing — a date with nobody attached is
    what an auditor is trained to disbelieve. Scope filters are ANDed
@@ -295,13 +531,24 @@ Three reasons, any one of which is enough:
    words are "after the records are made", and reading the activity date would
    raise a Critical on every record of a season somebody backfilled.
 
-Note also that this rule's thresholds mean **days elapsed**, not days remaining —
-the thing measured is an absence getting older rather than a deadline
-approaching. A number on a record that means the opposite of what the same number
-means on the other twelve is a number somebody will eventually misread, and that
-is the strongest single argument for leaving this one built-in.
+And the strongest argument is the one about the numbers: this rule's thresholds
+mean days **elapsed**, not days **remaining**. The thing measured is an absence
+getting older rather than a deadline approaching. A number on a record that means
+the opposite of what the same number means on the other twelve is a number
+somebody will eventually misread — and `date_field_role` deliberately did not
+grow a third value to paper over it. Two readings of a date field is a choice; a
+third that inverts the sign of every threshold beside it is a trap.
 
----
+### What "permanent" means here
+
+It means the answer is not "later". Both rules keep every tunable on their record
+— thresholds, scope filters, citations, regimes, packet list, switch — and only
+the shape of the join is code. `list_compliance_rules` reports them as
+`builtin_scanner`, and `get_compliance_rule` says on the row itself that the
+shape is a scanner rather than a gap.
+
+Two out of thirteen is the honest measure of a vocabulary: wide enough that the
+exceptions can be named, narrow enough that naming them is worth doing.
 
 ## 6. Provenance, approval and audit
 
@@ -402,6 +649,48 @@ docname, severity, category, company, source, message, due date, first seen.
 
 Not counts. Not "an alert of this type exists". The rows.
 
+`test_ccf_primitives.TheMigrationOfEachRuleChangesNothing` does the same thing
+for v0.22.1, once per migrated rule, on a fixture built to make that rule speak
+in as many of its shapes as it has — and it uses the **shipped scanner itself**
+as the oracle rather than a pasted expectation, by pointing the seeded rule back
+at its `builtin_scanner`, snapshotting, then pointing it at its declarative
+definition and snapshotting again. `test_e2e_workflow` then does it once more over
+a whole operation with all thirteen rules running together, because the
+interesting failures of a migration like this are not inside one rule.
+
+### The upgrade a v0.22.0 site actually gets
+
+**The seeder cannot perform v0.22.1's migration, and that is the same property
+that makes it safe.** It leaves alone anything already on the site, so a site
+that installed v0.22.0 has a `certification_expiring` row naming a built-in
+scanner that the seeder will never look at again.
+
+`patches/migrate_declarative_rules.py` does it deliberately, and answers the two
+questions the seeder never faces:
+
+- **an operator's edits survive.** Everything both shapes share is carried across
+  from the row that is on the site — thresholds, severities, cadence, citations,
+  regimes, retention, packets, producer recipe, approval, switch. A site that
+  contracted its annual detector cycle at ten months still has ten months
+  afterwards. Only the fields describing the *shape* of the scan come from the
+  shipped definition. `scope_filters` is **concatenated**, not replaced: in
+  v0.22.0 a built-in seeded with an empty filter list, so anything in that column
+  was added by an operator on top of the scanner's own scoping, and dropping it
+  would silently widen a rule somebody narrowed. `extra_parameters.spray_season_days`
+  is read across into `gate_within_days`, so a tuned spray season is not quietly
+  ignored by the new gate.
+- **the old row is superseded, not edited** — same as `update_compliance_rule`,
+  same reasoning. An alert raised last April can still be read against the
+  definition that raised it, and a sweep already running against v1 finishes
+  against v1.
+
+It is listed in `patches.txt` **and** called from `after_migrate`, so it runs at
+least twice on any real bench and is a no-op the second time: the check is "does
+this row still name a scanner", which is false the moment the first run
+succeeded. A rule it could not migrate keeps its built-in scanner — which still
+ships, still runs and still raises exactly the same alerts — and is named on the
+console.
+
 ---
 
 ## 8. Worked example
@@ -483,8 +772,8 @@ The rule *definitions* are data. The rule *engine* stays code.
 
 | Version | What |
 | --- | --- |
-| **v0.22.0** (this) | Compliance Rule doctype, declarative engine, sandbox, migration of the thirteen, seven tools. |
-| v0.22.1 | The primitives in §5, best-value first: `superseded_by_later_clean`, then `regime_heuristics_json`. Producer templates wired declaratively. |
+| v0.22.0 | Compliance Rule doctype, declarative engine, sandbox, migration of the thirteen, seven tools. **6 / 7 / 0.** |
+| **v0.22.1** (this) | The four primitives §5 named, plus `date_field_role`, `target_doctypes_json`, `category_heuristics_json` and the `istrue` filter operator. Five rules migrated; the remaining two argued as permanent. **11 / 2 / 0.** No new tools — the surface stays at 256. |
 | v0.23.5 | `propose_compliance_rule` wired: AI reads a regulation, drafts a rule with `authored_by = AI-proposed`, `enabled = 0` and an `ai_source_citation`; a review queue in Desk. |
 | v0.24.5 | Regulation Feed doctype + scheduled re-evaluation: registered sources are re-read, and regulations that moved produce change proposals. |
 

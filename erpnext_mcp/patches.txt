@@ -7,3 +7,4 @@ erpnext_mcp.patches.set_default_tool_switches
 erpnext_mcp.patches.register_custom_party_types
 erpnext_mcp.patches.migrate_training_types
 erpnext_mcp.patches.backfill_completion_signatures
+erpnext_mcp.patches.migrate_declarative_rules

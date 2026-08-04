@@ -24,12 +24,19 @@
   "scan_col",
   "builtin_scanner",
   "custom_python",
+  "target_doctypes_json",
   "cadence_section",
   "date_field",
+  "date_field_role",
+  "date_fields_json",
   "cadence_days",
   "window_field",
   "missing_date_behaviour",
   "due_date_mode",
+  "gate_date_field",
+  "gate_within_days",
+  "gate_scope",
+  "gate_related_table_json",
   "cadence_col",
   "threshold_critical_days",
   "threshold_warning_days",
@@ -39,9 +46,12 @@
   "scope_section",
   "scope_filters_json",
   "extra_parameters_json",
+  "superseded_by_later_clean_json",
   "message_section",
   "message_template",
   "regimes_from_field",
+  "regime_heuristics_json",
+  "category_heuristics_json",
   "producer_section",
   "producer_task_template",
   "producer_farm_task_type",
@@ -178,7 +188,7 @@
    "label": ""
   },
   {
-   "description": "The name of a scanner that SHIPS WITH THIS APP, for the rules whose gate is a join no set of declarative fields can express — a finding superseded by a later clean record, a child table walked and reduced to its worst row, two date fields that only matter together. The record still owns everything an operator would change: the thresholds, the scope, the citations, the regimes, the message where the scanner uses one, and the switch. Only the SHAPE of the scan is code, and it is code that was reviewed, tested and shipped rather than typed into a text field. list_compliance_rules names the scanners this site has.",
+   "description": "The name of a scanner that SHIPS WITH THIS APP, for a rule whose gate is a shape no set of declarative fields expresses. Since v0.22.1 that is TWO rules and both are permanent: a child table walked and folded to its worst row, which is an aggregation rather than a filter; and a walk over a TABLE of doctypes whose thresholds mean days elapsed rather than days remaining. Everything else the v0.22.0 notes listed here — supersession by a later clean record, two dates that only matter together, several anchors of the same kind — is now a field. The record still owns everything an operator would change: the thresholds, the scope, the citations, the regimes, the message where the scanner uses one, and the switch. Only the SHAPE of the scan is code, and it is code that was reviewed, tested and shipped rather than typed into a text field. list_compliance_rules names the scanners this site has.",
    "fieldname": "builtin_scanner",
    "fieldtype": "Data",
    "label": "Built-in Scanner",
@@ -192,6 +202,12 @@
    "options": "Python"
   },
   {
+   "description": "A JSON list of ADDITIONAL doctypes this one rule walks, where a rule is genuinely about more than one kind of record — `[{\"doctype\": \"Detector Test\", \"date_field\": \"test_date\", \"label\": \"the detector test\"}]`. `target_doctype` above is the first and is singular by design; this is the exception, and it is a small one. A cabin with a water stain and a cabin with a dead CO detector are the same conversation with the same person on the same walk round the camp, and splitting them into two rule_ids would split one afternoon's work across two alert types — and change every alert docname on every site. `label` is the fragment the message says instead of the doctype name. A doctype in this list that a site has not got is skipped, not fatal.",
+   "fieldname": "target_doctypes_json",
+   "fieldtype": "Long Text",
+   "label": "Additional Target DocTypes (JSON)"
+  },
+  {
    "fieldname": "cadence_section",
    "fieldtype": "Section Break",
    "label": "The cadence"
@@ -201,6 +217,20 @@
    "fieldname": "date_field",
    "fieldtype": "Data",
    "label": "Date Field"
+  },
+  {
+   "default": "Clock",
+   "description": "Whether `date_field` is a DEADLINE or a TIMESTAMP. `Clock` is every cadence and expiry rule: how far away the date is decides the severity band. `Timestamp` says the date is WHEN THE THING WAS FOUND — a corrective action is not more or less open for being three weeks old — so it is read for the message and for the supersession test and bands nothing: every matching row raises at `severity_expired`, and a row with no date raises too, because a finding nobody dated is still a finding.",
+   "fieldname": "date_field_role",
+   "fieldtype": "Select",
+   "label": "Date Field Role",
+   "options": "Clock\nTimestamp"
+  },
+  {
+   "description": "SEVERAL anchors of the same kind, where EITHER being stale fires the rule and the message must name which — `[{\"field\": \"smoke_detector_last_test\", \"label\": \"smoke\"}, {\"field\": \"co_detector_last_test\", \"label\": \"CO\"}]`. Each is measured against the same `cadence_days`; the severity is folded to the worst of them; the message gets `stale_dates` (one entry per field that is actually stale, with its label, its date and its age) and `first_stale_label`. 'The CO detector was last tested 400 days ago' is a different errand from 'no smoke detector test has ever been recorded', and an alert saying only 'a detector is overdue' sends somebody to test the wrong one. Overrides `date_field` when set.",
+   "fieldname": "date_fields_json",
+   "fieldtype": "Long Text",
+   "label": "Date Fields (JSON)"
   },
   {
    "default": "0",
@@ -230,6 +260,32 @@
    "fieldtype": "Select",
    "label": "Due Date",
    "options": "From Anchor\nToday\nNone"
+  },
+  {
+   "description": "A SECOND date, used only as a gate: the rule considers a row only where this date is inside `gate_within_days`. It is a conjunction over two independent dates, which the one cadence anchor above cannot express — a block raises a water-test alert when it was sprayed inside the season AND its water was tested outside the cadence, and neither half fires alone. Ground nobody is spraying raises nothing however stale its water. A row whose gate date is EMPTY is gated OUT: the gate is a claim that the condition matters now, and no date is no claim.",
+   "fieldname": "gate_date_field",
+   "fieldtype": "Data",
+   "label": "Gate Date Field"
+  },
+  {
+   "description": "How recent `gate_date_field` must be for the row to be considered. 120 on a last-spray date is about one spray season in tree fruit: a block sprayed inside it will be sprayed again, and its water matters now.",
+   "fieldname": "gate_within_days",
+   "fieldtype": "Int",
+   "label": "Gate Within (days)"
+  },
+  {
+   "default": "Direct",
+   "description": "Where the gate date is read from. `Direct` is a column on the row being scanned. `Latest Related` is the newest date on another doctype pointing back at it, described in `gate_related_table_json` — which is what 'when was this block last sprayed' looks like on a site keeping a spray log rather than a column.",
+   "fieldname": "gate_scope",
+   "fieldtype": "Select",
+   "label": "Gate Scope",
+   "options": "Direct\nLatest Related"
+  },
+  {
+   "description": "For a `Latest Related` gate: `{\"doctype\": \"Farm Task\", \"subject_field\": \"field\", \"date_field\": \"completed_on\", \"scope_filters\": [...]}`. The newest `date_field` on a row of `doctype` whose `subject_field` names the row being scanned. Read ONCE PER SWEEP and folded to a per-subject maximum, not once per candidate — a camp with fifty cabins and four years of history is one query, not four hundred.",
+   "fieldname": "gate_related_table_json",
+   "fieldtype": "Long Text",
+   "label": "Gate Related Table (JSON)"
   },
   {
    "fieldname": "cadence_col",
@@ -292,6 +348,12 @@
    "label": "Extra Parameters (JSON)"
   },
   {
+   "description": "The one gate in this engine that is a question about OTHER ROWS. A finding stops being true when a LATER CLEAN RECORD FOR THE SAME SUBJECT supersedes it — a cabin re-inspected in September with nothing found says more about July's water stain than a checkbox does, and it requires nobody to remember a field. `{\"subject_field\": \"unit\", \"clean_state_field\": \"workflow_state\", \"clean_state_values\": [\"Recorded\"], \"unreadable_counts_as_dirty\": true}`. `doctype` and `date_field` default to the target's. `unreadable_counts_as_dirty` (the default) means a record whose state is empty or unreadable does NOT supersede: a result nobody can interpret is not evidence that anything is safe, and treating it as clean is how a compliance file becomes a clean record of nothing.",
+   "fieldname": "superseded_by_later_clean_json",
+   "fieldtype": "Long Text",
+   "label": "Superseded By Later Clean (JSON)"
+  },
+  {
    "fieldname": "message_section",
    "fieldtype": "Section Break",
    "label": "What it says"
@@ -307,6 +369,18 @@
    "fieldname": "regimes_from_field",
    "fieldtype": "Data",
    "label": "Per-row Regimes Field"
+  },
+  {
+   "description": "An ORDERED lookup that reads the regimes off a NAME rather than off a column, for the case `regimes_from_field` cannot reach — a certificate's audits come from its TYPE, and there is no tags column on it, only a name to read. First match wins and THE ORDER IS THE WHOLE CONTENT: `globalgap` must be checked before `gap`, because \"GlobalGAP\" contains \"GAP\" and a USDA GAP packet must not be handed another scheme's certificate. `[{\"if_field_contains\": {\"field\": [\"cert_type\", \"cert_name\"], \"value\": [\"wps\", \"worker protection\"]}, \"then_regimes\": [\"WPS\"]}, {\"default_regimes\": [\"Internal\"]}]`. Where entries name several fields, the FIELD ORDER IS THE OUTER LOOP: the whole table is tried against the type before any of it is tried against the name, so a word somebody typed on the day cannot retag a certificate whose type already said something. Overrides `regimes` per alert; the rule's own `regimes` stays the UNION of what this table can emit, which is what a one-regime sweep matches on.",
+   "fieldname": "regime_heuristics_json",
+   "fieldtype": "Long Text",
+   "label": "Regime Heuristics (JSON)"
+  },
+  {
+   "description": "The same ordered lookup, producing the alert's CATEGORY instead of its regimes — `[{\"if_field_in\": {\"field\": \"cert_type\", \"value\": [\"Applicator License\"]}, \"then_category\": \"Workforce\"}, {\"default_category\": \"Certifications\"}]`. One rule can fire on eleven kinds of certificate, and an applicator licence is a Workforce item while a GlobalGAP certificate is a Certifications one: the category is a property of the row, and a constant on the rule would file most of them under the wrong heading.",
+   "fieldname": "category_heuristics_json",
+   "fieldtype": "Long Text",
+   "label": "Category Heuristics (JSON)"
   },
   {
    "fieldname": "producer_section",

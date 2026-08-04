@@ -49,7 +49,9 @@ site at call time.
   runtime stays deterministic: no model runs in the trigger path, every rule
   needs a named human approver before it can fire, and edits supersede rather
   than overwrite so an alert from April is still readable against the definition
-  that raised it. See
+  that raised it. Since v0.22.1 **eleven of the thirteen shipped rules are fully
+  declarative and none uses the sandboxed escape hatch** — the remaining two are
+  argued as permanent rather than pending. See
   [docs/configurable_compliance_framework.md](docs/configurable_compliance_framework.md).
 - MIT. Three runtime dependencies beyond Frappe/ERPNext (`shapely` and `h3` for
   field boundaries, `segno` for the mobile login QR), and the app still loads

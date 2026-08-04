@@ -365,6 +365,33 @@ def _compliance_rules() -> None:
 		)
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not seed rule {failure.get('name')} — {failure.get('reason')}")
+	_declarative_rules()
+
+
+def _declarative_rules() -> None:
+	"""Move the five rules v0.22.1 took declarative onto their new definitions.
+
+	SEPARATE FROM THE SEEDER ABOVE, because the seeder's whole contract is that it
+	leaves alone anything already on the site — which is exactly why it can never
+	perform this migration. A v0.22.0 site already has a `certification_expiring`
+	row naming a built-in scanner, and the seeder will never look at it again.
+
+	Listed in `patches.txt` AND called from here, the same belt-and-braces
+	`migrate_training_types` gets and for the same reason: the patch entry records
+	in the Patch Log when this first ran, and the hook catches a site that upgraded
+	across the version. It is therefore run at least twice on any real bench, and
+	is a no-op the second time — the check is "does this row still name a
+	scanner", which is false the moment the first run succeeded.
+	"""
+	try:
+		from .patches import migrate_declarative_rules
+
+		report = migrate_declarative_rules.migrate_declarative_rules()
+	except Exception as exc:  # pragma: no cover - the patch swallows its own
+		print(f"erpnext_mcp: the declarative rule migration did not run — {type(exc).__name__}: {exc}")
+		return
+	for line in migrate_declarative_rules.report_lines(report):
+		print(f"erpnext_mcp: {line}")
 
 
 def _report_failures(what: str, builder) -> None:

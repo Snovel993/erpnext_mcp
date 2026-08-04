@@ -6053,6 +6053,83 @@ TOOLS = {
 			"extra_parameters": _field(
 				_OBJECT, 'Named intervals a built-in scanner reads, e.g. {"spray_season_days": 120}.'
 			),
+			# ── v0.22.1's primitives. Every one is optional; a rule that uses none
+			# of them is the rule v0.22.0 could already express. ────────────────
+			"superseded_by_later_clean": _field(
+				_OBJECT,
+				"THE ONE GATE THAT IS A QUESTION ABOUT OTHER ROWS. A finding stops being true "
+				"when a LATER CLEAN RECORD FOR THE SAME SUBJECT supersedes it — a cabin "
+				're-inspected in September with nothing found. {"subject_field": "unit", '
+				'"clean_state_field": "workflow_state", "clean_state_values": ["Recorded"], '
+				'"unreadable_counts_as_dirty": true}. `doctype` and `date_field` default to '
+				"the target's. Leave `unreadable_counts_as_dirty` at true unless you mean it: "
+				"a record whose state nobody can read is not evidence that anything was fixed.",
+			),
+			"gate_date_field": _field(
+				_STRING,
+				"A SECOND date used only as a gate — the rule considers a row only where this "
+				"date is inside `gate_within_days`. It is a conjunction over two independent "
+				"dates, which one cadence anchor cannot express: a block raises a water-test "
+				"alert when it was sprayed inside the season AND its water was tested outside "
+				"the cadence, and neither half fires alone. A row whose gate date is EMPTY is "
+				"gated OUT — the gate is a claim that the condition matters now, and no date "
+				"is no claim.",
+			),
+			"gate_within_days": _field(_INTEGER, "How recent `gate_date_field` must be."),
+			"gate_scope": _field(
+				_STRING, "'Direct' (a column on the scanned row, the default) or 'Latest Related'."
+			),
+			"gate_related_table": _field(
+				_OBJECT,
+				'For a Latest Related gate: {"doctype", "subject_field", "date_field", '
+				'"subject_key", "scope_filters"} — the newest date on another doctype pointing '
+				"back at this row. Read once per sweep and folded to a per-subject maximum, "
+				"not once per candidate.",
+			),
+			"date_fields": _field(
+				{"type": "array", "items": _OBJECT},
+				"SEVERAL anchors of the same kind, where either being stale fires and the "
+				'message must name which — [{"field": "smoke_detector_last_test", "label": '
+				'"smoke"}, {"field": "co_detector_last_test", "label": "CO"}]. The severity '
+				"folds to the worst; the template gets `stale_dates` (only the fields actually "
+				"stale, each with its label, date and age) and `first_stale_label`. Overrides "
+				"`date_field`. Labels are FRAGMENTS the sentence around them completes.",
+			),
+			"date_field_role": _field(
+				_STRING,
+				"'Clock' (default) or 'Timestamp'. Timestamp says the date is WHEN THE THING "
+				"WAS FOUND rather than a deadline: it is read for the message and bands "
+				"nothing, every matching row raises at `severity_expired`, and a row with no "
+				"date raises too. Use it for a finding — a corrective action is not more or "
+				"less open for being three weeks old, and as a clock it would stop firing on "
+				"the day it was written.",
+			),
+			"target_doctypes": _field(
+				{"type": "array", "items": _OBJECT},
+				"Additional doctypes this ONE rule walks, for a rule genuinely about more than "
+				'one kind of record — [{"doctype": "Detector Test", "date_field": "test_date", '
+				'"label": "the detector test"}]. `label` is what the message says instead of '
+				"the doctype name. Rare and deliberate: two rule_ids would be two lists for "
+				"one afternoon's work.",
+			),
+			"regime_heuristics": _field(
+				{"type": "array", "items": _OBJECT},
+				"An ORDERED lookup that reads the regimes off a NAME rather than a column, for "
+				"the case `regimes_from_field` cannot reach — a certificate's audits come from "
+				"its type, and there is no tags column on it. First match wins and THE ORDER "
+				"IS THE CONTENT: check `globalgap` before `gap`, because 'GlobalGAP' contains "
+				"'GAP'. Where entries name several fields the FIELD ORDER IS THE OUTER LOOP — "
+				"the whole table is tried against the type before any of it is tried against "
+				'the name. [{"if_field_contains": {"field": ["cert_type", "cert_name"], '
+				'"value": ["wps"]}, "then_regimes": ["WPS"]}, {"default_regimes": ["Internal"]}]',
+			),
+			"category_heuristics": _field(
+				{"type": "array", "items": _OBJECT},
+				"The same shape producing the alert's CATEGORY, for a rule whose rows belong "
+				'under different headings — [{"if_field_in": {"field": "cert_type", "value": '
+				'["Applicator License"]}, "then_category": "Workforce"}, {"default_category": '
+				'"Certifications"}]',
+			),
 			"purpose": _field(_STRING, "What goes wrong in the world if nobody acts on this."),
 			"authored_by": _field(_STRING, "System, Operator (default) or AI-proposed."),
 			"ai_source_citation": _field(_STRING, "If AI-proposed: the URL and section it was read from."),
@@ -6170,6 +6247,37 @@ TOOLS = {
 				_STRING, "Replace the program. Vetted by the sandbox before anything is written."
 			),
 			"extra_parameters": _field(_OBJECT, "Replace the named intervals a built-in scanner reads."),
+			# ── v0.22.1's primitives, each replaced whole for the same reason
+			# `scope_filters` is: a structure edited one entry at a time by index
+			# is one somebody reorders by accident, and in an ORDERED heuristic
+			# table the order is the entire content. ────────────────────────────
+			"superseded_by_later_clean": _field(
+				_OBJECT, "Replace the supersession test. See create_compliance_rule for the shape."
+			),
+			"gate_date_field": _field(_STRING, "Change the second date used as a gate."),
+			"gate_within_days": _field(
+				_INTEGER,
+				"Change how recent the gate date must be. THE MOST LIKELY EDIT ON THIS "
+				"GROUP: a spray season is a property of the crop and the county, and the "
+				"shipped 120 days is tree fruit in the Columbia Gorge.",
+			),
+			"gate_scope": _field(_STRING, "'Direct' or 'Latest Related'."),
+			"gate_related_table": _field(_OBJECT, "Replace the related-table gate definition."),
+			"date_fields": _field(
+				{"type": "array", "items": _OBJECT}, "Replace the whole list of plural anchors."
+			),
+			"date_field_role": _field(_STRING, "'Clock' or 'Timestamp'."),
+			"target_doctypes": _field(
+				{"type": "array", "items": _OBJECT}, "Replace the additional target doctypes."
+			),
+			"regime_heuristics": _field(
+				{"type": "array", "items": _OBJECT},
+				"Replace the ordered regime lookup. Passing it replaces rather than merges — "
+				"the ORDER is the content, and a table merged by key would silently reorder it.",
+			),
+			"category_heuristics": _field(
+				{"type": "array", "items": _OBJECT}, "Replace the ordered category lookup."
+			),
 			"purpose": _field(_STRING, "Replace the purpose."),
 			"ai_source_citation": _field(_STRING, "Replace the AI source citation."),
 		},

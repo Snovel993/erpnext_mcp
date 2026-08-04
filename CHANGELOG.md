@@ -3,6 +3,82 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.22.1 — 2026-08-04
+
+**The vocabulary reaches its own problem domain.** v0.22.0 shipped six
+declarative rules and seven built-in scanners, and named the four primitives that
+would move most of the seven. This release built them: **five rules migrated**,
+and the split is now **11 declarative / 2 built-in-permanent / 0
+`custom_python`**. The two that stay are argued as *permanent* rather than
+pending — an aggregation and a walk over a table of doctypes whose thresholds
+mean days elapsed rather than days remaining. Tool surface **unchanged at 256**;
+suite **4,187 → 4,277 passing**. **Behaviour drift: zero**, asserted per rule
+against the shipped scanners themselves. Full notes:
+[`RELEASES/v0.22.1.md`](RELEASES/v0.22.1.md).
+
+### Added
+
+- **`superseded_by_later_clean_json`** — the one gate that is a question about
+  *other rows*. A finding stops being true when a later clean record for the same
+  subject supersedes it. Took `housing_corrective_action_open` and
+  `water_test_contamination` declarative at once. `unreadable_counts_as_dirty`
+  defaults to true: a record whose state nobody can read does not supersede.
+  Indexed once per sweep, not queried per candidate.
+- **`regime_heuristics_json`** — an ordered lookup that reads the regimes off a
+  *name* rather than a column, for the case `regimes_from_field` cannot reach.
+  First match wins and the order is the content (`globalgap` before `gap`); where
+  entries name several fields the **field order is the outer loop**, so a
+  certificate's type is never overridden by a word in its name. Took
+  `certification_expiring` declarative. Derived from `CERT_REGIME_HEURISTICS`
+  rather than restated beside it.
+- **`gate_date_field` + `gate_within_days` + `gate_scope` +
+  `gate_related_table_json`** — a second date used only as a gate, for a rule
+  whose condition is a conjunction over two independent dates. Took
+  `water_test_stale` declarative. A row with no gate date is gated *out*, which is
+  deliberately the opposite of `missing_date_behaviour`.
+- **`date_fields_json`** — several anchors of the same kind, where either being
+  stale fires and the message must name which. The severity folds to the worst;
+  the template gets `stale_dates` and `first_stale_label`. Took
+  `housing_detector_test_stale` declarative.
+- **`date_field_role`** (`Clock` / `Timestamp`) — a finding's date is when the
+  thing was found, not a deadline. Without it, both supersession rules would have
+  stopped firing on the day a finding was written.
+- **`target_doctypes_json`** — the one rule that walks two record types under one
+  `rule_id`, with a per-entry label so the message says "the detector test"
+  rather than "Detector Test".
+- **`category_heuristics_json`** — the same ordered shape producing the alert's
+  category, because an applicator licence is a Workforce item and a GlobalGAP
+  certificate is not.
+- **`istrue` / `isfalse` scope-filter operators** — the only correct way to
+  filter on a Check box, which read back before the database layer holds the
+  *string* `"0"`.
+- **`patches/migrate_declarative_rules.py`** — the upgrade a v0.22.0 site gets.
+  The seeder cannot do this (it leaves alone what is already there, which is what
+  protects an operator's edits), so the five are migrated deliberately:
+  thresholds, filters, citations, regimes and the switch carried across, scope
+  filters *concatenated* rather than replaced, `spray_season_days` read into
+  `gate_within_days`, and the old row superseded rather than edited.
+
+### Changed
+
+- **`_band` checks the outer window before the critical band.** Indistinguishable
+  from the shipped scanner until a per-row `window_field` is *narrower* than the
+  rule's critical threshold — a certificate whose issuing body turns renewals
+  round in ten days. The window is the claim about when work can usefully start.
+  No shipped rule's behaviour changes.
+- `get_compliance_rule` reports every new primitive, and an **empty** rather than
+  a null for the ones a rule does not use.
+- `docs/configurable_compliance_framework.md` §5 is now the migration's record
+  rather than a backlog, and §4 answers "when should I reach for `custom_python`"
+  with a table of eleven questions that are already fields.
+
+### Unchanged
+
+- Tool count, at **256 / 113 read / 143 mutating**.
+- The alert docname format, the `list_compliance_rules` return shape, the six
+  rules that were already declarative, and the two permanent built-ins.
+- Every existing test — none was modified.
+
 ## 0.22.0 — 2026-08-04
 
 **The rules themselves are data.** A compliance rule used to be a Python

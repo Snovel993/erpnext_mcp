@@ -203,23 +203,33 @@ def preview(row: dict, context: dict) -> dict:
 
 
 # ── the declarative evaluator ───────────────────────────────────────────────
+#
+# THE ORDER THE GATES ARE EVALUATED IN IS PART OF THE CONTRACT, and v0.22.1's
+# primitives made it worth stating rather than leaving to read off the code:
+#
+#   1. SCOPE FILTERS      define the population. Cheapest, purely local to the
+#                         row, and every later gate is a claim ABOUT that
+#                         population — a rule scoped to cabins should not be
+#                         asking a question about a shower block at all.
+#   2. THE GATE DATE      is this row's condition RIPE — is anybody spraying
+#                         this block? A row nothing is happening to raises
+#                         nothing however stale its other dates.
+#   3. SUPERSESSION       is this finding STILL the latest word on its subject?
+#                         The only gate that reads other rows, and therefore the
+#                         one worth running last of the three, on the smallest
+#                         set of candidates the first two leave.
+#   4. THE CLOCK          how far past due, and therefore which severity.
+#
+# A different order would not merely be slower. Running supersession before the
+# scope filters would mean a rule narrowed to one company reading another's
+# records to decide what it can see, which is the kind of thing nobody notices
+# until an auditor asks why an alert went quiet.
 def _declarative_scan(row: dict):
-	"""A closure that scans `target_doctype` per the record's own definition."""
+	"""A closure that scans the record's target doctype(s) per its own definition."""
 
 	def scan(context: dict) -> list:
 		today = context.get("today") or frappe.utils.today()
 		company = context.get("company") or ""
-		doctype = str(row.get("target_doctype") or "").strip()
-		if not doctype or not compat.doctype_exists(doctype):
-			return []
-		# A compliance column this app installs on demand. Absent means the rule
-		# has nothing to read, which is an EMPTY SCAN and not a failure — the
-		# same answer `_scan_i9` has always given, and it matters because an
-		# empty scan auto-dismisses stale alerts while a failure would not.
-		for fieldname in compliance_rules.names_list(row.get("requires_fields")):
-			if not compat.has_field(doctype, fieldname):
-				return []
-
 		warnings = []
 		try:
 			filters = compliance_rules.parse_filters(row.get("scope_filters_json"))
@@ -227,113 +237,500 @@ def _declarative_scan(row: dict):
 			warnings.append(f"scope_filters could not be read ({exc}); the rule scanned unscoped.")
 			filters = []
 
-		company_field = compat.first_field(doctype, *_COMPANY_FIELDS)
-		selected = _selectable_fields(doctype)
-		present = set(selected)
-		db_filters = {company_field: company} if (company and company_field) else {}
-		rows = frappe.db.get_all(doctype, filters=db_filters, fields=selected, limit=SCAN_CAP)
-
-		date_field = str(row.get("date_field") or "").strip()
-		cadence = int(row.get("cadence_days") or 0)
-		window_field = str(row.get("window_field") or "").strip()
-		on_missing = str(row.get("missing_date_behaviour") or compliance_rules.ON_MISSING_SKIP)
-		due_mode = str(row.get("due_date_mode") or compliance_rules.DUE_FROM_ANCHOR)
-		critical_days = int(row.get("threshold_critical_days") or 0)
-		warning_days = int(row.get("threshold_warning_days") or 0)
-		severity_critical = str(row.get("severity_critical") or SEVERITY_CRITICAL)
-		severity_warning = str(row.get("severity_warning") or SEVERITY_WARNING)
-		severity_expired = str(row.get("severity_expired") or SEVERITY_CRITICAL)
-		regimes_field = str(row.get("regimes_from_field") or "").strip()
-		rule_regimes = list(regimes_vocabulary.parse(row.get("regimes")) or [])
-		template = str(row.get("message_template") or "")
-
+		settings = _definition(row, warnings)
 		out = []
-		for candidate in rows or []:
-			candidate = dict(candidate)
-			matched, filter_warnings = compliance_rules.row_matches(candidate, filters, present)
-			for warning in filter_warnings:
-				if warning not in warnings:
-					warnings.append(warning)
-			if not matched:
+		for doctype, date_field, target_label in _targets(row, warnings):
+			if not compat.doctype_exists(doctype):
+				# Skipped, not fatal. A rule reading two camp records on a site that
+				# has only one of them should report on the one it has.
 				continue
-
-			anchor = candidate.get(date_field) if date_field else None
-			anchor_text = str(anchor or "").strip()
-			due_text = ""
-			days_remaining = None
-
-			if date_field:
-				if not anchor_text:
-					if on_missing == compliance_rules.ON_MISSING_SKIP:
-						continue
-				else:
-					due_text = _due_from(anchor_text, cadence)
-					days_remaining = days_until(today, due_text)
-					if days_remaining is None:
-						# An unparseable date. Skipped rather than raised: one bad
-						# cell must not take a whole rule's night with it.
-						warnings.append(
-							f"{doctype} {candidate.get('name')} has an unreadable {date_field} "
-							f"({anchor!r}) and was skipped."
-						)
-						continue
-
-			severity = _band(
-				days_remaining,
-				candidate,
-				window_field,
-				critical_days,
-				warning_days,
-				severity_critical,
-				severity_warning,
-				severity_expired,
-			)
-			if severity is None:
+			# A compliance column this app installs on demand. Absent means the rule
+			# has nothing to read, which is an EMPTY SCAN and not a failure — the
+			# same answer `_scan_i9` has always given, and it matters because an
+			# empty scan auto-dismisses stale alerts while a failure would not.
+			if any(
+				not compat.has_field(doctype, fieldname)
+				for fieldname in compliance_rules.names_list(row.get("requires_fields"))
+			):
 				continue
-
-			regimes = (
-				regimes_vocabulary.parse(candidate.get(regimes_field))
-				if regimes_field
-				else (list(rule_regimes) if rule_regimes else None)
-			)
-			rendered = render_message(
-				template,
-				candidate,
-				{
-					"today": today,
-					"days_remaining": days_remaining,
-					"days_overdue": (None if days_remaining is None else -days_remaining),
-					"days_since_anchor": days_since(today, anchor_text) if anchor_text else None,
-					"anchor": anchor_text or None,
-					"due_date": due_text or None,
-					"severity": severity,
-					"regimes": regimes if regimes is not None else list(rule_regimes),
-					"subject": candidate.get("name"),
-					"cadence_days": cadence,
-					"threshold_critical_days": critical_days,
-					"threshold_warning_days": warning_days,
-					"rule_title": row.get("title"),
-					"regulation_citations": row.get("regulation_citations"),
-				},
-				warnings,
-			)
-
-			out.append(
-				Observation(
-					source_doctype=doctype,
-					source_docname=str(candidate.get("name")),
-					message=rendered,
-					severity=severity,
-					due_date=_due_date(due_mode, due_text, today),
-					company=str(candidate.get(company_field) or "") if company_field else "",
-					category="",
-					regimes=regimes,
-					computation_warnings=list(warnings) or None,
+			out.extend(
+				_scan_one_target(
+					row, settings, filters, warnings, doctype, date_field, target_label, today, company
 				)
 			)
 		return out
 
 	return scan
+
+
+def _targets(row: dict, warnings: list) -> list:
+	"""(doctype, date_field, label) for every doctype this rule walks.
+
+	One entry for all but one shipped rule. `target_doctypes_json` is the
+	exception and it is a small one — see the field's own description.
+	"""
+	doctype = str(row.get("target_doctype") or "").strip()
+	date_field = str(row.get("date_field") or "").strip()
+	out = [(doctype, date_field, "")] if doctype else []
+	try:
+		extra = compliance_rules.parse_target_doctypes(row.get("target_doctypes_json"))
+	except ValueError as exc:
+		warnings.append(
+			f"target_doctypes could not be read ({exc}); the rule walked only {doctype or 'nothing'}."
+		)
+		return out
+	for entry in extra:
+		if entry["doctype"] == doctype and out:
+			# The primary, restated to carry its label. Replaced rather than added,
+			# because scanning one doctype twice would raise every alert twice and
+			# the second would collide with the first on the docname.
+			out[0] = (doctype, entry["date_field"] or date_field, entry["label"])
+			continue
+		out.append((entry["doctype"], entry["date_field"] or date_field, entry["label"]))
+	return out
+
+
+def _definition(row: dict, warnings: list) -> dict:
+	"""Everything read off the record ONCE, rather than once per candidate row."""
+
+	def blob(parser, raw, label, fallback):
+		try:
+			return parser(raw, label)
+		except ValueError as exc:
+			warnings.append(f"{label} could not be read ({exc}); the rule ran without it.")
+			return fallback
+
+	return {
+		"date_fields": blob(
+			compliance_rules.parse_date_fields, row.get("date_fields_json"), "date_fields", []
+		),
+		"date_role": str(row.get("date_field_role") or compliance_rules.DATE_ROLE_CLOCK),
+		"cadence": int(row.get("cadence_days") or 0),
+		"window_field": str(row.get("window_field") or "").strip(),
+		"on_missing": str(row.get("missing_date_behaviour") or compliance_rules.ON_MISSING_SKIP),
+		"due_mode": str(row.get("due_date_mode") or compliance_rules.DUE_FROM_ANCHOR),
+		"critical_days": int(row.get("threshold_critical_days") or 0),
+		"warning_days": int(row.get("threshold_warning_days") or 0),
+		"severity_critical": str(row.get("severity_critical") or SEVERITY_CRITICAL),
+		"severity_warning": str(row.get("severity_warning") or SEVERITY_WARNING),
+		"severity_expired": str(row.get("severity_expired") or SEVERITY_CRITICAL),
+		"regimes_field": str(row.get("regimes_from_field") or "").strip(),
+		"rule_regimes": list(regimes_vocabulary.parse(row.get("regimes")) or []),
+		"template": str(row.get("message_template") or ""),
+		"gate_field": str(row.get("gate_date_field") or "").strip(),
+		"gate_days": int(row.get("gate_within_days") or 0),
+		"gate_scope": str(row.get("gate_scope") or compliance_rules.GATE_DIRECT),
+		"gate_table": blob(
+			compliance_rules.parse_gate_table, row.get("gate_related_table_json"), "gate_related_table", {}
+		),
+		"supersession": blob(
+			compliance_rules.parse_supersession,
+			row.get("superseded_by_later_clean_json"),
+			"superseded_by_later_clean",
+			{},
+		),
+		"regime_heuristics": blob(
+			lambda raw, label: compliance_rules.parse_heuristics(raw, label, "regimes"),
+			row.get("regime_heuristics_json"),
+			"regime_heuristics",
+			[],
+		),
+		"category_heuristics": blob(
+			lambda raw, label: compliance_rules.parse_heuristics(raw, label, "category"),
+			row.get("category_heuristics_json"),
+			"category_heuristics",
+			[],
+		),
+	}
+
+
+def _scan_one_target(
+	row: dict,
+	settings: dict,
+	filters: list,
+	warnings: list,
+	doctype: str,
+	date_field: str,
+	target_label: str,
+	today: str,
+	company: str,
+) -> list:
+	company_field = compat.first_field(doctype, *_COMPANY_FIELDS)
+	selected = _selectable_fields(doctype)
+	present = set(selected)
+	db_filters = {company_field: company} if (company and company_field) else {}
+	rows = frappe.db.get_all(doctype, filters=db_filters, fields=selected, limit=SCAN_CAP)
+
+	supersession = settings["supersession"]
+	# BOTH INDEXES ARE BUILT ONCE PER TARGET, NOT ONCE PER CANDIDATE. A camp with
+	# fifty cabins and four years of history is two queries, not four hundred —
+	# and this is the reason the primitive is a field rather than a `custom_python`
+	# program, where the obvious way to write it is the per-row query.
+	clean = _clean_index(doctype, date_field, supersession, company, warnings) if supersession else {}
+	gate_index = (
+		_gate_index(settings["gate_table"], company, warnings)
+		if settings["gate_scope"] == compliance_rules.GATE_LATEST_RELATED and settings["gate_table"]
+		else {}
+	)
+
+	out = []
+	for candidate in rows or []:
+		candidate = dict(candidate)
+		matched, filter_warnings = compliance_rules.row_matches(candidate, filters, present)
+		for warning in filter_warnings:
+			if warning not in warnings:
+				warnings.append(warning)
+		if not matched:
+			continue
+
+		gate_date, gate_since, gated_in = _gate(candidate, settings, gate_index, today)
+		if not gated_in:
+			continue
+
+		if supersession and _superseded(candidate, supersession, clean, date_field):
+			continue
+
+		dates = _clock(candidate, settings, date_field, doctype, today, warnings)
+		if dates is None:
+			continue
+		severity, band, window_days = _band(
+			dates["days_remaining"],
+			candidate,
+			settings["window_field"],
+			settings["critical_days"],
+			settings["warning_days"],
+			settings["severity_critical"],
+			settings["severity_warning"],
+			settings["severity_expired"],
+			forced=(settings["date_role"] == compliance_rules.DATE_ROLE_TIMESTAMP),
+		)
+		if severity is None:
+			continue
+		stale = [entry for entry in dates["per_field"] if entry["stale"]]
+		if dates["per_field"] and not stale:
+			# Plural anchors: the fold said something raises, but no INDIVIDUAL
+			# field reaches a band. Nothing to name, so nothing to say.
+			continue
+
+		regimes = _regimes_of(candidate, settings)
+		category = _category_of(candidate, settings)
+		rendered = render_message(
+			settings["template"],
+			candidate,
+			{
+				"today": today,
+				"days_remaining": dates["days_remaining"],
+				"days_overdue": (None if dates["days_remaining"] is None else -dates["days_remaining"]),
+				"days_since_anchor": dates["days_since_anchor"],
+				"anchor": dates["anchor"] or None,
+				"due_date": dates["due_text"] or None,
+				"severity": severity,
+				"band": band,
+				"window_days": window_days,
+				"regimes": regimes if regimes is not None else list(settings["rule_regimes"]),
+				"subject": candidate.get("name"),
+				"cadence_days": settings["cadence"],
+				"threshold_critical_days": settings["critical_days"],
+				"threshold_warning_days": settings["warning_days"],
+				"rule_title": row.get("title"),
+				"regulation_citations": row.get("regulation_citations"),
+				# v0.22.1's per-primitive context.
+				"target_doctype": doctype,
+				"target_label": target_label or doctype,
+				"stale_dates": stale,
+				"first_stale_label": (stale[0]["label"] if stale else None),
+				"gate_date": gate_date or None,
+				"gate_days_since": gate_since,
+			},
+			warnings,
+		)
+
+		out.append(
+			Observation(
+				source_doctype=doctype,
+				source_docname=str(candidate.get("name")),
+				message=rendered,
+				severity=severity,
+				due_date=_due_date(settings["due_mode"], dates["due_text"], today),
+				company=str(candidate.get(company_field) or "") if company_field else "",
+				category=category,
+				regimes=regimes,
+				computation_warnings=list(warnings) or None,
+			)
+		)
+	return out
+
+
+# ── primitive 3: the second date, used only as a gate ───────────────────────
+def _gate(candidate: dict, settings: dict, gate_index: dict, today: str) -> tuple:
+	"""(gate_date, days_since, passes) — is this row's condition ripe at all?
+
+	A ROW WHOSE GATE DATE IS EMPTY IS GATED OUT, and that asymmetry is the whole
+	point. `missing_date_behaviour` exists because a cabin nobody has inspected
+	is the most overdue cabin there is; a block nobody has ever sprayed is the
+	LEAST urgent block there is, because Subpart E is engaged by water contacting
+	a crop and not by a date passing. The gate is a claim that the condition
+	matters now, and no date is no claim.
+	"""
+	table = settings["gate_table"]
+	related = settings["gate_scope"] == compliance_rules.GATE_LATEST_RELATED and table
+	if not (settings["gate_field"] or related):
+		return "", None, True
+	if related:
+		# `subject_key` is the column on THIS row the related rows point at,
+		# `name` by default — a spray record names the block, and the block is
+		# identified by its docname unless the site keys it some other way.
+		value = gate_index.get(str(candidate.get(table.get("subject_key") or "name") or ""))
+	else:
+		value = candidate.get(settings["gate_field"])
+	text = str(value or "").strip()
+	since = days_since(today, text) if text else None
+	if since is None or since > settings["gate_days"]:
+		return text, since, False
+	return text, since, True
+
+
+def _gate_index(table: dict, company: str, warnings: list) -> dict:
+	"""subject → the NEWEST gate date on the related doctype. One query."""
+	doctype = table["doctype"]
+	if not compat.doctype_exists(doctype):
+		warnings.append(
+			f"the gate reads {doctype}, which this site has not got, so every row was gated OUT and "
+			"the rule raised nothing. That is the safe direction for a gate — but it is not the same "
+			"as a clean operation, and this note is how you can tell them apart."
+		)
+		return {}
+	company_field = compat.first_field(doctype, *_COMPANY_FIELDS)
+	wanted = ["name", table["subject_field"], table["date_field"]]
+	wanted.extend(entry["field"] for entry in table["scope_filters"])
+	fields = compat.existing_fields(doctype, dict.fromkeys(wanted))
+	rows = frappe.db.get_all(
+		doctype,
+		filters={company_field: company} if (company and company_field) else {},
+		fields=fields,
+		limit=SCAN_CAP,
+	)
+	present = set(fields)
+	out: dict = {}
+	for entry in rows or []:
+		entry = dict(entry)
+		matched, _filter_warnings = compliance_rules.row_matches(entry, table["scope_filters"], present)
+		if not matched:
+			continue
+		subject = str(entry.get(table["subject_field"]) or "")
+		date = str(entry.get(table["date_field"]) or "").strip()
+		if not (subject and date):
+			continue
+		if date > out.get(subject, ""):
+			out[subject] = date
+	return out
+
+
+# ── primitive 1: superseded by a later clean record ─────────────────────────
+def _clean_index(doctype: str, date_field: str, config: dict, company: str, warnings: list) -> dict:
+	"""subject → every date on which a CLEAN record was written for it.
+
+	`date_field` is the TARGET'S, passed in rather than read off the config, so a
+	rule walking two doctypes gets each one's own date column — a Housing
+	Inspection is dated `inspection_date` and a Detector Test `test_date`, and a
+	supersession config naming one of them would silently stop superseding the
+	other.
+	"""
+	target = config.get("doctype") or doctype
+	if not compat.doctype_exists(target):
+		warnings.append(
+			f"supersession reads {target}, which this site has not got, so nothing could supersede "
+			"a finding and every open finding stayed open. That is the safe direction — a finding "
+			"wrongly left standing is read by somebody, and one wrongly dismissed is not."
+		)
+		return {}
+	subject_field = config["subject_field"]
+	date_field = config.get("date_field") or date_field
+	state_field = config["clean_state_field"]
+	fields = compat.existing_fields(target, dict.fromkeys(["name", subject_field, date_field, state_field]))
+	for fieldname in (subject_field, date_field, state_field):
+		if fieldname and fieldname not in fields:
+			warnings.append(
+				f"supersession names {target}.{fieldname}, which this site has not got, so no later "
+				"record could supersede a finding of this rule."
+			)
+			return {}
+	company_field = compat.first_field(target, *_COMPANY_FIELDS)
+	rows = frappe.db.get_all(
+		target,
+		filters={company_field: company} if (company and company_field) else {},
+		fields=fields,
+		limit=SCAN_CAP,
+	)
+	clean_values = config["clean_state_values"]
+	out: dict = {}
+	for entry in rows or []:
+		state = str(entry.get(state_field) or "").strip()
+		if not state:
+			if config.get("unreadable_counts_as_dirty", True):
+				continue
+		elif state not in clean_values:
+			continue
+		out.setdefault(str(entry.get(subject_field) or ""), []).append(str(entry.get(date_field) or ""))
+	return out
+
+
+def _superseded(candidate: dict, config: dict, clean: dict, date_field: str) -> bool:
+	"""Has a later clean record for the same subject overtaken this finding?
+
+	Dates are compared AS TEXT, which is correct for the ISO strings every date
+	column in this app holds and is what the Python this replaced did. A record
+	with no date supersedes nothing, because `"" > ""` is false and any real date
+	is greater than none — the finding stays standing, which is the safe answer.
+	"""
+	found_on = str(candidate.get(config.get("date_field") or date_field) or "")
+	subject = str(candidate.get(config["subject_field"]) or "")
+	return any(date > found_on for date in clean.get(subject, ()))
+
+
+# ── the clock, singular or plural ───────────────────────────────────────────
+def _clock(candidate: dict, settings: dict, date_field: str, doctype: str, today: str, warnings: list):
+	"""The anchor, the deadline and the days remaining. None means "skip this row".
+
+	Three shapes, and the third is v0.22.1's:
+
+	  NO DATE FIELD    the condition is a filter; there is no clock and the row
+	                   raises at `severity_expired`.
+	  ONE DATE FIELD   the ordinary case.
+	  SEVERAL          `date_fields_json`: each measured against the same cadence,
+	                   the severity folded to the WORST of them, and the message
+	                   handed the ones that are actually stale so it can name them.
+	"""
+	cadence = settings["cadence"]
+	plural = settings["date_fields"]
+	timestamp = settings["date_role"] == compliance_rules.DATE_ROLE_TIMESTAMP
+
+	if plural:
+		per_field = []
+		worst = None
+		unmeasured = False
+		for spec in plural:
+			text = str(candidate.get(spec["field"]) or "").strip()
+			if not text:
+				if settings["on_missing"] == compliance_rules.ON_MISSING_SKIP:
+					continue
+				per_field.append(
+					{
+						"label": spec["label"],
+						"field": spec["field"],
+						"date": None,
+						"days_since": None,
+						"days_remaining": None,
+						"stale": True,
+					}
+				)
+				unmeasured = True
+				continue
+			due = _due_from(text, cadence)
+			remaining = days_until(today, due)
+			if remaining is None:
+				warnings.append(
+					f"{doctype} {candidate.get('name')} has an unreadable {spec['field']} "
+					f"({candidate.get(spec['field'])!r}) and that date was not measured."
+				)
+				continue
+			per_field.append(
+				{
+					"label": spec["label"],
+					"field": spec["field"],
+					"date": text,
+					"days_since": days_since(today, text),
+					"days_remaining": remaining,
+					"stale": False,
+				}
+			)
+			worst = remaining if worst is None else min(worst, remaining)
+		if not per_field:
+			return None
+		for entry in per_field:
+			if entry["days_remaining"] is None:
+				continue
+			severity, _band_name, _window = _band(
+				entry["days_remaining"],
+				candidate,
+				settings["window_field"],
+				settings["critical_days"],
+				settings["warning_days"],
+				settings["severity_critical"],
+				settings["severity_warning"],
+				settings["severity_expired"],
+			)
+			entry["stale"] = severity is not None
+		anchor = next((entry["date"] for entry in per_field if entry["stale"] and entry["date"]), "")
+		return {
+			"anchor": anchor,
+			"due_text": _due_from(anchor, cadence) if anchor else "",
+			"days_remaining": None if unmeasured else worst,
+			"days_since_anchor": days_since(today, anchor) if anchor else None,
+			"per_field": per_field,
+		}
+
+	empty = {"anchor": "", "due_text": "", "days_remaining": None, "days_since_anchor": None, "per_field": []}
+	if not date_field:
+		return empty
+	anchor_text = str(candidate.get(date_field) or "").strip()
+	if not anchor_text:
+		# A TIMESTAMP IS NOT A DEADLINE, so a missing one does not silence the
+		# row: a corrective action nobody dated is still open, and the message
+		# says "on an unrecorded date" rather than nothing at all.
+		if not timestamp and settings["on_missing"] == compliance_rules.ON_MISSING_SKIP:
+			return None
+		return empty
+	due_text = _due_from(anchor_text, cadence)
+	remaining = days_until(today, due_text)
+	if remaining is None:
+		if timestamp:
+			return {**empty, "anchor": anchor_text}
+		# An unparseable date. Skipped rather than raised: one bad cell must not
+		# take a whole rule's night with it.
+		warnings.append(
+			f"{doctype} {candidate.get('name')} has an unreadable {date_field} "
+			f"({candidate.get(date_field)!r}) and was skipped."
+		)
+		return None
+	return {
+		"anchor": anchor_text,
+		"due_text": due_text,
+		"days_remaining": remaining,
+		"days_since_anchor": days_since(today, anchor_text),
+		"per_field": [],
+	}
+
+
+# ── primitives 2 and its category twin: an ordered table, as data ───────────
+def _regimes_of(candidate: dict, settings: dict):
+	"""Which audits THIS alert answers to: the heuristics, a column, or the rule.
+
+	The heuristics win where they are set, because they are the most specific
+	thing anybody said: a rule tagged with the union of eleven certificate
+	schemes is tagged so a one-regime sweep knows to RUN it, and the row is what
+	says which of the eleven this particular certificate actually is.
+	"""
+	if settings["regime_heuristics"]:
+		matched = compliance_rules.match_heuristics(settings["regime_heuristics"], candidate, "regimes")
+		if matched is not None:
+			return list(matched)
+	if settings["regimes_field"]:
+		return regimes_vocabulary.parse(candidate.get(settings["regimes_field"]))
+	return list(settings["rule_regimes"]) if settings["rule_regimes"] else None
+
+
+def _category_of(candidate: dict, settings: dict) -> str:
+	"""The alert's category where it is a property of the ROW rather than the rule.
+
+	Empty means "the rule's own category", which `base.py` has always read as the
+	fallback — so a rule with no heuristics behaves exactly as it did.
+	"""
+	if not settings["category_heuristics"]:
+		return ""
+	return str(
+		compliance_rules.match_heuristics(settings["category_heuristics"], candidate, "category") or ""
+	)
 
 
 def _due_from(anchor: str, cadence: int) -> str:
@@ -365,33 +762,49 @@ def _band(
 	severity_critical: str,
 	severity_warning: str,
 	severity_expired: str,
+	forced: bool = False,
 ):
-	"""Which severity this row raises, or None for "say nothing".
+	"""(severity, band, window) — what this row raises, or (None, "", window).
 
 	A NEGATIVE THRESHOLD MEANS THE BAND NEVER FIRES, which is how a rule that
 	only has something to say once the date has passed is written without a
 	second field to say so. `threshold_warning_days` is also the OUTER window: a
 	certificate two hundred days out reaches no band and the rule stays quiet,
 	which is the difference between this and a reminder.
+
+	`forced` is `date_field_role = Timestamp`: the date says when the thing was
+	FOUND, so there is no band to be in and every row that got this far raises.
+
+	THE OUTER WINDOW IS CHECKED BEFORE THE CRITICAL BAND, and v0.22.1 moved it
+	there. It changes nothing for a rule whose window is wider than its critical
+	threshold, which is every rule with a fixed pair. It matters the moment the
+	window is PER ROW: a certificate whose issuing body turns renewals round in
+	ten days is not a critical renewal task thirty days out just because the
+	rule's default threshold says thirty. The window is the claim about when the
+	work can usefully start, and nothing inside the rule outranks it.
 	"""
-	if days_remaining is None:
-		# Either the rule has no clock at all, or the anchor is missing on a rule
-		# whose `missing_date_behaviour` is Raise. Both mean "past due by the only
-		# measure this rule has".
-		return severity_expired
-	if days_remaining < 0:
-		return severity_expired
 	window = warning_days
 	if window_field:
 		try:
 			window = int(candidate.get(window_field) or 0) or warning_days
 		except (TypeError, ValueError):
 			window = warning_days
+	if forced:
+		return severity_expired, "expired", window
+	if days_remaining is None:
+		# Either the rule has no clock at all, or the anchor is missing on a rule
+		# whose `missing_date_behaviour` is Raise. Both mean "past due by the only
+		# measure this rule has".
+		return severity_expired, "expired", window
+	if days_remaining < 0:
+		return severity_expired, "expired", window
+	if days_remaining > window:
+		return None, "", window
 	if 0 <= critical_days and days_remaining <= critical_days:
-		return severity_critical
-	if 0 <= window and days_remaining <= window:
-		return severity_warning
-	return None
+		return severity_critical, "critical", window
+	if 0 <= window:
+		return severity_warning, "warning", window
+	return None, "", window
 
 
 def _selectable_fields(doctype: str) -> list:

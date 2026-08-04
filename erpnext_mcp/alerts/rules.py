@@ -484,22 +484,48 @@ register(
 	)
 )
 
-# BUILT-IN, AND HERE IS THE PRIMITIVE THAT WOULD MAKE IT DECLARATIVE. Three
-# things keep it out of the declarative engine, and only one of them is hard:
-#   * the renewal window is PER ROW (`renewal_window_days`) — already a
-#     declarative primitive, `window_field`, added for this rule;
-#   * the CATEGORY is per row (an applicator licence is Workforce, a GlobalGAP
-#     certificate is Certifications) — wants a `category_from_field`;
-#   * the REGIMES are derived from the certificate's TYPE through an eleven-row
-#     heuristic table, and that table is the hard one. `regimes_from_field`
-#     copies tags off a column; there is no column here, only a name to read.
-# A `regime_heuristics_json` primitive — ordered (needles → regimes) pairs, which
-# is what the table already is — would finish the job and take this rule
-# declarative. That is the v0.22.1 candidate with the best ratio in the set.
+#: The certificate types that are a WORKFORCE item rather than a Certifications
+#: one. An applicator licence and an FLC licence are about a person's authority
+#: to do the work; a GlobalGAP certificate is about the operation's paperwork,
+#: and filing them under one heading puts a person's lapsed licence in the
+#: section somebody reads at audit time rather than the one they read on Monday.
+CERT_WORKFORCE_TYPES = ("Applicator License", "Farm Labor Contractor License")
+
+#: v0.22.1. `CERT_REGIME_HEURISTICS` as the ordered lookup the rule record
+#: carries, DERIVED from the tuple above rather than restated beside it — a
+#: needle added there reaches the seeded rule without anybody remembering to
+#: copy it. `cert_type` is named before `cert_name` in every entry, and the
+#: engine's field order is the outer loop, which reproduces the legacy
+#: "read the type first and the name only as a fallback" exactly.
+CERT_REGIME_HEURISTIC_ROWS = [
+	{
+		"if_field_contains": {
+			"field": ["cert_type", "cert_name"],
+			"value": list(needles),
+			"case_insensitive": True,
+		},
+		"then_regimes": list(regimes),
+	}
+	for needles, regimes in CERT_REGIME_HEURISTICS
+] + [{"default_regimes": ["Internal"]}]
+
+# DECLARATIVE SINCE v0.22.1, AND IT COST TWO FIELDS. What kept it built-in was
+# never the window — `window_field` was added for it in v0.22.0 — but the two
+# things derived from the certificate's TYPE through a table:
+#   * `regime_heuristics_json` holds the eleven-row needle table as data,
+#     ORDERED, because "GlobalGAP" contains "GAP" and a USDA GAP packet must not
+#     be handed another scheme's certificate;
+#   * `category_heuristics_json` is the same shape producing the category, which
+#     is per row for the reason `CERT_WORKFORCE_TYPES` gives above.
+#
+# The third thing v0.22.1 had to fix was not a field at all: `_band` used to
+# check the critical threshold BEFORE the outer window, which is indistinguishable
+# from the legacy scanner until the per-row window is NARROWER than the rule's
+# critical threshold — a certificate whose issuing body turns renewals round in
+# ten days. The window now wins, which is what the Python always did.
 shape(
 	"certification_expiring",
 	target_doctype="Certification",
-	builtin_scanner="certification_expiring",
 	date_field="expiration_date",
 	cadence_days=0,
 	window_field="renewal_window_days",
@@ -508,6 +534,44 @@ shape(
 	severity_critical=SEVERITY_CRITICAL,
 	severity_warning=SEVERITY_WARNING,
 	severity_expired=SEVERITY_CRITICAL,
+	missing_date_behaviour="Skip",
+	due_date_mode="From Anchor",
+	scope_filters=[
+		# Superseded means a newer certificate covers this; revoked means it is not
+		# coming back. Neither is a renewal anybody can perform, and alerting on
+		# them would put permanent rows on a calendar nothing can ever clear. The
+		# `default` is load-bearing: a certificate nobody set a status on is Active.
+		{"field": "status", "op": "nin", "value": ["Superseded", "Revoked"], "default": "Active"}
+	],
+	regime_heuristics=CERT_REGIME_HEURISTIC_ROWS,
+	category_heuristics=[
+		{
+			"if_field_in": {
+				"field": "cert_type",
+				"value": list(CERT_WORKFORCE_TYPES),
+				# EXACT, because `cert_type` is a Select an operator chose from a
+				# closed list rather than free text somebody typed on the day.
+				"case_insensitive": False,
+			},
+			"then_category": "Workforce",
+		},
+		{"default_category": "Certifications"},
+	],
+	message_template=(
+		"{{ cert_type or 'Certificate' }} {{ name }}"
+		"{%- if holder %} held by {{ holder }}{% endif %}"
+		"{%- if band == 'expired' %} EXPIRED {{ days_overdue }} day(s) ago, on {{ expiration_date }}. "
+		"It is not a defence and has not been one since that date"
+		"{%- if issuing_body %}. Renewals go through {{ issuing_body }}.{% else %}.{% endif %}"
+		"{%- elif band == 'critical' %} expires in {{ days_remaining }} day(s), on "
+		"{{ expiration_date }}. Inside {{ threshold_critical_days }} days a renewal started now may "
+		"not come back before the lapse"
+		"{%- if issuing_body %} — {{ issuing_body }} issues it.{% else %}.{% endif %}"
+		"{%- else %} expires in {{ days_remaining }} day(s), on {{ expiration_date }}, which is "
+		"inside its {{ window_days }}-day renewal window. That window is the lead time the issuing "
+		"body actually takes, not a reminder preference — starting after it means missing it."
+		"{%- endif %}"
+	),
 	audit_packet_types=["GAP", "GlobalGAP", "FSMA"],
 	retention_years=3,
 )
@@ -715,29 +779,50 @@ register(
 	)
 )
 
-# BUILT-IN, AND THE REASON IS TWO DATES THAT ONLY MATTER TOGETHER. The
-# declarative engine has ONE cadence anchor: it computes days remaining against
-# one field and bands the answer. This rule's gate is a CONJUNCTION over two
-# independent fields — the block was sprayed inside the season AND its water was
-# tested outside the cadence — and the whole kairotic claim is that neither half
-# fires on its own. Ground nobody is spraying raises nothing however stale its
-# water; a block sprayed yesterday raises nothing if its water is current.
+# DECLARATIVE SINCE v0.22.1, AND IT COST ONE FIELD GROUP. What kept it built-in
+# was two dates that only matter together: the declarative engine has ONE cadence
+# anchor, and this rule's gate is a CONJUNCTION over two independent fields — the
+# block was sprayed inside the season AND its water was tested outside the
+# cadence. Neither half fires on its own. Ground nobody is spraying raises
+# nothing however stale its water; a block sprayed yesterday raises nothing if
+# its water is current.
 #
-# The primitive that would fix it is a second anchor: `gate_date_field` +
-# `gate_within_days`, meaning "only consider rows whose <field> is inside <n>
-# days". That is a small, well-shaped addition and it would take this rule
-# declarative on its own. It is the second-best v0.22.1 candidate.
+# `gate_date_field` + `gate_within_days` is the second anchor, used ONLY as a
+# gate: "consider a row only where <field> is inside <n> days". A block with no
+# spray date at all is gated OUT, which is the opposite of what
+# `missing_date_behaviour` does for the cadence anchor — and both are right. No
+# inspection ever recorded is the most overdue cabin there is; no spray ever
+# recorded is the least urgent block there is.
+#
+# `spray_season_days` STAYS IN `extra_parameters` as well as being the gate
+# interval. A site that tuned it in v0.22.0 tuned that key, and the seeder does
+# not overwrite an edited rule — so the key an operator may already have moved
+# keeps meaning what it meant, and the patch that migrates an existing row reads
+# it across into `gate_within_days`.
 shape(
 	"water_test_stale",
 	target_doctype="Field",
-	builtin_scanner="water_test_stale",
 	date_field="water_test_last_date",
 	cadence_days=WATER_TEST_DAYS,
 	threshold_critical_days=-1,
 	threshold_warning_days=-1,
 	severity_expired=SEVERITY_CRITICAL,
 	missing_date_behaviour="Raise",
+	due_date_mode="From Anchor",
+	gate_date_field="last_spray_date",
+	gate_within_days=SPRAY_SEASON_DAYS,
+	gate_scope="Direct",
+	scope_filters=[{"field": "condition", "op": "ne", "value": "Fallow", "default": ""}],
 	extra_parameters={"spray_season_days": SPRAY_SEASON_DAYS},
+	message_template=(
+		"{{ name }} was sprayed {{ gate_days_since }} day(s) ago and "
+		"{%- if days_since_anchor is none %} has NO agricultural water test on record at all"
+		"{%- else %} was last water-tested {{ days_since_anchor }} days ago, on "
+		"{{ water_test_last_date }}{% endif %}. FSMA Produce Safety Rule Subpart E wants "
+		"agricultural water tested within {{ cadence_days }} days, and the water going through the "
+		"sprayer onto a crop being harvested is agricultural water. This block is in active "
+		"rotation, so the next application is not defensible until the test is done."
+	),
 	audit_packet_types=["FSMA", "OSHA"],
 	retention_years=2,
 )
@@ -949,28 +1034,53 @@ register(
 	)
 )
 
-# BUILT-IN, AND THE REASON IS TWO ANCHORS OF THE SAME KIND. A cabin has a smoke
+# DECLARATIVE SINCE v0.22.1, AND IT COST THE PLURAL ANCHOR. A cabin has a smoke
 # detector and a CO detector, they are tested independently, EITHER being stale
-# fires the rule, and the message has to name which — "the CO detector was last
+# fires the rule, and the message has to NAME WHICH — "the CO detector was last
 # tested 400 days ago" is a different errand from "no smoke detector test has
 # ever been recorded", and an alert that said only "a detector is overdue" would
 # send somebody to test the wrong one.
 #
-# The primitive is a plural `date_fields` with a per-field label, folding to
-# "worst remaining" for the severity and enumerating the stale ones for the
-# message. It is more machinery than the other two candidates and it buys one
-# rule, so it is the third of the three rather than the first.
+# `date_fields_json` carries both anchors with a label each. The severity folds
+# to the worst of them; the message is handed `stale_dates`, which holds ONLY the
+# fields that actually reached a band, so a cabin whose smoke test is current and
+# whose CO test is four hundred days old produces one alert naming the CO
+# detector and not the other.
+#
+# The labels are FRAGMENTS — "smoke", "CO" — because the sentence around them
+# supplies "detector". A label that read as a sentence would produce a message
+# that read as a list.
 shape(
 	"housing_detector_test_stale",
 	target_doctype="Housing Unit",
-	builtin_scanner="housing_detector_test_stale",
 	date_field="smoke_detector_last_test",
+	date_fields=[
+		{"field": "smoke_detector_last_test", "label": "smoke"},
+		{"field": "co_detector_last_test", "label": "CO"},
+	],
 	cadence_days=DETECTOR_DAYS,
 	threshold_critical_days=-1,
 	threshold_warning_days=-1,
 	severity_expired=SEVERITY_WARNING,
 	missing_date_behaviour="Raise",
 	due_date_mode="None",
+	scope_filters=[
+		{"field": "unit_type", "op": "nin", "value": list(NON_RESIDENTIAL_TYPES), "default": ""},
+		{"field": "condition", "op": "ne", "value": "Uninhabitable", "default": ""},
+		# The FSMA worker-facility flag is what puts a building inside Subpart L and
+		# inside the camp's inspected estate. A shed on the same parcel is not a
+		# bunkhouse and does not need a detector test on record.
+		{"field": "fsma_worker_facility", "op": "istrue", "default": ""},
+	],
+	message_template=(
+		"{{ name }} is a FSMA worker facility and "
+		"{%- for entry in stale_dates %}{% if not loop.first %} and{% endif %}"
+		"{% if entry.days_since is none %} no {{ entry.label }} detector test has ever been recorded"
+		"{% else %} the {{ entry.label }} detector was last tested {{ entry.days_since }} days ago, "
+		"on {{ entry.date }}{% endif %}{% endfor %}. A detector nobody has tested inside a year is a "
+		"detector nobody knows works, and a camp cabin with a propane heater is exactly where that "
+		"matters."
+	),
 	audit_packet_types=["OSHA", "FSMA"],
 	retention_years=3,
 )
@@ -1557,31 +1667,68 @@ register(
 	)
 )
 
-# BUILT-IN, AND THE REASON IS SUPERSESSION — the one gate in the whole engine
-# that is a question about OTHER ROWS. Whether a July water stain is still true
-# depends on whether a September inspection of the SAME UNIT came back clean.
-# There is no filter on the finding's own row that can answer that, and there is
-# no threshold either: the condition stops being true because a different record
-# was written.
+# DECLARATIVE SINCE v0.22.1, AND IT IS THE MIGRATION THAT COST THE MOST. What
+# kept it built-in was SUPERSESSION — the one gate in the whole engine that is a
+# question about OTHER ROWS. Whether a July water stain is still true depends on
+# whether a September inspection of the SAME UNIT came back clean, and there is
+# no filter on the finding's own row that can answer that.
 #
-# It also walks TWO doctypes under one rule_id, deliberately — a cabin with a
-# water stain and a cabin with a dead CO detector are the same conversation with
-# the same person on the same walk round the camp.
+# `superseded_by_later_clean_json` is that question as four values, and it took
+# TWO rules declarative at once. But this rule needed two more things that
+# `water_test_contamination` did not, and they are the reason it was the hard one:
 #
-# A declarative primitive for this would be `superseded_by_later_clean`:
-# (doctype, subject_field, date_field, clean_state). That is expressible and
-# worth doing — it would take this rule AND water_test_contamination declarative
-# together, which is the best two-for-one in the set after the regime heuristics.
+#   * `target_doctypes_json`, because it walks Housing Inspection AND Detector
+#     Test under one rule_id. That is deliberate and not an accident of history:
+#     a cabin with a water stain and a cabin with a dead CO detector are the same
+#     conversation with the same person on the same walk round the camp. Two
+#     rule_ids would be two lists for one afternoon — and would change every
+#     alert docname on every site that has one.
+#   * `date_field_role = Timestamp`, because `inspection_date` is WHEN THE THING
+#     WAS FOUND rather than a deadline. Left as a clock, a finding recorded today
+#     has zero days remaining, reaches no band with these thresholds, and would
+#     have silently stopped firing on the day it was written — which is exactly
+#     the day somebody needs to see it.
 shape(
 	"housing_corrective_action_open",
 	target_doctype="Housing Inspection",
-	builtin_scanner="housing_corrective_action_open",
 	requires_doctypes="Housing Inspection",
+	target_doctypes=[
+		{
+			"doctype": "Housing Inspection",
+			"date_field": "inspection_date",
+			"label": "the habitability inspection",
+		},
+		{"doctype": "Detector Test", "date_field": "test_date", "label": "the detector test"},
+	],
 	date_field="inspection_date",
+	date_field_role="Timestamp",
+	cadence_days=0,
 	threshold_critical_days=-1,
 	threshold_warning_days=-1,
 	severity_expired=SEVERITY_CRITICAL,
 	due_date_mode="None",
+	scope_filters=[
+		{"field": "workflow_state", "op": "eq", "value": CORRECTIVE_ACTION_REQUIRED},
+		# Closed by hand, with a note saying what was done. The other exit.
+		{"field": "corrective_action_closed", "op": "isnull"},
+	],
+	superseded_by_later_clean={
+		"subject_field": "unit",
+		"clean_state_field": "workflow_state",
+		"clean_state_values": [RECORDED],
+		"unreadable_counts_as_dirty": True,
+	},
+	message_template=(
+		"{{ unit }} — {{ target_label }} on {{ anchor or 'an unrecorded date' }} found: "
+		# `(findings or '')` and not `findings|trim`: Jinja's `trim` stringifies
+		# first, so a NULL column renders the four characters `None` and the alert
+		# reports a finding of "None" to somebody at seven in the morning.
+		"{{ ((findings or '')|trim or 'a fault was recorded with no detail')[:200] }}"
+		"{%- if days_since_anchor is not none %}. Open {{ days_since_anchor }} day(s){% endif %}"
+		". Somebody sleeps in this building tonight. It closes when the fault is fixed and a fresh "
+		"clean record is written for the same unit, or when the corrective action is closed by hand "
+		"with a note saying what was done."
+	),
 	audit_packet_types=["OSHA", "FSMA"],
 	retention_years=3,
 )
@@ -1691,19 +1838,48 @@ register(
 	)
 )
 
-# BUILT-IN, SAME REASON AS THE CAMP RULE ABOVE and it would be fixed by the same
-# primitive. The gate is "is this result still the LATEST word on that zone" —
-# a question about other rows of the same doctype, which no filter on this row
-# can answer. `superseded_by_later_clean` takes both rules declarative at once.
+# DECLARATIVE SINCE v0.22.1, AND IT WAS THE CHEAP HALF OF THE SAME PRIMITIVE.
+# The gate is "is this result still the LATEST word on that zone" — a question
+# about other rows of the same doctype, which no filter on this row can answer.
+# One doctype, one date, so it needed `superseded_by_later_clean_json` and
+# `date_field_role = Timestamp` and nothing else. The camp rule paid for the
+# other two fields; this rule got them for free, which is the two-for-one the
+# v0.22.0 backlog predicted.
+#
+# `unreadable_counts_as_dirty` is the flag whose default matters most. A sample
+# whose state nobody can read does NOT supersede a contamination finding —
+# because a result nobody can interpret is not evidence that the water is safe,
+# and treating it as clean is how a compliance file becomes a clean record of
+# nothing.
 shape(
 	"water_test_contamination",
 	target_doctype="Water Test",
-	builtin_scanner="water_test_contamination",
 	date_field="test_date",
+	date_field_role="Timestamp",
+	cadence_days=0,
 	threshold_critical_days=-1,
 	threshold_warning_days=-1,
 	severity_expired=SEVERITY_CRITICAL,
 	due_date_mode="None",
+	scope_filters=[
+		{"field": "workflow_state", "op": "eq", "value": CORRECTIVE_ACTION_REQUIRED},
+		{"field": "corrective_action_closed", "op": "isnull"},
+	],
+	superseded_by_later_clean={
+		"subject_field": "source",
+		"clean_state_field": "workflow_state",
+		"clean_state_values": [RECORDED],
+		"unreadable_counts_as_dirty": True,
+	},
+	message_template=(
+		"{{ source }}{% if block %} (block {{ block }}){% endif %} was sampled on "
+		"{{ anchor or 'an unrecorded date' }} and the result was not clean: coliform "
+		"{{ coliform_result or 'unrecorded' }}, E. coli {{ ecoli_result or 'unrecorded' }}"
+		"{%- if days_since_anchor is not none %}. Open {{ days_since_anchor }} day(s){% endif %}"
+		". This is agricultural water going onto a crop being harvested, so FSMA Produce Safety "
+		"Rule Subpart E is engaged and the next application is not defensible until the source is "
+		"treated or switched and a clean sample comes back."
+	),
 	audit_packet_types=["FSMA"],
 	retention_years=2,
 )
