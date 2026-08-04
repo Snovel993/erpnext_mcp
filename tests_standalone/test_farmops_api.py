@@ -153,12 +153,13 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/start_task",
 		"/mobile/complete_task_via_mobile",
 		"/mobile/reject_task",
+		"/mobile/report_field_task",
 		"/mobile/list_compliance_alerts",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}
 
-	def test_the_route_table_is_exactly_the_eleven_the_app_calls(self):
+	def test_the_route_table_is_exactly_the_twelve_the_app_calls(self):
 		self.assertEqual({route.path for route in ROUTES}, self.EXPECTED)
 
 	def test_every_guarded_method_has_a_route_so_none_is_stranded(self):
@@ -208,7 +209,7 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 			with self.subTest(path=path):
 				self.assertEqual(self.post(path).status_code, 404)
 
-	def test_none_of_the_eleven_takes_kwargs(self):
+	def test_none_of_the_twelve_takes_kwargs(self):
 		"""`**kwargs` on a wrapper would forward the phone's whole body into a
 		tool — which is exactly how `record_data` and `worker_id` would become
 		reachable. `api/mobile.py` names every accepted argument for that reason;

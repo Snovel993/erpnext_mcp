@@ -1235,9 +1235,9 @@ class TheUpgradeFromV0220(PrimitiveTestCase):
 		self.a_v0220_site()
 		self.run_the_patch()
 		self.assertEqual(self.run_the_patch()["migrated"], [])
-		# Fourteen since v0.22.5, which seeds one rule that never had a scanner —
+		# Fifteen since v0.23.0, which adds field_flag_awaiting_dispatch —
 		# the patch has nothing to say about it and leaves it exactly alone.
-		self.assertEqual(len(compliance_rules.rule_rows()), 14)
+		self.assertEqual(len(compliance_rules.rule_rows()), 15)
 
 	def test_an_operator_edited_threshold_survives_the_migration(self):
 		"""The question the patch exists to answer well. A site that contracted its

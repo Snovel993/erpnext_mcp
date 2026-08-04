@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The nine methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The ten methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -15,7 +15,7 @@ identical session. Every gate below runs unchanged on whichever door was used.
 One function per method, named exactly as
 `FarmOpsKit/Sources/FarmOpsKit/Networking/MobileAPI.swift` names it. THERE IS NO
 DISPATCHER HERE ON PURPOSE: a method exists as a function or its path 404s, so
-the whole reachable surface is the nine `@frappe.whitelist()` lines below and an
+the whole reachable surface is the ten `@frappe.whitelist()` lines below and an
 auditor establishes that by reading them. A generic `call(tool_name, args)`
 would have been fewer lines and would have published all two hundred MCP tools —
 including `create_journal_entry`, `convey_parcel` and `import_chart_of_accounts`
@@ -432,7 +432,66 @@ def reject_task(user: str, task=None, task_assignment=None, reason=None) -> dict
 	}
 
 
-# ── 9. list_compliance_alerts ───────────────────────────────────────────────
+# ── 10. report_field_task ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("report_field_task", limit=guard.WRITE_LIMIT, mutating=True)
+def report_field_task(
+	user: str,
+	location_doctype=None,
+	location=None,
+	task_type=None,
+	skill_required=None,
+	urgency=None,
+	description=None,
+	photo_file_token=None,
+) -> dict:
+	"""A worker in the field flags a problem on the spot.
+
+	THE FIELD REPORT IS THE WORK ORDER. The worker taps, snaps a photo,
+	describes the problem, and the task is in the pool — one act, not a
+	two-step process with a separate ticket doctype between them.
+
+	`reported_by` IS FILLED FROM THE AUTHENTICATED CALLER, not from the
+	body. An account that can name somebody else in a request body is not
+	scoped to anything — the same principle as `list_my_tasks` filling
+	`worker_id` from the session.
+
+	`urgency` is CAPPED: field workers may choose Normal or High. Critical
+	is restricted to Foreman and Farm Manager roles, and the tool enforces
+	that — the wrapper passes the value through because the tool layer
+	already has the role check.
+	"""
+	allowed = guard.require_scope(user)
+	employee = _employee(user)
+
+	inner = {"reported_by": employee}
+	if location_doctype:
+		inner["location_doctype"] = str(location_doctype).strip()
+	if location:
+		inner["location"] = str(location).strip()
+	if task_type:
+		inner["task_type"] = str(task_type).strip()
+	if skill_required:
+		inner["skill_required"] = str(skill_required).strip()
+	if urgency:
+		inner["urgency"] = str(urgency).strip()
+	if description:
+		inner["description"] = str(description).strip()
+	if photo_file_token:
+		inner["photo_file_token"] = str(photo_file_token).strip()
+
+	company = guard.require_company(user, inner.get("company"), allowed) if inner.get("company") else ""
+	if not company and allowed:
+		inner["company"] = allowed[0]
+	elif company:
+		inner["company"] = company
+
+	result = dispatch.report_field_task(inner)
+	data = result.data
+	return shape.task(data, None)
+
+
+# ── 11. list_compliance_alerts ──────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("list_compliance_alerts", limit=guard.READ_LIMIT)
 def list_compliance_alerts(user: str, company=None) -> dict:

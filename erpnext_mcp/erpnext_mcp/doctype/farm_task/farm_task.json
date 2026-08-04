@@ -12,6 +12,7 @@
   "task_type",
   "state",
   "urgency",
+  "origin",
   "identity_col",
   "company",
   "location_doctype",
@@ -27,6 +28,11 @@
   "source_alert",
   "source_workorder",
   "inspection_session",
+  "field_report_section",
+  "reported_by",
+  "reported_at",
+  "field_report_col",
+  "report_photo",
   "evidence_section",
   "evidence_required",
   "record_section",
@@ -55,6 +61,16 @@
    "label": "Task Type",
    "options": "Inspection\nTest\nSpray\nRepair\nHarvest\nTraining\nCompliance-Audit\nHousing-Cleanup\nWater-Sampling\nOther",
    "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "compliance_rule",
+   "description": "How this task came into being. compliance_rule: generated from a compliance alert. foreman_dispatch: raised by a foreman from the Desk or MCP. field_reported: a worker in the field flagged a problem on the spot. worker_self_pick_from_pool: a worker picked it from the pool. Existing tasks default to compliance_rule.",
+   "fieldname": "origin",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Origin",
+   "options": "compliance_rule\nforeman_dispatch\nfield_reported\nworker_self_pick_from_pool",
    "search_index": 1
   },
   {
@@ -186,6 +202,35 @@
    "search_index": 1
   },
   {
+   "fieldname": "field_report_section",
+   "fieldtype": "Section Break",
+   "label": "Field Report"
+  },
+  {
+   "description": "The Employee who flagged this problem in the field, distinct from whoever is assigned to fix it. Blank for tasks that did not originate from a field report. DATA AND NOT A LINK, for the same reason assigned_to is: Frappe HR is not a dependency.",
+   "fieldname": "reported_by",
+   "fieldtype": "Data",
+   "label": "Reported By",
+   "search_index": 1
+  },
+  {
+   "description": "When the field report was raised — the moment the worker tapped 'Report a problem'. Distinct from creation, which is when the server processed it.",
+   "fieldname": "reported_at",
+   "fieldtype": "Datetime",
+   "label": "Reported At"
+  },
+  {
+   "fieldname": "field_report_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The 'before' photo the worker took at flag time: what the problem looked like before anybody was sent to fix it. Separate from completion evidence, which is the 'after'.",
+   "fieldname": "report_photo",
+   "fieldtype": "Attach",
+   "label": "Report Photo"
+  },
+  {
    "fieldname": "evidence_section",
    "fieldtype": "Section Break",
    "label": "Evidence Required to Close It"
@@ -275,7 +320,7 @@
   }
  ],
  "quick_entry": 0,
- "search_fields": "task_type,state,location,assigned_to",
+ "search_fields": "task_type,state,location,assigned_to,origin,reported_by",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

@@ -198,6 +198,7 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"start_task",
 		"complete_task_via_mobile",
 		"reject_task",
+		"report_field_task",
 		"list_compliance_alerts",
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
@@ -209,7 +210,7 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 			if not name.startswith("_") and getattr(getattr(module, name), "farm_ops_method", None)
 		}
 
-	def test_the_mobile_module_publishes_exactly_the_nine_the_app_calls(self):
+	def test_the_mobile_module_publishes_exactly_the_ten_the_app_calls(self):
 		self.assertEqual(self._whitelisted(mobile_api), self.MOBILE)
 
 	def test_the_files_module_publishes_exactly_the_two_the_app_calls(self):

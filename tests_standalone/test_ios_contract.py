@@ -429,7 +429,7 @@ class ContractTestCase(MobileAPITestCase):
 		return staged, finalized
 
 
-# ── 1. the eleven methods, each decoded by its mirror ────────────────────────
+# ── 1. the twelve methods, each decoded by its mirror ─────────────────────────
 class EveryMobileMethodDecodes(ContractTestCase):
 	"""The suite proper. One test per method the app calls."""
 
@@ -505,13 +505,22 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		for index, row in enumerate(body["alerts"]):
 			ComplianceAlertSummaryModel.decode(row, "list_compliance_alerts", f".alerts[{index}]")
 
-	def test_10_stage_file_chunk(self):
+	def test_10_report_field_task(self):
+		_staged, photo = self.upload("photo", "FR_photo.jpg")
+		row = self.wire(
+			"report_field_task",
+			photo_file_token=photo["file_token"],
+			description="broken sprinkler head",
+		)
+		FarmTaskModel.decode(row, "report_field_task")
+
+	def test_11_stage_file_chunk(self):
 		staged, _finalized = self.upload()
 		StagedChunkModel.decode(staged, "stage_file_chunk")
 		self.assertEqual(staged["chunk_index"], 0)
 		self.assertTrue(staged["complete"])
 
-	def test_11_finalize_staged_file(self):
+	def test_12_finalize_staged_file(self):
 		_staged, finalized = self.upload()
 		FinalizedFileModel.decode(finalized, "finalize_staged_file")
 		self.assertTrue(finalized["file_token"])
@@ -591,7 +600,7 @@ class TheMirrorsAreStrictEnough(ContractTestCase):
 
 # ── 3. the mirrors cover the surface, and keep covering it ──────────────────
 class TheContractIsComplete(ContractTestCase):
-	"""The test that fails when somebody adds a twelfth method and no mirror.
+	"""The test that fails when somebody adds a thirteenth method and no mirror.
 
 	Without this, the suite silently stops covering the surface the moment it
 	grows — which is precisely how the app got four undecodable releases while
@@ -609,8 +618,9 @@ class TheContractIsComplete(ContractTestCase):
 		"complete_task_via_mobile": "test_07",
 		"reject_task": "test_08",
 		"list_compliance_alerts": "test_09",
-		"stage_file_chunk": "test_10",
-		"finalize_staged_file": "test_11",
+		"report_field_task": "test_10",
+		"stage_file_chunk": "test_11",
+		"finalize_staged_file": "test_12",
 	}
 
 	def _published(self, module):

@@ -283,6 +283,7 @@
   "allow_get_farm_task",
   "dispatch_read_col",
   "allow_create_farm_task",
+  "allow_report_field_task",
   "allow_assign_farm_task",
   "allow_claim_farm_task",
   "allow_start_farm_task",
@@ -2179,6 +2180,13 @@
    "fieldname": "allow_create_farm_task",
    "fieldtype": "Check",
    "label": "Create Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. A worker in the field reports a problem on the spot. Photo required, rate-limited to 5 per worker per hour. Critical urgency restricted to Foreman and Farm Manager roles.",
+   "fieldname": "allow_report_field_task",
+   "fieldtype": "Check",
+   "label": "Report Field Task"
   },
   {
    "default": "0",

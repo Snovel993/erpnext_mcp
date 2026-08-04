@@ -3,6 +3,36 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.23.0 — 2026-08-04
+
+**Field-Initiated Tasks: every worker becomes a compliance sensor.** Workers in
+the field can report problems on the spot — tap "Report a problem," snap a photo,
+add a description, and create a Farm Task immediately. The field report IS the
+work order: no separate "Issue" or "Ticket" doctype. Photo-taking IS
+ticket-creation IS dispatch entry, all one act.
+
+**New fields on Farm Task:** `origin` (how the task came into being:
+`compliance_rule`, `foreman_dispatch`, `field_reported`,
+`worker_self_pick_from_pool`), `reported_by` (the Employee who flagged it),
+`reported_at` (when they flagged it), `report_photo` (the "before" photo).
+
+**New MCP tool:** `report_field_task` — mutating, rate-limited (5 per worker per
+hour), photo required. Workers may choose Normal or High urgency; Critical is
+restricted to Foreman and Farm Manager roles.
+
+**New mobile API endpoint:** `report_field_task` — whitelisted, same anti-spam
+rules, reporter resolved from the authenticated session.
+
+**New compliance rule:** `field_flag_awaiting_dispatch` — if a field-reported
+task sits in Available state for more than 24 hours without being claimed, raise a
+Warning alert to the foreman.
+
+**Anti-spam:** a foreman dismissing a report as "not a real issue" (Cancelled
+state) counts against the reporter's rate limit for the next 24 hours.
+
+The split is now **13 declarative / 2 built-in-permanent / 0 `custom_python`**.
+Tool count: **257** (113 read, 144 mutating).
+
 ## 0.22.5 — 2026-08-04
 
 **A rule that fires on the weather.** Every rule this app had ever shipped fired

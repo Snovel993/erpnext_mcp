@@ -6877,6 +6877,51 @@ TOOLS = {
 		available=_needs_doctype("Farm Task"),
 		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"report_field_task": _tool(
+		dispatch.report_field_task,
+		"MUTATING (default OFF). A worker in the field reports a problem on the "
+		"spot — tap, snap a photo, describe, and the task is in the pool.\n\n"
+		"THE FIELD REPORT IS THE WORK ORDER. No separate Issue or Ticket doctype. "
+		"Photo-taking IS ticket-creation IS dispatch entry, all one act. Every "
+		"worker becomes a compliance sensor.\n\n"
+		"ANTI-SPAM: 5 field reports per worker per hour. Photo required — a report "
+		"without evidence is a rumour. A foreman who dismisses a report as 'not a "
+		"real issue' counts that against the reporter's limit for 24 hours.\n\n"
+		"URGENCY IS CAPPED for field workers: Normal or High only. Critical is "
+		"restricted to Foreman and Farm Manager roles — every worker believing "
+		"their problem is Critical is how Critical stops meaning anything on a "
+		"board.",
+		{
+			"location_doctype": _field(
+				_STRING, "The register the place is in: Housing Unit, Field, Irrigation Zone or Parcel."
+			),
+			"location": _field(_STRING, "The docname of the cabin, block, zone or parcel."),
+			"task_type": _field(
+				_STRING,
+				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
+				"Housing-Cleanup, Water-Sampling or Other. Default Repair.",
+			),
+			"skill_required": _field(_STRING, "e.g. 'camp_maintenance', 'applicator_license'."),
+			"urgency": _field(
+				_STRING,
+				"Normal or High for field workers. Critical restricted to Foreman/Manager. "
+				"Default Normal.",
+			),
+			"description": _field(_STRING, "What the problem is, in the worker's words."),
+			"photo_file_token": _field(
+				_STRING,
+				"REQUIRED. The File docname from finalize_staged_file — the 'before' photo "
+				"of the problem.",
+			),
+			"reported_by": _field(_STRING, "The Employee id of the worker reporting. REQUIRED."),
+			"company": _COMPANY,
+		},
+		required=("reported_by", "photo_file_token"),
+		mutating=True,
+		title="Report a field task",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	"assign_farm_task": _tool(
 		dispatch.assign_farm_task,
 		"MUTATING (default OFF). Send one named person to one task — the foreman's "

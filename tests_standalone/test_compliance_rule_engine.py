@@ -246,12 +246,12 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		fall back to. It is the first rule this app ships that is ONLY data.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 14)
-		self.assertEqual(len(compliance_rules.rule_rows()), 14)
+		self.assertEqual(len(report["created"]), 15)
+		self.assertEqual(len(compliance_rules.rule_rows()), 15)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
-	def test_the_shapes_are_twelve_declarative_two_builtin_and_no_custom_python(self):
+	def test_the_shapes_are_thirteen_declarative_two_builtin_and_no_custom_python(self):
 		"""The split is a claim the release makes, so it is asserted rather than described.
 
 		v0.22.0 shipped 6/7/0 and named the four primitives that would move five of
@@ -270,6 +270,7 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 			sorted(shapes.get(compliance_rules.SHAPE_DECLARATIVE, [])),
 			[
 				"certification_expiring",
+				"field_flag_awaiting_dispatch",
 				"filing_response_due",
 				"flc_license_expiring",
 				"housing_corrective_action_open",
@@ -901,12 +902,12 @@ class TheApprovalGate(RuleEngineTestCase):
 
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
-	def test_seeding_twice_writes_fourteen_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 14)
+	def test_seeding_twice_writes_fifteen_rules_once(self):
+		self.assertEqual(len(self.seed_rules()["created"]), 15)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 14)
-		self.assertEqual(len(compliance_rules.rule_rows()), 14)
+		self.assertEqual(len(again["present"]), 15)
+		self.assertEqual(len(compliance_rules.rule_rows()), 15)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -954,7 +955,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 14)
+		self.assertEqual(data["rule_count"], 15)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)

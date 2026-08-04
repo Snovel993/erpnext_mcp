@@ -74,6 +74,10 @@ from ..erpnext_mcp.doctype.farm_task.farm_task import (
 	EVIDENCE_KEYS,
 	IN_PROGRESS,
 	MAX_CONCURRENT_CLAIMS,
+	ORIGIN_COMPLIANCE_RULE,
+	ORIGIN_FIELD_REPORTED,
+	ORIGIN_FOREMAN_DISPATCH,
+	ORIGINS,
 	REJECTED,
 	SELF_PICKABLE,
 	STATES,
@@ -185,12 +189,13 @@ def task_row(task: str) -> dict:
 
 def _describe_task(row: dict) -> dict:
 	contract = evidence_contract(row.get("evidence_required"))
-	return {
+	out = {
 		"name": row.get("name"),
 		"task_name": row.get("task_name"),
 		"task_type": row.get("task_type"),
 		"state": row.get("state") or DRAFT,
 		"urgency": row.get("urgency") or "Normal",
+		"origin": row.get("origin") or ORIGIN_COMPLIANCE_RULE,
 		"company": row.get("company") or None,
 		"location_doctype": row.get("location_doctype") or None,
 		"location": row.get("location") or None,
@@ -210,6 +215,13 @@ def _describe_task(row: dict) -> dict:
 		"open": (row.get("state") or DRAFT) not in TERMINAL_STATES,
 		"self_pickable": (row.get("dispatch_mode") or "Either") in SELF_PICKABLE,
 	}
+	if row.get("reported_by"):
+		out["reported_by"] = row["reported_by"]
+	if row.get("reported_at"):
+		out["reported_at"] = str(row["reported_at"])
+	if row.get("report_photo"):
+		out["report_photo"] = row["report_photo"]
+	return out
 
 
 def _safe_json(raw) -> dict:
@@ -2171,3 +2183,171 @@ def _pool_dispatch(recipe: dict) -> str:
 #: certificate points at a certificate, and a certificate is not somewhere
 #: anybody can be sent.
 _DISPATCHABLE_LOCATIONS = ("Housing Unit", "Field", "Irrigation Zone", "Parcel")
+
+
+# ── 12. report_field_task ───────────────────────────────────────────────────
+#: v0.23.0. Field-Initiated Tasks: a worker in the field becomes a compliance
+#: sensor. The field report IS the work order — no separate "Issue" or "Ticket"
+#: doctype. Photo-taking IS ticket-creation IS dispatch entry, all one act.
+
+FIELD_REPORT_LIMIT = 5
+FIELD_REPORT_WINDOW_SECONDS = 3600
+FIELD_REPORT_PENALTY_HOURS = 24
+
+#: Urgency values a field worker may choose. Critical is restricted to
+#: foreman/manager roles to prevent alarm inflation — every field worker
+#: believing their problem is Critical is how Critical stops meaning anything.
+_WORKER_URGENCY = ("Normal", "High")
+
+#: Roles that may use Critical urgency on a field report.
+_CRITICAL_ROLES = frozenset({"Foreman", "Farm Manager"})
+
+
+def _field_report_count(worker: str) -> int:
+	"""Reports this worker has filed in the current window."""
+	cutoff = frappe.utils.add_to_date(frappe.utils.now(), hours=-1, as_string=True, as_datetime=True)
+	return frappe.db.count(
+		FARM_TASK,
+		filters={
+			"origin": ORIGIN_FIELD_REPORTED,
+			"reported_by": worker,
+			"reported_at": (">=", cutoff),
+		},
+	)
+
+
+def _is_penalty_active(worker: str) -> bool:
+	"""Whether a foreman dismissed one of this worker's reports in the last 24h."""
+	cutoff = frappe.utils.add_to_date(
+		frappe.utils.now(), hours=-FIELD_REPORT_PENALTY_HOURS, as_string=True, as_datetime=True
+	)
+	return bool(
+		frappe.db.exists(
+			FARM_TASK,
+			{
+				"origin": ORIGIN_FIELD_REPORTED,
+				"reported_by": worker,
+				"state": CANCELLED,
+				"modified": (">=", cutoff),
+			},
+		)
+	)
+
+
+def report_field_task(args: dict) -> ToolResult:
+	"""A worker in the field flags a problem on the spot.
+
+	THE FIELD REPORT IS THE WORK ORDER. No separate doctype, no two-step
+	process, no gap between seeing and dispatching. The worker taps, snaps,
+	describes, and the task is in the pool in one act.
+
+	ANTI-SPAM: 5 per worker per hour. A foreman dismissing a report with
+	reason 'not a real issue' counts against the reporter's limit for the
+	next 24h. Photo required — a report without evidence is a rumour.
+
+	URGENCY IS CAPPED. Workers may choose Normal or High. Critical is
+	reserved for foreman/manager roles, because every worker believing their
+	problem is Critical is how Critical stops meaning anything on a board.
+	"""
+	_require()
+	company = _company(args)
+
+	worker = _worker(args, "reported_by", required=True)
+	worker_name = _worker_name(worker)
+
+	# ── anti-spam ──────────────────────────────────────────────────────────
+	if _is_penalty_active(worker):
+		raise ToolError(
+			f"{worker_name} ({worker}) had a field report dismissed as 'not a real issue' in the "
+			f"last {FIELD_REPORT_PENALTY_HOURS} hours, which counts against their rate limit. "
+			"Nothing was created."
+		)
+	count = _field_report_count(worker)
+	if count >= FIELD_REPORT_LIMIT:
+		raise ToolError(
+			f"{worker_name} ({worker}) has already filed {count} field reports in the last hour. "
+			f"The limit is {FIELD_REPORT_LIMIT}. Nothing was created."
+		)
+
+	# ── photo required ─────────────────────────────────────────────────────
+	photo = as_str(args, "photo_file_token")
+	if not photo:
+		raise ToolError(
+			"photo_file_token is required. A field report without a photograph is a rumour — the "
+			"photo is what turns 'there is a problem' into evidence somebody can act on. Upload "
+			"the photo first with stage_file_chunk / finalize_staged_file, then pass the file "
+			"token here. Nothing was created."
+		)
+	if not frappe.db.exists("File", photo):
+		raise ToolError(
+			f"no File {photo!r} on this site. Upload the photo first with stage_file_chunk / "
+			"finalize_staged_file, then pass the file token here. Nothing was created."
+		)
+
+	# ── urgency ────────────────────────────────────────────────────────────
+	urgency = as_str(args, "urgency") or "Normal"
+	if urgency == "Critical":
+		caller_roles = set(frappe.get_roles(frappe.session.user or ""))
+		if not (caller_roles & _CRITICAL_ROLES):
+			raise ToolError(
+				"Critical urgency on a field report is restricted to Foreman and Farm Manager "
+				"roles. A field worker may choose Normal or High. Nothing was created."
+			)
+	if urgency not in ("Low", "Normal", "High", "Critical"):
+		raise ToolError(
+			f"urgency {urgency!r} is not one of: Low, Normal, High, Critical. Nothing was created."
+		)
+
+	# ── location ───────────────────────────────────────────────────────────
+	location_doctype = as_str(args, "location_doctype")
+	location = as_str(args, "location")
+	if location and not location_doctype:
+		raise ToolError(
+			"location was given with no location_doctype. Pass the register it is in: "
+			"'Housing Unit', 'Field', 'Irrigation Zone' or 'Parcel'. Nothing was created."
+		)
+	if location_doctype and location:
+		if not compat.doctype_exists(location_doctype):
+			raise ToolError(f"this site has no {location_doctype!r} DocType. Nothing was created.")
+		if not frappe.db.exists(location_doctype, location):
+			raise ToolError(f"no {location_doctype} called {location!r} on this site. Nothing was created.")
+
+	# ── build the task ─────────────────────────────────────────────────────
+	task_type = as_str(args, "task_type") or "Repair"
+	skill_required = as_str(args, "skill_required")
+	description = as_str(args, "description")
+	task_name = description[:80] if description else f"Field report by {worker_name}"
+
+	doc = frappe.new_doc(FARM_TASK)
+	doc.task_name = task_name
+	doc.task_type = as_choice(FARM_TASK, "task_type", task_type, "task_type")
+	doc.urgency = urgency
+	doc.origin = ORIGIN_FIELD_REPORTED
+	doc.company = company
+	doc.location_doctype = location_doctype or None
+	doc.location = location or None
+	doc.skill_required = skill_required
+	doc.dispatch_mode = "Either"
+	doc.state = AVAILABLE
+	doc.notes = description
+	doc.evidence_required = json.dumps({"photos": True, "findings_text": True})
+	doc.reported_by = worker
+	doc.reported_at = frappe.utils.now()
+	doc.report_photo = photo
+	doc.insert(ignore_permissions=True)
+
+	described = _describe_task(dict(doc.as_dict()))
+	return ToolResult(
+		data={
+			**described,
+			"reported_by": worker,
+			"reported_by_name": worker_name,
+			"reported_at": str(doc.reported_at),
+			"report_photo": photo,
+		},
+		summary=(
+			f"field report {doc.name} ({doc.task_type}, {urgency}) "
+			f"reported by {worker_name} at {doc.location or 'unspecified location'}"
+		),
+		docstatus_delta="none → 0 (created)",
+	)

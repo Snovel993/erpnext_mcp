@@ -1503,7 +1503,58 @@ def declarative_seed_specs() -> list:
 			),
 			"authored_by": AUTHOR_SYSTEM,
 			"enabled": 1,
-		}
+		},
+		# ── v0.23.0: field report awaiting dispatch ────────────────────────
+		{
+			"rule_id": "field_flag_awaiting_dispatch",
+			"title": "A field-reported task has sat in Available for more than 24 hours without being claimed",
+			"category": "Workforce",
+			"target_doctype": "Farm Task",
+			"requires_doctypes": "Farm Task",
+			"date_field": "reported_at",
+			"date_field_role": DATE_ROLE_CLOCK,
+			"default_severity": SEVERITY_DEFAULT,
+			"due_date_mode": DUE_FROM_ANCHOR,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": 1,
+			"cadence_days": 0,
+			"scope_filters": [
+				{"field": "origin", "op": "eq", "value": "field_reported"},
+				{"field": "state", "op": "eq", "value": "Available"},
+			],
+			"message_template": (
+				"Field report {{ row.name }} ('{{ row.task_name }}') has been in Available "
+				"state for more than 24 hours since {{ row.reported_at }}. A worker flagged "
+				"a problem and nobody has claimed the task. Review and either dispatch "
+				"somebody or dismiss the report with a reason."
+			),
+			"regimes": [],
+			"regulation_citations": "",
+			"retention_years": 1,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": None,
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {},
+			"evidence_contract": {"findings_text": True},
+			"purpose": (
+				"A field report is a worker saying 'I see a problem'. If nobody claims the "
+				"resulting task within 24 hours, the report is either being ignored or was "
+				"never seen — and an ignored field report teaches the crew that reporting "
+				"problems is a waste of their time, which is the fastest way to lose the "
+				"eyes this whole feature exists to recruit."
+			),
+			"kairotic_gate_description": (
+				"Fires when a field-reported task (origin = field_reported) has been in "
+				"Available state for more than 24 hours. The clock starts at reported_at — "
+				"when the worker tapped 'Report a problem' — not at creation, which may "
+				"differ by the queue delay. Silences when the task is claimed, completed, "
+				"or cancelled."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
 	]
 
 

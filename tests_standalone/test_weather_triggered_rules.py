@@ -935,11 +935,11 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		self.assertEqual(live[0]["default_severity"], "Critical")
 		self.assertEqual(int(live[0]["version"]), 2)
 
-	def test_the_split_is_twelve_declarative_two_builtin_and_no_custom_python(self):
+	def test_the_split_is_thirteen_declarative_two_builtin_and_no_custom_python(self):
 		self.seed_rules()
 		shapes: dict = {}
 		for row in compliance_rules.rule_rows():
 			shapes.setdefault(compliance_rules.shape_of(row), []).append(row["rule_id"])
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 12)
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 13)
 		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 2)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])

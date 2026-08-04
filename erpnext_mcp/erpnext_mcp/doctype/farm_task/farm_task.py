@@ -102,6 +102,22 @@ DISPATCH_DISPATCHED = "Dispatched"
 DISPATCH_SELF_PICK = "Self-pick"
 SELF_PICKABLE = (DISPATCH_EITHER, DISPATCH_SELF_PICK)
 
+#: How a task came into being. The default is compliance_rule for backwards
+#: compatibility — every task that existed before v0.23.0 was either generated
+#: from a compliance alert or raised by a foreman, and compliance_rule is the
+#: right default for the majority that were generated.
+ORIGIN_COMPLIANCE_RULE = "compliance_rule"
+ORIGIN_FOREMAN_DISPATCH = "foreman_dispatch"
+ORIGIN_FIELD_REPORTED = "field_reported"
+ORIGIN_WORKER_SELF_PICK = "worker_self_pick_from_pool"
+
+ORIGINS = (
+	ORIGIN_COMPLIANCE_RULE,
+	ORIGIN_FOREMAN_DISPATCH,
+	ORIGIN_FIELD_REPORTED,
+	ORIGIN_WORKER_SELF_PICK,
+)
+
 
 class FarmTask(Document):
 	def autoname(self):
@@ -132,6 +148,13 @@ class FarmTask(Document):
 			frappe.throw(
 				_("State {0} is not one of: {1}.").format(self.state, ", ".join(STATES)),
 				title=_("Unknown Farm Task state"),
+			)
+
+		self.origin = str(self.origin or ORIGIN_COMPLIANCE_RULE).strip() or ORIGIN_COMPLIANCE_RULE
+		if self.origin not in ORIGINS:
+			frappe.throw(
+				_("Origin {0} is not one of: {1}.").format(self.origin, ", ".join(ORIGINS)),
+				title=_("Unknown Farm Task origin"),
 			)
 
 		if int(self.estimated_duration_minutes or 0) < 0:

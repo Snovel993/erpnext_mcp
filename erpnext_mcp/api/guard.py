@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Every gate the mobile HTTP surface has, in one file.
 
-`security.py` guards the MCP endpoint. This guards the eleven whitelisted
+`security.py` guards the MCP endpoint. This guards the twelve whitelisted
 methods a phone calls, and it has to do the whole job on its own — see
 `api/__init__.py` for why none of the MCP transport's checks reach this path.
 
@@ -84,7 +84,7 @@ GRANT = "Mobile Access Grant"
 #: not silently locked out, and so the brief's spelling is not a trap. What is
 #: NOT here is the whole point of the list: Family Member and Advisor are real
 #: roles with real logins on this site and neither belongs on a dispatch board,
-#: and Compliance Officer is deliberately absent because the eleven methods are
+#: and Compliance Officer is deliberately absent because the twelve methods are
 #: field work — a compliance reviewer reads the register in the Desk.
 FARM_OPS_ROLES = frozenset({"Field Worker", "Farm Worker", "Foreman", "Farm Manager"})
 

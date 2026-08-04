@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_fifty_six_tools_one_hundred_thirteen_read_one_hundred_forty_three_write(
+	def test_catalogue_is_two_hundred_fifty_seven_tools_one_hundred_thirteen_read_one_hundred_forty_four_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -536,9 +536,9 @@ class Catalogue(SeededTestCase):
 		rules into records came with them and are not tools, which is why the
 		catalogue grew by seven and the release by a great deal more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 256)
+		self.assertEqual(len(registry.TOOLS), 257)
 		self.assertEqual(len(registry.READ_TOOLS), 113)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 143)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 144)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
