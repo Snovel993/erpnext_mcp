@@ -998,12 +998,14 @@ APP_DOCTYPES = {
 	"Weather Company Override": "weather_company_override",
 	# ── v0.19.5: the judgement behind a normalized cash flow figure ──────────
 	"Normalization Adjustment": "normalization_adjustment",
+	# ── v0.19.6: the precomputed history every windowed report reads from ────
+	"Financial KPI History": "financial_kpi_history",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
 #: are built from each one's own JSON at `Store.reset` — see `_seed_app_reports`
 #: for why a migrated site already has them and the double had to catch up.
-APP_REPORTS = ("sustainable_cf_per_acre_by_quarter",)
+APP_REPORTS = ("sustainable_cf_per_acre_by_quarter", "sustainable_cf_per_acre_ttm_monthly")
 
 
 def _load_app_doctype(folder: str) -> dict:

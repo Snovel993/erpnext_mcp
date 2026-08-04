@@ -321,11 +321,15 @@
   "kpi_read_section",
   "allow_get_sustainable_cf_per_acre",
   "allow_list_normalization_adjustments",
+  "allow_get_windowed_report",
+  "allow_list_financial_kpi_history",
   "kpi_write_section",
   "allow_create_normalization_adjustment",
   "allow_approve_normalization_adjustment",
   "allow_reject_normalization_adjustment",
   "allow_backfill_asset_capex_type",
+  "allow_recompute_kpi_history",
+  "enable_kpi_history_sweep",
   "mobile_write_section",
   "allow_create_mobile_user",
   "allow_create_employee",
@@ -2398,6 +2402,20 @@
    "label": "List Normalization Adjustments"
   },
   {
+   "default": "1",
+   "description": "READ. Any registered financial report over a window, TRAILING TWELVE MONTHS BY DEFAULT, with the period just finished beside it and up to five years of prior windows under both. Agricultural revenue is aggressively seasonal — Q3 is harvest and Q1 is pruning — so two single periods set against each other say the operation collapsed in January and recovered in September, every year, on every farm. A rolling twelve months holds the whole cycle exactly once however it is read. The registry ships with sustainable_cf_per_acre, ocf and revenue.",
+   "fieldname": "allow_get_windowed_report",
+   "fieldtype": "Check",
+   "label": "Get Windowed Report"
+  },
+  {
+   "default": "1",
+   "description": "READ. The precomputed KPI cache as a plain time series, for drawing a line or exporting one. It reports what is NOT there as well as what is: a gap is a window nobody has computed yet, or one invalidated by a retroactively approved adjustment and not yet rebuilt, and it is not a period in which the business earned nothing.",
+   "fieldname": "allow_list_financial_kpi_history",
+   "fieldtype": "Check",
+   "label": "List Financial KPI History"
+  },
+  {
    "fieldname": "kpi_write_section",
    "fieldtype": "Section Break",
    "label": "Normalization and Capex Classification"
@@ -2429,6 +2447,20 @@
    "fieldname": "allow_backfill_asset_capex_type",
    "fieldtype": "Check",
    "label": "Backfill Asset Capex Type"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, and the only thing it can change is a CACHE. Rebuilds the precomputed history for one KPI; every row it writes is what the live computation would have produced, and every row it deletes comes back on the next read or the next overnight sweep. The answer to a retroactively approved normalization adjustment when the pack goes out this afternoon rather than tomorrow. Idempotent unless force=true, which clears the series and rebuilds it under the current code.",
+   "fieldname": "allow_recompute_kpi_history",
+   "fieldtype": "Check",
+   "label": "Recompute KPI History"
+  },
+  {
+   "default": "1",
+   "description": "Whether the overnight Financial KPI History sweep runs. ON by default, because it is what makes a windowed report answer in a second rather than a minute — a five-year Monthly history is sixty full computations over twelve months of GL each, and the point of doing them at two in the morning is that nobody is waiting. Turn it off on a very large book or a shared bench: reports still answer, they answer from a cold cache, and they say in their warnings how much history they had to leave out. It does not affect recompute_kpi_history, which is somebody asking on purpose.",
+   "fieldname": "enable_kpi_history_sweep",
+   "fieldtype": "Check",
+   "label": "Enable KPI History Overnight Sweep"
   },
   {
    "fieldname": "mobile_write_section",

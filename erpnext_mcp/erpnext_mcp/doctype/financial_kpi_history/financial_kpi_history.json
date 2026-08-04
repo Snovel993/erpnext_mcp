@@ -1,0 +1,213 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-03 23:30:00.000000",
+ "description": "One precomputed windowed figure: what a KPI was worth for one company, over one window, as of one reporting moment — and the components dict that produced it. THIS IS A CACHE AND NOT A RECORD. Every row in it is derivable from the ledger by rerunning the computer that wrote it, which is what makes it safe to delete a row whose window has been changed by a retroactively approved normalization adjustment. Nothing here is the only copy of anything. WHY IT EXISTS: a five-year Monthly history of a trailing-twelve-month figure is sixty full computations over twelve months of GL each, and recomputing that on every query would make a report unusable at the moment somebody is using it. The overnight sweep fills this while nobody is waiting; a live query reads it and computes only what is missing. THE COMPONENTS TRAVEL WITH THE FIGURE, in components_json, and that is not an optimisation — it is the same rule the KPI itself is built on. A cached number with no ingredients is a figure an auditor cannot test, and a historical figure is exactly the one they will ask about, because it is the one nobody can recompute from memory. IT IS NOT CREATED BY HAND. Writes come from erpnext_mcp/services/windowed_reports.py and from the scheduled sweep; a row somebody typed would be a figure with no computation behind it sitting in a table whose whole claim is that every row has one.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "kpi_key",
+  "company",
+  "identity_col",
+  "computation_step",
+  "window_type",
+  "window_months",
+  "period_section",
+  "as_of",
+  "period_start",
+  "period_end",
+  "value_section",
+  "value",
+  "computed_at",
+  "value_col",
+  "source_version",
+  "trace_section",
+  "components_json",
+  "computation_warnings_json"
+ ],
+ "fields": [
+  {
+   "default": "KPIH-.YYYY.-.####",
+   "description": "The series a cached snapshot is named from, expanded by the controller so a docname is the same shape on a bench and in the standalone suite — KPIH-2026-0001. The year is the year the snapshot is AS OF, not the year the sweep ran: a January sweep backfilling five years writes rows about five different years, and a series keyed off today() would file every one of them under this one.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "KPIH-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "Which figure this is a snapshot of — sustainable_cf_per_acre, ocf, revenue. A Data field and not a Link, deliberately: the registry of computers lives in Python (erpnext_mcp/services/financial_reports.py), because a computer is a function and not a record. When the Financial KPI Framework lands and KPIs become data, this becomes the link to a KPI Definition and every row already here keeps its meaning.",
+   "fieldname": "kpi_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "KPI Key",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The entity this figure belongs to. REQUIRED, and it is what scopes the row — a User Permission on Company reaches it, and no window ever sums across entities. OM Family Office, Highland LLC and Constancy Farms have different lenders asking different questions.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Monthly",
+   "description": "The rhythm this figure is recomputed and stepped at. Monthly is the standard's default; Daily is opt-in per KPI, because it is cheap for one report and ruinous across a framework — sixty snapshots becomes eighteen hundred. Part of what makes a cached row unique, because a Monthly and a Quarterly series of the same KPI are two different series and both are legitimate.",
+   "fieldname": "computation_step",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Computation Step",
+   "options": "Daily\nWeekly\nMonthly\nQuarterly\nYearly",
+   "reqd": 1
+  },
+  {
+   "default": "TTM",
+   "description": "What kind of window this figure covers. TTM is the standard's default — twelve months, rolling. Snapshot is one step on its own. MTD, QTD and YTD accumulate from the start of the current period to the reporting moment, which is what makes them comparable with the same span of the prior year. Custom is any other window_months.",
+   "fieldname": "window_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Window Type",
+   "options": "Snapshot\nTTM\nMTD\nQTD\nYTD\nCustom",
+   "reqd": 1
+  },
+  {
+   "default": "12",
+   "description": "How many months the window spans. 12 for TTM, because that is what the T and the M mean. Stored on the row rather than inferred from window_type so that a Custom eighteen-month window and a TTM one can sit side by side without either being mistaken for the other.",
+   "fieldname": "window_months",
+   "fieldtype": "Int",
+   "label": "Window Months",
+   "reqd": 1
+  },
+  {
+   "fieldname": "period_section",
+   "fieldtype": "Section Break",
+   "label": "The window"
+  },
+  {
+   "description": "THE REPORTING MOMENT this snapshot answers as of — the last completed step boundary, not the day the sweep ran. It is the key a series is walked by: a Monthly TTM history is one row per month-end, each holding what the trailing twelve months were worth on that date.",
+   "fieldname": "as_of",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "As Of",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "First day the window covers, inclusive. For a twelve-month window ending 2026-07-31 this is 2025-08-01 — the day AFTER the same date twelve months back, because period_end is inclusive everywhere in this app and 2025-07-31 to 2026-07-31 is twelve months and a day.",
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "label": "Period Start",
+   "reqd": 1
+  },
+  {
+   "description": "Last day the window covers, inclusive.",
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "label": "Period End",
+   "reqd": 1
+  },
+  {
+   "fieldname": "value_section",
+   "fieldtype": "Section Break",
+   "label": "The figure"
+  },
+  {
+   "description": "What the KPI was worth over this window. NULLABLE, AND NULL IS AN ANSWER: a per-acre figure with no productive acres in the denominator is a division nobody performed, and a zero there would be read as one. Read computation_warnings_json before quoting a row whose value is empty — it says which of the reasons applies.",
+   "fieldname": "value",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Value",
+   "precision": "4"
+  },
+  {
+   "description": "When this snapshot was computed. Not when the window ended — a five-year backfill run this morning writes sixty rows with sixty different as_of dates and one computed_at.",
+   "fieldname": "computed_at",
+   "fieldtype": "Datetime",
+   "label": "Computed At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "value_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The erpnext_mcp version whose code produced this figure. It is what makes a correction to a computer safely retroactive: a release that changes how maintenance capex is classified can invalidate every row written by an older version rather than leaving two definitions of one KPI in the same series, plotted on the same line, with nothing saying where the join is.",
+   "fieldname": "source_version",
+   "fieldtype": "Data",
+   "label": "Source Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "trace_section",
+   "fieldtype": "Section Break",
+   "label": "The ingredients"
+  },
+  {
+   "description": "The full components dict the live computation would have returned, as JSON: the summed normalization adjustments with their justifications, the aggregated maintenance capex with its assets, the time-weighted productive acres with its blocks. THIS IS WHY THE CACHE IS DEFENSIBLE. A cached number with no ingredients is a figure nobody can test, and the historical figures are exactly the ones an auditor asks about, because they are the ones nobody can recompute from memory.",
+   "fieldname": "components_json",
+   "fieldtype": "Long Text",
+   "label": "Components (JSON)"
+  },
+  {
+   "description": "Everything a reader had to know before quoting this figure, as a JSON list of sentences — the unclassified assets, the undated blocks, the partial window. Stored with the snapshot rather than regenerated, because a warning about the state of the data on the day the figure was computed is not the same as a warning about the state of the data today, and the first is the one that explains the number.",
+   "fieldname": "computation_warnings_json",
+   "fieldtype": "Small Text",
+   "label": "Computation Warnings (JSON)"
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 23:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Financial KPI History",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "kpi_key,company,as_of,computation_step",
+ "sort_field": "as_of",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

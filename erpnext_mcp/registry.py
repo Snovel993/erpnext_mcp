@@ -8497,16 +8497,220 @@ TOOLS = {
 		"came into bearing in February is weighted for the part of the period it "
 		"was actually earning.\n\n"
 		"`sustainable_cf_per_acre` is null — not zero — where there are no "
-		"productive acres. Read `computation_warnings` before quoting the figure.",
+		"productive acres. Read `computation_warnings` before quoting the figure.\n\n"
+		"v0.19.6: IT DEFAULTS TO A TRAILING TWELVE MONTHS. Call it with only a "
+		"company and you get the TTM window ending at the last completed month, "
+		"the month just finished beside it, and five years of prior TTM values "
+		"with their mean, median, spread and the two deltas. Agricultural revenue "
+		"is aggressively seasonal, and a single-period figure compared with "
+		"another single period says the farm collapsed in January and recovered "
+		"in September — every year, on every farm.\n\n"
+		"PASSING `period_start` AND `period_end` GETS THE OLD v0.19.5 PAYLOAD "
+		"back, exactly, with a deprecation note in `computation_warnings`. That "
+		"path still works because this figure is quoted in packs that were sent "
+		"before the window existed.",
 		{
 			"company": _COMPANY,
-			"period_start": _field(_STRING, "First day of the period, YYYY-MM-DD."),
-			"period_end": _field(_STRING, "Last day of the period, inclusive, YYYY-MM-DD."),
+			"as_of": _field(
+				_STRING,
+				"The reporting moment, YYYY-MM-DD. Defaults to today. The window ends at the "
+				"last COMPLETED computation step on or before it — read on 2026-08-03 with a "
+				"Monthly step, the window ends 2026-07-31.",
+			),
+			"window_type": _field(
+				_STRING,
+				"Snapshot, TTM (the default), MTD, QTD, YTD or Custom. TTM is twelve rolling "
+				"months; the to-date windows accumulate from the start of the current period "
+				"to as_of.",
+			),
+			"window_months": _field(
+				_INTEGER, "Months in the window. 12 for TTM, which is what the T and the M mean."
+			),
+			"computation_step": _field(
+				_STRING,
+				"Daily, Weekly, Monthly (the default), Quarterly or Yearly. Sets both the "
+				"boundary the window ends on and the spacing of the historical series.",
+			),
+			"historical_lookback_years": _field(
+				_INTEGER, "How far back to build the prior-window series. Default 5, maximum 10."
+			),
+			"include_historical_averages": _field(
+				_BOOLEAN, "Default TRUE. False skips the history entirely and answers faster."
+			),
+			"period_start": _field(
+				_STRING,
+				"DEPRECATED (v0.19.5 signature). First day of an explicit period, YYYY-MM-DD. "
+				"Pass with period_end to get the old point-in-time payload.",
+			),
+			"period_end": _field(
+				_STRING,
+				"DEPRECATED (v0.19.5 signature). Last day of the explicit period, inclusive.",
+			),
 		},
-		required=("period_start", "period_end"),
 		title="Sustainable CF/Acre",
 		available=_needs_doctype("Normalization Adjustment"),
 		requires="the Normalization Adjustment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.19.6: the window standard ────────────────────────────────────────
+	#
+	# Two read and one mutating. `get_windowed_report` is the generic entry
+	# point and the reason the standard generalizes: a report registered in
+	# services/financial_reports.py is reachable through it without another tool,
+	# another switch and another catalogue section. A framework whose every KPI
+	# costs a tool is a framework with six KPIs in it.
+	"get_windowed_report": _tool(
+		kpi.get_windowed_report,
+		"Any registered financial report over a window, with its own history "
+		"beside it. TRAILING TWELVE MONTHS BY DEFAULT. Read-only.\n\n"
+		"`report_name` selects among the registered computers: "
+		"'sustainable_cf_per_acre', 'ocf' (raw and normalized operating cash "
+		"flow) and 'revenue'. The payload lists what this site has.\n\n"
+		"WHY TTM IS THE DEFAULT AND NOT AN OPTION. Agricultural revenue is "
+		"aggressively seasonal: Q3 is harvest and Q1 is pruning, so comparing "
+		"two quarters says the operation collapsed in January and recovered in "
+		"September, every year, on every farm. A rolling twelve months contains "
+		"the whole cycle exactly once however it is read, which is why it is the "
+		"standard lens for lender covenants.\n\n"
+		"THREE BLOCKS, AND EACH CORRECTS THE OTHER TWO. `point_in_time` is the "
+		"period just finished. `window` (also `ttm` when the type is TTM) is the "
+		"rolling figure with its components — the summed adjustments, the "
+		"aggregated maintenance capex, the time-weighted acres, each still "
+		"inspectable. `historical_averages` is what that window has been worth "
+		"before, with mean, median, min, max, standard deviation, the delta "
+		"against the mean and the delta against the same window a year ago. A "
+		"TTM figure means one thing above its five-year mean and the opposite "
+		"below it, and the first two blocks cannot say which.\n\n"
+		"THE WINDOW ENDS AT THE LAST COMPLETED STEP, never at a part-finished "
+		"one: three days of August against twelve months of everything else is a "
+		"figure that falls every first of the month and recovers by the "
+		"thirty-first.\n\n"
+		"PARTIAL HISTORY IS SAID OUT LOUD, never annualized. A site with four "
+		"months of ledger gets four months of ledger and a warning, because "
+		"annualizing it would invent eight months of a season that has not "
+		"happened. Read `computation_warnings` before quoting anything here.\n\n"
+		"IT WARMS A CACHE, AND THAT IS THE ONE THING IT WRITES. Snapshots it had "
+		"to compute are saved to Financial KPI History so the next caller does "
+		"not recompute them — a five-year Monthly history is sixty full "
+		"computations over twelve months of GL each. NOTHING IN YOUR LEDGER IS "
+		"TOUCHED: no Account, no GL Entry, no Journal Entry, no Asset, no Field, "
+		"no adjustment. Every row it writes is derived state that the overnight "
+		"sweep would have written anyway, and deleting the lot changes no "
+		"answer this tool gives — only how long it takes to give it.",
+		{
+			"report_name": _field(
+				_STRING,
+				"Which registered report: 'sustainable_cf_per_acre', 'ocf' or 'revenue'. The "
+				"result lists the registry under `available_reports`.",
+			),
+			"company": _COMPANY,
+			"as_of": _field(
+				_STRING,
+				"The reporting moment, YYYY-MM-DD. Defaults to today. The window ends at the "
+				"last COMPLETED computation step on or before it.",
+			),
+			"window_type": _field(
+				_STRING,
+				"Snapshot, TTM (the default), MTD, QTD, YTD or Custom. The to-date windows run "
+				"from the start of the current period to as_of, which is what makes them "
+				"comparable with the same span of the prior year.",
+			),
+			"window_months": _field(_INTEGER, "Months in the window. Default 12."),
+			"computation_step": _field(
+				_STRING,
+				"Daily, Weekly, Monthly (the default), Quarterly or Yearly. Quarterly and "
+				"Yearly boundaries follow the company's own FISCAL year; the payload reports "
+				"`fiscal_year_start_month` so nobody has to infer it.",
+			),
+			"historical_lookback_years": _field(
+				_INTEGER, "How far back to build the prior-window series. Default 5, maximum 10."
+			),
+			"include_historical_averages": _field(
+				_BOOLEAN, "Default TRUE. False skips the history entirely and answers faster."
+			),
+		},
+		required=("report_name",),
+		title="Windowed financial report",
+		available=_needs_doctype("Normalization Adjustment"),
+		requires="the Normalization Adjustment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_financial_kpi_history": _tool(
+		kpi.list_financial_kpi_history,
+		"The precomputed KPI cache, read directly: the time series without the "
+		"apparatus around it. Read-only.\n\n"
+		"USE THIS TO DRAW A LINE. get_windowed_report answers 'what is this worth "
+		"now, and is that good'; this answers 'show me the series', and a caller "
+		"charting sixty months does not want sixty copies of the components dict "
+		"to get sixty numbers.\n\n"
+		"A GAP HERE IS NOT A GAP IN THE BUSINESS. It is a window nobody has "
+		"computed yet, or one that was invalidated by a retroactively approved "
+		"normalization adjustment and not yet rebuilt — and plotting it as a "
+		"continuous line draws a trend that did not happen. The payload says how "
+		"many rows had no value and why.\n\n"
+		"`source_versions` MATTERS ON A LONG SERIES: where a release changed how "
+		"a figure is computed, a series spanning the change holds two definitions "
+		"of one KPI on one line with nothing marking the join. The tool reports "
+		"it rather than leaving it to be noticed.\n\n"
+		"Scoped to the companies the caller may see.",
+		{
+			"kpi_key": _field(
+				_STRING, "'sustainable_cf_per_acre', 'ocf' or 'revenue'. Optional — omit for all."
+			),
+			"company": _COMPANY,
+			"computation_step": _field(
+				_STRING, "Daily, Weekly, Monthly, Quarterly or Yearly. Optional."
+			),
+			"window_type": _field(
+				_STRING, "Snapshot, TTM, MTD, QTD, YTD or Custom. Optional."
+			),
+			"from_date": _field(_STRING, "Earliest `as_of` to return, YYYY-MM-DD. Optional."),
+			"to_date": _field(_STRING, "Latest `as_of` to return, YYYY-MM-DD. Optional."),
+			"limit": _LIMIT,
+		},
+		title="List financial KPI history",
+		available=_needs_doctype("Financial KPI History"),
+		requires="the Financial KPI History DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"recompute_kpi_history": _tool(
+		kpi.recompute_kpi_history,
+		"MUTATING (default OFF). Rebuild the cached history for one KPI across "
+		"one or every company. IDEMPOTENT unless `force`, which clears the series "
+		"and builds it again.\n\n"
+		"THE ONLY THING IT CAN CHANGE IS A CACHE. Every row it writes is what the "
+		"live computation would have produced for that window, and every row it "
+		"deletes comes back on the next read or the next overnight sweep. Nothing "
+		"here is the only copy of anything, so the worst outcome of running it at "
+		"the wrong moment is time spent.\n\n"
+		"IT IS THE ANSWER TO A RETROACTIVE APPROVAL. Approving a normalization "
+		"adjustment for a period the history already covers invalidates the "
+		"snapshots whose window contained it; this rebuilds them NOW, with the "
+		"result in front of you, rather than overnight — which is what you want "
+		"when the pack goes out this afternoon. A Field productive-date backfill "
+		"is the other case: it moves the denominator of every window containing "
+		"the corrected block.\n\n"
+		"`force=true` CLEARS AND REBUILDS. Use it after a release changes how a "
+		"figure is computed: an incremental fill leaves the old rows in place, "
+		"and a series holding two definitions of one KPI is a line with an "
+		"unmarked join in it.",
+		{
+			"kpi_key": _field(
+				_STRING, "'sustainable_cf_per_acre', 'ocf' or 'revenue'. REQUIRED."
+			),
+			"company": _COMPANY,
+			"back_years": _field(
+				_INTEGER, "How many years of history to build. Default 5, maximum 10."
+			),
+			"force": _field(
+				_BOOLEAN,
+				"Default FALSE, which fills only what is missing. TRUE deletes the series "
+				"first and rebuilds every snapshot under the current code.",
+			),
+		},
+		required=("kpi_key",),
+		mutating=True,
+		idempotent=True,
+		title="Recompute KPI history",
+		available=_needs_doctype("Financial KPI History"),
+		requires="the Financial KPI History DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

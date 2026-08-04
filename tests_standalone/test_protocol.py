@@ -198,7 +198,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_thirty_five_tools_one_hundred_four_read_one_hundred_thirty_one_write(self):
+	def test_catalogue_is_two_hundred_thirty_eight_tools_one_hundred_six_read_one_hundred_thirty_two_write(self):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
 		both corrections to records that already exist, which is why neither is a
 		read. v0.14.0 added eight — six writes and two reads.
@@ -408,10 +408,40 @@ class Catalogue(SeededTestCase):
 		columns, the direct-method cash flow service and the quarterly dashboard
 		chart came with them and are not tools — which is why the catalogue grew
 		by six and the release by considerably more.
+
+		v0.19.6 ADDED THREE — two reads and one write — and retrofitted a fourth
+		without adding to the count. The release is the WINDOW STANDARD: every
+		financial report now defaults to a trailing twelve months, because
+		agricultural revenue is aggressively seasonal and two single periods set
+		against each other say the operation collapsed in January and recovered
+		in September, every year, on every farm.
+
+		  * `get_windowed_report` is the generic entry point and the reason the
+		    standard generalizes — a report registered in
+		    services/financial_reports.py is reachable through it without another
+		    tool, another switch and another catalogue section. A framework whose
+		    every KPI costs a tool is a framework with six KPIs in it;
+		  * `list_financial_kpi_history` reads the precomputed cache as a plain
+		    series, for drawing a line, and reports what is NOT there — a gap is
+		    a window nobody has computed, not a period the business earned
+		    nothing in;
+		  * `recompute_kpi_history` rebuilds that cache, and is the mildest
+		    mutating tool in the catalogue: every row it writes is derivable and
+		    every row it deletes comes back, so the worst outcome of running it
+		    at the wrong moment is time spent;
+		  * `get_sustainable_cf_per_acre` is the RETROFIT and adds nothing to the
+		    count. It now defaults to TTM; passing v0.19.5's period_start and
+		    period_end still returns v0.19.5's exact payload, because that figure
+		    is quoted in packs that were sent before the window existed.
+
+		The Financial KPI History doctype, the windowed-report engine, the two
+		demonstration computers, the overnight sweep and the retrofitted chart
+		came with them and are not tools — which is why the catalogue grew by
+		three and the release by considerably more.
 		"""
-		self.assertEqual(len(registry.TOOLS), 235)
-		self.assertEqual(len(registry.READ_TOOLS), 104)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 131)
+		self.assertEqual(len(registry.TOOLS), 238)
+		self.assertEqual(len(registry.READ_TOOLS), 106)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 132)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

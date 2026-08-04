@@ -819,7 +819,44 @@ def available() -> bool:
 KPI_REPORT_NAME = "Sustainable CF Per Acre by Quarter"
 KPI_CHART_NAME = "Sustainable CF/Acre by Quarter"
 
+#: v0.19.6. The rolling view, and the DEFAULT one from here on.
+#:
+#: Each point is a full twelve months rather than a discrete quarter, and that
+#: is the whole retrofit. Four calendar quarters on a farm are not comparable
+#: with each other — Q3 is harvest and Q1 is pruning, so the quarterly line falls
+#: off a cliff every January and climbs back every September whether or not
+#: anything happened. A reader who does not already know that reads a crisis.
+#: Consecutive rolling points differ only by the month that entered and the month
+#: that left, so the line moves when the business moves.
+#:
+#: `use_report_chart` IS 1 HERE AND 0 ON THE QUARTERLY ONE, which is the one
+#: mechanical difference between them. The rolling chart needs a dashed reference
+#: rule at the prior-window mean, and a `yMarker` is how frappe-charts draws a
+#: reference level — natively dashed, labelled, and not invited to be compared by
+#: shape the way a second line would be. A Dashboard Chart can only carry that if
+#: the report supplies its own chart config, which a Script Report does by
+#: returning a fourth value.
+KPI_TTM_REPORT_NAME = "Sustainable CF Per Acre TTM Monthly"
+KPI_TTM_CHART_NAME = "Sustainable CF/Acre TTM Monthly"
+
 KPI_CHARTS = (
+	{
+		"chart_name": KPI_TTM_CHART_NAME,
+		"chart_type": "Report",
+		"report_name": KPI_TTM_REPORT_NAME,
+		# See the note above: the report supplies the line AND the dashed mean.
+		"use_report_chart": 1,
+		"type": "Line",
+		"is_public": 1,
+		"filters_json": "{}",
+		"why": (
+			"The default view, and the one that can be read without knowing the season. Each "
+			"point is a rolling twelve months, so pruning, thinning, harvest and the winter "
+			"are inside every point exactly once and the line only moves when the business "
+			"does. The dashed rule is what the operation's own rolling figure has averaged, "
+			"which is the only thing that says whether today's number is good."
+		),
+	},
 	{
 		"chart_name": KPI_CHART_NAME,
 		"chart_type": "Report",
@@ -829,16 +866,26 @@ KPI_CHARTS = (
 		"is_public": 1,
 		"filters_json": "{}",
 		"why": (
-			"The trend is the whole point and a single quarter is not one. A farm that "
-			"deferred its maintenance shows a good quarter and a falling line, and only the "
-			"second of those is the truth about the operation."
+			"The discrete quarterly view, kept as a secondary. Four calendar quarters are "
+			"what a lender's own pack is laid out in, and lining up with theirs is worth "
+			"having — as long as nobody reads the January cliff as an event. The rolling "
+			"chart above is the one to read for a trend."
 		),
 	},
 )
 
+#: THE QUARTERLY CHART IS NOT RENAMED, and that is deliberate rather than an
+#: omission. v0.19.6 makes the rolling view the default and demotes the discrete
+#: quarterly one to a secondary — but a Dashboard Chart's DOCNAME is what a
+#: Dashboard, a workspace and anybody's saved link point at, so renaming the
+#: existing record would silently empty the dashboards of every site that
+#: installed v0.19.5. The demotion is expressed in the `why` above and in the new
+#: chart being the one the documentation opens with, which costs a reader one
+#: sentence and costs nobody a working dashboard.
+
 
 def kpi_chart_available() -> bool:
-	"""Whether this site can hold the KPI chart: the chart doctype and the report."""
+	"""Whether this site can hold the KPI charts: the chart doctype and the reports."""
 	try:
 		return bool(compat.doctype_exists(CHART) and compat.doctype_exists("Report"))
 	except Exception:
@@ -862,8 +909,9 @@ def install_kpi_charts() -> dict:
 	reported and the next migrate builds it.
 	"""
 	report = {
-		"chart": KPI_CHART_NAME,
-		"report": KPI_REPORT_NAME,
+		"chart": KPI_TTM_CHART_NAME,
+		"charts": [spec["chart_name"] for spec in KPI_CHARTS],
+		"report": KPI_TTM_REPORT_NAME,
 		"created_charts": [],
 		"existing_charts": [],
 		"failed": [],
@@ -872,33 +920,38 @@ def install_kpi_charts() -> dict:
 	if not report["available"]:
 		report["note"] = (
 			"this site does not have both the Dashboard Chart and Report doctypes, so there is "
-			"nothing to build the KPI chart out of. Every figure behind it is still readable "
-			"through get_sustainable_cf_per_acre, which returns more than the chart draws."
+			"nothing to build the KPI charts out of. Every figure behind them is still readable "
+			"through get_windowed_report, which returns a great deal more than a chart draws."
 		)
 		return report
 	if not compat.doctype_exists(kpi.DOCTYPE):
 		report["available"] = False
 		report["note"] = (
 			f"this site has no {kpi.DOCTYPE} DocType yet — it ships with erpnext_mcp and arrives "
-			"with `bench migrate`. The chart is built on the migrate that creates it."
-		)
-		return report
-	if not frappe.db.exists("Report", KPI_REPORT_NAME):
-		report["failed"].append(
-			{
-				"name": KPI_CHART_NAME,
-				"reason": (
-					f"the {KPI_REPORT_NAME!r} Report is not on this site yet. It ships as a "
-					"standard Script Report in this app's module and is created by the same "
-					"`bench migrate` that runs this, so the next migrate builds the chart. "
-					"Nothing was created: a chart pointing at a report that does not exist "
-					"renders an error, where a missing chart renders nothing."
-				),
-			}
+			"with `bench migrate`. The charts are built on the migrate that creates it."
 		)
 		return report
 
+	# EACH CHART IS CHECKED AGAINST ITS OWN REPORT, and a missing one takes only
+	# that chart down. v0.19.6 ships two, and a site part-way through a migrate
+	# may have one Report row and not the other — building the chart that CAN be
+	# built is strictly better than refusing both, and the one that could not is
+	# named so the next migrate is visibly the fix.
 	for spec in KPI_CHARTS:
+		if not frappe.db.exists("Report", spec["report_name"]):
+			report["failed"].append(
+				{
+					"name": spec["chart_name"],
+					"reason": (
+						f"the {spec['report_name']!r} Report is not on this site yet. It ships as "
+						"a standard Script Report in this app's module and is created by the same "
+						"`bench migrate` that runs this, so the next migrate builds the chart. "
+						"Nothing was created: a chart pointing at a report that does not exist "
+						"renders an error, where a missing chart renders nothing."
+					),
+				}
+			)
+			continue
 		_build(CHART, "chart_name", spec, report, "charts")
 	return report
 

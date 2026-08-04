@@ -29,7 +29,7 @@ it acts on `/api/method/erpnext_mcp.api.*` and nothing else, it never overrides
 an identity Frappe already established, it grants no permission of any kind, and
 it cannot raise. See the note above the declaration, and `api/fallback_auth.py`.
 
-THERE ARE EXACTLY FIVE SCHEDULED JOBS, and the count is in this docstring
+THERE ARE EXACTLY SIX SCHEDULED JOBS, and the count is in this docstring
 because it is a number somebody should have to change on purpose. Every one of
 them runs on somebody's site with nobody watching, so each has had to clear the
 same two bars: it writes only this app's own doctypes (or nothing at all), and
@@ -137,6 +137,34 @@ the alert sweep's one — the interval check skips a shift just read, the cache
 answers the request that would have gone out, and `append_readings` refuses a
 second row for a minute already on the timeline. A reading is immutable evidence
 and is only ever appended; nothing in this app edits one.
+
+THE SIXTH ARRIVED IN v0.19.6 AND IS THE ONE THAT DOES ARITHMETIC RATHER THAN
+HOUSEKEEPING. `services.windowed_reports.recompute_kpi_history_incremental`
+walks every registered financial report and every company, and fills in the
+trailing-twelve-month snapshots the cache is missing. It writes only this app's
+own `Financial KPI History` and never raises.
+
+IT IS ONE JOB THAT ITERATES, NOT ONE CRON PER KPI, and that is a deliberate
+constraint rather than an implementation detail. The Financial KPI Framework
+will add KPIs as data, and a scheduler with an entry per KPI is a scheduler
+nobody can read and a bench that wakes fifteen times a night to do fifteen
+things that could have been done once. Adding a report adds no line to this
+file.
+
+IT IS AT `0 2 * * *` AND IS THE SECOND `cron` ENTRY. `daily` would be tidier and
+is wrong: Frappe's `daily` fires whenever the day's first scheduler tick lands,
+which on a farm bench is during the morning, and this is the one job here that
+can genuinely take minutes on a large ledger. Two in the morning is chosen for
+what it is NOT competing with.
+
+IT IS SAFE TO RUN AT ANY CADENCE, for the reason the alert sweep is: it is
+incremental against what is already cached, so a run with nothing missing does
+nothing at all. And it is the only scheduled job in this app with a kill switch
+of its own — `enable_kpi_history_sweep` on ERPNext MCP Settings — because it is
+the only one whose cost scales with the size of somebody's books rather than
+with the number of their cabins. Turning it off costs speed and nothing else:
+every report still answers, from a cold cache, saying how much history it had to
+leave out.
 """
 
 app_name = "erpnext_mcp"
@@ -175,6 +203,15 @@ scheduler_events = {
 	"cron": {
 		"*/15 * * * *": [
 			"erpnext_mcp.services.weather.sweep_open_shifts",
+		],
+		#: v0.19.6. The KPI history sweep, at two in the morning. See the
+		#: docstring above for why it is a cron rather than `daily` — Frappe's
+		#: `daily` fires on the day's first tick, which on a farm bench is during
+		#: the morning, and this is the one job here that can take minutes on a
+		#: large ledger. ONE ENTRY THAT ITERATES: it walks every registered
+		#: report and every company, so adding a KPI adds no line to this file.
+		"0 2 * * *": [
+			"erpnext_mcp.services.windowed_reports.recompute_kpi_history_incremental",
 		],
 	},
 	"hourly": [

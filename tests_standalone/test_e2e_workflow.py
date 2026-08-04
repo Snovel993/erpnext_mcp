@@ -130,6 +130,13 @@ SWITCHES = {
 		"approve_normalization_adjustment",
 		"list_normalization_adjustments",
 		"get_sustainable_cf_per_acre",
+		# v0.19.6. And the number is now read over a WINDOW rather than over a
+		# period somebody typed, because a single agricultural period compared
+		# with another single agricultural period says the operation collapsed in
+		# January and recovered in September, every year, on every farm.
+		"get_windowed_report",
+		"list_financial_kpi_history",
+		"recompute_kpi_history",
 	)
 }
 
@@ -1603,3 +1610,237 @@ class TheSeasonReachesAPerAcreFigure(EndToEndWorkflow):
 		register = self.tool_data("list_normalization_adjustments", {"company": COMPANY})
 		self.assertEqual(register["counted_in_the_kpi"], [draft["name"]])
 		self.assertEqual(register["awaiting_a_decision"], [])
+
+
+class TheYearReachesARollingFigure(EndToEndWorkflow):
+	"""Company → block → a classified purchase → an approved adjustment → three
+	months of ledger → the SAME figure over a trailing twelve months, with its
+	own history under it.
+
+	v0.19.6, AND IT IS THE SAME WALK AS `TheSeasonReachesAPerAcreFigure` ENDING
+	ONE STEP FURTHER ON. That one proves a period produces a defensible number.
+	This proves the number can be read without knowing what season it is —
+	which is the difference between a figure an owner can act on and a figure
+	that has to be explained every time it is quoted.
+
+	ONE TEST, on purpose, for the reason every walk in this file is one test: the
+	claim is that the pieces connect, and a claim about connection cannot be made
+	by six tests that each re-walk the flow.
+
+	THE ASSERTIONS THAT MATTER ARE THE LAST THREE. The TTM window's ingredients
+	are checked, not only its value — the release inherits v0.19.5's obligation
+	that a normalized figure nobody can inspect is indistinguishable from an
+	arranged one, and a window makes that obligation harder rather than lighter.
+	Then the partial-history warning, because a three-month ledger under a
+	twelve-month window is exactly the case where a silently-smaller number would
+	be believed. Then the cache, because a figure that is not reproducible from
+	what was stored is a figure nobody can defend six months later.
+	"""
+
+	def test_the_year_ends_in_a_figure_that_can_be_read_without_a_calendar(self):
+		self.be_the_operator()
+
+		block = self.tool_data(
+			"create_field",
+			{
+				"parcel": PARCEL,
+				"field_name": "E2E TTM Block",
+				"acreage": 40.0,
+				"variety": "Bing",
+				"planting_year": 2019,
+				"productive_from_date": "2020-01-01",
+				"pre_yield_end_date": "2019-12-31",
+			},
+		)
+
+		abbr = ABBR
+		STORE.seed(
+			"Account",
+			[
+				{
+					"name": f"1100 - Cash - {abbr}",
+					"account_name": "Cash",
+					"account_number": "1100",
+					"root_type": "Asset",
+					"account_type": "Cash",
+					"is_group": 0,
+					"company": COMPANY,
+				},
+				{
+					"name": f"4100 - Sales - {abbr}",
+					"account_name": "Sales",
+					"account_number": "4100",
+					"root_type": "Income",
+					"account_type": "",
+					"is_group": 0,
+					"company": COMPANY,
+				},
+			],
+		)
+
+		# THREE MONTHS OF LEDGER INSIDE A TWELVE-MONTH WINDOW. Deliberately short:
+		# the interesting case is not a full year, it is the site that has just
+		# started keeping books, because that is where a figure quoted as "TTM"
+		# without a caveat is a figure somebody acts on.
+		months = {"2026-05-15": 90000, "2026-06-15": 120000, "2026-07-15": 150000}
+		rows = []
+		for index, (posting_date, amount) in enumerate(sorted(months.items()), start=1):
+			voucher = f"E2E-TTM-JV-{index}"
+			rows.extend(
+				[
+					{
+						"name": f"E2E-TTM-GL-{index}-cash",
+						"account": f"1100 - Cash - {abbr}",
+						"posting_date": posting_date,
+						"debit": amount,
+						"credit": 0,
+						"company": COMPANY,
+						"is_cancelled": 0,
+						"voucher_type": "Journal Entry",
+						"voucher_no": voucher,
+					},
+					{
+						"name": f"E2E-TTM-GL-{index}-sales",
+						"account": f"4100 - Sales - {abbr}",
+						"posting_date": posting_date,
+						"debit": 0,
+						"credit": amount,
+						"company": COMPANY,
+						"is_cancelled": 0,
+						"voucher_type": "Journal Entry",
+						"voucher_no": voucher,
+					},
+				]
+			)
+		STORE.seed("GL Entry", rows)
+
+		# The replacement pump, classified at the moment of purchase. The capex
+		# columns are grafted on the way `bench migrate` does — seeded rather than
+		# raised through `create_asset` because ERPNext's Asset needs an Asset
+		# Category carrying three accounts, and that scaffolding is exercised in
+		# test_assets.py. What this walk is about is the classification travelling
+		# into a TWELVE-MONTH figure rather than a quarterly one.
+		compliance_fields.install_compliance_fields(respect_switch=False)
+		STORE.seed(
+			"Asset",
+			[
+				{
+					"name": "E2E-TTM-PUMP",
+					"asset_name": "Well 2 booster pump (replacement)",
+					"company": COMPANY,
+					"purchase_date": "2026-06-10",
+					"gross_purchase_amount": 30000,
+					"docstatus": 1,
+					"capex_type": "Maintenance",
+					"maintenance_portion": 30000,
+					"growth_portion": 0,
+				}
+			],
+		)
+
+		# The judgement, proposed and then signed. It spans a QUARTER, which is
+		# the case that decides how the window is computed: a quarter-long
+		# adjustment falls inside no monthly bucket, so a year assembled from
+		# twelve months would drop it and nothing would say so.
+		why = (
+			"Hail on 2026-04-11 destroyed the frost fans on the north block; the replacement was "
+			"a single insured event and the last hail loss on this ground was 2011."
+		)
+		draft = self.tool_data(
+			"create_normalization_adjustment",
+			{
+				"company": COMPANY,
+				"fiscal_year": "2026",
+				"period_start": "2026-04-01",
+				"period_end": "2026-06-30",
+				"amount": 24000,
+				"direction": "Add-back to OCF",
+				"category": "Weather-Event-Loss",
+				"justification": why,
+			},
+		)
+		self.tool_data(
+			"approve_normalization_adjustment",
+			{
+				"name": draft["name"],
+				"approver_signature_file_token": "/files/e2e-ttm-signature.png",
+			},
+		)
+
+		# ── the window ────────────────────────────────────────────────────
+		data = self.tool_data(
+			"get_windowed_report",
+			{
+				"report_name": "sustainable_cf_per_acre",
+				"company": COMPANY,
+				"as_of": "2026-08-03",
+			},
+		)
+		self.assertEqual(data["window_type"], "TTM")
+		self.assertEqual(data["computation_step"], "Monthly")
+		# Read on 3 August, the window ends at the last COMPLETED month.
+		self.assertEqual(data["ttm"]["period_start"], "2025-08-01")
+		self.assertEqual(data["ttm"]["period_end"], "2026-07-31")
+		self.assertEqual(data["point_in_time"]["period_start"], "2026-07-01")
+		self.assertEqual(data["point_in_time"]["period_end"], "2026-07-31")
+
+		# (360,000 raw + 24,000 add-back − 30,000 maintenance capex) ÷ 40 acres
+		# productive for the whole window = 8,850 per acre.
+		components = data["ttm"]["components"]
+		self.assertEqual(components["raw_ocf"]["value"], 360000.0)
+		self.assertEqual(components["normalization_adjustments_total_addback"], 24000.0)
+		self.assertEqual(components["normalized_ocf"], 384000.0)
+		self.assertEqual(components["maintenance_capex"]["total"], 30000.0)
+		self.assertEqual(components["productive_acres"]["time_weighted"], 40.0)
+		self.assertEqual(data["ttm"]["value"], 8850.0)
+
+		# EVERY INGREDIENT SURVIVES THE WINDOW, which is v0.19.5's obligation and
+		# is harder rather than lighter across twelve months than across one
+		# quarter — the adjustment that spans a quarter is in here exactly once.
+		adjustment = components["normalization_adjustments"][0]
+		self.assertEqual(adjustment["name"], draft["name"])
+		self.assertEqual(adjustment["justification"], why)
+		self.assertTrue(adjustment["has_approver_signature"])
+		self.assertEqual(len(components["normalization_adjustments"]), 1)
+
+		capex = components["maintenance_capex"]["itemized"][0]
+		self.assertEqual(capex["asset"], "E2E-TTM-PUMP")
+		self.assertEqual(capex["maintenance_portion"], 30000.0)
+
+		acres = components["productive_acres"]["itemized"][0]
+		self.assertEqual(acres["field"], block["name"])
+		self.assertEqual(acres["time_weighted_acres"], 40.0)
+
+		# ── the caveat, which is the point of a three-month ledger ────────
+		partial = [line for line in data["computation_warnings"] if "PARTIAL" in line]
+		self.assertTrue(partial, data["computation_warnings"])
+		self.assertIn("not annualized", partial[0])
+		self.assertEqual(data["ledger_starts"], "2026-05-15")
+		self.assertEqual(data["ledger_months_available"], 3)
+
+		# The history block exists and says how thin it is rather than averaging
+		# three months into a norm.
+		averages = data["historical_averages"]
+		self.assertEqual(averages["requested_entries"], 60)
+		self.assertLess(averages["prior_ttm_count"], 60)
+		self.assertIsNone(averages["current_vs_prior_year_pct_delta"])
+
+		# ── the cache, which is what makes the figure reproducible later ──
+		cached = self.tool_data(
+			"list_financial_kpi_history",
+			{"company": COMPANY, "kpi_key": "sustainable_cf_per_acre"},
+		)
+		self.assertGreater(cached["count"], 0)
+		snapshot = next(row for row in cached["records"] if row["as_of"] == "2026-07-31")
+		self.assertEqual(snapshot["value"], 8850.0)
+		self.assertEqual(snapshot["period_start"], "2025-08-01")
+		self.assertEqual(snapshot["period_end"], "2026-07-31")
+
+		# And the old call shape still answers, exactly as it did, because this
+		# figure is quoted in packs that were sent before the window existed.
+		legacy = self.tool_data(
+			"get_sustainable_cf_per_acre",
+			{"company": COMPANY, "period_start": "2025-08-01", "period_end": "2026-07-31"},
+		)
+		self.assertEqual(legacy["sustainable_cf_per_acre"], 8850.0)
+		self.assertIn("DEPRECATED CALL SHAPE", legacy["computation_warnings"][0])

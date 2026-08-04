@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""The six tools behind Sustainable CF/Acre: propose, approve, refuse, classify, read.
+"""The nine tools behind Sustainable CF/Acre and the window standard.
 
-v0.19.5. FIVE OF THE SIX EXIST TO KEEP AN AI ON THE PROPOSING SIDE OF A LINE.
+v0.19.5 brought six — propose, approve, refuse, classify, list, read — and
+v0.19.6 brings three more: the generic windowed entry point, the cache reader
+and the cache rebuilder. They share this module because they share the gate: the
+same three roles, the same company scope, and the same argument about who is
+allowed to move a figure a lender reads.
+
+FIVE OF THE ORIGINAL SIX EXIST TO KEEP AN AI ON THE PROPOSING SIDE OF A LINE.
 
 An AI is genuinely good at the first half of a normalization. The items are
 scattered — an insurance recovery three months after the hailstorm, a settlement
@@ -53,18 +59,49 @@ planted in year six was growth and will be wrong until somebody fixes it in the
 Desk. That is a better place to start from than nine years of nulls, and worse
 than nine years of real classifications — both of which are true and both of
 which the result says.
+
+────────────────────────────────────────────────────────────────────────────
+v0.19.6: THE WINDOW IS NOW THE DEFAULT, AND THE OLD SHAPE STILL ANSWERS
+────────────────────────────────────────────────────────────────────────────
+
+`get_sustainable_cf_per_acre` used to require a period and return one. It now
+returns the trailing twelve months by default, with the period just finished
+beside it and five years of history under both. A caller that passes
+`period_start` and `period_end` — v0.19.5's signature — still gets v0.19.5's
+payload, exactly, with a deprecation sentence added to its warnings.
+
+THAT COMPATIBILITY IS NOT POLITENESS. This figure is quoted in lender packs and
+pasted into spreadsheets, and a release that changed what an unchanged call
+returned would silently alter a number somebody had already sent to a bank.
+
+`recompute_kpi_history` IS THE THIRD MUTATING TOOL HERE AND THE MILDEST THING IN
+THE FILE. It writes only a cache, every row of which is derivable from the
+ledger by rerunning the computer that wrote it, so the worst outcome of running
+it at the wrong moment is time spent. It is behind the same role gate as the
+rest anyway — a KPI history somebody can rebuild is a KPI history somebody can
+rebuild while a pack is being read off it.
 """
 
 from __future__ import annotations
+
+import json
 
 import frappe
 
 from .. import compat, roles, security
 from .. import kpi as kpi_module
-from ..args import as_bool, as_choice, as_date, as_limit, as_str, resolve_company
+from ..args import as_bool, as_choice, as_date, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
+
+# Imported for its side effect as well as its names: importing it REGISTERS the
+# three windowed computers. A tool module that reached `windowed_reports.run`
+# without this import would find an empty registry and refuse every report on
+# the grounds that none is registered, which is a confusing way to spell "the
+# module that registers them was never imported".
+from ..services import financial_reports  # noqa: F401
 from ..services import sustainable_cf_per_acre as service
+from ..services import windowed_reports as windows
 from . import employee as employee_tool
 from . import shifts as shift_tools
 
@@ -431,24 +468,49 @@ def approve_normalization_adjustment(args: dict) -> ToolResult:
 	doc.flags.ignore_permissions = True
 	doc.save(ignore_permissions=True)
 
+	# v0.19.6. THE APPROVAL IS RETROACTIVE AND THE CACHE HAS TO KNOW. Every cached
+	# window overlapping this adjustment's period was computed without it and is
+	# now wrong by exactly this amount — so those snapshots are DELETED and the
+	# next read or the next overnight sweep rebuilds them. Deleted rather than
+	# flagged, because a cached row carries the components list as well as the
+	# figure, and a components list that no longer produces the number above it is
+	# worse than a missing one. It never raises: an approval is a compliance act
+	# and losing one to housekeeping would be indefensible.
+	invalidated = windows.invalidate_overlapping(
+		company, row.get("period_start"), row.get("period_end")
+	)
+
 	described = kpi_module.describe(dict(doc.as_dict()))
+	data = {
+		**described,
+		"actor": actor,
+		"note": (
+			f"{doc.name} now counts towards Sustainable CF/Acre for {company} over "
+			f"{described['period_start']} to {described['period_end']}: "
+			f"{described['signed_effect_on_ocf']} on operating cash flow. The justification "
+			"and the signature travel with it into every computation — "
+			"get_sustainable_cf_per_acre itemizes both, because a figure whose adjustments "
+			"cannot be inspected is indistinguishable from one somebody arranged."
+		),
+		"justification_on_the_record": described["justification"],
+		"cache_invalidation": invalidated,
+	}
+	if invalidated.get("deleted"):
+		data["cache_note"] = (
+			f"{invalidated['deleted']} cached KPI snapshot(s) covering this period were "
+			"INVALIDATED. Each was computed before this approval existed and is now wrong by "
+			f"exactly {described['signed_effect_on_ocf']}, so they are dropped rather than left to "
+			"be read — a stale figure with an itemized ingredient list is the most expensive kind "
+			"of wrong. They rebuild on the next read of a windowed report, or overnight; "
+			f"recompute_kpi_history(kpi_key='sustainable_cf_per_acre', company={company!r}) "
+			"rebuilds them now if a pack is going out today."
+		)
 	return ToolResult(
-		data={
-			**described,
-			"actor": actor,
-			"note": (
-				f"{doc.name} now counts towards Sustainable CF/Acre for {company} over "
-				f"{described['period_start']} to {described['period_end']}: "
-				f"{described['signed_effect_on_ocf']} on operating cash flow. The justification "
-				"and the signature travel with it into every computation — "
-				"get_sustainable_cf_per_acre itemizes both, because a figure whose adjustments "
-				"cannot be inspected is indistinguishable from one somebody arranged."
-			),
-			"justification_on_the_record": described["justification"],
-		},
+		data=data,
 		summary=(
 			f"approved {doc.name} — {described['direction']} of {described['amount']} for "
 			f"{company}, signed by {employee or actor}"
+			+ (f"; {invalidated['deleted']} cached snapshot(s) invalidated" if invalidated.get("deleted") else "")
 		),
 		docstatus_delta=f"{row.get('status') or kpi_module.STATUS_DRAFT} → {kpi_module.STATUS_APPROVED}",
 	)
@@ -679,22 +741,67 @@ def _write_capex(asset: str, capex_type: str, split: dict) -> None:
 
 # ── 6. get_sustainable_cf_per_acre ──────────────────────────────────────────
 def get_sustainable_cf_per_acre(args: dict) -> ToolResult:
-	"""The KPI for one company over one period, with every ingredient on the plate."""
+	"""The KPI, TTM by default — or over a typed period, for a v0.19.5 caller.
+
+	TWO SHAPES OUT OF ONE TOOL, AND THE OLD ONE IS REACHED ONLY BY ASKING FOR IT.
+	A caller that passes `period_start` and `period_end` — the v0.19.5 signature —
+	gets v0.19.5's point-in-time payload back, with a deprecation sentence in
+	`computation_warnings`. Everybody else gets the windowed shape with a trailing
+	twelve months as the default.
+
+	The compatibility path is not politeness. v0.19.5's payload is quoted in
+	lender packs, saved in scripts and pasted into spreadsheets, and a release
+	that changed what those callers got back without their asking would silently
+	alter a figure somebody had already sent to a bank. So the old shape is exact
+	rather than approximated, and the warning is the only thing added to it.
+	"""
 	actor = require_kpi_role()
 	company = resolve_company(as_str(args, "company"), required=True)
 	employee_tool.require_company_scope(actor, company)
 
-	period_start = as_date(args, "period_start", required=True)
-	period_end = as_date(args, "period_end", required=True)
+	legacy_start = as_date(args, "period_start")
+	legacy_end = as_date(args, "period_end")
+	if legacy_start and legacy_end:
+		return _legacy_point_in_time(actor, company, legacy_start, legacy_end)
+	if legacy_start or legacy_end:
+		raise ToolError(
+			"period_start and period_end are the v0.19.5 signature and go TOGETHER — one without "
+			"the other is neither a period nor a window. Pass both to get the old point-in-time "
+			"payload for exactly that period, or pass neither and get the TTM window ending at "
+			"the last completed month, which is what this tool now returns by default."
+		)
+
+	report = _run_windowed("sustainable_cf_per_acre", actor, company, args)
+	return ToolResult(data=report["data"], summary=report["summary"])
+
+
+def _legacy_point_in_time(actor: str, company: str, period_start: str, period_end: str) -> ToolResult:
+	"""v0.19.5's payload, unchanged except for the sentence saying it is v0.19.5's."""
 	if period_end < period_start:
 		raise ToolError(f"period_end ({period_end}) is before period_start ({period_start}).")
 
 	report = service.compute(company, period_start, period_end)
 	per_acre = report["sustainable_cf_per_acre"]
 
+	warnings = list(report["computation_warnings"])
+	warnings.insert(
+		0,
+		"DEPRECATED CALL SHAPE. period_start and period_end are the v0.19.5 signature and this is "
+		"v0.19.5's point-in-time payload: one period, no trailing twelve months, no historical "
+		"averages. It still works and still returns exactly what it always did — that is "
+		"deliberate, because this figure is quoted in packs that were sent before v0.19.6 existed. "
+		"But a single agricultural period is the comparison the window standard exists to stop "
+		"anybody making: Q3 is harvest and Q1 is pruning, and setting them beside each other says "
+		"the farm collapsed in January and recovered in September, every year, on every farm. Drop "
+		"both arguments to get the TTM window plus five years of history, or pass "
+		"as_of=<date> to place the window at a moment other than today.",
+	)
+
 	data = {
 		**report,
+		"computation_warnings": warnings,
 		"actor": actor,
+		"call_shape": "v0.19.5 point-in-time (deprecated)",
 		"reading_it": (
 			"Read the components before the figure. Sustainable CF/Acre is a NORMALIZED number, "
 			"which means somebody has decided that money which really did move should not be "
@@ -719,6 +826,432 @@ def get_sustainable_cf_per_acre(args: dict) -> ToolResult:
 			f"{report['maintenance_capex']['total']} maintenance capex) ÷ "
 			f"{report['productive_acres']['time_weighted']} time-weighted acres), "
 			f"{len(report['normalization_adjustments'])} adjustment(s), "
-			f"{len(report['computation_warnings'])} warning(s)"
+			f"{len(warnings)} warning(s)"
 		)
 	return ToolResult(data=data, summary=summary)
+
+
+# ── 7. get_windowed_report ──────────────────────────────────────────────────
+#
+# v0.19.6. The generic entry point, and the reason the standard is a standard: a
+# report is registered once in `services/financial_reports.py` and is reachable
+# here without another tool, another switch and another catalogue entry. A
+# framework whose every KPI costs a tool is a framework with six KPIs in it.
+def _window_args(args: dict) -> dict:
+	"""The five window arguments, validated once for every tool that takes them."""
+	window_type = as_str(args, "window_type") or windows.WINDOW_TTM
+	matched = next(
+		(option for option in windows.WINDOW_TYPES if option.lower() == window_type.lower()), ""
+	)
+	if not matched:
+		raise ToolError(
+			f"window_type must be one of {', '.join(windows.WINDOW_TYPES)}; got {window_type!r}. "
+			"TTM is the default and the standard: twelve rolling months, so pruning, thinning, "
+			"harvest and the winter are each in the figure exactly once no matter when it is read."
+		)
+
+	step = as_str(args, "computation_step") or windows.STEP_MONTHLY
+	matched_step = next((option for option in windows.STEPS if option.lower() == step.lower()), "")
+	if not matched_step:
+		raise ToolError(
+			f"computation_step must be one of {', '.join(windows.STEPS)}; got {step!r}. Monthly is "
+			"the default: Daily is cheap for one report and ruinous across a framework, so it is "
+			"opted into per KPI rather than reached by accident."
+		)
+
+	months = as_int(args, "window_months", windows.DEFAULT_WINDOW_MONTHS) or windows.DEFAULT_WINDOW_MONTHS
+	if months < 1 or months > 120:
+		raise ToolError(
+			f"window_months must be between 1 and 120; got {months}. TTM is 12, which is what the "
+			"T and the M mean."
+		)
+
+	lookback = as_int(args, "historical_lookback_years", windows.DEFAULT_LOOKBACK_YEARS)
+	if lookback is None:
+		lookback = windows.DEFAULT_LOOKBACK_YEARS
+	if lookback < 0 or lookback > windows.MAX_LOOKBACK_YEARS:
+		raise ToolError(
+			f"historical_lookback_years must be between 0 and {windows.MAX_LOOKBACK_YEARS}; got "
+			f"{lookback}. Past that, every extra entry is a row saying 'no ledger', which is a "
+			"slower way of saying nothing."
+		)
+
+	return {
+		"as_of": as_date(args, "as_of") or frappe.utils.today(),
+		"window_type": matched,
+		"window_months": months,
+		"computation_step": matched_step,
+		"historical_lookback_years": lookback,
+		"historical_averaging_enabled": as_bool(args, "include_historical_averages", True),
+	}
+
+
+def _run_windowed(report_name: str, actor: str, company: str, args: dict) -> dict:
+	"""One registered report, windowed, with the sentences a reader needs around it."""
+	try:
+		entry = windows.registered(report_name)
+	except ValueError as exc:
+		raise ToolError(f"{exc} Nothing was computed.") from None
+	if entry.get("available") and not entry["available"]():
+		raise ToolError(
+			f"{report_name!r} cannot be computed on this site: it needs a doctype that is not "
+			"installed. For sustainable_cf_per_acre that is Normalization Adjustment, which ships "
+			"with erpnext_mcp — run `bench --site <site> migrate`. Nothing was computed."
+		)
+
+	options = _window_args(args)
+	report = windows.compute_windowed(entry["computer"], company, entry=entry, **options)
+
+	window = report.get("window") or {}
+	value = window.get("value")
+	averages = report.get("historical_averages") or {}
+	data = {
+		**report,
+		"actor": actor,
+		"reading_it": (
+			"THREE BLOCKS, AND EACH IS THE CORRECTION FOR THE OTHER TWO. `point_in_time` is the "
+			"period just finished, which on a farm flatters harvest and demonizes pruning. "
+			"`window` (`ttm` by default) is the same figure over twelve rolling months, so the "
+			"whole annual cycle is in it exactly once however it is read. `historical_averages` is "
+			"what that window has been worth for this operation before, which is the only thing "
+			"that says whether the current number is good — a TTM figure means one thing against a "
+			"five-year mean below it and the opposite against one above. Read "
+			"`computation_warnings` before quoting any of them: a partial window and a full one "
+			"look identical in the value and are not the same claim."
+		),
+	}
+	label = entry["label"]
+	if value is None:
+		summary = (
+			f"{company} {label} {options['window_type']} to {window.get('period_end')}: no "
+			f"defensible value ({len(report.get('computation_warnings') or [])} warning(s)) — read "
+			"computation_warnings"
+		)
+	else:
+		mean = averages.get("prior_ttm_mean")
+		delta = averages.get("current_vs_mean_pct_delta")
+		against = (
+			f", {delta:+.1f}% vs a {averages.get('prior_ttm_count')}-entry mean of {mean}"
+			if mean is not None and delta is not None
+			else ""
+		)
+		summary = (
+			f"{company} {label} {options['window_type']} {window.get('period_start')} to "
+			f"{window.get('period_end')}: {value}{against}; "
+			f"{len(report.get('computation_warnings') or [])} warning(s)"
+		)
+	return {"data": data, "summary": summary}
+
+
+def get_windowed_report(args: dict) -> ToolResult:
+	"""Any registered financial report, over a window, with its own history beside it."""
+	actor = require_kpi_role()
+	company = resolve_company(as_str(args, "company"), required=True)
+	employee_tool.require_company_scope(actor, company)
+
+	report_name = as_str(args, "report_name") or as_str(args, "report", required=True)
+	report = _run_windowed(report_name, actor, company, args)
+	report["data"]["available_reports"] = sorted(windows.COMPUTERS)
+	return ToolResult(data=report["data"], summary=report["summary"])
+
+
+# ── 8. list_financial_kpi_history ───────────────────────────────────────────
+def list_financial_kpi_history(args: dict) -> ToolResult:
+	"""The cache, read directly — the time series without the apparatus around it.
+
+	SEPARATE FROM `get_windowed_report` BECAUSE THE QUESTIONS ARE DIFFERENT. That
+	tool answers "what is this worth now, and is that good"; this one answers
+	"show me the line", and a caller drawing a chart or exporting a series does
+	not want sixty copies of the components dict to get sixty numbers.
+
+	It reports what is NOT there as well as what is. A gap in a cached series is
+	not a gap in the business — it is a window nobody has computed yet, or one
+	that was invalidated by a retroactively approved adjustment and not yet
+	rebuilt — and a series with a hole in it plotted as a continuous line is a
+	trend that did not happen.
+	"""
+	actor = require_kpi_role()
+	limit = min(as_limit(args), RECORD_CAP)
+
+	if not compat.doctype_exists(windows.DOCTYPE):
+		raise ToolError(
+			f"this site has no {windows.DOCTYPE} doctype yet — it ships with erpnext_mcp and "
+			"arrives with `bench --site <site> migrate`. Until it does, every windowed report "
+			"still answers; it just recomputes its history on every call and says so."
+		)
+
+	scope = _scoped_companies(actor, args)
+	filters = dict(scope["filters"])
+
+	kpi_key = as_str(args, "kpi_key")
+	if kpi_key:
+		filters["kpi_key"] = kpi_key
+	step = as_str(args, "computation_step")
+	if step:
+		matched = next((option for option in windows.STEPS if option.lower() == step.lower()), "")
+		if not matched:
+			raise ToolError(f"computation_step must be one of {', '.join(windows.STEPS)}; got {step!r}.")
+		filters["computation_step"] = matched
+	window_type = as_str(args, "window_type")
+	if window_type:
+		matched = next(
+			(option for option in windows.WINDOW_TYPES if option.lower() == window_type.lower()), ""
+		)
+		if not matched:
+			raise ToolError(
+				f"window_type must be one of {', '.join(windows.WINDOW_TYPES)}; got {window_type!r}."
+			)
+		filters["window_type"] = matched
+
+	from_date = as_date(args, "from_date")
+	to_date = as_date(args, "to_date")
+	if from_date and to_date:
+		filters["as_of"] = ("between", [from_date, to_date])
+	elif from_date:
+		filters["as_of"] = (">=", from_date)
+	elif to_date:
+		filters["as_of"] = ("<=", to_date)
+
+	rows = frappe.db.get_all(
+		windows.DOCTYPE,
+		filters=filters,
+		fields=compat.existing_fields(
+			windows.DOCTYPE,
+			(
+				"name",
+				"kpi_key",
+				"company",
+				"computation_step",
+				"window_type",
+				"window_months",
+				"as_of",
+				"period_start",
+				"period_end",
+				"value",
+				"computation_warnings_json",
+				"computed_at",
+				"source_version",
+			),
+		),
+		order_by="as_of desc, name desc",
+		limit=limit + 1,
+	)
+	truncated = len(rows or []) > limit
+	rows = (rows or [])[:limit]
+
+	records = []
+	versions: set = set()
+	unresolved = 0
+	for row in rows:
+		warnings = []
+		try:
+			warnings = json.loads(row.get("computation_warnings_json") or "[]")
+		except Exception:  # pragma: no cover - a row somebody edited
+			warnings = []
+		if row.get("value") is None:
+			unresolved += 1
+		if row.get("source_version"):
+			versions.add(str(row["source_version"]))
+		records.append(
+			{
+				"name": row.get("name"),
+				"kpi_key": row.get("kpi_key"),
+				"company": row.get("company"),
+				"computation_step": row.get("computation_step"),
+				"window_type": row.get("window_type"),
+				"window_months": row.get("window_months"),
+				"as_of": str(row.get("as_of") or "") or None,
+				"period_start": str(row.get("period_start") or "") or None,
+				"period_end": str(row.get("period_end") or "") or None,
+				"value": row.get("value"),
+				"warning_count": len(warnings),
+				"computation_warnings": warnings,
+				"computed_at": str(row.get("computed_at") or "") or None,
+				"source_version": row.get("source_version"),
+			}
+		)
+
+	values = [entry["value"] for entry in records if entry["value"] is not None]
+	data = {
+		"actor": actor,
+		"company": scope["company"],
+		"kpi_key": kpi_key or None,
+		"count": len(records),
+		"limit": limit,
+		"truncated": truncated,
+		"records": records,
+		"series": [
+			{"as_of": entry["as_of"], "value": entry["value"], "kpi_key": entry["kpi_key"]}
+			for entry in records
+		],
+		"value_count": len(values),
+		"min": round(min(values), 4) if values else None,
+		"max": round(max(values), 4) if values else None,
+		"source_versions": sorted(versions),
+		"note": (
+			"THIS IS A CACHE AND NOT A LEDGER. Every row here is derivable by rerunning the "
+			"computer that wrote it, which is what makes it safe for an approved normalization "
+			"adjustment to delete the snapshots whose window it changed. A gap in this series is a "
+			"window nobody has computed yet or one that was invalidated and not yet rebuilt — it "
+			"is NOT a period in which the business earned nothing, and plotting it as a continuous "
+			"line draws a trend that did not happen. recompute_kpi_history fills a gap; the "
+			"overnight sweep fills it by itself."
+		),
+	}
+	if unresolved:
+		data["null_value_note"] = (
+			f"{unresolved} row(s) have no value. Null is an answer here rather than a failure — a "
+			"per-acre figure with no productive acres in the denominator is a division nobody "
+			"performed — and each row's computation_warnings says which reason applies."
+		)
+	if len(versions) > 1:
+		data["version_note"] = (
+			f"these rows were computed by {len(versions)} different versions of erpnext_mcp: "
+			+ ", ".join(sorted(versions))
+			+ ". Where a release changed how a figure is computed, a series spanning the change is "
+			"two definitions of one KPI plotted on one line with nothing marking the join. "
+			"recompute_kpi_history(force=true) rebuilds the whole series under the current one."
+		)
+	if truncated:
+		data["truncation_note"] = (
+			f"More than {limit} row(s) matched and this is the newest {limit}. Narrow with "
+			"kpi_key, company, computation_step or a from_date/to_date range before treating the "
+			"series above as complete."
+		)
+	if not records:
+		data["empty_note"] = (
+			"Nothing is cached for these filters. That is the ordinary state of a site that has "
+			"not run the overnight sweep yet, and it costs nothing but speed: every windowed "
+			"report still answers, computing what it needs live and saying in its warnings how "
+			"much history it had to leave out."
+		)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{len(records)} cached KPI snapshot(s)"
+			+ (f" for {kpi_key}" if kpi_key else "")
+			+ (f" on {scope['company']}" if scope["company"] else "")
+			+ (f"; {unresolved} with no value" if unresolved else "")
+		),
+	)
+
+
+# ── 9. recompute_kpi_history ────────────────────────────────────────────────
+def recompute_kpi_history(args: dict) -> ToolResult:
+	"""Rebuild the cache for one KPI. Idempotent unless `force`, which clears first.
+
+	MUTATING, AND THE ONLY THING IT CAN MUTATE IS A CACHE. Every row it writes is
+	derivable from the ledger and every row it deletes comes back — so the worst
+	outcome of running it at the wrong moment is time spent, which is why it is
+	one of the few mutating tools in this app whose failure mode is boredom.
+
+	IT IS THE ANSWER TO A RETROACTIVE APPROVAL. Approving a normalization
+	adjustment for a period history already covers deletes the snapshots whose
+	window overlapped it, and the next read or the next sweep rebuilds them; this
+	is how somebody rebuilds them NOW, with the result in front of them, before
+	sending the pack. The other case is a Field productive-date backfill, which
+	changes the denominator of every window containing the corrected block.
+
+	`force` CLEARS AND REBUILDS rather than filling gaps. That is the heavier
+	operation and it exists for the case the incremental path cannot reach: a
+	release that changed how a figure is computed leaves a series holding two
+	definitions of one KPI, plotted on one line, with nothing marking the join.
+	"""
+	actor = require_kpi_role()
+
+	if not compat.doctype_exists(windows.DOCTYPE):
+		raise ToolError(
+			f"this site has no {windows.DOCTYPE} doctype yet — it ships with erpnext_mcp and "
+			"arrives with `bench --site <site> migrate`. Nothing was changed."
+		)
+
+	kpi_key = as_str(args, "kpi_key", required=True)
+	entry = next(
+		(item for item in windows.COMPUTERS.values() if item["kpi_key"] == kpi_key),
+		None,
+	)
+	if not entry:
+		raise ToolError(
+			f"no registered report computes {kpi_key!r}. This site has: "
+			f"{', '.join(sorted(item['kpi_key'] for item in windows.COMPUTERS.values())) or '<none>'}. "
+			"Nothing was changed."
+		)
+
+	back_years = as_int(args, "back_years", windows.DEFAULT_LOOKBACK_YEARS)
+	if back_years is None:
+		back_years = windows.DEFAULT_LOOKBACK_YEARS
+	if back_years < 1 or back_years > windows.MAX_LOOKBACK_YEARS:
+		raise ToolError(
+			f"back_years must be between 1 and {windows.MAX_LOOKBACK_YEARS}; got {back_years}. "
+			"Nothing was changed."
+		)
+	force = as_bool(args, "force", False)
+
+	company = resolve_company(as_str(args, "company"), required=False)
+	if company:
+		employee_tool.require_company_scope(actor, company)
+		companies = [company]
+	else:
+		allowed = shift_tools._readable_companies(actor)
+		companies = list(allowed) if allowed else (frappe.db.get_all("Company", pluck="name", limit=200) or [])
+
+	cleared = 0
+	written = 0
+	per_company = []
+	for name in companies:
+		before = windows.clear(kpi_key, str(name)) if force else 0
+		cleared += before
+		count = windows._sweep_one(entry, str(name), lookback_years=back_years)
+		written += count
+		per_company.append({"company": str(name), "cleared": before, "written": count})
+
+	data = {
+		"actor": actor,
+		"kpi_key": kpi_key,
+		"report_name": entry["report_name"],
+		"companies": [str(name) for name in companies],
+		"back_years": back_years,
+		"force": bool(force),
+		"snapshots_cleared": cleared,
+		"snapshots_written": written,
+		"per_company": per_company,
+		"computation_step": entry["default_step"],
+		"note": (
+			"THE CACHE IS DERIVABLE AND THAT IS WHY THIS IS SAFE. Nothing here is the only copy of "
+			"anything: every snapshot written is what the live computation would have produced for "
+			"that window, and every snapshot cleared comes back on the next read or the next "
+			"overnight sweep. The cost of running this at the wrong moment is time."
+		),
+	}
+	if force:
+		data["force_note"] = (
+			f"force=true, so {cleared} existing snapshot(s) were DELETED and rebuilt rather than "
+			"filled around. Use it after a release changes how a figure is computed — an "
+			"incremental fill leaves the old rows in place, and a series holding two definitions "
+			"of one KPI is a line with an unmarked join in it."
+		)
+	else:
+		data["idempotent_note"] = (
+			"force=false, so only missing snapshots were computed and a second run finds nothing "
+			"to do. That is the ordinary use: filling the gap a retroactively approved adjustment "
+			"left, without touching rows that are still correct."
+		)
+	if not written and not cleared:
+		data["empty_note"] = (
+			"Nothing was written. Either the cache is already complete for this KPI and window — "
+			"which is what a second run looks like — or these companies have no submitted GL "
+			"postings at all, in which case there is no ledger to compute a history from."
+		)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{'rebuilt' if force else 'filled'} {written} cached snapshot(s) of {kpi_key} across "
+			f"{len(companies)} company(ies), {back_years} year(s) back"
+			+ (f"; {cleared} cleared first" if cleared else "")
+		),
+		docstatus_delta=(
+			f"{cleared} cached snapshot(s) deleted, {written} written"
+			if cleared
+			else f"{written} cached snapshot(s) written"
+		),
+	)

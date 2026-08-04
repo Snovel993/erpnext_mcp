@@ -168,6 +168,28 @@ def drift_report_email() -> str:
 	return str(_value("drift_report_email") or "").strip()
 
 
+def kpi_history_sweep_enabled() -> bool:
+	"""Whether the overnight Financial KPI History sweep runs at all. v0.19.6.
+
+	Ships ON, because the sweep is what makes a windowed report answer in a
+	second rather than a minute — a five-year Monthly history is sixty full
+	computations over twelve months of GL each, and the whole point of computing
+	them at two in the morning is that nobody is waiting.
+
+	It is a switch rather than a fact because it is the only scheduled job in
+	this app that does arbitrary amounts of arithmetic over a site's whole
+	ledger. An operator with a very large book, a shared bench, or a night window
+	they need for something else has a reason to turn it off — and the cost of
+	doing so is bounded and visible: reports still answer, they answer from a
+	cold cache, and they say in `computation_warnings` how much history they had
+	to leave out.
+
+	Turning it off does NOT stop `recompute_kpi_history`, which is somebody
+	asking on purpose, in the moment, with the result in front of them.
+	"""
+	return as_bool(_value("enable_kpi_history_sweep"))
+
+
 def require_user_context() -> bool:
 	return as_bool(_value("require_user_context"))
 

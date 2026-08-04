@@ -5,8 +5,8 @@ Nine jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
 the fifth — the Farm Task Dispatch Kanban board — in v0.16.0, the sixth —
 the six mobile roles — in v0.17.0, the seventh — the compliance vocabulary
 and the training curricula — in v0.19.2, the eighth — the Weather Settings
-defaults — in v0.19.4, and the ninth — the Sustainable CF/Acre dashboard chart
-— in v0.19.5.
+defaults — in v0.19.4, and the ninth — the Sustainable CF/Acre dashboard charts
+— in v0.19.5, which v0.19.6 turned into two charts rather than a tenth job.
 
 The first is making the DocType JSON's declared defaults *true in the
 database*. A Frappe Single stores a row per field that has been set, so straight
@@ -197,17 +197,25 @@ def _dispatch_board() -> None:
 
 
 def _kpi_charts() -> None:
-	"""Build the Sustainable CF/Acre chart. v0.19.5, and the ninth job.
+	"""Build the Sustainable CF/Acre charts. v0.19.5, and the ninth job.
 
 	Reported through the same printer as the two dashboard builders, and it has
-	one failure mode worth printing: the chart's source is a standard Script
+	one failure mode worth printing: each chart's source is a standard Script
 	Report created by the SAME `bench migrate` that runs this, so a first pass may
-	find the Report row not yet written. That lands in `failed` with the sentence
+	find a Report row not yet written. That lands in `failed` with the sentence
 	saying the next migrate builds it, which is a far better outcome than a chart
 	pointing at a report that does not exist — a missing chart renders nothing, and
 	a broken one renders an error.
+
+	v0.19.6 MADE IT TWO CHARTS AND EACH IS CHECKED SEPARATELY. The rolling
+	twelve-month view is the new default and the discrete quarterly one stays
+	beside it; a site part-way through a migrate may have one Report row and not
+	the other, and building the chart that CAN be built is strictly better than
+	refusing both. The quarterly chart is NOT renamed — a Dashboard Chart's
+	docname is what a dashboard points at, and demoting it by renaming the record
+	would silently empty the dashboards of every site that installed v0.19.5.
 	"""
-	_report_failures("the Sustainable CF/Acre chart", dashboard.install_kpi_charts)
+	_report_failures("the Sustainable CF/Acre charts", dashboard.install_kpi_charts)
 
 
 def _mobile_roles() -> None:
@@ -488,6 +496,18 @@ _REGENERATED_DOCTYPES = (
 	(
 		"Weather Company Override",
 		"per-company threshold rows on Weather Settings — a few numbers, retypable",
+	),
+	# v0.19.6. THE ONLY DOCTYPE THIS APP SHIPS THAT IS A CACHE, and the reason it
+	# is on this list rather than the precious one is worth stating rather than
+	# leaving to be inferred from its absence: every row in it is DERIVABLE. Each
+	# is what `services/windowed_reports.py` would compute again from GL Entry,
+	# the Asset register and the Field register — all of which survive, or are
+	# themselves warned about above. Losing the cache loses no fact and no
+	# judgement; it loses the speed of the first report somebody opens
+	# afterwards, and the overnight sweep has it back by morning.
+	(
+		"Financial KPI History",
+		"precomputed windowed KPI values — recomputed from the ledger by the overnight sweep",
 	),
 )
 

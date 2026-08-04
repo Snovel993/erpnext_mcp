@@ -293,14 +293,16 @@ class TheScheduledJobs(unittest.TestCase):
 			with self.subTest(hook=hook, path=path):
 				self.assertTrue(callable(resolve(path)))
 
-	def test_they_are_these_five_and_nothing_else(self):
-		"""Five jobs. Three write only this app's own doctypes or nothing at all;
+	def test_they_are_these_six_and_nothing_else(self):
+		"""Six jobs. Three write only this app's own doctypes or nothing at all;
 		the fourth writes two credential fields on Frappe's User and had to argue
-		for it — see hooks.py and tools/mobile.sweep_idle_grants — and the fifth
-		makes an outbound request to somebody else's server, which is a bar none
-		of the others had to clear.
+		for it — see hooks.py and tools/mobile.sweep_idle_grants — the fifth makes
+		an outbound request to somebody else's server, which is a bar none of the
+		others had to clear, and the sixth does arbitrary arithmetic over a
+		site's whole ledger, which is a different bar again and is why it is the
+		only one with a kill switch of its own.
 
-		Asserted as an exact mapping rather than a membership check, so a sixth
+		Asserted as an exact mapping rather than a membership check, so a seventh
 		job fails here and has to be argued for. Every scheduled job is code that
 		runs on somebody's site with nobody watching, which is the same reason
 		`KNOWN_HOOKS` refuses an unexamined hook key.
@@ -310,15 +312,28 @@ class TheScheduledJobs(unittest.TestCase):
 		away, and nightly meant a worker saw the phone asking them to walk a cabin
 		they had already walked, all day.
 
-		The weather sweep arrived in v0.19.4 as the only `cron` entry, at fifteen
+		The weather sweep arrived in v0.19.4 as the first `cron` entry, at fifteen
 		minutes, because OAR 437-004-1131 asks what the conditions were across an
 		exposure period: nine readings on a nine-hour shift is a sketch and
 		thirty-six is a timeline.
+
+		The KPI history sweep arrived in v0.19.6 as the second, at two in the
+		morning. `daily` would be tidier and is wrong: Frappe's `daily` fires on
+		the day's first scheduler tick, which on a farm bench is during the
+		morning, and this is the one job here that can take minutes on a large
+		ledger. IT IS ONE ENTRY THAT ITERATES over every registered report and
+		every company — a scheduler with a cron per KPI is one nobody can read,
+		and the Financial KPI Framework is going to add KPIs as data.
 		"""
 		self.assertEqual(
 			hooks.scheduler_events,
 			{
-				"cron": {"*/15 * * * *": ["erpnext_mcp.services.weather.sweep_open_shifts"]},
+				"cron": {
+					"*/15 * * * *": ["erpnext_mcp.services.weather.sweep_open_shifts"],
+					"0 2 * * *": [
+						"erpnext_mcp.services.windowed_reports.recompute_kpi_history_incremental"
+					],
+				},
 				"hourly": ["erpnext_mcp.alerts.sweep"],
 				"daily": [
 					"erpnext_mcp.tools.uploads.collect_expired_sessions",
@@ -327,6 +342,32 @@ class TheScheduledJobs(unittest.TestCase):
 				"weekly": ["erpnext_mcp.drift.scan"],
 			},
 		)
+
+	def test_the_kpi_history_sweep_never_raises_and_takes_no_arguments(self):
+		"""Same contract as the other five, and it needs it for its own reason.
+
+		It is the only scheduled job whose cost scales with the size of somebody's
+		BOOKS rather than with the number of their cabins or their open shifts, so
+		its failure modes include ones nobody can enumerate in advance: a company
+		with a decade of ledger, a chart of accounts nobody typed correctly, a
+		computer that raises on a period the developer never saw. None of those
+		may take a scheduler tick down, and none of them is a reason the other
+		five jobs in that tick do not run.
+		"""
+		import inspect
+
+		from erpnext_mcp.services import windowed_reports
+
+		from .harness import INSTALLED_DOCTYPES
+
+		self.assertEqual(
+			list(inspect.signature(windowed_reports.recompute_kpi_history_incremental).parameters), []
+		)
+		INSTALLED_DOCTYPES.discard("Financial KPI History")
+		try:
+			self.assertEqual(windowed_reports.recompute_kpi_history_incremental(), 0)
+		finally:
+			INSTALLED_DOCTYPES.add("Financial KPI History")
 
 	def test_the_weather_sweep_never_raises_and_takes_no_arguments(self):
 		"""Same contract as the other four, and it needs it more than any of them.

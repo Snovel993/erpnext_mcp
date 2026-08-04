@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **235 tools** — 104 read-only, 131 mutating.
+- **238 tools** — 106 read-only, 132 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -1459,6 +1459,48 @@ apportioned by the accounts on the other side, with a mixed voucher split
 proportionally. A report's output cannot be traced back to rows, and the whole
 argument here is that it has to be. Full notes:
 **[docs/kpi_sustainable_cf_per_acre.md](docs/kpi_sustainable_cf_per_acre.md)**.
+
+---
+
+**The window standard** — v0.19.6, and the reason the figure above can be read
+without knowing what season it is.
+
+**Every financial report defaults to a trailing twelve months.** Not a feature on
+one metric: the shape every financial figure in this app takes. Agricultural
+revenue is aggressively seasonal, so Q3 is harvest and Q1 is pruning — set two
+single periods against each other and the answer is that the operation collapsed
+in January and recovered in September, **every year, on every farm**, whether or
+not anything happened. A rolling twelve months contains the whole cycle exactly
+once however it is read, so consecutive points differ only by the month that
+entered and the month that left: the figure moves when the business moves.
+
+**Three blocks, and each corrects the other two.** `point_in_time` is the period
+just finished. `window` (also `ttm`) is the rolling figure, with the summed
+adjustments, the aggregated maintenance capex and the time-weighted acres each
+still inspectable. `historical_averages` is what that window has been worth for
+this operation before — the only thing that says whether the current number is
+good. A TTM figure means one thing above its five-year mean and the opposite
+below it.
+
+**The window ends at the last completed step**, never a part-finished one — three
+days of August against twelve months of everything else is a figure that falls
+every first of the month and recovers by the thirty-first. **Partial history is
+labelled, never annualized.** **Quarterly and Yearly steps follow the company's
+own fiscal year**, and the payload says which month it opens in.
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `get_windowed_report` | Any registered report over a window — `sustainable_cf_per_acre`, `ocf`, `revenue` — TTM by default, with its own history beside it. Registering a computer is the whole of adding a fourth. | Touch your ledger. It warms the `Financial KPI History` cache and writes nothing else: no Account, no GL Entry, no Asset, no Field, no adjustment. A test asserts exactly that. |
+| `list_financial_kpi_history` | The cache as a plain series, for drawing or exporting a line. | Hide a gap. A missing window is reported as missing, because plotting it as continuous draws a trend that did not happen. |
+| `recompute_kpi_history` | Rebuilds the cache for one KPI — the answer to a retroactively approved adjustment when the pack goes out this afternoon. `force=true` clears and rebuilds. | Change anything not derivable. Every row it writes is what the live computation would produce and every row it deletes comes back; the worst outcome of running it wrongly is time spent. |
+
+The history is cached in `Financial KPI History` and filled by an overnight sweep
+at 02:00 — a five-year Monthly history is sixty full computations over twelve
+months of GL each. Approving a normalization adjustment for a period the cache
+already covers **deletes** the snapshots whose window contained it: a stale
+components list is worse than a missing one, because it is a set of ingredients
+that does not produce the number printed above it. Full notes:
+**[docs/reporting_ttm_standard.md](docs/reporting_ttm_standard.md)**.
 
 
 ## Compliance packets

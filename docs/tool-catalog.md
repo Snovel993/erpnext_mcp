@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 235 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 238 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 104 read tools are **on** by default and can be switched off individually. A
+All 106 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -6676,18 +6676,133 @@ state, it is a figure that will change after the pack goes out.
 
 ## 223. `get_sustainable_cf_per_acre`
 
-**Read-only.** `company`, `period_start`, `period_end`. Returns `raw_ocf` (with
-its sourcing note and the investing and financing sections beside it),
-`normalization_adjustments` itemized with justifications, `normalized_ocf`,
-`maintenance_capex` itemized per asset with the unclassified count and amount
-called out, `productive_acres` itemized per block with days in service, the
-figure, and `computation_warnings`.
+**Read-only.** `company`, optional `as_of`, `window_type`, `window_months`,
+`computation_step`, `historical_lookback_years`, `include_historical_averages` —
+and the deprecated `period_start` / `period_end` pair.
+
+**Since v0.19.6 it defaults to a trailing twelve months.** Call it with only a
+company and you get the TTM window ending at the last completed month, the month
+just finished beside it, and five years of prior TTM values with their mean,
+median, spread and the two deltas. The window's `components` carry everything the
+single-period payload carried — the summed adjustments with their justifications,
+the aggregated maintenance capex per asset, the time-weighted acres per block.
+See `docs/reporting_ttm_standard.md` for the shape and the boundary rule.
+
+**Passing `period_start` and `period_end` returns the v0.19.5 payload, exactly**,
+with a deprecation sentence at the head of `computation_warnings`: `raw_ocf` with
+its sourcing note and the investing and financing sections, the itemized
+adjustments, `normalized_ocf`, `maintenance_capex` with the unclassified count
+and amount called out, `productive_acres` per block with days in service, the
+figure. That path is kept because this number is quoted in packs that were sent
+before the window existed, and a release that changed what an unchanged call
+returned would silently alter a figure somebody had already given a bank. One of
+the two without the other is refused rather than guessed at.
 
 `sustainable_cf_per_acre` is **null, not zero**, where there are no productive
 acres: a division nobody performed is not an answer, and a zero would be read as
 one. **Read `computation_warnings` before quoting the figure** — undated blocks,
 unclassified assets and a period with no approved adjustments at all are each a
 sentence there rather than a silence.
+
+## v0.19.6 — the window standard
+
+**Every financial report now defaults to a trailing twelve months.** Not a
+feature on one metric: the shape every financial figure in this app takes from
+here on. `docs/reporting_ttm_standard.md` is the full argument; the short version
+is that agricultural revenue is aggressively seasonal, so Q3 is harvest and Q1 is
+pruning, and two single periods set against each other say the operation
+collapsed in January and recovered in September — every year, on every farm,
+whether or not anything happened.
+
+**Three blocks, and each is the correction for the other two.** `point_in_time`
+is the period just finished. `window` (also `ttm` when the type is TTM) is the
+same figure over twelve rolling months, so the whole annual cycle is inside it
+exactly once however it is read. `historical_averages` is what that window has
+been worth for this operation before — which is the only thing that says whether
+the current number is good. A TTM figure means one thing above its five-year mean
+and the opposite below it, and the first two blocks cannot say which.
+
+**The window ends at the last completed step, never a part-finished one.** Read
+on 2026-08-03 with a Monthly step, the window is 2025-08-01 to 2026-07-31. Three
+days of August against twelve months of everything else is a figure that falls
+every first of the month and recovers by the thirty-first, and an operator
+reading it on the fourth will believe the fall.
+
+**Quarterly and Yearly steps follow the company's own fiscal year**, and the
+payload reports `fiscal_year_start_month` rather than leaving it to be inferred.
+A July-year operation stepping its history by calendar quarters would put every
+year-end close in the middle of a bucket.
+
+**Partial history is said out loud and never annualized.** A site with four
+months of ledger gets four months of ledger, labelled, because annualizing it
+would invent eight months of a season that has not happened.
+
+**The history is cached in `Financial KPI History`**, filled by an overnight
+sweep at 02:00. A five-year Monthly history is sixty full computations over
+twelve months of GL each; a live query reads the cache and computes at most
+twenty-four missing snapshots before stopping and naming the tool that fills the
+rest. Approving a normalization adjustment for a period the cache already covers
+**deletes** the snapshots whose window contained it — a stale components list is
+worse than a missing one, because it is a set of ingredients that does not
+produce the number printed above it.
+
+## 224. `get_windowed_report`
+
+**Read-only.** `report_name` (required), `company`, optional `as_of`,
+`window_type`, `window_months`, `computation_step`,
+`historical_lookback_years`, `include_historical_averages`.
+
+`report_name` selects among the registered computers — `sustainable_cf_per_acre`,
+`ocf` (raw and normalized operating cash flow, for a covenant test that needs the
+figure without an acreage denominator attached) and `revenue`. The payload lists
+what this site has under `available_reports`.
+
+**This is the generic entry point and it is why the standard generalizes.** A
+report registered in `erpnext_mcp/services/financial_reports.py` is reachable
+through it without another tool, another switch and another section here — a
+framework whose every KPI costs a tool is a framework with six KPIs in it.
+
+**It warms a cache, and that is the one thing it writes.** Snapshots it had to
+compute are saved to `Financial KPI History` so the next caller does not
+recompute them. Nothing in your ledger is touched: no Account, no GL Entry, no
+Journal Entry, no Asset, no Field, no adjustment. Deleting every cached row
+changes no answer this tool gives — only how long it takes to give it.
+
+## 225. `list_financial_kpi_history`
+
+**Read-only.** Optional `kpi_key`, `company`, `computation_step`, `window_type`,
+`from_date`, `to_date`, `limit`. The precomputed cache as a plain series — use it
+to draw a line or export one, where `get_windowed_report` would send sixty copies
+of the components dict to deliver sixty numbers.
+
+**A gap here is not a gap in the business.** It is a window nobody has computed
+yet, or one invalidated by a retroactively approved adjustment and not yet
+rebuilt, and plotting it as a continuous line draws a trend that did not happen.
+`source_versions` matters on a long series: where a release changed how a figure
+is computed, a series spanning the change holds two definitions of one KPI on one
+line with nothing marking the join.
+
+## 226. `recompute_kpi_history`
+
+**MUTATING (default OFF).** `kpi_key` (required), optional `company`,
+`back_years` (default 5), `force` (default FALSE).
+
+**The mildest mutating tool in this catalogue.** The only thing it can change is
+a cache: every row it writes is what the live computation would have produced,
+and every row it deletes comes back on the next read or the next overnight sweep.
+The worst outcome of running it at the wrong moment is time spent.
+
+**It is the answer to a retroactive approval.** Approving a normalization
+adjustment for a period the history already covers invalidates the snapshots
+whose window contained it; this rebuilds them *now*, with the result in front of
+you, which is what you want when the pack goes out this afternoon. A Field
+productive-date backfill is the other case — it moves the denominator of every
+window containing the corrected block.
+
+`force=true` **clears and rebuilds** rather than filling gaps. Use it after a
+release changes how a figure is computed: an incremental fill leaves the old rows
+in place, and a series holding two definitions of one KPI is a line with an
+unmarked join in it.
 
 
 ---

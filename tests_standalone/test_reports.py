@@ -6,29 +6,38 @@ from .harness import STORE
 
 
 class ListReports(V2TestCase):
-	"""Five fixture reports plus the one this app ships.
+	"""Five fixture reports plus the two this app ships.
 
-	v0.19.5 added `Sustainable CF Per Acre by Quarter`, a standard Script Report
-	in this app's own module, and the fixture seeds it from its shipped JSON the
-	way a real `bench migrate` does. So every count here is one higher than it was
-	and the app's own report is a legitimate member of the list — which is the
-	point: `list_reports` is how somebody finds it.
+	v0.19.5 added `Sustainable CF Per Acre by Quarter` and v0.19.6 added
+	`Sustainable CF Per Acre TTM Monthly` — both standard Script Reports in this
+	app's own module, and the fixture seeds each from its shipped JSON the way a
+	real `bench migrate` does. So every count here is two higher than it was and
+	the app's own reports are legitimate members of the list, which is the point:
+	`list_reports` is how somebody finds them.
+
+	BOTH SHIP AND NEITHER REPLACES THE OTHER. The rolling one is the default view
+	because four calendar quarters on a farm are not comparable with each other;
+	the discrete one is kept because a lender's pack is laid out in their
+	quarters and lining up with it is worth having.
 	"""
 
 	def test_lists_every_report_with_its_type(self):
 		data = self.tool_data("list_reports")
-		self.assertEqual(data["count"], 6)
+		self.assertEqual(data["count"], 7)
 		by_name = {row["name"]: row for row in data["reports"]}
 		self.assertEqual(by_name["Cash Movement"]["report_type"], "Query Report")
 		self.assertEqual(by_name["Open Purchase Orders"]["report_type"], "Report Builder")
 		self.assertEqual(
 			by_name["Sustainable CF Per Acre by Quarter"]["report_type"], "Script Report"
 		)
+		self.assertEqual(
+			by_name["Sustainable CF Per Acre TTM Monthly"]["report_type"], "Script Report"
+		)
 
 	def test_counts_by_report_type(self):
 		data = self.tool_data("list_reports")
 		self.assertEqual(data["by_report_type"]["Query Report"], 2)
-		self.assertEqual(data["by_report_type"]["Script Report"], 2)
+		self.assertEqual(data["by_report_type"]["Script Report"], 3)
 
 	def test_filters_by_module(self):
 		data = self.tool_data("list_reports", {"module": "Buying"})
@@ -39,7 +48,11 @@ class ListReports(V2TestCase):
 		flag = self.tool_data("list_reports", {"is_standard": True})
 		self.assertEqual(
 			[row["name"] for row in words["reports"]],
-			["Accounts Receivable Summary", "Sustainable CF Per Acre by Quarter"],
+			[
+				"Accounts Receivable Summary",
+				"Sustainable CF Per Acre TTM Monthly",
+				"Sustainable CF Per Acre by Quarter",
+			],
 		)
 		self.assertEqual(words["reports"], flag["reports"])
 

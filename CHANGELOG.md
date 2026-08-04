@@ -3,6 +3,145 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.19.6 — 2026-08-03
+
+**The window standard.** Every financial report in this app now defaults to a
+**trailing twelve months**, with a configurable computation step and a
+historical-averages block beside it. Not a feature on one metric — the shape
+every financial figure takes from here on. Agricultural revenue is aggressively
+seasonal, so Q3 is harvest and Q1 is pruning, and two single periods set against
+each other say the operation collapsed in January and recovered in September:
+every year, on every farm, whether or not anything happened. Full notes:
+[`RELEASES/v0.19.6.md`](RELEASES/v0.19.6.md). The standard itself:
+[`docs/reporting_ttm_standard.md`](docs/reporting_ttm_standard.md).
+
+Suite: 3,895 → **3,980 passing**. Tool surface: 235 → **238** (106 read, 132
+mutating).
+
+### Added
+
+- **`services/windowed_reports.py`.** One utility that turns any point-in-time
+  computation into a windowed one. The boundary rule is one rule and not five:
+  `period_end` is the last **completed** computation-step boundary on or before
+  `as_of`, and `period_start` is `add_months(period_end, -window_months) + 1
+  day`. Read on 2026-08-03, a Monthly window is 2025-08-01 to 2026-07-31 and a
+  Quarterly one is 2025-07-01 to 2026-06-30. **The part-finished period is
+  excluded and that is the point**: three days of August against twelve months of
+  everything else is a figure that falls every first of the month and recovers by
+  the thirty-first, and an operator reading it on the fourth will believe the
+  fall.
+- **Three blocks in every payload, and each corrects the other two.**
+  `point_in_time` is the period just finished; `window` (also `ttm` when the type
+  is TTM) is the same figure over twelve rolling months; `historical_averages` is
+  what that window has been worth for this operation before, with mean, median,
+  min, max, standard deviation and the deltas against the mean and against the
+  same window a year ago. A TTM figure means one thing above its five-year mean
+  and the opposite below it, and the first two blocks cannot say which.
+- **`Financial KPI History` DocType.** The cache: one row per `(kpi_key, company,
+  computation_step, window_type, window_months, as_of)`, carrying the
+  **components dict** as well as the figure. That is not an optimisation — a
+  cached number with no ingredients is one an auditor cannot test, and the
+  historical figures are exactly the ones nobody can recompute from memory. It is
+  `in_create` with no create permission: writes come from the service and the
+  sweep, because a row somebody typed would be a figure with no computation
+  behind it in a table whose whole claim is that every row has one.
+- **`services/financial_reports.py`** — three registered computers, deliberately
+  not three of a kind. `sustainable_cf_per_acre` (a ratio), `ocf` (raw and
+  normalized operating cash flow, so a covenant test can have the figure without
+  an acreage denominator attached) and `revenue` (a sum over GL Income rows,
+  credits less debits, submitted vouchers only).
+- **`get_windowed_report`** — READ, on by default. The generic entry point, and
+  the reason the standard generalizes: a report registered in
+  `financial_reports.py` is reachable through it without another tool, another
+  switch and another catalogue section. A framework whose every KPI costs a tool
+  is a framework with six KPIs in it.
+- **`list_financial_kpi_history`** — READ, on by default. The cache as a plain
+  series, for drawing or exporting a line. It reports what is **not** there: a
+  gap is a window nobody has computed yet, or one invalidated by a retroactively
+  approved adjustment and not yet rebuilt, and plotting it as a continuous line
+  draws a trend that did not happen.
+- **`recompute_kpi_history`** — MUTATING, off by default, and the mildest
+  mutating tool in the catalogue. The only thing it can change is a cache: every
+  row it writes is what the live computation would have produced and every row it
+  deletes comes back, so the worst outcome of running it at the wrong moment is
+  time spent. It is the answer to a retroactive approval when the pack goes out
+  this afternoon rather than tomorrow.
+- **An overnight sweep at `0 2 * * *`** — the sixth scheduled job, and **one job
+  that iterates** every registered report and every company rather than a cron
+  per KPI. `daily` would be tidier and is wrong: Frappe's `daily` fires on the
+  day's first tick, which on a farm bench is during the morning, and this is the
+  one job that can take minutes on a large ledger. It is the only scheduled job
+  in this app with a kill switch of its own — `enable_kpi_history_sweep` — because
+  it is the only one whose cost scales with the size of somebody's books.
+- **`Sustainable CF Per Acre TTM Monthly` report and chart**, the new default
+  view: twenty-four rolling points, each a full twelve months, with a **dashed
+  reference rule** at the prior-window mean. The mean is a frappe-charts
+  `yMarker` rather than a second dataset — a second solid line invites the reader
+  to compare its *shape* with the first, which is meaningless because it has
+  none.
+- **`docs/reporting_ttm_standard.md`** — the standard, the annotated output
+  shape, the boundary rule, how to add a windowed report, budget-vs-actual usage,
+  the cache strategy, and the tie-in to the Financial KPI Framework.
+
+### Changed
+
+- **`get_sustainable_cf_per_acre` defaults to TTM.** Call it with only a company
+  and you get the trailing twelve months ending at the last completed month, the
+  month just finished beside it, and five years of prior windows under both — with
+  every ingredient still itemized inside the window. **Passing `period_start` and
+  `period_end` returns the v0.19.5 payload, exactly**, with a deprecation
+  sentence at the head of `computation_warnings`. That path is kept because this
+  figure is quoted in packs that were sent before the window existed, and a
+  release that changed what an unchanged call returned would silently alter a
+  number somebody had already given a bank. The v0.19.5 end-to-end test passes
+  unmodified. One of the two arguments without the other is refused rather than
+  guessed at.
+- **`approve_normalization_adjustment` invalidates the cache.** A retroactive
+  approval genuinely changes what every window containing it was worth, so every
+  cached snapshot whose window overlaps the adjustment's period is **deleted**
+  and the next read or the next sweep rebuilds it. Deleted rather than flagged,
+  because a cached row carries the components list as well as the figure, and a
+  stale components list is worse than a missing one — it is a set of ingredients
+  that does not produce the number printed above it. The result says how many
+  went.
+- **Quarterly and Yearly steps follow the company's own fiscal year**, with
+  `fiscal_year_start_month` reported in the payload and a warning on a
+  non-calendar year. A July-year operation stepping a rolling window by calendar
+  quarters would put every year-end close in the middle of a bucket. The
+  *discrete quarterly* report keeps calendar quarters, deliberately: it is read
+  beside a lender's own pack.
+- **The v0.19.5 quarterly chart is demoted, not renamed.** It stays as the
+  secondary discrete view with its `why` text rewritten. Renaming the record
+  would silently empty the dashboards of every site that installed v0.19.5,
+  because a Dashboard Chart's docname is what a Dashboard and anybody's saved
+  link point at.
+
+### Notes
+
+- **Partial history is a warning, never a quietly smaller number.** A site with
+  four months of ledger gets four months of ledger, labelled, and it is **not**
+  annualized — annualizing would invent eight months of a season that has not
+  happened. Every statistic from a short series reports `prior_ttm_count`, and
+  anything that cannot be computed is **null rather than zero**: a standard
+  deviation of zero means a perfectly steady business, and one of null means a
+  single snapshot.
+- **The window is computed whole, not assembled from twelve months.** Two
+  reasons, and the second is the one that decided it. Sustainable CF/Acre is a
+  *ratio*, and the average of twelve monthly ratios is not the ratio of the
+  twelve-month totals. And `kpi.approved_in_period` counts an adjustment whose
+  period falls *inside* the window — so a quarter-long insurance recovery falls
+  inside no monthly bucket, and a year assembled from twelve months would drop it
+  with nothing anywhere saying why. Computers declare `bucket_additive`; revenue
+  is, and the cash-flow figures are not.
+- **A live query computes at most 24 missing snapshots** and then stops, with a
+  warning naming the tool that fills the rest. A read that runs for four minutes
+  is a read somebody kills and then distrusts.
+- **`get_windowed_report` is annotated read-only and does write the cache.**
+  Nothing in a ledger is touched — no Account, no GL Entry, no Journal Entry, no
+  Asset, no Field, no adjustment — and a test asserts that a windowed read
+  changes no table except `Financial KPI History` and the audit log. Deleting
+  every cached row changes no answer, only how long the next report takes.
+
 ## 0.19.5 — 2026-08-03
 
 **What the year actually earned per acre.** The first release in the v0.19.x run
