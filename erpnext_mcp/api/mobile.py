@@ -330,6 +330,7 @@ def complete_task_via_mobile(
 	longitude=None,
 	farm_location_gps=None,
 	evidence_files=None,
+	visit_id=None,
 ) -> dict:
 	"""Finish one task: file the evidence, write the compliance record.
 
@@ -352,6 +353,21 @@ def complete_task_via_mobile(
 	worker who typed "MC-Cabin-01" in a shed with no fix said something the
 	handset could not — and the coordinates are formatted only as a fallback.
 	Both still land in the audit row either way, unchanged.
+
+	v0.20.1. THIS CALL IS SAFE TO SEND TWICE, which it was not before. A queued
+	completion that reached the server and whose acknowledgement did not reach
+	the handset used to come back as a hard error about work that was already
+	filed — three Failed entries per task in a sync queue, on an iPad, over an
+	evening's real work. `complete_farm_task` now recognises an identical
+	resubmission by its signature and answers with the completion already on
+	record and `x_idempotent: true`. IT IS STILL A REFUSAL when the second
+	submission is a different one: a different worker, different evidence or a
+	different account of the work is a conflict, and absorbing it silently would
+	be a worse bug than the one being fixed.
+
+	`visit_id` IS THE HANDSET'S, forwarded as sent. It groups the completions of
+	one trip so `list_visits` can report the trip rather than five unrelated
+	tasks, and nothing on this side validates its shape — see the tool wrapper.
 	"""
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
@@ -369,6 +385,7 @@ def complete_task_via_mobile(
 		("witness", witness),
 		("completed_at", completed_at),
 		("actual_duration_minutes", actual_duration_minutes),
+		("visit_id", visit_id),
 	):
 		if value is not None:
 			inner[key] = value

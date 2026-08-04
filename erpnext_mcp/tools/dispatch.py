@@ -61,7 +61,7 @@ import json
 
 import frappe
 
-from .. import alerts, compat, records
+from .. import alerts, compat, completions, records
 from ..args import as_bool, as_choice, as_int, as_limit, as_str, resolve_company
 from ..erpnext_mcp.doctype.farm_task.farm_task import (
 	AVAILABLE,
@@ -149,6 +149,8 @@ _ASSIGNMENT_FIELDS = (
 	"rejection_reason",
 	"signature_file",
 	"produced_record",
+	"visit_id",
+	"completion_signature",
 	"creation",
 	"owner",
 )
@@ -246,6 +248,14 @@ def _describe_assignment(row: dict) -> dict:
 		"rejection_reason": row.get("rejection_reason") or None,
 		"signature_file": row.get("signature_file") or None,
 		"produced_record": row.get("produced_record") or None,
+		# v0.20.1. `visit_id` is reported so a client can PROVE THE ROUND TRIP —
+		# the handset mints it, and reading it back off the record is the only
+		# way the app can tell "the server has my visit" from "the server has my
+		# completion and dropped the grouping". The signature is reported once at
+		# the TOP LEVEL of a completion's result rather than on every assignment
+		# any tool happens to describe: it is a fact about one submission, not a
+		# property of the assignment worth repeating on a dispatch board.
+		"visit_id": row.get("visit_id") or None,
 	}
 
 
@@ -276,30 +286,7 @@ def _worker_name(worker: str, given: str = "") -> str:
 	return worker
 
 
-def _assignment_for(args: dict, task_name: str = "") -> dict:
-	"""The live assignment named by `assignment`, or inferred from the task."""
-	explicit = as_str(args, "assignment") or as_str(args, "task_assignment")
-	if explicit:
-		if not frappe.db.exists(FARM_TASK_ASSIGNMENT, explicit):
-			raise ToolError(f"no Farm Task Assignment called {explicit!r} on this site. Nothing was changed.")
-		return dict(
-			frappe.db.get_value(
-				FARM_TASK_ASSIGNMENT,
-				explicit,
-				compat.existing_fields(FARM_TASK_ASSIGNMENT, _ASSIGNMENT_FIELDS),
-				as_dict=True,
-			)
-			or {}
-		)
-
-	task = task_name or as_str(args, "task", required=True)
-	name = live_assignment(task)
-	if not name:
-		raise ToolError(
-			f"{task} has nobody holding it, so there is nothing to start, complete or reject. It has "
-			"to be claimed with claim_farm_task or dispatched with assign_farm_task first. Nothing "
-			"was changed."
-		)
+def _assignment_row(name: str) -> dict:
 	return dict(
 		frappe.db.get_value(
 			FARM_TASK_ASSIGNMENT,
@@ -309,6 +296,55 @@ def _assignment_for(args: dict, task_name: str = "") -> dict:
 		)
 		or {}
 	)
+
+
+def _last_completion(task: str) -> str:
+	"""The most recent Completed assignment on this task, or "".
+
+	v0.20.1, AND ONLY THE COMPLETION PATH ASKS FOR IT. A retry that names just
+	the task finds no LIVE assignment, because the completion it is retrying is
+	what ended the live one — so without this the second attempt is refused with
+	"nobody is holding it", which is a worse answer than "already completed" and
+	the same lost work. Newest first, because a task claimed, completed, reopened
+	and completed again has two, and the one a client is retrying is the last.
+	"""
+	rows = (
+		frappe.db.get_all(
+			FARM_TASK_ASSIGNMENT,
+			filters={"task": task, "state": COMPLETED},
+			pluck="name",
+			order_by="modified desc",
+			limit=1,
+		)
+		or []
+	)
+	return str(rows[0]) if rows else ""
+
+
+def _assignment_for(args: dict, task_name: str = "", or_completed: bool = False) -> dict:
+	"""The live assignment named by `assignment`, or inferred from the task.
+
+	`or_completed` falls back to the newest finished assignment where nothing is
+	live. ONLY `complete_farm_task` passes it, and only so that a re-sent
+	completion reaches the signature check instead of a refusal about an empty
+	board — starting or rejecting a task that is already finished is a genuine
+	mistake and still says so.
+	"""
+	explicit = as_str(args, "assignment") or as_str(args, "task_assignment")
+	if explicit:
+		if not frappe.db.exists(FARM_TASK_ASSIGNMENT, explicit):
+			raise ToolError(f"no Farm Task Assignment called {explicit!r} on this site. Nothing was changed.")
+		return _assignment_row(explicit)
+
+	task = task_name or as_str(args, "task", required=True)
+	name = live_assignment(task) or (_last_completion(task) if or_completed else "")
+	if not name:
+		raise ToolError(
+			f"{task} has nobody holding it, so there is nothing to start, complete or reject. It has "
+			"to be claimed with claim_farm_task or dispatched with assign_farm_task first. Nothing "
+			"was changed."
+		)
+	return _assignment_row(name)
 
 
 def _set_task_state(task: str, state: str, **fields) -> None:
@@ -655,7 +691,7 @@ def start_farm_task(args: dict) -> ToolResult:
 def complete_farm_task(args: dict) -> ToolResult:
 	"""Finish one task: check the evidence, file it, and write the compliance record."""
 	_require()
-	assignment = _assignment_for(args)
+	assignment = _assignment_for(args, or_completed=True)
 	task = task_row(assignment["task"])
 	worker = _worker(args)
 
@@ -666,6 +702,14 @@ def complete_farm_task(args: dict) -> ToolResult:
 			"completion filed by somebody who was not there is not a chain of custody, it is a "
 			"rumour — and it is the first thing an auditor pulls on. Nothing was changed."
 		)
+	# v0.20.1. A COMPLETION THAT ARRIVES TWICE IS ONE COMPLETION. See
+	# `_replayed` — the refusal below still stands for every finished assignment
+	# whose signature does not match, which is the case where two different
+	# submissions are genuinely in conflict.
+	if assignment.get("state") == COMPLETED:
+		replay = _replayed(assignment, task, worker, args)
+		if replay is not None:
+			return replay
 	if assignment.get("state") not in (CLAIMED, IN_PROGRESS):
 		raise ToolError(
 			f"{assignment['name']} is {assignment.get('state')} and cannot be completed. Nothing was changed."
@@ -726,6 +770,30 @@ def complete_farm_task(args: dict) -> ToolResult:
 	for row in evidence:
 		doc.append("evidence_files", dict(row))
 
+	# v0.20.1. THE VISIT AND THE SIGNATURE, both written here and nowhere else.
+	#
+	# `visit_id` is written ONLY WHEN GIVEN, on the same argument `farm_location_gps`
+	# is: a client that does not mint one leaves whatever is already on the row
+	# alone, and blanking it would turn a trip somebody can see in `list_visits`
+	# into five unrelated completions.
+	#
+	# The signature is hashed from THE PAYLOAD AS IT ARRIVED — `as_str(args,
+	# "completed_at")` and not `doc.completed_at`, because the second one is the
+	# server's `now()` where the client sent nothing, and `now()` differs on every
+	# retry. Hashing it would make the record unmatchable by the very resubmission
+	# it exists to recognise. See `erpnext_mcp/completions.py`.
+	visit = as_str(args, "visit_id")
+	if visit:
+		doc.visit_id = visit
+	doc.completion_signature = completions.signature(
+		assignment["name"],
+		worker,
+		evidence,
+		findings,
+		narrative,
+		as_str(args, "completed_at"),
+	)
+
 	# WHAT GOES ON THE COMPLIANCE RECORD IS NOT ALWAYS WHAT THE WORKER TYPED.
 	# `records.branch_state` reads a record's state off its findings text —
 	# non-empty means Corrective Action Required — so a worker who typed the
@@ -755,6 +823,13 @@ def complete_farm_task(args: dict) -> ToolResult:
 		"produced_record_doctype": task.get("creates_record") or None,
 		"produced_record_state": record_state,
 		"final_state": final_state,
+		# v0.20.1. ALWAYS PRESENT, AND FALSE HERE. A client that has to test
+		# whether the key exists before reading it has two code paths where it
+		# needs one, and the one it exercises least is the one that breaks — this
+		# whole release is about a retry path nobody ran until an orchard did.
+		"x_idempotent": False,
+		"completion_signature": doc.completion_signature,
+		"visit_id": doc.visit_id or None,
 	}
 	if record_note:
 		data["record_note"] = record_note
@@ -780,6 +855,89 @@ def complete_farm_task(args: dict) -> ToolResult:
 			f"file(s)" + (f", produced {task.get('creates_record')} {produced}" if produced else "")
 		),
 		docstatus_delta=f"{assignment.get('state')} → {final_state}",
+	)
+
+
+def _replayed(assignment: dict, task: dict, worker: str, args: dict):
+	"""The existing completion, where this submission IS that completion. Else None.
+
+	v0.20.1, and the reason is in `erpnext_mcp/completions.py`: an offline queue
+	drained into a connection that dropped between the server's acknowledgement
+	and the handset's receipt, and every re-send came back as a hard error about
+	work that was already filed and evidenced.
+
+	RETURNING None IS NOT "NO OPINION" — it is "this is a different submission",
+	and the caller's refusal then stands. Two people cannot file the same
+	completion, a second account of the same work is not the first one again, and
+	a task genuinely completed twice by accident is a thing somebody should be
+	told about rather than have quietly absorbed. The whole value of the
+	signature is that it separates those from a phone asking the same question
+	twice.
+
+	NOTHING HERE WRITES. No record is produced, no state moves, no evidence row
+	is appended — that is the entire promise, and it is kept by there being no
+	`save` in this function. The response is rebuilt by READING the assignment
+	that already exists, so three rapid retries produce three identical answers
+	and one record.
+	"""
+	stored = str(assignment.get("completion_signature") or "").strip()
+	if not stored:
+		# A Completed row with no signature at all. Pre-v0.20.1 rows are given
+		# one by the backfill patch; a row that still has none after that is one
+		# the backfill could not read, and guessing that an unknown submission
+		# matches it would turn a genuine conflict into a silent success.
+		return None
+	evidence = inspections.normalise_evidence(args.get("evidence_files"), "evidence_files")
+	if not completions.matches(
+		stored,
+		assignment["name"],
+		worker,
+		evidence,
+		as_str(args, "findings_text"),
+		as_str(args, "completion_narrative"),
+		as_str(args, "completed_at"),
+	):
+		return None
+
+	doc = frappe.get_doc(FARM_TASK_ASSIGNMENT, assignment["name"])
+	row = _assignment_row(assignment["name"])
+	produced = str(row.get("produced_record") or "") or None
+	doctype = str(task.get("creates_record") or "").strip()
+	record_state = None
+	if produced and doctype and compat.doctype_exists(doctype):
+		record_state = str(frappe.db.get_value(doctype, produced, "workflow_state") or "") or None
+	filed = len(doc.get("evidence_files") or [])
+
+	data = {
+		"task": _describe_task(task_row(assignment["task"])),
+		"assignment": _describe_assignment(row),
+		"evidence_filed": filed,
+		"evidence_required": evidence_contract(task.get("evidence_required")),
+		"produced_record": produced,
+		"produced_record_doctype": doctype or None,
+		"produced_record_state": record_state,
+		"final_state": str(task.get("state") or COMPLETED),
+		"x_idempotent": True,
+		"completion_signature": stored,
+		"visit_id": row.get("visit_id") or None,
+		"idempotent_note": (
+			f"This completion was already filed, at {row.get('completed_at')}, and nothing was "
+			"changed by this call. The submission matches the one on record — same worker, same "
+			"evidence, same account of the work — so this is the SAME completion arriving twice "
+			"rather than a second one. That is the expected shape of a mobile client whose "
+			"acknowledgement was lost to a dropped connection, and it is a success: the work is "
+			"recorded, the evidence is filed"
+			+ (f" and {doctype} {produced} exists" if produced else "")
+			+ ". A client seeing this may clear the item from its queue."
+		),
+	}
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{row.get('assigned_to_name') or worker} had already completed {assignment['task']} "
+			f"at {row.get('completed_at')}; this identical resubmission changed nothing"
+		),
+		docstatus_delta=f"{COMPLETED} → {COMPLETED} (no change)",
 	)
 
 

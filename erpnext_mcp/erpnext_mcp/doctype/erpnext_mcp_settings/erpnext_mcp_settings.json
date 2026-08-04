@@ -345,7 +345,9 @@
   "allow_claim_task_via_mobile",
   "allow_start_task_via_mobile",
   "fieldwork_write_col",
-  "allow_complete_task_via_mobile"
+  "allow_complete_task_via_mobile",
+  "visit_section",
+  "allow_list_visits"
  ],
  "fields": [
   {
@@ -2563,12 +2565,24 @@
    "fieldname": "allow_complete_task_via_mobile",
    "fieldtype": "Check",
    "label": "Complete Task (Mobile)"
+  },
+  {
+   "fieldname": "visit_section",
+   "fieldtype": "Section Break",
+   "label": "Visits"
+  },
+  {
+   "default": "1",
+   "description": "READ. Completed task assignments grouped into the trips their handsets recorded — five cabins closed on one walk to the north block is ONE visit and five completions. The grouping is the app's `visit_id` rather than a guess from how close the timestamps are, because no threshold gets both an unhurried walk and two fast jobs at opposite ends of a property right. A completion with no visit_id is in no visit and is counted separately; everything filed before v0.20.1 is in that group.",
+   "fieldname": "allow_list_visits",
+   "fieldtype": "Check",
+   "label": "List Visits"
   }
  ],
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-31 12:00:00.000000",
+ "modified": "2026-08-03 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

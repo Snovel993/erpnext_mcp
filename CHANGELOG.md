@@ -3,6 +3,59 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.20.1 — 2026-08-03
+
+**The acknowledgement that never arrived.** A worker's iPad drained its offline
+queue into a connection that dropped between the server's acknowledgement and
+the app's receipt of it. The server had accepted every completion; the app
+re-sent, as any client must; the server answered `already Completed` as a hard
+error. Three Failed entries per task, on work that was filed and evidenced the
+first time. **A client cannot know whether its request landed**, and the only
+place that question can be answered is here. Tool surface **238 → 239** (107
+read, 132 mutating); suite **3,984 → 4,055 passing**. Full notes:
+[`RELEASES/v0.20.1.md`](RELEASES/v0.20.1.md).
+
+### Fixed
+
+- **`complete_task_via_mobile` and `complete_farm_task` are idempotent.** An
+  identical resubmission — same assignment, same worker, same evidence, same
+  words, same `completed_at` as sent — returns the completion already on record
+  with `x_idempotent: true` and **writes nothing**: no second compliance record,
+  no duplicated evidence rows, no state transition. A resubmission that differs
+  in any of those is still refused, because two people cannot file the same
+  completion and a second account of the same work is not the first one again.
+- **A retry naming only the task no longer fails differently.** A completion
+  ends the *live* assignment, so a second call carrying just a task name used to
+  be refused with "has nobody holding it". `_assignment_for` now falls back to
+  the newest Completed assignment — for the completion path only; starting or
+  rejecting a finished task still says so.
+
+### Added
+
+- **`completion_signature` on Farm Task Assignment** — sha256 over the
+  assignment, the worker, the sorted evidence file references, the findings and
+  narrative, and **the clock-out time as the client sent it**. Hashing the
+  server's `now()` fallback instead would make every retry a conflict. See
+  [`erpnext_mcp/completions.py`](erpnext_mcp/completions.py) for what is
+  excluded and why.
+- **A migration backfill** (`patches/backfill_completion_signatures.py`) so the
+  pre-v0.20.1 rows — the ones most likely to be sitting in a stuck queue — are
+  recognised too. It uses a distinct `v1b` scheme that leaves the clock-out time
+  out of the hash, because nothing on a legacy row says whether the client or
+  the server chose it and guessing would create false conflicts on exactly the
+  oldest rows. Idempotent; never rewrites a signature a completion wrote.
+- **`visit_id` on Farm Task Assignment**, accepted by
+  `complete_task_via_mobile` and returned in the payload. The identifier the
+  handset mints when a worker arrives somewhere and reuses for every task closed
+  before they leave. Unvalidated in v0.20.1 beyond being a string.
+- **`list_visits`** (read, on by default). Completed assignments grouped into the
+  trips their handsets recorded, with the span, the places, the distinct
+  evidence-file count and the task list. The grouping is the phone's, not a guess
+  from timestamps — no threshold gets both an unhurried walk and two fast jobs at
+  opposite ends of a property right. A completion with no `visit_id` is in **no**
+  visit and is counted separately; one-task visits **are** returned, because that
+  is what a question about wasted travel is looking for.
+
 ## 0.19.7 — 2026-08-03
 
 **A green board.** A maintenance pass with no behaviour changes: the

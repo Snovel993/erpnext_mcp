@@ -300,4 +300,18 @@ def completion(data: dict) -> dict:
 		"final_state": data.get("final_state"),
 		"evidence_filed": data.get("evidence_filed"),
 		"record_note": data.get("record_note"),
+		# v0.20.1. `x_idempotent` IS THE FIELD THE APP'S SYNC QUEUE READS, and it
+		# is always present so that reading it is one branch rather than two.
+		# True means "this exact completion was already on record and nothing
+		# changed" — which is a success, and the queue item may be cleared. A
+		# genuinely conflicting resubmission never reaches here; it is still an
+		# error, from complete_farm_task, unchanged.
+		#
+		# `visit_id` is echoed so the handset can prove the grouping survived the
+		# round trip, and `completion_signature` so a client that wants to can
+		# hold the server's own identifier for the submission it filed.
+		"x_idempotent": bool(data.get("x_idempotent")),
+		"idempotent_note": data.get("idempotent_note"),
+		"visit_id": data.get("visit_id"),
+		"completion_signature": data.get("completion_signature"),
 	}

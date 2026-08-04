@@ -82,6 +82,7 @@ from .tools import (
 	trade,
 	training,
 	uploads,
+	visits,
 	weather,
 	workflow,
 )
@@ -6392,7 +6393,14 @@ TOOLS = {
 		"updated; what needs a person is the finding, and a Critical alert now "
 		"stands against the record. A clean completion goes straight to Completed, "
 		"because routing clean work through a review queue is how a review queue "
-		"stops being read.",
+		"stops being read.\n\n"
+		"IDEMPOTENT SINCE v0.20.1. An identical resubmission — same assignment, "
+		"same worker, same evidence, same words, same completed_at — returns the "
+		"completion already on record with `x_idempotent: true` and writes "
+		"nothing: no second compliance record, no duplicated evidence rows. A "
+		"resubmission that DIFFERS in any of those is still refused. The client "
+		"that cannot know whether its request arrived is the case this exists "
+		"for; two genuinely different completions of one task is not.",
 		{
 			"assignment": _field(_STRING, "The Farm Task Assignment docname. Or pass `task`."),
 			"task": _field(_STRING, "The Farm Task docname — its live assignment is used."),
@@ -6419,6 +6427,12 @@ TOOLS = {
 				"Extra fields for the compliance record — a laboratory's results, a detector's "
 				"pass/fail, the irrigation zone a sample came from. Merged over the task's own "
 				"`creates_record_data`.",
+			),
+			"visit_id": _field(
+				_STRING,
+				"The trip this completion belongs to. One identifier reused across every task "
+				"closed on one walk to one place; list_visits reports the rollup. Free text, "
+				"unvalidated, and not part of what makes a resubmission identical.",
 			),
 		},
 		required=("worker_id",),
@@ -8882,9 +8896,16 @@ TOOLS = {
 		"this wrapper preserves the distinction.\n\n"
 		"Every refusal comes from complete_farm_task and is unchanged: a submission "
 		"short of the evidence contract, a completion filed by anybody but the "
-		"worker holding the task, an unclaimed or finished task. A completion whose "
-		"record found something lands in Awaiting-Review — the work IS done and the "
-		"register IS updated; what needs a person is the finding.",
+		"worker holding the task, an unclaimed task. A completion whose record "
+		"found something lands in Awaiting-Review — the work IS done and the "
+		"register IS updated; what needs a person is the finding.\n\n"
+		"v0.20.1: SAFE TO SEND TWICE. An identical resubmission of a completion "
+		"already on record returns that completion with `x_idempotent: true` and "
+		"changes nothing — no second compliance record, no duplicated evidence. "
+		"That is for the client which cannot know whether its request landed "
+		"before the connection dropped. A submission that DIFFERS — another "
+		"worker, other evidence, a different account of the work — is still "
+		"refused as the conflict it is.",
 		{
 			"assignment_name": _field(_STRING, "The Farm Task Assignment docname."),
 			"assignment": _field(_STRING, "Alias for assignment_name."),
@@ -8915,10 +8936,59 @@ TOOLS = {
 				_OBJECT,
 				"Extra fields for the compliance record — laboratory results, a detector's pass/fail.",
 			),
+			"visit_id": _field(
+				_STRING,
+				"The trip this completion belongs to — one identifier the client mints when a "
+				"worker arrives somewhere and reuses for every task they close before they "
+				"leave. Five cabins on one walk is ONE visit and five completions. Free text; "
+				"unvalidated. list_visits reports the rollup.",
+			),
 			"user": _field(_STRING, "Only when the request carries no per-user credential."),
 		},
 		mutating=True,
 		title="Complete a task (mobile)",
+		available=_needs_doctype("Farm Task Assignment"),
+		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.20.1: the trip, rather than the tasks it contained ───────────────
+	"list_visits": _tool(
+		visits.list_visits,
+		"Completed task assignments grouped into the TRIPS their handsets "
+		"recorded. Five cabins closed on one walk to the north block is ONE visit "
+		"and five completions. Read-only.\n\n"
+		"THE GROUPING IS THE HANDSET'S, NOT A GUESS FROM TIMESTAMPS. The app mints "
+		"a `visit_id` when a worker arrives somewhere and reuses it for every task "
+		"they close before they leave, because the phone is the only thing that "
+		"was there. Two cabins forty minutes apart on one unhurried walk are one "
+		"trip; two a minute apart from opposite ends of the property are two, and "
+		"no timestamp threshold gets both right.\n\n"
+		"A COMPLETION WITH NO `visit_id` IS IN NO VISIT — not in a synthetic "
+		"one-task visit, and not in an 'unassigned' bucket dressed as a trip. "
+		"Everything filed before v0.20.1 is in that group; `ungrouped_completions` "
+		"reports how many.\n\n"
+		"ONE-TASK VISITS ARE RETURNED. Somebody drove out, did one job and drove "
+		"back, which is exactly what a question about wasted travel is looking "
+		"for. `single_task_visits` counts them so a caller can filter knowingly.\n\n"
+		"`duration_minutes` IS FIRST COMPLETION TO LAST and says nothing about the "
+		"drive out or the walk in — a one-task visit measures zero, because one "
+		"completion is one instant. `total_evidence_files` counts distinct FILES "
+		"and not evidence rows: one signature filed against three cabins is one "
+		"photograph.\n\n"
+		"Scoped to the companies the calling account may actually reach.",
+		{
+			"company": _COMPANY,
+			"worker": _field(_STRING, "Whose visits. Docname, employee number, name or login."),
+			"location": _field(
+				_STRING,
+				"Visits that touched this place — the Farm Task's `location` docname. A trip "
+				"that also went elsewhere is returned WHOLE, with its other tasks: reporting "
+				"a visit with half its work missing would answer a different question.",
+			),
+			"from_date": _field(_STRING, "Earliest completion date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest completion date, YYYY-MM-DD."),
+			"limit": _field(_INTEGER, "Maximum visits. Default 100, hard maximum 500."),
+		},
+		title="List visits",
 		available=_needs_doctype("Farm Task Assignment"),
 		requires="the Farm Task Assignment DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

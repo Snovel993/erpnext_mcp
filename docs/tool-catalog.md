@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 238 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 239 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 106 read tools are **on** by default and can be switched off individually. A
+All 107 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -6804,6 +6804,69 @@ release changes how a figure is computed: an incremental fill leaves the old row
 in place, and a series holding two definitions of one KPI is a line with an
 unmarked join in it.
 
+---
+
+## 227. `list_visits`
+
+Read. Optional `company`, `worker`, `location`, `from_date`, `to_date`, `limit`
+(default 100, maximum 500).
+
+**A worker does not go to a task, they go somewhere.** They drive to the north
+block, walk five cabins, close five task assignments and drive back. The board
+records five completions with five timestamps; this reports the trip.
+
+```json
+{
+  "visits": [
+    {
+      "visit_id": "5C1F0A64-…",
+      "first_completion_datetime": "2026-08-03 09:12:04",
+      "last_completion_datetime": "2026-08-03 10:41:55",
+      "duration_minutes": 89,
+      "location": "MC-Cabin-01",
+      "locations": ["MC-Cabin-01", "MC-Cabin-02"],
+      "company": "Example Trading Co",
+      "completing_user": "HR-EMP-00007",
+      "task_assignment_names": ["FTA-2026-00311", "FTA-2026-00312"],
+      "total_tasks": 2,
+      "total_evidence_files": 5,
+      "logged_duration_minutes": 55
+    }
+  ],
+  "count": 1, "single_task_visits": 0, "ungrouped_completions": 14
+}
+```
+
+**The grouping is the handset's, not a guess from timestamps.** The app mints a
+`visit_id` when a worker arrives and reuses it for every task closed before they
+leave, because the phone is the only thing that was there. Two cabins forty
+minutes apart on one unhurried walk are one trip; two a minute apart from
+opposite ends of the property are two — and no threshold gets both right.
+
+**A completion with no `visit_id` is in no visit.** Not a synthetic one-task
+visit, not an "unassigned" bucket dressed as a trip. Everything filed before
+v0.20.1 has the column blank; `ungrouped_completions` says how many were skipped.
+
+**One-task visits are returned.** Somebody drove out, did one job and drove back
+— which is precisely what a question about wasted travel is looking for. Filter
+on `total_tasks` if the question is about multi-stop rounds; `single_task_visits`
+tells you exactly what you would be dropping.
+
+`duration_minutes` is **first completion to last** and excludes the drive out and
+the walk in; a one-task visit measures zero, because one completion is one
+instant. `logged_duration_minutes` is the sum of what the workers themselves
+recorded per task, which is a different number and deliberately reported beside
+it. `total_evidence_files` counts distinct **Files**, not evidence rows: one
+signature filed against three cabins is one photograph.
+
+The `location` filter matches a visit **any** of whose tasks is at that place,
+and returns the visit whole — reporting a trip with half its work missing would
+answer a different question.
+
+There is no `Farm Visit` doctype and there should not be one: a visit has no
+facts of its own. Every field above is derived from the completions in it, and a
+row that had to be created before them could not be created by a client that was
+offline when the trip started.
 
 ---
 
@@ -6817,7 +6880,7 @@ Everything a tool needs is in two places:
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
-   `shifts`, `heat`, `kpi` or `fieldwork` —
+   `shifts`, `heat`, `kpi`, `visits` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

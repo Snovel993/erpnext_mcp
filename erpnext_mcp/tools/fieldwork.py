@@ -630,6 +630,13 @@ def complete_task_via_mobile(args: dict) -> ToolResult:
 	if "clean_pass" in args:
 		inner["clean_pass"] = args.get("clean_pass")
 
+	# v0.20.1. `visit_id` joins the pass-through list. It is the handset's own
+	# identifier for one trip — five cabins closed on one walk to the north block
+	# is one visit and five completions — and it is forwarded UNVALIDATED beyond
+	# being a string, because the app mints it and a server with opinions about
+	# somebody else's UUID format would refuse a completion over the one field
+	# that carries no evidence. v0.20.2 can tighten it once the iOS format is
+	# confirmed; `list_visits` reads whatever is there.
 	for key in (
 		"signature_file",
 		"completion_narrative",
@@ -638,6 +645,7 @@ def complete_task_via_mobile(args: dict) -> ToolResult:
 		"actual_duration_minutes",
 		"completed_at",
 		"record_data",
+		"visit_id",
 	):
 		if args.get(key) is not None:
 			inner[key] = args.get(key)

@@ -436,9 +436,29 @@ class Catalogue(SeededTestCase):
 		demonstration computers, the overnight sweep and the retrofitted chart
 		came with them and are not tools — which is why the catalogue grew by
 		three and the release by considerably more.
+
+		v0.20.1 ADDED EXACTLY ONE, and it is a read:
+
+		  * `list_visits` groups completed task assignments into the trips their
+		    handsets recorded. Five cabins closed on one walk is one visit and
+		    five completions, and the grouping is the phone's rather than a guess
+		    from how close the timestamps are — no threshold gets both an
+		    unhurried walk and two fast jobs at opposite ends of a property right.
+
+		THE REST OF THAT RELEASE IS NOT A TOOL AND THAT IS THE POINT OF IT.
+		`complete_task_via_mobile` became idempotent — a resubmission whose
+		signature matches the completion already on record returns it with
+		`x_idempotent: true` instead of a hard error — because a client cannot
+		know whether its request landed before the connection dropped, and an
+		iPad in an orchard proved it by showing three Failed entries per task on
+		work that had been filed the first time. A fix that arrived as a NEW
+		tool would have left the broken one in the catalogue for every client
+		already calling it. The two new columns on Farm Task Assignment
+		(`completion_signature`, `visit_id`) and the backfill patch came with it
+		and are not tools either.
 		"""
-		self.assertEqual(len(registry.TOOLS), 238)
-		self.assertEqual(len(registry.READ_TOOLS), 106)
+		self.assertEqual(len(registry.TOOLS), 239)
+		self.assertEqual(len(registry.READ_TOOLS), 107)
 		self.assertEqual(len(registry.MUTATING_TOOLS), 132)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):

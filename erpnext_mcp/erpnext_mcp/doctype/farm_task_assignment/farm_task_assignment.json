@@ -31,7 +31,11 @@
   "evidence_section",
   "signature_file",
   "produced_record",
-  "evidence_files"
+  "evidence_files",
+  "idempotency_section",
+  "visit_id",
+  "idempotency_col",
+  "completion_signature"
  ],
  "fields": [
   {
@@ -193,11 +197,35 @@
    "fieldtype": "Table",
    "label": "Evidence Files",
    "options": "Farm Task Evidence"
+  },
+  {
+   "fieldname": "idempotency_section",
+   "fieldtype": "Section Break",
+   "label": "Submission"
+  },
+  {
+   "description": "The visit this completion belongs to: one identifier the handset mints when a worker arrives somewhere and reuses for every task they close before they leave. Five cabins done in one trip to the north block is ONE visit and five completions, and without this the only way to see the trip is to guess it from timestamps. Free text and unvalidated on purpose in v0.20.1 — it is whatever the app mints, and a server that rejected an identifier it had opinions about would drop a completion over its least important field. Blank on any completion filed before v0.20.1, and on any filed by a client that does not mint one; list_visits reports only completions that carry one.",
+   "fieldname": "visit_id",
+   "fieldtype": "Data",
+   "label": "Visit",
+   "search_index": 1
+  },
+  {
+   "fieldname": "idempotency_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What makes a re-sent completion recognisable as the SAME completion. A hash of the assignment, the worker, the evidence, what they wrote and the clock-out time as the client sent it — see erpnext_mcp/completions.py for what is in it and why each part. A client whose acknowledgement was lost to a dropped connection re-sends, and this is how the server answers 'you already filed this' as a success instead of as an error. Read-only: it is written by the completion that produced it, and a hand-edited signature would make a genuine conflict look like a retry.",
+   "fieldname": "completion_signature",
+   "fieldtype": "Data",
+   "label": "Completion Signature",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-07-31 18:00:00.000000",
+ "modified": "2026-08-03 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Farm Task Assignment",

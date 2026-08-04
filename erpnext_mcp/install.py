@@ -100,7 +100,7 @@ the settings form, and there is no code path that makes it for them.
 import frappe
 
 from . import compliance_fields, dashboard, roles, settings, training
-from .patches import migrate_training_types
+from .patches import backfill_completion_signatures, migrate_training_types
 from .tools import company
 
 
@@ -114,6 +114,7 @@ def after_install() -> None:
 	_mobile_roles()
 	_compliance_vocabulary()
 	_kpi_charts()
+	_completion_signatures()
 	frappe.db.commit()
 
 
@@ -127,6 +128,7 @@ def after_migrate() -> None:
 	_mobile_roles()
 	_compliance_vocabulary()
 	_kpi_charts()
+	_completion_signatures()
 
 
 def _weather_settings() -> None:
@@ -258,6 +260,30 @@ def _compliance_vocabulary() -> None:
 		print(f"erpnext_mcp: training types were not migrated — {type(exc).__name__}: {exc}")
 		return
 	for line in migrate_training_types.report_lines(report):
+		print(line)
+
+
+def _completion_signatures() -> None:
+	"""Sign the completions filed before v0.20.1, so a re-sent one is recognised.
+
+	v0.20.1, and the tenth job. Runs as a listed patch AS WELL, for the same
+	reason `_compliance_vocabulary` runs its migration twice: the patch entry
+	records in the Patch Log when the backfill first happened, and this hook
+	catches a site that upgraded straight across the version. It is idempotent —
+	it only writes rows whose signature is empty — so the second run is a no-op
+	and prints nothing.
+
+	ON `after_install` IT WILL FIND NOTHING, which is correct and not worth
+	branching on: a site installing this app for the first time has no completed
+	assignments to sign, and a job that is only wired into one of the two hooks
+	is a job somebody has to remember about later.
+	"""
+	try:
+		report = backfill_completion_signatures.backfill_completion_signatures()
+	except Exception as exc:  # pragma: no cover - the backfill swallows its own
+		print(f"erpnext_mcp: completion signatures were not backfilled — {type(exc).__name__}: {exc}")
+		return
+	for line in backfill_completion_signatures.report_lines(report):
 		print(line)
 
 
