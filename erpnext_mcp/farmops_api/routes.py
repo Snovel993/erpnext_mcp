@@ -96,6 +96,8 @@ ROUTES = (
 	Route("/mobile", mobile_api.list_compliance_alerts),
 	Route("/mobile", mobile_api.scan_asset),
 	Route("/mobile", mobile_api.get_asset_detail),
+	Route("/mobile", mobile_api.log_asset_state_change),
+	Route("/mobile", mobile_api.get_available_actions),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

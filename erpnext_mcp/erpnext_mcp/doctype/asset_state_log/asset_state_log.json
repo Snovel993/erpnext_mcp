@@ -1,0 +1,170 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-04 12:00:00.000000",
+ "description": "One state-change event on one asset: who did what, when, where, and what the asset moved from and to. Append-only — a state log is a fact about the past, not a draft to be edited. The timeline of an asset's state changes is what a compliance review reads.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "autoname": "hash",
+ "naming_rule": "Random",
+ "field_order": [
+  "asset_name",
+  "asset_type",
+  "info_col",
+  "action",
+  "from_state",
+  "to_state",
+  "detail_section",
+  "performed_by",
+  "performed_at",
+  "detail_col",
+  "notes",
+  "location_section",
+  "gps_latitude",
+  "location_col",
+  "gps_longitude",
+  "photo_section",
+  "photo"
+ ],
+ "fields": [
+  {
+   "fieldname": "asset_name",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Asset",
+   "options": "Asset Register",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "asset_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Asset Type",
+   "read_only": 1
+  },
+  {
+   "fieldname": "info_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The action the worker performed, e.g. open_valve, fill_tank, winterize.",
+   "fieldname": "action",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Action",
+   "reqd": 1
+  },
+  {
+   "fieldname": "from_state",
+   "fieldtype": "Data",
+   "label": "From State"
+  },
+  {
+   "fieldname": "to_state",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "To State"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "Detail"
+  },
+  {
+   "fieldname": "performed_by",
+   "fieldtype": "Link",
+   "label": "Performed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "performed_at",
+   "fieldtype": "Datetime",
+   "label": "Performed At"
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "location_section",
+   "fieldtype": "Section Break",
+   "label": "Location"
+  },
+  {
+   "fieldname": "gps_latitude",
+   "fieldtype": "Float",
+   "label": "GPS Latitude",
+   "precision": "7"
+  },
+  {
+   "fieldname": "location_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "gps_longitude",
+   "fieldtype": "Float",
+   "label": "GPS Longitude",
+   "precision": "7"
+  },
+  {
+   "fieldname": "photo_section",
+   "fieldtype": "Section Break",
+   "label": "Photo"
+  },
+  {
+   "fieldname": "photo",
+   "fieldtype": "Attach",
+   "label": "Photo"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-04 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Asset State Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 0
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 0
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "asset_name,action,to_state",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

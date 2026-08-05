@@ -2837,6 +2837,27 @@
    "fieldname": "allow_bulk_create_assets",
    "fieldtype": "Check",
    "label": "Bulk Create Assets"
+  },
+  {
+   "default": "1",
+   "description": "READ. List valid state-change actions for an asset given its current state and type.",
+   "fieldname": "allow_get_available_actions",
+   "fieldtype": "Check",
+   "label": "Get Available Actions"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Log a state-change action on an asset — validates the transition, updates current_state, creates an immutable audit log entry.",
+   "fieldname": "allow_log_asset_state_change",
+   "fieldtype": "Check",
+   "label": "Log Asset State Change"
+  },
+  {
+   "default": "1",
+   "description": "READ. Chronological state-change log for one asset.",
+   "fieldname": "allow_list_asset_state_history",
+   "fieldtype": "Check",
+   "label": "List Asset State History"
   }
  ],
  "index_web_pages_for_search": 0,

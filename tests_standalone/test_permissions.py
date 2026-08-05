@@ -220,6 +220,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		self.assertEqual(
 			sorted(unscoped),
 			[
+				"Asset State Log",
 				"Compliance Regime",
 				"Compliance Rule",
 				"Inspection Template",

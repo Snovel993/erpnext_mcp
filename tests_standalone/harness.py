@@ -1012,6 +1012,8 @@ APP_DOCTYPES = {
 	"Compliance Rule": "compliance_rule",
 	# v0.24.0. Universal Asset Tags — one durable ID per reportable asset.
 	"Asset Register": "asset_register",
+	# v0.25.0. State-change events on assets — who did what, when, where.
+	"Asset State Log": "asset_state_log",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -1964,9 +1966,11 @@ class CustomFieldDocument(Document):
 
 
 def _autoname_from_meta(doc) -> str:
-	"""Frappe's `field:<fieldname>` naming rule, which the dimension masters use."""
+	"""Frappe's `field:<fieldname>` and `prompt` naming rules."""
 	meta = META.get(doc.doctype)
 	autoname = str(getattr(meta, "autoname", "") or "") if meta else ""
+	if autoname == "prompt":
+		return str(doc.get("__newname") or "").strip()
 	if not autoname.startswith("field:"):
 		return ""
 	return str(doc.get(autoname.split(":", 1)[1]) or "").strip()
@@ -2166,6 +2170,8 @@ class Store:
 		self.reset()
 
 	def reset(self):
+		global _now_counter
+		_now_counter = 0
 		self.file_contents: dict[str, bytes] = {}
 		self.denied_permissions: set = set()
 		self.installed_apps: list[str] = ["frappe", "erpnext"]
@@ -2821,8 +2827,13 @@ INSTALLED_DOCTYPES = set(ERPNEXT_SCHEMA) | set(APP_DOCTYPES)
 
 
 # ── utils ───────────────────────────────────────────────────────────────────
+_now_counter = 0
+
 def _now() -> str:
-	return datetime.datetime(2026, 7, 24, 9, 0, 0).isoformat(sep=" ")
+	global _now_counter
+	_now_counter += 1
+	base = datetime.datetime(2026, 7, 24, 9, 0, 0)
+	return (base + datetime.timedelta(seconds=_now_counter)).isoformat(sep=" ")
 
 
 def _getdate(value=None):

@@ -6,10 +6,9 @@ unit — gets a durable ID tag (QR and optional NFC) so a worker can scan it and
 see what it is, what has happened to it, and what is due. The tag is the
 docname, and the docname is the printable ID.
 
-THIS VERSION IS READ-ONLY HISTORY PLUS SCAN LOGGING. State-change actions
-(opening a valve, marking a sprayer empty) are v0.25.0. What ships here is the
-register, the scan event, and the history timeline that pulls from every doctype
-that references an asset.
+v0.25.0 adds state-change actions: a worker scans an asset and picks an action
+(open a valve, fill a sprayer tank, winterize a cabin). The state machine
+validates transitions, updates the asset's current_state, and logs the event.
 
 WHY THE HISTORY IS CROSS-DOCTYPE. An irrigation valve's history includes water
 tests, inspection sessions, compliance alerts, and farm tasks — all of them
@@ -30,6 +29,7 @@ from ..render import qr
 from ..result import ToolResult
 
 ASSET_REGISTER = "Asset Register"
+ASSET_STATE_LOG = "Asset State Log"
 
 REGISTER_CAP = 500
 
@@ -71,6 +71,7 @@ _HISTORY_DOCTYPES = (
     ("Water Test", "water_source", "name,source_name,test_type,result,test_date,creation"),
     ("Inspection Session", "location", "name,template,status,creation"),
     ("Compliance Alert", "asset_register", "name,alert_type,severity,status,creation"),
+    ("Asset State Log", "asset_name", "name,action,from_state,to_state,performed_by,performed_at,creation"),
 )
 
 
@@ -414,7 +415,7 @@ def register_asset(args: dict) -> ToolResult:
             )
 
     doc = frappe.new_doc(ASSET_REGISTER)
-    doc.name = name
+    doc.__newname = name
     doc.asset_type = asset_type
     doc.company = company
     doc.location = location or None
@@ -564,7 +565,7 @@ def bulk_create_assets(args: dict) -> ToolResult:
             continue
 
         doc = frappe.new_doc(ASSET_REGISTER)
-        doc.name = name
+        doc.__newname = name
         doc.asset_type = asset_type
         doc.company = company
         doc.location = str(item.get("location") or "").strip() or None
@@ -676,4 +677,296 @@ def generate_asset_qr_sheet(args: dict) -> ToolResult:
             "errors": errors,
         },
         summary=f"{len(labels)} label(s) generated for {template}",
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v0.25.0 — state-change actions
+# ══════════════════════════════════════════════════════════════════════════════
+
+_STATE_DEFINITIONS: dict[str, dict] = {
+    "Irrigation Valve": {
+        "default": "closed",
+        "actions": {
+            "open_valve": {"from": ["closed"], "to": "open"},
+            "close_valve": {"from": ["open"], "to": "closed"},
+            "winterize": {"from": ["closed"], "to": "winterized"},
+            "reopen": {"from": ["winterized"], "to": "closed"},
+        },
+    },
+    "Housing Unit": {
+        "default": "vacant",
+        "actions": {
+            "mark_occupied": {"from": ["vacant"], "to": "occupied"},
+            "mark_vacant": {"from": ["occupied", "uninhabitable"], "to": "vacant"},
+            "mark_uninhabitable": {"from": ["vacant", "occupied"], "to": "uninhabitable"},
+            "winterize": {"from": ["vacant"], "to": "winterized"},
+            "reopen": {"from": ["winterized"], "to": "vacant"},
+        },
+    },
+    "Sprayer": {
+        "default": "empty",
+        "actions": {
+            "fill_tank": {"from": ["empty", "cleaned"], "to": "loaded"},
+            "start_spray": {"from": ["loaded"], "to": "in_use"},
+            "end_spray": {"from": ["in_use"], "to": "empty"},
+            "clean_tank": {"from": ["empty"], "to": "cleaned"},
+        },
+    },
+    "Tractor": {
+        "default": "in_service",
+        "actions": {
+            "put_in_service": {"from": ["out_of_service", "maintenance"], "to": "in_service"},
+            "take_out_of_service": {"from": ["in_service"], "to": "out_of_service"},
+            "start_maintenance": {"from": ["in_service", "out_of_service"], "to": "maintenance"},
+            "end_maintenance": {"from": ["maintenance"], "to": "in_service"},
+        },
+    },
+    "Water Source": {
+        "default": "active",
+        "actions": {
+            "activate": {"from": ["inactive"], "to": "active"},
+            "deactivate": {"from": ["active", "treated"], "to": "inactive"},
+            "log_treatment": {"from": ["active", "contaminated"], "to": "treated"},
+            "mark_contaminated": {"from": ["active", "treated"], "to": "contaminated"},
+            "clear_contamination": {"from": ["contaminated"], "to": "active"},
+        },
+    },
+    "Storage": {
+        "default": "closed",
+        "actions": {
+            "open_for_season": {"from": ["closed", "off_season"], "to": "open"},
+            "close_for_season": {"from": ["open", "active_season"], "to": "off_season"},
+            "log_temperature": {"from": ["open", "active_season"], "to": "active_season"},
+        },
+    },
+    "Cold Storage": {
+        "default": "closed",
+        "actions": {
+            "open_for_season": {"from": ["closed", "off_season"], "to": "open"},
+            "close_for_season": {"from": ["open", "active_season"], "to": "off_season"},
+            "log_temperature": {"from": ["open", "active_season"], "to": "active_season"},
+        },
+    },
+    "Block": {
+        "default": "active",
+        "actions": {
+            "activate": {"from": ["dormant", "fallow"], "to": "active"},
+            "set_dormant": {"from": ["active"], "to": "dormant"},
+            "set_fallow": {"from": ["active", "dormant"], "to": "fallow"},
+        },
+    },
+    "Irrigation Zone": {
+        "default": "active",
+        "actions": {
+            "activate": {"from": ["winterized", "offline"], "to": "active"},
+            "winterize": {"from": ["active"], "to": "winterized"},
+            "take_offline": {"from": ["active", "winterized"], "to": "offline"},
+        },
+    },
+    "General": {
+        "default": "active",
+        "actions": {
+            "activate": {"from": ["inactive", "needs_repair"], "to": "active"},
+            "deactivate": {"from": ["active"], "to": "inactive"},
+            "flag_repair": {"from": ["active", "inactive"], "to": "needs_repair"},
+            "clear_repair": {"from": ["needs_repair"], "to": "active"},
+        },
+    },
+}
+
+
+def _current_state_value(state_json) -> str:
+    parsed = _parse_state(state_json)
+    if parsed and isinstance(parsed, dict):
+        return str(parsed.get("state") or "")
+    return ""
+
+
+def _actions_for(asset_type: str, current: str) -> list[dict]:
+    defn = _STATE_DEFINITIONS.get(asset_type)
+    if not defn:
+        return []
+    result = []
+    effective = current or defn["default"]
+    for action_name, rule in defn["actions"].items():
+        if effective in rule["from"]:
+            result.append({
+                "action": action_name,
+                "from_state": effective,
+                "to_state": rule["to"],
+            })
+    return result
+
+
+# ── get_available_actions ─────────────────────────────────────────────────
+def get_available_actions(args: dict) -> ToolResult:
+    """What can be done to this asset right now, given its type and current state."""
+    _require()
+    name = as_str(args, "asset_name", required=True)
+    row = asset_row(name)
+    asset_type = row.get("asset_type") or "General"
+    current = _current_state_value(row.get("current_state"))
+
+    defn = _STATE_DEFINITIONS.get(asset_type, _STATE_DEFINITIONS["General"])
+    effective = current or defn["default"]
+    actions = _actions_for(asset_type, effective)
+
+    all_states = set()
+    for rule in defn["actions"].values():
+        all_states.update(rule["from"])
+        all_states.add(rule["to"])
+
+    return ToolResult(
+        data={
+            "asset_name": row["name"],
+            "asset_type": asset_type,
+            "current_state": effective,
+            "available_actions": actions,
+            "all_states": sorted(all_states),
+        },
+        summary=f"{row['name']}: {len(actions)} available action(s) from {effective!r}",
+    )
+
+
+# ── log_asset_state_change ───────────────────────────────────────────────
+def log_asset_state_change(args: dict) -> ToolResult:
+    """Perform a state-change action on an asset.
+
+    Validates the transition, updates current_state on the Asset Register record,
+    and writes an Asset State Log entry.
+    """
+    _require()
+    compat.require_doctype(
+        ASSET_STATE_LOG,
+        "It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
+    )
+
+    name = as_str(args, "asset_name", required=True)
+    action = as_str(args, "action", required=True)
+    row = asset_row(name)
+    asset_type = row.get("asset_type") or "General"
+    current = _current_state_value(row.get("current_state"))
+
+    defn = _STATE_DEFINITIONS.get(asset_type, _STATE_DEFINITIONS["General"])
+    effective = current or defn["default"]
+
+    action_def = defn["actions"].get(action)
+    if not action_def:
+        valid = sorted(defn["actions"].keys())
+        raise ToolError(
+            f"{action!r} is not a valid action for asset type {asset_type!r}. "
+            f"Valid actions: {', '.join(valid)}."
+        )
+
+    if effective not in action_def["from"]:
+        available = _actions_for(asset_type, effective)
+        available_names = [a["action"] for a in available]
+        raise ToolError(
+            f"Cannot {action!r} from state {effective!r}. "
+            f"Available actions in this state: {', '.join(available_names) or 'none'}."
+        )
+
+    to_state = action_def["to"]
+
+    doc = frappe.get_doc(ASSET_REGISTER, row["name"])
+    doc.current_state = json.dumps({"state": to_state})
+    doc.save(ignore_permissions=True)
+
+    log = frappe.new_doc(ASSET_STATE_LOG)
+    log.asset_name = row["name"]
+    log.asset_type = asset_type
+    log.action = action
+    log.from_state = effective
+    log.to_state = to_state
+    log.performed_by = as_str(args, "performed_by") or (frappe.session.user if hasattr(frappe, "session") else None)
+    log.performed_at = frappe.utils.now()
+    log.notes = as_str(args, "notes")
+
+    gps_lat = args.get("gps_lat") or args.get("gps_latitude")
+    gps_lon = args.get("gps_lon") or args.get("gps_longitude")
+    if gps_lat is not None:
+        try:
+            log.gps_latitude = float(gps_lat)
+        except (TypeError, ValueError):
+            pass
+    if gps_lon is not None:
+        try:
+            log.gps_longitude = float(gps_lon)
+        except (TypeError, ValueError):
+            pass
+
+    photo = as_str(args, "photo_file_token")
+    if photo:
+        log.photo = photo
+
+    log.insert(ignore_permissions=True)
+
+    return ToolResult(
+        data={
+            "asset_name": row["name"],
+            "asset_type": asset_type,
+            "action": action,
+            "from_state": effective,
+            "to_state": to_state,
+            "log_name": log.name,
+            "performed_by": log.performed_by,
+            "performed_at": str(log.performed_at or ""),
+        },
+        summary=f"{row['name']}: {action} ({effective} → {to_state})",
+        docstatus_delta="0 → 0 (updated)",
+    )
+
+
+# ── list_asset_state_history ─────────────────────────────────────────────
+def list_asset_state_history(args: dict) -> ToolResult:
+    """Chronological state-change log for one asset."""
+    _require()
+    name = as_str(args, "asset_name", required=True)
+    row = asset_row(name)
+    limit = as_limit(args)
+
+    if not compat.doctype_exists(ASSET_STATE_LOG):
+        return ToolResult(
+            data={"asset_name": row["name"], "event_count": 0, "events": []},
+            summary=f"{row['name']}: no state log (Asset State Log doctype not installed)",
+        )
+
+    fields = compat.existing_fields(
+        ASSET_STATE_LOG,
+        ("name", "action", "from_state", "to_state", "performed_by", "performed_at",
+         "notes", "gps_latitude", "gps_longitude", "photo", "asset_type", "creation"),
+    )
+
+    rows = frappe.db.get_all(
+        ASSET_STATE_LOG,
+        filters={"asset_name": row["name"]},
+        fields=fields,
+        order_by="creation desc",
+        limit=limit,
+    )
+
+    events = []
+    for r in rows or []:
+        events.append({
+            "log_name": r.get("name"),
+            "action": r.get("action"),
+            "from_state": r.get("from_state"),
+            "to_state": r.get("to_state"),
+            "performed_by": r.get("performed_by") or None,
+            "performed_at": str(r.get("performed_at") or r.get("creation") or ""),
+            "notes": r.get("notes") or None,
+            "gps_latitude": round(float(r.get("gps_latitude") or 0), 7) or None,
+            "gps_longitude": round(float(r.get("gps_longitude") or 0), 7) or None,
+            "photo": r.get("photo") or None,
+        })
+
+    return ToolResult(
+        data={
+            "asset_name": row["name"],
+            "asset_type": row.get("asset_type"),
+            "event_count": len(events),
+            "events": events,
+        },
+        summary=f"{row['name']}: {len(events)} state change(s)",
     )

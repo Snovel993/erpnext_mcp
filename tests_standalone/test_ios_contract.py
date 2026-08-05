@@ -396,6 +396,37 @@ class AssetDetailModel(Codable):
 	)
 
 
+class StateChangeModel(Codable):
+	"""`StateChangeResponse` — confirmation after logging a state change."""
+
+	SWIFT = "StateChangeResponse.swift"
+	STRICT = (
+		("asset_name", str, 5),
+		("action", str, 6),
+		("from_state", str, 7),
+		("to_state", str, 8),
+	)
+	LENIENT = (
+		("asset_type", str, 10),
+		("log_name", str, 11),
+		("performed_by", str, 12),
+	)
+
+
+class AvailableActionsModel(Codable):
+	"""`AvailableActionsResponse` — what a worker can do to an asset now."""
+
+	SWIFT = "AvailableActionsResponse.swift"
+	STRICT = (
+		("asset_name", str, 5),
+		("current_state", str, 6),
+	)
+	LENIENT = (
+		("asset_type", str, 8),
+		("available_actions", list, 9),
+	)
+
+
 # ── the wire ────────────────────────────────────────────────────────────────
 def on_the_wire(value):
 	"""What `frappe.as_json` would put on the phone's socket.
@@ -574,6 +605,31 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		AssetDetailModel.decode(row, "get_asset_detail")
 		self.assertEqual(row["name"], "MC-Valve-05")
 
+	def test_15_log_asset_state_change(self):
+		self.configure(enabled=1, allow_log_asset_state_change=1, allow_register_asset=1)
+		self.tool_data("register_asset", {
+			"name": "MC-Valve-05",
+			"asset_type": "Irrigation Valve",
+			"company": MAIN,
+		})
+		self.be()
+		row = self.wire("log_asset_state_change", asset_name="MC-Valve-05", action="open_valve")
+		StateChangeModel.decode(row, "log_asset_state_change")
+		self.assertEqual(row["from_state"], "closed")
+		self.assertEqual(row["to_state"], "open")
+
+	def test_16_get_available_actions(self):
+		self.configure(enabled=1, allow_get_available_actions=1, allow_register_asset=1)
+		self.tool_data("register_asset", {
+			"name": "MC-Valve-05",
+			"asset_type": "Irrigation Valve",
+			"company": MAIN,
+		})
+		self.be()
+		row = self.wire("get_available_actions", asset_name="MC-Valve-05")
+		AvailableActionsModel.decode(row, "get_available_actions")
+		self.assertEqual(row["current_state"], "closed")
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -672,6 +728,8 @@ class TheContractIsComplete(ContractTestCase):
 		"finalize_staged_file": "test_12",
 		"scan_asset": "test_13",
 		"get_asset_detail": "test_14",
+		"log_asset_state_change": "test_15",
+		"get_available_actions": "test_16",
 	}
 
 	def _published(self, module):

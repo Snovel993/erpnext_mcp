@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.25.0 — 2026-08-04
+
+**State-Change Actions: every asset knows what you can do to it.** Workers scan
+an asset tag and see not just what it is, but what they can do to it right now.
+Each asset type defines its own state machine — a valve can be opened, closed,
+or winterized; a sprayer cycles through empty, loaded, in-use, and cleaned; a
+housing unit tracks occupancy and winterization. The system validates every
+transition: you cannot winterize an open valve, and you cannot load a sprayer
+that is already in use.
+
+**New DocType: Asset State Log.** Append-only audit trail of every state change.
+Immutable rows — the controller refuses edits after insert. Fields: asset_name,
+asset_type, action, from_state, to_state, performed_by, performed_at, notes,
+GPS coordinates, photo attachment.
+
+**3 new MCP tools** — 2 read-only (get_available_actions,
+list_asset_state_history), 1 mutating (log_asset_state_change). State changes
+appear in the cross-doctype asset history timeline alongside tasks, inspections,
+and compliance alerts.
+
+**New mobile API endpoints:** log_asset_state_change (POST, mutating),
+get_available_actions (POST/GET, read-only).
+
+**Bug fix:** Asset Register naming — records now correctly use the user-specified
+tag ID as the docname instead of a random hash.
+
+Tool count: **270** (120 read, 150 mutating).
+
 ## 0.24.0 — 2026-08-04
 
 **Universal Asset Tags: scan it, see its history, log what happened.** Every

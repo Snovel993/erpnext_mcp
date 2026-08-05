@@ -164,6 +164,7 @@
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Asset Register",
+ "autoname": "prompt",
  "naming_rule": "Set by user",
  "owner": "Administrator",
  "permissions": [

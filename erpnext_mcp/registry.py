@@ -10167,6 +10167,61 @@ TOOLS = {
 		available=_qr_available,
 		requires=qr.REQUIRES,
 	),
+	# ── v0.25.0: Asset state-change actions ────────────────────────────────
+	"get_available_actions": _tool(
+		asset_tags.get_available_actions,
+		"What state-change actions can be performed on this asset right now, "
+		"given its type and current state. Each asset type has its own state "
+		"machine (a valve can be opened or closed, a sprayer can be filled or "
+		"emptied). Read-only.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname."),
+		},
+		required=("asset_name",),
+		title="Get available actions for an asset",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"log_asset_state_change": _tool(
+		asset_tags.log_asset_state_change,
+		"MUTATING (default OFF). Record a state-change action on an asset — "
+		"open a valve, fill a sprayer tank, winterize a cabin. Validates the "
+		"transition against the asset type's state machine, updates the "
+		"asset's current_state, and writes an Asset State Log entry.\n\n"
+		"REFUSES: an action not defined for this asset type; a transition "
+		"from the current state that the state machine does not allow.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname (from the QR/NFC tag)."),
+			"action": _field(
+				_STRING,
+				"The action to perform, e.g. 'open_valve', 'fill_tank', 'winterize'. "
+				"Call get_available_actions to see what is valid right now.",
+			),
+			"notes": _field(_STRING, "Optional notes about the state change."),
+			"photo_file_token": _field(_STRING, "Optional File docname of a photo."),
+			"gps_lat": _field(_NUMBER, "Latitude from the worker's GPS fix."),
+			"gps_lon": _field(_NUMBER, "Longitude from the worker's GPS fix."),
+			"performed_by": _field(_STRING, "The User who performed the action. Defaults to session user."),
+		},
+		required=("asset_name", "action"),
+		mutating=True,
+		title="Log an asset state change",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	"list_asset_state_history": _tool(
+		asset_tags.list_asset_state_history,
+		"Chronological log of state changes for one asset: who did what, "
+		"when, and what state the asset moved from and to. Read-only.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname."),
+			"limit": _field(_INTEGER, "Maximum events returned. Default 100."),
+		},
+		required=("asset_name",),
+		title="List asset state change history",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 }
 
 #: Tool names in catalogue order, read tools first. Used by the settings doctype

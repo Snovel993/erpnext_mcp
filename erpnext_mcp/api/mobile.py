@@ -549,3 +549,50 @@ def get_asset_detail(user: str, asset_name=None) -> dict:
 
 	result = asset_tags.get_asset_detail({"asset_name": asset_name})
 	return result.data
+
+
+# ── 14. log_asset_state_change ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("log_asset_state_change", mutating=True, limit=guard.WRITE_LIMIT)
+def log_asset_state_change(
+	user: str,
+	asset_name=None,
+	action=None,
+	notes=None,
+	photo_file_token=None,
+	gps_lat=None,
+	gps_lon=None,
+) -> dict:
+	"""Record a state-change action on an asset. Validates the transition."""
+	guard.require_scope(user)
+	asset_name = str(asset_name or "").strip()
+	if not asset_name:
+		frappe.throw("asset_name is required.", frappe.ValidationError)
+	action_str = str(action or "").strip()
+	if not action_str:
+		frappe.throw("action is required.", frappe.ValidationError)
+
+	result = asset_tags.log_asset_state_change({
+		"asset_name": asset_name,
+		"action": action_str,
+		"performed_by": user,
+		"notes": str(notes or "").strip() or None,
+		"photo_file_token": str(photo_file_token or "").strip() or None,
+		"gps_lat": gps_lat,
+		"gps_lon": gps_lon,
+	})
+	return result.data
+
+
+# ── 15. get_available_actions ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_available_actions", limit=guard.READ_LIMIT)
+def get_available_actions(user: str, asset_name=None) -> dict:
+	"""What state-change actions can be performed on this asset right now."""
+	guard.require_scope(user)
+	asset_name = str(asset_name or "").strip()
+	if not asset_name:
+		frappe.throw("asset_name is required.", frappe.ValidationError)
+
+	result = asset_tags.get_available_actions({"asset_name": asset_name})
+	return result.data

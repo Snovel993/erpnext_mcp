@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_fifty_seven_tools_one_hundred_thirteen_read_one_hundred_forty_four_write(
+	def test_catalogue_is_two_hundred_seventy_tools_one_hundred_twenty_read_one_hundred_fifty_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -535,10 +535,13 @@ class Catalogue(SeededTestCase):
 		the restricted-Python sandbox and the migration of the thirteen shipped
 		rules into records came with them and are not tools, which is why the
 		catalogue grew by seven and the release by a great deal more.
+
+		v0.25.0 added three for asset state-change actions: get_available_actions
+		and list_asset_state_history are reads, log_asset_state_change is a write.
 		"""
-		self.assertEqual(len(registry.TOOLS), 267)
-		self.assertEqual(len(registry.READ_TOOLS), 118)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 149)
+		self.assertEqual(len(registry.TOOLS), 270)
+		self.assertEqual(len(registry.READ_TOOLS), 120)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 150)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
