@@ -87,6 +87,21 @@ ZONE_OUTSIDE = {
 	],
 }
 
+#: A rectangle that CONTAINS `BLOCK` with room around it — the parcel the block
+#: sits on. Roughly 0.014 by 0.011 degrees, which is about 300 acres.
+PARCEL_OUTLINE = {
+	"type": "Polygon",
+	"coordinates": [
+		[
+			[-121.1850, 45.5950],
+			[-121.1710, 45.5950],
+			[-121.1710, 45.6060],
+			[-121.1850, 45.6060],
+			[-121.1850, 45.5950],
+		]
+	],
+}
+
 INSIDE_POINT = {"lat": 45.6015, "lon": -121.1780}
 OUTSIDE_POINT = {"lat": 45.7000, "lon": -121.3000}
 
@@ -102,6 +117,11 @@ ALL_ON = {
 	"allow_get_parcel_field_summary": 1,
 	"allow_set_field_boundary": 1,
 	"allow_set_zone_boundary": 1,
+	"allow_set_parcel_boundary": 1,
+	"allow_get_parcel": 1,
+	"allow_list_parcels": 1,
+	"allow_create_housing_unit": 1,
+	"allow_update_housing_unit": 1,
 	"allow_find_fields_containing_point": 1,
 	"allow_find_fields_by_h3_cell": 1,
 	"allow_import_field_boundary_geojson": 1,
@@ -137,6 +157,22 @@ class GeoTestCase(V12TestCase):
 		payload = {"field": field, "zone_name": zone_name, "area_sq_ft": area_sq_ft}
 		payload.update(kw)
 		return self.tool_data("create_irrigation_zone", payload)
+
+	def map_parcel(self, parcel_name="Mill Creek", geometry=None):
+		"""Trace an already-registered parcel. Separate from `a_mapped_parcel` so a
+		test can register the parcel, put things on it, and only then draw the
+		outline — which is the order every one of the containment tests needs."""
+		return self.tool_data(
+			"set_parcel_boundary",
+			{
+				"parcel": parcel_name,
+				"boundary_geojson": json.dumps(geometry or PARCEL_OUTLINE),
+			},
+		)
+
+	def a_mapped_parcel(self, parcel_name="Mill Creek", acreage=330.0, geometry=None, **kw):
+		self.a_parcel(parcel_name=parcel_name, acreage=acreage, **kw)
+		return self.map_parcel(parcel_name, geometry)
 
 	def a_mapped_field(self, **kw):
 		self.a_parcel()
@@ -382,11 +418,16 @@ class SetFieldBoundary(GeoTestCase):
 		)
 		self.assertTrue(any("No acreage was recorded" in w for w in data["warnings"]))
 
-	def test_it_says_that_the_parcel_was_not_checked(self):
-		"""Parcels carry no polygon in this release. A caller who assumes it was
-		checked is a caller who will be surprised in Sprint 7."""
+	def test_an_unmapped_parcel_is_said_out_loud_rather_than_left_as_a_silent_gap(self):
+		"""'Nothing was checked' and 'it checked out' are different answers.
+
+		From v0.12.0 to v0.31.0 this warning was unconditional, because a Parcel
+		carried no polygon at all. v0.32.0 gave it one, so the sentence now means
+		something narrower and truer: this particular parcel has not been traced.
+		"""
 		data = self.a_mapped_field()
-		self.assertTrue(any("parcel has no boundary" in w for w in data["warnings"]))
+		self.assertTrue(any("has no boundary of its own" in w for w in data["warnings"]))
+		self.assertIsNone(data["boundary_contained_in_parcel"])
 
 	def test_dry_run_computes_everything_and_writes_nothing(self):
 		self.a_parcel()
@@ -810,6 +851,282 @@ class ImportFieldBoundaries(GeoTestCase):
 				{"feature_collection": self.collection(self.feature("Block One"))},
 			),
 		)
+
+
+# ── set_parcel_boundary, and the gap it closes ──────────────────────────────
+class SetParcelBoundary(GeoTestCase):
+	"""v0.32.0. THE OUTER SHAPE, and the answer set_field_boundary spent nineteen
+	releases apologising for not having.
+
+	From v0.12.0 to v0.31.0 every call of `set_field_boundary` ended with a line
+	saying a parcel had no boundary, so nothing had checked the block sat inside
+	its parcel. It does now, in both directions: setting either shape reports the
+	disagreement, and neither refuses it — a planting that predates a deed split
+	really does straddle the line.
+	"""
+
+	def test_it_stores_the_polygon_and_derives_everything_else(self):
+		self.a_mapped_parcel()
+		row = STORE.tables["Parcel"]["Mill Creek - ETC"]
+		self.assertTrue(row["boundary_geojson"])
+		self.assertAlmostEqual(row["boundary_centroid_lat"], 45.6005, delta=0.001)
+		self.assertAlmostEqual(row["boundary_centroid_lon"], -121.178, delta=0.001)
+		self.assertTrue(row["boundary_bbox_geojson"])
+		self.assertTrue(row["area_computed_acres"])
+
+	def test_it_stores_cells_at_every_resolution(self):
+		"""The H3 fill has to be a SUPERSET. A centre-based fill returns an empty
+		set for a shape smaller than one cell, and an index built on it answers
+		'on no parcel' for a point plainly on one."""
+		self.a_mapped_parcel()
+		cells = json.loads(STORE.tables["Parcel"]["Mill Creek - ETC"]["h3_cells"])
+		self.assertEqual(sorted(int(key) for key in cells), list(geo.H3_RESOLUTIONS))
+		for resolution, entries in cells.items():
+			self.assertTrue(entries, f"resolution {resolution} came back empty")
+
+	def test_the_computed_area_is_a_second_opinion_on_the_deeded_one(self):
+		data = self.a_mapped_parcel()
+		self.assertAlmostEqual(data["area_computed_acres"], 330, delta=5)
+		self.assertEqual(data["acreage_recorded"], 330.0)
+		self.assertEqual(data["warnings"], [])
+
+	def test_a_polygon_wildly_at_odds_with_the_acreage_is_refused(self):
+		"""Past 25% one of the two figures is about a different piece of ground —
+		and on a PARCEL the recorded acreage is usually the one to trust, because
+		it is the number the assessor, the deed and the tax bill agree on."""
+		self.a_parcel(parcel_name="Mill Creek", acreage=40)
+		message = self.tool_error(
+			"set_parcel_boundary",
+			{"parcel": "Mill Creek", "boundary_geojson": json.dumps(PARCEL_OUTLINE)},
+		)
+		self.assertIn("different piece of ground", message)
+		self.assertIn("Nothing was changed", message)
+		self.assertFalse(STORE.tables["Parcel"]["Mill Creek - ETC"].get("boundary_geojson"))
+
+	def test_a_few_percent_is_a_warning_and_not_a_refusal(self):
+		"""A deed, an assessor's map and a GIS trace routinely disagree."""
+		self.a_parcel(parcel_name="Mill Creek", acreage=350)
+		data = self.tool_data(
+			"set_parcel_boundary",
+			{"parcel": "Mill Creek", "boundary_geojson": json.dumps(PARCEL_OUTLINE)},
+		)
+		self.assertTrue(data["changed"])
+		self.assertTrue(any("routinely disagree" in w for w in data["warnings"]))
+
+	def test_no_recorded_acreage_is_not_a_disagreement(self):
+		self.a_parcel(parcel_name="Mill Creek", acreage=0)
+		data = self.tool_data(
+			"set_parcel_boundary",
+			{"parcel": "Mill Creek", "boundary_geojson": json.dumps(PARCEL_OUTLINE)},
+		)
+		self.assertTrue(any("No acreage was recorded" in w for w in data["warnings"]))
+
+	def test_a_self_intersecting_boundary_is_refused(self):
+		self.a_parcel(parcel_name="Mill Creek", acreage=0)
+		bowtie = {
+			"type": "Polygon",
+			"coordinates": [
+				[
+					[-121.1850, 45.5950],
+					[-121.1710, 45.6060],
+					[-121.1710, 45.5950],
+					[-121.1850, 45.6060],
+					[-121.1850, 45.5950],
+				]
+			],
+		}
+		self.assertIn(
+			"not a valid polygon",
+			self.tool_error(
+				"set_parcel_boundary",
+				{"parcel": "Mill Creek", "boundary_geojson": json.dumps(bowtie)},
+			),
+		)
+
+	def test_a_point_is_not_an_area(self):
+		self.a_parcel(parcel_name="Mill Creek", acreage=0)
+		self.assertIn(
+			"not an area",
+			self.tool_error(
+				"set_parcel_boundary",
+				{
+					"parcel": "Mill Creek",
+					"boundary_geojson": json.dumps({"type": "Point", "coordinates": [-121.18, 45.6]}),
+				},
+			),
+		)
+
+	def test_dry_run_computes_everything_and_writes_nothing(self):
+		self.a_parcel(parcel_name="Mill Creek", acreage=330)
+		data = self.tool_data(
+			"set_parcel_boundary",
+			{
+				"parcel": "Mill Creek",
+				"boundary_geojson": json.dumps(PARCEL_OUTLINE),
+				"dry_run": True,
+			},
+		)
+		self.assertTrue(data["dry_run"])
+		self.assertFalse(data["changed"])
+		self.assertTrue(data["area_computed_acres"])
+		self.assertFalse(STORE.tables["Parcel"]["Mill Creek - ETC"].get("boundary_geojson"))
+
+	def test_a_block_inside_the_parcel_is_not_reported(self):
+		self.a_parcel(parcel_name="Mill Creek", acreage=330)
+		self.a_field()
+		self.tool_data(
+			"set_field_boundary",
+			{"field": "Yellow Camp Block 3", "boundary_geojson": json.dumps(BLOCK)},
+		)
+		self.assertEqual(self.map_parcel()["outside_boundary"], {})
+
+	def test_a_block_hanging_over_the_deed_line_is_reported_and_not_refused(self):
+		"""A planting that predates a deed split really does straddle the line."""
+		self.a_parcel(parcel_name="Mill Creek", acreage=330)
+		self.a_field()
+		self.tool_data(
+			"set_field_boundary",
+			{
+				"field": "Yellow Camp Block 3",
+				"boundary_geojson": json.dumps(shifted(BLOCK, east=0.010)),
+			},
+		)
+		data = self.map_parcel()
+		self.assertEqual(data["outside_boundary"]["Field"], ["Yellow Camp Block 3 - MC"])
+		self.assertTrue(any("straddle a deed line" in w for w in data["warnings"]))
+		self.assertTrue(data["changed"])
+
+	def test_an_unmapped_block_is_not_reported_as_outside(self):
+		"""It is UNMAPPED, which is a different answer. Listing fifty names that
+		mean nothing would bury the two that do."""
+		self.a_parcel(parcel_name="Mill Creek", acreage=330)
+		self.a_field()
+		self.assertEqual(self.map_parcel()["outside_boundary"], {})
+
+	def test_a_cabin_outside_the_parcel_is_reported(self):
+		"""v0.32.0 gave Housing Unit coordinates, which is what makes a point
+		checkable against a parcel outline at all."""
+		self.a_parcel(parcel_name="Mill Creek", acreage=330)
+		self.tool_data(
+			"create_housing_unit",
+			{
+				"parcel": "Mill Creek",
+				"unit_name": "MC-Cabin-01",
+				"gps_latitude": 45.7000,
+				"gps_longitude": -121.3000,
+			},
+		)
+		data = self.tool_data(
+			"set_parcel_boundary",
+			{"parcel": "Mill Creek", "boundary_geojson": json.dumps(PARCEL_OUTLINE)},
+		)
+		self.assertEqual(data["outside_boundary"]["Housing Unit"], ["MC-Cabin-01 - MC"])
+
+	def test_a_cabin_on_the_parcel_is_not_reported(self):
+		self.a_parcel(parcel_name="Mill Creek", acreage=330)
+		self.tool_data(
+			"create_housing_unit",
+			{
+				"parcel": "Mill Creek",
+				"unit_name": "MC-Cabin-01",
+				"gps_latitude": 45.6015,
+				"gps_longitude": -121.1780,
+			},
+		)
+		data = self.tool_data(
+			"set_parcel_boundary",
+			{"parcel": "Mill Creek", "boundary_geojson": json.dumps(PARCEL_OUTLINE)},
+		)
+		self.assertEqual(data["outside_boundary"], {})
+
+	def test_setting_it_twice_replaces_it(self):
+		self.a_mapped_parcel()
+		first = STORE.tables["Parcel"]["Mill Creek - ETC"]["boundary_centroid_lon"]
+		self.tool_data(
+			"set_parcel_boundary",
+			{
+				"parcel": "Mill Creek",
+				"boundary_geojson": json.dumps(shifted(PARCEL_OUTLINE, east=0.001)),
+			},
+		)
+		second = STORE.tables["Parcel"]["Mill Creek - ETC"]["boundary_centroid_lon"]
+		self.assertAlmostEqual(second - first, 0.001, delta=0.0002)
+
+	def test_the_switch_is_off_by_default(self):
+		self.a_parcel(parcel_name="Mill Creek", acreage=330)
+		self.configure(enabled=1)
+		self.assertIn(
+			"switched off",
+			self.tool_error(
+				"set_parcel_boundary",
+				{"parcel": "Mill Creek", "boundary_geojson": json.dumps(PARCEL_OUTLINE)},
+			),
+		)
+
+	def test_it_is_audited(self):
+		self.a_mapped_parcel()
+		self.assertAudited("set_parcel_boundary", "Success")
+
+	def test_get_parcel_hands_back_the_shape_and_list_parcels_does_not(self):
+		"""A boundary is kilobytes of coordinates and a register would carry one
+		per row. The list says `mapped` and a centroid; the single read is the one
+		a map calls and gets the polygon from."""
+		self.a_mapped_parcel()
+		single = self.tool_data("get_parcel", {"parcel": "Mill Creek"})
+		self.assertTrue(single["boundary_geojson"])
+		self.assertTrue(single["mapped"])
+		self.assertEqual(single["boundary_centroid"]["lat"], round(45.6005, 7))
+		listed = self.tool_data("list_parcels", {"owning_entity": MAIN})["parcels"][0]
+		self.assertTrue(listed["mapped"])
+		self.assertNotIn("boundary_geojson", listed)
+
+	def test_an_unmapped_parcel_reports_no_centroid_rather_than_null_island(self):
+		"""[0, 0] is a real place in the Gulf of Guinea, and it is what an unset
+		Float pair looks like. A map that flies there looks exactly like a map
+		showing you where something is."""
+		self.a_parcel(parcel_name="Mill Creek", acreage=330)
+		single = self.tool_data("get_parcel", {"parcel": "Mill Creek"})
+		self.assertFalse(single["mapped"])
+		self.assertIsNone(single["boundary_centroid"])
+		self.assertIsNone(single["boundary_geojson"])
+
+
+# ── the two shapes check each other ─────────────────────────────────────────
+class TheBlockIsCheckedAgainstItsParcel(GeoTestCase):
+	"""THE GAP v0.32.0 CLOSES, from the other side. `set_field_boundary` reports
+	whether the block sits inside the parcel — reported and never enforced, and
+	null rather than false when the parcel has no shape to check against."""
+
+	def test_a_block_inside_its_parcel_is_reported_as_contained(self):
+		self.a_mapped_parcel()
+		self.a_field()
+		data = self.tool_data(
+			"set_field_boundary",
+			{"field": "Yellow Camp Block 3", "boundary_geojson": json.dumps(BLOCK)},
+		)
+		self.assertTrue(data["boundary_contained_in_parcel"])
+		self.assertFalse(any("not fully inside" in w for w in data["warnings"]))
+
+	def test_a_block_outside_its_parcel_is_warned_about_and_not_refused(self):
+		self.a_mapped_parcel()
+		self.a_field()
+		data = self.tool_data(
+			"set_field_boundary",
+			{
+				"field": "Yellow Camp Block 3",
+				"boundary_geojson": json.dumps(shifted(BLOCK, east=0.010)),
+			},
+		)
+		self.assertFalse(data["boundary_contained_in_parcel"])
+		self.assertTrue(any("not fully inside" in w for w in data["warnings"]))
+		self.assertTrue(data["changed"])
+
+	def test_an_unmapped_parcel_gives_a_null_answer_not_a_false_one(self):
+		"""'We could not check' and 'we checked and it is outside' are different
+		answers, and only one of them is somebody's problem."""
+		data = self.a_mapped_field()
+		self.assertIsNone(data["boundary_contained_in_parcel"])
+		self.assertTrue(any("has no boundary of its own" in w for w in data["warnings"]))
 
 
 # ── the boundary is compliance evidence ─────────────────────────────────────

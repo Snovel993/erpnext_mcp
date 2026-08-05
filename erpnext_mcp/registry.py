@@ -4732,6 +4732,45 @@ TOOLS = {
 		available=_geo_ready("Irrigation Zone"),
 		requires=_GEO_REQUIRES,
 	),
+	"set_parcel_boundary": _tool(
+		realestate.set_parcel_boundary,
+		"MUTATING (default OFF). The same for a parcel — the OUTER shape, the one the "
+		"deed and the tax bill both describe — plus one more answer: which of the "
+		"blocks, zones and cabins registered on it now fall outside it.\n\n"
+		"v0.32.0 CLOSES A GAP set_field_boundary HAS BEEN APOLOGISING FOR SINCE "
+		"v0.12.0. Every call of that tool used to end with a line saying a parcel had "
+		"no boundary, so nothing had checked the block sat inside its parcel. It does "
+		"now, and the check runs in both directions: setting either shape reports the "
+		"disagreement.\n\n"
+		"CONTAINMENT IS REPORTED, NEVER ENFORCED, which matters more here than "
+		"anywhere else this app checks it. A planting that predates a deed split "
+		"really does straddle the line, and a cabin on the far side of a road "
+		"easement is a real cabin. Refusing those would make them unrecordable.\n\n"
+		"ONLY THINGS THAT HAVE A POSITION ARE TESTED. A block with no polygon and a "
+		"cabin with no coordinates are not outside the parcel — they are unmapped, "
+		"and listing them as violations would bury the two names that mean "
+		"something under fifty that do not.\n\n"
+		"Refuses everything set_field_boundary refuses, comparing the area against "
+		"the parcel's own deeded or GIS acreage. `dry_run=true` computes everything "
+		"and writes nothing.",
+		{
+			"parcel": _field(_STRING, "The Parcel docname, or its parcel name such as 'Red Camp'."),
+			"boundary_geojson": _field(
+				_STRING,
+				"The boundary as GeoJSON, in [longitude, latitude] degrees. A bare geometry, a "
+				"Feature, or a FeatureCollection holding exactly one Feature.",
+			),
+			"owning_entity": _field(_STRING, "Narrow a bare parcel name to one company."),
+			"company": _field(_STRING, "Alias for owning_entity."),
+			"dry_run": _field(_BOOLEAN, "Validate and compute without writing. Default false."),
+		},
+		required=("parcel", "boundary_geojson"),
+		mutating=True,
+		idempotent=True,
+		title="Set a parcel boundary",
+		available=_geo_ready("Parcel"),
+		requires=_GEO_REQUIRES,
+	),
 	"find_fields_containing_point": _tool(
 		farm.find_fields_containing_point,
 		"Which blocks is this GPS fix inside? Read-only. THIS IS THE GEOFENCE "
@@ -4906,6 +4945,16 @@ TOOLS = {
 			"condition": _field(_STRING, "Excellent, Good, Fair, Poor, Needs Repair or Uninhabitable."),
 			"related_asset": _field(_STRING, "The Fixed Asset carrying the building, if there is one."),
 			"access_card_zone": _field(_STRING, "Access-control zone name, for a card system to come."),
+			"gps_latitude": _field(
+				_NUMBER,
+				"Where the building stands, in decimal degrees, -90 to 90. Set with gps_longitude "
+				"or not at all — half a coordinate puts the unit on a map off the coast of Ghana.",
+			),
+			"gps_longitude": _field(
+				_NUMBER,
+				"Decimal degrees, -180 to 180. Negative in the western hemisphere: a Pacific "
+				"Northwest camp reads about -121.",
+			),
 			"fsma_worker_facility": _field(
 				_BOOLEAN, "Subject to FSMA Produce Safety Rule Subpart L worker facility requirements."
 			),
@@ -4929,8 +4978,15 @@ TOOLS = {
 	"update_housing_unit": _tool(
 		housing.update_housing_unit,
 		"MUTATING (default OFF). Change a registered unit: type, square footage, "
-		"capacity, year built, condition, asset link, access-card zone, and every "
-		"compliance flag and date. Every change is echoed as before → after.\n\n"
+		"capacity, year built, condition, asset link, access-card zone, WHERE IT "
+		"STANDS, and every compliance flag and date. Every change is echoed as "
+		"before → after.\n\n"
+		"gps_latitude AND gps_longitude MOVE TOGETHER OR NOT AT ALL (v0.32.0). "
+		"Passing one is filled in from the stored other; a genuine half-pair is "
+		"refused, because a unit carrying a corrected longitude beside a stale "
+		"latitude sits somewhere neither reading of the record meant. A camp address "
+		"is a driveway off a county road and a cabin number is paint on a door — "
+		"neither puts an ambulance at the right building.\n\n"
 		"CANNOT re-key: unit_name is refused because the docname is built from it and "
 		"every assignment points at that docname. CANNOT move a building between "
 		"parcels — even a manufactured home that really was moved should be "
@@ -4950,6 +5006,13 @@ TOOLS = {
 			"condition": _field(_STRING, "New condition. Empty string clears it."),
 			"related_asset": _field(_STRING, "New Fixed Asset. Empty string clears it."),
 			"access_card_zone": _field(_STRING, "New access-card zone."),
+			"gps_latitude": _field(
+				_NUMBER,
+				"New latitude, decimal degrees. THE PAIR MOVES TOGETHER: passing one on its own "
+				"is filled in from the stored other, and clearing the position means passing both "
+				"as empty.",
+			),
+			"gps_longitude": _field(_NUMBER, "New longitude, decimal degrees."),
 			"fsma_worker_facility": _field(_BOOLEAN, "New FSMA worker facility flag."),
 			"or_housing_law_compliant": _field(_STRING, "Yes, No, Unknown or Not Applicable."),
 			"max_occupants_per_or_law": _field(_INTEGER, "New occupancy limit."),
@@ -9543,6 +9606,67 @@ TOOLS = {
 		available=_needs_doctype("Farm Shift"),
 		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"log_shift_location": _tool(
+		shifts.log_shift_location,
+		"MUTATING (default OFF). Append one GPS fix to a shift's track. This is what "
+		"the iOS app posts periodically while a shift is running.\n\n"
+		"IT APPENDS AND NEVER EDITS. A breadcrumb somebody can correct is not a "
+		"record of where the phone was, it is a record of where somebody would like "
+		"it to have been, and those two documents are indistinguishable afterwards.\n\n"
+		"THIS IS THE ONE TOOL ON THE SHIFT SURFACE A WORKER'S PHONE DRIVES RATHER "
+		"THAN THE FOREMAN, and it does not contradict the sole-actor rule the rest of "
+		"this surface keeps. That rule is about who is ANSWERABLE — who forms the "
+		"crew, calls the water break, signs the close — and none of it moves here. A "
+		"breadcrumb attests to nothing; it records where a device was, which is a "
+		"measurement rather than a claim.\n\n"
+		"ONE FIX PER CALL, carrying its own `timestamp` — WHEN IT WAS TAKEN, not when "
+		"it arrived. A phone out of signal posts an hour of them the moment the bars "
+		"come back, so the order they land in does not matter and a catch-up loop "
+		"draws the right track.\n\n"
+		"AN OPEN SHIFT IS NOT REQUIRED. A phone that could not reach the site until "
+		"the evening is posting about a shift the foreman has already closed, and "
+		"refusing those would throw away the evidence that is hardest to collect. A "
+		"fix outside the shift's own span is REPORTED instead — a device still "
+		"reporting after the crew went home traces the drive to the shop.\n\n"
+		"REFUSES: coordinates that are not on Earth (a latitude past 90 is the pair "
+		"the wrong way round, and it is the only version of that mistake a computer "
+		"can catch); an employee belonging to another company than the shift does. "
+		"WARNS, DOES NOT REFUSE: a poor reported accuracy. A fix under a canopy in a "
+		"canyon reads badly and is still the only record the crew was there.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
+			"name": _field(_STRING, "Alias for shift."),
+			"latitude": _field(_NUMBER, "Decimal degrees, -90 to 90. `lat` is accepted for it."),
+			"longitude": _field(_NUMBER, "Decimal degrees, -180 to 180. `lon` is accepted for it."),
+			"lat": _field(_NUMBER, "Alias for latitude."),
+			"lon": _field(_NUMBER, "Alias for longitude."),
+			"timestamp": _field(
+				_STRING,
+				"When the fix was TAKEN, YYYY-MM-DD HH:MM:SS. Defaults to now, which is right "
+				"for a phone posting live and wrong for one catching up — send the phone's own "
+				"time for anything that queued.",
+			),
+			"accuracy_meters": _field(
+				_NUMBER,
+				"The horizontal accuracy the device reported. Kept and never gated on; a figure "
+				"past 50 m is noted, because it cannot settle which side of a block line "
+				"somebody was on.",
+			),
+			"employee": _field(
+				_STRING,
+				"Whose device this is, when the fix belongs to one person rather than the crew. "
+				"Optional: a foreman's phone in the truck traces the crew's day, and refusing "
+				"that would throw away the only track most shifts will ever have.",
+			),
+			"source": _field(_STRING, "iOS (default) or Manual — a coordinate somebody typed afterwards."),
+			"notes": _field(_STRING, "Why this fix is here. Empty for everything the phone posted."),
+		},
+		required=("shift",),
+		mutating=True,
+		title="Log a shift location fix",
+		available=_needs_doctype("Shift Location Log"),
+		requires="the Shift Location Log DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	"create_heat_exposure_event": _tool(
 		heat.create_heat_exposure_event,
 		"MUTATING (default OFF). Document OAR 437-004-1131 for one shift, signed and "
@@ -9711,6 +9835,41 @@ TOOLS = {
 		title="Get a shift",
 		available=_needs_doctype("Farm Shift"),
 		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_shift_track": _tool(
+		shifts.get_shift_track,
+		"Where the crew went during one shift, in the order it happened. Read-only.\n\n"
+		"IN THE ORDER THE FIXES WERE TAKEN, NOT THE ORDER THEY ARRIVED. A phone out "
+		"of signal in a canyon posts an hour of breadcrumbs the moment the bars come "
+		"back, so a track sorted by insertion draws the crew standing still all "
+		"morning where the signal returned and then teleporting across the farm.\n\n"
+		"`gaps` IS THE PART A READER MISJUDGES. Every silence longer than ten "
+		"minutes is named with its length, because a straight line drawn between the "
+		"two ends of one is a line the crew did not walk. Nothing is interpolated: an "
+		"invented position on a record read in a wage dispute or a re-entry-interval "
+		"question is the worst thing this app could put on a map.\n\n"
+		"`accuracy_meters` comes back per fix and is never used as a filter. A fix "
+		"under a canopy in a canyon reads badly and is still the only record the crew "
+		"was there — dropping it would delete the evidence from precisely the ground "
+		"that is hardest to work.\n\n"
+		"Empty is the ordinary answer for a shift worked before the phones were "
+		"logging, and it is not a gap in the compliance record: the shift's own "
+		"location, crew spans and event timeline are unaffected. Scoped to the "
+		"companies the calling account may actually reach.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
+			"name": _field(_STRING, "Alias for shift."),
+			"employee": _field(
+				_STRING,
+				"Only this person's fixes. Without it the track is every device that reported "
+				"on the shift, which for most crews is the foreman's phone alone.",
+			),
+			"limit": _field(_INTEGER, "Maximum fixes. Default and hard maximum 5000, oldest first."),
+		},
+		required=("shift",),
+		title="Get a shift's location track",
+		available=_needs_doctype("Shift Location Log"),
+		requires="the Shift Location Log DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"list_heat_exposure_events": _tool(
 		heat.list_heat_exposure_events,

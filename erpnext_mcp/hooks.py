@@ -298,6 +298,49 @@ has_permission = {
 	"Family": "erpnext_mcp.permissions.family_has_permission",
 }
 
+#: FORM JAVASCRIPT FOR SEVEN DOCTYPES, ALL SEVEN OF THEM THIS APP'S OWN. v0.32.0.
+#:
+#: THE INVARIANT THIS FILE KEEPS IS ABOUT OTHER PEOPLE'S DOCTYPES, and every key
+#: below is a doctype that would not exist if this app were not installed. An
+#: operator who removes the app loses these forms entirely, so a script attached
+#: to one cannot change how anything they still have behaves. That is the same
+#: line `permission_query_conditions` draws and `test_hooks.py` now asserts here
+#: too: every doctype named in this hook is one this app created.
+#:
+#: WHAT THE SCRIPTS DO: draw a Leaflet map of whatever the record knows about
+#: where it is. A boundary nobody can look at is a boundary nobody checks, and
+#: the failure that produces is specific — a block traced with two vertices
+#: transposed passes every validation this app makes and is obviously wrong to
+#: anybody who sees it drawn.
+#:
+#: WHAT THEY DO NOT DO: write. There is no drag-to-move marker, no draw-a-polygon
+#: tool and no save path of any kind. A boundary is compliance evidence, it is
+#: set through the three boundary tools, and those validate the shape, refuse a
+#: self-intersection, compare the area against the recorded acreage and recompute
+#: every derived field. A map that could nudge a vertex would be a way round all
+#: of that with no validation and no audit row.
+#:
+#: `geo_map_widget.js` IS LISTED FIRST IN EVERY ENTRY because Frappe concatenates
+#: the files in order into the form's script, and the per-doctype file calls into
+#: the widget at evaluation time. The widget itself is idempotent — it returns
+#: early when it is already installed — which is what makes listing it seven
+#: times cost nothing on a session that opens seven forms.
+#:
+#: THE LIBRARY COMES FROM A CDN AND THE TILES FROM OPENSTREETMAP, so a bench with
+#: no outbound internet gets no map. That case is handled rather than left to
+#: fail: the section says the library could not be reached and prints the
+#: coordinates underneath. The record is the coordinates; the map is a reading of
+#: them, and losing the reading must not look like losing the record.
+doctype_js = {
+	"Parcel": ["public/js/geo_map_widget.js", "public/js/parcel_map.js"],
+	"Field": ["public/js/geo_map_widget.js", "public/js/field_map.js"],
+	"Irrigation Zone": ["public/js/geo_map_widget.js", "public/js/irrigation_zone_map.js"],
+	"Housing Unit": ["public/js/geo_map_widget.js", "public/js/housing_unit_map.js"],
+	"Asset Register": ["public/js/geo_map_widget.js", "public/js/asset_register_map.js"],
+	"Farm Shift": ["public/js/geo_map_widget.js", "public/js/farm_shift_map.js"],
+	"Farm Task": ["public/js/geo_map_widget.js", "public/js/farm_task_map.js"],
+}
+
 #: THE ONLY REQUEST-LIFECYCLE HOOK THIS APP INSTALLS. v0.17.2, and it is here
 #: because the Tailscale `serve`/`funnel` proxy removes the `Authorization`
 #: header — proven three ways on 2026-08-01, including from inside the tailnet,

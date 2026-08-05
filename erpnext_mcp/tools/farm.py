@@ -1420,12 +1420,33 @@ def set_field_boundary(args: dict) -> ToolResult:
 			f"{derived['area_computed_acres']} acres — set it with update_field if that is right."
 		)
 
-	# Parcels carry no polygon in this release, so containment cannot be checked
-	# against one. Said out loud rather than left as a silent gap: a caller who
-	# assumes it was checked is a caller who will be surprised in Sprint 7.
-	warnings.append(
-		"A parcel has no boundary in this release, so nothing checked that this block sits inside its parcel."
+	# v0.32.0. Parcels carry a polygon now, so this is a real check rather than
+	# the apology it was from v0.12.0 to v0.31.0 — every call used to end with a
+	# line saying a parcel had no boundary and nothing had been checked.
+	#
+	# REPORTED, NEVER REFUSED, for the same reason a zone outside its field is: a
+	# block genuinely does straddle a deed line on plenty of farms, because the
+	# planting predates the split. And an unmapped parcel is still said out loud,
+	# because "nothing was checked" and "it checked out" are different answers.
+	parcel_shape = geo.stored_shape(
+		frappe.db.get_value(PARCEL, row.get("parcel"), "boundary_geojson")
+		if row.get("parcel") and compat.has_field(PARCEL, "boundary_geojson")
+		else None
 	)
+	if parcel_shape is None:
+		inside_parcel = None
+		warnings.append(
+			f"{row.get('parcel')} has no boundary of its own, so nothing checked that this block "
+			"sits inside its parcel. Set it with set_parcel_boundary."
+		)
+	else:
+		inside_parcel = geo.covers_shape(parcel_shape, shape)
+		if not inside_parcel:
+			warnings.append(
+				f"This block is not fully inside {row.get('parcel')}'s boundary. That is allowed and "
+				"is sometimes right — a planting that predates a deed split really does straddle the "
+				"line — but if it was not deliberate, one of the two polygons is wrong."
+			)
 
 	zones_outside = _zones_outside(row["name"], shape)
 	if zones_outside:
@@ -1451,6 +1472,7 @@ def set_field_boundary(args: dict) -> ToolResult:
 			resolution: len(cells) for resolution, cells in sorted(json.loads(derived["h3_cells"]).items())
 		},
 		"h3_resolutions": list(geo.H3_RESOLUTIONS),
+		"boundary_contained_in_parcel": inside_parcel,
 		"zones_outside_boundary": zones_outside,
 		"warnings": warnings,
 		"dry_run": bool(dry_run),

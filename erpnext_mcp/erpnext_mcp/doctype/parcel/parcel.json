@@ -29,6 +29,14 @@
   "related_asset",
   "conveyance_section",
   "conveyance_events",
+  "boundary_section",
+  "boundary_geojson",
+  "boundary_centroid_lat",
+  "boundary_centroid_lon",
+  "boundary_col",
+  "boundary_bbox_geojson",
+  "h3_cells",
+  "area_computed_acres",
   "notes_section",
   "notes"
  ],
@@ -178,6 +186,61 @@
    "fieldtype": "Table",
    "label": "Conveyance Events",
    "options": "Parcel Conveyance Event"
+  },
+  {
+   "description": "The shape on the ground, and on a parcel it is the OUTER one: every Field, Irrigation Zone and Housing Unit registered here is expected to sit inside it. Everything below the polygon is DERIVED from it on save and must not be edited by hand — a figure a person can change independently of the polygon is a figure that will disagree with it, and the disagreement surfaces as a geofence saying no to somebody standing in the right place.",
+   "fieldname": "boundary_section",
+   "fieldtype": "Section Break",
+   "label": "Boundary"
+  },
+  {
+   "description": "The parcel boundary as a GeoJSON Polygon or MultiPolygon, in [longitude, latitude] degrees. Set it with set_parcel_boundary rather than by hand: the tool validates the shape and recomputes everything derived from it. A parcel traced off the assessor's map is the usual source, and it is the shape the deed and the tax bill both describe.",
+   "fieldname": "boundary_geojson",
+   "fieldtype": "Long Text",
+   "label": "Boundary (GeoJSON)"
+  },
+  {
+   "description": "Computed. Where a map opens, and the cheap first cut for a distance query. For a shape whose true centroid falls outside it — a parcel wrapped round somebody else's inholding — this is an interior point instead, because centring on the inholding is centring on ground that is not this parcel's.",
+   "fieldname": "boundary_centroid_lat",
+   "fieldtype": "Float",
+   "label": "Centroid Latitude",
+   "precision": "7",
+   "read_only": 1
+  },
+  {
+   "description": "Computed. See Centroid Latitude.",
+   "fieldname": "boundary_centroid_lon",
+   "fieldtype": "Float",
+   "label": "Centroid Longitude",
+   "precision": "7",
+   "read_only": 1
+  },
+  {
+   "fieldname": "boundary_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Computed. A bounding box is a guaranteed superset of the shape it bounds, which is what makes it the only safe cheap prefilter for 'is this point inside' — a candidate set built from it can never miss the right answer.",
+   "fieldname": "boundary_bbox_geojson",
+   "fieldtype": "Text",
+   "label": "Bounding Box (GeoJSON)",
+   "read_only": 1
+  },
+  {
+   "description": "Computed. JSON of {resolution: [cells]} at resolutions 6, 7, 8, 9 and 10, holding every cell the shape TOUCHES. Not every cell whose centre is inside it: a centre-based fill returns nothing for a shape smaller than one cell, and an index built on it would answer 'on no parcel' for a point plainly on one.",
+   "fieldname": "h3_cells",
+   "fieldtype": "Long Text",
+   "label": "H3 Cells",
+   "read_only": 1
+  },
+  {
+   "description": "Computed from the polygon by spherical excess. This is a different number from the deeded or GIS acreage above and both are worth having: a deed, an assessor's map and a GIS trace routinely disagree by a few percent. A gap over 5% is reported; over 25% the boundary is refused, because at that point one of the two figures is about a different piece of ground.",
+   "fieldname": "area_computed_acres",
+   "fieldtype": "Float",
+   "label": "Computed Area (acres)",
+   "precision": "4",
+   "read_only": 1
   },
   {
    "fieldname": "notes_section",

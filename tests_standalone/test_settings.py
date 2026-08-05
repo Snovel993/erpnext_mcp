@@ -26,6 +26,10 @@ HR_TOOLS = ("get_attendance_summary", "get_leave_balance", "list_employees")
 GEO_TOOLS = (
 	"set_field_boundary",
 	"set_zone_boundary",
+	# v0.32.0. Six now, not five: a parcel carries a polygon too, and it goes
+	# unavailable on a bench with no shapely and h3 for exactly the same reason
+	# the other five do.
+	"set_parcel_boundary",
 	"find_fields_containing_point",
 	"find_fields_by_h3_cell",
 	"import_field_boundary_geojson",

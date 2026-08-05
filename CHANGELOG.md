@@ -3,6 +3,92 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.32.0 — 2026-08-05
+
+**Geo Map Views + Crew Tracking.** This app has been storing polygons since
+v0.12.0 and coordinates since v0.17.0, and until now the only way to see one was
+to read a Long Text field full of numbers. A boundary nobody can look at is a
+boundary nobody checks, and the failure that produces is specific: a block traced
+with two vertices transposed passes every validation this app makes — it is a
+valid polygon, it is on Earth, its area is plausible — and it is obviously wrong
+to anybody who sees it drawn.
+
+**A Leaflet map on seven Desk forms.** Parcel, Field and Irrigation Zone draw
+their boundary with the shape they are expected to sit inside underneath it, so a
+containment disagreement the tools merely *report* is a thing somebody can look
+at. Housing Unit and Asset Register draw a marker. Farm Task resolves its
+location through whichever register names the place. Farm Shift draws the crew's
+track. The library comes from a CDN and the tiles from OpenStreetMap, so a bench
+with no outbound internet gets a sentence saying so and the coordinates printed
+underneath — the record is the coordinates and the map is a reading of them.
+Nothing on any of these forms writes: a map that could nudge a vertex would be a
+way round every validation the boundary tools make, with no audit row.
+
+**`doctype_js` was a forbidden hook until this release**, spelled "this app adds
+no client script to a doctype it does not own" — and the clause after the comma
+was always the real rule. All seven doctypes here are ones this app created, so
+an operator who removes the app loses the forms too. `test_hooks.py` now asserts
+the rule the sentence stated rather than the ban that stood in for it, the same
+move `permission_query_conditions` made in v0.17.1.
+
+**One new DocType: Shift Location Log.** One GPS fix, taken during a shift, at a
+time. Standalone rather than a child table of the shift, for two reasons that
+both bite in production: a nine-hour shift at a fix every two minutes is two
+hundred and seventy rows and a child table is loaded whole every time anybody
+opens the shift form; and an append to a standalone doctype is one INSERT, while
+an append to a child table is a save of the parent that re-runs every validation
+on the crew, the events and the weather timeline.
+
+**Three new tools** — one read and two writes:
+- `get_shift_track` (read, default ON)
+- `log_shift_location`, `set_parcel_boundary` (write, default OFF)
+
+**A track is read in the order the fixes were TAKEN, not the order they
+arrived.** A phone out of signal in a canyon posts an hour of breadcrumbs the
+moment the bars come back, so a track sorted by insertion draws the crew standing
+still all morning where the signal returned and then teleporting across the farm.
+Every silence longer than ten minutes is reported as a gap with its length, and
+nothing is interpolated — an invented position on a record read in a wage dispute
+or a re-entry-interval question is the worst thing this app could put on a map.
+
+**`log_shift_location` is the one tool on the shift surface a worker's phone
+drives rather than the foreman**, and it does not contradict v0.19.3's sole-actor
+rule. That rule is about who is *answerable* — who forms the crew, calls the
+water break, signs the close — and none of it moves. A breadcrumb attests to
+nothing; it records where a device was, which is a measurement rather than a
+claim. It appends and never edits, and it does not require an open shift: a phone
+that could not reach the site until the evening is posting about a shift the
+foreman has already closed, and refusing those would throw away the evidence that
+is hardest to collect.
+
+**`accuracy_meters` is kept and never gated on.** A fix under a canopy in a
+canyon reports three hundred metres and is still the only record that the crew
+was there, so a threshold that dropped it would delete the evidence from
+precisely the ground that is hardest to work. Past fifty metres it is noted,
+because a fix that coarse cannot settle which side of a block line somebody was
+on.
+
+**`set_parcel_boundary` closes a gap `set_field_boundary` had been apologising
+for since v0.12.0**, in a warning on every single call: a parcel had no boundary,
+so nothing checked that the block sat inside its parcel. Parcel now carries the
+same derived suite Field and Irrigation Zone do — centroid, bounding box, H3
+coverage at resolutions 6–10 and computed area — and the check runs in both
+directions. It is reported and never enforced, which matters more here than
+anywhere else this app checks containment: a planting that predates a deed split
+really does straddle the line. Only things that *have* a position are tested; a
+block with no polygon and a cabin with no coordinates are unmapped, which is a
+different answer.
+
+**Housing Unit gains `gps_latitude` and `gps_longitude`**, accepted by
+`create_housing_unit` and `update_housing_unit`. The pair moves together or not
+at all: passing one is filled in from the stored other, and a genuine half-pair
+is refused, because a unit carrying a corrected longitude beside a stale latitude
+sits somewhere neither reading of the record meant. A camp address is a driveway
+off a county road and a cabin number is paint on a door; neither of them puts an
+ambulance at the right building.
+
+4799 standalone tests, zero failures.
+
 ## 0.31.0 — 2026-08-05
 
 **Expense Receipt Capture.** A foreman photographs a receipt at the fuel pump or

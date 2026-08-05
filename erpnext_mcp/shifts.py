@@ -97,6 +97,11 @@ DOCTYPE = "Farm Shift"
 CREW_DOCTYPE = "Farm Shift Crew Member"
 EVENT_DOCTYPE = "Farm Shift Compliance Event"
 WEATHER_DOCTYPE = "Farm Shift Weather Reading"
+#: v0.32.0. The crew's track. NOT a child table of the shift, and
+#: `shift_location_log.py` argues why at length — the short version is that a
+#: nine-hour shift at a fix every two minutes is two hundred and seventy rows,
+#: and a child table is loaded whole every time anybody opens the shift form.
+LOCATION_DOCTYPE = "Shift Location Log"
 HEAT_DOCTYPE = "Heat Exposure Event"
 ACCLIMATIZATION_DOCTYPE = "Heat Acclimatization Worker"
 
@@ -223,6 +228,21 @@ WEATHER_FIELDS = (
 	"idx",
 )
 
+LOCATION_FIELDS = (
+	"name",
+	"shift",
+	"employee",
+	"employee_name",
+	"company",
+	"timestamp",
+	"source",
+	"latitude",
+	"longitude",
+	"accuracy_meters",
+	"h3_cell",
+	"notes",
+)
+
 HEAT_FIELDS = (
 	"name",
 	"farm_shift",
@@ -320,6 +340,50 @@ def weather_of(shift: str) -> list:
 		_child_rows(WEATHER_DOCTYPE, WEATHER_FIELDS, shift, "weather_timeline", "idx asc"),
 		key=lambda row: str(row.get("reading_datetime") or ""),
 	)
+
+
+def track_of(shift: str, employee: str = "", limit: int = 5000) -> list:
+	"""One shift's GPS breadcrumbs, IN TIME ORDER.
+
+	v0.32.0. Ordered by when the fix was TAKEN rather than by when it landed,
+	which is the whole reason the doctype carries both ideas. A phone out of
+	signal in a canyon posts an hour of breadcrumbs the moment the bars come back,
+	so a track sorted by insertion draws the crew standing still all morning at the
+	spot where the signal returned and then teleporting.
+	"""
+	if not compat.doctype_exists(LOCATION_DOCTYPE):
+		return []
+	filters = {"shift": shift}
+	if employee:
+		filters["employee"] = employee
+	return [
+		dict(row)
+		for row in frappe.db.get_all(
+			LOCATION_DOCTYPE,
+			filters=filters,
+			fields=compat.existing_fields(LOCATION_DOCTYPE, LOCATION_FIELDS),
+			order_by="timestamp asc",
+			limit=limit,
+		)
+		or []
+	]
+
+
+def describe_location_row(row: dict) -> dict:
+	"""One breadcrumb, in the shape every tool and map reports it."""
+	accuracy = row.get("accuracy_meters")
+	return {
+		"name": row.get("name"),
+		"employee": row.get("employee") or None,
+		"employee_name": row.get("employee_name") or row.get("employee") or None,
+		"timestamp": str(row.get("timestamp") or "") or None,
+		"lat": round(float(row.get("latitude") or 0), 7),
+		"lon": round(float(row.get("longitude") or 0), 7),
+		"accuracy_meters": round(float(accuracy), 2) if accuracy not in (None, "") else None,
+		"h3_cell": row.get("h3_cell") or None,
+		"source": row.get("source") or None,
+		"notes": row.get("notes") or None,
+	}
 
 
 def acclimatization_of(heat_event: str) -> list:

@@ -1,0 +1,181 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-05 09:00:00.000000",
+ "description": "One GPS fix, taken during a shift, at a time. A breadcrumb rather than a position: the shift already has a location in the words the crew uses and a coordinate for the weather fetch, and neither of those answers where the crew actually went between six in the morning and three in the afternoon. A track does, and it is the same evidence twice over — which block the crew was in when the re-entry interval was running, and whether the hours somebody is claiming were worked where the work was. NOT A CHILD TABLE OF THE SHIFT, deliberately: a nine-hour shift logging a fix every two minutes is two hundred and seventy rows, and a child table is loaded whole every time anybody opens the shift form. Rows are appended and never edited; a breadcrumb somebody could correct is not a record of where the phone was.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "shift",
+  "employee",
+  "employee_name",
+  "identity_col",
+  "company",
+  "timestamp",
+  "source",
+  "position_section",
+  "latitude",
+  "longitude",
+  "position_col",
+  "accuracy_meters",
+  "h3_cell",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The shift this fix was taken during. Required: a coordinate with no exposure period behind it is a dot on a map, and every question this doctype exists to answer — which block, during which hours, under whose supervision — is asked of a shift.",
+   "fieldname": "shift",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Shift",
+   "options": "Farm Shift",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Whose phone this came off, when the fix belongs to one person rather than to the crew. Optional on purpose: a foreman's phone in the truck traces the crew's day, and refusing that fix because it names nobody in particular would throw away the only track most shifts will ever have.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "Denormalised from the Employee at write time, so a track read years later still names the person as they were named then.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Filled from the shift on save. It is what scopes a track to a company — a User Permission on Company reaches this doctype because this column links to one, and without it a scoped account could read every crew's movements on the site.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "When the fix was taken, which is not when it arrived. A phone out of signal in a canyon posts an hour of breadcrumbs the moment it comes back, and a timestamp assigned on receipt would draw the crew's whole morning at the spot where the bars returned.",
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Timestamp",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "iOS",
+   "description": "Where the fix came from. iOS is the ordinary case — the phone posting periodically while the shift is open. Manual is somebody typing a coordinate afterwards, and it is a different kind of evidence: worth keeping, worth being able to tell apart.",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Source",
+   "options": "iOS\nManual"
+  },
+  {
+   "fieldname": "position_section",
+   "fieldtype": "Section Break",
+   "label": "Position"
+  },
+  {
+   "description": "Decimal degrees, -90 to 90. Seven decimal places is about a centimetre — far finer than any phone fixes, and here so a coordinate is stored as it arrived rather than rounded on the way in.",
+   "fieldname": "latitude",
+   "fieldtype": "Float",
+   "label": "Latitude",
+   "precision": "7",
+   "reqd": 1
+  },
+  {
+   "description": "Decimal degrees, -180 to 180. Negative in the western hemisphere: a Pacific Northwest orchard reads about -121, and a positive number there is a coordinate in China.",
+   "fieldname": "longitude",
+   "fieldtype": "Float",
+   "label": "Longitude",
+   "precision": "7",
+   "reqd": 1
+  },
+  {
+   "fieldname": "position_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The horizontal accuracy the phone reported, in metres. KEPT RATHER THAN USED AS A GATE: a fix under trees in a canyon reads badly and is still the only record that the crew was there, and a threshold that dropped it would delete the evidence from exactly the ground that is hardest to work. It is here so a reader can weigh a breadcrumb — a 5-metre fix and a 300-metre fix are both true and they are not the same claim.",
+   "fieldname": "accuracy_meters",
+   "fieldtype": "Float",
+   "label": "Accuracy (metres)",
+   "precision": "2"
+  },
+  {
+   "description": "Computed. The H3 cell this point falls in at resolution 10, so a track can be joined against a Field's or a Parcel's stored coverage without loading either polygon. Blank on a site without the h3 package; the coordinates are the record and this is the index.",
+   "fieldname": "h3_cell",
+   "fieldtype": "Data",
+   "label": "H3 Cell (res 10)",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Why this fix is here, for the ones somebody entered by hand. Empty for everything the phone posted.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-05 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Shift Location Log",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "shift,employee,timestamp",
+ "sort_field": "timestamp",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

@@ -1033,6 +1033,9 @@ APP_DOCTYPES = {
 	# v0.31.0. Expense Receipt Capture.
 	"Expense Receipt": "expense_receipt",
 	"Expense Receipt Item": "expense_receipt_item",
+	# v0.32.0. The crew's track. Standalone rather than a child table of the
+	# shift, and `shift_location_log.py` argues why.
+	"Shift Location Log": "shift_location_log",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

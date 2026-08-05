@@ -80,6 +80,11 @@ _UNIT_FIELDS = (
 	"condition",
 	"related_asset",
 	"access_card_zone",
+	# v0.32.0. Where the building actually stands. Selected through
+	# `compat.existing_fields`, so a site that has not migrated yet reads a unit
+	# without them rather than failing on a column that is not there.
+	"gps_latitude",
+	"gps_longitude",
 	"fsma_worker_facility",
 	"or_housing_law_compliant",
 	"max_occupants_per_or_law",
@@ -184,6 +189,10 @@ def _describe_unit(row: dict, today: str = "") -> dict:
 		"condition": row.get("condition") or None,
 		"related_asset": row.get("related_asset") or None,
 		"access_card_zone": row.get("access_card_zone") or None,
+		# NEVER `{lat: 0, lon: 0}`. Null island is a real place and an unset
+		# coordinate looks exactly like it, so an unmapped cabin reports nothing
+		# rather than a point in the Gulf of Guinea a map would fly to.
+		"gps": _gps(row),
 		"residential": (row.get("unit_type") or "") not in NON_RESIDENTIAL_TYPES,
 		"fsma_worker_facility": compat.checked(row.get("fsma_worker_facility")),
 		"or_housing_law_compliant": row.get("or_housing_law_compliant") or "Unknown",
@@ -195,6 +204,45 @@ def _describe_unit(row: dict, today: str = "") -> dict:
 		"co_detector_last_test": _date_str(row.get("co_detector_last_test")),
 		"notes": row.get("notes") or None,
 	}
+
+
+def _gps(row: dict) -> dict | None:
+	"""`{lat, lon}` for a unit somebody has located, or None."""
+	latitude = row.get("gps_latitude")
+	longitude = row.get("gps_longitude")
+	if latitude in (None, "") or longitude in (None, ""):
+		return None
+	if not float(latitude) and not float(longitude):
+		return None
+	return {"lat": round(float(latitude), 7), "lon": round(float(longitude), 7)}
+
+
+def check_coordinates(latitude, longitude) -> tuple:
+	"""A lat/lon pair, checked to be on Earth, or a ToolError saying which is wrong.
+
+	BOTH OR NEITHER. Half a coordinate is not a position, and a unit carrying a
+	latitude and no longitude would sit on a map at longitude zero — off the coast
+	of Ghana, on the same meridian as everything else anybody forgot to finish.
+	"""
+	given = [value for value in (latitude, longitude) if value not in (None, "")]
+	if not given:
+		return None, None
+	if len(given) == 1:
+		raise ToolError(
+			"gps_latitude and gps_longitude have to be set together. Half a coordinate is not a "
+			"position — a unit with a latitude and no longitude sits on a map off the coast of "
+			"Ghana. Nothing was changed."
+		)
+	latitude = as_float(latitude, "gps_latitude")
+	longitude = as_float(longitude, "gps_longitude")
+	if not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
+		raise ToolError(
+			f"[{longitude}, {latitude}] is not a point on Earth. Latitude runs -90 to 90 and "
+			"longitude -180 to 180 — a latitude past 90 is almost always the pair the wrong way "
+			"round, which is the one version of this mistake a computer can catch. Nothing was "
+			"changed."
+		)
+	return latitude, longitude
 
 
 def _overdue(inspection: str | None, today: str = "") -> bool:
@@ -434,6 +482,11 @@ def create_housing_unit(args: dict) -> ToolResult:
 		entity = frappe.db.get_value(PARCEL, parcel, "owning_entity") or company or ""
 		doc.related_asset = _check_asset(asset, entity, parcel)
 
+	latitude, longitude = check_coordinates(args.get("gps_latitude"), args.get("gps_longitude"))
+	if latitude is not None:
+		doc.gps_latitude = latitude
+		doc.gps_longitude = longitude
+
 	for key in ("last_habitability_inspection", "smoke_detector_last_test", "co_detector_last_test"):
 		doc.set(key, as_date(args, key))
 	fsma = as_bool(args, "fsma_worker_facility")
@@ -541,6 +594,20 @@ def update_housing_unit(args: dict) -> ToolResult:
 			_stage(changes, doc, key, as_date(args, key) or "")
 	if "fsma_worker_facility" in args:
 		_stage(changes, doc, "fsma_worker_facility", 1 if as_bool(args, "fsma_worker_facility") else 0)
+
+	# v0.32.0. THE PAIR MOVES TOGETHER OR NOT AT ALL. Accepting one on its own
+	# would let a caller correct a longitude and leave the old latitude behind,
+	# which produces a coordinate that is somewhere — just not anywhere either
+	# reading of the record meant. `check_coordinates` refuses the half-call; the
+	# two-field carry below is what makes the other half available to it when only
+	# one was passed.
+	if "gps_latitude" in args or "gps_longitude" in args:
+		latitude, longitude = check_coordinates(
+			args.get("gps_latitude", row.get("gps_latitude")),
+			args.get("gps_longitude", row.get("gps_longitude")),
+		)
+		_stage(changes, doc, "gps_latitude", latitude)
+		_stage(changes, doc, "gps_longitude", longitude)
 	if "related_asset" in args:
 		asset = as_str(args, "related_asset")
 		if asset and asset != row.get("related_asset"):
@@ -550,9 +617,9 @@ def update_housing_unit(args: dict) -> ToolResult:
 	if not changes:
 		raise ToolError(
 			"nothing to change. Pass at least one of: unit_type, square_footage, capacity, "
-			"year_built, condition, related_asset, access_card_zone, fsma_worker_facility, "
-			"or_housing_law_compliant, max_occupants_per_or_law, last_habitability_inspection, "
-			"smoke_detector_last_test, co_detector_last_test, notes."
+			"year_built, condition, related_asset, access_card_zone, gps_latitude, gps_longitude, "
+			"fsma_worker_facility, or_housing_law_compliant, max_occupants_per_or_law, "
+			"last_habitability_inspection, smoke_detector_last_test, co_detector_last_test, notes."
 		)
 
 	# The controller only fills in a blank lawful occupancy, so a square footage

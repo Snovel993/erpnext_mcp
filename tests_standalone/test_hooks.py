@@ -37,6 +37,8 @@ site behaves, and every one of those hooks is a way to break that promise
 silently.
 """
 
+import json
+import pathlib
 import types
 import unittest
 
@@ -65,6 +67,13 @@ from .harness import frappe  # noqa: F401 - installs the frappe double before er
 #:   "path_list"  a plain list of dotted paths — `auth_hooks`, which is the
 #:                shape `validate_auth_via_hooks` iterates.
 #:   "jinja"      a dict of lists of dotted paths that must carry NO colon.
+#:   "asset_map"  a dict of doctype → list of FILE PATHS inside the app —
+#:                `doctype_js`. NOT dotted paths, so the resolver must not walk
+#:                it: `frappe.get_attr` on "public/js/field_map.js" would look
+#:                for an app called "public/js/field_map" and throw the same
+#:                AppNotInstalledError this module exists for. It gets its own
+#:                shape and its own checks — the files exist, and every doctype
+#:                named is one this app created.
 #:
 #: A key missing from here fails `test_every_hook_key_is_accounted_for`, which is
 #: the whole point: a new hook is a new way to take a site down and it does not
@@ -85,6 +94,7 @@ KNOWN_HOOKS = {
 	"permission_query_conditions": "path_dict",
 	"has_permission": "path_dict",
 	"auth_hooks": "path_list",
+	"doctype_js": "asset_map",
 }
 
 #: Hook keys this app must NOT declare, and why each one would be a lie.
@@ -94,6 +104,12 @@ KNOWN_HOOKS = {
 #: spelling, `jinja` has existed since v14, and v14 is this app's floor, so a
 #: second declaration buys nothing and doubles the surface for exactly the format
 #: mistake that caused the outage.
+#: `doctype_js` WAS here until v0.32.0, spelled "this app adds no client script
+#: to a doctype it does not own" — and the clause after the dash was always the
+#: real rule. v0.32.0 attaches a map to seven doctypes, all seven of which this
+#: app created, so `TheFormScripts` below asserts the rule the sentence stated
+#: rather than the ban that stood in for it. Same move, and the same argument, as
+#: the two permission hooks made in v0.17.1.
 #: `permission_query_conditions` and `has_permission` WERE here until v0.17.1,
 #: on the grounds that "this app changes nobody's visibility". That was a proxy
 #: for the invariant actually worth keeping — do not touch OTHER PEOPLE'S
@@ -106,7 +122,6 @@ FORBIDDEN_HOOKS = {
 	"override_doctype_class": "this app overrides no doctype",
 	"override_whitelisted_methods": "this app overrides no framework method",
 	"fixtures": "this app ships no fixtures",
-	"doctype_js": "this app adds no client script to a doctype it does not own",
 }
 
 
@@ -244,6 +259,95 @@ class EveryPathResolves(unittest.TestCase):
 		# The app name Frappe would have looked for, and did not find.
 		self.assertIn("erpnext_mcp_amount_in_words:erpnext_mcp", str(caught.exception))
 		self.assertIn(":", shipped)
+
+
+class TheFormScripts(unittest.TestCase):
+	"""`doctype_js`, and the rule the blanket ban on it was standing in for.
+
+	v0.32.0 attaches a Leaflet map to the seven doctypes in this app that know
+	where they are. Until then the key was FORBIDDEN outright, on the grounds that
+	"this app adds no client script to a doctype it does not own" — and the clause
+	after the comma was always the actual invariant. A script on a doctype this
+	app created goes when the app goes; a script on somebody else's stays behind
+	changing how their form behaves, which is the promise `hooks.py` makes.
+
+	So the ban becomes three assertions: every doctype named is one this app
+	shipped, every file named exists, and the shared widget is listed first in
+	every entry — because Frappe concatenates them in order and the per-doctype
+	file calls into the widget as it is evaluated.
+	"""
+
+	#: Where the app's own DocType JSON lives, so "did this app create it" is
+	#: answered from what ships rather than from a list somebody maintains.
+	DOCTYPE_DIR = pathlib.Path(__file__).resolve().parent.parent / "erpnext_mcp" / "erpnext_mcp" / "doctype"
+	APP_DIR = pathlib.Path(__file__).resolve().parent.parent / "erpnext_mcp"
+
+	SHARED_WIDGET = "public/js/geo_map_widget.js"
+
+	def app_doctypes(self) -> set:
+		out = set()
+		for path in self.DOCTYPE_DIR.glob("*/*.json"):
+			if path.stem != path.parent.name:
+				continue
+			out.add(json.loads(path.read_text(encoding="utf-8"))["name"])
+		return out
+
+	def test_every_doctype_it_names_is_one_this_app_created(self):
+		"""THE INVARIANT THE BAN WAS A PROXY FOR. A form script on a doctype this
+		app created disappears with the app; one on somebody else's does not, and
+		an operator who removes us would be left with a form that behaves
+		differently and no way to find out why."""
+		ours = self.app_doctypes()
+		self.assertTrue(ours, "could not enumerate this app's doctypes")
+		for doctype in hooks.doctype_js:
+			with self.subTest(doctype=doctype):
+				self.assertIn(
+					doctype,
+					ours,
+					f"doctype_js attaches a script to {doctype!r}, which this app did not "
+					"create. Installing this app would then change how a form the operator "
+					"already had behaves — which hooks.py promises never happens.",
+				)
+
+	def test_every_file_it_names_exists(self):
+		"""A `doctype_js` path Frappe cannot read is not an error anybody sees: the
+		form simply renders without the script. This is the only thing that
+		notices a renamed file."""
+		for doctype, files in hooks.doctype_js.items():
+			for relative in files:
+				with self.subTest(doctype=doctype, file=relative):
+					self.assertTrue(
+						(self.APP_DIR / relative).is_file(),
+						f"doctype_js[{doctype!r}] names {relative!r}, which is not a file in "
+						"the app. Frappe skips a path it cannot read and the form loses its "
+						"script silently.",
+					)
+
+	def test_the_shared_widget_is_listed_first_everywhere(self):
+		"""ORDER IS LOAD ORDER. Frappe concatenates these into one script in the
+		order given, and each per-doctype file calls into the widget as it is
+		evaluated — so a widget listed second is a ReferenceError that takes the
+		whole form script down."""
+		for doctype, files in hooks.doctype_js.items():
+			with self.subTest(doctype=doctype):
+				self.assertIsInstance(files, list)
+				self.assertEqual(files[0], self.SHARED_WIDGET)
+				self.assertEqual(len(files), 2, "one widget plus one per-doctype script")
+
+	def test_nothing_here_is_a_dotted_path(self):
+		"""The resolver must never walk this hook. `frappe.get_attr` on
+		"public/js/field_map.js" reads the app name as everything before the first
+		dot — "public/js/field_map" — and throws the AppNotInstalledError this
+		whole module exists because of."""
+		for _, path in dotted_paths():
+			self.assertNotIn("public/js", str(path))
+
+	def test_every_map_script_carries_the_licence_header(self):
+		for files in hooks.doctype_js.values():
+			for relative in files:
+				with self.subTest(file=relative):
+					head = (self.APP_DIR / relative).read_text(encoding="utf-8").split("\n", 1)[0]
+					self.assertEqual(head, "// SPDX-License-Identifier: MIT")
 
 
 class TheJinjaMethod(unittest.TestCase):

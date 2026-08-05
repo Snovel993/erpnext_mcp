@@ -898,6 +898,112 @@ class GetEmployeeHousingHistory(HousingTestCase):
 		self.assertIn("list_housing_assignments", error)
 
 
+# ── where the building actually stands ──────────────────────────────────────
+class TheUnitHasAPosition(HousingTestCase):
+	"""v0.32.0. A camp address is a driveway off a county road and a cabin number
+	is paint on a door; neither of them puts an ambulance, an inspector or a crew
+	bus at the right building.
+
+	THE PAIR MOVES TOGETHER OR NOT AT ALL, and that is the rule worth testing. A
+	unit carrying a corrected longitude beside a stale latitude sits somewhere
+	neither reading of the record meant, and it looks exactly as valid as a
+	correct one.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.a_parcel()
+
+	def test_a_unit_can_be_registered_with_its_coordinates(self):
+		data = self.a_unit(gps_latitude=45.6015, gps_longitude=-121.178)
+		self.assertEqual(data["gps"], {"lat": 45.6015, "lon": -121.178})
+
+	def test_a_unit_with_no_coordinates_reports_none_rather_than_null_island(self):
+		"""[0, 0] is a real place in the Gulf of Guinea and it is what an unset
+		Float pair looks like. A map that flies there looks exactly like a map
+		showing you where something is."""
+		self.assertIsNone(self.a_unit()["gps"])
+
+	def test_the_position_can_be_set_afterwards(self):
+		self.a_unit()
+		data = self.tool_data(
+			"update_housing_unit",
+			{"unit": "MC-Cabin-01", "gps_latitude": 45.6015, "gps_longitude": -121.178},
+		)
+		self.assertEqual(data["gps"], {"lat": 45.6015, "lon": -121.178})
+		self.assertEqual(sorted(data["changed"]), ["gps_latitude", "gps_longitude"])
+
+	def test_correcting_one_half_keeps_the_other(self):
+		"""The carry that makes a half-call safe rather than refused: passing a new
+		latitude on its own is checked against the STORED longitude."""
+		self.a_unit(gps_latitude=45.6015, gps_longitude=-121.178)
+		data = self.tool_data("update_housing_unit", {"unit": "MC-Cabin-01", "gps_latitude": 45.6020})
+		self.assertEqual(data["gps"], {"lat": 45.602, "lon": -121.178})
+		self.assertEqual(list(data["changed"]), ["gps_latitude"])
+
+	def test_half_a_coordinate_on_an_unlocated_unit_is_refused(self):
+		"""A unit with a latitude and no longitude sits on a map off the coast of
+		Ghana, which is a position and not the one anybody meant."""
+		self.a_unit()
+		message = self.tool_error("update_housing_unit", {"unit": "MC-Cabin-01", "gps_latitude": 45.6015})
+		self.assertIn("have to be set together", message)
+		self.assertIn("Nothing was changed", message)
+
+	def test_half_a_coordinate_at_creation_is_refused(self):
+		message = self.tool_error(
+			"create_housing_unit",
+			{"parcel": "Mill Creek", "unit_name": "MC-Cabin-09", "gps_longitude": -121.178},
+		)
+		self.assertIn("have to be set together", message)
+
+	def test_a_latitude_past_ninety_is_the_pair_the_wrong_way_round(self):
+		message = self.tool_error(
+			"create_housing_unit",
+			{
+				"parcel": "Mill Creek",
+				"unit_name": "MC-Cabin-09",
+				"gps_latitude": -121.178,
+				"gps_longitude": 45.6015,
+			},
+		)
+		self.assertIn("not a point on Earth", message)
+		self.assertIn("wrong way round", message)
+
+	def test_a_longitude_off_the_planet_is_refused(self):
+		self.a_unit()
+		self.assertIn(
+			"not a point on Earth",
+			self.tool_error(
+				"update_housing_unit",
+				{"unit": "MC-Cabin-01", "gps_latitude": 45.6, "gps_longitude": 361},
+			),
+		)
+
+	def test_the_position_can_be_cleared_by_passing_both_empty(self):
+		self.a_unit(gps_latitude=45.6015, gps_longitude=-121.178)
+		data = self.tool_data(
+			"update_housing_unit",
+			{"unit": "MC-Cabin-01", "gps_latitude": "", "gps_longitude": ""},
+		)
+		self.assertIsNone(data["gps"])
+
+	def test_it_comes_back_from_the_single_read_and_the_register(self):
+		self.a_unit(gps_latitude=45.6015, gps_longitude=-121.178)
+		single = self.tool_data("get_housing_unit", {"unit": "MC-Cabin-01"})
+		self.assertEqual(single["gps"], {"lat": 45.6015, "lon": -121.178})
+		listed = self.tool_data("list_housing_units", {"owning_entity": MAIN})["units"][0]
+		self.assertEqual(listed["gps"], {"lat": 45.6015, "lon": -121.178})
+
+	def test_the_position_is_not_by_itself_a_reason_to_have_called_update(self):
+		"""`nothing to change` still fires for a call that passes no argument at
+		all — the new fields are added to the sentence rather than to the set of
+		things that count as a no-op."""
+		self.a_unit()
+		message = self.tool_error("update_housing_unit", {"unit": "MC-Cabin-01"})
+		self.assertIn("gps_latitude", message)
+		self.assertIn("nothing to change", message)
+
+
 # ── compliance is woven, not a shadow layer ─────────────────────────────────
 class WovenNotShadow(HousingTestCase):
 	"""The same test as in test_farm: remove a compliance field and show the

@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_three_hundred_eighteen_tools_one_hundred_forty_eight_read_one_hundred_seventy_write(
+	def test_catalogue_is_three_hundred_twenty_one_tools_one_hundred_forty_nine_read_one_hundred_seventy_two_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -574,6 +574,13 @@ class Catalogue(SeededTestCase):
 		than one verdict argument because they are two switches an operator sets
 		independently, and that is a difference a single tool cannot express.
 
+		v0.32.0 ADDED THREE — one read and two writes — for geography and crew
+		tracking: get_shift_track reads; log_shift_location and
+		set_parcel_boundary write. The last of those closes a gap
+		set_field_boundary had been apologising for since v0.12.0, in a warning
+		on every single call: a parcel had no boundary, so nothing checked that
+		the block sat inside its parcel.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -581,9 +588,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 318)
-		self.assertEqual(len(registry.READ_TOOLS), 148)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 170)
+		self.assertEqual(len(registry.TOOLS), 321)
+		self.assertEqual(len(registry.READ_TOOLS), 149)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 172)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

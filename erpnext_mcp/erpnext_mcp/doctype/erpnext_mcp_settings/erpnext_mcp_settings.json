@@ -203,6 +203,7 @@
   "geo_tools_col",
   "allow_set_field_boundary",
   "allow_set_zone_boundary",
+  "allow_set_parcel_boundary",
   "allow_import_field_boundary_geojson",
   "family_tools_section",
   "allow_list_family_members",
@@ -311,6 +312,7 @@
   "shift_section",
   "allow_list_shifts",
   "allow_get_shift",
+  "allow_get_shift_track",
   "allow_list_heat_exposure_events",
   "allow_get_heat_exposure_event",
   "shift_col",
@@ -319,6 +321,7 @@
   "allow_remove_worker_from_shift",
   "allow_log_shift_event",
   "allow_end_shift",
+  "allow_log_shift_location",
   "allow_create_heat_exposure_event",
   "weather_section",
   "allow_get_weather_timeline",
@@ -1731,6 +1734,13 @@
   },
   {
    "default": "0",
+   "description": "WRITE. The same for a parcel \u2014 the OUTER shape, the one the deed and the tax bill both describe \u2014 and reports which of the blocks, zones and cabins registered on it fall outside it. Reported rather than enforced: a planting that predates a deed split really does straddle the line. This closes the gap set_field_boundary apologised for on every call from v0.12.0 to v0.31.0, when a parcel had no boundary to check a block against.",
+   "fieldname": "allow_set_parcel_boundary",
+   "fieldtype": "Check",
+   "label": "Set Parcel Boundary"
+  },
+  {
+   "default": "0",
    "description": "WRITE. Set boundaries on existing blocks from a GeoJSON FeatureCollection. Dry run by default, per-feature errors, and it never creates a Field.",
    "fieldname": "allow_import_field_boundary_geojson",
    "fieldtype": "Check",
@@ -2441,6 +2451,13 @@
   },
   {
    "default": "1",
+   "description": "READ. Where the crew went during one shift, in the order the fixes were TAKEN rather than the order they arrived \u2014 a phone out of signal posts an hour of breadcrumbs the moment the bars come back, and a track sorted by insertion draws the crew teleporting. Reports every silence longer than ten minutes as a gap and interpolates nothing: an invented position on a record read in a wage dispute is the worst thing this app could put on a map. ON by default, because reading a track cannot create one.",
+   "fieldname": "allow_get_shift_track",
+   "fieldtype": "Check",
+   "label": "Get Shift Track"
+  },
+  {
+   "default": "1",
    "description": "READ. Every documented hot shift and what each one claims about OAR 437-004-1131 \u2014 water, shade, rest cycle, observation, training. Reports the shifts where heat illness signs were observed, which is what an investigation reads first, and the ones that do not confirm current heat training, which is a citation on the first hot morning.",
    "fieldname": "allow_list_heat_exposure_events",
    "fieldtype": "Check",
@@ -2492,6 +2509,13 @@
    "fieldname": "allow_end_shift",
    "fieldtype": "Check",
    "label": "End Shift"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Appends one GPS fix to a shift's track \u2014 what the iOS app posts periodically while a shift is running. IT APPENDS AND NEVER EDITS: a breadcrumb somebody can correct is not a record of where the phone was. This is the one tool on the shift surface a worker's phone drives rather than the foreman, and it does not contradict the sole-actor rule \u2014 that rule is about who is ANSWERABLE, and a breadcrumb attests to nothing. OFF by default: a location track is a record of where people were, and turning it on is a decision an operator should take on purpose.",
+   "fieldname": "allow_log_shift_location",
+   "fieldtype": "Check",
+   "label": "Log Shift Location"
   },
   {
    "default": "0",

@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **318 tools** — 148 read-only, 170 mutating.
+- **321 tools** — 149 read-only, 172 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -26,8 +26,10 @@ site at call time.
   Installing it cannot change how anything already on your site behaves. The
   hooks it installs are additive and namespaced: two daily jobs that touch only
   this app's own tables (expired upload-staging rows, and the compliance alert
-  sweep), and one Jinja method (`erpnext_mcp_amount_in_words`) the check print
-  format calls. Every one is resolved by a test — see
+  sweep), one Jinja method (`erpnext_mcp_amount_in_words`) the check print
+  format calls, and — from v0.32.0 — a Leaflet map on seven of its own forms,
+  every one of which is a doctype this app created. Every one is resolved by a
+  test — see
   `tests_standalone/test_hooks.py`, and v0.14.1 in the changelog for why that
   test exists.
 - **One deliberate exception to "no field on anybody else's doctype", and it is
@@ -103,9 +105,10 @@ one. This closes that gap without handing anything away:
 - **It is one whitelisted method.** No second listener, no sidecar, no new port,
   no process to supervise. Your existing nginx, TLS and access logs already
   cover it, and the server is up whenever the site is.
-- **Uninstalling leaves no trace.** No `doc_events`, no scheduler jobs, no
-  overrides, no fixtures, and no field added to a doctype it did not create.
-  Its own doctypes and an endpoint, and then they are gone.
+- **Uninstalling leaves no trace.** No `doc_events`, no overrides, no fixtures,
+  and no field added to a doctype it did not create. Its own doctypes, an
+  endpoint, six scheduled jobs that touch only its own tables, and form scripts
+  on seven of its own forms — and then they are gone.
 
 If you maintain a Frappe site for somebody else, the honest pitch is narrower:
 this is a way to let them ask questions without giving them Desk access or
@@ -286,7 +289,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 318 tools
+## The 321 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.

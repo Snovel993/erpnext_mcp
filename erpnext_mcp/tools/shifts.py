@@ -54,10 +54,12 @@ the same way, so a scoped account listing "every shift" gets its own entity's.
 
 from __future__ import annotations
 
+import itertools
+
 import frappe
 
-from .. import compat, shifts
-from ..args import as_choice, as_date, as_limit, as_str, resolve_company
+from .. import compat, geo, shifts
+from ..args import as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 from . import employee as employee_tool
@@ -67,6 +69,25 @@ DOCTYPE = shifts.DOCTYPE
 #: Most shifts any one read returns. A shift register is read to answer a
 #: question about a period or a crew, not to be exported.
 RECORD_CAP = 500
+
+#: Most breadcrumbs one `get_shift_track` call returns. Deliberately much larger
+#: than `RECORD_CAP`: a track is not a register, and the useful cadence for a
+#: crew's movements is a fix every thirty seconds to two minutes — so a nine-hour
+#: shift is between two hundred and eleven hundred points, and a limit that cut
+#: at five hundred would silently drop the afternoon of a normal day.
+TRACK_CAP = 5000
+
+#: How long a silence has to be before a track REPORTS it as a gap. Ten minutes,
+#: because the cadences a phone actually posts at are all well under it — so a
+#: quiet stretch past ten minutes is a device in a pocket, out of signal, or off,
+#: and a straight line drawn across it is a line the crew did not walk.
+TRACK_GAP_SECONDS = 10 * 60
+
+#: How poor a reported accuracy has to be before it is worth saying so. Fifty
+#: metres is about half an orchard block: past it a fix cannot settle which side
+#: of a boundary somebody was on, which is most of what a track gets asked. It is
+#: a NOTE and never a gate — see the doctype controller on why a bad fix is kept.
+POOR_ACCURACY_METRES = 50.0
 
 #: Most workers one `start_shift` call will roster. Sixty is a large crew on a
 #: single block; past it the caller has almost certainly passed a company roster
@@ -781,6 +802,15 @@ def get_shift(args: dict) -> ToolResult:
 		**described,
 		"heat_exposure_event": (shifts.describe_heat_event(heat[0]) if heat else None),
 		"crew_note": _crew_note(described),
+		# A COUNT AND NOT THE TRACK. A shift with a fix every two minutes carries
+		# hundreds of points, and returning them here would make every read of
+		# every shift pay for a map nobody asked to see. `get_shift_track` is the
+		# tool that draws it.
+		"location_log_count": (
+			frappe.db.count(shifts.LOCATION_DOCTYPE, {"shift": row["name"]})
+			if compat.doctype_exists(shifts.LOCATION_DOCTYPE)
+			else 0
+		),
 	}
 	if not described["weather_timeline"]:
 		data["weather_note"] = (
@@ -815,3 +845,244 @@ def get_shift(args: dict) -> ToolResult:
 			f"{described['compliance_event_count']} event(s) logged"
 		),
 	)
+
+
+# ── 8. log_shift_location ───────────────────────────────────────────────────
+def log_shift_location(args: dict) -> ToolResult:
+	"""Append one GPS fix to a shift's track. Appends only; never edits.
+
+	v0.32.0. THIS IS THE ONE TOOL ON THE SHIFT SURFACE THE WORKER'S PHONE DRIVES
+	RATHER THAN THE FOREMAN, and it is not a contradiction of the sole-actor rule
+	in `erpnext_mcp/shifts.py`. That rule is about who is ANSWERABLE — who forms
+	the crew, calls the water break and signs the close — and none of that moves.
+	A breadcrumb asserts nothing and attests to nothing. It records where a device
+	was, which is a measurement rather than a claim, and the foreman's record is
+	the thing it corroborates.
+
+	ONE FIX PER CALL, in the shape a phone actually sends. A caller catching up
+	after a canyon posts them in a loop; each one carries its own `timestamp`, so
+	the order they arrive in does not matter and the track is drawn from when they
+	were TAKEN.
+
+	AN OPEN SHIFT IS NOT REQUIRED, and that is deliberate rather than lax. A phone
+	that could not reach the site until the evening is posting fixes about a shift
+	the foreman has already closed, and refusing them would throw away exactly the
+	evidence that is hardest to collect. A fix outside the shift's own span is
+	REPORTED — it is worth knowing about, because a phone left running in a truck
+	after the crew went home traces the drive to the shop.
+	"""
+	_require()
+	compat.require_doctype(
+		shifts.LOCATION_DOCTYPE,
+		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
+	)
+	actor = employee_tool.require_hr_role()
+	row = _resolve_shift(args)
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	latitude, longitude = _coordinates(args)
+	when = _when(args, "timestamp")
+	accuracy = args.get("accuracy_meters")
+	source = as_choice(shifts.LOCATION_DOCTYPE, "source", as_str(args, "source") or "iOS", "source")
+
+	person = as_str(args, "employee")
+	if person:
+		person = employee_tool.resolve_employee(person)
+		theirs = str(frappe.db.get_value("Employee", person, "company") or "")
+		if theirs and theirs != str(row.get("company") or ""):
+			raise ToolError(
+				f"{person} is employed by {theirs} and this shift belongs to {row.get('company')}. "
+				"A breadcrumb filed against another entity's crew is evidence in the wrong packet. "
+				"Nothing was created."
+			)
+
+	doc = frappe.new_doc(shifts.LOCATION_DOCTYPE)
+	doc.shift = row["name"]
+	doc.employee = person or None
+	doc.timestamp = when
+	doc.latitude = latitude
+	doc.longitude = longitude
+	doc.source = source
+	if accuracy not in (None, ""):
+		doc.accuracy_meters = as_float(accuracy, "accuracy_meters")
+	doc.notes = as_str(args, "notes")
+	doc.flags.ignore_permissions = True
+	doc.insert(ignore_permissions=True)
+
+	described = shifts.describe_location_row(dict(doc.as_dict()))
+	warnings = []
+	start = str(row.get("start_datetime") or "")
+	end = str(row.get("end_datetime") or "")
+	if start and str(when) < start:
+		warnings.append(
+			f"This fix is timestamped {when}, before the shift started at {start}. It is kept — the "
+			"phone's clock is the phone's clock — but a track that begins before the crew does is "
+			"usually a device left running from the day before."
+		)
+	if end and str(when) > end:
+		warnings.append(
+			f"This fix is timestamped {when}, after the shift ended at {end}. Kept for the same "
+			"reason, and worth a look: a phone still reporting after the crew went home traces the "
+			"drive to the shop rather than the work."
+		)
+	if described["accuracy_meters"] and described["accuracy_meters"] > POOR_ACCURACY_METRES:
+		warnings.append(
+			f"The phone reported {described['accuracy_meters']} m of accuracy on this fix, which is "
+			f"past {POOR_ACCURACY_METRES:.0f} m. It is kept rather than dropped — a fix under a "
+			"canopy in a canyon reads badly and is still the only record the crew was there — but "
+			"it will not settle which side of a block line somebody was on."
+		)
+
+	total = frappe.db.count(shifts.LOCATION_DOCTYPE, {"shift": row["name"]})
+	data = {
+		"shift": row["name"],
+		"company": row.get("company"),
+		"log": doc.name,
+		**described,
+		"shift_open": shifts.is_open(row),
+		"logs_on_this_shift": total,
+		"warnings": warnings,
+	}
+	if not described["h3_cell"]:
+		data["index_note"] = (
+			"No H3 cell was computed for this fix, so it cannot be joined against a block's or a "
+			f"parcel's stored coverage — this site is missing {geo.requires_sentence()}. The "
+			"coordinates are stored and are the evidence; the cell is only the index over them."
+		)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"logged [{described['lat']}, {described['lon']}] at {described['timestamp']} on "
+			f"{row['name']} ({total} fix(es) on this shift)"
+		),
+		docstatus_delta="none → 0 (created)",
+	)
+
+
+def _coordinates(args: dict) -> tuple:
+	"""`latitude` and `longitude` from the call, both required and both on Earth.
+
+	`lat` and `lon` are accepted as aliases because that is what
+	`find_fields_containing_point` calls them and what a phone's location API
+	hands back. One spelling refused is one round trip for nothing.
+	"""
+	pairs = {}
+	for full, short in (("latitude", "lat"), ("longitude", "lon")):
+		value = args.get(full)
+		if value in (None, ""):
+			value = args.get(short)
+		if value in (None, ""):
+			raise ToolError(
+				f"{full} is required, in decimal degrees ({short!r} is accepted for it). A "
+				"breadcrumb with no position is a timestamp. Nothing was created."
+			)
+		pairs[full] = as_float(value, full)
+	latitude, longitude = pairs["latitude"], pairs["longitude"]
+	if not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
+		raise ToolError(
+			f"[{longitude}, {latitude}] is not a point on Earth. Latitude runs -90 to 90 and "
+			"longitude -180 to 180 — a latitude past 90 is almost always the pair the wrong way "
+			"round, which is the one version of this mistake a computer can catch. Nothing was "
+			"created."
+		)
+	return latitude, longitude
+
+
+# ── 9. get_shift_track ──────────────────────────────────────────────────────
+def get_shift_track(args: dict) -> ToolResult:
+	"""Where the crew went during one shift, in the order it happened.
+
+	IN THE ORDER THE FIXES WERE TAKEN, not the order they arrived. A phone out of
+	signal posts an hour of breadcrumbs the moment the bars come back, and a track
+	sorted by insertion draws the crew standing still all morning where the signal
+	returned and then teleporting across the farm.
+
+	THE GAPS ARE REPORTED because a track's silences are the part a reader
+	misjudges. Twenty minutes with no fix is a phone in a pocket under a canopy,
+	an hour is a device that was off, and a straight line drawn between the two
+	ends of either one is a line the crew did not walk.
+	"""
+	_require()
+	actor = employee_tool.require_hr_role()
+	row = _resolve_shift(args, "shift")
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	person = as_str(args, "employee")
+	if person:
+		person = employee_tool.resolve_employee(person)
+
+	# NOT `as_limit`, whose 500-row ceiling is the right one for a register and the
+	# wrong one for a track: a nine-hour shift at a fix every thirty seconds is
+	# eleven hundred points, and a track cut at five hundred loses the afternoon
+	# without saying which half went.
+	limit = max(1, min(TRACK_CAP, as_int(args, "limit", TRACK_CAP) or TRACK_CAP))
+	found = shifts.track_of(row["name"], person, limit=limit + 1)
+	truncated = len(found) > limit
+	found = found[:limit]
+	points = [shifts.describe_location_row(entry) for entry in found]
+
+	first = points[0]["timestamp"] if points else None
+	last = points[-1]["timestamp"] if points else None
+	data = {
+		"shift": row["name"],
+		"company": row.get("company"),
+		"employee": person or None,
+		"shift_start": str(row.get("start_datetime") or "") or None,
+		"shift_end": str(row.get("end_datetime") or "") or None,
+		"shift_open": shifts.is_open(row),
+		"count": len(points),
+		"truncated": truncated,
+		"first_fix": first,
+		"last_fix": last,
+		"track": points,
+		"gaps": _track_gaps(points),
+		"employees_tracked": sorted({entry["employee"] for entry in points if entry["employee"]}),
+	}
+	if not points:
+		data["note"] = (
+			"No location logs for this shift. That is the ordinary case for a shift worked before "
+			"the phones were logging, and it is not a gap in the compliance record — the shift's "
+			"own location, crew spans and event timeline are unaffected. log_shift_location is what "
+			"writes a track, and it is off by default."
+		)
+	if truncated:
+		data["truncation_note"] = (
+			f"More than {limit} fix(es) are on this shift and this is the first {limit} by time. "
+			"Narrow by employee, or read the register directly — the ones after the cut are the END "
+			"of the day, which is the half a truncated track quietly loses."
+		)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{row['name']}: {len(points)} fix(es)"
+			+ (f" from {first} to {last}" if points else "")
+			+ (f" for {person}" if person else "")
+		),
+	)
+
+
+def _track_gaps(points: list) -> list:
+	"""Every silence longer than `TRACK_GAP_SECONDS`, as it would be drawn.
+
+	Reported rather than filled. The alternative — interpolating between the two
+	ends — invents a position for every minute the phone was quiet, and an
+	invented position on a record read in a wage dispute or a re-entry-interval
+	question is the worst thing this app could put on a map.
+	"""
+	out = []
+	for earlier, later in itertools.pairwise(points):
+		if not earlier["timestamp"] or not later["timestamp"]:
+			continue
+		try:
+			seconds = float(frappe.utils.time_diff_in_seconds(later["timestamp"], earlier["timestamp"]))
+		except Exception:  # pragma: no cover - an unparseable stored timestamp
+			continue
+		if seconds > TRACK_GAP_SECONDS:
+			out.append(
+				{
+					"from": earlier["timestamp"],
+					"to": later["timestamp"],
+					"minutes": round(seconds / 60.0, 1),
+				}
+			)
+	return out

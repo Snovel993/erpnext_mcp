@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 318 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 321 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 148 read tools are **on** by default and can be switched off individually. A
+All 149 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -4542,9 +4542,12 @@ surfaces as a geofence saying no to somebody standing in the right place.
 a tape measure routinely disagree, and both figures are kept); a shape spanning
 more than a degree of latitude or longitude — about seventy miles, which is a
 county rather than a block; coordinates at `[0, 0]`, which is what an unset
-coordinate looks like; zones on this block that now fall outside it; and the fact
-that **a parcel has no boundary in this release**, so nothing checked that the
-block sits inside its parcel.
+coordinate looks like; zones on this block that now fall outside it; and — from
+v0.32.0 — a block that hangs over its **parcel's** boundary.
+`boundary_contained_in_parcel` comes back `true`, `false`, or `null` where the
+parcel has no shape of its own to check against. From v0.12.0 to v0.31.0 this
+warning was unconditional and said a parcel had no boundary at all;
+**118a** is the tool that gave it one.
 
 ```
 set_field_boundary {"field": "Yellow Camp Block 3", "boundary_geojson": "{...}"}
@@ -4581,6 +4584,54 @@ would repeat.
 The area comparison is against the zone's own acreage, which is computed from its
 square footage — so a polygon and a design drawing disagreeing by a quarter means
 one of them is a different zone.
+
+---
+
+## 118a. `set_parcel_boundary`
+
+**MUTATING**, default OFF (`allow_set_parcel_boundary`). Needs `shapely` and
+`h3`. v0.32.0.
+
+**Arguments:** `parcel` (required), `boundary_geojson` (required),
+`owning_entity`, `dry_run` (default `false`).
+
+**Returns** everything **117** returns, with `outside_boundary` in place of
+`zones_outside_boundary`.
+
+**The outer shape — the one the deed and the tax bill both describe.** A parcel
+is the unit the county assessor, the deed and the appraisal all agree on, which
+is why the register is keyed on it; from v0.32.0 it is also the unit that carries
+an outline. Everything registered on the parcel is expected to sit inside it, and
+this is the tool that says which things do not.
+
+`outside_boundary` is `{doctype: [names]}` over the three registers that hang off
+a parcel:
+
+| Register | Compared how |
+| --- | --- |
+| `Field` | polygon inside polygon |
+| `Irrigation Zone` | polygon inside polygon |
+| `Housing Unit` | its `gps_latitude` / `gps_longitude` inside the outline (v0.32.0 gave it coordinates) |
+
+**Only things that have a position are tested.** A block with no polygon and a
+cabin with no coordinates are not outside the parcel — they are *unmapped*, which
+is a different answer. Listing them as violations would bury the two names that
+mean something under fifty that do not.
+
+**Containment is reported, never enforced**, and it matters more here than
+anywhere else this app checks it: a planting that predates a deed split really
+does straddle the line, and a cabin on the far side of a road easement is a real
+cabin. Refusing those would make them unrecordable.
+
+Refuses everything **117** refuses, comparing the polygon's area against the
+parcel's own deeded or GIS acreage. On a parcel that recorded figure is usually
+the one to trust, and the refusal message says so.
+
+```
+set_parcel_boundary {"parcel": "Mill Creek", "boundary_geojson": "{...}"}
+→ Mill Creek - ETC: boundary set, 329.9367 acres,
+  centroid 45.6005,-121.178
+```
 
 ---
 
@@ -6418,6 +6469,75 @@ they were there to the end. Computed rather than written back, because writing i
 would destroy the distinction between "left at 13:00" and "stayed to the end" the
 moment the end time changed.
 
+From v0.32.0 it also reports `location_log_count` — **a count and not the
+track**. A shift with a fix every two minutes carries hundreds of points, and
+returning them on every read of every shift would make each one pay for a map
+nobody asked to see. **210b** is the tool that draws it.
+
+## 210a. `log_shift_location`
+
+**MUTATING**, default OFF (`allow_log_shift_location`). v0.32.0. What the iOS app
+posts periodically while a shift is running.
+
+| Argument | Notes |
+| --- | --- |
+| `shift` | **Required.** An open shift is *not* required — see below. |
+| `latitude`, `longitude` | **Required.** `lat` / `lon` accepted for them. |
+| `timestamp` | When the fix was **taken**, not when it arrived. Defaults to now, which is right for a phone posting live and wrong for one catching up. |
+| `accuracy_meters` | Kept, never gated on. Past 50 m it is noted. |
+| `employee` | Whose device. Optional. |
+| `source` | `iOS` (default) or `Manual`. |
+| `notes` | Empty for everything the phone posted. |
+
+**It appends and never edits.** A breadcrumb somebody can correct is not a record
+of where the phone was, it is a record of where somebody would like it to have
+been, and those two documents are indistinguishable afterwards.
+
+**This is the one tool on the shift surface a worker's phone drives rather than
+the foreman**, and it does not contradict the sole-actor rule the rest of that
+surface keeps. That rule is about who is *answerable* — who forms the crew, calls
+the water break, signs the close — and none of it moves here. A breadcrumb
+attests to nothing; it records where a device was, which is a measurement rather
+than a claim.
+
+**An open shift is not required.** A phone that could not reach the site until the
+evening is posting about a shift the foreman has already closed, and refusing
+those would throw away the evidence that is hardest to collect. A fix outside the
+shift's own span is reported instead — a device still reporting after the crew
+went home traces the drive to the shop.
+
+| Refusal | Why |
+| --- | --- |
+| Coordinates off Earth | a latitude past 90 is the pair the wrong way round, and it is the only version of that mistake a computer can catch |
+| A missing latitude or longitude | a breadcrumb with no position is a timestamp |
+| An employee from another company | a fix filed against another entity's crew is evidence in the wrong packet |
+
+## 210b. `get_shift_track`
+
+**Read-only**, default ON (`allow_get_shift_track`). v0.32.0.
+
+**Arguments:** `shift` (required), `employee`, `limit` (default and hard maximum
+5000).
+
+**Returns** `track` (each point with `lat`, `lon`, `timestamp`,
+`accuracy_meters`, `h3_cell`, `employee`, `source`), `count`, `first_fix`,
+`last_fix`, `gaps`, `employees_tracked`, `truncated` and the shift's own span.
+
+**In the order the fixes were taken, not the order they arrived.** A phone out of
+signal in a canyon posts an hour of breadcrumbs the moment the bars come back, so
+a track sorted by insertion draws the crew standing still all morning where the
+signal returned and then teleporting across the farm.
+
+**`gaps` is the part a reader misjudges.** Every silence longer than ten minutes
+is named with its length, because a straight line drawn between the two ends of
+one is a line the crew did not walk. Nothing is interpolated: an invented position
+on a record read in a wage dispute or a re-entry-interval question is the worst
+thing this app could put on a map.
+
+Empty is the ordinary answer for a shift worked before the phones were logging,
+and it is **not** a gap in the compliance record — the shift's own location, crew
+spans and event timeline are unaffected.
+
 ## 211. `list_heat_exposure_events`
 
 **Read-only.** `company`, `from_date`/`to_date`, `with_gaps_only`, `limit`.
@@ -7386,6 +7506,81 @@ messages asking why.
 be approved or rejected — deciding an already-decided one would overwrite the name
 and date of whoever decided it first, which is the one thing an approval record
 exists to preserve.
+
+---
+
+## v0.32.0 — geo map views and crew tracking
+
+Two halves of one idea: **the geography this app has been storing since v0.12.0
+becomes something a person can look at, and a shift stops being a place and
+starts being a path.**
+
+### The map
+
+A Leaflet map is injected into seven Desk forms through `doctype_js`, all seven
+of them doctypes this app created.
+
+| Form | What it draws |
+| --- | --- |
+| `Parcel` | its own outline |
+| `Field` | its boundary, over its parcel's |
+| `Irrigation Zone` | its boundary, over the block it waters |
+| `Housing Unit` | a marker, over its parcel's outline |
+| `Asset Register` | a marker at `gps_latitude` / `gps_longitude` |
+| `Farm Task` | the location resolved through whichever register `location_doctype` names |
+| `Farm Shift` | the shift's anchor, plus the crew's track as a coloured polyline |
+
+**Drawing the containing shape underneath is the point of the whole widget.** The
+boundary tools *report* containment and never enforce it, and a disagreement
+reported in a warning string is a disagreement nobody pictures. Drawn, the
+difference between "that is the corner we always farmed across" and "two vertices
+are in the wrong order" takes a second to see.
+
+**Nothing on any of these forms writes.** There is no drag-to-move marker, no
+draw-a-polygon tool and no save path of any kind. A boundary is compliance
+evidence and it is set through the three boundary tools, which validate the shape,
+refuse a self-intersection, compare the area against the recorded acreage and
+recompute every derived field.
+
+**The library comes from a CDN and the tiles from OpenStreetMap**, so a bench with
+no outbound internet gets no map. That is handled rather than left to fail: the
+section says the library could not be reached and prints the coordinates
+underneath. The record is the coordinates; the map is a reading of them.
+
+`doctype_js` was a **forbidden hook** until this release, spelled "this app adds
+no client script to a doctype it does not own" — and the clause after the comma
+was always the real rule. `test_hooks.py` now asserts that every doctype named is
+one this app shipped, that every file named exists, and that the shared widget is
+listed first in every entry (Frappe concatenates them in order, and a widget
+listed second is a `ReferenceError` that takes the whole form script down).
+
+### The track
+
+**Shift Location Log** — one GPS fix, taken during a shift, at a time. Standalone
+rather than a child table of the shift: a nine-hour shift at a fix every two
+minutes is two hundred and seventy rows, and a child table is loaded whole every
+time anybody opens the shift form.
+
+- **210a `log_shift_location`** (write, default OFF) — what the phone posts.
+- **210b `get_shift_track`** (read, default ON) — what the map draws.
+
+See those sections above for the ordering rule, the gap reporting and why an
+open shift is not required.
+
+### The parcel outline
+
+**118a `set_parcel_boundary`** (write, default OFF) closes the gap
+`set_field_boundary` had been apologising for on every call since v0.12.0. Parcel
+now carries the same derived suite Field and Irrigation Zone do, and
+`set_field_boundary` returns `boundary_contained_in_parcel` — `true`, `false`, or
+`null` where the parcel has no shape to check against.
+
+**Housing Unit gains `gps_latitude` and `gps_longitude`**, accepted by
+`create_housing_unit` and `update_housing_unit`, and returned as a `gps` object
+(or `null` — never `{lat: 0, lon: 0}`, because null island is a real place and it
+is what an unset Float pair looks like). The pair moves together or not at all:
+passing one is filled in from the stored other, and a genuine half-pair is
+refused.
 
 ---
 

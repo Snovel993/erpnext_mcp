@@ -733,6 +733,13 @@ _PRECIOUS_DOCTYPES = (
 		"refused it. The photograph is the substantiation a deduction rests on, and it "
 		"exists nowhere else once the paper slip is in a truck door pocket",
 	),
+	(
+		"Shift Location Log",
+		"the crew tracks — every GPS fix the phones posted during a shift, with the time "
+		"each one was taken. It is the only record of where anybody actually went, which "
+		"is what answers a re-entry-interval question and a disputed timesheet alike, and "
+		"a measurement nobody kept cannot be taken again",
+	),
 )
 
 #: Doctypes that go with the app and are NOT worth warning about, with why. The

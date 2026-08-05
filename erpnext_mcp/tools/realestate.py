@@ -46,9 +46,11 @@ at them. It does not expire a lease because a date has passed either: see the
 note in `list_leases` on why a calendar is not a decision.
 """
 
+import json
+
 import frappe
 
-from .. import compat
+from .. import compat, geo
 from ..args import (
 	as_bool,
 	as_choice,
@@ -147,6 +149,14 @@ _PARCEL_FIELDS = (
 	"appraiser",
 	"appraisal_document",
 	"related_asset",
+	# v0.32.0. The shape on the ground and everything derived from it. Selected
+	# through `compat.existing_fields`, so a site that has not migrated yet reads
+	# a parcel without them rather than failing on a column that is not there.
+	"boundary_geojson",
+	"boundary_centroid_lat",
+	"boundary_centroid_lon",
+	"boundary_bbox_geojson",
+	"area_computed_acres",
 	"notes",
 	"creation",
 	"owner",
@@ -246,8 +256,29 @@ def _describe_parcel(row: dict) -> dict:
 		"appraiser": row.get("appraiser") or None,
 		"appraisal_document": row.get("appraisal_document") or None,
 		"related_asset": row.get("related_asset") or None,
+		# v0.32.0. THE CENTROID IS REPORTED AND THE POLYGON IS NOT. A boundary is
+		# a few kilobytes of coordinates and every list of parcels would carry one
+		# per row; `mapped` says whether there is one and `get_parcel` hands back
+		# the shape itself for the one parcel somebody asked about.
+		"mapped": bool(str(row.get("boundary_geojson") or "").strip()),
+		"boundary_centroid": _centroid(row),
+		"area_computed_acres": round(float(row.get("area_computed_acres") or 0), 4) or None,
 		"notes": row.get("notes") or None,
 	}
+
+
+def _centroid(row: dict) -> dict | None:
+	"""`{lat, lon}` for a mapped parcel, or None. Never `{lat: 0, lon: 0}`.
+
+	Null island is a real place and an unset coordinate looks exactly like it, so
+	a parcel with no boundary reports nothing rather than a point in the Gulf of
+	Guinea that a map would happily fly to.
+	"""
+	latitude = row.get("boundary_centroid_lat")
+	longitude = row.get("boundary_centroid_lon")
+	if latitude in (None, "") or longitude in (None, ""):
+		return None
+	return {"lat": round(float(latitude), 7), "lon": round(float(longitude), 7)}
 
 
 def _describe_lease(row: dict, today: str = "") -> dict:
@@ -800,6 +831,12 @@ def get_parcel(args: dict) -> ToolResult:
 		]
 	data["leases"] = leases
 	data["active_leases"] = len([lease for lease in leases if lease["status"] == "Active"])
+
+	# THE ONE READ THAT HANDS BACK THE WHOLE POLYGON. `list_parcels` reports
+	# `mapped` and a centroid; this is the tool a map calls for one parcel, and
+	# giving it the shape saves a second round trip for the only thing it wants.
+	data["boundary_geojson"] = entry.get("boundary_geojson") or None
+	data["boundary_bbox_geojson"] = entry.get("boundary_bbox_geojson") or None
 
 	data["attachments"] = frappe.db.count(
 		"File", {"attached_to_doctype": PARCEL, "attached_to_name": entry["name"]}
@@ -1371,6 +1408,166 @@ def link_parcel_to_asset(args: dict) -> ToolResult:
 		f"(cost {summary['gross_purchase_amount']:,.2f}, appraised {summary['appraised_value']:,.2f})",
 		docstatus_delta="",
 	)
+
+
+# ── 319. set_parcel_boundary ────────────────────────────────────────────────
+def set_parcel_boundary(args: dict) -> ToolResult:
+	"""Give a parcel its shape, and say which of the things on it now fall outside it.
+
+	v0.32.0, and it closes a gap `set_field_boundary` has been apologising for
+	since v0.12.0: that tool warned, on every call, that a parcel had no boundary
+	so nothing had checked the block sat inside its parcel. It does now.
+
+	CONTAINMENT IS REPORTED AND NEVER ENFORCED, which is the same posture
+	`set_zone_boundary` takes towards its field and is more obviously right here.
+	A parcel traced off an assessor's map and a block traced off a drone flight
+	are two independent measurements of adjacent ground; where they disagree by a
+	metre along a shared line, the answer is that somebody should look, not that
+	the parcel cannot be recorded. And a block genuinely does straddle two parcels
+	on plenty of farms — the deed line runs down the middle of a planting because
+	the planting predates the split.
+	"""
+	_require(PARCEL)
+	geo.require()
+	company = _entity(args, required=False) or ""
+	entry = parcel_row(as_str(args, "parcel", required=True), company)
+
+	geometry = geo.parse(args.get("boundary_geojson"))
+	derived = geo.derive(geometry)
+	shape = derived.pop("shape")
+
+	ratio, verdict = geo.area_disagreement(entry.get("acreage"), derived["area_computed_acres"])
+	entered = round(float(entry.get("acreage") or 0), 2)
+	if verdict == "refuse":
+		raise ToolError(
+			f"the boundary encloses {derived['area_computed_acres']} acres and {entry['name']} is "
+			f"recorded as {entered} — a difference of {round(ratio * 100, 1)}%. That is not a survey "
+			"disagreement, it is one of the two figures being about a different piece of ground. A "
+			"parcel is the unit the assessor, the deed and the tax bill all agree on, so the acreage "
+			"here is usually the one worth trusting — check the polygon, or fix the acreage with "
+			"update_parcel. Nothing was changed."
+		)
+
+	warnings = list(geo.check_coordinates_look_like_degrees(geometry, "boundary_geojson"))
+	if verdict == "warn":
+		warnings.append(
+			f"The boundary encloses {derived['area_computed_acres']} acres against a recorded "
+			f"{entered} — {round(ratio * 100, 1)}%. A deed, an assessor's map and a GIS trace "
+			"routinely disagree by a few percent; both figures are kept and neither is overwritten."
+		)
+	if not entered:
+		warnings.append(
+			f"No acreage was recorded on this parcel, so nothing was compared. The polygon says "
+			f"{derived['area_computed_acres']} acres — set it with update_parcel if that is right."
+		)
+
+	outside = _things_outside(entry["name"], shape)
+	for doctype, names in sorted(outside.items()):
+		warnings.append(
+			f"{len(names)} {doctype}(s) on this parcel fall outside its boundary: "
+			f"{', '.join(names)}. That is allowed — a block really can straddle a deed line, and a "
+			"cabin on the far side of a road easement is a real cabin — but if it was not "
+			"deliberate, one of the two shapes is wrong."
+		)
+
+	dry_run = as_bool(args, "dry_run", False)
+	data = {
+		"parcel": entry["name"],
+		"owning_entity": entry.get("owning_entity"),
+		"acreage_recorded": entered or None,
+		"area_computed_acres": derived["area_computed_acres"],
+		"area_disagreement_ratio": ratio or None,
+		"boundary_centroid": {
+			"lat": derived["boundary_centroid_lat"],
+			"lon": derived["boundary_centroid_lon"],
+		},
+		"boundary_bbox_geojson": derived["boundary_bbox_geojson"],
+		"h3_cell_counts": {
+			resolution: len(cells) for resolution, cells in sorted(json.loads(derived["h3_cells"]).items())
+		},
+		"h3_resolutions": list(geo.H3_RESOLUTIONS),
+		"outside_boundary": {doctype: names for doctype, names in sorted(outside.items())},
+		"warnings": warnings,
+		"dry_run": bool(dry_run),
+		"changed": False,
+	}
+	if dry_run:
+		return ToolResult(
+			data,
+			f"dry run: would set a {derived['area_computed_acres']}-acre boundary on {entry['name']}",
+		)
+
+	doc = frappe.get_doc(PARCEL, entry["name"])
+	for fieldname, value in derived.items():
+		doc.set(fieldname, value)
+	doc.save(ignore_permissions=True)
+
+	data["changed"] = True
+	return ToolResult(
+		data,
+		f"{entry['name']}: boundary set, {derived['area_computed_acres']} acres, "
+		f"centroid {derived['boundary_centroid_lat']},{derived['boundary_centroid_lon']}",
+		docstatus_delta="0 → 0 (updated)",
+	)
+
+
+#: What sits on a parcel and can be checked against its outline, and how each one
+#: says where it is. A polygon is compared with `covers`; a point with
+#: `covers_point`. Housing Unit is in the point list from v0.32.0, which is the
+#: release that gave it coordinates at all.
+_CONTAINED_POLYGONS = (("Field", "parcel"), ("Irrigation Zone", "parcel"))
+_CONTAINED_POINTS = (("Housing Unit", "parcel", "gps_latitude", "gps_longitude"),)
+
+
+def _things_outside(parcel: str, shape) -> dict:
+	"""Everything registered on this parcel whose own position is not inside it.
+
+	Only records that HAVE a position are tested. A block with no boundary and a
+	cabin with no coordinates are not outside the parcel — they are unmapped, and
+	reporting them as violations would fill the result with fifty names that mean
+	nothing and bury the two that do.
+	"""
+	out: dict = {}
+	for doctype, link_field in _CONTAINED_POLYGONS:
+		if not compat.doctype_exists(doctype) or not compat.has_field(doctype, "boundary_geojson"):
+			continue
+		names = []
+		for row in (
+			frappe.db.get_all(
+				doctype,
+				filters={link_field: parcel, "boundary_geojson": ("is", "set")},
+				fields=["name", "boundary_geojson"],
+				limit=REGISTER_CAP,
+			)
+			or []
+		):
+			other = geo.stored_shape(row.get("boundary_geojson"))
+			if other is not None and not geo.covers_shape(shape, other):
+				names.append(str(row["name"]))
+		if names:
+			out[doctype] = sorted(names)
+
+	for doctype, link_field, lat_field, lon_field in _CONTAINED_POINTS:
+		if not compat.doctype_exists(doctype) or not compat.has_field(doctype, lat_field):
+			continue
+		names = []
+		for row in (
+			frappe.db.get_all(
+				doctype,
+				filters={link_field: parcel},
+				fields=["name", lat_field, lon_field],
+				limit=REGISTER_CAP,
+			)
+			or []
+		):
+			latitude, longitude = row.get(lat_field), row.get(lon_field)
+			if not latitude or not longitude:
+				continue
+			if not geo.covers_point(shape, latitude, longitude):
+				names.append(str(row["name"]))
+		if names:
+			out[doctype] = sorted(names)
+	return out
 
 
 # ── 127. convey_parcel ──────────────────────────────────────────────────────

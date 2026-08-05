@@ -20,6 +20,10 @@
   "related_asset",
   "linkage_col",
   "access_card_zone",
+  "position_section",
+  "gps_latitude",
+  "position_col",
+  "gps_longitude",
   "compliance_section",
   "fsma_worker_facility",
   "or_housing_law_compliant",
@@ -126,6 +130,31 @@
    "fieldname": "access_card_zone",
    "fieldtype": "Data",
    "label": "Access Card Zone"
+  },
+  {
+   "description": "Where the building actually stands. A camp address is a driveway off a county road and a cabin number is a number somebody painted on a door — neither of them puts an ambulance, an inspector or a crew bus at the right building. A parcel has a boundary and a unit has a point, and the point is the one that answers 'which cabin'.",
+   "fieldname": "position_section",
+   "fieldtype": "Section Break",
+   "label": "Position"
+  },
+  {
+   "description": "Decimal degrees, -90 to 90. Set it with update_housing_unit. Seven decimal places is about a centimetre, which is far finer than a phone will ever fix — the precision is here so a coordinate copied from a survey is not rounded on the way in.",
+   "fieldname": "gps_latitude",
+   "fieldtype": "Float",
+   "label": "GPS Latitude",
+   "precision": "7"
+  },
+  {
+   "fieldname": "position_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Decimal degrees, -180 to 180. Negative in the western hemisphere: a Pacific Northwest camp reads about -121, and a positive number there is a coordinate in China.",
+   "fieldname": "gps_longitude",
+   "fieldtype": "Float",
+   "label": "GPS Longitude",
+   "precision": "7"
   },
   {
    "description": "The facts three different regimes ask about the same building. They are on the unit rather than in a compliance register because they are also the facts that decide whether anybody can be put in it tonight: an Uninhabitable unit with no smoke detector test is not a reporting problem, it is a unit that has to stay empty.",
