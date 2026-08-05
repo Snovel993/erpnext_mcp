@@ -301,6 +301,13 @@
   "allow_deactivate_salary_structure",
   "allow_calculate_payroll",
   "allow_submit_payroll",
+  "expense_receipt_section",
+  "allow_list_expense_receipts",
+  "allow_get_expense_receipt",
+  "expense_receipt_col",
+  "allow_submit_expense_receipt",
+  "allow_approve_expense_receipt",
+  "allow_reject_expense_receipt",
   "shift_section",
   "allow_list_shifts",
   "allow_get_shift",
@@ -2370,6 +2377,50 @@
    "label": "Submit Payroll"
   },
   {
+   "fieldname": "expense_receipt_section",
+   "fieldtype": "Section Break",
+   "label": "Expense Receipt Capture"
+  },
+  {
+   "default": "1",
+   "description": "READ. List expense receipts with filters by status, employee, company, category, task and receipt date range. Lowest OCR confidence first.",
+   "fieldname": "allow_list_expense_receipts",
+   "fieldtype": "Check",
+   "label": "List Expense Receipts"
+  },
+  {
+   "default": "1",
+   "description": "READ. One expense receipt in full — extracted fields, photograph, line items, the raw OCR text behind them, and the review trail.",
+   "fieldname": "allow_get_expense_receipt",
+   "fieldtype": "Check",
+   "label": "Get Expense Receipt"
+  },
+  {
+   "fieldname": "expense_receipt_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Capture an operational expense from a photographed receipt — the OCR-extracted merchant, amount and date, with the image and raw text kept beside them.",
+   "fieldname": "allow_submit_expense_receipt",
+   "fieldtype": "Check",
+   "label": "Submit Expense Receipt"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Approve an expense receipt, recording which Employee approved it and when. Separate from rejection on purpose: approving and refusing are different permissions.",
+   "fieldname": "allow_approve_expense_receipt",
+   "fieldtype": "Check",
+   "label": "Approve Expense Receipt"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Reject an expense receipt with a required reason, recording which Employee rejected it and when.",
+   "fieldname": "allow_reject_expense_receipt",
+   "fieldtype": "Check",
+   "label": "Reject Expense Receipt"
+  },
+  {
    "fieldname": "shift_section",
    "fieldtype": "Section Break",
    "label": "Crew Shifts and Heat Exposure"
@@ -3254,7 +3305,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-05 09:00:00.000000",
+ "modified": "2026-08-05 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

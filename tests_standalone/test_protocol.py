@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_eighty_five_tools_one_hundred_twenty_eight_read_one_hundred_fifty_seven_write(
+	def test_catalogue_is_three_hundred_eighteen_tools_one_hundred_forty_eight_read_one_hundred_seventy_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -560,10 +560,30 @@ class Catalogue(SeededTestCase):
 		preview_total_payroll_taxes and list_employees_by_work_state read;
 		create_state_tax_config, update_state_tax_config and
 		import_state_tax_table write.
+
+		v0.30.0 ADDED NINE — five reads and four writes — for salary structures
+		and the payroll engine: get_salary_structure, list_salary_structures,
+		preview_payroll, get_payroll_entry and list_payroll_entries read;
+		create_salary_structure, deactivate_salary_structure, calculate_payroll
+		and submit_payroll write.
+
+		v0.31.0 ADDED FIVE — two reads and three writes — for expense receipt
+		capture: list_expense_receipts and get_expense_receipt read;
+		submit_expense_receipt, approve_expense_receipt and
+		reject_expense_receipt write. Approval and rejection are two tools rather
+		than one verdict argument because they are two switches an operator sets
+		independently, and that is a difference a single tool cannot express.
+
+		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
+		tools without touching them, so this test, `test_read_tools.py`'s copy of
+		the read count and the three in `test_tool_catalog_count.py` all failed on
+		main until v0.31.0. The counts are cheap to update and the failure is
+		loud; what it cost was the signal — six red tests that everybody had
+		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 304)
-		self.assertEqual(len(registry.READ_TOOLS), 141)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 163)
+		self.assertEqual(len(registry.TOOLS), 318)
+		self.assertEqual(len(registry.READ_TOOLS), 148)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 170)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

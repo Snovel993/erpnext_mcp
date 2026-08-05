@@ -54,6 +54,7 @@ from .tools import (
 	dispatch,
 	employee,
 	evidence,
+	expenses,
 	farm,
 	fieldwork,
 	files,
@@ -8878,6 +8879,148 @@ TOOLS = {
 		title="Submit payroll",
 		available=_needs_doctype("Farm Payroll Entry"),
 		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+	),
+	# ── v0.31.0: Expense Receipt Capture ────────────────────────────────────
+	"list_expense_receipts": _tool(
+		expenses.list_expense_receipts,
+		"Operational expense receipts, filtered by status, employee, company, "
+		"category, task and receipt date range. Returns the extracted fields, the "
+		"scanner's confidence and the total of everything matched, LOWEST "
+		"CONFIDENCE FIRST — so the receipts somebody most needs to open the photo "
+		"for are at the top rather than at the end. Read-only.",
+		{
+			"company": _COMPANY,
+			"status": _field(_STRING, "Filter by status: Draft, Submitted, Approved, or Rejected."),
+			"employee": _field(_STRING, "Filter by who submitted it — Employee docname or employee_name."),
+			"submitted_by": _field(_STRING, "Alias for employee."),
+			"category": _field(
+				_STRING,
+				"Filter by category: Fuel, Equipment Parts, Supplies, Hardware, "
+				"Feed, Seed, Fertilizer, or Other.",
+			),
+			"farm_task": _field(_STRING, "Filter to the receipts booked against one Farm Task."),
+			"from_date": _field(_STRING, "Earliest receipt_date as YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest receipt_date as YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+		title="List expense receipts",
+	),
+	"get_expense_receipt": _tool(
+		expenses.get_expense_receipt,
+		"One expense receipt in full: the extracted fields, the attached "
+		"photograph, the line items the scanner could read, the RAW OCR TEXT it "
+		"read them out of, and the review trail — who approved or rejected it, "
+		"when, and on what grounds. Read-only.",
+		{
+			"name": _field(_STRING, "The Expense Receipt docname."),
+			"expense_receipt": _field(_STRING, "Alias for name."),
+			"receipt": _field(_STRING, "Alias for name."),
+		},
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+		title="Get expense receipt",
+	),
+	"submit_expense_receipt": _tool(
+		expenses.submit_expense_receipt,
+		"MUTATING (default OFF). Capture one operational expense from a "
+		"photographed receipt. Takes the fields an on-device OCR pass already "
+		"extracted — merchant, amount, date — together with the image, the raw "
+		"OCR text and the scanner's confidence, so a bookkeeper can always check "
+		"the machine's reading against the paper. Creates the receipt as "
+		"Submitted; pass status Draft for a client holding an offline queue. "
+		"Approval and rejection are separate tools with separate switches.",
+		{
+			"merchant": _field(_STRING, "The vendor as it reads on the receipt."),
+			"amount": _field(_NUMBER, "The receipt total, including tax."),
+			"receipt_date": _field(_STRING, "The date on the receipt as YYYY-MM-DD."),
+			"category": _field(
+				_STRING,
+				"Fuel, Equipment Parts, Supplies, Hardware, Feed, Seed, Fertilizer "
+				"or Other. Defaults to Other.",
+			),
+			"company": _COMPANY,
+			"submitted_by": _field(_STRING, "The Employee who photographed it — docname or employee_name."),
+			"employee": _field(_STRING, "Alias for submitted_by."),
+			"farm_task": _field(_STRING, "Optional Farm Task this expense was incurred for."),
+			"status": _field(_STRING, "Draft or Submitted. Defaults to Submitted."),
+			"receipt_image": _field(_STRING, "File URL of the photograph, as returned by an upload tool."),
+			"ocr_raw_text": _field(_STRING, "Everything the scanner read, unedited. Kept for audit."),
+			"ocr_confidence": _field(
+				_NUMBER,
+				"The scanner's confidence as a FRACTION from 0 to 1, not a "
+				"percentage. A low number is not an error — it is a receipt "
+				"somebody should look at, and it sorts to the top of the list.",
+			),
+			"items": _field(
+				{
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"description": _STRING,
+							"quantity": _NUMBER,
+							"unit_price": _NUMBER,
+							"line_total": _NUMBER,
+						},
+					},
+				},
+				"Line items the scanner could read. `line_total` is filled from "
+				"quantity times unit_price where it is missing, and left alone "
+				"where the receipt gave one. The lines are never reconciled "
+				"against the total — tax, tips and deposits live between them.",
+			),
+			"notes": _field(_STRING, "Anything the person capturing it wants to add."),
+		},
+		required=("merchant", "amount", "receipt_date", "submitted_by"),
+		mutating=True,
+		title="Submit expense receipt",
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+	),
+	"approve_expense_receipt": _tool(
+		expenses.approve_expense_receipt,
+		"MUTATING (default OFF). Approve an expense receipt, recording which "
+		"Employee approved it and on what date. Only a Draft or Submitted receipt "
+		"can be approved — deciding an already-decided one would overwrite the "
+		"name and date of whoever decided it first.",
+		{
+			"name": _field(_STRING, "The Expense Receipt docname."),
+			"expense_receipt": _field(_STRING, "Alias for name."),
+			"receipt": _field(_STRING, "Alias for name."),
+			"approved_by": _field(_STRING, "The approving Employee — docname or employee_name."),
+			"employee": _field(_STRING, "Alias for approved_by."),
+			"approved_date": _field(_STRING, "Date as YYYY-MM-DD. Defaults to today."),
+		},
+		required=("name", "approved_by"),
+		mutating=True,
+		title="Approve expense receipt",
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+	),
+	"reject_expense_receipt": _tool(
+		expenses.reject_expense_receipt,
+		"MUTATING (default OFF). Reject an expense receipt WITH A REASON, "
+		"recording which Employee rejected it, on what date, and why. The reason "
+		"is required and is stored on the record rather than in a comment, so the "
+		"phone that submitted the receipt gets it back. Only a Draft or Submitted "
+		"receipt can be rejected.",
+		{
+			"name": _field(_STRING, "The Expense Receipt docname."),
+			"expense_receipt": _field(_STRING, "Alias for name."),
+			"receipt": _field(_STRING, "Alias for name."),
+			"reason": _field(_STRING, "Why it was refused, in the words of whoever refused it."),
+			"rejection_reason": _field(_STRING, "Alias for reason."),
+			"rejected_by": _field(_STRING, "The rejecting Employee — docname or employee_name."),
+			"employee": _field(_STRING, "Alias for rejected_by."),
+			"rejected_date": _field(_STRING, "Date as YYYY-MM-DD. Defaults to today."),
+		},
+		required=("name", "reason", "rejected_by"),
+		mutating=True,
+		title="Reject expense receipt",
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
 	),
 	# ── v0.19.0: the training register ──────────────────────────────────────
 	"record_training": _tool(

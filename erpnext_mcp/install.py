@@ -726,6 +726,13 @@ _PRECIOUS_DOCTYPES = (
 		"employee, with the per-slip breakdown of federal and state withholding, FICA, "
 		"and the minimum wage check. The record that proves everybody was paid correctly",
 	),
+	(
+		"Expense Receipt",
+		"the operational expense register — every receipt a foreman photographed in the "
+		"field, with the image, the raw OCR text it was read out of, and who approved or "
+		"refused it. The photograph is the substantiation a deduction rests on, and it "
+		"exists nowhere else once the paper slip is in a truck door pocket",
+	),
 )
 
 #: Doctypes that go with the app and are NOT worth warning about, with why. The

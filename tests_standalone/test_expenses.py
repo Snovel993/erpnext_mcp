@@ -1,0 +1,867 @@
+# SPDX-License-Identifier: MIT
+"""Expense Receipt Capture — v0.31.0.
+
+TEN CLAIMS.
+
+1. `CaptureAndRead` — a submitted receipt comes back with everything it went in with.
+2. `RequiredFields` — merchant, amount, receipt_date, submitted_by and company are refused when absent.
+3. `Validation` — category, status, confidence, amount and every Link are checked with a sentence.
+4. `LineItems` — a missing line total is derived, a given one is kept, and neither is reconciled against the receipt total.
+5. `ApprovalFlow` — approval records who and when.
+6. `RejectionFlow` — rejection requires a reason and records who, when and why.
+7. `StatusTransitions` — a decided receipt cannot be decided again, in either direction.
+8. `Listing` — every filter narrows, the ordering surfaces doubt first, and the total is the total of what matched.
+9. `SettingsGates` — all five switches refuse by name, and the read/write defaults are the ones the app promises.
+10. `TheDoctypeItself` — the schema is well-formed, the controller is reachable, and the constants agree with the JSON.
+
+WHY THE OCR FIELDS ARE TESTED AS DATA AND NOT AS BEHAVIOUR. Nothing in this app
+does OCR — the extraction runs on the phone, in iOS Vision, before any of this is
+called. What the server owes is that the machine's reading and the photograph it
+was read off SURVIVE TOGETHER, and that a low confidence is visible rather than
+silently swallowed. Those are the two things asserted below.
+"""
+
+import json
+
+from erpnext_mcp import registry
+from erpnext_mcp.erpnext_mcp.doctype.expense_receipt.expense_receipt import ExpenseReceipt
+from erpnext_mcp.tools import expenses
+
+from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
+from .harness import STORE, _load_app_doctype
+
+EXPENSE_TOOLS = (
+	"list_expense_receipts",
+	"get_expense_receipt",
+	"submit_expense_receipt",
+	"approve_expense_receipt",
+	"reject_expense_receipt",
+)
+
+EXPENSE_TOOLS_ON = {f"allow_{name}": 1 for name in EXPENSE_TOOLS}
+
+#: A receipt off a fuel pump, with the fields an on-device OCR pass would have
+#: filled in. Every test that needs "a receipt" starts from this and overrides the
+#: one field it is actually about.
+FUEL_RECEIPT = {
+	"merchant": "Valley Co-op Fuel",
+	"amount": 184.62,
+	"receipt_date": "2026-06-14",
+	"category": "Fuel",
+	"company": MAIN,
+	"submitted_by": "HR-EMP-00001",
+	"receipt_image": "/files/receipt-fuel-2026-06-14.jpg",
+	"ocr_raw_text": "VALLEY CO-OP FUEL\n14/06/2026\nDIESEL 42.1 GAL\nTOTAL 184.62",
+	"ocr_confidence": 0.94,
+}
+
+#: A parts receipt with two lines, one of which the scanner read a total for and
+#: one of which it did not. The pair is the whole of the line-total claim: 2 at
+#: $31.25 has to come out $62.50, and 4 at $2.10 has to stay the $7.40 the slip
+#: says rather than becoming the $8.40 the multiplication would give.
+PARTS_RECEIPT = {
+	**FUEL_RECEIPT,
+	"merchant": "Cascade Ag Parts",
+	"category": "Equipment Parts",
+	"amount": 96.40,
+	"items": [
+		{"description": "Hydraulic hose 1/2in", "quantity": 2, "unit_price": 31.25},
+		{"description": "Hose clamp", "quantity": 4, "unit_price": 2.10, "line_total": 7.40},
+	],
+}
+
+
+class ExpenseTestCase(V12TestCase):
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, **EXPENSE_TOOLS_ON)
+		install_hrms()
+		self._seed_task()
+
+	def _seed_task(self):
+		STORE.seed(
+			"Farm Task",
+			[
+				{
+					"name": "TASK-2026-0001",
+					"title": "Thin block 4",
+					"company": MAIN,
+					"status": "Open",
+				}
+			],
+		)
+
+	def capture(self, **overrides):
+		"""Submit one receipt and return its payload."""
+		return self.tool_data("submit_expense_receipt", {**FUEL_RECEIPT, **overrides})
+
+
+# ── Claim 1: a receipt comes back with what it went in with ──────────────
+
+
+class CaptureAndRead(ExpenseTestCase):
+	def test_submit_returns_the_new_docname_and_the_extracted_fields(self):
+		data = self.capture()
+		self.assertTrue(data["name"])
+		self.assertEqual(data["merchant"], "Valley Co-op Fuel")
+		self.assertEqual(data["amount"], 184.62)
+		self.assertEqual(data["receipt_date"], "2026-06-14")
+		self.assertEqual(data["category"], "Fuel")
+		self.assertEqual(data["submitted_by"], "HR-EMP-00001")
+
+	def test_a_captured_receipt_is_submitted_not_draft(self):
+		"""The foreman pressed the button. Landing it in Draft would leave every
+		receipt waiting on a second action nobody knows they owe."""
+		self.assertEqual(self.capture()["status"], "Submitted")
+
+	def test_a_client_with_an_offline_queue_can_post_a_draft(self):
+		self.assertEqual(self.capture(status="Draft")["status"], "Draft")
+
+	def test_get_returns_the_photograph_and_the_raw_ocr_text(self):
+		"""The two fields that settle an argument about what the slip said."""
+		name = self.capture()["name"]
+		data = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(data["receipt_image"], "/files/receipt-fuel-2026-06-14.jpg")
+		self.assertIn("TOTAL 184.62", data["ocr_raw_text"])
+		self.assertEqual(data["ocr_confidence"], 0.94)
+
+	def test_the_list_view_does_not_carry_the_raw_ocr_text(self):
+		"""It is the largest field on the record and no list needs it."""
+		self.capture()
+		row = self.tool_data("list_expense_receipts", {"company": MAIN})["receipts"][0]
+		self.assertNotIn("ocr_raw_text", row)
+		self.assertIn("receipt_image", row)
+
+	def test_an_expense_can_be_booked_against_a_task(self):
+		data = self.capture(farm_task="TASK-2026-0001")
+		self.assertEqual(data["farm_task"], "TASK-2026-0001")
+		got = self.tool_data("get_expense_receipt", {"name": data["name"]})
+		self.assertEqual(got["farm_task"], "TASK-2026-0001")
+
+	def test_a_receipt_with_no_task_is_still_a_receipt(self):
+		self.assertIsNone(self.capture()["farm_task"])
+
+	def test_the_employee_can_be_named_rather_than_keyed(self):
+		"""A manager in a chat client knows a person's name, not their docname."""
+		data = self.capture(submitted_by="Ada Orchard")
+		self.assertEqual(data["submitted_by"], "HR-EMP-00001")
+
+	def test_notes_survive_the_round_trip(self):
+		name = self.capture(notes="Filled the spray tractor before the block 4 pass.")["name"]
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertIn("spray tractor", got["notes"])
+
+	def test_get_accepts_the_documented_aliases(self):
+		name = self.capture()["name"]
+		for key in ("name", "expense_receipt", "receipt"):
+			with self.subTest(alias=key):
+				self.assertEqual(self.tool_data("get_expense_receipt", {key: name})["name"], name)
+
+	def test_the_capture_is_audited_with_a_summary_an_operator_can_read(self):
+		self.capture()
+		rows = self.audit_rows(tool_name="submit_expense_receipt")
+		self.assertTrue(rows)
+		self.assertIn("Valley Co-op Fuel", rows[-1]["result_summary"])
+
+
+# ── Claim 2: the fields without which a receipt is not a record ──────────
+
+
+class RequiredFields(ExpenseTestCase):
+	def test_merchant_is_required(self):
+		payload = dict(FUEL_RECEIPT)
+		payload.pop("merchant")
+		self.assertIn("merchant", self.tool_error("submit_expense_receipt", payload))
+
+	def test_amount_is_required(self):
+		payload = dict(FUEL_RECEIPT)
+		payload.pop("amount")
+		self.assertIn("amount", self.tool_error("submit_expense_receipt", payload))
+
+	def test_receipt_date_is_required(self):
+		payload = dict(FUEL_RECEIPT)
+		payload.pop("receipt_date")
+		self.assertIn("receipt_date", self.tool_error("submit_expense_receipt", payload))
+
+	def test_submitted_by_is_required(self):
+		payload = dict(FUEL_RECEIPT)
+		payload.pop("submitted_by")
+		self.assertIn("submitted_by", self.tool_error("submit_expense_receipt", payload))
+
+	def test_company_is_required_on_a_multi_company_site(self):
+		"""The fixture has two companies on purpose, which is what makes this
+		testable at all — on a one-company site it would be inferred."""
+		payload = dict(FUEL_RECEIPT)
+		payload.pop("company")
+		error = self.tool_error("submit_expense_receipt", payload)
+		self.assertIn("company is required", error)
+		self.assertIn(MAIN, error)
+
+	def test_a_zero_amount_is_allowed(self):
+		"""A comped part still generates a slip somebody has to file."""
+		self.assertEqual(self.capture(amount=0)["amount"], 0.0)
+
+	def test_the_registry_declares_the_same_required_fields(self):
+		"""The schema a client validates against and the checks the handler runs
+		have to agree, or a client is told a call is well-formed and it is not."""
+		required = set(registry.TOOLS["submit_expense_receipt"]["inputSchema"]["required"])
+		self.assertEqual(required, {"merchant", "amount", "receipt_date", "submitted_by"})
+
+
+# ── Claim 3: everything else is checked with a sentence ──────────────────
+
+
+class Validation(ExpenseTestCase):
+	def test_an_unknown_category_is_refused_with_the_list(self):
+		error = self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "category": "Bribes"})
+		self.assertIn("category must be one of", error)
+		self.assertIn("Fertilizer", error)
+
+	def test_the_category_defaults_to_other(self):
+		payload = dict(FUEL_RECEIPT)
+		payload.pop("category")
+		self.assertEqual(self.tool_data("submit_expense_receipt", payload)["category"], "Other")
+
+	def test_every_shipped_category_is_accepted(self):
+		for category in expenses.CATEGORIES:
+			with self.subTest(category=category):
+				self.assertEqual(self.capture(category=category)["category"], category)
+
+	def test_a_receipt_cannot_be_captured_straight_into_approved(self):
+		"""Approval is a separate tool with a separate switch. Letting the capture
+		call set it would put the write end of the phone past the gate an operator
+		turned off."""
+		error = self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "status": "Approved"})
+		self.assertIn("status must be Draft or Submitted", error)
+
+	def test_a_confidence_above_one_is_refused_as_a_percentage(self):
+		error = self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "ocr_confidence": 87})
+		self.assertIn("fraction from 0 to 1", error)
+		self.assertIn("percentage", error)
+
+	def test_a_negative_confidence_is_refused(self):
+		self.assertIn(
+			"fraction from 0 to 1",
+			self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "ocr_confidence": -0.2}),
+		)
+
+	def test_the_boundary_values_of_confidence_are_allowed(self):
+		"""0 and 1 are legitimate readings — an unreadable slip and a perfect one."""
+		for value in (0, 1):
+			with self.subTest(confidence=value):
+				name = self.capture(ocr_confidence=value)["name"]
+				got = self.tool_data("get_expense_receipt", {"name": name})
+				self.assertEqual(got["ocr_confidence"], float(value))
+
+	def test_a_receipt_with_no_confidence_at_all_is_accepted(self):
+		"""A client that does no OCR — somebody typing it in — is not a broken client."""
+		payload = dict(FUEL_RECEIPT)
+		payload.pop("ocr_confidence")
+		payload.pop("ocr_raw_text")
+		data = self.tool_data("submit_expense_receipt", payload)
+		self.assertTrue(data["name"])
+
+	def test_a_negative_amount_is_refused_and_says_what_to_use_instead(self):
+		error = self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "amount": -50})
+		self.assertIn("negative", error)
+		self.assertIn("credit note", error)
+
+	def test_an_unknown_employee_is_refused_by_name(self):
+		error = self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "submitted_by": "Nobody"})
+		self.assertIn("no Employee called", error)
+		self.assertIn("Nobody", error)
+
+	def test_an_unknown_task_is_refused_by_name(self):
+		error = self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "farm_task": "TASK-NOPE"})
+		self.assertIn("no Farm Task called", error)
+
+	def test_an_unknown_company_is_refused_with_the_known_ones(self):
+		error = self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "company": "Nowhere Farms"})
+		self.assertIn("no Company named", error)
+
+	def test_a_malformed_date_is_refused(self):
+		self.assertIn(
+			"YYYY-MM-DD",
+			self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "receipt_date": "last tuesday"}),
+		)
+
+	def test_getting_a_receipt_that_does_not_exist_says_so(self):
+		self.assertIn(
+			"no Expense Receipt called",
+			self.tool_error("get_expense_receipt", {"name": "EXR-2026-9999"}),
+		)
+
+	def test_getting_a_receipt_with_no_name_at_all_says_which_argument(self):
+		self.assertIn("name", self.tool_error("get_expense_receipt", {}))
+
+	def test_the_controller_refuses_the_same_confidence_the_tool_does(self):
+		"""The Desk form is a second door onto the same record, and a check that
+		lives only in the tool is one the form walks straight past."""
+		import frappe
+
+		doc = frappe.get_doc({**FUEL_RECEIPT, "doctype": "Expense Receipt", "ocr_confidence": 42})
+		doc.flags.ignore_permissions = True
+		with self.assertRaises(Exception) as caught:
+			doc.insert()
+		self.assertIn("0 to 1", str(caught.exception))
+
+
+# ── Claim 4: the line items ──────────────────────────────────────────────
+
+
+class LineItems(ExpenseTestCase):
+	PARTS = PARTS_RECEIPT
+
+	def test_a_missing_line_total_is_derived_from_quantity_and_price(self):
+		data = self.tool_data("submit_expense_receipt", self.PARTS)
+		self.assertEqual(data["items"][0]["line_total"], 62.50)
+
+	def test_a_line_total_the_scanner_read_is_kept_over_the_multiplication(self):
+		"""Four at $2.10 is $8.40 and the receipt says $7.40. The receipt is right —
+		it gave a discount — and inventing the product would overwrite the truth."""
+		data = self.tool_data("submit_expense_receipt", self.PARTS)
+		self.assertEqual(data["items"][1]["line_total"], 7.40)
+
+	def test_the_items_survive_a_re_read(self):
+		name = self.tool_data("submit_expense_receipt", self.PARTS)["name"]
+		items = self.tool_data("get_expense_receipt", {"name": name})["items"]
+		self.assertEqual(len(items), 2)
+		self.assertEqual(items[0]["description"], "Hydraulic hose 1/2in")
+		self.assertEqual(items[0]["quantity"], 2.0)
+		self.assertEqual(items[0]["unit_price"], 31.25)
+
+	def test_the_items_total_is_reported_and_is_not_the_receipt_total(self):
+		"""Tax, tips, deposits and core charges live between the lines and the
+		total. Reporting both and reconciling neither is the honest answer."""
+		name = self.tool_data("submit_expense_receipt", self.PARTS)["name"]
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(got["items_total"], 69.90)
+		self.assertEqual(got["amount"], 96.40)
+
+	def test_a_receipt_with_no_legible_lines_is_still_valid(self):
+		"""The total is the field that matters. A thermal slip that OCR could not
+		itemise is an expense, not an error."""
+		name = self.capture()["name"]
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(got["items"], [])
+		self.assertEqual(got["items_total"], 0)
+
+	def test_items_that_are_not_a_list_are_refused(self):
+		self.assertIn(
+			"items must be a list",
+			self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "items": "hose, clamp"}),
+		)
+
+	def test_an_item_that_is_not_an_object_is_refused_by_position(self):
+		error = self.tool_error(
+			"submit_expense_receipt", {**FUEL_RECEIPT, "items": [{"description": "ok"}, "clamp"]}
+		)
+		self.assertIn("items[2]", error)
+
+	def test_a_non_numeric_quantity_is_refused_by_position(self):
+		error = self.tool_error(
+			"submit_expense_receipt",
+			{**FUEL_RECEIPT, "items": [{"description": "hose", "quantity": "two", "unit_price": 3}]},
+		)
+		self.assertIn("items[1].quantity", error)
+
+	def test_a_line_with_a_description_and_no_numbers_is_kept(self):
+		"""OCR reads a description far more often than it reads the column beside
+		it. Dropping the row would lose the only thing it did read."""
+		name = self.tool_data(
+			"submit_expense_receipt", {**FUEL_RECEIPT, "items": [{"description": "Misc hardware"}]}
+		)["name"]
+		items = self.tool_data("get_expense_receipt", {"name": name})["items"]
+		self.assertEqual(len(items), 1)
+		self.assertEqual(items[0]["description"], "Misc hardware")
+		self.assertEqual(items[0]["line_total"], 0.0)
+
+
+# ── Claim 5: approval ────────────────────────────────────────────────────
+
+
+class ApprovalFlow(ExpenseTestCase):
+	def test_approval_moves_the_status_and_records_who_and_when(self):
+		name = self.capture()["name"]
+		data = self.tool_data(
+			"approve_expense_receipt",
+			{"name": name, "approved_by": "HR-EMP-00002", "approved_date": "2026-06-20"},
+		)
+		self.assertEqual(data["status"], "Approved")
+		self.assertEqual(data["approved_by"], "HR-EMP-00002")
+		self.assertEqual(data["approved_date"], "2026-06-20")
+
+	def test_the_approval_is_on_the_record_and_not_only_in_the_reply(self):
+		name = self.capture()["name"]
+		self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00002"})
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(got["status"], "Approved")
+		self.assertEqual(got["approved_by"], "HR-EMP-00002")
+		self.assertTrue(got["approved_date"])
+
+	def test_the_approval_date_defaults_to_today(self):
+		name = self.capture()["name"]
+		data = self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00002"})
+		self.assertTrue(data["approved_date"])
+
+	def test_a_draft_can_be_approved_without_being_submitted_first(self):
+		"""A bookkeeper looking at a queue of offline-captured drafts should not
+		have to walk each one through a state nobody is waiting on."""
+		name = self.capture(status="Draft")["name"]
+		data = self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00002"})
+		self.assertEqual(data["status"], "Approved")
+
+	def test_the_approver_can_be_named_rather_than_keyed(self):
+		name = self.capture()["name"]
+		data = self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "Ben Packhouse"})
+		self.assertEqual(data["approved_by"], "HR-EMP-00002")
+
+	def test_an_unknown_approver_is_refused_and_the_receipt_is_untouched(self):
+		name = self.capture()["name"]
+		self.assertIn(
+			"no Employee called",
+			self.tool_error("approve_expense_receipt", {"name": name, "approved_by": "Nobody"}),
+		)
+		self.assertEqual(self.tool_data("get_expense_receipt", {"name": name})["status"], "Submitted")
+
+	def test_approving_a_receipt_that_does_not_exist_says_so(self):
+		self.assertIn(
+			"no Expense Receipt called",
+			self.tool_error(
+				"approve_expense_receipt", {"name": "EXR-2026-9999", "approved_by": "HR-EMP-00002"}
+			),
+		)
+
+	def test_approval_leaves_the_rejection_fields_empty(self):
+		name = self.capture()["name"]
+		self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00002"})
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertIsNone(got["rejected_by"])
+		self.assertIsNone(got["rejection_reason"])
+
+
+# ── Claim 6: rejection ───────────────────────────────────────────────────
+
+
+class RejectionFlow(ExpenseTestCase):
+	def test_rejection_records_who_when_and_why(self):
+		name = self.capture()["name"]
+		data = self.tool_data(
+			"reject_expense_receipt",
+			{
+				"name": name,
+				"rejected_by": "HR-EMP-00002",
+				"reason": "Personal fuel — not a company vehicle.",
+				"rejected_date": "2026-06-21",
+			},
+		)
+		self.assertEqual(data["status"], "Rejected")
+		self.assertEqual(data["rejected_by"], "HR-EMP-00002")
+		self.assertEqual(data["rejected_date"], "2026-06-21")
+		self.assertIn("Personal fuel", data["rejection_reason"])
+
+	def test_the_reason_comes_back_to_the_phone_that_submitted_it(self):
+		"""Stored on the record rather than in a comment, so a read of the receipt
+		returns it without a second call to a different surface."""
+		name = self.capture()["name"]
+		self.tool_data(
+			"reject_expense_receipt",
+			{"name": name, "rejected_by": "HR-EMP-00002", "reason": "No itemised detail."},
+		)
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(got["status"], "Rejected")
+		self.assertIn("No itemised detail", got["rejection_reason"])
+
+	def test_a_rejection_with_no_reason_is_refused(self):
+		name = self.capture()["name"]
+		error = self.tool_error(
+			"reject_expense_receipt", {"name": name, "rejected_by": "HR-EMP-00002", "reason": ""}
+		)
+		self.assertIn("reason is required", error)
+
+	def test_a_refused_rejection_leaves_the_receipt_where_it_was(self):
+		name = self.capture()["name"]
+		self.tool_error("reject_expense_receipt", {"name": name, "rejected_by": "HR-EMP-00002"})
+		self.assertEqual(self.tool_data("get_expense_receipt", {"name": name})["status"], "Submitted")
+
+	def test_the_reason_can_be_sent_under_either_name(self):
+		name = self.capture()["name"]
+		data = self.tool_data(
+			"reject_expense_receipt",
+			{"name": name, "rejected_by": "HR-EMP-00002", "rejection_reason": "Duplicate of EXR-2026-0004."},
+		)
+		self.assertIn("Duplicate", data["rejection_reason"])
+
+	def test_rejection_leaves_the_approval_fields_empty(self):
+		name = self.capture()["name"]
+		self.tool_data(
+			"reject_expense_receipt",
+			{"name": name, "rejected_by": "HR-EMP-00002", "reason": "Wrong company."},
+		)
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertIsNone(got["approved_by"])
+		self.assertIsNone(got["approved_date"])
+
+	def test_the_rejection_is_audited_with_the_reason_in_the_summary(self):
+		name = self.capture()["name"]
+		self.tool_data(
+			"reject_expense_receipt",
+			{"name": name, "rejected_by": "HR-EMP-00002", "reason": "Personal fuel."},
+		)
+		rows = self.audit_rows(tool_name="reject_expense_receipt")
+		self.assertTrue(rows)
+		self.assertIn("Personal fuel", rows[-1]["result_summary"])
+
+
+# ── Claim 7: a decision is taken once ────────────────────────────────────
+
+
+class StatusTransitions(ExpenseTestCase):
+	def _approved(self):
+		name = self.capture()["name"]
+		self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00002"})
+		return name
+
+	def _rejected(self):
+		name = self.capture()["name"]
+		self.tool_data(
+			"reject_expense_receipt",
+			{"name": name, "rejected_by": "HR-EMP-00002", "reason": "Personal fuel."},
+		)
+		return name
+
+	def test_an_approved_receipt_cannot_be_approved_again(self):
+		error = self.tool_error(
+			"approve_expense_receipt", {"name": self._approved(), "approved_by": "HR-EMP-00003"}
+		)
+		self.assertIn("already 'Approved'", error)
+
+	def test_an_approved_receipt_cannot_be_rejected(self):
+		"""Not a policy about second thoughts — it is that overwriting the record
+		would erase the name and date of whoever decided it first."""
+		error = self.tool_error(
+			"reject_expense_receipt",
+			{"name": self._approved(), "rejected_by": "HR-EMP-00003", "reason": "Changed my mind."},
+		)
+		self.assertIn("already 'Approved'", error)
+
+	def test_a_rejected_receipt_cannot_be_approved(self):
+		error = self.tool_error(
+			"approve_expense_receipt", {"name": self._rejected(), "approved_by": "HR-EMP-00003"}
+		)
+		self.assertIn("already 'Rejected'", error)
+
+	def test_a_rejected_receipt_cannot_be_rejected_again(self):
+		error = self.tool_error(
+			"reject_expense_receipt",
+			{"name": self._rejected(), "rejected_by": "HR-EMP-00003", "reason": "Still no."},
+		)
+		self.assertIn("already 'Rejected'", error)
+
+	def test_the_first_decision_stands_after_a_refused_second_one(self):
+		name = self._approved()
+		self.tool_error(
+			"reject_expense_receipt",
+			{"name": name, "rejected_by": "HR-EMP-00003", "reason": "Changed my mind."},
+		)
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(got["status"], "Approved")
+		self.assertEqual(got["approved_by"], "HR-EMP-00002")
+
+	def test_the_two_decidable_statuses_are_the_two_the_capture_tool_can_create(self):
+		"""Stated as an identity rather than two lists, so a status added to one
+		cannot quietly go missing from the other."""
+		self.assertEqual(set(expenses.REVIEWABLE_STATUSES), set(expenses.CREATABLE_STATUSES))
+
+
+# ── Claim 8: listing ─────────────────────────────────────────────────────
+
+
+class Listing(ExpenseTestCase):
+	def setUp(self):
+		super().setUp()
+		self.capture(merchant="Valley Co-op Fuel", category="Fuel", amount=100, receipt_date="2026-06-01")
+		self.capture(
+			merchant="Cascade Ag Parts",
+			category="Equipment Parts",
+			amount=200,
+			receipt_date="2026-06-15",
+			submitted_by="HR-EMP-00002",
+			ocr_confidence=0.41,
+		)
+		self.capture(
+			merchant="Orchard Supply",
+			category="Supplies",
+			amount=50,
+			receipt_date="2026-07-02",
+			farm_task="TASK-2026-0001",
+			ocr_confidence=0.99,
+		)
+
+	def test_it_lists_everything_for_the_company(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN})
+		self.assertEqual(data["count"], 3)
+
+	def test_the_total_is_the_total_of_what_matched(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN})
+		self.assertEqual(data["total_amount"], 350.0)
+
+	def test_the_least_confident_reading_sorts_first(self):
+		"""The receipt nobody can read is the one somebody has to open the photo
+		for. Ordering it last would put it where it is never looked at."""
+		data = self.tool_data("list_expense_receipts", {"company": MAIN})
+		self.assertEqual(data["receipts"][0]["merchant"], "Cascade Ag Parts")
+		self.assertEqual(data["receipts"][-1]["merchant"], "Orchard Supply")
+
+	def test_it_filters_by_employee(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN, "employee": "HR-EMP-00002"})
+		self.assertEqual(data["count"], 1)
+		self.assertEqual(data["receipts"][0]["merchant"], "Cascade Ag Parts")
+
+	def test_it_filters_by_employee_name(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN, "employee": "Ben Packhouse"})
+		self.assertEqual(data["count"], 1)
+
+	def test_it_filters_by_category(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN, "category": "Fuel"})
+		self.assertEqual(data["count"], 1)
+		self.assertEqual(data["total_amount"], 100.0)
+
+	def test_it_filters_by_task(self):
+		data = self.tool_data("list_expense_receipts", {"farm_task": "TASK-2026-0001"})
+		self.assertEqual(data["count"], 1)
+		self.assertEqual(data["receipts"][0]["merchant"], "Orchard Supply")
+
+	def test_it_filters_by_status(self):
+		name = self.tool_data("list_expense_receipts", {"company": MAIN})["receipts"][0]["name"]
+		self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00002"})
+		self.assertEqual(
+			self.tool_data("list_expense_receipts", {"company": MAIN, "status": "Approved"})["count"], 1
+		)
+		self.assertEqual(
+			self.tool_data("list_expense_receipts", {"company": MAIN, "status": "Submitted"})["count"], 2
+		)
+
+	def test_it_filters_by_a_date_range(self):
+		data = self.tool_data(
+			"list_expense_receipts", {"company": MAIN, "from_date": "2026-06-01", "to_date": "2026-06-30"}
+		)
+		self.assertEqual(data["count"], 2)
+		self.assertEqual(data["total_amount"], 300.0)
+
+	def test_from_date_alone_is_an_open_ended_range(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN, "from_date": "2026-06-15"})
+		self.assertEqual(data["count"], 2)
+
+	def test_to_date_alone_is_an_open_ended_range(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN, "to_date": "2026-06-01"})
+		self.assertEqual(data["count"], 1)
+
+	def test_it_scopes_to_the_company_asked_for(self):
+		self.capture(company=OTHER, merchant="Second Co Diesel", amount=999)
+		self.assertEqual(self.tool_data("list_expense_receipts", {"company": MAIN})["count"], 3)
+		self.assertEqual(self.tool_data("list_expense_receipts", {"company": OTHER})["count"], 1)
+
+	def test_the_limit_is_honoured(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN, "limit": 2})
+		self.assertEqual(data["count"], 2)
+
+	def test_an_unknown_status_filter_is_refused_with_the_list(self):
+		error = self.tool_error("list_expense_receipts", {"status": "Pending"})
+		self.assertIn("status must be one of", error)
+		self.assertIn("Approved", error)
+
+	def test_an_unknown_category_filter_is_refused_with_the_list(self):
+		self.assertIn(
+			"category must be one of",
+			self.tool_error("list_expense_receipts", {"category": "Bribes"}),
+		)
+
+	def test_a_filter_that_matches_nothing_is_an_empty_list_not_an_error(self):
+		data = self.tool_data("list_expense_receipts", {"company": MAIN, "status": "Rejected"})
+		self.assertEqual(data["count"], 0)
+		self.assertEqual(data["total_amount"], 0)
+		self.assertEqual(data["receipts"], [])
+
+	def test_reading_the_list_writes_nothing(self):
+		before = {doctype: len(rows) for doctype, rows in STORE.tables.items()}
+		self.tool_data("list_expense_receipts", {"company": MAIN})
+		self.tool_data(
+			"get_expense_receipt",
+			{"name": self.tool_data("list_expense_receipts", {"company": MAIN})["receipts"][0]["name"]},
+		)
+		after = {doctype: len(rows) for doctype, rows in STORE.tables.items()}
+		after.pop("MCP Action Log", None)
+		before.pop("MCP Action Log", None)
+		self.assertEqual(before, after)
+
+
+# ── Claim 9: the switches ────────────────────────────────────────────────
+
+
+class SettingsGates(ExpenseTestCase):
+	def test_each_tool_is_refused_by_the_name_of_the_field_to_tick(self):
+		"""An operator reading the refusal has to be able to find the checkbox."""
+		calls = {
+			"list_expense_receipts": {},
+			"get_expense_receipt": {"name": "EXR-2026-0001"},
+			"submit_expense_receipt": FUEL_RECEIPT,
+			"approve_expense_receipt": {"name": "EXR-2026-0001", "approved_by": "HR-EMP-00002"},
+			"reject_expense_receipt": {
+				"name": "EXR-2026-0001",
+				"rejected_by": "HR-EMP-00002",
+				"reason": "No.",
+			},
+		}
+		for name, arguments in calls.items():
+			with self.subTest(tool=name):
+				self.configure(enabled=1, **{**EXPENSE_TOOLS_ON, f"allow_{name}": 0})
+				error = self.tool_error(name, arguments)
+				self.assertIn(f"allow_{name}", error)
+				self.assertIn("switched off", error)
+
+	def test_a_disabled_tool_never_reaches_the_site(self):
+		"""Refused on the name alone, before the arguments are looked at — so a
+		switched-off capture cannot create a row on its way to being refused."""
+		self.configure(enabled=1, **{**EXPENSE_TOOLS_ON, "allow_submit_expense_receipt": 0})
+		self.tool_error("submit_expense_receipt", FUEL_RECEIPT)
+		self.assertEqual(len(STORE.rows("Expense Receipt")), 0)
+
+	def test_approval_and_rejection_are_switched_separately(self):
+		"""The whole reason they are two tools. An operator who wants a manager
+		able to approve is not thereby saying they may refuse."""
+		self.configure(enabled=1, **{**EXPENSE_TOOLS_ON, "allow_reject_expense_receipt": 0})
+		name = self.capture()["name"]
+		self.assertIn(
+			"allow_reject_expense_receipt",
+			self.tool_error(
+				"reject_expense_receipt", {"name": name, "rejected_by": "HR-EMP-00002", "reason": "No."}
+			),
+		)
+		self.assertEqual(
+			self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00002"})[
+				"status"
+			],
+			"Approved",
+		)
+
+	def test_the_two_reads_ship_on_and_the_three_writes_ship_off(self):
+		fields = {field["fieldname"]: field for field in _load_app_doctype("erpnext_mcp_settings")["fields"]}
+		self.assertEqual(fields["allow_list_expense_receipts"]["default"], "1")
+		self.assertEqual(fields["allow_get_expense_receipt"]["default"], "1")
+		self.assertEqual(fields["allow_submit_expense_receipt"]["default"], "0")
+		self.assertEqual(fields["allow_approve_expense_receipt"]["default"], "0")
+		self.assertEqual(fields["allow_reject_expense_receipt"]["default"], "0")
+
+	def test_out_of_the_box_the_writes_are_refused_and_the_reads_are_not(self):
+		"""The shipped posture, exercised rather than read off the JSON."""
+		self.configure(enabled=1)
+		self.assertIn("switched off", self.tool_error("submit_expense_receipt", FUEL_RECEIPT))
+		self.tool_data("list_expense_receipts", {"company": MAIN})
+
+	def test_the_registry_agrees_with_the_switches_about_which_ones_write(self):
+		for name in ("list_expense_receipts", "get_expense_receipt"):
+			with self.subTest(tool=name):
+				self.assertIn(name, registry.READ_TOOLS)
+		for name in ("submit_expense_receipt", "approve_expense_receipt", "reject_expense_receipt"):
+			with self.subTest(tool=name):
+				self.assertIn(name, registry.MUTATING_TOOLS)
+
+	def test_every_expense_tool_says_what_it_needs_when_the_doctype_is_absent(self):
+		for name in EXPENSE_TOOLS:
+			with self.subTest(tool=name):
+				self.assertIn("Expense Receipt", registry.TOOLS[name]["requires"])
+				self.assertIn("v0.31.0", registry.TOOLS[name]["requires"])
+
+
+# ── Claim 10: the schema itself ──────────────────────────────────────────
+
+
+class TheDoctypeItself(ExpenseTestCase):
+	def setUp(self):
+		super().setUp()
+		self.receipt = _load_app_doctype("expense_receipt")
+		self.item = _load_app_doctype("expense_receipt_item")
+		self.by_name = {field["fieldname"]: field for field in self.receipt["fields"]}
+
+	def test_every_field_the_specification_named_is_there(self):
+		for fieldname in (
+			"merchant",
+			"amount",
+			"receipt_date",
+			"category",
+			"receipt_image",
+			"ocr_raw_text",
+			"ocr_confidence",
+			"submitted_by",
+			"farm_task",
+			"company",
+			"notes",
+			"status",
+			"approved_by",
+			"approved_date",
+		):
+			with self.subTest(field=fieldname):
+				self.assertIn(fieldname, self.by_name)
+
+	def test_the_reqd_fields_are_exactly_the_ones_a_receipt_is_useless_without(self):
+		"""Asserted as an exact set rather than a membership check: a field that
+		quietly became mandatory is a phone that quietly stops being able to post."""
+		reqd = {name for name, field in self.by_name.items() if field.get("reqd")}
+		self.assertEqual(reqd, {"merchant", "amount", "receipt_date", "submitted_by", "company", "status"})
+
+	def test_the_receipt_image_is_an_image_field_and_not_a_bare_attachment(self):
+		"""It is a photograph, and the Desk showing it inline is the difference
+		between checking a receipt and downloading one."""
+		self.assertEqual(self.by_name["receipt_image"]["fieldtype"], "Attach Image")
+
+	def test_the_raw_ocr_text_is_long_text_and_the_confidence_is_a_float(self):
+		self.assertEqual(self.by_name["ocr_raw_text"]["fieldtype"], "Long Text")
+		self.assertEqual(self.by_name["ocr_confidence"]["fieldtype"], "Float")
+
+	def test_the_status_options_and_default_are_what_the_tools_assume(self):
+		self.assertEqual(self.by_name["status"]["options"].split("\n"), list(expenses.STATUSES))
+		self.assertEqual(self.by_name["status"]["default"], "Draft")
+
+	def test_the_category_options_match_the_list_the_tools_validate_against(self):
+		"""Two hand-written copies of one list is how a category gets accepted by
+		the tool and refused by the database."""
+		self.assertEqual(tuple(self.by_name["category"]["options"].split("\n")), expenses.CATEGORIES)
+
+	def test_the_item_table_is_a_child_table_with_the_four_named_columns(self):
+		self.assertEqual(int(self.item.get("istable") or 0), 1)
+		fields = {field["fieldname"] for field in self.item["fields"]}
+		self.assertEqual(fields, {"description", "quantity", "unit_price", "line_total"})
+
+	def test_the_receipt_points_at_the_item_table(self):
+		self.assertEqual(self.by_name["items"]["fieldtype"], "Table")
+		self.assertEqual(self.by_name["items"]["options"], "Expense Receipt Item")
+
+	def test_the_controller_is_importable_and_is_a_document(self):
+		"""The v0.7.1 failure: a DocType JSON with no Python module beside it, and
+		a `bench migrate` that dies with ModuleNotFoundError."""
+		import frappe
+
+		self.assertIsNotNone(frappe.new_doc("Expense Receipt"))
+		self.assertIsNotNone(frappe.new_doc("Expense Receipt Item"))
+		self.assertTrue(issubclass(ExpenseReceipt, object))
+
+	def test_it_is_named_by_a_series_a_person_can_read(self):
+		self.assertEqual(self.receipt["autoname"], "naming_series:")
+		self.assertEqual(self.by_name["naming_series"]["default"], "EXR-.YYYY.-.####")
+
+	def test_the_register_is_declared_precious_so_uninstall_warns_about_it(self):
+		"""The photograph is the substantiation a deduction rests on, and it
+		exists nowhere else once the paper is in a truck door pocket."""
+		from erpnext_mcp import install
+
+		precious = dict(install._PRECIOUS_DOCTYPES)
+		self.assertIn("Expense Receipt", precious)
+		self.assertIn("photograph", precious["Expense Receipt"])
+
+	def test_the_tool_payload_is_json_serialisable(self):
+		"""Every tool result goes down the wire as JSON. A Date or a Decimal that
+		reached the payload would fail at the transport rather than here."""
+		name = self.capture()["name"]
+		result = self.tool("get_expense_receipt", {"name": name})
+		json.loads(result["content"][0]["text"])

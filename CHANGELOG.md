@@ -3,6 +3,76 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.31.0 — 2026-08-05
+
+**Expense Receipt Capture.** A foreman photographs a receipt at the fuel pump or
+the parts counter, iOS Vision OCR reads the merchant, the total and the date off
+it on-device, and the phone posts the extracted fields, the image and the raw OCR
+text here in one call. The extraction runs on the device on purpose: the photo is
+the largest thing in the payload and the extraction is the cheapest part of the
+job, so doing it there means the foreman sees what the machine read and can
+correct it while the paper is still in their hand.
+
+**Two new DocTypes:** Expense Receipt (the register, with the photograph, the raw
+OCR text and the scanner's confidence kept beside the extracted fields) and
+Expense Receipt Item (the line detail, as a child table).
+
+**Five new tools** — two reads and three writes:
+- `list_expense_receipts`, `get_expense_receipt` (read)
+- `submit_expense_receipt`, `approve_expense_receipt`,
+  `reject_expense_receipt` (write)
+
+**`ocr_confidence` is a sorting key, not a gate.** A crumpled thermal slip
+photographed in the sun reads badly and is still a real expense.
+`list_expense_receipts` orders lowest confidence first, so the receipts somebody
+most needs to open the photo for are at the top of the page rather than at the end
+of it. The field is range-checked to 0..1 — a scanner reporting `87` meant `0.87`,
+and a field that silently accepts both makes the ordering meaningless.
+
+**Approval and rejection are separate tools with separate switches**, because an
+operator who wants a manager able to approve reimbursements is not thereby saying
+the same surface may refuse them. A rejection **requires a reason**, stored on the
+record rather than in a comment so the phone that submitted the receipt gets it
+back. Neither decision can be taken twice: overwriting would erase the name and
+date of whoever decided first.
+
+**Line totals are derived only where the scanner left them blank.** OCR reads a
+bold receipt total far more reliably than a column of line arithmetic, so a row
+with a quantity and a unit price and no total gets the product — and a row that
+carries its own total keeps it, because a receipt that charges four at $3 and
+totals $11.50 after a discount is telling the truth and the multiplication is not.
+The lines are never reconciled against the receipt total; tax, tips, deposits and
+core charges all live in between, and a validation that demanded they agree would
+reject most real receipts.
+
+**Also in this release:** the tool counts in `docs/tool-catalog.md`,
+`test_protocol.py` and `test_read_tools.py` are back in step with the registry —
+v0.30.0's nine tools landed without them, and the six tests that guard the
+agreement had been red since.
+
+## 0.30.0 — 2026-08-05
+
+**Salary Structures + Payroll Engine.** A pure-function payroll calculator over
+the state and federal engines v0.28.0 and v0.29.0 built. A salary structure links
+an Employee to a pay type — Piece Rate, Hourly or Salary — and a base rate; the
+calculator walks the shifts in a pay period, computes gross with overtime and
+break pay, runs federal withholding, state withholding and FICA over it, and
+checks the result against the minimum wage for the state the work happened in.
+
+**Three new DocTypes:** Farm Salary Structure (one active structure per employee,
+bounded by effective dates), Farm Payroll Entry (one run per pay period per
+company) and Farm Payroll Slip (the per-employee child rows under it).
+
+**Nine new tools** — five reads and four writes:
+- `get_salary_structure`, `list_salary_structures`, `preview_payroll`,
+  `get_payroll_entry`, `list_payroll_entries` (read)
+- `create_salary_structure`, `deactivate_salary_structure`,
+  `calculate_payroll`, `submit_payroll` (write)
+
+**`preview_payroll` writes nothing.** It runs one employee down the same code
+path `calculate_payroll` takes and reports what the slip would say — which is how
+a rate change gets checked before a pay run rather than after one.
+
 ## 0.29.0 — 2026-08-05
 
 **State Tax Engines — Oregon + Washington.** Pure-function calculation engines

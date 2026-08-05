@@ -1030,6 +1030,9 @@ APP_DOCTYPES = {
 	"Farm Salary Structure": "farm_salary_structure",
 	"Farm Payroll Entry": "farm_payroll_entry",
 	"Farm Payroll Slip": "farm_payroll_slip",
+	# v0.31.0. Expense Receipt Capture.
+	"Expense Receipt": "expense_receipt",
+	"Expense Receipt Item": "expense_receipt_item",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -1448,6 +1451,11 @@ CHILD_TABLES = {
 	# double has to store them as child rows or the per-company threshold is
 	# untestable and would look like it worked.
 	("Weather Settings", "per_company_overrides"): "Weather Company Override",
+	# v0.31.0. The line items OCR read off a receipt. Modelled so an appended row
+	# carries its own doctype the way Frappe gives it one — which is what makes
+	# `get_expense_receipt` returning the same four keys on a freshly built
+	# document and on one re-read from the store a test rather than a hope.
+	("Expense Receipt", "items"): "Expense Receipt Item",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as

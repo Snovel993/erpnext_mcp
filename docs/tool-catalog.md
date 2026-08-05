@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 304 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 318 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 141 read tools are **on** by default and can be switched off individually. A
+All 148 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7271,6 +7271,121 @@ Also in this release:
 - `scan_asset` response includes `can_report` and `suggested_skill`
 - Farm Task doctype gains an `asset` Link field to Asset Register
 - Tasks linked to an asset appear in `get_asset_detail`'s history timeline
+
+---
+
+## v0.31.0 — expense receipt capture
+
+A foreman photographs a receipt at the fuel pump or the parts counter, iOS Vision
+OCR reads the merchant, the total and the date off it **on the device**, and the
+phone posts the extracted fields, the image and the raw OCR text here in one call.
+
+The extraction runs on the phone on purpose. The photograph is the largest thing
+in the payload and the extraction is the cheapest part of the job; doing it there
+means the foreman sees what the machine read before they put the phone away and
+can correct it while the paper is still in their hand. By the time these tools see
+a receipt, a person has already looked at the reading.
+
+Two DocTypes: **Expense Receipt** (the register) and **Expense Receipt Item** (the
+line detail, a child table).
+
+### `list_expense_receipts`
+
+**READ (default ON).** Receipts filtered by `status`, `employee`,
+`company`, `category`, `farm_task` and a `from_date`/`to_date` range on the
+receipt date. Returns each receipt's extracted fields, its image URL and the
+scanner's confidence, plus `count` and `total_amount` for everything that matched.
+
+**Ordered lowest OCR confidence first.** The receipt nobody can read is the one
+somebody has to open the photo for; sorting it last would put it where it is never
+looked at.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `company` | | Company name or abbreviation |
+| `status` | | `Draft`, `Submitted`, `Approved` or `Rejected` |
+| `employee` | | Who submitted it — docname or employee name (`submitted_by` is an alias) |
+| `category` | | `Fuel`, `Equipment Parts`, `Supplies`, `Hardware`, `Feed`, `Seed`, `Fertilizer`, `Other` |
+| `farm_task` | | Only the receipts booked against one task |
+| `from_date` / `to_date` | | Receipt date range, `YYYY-MM-DD` |
+| `limit` | | Default 100, hard maximum 500 |
+
+### `get_expense_receipt`
+
+**READ (default ON).** One receipt in full: the extracted fields, the photograph,
+the line items, `ocr_raw_text` — everything the scanner read, unedited — and the
+review trail: who approved or rejected it, when, and on what grounds. `items_total`
+is the sum of the lines and is **not** expected to equal `amount`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Expense Receipt docname (`expense_receipt`, `receipt` are aliases) |
+
+### `submit_expense_receipt`
+
+**MUTATING (default OFF).** Capture one expense. Creates the receipt as
+`Submitted`; pass `status: "Draft"` for a client holding an offline queue.
+Approval and rejection are separate tools with separate switches, so this call
+cannot create an already-approved receipt.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `merchant` | yes | The vendor as it reads on the receipt |
+| `amount` | yes | The receipt total, including tax |
+| `receipt_date` | yes | `YYYY-MM-DD` |
+| `submitted_by` | yes | Employee who photographed it — docname or name (`employee` is an alias) |
+| `company` | | Required on a multi-company site |
+| `category` | | Defaults to `Other` |
+| `farm_task` | | The job the expense was incurred for |
+| `status` | | `Draft` or `Submitted`. Defaults to `Submitted` |
+| `receipt_image` | | File URL of the photograph |
+| `ocr_raw_text` | | Everything the scanner read, kept for audit |
+| `ocr_confidence` | | A **fraction from 0 to 1**, not a percentage |
+| `items` | | `[{description, quantity, unit_price, line_total}, …]` |
+| `notes` | | Anything the person capturing it wants to add |
+
+`ocr_confidence` is range-checked rather than rescaled. A scanner reporting `87`
+meant `0.87` and is refused with that sentence — silently dividing by 100 would
+put a guessed number in the field an approver uses to decide what to look at, and
+`1.4` is genuinely ambiguous between a percentage and a bug.
+
+A line item with a `quantity` and a `unit_price` but no `line_total` gets the
+product; one that carries its own total keeps it. OCR reads a bold receipt total
+far more reliably than a column of line arithmetic, and a receipt that charges
+four at $3 and totals $11.50 after a discount is telling the truth.
+
+### `approve_expense_receipt`
+
+**MUTATING (default OFF).** Sets `status` to `Approved` and records
+`approved_by` and `approved_date`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Expense Receipt docname |
+| `approved_by` | yes | Approving Employee — docname or name |
+| `approved_date` | | `YYYY-MM-DD`. Defaults to today |
+
+### `reject_expense_receipt`
+
+**MUTATING (default OFF).** Sets `status` to `Rejected` and records
+`rejected_by`, `rejected_date` and `rejection_reason`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Expense Receipt docname |
+| `reason` | yes | Why it was refused (`rejection_reason` is an alias) |
+| `rejected_by` | yes | Rejecting Employee — docname or name |
+| `rejected_date` | | `YYYY-MM-DD`. Defaults to today |
+
+The reason is required and is stored **on the record**, not in a comment, so
+`get_expense_receipt` returns it to the phone that submitted the thing. A
+rejection with no sentence beside it is the state that generates the next three
+messages asking why.
+
+**Neither decision can be taken twice.** Only a `Draft` or `Submitted` receipt can
+be approved or rejected — deciding an already-decided one would overwrite the name
+and date of whoever decided it first, which is the one thing an approval record
+exists to preserve.
 
 ---
 

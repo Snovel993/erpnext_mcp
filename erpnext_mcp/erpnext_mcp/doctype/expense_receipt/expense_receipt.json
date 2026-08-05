@@ -1,0 +1,263 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-05 13:00:00.000000",
+ "description": "One operational expense, captured from the receipt itself. A foreman photographs the slip in the field, on-device OCR reads the merchant, the total and the date off it, and this is where that lands — with the photo, the raw OCR text and the scanner's own confidence kept beside the extracted fields so a bookkeeper can always check the machine's reading against the paper. Status moves Draft to Submitted to Approved or Rejected; approval and rejection each record who acted and when, and a rejection records why.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "merchant",
+  "amount",
+  "receipt_date",
+  "category",
+  "col_break_header",
+  "company",
+  "submitted_by",
+  "farm_task",
+  "status",
+  "image_section",
+  "receipt_image",
+  "items_section",
+  "items",
+  "ocr_section",
+  "ocr_confidence",
+  "ocr_raw_text",
+  "review_section",
+  "approved_by",
+  "approved_date",
+  "col_break_review",
+  "rejected_by",
+  "rejected_date",
+  "rejection_reason",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "EXR-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "EXR-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The vendor as it reads on the receipt.",
+   "fieldname": "merchant",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Merchant",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "The receipt total, including tax.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "reqd": 1
+  },
+  {
+   "fieldname": "receipt_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Receipt Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Other",
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Fuel\nEquipment Parts\nSupplies\nHardware\nFeed\nSeed\nFertilizer\nOther"
+  },
+  {
+   "fieldname": "col_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The employee who photographed the receipt.",
+   "fieldname": "submitted_by",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Submitted By",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The job this expense was incurred for, if there is one.",
+   "fieldname": "farm_task",
+   "fieldtype": "Link",
+   "label": "Farm Task",
+   "options": "Farm Task",
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nSubmitted\nApproved\nRejected",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "image_section",
+   "fieldtype": "Section Break",
+   "label": "The Receipt"
+  },
+  {
+   "description": "The photograph the extracted fields were read off. Keep it: it is the only thing that outlives a disagreement about what the slip said.",
+   "fieldname": "receipt_image",
+   "fieldtype": "Attach Image",
+   "label": "Receipt Image"
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Line Items"
+  },
+  {
+   "description": "Whatever line detail the scanner could read. A receipt with no legible lines is still a valid expense — the total is the field that matters.",
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Expense Receipt Item"
+  },
+  {
+   "fieldname": "ocr_section",
+   "fieldtype": "Section Break",
+   "label": "OCR"
+  },
+  {
+   "default": "0",
+   "description": "The scanner's own confidence in its reading, 0 to 1. A low number is not an error; it is a receipt somebody should look at.",
+   "fieldname": "ocr_confidence",
+   "fieldtype": "Float",
+   "label": "OCR Confidence",
+   "precision": "3"
+  },
+  {
+   "description": "Everything the scanner read, unedited. The audit trail behind every field above it.",
+   "fieldname": "ocr_raw_text",
+   "fieldtype": "Long Text",
+   "label": "OCR Raw Text"
+  },
+  {
+   "fieldname": "review_section",
+   "fieldtype": "Section Break",
+   "label": "Review"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "Employee",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_date",
+   "fieldtype": "Date",
+   "label": "Approved Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_review",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "rejected_by",
+   "fieldtype": "Link",
+   "label": "Rejected By",
+   "options": "Employee",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejected_date",
+   "fieldtype": "Date",
+   "label": "Rejected Date",
+   "read_only": 1
+  },
+  {
+   "description": "Why it was refused, in the words of whoever refused it. Required to reject.",
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-05 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Expense Receipt",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Farm Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Foreman",
+   "write": 1
+  }
+ ],
+ "search_fields": "merchant,category,status,company",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "merchant",
+ "track_changes": 1
+}
