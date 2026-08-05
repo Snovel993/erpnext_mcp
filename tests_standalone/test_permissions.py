@@ -230,6 +230,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"MCP Action Log",
 				"Staged File Chunk",
 				"Staged File Upload Session",
+				"State Tax Table",
 				"Training Type",
 			],
 		)

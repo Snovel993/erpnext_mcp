@@ -16,6 +16,7 @@
   "identity_col",
   "company",
   "location",
+  "work_state",
   "farm_location_gps",
   "when_section",
   "start_datetime",
@@ -105,6 +106,15 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Location"
+  },
+  {
+   "description": "Which state's wage and tax law governs this shift. Payroll uses this to route to the correct state withholding engine — Oregon or Washington. An employee who works shifts in both states in the same pay period gets each shift's gross calculated under its own state's rules.",
+   "fieldname": "work_state",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Work State",
+   "options": "\nOR\nWA",
+   "search_index": 1
   },
   {
    "description": "Latitude,longitude or a place name, in the same spelling Farm Task Assignment uses since v0.19.1. THIS IS THE WEATHER ANCHOR: v0.19.4 walks every open shift every fifteen minutes and asks Open-Meteo what the conditions are HERE, and a shift with no coordinates gets no timeline. 'Latitude 45.52, longitude -122.68' and '45.52,-122.68' are both accepted; a block name is accepted and resolved later.",

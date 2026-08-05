@@ -3,6 +3,32 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.29.0 — 2026-08-05
+
+**State Tax Engines — Oregon + Washington.** Pure-function calculation engines
+for state-level payroll taxes, keyed by work location per shift (not employer
+HQ). Oregon: income tax (ORS 316.037, 4 brackets), Statewide Transit Tax,
+Paid Leave Oregon (ORS 657B), workers' comp. Washington: PFML (RCW 50A),
+WA Cares Fund (RCW 50B), L&I workers' comp. No WA state income tax.
+
+**Two new DocTypes:** State Tax Configuration (per company × state × tax year,
+with state-conditional field visibility) and State Tax Table (Oregon income
+tax brackets by filing status).
+
+**Nine new tools** — six reads and three writes:
+- `get_state_tax_config`, `list_state_tax_configs`, `get_state_tax_table`,
+  `preview_state_withholding`, `preview_total_payroll_taxes`,
+  `list_employees_by_work_state` (read)
+- `create_state_tax_config`, `update_state_tax_config`,
+  `import_state_tax_table` (write)
+
+**Combined payroll preview:** `preview_total_payroll_taxes` returns federal
+withholding, FICA, and state taxes in one call. Cross-state pay periods
+(employee works shifts in both OR and WA) are handled per-shift.
+
+**Farm Shift gains `work_state`:** a per-shift Select field (OR / WA) that
+routes each shift's gross to the correct state engine.
+
 ## 0.28.0 — 2026-08-04
 
 **W-4 + Federal Withholding Engine.** A pure-function calculation engine for

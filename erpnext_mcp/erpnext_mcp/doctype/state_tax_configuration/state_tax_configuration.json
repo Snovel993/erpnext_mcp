@@ -1,0 +1,266 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-05 09:00:00.000000",
+ "description": "Per-company, per-state tax configuration. One record per (company x state x tax_year). Oregon: income tax, Statewide Transit Tax, Paid Leave Oregon, Workers' Compensation. Washington: PFML, WA Cares Fund, L&I. Rates are entered by the employer because they vary by classification and employer size.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "state",
+  "tax_year",
+  "status",
+  "or_section",
+  "or_income_tax_enabled",
+  "or_transit_tax_rate",
+  "or_paid_leave_section",
+  "or_paid_leave_rate",
+  "or_paid_leave_employee_share",
+  "or_paid_leave_col",
+  "or_paid_leave_employer_share",
+  "or_paid_leave_small_employer",
+  "or_workers_comp_section",
+  "or_workers_comp_rate",
+  "wa_section",
+  "wa_pfml_rate",
+  "wa_pfml_employee_share",
+  "wa_pfml_col",
+  "wa_pfml_employer_share",
+  "wa_pfml_wage_base",
+  "wa_cares_section",
+  "wa_cares_rate",
+  "wa_cares_employee_only",
+  "wa_cares_exempt_employees",
+  "wa_li_section",
+  "wa_li_rate_employee",
+  "wa_li_col",
+  "wa_li_rate_employer"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "State",
+   "options": "OR\nWA",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "tax_year",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Tax Year",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nSuperseded"
+  },
+  {
+   "depends_on": "eval:doc.state=='OR'",
+   "fieldname": "or_section",
+   "fieldtype": "Section Break",
+   "label": "Oregon Income Tax"
+  },
+  {
+   "default": "1",
+   "fieldname": "or_income_tax_enabled",
+   "fieldtype": "Check",
+   "label": "Oregon Income Tax Enabled",
+   "description": "Enable Oregon state income tax withholding."
+  },
+  {
+   "default": "0.1",
+   "fieldname": "or_transit_tax_rate",
+   "fieldtype": "Percent",
+   "label": "Statewide Transit Tax Rate",
+   "description": "Oregon Statewide Transit Tax rate (0.1% for 2025). No wage base cap."
+  },
+  {
+   "depends_on": "eval:doc.state=='OR'",
+   "fieldname": "or_paid_leave_section",
+   "fieldtype": "Section Break",
+   "label": "Paid Leave Oregon (ORS 657B)"
+  },
+  {
+   "default": "1.0",
+   "fieldname": "or_paid_leave_rate",
+   "fieldtype": "Percent",
+   "label": "Paid Leave Total Rate",
+   "description": "Total Paid Leave Oregon contribution rate (1.0% for 2025)."
+  },
+  {
+   "default": "60",
+   "fieldname": "or_paid_leave_employee_share",
+   "fieldtype": "Percent",
+   "label": "Employee Share",
+   "description": "Employee share of the total rate (60% for employers with 25+ employees)."
+  },
+  {
+   "fieldname": "or_paid_leave_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "40",
+   "fieldname": "or_paid_leave_employer_share",
+   "fieldtype": "Percent",
+   "label": "Employer Share",
+   "description": "Employer share of the total rate (40% for employers with 25+ employees)."
+  },
+  {
+   "default": "0",
+   "fieldname": "or_paid_leave_small_employer",
+   "fieldtype": "Check",
+   "label": "Small Employer (under 25 employees)",
+   "description": "Employers with fewer than 25 employees do not pay the employer share."
+  },
+  {
+   "depends_on": "eval:doc.state=='OR'",
+   "fieldname": "or_workers_comp_section",
+   "fieldtype": "Section Break",
+   "label": "Oregon Workers' Compensation"
+  },
+  {
+   "default": "0",
+   "fieldname": "or_workers_comp_rate",
+   "fieldtype": "Percent",
+   "label": "Workers' Comp Rate",
+   "description": "Varies by classification code. Employer-entered."
+  },
+  {
+   "depends_on": "eval:doc.state=='WA'",
+   "fieldname": "wa_section",
+   "fieldtype": "Section Break",
+   "label": "Washington Paid Family & Medical Leave (RCW 50A)"
+  },
+  {
+   "default": "0.92",
+   "fieldname": "wa_pfml_rate",
+   "fieldtype": "Percent",
+   "label": "PFML Rate",
+   "description": "Total PFML rate (0.92% for 2025)."
+  },
+  {
+   "default": "72.76",
+   "fieldname": "wa_pfml_employee_share",
+   "fieldtype": "Percent",
+   "label": "Employee Share",
+   "description": "Employee share of PFML rate (typically ~72.76%)."
+  },
+  {
+   "fieldname": "wa_pfml_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "27.24",
+   "fieldname": "wa_pfml_employer_share",
+   "fieldtype": "Percent",
+   "label": "Employer Share",
+   "description": "Employer share of PFML rate (typically ~27.24%)."
+  },
+  {
+   "default": "176100",
+   "fieldname": "wa_pfml_wage_base",
+   "fieldtype": "Currency",
+   "label": "PFML Wage Base",
+   "description": "Social Security wage base ($176,100 for 2025)."
+  },
+  {
+   "depends_on": "eval:doc.state=='WA'",
+   "fieldname": "wa_cares_section",
+   "fieldtype": "Section Break",
+   "label": "WA Cares Fund (RCW 50B)"
+  },
+  {
+   "default": "0.58",
+   "fieldname": "wa_cares_rate",
+   "fieldtype": "Percent",
+   "label": "WA Cares Rate",
+   "description": "WA Cares Fund premium rate (0.58% for 2025). Employee-only."
+  },
+  {
+   "default": "1",
+   "fieldname": "wa_cares_employee_only",
+   "fieldtype": "Check",
+   "label": "Employee Only",
+   "description": "WA Cares is 100% employee-paid. Employer pays nothing.",
+   "read_only": 1
+  },
+  {
+   "fieldname": "wa_cares_exempt_employees",
+   "fieldtype": "Small Text",
+   "label": "Exempt Employees",
+   "description": "Employee IDs who opted out before the deadline. Comma-separated."
+  },
+  {
+   "depends_on": "eval:doc.state=='WA'",
+   "fieldname": "wa_li_section",
+   "fieldtype": "Section Break",
+   "label": "Washington Labor & Industries"
+  },
+  {
+   "default": "0",
+   "fieldname": "wa_li_rate_employee",
+   "fieldtype": "Percent",
+   "label": "L&I Employee Rate",
+   "description": "Varies by risk class. Employer-entered."
+  },
+  {
+   "fieldname": "wa_li_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "wa_li_rate_employer",
+   "fieldtype": "Percent",
+   "label": "L&I Employer Rate",
+   "description": "Varies by risk class. Employer-entered."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-05 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "State Tax Configuration",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

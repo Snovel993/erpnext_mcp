@@ -1,0 +1,106 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-05 09:00:00.000000",
+ "description": "State income tax withholding bracket. One row per bracket per filing status per tax year per state. Oregon uses ORS 316.037 brackets; Washington has no state income tax and needs no rows here.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "state",
+  "tax_year",
+  "filing_status",
+  "bracket_floor",
+  "bracket_ceiling",
+  "base_tax",
+  "marginal_rate"
+ ],
+ "fields": [
+  {
+   "default": "OR",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "State",
+   "options": "OR\nWA",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "tax_year",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Tax Year",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "filing_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Filing Status",
+   "options": "Single\nMarried Filing Jointly\nHead of Household",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "bracket_floor",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Bracket Floor",
+   "reqd": 1,
+   "description": "Income over this amount."
+  },
+  {
+   "fieldname": "bracket_ceiling",
+   "fieldtype": "Currency",
+   "label": "Bracket Ceiling",
+   "description": "Up to this amount. Leave blank for the top bracket."
+  },
+  {
+   "fieldname": "base_tax",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Base Tax",
+   "reqd": 1,
+   "description": "Flat tax on income up to bracket floor."
+  },
+  {
+   "fieldname": "marginal_rate",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Marginal Rate",
+   "reqd": 1,
+   "description": "Rate on income above bracket floor, as a percentage."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-05 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "State Tax Table",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

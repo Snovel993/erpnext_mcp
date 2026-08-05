@@ -553,10 +553,17 @@ class Catalogue(SeededTestCase):
 		get_federal_tax_table, preview_federal_withholding,
 		list_employees_missing_w4 and calculate_payroll_taxes read;
 		submit_w4, update_fica_config and import_federal_tax_table write.
+
+		v0.29.0 ADDED NINE — six reads and three writes — for the
+		State Tax Engines (Oregon + Washington): get_state_tax_config,
+		list_state_tax_configs, get_state_tax_table, preview_state_withholding,
+		preview_total_payroll_taxes and list_employees_by_work_state read;
+		create_state_tax_config, update_state_tax_config and
+		import_state_tax_table write.
 		"""
-		self.assertEqual(len(registry.TOOLS), 295)
-		self.assertEqual(len(registry.READ_TOOLS), 135)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 160)
+		self.assertEqual(len(registry.TOOLS), 304)
+		self.assertEqual(len(registry.READ_TOOLS), 141)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 163)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

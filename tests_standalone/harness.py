@@ -1023,6 +1023,9 @@ APP_DOCTYPES = {
 	"W-4 Form": "w_4_form",
 	"Federal Tax Table": "federal_tax_table",
 	"FICA Configuration": "fica_configuration",
+	# v0.29.0. State Tax Engines (Oregon + Washington).
+	"State Tax Configuration": "state_tax_configuration",
+	"State Tax Table": "state_tax_table",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

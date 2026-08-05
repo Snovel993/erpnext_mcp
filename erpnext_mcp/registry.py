@@ -82,6 +82,7 @@ from .tools import (
 	rules,
 	sessions,
 	shifts,
+	state_tax,
 	tax,
 	trade,
 	training,
@@ -8548,6 +8549,189 @@ TOOLS = {
 		title="Import tax brackets",
 		available=_needs_doctype("Federal Tax Table"),
 		requires="the Federal Tax Table doctype (run bench migrate after installing v0.28.0)",
+	),
+	# ── v0.29.0: State Tax Engines (Oregon + Washington) ───────────────────
+	"get_state_tax_config": _tool(
+		state_tax.get_state_tax_config,
+		"Current state tax configuration for a company, state and tax year: "
+		"Oregon income tax, transit tax, Paid Leave, Workers' Comp rates; "
+		"Washington PFML, WA Cares, L&I rates. Read-only.",
+		{
+			"company": _COMPANY,
+			"state": _field(_STRING, "OR or WA."),
+			"tax_year": _field(_INTEGER, "Tax year (e.g. 2025)."),
+		},
+		required=("state", "tax_year"),
+		available=_needs_doctype("State Tax Configuration"),
+		requires="the State Tax Configuration doctype (run bench migrate after installing v0.29.0)",
+		title="Get state tax config",
+	),
+	"list_state_tax_configs": _tool(
+		state_tax.list_state_tax_configs,
+		"All state tax configurations with optional filtering by company, "
+		"state, and status. Read-only.",
+		{
+			"company": _COMPANY,
+			"state": _field(_STRING, "Filter by state: OR or WA."),
+			"status": _field(_STRING, "Filter by status: Active or Superseded."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("State Tax Configuration"),
+		requires="the State Tax Configuration doctype (run bench migrate after installing v0.29.0)",
+		title="List state tax configs",
+	),
+	"get_state_tax_table": _tool(
+		state_tax.get_state_tax_table,
+		"State income tax brackets for a state, tax year and filing status. "
+		"Oregon uses ORS 316.037 brackets; Washington has no income tax and "
+		"returns an empty list with a note. Read-only.",
+		{
+			"state": _field(_STRING, "OR or WA."),
+			"tax_year": _field(_INTEGER, "Tax year (e.g. 2025)."),
+			"filing_status": _field(_STRING, "Single, Married Filing Jointly, or Head of Household."),
+		},
+		required=("state", "tax_year", "filing_status"),
+		available=_needs_doctype("State Tax Table"),
+		requires="the State Tax Table doctype (run bench migrate after installing v0.29.0)",
+		title="Get state tax brackets",
+	),
+	"preview_state_withholding": _tool(
+		state_tax.preview_state_withholding,
+		"Dry-run state withholding calculation: pass an employee, gross pay, "
+		"pay frequency and work state (OR or WA), and get back every state tax "
+		"that would be withheld with a step-by-step computation_detail. The "
+		"work_state is what makes per-shift routing work — it is the state where "
+		"the work happened, not the employer's HQ. Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"gross_pay": _field(_NUMBER, "Gross pay for this pay period."),
+			"pay_frequency": _field(_STRING, "Annual, Monthly, Semimonthly, Biweekly, Weekly, or Daily."),
+			"work_state": _field(_STRING, "OR or WA — the state where the work happened."),
+			"tax_year": _field(_INTEGER, "Tax year. Defaults to the W-4's tax year."),
+		},
+		required=("gross_pay", "pay_frequency", "work_state"),
+		available=_needs_doctype("State Tax Configuration"),
+		requires="the State Tax Configuration doctype (run bench migrate after installing v0.29.0)",
+		title="Preview state withholding",
+	),
+	"preview_total_payroll_taxes": _tool(
+		state_tax.preview_total_payroll_taxes,
+		"Combined federal + state payroll tax preview. Runs the federal engine "
+		"(W-4, Circular E, FICA) and the appropriate state engine together and "
+		"returns a unified breakdown with grand totals. The work_state parameter "
+		"routes to Oregon or Washington. Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"gross_pay": _field(_NUMBER, "Gross pay for this pay period."),
+			"pay_frequency": _field(_STRING, "Annual, Monthly, Semimonthly, Biweekly, Weekly, or Daily."),
+			"work_state": _field(_STRING, "OR or WA — the state where the work happened."),
+			"tax_year": _field(_INTEGER, "Tax year. Defaults to the W-4's tax year."),
+			"ytd_gross": _field(_NUMBER, "Year-to-date gross pay before this period. Default 0."),
+			"ytd_ss_withheld": _field(_NUMBER, "Year-to-date SS tax withheld. Default 0."),
+		},
+		required=("gross_pay", "pay_frequency", "work_state"),
+		available=_needs_doctype("State Tax Configuration"),
+		requires="the State Tax Configuration doctype (run bench migrate after installing v0.29.0)",
+		title="Preview total payroll taxes",
+	),
+	"list_employees_by_work_state": _tool(
+		state_tax.list_employees_by_work_state,
+		"Active employees grouped by their primary work state, determined from "
+		"their most recent Farm Shift's work_state field. Employees with no "
+		"shift records appear in the no_work_state list. Read-only.",
+		{
+			"company": _COMPANY,
+		},
+		available=_needs_doctype("State Tax Configuration"),
+		requires="the State Tax Configuration doctype (run bench migrate after installing v0.29.0)",
+		title="Employees by work state",
+	),
+	"create_state_tax_config": _tool(
+		state_tax.create_state_tax_config,
+		"MUTATING (default OFF). Create a State Tax Configuration for a company, "
+		"state and tax year. One Active config per (company x state x tax_year). "
+		"Pass the state-specific rates — Oregon: transit tax, paid leave, workers "
+		"comp; Washington: PFML, WA Cares, L&I.",
+		{
+			"company": _COMPANY,
+			"state": _field(_STRING, "OR or WA."),
+			"tax_year": _field(_INTEGER, "Tax year (e.g. 2025)."),
+			"or_income_tax_enabled": _field(_BOOLEAN, "Enable Oregon income tax. Default true."),
+			"or_transit_tax_rate": _field(_NUMBER, "Oregon Statewide Transit Tax rate (e.g. 0.1)."),
+			"or_paid_leave_rate": _field(_NUMBER, "Paid Leave Oregon total rate (e.g. 1.0)."),
+			"or_paid_leave_employee_share": _field(_NUMBER, "Employee share of paid leave rate (e.g. 60)."),
+			"or_paid_leave_employer_share": _field(_NUMBER, "Employer share of paid leave rate (e.g. 40)."),
+			"or_paid_leave_small_employer": _field(_BOOLEAN, "Under 25 employees — no employer share."),
+			"or_workers_comp_rate": _field(_NUMBER, "Workers' comp rate, varies by classification."),
+			"wa_pfml_rate": _field(_NUMBER, "WA PFML rate (e.g. 0.92)."),
+			"wa_pfml_employee_share": _field(_NUMBER, "Employee share of PFML (e.g. 72.76)."),
+			"wa_pfml_employer_share": _field(_NUMBER, "Employer share of PFML (e.g. 27.24)."),
+			"wa_pfml_wage_base": _field(_NUMBER, "PFML wage base (e.g. 176100)."),
+			"wa_cares_rate": _field(_NUMBER, "WA Cares rate (e.g. 0.58)."),
+			"wa_cares_exempt_employees": _field(_STRING, "Comma-separated employee IDs who opted out."),
+			"wa_li_rate_employee": _field(_NUMBER, "L&I employee rate, varies by risk class."),
+			"wa_li_rate_employer": _field(_NUMBER, "L&I employer rate, varies by risk class."),
+		},
+		required=("state", "tax_year"),
+		mutating=True,
+		title="Create state tax config",
+		available=_needs_doctype("State Tax Configuration"),
+		requires="the State Tax Configuration doctype (run bench migrate after installing v0.29.0)",
+	),
+	"update_state_tax_config": _tool(
+		state_tax.update_state_tax_config,
+		"MUTATING (default OFF). Update rates on an existing State Tax "
+		"Configuration. Pass only the fields that changed.",
+		{
+			"company": _COMPANY,
+			"state": _field(_STRING, "OR or WA."),
+			"tax_year": _field(_INTEGER, "Tax year."),
+			"or_income_tax_enabled": _field(_BOOLEAN, "Enable/disable Oregon income tax."),
+			"or_transit_tax_rate": _field(_NUMBER, "New transit tax rate."),
+			"or_paid_leave_rate": _field(_NUMBER, "New paid leave total rate."),
+			"or_paid_leave_employee_share": _field(_NUMBER, "New employee share."),
+			"or_paid_leave_employer_share": _field(_NUMBER, "New employer share."),
+			"or_paid_leave_small_employer": _field(_BOOLEAN, "Small employer flag."),
+			"or_workers_comp_rate": _field(_NUMBER, "New workers' comp rate."),
+			"wa_pfml_rate": _field(_NUMBER, "New PFML rate."),
+			"wa_pfml_employee_share": _field(_NUMBER, "New employee share."),
+			"wa_pfml_employer_share": _field(_NUMBER, "New employer share."),
+			"wa_pfml_wage_base": _field(_NUMBER, "New wage base."),
+			"wa_cares_rate": _field(_NUMBER, "New WA Cares rate."),
+			"wa_cares_exempt_employees": _field(_STRING, "Updated exempt employees list."),
+			"wa_li_rate_employee": _field(_NUMBER, "New L&I employee rate."),
+			"wa_li_rate_employer": _field(_NUMBER, "New L&I employer rate."),
+		},
+		required=("state", "tax_year"),
+		mutating=True,
+		idempotent=True,
+		title="Update state tax config",
+		available=_needs_doctype("State Tax Configuration"),
+		requires="the State Tax Configuration doctype (run bench migrate after installing v0.29.0)",
+	),
+	"import_state_tax_table": _tool(
+		state_tax.import_state_tax_table,
+		"MUTATING (default OFF). Bulk import state income tax brackets. Each "
+		"bracket specifies filing_status, bracket_floor, bracket_ceiling, "
+		"base_tax, and marginal_rate. Oregon needs these; Washington does not.",
+		{
+			"state": _field(_STRING, "OR or WA."),
+			"tax_year": _field(_INTEGER, "Tax year."),
+			"brackets": _field(
+				{"type": "array", "items": _OBJECT},
+				"Array of bracket objects with: filing_status, bracket_floor, "
+				"bracket_ceiling (null for top), base_tax, marginal_rate.",
+			),
+		},
+		required=("state", "tax_year", "brackets"),
+		mutating=True,
+		title="Import state tax brackets",
+		available=_needs_doctype("State Tax Table"),
+		requires="the State Tax Table doctype (run bench migrate after installing v0.29.0)",
 	),
 	# ── v0.19.0: the training register ──────────────────────────────────────
 	"record_training": _tool(
