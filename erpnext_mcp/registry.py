@@ -87,6 +87,7 @@ from .tools import (
 	training,
 	uploads,
 	visits,
+	w4,
 	weather,
 	workflow,
 )
@@ -8366,6 +8367,187 @@ TOOLS = {
 		title="Destroy an I-9",
 		available=_needs_doctype("I-9 Form"),
 		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+	),
+	# ── v0.28.0: W-4 / Federal Withholding Engine ─────────────────────────
+	"get_w4": _tool(
+		w4.get_w4,
+		"Current active W-4 for an employee: filing status, dependents credits, "
+		"other income, deductions, extra withholding. Returns the most recent Active "
+		"W-4 for the employee (optionally filtered by tax_year). Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname, employee_name, or employee number."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"tax_year": _field(_INTEGER, "Filter by tax year."),
+		},
+		available=_needs_doctype("W-4 Form"),
+		requires="the W-4 Form doctype (run bench migrate after installing v0.28.0)",
+		title="Get employee W-4",
+	),
+	"list_w4_forms": _tool(
+		w4.list_w4_forms,
+		"All W-4 forms with optional filtering by company, status (Draft/Active/"
+		"Superseded), and tax year. Read-only.",
+		{
+			"company": _COMPANY,
+			"status": _field(_STRING, "Filter by status: Draft, Active, Superseded."),
+			"tax_year": _field(_INTEGER, "Filter by tax year."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("W-4 Form"),
+		requires="the W-4 Form doctype (run bench migrate after installing v0.28.0)",
+		title="List W-4 forms",
+	),
+	"get_fica_config": _tool(
+		w4.get_fica_config,
+		"Current FICA rates: Social Security, Medicare, Additional Medicare, and "
+		"FUTA rates and thresholds for the configured tax year. Read-only.",
+		{},
+		available=_needs_doctype("FICA Configuration"),
+		requires="the FICA Configuration doctype (run bench migrate after installing v0.28.0)",
+		title="Get FICA config",
+	),
+	"get_federal_tax_table": _tool(
+		w4.get_federal_tax_table,
+		"Federal withholding brackets for a specific filing status and payroll "
+		"period. Returns the IRS Circular E percentage method brackets. Read-only.",
+		{
+			"tax_year": _field(_INTEGER, "Tax year (e.g. 2025)."),
+			"filing_status": _field(_STRING, "Single, Married Filing Jointly, or Head of Household."),
+			"payroll_period": _field(_STRING, "Annual, Monthly, Semimonthly, Biweekly, Weekly, or Daily."),
+		},
+		required=("tax_year", "filing_status", "payroll_period"),
+		available=_needs_doctype("Federal Tax Table"),
+		requires="the Federal Tax Table doctype (run bench migrate after installing v0.28.0)",
+		title="Get tax brackets",
+	),
+	"preview_federal_withholding": _tool(
+		w4.preview_federal_withholding,
+		"Dry-run withholding calculation showing exactly what would be withheld "
+		"for an employee: federal income tax (percentage method from the W-4), "
+		"Social Security, Medicare, Additional Medicare, and FUTA. Returns a "
+		"step-by-step computation_detail for audit. Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"gross_pay": _field(_NUMBER, "Gross pay for this pay period."),
+			"pay_frequency": _field(_STRING, "Annual, Monthly, Semimonthly, Biweekly, Weekly, or Daily."),
+			"tax_year": _field(_INTEGER, "Tax year. Defaults to the W-4's tax year."),
+			"ytd_gross": _field(_NUMBER, "Year-to-date gross pay before this period. Default 0."),
+			"ytd_ss_withheld": _field(_NUMBER, "Year-to-date SS tax withheld. Default 0."),
+		},
+		required=("gross_pay", "pay_frequency"),
+		available=_needs_doctype("W-4 Form"),
+		requires="the W-4 Form doctype (run bench migrate after installing v0.28.0)",
+		title="Preview withholding",
+	),
+	"list_employees_missing_w4": _tool(
+		w4.list_employees_missing_w4,
+		"Active employees with no active W-4 on file. Use to find employees "
+		"who need a W-4 submitted before payroll can run. Read-only.",
+		{
+			"company": _COMPANY,
+		},
+		available=_needs_doctype("W-4 Form"),
+		requires="the W-4 Form doctype (run bench migrate after installing v0.28.0)",
+		title="Employees missing W-4",
+	),
+	"calculate_payroll_taxes": _tool(
+		w4.calculate_payroll_taxes,
+		"Run the full federal payroll tax calculation engine for an employee and "
+		"return the breakdown. Reads the employee's active W-4, FICA config, and "
+		"tax table. Does NOT write anything — purely a calculation. Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"gross_pay": _field(_NUMBER, "Gross pay for this pay period."),
+			"pay_frequency": _field(_STRING, "Annual, Monthly, Semimonthly, Biweekly, Weekly, or Daily."),
+			"tax_year": _field(_INTEGER, "Tax year. Defaults to the W-4's tax year."),
+			"ytd_gross": _field(_NUMBER, "Year-to-date gross pay before this period. Default 0."),
+			"ytd_ss_withheld": _field(_NUMBER, "Year-to-date SS tax withheld. Default 0."),
+		},
+		required=("gross_pay", "pay_frequency"),
+		available=_needs_doctype("W-4 Form"),
+		requires="the W-4 Form doctype (run bench migrate after installing v0.28.0)",
+		title="Calculate payroll taxes",
+	),
+	"submit_w4": _tool(
+		w4.submit_w4,
+		"MUTATING (default OFF). Submit a W-4 for an employee. Creates a new "
+		"Active W-4 Form and supersedes any prior Active W-4 for the same employee "
+		"and tax year (sets old one to Superseded with a superseded_by link).\n\n"
+		"Only one Active W-4 per employee per tax_year.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"company": _COMPANY,
+			"tax_year": _field(_INTEGER, "Tax year (e.g. 2025)."),
+			"filing_status": _field(
+				_STRING,
+				"Single or Married Filing Separately, Married Filing Jointly, or Head of Household.",
+			),
+			"multiple_jobs": _field(_BOOLEAN, "Step 2(c) — multiple jobs or spouse works."),
+			"additional_income_from_other_jobs": _field(
+				_NUMBER, "Step 2 — additional income from other jobs worksheet."
+			),
+			"dependents_under_17_count": _field(_INTEGER, "Step 3 — qualifying children under 17."),
+			"other_dependents_count": _field(_INTEGER, "Step 3 — other dependents."),
+			"other_income": _field(_NUMBER, "Step 4(a) — other income not from jobs."),
+			"deductions": _field(_NUMBER, "Step 4(b) — itemized deductions above standard deduction."),
+			"extra_withholding_per_period": _field(
+				_NUMBER, "Step 4(c) — additional withholding per pay period."
+			),
+		},
+		required=("tax_year", "filing_status"),
+		mutating=True,
+		title="Submit a W-4",
+		available=_needs_doctype("W-4 Form"),
+		requires="the W-4 Form doctype (run bench migrate after installing v0.28.0)",
+	),
+	"update_fica_config": _tool(
+		w4.update_fica_config,
+		"MUTATING (default OFF). Update FICA rates and thresholds for a new tax "
+		"year. Pass only the fields that changed.",
+		{
+			"tax_year": _field(_INTEGER, "Tax year."),
+			"social_security_rate_employee": _field(_NUMBER, "SS employee rate (e.g. 6.2)."),
+			"social_security_rate_employer": _field(_NUMBER, "SS employer rate (e.g. 6.2)."),
+			"social_security_wage_base": _field(_NUMBER, "SS wage base limit (e.g. 176100)."),
+			"medicare_rate_employee": _field(_NUMBER, "Medicare employee rate (e.g. 1.45)."),
+			"medicare_rate_employer": _field(_NUMBER, "Medicare employer rate (e.g. 1.45)."),
+			"additional_medicare_threshold": _field(_NUMBER, "Additional Medicare threshold (e.g. 200000)."),
+			"additional_medicare_rate": _field(_NUMBER, "Additional Medicare rate (e.g. 0.9)."),
+			"futa_rate": _field(_NUMBER, "FUTA rate (e.g. 6.0)."),
+			"futa_wage_base": _field(_NUMBER, "FUTA wage base (e.g. 7000)."),
+			"futa_state_credit_max": _field(_NUMBER, "Max state credit (e.g. 5.4)."),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Update FICA config",
+		available=_needs_doctype("FICA Configuration"),
+		requires="the FICA Configuration doctype (run bench migrate after installing v0.28.0)",
+	),
+	"import_federal_tax_table": _tool(
+		w4.import_federal_tax_table,
+		"MUTATING (default OFF). Bulk import withholding brackets for a new tax "
+		"year. Each bracket specifies filing_status, payroll_period, bracket_floor, "
+		"bracket_ceiling, base_tax, and marginal_rate.",
+		{
+			"tax_year": _field(_INTEGER, "Tax year."),
+			"brackets": _field(
+				{"type": "array", "items": _OBJECT},
+				"Array of bracket objects with: filing_status, payroll_period, bracket_floor, "
+				"bracket_ceiling (null for top), base_tax, marginal_rate.",
+			),
+		},
+		required=("tax_year", "brackets"),
+		mutating=True,
+		title="Import tax brackets",
+		available=_needs_doctype("Federal Tax Table"),
+		requires="the Federal Tax Table doctype (run bench migrate after installing v0.28.0)",
 	),
 	# ── v0.19.0: the training register ──────────────────────────────────────
 	"record_training": _tool(

@@ -101,7 +101,7 @@ the settings form, and there is no code path that makes it for them.
 
 import frappe
 
-from . import compliance_fields, dashboard, i9_documents, roles, settings, training
+from . import compliance_fields, dashboard, i9_documents, roles, settings, training, withholding
 from .patches import backfill_completion_signatures, migrate_training_types
 from .tools import company
 
@@ -110,6 +110,7 @@ def after_install() -> None:
 	settings.seed_defaults()
 	_weather_settings()
 	_i9_settings()
+	_fica_settings()
 	company.ensure_party_types()
 	_compliance_fields()
 	_command_center()
@@ -121,6 +122,7 @@ def after_install() -> None:
 	_inspection_templates()
 	_compliance_rules()
 	_i9_document_types()
+	_federal_tax_table()
 	frappe.db.commit()
 
 
@@ -128,6 +130,7 @@ def after_migrate() -> None:
 	settings.seed_defaults()
 	_weather_settings()
 	_i9_settings()
+	_fica_settings()
 	company.ensure_party_types()
 	_compliance_fields()
 	_command_center()
@@ -139,6 +142,7 @@ def after_migrate() -> None:
 	_inspection_templates()
 	_compliance_rules()
 	_i9_document_types()
+	_federal_tax_table()
 
 
 def _i9_settings() -> None:
@@ -171,6 +175,50 @@ def _i9_document_types() -> None:
 		print(f"erpnext_mcp: seeded {len(report['created'])} I-9 document type(s)")
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not seed I-9 document {failure.get('name')} — {failure.get('reason')}")
+
+
+def _fica_settings() -> None:
+	"""Make FICA Configuration's declared defaults true in the database.
+
+	v0.28.0, and the same pattern as _i9_settings — a Frappe Single whose
+	defaults need seeding. Skipped silently on a site whose doctype has not
+	migrated yet.
+	"""
+	try:
+		if not frappe.db.exists("DocType", "FICA Configuration"):
+			return
+		settings.seed_defaults("FICA Configuration")
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(f"erpnext_mcp: FICA Configuration defaults were not seeded — {type(exc).__name__}: {exc}")
+
+
+def _federal_tax_table() -> None:
+	"""Seed 2025 federal tax brackets if the table is empty.
+
+	v0.28.0. IT ONLY SEEDS WHEN THE TABLE HAS NO ROWS AT ALL for the seed
+	year, so an operator who imported their own brackets or edited the seeded
+	ones keeps their data.
+	"""
+	try:
+		if not frappe.db.exists("DocType", "Federal Tax Table"):
+			return
+		existing = frappe.db.count("Federal Tax Table", {"tax_year": withholding.SEED_TAX_YEAR})
+		if existing:
+			return
+		brackets = withholding.seed_brackets()
+		created = 0
+		for bracket in brackets:
+			doc = frappe.get_doc({
+				"doctype": "Federal Tax Table",
+				**bracket,
+			})
+			doc.flags.ignore_permissions = True
+			doc.insert()
+			created += 1
+		if created:
+			print(f"erpnext_mcp: seeded {created} federal tax bracket(s) for tax year {withholding.SEED_TAX_YEAR}")
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(f"erpnext_mcp: the federal tax table was not seeded — {type(exc).__name__}: {exc}")
 
 
 def _weather_settings() -> None:
@@ -660,6 +708,12 @@ _PRECIOUS_DOCTYPES = (
 		"or destroyed each form, from which IP, at which moment. The record an audit asks "
 		"for and the thing that says nobody tampered with the form between signing and filing",
 	),
+	(
+		"W-4 Form",
+		"every Form W-4 on the site — filing status, dependents credits, extra withholding, "
+		"and the supersession chain showing which certificate replaced which. The basis for "
+		"every federal withholding calculation and the record an IRS inquiry asks for",
+	),
 )
 
 #: Doctypes that go with the app and are NOT worth warning about, with why. The
@@ -688,6 +742,8 @@ _REGENERATED_DOCTYPES = (
 	# entry is where the loss of a weather timeline is actually spelled out.
 	("I-9 Document Type", "pre-seeded USCIS-accepted document list, rebuilt from i9_documents.py on every migrate"),
 	("I-9 Settings", "reseeded from its own declared defaults on every migrate"),
+	("FICA Configuration", "reseeded from its own declared defaults on every migrate"),
+	("Federal Tax Table", "pre-seeded IRS Pub 15-T brackets, rebuilt from withholding.py on every migrate"),
 	("Weather Settings", "reseeded from its own declared defaults on every migrate"),
 	(
 		"Weather Company Override",

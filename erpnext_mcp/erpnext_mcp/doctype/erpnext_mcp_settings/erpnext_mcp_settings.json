@@ -267,6 +267,18 @@
   "allow_update_i9_settings",
   "allow_flag_i9_reverification",
   "allow_destroy_i9",
+  "w4_section",
+  "allow_get_w4",
+  "allow_list_w4_forms",
+  "allow_get_fica_config",
+  "allow_get_federal_tax_table",
+  "allow_preview_federal_withholding",
+  "allow_list_employees_missing_w4",
+  "allow_calculate_payroll_taxes",
+  "w4_col",
+  "allow_submit_w4",
+  "allow_update_fica_config",
+  "allow_import_federal_tax_table",
   "shift_section",
   "allow_list_shifts",
   "allow_get_shift",
@@ -2109,6 +2121,86 @@
    "fieldname": "allow_destroy_i9",
    "fieldtype": "Check",
    "label": "Destroy I-9"
+  },
+  {
+   "fieldname": "w4_section",
+   "fieldtype": "Section Break",
+   "label": "W-4 / Federal Withholding"
+  },
+  {
+   "default": "1",
+   "description": "READ. Retrieve a single W-4 Form by name or employee+tax_year.",
+   "fieldname": "allow_get_w4",
+   "fieldtype": "Check",
+   "label": "Get W-4"
+  },
+  {
+   "default": "1",
+   "description": "READ. List W-4 Forms with optional filters on employee, company, tax_year, status.",
+   "fieldname": "allow_list_w4_forms",
+   "fieldtype": "Check",
+   "label": "List W-4 Forms"
+  },
+  {
+   "default": "1",
+   "description": "READ. Return the current FICA Configuration (SS/Medicare/FUTA rates and thresholds).",
+   "fieldname": "allow_get_fica_config",
+   "fieldtype": "Check",
+   "label": "Get FICA Config"
+  },
+  {
+   "default": "1",
+   "description": "READ. Return Federal Tax Table brackets for a given tax_year, filing_status, payroll_period.",
+   "fieldname": "allow_get_federal_tax_table",
+   "fieldtype": "Check",
+   "label": "Get Federal Tax Table"
+  },
+  {
+   "default": "1",
+   "description": "READ. Preview federal withholding for hypothetical inputs without saving anything.",
+   "fieldname": "allow_preview_federal_withholding",
+   "fieldtype": "Check",
+   "label": "Preview Federal Withholding"
+  },
+  {
+   "default": "1",
+   "description": "READ. List active employees who have no current-year W-4 on file.",
+   "fieldname": "allow_list_employees_missing_w4",
+   "fieldtype": "Check",
+   "label": "List Employees Missing W-4"
+  },
+  {
+   "default": "1",
+   "description": "READ. Calculate full payroll taxes (federal income tax, SS, Medicare, FUTA) for an employee's pay period using their active W-4.",
+   "fieldname": "allow_calculate_payroll_taxes",
+   "fieldtype": "Check",
+   "label": "Calculate Payroll Taxes"
+  },
+  {
+   "fieldname": "w4_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a new W-4 Form. If the employee already has an Active W-4 for the same tax year, the old one is set to Superseded.",
+   "fieldname": "allow_submit_w4",
+   "fieldtype": "Check",
+   "label": "Submit W-4"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Update FICA Configuration rates and thresholds (SS rate, wage base, Medicare rate, FUTA rate, etc.).",
+   "fieldname": "allow_update_fica_config",
+   "fieldtype": "Check",
+   "label": "Update FICA Config"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Import or replace Federal Tax Table brackets for a given tax year.",
+   "fieldname": "allow_import_federal_tax_table",
+   "fieldtype": "Check",
+   "label": "Import Federal Tax Table"
   },
   {
    "fieldname": "shift_section",

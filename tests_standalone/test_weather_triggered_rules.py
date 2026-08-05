@@ -940,6 +940,6 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		shapes: dict = {}
 		for row in compliance_rules.rule_rows():
 			shapes.setdefault(compliance_rules.shape_of(row), []).append(row["rule_id"])
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 16)
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 18)
 		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 2)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])

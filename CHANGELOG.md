@@ -3,6 +3,27 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.28.0 — 2026-08-04
+
+**W-4 + Federal Withholding Engine.** A pure-function calculation engine for
+IRS Pub 15-T percentage-method withholding (2020+ W-4), Social Security,
+Medicare (including additional Medicare over $200k), and FUTA. Pre-seeded with
+2025 tax brackets for all filing statuses and payroll periods.
+
+**Three new DocTypes:** W-4 Form (the employee's filing, with superseding
+workflow), Federal Tax Table (period-specific marginal brackets), and FICA
+Configuration (single doctype for SS/Medicare/FUTA rates and thresholds).
+
+**Ten new tools** — seven reads and three writes:
+- `get_w4`, `list_w4_forms`, `get_fica_config`, `get_federal_tax_table`,
+  `preview_federal_withholding`, `list_employees_missing_w4`,
+  `calculate_payroll_taxes` (read)
+- `submit_w4`, `update_fica_config`, `import_federal_tax_table` (write)
+
+**Two new compliance rules:** `employee_missing_w4` (Warning — active employee
+has no current-year W-4) and `w4_tax_year_outdated` (Info — active W-4 is for
+a prior tax year).
+
 ## 0.27.0 — 2026-08-04
 
 **Structured I-9 workflow.** Replaces opaque file attachments with a structured

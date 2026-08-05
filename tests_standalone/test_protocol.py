@@ -547,10 +547,16 @@ class Catalogue(SeededTestCase):
 		get_i9_retention_report and list_expiring_work_authorizations read;
 		create_i9_form, submit_i9_section_1, submit_i9_section_2,
 		update_i9_settings, flag_i9_reverification and destroy_i9 write.
+
+		v0.28.0 ADDED TEN — seven reads and three writes — for the
+		W-4 / Federal Withholding Engine: get_w4, list_w4_forms, get_fica_config,
+		get_federal_tax_table, preview_federal_withholding,
+		list_employees_missing_w4 and calculate_payroll_taxes read;
+		submit_w4, update_fica_config and import_federal_tax_table write.
 		"""
-		self.assertEqual(len(registry.TOOLS), 285)
-		self.assertEqual(len(registry.READ_TOOLS), 128)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 157)
+		self.assertEqual(len(registry.TOOLS), 295)
+		self.assertEqual(len(registry.READ_TOOLS), 135)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 160)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

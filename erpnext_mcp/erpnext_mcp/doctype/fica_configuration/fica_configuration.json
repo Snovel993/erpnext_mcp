@@ -1,0 +1,155 @@
+{
+ "actions": [],
+ "creation": "2026-08-04 09:00:00.000000",
+ "description": "Federal Insurance Contributions Act rates and thresholds for a tax year. Social Security, Medicare, Additional Medicare, and FUTA. One record per site — update for each new tax year.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "tax_year",
+  "social_security_section",
+  "social_security_rate_employee",
+  "social_security_rate_employer",
+  "social_security_wage_base",
+  "medicare_section",
+  "medicare_rate_employee",
+  "medicare_rate_employer",
+  "additional_medicare_threshold",
+  "additional_medicare_rate",
+  "futa_section",
+  "futa_rate",
+  "futa_wage_base",
+  "futa_state_credit_max"
+ ],
+ "fields": [
+  {
+   "fieldname": "tax_year",
+   "fieldtype": "Int",
+   "label": "Tax Year",
+   "reqd": 1,
+   "default": "2025",
+   "description": "The tax year these rates apply to."
+  },
+  {
+   "fieldname": "social_security_section",
+   "fieldtype": "Section Break",
+   "label": "Social Security (OASDI)"
+  },
+  {
+   "default": "6.2",
+   "fieldname": "social_security_rate_employee",
+   "fieldtype": "Percent",
+   "label": "Employee Rate",
+   "reqd": 1,
+   "description": "Employee Social Security tax rate (6.2% for 2025)."
+  },
+  {
+   "default": "6.2",
+   "fieldname": "social_security_rate_employer",
+   "fieldtype": "Percent",
+   "label": "Employer Rate",
+   "reqd": 1,
+   "description": "Employer Social Security tax rate (6.2% for 2025)."
+  },
+  {
+   "default": "176100",
+   "fieldname": "social_security_wage_base",
+   "fieldtype": "Currency",
+   "label": "Wage Base Limit",
+   "reqd": 1,
+   "description": "Maximum earnings subject to Social Security tax ($176,100 for 2025)."
+  },
+  {
+   "fieldname": "medicare_section",
+   "fieldtype": "Section Break",
+   "label": "Medicare (HI)"
+  },
+  {
+   "default": "1.45",
+   "fieldname": "medicare_rate_employee",
+   "fieldtype": "Percent",
+   "label": "Employee Rate",
+   "reqd": 1,
+   "description": "Employee Medicare tax rate (1.45%)."
+  },
+  {
+   "default": "1.45",
+   "fieldname": "medicare_rate_employer",
+   "fieldtype": "Percent",
+   "label": "Employer Rate",
+   "reqd": 1,
+   "description": "Employer Medicare tax rate (1.45%)."
+  },
+  {
+   "default": "200000",
+   "fieldname": "additional_medicare_threshold",
+   "fieldtype": "Currency",
+   "label": "Additional Medicare Threshold",
+   "reqd": 1,
+   "description": "YTD earnings above which the additional Medicare tax applies ($200,000)."
+  },
+  {
+   "default": "0.9",
+   "fieldname": "additional_medicare_rate",
+   "fieldtype": "Percent",
+   "label": "Additional Medicare Rate",
+   "reqd": 1,
+   "description": "Additional Medicare tax rate on earnings above the threshold (0.9%)."
+  },
+  {
+   "fieldname": "futa_section",
+   "fieldtype": "Section Break",
+   "label": "FUTA (Federal Unemployment)"
+  },
+  {
+   "default": "6.0",
+   "fieldname": "futa_rate",
+   "fieldtype": "Percent",
+   "label": "FUTA Rate",
+   "reqd": 1,
+   "description": "Federal unemployment tax rate (6.0%)."
+  },
+  {
+   "default": "7000",
+   "fieldname": "futa_wage_base",
+   "fieldtype": "Currency",
+   "label": "FUTA Wage Base",
+   "reqd": 1,
+   "description": "First $7,000 of each employee's annual wages."
+  },
+  {
+   "default": "5.4",
+   "fieldname": "futa_state_credit_max",
+   "fieldtype": "Percent",
+   "label": "Maximum State Credit",
+   "reqd": 1,
+   "description": "Maximum credit for state unemployment taxes paid (5.4%). Effective FUTA rate is typically 0.6%."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-04 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "FICA Configuration",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

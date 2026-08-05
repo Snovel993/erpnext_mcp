@@ -223,6 +223,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"Asset State Log",
 				"Compliance Regime",
 				"Compliance Rule",
+				"Federal Tax Table",
 				"I-9 Audit Log",
 				"I-9 Document Type",
 				"Inspection Template",

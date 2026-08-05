@@ -1019,6 +1019,10 @@ APP_DOCTYPES = {
 	"I-9 Audit Log": "i_9_audit_log",
 	"I-9 Settings": "i_9_settings",
 	"I-9 Document Type": "i_9_document_type",
+	# v0.28.0. W-4 / Federal Withholding Engine.
+	"W-4 Form": "w_4_form",
+	"Federal Tax Table": "federal_tax_table",
+	"FICA Configuration": "fica_configuration",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

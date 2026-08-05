@@ -1690,6 +1690,95 @@ def declarative_seed_specs() -> list:
 			"authored_by": AUTHOR_SYSTEM,
 			"enabled": 1,
 		},
+		# ── v0.28.0: W-4 compliance ─────────────────────────────────────────
+		{
+			"rule_id": "employee_missing_w4",
+			"title": "Active employee has no current-year W-4 on file",
+			"category": "Workforce",
+			"target_doctype": "Employee",
+			"requires_doctypes": "Employee, W-4 Form",
+			"requires_fields": "w4_status",
+			"date_field": "date_of_joining",
+			"date_field_role": DATE_ROLE_STATE,
+			"default_severity": "Warning",
+			"due_date_mode": DUE_NONE,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"scope_filters": [
+				{"field": "status", "op": "eq", "value": "Active"},
+				{"field": "w4_status", "op": "isnull"},
+			],
+			"message_template": (
+				"{{ row.employee_name }} ({{ row.name }}) is an active employee with no "
+				"current-year W-4 on file. Federal withholding cannot be calculated without "
+				"a W-4. Submit one with submit_w4."
+			),
+			"regimes": [],
+			"regulation_citations": "26 USC § 3402(f) — employee withholding certificate requirement",
+			"retention_years": 0,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": None,
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {},
+			"evidence_contract": {},
+			"purpose": (
+				"Every employee must have a Form W-4 on file for the employer to calculate "
+				"federal income tax withholding. Without one, the employer cannot run payroll "
+				"in compliance with IRS requirements."
+			),
+			"kairotic_gate_description": (
+				"Fires for any Active employee who has no W-4 Form with status Active. "
+				"Checked by querying the W-4 Form table for a matching employee + Active status."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
+		{
+			"rule_id": "w4_tax_year_outdated",
+			"title": "Employee's active W-4 is for a prior tax year",
+			"category": "Workforce",
+			"target_doctype": "W-4 Form",
+			"requires_doctypes": "W-4 Form",
+			"date_field": "effective_date",
+			"date_field_role": DATE_ROLE_STATE,
+			"default_severity": "Info",
+			"due_date_mode": DUE_NONE,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"scope_filters": [
+				{"field": "status", "op": "eq", "value": "Active"},
+			],
+			"message_template": (
+				"{{ row.employee_name }}'s active W-4 is for tax year {{ row.tax_year }}, "
+				"which is a prior year. This may be fine — employees are not required to "
+				"file a new W-4 annually — but review whether withholding is still correct."
+			),
+			"regimes": [],
+			"regulation_citations": "IRS Publication 15-T — employers may continue to use a prior-year W-4",
+			"retention_years": 0,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": None,
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {},
+			"evidence_contract": {},
+			"purpose": (
+				"An employee's W-4 from a prior tax year is valid but may result in "
+				"incorrect withholding if their circumstances changed. This informational "
+				"rule surfaces them for review without requiring action."
+			),
+			"kairotic_gate_description": (
+				"Fires for any Active W-4 Form whose tax_year is less than the current "
+				"calendar year. Informational — some are fine, flagged for review."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
 	]
 
 

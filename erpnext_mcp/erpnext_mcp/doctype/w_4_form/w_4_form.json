@@ -1,0 +1,274 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-04 09:00:00.000000",
+ "description": "Form W-4 — Employee’s Withholding Certificate (2020+ redesign). Tracks filing status, multiple-jobs checkbox, dependents credits, other income, deductions, and extra withholding. Only one Active W-4 per employee per tax year; a new submission supersedes the prior one.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "employee",
+  "employee_name",
+  "company",
+  "tax_year",
+  "status",
+  "effective_date",
+  "superseded_by",
+  "step_1_section",
+  "filing_status",
+  "multiple_jobs",
+  "step_2_section",
+  "additional_income_from_other_jobs",
+  "step_3_section",
+  "dependents_under_17_count",
+  "dependents_under_17_amount",
+  "dependents_col",
+  "other_dependents_count",
+  "other_dependents_amount",
+  "total_dependents_credit",
+  "step_4_section",
+  "other_income",
+  "deductions",
+  "extra_withholding_per_period",
+  "signature_section",
+  "signature",
+  "signed_at",
+  "signed_ip"
+ ],
+ "fields": [
+  {
+   "default": "W4-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "W4-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "tax_year",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Tax Year",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nActive\nSuperseded",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "label": "Effective Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "W-4 Form",
+   "read_only": 1,
+   "description": "Set automatically when a newer W-4 replaces this one."
+  },
+  {
+   "fieldname": "step_1_section",
+   "fieldtype": "Section Break",
+   "label": "Step 1 — Filing Status"
+  },
+  {
+   "default": "Single or Married Filing Separately",
+   "fieldname": "filing_status",
+   "fieldtype": "Select",
+   "label": "Filing Status",
+   "options": "Single or Married Filing Separately\nMarried Filing Jointly\nHead of Household",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Step 2(c) checkbox — check if employee holds multiple jobs or if married filing jointly and both spouses work.",
+   "fieldname": "multiple_jobs",
+   "fieldtype": "Check",
+   "label": "Multiple Jobs or Spouse Works"
+  },
+  {
+   "fieldname": "step_2_section",
+   "fieldtype": "Section Break",
+   "label": "Step 2 — Multiple Jobs (Optional)",
+   "depends_on": "eval:doc.multiple_jobs"
+  },
+  {
+   "default": "0",
+   "description": "From the Multiple Jobs Worksheet or the IRS Tax Withholding Estimator.",
+   "fieldname": "additional_income_from_other_jobs",
+   "fieldtype": "Currency",
+   "label": "Additional Income from Other Jobs"
+  },
+  {
+   "fieldname": "step_3_section",
+   "fieldtype": "Section Break",
+   "label": "Step 3 — Dependents"
+  },
+  {
+   "default": "0",
+   "fieldname": "dependents_under_17_count",
+   "fieldtype": "Int",
+   "label": "Qualifying Children Under 17",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "description": "Count × $2,000. Computed automatically.",
+   "fieldname": "dependents_under_17_amount",
+   "fieldtype": "Currency",
+   "label": "Under-17 Credit Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "dependents_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "other_dependents_count",
+   "fieldtype": "Int",
+   "label": "Other Dependents",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "description": "Count × $500. Computed automatically.",
+   "fieldname": "other_dependents_amount",
+   "fieldtype": "Currency",
+   "label": "Other Dependents Credit Amount",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Sum of under-17 and other dependents credits.",
+   "fieldname": "total_dependents_credit",
+   "fieldtype": "Currency",
+   "label": "Total Dependents Credit",
+   "read_only": 1
+  },
+  {
+   "fieldname": "step_4_section",
+   "fieldtype": "Section Break",
+   "label": "Step 4 — Other Adjustments (Optional)"
+  },
+  {
+   "default": "0",
+   "description": "4(a) — Other income not from jobs: interest, dividends, retirement income.",
+   "fieldname": "other_income",
+   "fieldtype": "Currency",
+   "label": "Other Income"
+  },
+  {
+   "default": "0",
+   "description": "4(b) — Itemized deductions above the standard deduction amount.",
+   "fieldname": "deductions",
+   "fieldtype": "Currency",
+   "label": "Deductions"
+  },
+  {
+   "default": "0",
+   "description": "4(c) — Additional amount to withhold each pay period.",
+   "fieldname": "extra_withholding_per_period",
+   "fieldtype": "Currency",
+   "label": "Extra Withholding Per Period"
+  },
+  {
+   "fieldname": "signature_section",
+   "fieldtype": "Section Break",
+   "label": "Signature"
+  },
+  {
+   "fieldname": "signature",
+   "fieldtype": "Attach",
+   "label": "Signature"
+  },
+  {
+   "fieldname": "signed_at",
+   "fieldtype": "Datetime",
+   "label": "Signed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "signed_ip",
+   "fieldtype": "Data",
+   "label": "Signed IP",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-04 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "W-4 Form",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR User",
+   "write": 1
+  }
+ ],
+ "search_fields": "employee_name,status,company,tax_year",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}

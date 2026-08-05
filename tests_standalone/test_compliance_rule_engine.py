@@ -86,6 +86,8 @@ class RuleEngineTestCase(AlertTestCase):
 		self.a_block()
 		self.a_cabin()
 		self.an_employee(i9="Expired", flc_license_expiration=days_from_today(20))
+		for row in STORE.rows("Employee"):
+			row.setdefault("w4_status", "Active")
 		self.a_filing(response_due_in_days=-4)
 		self.an_audit(due_in_days=-25)
 		self.a_training(expires_in_days=12)
@@ -249,12 +251,12 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		`work_authorization_expiring`, `i9_retention_destruction_eligible`.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 18)
-		self.assertEqual(len(compliance_rules.rule_rows()), 18)
+		self.assertEqual(len(report["created"]), 20)
+		self.assertEqual(len(compliance_rules.rule_rows()), 20)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
-	def test_the_shapes_are_sixteen_declarative_two_builtin_and_no_custom_python(self):
+	def test_the_shapes_are_eighteen_declarative_two_builtin_and_no_custom_python(self):
 		"""The split is a claim the release makes, so it is asserted rather than described.
 
 		v0.22.0 shipped 6/7/0 and named the four primitives that would move five of
@@ -266,6 +268,7 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		do not reach its own problem domain.
 
 		v0.27.0 added three I-9 declarative rules.
+		v0.28.0 added two W-4 declarative rules.
 		"""
 		self.seed_rules()
 		shapes = {}
@@ -275,6 +278,7 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 			sorted(shapes.get(compliance_rules.SHAPE_DECLARATIVE, [])),
 			[
 				"certification_expiring",
+				"employee_missing_w4",
 				"field_flag_awaiting_dispatch",
 				"filing_response_due",
 				"flc_license_expiring",
@@ -287,6 +291,7 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 				"policy_review_overdue",
 				"shift_heat_threshold_crossed",
 				"training_expiring",
+				"w4_tax_year_outdated",
 				"water_test_contamination",
 				"water_test_stale",
 				"work_authorization_expiring",
@@ -910,12 +915,12 @@ class TheApprovalGate(RuleEngineTestCase):
 
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
-	def test_seeding_twice_writes_eighteen_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 18)
+	def test_seeding_twice_writes_twenty_rules_once(self):
+		self.assertEqual(len(self.seed_rules()["created"]), 20)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 18)
-		self.assertEqual(len(compliance_rules.rule_rows()), 18)
+		self.assertEqual(len(again["present"]), 20)
+		self.assertEqual(len(compliance_rules.rule_rows()), 20)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -963,7 +968,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 18)
+		self.assertEqual(data["rule_count"], 20)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)
@@ -982,7 +987,7 @@ class TheRuleTools(RuleEngineTestCase):
 		employees = self.tool_data("list_compliance_rules", {"target_doctype": "Employee"})
 		self.assertEqual(
 			sorted(rule["alert_type"] for rule in employees["rules"]),
-			["flc_license_expiring", "i9_expired"],
+			["employee_missing_w4", "flc_license_expiring", "i9_expired"],
 		)
 
 	def test_a_regime_that_is_not_in_the_vocabulary_is_refused_by_name(self):
