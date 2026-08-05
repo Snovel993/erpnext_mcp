@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""The closed list of twelve routes, and the argument filter Frappe was doing.
+"""The closed list of routes, and the argument filter Frappe was doing.
 
 THERE IS NO DISPATCHER AND NO METHOD-NAME ARGUMENT, for the same reason
 `api/mobile.py` has neither: a route exists in the table below or its path 404s,
-so the entire reachable surface of this service is twelve lines an auditor can
+so the entire reachable surface of this service is the lines an auditor can
 read in one screen. This app has two hundred-odd MCP tools; `create_journal_entry`,
 `convey_parcel`, `import_chart_of_accounts` and `disable_je_gate` are among them
 and NONE of them is reachable from here at any path, under any argument, by any
@@ -79,7 +79,7 @@ class Route:
 		return f"<Route {self.path}{' (mutating)' if self.mutating else ''}>"
 
 
-#: The ten mobile methods and the two file methods. ORDER IS THE APP'S ORDER —
+#: The mobile methods and the two file methods. ORDER IS THE APP'S ORDER —
 #: identity, lists, detail, lifecycle, field reports, compliance, upload —
 #: because this table is the first thing somebody reads to learn what a phone
 #: can do.
@@ -98,6 +98,7 @@ ROUTES = (
 	Route("/mobile", mobile_api.get_asset_detail),
 	Route("/mobile", mobile_api.log_asset_state_change),
 	Route("/mobile", mobile_api.get_available_actions),
+	Route("/mobile", mobile_api.report_asset_issue),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

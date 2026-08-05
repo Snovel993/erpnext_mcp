@@ -630,6 +630,26 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		AvailableActionsModel.decode(row, "get_available_actions")
 		self.assertEqual(row["current_state"], "closed")
 
+	def test_17_report_asset_issue(self):
+		self.configure(
+			enabled=1, allow_report_asset_issue=1, allow_register_asset=1,
+			allow_report_field_task=1,
+		)
+		self.tool_data("register_asset", {
+			"name": "MC-Valve-05",
+			"asset_type": "Irrigation Valve",
+			"company": MAIN,
+		})
+		self.be()
+		_staged, photo = self.upload("photo", "AI_photo.jpg")
+		row = self.wire(
+			"report_asset_issue",
+			asset_name="MC-Valve-05",
+			description="Leaking badly",
+			photo_file_token=photo["file_token"],
+		)
+		FarmTaskModel.decode(row, "report_asset_issue")
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -730,6 +750,7 @@ class TheContractIsComplete(ContractTestCase):
 		"get_asset_detail": "test_14",
 		"log_asset_state_change": "test_15",
 		"get_available_actions": "test_16",
+		"report_asset_issue": "test_17",
 	}
 
 	def _published(self, module):

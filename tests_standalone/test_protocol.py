@@ -538,10 +538,12 @@ class Catalogue(SeededTestCase):
 
 		v0.25.0 added three for asset state-change actions: get_available_actions
 		and list_asset_state_history are reads, log_asset_state_change is a write.
+
+		v0.26.0 added one mutating tool: report_asset_issue.
 		"""
-		self.assertEqual(len(registry.TOOLS), 270)
+		self.assertEqual(len(registry.TOOLS), 271)
 		self.assertEqual(len(registry.READ_TOOLS), 120)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 150)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 151)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

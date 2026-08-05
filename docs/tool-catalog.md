@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 267 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 271 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 118 read tools are **on** by default and can be switched off individually. A
+All 120 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7237,6 +7237,43 @@ Until then, author rules with `create_compliance_rule` and check them with
 
 ---
 
+## v0.26.0 — field-initiated task creation from asset scan
+
+Worker scans an asset's QR tag and taps "Flag needs repair" to create a Farm Task
+linked to the asset, with skill and location auto-filled from the asset type.
+
+### `report_asset_issue`
+
+**MUTATING (default OFF).** Convenience wrapper: report a problem on a specific
+asset. Looks up the asset, auto-fills `skill_required` from the asset type
+(Housing Unit → camp_maintenance, Irrigation Valve → irrigation, etc.), then
+creates a Farm Task linked to the asset.
+
+Delegates to `report_field_task` under the hood — same anti-spam, same photo
+requirement, same urgency cap. The difference is the caller names an asset
+instead of manually providing location and skill.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `asset_name` | yes | Asset Register docname from the QR/NFC tag |
+| `reported_by` | yes | Employee id of the reporting worker |
+| `photo_file_token` | yes | File docname from `finalize_staged_file` |
+| `description` | | What the problem is |
+| `urgency` | | Normal or High (Critical restricted to Foreman/Manager) |
+| `task_type` | | Default Repair |
+| `skill_required` | | Override the auto-mapped skill |
+| `gps_lat` / `gps_lon` | | GPS coordinates |
+| `company` | | Defaults to the asset's company |
+
+Also in this release:
+
+- `report_field_task` gains an optional `asset` parameter to link a task to an asset
+- `scan_asset` response includes `can_report` and `suggested_skill`
+- Farm Task doctype gains an `asset` Link field to Asset Register
+- Tasks linked to an asset appear in `get_asset_detail`'s history timeline
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -7247,7 +7284,8 @@ Everything a tool needs is in two places:
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
-   `shifts`, `heat`, `kpi`, `visits`, `sessions`, `rules` or `fieldwork` —
+   `shifts`, `heat`, `kpi`, `visits`, `sessions`, `rules`, `asset_tags` or
+   `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

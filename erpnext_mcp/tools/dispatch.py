@@ -128,6 +128,7 @@ _TASK_FIELDS = (
 	"creates_record_data",
 	"produced_record",
 	"notes",
+	"asset",
 	"creation",
 	"modified",
 	"owner",
@@ -215,6 +216,8 @@ def _describe_task(row: dict) -> dict:
 		"open": (row.get("state") or DRAFT) not in TERMINAL_STATES,
 		"self_pickable": (row.get("dispatch_mode") or "Either") in SELF_PICKABLE,
 	}
+	if row.get("asset"):
+		out["asset"] = row["asset"]
 	if row.get("reported_by"):
 		out["reported_by"] = row["reported_by"]
 	if row.get("reported_at"):
@@ -2312,9 +2315,22 @@ def report_field_task(args: dict) -> ToolResult:
 		if not frappe.db.exists(location_doctype, location):
 			raise ToolError(f"no {location_doctype} called {location!r} on this site. Nothing was created.")
 
+	# ── asset ─────────────────────────────────────────────────────────────
+	asset_name = as_str(args, "asset")
+	asset_doc = None
+	if asset_name:
+		from .asset_tags import ASSET_REGISTER, ASSET_TYPE_SKILL_MAP, asset_row
+		asset_doc = asset_row(asset_name)
+		if not location and not location_doctype:
+			location_doctype = asset_doc.get("location_doctype") or None
+			location = asset_doc.get("location") or None
+
 	# ── build the task ─────────────────────────────────────────────────────
 	task_type = as_str(args, "task_type") or "Repair"
 	skill_required = as_str(args, "skill_required")
+	if not skill_required and asset_doc:
+		asset_type = asset_doc.get("asset_type") or "General"
+		skill_required = ASSET_TYPE_SKILL_MAP.get(asset_type, "general_maintenance")
 	description = as_str(args, "description")
 	task_name = description[:80] if description else f"Field report by {worker_name}"
 
@@ -2334,6 +2350,8 @@ def report_field_task(args: dict) -> ToolResult:
 	doc.reported_by = worker
 	doc.reported_at = frappe.utils.now()
 	doc.report_photo = photo
+	if asset_doc and compat.has_field(FARM_TASK, "asset"):
+		doc.asset = asset_doc["name"]
 	doc.insert(ignore_permissions=True)
 
 	described = _describe_task(dict(doc.as_dict()))

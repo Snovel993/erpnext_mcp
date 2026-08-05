@@ -28,6 +28,8 @@
   "source_alert",
   "source_workorder",
   "inspection_session",
+  "asset_section",
+  "asset",
   "field_report_section",
   "reported_by",
   "reported_at",
@@ -202,6 +204,19 @@
    "search_index": 1
   },
   {
+   "fieldname": "asset_section",
+   "fieldtype": "Section Break",
+   "label": "Asset"
+  },
+  {
+   "description": "The Asset Register record this task is about, where it is about one. A broken valve, a cabin window, a sprayer hose — any tagged asset a worker can scan. When present, the task appears in the asset's history timeline and the skill_required can be auto-filled from the asset type.",
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "label": "Asset",
+   "options": "Asset Register",
+   "search_index": 1
+  },
+  {
    "fieldname": "field_report_section",
    "fieldtype": "Section Break",
    "label": "Field Report"
@@ -320,7 +335,7 @@
   }
  ],
  "quick_entry": 0,
- "search_fields": "task_type,state,location,assigned_to,origin,reported_by",
+ "search_fields": "task_type,state,location,assigned_to,origin,reported_by,asset",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

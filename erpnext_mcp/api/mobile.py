@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The ten methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The sixteen methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -444,6 +444,7 @@ def report_field_task(
 	urgency=None,
 	description=None,
 	photo_file_token=None,
+	asset=None,
 ) -> dict:
 	"""A worker in the field flags a problem on the spot.
 
@@ -479,6 +480,8 @@ def report_field_task(
 		inner["description"] = str(description).strip()
 	if photo_file_token:
 		inner["photo_file_token"] = str(photo_file_token).strip()
+	if asset:
+		inner["asset"] = str(asset).strip()
 
 	company = guard.require_company(user, inner.get("company"), allowed) if inner.get("company") else ""
 	if not company and allowed:
@@ -596,3 +599,56 @@ def get_available_actions(user: str, asset_name=None) -> dict:
 
 	result = asset_tags.get_available_actions({"asset_name": asset_name})
 	return result.data
+
+
+# ── 16. report_asset_issue ──────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("report_asset_issue", mutating=True, limit=guard.WRITE_LIMIT)
+def report_asset_issue(
+	user: str,
+	asset_name=None,
+	description=None,
+	urgency=None,
+	photo_file_token=None,
+	task_type=None,
+	skill_required=None,
+	gps_lat=None,
+	gps_lon=None,
+) -> dict:
+	"""Report a problem on a specific asset. Convenience wrapper that auto-fills
+	location and skill from the asset, then creates a Farm Task."""
+	allowed = guard.require_scope(user)
+	employee = _employee(user)
+
+	asset_name = str(asset_name or "").strip()
+	if not asset_name:
+		frappe.throw("asset_name is required.", frappe.ValidationError)
+
+	inner = {
+		"asset_name": asset_name,
+		"reported_by": employee,
+	}
+	if description:
+		inner["description"] = str(description).strip()
+	if urgency:
+		inner["urgency"] = str(urgency).strip()
+	if photo_file_token:
+		inner["photo_file_token"] = str(photo_file_token).strip()
+	if task_type:
+		inner["task_type"] = str(task_type).strip()
+	if skill_required:
+		inner["skill_required"] = str(skill_required).strip()
+	if gps_lat is not None:
+		inner["gps_lat"] = gps_lat
+	if gps_lon is not None:
+		inner["gps_lon"] = gps_lon
+
+	company = guard.require_company(user, None, allowed) if allowed else ""
+	if not company and allowed:
+		inner["company"] = allowed[0]
+	elif company:
+		inner["company"] = company
+
+	result = asset_tags.report_asset_issue(inner)
+	data = result.data
+	return shape.task(data, None)

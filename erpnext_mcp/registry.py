@@ -6915,6 +6915,11 @@ TOOLS = {
 				"of the problem.",
 			),
 			"reported_by": _field(_STRING, "The Employee id of the worker reporting. REQUIRED."),
+			"asset": _field(
+				_STRING,
+				"Optional Asset Register docname. When provided, the task is linked to this "
+				"asset, and location/skill_required are auto-filled from it if not given explicitly.",
+			),
 			"company": _COMPANY,
 		},
 		required=("reported_by", "photo_file_token"),
@@ -6922,6 +6927,49 @@ TOOLS = {
 		title="Report a field task",
 		available=_needs_doctype("Farm Task"),
 		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.26.0: Asset-initiated field report ────────────────────────────
+	"report_asset_issue": _tool(
+		asset_tags.report_asset_issue,
+		"MUTATING (default OFF). Convenience wrapper: report a problem on a "
+		"specific asset. Looks up the asset, auto-fills location and "
+		"skill_required from the asset type, then creates a Farm Task linked "
+		"to the asset.\n\n"
+		"DELEGATES TO report_field_task under the hood — same anti-spam, "
+		"same photo requirement, same urgency cap. The difference is that the "
+		"caller names an asset instead of manually providing location and skill.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname (from the QR/NFC tag). REQUIRED."),
+			"description": _field(_STRING, "What the problem is, in the worker's words."),
+			"urgency": _field(
+				_STRING,
+				"Normal or High for field workers. Critical restricted to Foreman/Manager. "
+				"Default Normal.",
+			),
+			"photo_file_token": _field(
+				_STRING,
+				"REQUIRED. The File docname from finalize_staged_file — the 'before' photo "
+				"of the problem.",
+			),
+			"reported_by": _field(_STRING, "The Employee id of the worker reporting. REQUIRED."),
+			"task_type": _field(
+				_STRING,
+				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
+				"Housing-Cleanup, Water-Sampling or Other. Default Repair.",
+			),
+			"skill_required": _field(
+				_STRING,
+				"Override the auto-mapped skill. If omitted, mapped from asset type.",
+			),
+			"gps_lat": _field(_NUMBER, "Latitude from the scanner's GPS fix."),
+			"gps_lon": _field(_NUMBER, "Longitude from the scanner's GPS fix."),
+			"company": _COMPANY,
+		},
+		required=("asset_name", "reported_by", "photo_file_token"),
+		mutating=True,
+		title="Report an asset issue",
+		available=_needs_doctype("Farm Task", "Asset Register"),
+		requires="the Farm Task and Asset Register DocTypes — run `bench migrate`",
 	),
 	"assign_farm_task": _tool(
 		dispatch.assign_farm_task,

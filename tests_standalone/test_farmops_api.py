@@ -159,6 +159,7 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/get_asset_detail",
 		"/mobile/log_asset_state_change",
 		"/mobile/get_available_actions",
+		"/mobile/report_asset_issue",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

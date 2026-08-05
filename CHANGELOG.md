@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.26.0 — 2026-08-04
+
+**Field-initiated task creation from asset scan.** Worker scans an asset's QR
+tag and taps "Flag needs repair" to create a Farm Task linked to the asset, with
+skill and location auto-filled from the asset type.
+
+**New tool: `report_asset_issue`.** Convenience wrapper that takes an asset name,
+auto-maps skill_required from the asset type (Housing Unit → camp_maintenance,
+Irrigation Valve → irrigation, etc.), and creates a linked Farm Task.
+
+**Enhanced: `report_field_task` gains an `asset` parameter.** Links the task to
+an asset and auto-fills skill/location when not given explicitly.
+
+**Enhanced: `scan_asset` response** now includes `can_report` and
+`suggested_skill` for the iOS "Flag needs repair" button.
+
+**New field on Farm Task: `asset`.** Link to Asset Register. Tasks linked to an
+asset appear in `get_asset_detail`'s history timeline.
+
 ## 0.25.0 — 2026-08-04
 
 **State-Change Actions: every asset knows what you can do to it.** Workers scan

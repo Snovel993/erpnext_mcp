@@ -66,6 +66,7 @@ ASSET_TYPES = (
 
 _HISTORY_DOCTYPES = (
     ("Farm Task", "asset_register", "name,task_type,status,priority,assigned_to,creation"),
+    ("Farm Task", "asset", "name,task_type,state,urgency,assigned_to,origin,creation"),
     ("Housing Inspection", "housing_unit", "name,unit,inspector,inspection_date,creation"),
     ("Detector Test", "housing_unit", "name,unit,test_type,result,test_date,creation"),
     ("Water Test", "water_source", "name,source_name,test_type,result,test_date,creation"),
@@ -73,6 +74,19 @@ _HISTORY_DOCTYPES = (
     ("Compliance Alert", "asset_register", "name,alert_type,severity,status,creation"),
     ("Asset State Log", "asset_name", "name,action,from_state,to_state,performed_by,performed_at,creation"),
 )
+
+ASSET_TYPE_SKILL_MAP: dict[str, str] = {
+    "Housing Unit": "camp_maintenance",
+    "Irrigation Valve": "irrigation",
+    "Irrigation Zone": "irrigation",
+    "Sprayer": "equipment_maintenance",
+    "Tractor": "equipment_maintenance",
+    "Water Source": "water_management",
+    "Storage": "facility_maintenance",
+    "Cold Storage": "facility_maintenance",
+    "Block": "field_operations",
+    "General": "general_maintenance",
+}
 
 
 def _require() -> None:
@@ -237,23 +251,30 @@ def get_asset_detail(args: dict) -> ToolResult:
     history = _asset_history(row["name"], limit=as_limit(args))
 
     open_tasks = []
-    if compat.doctype_exists("Farm Task") and compat.has_field("Farm Task", "asset_register"):
-        try:
-            tasks = frappe.db.get_all(
-                "Farm Task",
-                filters={
-                    "asset_register": row["name"],
-                    "status": ("in", ["Open", "In Progress", "Dispatched", "Claimed"]),
-                },
-                fields=compat.existing_fields(
-                    "Farm Task", ["name", "task_type", "status", "priority", "assigned_to", "creation"]
-                ),
-                order_by="creation desc",
-                limit=50,
-            )
-            open_tasks = [dict(t) for t in tasks or []]
-        except Exception:
-            pass
+    if compat.doctype_exists("Farm Task"):
+        task_fields = compat.existing_fields(
+            "Farm Task", ["name", "task_type", "state", "urgency", "assigned_to", "origin", "creation"]
+        )
+        seen = set()
+        for link_field in ("asset", "asset_register"):
+            if not compat.has_field("Farm Task", link_field):
+                continue
+            live_states = ("Draft", "Available", "Claimed", "In-Progress", "Awaiting-Review",
+                           "Open", "In Progress", "Dispatched")
+            try:
+                tasks = frappe.db.get_all(
+                    "Farm Task",
+                    filters={link_field: row["name"], "state": ("in", list(live_states))},
+                    fields=task_fields,
+                    order_by="creation desc",
+                    limit=50,
+                )
+                for t in tasks or []:
+                    if t.get("name") not in seen:
+                        seen.add(t["name"])
+                        open_tasks.append(dict(t))
+            except Exception:
+                pass
 
     children = frappe.db.get_all(
         ASSET_REGISTER,
@@ -335,23 +356,30 @@ def scan_asset(args: dict) -> ToolResult:
     described = _describe_asset(dict(doc.as_dict()))
 
     open_tasks = []
-    if compat.doctype_exists("Farm Task") and compat.has_field("Farm Task", "asset_register"):
-        try:
-            tasks = frappe.db.get_all(
-                "Farm Task",
-                filters={
-                    "asset_register": doc.name,
-                    "status": ("in", ["Open", "In Progress", "Dispatched", "Claimed"]),
-                },
-                fields=compat.existing_fields(
-                    "Farm Task", ["name", "task_type", "status", "priority", "creation"]
-                ),
-                order_by="creation desc",
-                limit=20,
-            )
-            open_tasks = [dict(t) for t in tasks or []]
-        except Exception:
-            pass
+    if compat.doctype_exists("Farm Task"):
+        task_fields = compat.existing_fields(
+            "Farm Task", ["name", "task_type", "state", "urgency", "assigned_to", "origin", "creation"]
+        )
+        seen = set()
+        for link_field in ("asset", "asset_register"):
+            if not compat.has_field("Farm Task", link_field):
+                continue
+            live_states = ("Draft", "Available", "Claimed", "In-Progress", "Awaiting-Review",
+                           "Open", "In Progress", "Dispatched")
+            try:
+                tasks = frappe.db.get_all(
+                    "Farm Task",
+                    filters={link_field: doc.name, "state": ("in", list(live_states))},
+                    fields=task_fields,
+                    order_by="creation desc",
+                    limit=20,
+                )
+                for t in tasks or []:
+                    if t.get("name") not in seen:
+                        seen.add(t["name"])
+                        open_tasks.append(dict(t))
+            except Exception:
+                pass
 
     due_compliance = []
     if compat.doctype_exists("Compliance Alert") and compat.has_field("Compliance Alert", "asset_register"):
@@ -372,6 +400,10 @@ def scan_asset(args: dict) -> ToolResult:
         except Exception:
             pass
 
+    asset_type = described.get("asset_type") or "General"
+    can_report = compat.doctype_exists("Farm Task") and compat.has_field("Farm Task", "asset")
+    suggested_skill = ASSET_TYPE_SKILL_MAP.get(asset_type, "general_maintenance")
+
     return ToolResult(
         data={
             **described,
@@ -380,6 +412,8 @@ def scan_asset(args: dict) -> ToolResult:
             "open_task_count": len(open_tasks),
             "due_compliance": due_compliance,
             "due_compliance_count": len(due_compliance),
+            "can_report": can_report,
+            "suggested_skill": suggested_skill,
         },
         summary=f"scanned {doc.name}" + (f" by {scanned_by}" if scanned_by else ""),
         docstatus_delta="0 → 0 (updated)",
@@ -678,6 +712,65 @@ def generate_asset_qr_sheet(args: dict) -> ToolResult:
         },
         summary=f"{len(labels)} label(s) generated for {template}",
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v0.26.0 — field-initiated task creation from asset scan
+# ══════════════════════════════════════════════════════════════════════════════
+
+def report_asset_issue(args: dict) -> ToolResult:
+	"""Convenience wrapper: report a problem on a specific asset.
+
+	Looks up the asset, auto-fills location and skill_required from it, then
+	delegates to dispatch.report_field_task with the asset link pre-filled.
+	"""
+	_require()
+	compat.require_doctype(
+		"Farm Task",
+		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
+	)
+
+	asset_name = as_str(args, "asset_name", required=True)
+	row = asset_row(asset_name)
+	asset_type = row.get("asset_type") or "General"
+
+	inner = {
+		"reported_by": as_str(args, "reported_by", required=True),
+		"photo_file_token": as_str(args, "photo_file_token", required=True),
+		"asset": row["name"],
+		"task_type": as_str(args, "task_type") or "Repair",
+		"skill_required": as_str(args, "skill_required") or ASSET_TYPE_SKILL_MAP.get(asset_type, "general_maintenance"),
+		"urgency": as_str(args, "urgency") or "Normal",
+	}
+	description = as_str(args, "description")
+	if description:
+		inner["description"] = description
+
+	company = as_str(args, "company") or row.get("company")
+	if company:
+		inner["company"] = company
+
+	gps_lat = args.get("gps_lat") or args.get("gps_latitude")
+	gps_lon = args.get("gps_lon") or args.get("gps_longitude")
+	if gps_lat is not None and gps_lon is not None:
+		inner["gps_lat"] = gps_lat
+		inner["gps_lon"] = gps_lon
+
+	from . import dispatch
+	result = dispatch.report_field_task(inner)
+	data = result.data or {}
+	data["asset"] = row["name"]
+	data["asset_type"] = asset_type
+	data["skill_auto_mapped"] = "skill_required" not in args or not args.get("skill_required")
+
+	return ToolResult(
+		data=data,
+		summary=(
+			f"field report {data.get('name', '?')} on {row['name']} ({asset_type}), "
+			f"skill={inner['skill_required']}"
+		),
+		docstatus_delta="none → 0 (created)",
+	)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

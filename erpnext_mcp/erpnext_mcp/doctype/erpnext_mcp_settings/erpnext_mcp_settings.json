@@ -284,6 +284,7 @@
   "dispatch_read_col",
   "allow_create_farm_task",
   "allow_report_field_task",
+  "allow_report_asset_issue",
   "allow_assign_farm_task",
   "allow_claim_farm_task",
   "allow_start_farm_task",
@@ -2199,6 +2200,13 @@
    "fieldname": "allow_report_field_task",
    "fieldtype": "Check",
    "label": "Report Field Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Report a problem on a specific asset. Convenience wrapper that auto-fills skill_required from the asset type and creates a linked Farm Task.",
+   "fieldname": "allow_report_asset_issue",
+   "fieldtype": "Check",
+   "label": "Report Asset Issue"
   },
   {
    "default": "0",
