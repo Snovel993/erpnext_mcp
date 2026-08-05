@@ -75,6 +75,7 @@ from .tools import (
 	opening,
 	packets,
 	parties,
+	payroll,
 	printing,
 	read,
 	realestate,
@@ -8732,6 +8733,151 @@ TOOLS = {
 		title="Import state tax brackets",
 		available=_needs_doctype("State Tax Table"),
 		requires="the State Tax Table doctype (run bench migrate after installing v0.29.0)",
+	),
+	# ── v0.30.0: Salary Structures + Payroll ────────────────────────────────
+	"get_salary_structure": _tool(
+		payroll.get_salary_structure,
+		"Get the active salary structure for an employee: pay type (Piece Rate, "
+		"Hourly, or Salary), base rate, effective dates. Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"company": _COMPANY,
+		},
+		available=_needs_doctype("Farm Salary Structure"),
+		requires="the Farm Salary Structure doctype (run bench migrate after installing v0.30.0)",
+		title="Get salary structure",
+	),
+	"list_salary_structures": _tool(
+		payroll.list_salary_structures,
+		"All salary structures with optional filtering by company, employee, "
+		"pay type, and active status. Read-only.",
+		{
+			"company": _COMPANY,
+			"employee": _field(_STRING, "Filter by employee docname or name."),
+			"pay_type": _field(_STRING, "Filter by pay type: Piece Rate, Hourly, or Salary."),
+			"is_active": _field(_BOOLEAN, "Filter by active status."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("Farm Salary Structure"),
+		requires="the Farm Salary Structure doctype (run bench migrate after installing v0.30.0)",
+		title="List salary structures",
+	),
+	"preview_payroll": _tool(
+		payroll.preview_payroll,
+		"Dry-run payroll calculation for a single employee over a date range. "
+		"Shows gross pay, all deductions (federal, state, FICA), and net pay "
+		"WITHOUT creating any records. Uses the employee's active salary "
+		"structure, W-4, and shifts in the period. Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"pay_period_start": _field(_STRING, "Start date as YYYY-MM-DD."),
+			"pay_period_end": _field(_STRING, "End date as YYYY-MM-DD."),
+			"pay_frequency": _field(_STRING, "Weekly, Biweekly, Semimonthly, or Monthly. Default Biweekly."),
+			"company": _COMPANY,
+		},
+		required=("pay_period_start", "pay_period_end"),
+		available=_needs_doctype("Farm Salary Structure"),
+		requires="the Farm Salary Structure doctype (run bench migrate after installing v0.30.0)",
+		title="Preview payroll",
+	),
+	"get_payroll_entry": _tool(
+		payroll.get_payroll_entry,
+		"A Farm Payroll Entry with all its slips: per-employee gross, "
+		"deductions, net, hours, piece units, and state tax detail. Read-only.",
+		{
+			"name": _field(_STRING, "The Farm Payroll Entry docname."),
+			"payroll_entry": _field(_STRING, "Alias for name."),
+		},
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+		title="Get payroll entry",
+	),
+	"list_payroll_entries": _tool(
+		payroll.list_payroll_entries,
+		"List Farm Payroll Entries with optional filtering by company, status, "
+		"and pay frequency. Read-only.",
+		{
+			"company": _COMPANY,
+			"status": _field(_STRING, "Filter by status: Draft, Calculated, Submitted, Cancelled."),
+			"pay_frequency": _field(_STRING, "Filter by frequency: Weekly, Biweekly, Semimonthly, Monthly."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+		title="List payroll entries",
+	),
+	"create_salary_structure": _tool(
+		payroll.create_salary_structure,
+		"MUTATING (default OFF). Create a salary structure linking an employee "
+		"to a pay type and base rate. One active structure per employee; "
+		"deactivate the old one first if switching pay types.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"company": _COMPANY,
+			"pay_type": _field(_STRING, "Piece Rate, Hourly, or Salary."),
+			"base_rate": _field(_NUMBER, "Rate per unit/hour or periodic salary amount."),
+			"effective_from": _field(_STRING, "Start date as YYYY-MM-DD. Defaults to today."),
+			"effective_to": _field(_STRING, "End date as YYYY-MM-DD. Leave blank for open-ended."),
+			"notes": _field(_STRING, "Optional notes."),
+		},
+		required=("pay_type", "base_rate"),
+		mutating=True,
+		title="Create salary structure",
+		available=_needs_doctype("Farm Salary Structure"),
+		requires="the Farm Salary Structure doctype (run bench migrate after installing v0.30.0)",
+	),
+	"deactivate_salary_structure": _tool(
+		payroll.deactivate_salary_structure,
+		"MUTATING (default OFF). Soft-deactivate a salary structure: sets "
+		"is_active to 0 and effective_to to today. Pass either the docname "
+		"or an employee to deactivate their current active structure.",
+		{
+			"name": _field(_STRING, "The Farm Salary Structure docname."),
+			"salary_structure": _field(_STRING, "Alias for name."),
+			"employee": _field(_STRING, "Employee whose active structure to deactivate."),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Deactivate salary structure",
+		available=_needs_doctype("Farm Salary Structure"),
+		requires="the Farm Salary Structure doctype (run bench migrate after installing v0.30.0)",
+	),
+	"calculate_payroll": _tool(
+		payroll.calculate_payroll,
+		"MUTATING (default OFF). Generate a full payroll entry for a pay "
+		"period. Creates a Farm Payroll Entry in Calculated status with one "
+		"slip per active employee who has a salary structure. Each slip "
+		"includes gross pay, federal and state withholding, FICA, and net pay.",
+		{
+			"company": _COMPANY,
+			"pay_period_start": _field(_STRING, "Start date as YYYY-MM-DD."),
+			"pay_period_end": _field(_STRING, "End date as YYYY-MM-DD."),
+			"pay_frequency": _field(_STRING, "Weekly, Biweekly, Semimonthly, or Monthly. Default Biweekly."),
+		},
+		required=("pay_period_start", "pay_period_end"),
+		mutating=True,
+		title="Calculate payroll",
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+	),
+	"submit_payroll": _tool(
+		payroll.submit_payroll,
+		"MUTATING (default OFF). Move a Farm Payroll Entry from Calculated to "
+		"Submitted (final). Only Calculated entries can be submitted.",
+		{
+			"name": _field(_STRING, "The Farm Payroll Entry docname."),
+			"payroll_entry": _field(_STRING, "Alias for name."),
+		},
+		mutating=True,
+		title="Submit payroll",
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
 	),
 	# ── v0.19.0: the training register ──────────────────────────────────────
 	"record_training": _tool(

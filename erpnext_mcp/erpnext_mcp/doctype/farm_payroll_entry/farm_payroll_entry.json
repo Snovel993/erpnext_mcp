@@ -1,0 +1,169 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-05 09:00:00.000000",
+ "description": "One payroll run per pay period per company. Contains Farm Payroll Slip child rows, one per employee. Status moves from Draft to Calculated (all slips computed) to Submitted (final) to Cancelled.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "pay_frequency",
+  "status",
+  "col_break_period",
+  "pay_period_start",
+  "pay_period_end",
+  "totals_section",
+  "total_gross",
+  "total_deductions",
+  "col_break_totals",
+  "total_net",
+  "employee_count",
+  "slips_section",
+  "slips"
+ ],
+ "fields": [
+  {
+   "default": "PAY-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "PAY-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Biweekly",
+   "fieldname": "pay_frequency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Pay Frequency",
+   "options": "Weekly\nBiweekly\nSemimonthly\nMonthly",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nCalculated\nSubmitted\nCancelled",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "col_break_period",
+   "fieldtype": "Column Break",
+   "label": "Pay Period"
+  },
+  {
+   "fieldname": "pay_period_start",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Pay Period Start",
+   "reqd": 1
+  },
+  {
+   "fieldname": "pay_period_end",
+   "fieldtype": "Date",
+   "label": "Pay Period End",
+   "reqd": 1
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break",
+   "label": "Totals"
+  },
+  {
+   "default": "0",
+   "fieldname": "total_gross",
+   "fieldtype": "Currency",
+   "label": "Total Gross",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "total_deductions",
+   "fieldtype": "Currency",
+   "label": "Total Deductions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_totals",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "total_net",
+   "fieldtype": "Currency",
+   "label": "Total Net",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "employee_count",
+   "fieldtype": "Int",
+   "label": "Employee Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "slips_section",
+   "fieldtype": "Section Break",
+   "label": "Payroll Slips"
+  },
+  {
+   "fieldname": "slips",
+   "fieldtype": "Table",
+   "label": "Slips",
+   "options": "Farm Payroll Slip"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-05 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Payroll Entry",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR User"
+  }
+ ],
+ "search_fields": "company,status,pay_frequency",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "company",
+ "track_changes": 1
+}

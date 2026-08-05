@@ -290,6 +290,17 @@
   "allow_create_state_tax_config",
   "allow_update_state_tax_config",
   "allow_import_state_tax_table",
+  "payroll_section",
+  "allow_get_salary_structure",
+  "allow_list_salary_structures",
+  "allow_preview_payroll",
+  "allow_get_payroll_entry",
+  "allow_list_payroll_entries",
+  "payroll_col",
+  "allow_create_salary_structure",
+  "allow_deactivate_salary_structure",
+  "allow_calculate_payroll",
+  "allow_submit_payroll",
   "shift_section",
   "allow_list_shifts",
   "allow_get_shift",
@@ -2287,6 +2298,78 @@
    "label": "Import State Tax Table"
   },
   {
+   "fieldname": "payroll_section",
+   "fieldtype": "Section Break",
+   "label": "Salary Structures and Payroll"
+  },
+  {
+   "default": "1",
+   "description": "READ. Get the active salary structure for an employee — pay type, base rate, effective dates.",
+   "fieldname": "allow_get_salary_structure",
+   "fieldtype": "Check",
+   "label": "Get Salary Structure"
+  },
+  {
+   "default": "1",
+   "description": "READ. List salary structures with optional filters by company, employee, pay type, active status.",
+   "fieldname": "allow_list_salary_structures",
+   "fieldtype": "Check",
+   "label": "List Salary Structures"
+  },
+  {
+   "default": "1",
+   "description": "READ. Dry-run payroll calculation for one employee over a date range. Shows gross, deductions, net without creating records.",
+   "fieldname": "allow_preview_payroll",
+   "fieldtype": "Check",
+   "label": "Preview Payroll"
+  },
+  {
+   "default": "1",
+   "description": "READ. Get a Farm Payroll Entry with all its payroll slips — totals, per-employee breakdowns, deduction details.",
+   "fieldname": "allow_get_payroll_entry",
+   "fieldtype": "Check",
+   "label": "Get Payroll Entry"
+  },
+  {
+   "default": "1",
+   "description": "READ. List payroll entries with optional filters by company, status, pay frequency.",
+   "fieldname": "allow_list_payroll_entries",
+   "fieldtype": "Check",
+   "label": "List Payroll Entries"
+  },
+  {
+   "fieldname": "payroll_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a salary structure for an employee — pay type, base rate, effective period.",
+   "fieldname": "allow_create_salary_structure",
+   "fieldtype": "Check",
+   "label": "Create Salary Structure"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Soft-deactivate a salary structure. Sets is_active to 0 and effective_to to today.",
+   "fieldname": "allow_deactivate_salary_structure",
+   "fieldtype": "Check",
+   "label": "Deactivate Salary Structure"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Generate a full payroll entry for a pay period — creates a Draft entry with calculated slips for every active employee with a salary structure.",
+   "fieldname": "allow_calculate_payroll",
+   "fieldtype": "Check",
+   "label": "Calculate Payroll"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Move a payroll entry from Calculated to Submitted (final).",
+   "fieldname": "allow_submit_payroll",
+   "fieldtype": "Check",
+   "label": "Submit Payroll"
+  },
+  {
    "fieldname": "shift_section",
    "fieldtype": "Section Break",
    "label": "Crew Shifts and Heat Exposure"
@@ -3171,7 +3254,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-04 12:00:00.000000",
+ "modified": "2026-08-05 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

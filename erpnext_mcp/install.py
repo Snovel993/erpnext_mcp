@@ -714,6 +714,18 @@ _PRECIOUS_DOCTYPES = (
 		"and the supersession chain showing which certificate replaced which. The basis for "
 		"every federal withholding calculation and the record an IRS inquiry asks for",
 	),
+	(
+		"Farm Salary Structure",
+		"the salary register — which employee earns what rate, by what method (piece, "
+		"hourly, salary), from which date. The basis for every payroll calculation and "
+		"the record a wage claim or audit asks for",
+	),
+	(
+		"Farm Payroll Entry",
+		"the payroll register — every pay period's gross, deductions and net for every "
+		"employee, with the per-slip breakdown of federal and state withholding, FICA, "
+		"and the minimum wage check. The record that proves everybody was paid correctly",
+	),
 )
 
 #: Doctypes that go with the app and are NOT worth warning about, with why. The

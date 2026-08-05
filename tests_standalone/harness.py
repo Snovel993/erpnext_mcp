@@ -1026,6 +1026,10 @@ APP_DOCTYPES = {
 	# v0.29.0. State Tax Engines (Oregon + Washington).
 	"State Tax Configuration": "state_tax_configuration",
 	"State Tax Table": "state_tax_table",
+	# v0.30.0. Salary Structures + Payroll.
+	"Farm Salary Structure": "farm_salary_structure",
+	"Farm Payroll Entry": "farm_payroll_entry",
+	"Farm Payroll Slip": "farm_payroll_slip",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

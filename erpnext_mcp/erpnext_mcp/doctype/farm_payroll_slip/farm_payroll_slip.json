@@ -1,0 +1,217 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-05 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "salary_structure",
+  "pay_type",
+  "work_state",
+  "col_break_hours",
+  "total_hours",
+  "regular_hours",
+  "overtime_hours",
+  "piece_section",
+  "piece_units",
+  "piece_rate",
+  "minimum_wage_check",
+  "effective_hourly_rate",
+  "pay_section",
+  "gross_pay",
+  "col_break_deductions",
+  "federal_withholding",
+  "state_withholding",
+  "social_security",
+  "medicare",
+  "state_taxes_detail",
+  "totals_section",
+  "total_deductions",
+  "net_pay"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "salary_structure",
+   "fieldtype": "Link",
+   "label": "Salary Structure",
+   "options": "Farm Salary Structure"
+  },
+  {
+   "fieldname": "pay_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Pay Type",
+   "read_only": 1
+  },
+  {
+   "fieldname": "work_state",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Work State",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_hours",
+   "fieldtype": "Column Break",
+   "label": "Hours"
+  },
+  {
+   "default": "0",
+   "fieldname": "total_hours",
+   "fieldtype": "Float",
+   "label": "Total Hours",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "regular_hours",
+   "fieldtype": "Float",
+   "label": "Regular Hours",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "overtime_hours",
+   "fieldtype": "Float",
+   "label": "Overtime Hours",
+   "read_only": 1
+  },
+  {
+   "fieldname": "piece_section",
+   "fieldtype": "Section Break",
+   "label": "Piece Rate"
+  },
+  {
+   "default": "0",
+   "fieldname": "piece_units",
+   "fieldtype": "Float",
+   "label": "Piece Units",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "piece_rate",
+   "fieldtype": "Currency",
+   "label": "Piece Rate",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "minimum_wage_check",
+   "fieldtype": "Check",
+   "label": "Meets Minimum Wage",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "effective_hourly_rate",
+   "fieldtype": "Currency",
+   "label": "Effective Hourly Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pay_section",
+   "fieldtype": "Section Break",
+   "label": "Pay"
+  },
+  {
+   "default": "0",
+   "fieldname": "gross_pay",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Gross Pay",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_deductions",
+   "fieldtype": "Column Break",
+   "label": "Deductions"
+  },
+  {
+   "default": "0",
+   "fieldname": "federal_withholding",
+   "fieldtype": "Currency",
+   "label": "Federal Withholding",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "state_withholding",
+   "fieldtype": "Currency",
+   "label": "State Withholding",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "social_security",
+   "fieldtype": "Currency",
+   "label": "Social Security",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "medicare",
+   "fieldtype": "Currency",
+   "label": "Medicare",
+   "read_only": 1
+  },
+  {
+   "fieldname": "state_taxes_detail",
+   "fieldtype": "JSON",
+   "label": "State Taxes Detail",
+   "read_only": 1
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break",
+   "label": "Totals"
+  },
+  {
+   "default": "0",
+   "fieldname": "total_deductions",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Deductions",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "net_pay",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Net Pay",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-05 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Payroll Slip",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
