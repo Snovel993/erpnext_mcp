@@ -103,9 +103,14 @@ def seed_i9_document_types() -> dict:
                 existing.append(spec["doc_title"])
                 continue
 
-            doc = frappe.get_doc({"doctype": DOCTYPE, "enabled": 1, **spec})
-            doc.flags.ignore_permissions = True
-            doc.insert()
+            doc = frappe.new_doc(DOCTYPE)
+            doc.doc_title = spec["doc_title"]
+            doc.list_category = spec["list_category"]
+            doc.uscis_code = spec.get("uscis_code", "")
+            doc.description = spec.get("description", "")
+            doc.requires_photo = spec.get("requires_photo", 0)
+            doc.enabled = 1
+            doc.insert(ignore_permissions=True)
             created.append(spec["doc_title"])
         except Exception as exc:
             failed.append({"name": spec["doc_title"], "reason": f"{type(exc).__name__}: {exc}"})
