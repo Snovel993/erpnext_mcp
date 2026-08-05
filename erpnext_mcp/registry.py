@@ -63,6 +63,7 @@ from .tools import (
 	heat,
 	housing,
 	hr,
+	i9,
 	inspections,
 	investment_report,
 	kpi,
@@ -8091,6 +8092,280 @@ TOOLS = {
 		title="Onboard a new employee",
 		available=_needs_doctype("Employee"),
 		requires="the Employee DocType, which Frappe HR ships",
+	),
+	# ── v0.27.0: the structured I-9 workflow ────────────────────────────────
+	"get_i9_settings": _tool(
+		i9.get_i9_settings,
+		"Current I-9 compliance configuration: whether document copies are stored "
+		"(uniformity rule), E-Verify enrolment, employer defaults for Section 2, "
+		"and reminder lead times. Read-only.",
+		{},
+		available=_needs_doctype("I-9 Settings"),
+		requires="the I-9 Settings doctype (run bench migrate after installing v0.27.0)",
+		title="Get I-9 settings",
+	),
+	"get_i9_form": _tool(
+		i9.get_i9_form,
+		"Full I-9 record for one employee: Section 1 (employee info), Section 2 "
+		"(employer verification), status, retention dates, and destruction state. "
+		"Every call is logged to the I-9 Audit Log as 'Viewed'. Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname, employee_name, or employee number."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+		},
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+		title="Get an I-9 form",
+	),
+	"list_i9_forms": _tool(
+		i9.list_i9_forms,
+		"All I-9 forms with optional filtering by company and status. Returns "
+		"name, employee, status, hire date, and retention dates. Read-only.",
+		{
+			"company": _COMPANY,
+			"status": _field(
+				_STRING,
+				"Filter by status: Draft, Section 1 Complete, Awaiting Verification, "
+				"Complete, Reverification Needed, Expired, Destroyed.",
+			),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+		title="List I-9 forms",
+	),
+	"list_pending_i9_verifications": _tool(
+		i9.list_pending_i9_verifications,
+		"I-9 forms awaiting employer verification — Section 1 complete but Section 2 "
+		"not yet done. Shows days since hire and whether verification is overdue "
+		"(past the 3-business-day deadline). Read-only.",
+		{
+			"company": _COMPANY,
+		},
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+		title="List pending I-9 verifications",
+	),
+	"get_i9_audit_log": _tool(
+		i9.get_i9_audit_log,
+		"Audit trail for one employee's I-9: who created, signed, viewed, printed, "
+		"or destroyed the form, from which IP, at which moment. The I-9 Audit Log "
+		"is append-only and immutable — rows cannot be edited after insertion. Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname, employee_name, or employee number."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("I-9 Audit Log"),
+		requires="the I-9 Audit Log doctype (run bench migrate after installing v0.27.0)",
+		title="Get I-9 audit log",
+	),
+	"list_i9_document_types": _tool(
+		i9.list_i9_document_types,
+		"USCIS-accepted documents for I-9 verification, by list category (A, B, C). "
+		"List A documents establish both identity and employment authorization. "
+		"List B establishes identity; List C establishes employment authorization. "
+		"Read-only.",
+		{
+			"list_category": _field(_STRING, "Filter by list: A, B, or C."),
+		},
+		available=_needs_doctype("I-9 Document Type"),
+		requires="the I-9 Document Type doctype (run bench migrate after installing v0.27.0)",
+		title="List I-9 document types",
+	),
+	"get_i9_retention_report": _tool(
+		i9.get_i9_retention_report,
+		"I-9 forms approaching or past their retention date. Shows forms within "
+		"90 days of retention and those eligible for destruction. Read-only.",
+		{
+			"company": _COMPANY,
+		},
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+		title="Get I-9 retention report",
+	),
+	"list_expiring_work_authorizations": _tool(
+		i9.list_expiring_work_authorizations,
+		"Employees whose work authorization expires within N days. For aliens "
+		"authorized to work and lawful permanent residents with an expiry date "
+		"on their I-9. Read-only.",
+		{
+			"company": _COMPANY,
+			"days_ahead": _field(_INTEGER, "Look-ahead window in days. Default 90."),
+		},
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+		title="List expiring work authorizations",
+	),
+	"create_i9_form": _tool(
+		i9.create_i9_form,
+		"MUTATING (default OFF). Create a Draft I-9 Form for an employee. "
+		"One active I-9 per employee — refused if an undestroyed one already exists.\n\n"
+		"DOES NOT FILL ANY SECTION. The draft is a shell: employee, company, hire date. "
+		"Section 1 goes through submit_i9_section_1; Section 2 through submit_i9_section_2.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"company": _COMPANY,
+			"hire_date": _field(_STRING, "YYYY-MM-DD. The date the employee started or will start."),
+		},
+		required=("hire_date",),
+		mutating=True,
+		idempotent=False,
+		title="Create a draft I-9 form",
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+	),
+	"submit_i9_section_1": _tool(
+		i9.submit_i9_section_1,
+		"MUTATING (default OFF). Fill Section 1 of a Draft I-9 — the employee's "
+		"personal information, citizenship status, and signature.\n\n"
+		"SSN: ONLY THE LAST FOUR DIGITS ARE STORED. Pass a full SSN if you must — "
+		"it is stripped to the last four before it touches the database.\n\n"
+		"Moves the I-9 from Draft to 'Section 1 Complete'. Logged to I-9 Audit Log.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"legal_first_name": _field(_STRING, "Legal first name."),
+			"legal_middle_name": _field(_STRING, "Legal middle name."),
+			"legal_last_name": _field(_STRING, "Legal last name."),
+			"other_last_names": _field(_STRING, "Other last names used (maiden name, etc)."),
+			"address_street": _field(_STRING, "Street address."),
+			"address_city": _field(_STRING, "City."),
+			"address_state": _field(_STRING, "State."),
+			"address_zip": _field(_STRING, "ZIP code."),
+			"date_of_birth": _field(_STRING, "YYYY-MM-DD."),
+			"ssn_last_four": _field(_STRING, "Last 4 digits of SSN. Full SSN is stripped to last 4."),
+			"email": _field(_STRING, "Email address."),
+			"phone": _field(_STRING, "Phone number."),
+			"citizenship_status": _field(
+				_STRING,
+				"US Citizen, Noncitizen National, Lawful Permanent Resident, or Alien Authorized to Work.",
+			),
+			"alien_registration_number": _field(
+				_STRING, "USCIS number. Required for LPR and Alien Authorized to Work."
+			),
+			"alien_work_authorization_expiry": _field(
+				_STRING, "YYYY-MM-DD. Required for Alien Authorized to Work."
+			),
+			"section_1_signature": _field(_STRING, "Attach URL or base64 of the signature image."),
+			"preparer_used": _field(_BOOLEAN, "Whether a preparer/translator was used."),
+			"preparer_name": _field(_STRING, "Preparer name, if used."),
+			"preparer_address": _field(_STRING, "Preparer address, if used."),
+			"preparer_signature": _field(_STRING, "Preparer signature attach URL, if used."),
+		},
+		required=("legal_first_name", "legal_last_name", "citizenship_status"),
+		mutating=True,
+		title="Submit I-9 Section 1",
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+	),
+	"submit_i9_section_2": _tool(
+		i9.submit_i9_section_2,
+		"MUTATING (default OFF). Fill Section 2 of an I-9 — employer verification "
+		"of the employee's identity and employment authorization documents.\n\n"
+		"VALIDATES THE 3-BUSINESS-DAY RULE: verification_date must be within "
+		"3 business days of the hire date. Refused if overdue.\n\n"
+		"document_path is 'List A' (one document proves both) or 'List B + C' "
+		"(one identity document plus one employment authorization document).\n\n"
+		"Moves the I-9 to 'Complete'. Logged to I-9 Audit Log.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"document_path": _field(_STRING, "'List A' or 'List B + C'."),
+			"list_a_doc_title": _field(_STRING, "List A document title."),
+			"list_a_doc_authority": _field(_STRING, "List A issuing authority."),
+			"list_a_doc_number": _field(_STRING, "List A document number."),
+			"list_a_doc_expiry": _field(_STRING, "YYYY-MM-DD. List A expiration date."),
+			"list_b_doc_title": _field(_STRING, "List B document title."),
+			"list_b_doc_authority": _field(_STRING, "List B issuing authority."),
+			"list_b_doc_number": _field(_STRING, "List B document number."),
+			"list_b_doc_expiry": _field(_STRING, "YYYY-MM-DD. List B expiration date."),
+			"list_c_doc_title": _field(_STRING, "List C document title."),
+			"list_c_doc_authority": _field(_STRING, "List C issuing authority."),
+			"list_c_doc_number": _field(_STRING, "List C document number."),
+			"list_c_doc_expiry": _field(_STRING, "YYYY-MM-DD. List C expiration date."),
+			"document_copies_stored": _field(_BOOLEAN, "Whether document copies are stored on file."),
+			"verifier_name": _field(_STRING, "Name of the person who verified the documents."),
+			"verifier_title": _field(_STRING, "Title of the verifier."),
+			"section_2_signature": _field(_STRING, "Attach URL or base64 of the verifier signature."),
+			"verification_date": _field(_STRING, "YYYY-MM-DD. Must be within 3 business days of hire."),
+		},
+		required=("document_path", "verifier_name", "verification_date"),
+		mutating=True,
+		title="Submit I-9 Section 2",
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+	),
+	"update_i9_settings": _tool(
+		i9.update_i9_settings,
+		"MUTATING (default OFF). Update the I-9 site configuration: document copy "
+		"policy (uniformity rule), E-Verify enrolment, employer defaults for "
+		"Section 2, and reminder lead times.\n\n"
+		"IF enrolled_in_e_verify IS SET TO TRUE, store_document_copies is forced on.",
+		{
+			"store_document_copies": _field(
+				_BOOLEAN,
+				"Store copies for ALL employees (uniformity rule). Mixing is a discrimination claim.",
+			),
+			"enrolled_in_e_verify": _field(_BOOLEAN, "E-Verify enrolment. Forces store_document_copies on."),
+			"business_legal_name": _field(_STRING, "Employer legal name for Section 2."),
+			"business_address": _field(_STRING, "Employer address for Section 2."),
+			"business_ein": _field(_STRING, "Employer EIN."),
+			"reminder_days_before_doc_expiration": _field(
+				_INTEGER, "Days before document expiration to raise a warning."
+			),
+			"reminder_days_before_destruction": _field(
+				_INTEGER, "Days before retention date to flag for destruction."
+			),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Update I-9 settings",
+		available=_needs_doctype("I-9 Settings"),
+		requires="the I-9 Settings doctype (run bench migrate after installing v0.27.0)",
+	),
+	"flag_i9_reverification": _tool(
+		i9.flag_i9_reverification,
+		"MUTATING (default OFF). Move a Complete I-9 to 'Reverification Needed' "
+		"when an employee's work authorization is expiring or has expired.\n\n"
+		"Requires a reason. Logged to I-9 Audit Log.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"reason": _field(_STRING, "Why reverification is needed."),
+		},
+		required=("reason",),
+		mutating=True,
+		title="Flag I-9 for reverification",
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+	),
+	"destroy_i9": _tool(
+		i9.destroy_i9,
+		"MUTATING (default OFF). Mark an I-9 as Destroyed after the retention "
+		"period has passed. REFUSED if retention_until has not been reached.\n\n"
+		"Retention rule: MAX(hire_date + 3 years, termination_date + 1 year). "
+		"Logged to I-9 Audit Log.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"destruction_certificate": _field(
+				_STRING, "Attach URL for the destruction certificate."
+			),
+		},
+		mutating=True,
+		destructive=True,
+		title="Destroy an I-9",
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
 	),
 	# ── v0.19.0: the training register ──────────────────────────────────────
 	"record_training": _tool(

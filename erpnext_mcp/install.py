@@ -101,7 +101,7 @@ the settings form, and there is no code path that makes it for them.
 
 import frappe
 
-from . import compliance_fields, dashboard, roles, settings, training
+from . import compliance_fields, dashboard, i9_documents, roles, settings, training
 from .patches import backfill_completion_signatures, migrate_training_types
 from .tools import company
 
@@ -109,6 +109,7 @@ from .tools import company
 def after_install() -> None:
 	settings.seed_defaults()
 	_weather_settings()
+	_i9_settings()
 	company.ensure_party_types()
 	_compliance_fields()
 	_command_center()
@@ -119,12 +120,14 @@ def after_install() -> None:
 	_completion_signatures()
 	_inspection_templates()
 	_compliance_rules()
+	_i9_document_types()
 	frappe.db.commit()
 
 
 def after_migrate() -> None:
 	settings.seed_defaults()
 	_weather_settings()
+	_i9_settings()
 	company.ensure_party_types()
 	_compliance_fields()
 	_command_center()
@@ -135,6 +138,39 @@ def after_migrate() -> None:
 	_completion_signatures()
 	_inspection_templates()
 	_compliance_rules()
+	_i9_document_types()
+
+
+def _i9_settings() -> None:
+	"""Make I-9 Settings' declared defaults true in the database.
+
+	v0.27.0, and the same pattern as _weather_settings — a Frappe Single whose
+	defaults need seeding. Skipped silently on a site whose doctype has not
+	migrated yet.
+	"""
+	try:
+		if not frappe.db.exists("DocType", "I-9 Settings"):
+			return
+		settings.seed_defaults("I-9 Settings")
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(f"erpnext_mcp: I-9 Settings defaults were not seeded — {type(exc).__name__}: {exc}")
+
+
+def _i9_document_types() -> None:
+	"""Seed the USCIS-accepted documents for I-9 verification.
+
+	v0.27.0. IT ONLY EVER CREATES WHAT IS NOT THERE, checked by doc_title.
+	An operator who edited or deactivated a document keeps their change.
+	"""
+	try:
+		report = i9_documents.seed_i9_document_types()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the I-9 document types were not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("created"):
+		print(f"erpnext_mcp: seeded {len(report['created'])} I-9 document type(s)")
+	for failure in report.get("failed") or ():
+		print(f"erpnext_mcp: could not seed I-9 document {failure.get('name')} — {failure.get('reason')}")
 
 
 def _weather_settings() -> None:
@@ -612,6 +648,18 @@ _PRECIOUS_DOCTYPES = (
 		"of harvest' and 'dismissed for cause' are different answers to the same "
 		"question and this is the only place either survives",
 	),
+	(
+		"I-9 Form",
+		"every structured Form I-9 on the site — Section 1, Section 2, retention dates, "
+		"and the status workflow from Draft through Complete to Destroyed. The only record "
+		"of employment eligibility verification for every employee who has one",
+	),
+	(
+		"I-9 Audit Log",
+		"the immutable trail of every I-9 action — who created, signed, viewed, printed, "
+		"or destroyed each form, from which IP, at which moment. The record an audit asks "
+		"for and the thing that says nobody tampered with the form between signing and filing",
+	),
 )
 
 #: Doctypes that go with the app and are NOT worth warning about, with why. The
@@ -638,6 +686,8 @@ _REGENERATED_DOCTYPES = (
 	# handful of numbers an operator typed and can retype, and the readings they
 	# governed go with `Farm Shift` — which IS on the precious list, and whose
 	# entry is where the loss of a weather timeline is actually spelled out.
+	("I-9 Document Type", "pre-seeded USCIS-accepted document list, rebuilt from i9_documents.py on every migrate"),
+	("I-9 Settings", "reseeded from its own declared defaults on every migrate"),
 	("Weather Settings", "reseeded from its own declared defaults on every migrate"),
 	(
 		"Weather Company Override",

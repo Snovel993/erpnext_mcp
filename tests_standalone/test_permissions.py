@@ -223,6 +223,8 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"Asset State Log",
 				"Compliance Regime",
 				"Compliance Rule",
+				"I-9 Audit Log",
+				"I-9 Document Type",
 				"Inspection Template",
 				"MCP Action Log",
 				"Staged File Chunk",

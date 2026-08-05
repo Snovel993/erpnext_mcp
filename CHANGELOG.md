@@ -3,6 +3,39 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.27.0 — 2026-08-04
+
+**Structured I-9 workflow.** Replaces opaque file attachments with a structured
+record carrying Section 1 (employee info), Section 2 (employer verification),
+retention dates, and an immutable audit trail. SSN is stripped to the last four
+digits before it touches the database.
+
+**Four new DocTypes:** I-9 Form (the workflow record), I-9 Settings (per-site
+configuration), I-9 Audit Log (append-only, immutable trail of every I-9
+action), and I-9 Document Type (USCIS-seeded lookup of acceptable documents by
+List A/B/C category).
+
+**Fourteen new tools** — eight reads and six writes:
+- `get_i9_settings`, `get_i9_form`, `list_i9_forms`,
+  `list_pending_i9_verifications`, `get_i9_audit_log`,
+  `list_i9_document_types`, `get_i9_retention_report`,
+  `list_expiring_work_authorizations` (reads)
+- `create_i9_form`, `submit_i9_section_1`, `submit_i9_section_2`,
+  `update_i9_settings`, `flag_i9_reverification`, `destroy_i9` (writes)
+
+**Section 2 enforces the 3-business-day rule** from the hire date, refusing
+verification that arrives late.
+
+**Retention dates are federal:** MAX(hire + 3 years, termination + 1 year).
+`destroy_i9` refuses to mark an I-9 as destroyed until the retention date has
+passed.
+
+**Integration with `onboard_employee`:** auto-creates a Draft I-9 Form when the
+I-9 Form doctype exists on the site.
+
+**Three new compliance rules:** `i9_verification_overdue`,
+`work_authorization_expiring`, `i9_retention_destruction_eligible`.
+
 ## 0.26.0 — 2026-08-04
 
 **Field-initiated task creation from asset scan.** Worker scans an asset's QR

@@ -1,0 +1,104 @@
+{
+ "actions": [],
+ "creation": "2026-08-04 09:00:00.000000",
+ "description": "Per-site I-9 compliance configuration. Controls whether document copies are stored (uniformity rule), E-Verify enrolment, employer defaults for Section 2, and reminder lead times.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "document_handling_section",
+  "store_document_copies",
+  "enrolled_in_e_verify",
+  "employer_section",
+  "business_legal_name",
+  "business_address",
+  "business_ein",
+  "reminders_section",
+  "reminder_days_before_doc_expiration",
+  "reminder_days_before_destruction"
+ ],
+ "fields": [
+  {
+   "fieldname": "document_handling_section",
+   "fieldtype": "Section Break",
+   "label": "Document Handling"
+  },
+  {
+   "default": "0",
+   "description": "If enabled, document copies MUST be stored for ALL employees (uniformity rule). Mixing — copies for some, not for others — is a discrimination claim.",
+   "fieldname": "store_document_copies",
+   "fieldtype": "Check",
+   "label": "Store Document Copies"
+  },
+  {
+   "default": "0",
+   "description": "If enrolled in E-Verify, document copies are mandatory and store_document_copies is forced on.",
+   "fieldname": "enrolled_in_e_verify",
+   "fieldtype": "Check",
+   "label": "Enrolled in E-Verify"
+  },
+  {
+   "fieldname": "employer_section",
+   "fieldtype": "Section Break",
+   "label": "Employer Defaults (Section 2)"
+  },
+  {
+   "fieldname": "business_legal_name",
+   "fieldtype": "Data",
+   "label": "Business Legal Name"
+  },
+  {
+   "fieldname": "business_address",
+   "fieldtype": "Data",
+   "label": "Business Address"
+  },
+  {
+   "fieldname": "business_ein",
+   "fieldtype": "Data",
+   "label": "Business EIN"
+  },
+  {
+   "fieldname": "reminders_section",
+   "fieldtype": "Section Break",
+   "label": "Reminders"
+  },
+  {
+   "default": "90",
+   "description": "Days before a document expiration date to raise a warning.",
+   "fieldname": "reminder_days_before_doc_expiration",
+   "fieldtype": "Int",
+   "label": "Days Before Document Expiration",
+   "non_negative": 1
+  },
+  {
+   "default": "60",
+   "description": "Days before retention-until date to flag an I-9 as eligible for destruction.",
+   "fieldname": "reminder_days_before_destruction",
+   "fieldtype": "Int",
+   "label": "Days Before Destruction Eligibility",
+   "non_negative": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-04 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "I-9 Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

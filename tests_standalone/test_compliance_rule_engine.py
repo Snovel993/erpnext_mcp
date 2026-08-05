@@ -244,14 +244,17 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		`shift_heat_threshold_crossed` has no shipped scanner and never had one:
 		it was authored as a record, in the vocabulary, and there is nothing to
 		fall back to. It is the first rule this app ships that is ONLY data.
+
+		v0.27.0 added three I-9 rules: `i9_verification_overdue`,
+		`work_authorization_expiring`, `i9_retention_destruction_eligible`.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 15)
-		self.assertEqual(len(compliance_rules.rule_rows()), 15)
+		self.assertEqual(len(report["created"]), 18)
+		self.assertEqual(len(compliance_rules.rule_rows()), 18)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
-	def test_the_shapes_are_thirteen_declarative_two_builtin_and_no_custom_python(self):
+	def test_the_shapes_are_sixteen_declarative_two_builtin_and_no_custom_python(self):
 		"""The split is a claim the release makes, so it is asserted rather than described.
 
 		v0.22.0 shipped 6/7/0 and named the four primitives that would move five of
@@ -261,6 +264,8 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		pointed at 11/2/0 than it was at 6/7/0: a framework that needed a program
 		for eleven of its own thirteen rules would be a framework whose primitives
 		do not reach its own problem domain.
+
+		v0.27.0 added three I-9 declarative rules.
 		"""
 		self.seed_rules()
 		shapes = {}
@@ -277,11 +282,14 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 				"housing_detector_test_stale",
 				"housing_inspection_overdue",
 				"i9_expired",
+				"i9_retention_destruction_eligible",
+				"i9_verification_overdue",
 				"policy_review_overdue",
 				"shift_heat_threshold_crossed",
 				"training_expiring",
 				"water_test_contamination",
 				"water_test_stale",
+				"work_authorization_expiring",
 			],
 		)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])
@@ -902,12 +910,12 @@ class TheApprovalGate(RuleEngineTestCase):
 
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
-	def test_seeding_twice_writes_fifteen_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 15)
+	def test_seeding_twice_writes_eighteen_rules_once(self):
+		self.assertEqual(len(self.seed_rules()["created"]), 18)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 15)
-		self.assertEqual(len(compliance_rules.rule_rows()), 15)
+		self.assertEqual(len(again["present"]), 18)
+		self.assertEqual(len(compliance_rules.rule_rows()), 18)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -955,7 +963,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 15)
+		self.assertEqual(data["rule_count"], 18)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)

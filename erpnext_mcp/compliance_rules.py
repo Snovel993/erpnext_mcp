@@ -1555,6 +1555,141 @@ def declarative_seed_specs() -> list:
 			"authored_by": AUTHOR_SYSTEM,
 			"enabled": 1,
 		},
+		# ── v0.27.0: I-9 compliance rules ──────────────────────────────────
+		{
+			"rule_id": "i9_verification_overdue",
+			"title": "I-9 employer verification is overdue — hired more than 3 business days ago",
+			"category": "Workforce",
+			"target_doctype": "I-9 Form",
+			"requires_doctypes": "I-9 Form",
+			"date_field": "hire_date",
+			"date_field_role": DATE_ROLE_CLOCK,
+			"default_severity": SEVERITY_DEFAULT,
+			"due_date_mode": DUE_FROM_ANCHOR,
+			"threshold_critical_days": 5,
+			"threshold_warning_days": 3,
+			"cadence_days": 0,
+			"scope_filters": [
+				{"field": "status", "op": "in", "value": ["Section 1 Complete", "Awaiting Verification"]},
+			],
+			"message_template": (
+				"I-9 Section 2 verification for {{ row.employee_name }} (hired {{ row.hire_date }}) "
+				"is overdue. Federal law requires employer verification within 3 business days of "
+				"the hire date. Complete Section 2 immediately."
+			),
+			"regimes": [],
+			"regulation_citations": "8 CFR § 274a.2(b)(1)(ii) — employer verification deadline",
+			"retention_years": 3,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": None,
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {},
+			"evidence_contract": {},
+			"purpose": (
+				"Federal regulation requires that Section 2 of Form I-9 be completed within "
+				"3 business days of the employee's first day of work. An overdue verification "
+				"is a recordable violation whether the employee turns out to be authorized or not."
+			),
+			"kairotic_gate_description": (
+				"Fires when an I-9 Form is in 'Section 1 Complete' or 'Awaiting Verification' "
+				"status and the hire date was more than 3 business days ago. Silences when "
+				"Section 2 is completed."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
+		{
+			"rule_id": "work_authorization_expiring",
+			"title": "Employee work authorization is expiring",
+			"category": "Workforce",
+			"target_doctype": "I-9 Form",
+			"requires_doctypes": "I-9 Form",
+			"date_field": "alien_work_authorization_expiry",
+			"date_field_role": DATE_ROLE_CLOCK,
+			"default_severity": SEVERITY_DEFAULT,
+			"due_date_mode": DUE_FROM_ANCHOR,
+			"threshold_critical_days": 30,
+			"threshold_warning_days": 90,
+			"cadence_days": 0,
+			"scope_filters": [
+				{"field": "status", "op": "in", "value": ["Complete", "Reverification Needed"]},
+				{"field": "citizenship_status", "op": "in",
+				 "value": ["Alien Authorized to Work", "Lawful Permanent Resident"]},
+			],
+			"message_template": (
+				"Work authorization for {{ row.employee_name }} expires on "
+				"{{ row.alien_work_authorization_expiry }}. Initiate reverification before "
+				"the expiration date to maintain employment eligibility."
+			),
+			"regimes": [],
+			"regulation_citations": "8 CFR § 274a.2(b)(1)(viii) — reverification of employment authorization",
+			"retention_years": 3,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": None,
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {},
+			"evidence_contract": {},
+			"purpose": (
+				"An employee whose work authorization expires without reverification cannot "
+				"legally continue working. The employer must reverify before the expiration "
+				"date — not after. This rule provides lead time for the process."
+			),
+			"kairotic_gate_description": (
+				"Fires when a Complete or Reverification Needed I-9 for an alien authorized "
+				"to work has a work authorization expiry within 90 days (Warning) or 30 days "
+				"(Critical). Silences when reverification is completed."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
+		{
+			"rule_id": "i9_retention_destruction_eligible",
+			"title": "I-9 is past retention date and eligible for destruction",
+			"category": "Workforce",
+			"target_doctype": "I-9 Form",
+			"requires_doctypes": "I-9 Form",
+			"date_field": "retention_until",
+			"date_field_role": DATE_ROLE_CLOCK,
+			"default_severity": "Info",
+			"due_date_mode": DUE_FROM_ANCHOR,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": 0,
+			"cadence_days": 0,
+			"scope_filters": [
+				{"field": "status", "op": "ne", "value": "Destroyed"},
+			],
+			"message_template": (
+				"I-9 for {{ row.employee_name }} has passed its retention date "
+				"({{ row.retention_until }}) and is eligible for destruction. Destroy or "
+				"archive per your retention policy."
+			),
+			"regimes": [],
+			"regulation_citations": "8 CFR § 274a.2(b)(2)(i)(A) — I-9 retention period",
+			"retention_years": 0,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": None,
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {},
+			"evidence_contract": {},
+			"purpose": (
+				"An I-9 must be retained for either 3 years after the date of hire or "
+				"1 year after termination, whichever is later. After that date the employer "
+				"MAY destroy it, and in many cases SHOULD to limit exposure in an audit. "
+				"This rule surfaces the decision at the right time."
+			),
+			"kairotic_gate_description": (
+				"Fires when an I-9 Form that is not Destroyed has passed its retention_until "
+				"date. An informational alert — it surfaces the choice, it does not make it."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
 	]
 
 

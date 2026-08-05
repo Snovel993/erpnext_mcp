@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_two_hundred_seventy_tools_one_hundred_twenty_read_one_hundred_fifty_write(
+	def test_catalogue_is_two_hundred_eighty_five_tools_one_hundred_twenty_eight_read_one_hundred_fifty_seven_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -540,10 +540,17 @@ class Catalogue(SeededTestCase):
 		and list_asset_state_history are reads, log_asset_state_change is a write.
 
 		v0.26.0 added one mutating tool: report_asset_issue.
+
+		v0.27.0 ADDED FOURTEEN — eight reads and six writes — for the
+		structured I-9 workflow: get_i9_settings, get_i9_form, list_i9_forms,
+		list_pending_i9_verifications, get_i9_audit_log, list_i9_document_types,
+		get_i9_retention_report and list_expiring_work_authorizations read;
+		create_i9_form, submit_i9_section_1, submit_i9_section_2,
+		update_i9_settings, flag_i9_reverification and destroy_i9 write.
 		"""
-		self.assertEqual(len(registry.TOOLS), 271)
-		self.assertEqual(len(registry.READ_TOOLS), 120)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 151)
+		self.assertEqual(len(registry.TOOLS), 285)
+		self.assertEqual(len(registry.READ_TOOLS), 128)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 157)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

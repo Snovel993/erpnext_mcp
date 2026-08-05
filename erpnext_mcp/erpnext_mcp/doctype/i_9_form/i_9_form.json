@@ -1,0 +1,499 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-04 09:00:00.000000",
+ "description": "Structured Form I-9 — Employment Eligibility Verification. Tracks Section 1 (employee), Section 2 (employer verification), retention dates, and destruction. Every action is logged to I-9 Audit Log.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "employee",
+  "employee_name",
+  "company",
+  "status",
+  "hire_date",
+  "section_1_break",
+  "legal_first_name",
+  "legal_middle_name",
+  "legal_last_name",
+  "other_last_names",
+  "address_section",
+  "address_street",
+  "address_city",
+  "address_col",
+  "address_state",
+  "address_zip",
+  "personal_section",
+  "date_of_birth",
+  "ssn_last_four",
+  "email",
+  "phone",
+  "citizenship_section",
+  "citizenship_status",
+  "alien_registration_number",
+  "alien_work_authorization_expiry",
+  "section_1_signature_section",
+  "section_1_signature",
+  "section_1_signed_at",
+  "section_1_signed_ip",
+  "preparer_section",
+  "preparer_used",
+  "preparer_name",
+  "preparer_address",
+  "preparer_signature",
+  "section_2_break",
+  "document_path",
+  "list_a_section",
+  "list_a_doc_title",
+  "list_a_doc_authority",
+  "list_a_doc_number",
+  "list_a_doc_expiry",
+  "list_b_section",
+  "list_b_doc_title",
+  "list_b_doc_authority",
+  "list_b_doc_number",
+  "list_b_doc_expiry",
+  "list_c_section",
+  "list_c_doc_title",
+  "list_c_doc_authority",
+  "list_c_doc_number",
+  "list_c_doc_expiry",
+  "document_copies_stored",
+  "verifier_section",
+  "verifier_name",
+  "verifier_title",
+  "section_2_signature",
+  "section_2_signed_at",
+  "section_2_signed_ip",
+  "verification_date",
+  "retention_section",
+  "retention_until",
+  "destruction_eligible_date",
+  "destroyed_at",
+  "destruction_certificate"
+ ],
+ "fields": [
+  {
+   "default": "I9-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "I9-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nSection 1 Complete\nAwaiting Verification\nComplete\nReverification Needed\nExpired\nDestroyed",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "hire_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Hire Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_1_break",
+   "fieldtype": "Section Break",
+   "label": "Section 1 — Employee Information"
+  },
+  {
+   "fieldname": "legal_first_name",
+   "fieldtype": "Data",
+   "label": "Legal First Name"
+  },
+  {
+   "fieldname": "legal_middle_name",
+   "fieldtype": "Data",
+   "label": "Legal Middle Name"
+  },
+  {
+   "fieldname": "legal_last_name",
+   "fieldtype": "Data",
+   "label": "Legal Last Name"
+  },
+  {
+   "fieldname": "other_last_names",
+   "fieldtype": "Data",
+   "label": "Other Last Names Used"
+  },
+  {
+   "fieldname": "address_section",
+   "fieldtype": "Section Break",
+   "label": "Address"
+  },
+  {
+   "fieldname": "address_street",
+   "fieldtype": "Data",
+   "label": "Street Address"
+  },
+  {
+   "fieldname": "address_city",
+   "fieldtype": "Data",
+   "label": "City"
+  },
+  {
+   "fieldname": "address_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "address_state",
+   "fieldtype": "Data",
+   "label": "State"
+  },
+  {
+   "fieldname": "address_zip",
+   "fieldtype": "Data",
+   "label": "ZIP Code"
+  },
+  {
+   "fieldname": "personal_section",
+   "fieldtype": "Section Break",
+   "label": "Personal"
+  },
+  {
+   "fieldname": "date_of_birth",
+   "fieldtype": "Date",
+   "label": "Date of Birth"
+  },
+  {
+   "description": "Only the last four digits. The full SSN is never stored.",
+   "fieldname": "ssn_last_four",
+   "fieldtype": "Data",
+   "label": "SSN (Last 4)"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "label": "Phone",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "citizenship_section",
+   "fieldtype": "Section Break",
+   "label": "Citizenship / Immigration Status"
+  },
+  {
+   "fieldname": "citizenship_status",
+   "fieldtype": "Select",
+   "label": "Citizenship Status",
+   "options": "\nUS Citizen\nNoncitizen National\nLawful Permanent Resident\nAlien Authorized to Work"
+  },
+  {
+   "depends_on": "eval:['Lawful Permanent Resident','Alien Authorized to Work'].includes(doc.citizenship_status)",
+   "fieldname": "alien_registration_number",
+   "fieldtype": "Data",
+   "label": "Alien Registration / USCIS Number"
+  },
+  {
+   "depends_on": "eval:doc.citizenship_status=='Alien Authorized to Work'",
+   "fieldname": "alien_work_authorization_expiry",
+   "fieldtype": "Date",
+   "label": "Work Authorization Expiry"
+  },
+  {
+   "fieldname": "section_1_signature_section",
+   "fieldtype": "Section Break",
+   "label": "Section 1 Signature"
+  },
+  {
+   "fieldname": "section_1_signature",
+   "fieldtype": "Attach",
+   "label": "Section 1 Signature"
+  },
+  {
+   "fieldname": "section_1_signed_at",
+   "fieldtype": "Datetime",
+   "label": "Section 1 Signed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_1_signed_ip",
+   "fieldtype": "Data",
+   "label": "Section 1 Signed IP",
+   "read_only": 1
+  },
+  {
+   "fieldname": "preparer_section",
+   "fieldtype": "Section Break",
+   "label": "Preparer / Translator"
+  },
+  {
+   "default": "0",
+   "fieldname": "preparer_used",
+   "fieldtype": "Check",
+   "label": "Preparer / Translator Used"
+  },
+  {
+   "depends_on": "eval:doc.preparer_used",
+   "fieldname": "preparer_name",
+   "fieldtype": "Data",
+   "label": "Preparer Name"
+  },
+  {
+   "depends_on": "eval:doc.preparer_used",
+   "fieldname": "preparer_address",
+   "fieldtype": "Data",
+   "label": "Preparer Address"
+  },
+  {
+   "depends_on": "eval:doc.preparer_used",
+   "fieldname": "preparer_signature",
+   "fieldtype": "Attach",
+   "label": "Preparer Signature"
+  },
+  {
+   "fieldname": "section_2_break",
+   "fieldtype": "Section Break",
+   "label": "Section 2 — Employer Verification"
+  },
+  {
+   "fieldname": "document_path",
+   "fieldtype": "Select",
+   "label": "Document Path",
+   "options": "\nList A\nList B + C"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List A'",
+   "fieldname": "list_a_section",
+   "fieldtype": "Section Break",
+   "label": "List A Document"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List A'",
+   "fieldname": "list_a_doc_title",
+   "fieldtype": "Data",
+   "label": "List A Document Title"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List A'",
+   "fieldname": "list_a_doc_authority",
+   "fieldtype": "Data",
+   "label": "List A Issuing Authority"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List A'",
+   "fieldname": "list_a_doc_number",
+   "fieldtype": "Data",
+   "label": "List A Document Number"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List A'",
+   "fieldname": "list_a_doc_expiry",
+   "fieldtype": "Date",
+   "label": "List A Expiration Date"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_b_section",
+   "fieldtype": "Section Break",
+   "label": "List B Document (Identity)"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_b_doc_title",
+   "fieldtype": "Data",
+   "label": "List B Document Title"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_b_doc_authority",
+   "fieldtype": "Data",
+   "label": "List B Issuing Authority"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_b_doc_number",
+   "fieldtype": "Data",
+   "label": "List B Document Number"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_b_doc_expiry",
+   "fieldtype": "Date",
+   "label": "List B Expiration Date"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_c_section",
+   "fieldtype": "Section Break",
+   "label": "List C Document (Employment Authorization)"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_c_doc_title",
+   "fieldtype": "Data",
+   "label": "List C Document Title"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_c_doc_authority",
+   "fieldtype": "Data",
+   "label": "List C Issuing Authority"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_c_doc_number",
+   "fieldtype": "Data",
+   "label": "List C Document Number"
+  },
+  {
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "fieldname": "list_c_doc_expiry",
+   "fieldtype": "Date",
+   "label": "List C Expiration Date"
+  },
+  {
+   "default": "0",
+   "fieldname": "document_copies_stored",
+   "fieldtype": "Check",
+   "label": "Document Copies Stored"
+  },
+  {
+   "fieldname": "verifier_section",
+   "fieldtype": "Section Break",
+   "label": "Verifier"
+  },
+  {
+   "fieldname": "verifier_name",
+   "fieldtype": "Data",
+   "label": "Verifier Name"
+  },
+  {
+   "fieldname": "verifier_title",
+   "fieldtype": "Data",
+   "label": "Verifier Title"
+  },
+  {
+   "fieldname": "section_2_signature",
+   "fieldtype": "Attach",
+   "label": "Section 2 Signature"
+  },
+  {
+   "fieldname": "section_2_signed_at",
+   "fieldtype": "Datetime",
+   "label": "Section 2 Signed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_2_signed_ip",
+   "fieldtype": "Data",
+   "label": "Section 2 Signed IP",
+   "read_only": 1
+  },
+  {
+   "fieldname": "verification_date",
+   "fieldtype": "Date",
+   "label": "Verification Date"
+  },
+  {
+   "fieldname": "retention_section",
+   "fieldtype": "Section Break",
+   "label": "Retention"
+  },
+  {
+   "description": "Auto-calculated: MAX(hire_date + 3 years, termination_date + 1 year).",
+   "fieldname": "retention_until",
+   "fieldtype": "Date",
+   "label": "Retain Until",
+   "read_only": 1
+  },
+  {
+   "fieldname": "destruction_eligible_date",
+   "fieldtype": "Date",
+   "label": "Destruction Eligible Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "destroyed_at",
+   "fieldtype": "Datetime",
+   "label": "Destroyed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "destruction_certificate",
+   "fieldtype": "Attach",
+   "label": "Destruction Certificate"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-04 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "I-9 Form",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "employee_name,status,company",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}

@@ -1014,6 +1014,11 @@ APP_DOCTYPES = {
 	"Asset Register": "asset_register",
 	# v0.25.0. State-change events on assets — who did what, when, where.
 	"Asset State Log": "asset_state_log",
+	# v0.27.0. The structured I-9 workflow.
+	"I-9 Form": "i_9_form",
+	"I-9 Audit Log": "i_9_audit_log",
+	"I-9 Settings": "i_9_settings",
+	"I-9 Document Type": "i_9_document_type",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -2967,7 +2972,8 @@ def _controller(doctype: str):
 	if not folder:
 		return STUB_CONTROLLERS.get(doctype, Document)
 	module = __import__(f"erpnext_mcp.erpnext_mcp.doctype.{folder}.{folder}", fromlist=["x"])
-	return getattr(module, doctype.replace(" ", ""), Document)
+	class_name = doctype.replace(" ", "").replace("-", "")
+	return getattr(module, class_name, Document)
 
 
 def _build_frappe() -> types.ModuleType:

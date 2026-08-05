@@ -1,0 +1,95 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:doc_title",
+ "creation": "2026-08-04 09:00:00.000000",
+ "description": "USCIS-accepted identity and employment eligibility documents for Form I-9. Pre-seeded with the current List A, B and C documents; an operator can add or deactivate rows but should not need to.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "doc_title",
+  "list_category",
+  "uscis_code",
+  "enabled",
+  "detail_section",
+  "description",
+  "requires_photo"
+ ],
+ "fields": [
+  {
+   "fieldname": "doc_title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Document Title",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "list_category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "List Category",
+   "options": "A\nB\nC",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "uscis_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "USCIS Code"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "Detail"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "default": "0",
+   "fieldname": "requires_photo",
+   "fieldtype": "Check",
+   "label": "Requires Photo"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-04 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "I-9 Document Type",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "list_category,uscis_code",
+ "sort_field": "list_category",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "doc_title",
+ "track_changes": 0
+}

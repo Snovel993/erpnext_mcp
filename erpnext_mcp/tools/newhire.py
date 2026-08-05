@@ -88,10 +88,10 @@ from __future__ import annotations
 import frappe
 
 from .. import compat
-from ..args import as_bool, as_str, resolve_company
+from ..args import as_bool, as_date, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
-from . import dispatch, files, mobile
+from . import dispatch, files, i9, mobile
 from . import employee as employee_tool
 from .housing import EMPLOYEE, hr_installed
 
@@ -159,6 +159,7 @@ def onboard_employee(args: dict) -> ToolResult:
 		"steps": [],
 		"skipped": [],
 		"employee": None,
+		"i9_form": None,
 		"documents": [],
 		"mobile": None,
 		"link": None,
@@ -169,6 +170,7 @@ def onboard_employee(args: dict) -> ToolResult:
 	employee = _employee(args, full_name, company, report)
 	report["employee"] = employee
 
+	_i9_form(args, employee, company, report)
 	_paperwork(args, employee, report)
 
 	if email:
@@ -290,6 +292,37 @@ def _employee(args: dict, full_name: str, company: str, report: dict) -> str:
 	name = result.data["employee"]
 	report["steps"].append({"step": "employee", "action": "created", "name": name})
 	return name
+
+
+# ── 1b. the structured I-9 ──────────────────────────────────────────────────
+def _i9_form(args: dict, employee: str, company: str, report: dict) -> None:
+	"""Create a Draft I-9 Form if the I-9 Form doctype exists on this site.
+
+	v0.27.0. `onboard_employee` auto-creates a structured I-9 alongside the
+	Employee, so the I-9 workflow starts from onboarding rather than requiring a
+	separate create_i9_form call. If create_i9_form is not enabled on the settings,
+	or the doctype does not exist, this is silently skipped — the paperwork step
+	still attaches any I-9 file attachment the caller supplied.
+
+	NOT FATAL. A structured I-9 that could not be created must not undo an
+	onboarding that otherwise worked.
+	"""
+	if not compat.doctype_exists("I-9 Form"):
+		return
+
+	existing = frappe.db.get_value("I-9 Form", {"employee": employee, "status": ["!=", "Destroyed"]}, "name")
+	if existing:
+		report["steps"].append({"step": "i9_form", "action": "reused", "name": str(existing)})
+		report["i9_form"] = str(existing)
+		return
+
+	hire_date = as_date(args, "date_of_joining") or str(frappe.utils.today())
+	try:
+		result = i9.create_i9_form({"employee": employee, "company": company, "hire_date": hire_date})
+		report["i9_form"] = result.data.get("name")
+		report["steps"].append({"step": "i9_form", "action": "created", "name": result.data.get("name")})
+	except Exception as exc:
+		report["skipped"].append({"step": "i9_form", "reason": f"{type(exc).__name__}: {exc}"})
 
 
 # ── 2. the paperwork ────────────────────────────────────────────────────────

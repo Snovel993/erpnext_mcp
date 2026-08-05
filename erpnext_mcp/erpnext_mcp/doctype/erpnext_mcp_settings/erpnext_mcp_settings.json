@@ -251,6 +251,22 @@
   "training_col",
   "allow_record_training",
   "allow_sign_training_supervisor_review",
+  "i9_section",
+  "allow_get_i9_settings",
+  "allow_get_i9_form",
+  "allow_list_i9_forms",
+  "allow_list_pending_i9_verifications",
+  "allow_get_i9_audit_log",
+  "allow_list_i9_document_types",
+  "allow_get_i9_retention_report",
+  "allow_list_expiring_work_authorizations",
+  "i9_col",
+  "allow_create_i9_form",
+  "allow_submit_i9_section_1",
+  "allow_submit_i9_section_2",
+  "allow_update_i9_settings",
+  "allow_flag_i9_reverification",
+  "allow_destroy_i9",
   "shift_section",
   "allow_list_shifts",
   "allow_get_shift",
@@ -1985,6 +2001,114 @@
    "fieldname": "allow_sign_training_supervisor_review",
    "fieldtype": "Check",
    "label": "Sign Training Supervisor Review"
+  },
+  {
+   "description": "Structured Form I-9 workflow — employment eligibility verification with Section 1/2 status tracking, retention dates, audit logging, and USCIS document type lookup. Only usable where the I-9 doctypes exist (run bench migrate after installing v0.27.0).",
+   "fieldname": "i9_section",
+   "fieldtype": "Section Break",
+   "label": "I-9 Compliance"
+  },
+  {
+   "default": "1",
+   "description": "Current I-9 compliance configuration: uniformity rule, E-Verify, employer defaults, reminder lead times.",
+   "fieldname": "allow_get_i9_settings",
+   "fieldtype": "Check",
+   "label": "Get I-9 Settings"
+  },
+  {
+   "default": "1",
+   "description": "Full I-9 record for one employee. Every call is logged to the I-9 Audit Log.",
+   "fieldname": "allow_get_i9_form",
+   "fieldtype": "Check",
+   "label": "Get I-9 Form"
+  },
+  {
+   "default": "1",
+   "description": "All I-9 forms with filtering by company and status.",
+   "fieldname": "allow_list_i9_forms",
+   "fieldtype": "Check",
+   "label": "List I-9 Forms"
+  },
+  {
+   "default": "1",
+   "description": "I-9s awaiting employer verification — Section 1 done, Section 2 not yet.",
+   "fieldname": "allow_list_pending_i9_verifications",
+   "fieldtype": "Check",
+   "label": "List Pending I-9 Verifications"
+  },
+  {
+   "default": "1",
+   "description": "Immutable audit trail for an employee's I-9 form.",
+   "fieldname": "allow_get_i9_audit_log",
+   "fieldtype": "Check",
+   "label": "Get I-9 Audit Log"
+  },
+  {
+   "default": "1",
+   "description": "USCIS-accepted documents for I-9 verification by list category.",
+   "fieldname": "allow_list_i9_document_types",
+   "fieldtype": "Check",
+   "label": "List I-9 Document Types"
+  },
+  {
+   "default": "1",
+   "description": "I-9 forms approaching or past retention date, eligible for destruction.",
+   "fieldname": "allow_get_i9_retention_report",
+   "fieldtype": "Check",
+   "label": "Get I-9 Retention Report"
+  },
+  {
+   "default": "1",
+   "description": "Employees whose work authorization expires within N days.",
+   "fieldname": "allow_list_expiring_work_authorizations",
+   "fieldtype": "Check",
+   "label": "List Expiring Work Authorizations"
+  },
+  {
+   "fieldname": "i9_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a Draft I-9 Form for an employee.",
+   "fieldname": "allow_create_i9_form",
+   "fieldtype": "Check",
+   "label": "Create I-9 Form"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Fill Section 1 of a Draft I-9 (employee info). SSN stripped to last 4.",
+   "fieldname": "allow_submit_i9_section_1",
+   "fieldtype": "Check",
+   "label": "Submit I-9 Section 1"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Fill Section 2 of an I-9 (employer verification). Validates the 3-business-day rule.",
+   "fieldname": "allow_submit_i9_section_2",
+   "fieldtype": "Check",
+   "label": "Submit I-9 Section 2"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Update I-9 site configuration.",
+   "fieldname": "allow_update_i9_settings",
+   "fieldtype": "Check",
+   "label": "Update I-9 Settings"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Flag a Complete I-9 for reverification when work auth expires.",
+   "fieldname": "allow_flag_i9_reverification",
+   "fieldtype": "Check",
+   "label": "Flag I-9 Reverification"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Mark an I-9 as Destroyed after retention period. Refused if retention date not yet reached.",
+   "fieldname": "allow_destroy_i9",
+   "fieldtype": "Check",
+   "label": "Destroy I-9"
   },
   {
    "fieldname": "shift_section",
