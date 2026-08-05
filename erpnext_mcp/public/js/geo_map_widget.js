@@ -18,7 +18,7 @@
  * form that mysteriously has no map.
  *
  * IT IS LOADED FROM A CDN AND IT DEGRADES. Leaflet is not vendored into this app
- * and OpenStreetMap tiles are fetched from openstreetmap.org, so a bench with no
+ * and the tiles are fetched from Esri and OpenStreetMap, so a bench with no
  * outbound internet — which is a perfectly reasonable way to run a farm's
  * server — gets no map. That case is HANDLED RATHER THAN LEFT TO FAIL: the
  * section renders a sentence saying the library could not be reached, and it
@@ -26,17 +26,51 @@
  * the map is a reading of them, and losing the reading must not look like losing
  * the record.
  *
- * NOTHING HERE WRITES. The map is read-only in every direction — there is no
- * drag-to-move marker, no draw-a-polygon tool, and no save path of any kind. A
- * boundary is compliance evidence and it is set through `set_field_boundary`,
- * `set_zone_boundary` or `set_parcel_boundary`, which validate the shape, refuse
- * a self-intersection, compare the area against the recorded acreage and
- * recompute every derived field. A map that could nudge a vertex would be a way
- * to change all of that by accident, with no validation and no audit row.
+ * ──────────────────────────────────────────────────────────────────────────
+ * v0.33.0: THE MAP CAN NOW BE DRAWN ON, AND v0.32.0'S REFUSAL STILL HOLDS
+ * ──────────────────────────────────────────────────────────────────────────
  *
- * THE TILE LAYER IS OSM's PUBLIC SERVER, which is free and asks for
- * attribution rather than an API key. That attribution is in the layer options
- * below and must stay there: it is the condition of use, not a courtesy.
+ * What this file said a release ago was "nothing here writes… a map that could
+ * nudge a vertex would be a way to change all of that by accident, with no
+ * validation and no audit row." Every word of that is still true, and it is
+ * satisfied rather than abandoned.
+ *
+ * The thing being refused was a map that WROTE TO THE FIELD. Nothing here does.
+ * The draw tools produce a polygon; the polygon is sent to
+ * `erpnext_mcp.api.gis.save_boundary`; that calls `set_parcel_boundary`,
+ * `set_field_boundary` or `set_zone_boundary` — the same three tools the AI
+ * calls, unchanged. They parse the shape, refuse a self-intersection, compare
+ * the enclosed area against the recorded acreage and REFUSE a disagreement past
+ * a quarter, report what now falls outside, recompute every derived field, and
+ * leave a row. A vertex nudged by accident does not get saved quietly; it gets
+ * an area disagreement and a refusal, on screen, before anything changes.
+ *
+ * SO THE MAP IS NOT A WAY ROUND THE BOUNDARY TOOLS. It is a second caller of
+ * them, and the only one whose caller can see the shape they are about to
+ * commit. `api/gis.py` argues the whole thing, including why the permission
+ * check had to be rebuilt there.
+ *
+ * ONLY THREE FORMS ARE EDITABLE — Parcel, Field, Irrigation Zone — because only
+ * those three carry a polygon. Housing Unit, Asset Register, Farm Shift and Farm
+ * Task use `attach_point` and stay exactly as read-only as they were.
+ *
+ * NO AREA IS COMPUTED IN THIS FILE, and that is deliberate rather than lazy.
+ * Leaflet.draw offers a live acreage readout while you drag; taking it would put
+ * a second area implementation in the app, in a different language, and the day
+ * it disagreed with `geo.area_acres` by three percent nobody would know which
+ * number the compliance record was built on. The server answers with the area it
+ * actually stored, after the save, and that is the only figure shown.
+ *
+ * SATELLITE IS THE DEFAULT LAYER FROM v0.33.0, because a street map cannot be
+ * traced against. An orchard block's corner is a change in canopy, a headland or
+ * a road edge — all of them visible in imagery and none of them on a street map,
+ * which for most of this county draws two roads and a lot of white. OSM is still
+ * one click away in the layer control, and it is the better layer for finding a
+ * cabin by its driveway.
+ *
+ * THE TILE ATTRIBUTIONS ARE THE CONDITION OF USE, NOT A COURTESY, for both
+ * providers. Esri's World Imagery and OSM's tile server are free and ask to be
+ * credited; the strings are in the layer options below and must stay there.
  */
 
 frappe.provide("erpnext_mcp.geo_map");
@@ -53,8 +87,25 @@ frappe.provide("erpnext_mcp.geo_map");
 	const LEAFLET_JS = `https://cdnjs.cloudflare.com/ajax/libs/leaflet/${LEAFLET_VERSION}/leaflet.js`;
 	const LEAFLET_CSS = `https://cdnjs.cloudflare.com/ajax/libs/leaflet/${LEAFLET_VERSION}/leaflet.css`;
 
-	const TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-	const TILE_ATTRIBUTION =
+	//: The draw plugin, loaded ONLY on the three forms that can be drawn on and
+	//: only when one of them is opened. It is 130 KB of JavaScript and a marker
+	//: sprite that a Housing Unit form has no use for.
+	const DRAW_VERSION = "1.0.4";
+	const DRAW_JS = `https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/${DRAW_VERSION}/leaflet.draw.js`;
+	const DRAW_CSS = `https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/${DRAW_VERSION}/leaflet.draw.css`;
+
+	//: Esri's World Imagery, which is free, needs no key, and is the layer a
+	//: boundary is actually traced against. `{y}` BEFORE `{x}` — this is an
+	//: ArcGIS tile path (`/tile/{z}/{row}/{col}`), not the XYZ order every other
+	//: tile URL in the world uses, and getting it round the wrong way produces a
+	//: map of somewhere else entirely rather than an error.
+	const SATELLITE_URL =
+		"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+	const SATELLITE_ATTRIBUTION =
+		"Imagery &copy; Esri — Esri, Maxar, Earthstar Geographics, and the GIS User Community";
+
+	const STREET_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+	const STREET_ATTRIBUTION =
 		'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 	//: How far in a map opens on a single point. Seventeen is about a hundred
@@ -68,14 +119,71 @@ frappe.provide("erpnext_mcp.geo_map");
 	//: which block it is next to.
 	const MAX_FIT_ZOOM = 18;
 
+	//: Where an editable map opens when the record has NO shape and nothing above
+	//: it has one either — which is the ordinary state of a parcel somebody is
+	//: about to trace for the first time.
+	//:
+	//: A HARDCODED PLACE, AND SAID SO. The honest alternatives are a world view at
+	//: zoom 2, where the operator pans for a minute before they can start, or a
+	//: geocode of the parcel's address, which is a call to somebody's paid service
+	//: to guess at a farm road. This app was built for tree fruit in the Columbia
+	//: Gorge and its only county GIS integration is Wasco County's; opening over
+	//: The Dalles is a default that is right most of the time and costs one drag
+	//: when it is wrong. `attach_editable_boundary` takes `home` to override it.
+	const HOME_VIEW = { centre: [45.6, -121.18], zoom: 12 };
+
 	const MAP_HEIGHT = "360px";
+	const EDITABLE_MAP_HEIGHT = "480px";
 
 	//: How long to wait for the CDN before giving up and printing the coordinates.
 	//: Eight seconds is past any working connection and short enough that a bench
 	//: with no internet does not look hung.
 	const LOAD_TIMEOUT_MS = 8000;
 
+	const SAVE_METHOD = "erpnext_mcp.api.gis.save_boundary";
+	const COUNTY_METHOD = "erpnext_mcp.api.gis.query_county_parcels";
+
+	//: THE COLOURS MEAN A STATE, NOT A DOCTYPE. v0.32.0 gave each form's own
+	//: shape its own colour, which was fine when every shape was equally fixed.
+	//: With three layers that can be on one map at once — the container above,
+	//: the shape being edited, and a county polygon on approval — what a reader
+	//: needs to tell apart is which one they are about to change. So: purple and
+	//: faint is context and cannot be touched, red is the editable shape, and
+	//: purple dashed is a proposal that has not been applied to anything yet.
+	const DRAWN_STYLE = { color: "#cf222e", weight: 3, fillOpacity: 0.18 };
+	const PREVIEW_STYLE = { color: "#8250df", weight: 3, dashArray: "6 4", fillOpacity: 0.12 };
+
 	let loading = null;
+	let loading_draw = null;
+
+	/** One <script> tag, resolved when it runs. Rejects on error or timeout. */
+	function load_script(source) {
+		return new Promise((resolve, reject) => {
+			const script = document.createElement("script");
+			script.src = source;
+			script.async = true;
+			const timer = setTimeout(() => reject(new Error("timed out")), LOAD_TIMEOUT_MS);
+			script.onload = () => {
+				clearTimeout(timer);
+				resolve();
+			};
+			script.onerror = () => {
+				clearTimeout(timer);
+				reject(new Error("could not be fetched"));
+			};
+			document.head.appendChild(script);
+		});
+	}
+
+	function load_stylesheet(href) {
+		if (document.querySelector(`link[href="${href}"]`)) {
+			return;
+		}
+		const link = document.createElement("link");
+		link.rel = "stylesheet";
+		link.href = href;
+		document.head.appendChild(link);
+	}
 
 	/** Leaflet, loaded once per page. Resolves with `L`, or rejects. */
 	function load_leaflet() {
@@ -86,30 +194,45 @@ frappe.provide("erpnext_mcp.geo_map");
 			return loading;
 		}
 		loading = new Promise((resolve, reject) => {
-			if (!document.querySelector(`link[href="${LEAFLET_CSS}"]`)) {
-				const link = document.createElement("link");
-				link.rel = "stylesheet";
-				link.href = LEAFLET_CSS;
-				document.head.appendChild(link);
-			}
-			const script = document.createElement("script");
-			script.src = LEAFLET_JS;
-			script.async = true;
-			const timer = setTimeout(
-				() => reject(new Error("timed out")),
-				LOAD_TIMEOUT_MS
+			load_stylesheet(LEAFLET_CSS);
+			load_script(LEAFLET_JS).then(
+				() =>
+					window.L && window.L.map
+						? resolve(window.L)
+						: reject(new Error("loaded but empty")),
+				reject
 			);
-			script.onload = () => {
-				clearTimeout(timer);
-				window.L && window.L.map ? resolve(window.L) : reject(new Error("loaded but empty"));
-			};
-			script.onerror = () => {
-				clearTimeout(timer);
-				reject(new Error("could not be fetched"));
-			};
-			document.head.appendChild(script);
 		});
 		return loading;
+	}
+
+	/** Leaflet.draw on top of Leaflet, loaded once per page. Resolves with `L`.
+	 *
+	 * THE CSS IS LOADED FROM HERE AND NOT FROM `app_include_css`, which would put
+	 * it on every page of the Desk for every user, including the several hundred
+	 * who will never open a Parcel. `hooks.py` is a file this app keeps almost
+	 * empty on purpose; a stylesheet loaded where it is needed costs one request
+	 * on three forms instead of one on all of them.
+	 */
+	function load_draw() {
+		return load_leaflet().then((L) => {
+			if (L.Control && L.Control.Draw) {
+				return L;
+			}
+			if (!loading_draw) {
+				loading_draw = new Promise((resolve, reject) => {
+					load_stylesheet(DRAW_CSS);
+					load_script(DRAW_JS).then(
+						() =>
+							window.L && window.L.Control && window.L.Control.Draw
+								? resolve(window.L)
+								: reject(new Error("the draw plugin loaded but empty")),
+						reject
+					);
+				});
+			}
+			return loading_draw;
+		});
 	}
 
 	/** A GeoJSON geometry from a stored Long Text field, or null. */
@@ -118,7 +241,7 @@ frappe.provide("erpnext_mcp.geo_map");
 			return null;
 		}
 		try {
-			const parsed = JSON.parse(raw);
+			const parsed = typeof raw === "object" ? raw : JSON.parse(raw);
 			// Accept whatever the boundary tools accept, for the same reason they
 			// do: a caller exporting from QGIS gets whichever of the three shapes
 			// the export button produced.
@@ -243,6 +366,13 @@ frappe.provide("erpnext_mcp.geo_map");
 				lines.push(`${entry.label || "centroid"}: ${entry.centroid[0]}, ${entry.centroid[1]}`);
 			}
 		});
+		if (spec.editable && spec.editable.centroid) {
+			lines.push(
+				`${spec.editable.docname || "centroid"}: ${spec.editable.centroid[0]}, ${
+					spec.editable.centroid[1]
+				}`
+			);
+		}
 		if (spec.track && spec.track.length) {
 			lines.push(
 				__("{0} location fix(es) recorded, from {1} to {2}", [
@@ -252,6 +382,13 @@ frappe.provide("erpnext_mcp.geo_map");
 				])
 			);
 		}
+		const editing = spec.editable
+			? `<div style="margin-top:6px">${escape_html(
+					__(
+						"Drawing a boundary needs the map, so it is unavailable here. The boundary tools still work from the MCP surface, and the field can be edited directly."
+					)
+				)}</div>`
+			: "";
 		body.innerHTML = `
 			<div class="text-muted" style="padding:8px 0">
 				<div>${escape_html(
@@ -262,7 +399,27 @@ frappe.provide("erpnext_mcp.geo_map");
 				<div style="margin-top:6px;font-family:monospace">${lines
 					.map((line) => escape_html(line))
 					.join("<br>")}</div>
+				${editing}
 			</div>`;
+	}
+
+	/** The two base layers and the control that swaps them.
+	 *
+	 * Satellite is added to the map and is therefore the one that shows; both are
+	 * named in the control. See the module docstring for why imagery and not
+	 * streets is the default.
+	 */
+	function add_base_layers(L, map) {
+		const satellite = L.tileLayer(SATELLITE_URL, {
+			attribution: SATELLITE_ATTRIBUTION,
+			maxZoom: 19,
+		});
+		const streets = L.tileLayer(STREET_URL, { attribution: STREET_ATTRIBUTION, maxZoom: 19 });
+		satellite.addTo(map);
+		L.control
+			.layers({ [__("Satellite")]: satellite, [__("Streets")]: streets }, {}, { position: "topright" })
+			.addTo(map);
+		return { satellite: satellite, streets: streets };
 	}
 
 	/**
@@ -273,27 +430,38 @@ frappe.provide("erpnext_mcp.geo_map");
 	 *   point:      [lat, lon]                               — a single marker
 	 *   point_label: string
 	 *   track:      [{ lat, lon, timestamp, label }]         — a crew's breadcrumbs
+	 *   editable:   { doctype, docname, geometry, centroid, county } — v0.33.0
+	 *   home:       { centre: [lat, lon], zoom }             — where an empty map opens
 	 *   title:      the section heading
-	 * Any combination; a record with none of them gets no section at all.
+	 * Any combination; a record with none of them and nothing editable gets no
+	 * section at all.
 	 */
 	erpnext_mcp.geo_map.render = function (frm, spec) {
 		spec = spec || {};
+		const editable = spec.editable || null;
 		const has_anything =
 			(spec.geometries || []).length || spec.point || (spec.track || []).length;
-		if (!has_anything) {
+		if (!has_anything && !editable) {
 			return;
 		}
 		const body = section_for(frm, spec.title);
 		const canvas = document.createElement("div");
-		canvas.style.height = MAP_HEIGHT;
+		canvas.style.height = editable ? EDITABLE_MAP_HEIGHT : MAP_HEIGHT;
 		canvas.style.width = "100%";
 		canvas.style.borderRadius = "6px";
 		body.appendChild(canvas);
 
-		load_leaflet()
+		const controls = editable ? document.createElement("div") : null;
+		if (controls) {
+			controls.className = "erpnext-mcp-map-controls";
+			controls.style.marginTop = "10px";
+			body.appendChild(controls);
+		}
+
+		(editable ? load_draw() : load_leaflet())
 			.then((L) => {
 				const map = L.map(canvas, { scrollWheelZoom: false });
-				L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 19 }).addTo(map);
+				add_base_layers(L, map);
 				const bounds = [];
 
 				(spec.geometries || []).forEach((entry) => {
@@ -367,10 +535,19 @@ frappe.provide("erpnext_mcp.geo_map");
 					line.forEach((position) => bounds.push(position));
 				}
 
+				if (editable) {
+					install_editing(L, map, frm, spec, controls, bounds);
+				}
+
 				if (bounds.length > 1) {
 					map.fitBounds(L.latLngBounds(bounds).pad(0.08), { maxZoom: MAX_FIT_ZOOM });
 				} else if (bounds.length === 1) {
 					map.setView(bounds[0], POINT_ZOOM);
+				} else {
+					// Nothing at all to fit to, which only happens on an editable map
+					// of a record that has never been traced. See HOME_VIEW.
+					const home = spec.home || HOME_VIEW;
+					map.setView(home.centre, home.zoom);
 				}
 
 				// Leaflet measures its container on creation, and the dashboard
@@ -384,6 +561,544 @@ frappe.provide("erpnext_mcp.geo_map");
 				render_fallback(body, (error && error.message) || "unavailable", spec);
 			});
 	};
+
+	// ── drawing, and the one call that saves what was drawn ──────────────────
+
+	/** Every shape currently in the editable group, as one GeoJSON geometry.
+	 *
+	 * TWO SHAPES BECOME A MultiPolygon rather than a refusal. A parcel cut in half
+	 * by a county road is two pieces of one parcel, `geo.parse` accepts a
+	 * MultiPolygon, and telling somebody to draw it as one shape would mean
+	 * drawing a boundary across a road that is not theirs.
+	 */
+	function current_geometry(group) {
+		const collection = group.toGeoJSON();
+		const areas = ((collection && collection.features) || [])
+			.map((feature) => feature && feature.geometry)
+			.filter((geometry) => geometry && (geometry.type === "Polygon" || geometry.type === "MultiPolygon"));
+		if (!areas.length) {
+			return null;
+		}
+		if (areas.length === 1) {
+			return areas[0];
+		}
+		const coordinates = [];
+		areas.forEach((geometry) => {
+			if (geometry.type === "Polygon") {
+				coordinates.push(geometry.coordinates);
+			} else {
+				(geometry.coordinates || []).forEach((polygon) => coordinates.push(polygon));
+			}
+		});
+		return { type: "MultiPolygon", coordinates: coordinates };
+	}
+
+	/** A button, in the Desk's own classes so it looks like the rest of the form. */
+	function button(label, variant) {
+		const element = document.createElement("button");
+		element.type = "button";
+		element.className = `btn btn-${variant || "default"} btn-sm`;
+		element.style.marginRight = "8px";
+		element.textContent = label;
+		return element;
+	}
+
+	/** What the server said, in the channel that suits it.
+	 *
+	 * WARNINGS GET A MODAL AND NOT A TOAST. Every warning the boundary tools emit
+	 * is a thing somebody has to decide about — a block that now hangs outside its
+	 * parcel, an acreage that disagrees by eight percent, three zones left outside
+	 * the shape. A toast that fades after four seconds is how those get missed.
+	 */
+	function report(result) {
+		const warnings = (result && result.warnings) || [];
+		if (warnings.length) {
+			frappe.msgprint({
+				title: __("Boundary saved, with {0} note(s)", [warnings.length]),
+				indicator: "orange",
+				message: `<div>${escape_html(result.summary || "")}</div><ul>${warnings
+					.map((line) => `<li>${escape_html(line)}</li>`)
+					.join("")}</ul>`,
+			});
+			return;
+		}
+		frappe.show_alert({ message: escape_html(result.summary || __("Boundary saved")), indicator: "green" });
+	}
+
+	/** The draw toolbar, the buttons under it, and the save path they lead to. */
+	function install_editing(L, map, frm, spec, controls, bounds) {
+		const conf = spec.editable;
+		const group = new L.FeatureGroup();
+		map.addLayer(group);
+
+		if (conf.geometry) {
+			L.geoJSON(conf.geometry, { style: DRAWN_STYLE }).eachLayer((layer) => group.addLayer(layer));
+			try {
+				const box = group.getBounds();
+				if (box.isValid()) {
+					bounds.push(box.getSouthWest(), box.getNorthEast());
+				}
+			} catch (error) {
+				// Unboundable, same as the read-only path. The view falls back.
+			}
+		}
+
+		map.addControl(
+			new L.Control.Draw({
+				position: "topleft",
+				draw: {
+					// `allowIntersection: false` is the client-side half of the
+					// check `geo.validate_geometry` makes on the server: a
+					// self-intersecting ring is refused there, and refusing it
+					// while the mouse is still moving is a better place to say so.
+					// The server check is not removed — it is what protects the
+					// other two callers.
+					polygon: {
+						allowIntersection: false,
+						showArea: false,
+						shapeOptions: DRAWN_STYLE,
+						drawError: {
+							color: "#cf222e",
+							message: __("A boundary cannot cross itself."),
+						},
+					},
+					rectangle: { showArea: false, shapeOptions: DRAWN_STYLE },
+					polyline: false,
+					circle: false,
+					marker: false,
+					circlemarker: false,
+				},
+				edit: { featureGroup: group, remove: true },
+			})
+		);
+
+		const original = conf.geometry ? JSON.stringify(conf.geometry) : "";
+		let dirty = false;
+
+		const save_button = button(__("Save Boundary"), "primary");
+		const revert_button = button(__("Revert"), "default");
+		const status = document.createElement("span");
+		status.className = "text-muted";
+		status.style.marginLeft = "4px";
+
+		function refresh_buttons() {
+			save_button.disabled = !dirty;
+			revert_button.disabled = !dirty;
+			status.textContent = dirty
+				? __("Unsaved shape — nothing is written until you press Save Boundary.")
+				: conf.geometry
+					? __("Drawn from the saved boundary. Use the edit tool to move a vertex.")
+					: __("No boundary recorded. Draw one with the polygon or rectangle tool.");
+		}
+
+		function mark_dirty() {
+			dirty = true;
+			refresh_buttons();
+		}
+
+		map.on(L.Draw.Event.CREATED, (event) => {
+			// ONE RECORD, ONE BOUNDARY. Drawing a second shape replaces the first
+			// rather than adding to it — a person who wants two pieces edits the
+			// shape into a MultiPolygon deliberately, and the far commoner case is
+			// somebody redrawing because the first attempt was wrong.
+			group.clearLayers();
+			group.addLayer(event.layer);
+			mark_dirty();
+		});
+		map.on(L.Draw.Event.EDITED, mark_dirty);
+		map.on(L.Draw.Event.DELETED, mark_dirty);
+
+		function save(extra) {
+			const geometry = current_geometry(group);
+			if (!geometry) {
+				frappe.msgprint({
+					title: __("Nothing to save"),
+					indicator: "red",
+					message: __(
+						"There is no shape on the map. Draw one with the polygon tool, or import it from the county."
+					),
+				});
+				return Promise.resolve(null);
+			}
+			return frappe
+				.call({
+					method: SAVE_METHOD,
+					args: {
+						doctype: conf.doctype,
+						name: conf.docname,
+						geojson: JSON.stringify(geometry),
+					},
+					freeze: true,
+					freeze_message: __("Saving the boundary…"),
+				})
+				.then((response) => {
+					const result = response && response.message;
+					if (!result) {
+						return null;
+					}
+					dirty = false;
+					report(Object.assign({}, result, extra || {}));
+					// Reload rather than patch: the tools recompute the centroid,
+					// the bounding box, the H3 coverage and the computed acreage,
+					// and a form still showing the previous release's numbers next
+					// to the new shape is exactly the disagreement this widget
+					// exists to catch.
+					frm.reload_doc();
+					return result;
+				});
+		}
+
+		save_button.addEventListener("click", () => save());
+		revert_button.addEventListener("click", () => {
+			group.clearLayers();
+			if (original) {
+				L.geoJSON(JSON.parse(original), { style: DRAWN_STYLE }).eachLayer((layer) =>
+					group.addLayer(layer)
+				);
+			}
+			dirty = false;
+			refresh_buttons();
+		});
+
+		controls.appendChild(save_button);
+		controls.appendChild(revert_button);
+
+		if (conf.county) {
+			const import_button = button(__("Import from County GIS"), "default");
+			import_button.addEventListener("click", () =>
+				open_county_import(frm, {
+					L: L,
+					map: map,
+					group: group,
+					controls: controls,
+					conf: conf,
+					save: save,
+					mark_dirty: mark_dirty,
+					style: DRAWN_STYLE,
+				})
+			);
+			controls.appendChild(import_button);
+		}
+
+		controls.appendChild(status);
+		refresh_buttons();
+	}
+
+	// ── the county import ────────────────────────────────────────────────────
+
+	/** Ask the server's proxy, and hand the answer to the preview.
+	 *
+	 * THE BROWSER NEVER TALKS TO THE COUNTY. `api/gis.py` holds the URL, validates
+	 * the tax lot before it goes into a `where` clause, and answers with a shape
+	 * in this app's own vocabulary. See that module for why the request is proxied
+	 * rather than made from here.
+	 */
+	function query_county(args) {
+		return frappe
+			.call({
+				method: COUNTY_METHOD,
+				args: args,
+				freeze: true,
+				freeze_message: __("Asking the county…"),
+			})
+			.then((response) => (response && response.message) || null);
+	}
+
+	function open_county_import(frm, ctx) {
+		const dialog = new frappe.ui.Dialog({
+			title: __("Import from County GIS"),
+			fields: [
+				{
+					fieldtype: "Data",
+					fieldname: "tax_lot",
+					label: __("Tax Lot Number"),
+					default: frm.doc.parcel_id || "",
+					description: __(
+						"Wasco County tax lots look like 2N11E35BA-01600 — township, range, section, quarter, lot. It is the Assessor Parcel ID on this form."
+					),
+				},
+				{
+					fieldtype: "HTML",
+					fieldname: "note",
+					options: `<div class="text-muted" style="margin-top:4px">${escape_html(
+						__(
+							"Or close this and press Find Under a Point, then click the parcel on the satellite map. Nothing is saved until you press Apply on the result."
+						)
+					)}</div>`,
+				},
+			],
+			primary_action_label: __("Search"),
+			primary_action(values) {
+				const lot = String((values && values.tax_lot) || "").trim();
+				if (!lot) {
+					frappe.msgprint(__("Enter a tax lot number, or use Find Under a Point."));
+					return;
+				}
+				dialog.hide();
+				query_county({ tax_lot: lot }).then((result) => preview_county(frm, ctx, result));
+			},
+			secondary_action_label: __("Find Under a Point"),
+			secondary_action() {
+				dialog.hide();
+				arm_point_pick(frm, ctx);
+			},
+		});
+		dialog.show();
+	}
+
+	/** One click on the map becomes one spatial query, and then disarms itself.
+	 *
+	 * ARMED RATHER THAN ALWAYS-ON. A map that queried the county on every click
+	 * would fire while somebody was panning to look at a corner, and each firing
+	 * is an outbound request from the farm's server.
+	 */
+	function arm_point_pick(frm, ctx) {
+		const map = ctx.map;
+		const banner = notice(
+			ctx.controls,
+			__("Click the parcel on the map. Press Escape to cancel."),
+			"blue"
+		);
+		const previous_cursor = map.getContainer().style.cursor;
+		map.getContainer().style.cursor = "crosshair";
+
+		function disarm() {
+			map.off("click", on_click);
+			document.removeEventListener("keydown", on_key);
+			map.getContainer().style.cursor = previous_cursor;
+			banner.remove();
+		}
+		function on_click(event) {
+			disarm();
+			query_county({
+				lat: event.latlng.lat.toFixed(6),
+				lon: event.latlng.lng.toFixed(6),
+			}).then((result) => preview_county(frm, ctx, result));
+		}
+		function on_key(event) {
+			if (event.key === "Escape") {
+				disarm();
+			}
+		}
+		map.on("click", on_click);
+		document.addEventListener("keydown", on_key);
+	}
+
+	/** A dismissable line under the map. Returns something with `.remove()`. */
+	function notice(controls, text, indicator) {
+		const element = document.createElement("div");
+		element.className = "erpnext-mcp-map-notice";
+		element.style.marginTop = "8px";
+		element.innerHTML = `<span class="indicator ${indicator || "blue"}">${escape_html(text)}</span>`;
+		controls.appendChild(element);
+		return element;
+	}
+
+	/** Draw what the county sent, and let somebody look at it before applying it.
+	 *
+	 * THE PREVIEW IS THE POINT OF THE WHOLE FEATURE. A tax lot number typed with
+	 * one character wrong returns a real parcel, somewhere else, and every number
+	 * on it looks plausible. Drawn on the satellite image next to the block the
+	 * operator knows, it is obviously the wrong piece of ground in under a second.
+	 */
+	function preview_county(frm, ctx, result) {
+		if (!result) {
+			return;
+		}
+		const features = result.features || [];
+		(result.warnings || []).forEach((line) =>
+			frappe.show_alert({ message: escape_html(line), indicator: "orange" }, 10)
+		);
+		if (!features.length) {
+			return;
+		}
+
+		const layers = new ctx.L.FeatureGroup();
+		ctx.map.addLayer(layers);
+		features.forEach((feature) => {
+			ctx.L.geoJSON(feature.geometry, { style: PREVIEW_STYLE }).eachLayer((layer) =>
+				layers.addLayer(layer)
+			);
+		});
+		try {
+			ctx.map.fitBounds(layers.getBounds().pad(0.15), { maxZoom: MAX_FIT_ZOOM });
+		} catch (error) {
+			// Nothing to fit to. The shape is still on the map at whatever view.
+		}
+
+		const panel = document.createElement("div");
+		panel.className = "erpnext-mcp-county-result";
+		panel.style.marginTop = "10px";
+		panel.style.padding = "8px 10px";
+		panel.style.border = "1px solid var(--border-color, #d0d7de)";
+		panel.style.borderRadius = "6px";
+
+		const heading = document.createElement("div");
+		heading.className = "text-muted";
+		heading.style.marginBottom = "6px";
+		heading.textContent = __("{0} — {1} match(es). Nothing is saved until you press Apply.", [
+			result.label || result.county,
+			features.length,
+		]);
+		panel.appendChild(heading);
+
+		function close() {
+			ctx.map.removeLayer(layers);
+			panel.remove();
+		}
+
+		features.forEach((feature) => {
+			const row = document.createElement("div");
+			row.style.display = "flex";
+			row.style.alignItems = "center";
+			row.style.gap = "8px";
+			row.style.padding = "4px 0";
+
+			const apply = button(__("Apply"), "primary");
+			apply.style.marginRight = "0";
+			apply.addEventListener("click", () => {
+				close();
+				apply_county_feature(frm, ctx, feature, result);
+			});
+			row.appendChild(apply);
+
+			const label = document.createElement("span");
+			label.innerHTML = describe_feature(feature);
+			row.appendChild(label);
+			panel.appendChild(row);
+		});
+
+		const discard = button(__("Discard"), "default");
+		discard.style.marginTop = "6px";
+		discard.addEventListener("click", close);
+		panel.appendChild(discard);
+
+		ctx.controls.appendChild(panel);
+	}
+
+	/** One county parcel in a sentence, with both acreages when they exist.
+	 *
+	 * BOTH NUMBERS, NEVER ONE. `county_acres` is the assessor's own figure on its
+	 * own projected grid; `area_computed_acres` is what `geo.area_acres` makes of
+	 * the same polygon on a sphere. They agree to a fraction of a percent when the
+	 * import is right, and a reader who can see both can tell a projection
+	 * difference from the wrong parcel.
+	 */
+	function describe_feature(feature) {
+		const parts = [];
+		if (feature.tax_lot) {
+			parts.push(`<strong>${escape_html(feature.tax_lot)}</strong>`);
+		}
+		if (feature.taxpayer) {
+			parts.push(escape_html(feature.taxpayer));
+		}
+		if (feature.county_acres) {
+			parts.push(escape_html(__("{0} acres (county)", [feature.county_acres])));
+		}
+		if (feature.area_computed_acres) {
+			parts.push(escape_html(__("{0} acres (computed)", [feature.area_computed_acres])));
+		}
+		return parts.join(" &middot; ") || escape_html(__("an unnamed parcel"));
+	}
+
+	/**
+	 * Put the county's shape on the form and save it, filling only what is empty.
+	 *
+	 * AN EMPTY FIELD BEING FILLED IS NOT AN OVERWRITE, and that line is the whole
+	 * policy here. A parcel whose acreage was typed off the deed and a county
+	 * whose GIS says something different are two sources that disagree, and the
+	 * app's job is to say so rather than to pick — so a value already on the form
+	 * is left exactly where it is and the difference is reported. A blank field
+	 * has no second source to lose.
+	 *
+	 * THE ACREAGE MATTERS MORE THAN IT LOOKS. `set_parcel_boundary` REFUSES a
+	 * polygon that disagrees with the recorded acreage by more than a quarter, so
+	 * a parcel recorded at 131 acres and a tax lot that is really 41 will be
+	 * refused by the server — which is the correct outcome and usually means the
+	 * wrong lot was imported. Filling a BLANK acreage from the county is safe for
+	 * the opposite reason: the county's acres and the county's polygon are the
+	 * same measurement, so they cannot disagree with each other.
+	 *
+	 * `title_holder` IS NEVER TOUCHED. It is a Link to a Related Party on this
+	 * site, and the county's `Taxpayer` is a free-text name off a tax roll —
+	 * resolving one to the other by string match is how a parcel ends up owned by
+	 * the wrong entity in an accounting system.
+	 */
+	function apply_county_feature(frm, ctx, feature, result) {
+		ctx.group.clearLayers();
+		ctx.L.geoJSON(feature.geometry, { style: ctx.style }).eachLayer((layer) =>
+			ctx.group.addLayer(layer)
+		);
+		ctx.mark_dirty();
+
+		const filled = [];
+		const kept = [];
+
+		function consider(fieldname, label, value) {
+			if (value == null || value === "") {
+				return;
+			}
+			const current = frm.doc[fieldname];
+			if (!current) {
+				frm.set_value(fieldname, value);
+				filled.push(__("{0} set to {1}", [label, value]));
+			} else if (String(current) !== String(value)) {
+				kept.push(__("{0}: the county says {1}, this record says {2} — left as it was.", [
+					label,
+					value,
+					current,
+				]));
+			}
+		}
+
+		consider("parcel_id", __("Assessor Parcel ID"), feature.tax_lot);
+		consider("acreage", __("Acreage"), feature.county_acres);
+		consider("county", __("County"), county_name(result));
+
+		if (feature.taxpayer) {
+			kept.push(
+				__(
+					"The county names the taxpayer as {0}. Title Holder links to a Related Party on this site, so it is not set from a tax roll — set it by hand if it is right.",
+					[feature.taxpayer]
+				)
+			);
+		}
+
+		const notes = filled.concat(kept);
+		const finish = () =>
+			ctx.save().then((result) => {
+				if (result && notes.length) {
+					frappe.msgprint({
+						title: __("Imported from the county"),
+						indicator: "blue",
+						message: `<ul>${notes.map((line) => `<li>${escape_html(line)}</li>`).join("")}</ul>`,
+					});
+				}
+			});
+
+		// The form's own fields are saved FIRST, because the boundary tool reads
+		// the acreage it is about to compare against out of the database. Saving
+		// the shape against an acreage that is still only on the screen would
+		// compare it with whatever was there before.
+		if (frm.is_dirty()) {
+			frm.save().then(finish);
+			return;
+		}
+		finish();
+	}
+
+	/** "Wasco" from "Wasco County, Oregon" — the server's own label, trimmed.
+	 *
+	 * The Parcel form's `county` is a plain Data field that people type "Wasco"
+	 * into. Writing the service's full label there would put a different spelling
+	 * in every parcel imported after this release than in every one before it.
+	 */
+	function county_name(result) {
+		const label = String((result && result.label) || "").trim();
+		return label ? label.split(",")[0].replace(/\s+County$/i, "").trim() : "";
+	}
+
+	// ── one linked record's shape, for context underneath ────────────────────
 
 	/** One linked record's boundary, or a null entry. Never rejects.
 	 *
@@ -429,6 +1144,12 @@ frappe.provide("erpnext_mcp.geo_map");
 	 * reported in a warning string is a disagreement nobody pictures. Drawn, it
 	 * takes a second to see whether the overhang is the shared water line
 	 * somebody meant or two vertices in the wrong order.
+	 *
+	 * READ-ONLY, AND STILL USED. v0.33.0 gave the three boundary-carrying forms an
+	 * editable map through `attach_editable_boundary`; this stays because it is
+	 * the right shape for any future doctype that carries a polygon nobody should
+	 * be redrawing from a form, and because the read path is what the editable one
+	 * degrades to when the draw plugin cannot be fetched.
 	 */
 	erpnext_mcp.geo_map.attach_boundary = function (doctype, options) {
 		options = options || {};
@@ -466,6 +1187,62 @@ frappe.provide("erpnext_mcp.geo_map");
 		});
 	};
 
+	/**
+	 * The same map, with a draw toolbar and a save button. v0.33.0.
+	 *
+	 * THE DIFFERENCE FROM `attach_boundary` IS NOT ONLY THE TOOLBAR: this one
+	 * renders on a record that has NO boundary at all, which the read-only version
+	 * deliberately does not. An empty map is nothing to look at and everything to
+	 * draw on, and a parcel with no shape yet is exactly the record somebody opens
+	 * meaning to trace it.
+	 *
+	 * IT IS NOT ATTACHED TO A NEW, UNSAVED RECORD. `save_boundary` needs a docname
+	 * to write to and the boundary tools need the acreage out of the database to
+	 * compare against — so a form that has never been saved gets no map, and the
+	 * map appears the moment it has one.
+	 *
+	 * `options.county` turns on the county GIS import, and only Parcel sets it. A
+	 * county publishes TAX LOTS: the unit the assessor, the deed and the tax bill
+	 * agree on, which is this app's Parcel. It has never heard of an orchard block
+	 * or an irrigation zone, and an import button on those forms would be an
+	 * invitation to set a block's boundary to the whole tax lot it sits in.
+	 */
+	erpnext_mcp.geo_map.attach_editable_boundary = function (doctype, options) {
+		options = options || {};
+		frappe.ui.form.on(doctype, {
+			refresh(frm) {
+				if (frm.is_new() || !frm.doc.name) {
+					return;
+				}
+				const geometry = parse_geometry(frm.doc.boundary_geojson);
+				const centroid = point_of(
+					frm.doc.boundary_centroid_lat,
+					frm.doc.boundary_centroid_lon
+				);
+				const container = options.container ? frm.doc[options.container.field] : null;
+				fetch_boundary(
+					options.container && options.container.doctype,
+					container,
+					container,
+					"#8250df"
+				).then((outer) => {
+					erpnext_mcp.geo_map.render(frm, {
+						title: options.title || __("Boundary"),
+						geometries: outer ? [outer] : [],
+						home: options.home,
+						editable: {
+							doctype: doctype,
+							docname: frm.doc.name,
+							geometry: geometry,
+							centroid: centroid,
+							county: !!options.county,
+						},
+					});
+				});
+			},
+		});
+	};
+
 	/** The whole map for a doctype that carries a single lat/lon pair. */
 	erpnext_mcp.geo_map.attach_point = function (doctype, options) {
 		options = options || {};
@@ -490,4 +1267,5 @@ frappe.provide("erpnext_mcp.geo_map");
 	erpnext_mcp.geo_map.point_of = point_of;
 	erpnext_mcp.geo_map.parse_gps_string = parse_gps_string;
 	erpnext_mcp.geo_map.fetch_boundary = fetch_boundary;
+	erpnext_mcp.geo_map.current_geometry = current_geometry;
 })();

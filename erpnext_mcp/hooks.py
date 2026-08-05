@@ -313,12 +313,30 @@ has_permission = {
 #: transposed passes every validation this app makes and is obviously wrong to
 #: anybody who sees it drawn.
 #:
-#: WHAT THEY DO NOT DO: write. There is no drag-to-move marker, no draw-a-polygon
-#: tool and no save path of any kind. A boundary is compliance evidence, it is
-#: set through the three boundary tools, and those validate the shape, refuse a
-#: self-intersection, compare the area against the recorded acreage and recompute
-#: every derived field. A map that could nudge a vertex would be a way round all
-#: of that with no validation and no audit row.
+#: WHAT THEY DO NOT DO: WRITE A FIELD. v0.32.0 said "no draw-a-polygon tool and
+#: no save path of any kind", and v0.33.0 added a draw tool to three of these
+#: seven forms — Parcel, Field and Irrigation Zone, the three that carry a
+#: polygon. The sentence that mattered is the one after it, and it is unchanged:
+#: a boundary is compliance evidence, it is set through the three boundary tools,
+#: and those validate the shape, refuse a self-intersection, compare the area
+#: against the recorded acreage and recompute every derived field.
+#:
+#: The draw tool does not go round any of that. It produces a polygon and hands
+#: it to `erpnext_mcp.api.gis.save_boundary`, which checks the caller may write to
+#: that specific document and then calls the same three tools the AI calls, with
+#: every check they have always made. A vertex nudged by accident gets an area
+#: disagreement and a refusal on screen rather than a quiet save. `api/gis.py`
+#: argues the whole thing, including why `api/guard.py` is the wrong gate here.
+#:
+#: THE OTHER FOUR STAY READ-ONLY — Housing Unit, Asset Register, Farm Shift and
+#: Farm Task draw a marker or a track, and none of them carries a shape anybody
+#: should be redrawing from a form.
+#:
+#: NO `app_include_js` OR `app_include_css`, INCLUDING FOR THE DRAW PLUGIN. Both
+#: would put an asset on every page of the Desk for every user, most of whom will
+#: never open a Parcel. Leaflet, Leaflet.draw and both stylesheets are fetched by
+#: `geo_map_widget.js` when a form that needs them is opened, and the draw plugin
+#: is not fetched at all on the four read-only forms.
 #:
 #: `geo_map_widget.js` IS LISTED FIRST IN EVERY ENTRY because Frappe concatenates
 #: the files in order into the form's script, and the per-doctype file calls into
@@ -326,9 +344,9 @@ has_permission = {
 #: early when it is already installed — which is what makes listing it seven
 #: times cost nothing on a session that opens seven forms.
 #:
-#: THE LIBRARY COMES FROM A CDN AND THE TILES FROM OPENSTREETMAP, so a bench with
-#: no outbound internet gets no map. That case is handled rather than left to
-#: fail: the section says the library could not be reached and prints the
+#: THE LIBRARY COMES FROM A CDN AND THE TILES FROM ESRI AND OPENSTREETMAP, so a
+#: bench with no outbound internet gets no map. That case is handled rather than
+#: left to fail: the section says the library could not be reached and prints the
 #: coordinates underneath. The record is the coordinates; the map is a reading of
 #: them, and losing the reading must not look like losing the record.
 doctype_js = {

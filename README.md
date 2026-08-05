@@ -27,8 +27,9 @@ site at call time.
   hooks it installs are additive and namespaced: two daily jobs that touch only
   this app's own tables (expired upload-staging rows, and the compliance alert
   sweep), one Jinja method (`erpnext_mcp_amount_in_words`) the check print
-  format calls, and — from v0.32.0 — a Leaflet map on seven of its own forms,
-  every one of which is a doctype this app created. Every one is resolved by a
+  format calls, and — from v0.32.0 — a Leaflet map on seven of its own forms
+  (drawable on the three that carry a polygon, from v0.33.0), every one of which
+  is a doctype this app created. Every one is resolved by a
   test — see
   `tests_standalone/test_hooks.py`, and v0.14.1 in the changelog for why that
   test exists.

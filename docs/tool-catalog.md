@@ -7540,7 +7540,9 @@ are in the wrong order" takes a second to see.
 draw-a-polygon tool and no save path of any kind. A boundary is compliance
 evidence and it is set through the three boundary tools, which validate the shape,
 refuse a self-intersection, compare the area against the recorded acreage and
-recompute every derived field.
+recompute every derived field. *(v0.33.0 added a draw tool to the three
+boundary-carrying forms. The sentence after the full stop is what mattered and is
+unchanged — see that release's section below.)*
 
 **The library comes from a CDN and the tiles from OpenStreetMap**, so a bench with
 no outbound internet gets no map. That is handled rather than left to fail: the
@@ -7581,6 +7583,131 @@ now carries the same derived suite Field and Irrigation Zone do, and
 is what an unset Float pair looks like). The pair moves together or not at all:
 passing one is filled in from the stored other, and a genuine half-pair is
 refused.
+
+---
+
+## v0.33.0 — drawing a boundary, and importing one from the county
+
+**NO NEW MCP TOOLS.** The tool count is unchanged and every number above still
+holds. What this release adds is a second *caller* of three tools that already
+existed, reached from a Desk form rather than from the model — so it is
+documented here rather than in the catalogue proper.
+
+### Two whitelisted methods, and neither is on the MCP surface
+
+| Method | What it does |
+| --- | --- |
+| `erpnext_mcp.api.gis.save_boundary` | takes a drawn or imported polygon and calls `set_parcel_boundary`, `set_field_boundary` or `set_zone_boundary` |
+| `erpnext_mcp.api.gis.query_county_parcels` | asks a county's ArcGIS parcel layer for a shape, by tax lot number or by a point |
+
+They are reached at `/api/method/erpnext_mcp.api.gis.<name>` by a signed-in Desk
+user. `security.authorize()` — the master switch, the shared `X-MCP-Token`, the
+CIDR allowlist — does not run on that path and cannot, so the gate is rebuilt in
+`api/gis.py`: a named user, `frappe.has_permission(doctype, "write", doc=name,
+throw=True)` on the **specific** document, and a closed list of three doctypes
+with no dispatcher and no method-name argument.
+
+That permission check is the one that would have been easy to skip. The boundary
+tools end in `doc.save(ignore_permissions=True)` — correct for them, because the
+MCP transport authorised three layers earlier — so a wrapper that trusted the
+framework would have handed every signed-in account a write to every parcel.
+
+**The `allow_<tool>` switches are deliberately not consulted**, the same call
+`api/__init__.py` made for the phone. Those switches are the model's leash;
+`allow_set_parcel_boundary` off means "the model may not redraw the farm", and
+reading it here would mean an operator who distrusts the AI also loses the
+ability to trace a parcel by hand.
+
+### The draw tool does not go round anything
+
+Parcel, Field and Irrigation Zone get a Leaflet.draw toolbar — polygon, rectangle,
+edit, delete — and a **Save Boundary** button. Nothing is written until it is
+pressed, and what it presses is the same boundary tool the AI calls: the polygon
+is parsed, a self-intersection is refused, the enclosed area is compared against
+the recorded acreage and a disagreement past a quarter is **refused outright**,
+containment against the shape above is reported, and every derived field is
+recomputed. A vertex nudged by accident gets an area disagreement on screen, not
+a quiet save.
+
+Two shapes drawn on one record become a `MultiPolygon` rather than a refusal — a
+parcel cut in half by a county road is two pieces of one parcel.
+
+**No area is computed in the browser.** Leaflet.draw offers a live acreage readout
+while you drag; taking it would put a second area implementation in the app, in a
+different language, and the day it disagreed with `geo.area_acres` by three per
+cent nobody would know which figure the compliance record was built on. The
+server answers with the area it actually stored.
+
+The other four map forms — Housing Unit, Asset Register, Farm Shift, Farm Task —
+stay exactly as read-only as they were. None of them carries a shape anybody
+should be redrawing from a form.
+
+### Satellite is the default layer
+
+Esri World Imagery (free, no key) with OpenStreetMap one click away in the layer
+control. A street map cannot be traced against: an orchard block's corner is a
+change in canopy, a headland or a road edge, none of which is on a street map,
+which for most of this county draws two roads and a lot of white. Both
+attributions are the condition of use rather than a courtesy.
+
+### The county import, on Parcel and no other form
+
+Wasco County publishes its tax lots as an ArcGIS FeatureServer — free, no key,
+WGS84 on request (`outSR=4326`; the layer's native grid is Oregon Stateplane North
+in feet, WKID 2913). That polygon is what the assessor, the deed and the tax bill
+are all describing, which makes it a far better starting point than tracing an
+outline off a satellite image by eye.
+
+Two ways to ask: type a tax lot number (`2N11E35BA-01600`), or press **Find Under
+a Point** and click the parcel on the satellite map. Either way the result is
+**drawn on the map first**, dashed, next to the block the operator already knows —
+because a tax lot number typed with one character wrong returns a real parcel
+somewhere else and every number on it looks plausible. **Apply** is what commits
+it, through `save_boundary` like everything else.
+
+**The request is proxied by the server, never made by the browser.** CORS is not
+ours to promise, the URL belongs in one place rather than in a cached JavaScript
+file, and the `where` clause is a query language that the browser is the wrong
+place to be careful about. The tax lot is checked against an **allowlist** —
+letters, digits, dots and hyphens — rather than escaped, because escaping means
+implementing somebody else's SQL dialect correctly without being able to test it.
+
+`x` is longitude and `y` is latitude in an ArcGIS point geometry, which is the
+opposite order from every other pair in this app. Swapping them asks about a point
+in the Southern Ocean, which comes back **empty rather than wrong** — so nothing
+would ever say what happened. There is a test that reads the outgoing parameters.
+
+**An ArcGIS error is an HTTP 200.** The service answers `{"error": {...}}` with a
+200 and a JSON content type, so a client that checked only the status code would
+report a malformed query as "the county has never heard of your parcel". It is
+checked by name, first.
+
+### What the import fills in, and what it refuses to
+
+An empty field being filled is not an overwrite; a field that already has a value
+is left exactly where it is and the difference is reported.
+
+| Form field | From the county |
+| --- | --- |
+| `parcel_id` | `MapTaxlot` — filled if blank |
+| `acreage` | `CalculatedAcres` — filled if blank |
+| `county` | the service's own label, trimmed to "Wasco" |
+| `title_holder` | **never**. `Taxpayer` is free text off a tax roll; `title_holder` is a Link to a Related Party on this site, and matching one to the other by string is how a parcel ends up owned by the wrong entity in an accounting system. It is shown and left to a person. |
+
+Both acreages are always reported side by side — the county's, computed on its own
+projected grid, and this app's, computed spherically from the same polygon. They
+agree to a fraction of a per cent when the import is right, and a reader who can
+see both can tell a projection difference from the wrong parcel.
+
+### Degradation
+
+`requests` is imported defensively, like shapely, h3 and segno before it: a bench
+without it loses the county lookup **by name**, with the pip command, rather than
+failing to import the module and taking `save_boundary` down with it. Drawing a
+boundary by hand needs no network at all. Leaflet, Leaflet.draw and both
+stylesheets are still fetched from a CDN when a form that needs them is opened —
+there is no `app_include_js` or `app_include_css`, so the draw plugin is not
+fetched at all on the four read-only map forms.
 
 ---
 
