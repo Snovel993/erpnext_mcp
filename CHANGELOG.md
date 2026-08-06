@@ -79,6 +79,40 @@ worse than a field an operator sets once.
 `get_tax_form` read; `generate_tax_form`, `regenerate_tax_form` and
 `mark_tax_form_filed` write, all three default OFF.
 
+### The boundary editor, on a record that does not exist yet
+
+A patch to v0.33.0's map, client-side only — no new tool, no schema change.
+
+**The map and the draw tools now appear on a NEW Parcel, Field or Irrigation
+Zone**, and Save Boundary on one creates the record first and sets the boundary
+second, in a single press. v0.33.0 withheld the map until the record was saved,
+because `save_boundary` needs a docname and the boundary tools read the recorded
+acreage out of the database to compare the drawn area against. Both are still
+true; the order is now enforced in the widget instead of being demanded of the
+operator. Nothing skips validation — `frm.save()` runs every mandatory field and
+every doctype check before a polygon is offered to anything, and a record that
+will not save does not get a boundary.
+
+**The county import works the same way on a blank Parcel form.** Importing a
+Wasco County tax lot fills in the parcel ID, the acreage and the county, saves
+them, and only then applies the polygon — because those are precisely the values
+`set_parcel_boundary` checks the shape against, so they have to be on disk
+first.
+
+**Every `frappe.call` in the widget now has a `.catch`.** It did not, and the
+failure that produced was the worst available: a rejected promise nobody
+listened to, so an expired session or a dropped connection lifted the freeze,
+re-enabled the button, left the drawing where it was and said nothing at all. A
+boundary that silently did not save looks identical to one that did. Where the
+server refused on purpose — a self-intersection, an acreage that disagrees by
+half — Frappe has already shown that sentence and it is not repeated.
+
+**A block's parcel outline now appears when the parcel is chosen**, rather than
+only on the next refresh. On a new Field the link starts empty, which is exactly
+when somebody wants the deed line to trace against. A form where a shape has
+already been drawn is left alone; losing a traced boundary to a link field would
+be the worse trade.
+
 ## 0.33.0 — 2026-08-05
 
 **Interactive Map Drawing + Wasco County GIS Import.** v0.32.0 put a map on seven

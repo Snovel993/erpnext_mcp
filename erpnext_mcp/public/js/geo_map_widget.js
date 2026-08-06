@@ -71,6 +71,29 @@
  * THE TILE ATTRIBUTIONS ARE THE CONDITION OF USE, NOT A COURTESY, for both
  * providers. Esri's World Imagery and OSM's tile server are free and ask to be
  * credited; the strings are in the layer options below and must stay there.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * v0.34.0: THE MAP ARRIVES BEFORE THE RECORD DOES, AND FAILURES ARE AUDIBLE
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ * TWO THINGS CHANGE, AND ONE OF THEM IS A REVERSAL.
+ *
+ * The first: a form that has never been saved now gets the map and the draw
+ * tools, and Save Boundary on it creates the record and then sets the boundary,
+ * in one press. v0.33.0 withheld the map from a new record because the server
+ * needs a docname and the boundary tools need the acreage out of the database —
+ * both still true, and both now handled in `save()` rather than in front of the
+ * operator. The order of a parcel being created is: open the form, look at the
+ * imagery, trace the block, fill in the fields, press once.
+ *
+ * The second: every `frappe.call` in this file now has a `.catch`. It did not,
+ * and the shape of that bug was the worst available — a rejected promise nobody
+ * listened to, so an expired session or a dropped connection lifted the freeze,
+ * re-enabled the button, left the drawing exactly where it was and said nothing
+ * whatsoever. A boundary that silently did not save looks identical to one that
+ * did, and the operator finds out weeks later from a report. See
+ * `explain_failure`, including why it stays quiet when the server has already
+ * spoken for itself.
  */
 
 frappe.provide("erpnext_mcp.geo_map");
@@ -334,6 +357,7 @@ frappe.provide("erpnext_mcp.geo_map");
 		const key = "__erpnext_mcp_map";
 		if (frm[key] && frm[key].wrapper && document.body.contains(frm[key].wrapper)) {
 			frm[key].body.innerHTML = "";
+			show_dashboard(frm);
 			return frm[key].body;
 		}
 		const wrapper = document.createElement("div");
@@ -351,8 +375,34 @@ frappe.provide("erpnext_mcp.geo_map");
 				frm.$wrapper.find(".form-layout").first().prepend(wrapper);
 			}
 		}
+		show_dashboard(frm);
 		frm[key] = { wrapper: wrapper, body: body };
 		return body;
+	}
+
+	/** Make sure the dashboard the section was just added to is not hidden.
+	 *
+	 * `.empty-section` is `display: none !important` in the Desk's own stylesheet
+	 * and Frappe puts it on the WHOLE dashboard container — not on one section —
+	 * whenever a form's dashboard has nothing in it. `add_section` does not take
+	 * it off again, and `dashboard.reset()` does not either, so a container hidden
+	 * while some other record was on screen stays hidden with the map inside it.
+	 *
+	 * THAT IS NOT HYPOTHETICAL FROM v0.34.0. Frappe keeps ONE form object per
+	 * doctype and reuses it for every record of that doctype, including the new
+	 * one — so the state left behind by the record viewed a moment ago is the
+	 * state a blank form starts in, and "the map does not appear when I press New,
+	 * but only sometimes" is the shape that bug would take.
+	 */
+	function show_dashboard(frm) {
+		try {
+			if (frm.dashboard && typeof frm.dashboard.show === "function") {
+				frm.dashboard.show();
+			}
+		} catch (error) {
+			// A Frappe whose dashboard has no `show`. The section is already in the
+			// page; this only decides whether the container admits to holding it.
+		}
 	}
 
 	/** What to show when there is no Leaflet: the numbers, in plain text. */
@@ -603,6 +653,73 @@ frappe.provide("erpnext_mcp.geo_map");
 		return element;
 	}
 
+	/** True when Frappe has already put this failure on screen itself.
+	 *
+	 * A `ToolError` out of `api/gis.py` is turned into `frappe.throw`, which
+	 * arrives here as an HTTP 417 carrying `_server_messages` — and Frappe's own
+	 * request cleanup has already shown that sentence in a modal by the time the
+	 * rejection reaches us. It is the sentence worth reading, too: it names which
+	 * two acreages disagreed and by how much.
+	 */
+	function already_spoken(error) {
+		// The field is read by name and never inferred from the body being JSON:
+		// a 500 answers with a JSON body too, and taking that as "the server has
+		// spoken" would suppress the message on the one failure that has none.
+		const payload = (error && error.responseJSON) || error || {};
+		const messages = payload._server_messages;
+		return !!(messages && String(messages).replace(/[[\]"\s]/g, "").length);
+	}
+
+	/** Say that a call did not come back. Never say nothing.
+	 *
+	 * THIS IS THE HANDLER THAT WAS MISSING, and its absence had one symptom:
+	 * a boundary that silently did not save looks exactly like one that did.
+	 * `frappe.call` rejects its promise on any non-200 — an expired session, a
+	 * dropped connection, a server exception with no message — and a `.then()`
+	 * with no `.catch()` after it turns that into an unhandled rejection in a
+	 * console nobody has open. The freeze lifts, the button re-enables, the shape
+	 * stays on the map, and the record is unchanged.
+	 *
+	 * THE ONE THING IT WILL NOT DO IS SAY IT TWICE. Where the server refused on
+	 * purpose, Frappe has already shown the refusal and it is a better sentence
+	 * than anything this function knows how to write; a second modal on top of it
+	 * would train people to dismiss both without reading either.
+	 */
+	function explain_failure(error, headline) {
+		if (window.console && console.error) {
+			console.error("erpnext_mcp.geo_map:", headline, error);
+		}
+		if (already_spoken(error)) {
+			return null;
+		}
+		const detail =
+			(error && (error.message || (error.responseJSON && error.responseJSON.exception))) || "";
+		frappe.msgprint({
+			title: __("Boundary Error"),
+			indicator: "red",
+			message: `<div>${escape_html(headline)}</div>${
+				detail ? `<div style="margin-top:6px;font-family:monospace">${escape_html(detail)}</div>` : ""
+			}`,
+		});
+		return null;
+	}
+
+	/** `frm.save()`, as a promise that actually settles when the save fails.
+	 *
+	 * THE FOURTH ARGUMENT IS THE WHOLE POINT. Frappe's `Form.save(action,
+	 * callback, btn, on_error)` resolves its promise after a successful write,
+	 * but on a failed one it rejects ONLY if an `on_error` was handed in — a
+	 * plain `frm.save()` that trips a mandatory field shows its dialog and then
+	 * leaves the promise pending forever. Anything chained behind it, including
+	 * the `.catch` that is supposed to explain the failure, never runs at all.
+	 *
+	 * The no-op callback exists purely to switch that rejection on; what to say
+	 * about it is the caller's business, in the rejection handler.
+	 */
+	function save_record(frm) {
+		return frm.save("Save", null, null, () => {});
+	}
+
 	/** What the server said, in the channel that suits it.
 	 *
 	 * WARNINGS GET A MODAL AND NOT A TOAST. Every warning the boundary tools emit
@@ -675,6 +792,12 @@ frappe.provide("erpnext_mcp.geo_map");
 		const original = conf.geometry ? JSON.stringify(conf.geometry) : "";
 		let dirty = false;
 
+		// Read by the container link's own handler, which rebuilds this whole
+		// section and would throw an unsaved shape away with it. Set on the form
+		// rather than kept here because the two live in different closures, and
+		// reassigned on every rebuild so it always answers for the map on screen.
+		frm.__erpnext_mcp_drawing = () => dirty;
+
 		const save_button = button(__("Save Boundary"), "primary");
 		const revert_button = button(__("Revert"), "default");
 		const status = document.createElement("span");
@@ -684,6 +807,17 @@ frappe.provide("erpnext_mcp.geo_map");
 		function refresh_buttons() {
 			save_button.disabled = !dirty;
 			revert_button.disabled = !dirty;
+			// `frm.is_new()` is asked here rather than read off `conf` because a
+			// form can stop being new while this toolbar is on screen: that is
+			// exactly what pressing Save Boundary on an unsaved record does.
+			if (frm.is_new()) {
+				status.textContent = dirty
+					? __(
+							"Unsaved shape — Save Boundary will create this record first, then set the boundary on it."
+						)
+					: __("Draw a boundary, then press Save Boundary to create the record.");
+				return;
+			}
 			status.textContent = dirty
 				? __("Unsaved shape — nothing is written until you press Save Boundary.")
 				: conf.geometry
@@ -708,6 +842,29 @@ frappe.provide("erpnext_mcp.geo_map");
 		map.on(L.Draw.Event.EDITED, mark_dirty);
 		map.on(L.Draw.Event.DELETED, mark_dirty);
 
+		/**
+		 * Send what is on the map to the boundary tools, creating the record first
+		 * if it does not exist yet.
+		 *
+		 * THE RECORD IS SAVED BEFORE THE SHAPE IS, AND IN THAT ORDER ONLY. There
+		 * is no way to hand a polygon to `set_parcel_boundary` and have it invent
+		 * the parcel: the tool reads the recorded acreage out of the database to
+		 * compare the drawn area against, refuses a disagreement past a quarter,
+		 * and writes its derived fields onto a row that has to be there. So an
+		 * unsaved form does `frm.save()` first — which runs every mandatory-field
+		 * and validation check the doctype has, in Frappe's own channel, with
+		 * Frappe's own dialog — and only a record that actually landed goes on to
+		 * get a boundary.
+		 *
+		 * THE GEOMETRY IS READ OFF THE MAP BEFORE ANY OF THAT. Saving a new record
+		 * re-renders the form, which tears this map section down and builds a
+		 * fresh one; `group` is then a layer group belonging to a map nobody can
+		 * see. The shape has to be in hand before the save, not fetched after it.
+		 *
+		 * AND THE NAME IS READ AFTER. `conf.docname` is null on a form that was
+		 * new when the map was drawn — `frm.doc.name` is the one that becomes the
+		 * real name the moment the record exists.
+		 */
 		function save(extra) {
 			const geometry = current_geometry(group);
 			if (!geometry) {
@@ -720,32 +877,54 @@ frappe.provide("erpnext_mcp.geo_map");
 				});
 				return Promise.resolve(null);
 			}
-			return frappe
-				.call({
-					method: SAVE_METHOD,
-					args: {
-						doctype: conf.doctype,
-						name: conf.docname,
-						geojson: JSON.stringify(geometry),
-					},
-					freeze: true,
-					freeze_message: __("Saving the boundary…"),
-				})
-				.then((response) => {
-					const result = response && response.message;
-					if (!result) {
-						return null;
-					}
-					dirty = false;
-					report(Object.assign({}, result, extra || {}));
-					// Reload rather than patch: the tools recompute the centroid,
-					// the bounding box, the H3 coverage and the computed acreage,
-					// and a form still showing the previous release's numbers next
-					// to the new shape is exactly the disagreement this widget
-					// exists to catch.
-					frm.reload_doc();
-					return result;
-				});
+
+			function commit_boundary() {
+				return frappe
+					.call({
+						method: SAVE_METHOD,
+						args: {
+							doctype: conf.doctype,
+							name: frm.doc.name,
+							geojson: JSON.stringify(geometry),
+						},
+						freeze: true,
+						freeze_message: __("Saving the boundary…"),
+					})
+					.then((response) => {
+						const result = response && response.message;
+						if (!result) {
+							return null;
+						}
+						dirty = false;
+						report(Object.assign({}, result, extra || {}));
+						// Reload rather than patch: the tools recompute the centroid,
+						// the bounding box, the H3 coverage and the computed acreage,
+						// and a form still showing the previous release's numbers next
+						// to the new shape is exactly the disagreement this widget
+						// exists to catch.
+						frm.reload_doc();
+						return result;
+					})
+					.catch((error) =>
+						explain_failure(
+							error,
+							__("The boundary was not saved. The shape is still on the map — nothing on this record changed.")
+						)
+					);
+			}
+
+			if (frm.is_new()) {
+				return save_record(frm).then(commit_boundary, (error) =>
+					// A rejection here is nearly always a mandatory field the form
+					// has already highlighted and named in its own dialog, so this
+					// says what did NOT happen rather than repeating what did.
+					explain_failure(
+						error,
+						__("The record was not created, so the boundary was not saved. Fill in the required fields and press Save Boundary again.")
+					)
+				);
+			}
+			return commit_boundary();
 		}
 
 		save_button.addEventListener("click", () => save());
@@ -801,7 +980,13 @@ frappe.provide("erpnext_mcp.geo_map");
 				freeze: true,
 				freeze_message: __("Asking the county…"),
 			})
-			.then((response) => (response && response.message) || null);
+			.then((response) => (response && response.message) || null)
+			.catch((error) =>
+				explain_failure(
+					error,
+					__("The county could not be asked. Nothing was imported and nothing on this record changed.")
+				)
+			);
 	}
 
 	function open_county_import(frm, ctx) {
@@ -1080,8 +1265,21 @@ frappe.provide("erpnext_mcp.geo_map");
 		// the acreage it is about to compare against out of the database. Saving
 		// the shape against an acreage that is still only on the screen would
 		// compare it with whatever was there before.
-		if (frm.is_dirty()) {
-			frm.save().then(finish);
+		//
+		// A NEVER-SAVED PARCEL TAKES THE SAME PATH, which is why `is_new` is asked
+		// alongside `is_dirty` rather than left to `save()` to notice. Importing a
+		// tax lot onto a blank Parcel form is the ordinary way to create one from
+		// v0.34.0: the county fills in the parcel ID, the acreage and the county
+		// name, and those three are precisely the values the boundary tool is
+		// about to check the polygon against — so they have to be on disk before
+		// the polygon is offered, on a new record exactly as on an old one.
+		if (frm.is_dirty() || frm.is_new()) {
+			save_record(frm).then(finish, (error) =>
+				explain_failure(
+					error,
+					__("The record was not saved, so the county's boundary was not applied. Fill in the required fields and import again.")
+				)
+			);
 			return;
 		}
 		finish();
@@ -1196,10 +1394,25 @@ frappe.provide("erpnext_mcp.geo_map");
 	 * draw on, and a parcel with no shape yet is exactly the record somebody opens
 	 * meaning to trace it.
 	 *
-	 * IT IS NOT ATTACHED TO A NEW, UNSAVED RECORD. `save_boundary` needs a docname
-	 * to write to and the boundary tools need the acreage out of the database to
-	 * compare against — so a form that has never been saved gets no map, and the
-	 * map appears the moment it has one.
+	 * IT IS ATTACHED TO A NEW, UNSAVED RECORD TOO, FROM v0.34.0 — which is a
+	 * reversal, and the reason for the original refusal is worth restating because
+	 * it was a real constraint and it has not gone away. `save_boundary` needs a
+	 * docname to write to, and the boundary tools read the recorded acreage out of
+	 * the DATABASE to compare the drawn area against; neither works against a form
+	 * that exists only on screen.
+	 *
+	 * What was wrong was the conclusion drawn from it. Withholding the map until
+	 * the record was saved put the constraint in front of the operator instead of
+	 * behind them, and it did it at the worst possible moment: a parcel being
+	 * created is precisely the record nobody has traced yet, and the answer they
+	 * got was a form with no map and no explanation, followed by a save, followed
+	 * by a map. The constraint is now honoured where it belongs — in `save()`,
+	 * which creates the record first and sets the boundary second, in one press.
+	 *
+	 * SO THE ORDER IS ENFORCED AND NOT ASKED FOR. Nothing about a drawn shape
+	 * skips validation: `frm.save()` runs every mandatory field and every doctype
+	 * check before the polygon is offered to anything, and a record that will not
+	 * save does not get a boundary.
 	 *
 	 * `options.county` turns on the county GIS import, and only Parcel sets it. A
 	 * county publishes TAX LOTS: the unit the assessor, the deed and the tax bill
@@ -1209,38 +1422,67 @@ frappe.provide("erpnext_mcp.geo_map");
 	 */
 	erpnext_mcp.geo_map.attach_editable_boundary = function (doctype, options) {
 		options = options || {};
-		frappe.ui.form.on(doctype, {
-			refresh(frm) {
-				if (frm.is_new() || !frm.doc.name) {
+
+		const handlers = {
+			refresh: draw,
+		};
+
+		// THE SHAPE ABOVE ARRIVES WHILE THE FORM IS BEING FILLED IN, which only
+		// matters now that the map is on a new record. A block's parcel is chosen
+		// on the form, and until it is chosen there is nothing to draw underneath
+		// — so on a saved record the container was always there when the map was
+		// built, and on a new one it is empty at exactly the moment somebody wants
+		// to trace against it. The deed line a block should stop at is not visible
+		// on satellite imagery; without this the first thing the map is for does
+		// not work on the record that needs it most.
+		//
+		// IT WILL NOT REDRAW OVER WORK IN PROGRESS. Rebuilding the section throws
+		// the map away and with it any shape not yet saved, so a form where
+		// somebody has already drawn is left alone and gets the container on its
+		// next refresh instead. Losing a traced boundary to a link field is a far
+		// worse trade than a missing outline.
+		if (options.container && options.container.field) {
+			handlers[options.container.field] = function (frm) {
+				if (frm.__erpnext_mcp_drawing && frm.__erpnext_mcp_drawing()) {
 					return;
 				}
-				const geometry = parse_geometry(frm.doc.boundary_geojson);
-				const centroid = point_of(
-					frm.doc.boundary_centroid_lat,
-					frm.doc.boundary_centroid_lon
-				);
-				const container = options.container ? frm.doc[options.container.field] : null;
-				fetch_boundary(
-					options.container && options.container.doctype,
-					container,
-					container,
-					"#8250df"
-				).then((outer) => {
-					erpnext_mcp.geo_map.render(frm, {
-						title: options.title || __("Boundary"),
-						geometries: outer ? [outer] : [],
-						home: options.home,
-						editable: {
-							doctype: doctype,
-							docname: frm.doc.name,
-							geometry: geometry,
-							centroid: centroid,
-							county: !!options.county,
-						},
-					});
+				draw(frm);
+			};
+		}
+
+		frappe.ui.form.on(doctype, handlers);
+
+		function draw(frm) {
+			const geometry = parse_geometry(frm.doc.boundary_geojson);
+			const centroid = point_of(frm.doc.boundary_centroid_lat, frm.doc.boundary_centroid_lon);
+			const container = options.container ? frm.doc[options.container.field] : null;
+			fetch_boundary(
+				options.container && options.container.doctype,
+				container,
+				container,
+				"#8250df"
+			).then((outer) => {
+				erpnext_mcp.geo_map.render(frm, {
+					title: options.title || __("Boundary"),
+					geometries: outer ? [outer] : [],
+					home: options.home,
+					editable: {
+						doctype: doctype,
+						// Null on a form that has never been saved. Frappe's
+						// placeholder name for one is a real-looking string —
+						// "new-parcel-abc123" — and a placeholder that reaches the
+						// server would be looked up, missed, and reported as a
+						// parcel that does not exist. `save()` reads the name off
+						// `frm.doc` at the moment it sends, by which point the
+						// record is real.
+						docname: frm.is_new() ? null : frm.doc.name,
+						geometry: geometry,
+						centroid: centroid,
+						county: !!options.county,
+					},
 				});
-			},
-		});
+			});
+		}
 	};
 
 	/** The whole map for a doctype that carries a single lat/lon pair. */
