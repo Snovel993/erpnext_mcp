@@ -1038,6 +1038,9 @@ APP_DOCTYPES = {
 	"Shift Location Log": "shift_location_log",
 	# v0.34.0. The filing register.
 	"Tax Form": "tax_form",
+	# v0.38.0. Where the regulations live, and what they said last time.
+	"Regulation Feed": "regulation_feed",
+	"Regulation Feed Rule Link": "regulation_feed_rule_link",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

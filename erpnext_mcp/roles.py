@@ -264,7 +264,15 @@ CALENDAR = ("Compliance Alert",)
 #: required and the person who decides who walks it must not be the same account,
 #: and the person who can silently redefine "required" must be fewer people
 #: still.
-RULE_DEFINITIONS = ("Compliance Rule",)
+#:
+#: v0.38.0 ADDS `Regulation Feed` TO THIS GROUP RATHER THAN TO THE REGISTERS,
+#: and the reason is the same one that put Compliance Rule here. A feed is not an
+#: observation about this operation; it is a pointer at the TEXT a rule was
+#: written from, and editing one changes what the site checks and what a change
+#: log will say about which rules to re-read. The two roles whose job is the
+#: compliance framework hold it, and nobody else — a Foreman reads the calendar,
+#: and the register of where the rules came from is one layer up from that.
+RULE_DEFINITIONS = ("Compliance Rule", "Regulation Feed")
 GROUND = ("Parcel", "Field", "Irrigation Zone")
 CAMP = ("Housing Unit", "Housing Assignment")
 HOLDING = ("Cap Table Entry", "Member Event", "Note Payable", "Asset Cost Profile")

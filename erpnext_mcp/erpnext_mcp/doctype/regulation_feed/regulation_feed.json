@@ -1,0 +1,190 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:feed_name",
+ "creation": "2026-08-05 12:00:00.000000",
+ "description": "WHERE A REGULATION LIVES, so this site can notice when it moves. v0.22.0 made a compliance rule a record; v0.37.0 let a model draft one from regulation text and a person approve it. Both of those are about the moment a rule is written, and neither of them has anything to say six months later when the agency renumbers a section or raises a threshold. This doctype is the pointer that was missing: a URL, the regime it serves, how often to look, and a hash of what was there last time. IT DETECTS AND IT DOES NOT REMEDIATE, and that line is the whole design rather than a limitation of this release. A changed page is evidence that somebody should read the regulation again — not evidence about what it now says, and certainly not authority to rewrite a rule that is firing on somebody's compliance calendar. So a detected change writes a timestamp, a hash and a log entry naming the rules that were derived from this source, and stops. What happens next is a person reading the diff and, if a rule genuinely needs to change, `propose_compliance_rule` drafting the replacement and `approve_compliance_rule` putting a name on it. THE HASH IS OF NORMALISED TEXT rather than of the bytes, because a page carrying its own 'last updated 14:02' would otherwise report a change every single time it was checked, and an alarm that is always on is an alarm nobody reads. See `erpnext_mcp/services/regulation_feed.py` for exactly what is normalised away and what is deliberately kept.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "feed_name",
+  "url",
+  "regime",
+  "identity_col",
+  "company",
+  "check_frequency",
+  "status",
+  "description_section",
+  "description",
+  "affected_rules",
+  "state_section",
+  "last_checked",
+  "last_change_detected",
+  "state_col",
+  "last_content_hash",
+  "error_message",
+  "log_section",
+  "change_log"
+ ],
+ "fields": [
+  {
+   "description": "The docname, and what somebody scanning the register reads. Name it after the regulation rather than after the website: 'OAR 437-004 Agricultural Labor' is a source anybody on the operation can place, and 'OSHA page' is a row nobody can tell from the other three.",
+   "fieldname": "feed_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Feed",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "The http(s) URL that is checked. Point it at the NARROWEST page that carries the rule — a division of the rulebook rather than the rulebook's index, a specific Federal Register document rather than the search results that found it. A broad page changes for reasons that have nothing to do with this operation, and every one of those is a person asked to read a regulation for nothing.",
+   "fieldname": "url",
+   "fieldtype": "Data",
+   "label": "URL",
+   "options": "URL",
+   "reqd": 1
+  },
+  {
+   "description": "The audit this source answers to: OR-OSHA, FSMA, WPS, GAP, GlobalGAP, PrimusGFS, NOP, OTCO, Internal. It is how somebody preparing for one inspection finds the sources that bear on it, and how list_regulation_changes narrows 'what moved' to the scheme somebody is actually working on.",
+   "fieldname": "regime",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Regime",
+   "options": "Compliance Regime",
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The entity this source is watched on behalf of. A multi-entity operation whose entities hold different certificates watches different sources, and the scoping is what keeps one entity's compliance officer out of the other's register.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "default": "Weekly",
+   "description": "How often the sweep looks. THE CRON RUNS DAILY WHATEVER THIS SAYS — a Frappe cron expression is a static string in hooks.py and cannot be rewritten from a form — so this is a floor rather than a clock: Weekly means the sweep skips this feed until its last check is seven days old. Daily is for a source in an active rulemaking; Monthly is right for a certifier's handbook, which changes when the certifier says so and not on a schedule.",
+   "fieldname": "check_frequency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Check Frequency",
+   "options": "Daily\nWeekly\nMonthly"
+  },
+  {
+   "default": "Active",
+   "description": "PAUSED IS THE KILL SWITCH AND IT IS THE ONLY ONE PER FEED. A paused feed is skipped by the sweep and by check_all_regulation_feeds, and stays skipped until a person unpauses it — which is the right control for a source that has moved, gone behind a login, or started answering with a page that changes every time it is fetched. ERROR IS NOT A KILL SWITCH: it is what the last check reported, the sweep retries an errored feed on its next turn, and a successful check clears it back to Active. A source that was unreachable for an afternoon must not be a source nobody checks again.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nPaused\nError",
+   "search_index": 1
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": "What This Source Covers"
+  },
+  {
+   "description": "What is at that URL, in the words of somebody who has read it: which subject, which sections, and what on this operation turns on it. It is what a person reads when the change log says this source moved, and it is the difference between 'go and read a rulebook' and 'go and check whether the shade requirement changed'.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "description": "The Compliance Rules that were written from this source. INFORMATIONAL, in one direction only: a change detected here names these rules in the log so a reader knows where to look, and nothing in this app edits, disables or supersedes a rule because a page changed. Updating a rule is still propose_compliance_rule drafting it and approve_compliance_rule putting a name on it.",
+   "fieldname": "affected_rules",
+   "fieldtype": "Table MultiSelect",
+   "label": "Rules Derived From This Source",
+   "options": "Regulation Feed Rule Link"
+  },
+  {
+   "fieldname": "state_section",
+   "fieldtype": "Section Break",
+   "label": "Last Check"
+  },
+  {
+   "description": "When this source was last successfully asked. Written by the sweep and by check_regulation_feed; empty means it has never been checked, which is why the first check is a BASELINE rather than a change.",
+   "fieldname": "last_checked",
+   "fieldtype": "Datetime",
+   "label": "Last Checked",
+   "read_only": 1
+  },
+  {
+   "description": "When the normalised content last differed from the hash recorded before it. THIS IS THE FIELD list_regulation_changes SORTS AND FILTERS ON — 'what regulations moved since our last compliance review' is that query and nothing more.",
+   "fieldname": "last_change_detected",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Last Change Detected",
+   "read_only": 1
+  },
+  {
+   "fieldname": "state_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "SHA-256 of the NORMALISED content at the last successful check — tags, scripts, comments, timestamps, dates and clock times taken out, whitespace collapsed. Not of the bytes: a page that stamps itself with the minute it was served would otherwise report a change on every check, and a detector that always fires detects nothing. The consequence is stated rather than hidden: a change that is ONLY a date — a compliance deadline moved from March 1 to April 1 — is invisible to this hash, and the note in services/regulation_feed.py says what to do about it.",
+   "fieldname": "last_content_hash",
+   "fieldtype": "Data",
+   "label": "Last Content Hash",
+   "read_only": 1
+  },
+  {
+   "description": "What the last check failed with, when it failed. Cleared by the next check that succeeds, so a message here is about now rather than about something that was fixed in April.",
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Last Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "log_section",
+   "fieldtype": "Section Break",
+   "label": "Change Log"
+  },
+  {
+   "description": "Every change, error and recovery this feed has seen, one timestamped line each, oldest first. APPEND-ONLY: no entry is ever edited, and when the log reaches its cap the OLDEST lines are dropped with a line saying so rather than the newest being refused — a log that stopped recording would be a detector that had quietly switched itself off. A CHANGED line carries the hash it moved from, the hash it moved to, the size of the normalised text, and the rule_ids of every rule derived from this source, because the sentence a reader needs is 'this moved and these three rules were written from it'.",
+   "fieldname": "change_log",
+   "fieldtype": "Text",
+   "label": "Change Log",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-05 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Regulation Feed",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "url,regime,status,check_frequency",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "feed_name",
+ "track_changes": 1
+}

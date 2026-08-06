@@ -397,8 +397,8 @@ class TheScheduledJobs(unittest.TestCase):
 			with self.subTest(hook=hook, path=path):
 				self.assertTrue(callable(resolve(path)))
 
-	def test_they_are_these_six_and_nothing_else(self):
-		"""Six jobs. Three write only this app's own doctypes or nothing at all;
+	def test_they_are_these_seven_and_nothing_else(self):
+		"""Seven jobs. Three write only this app's own doctypes or nothing at all;
 		the fourth writes two credential fields on Frappe's User and had to argue
 		for it — see hooks.py and tools/mobile.sweep_idle_grants — the fifth makes
 		an outbound request to somebody else's server, which is a bar none of the
@@ -406,7 +406,7 @@ class TheScheduledJobs(unittest.TestCase):
 		site's whole ledger, which is a different bar again and is why it is the
 		only one with a kill switch of its own.
 
-		Asserted as an exact mapping rather than a membership check, so a seventh
+		Asserted as an exact mapping rather than a membership check, so an eighth
 		job fails here and has to be argued for. Every scheduled job is code that
 		runs on somebody's site with nobody watching, which is the same reason
 		`KNOWN_HOOKS` refuses an unexamined hook key.
@@ -428,6 +428,15 @@ class TheScheduledJobs(unittest.TestCase):
 		ledger. IT IS ONE ENTRY THAT ITERATES over every registered report and
 		every company — a scheduler with a cron per KPI is one nobody can read,
 		and the Financial KPI Framework is going to add KPIs as data.
+
+		The regulation feed sweep arrived in v0.38.0 as the third, at four in the
+		morning, and it is the SECOND job here that talks to somebody else's
+		server — a different server per feed. It DETECTS AND DOES NOT REMEDIATE:
+		it writes a hash, a timestamp and a log line on this app's own Regulation
+		Feed, and modifies no Compliance Rule at all. The alternative would be a
+		farm's compliance calendar rewritten at four in the morning off a website
+		redesign, which is why the assertion below is worth having: a future
+		release wiring a remediation job in has to change this line to do it.
 		"""
 		self.assertEqual(
 			hooks.scheduler_events,
@@ -435,6 +444,7 @@ class TheScheduledJobs(unittest.TestCase):
 				"cron": {
 					"*/15 * * * *": ["erpnext_mcp.services.weather.sweep_open_shifts"],
 					"0 2 * * *": ["erpnext_mcp.services.windowed_reports.recompute_kpi_history_incremental"],
+					"0 4 * * *": ["erpnext_mcp.services.regulation_feed.sweep_due_feeds"],
 				},
 				"hourly": ["erpnext_mcp.alerts.sweep"],
 				"daily": [

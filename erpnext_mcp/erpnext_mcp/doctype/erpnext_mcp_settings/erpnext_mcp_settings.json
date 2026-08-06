@@ -444,6 +444,15 @@
   "allow_update_compliance_rule",
   "allow_deactivate_compliance_rule",
   "allow_propose_compliance_rule",
+  "regulation_feed_section",
+  "allow_list_regulation_feeds",
+  "allow_get_regulation_feed",
+  "allow_list_regulation_changes",
+  "regulation_feed_write_col",
+  "allow_create_regulation_feed",
+  "allow_update_regulation_feed",
+  "allow_check_regulation_feed",
+  "allow_check_all_regulation_feeds",
   "asset_tag_section",
   "allow_list_assets",
   "allow_get_asset_detail",
@@ -3322,6 +3331,65 @@
    "fieldname": "allow_propose_compliance_rule",
    "fieldtype": "Check",
    "label": "Propose Compliance Rule"
+  },
+  {
+   "fieldname": "regulation_feed_section",
+   "fieldtype": "Section Break",
+   "label": "Regulation Feed and Change Detection"
+  },
+  {
+   "default": "1",
+   "description": "READ. The regulation register: every source this site watches, with the regime it serves, how often it is checked, when it was last looked at and when it last moved. `status` is a report rather than a setting \u2014 Error is what the last check said, and Paused is the only state that keeps a feed out of the sweep.",
+   "fieldname": "allow_list_regulation_feeds",
+   "fieldtype": "Check",
+   "label": "List Regulation Feeds"
+  },
+  {
+   "default": "1",
+   "description": "READ. One source in full, including its append-only change log \u2014 every change, error and recovery it has seen, one timestamped entry each. A CHANGED entry names the rules derived from this source; it does not mean any of them was touched.",
+   "fieldname": "allow_get_regulation_feed",
+   "fieldtype": "Check",
+   "label": "Get Regulation Feed"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which regulations have moved since a date, and which compliance rules were written from them. The tool a quarterly compliance review opens with. The rules it names are a reading list rather than a changelog of the calendar: every one of them is still running on the definition a person approved.",
+   "fieldname": "allow_list_regulation_changes",
+   "fieldtype": "Check",
+   "label": "List Regulation Changes"
+  },
+  {
+   "fieldname": "regulation_feed_write_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Registers a regulatory source \u2014 a URL, the regime it serves, what it covers, how often to look, and the compliance rules that were written from it. It writes a pointer and fetches nothing until a check runs. Refuses a URL that is not http(s), a feed name already on the site, a regime the vocabulary does not hold, and a rule link that resolves to nothing.",
+   "fieldname": "allow_create_regulation_feed",
+   "fieldtype": "Check",
+   "label": "Create Regulation Feed"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Edits a source, and pauses one \u2014 which is the kill switch, and keeps the whole change log. It CANNOT write the detector's own memory: the stored hash, the last-checked and last-changed timestamps and the change log are refused as arguments, because a hash somebody typed is a change that will never be reported.",
+   "fieldname": "allow_update_regulation_feed",
+   "fieldtype": "Check",
+   "label": "Update Regulation Feed"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, AND IT MAKES AN OUTBOUND REQUEST. Fetches one source and compares a hash of its normalised text against the stored one. DETECTION ONLY: a change writes a hash, a timestamp and a log line naming the rules derived from that source, and modifies no rule at all. Ticking this lets an AI client ask a state agency's website a question on this site's behalf.",
+   "fieldname": "allow_check_regulation_feed",
+   "fieldtype": "Check",
+   "label": "Check Regulation Feed"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, AND IT MAKES SEVERAL OUTBOUND REQUESTS. The sweep on demand: every source that is not paused and is older than its own check frequency, through the same code path the daily scheduler takes. One source's failure is one source's failure. It detects only \u2014 no compliance rule is read, modified, disabled or superseded by it.",
+   "fieldname": "allow_check_all_regulation_feeds",
+   "fieldtype": "Check",
+   "label": "Check All Regulation Feeds"
   },
   {
    "fieldname": "asset_tag_section",

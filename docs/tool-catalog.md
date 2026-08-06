@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 332 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 339 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 153 read tools are **on** by default and can be switched off individually. A
+All 156 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7411,6 +7411,190 @@ right question. A draft carrying one — or carrying a producer assignee express
 until the approver passes `accept_ai_authored_code`. The refusal prints the
 program back at them: an acknowledgement of code nobody displayed is not one.
 
+## 246. `list_regulation_feeds`
+
+Read-only. The regulation register: every source this site watches for change,
+with the URL, the regime it serves, how often it is checked, when it was last
+looked at, and when it last **moved**.
+
+**What the register is for.** v0.22.0 made a compliance rule a record and v0.37.0
+let a model draft one from a regulation. Neither of those knows anything about the
+regulation six months later, when OR-OSHA renumbers a subsection or a certifier
+reissues a handbook. A feed is the pointer that was missing.
+
+Read `status` as a report rather than as a setting. **Error** is what the last
+check said, not a decision anybody made — the sweep retries an errored feed and a
+successful check clears it back to Active. **Paused** is the decision, and it is
+the only state that keeps a feed out of the sweep.
+
+`never_checked` is the list to act on first: a source nothing is known about looks
+exactly like a source that has not changed.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `status` | | `Active`, `Paused` or `Error` |
+| `regime` | | One audit: OR-OSHA, FSMA, WPS, GAP, GlobalGAP, PrimusGFS, NOP, OTCO, Internal |
+| `company` | | Company name or abbreviation |
+| `due_only` | | Only feeds the sweep would check right now |
+| `limit` | | Default 100, hard maximum 500 |
+
+## 247. `get_regulation_feed`
+
+Read-only. One source in full, **including its change log** — every change, error
+and recovery it has seen, one timestamped entry each, newest first.
+
+The change log is the only account anywhere of what a source has done over time,
+and it is append-only: no entry is ever edited, and when it reaches its cap the
+*oldest* lines are dropped with a line saying so. A dropped-newest log would be a
+detector that had quietly switched itself off.
+
+A `CHANGED` entry carries the hash it moved from, the hash it moved to, the size
+of the normalised text, and the `rule_id` of every Compliance Rule derived from
+that source. **A rule named in an entry was not touched.** The link is
+informational in one direction: nothing in this app edits, disables or supersedes
+a rule because a web page changed. It says where to look.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Regulation Feed docname, or part of the feed name |
+| `feed` | | Alias for `name` |
+| `log_limit` | | Change log entries to return, newest first |
+
+## 248. `list_regulation_changes`
+
+Read-only. Which regulations have moved since a date, and which compliance rules
+were written from them.
+
+**The question this whole surface exists to answer** — *what regulations moved
+since our last compliance review* — and the tool a quarterly review opens with. It
+is a filter on `last_change_detected` and nothing cleverer: the fact was recorded
+when it happened, by the sweep, so answering it later costs one query and no
+network at all.
+
+`rules_to_review` is a **reading list, not a changelog of your calendar.** Every
+rule named there is still running on exactly the definition a person approved.
+Where one genuinely needs to change, read the source and use
+`propose_compliance_rule` — the draft lands disabled with its citation on it, and
+`approve_compliance_rule` is where a name goes on the replacement.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `since` | | `YYYY-MM-DD`. Default 90 days ago |
+| `regime` | | Only sources for one audit |
+| `company` | | Company name or abbreviation |
+| `limit` | | Default 100, hard maximum 500 |
+
+## 249. `create_regulation_feed`
+
+**MUTATING (default off).** Register a regulatory source — a URL, the regime it
+serves, what it covers and how often to look — so the site notices when the
+regulation moves. It writes a pointer and fetches nothing until a check runs.
+
+**Point it at the narrowest page that carries the rule**: a division of the
+rulebook rather than the rulebook's index, a specific Federal Register document
+rather than the search that found it. A broad page changes for reasons that have
+nothing to do with this operation, and every one of those is a person asked to
+read a regulation for nothing.
+
+`affected_rules` is the link back to the rules this source produced, by docname or
+by `rule_id`. Informational in one direction only: a detected change names those
+rules in the log so a reader knows where to look, and **nothing in this app edits,
+disables or supersedes a rule because a page changed.**
+
+Refuses a feed name already on the site (the name is the docname); a URL that is
+not `http(s)`, because that field is handed to an outbound request by a scheduled
+job; a description shorter than a sentence, because the description is what
+somebody reads when the log says this moved; a regime the vocabulary does not
+hold; and an `affected_rules` entry that resolves to no Compliance Rule.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `feed_name` | yes | The docname. Name it after the regulation, not the website |
+| `url` | yes | The `http(s)` URL that is checked |
+| `description` | yes | What is at that URL, and what on this operation turns on it |
+| `regime` | | The audit this source answers to |
+| `check_frequency` | | `Daily`, `Weekly` (default) or `Monthly` |
+| `status` | | `Active` (default) or `Paused`. `Error` cannot be set by hand |
+| `company` | | Company name or abbreviation |
+| `affected_rules` | | Compliance Rules written from this source, by docname or `rule_id` |
+
+## 250. `update_regulation_feed`
+
+**MUTATING (default off).** Edit a source's URL, description, regime, frequency,
+status or rule links. Pausing one here is the kill switch: a paused feed is
+skipped by the sweep and keeps its whole change log.
+
+**It cannot write the detector's own memory.** `last_content_hash`,
+`last_checked`, `last_change_detected` and `change_log` are *refused* as arguments
+rather than ignored: a hash somebody typed is a change that will never be
+reported, and a change log somebody edited is the one record here whose entire
+value is that nobody edited it.
+
+**Changing the URL clears the stored hash**, and logs that it did. A hash taken
+over one page says nothing about another, so leaving it would make the next check
+report a change that is really a change of subject.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Regulation Feed docname, or part of the feed name |
+| `url` | | A new `http(s)` URL. Clears the stored hash |
+| `description` | | What this source covers |
+| `regime` | | The audit this source answers to |
+| `check_frequency` | | `Daily`, `Weekly` or `Monthly` |
+| `status` | | `Active` or `Paused` |
+| `company` | | Company name or abbreviation |
+| `affected_rules` | | Replaces the whole set of linked rules |
+
+## 251. `check_regulation_feed`
+
+**MUTATING (default off), and it makes an outbound request.** Fetch one source now
+and say whether its content changed since the last check.
+
+**It detects and it does not remediate,** and that line is the design rather than
+a limitation. A changed page is evidence that somebody should read a regulation
+again; it is not evidence about what the regulation now says, and it is not
+authority to rewrite a rule firing on somebody's compliance calendar. So a change
+writes a hash, a timestamp and a log line naming the rules derived from that
+source, **and stops.**
+
+**The hash is of normalised text, not of the bytes** — tags, scripts, comments,
+entity escapes, ISO and US and month-name dates, clock times and long hex strings
+taken out, whitespace collapsed — because a page that stamps itself with the
+minute it was served would otherwise report a change on every check, and a
+detector that always fires detects nothing. **The cost is real and stated: a
+change that is *only* a date is invisible to it.**
+
+The first check is a **baseline** and cannot be a change, because there is nothing
+to compare against. A fetch that fails sets the feed to `Error` with the message
+and **does not move `last_checked`**, so the next sweep retries rather than
+waiting out the whole frequency.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Regulation Feed docname, or part of the feed name |
+| `force` | | Check even a Paused feed. Default false |
+
+## 252. `check_all_regulation_feeds`
+
+**MUTATING (default off), and it makes several outbound requests.** Run the sweep
+now: every source that is not Paused and is older than its own `check_frequency`.
+Returns which ones **moved** and which could not be reached.
+
+The same function the daily scheduler calls, with the same due logic —
+deliberately, because a manual sweep with a second implementation is one that can
+disagree with the nightly one. One source's failure is one source's failure: an
+agency site behind a WAF does not stop the other eleven being checked, and nothing
+here raises.
+
+`force` checks every unpaused feed regardless of when it was last looked at —
+right before a certification audit, and rude to a public server nobody is paying
+for as a habit.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `company` | | Company name or abbreviation |
+| `force` | | Ignore each feed's frequency. Default false |
+
 ---
 
 ## v0.26.0 — field-initiated task creation from asset scan
@@ -8160,8 +8344,8 @@ Everything a tool needs is in two places:
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
-   `shifts`, `heat`, `kpi`, `visits`, `sessions`, `rules`, `asset_tags` or
-   `fieldwork` —
+   `shifts`, `heat`, `kpi`, `visits`, `sessions`, `rules`, `asset_tags`,
+   `feeds` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

@@ -3,6 +3,87 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.38.0 — 2026-08-05
+
+**Regulation Feed and Change Detection.** v0.22.0 made a compliance rule a
+record. v0.37.0 let a model draft one from regulation text and a person approve
+it. Both of those are about the moment a rule is written, and neither has
+anything to say six months later, when OR-OSHA renumbers a subsection or a
+certifier reissues a handbook — so the rules got easy to write and stayed exactly
+as hard to keep current. This is the pointer that was missing: a URL, a hash of
+what was there last time, and a job that looks. Seven new tools (339 total: 156
+read, 183 mutating), two new DocTypes, one new scheduled job.
+
+**It detects and it does not remediate, and that line is the design.** A changed
+page is evidence that somebody should read a regulation again. It is not evidence
+about what the regulation now says, and it is not authority to rewrite a rule
+firing on somebody's compliance calendar. The failure mode of the other design is
+specific: a page reflows, a scraper reads a threshold out of the new layout
+wrong, a rule is silently updated, and an operation spends a season inspecting to
+a number nobody chose. So a detected change writes four things — a hash, a
+timestamp, a log line, and the `rule_id` of every rule derived from that source —
+and stops. Where a rule genuinely needs to change, the path is the one v0.37.0
+built and this release does not go round: `propose_compliance_rule` drafts the
+replacement DISABLED with its citation, and `approve_compliance_rule` supersedes
+the live rule with somebody's name on it. There is a test that a rule row is
+identical after a detected change, and it is the whole guarantee.
+
+**The hash is of normalised text and not of the bytes, because a detector that
+always fires detects nothing.** A rulebook page carries a "Last updated 08/05/2026
+14:02" stamp, a session nonce, a build hash on its stylesheet and a copyright
+year, and a hash of the bytes reports a change on every check for ever — the
+first week somebody reads those alerts, the second week nobody does, and the
+month the rule actually changes the alert is indistinguishable from the noise it
+has been buried in. `normalise` throws away scripts, styles, comments, tags,
+entity escapes, ISO and US and month-name dates, clock times, long hex strings
+and every whitespace difference. **The cost is stated rather than hidden: a change
+that is ONLY a date is invisible**, and there is a test asserting exactly that, so
+a release that changes its mind about the trade has to change it on purpose.
+
+**`Regulation Feed`, and the four fields that are the detector's own memory.**
+`last_content_hash`, `last_checked`, `last_change_detected` and `change_log` are
+written only by a check and are REFUSED as arguments to `update_regulation_feed`
+— a hash somebody typed is a change that will never be reported, and a change log
+somebody edited is the one record here whose entire value is that nobody edited
+it. The log is append-only, oldest-first on the record and newest-first when
+read, and at its cap the OLDEST lines are dropped with a line saying so: a
+detector whose log filled up and stopped recording would be one that quietly
+switched itself off.
+
+**Four outcomes, and each of them lands on the record.** BASELINE — a first check
+cannot be a change, so `last_change_detected` stays empty and a feed registered
+today does not top every "what moved" list. UNCHANGED — `last_checked` moves and
+nothing else does, and no log line is written, because a weekly feed accumulating
+a hundred and fifty "still the same" lines a year is a log the changes are buried
+in. CHANGED — both hashes, the size of the normalised text, and the rules to
+re-read. ERROR — status and message on the record, and **`last_checked`
+deliberately not moved**, so a monthly feed that failed today is retried tomorrow
+rather than in thirty days.
+
+**Paused is the kill switch; Error is a report.** `Error` is what the last check
+said, not a decision anybody made — the sweep retries an errored feed and a
+successful check clears it back to Active with a RECOVERED line. `Paused` is the
+decision, it is the only state that keeps a feed out of the sweep, and it keeps
+the whole change log. There is no `delete_regulation_feed`, for the reason there
+is no delete on a Compliance Rule: a source this operation watched for two
+seasons is a record of what it was watching and when.
+
+**The seventh scheduled job, at four in the morning.** `sweep_due_feeds` is the
+second job in this app that talks to somebody else's server and the first that
+talks to a different one per record. It writes only `Regulation Feed`, it never
+raises, and one agency site behind a WAF does not stop the other eleven being
+checked. Each feed's `check_frequency` is the floor and the cron is the ceiling,
+exactly as `Weather Settings.fetch_interval_minutes` is: the sweep cannot run
+more often than it is scheduled, so a Monthly feed is skipped on the twenty-nine
+mornings it is not due. `check_all_regulation_feeds` runs the same function, so a
+manual sweep cannot disagree with the nightly one.
+
+**Three reads ship ON and four writes ship OFF.** The register is readable out of
+the box; nothing reaches out of the box. Two of the four writes make outbound
+requests to servers this operation does not own, which is a decision an operator
+makes rather than inherits — and until the switch is ticked, nothing on the site
+talks to anybody.
+
 ## 0.37.0 — 2026-08-05
 
 **AI-Proposed Compliance Rules.** v0.21.0 declared

@@ -1,0 +1,39 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-05 12:00:00.000000",
+ "description": "One rule that was derived from one regulation source. The child table behind the Table MultiSelect on Regulation Feed.affected_rules — the same shape as Compliance Regime Link, and for the same reason: it carries nothing but the link, because anything else on it would be a fact about the rule, which belongs on Compliance Rule, or a fact about the source, which belongs on the feed. WHAT THE SET MEANS IS INFORMATIONAL AND NOTHING MORE. A row here says somebody read this source when they wrote that rule, so a change detected on the source is worth reading against it. It grants the feed no power over the rule: nothing in this app edits, disables or supersedes a Compliance Rule because a web page changed. The link's whole job is to put the right rule_ids in the change log entry, so the person reading it knows where to look.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "rule"
+ ],
+ "fields": [
+  {
+   "columns": 4,
+   "description": "The Compliance Rule that was written from this source.",
+   "fieldname": "rule",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Rule",
+   "options": "Compliance Rule",
+   "reqd": 1,
+   "search_index": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-05 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Regulation Feed Rule Link",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

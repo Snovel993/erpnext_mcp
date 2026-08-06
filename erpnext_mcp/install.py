@@ -741,6 +741,14 @@ _PRECIOUS_DOCTYPES = (
 		"a measurement nobody kept cannot be taken again",
 	),
 	(
+		"Regulation Feed",
+		"the regulation register — every source this operation watches for change, and the "
+		"append-only change log saying when each one moved. The log is the only record of "
+		"WHEN a regulation shifted under a rule that was written from it, which is what an "
+		"auditor asks about a citation that has been renumbered twice, and nothing outside "
+		"this site holds it",
+	),
+	(
 		"Tax Form",
 		"the filing register — every W-2, 1099-NEC, 941, OR-WR, OQ and WA-ESD that was "
 		"computed, holding the box and line values exactly as they stood when it was "

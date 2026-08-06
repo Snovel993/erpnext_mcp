@@ -56,6 +56,7 @@ from .tools import (
 	evidence,
 	expenses,
 	farm,
+	feeds,
 	fieldwork,
 	files,
 	fiscal,
@@ -6586,6 +6587,244 @@ TOOLS = {
 		title="Propose a compliance rule from a regulation",
 		available=_needs_doctype("Compliance Rule"),
 		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── the regulation register (v0.38.0) ───────────────────────────────────
+	"list_regulation_feeds": _tool(
+		feeds.list_regulation_feeds,
+		"The regulation register: every source this site watches for changes, with "
+		"the URL, the regime it serves, how often it is checked, when it was last "
+		"looked at and when it last MOVED. Read-only.\n\n"
+		"WHAT THIS REGISTER IS FOR. v0.22.0 made a compliance rule a record and "
+		"v0.37.0 let a model draft one from a regulation; neither of those knows "
+		"anything about the regulation six months later, when a subsection is "
+		"renumbered or a certifier reissues a handbook. A feed is the pointer that "
+		"was missing — where the rule was read from, and a hash of what was there "
+		"last time.\n\n"
+		"READ `status` AS A REPORT RATHER THAN AS A SETTING. Error is what the last "
+		"check said, not a decision anybody made: the sweep retries an errored feed "
+		"and a successful check clears it. PAUSED is the decision, and it is the only "
+		"state that keeps a feed out of the sweep. `never_checked` is the list worth "
+		"acting on first — a source nothing is known about looks exactly like a "
+		"source that has not changed.",
+		{
+			"status": _field(_STRING, "Active, Paused or Error."),
+			"regime": _field(
+				_STRING,
+				"Only sources for one audit: OR-OSHA, FSMA, WPS, GAP, GlobalGAP, PrimusGFS, "
+				"NOP, OTCO, Internal.",
+			),
+			"company": _COMPANY,
+			"due_only": _field(
+				_BOOLEAN,
+				"Only feeds the sweep would check right now — not paused, and older than "
+				"their own check_frequency.",
+			),
+			"limit": _LIMIT,
+		},
+		title="List regulation feeds",
+		available=_needs_doctype("Regulation Feed"),
+		requires="the Regulation Feed DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_regulation_feed": _tool(
+		feeds.get_regulation_feed,
+		"One regulatory source in full, INCLUDING ITS CHANGE LOG — every change, "
+		"error and recovery it has seen, one timestamped entry each, newest first. "
+		"Read-only.\n\n"
+		"THE CHANGE LOG IS THE ONLY ACCOUNT ANYWHERE of what this source has done "
+		"over time, and it is append-only: no entry is ever edited, and when it "
+		"reaches its cap the oldest lines are dropped with a line saying so. A "
+		"CHANGED entry carries the hash it moved from, the hash it moved to, and the "
+		"rule_ids of every Compliance Rule derived from this source.\n\n"
+		"A RULE NAMED IN AN ENTRY WAS NOT TOUCHED. The link is informational in one "
+		"direction: nothing in this app edits, disables or supersedes a rule because "
+		"a web page changed. It says where to look.",
+		{
+			"name": _field(_STRING, "Regulation Feed docname, or part of the feed name."),
+			"feed": _field(_STRING, "Alias for name."),
+			"log_limit": _field(_INTEGER, "How many change log entries to return, newest first."),
+		},
+		required=("name",),
+		title="Regulation feed detail",
+		available=_needs_doctype("Regulation Feed"),
+		requires="the Regulation Feed DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_regulation_changes": _tool(
+		feeds.list_regulation_changes,
+		"WHICH REGULATIONS HAVE MOVED SINCE A DATE, and which compliance rules were "
+		"written from them. Read-only.\n\n"
+		"THE QUESTION THIS WHOLE SURFACE EXISTS TO ANSWER — 'what regulations moved "
+		"since our last compliance review' — and the tool to open a quarterly review "
+		"with. It is a filter on `last_change_detected` and nothing cleverer: the "
+		"fact was recorded when it happened, by the sweep, so answering it later "
+		"costs one query and no network at all.\n\n"
+		"`rules_to_review` IS A READING LIST, NOT A CHANGELOG OF YOUR CALENDAR. Every "
+		"rule named there is running on exactly the definition a person approved. "
+		"Where one genuinely needs to change, read the source and use "
+		"propose_compliance_rule — the draft lands disabled with its citation on it, "
+		"and approve_compliance_rule is where a name goes on the replacement.",
+		{
+			"since": _field(
+				_STRING,
+				"YYYY-MM-DD. Defaults to 90 days ago, which is the interval most operations "
+				"review compliance on.",
+			),
+			"regime": _field(_STRING, "Only sources for one audit."),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="Regulations that changed",
+		available=_needs_doctype("Regulation Feed"),
+		requires="the Regulation Feed DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_regulation_feed": _tool(
+		feeds.create_regulation_feed,
+		"MUTATING. Register a regulatory source — a URL, the regime it serves, what "
+		"it covers and how often to look — so this site notices when the regulation "
+		"moves.\n\n"
+		"POINT IT AT THE NARROWEST PAGE THAT CARRIES THE RULE: a division of the "
+		"rulebook rather than the rulebook's index, a specific Federal Register "
+		"document rather than the search that found it. A broad page changes for "
+		"reasons that have nothing to do with this operation, and every one of those "
+		"is a person asked to read a regulation for nothing.\n\n"
+		"`affected_rules` IS THE LINK BACK TO THE RULES THIS SOURCE PRODUCED, by "
+		"docname or by rule_id. It is informational in one direction only: a detected "
+		"change names those rules in the log so a reader knows where to look, and "
+		"NOTHING in this app edits, disables or supersedes a rule because a page "
+		"changed.\n\n"
+		"IT REFUSES: a feed name already on the site (the name is the docname); a URL "
+		"that is not http(s), because that field is handed to an outbound request by "
+		"a scheduled job; a description shorter than a sentence, because the "
+		"description is what somebody reads when the log says this moved; a regime "
+		"the vocabulary does not hold; and an affected_rule that resolves to no "
+		"Compliance Rule.",
+		{
+			"feed_name": _field(
+				_STRING,
+				"The docname. Name it after the REGULATION rather than the website — 'OAR "
+				"437-004 Agricultural Labor', not 'OSHA page'.",
+			),
+			"url": _field(_STRING, "The http(s) URL that is checked."),
+			"description": _field(
+				_STRING,
+				"What is at that URL, in the words of somebody who has read it: which "
+				"subject, which sections, and what on this operation turns on them.",
+			),
+			"regime": _field(
+				_STRING,
+				"The audit this source answers to: OR-OSHA, FSMA, WPS, GAP, GlobalGAP, "
+				"PrimusGFS, NOP, OTCO, Internal.",
+			),
+			"check_frequency": _field(
+				_STRING,
+				"Daily, Weekly or Monthly. Default Weekly. Daily is for a source in an active "
+				"rulemaking; Monthly is right for a certifier's handbook.",
+			),
+			"status": _field(_STRING, "Active (default) or Paused. Error cannot be set by hand."),
+			"company": _COMPANY,
+			"affected_rules": _field(
+				_STRING_ARRAY,
+				"Compliance Rules written from this source, by docname or rule_id.",
+			),
+		},
+		required=("feed_name", "url", "description"),
+		mutating=True,
+		title="Register a regulation feed",
+		available=_needs_doctype("Regulation Feed"),
+		requires="the Regulation Feed DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_regulation_feed": _tool(
+		feeds.update_regulation_feed,
+		"MUTATING. Edit a source's URL, description, regime, frequency, status or "
+		"rule links. Pausing one here is the kill switch: a paused feed is skipped by "
+		"the sweep and keeps its whole change log.\n\n"
+		"IT CANNOT WRITE THE DETECTOR'S OWN MEMORY. `last_content_hash`, "
+		"`last_checked`, `last_change_detected` and `change_log` are REFUSED as "
+		"arguments rather than ignored: a hash somebody typed is a change that will "
+		"never be reported, and a change log somebody edited is the one record here "
+		"whose entire value is that nobody edited it.\n\n"
+		"CHANGING THE URL CLEARS THE STORED HASH, and logs that it did. A hash taken "
+		"over one page says nothing about another, so leaving it would make the next "
+		"check report a change that is really a change of subject.",
+		{
+			"name": _field(_STRING, "Regulation Feed docname, or part of the feed name."),
+			"feed": _field(_STRING, "Alias for name."),
+			"url": _field(_STRING, "A new http(s) URL. Clears the stored hash."),
+			"description": _field(_STRING, "What this source covers."),
+			"regime": _field(_STRING, "The audit this source answers to."),
+			"check_frequency": _field(_STRING, "Daily, Weekly or Monthly."),
+			"status": _field(_STRING, "Active or Paused. Error is a report, not a setting."),
+			"company": _COMPANY,
+			"affected_rules": _field(
+				_STRING_ARRAY,
+				"Replaces the whole set of rules linked to this source, by docname or rule_id.",
+			),
+		},
+		required=("name",),
+		mutating=True,
+		title="Update a regulation feed",
+		available=_needs_doctype("Regulation Feed"),
+		requires="the Regulation Feed DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"check_regulation_feed": _tool(
+		feeds.check_regulation_feed,
+		"MUTATING. Fetch ONE source now and say whether its content changed since the "
+		"last check.\n\n"
+		"IT DETECTS AND IT DOES NOT REMEDIATE, and that line is the design rather "
+		"than a limitation. A changed page is evidence that somebody should read a "
+		"regulation again; it is not evidence about what the regulation now says, and "
+		"it is not authority to rewrite a rule firing on somebody's compliance "
+		"calendar. So a change writes a hash, a timestamp and a log line naming the "
+		"rules derived from this source, AND STOPS. Where a rule genuinely needs to "
+		"change: read the source, propose_compliance_rule drafts the replacement "
+		"disabled, approve_compliance_rule puts a name on it.\n\n"
+		"THE HASH IS OF NORMALISED TEXT, not of the bytes — tags, scripts, comments, "
+		"dates, clock times and long hex strings taken out — because a page that "
+		"stamps itself with the minute it was served would otherwise report a change "
+		"on every check, and a detector that always fires detects nothing. THE COST "
+		"IS REAL AND STATED: a change that is ONLY a date is invisible to it.\n\n"
+		"THE FIRST CHECK IS A BASELINE and cannot be a change, because there is "
+		"nothing to compare against. A fetch that fails sets the feed to Error with "
+		"the message and DOES NOT move `last_checked`, so the next sweep retries "
+		"rather than waiting out the whole frequency.",
+		{
+			"name": _field(_STRING, "Regulation Feed docname, or part of the feed name."),
+			"feed": _field(_STRING, "Alias for name."),
+			"force": _field(_BOOLEAN, "Check even a Paused feed. Default false."),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Check one regulation feed",
+		available=_needs_doctype("Regulation Feed"),
+		requires="the Regulation Feed DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"check_all_regulation_feeds": _tool(
+		feeds.check_all_regulation_feeds,
+		"MUTATING. Run the sweep now: every source that is not Paused and is older "
+		"than its own check_frequency. Returns which ones MOVED and which could not "
+		"be reached.\n\n"
+		"THE SAME FUNCTION THE DAILY SCHEDULER CALLS, with the same due logic — "
+		"deliberately, because a manual sweep with a second implementation is one "
+		"that can disagree with the nightly one. One source's failure is one source's "
+		"failure: an agency site behind a WAF does not stop the other eleven being "
+		"checked, and nothing here raises.\n\n"
+		"IT DETECTS ONLY. No Compliance Rule is read, modified, disabled or "
+		"superseded by this call, and none can be. The changed list names the rules "
+		"derived from each moved source so a person knows where to look.\n\n"
+		"`force` CHECKS EVERY UNPAUSED FEED regardless of when it was last looked at "
+		"— right before a certification audit, and rude to a public server nobody is "
+		"paying for as a habit.",
+		{
+			"company": _COMPANY,
+			"force": _field(
+				_BOOLEAN, "Ignore each feed's frequency and check them all. Default false."
+			),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Check all regulation feeds",
+		available=_needs_doctype("Regulation Feed"),
+		requires="the Regulation Feed DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"get_audit_readiness": _tool(
 		calendar.get_audit_readiness,

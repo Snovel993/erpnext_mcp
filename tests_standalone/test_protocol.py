@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_three_hundred_thirty_two_tools_one_hundred_fifty_three_read_one_hundred_seventy_nine_write(
+	def test_catalogue_is_three_hundred_thirty_nine_tools_one_hundred_fifty_six_read_one_hundred_eighty_three_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -633,6 +633,17 @@ class Catalogue(SeededTestCase):
 		fine while every template is typed by the person who wants it and is not
 		fine the moment a model can draft one.
 
+		v0.38.0 ADDED SEVEN — three reads and four writes — and they are the
+		layer the two proposal tools were missing. A rule drafted from a
+		regulation says which regulation it was drafted from; nothing before this
+		release watched that regulation afterwards. A Regulation Feed is the
+		pointer: a URL, a hash of its normalised text, and a daily sweep. THE
+		FOUR WRITES DETECT AND DO NOT REMEDIATE — the two check tools fetch,
+		compare and log, and no Compliance Rule is modified by any of them. That
+		is the property that makes putting a change detector on a timer safe at
+		all, and it is why the count moved by seven rather than by eight: there is
+		no auto-update tool here and there is not going to be one.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -640,9 +651,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 332)
-		self.assertEqual(len(registry.READ_TOOLS), 153)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 179)
+		self.assertEqual(len(registry.TOOLS), 339)
+		self.assertEqual(len(registry.READ_TOOLS), 156)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 183)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

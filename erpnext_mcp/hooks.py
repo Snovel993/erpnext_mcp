@@ -29,7 +29,7 @@ it acts on `/api/method/erpnext_mcp.api.*` and nothing else, it never overrides
 an identity Frappe already established, it grants no permission of any kind, and
 it cannot raise. See the note above the declaration, and `api/fallback_auth.py`.
 
-THERE ARE EXACTLY SIX SCHEDULED JOBS, and the count is in this docstring
+THERE ARE EXACTLY SEVEN SCHEDULED JOBS, and the count is in this docstring
 because it is a number somebody should have to change on purpose. Every one of
 them runs on somebody's site with nobody watching, so each has had to clear the
 same two bars: it writes only this app's own doctypes (or nothing at all), and
@@ -165,6 +165,32 @@ the only one whose cost scales with the size of somebody's books rather than
 with the number of their cabins. Turning it off costs speed and nothing else:
 every report still answers, from a cold cache, saying how much history it had to
 leave out.
+
+THE SEVENTH ARRIVED IN v0.38.0 AND IS THE OTHER JOB THAT TALKS TO SOMEBODY
+ELSE'S SERVER. `services.regulation_feed.sweep_due_feeds` fetches every
+registered regulatory source that is due, hashes its normalised text and compares
+it to the hash from last time. It writes only this app's own `Regulation Feed`
+and it never raises.
+
+IT DETECTS AND IT DOES NOT REMEDIATE, and that is why it is allowed on a
+schedule at all. A changed page means somebody should read a regulation again; it
+does not mean anything about what the regulation now says. So the job writes a
+hash, a timestamp and a log line naming the rules that were derived from that
+source, and stops. Nothing on this schedule edits a Compliance Rule, and the
+alternative design — a sweep that acted on what it found — would be a farm's
+compliance calendar rewritten at four in the morning off a website redesign.
+
+IT IS THE ONE JOB HERE WHOSE KILL SWITCH IS PER RECORD. `status` = Paused on a
+feed keeps that source out of the sweep and keeps its change log; a site with no
+Active feeds does no work and makes no request. That is the right shape for this
+job because the decision it serves is per source — one agency site went behind a
+login, and the other eleven are fine.
+
+IT IS SAFE TO RUN AT ANY CADENCE, for two independent reasons. The due check
+skips a feed looked at more recently than its own `check_frequency`, which is
+also the courtesy owed to a public server nobody is paying for. And every run is
+a full comparison against stored state rather than an increment, so a second run
+in the same hour finds the hash the first one wrote and reports no change.
 """
 
 app_name = "erpnext_mcp"
@@ -212,6 +238,21 @@ scheduler_events = {
 		#: report and every company, so adding a KPI adds no line to this file.
 		"0 2 * * *": [
 			"erpnext_mcp.services.windowed_reports.recompute_kpi_history_incremental",
+		],
+		#: v0.38.0. The regulation feed sweep, at four in the morning. THE SECOND
+		#: ENTRY HERE THAT TALKS TO SOMEBODY ELSE'S SERVER, and unlike the weather
+		#: it talks to a DIFFERENT server per feed — a state agency's rulebook host,
+		#: a certifier's WordPress — so `daily` at a named hour rather than one of
+		#: Frappe's intervals: it is one request per due source, and four in the
+		#: morning is chosen for what it is not competing with. ONE JOB THAT
+		#: ITERATES: adding a feed adds no line to this file.
+		#:
+		#: `check_frequency` on each feed is the FLOOR and this cron is the CEILING,
+		#: exactly as `Weather Settings.fetch_interval_minutes` is: the sweep cannot
+		#: run more often than it is scheduled, and a Monthly feed is skipped on the
+		#: twenty-nine mornings it is not due.
+		"0 4 * * *": [
+			"erpnext_mcp.services.regulation_feed.sweep_due_feeds",
 		],
 	},
 	"hourly": [
