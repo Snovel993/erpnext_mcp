@@ -3,6 +3,120 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.39.0 — 2026-08-06
+
+**Financial KPI Framework.** v0.19.5 shipped one KPI. v0.19.6 put it under a
+window standard and showed the standard generalized by registering two more
+beside it. All three are Python functions, and adding a fourth is six lines, a
+test, a review, a release and a deploy — a perfectly good process for a KPI this
+app's authors chose, and no process at all for a KPI somebody's lender asked
+about on a Tuesday. Every operation has two or three ratios that are genuinely
+its own: a packing house watches cost per bin, an operation carrying an equipment
+note watches debt service coverage on the covenant's own definition, a family
+office watches distributions against normalized cash flow. None of those belong
+in a shipped app and all of them belong on the dashboard of the farm that needs
+them. So a KPI is now a RECORD. Seven new tools (346 total: 160 read, 186
+mutating), one new DocType, one new compliance rule, one new scheduled job.
+
+**The engine does not move, and that is the release rather than a caveat.**
+`formula_type` has exactly two values and both are deterministic. `Built-in`
+delegates to a computer that ships with this app, reviewed and tested like any
+other code, while the record owns the window, the step, the lookback, the four
+thresholds, the dashboard position and the switch — and owns nothing about the
+arithmetic. `Expression` evaluates the text over the variables
+`expression_inputs` names, parsed to an AST with every node checked against an
+allowlist of arithmetic and walked by an evaluator with no builtins, no attribute
+access, no subscripts, no statements and no name binding. **There is no third
+value and there is no field on the record that holds Python.** That is a
+deliberate difference from `Compliance Rule.custom_python`: a compliance rule can
+need to express a shape no set of fields captures, and a financial KPI is a
+number divided by another number. Two sandboxes, on purpose — merging them would
+mean the finance side inherited every node the compliance side needs.
+
+**Refused at SAVE time, not at compute time.** `import`, every attribute access
+(`x.__class__.__bases__[0].__subclasses__()` needs no imports at all),
+subscripts, comprehensions, lambdas, string constants, calls to anything but
+`min`/`max`/`abs`/`round`, and exponents above 64. Also refused: a Built-in
+naming a computer this site has not got, an expression reading a variable
+`expression_inputs` does not define, a critical threshold on the wrong side of
+its warning threshold, and a KPI that reads itself. The failure every one of
+these prevents is the quiet one — a definition that saves, computes nightly,
+draws a line, and is wrong in a way nothing announces.
+
+**Every KPI goes through the window standard and none of them gets its own.**
+`compute_kpi` builds a computer and hands it to `windowed_reports.compute_windowed`
+— the same function `get_windowed_report` has gone through since v0.19.6 — so the
+boundaries, the fiscal-year anchoring, the cache, the history, the statistics and
+the partial-window warnings behave identically for a KPI typed into a form this
+morning and for the one that shipped in v0.19.5. There is a test asserting the
+two produce the same figure. A framework whose new KPIs get a second, simpler
+window implementation is one where the new KPIs are quietly wrong at the fiscal
+year boundary, and nobody finds out until a lender does.
+
+**A definition holds the question and never an answer.** Nothing on the record is
+a number from the ledger. Every figure is computed when asked for, cached in
+`Financial KPI History` with the components that produced it, and derivable again
+— which is what makes an Expression KPI as defensible as a built-in one: the
+components carry every input with how many accounts it matched, how many GL
+entries, which way round it was read, and whether it was a balance or a movement.
+
+**`kpi_id` is the cache key, so it is unique and it cannot move.** A Compliance
+Rule is versioned by copy; a KPI is not, because an alert is an EVENT with a
+definition behind it and a KPI is a LINE — and a line assembled from two
+definitions of one number is a chart with an unmarked join in it. `update` refuses
+a rename outright and reports an arithmetic change as a decision with the cached
+row count in front of the caller.
+
+**Four input sources.** `gl` reads GL Entry directly so every figure traces back
+to rows somebody can open; `"balance": true` makes it a POSITION at the window's
+end rather than a movement across it, because a current ratio built from twelve
+months of movement in a cash account is not a current ratio. `report` reads a
+component off a shipped computer. `kpi` is another definition, with cycles refused
+at save time and caught with a named chain at compute time. `constant` is a number
+with a name. The `natural` sign reads credit-balance roots as credits less debits
+so every figure comes out positive on a well-kept set of books.
+
+**Thresholds go to the compliance calendar, not to a second alerting system.**
+`financial_kpi_threshold_breach` is the twenty-first shipped rule and the first
+about money rather than a regulator, under a new `Finance` category, with the
+same dismissal, snooze and auto-clear as everything else — nobody closes it,
+because there was never a task, there was a number. It is built-in for a reason
+neither other built-in has: its thresholds are not on its own row, they are on
+each definition, because a ratio's warning line and a dollar figure's warning line
+cannot share a column. **It reads the cache and never computes** — the sweep runs
+hourly beside somebody's real work — so an alert and a dashboard can never
+disagree about the value. A KPI with no cached value raises nothing AND DISMISSES
+NOTHING.
+
+**Empty is not zero and `No thresholds` is not `OK`.** An omitted threshold means
+that direction is not bad for this KPI; a zero means a negative value is a
+warning. "Nobody drew a line" and "inside the line" are different statements, and
+`compute_all_kpis` names the unwatched KPIs, because an empty `breached` list is
+not by itself a healthy operation.
+
+**The seeder writes exactly one definition** — Sustainable CF/Acre, on the
+computer that has shipped since v0.19.5, adopting the `kpi_key` the cache has
+been using since v0.19.6 so the existing series continues. A seeded KPI is a claim
+that this app knows what an operation should watch, and it can only honestly make
+that claim about a metric it also ships the computer for. No thresholds are seeded
+either: a defensible floor under cash flow per acre is a number about one
+operation's own cost structure.
+
+**The eighth scheduled job**, `refresh_all_kpi_caches` at 03:00, between the
+shipped-report sweep and the regulation feed. One job that iterates, which here is
+load-bearing rather than tidy: the whole point of the release is that an operator
+adds a KPI without a code release, and a KPI needing its own scheduler entry would
+be one they could not add. It shares `enable_kpi_history_sweep` with the 02:00 job.
+
+**The existing tools got two things.** `recompute_kpi_history` accepts a
+`kpi_key` that names a definition and delegates to the framework, which reads that
+definition's own window rather than assuming a monthly TTM.
+`list_financial_kpi_history` returns a `definitions` block joining each key to its
+record — title, unit, category, thresholds — and reports orphaned keys. Sites that
+have not migrated the DocType get exactly the payload v0.38.0 gave.
+
+82 new standalone tests (5,377 total).
+
 ## 0.38.0 — 2026-08-05
 
 **Regulation Feed and Change Detection.** v0.22.0 made a compliance rule a

@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **339 tools** — 156 read-only, 183 mutating.
+- **346 tools** — 160 read-only, 186 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -1518,6 +1518,50 @@ already covers **deletes** the snapshots whose window contained it: a stale
 components list is worse than a missing one, because it is a set of ingredients
 that does not produce the number printed above it. Full notes:
 **[docs/reporting_ttm_standard.md](docs/reporting_ttm_standard.md)**.
+
+
+## The Financial KPI Framework
+
+**v0.19.6 made the window standard generalize across three *shipped* reports.
+v0.39.0 makes the KPI itself a record.** Every operation has two or three ratios
+that are genuinely its own — a cost per bin that only means anything against its
+own bin count, a debt service coverage on the covenant's arithmetic rather than
+anybody else's — and none of them belong in a shipped app. A `Financial KPI
+Definition` is what an operation adds without a release, a deploy or an engineer.
+
+**The engine does not move.** `formula_type` has exactly two values and both are
+deterministic: `Built-in` delegates to a computer that ships with this app, and
+`Expression` evaluates arithmetic over named inputs in a sandbox that parses to an
+AST and refuses every node that is not arithmetic — no imports, no attribute
+access, no subscripts, no comprehensions, no calls except `min`, `max`, `abs`,
+`round`. **Nothing on the record holds Python**, which is the deliberate
+difference from `Compliance Rule.custom_python`: a compliance rule can need to
+express a shape no set of fields captures, and a financial KPI is a number divided
+by another number.
+
+| Tool | What it does | What it cannot do |
+| --- | --- | --- |
+| `create_financial_kpi_definition` | Define a KPI as a record: how it is computed, over what window, and what values are worth an alert. | Run code. The expression is checked against an arithmetic allowlist before it is stored, and refused at SAVE time rather than discovered as a quiet null at three in the morning. |
+| `update_financial_kpi_definition` | Edit one in place, returning the diff with the previous values. | Rename a `kpi_id`. It is the cache key on every history row, and renaming orphans the whole series. |
+| `list_financial_kpi_definitions` / `get_financial_kpi_definition` | The register, and one definition with its `problems` and its cached row count. | Report a broken definition as healthy. A Built-in naming a missing computer is named as such. |
+| `compute_kpi` / `compute_all_kpis` | One KPI, or the whole dashboard, each with its history and its threshold verdict. | Touch your ledger. They warm the cache and write nothing else. |
+| `refresh_kpi_cache` | Fill or, with `force`, rebuild the cached history. | Change anything not derivable, exactly as `recompute_kpi_history` cannot. |
+
+**A definition holds the question and never an answer.** Every figure is computed
+from the ledger when asked for and cached with the components that produced it, so
+an Expression KPI reports not just that `current_assets` was 412,000 but how many
+accounts it matched, how many GL entries, which way round they were read, and
+whether it was a balance at the window's end or a movement across it — a
+distinction a current ratio lives or dies on.
+
+**Thresholds land on the one compliance calendar.** A KPI past its critical line
+raises a `Compliance Alert` under a new `Finance` category, with the same
+dismissal, snooze and auto-clear as an expiring certificate. Nobody closes it,
+because there was never a task — there was a number. The scan **reads the cache
+and never computes**, so an alert and a dashboard can never disagree about the
+value. An omitted threshold is not a threshold of zero, and a KPI with no
+thresholds reports `No thresholds` rather than `OK`. Full notes:
+**[docs/financial_kpi_framework.md](docs/financial_kpi_framework.md)**.
 
 
 ## Compliance packets

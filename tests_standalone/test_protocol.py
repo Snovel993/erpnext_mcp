@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_three_hundred_thirty_nine_tools_one_hundred_fifty_six_read_one_hundred_eighty_three_write(
+	def test_catalogue_is_three_hundred_forty_six_tools_one_hundred_sixty_read_one_hundred_eighty_six_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -644,6 +644,22 @@ class Catalogue(SeededTestCase):
 		all, and it is why the count moved by seven rather than by eight: there is
 		no auto-update tool here and there is not going to be one.
 
+		v0.39.0 ADDED SEVEN — four reads and three writes — and they are the
+		Financial KPI Framework. v0.19.6 made the window standard generalize
+		across three SHIPPED reports; this makes the KPI itself a record, so an
+		operation can add the ratio its own lender asks about without a release,
+		a deploy or an engineer.
+
+		NONE OF THE SEVEN CAN RUN CODE, and that is the property worth counting.
+		`create_financial_kpi_definition` and its update take a built-in
+		computer's NAME or an ARITHMETIC EXPRESSION, and the expression is parsed
+		to an AST and checked against an allowlist before it is stored — no
+		imports, no attribute access, no subscripts, no comprehensions, no calls
+		except min, max, abs and round. That is a deliberate difference from
+		`create_compliance_rule`, which does have a `custom_python` field: a
+		compliance rule can need to express a shape no set of fields captures,
+		and a financial KPI is a number divided by another number.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -651,9 +667,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 339)
-		self.assertEqual(len(registry.READ_TOOLS), 156)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 183)
+		self.assertEqual(len(registry.TOOLS), 346)
+		self.assertEqual(len(registry.READ_TOOLS), 160)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 186)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

@@ -1,0 +1,317 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One financial KPI, defined as DATA rather than as code: what it is called, how it is computed, over what window, and what values are worth an alert. THIS IS THE SAME MOVE v0.22.0 MADE FOR COMPLIANCE RULES, pointed at the finance side. Before it, adding a KPI meant a Python function, a registration call, a release and a deploy; after it, an operation can add the ratio its own lender asks about — a debt service coverage, a cost per bin, a current ratio — in an afternoon, and change its thresholds without waiting for anybody. WHAT DOES NOT MOVE IS THE ENGINE. `formula_type` has exactly two values and both are deterministic: Built-in delegates to a computer that SHIPS with this app, reviewed and tested, and Expression evaluates arithmetic in a sandbox that cannot import, cannot call, cannot loop and cannot reach the interpreter it is running inside. There is no third value, and there is deliberately no field anywhere on this record that holds Python. WHAT A DEFINITION IS NOT is a number. Every value this record produces is computed from the ledger at the moment somebody asks, cached in `Financial KPI History` with the ingredients that made it, and derivable again by rerunning the same computation — see that doctype for why the cache is safe to delete. A KPI Definition holds the QUESTION; nothing here holds an answer. THE THRESHOLDS ARE THE ONLY PART THAT REACHES OUTSIDE FINANCE. A value past `threshold_warning_low` or `threshold_critical_high` raises a Compliance Alert through the same calendar an expiring certificate raises one through, with the same dismissal, the same snooze and the same auto-clear when the value comes back. A covenant about to be breached and a cabin with a dead detector are both things somebody has to know on a Monday morning, and an operation with two alerting systems reads neither.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "kpi_id",
+  "title",
+  "category",
+  "unit",
+  "identity_col",
+  "enabled",
+  "company",
+  "description",
+  "formula_section",
+  "formula_type",
+  "builtin_function",
+  "formula_col",
+  "expression",
+  "expression_inputs",
+  "window_section",
+  "default_window_type",
+  "default_window_months",
+  "window_col",
+  "default_computation_step",
+  "historical_averaging_enabled",
+  "historical_lookback_years",
+  "threshold_section",
+  "threshold_warning_low",
+  "threshold_critical_low",
+  "threshold_col",
+  "threshold_warning_high",
+  "threshold_critical_high",
+  "dashboard_section",
+  "dashboard_visible",
+  "dashboard_col",
+  "display_order"
+ ],
+ "fields": [
+  {
+   "default": "KPID-.YYYY.-.####",
+   "description": "The series a KPI Definition is named from, expanded by the controller rather than by Frappe's naming_series hook so a docname is the same shape on a bench and in the standalone suite — KPID-2026-0001. The year is the year the definition was authored, which is the year an auditor asking 'since when have you reported this' is after.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "KPID-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The stable key this KPI's cached history is filed under — `sustainable_cf_per_acre`, `current_ratio`, `cost_per_bin`. IT IS THE `kpi_key` ON EVERY Financial KPI History ROW, so it must never change on a definition that has been computed: renaming it orphans the whole series and the chart starts again from nothing, with the old line still in the table under a name nothing reads. UNIQUE ACROSS THE SITE, unlike a Compliance Rule's rule_id — a KPI is not versioned by copy, because a KPI whose definition changed silently is a line with an unmarked join in it and the honest fix is a NEW kpi_id beside the old one, so both series stay readable. Lower-case, digits and underscores only; it is a key rather than a label, and `title` is where the words go.",
+   "fieldname": "kpi_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "KPI ID",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "description": "What the KPI is called on a dashboard, in the words the person reading it uses — 'Sustainable Cash Flow per Acre', not 'kpi 1'.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "default": "Custom",
+   "description": "Which shelf of the dashboard this KPI sits on. Profitability is what was earned, Liquidity is whether the bills can be paid this month, Leverage is what is owed against what is owned, Efficiency is what the assets produced per unit of themselves, and Operational is the farm rather than the ledger — bins per acre, cost per hour. Custom is the honest answer for anything that is genuinely one operation's own question, and it is the DEFAULT for exactly that reason: a category picked to avoid leaving a field empty is a grouping nobody can read.",
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Profitability\nLiquidity\nLeverage\nEfficiency\nOperational\nCustom",
+   "reqd": 1
+  },
+  {
+   "default": "Currency",
+   "description": "What the number IS, so nobody has to infer it from its size. THIS IS NOT DECORATION: 0.42 is a catastrophe as a current ratio, a fine gross margin as a percentage and a rounding error as dollars, and the same four digits appear on the same dashboard meaning all three. A Percentage is stored as the percentage — 42.0, not 0.42 — because that is what the threshold fields will be typed in and a unit that means one thing in the value and another in the threshold is worse than no unit at all.",
+   "fieldname": "unit",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Unit",
+   "options": "Currency\nPercentage\nRatio\nDays\nAcres\nUnits",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Whether this KPI is computed at all — by the overnight refresh, by compute_all_kpis, and by the threshold scan that puts breaches on the compliance calendar. OFF IS NOT DELETED. A disabled KPI keeps every cached snapshot it ever produced, so the history is still readable and still charts; it simply stops being extended and stops raising alerts. DEFAULT ON, unlike a Compliance Rule, and the difference is what the two things do when they are wrong: a rule that fires wrongly accuses somebody of a compliance failure, so it is authored in Draft and approved before it can ever fire. A KPI that is wrong reports a number, on a dashboard, beside its own ingredients — which is a thing a reader can check and an alert is not.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "description": "The one entity this KPI is defined for, or EMPTY FOR EVERY COMPANY — and empty is the ordinary case. A current ratio is a current ratio at Highland LLC and at Constancy Farms, and a definition per company would be three rows to edit every time the threshold moves. Fill it in where the KPI is genuinely about one entity: an orchard-only cost per bin means nothing at a family office that owns no trees, and computing it there would put a null on a dashboard every month for ever.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "What the KPI means and why this operation watches it, in prose. It is what a lender's analyst and a new bookkeeper both read first, and the place to say the thing the formula cannot — which direction is good, what a normal year looks like, what the number does at harvest.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "formula_section",
+   "fieldtype": "Section Break",
+   "label": "How it is computed"
+  },
+  {
+   "default": "Built-in",
+   "description": "WHICH OF THE TWO DETERMINISTIC PATHS COMPUTES THIS. Built-in delegates to a computer that ships with this app — reviewed, tested, and registered in erpnext_mcp/services/financial_reports.py — and the record still owns everything an operator would change: the window, the step, the lookback, the thresholds, the switch. Expression evaluates the arithmetic in `expression` over the variables `expression_inputs` names, in a sandbox that parses to an AST and refuses every node that is not arithmetic. There is no third value. A KPI whose shape is neither of these has outgrown a form field and wants a shipped computer, which is six lines and a test.",
+   "fieldname": "formula_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Formula Type",
+   "options": "Built-in\nExpression",
+   "reqd": 1
+  },
+  {
+   "description": "For a Built-in KPI: the name of the shipped computer that produces it — `sustainable_cf_per_acre`, `ocf`, `revenue`. The controller refuses a name this site does not have, because a definition pointing at a computer that does not exist produces nothing, for ever, quietly — the same failure `builtin_scanner` on a Compliance Rule is guarded against, for the same reason. list_financial_kpi_definitions names the computers this site has.",
+   "fieldname": "builtin_function",
+   "fieldtype": "Data",
+   "label": "Built-in Function",
+   "search_index": 1
+  },
+  {
+   "fieldname": "formula_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "For an Expression KPI: the arithmetic, written over the variable names `expression_inputs` defines — `(current_assets - inventory) / current_liabilities`, `net_income / revenue * 100`. WHAT IS ALLOWED IS ARITHMETIC AND NOTHING ELSE: + - * / // % **, unary minus, parentheses, comparisons inside a conditional, and the named functions min, max, abs and round. WHAT IS REFUSED IS EVERYTHING ELSE, by name, at save time rather than at compute time — no imports, no attribute access, no subscripts, no lambdas, no comprehensions, no assignment, no calls to anything not on the four-name list. A division by zero is not an error here: it is a null value with a warning saying which denominator was empty, because a farm with no acres in production has no cash flow per acre and a zero there would be read as one.",
+   "fieldname": "expression",
+   "fieldtype": "Small Text",
+   "label": "Expression"
+  },
+  {
+   "description": "For an Expression KPI: what each variable in `expression` is, as a JSON object mapping name to a source spec. FOUR SOURCES, and each is a query this app already knows how to run. `{\"source\": \"gl\", \"root_type\": \"Income\"}` sums GL movement over the window on accounts of that root type; add `account_type`, `accounts` or `account_number_prefix` to narrow it, and `\"balance\": true` for a balance-sheet figure, which is a cumulative position at the window's end rather than a movement across it — a current ratio computed from twelve months of movement in a cash account is not a current ratio. `{\"source\": \"report\", \"report_name\": \"revenue\", \"path\": \"total\"}` reads a component off a shipped computer, so an Expression KPI can be built on top of one. `{\"source\": \"kpi\", \"kpi_id\": \"...\"}` is another definition's value, with cycles refused at save time rather than found by a stack overflow at two in the morning. `{\"source\": \"constant\", \"value\": 43560}` is a number with a name, which is what a magic constant in a formula should always have been. EVERY VARIABLE THE EXPRESSION USES MUST BE DEFINED HERE and every variable defined here should be used: an undefined name is refused at save, and an unused one is reported, because it is usually a rename that got as far as one field.",
+   "fieldname": "expression_inputs",
+   "fieldtype": "Long Text",
+   "label": "Expression Inputs (JSON)"
+  },
+  {
+   "fieldname": "window_section",
+   "fieldtype": "Section Break",
+   "label": "Over what window"
+  },
+  {
+   "default": "TTM",
+   "description": "The window this KPI is computed over unless a caller asks for another. TTM IS THE DEFAULT AND IT IS THE STANDARD OF THIS APP, for the reason docs/reporting_ttm_standard.md argues at length: agricultural revenue is aggressively seasonal, so a quarter-on-quarter comparison says the operation collapsed in January and recovered in September, every year, on every farm. A rolling twelve months contains the whole cycle exactly once however it is read. Snapshot is one step on its own and is the right answer for a balance-sheet ratio, which is a position rather than a flow.",
+   "fieldname": "default_window_type",
+   "fieldtype": "Select",
+   "label": "Default Window Type",
+   "options": "Snapshot\nTTM\nMTD\nQTD\nYTD\nCustom",
+   "reqd": 1
+  },
+  {
+   "default": "12",
+   "description": "How many months the default window spans. 12 for TTM, because that is what the T and the M mean. Stored on the definition rather than inferred so a Custom eighteen-month window is a thing an operator can set once rather than pass on every call.",
+   "fieldname": "default_window_months",
+   "fieldtype": "Int",
+   "label": "Default Window Months",
+   "reqd": 1
+  },
+  {
+   "fieldname": "window_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Monthly",
+   "description": "The rhythm this KPI is stepped and cached at. Monthly is the standard's default. DAILY IS OPT-IN PER KPI AND THE COST IS THE REASON: a five-year Monthly history is sixty snapshots and a five-year Daily one is over eighteen hundred, each a full computation over twelve months of GL, and a framework that let every KPI default to Daily would be a bench doing a hundred thousand of them a night.",
+   "fieldname": "default_computation_step",
+   "fieldtype": "Select",
+   "label": "Default Computation Step",
+   "options": "Daily\nWeekly\nMonthly\nQuarterly\nYearly",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Whether compute_kpi builds the prior-window series and its statistics beside the current figure. ON BY DEFAULT, AND THAT IS AN ARGUMENT RATHER THAN A CONVENIENCE: a TTM figure means one thing above this operation's five-year mean and the opposite below it, and a KPI reported without its own history is a number nobody can read. Turn it off for a KPI that is genuinely a position rather than a trend, or where the history costs more than it says.",
+   "fieldname": "historical_averaging_enabled",
+   "fieldtype": "Check",
+   "label": "Historical Averaging Enabled"
+  },
+  {
+   "default": "5",
+   "description": "How many years of prior windows the history covers. Five, because that is long enough to contain a bad year and a good one and short enough that the operation on the far end of it is recognisably the same business. Capped at ten: past that, every extra entry is a row saying 'no ledger', which is a slower way of saying nothing.",
+   "fieldname": "historical_lookback_years",
+   "fieldtype": "Int",
+   "label": "Historical Lookback Years"
+  },
+  {
+   "fieldname": "threshold_section",
+   "fieldtype": "Section Break",
+   "label": "What is worth an alert"
+  },
+  {
+   "description": "The value at or below which this KPI is a Warning. LEAVE IT EMPTY WHERE LOW IS NOT BAD — an empty threshold is not a threshold of zero, and the difference matters on every KPI where the interesting direction is upward. Thresholds are compared against the CURRENT WINDOW's value, and a breach raises a Compliance Alert on the same calendar an expiring certificate raises one on, which auto-clears when the value comes back inside.",
+   "fieldname": "threshold_warning_low",
+   "fieldtype": "Float",
+   "label": "Warning Below",
+   "precision": "4"
+  },
+  {
+   "description": "The value at or below which this KPI is Critical. Must be at or below `threshold_warning_low` where both are set — a critical floor above the warning floor is a pair of thresholds that can never both be read the way they are written, and the controller refuses it rather than letting a dashboard quietly report Warning for a value that is past the critical line.",
+   "fieldname": "threshold_critical_low",
+   "fieldtype": "Float",
+   "label": "Critical Below",
+   "precision": "4"
+  },
+  {
+   "fieldname": "threshold_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The value at or above which this KPI is a Warning. The upward direction, and it is a real one: a debt-to-equity ratio, a days-sales-outstanding, a cost per bin are all KPIs whose bad news is a big number. Empty where high is not bad.",
+   "fieldname": "threshold_warning_high",
+   "fieldtype": "Float",
+   "label": "Warning Above",
+   "precision": "4"
+  },
+  {
+   "description": "The value at or above which this KPI is Critical. Must be at or above `threshold_warning_high` where both are set, for the reason the low pair is checked in the other direction.",
+   "fieldname": "threshold_critical_high",
+   "fieldtype": "Float",
+   "label": "Critical Above",
+   "precision": "4"
+  },
+  {
+   "fieldname": "dashboard_section",
+   "fieldtype": "Section Break",
+   "label": "On the dashboard"
+  },
+  {
+   "default": "1",
+   "description": "Whether this KPI appears on the financial dashboard. SEPARATE FROM `enabled`, and the two say different things: a KPI that is enabled and not visible is still computed, still cached and still alerts — it is an input to another KPI or a covenant test nobody wants on the front page. A KPI that is visible and not enabled shows nothing, because there is nothing to show.",
+   "fieldname": "dashboard_visible",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Dashboard Visible"
+  },
+  {
+   "fieldname": "dashboard_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Where this KPI sits in its category, lowest first. Ties fall back to `title`, so a dashboard built from definitions nobody ordered is alphabetical rather than arbitrary — which is the property that matters, because an order that changes between two page loads is one a reader stops trusting.",
+   "fieldname": "display_order",
+   "fieldtype": "Int",
+   "label": "Display Order"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Financial KPI Definition",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "kpi_id,title,category,formula_type",
+ "sort_field": "display_order",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

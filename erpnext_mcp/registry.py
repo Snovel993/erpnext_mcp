@@ -69,6 +69,7 @@ from .tools import (
 	inspections,
 	investment_report,
 	kpi,
+	kpidefs,
 	meta,
 	mobile,
 	mutate,
@@ -231,7 +232,8 @@ _RULE_DRAFT_ARGUMENTS = {
 	"title": _field(_STRING, "What the rule says, in the words somebody reads on a phone."),
 	"category": _field(
 		_STRING,
-		"Audits, Certifications, Filings, Housing, Policies, Records, Water and Sanitation or Workforce.",
+		"Audits, Certifications, Filings, Finance, Housing, Policies, Records, Water and Sanitation "
+				"or Workforce.",
 	),
 	"target_doctype": _field(_STRING, "The DocType whose rows this rule walks."),
 	"kairotic_gate_description": _field(
@@ -6167,7 +6169,7 @@ TOOLS = {
 			"category": _field(
 				_STRING,
 				"Certifications, Policies, Workforce, Records, Housing, Water and Sanitation, Spray and "
-				"Pesticides, Filings, Audits or Other.",
+				"Pesticides, Filings, Audits, Finance or Other.",
 			),
 			"alert_type": _field(_STRING, "One rule's alerts only. list_compliance_rules names them."),
 			"regime": _field(
@@ -6951,7 +6953,7 @@ TOOLS = {
 			"category": _field(
 				_STRING,
 				"Certifications, Policies, Workforce, Records, Housing, Water and Sanitation, Spray and "
-				"Pesticides, Filings, Audits or Other.",
+				"Pesticides, Filings, Audits, Finance or Other.",
 			),
 			"severity": _field(
 				_STRING, "Critical, Warning or Info — EXACTLY this severity, not 'and worse'."
@@ -10927,6 +10929,375 @@ TOOLS = {
 		title="Recompute KPI history",
 		available=_needs_doctype("Financial KPI History"),
 		requires="the Financial KPI History DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── the Financial KPI Framework (v0.39.0) ────────────────────────────────
+	#
+	# SEVEN TOOLS, AND THEY ARE THE POINT OF THE RELEASE. v0.19.6 made the window
+	# standard generalize across three SHIPPED reports; this makes the KPI itself
+	# a record, so an operation can add the ratio its own lender asks about
+	# without a release, a deploy or an engineer.
+	#
+	# NONE OF THEM CAN RUN CODE. `create` and `update` accept a built-in
+	# computer's NAME or an ARITHMETIC EXPRESSION, and the expression is parsed to
+	# an AST and checked against an allowlist before it is stored. That is a
+	# deliberate difference from `create_compliance_rule`, which does have a
+	# `custom_python` field: a compliance rule can need to express a shape no set
+	# of fields captures, and a financial KPI is a number divided by another
+	# number. See `services/kpi_engine.py`.
+	"create_financial_kpi_definition": _tool(
+		kpidefs.create_financial_kpi_definition,
+		"MUTATING (default OFF). Define one financial KPI as a RECORD: what it "
+		"is called, how it is computed, over what window, and what values are "
+		"worth an alert.\n\n"
+		"TWO FORMULA TYPES AND NO THIRD. `Built-in` delegates to a computer that "
+		"ships with this app — 'sustainable_cf_per_acre', 'ocf', 'revenue' — and "
+		"the record still owns the window, the step, the lookback, the "
+		"thresholds and the switch. `Expression` evaluates arithmetic over the "
+		"variables `expression_inputs` names, in a sandbox that parses to an AST "
+		"and refuses every node that is not arithmetic: no imports, no attribute "
+		"access, no subscripts, no comprehensions, no calls except min, max, abs "
+		"and round. NOTHING ON THIS RECORD HOLDS PYTHON.\n\n"
+		"`expression_inputs` HAS FOUR SOURCES. `{\"source\": \"gl\", \"root_type\": "
+		"\"Income\"}` sums GL movement over the window; add `account_type`, "
+		"`accounts` or `account_number_prefix` to narrow it, and "
+		"`\"balance\": true` for a balance-sheet figure, which is a POSITION at "
+		"the window's end rather than a movement across it — a current ratio "
+		"built from twelve months of movement in a cash account is not a current "
+		"ratio. `{\"source\": \"report\", \"report_name\": \"revenue\", \"path\": "
+		"\"total\"}` reads a component off a built-in computer. `{\"source\": "
+		"\"kpi\", \"kpi_id\": \"...\"}` is another definition's value, with cycles "
+		"refused. `{\"source\": \"constant\", \"value\": 43560}` is a number with a "
+		"name.\n\n"
+		"`kpi_id` IS THE CACHE KEY AND CANNOT BE CHANGED LATER. Every "
+		"Financial KPI History row carries it, so it must be unique and must "
+		"never move on a KPI that has been computed — renaming it orphans the "
+		"whole series.\n\n"
+		"ENABLED ON CREATION, unlike a Compliance Rule, and the difference is "
+		"what the two do when wrong: a rule that fires wrongly accuses somebody "
+		"of a compliance failure; a KPI that is wrong reports a number beside its "
+		"own ingredients and its own warnings, which a reader can check. Pass "
+		"`enabled=false` to author one quietly.",
+		{
+			"kpi_id": _field(
+				_STRING,
+				"REQUIRED. The stable key — lower-case letters, digits and underscores. It is "
+				"what every cached history row, chart and export joins on, and it cannot be "
+				"changed afterwards.",
+			),
+			"title": _field(_STRING, "REQUIRED. What the KPI is called on a dashboard."),
+			"description": _field(
+				_STRING,
+				"What it means and why this operation watches it. The place to say which "
+				"direction is good and what a normal year looks like.",
+			),
+			"category": _field(
+				_STRING,
+				"Profitability, Liquidity, Leverage, Efficiency, Operational or Custom (the "
+				"default). Custom is the honest answer for a metric that is one operation's own "
+				"question.",
+			),
+			"unit": _field(
+				_STRING,
+				"Currency (default), Percentage, Ratio, Days, Acres or Units. NOT decoration: "
+				"0.42 is a catastrophe as a ratio and a fine margin as a percentage. A Percentage "
+				"is stored as 42.0, not 0.42.",
+			),
+			"formula_type": _field(_STRING, "'Built-in' (the default) or 'Expression'."),
+			"builtin_function": _field(
+				_STRING,
+				"For Built-in: which shipped computer — 'sustainable_cf_per_acre', 'ocf' or "
+				"'revenue'. list_financial_kpi_definitions names the ones this site has.",
+			),
+			"expression": _field(
+				_STRING,
+				"For Expression: the arithmetic over the input variable names, e.g. "
+				"'(current_assets - inventory) / current_liabilities'.",
+			),
+			"expression_inputs": _field(
+				_OBJECT,
+				"For Expression: a JSON object mapping each variable name to its source. See the "
+				"tool description for the four sources.",
+			),
+			"company": _field(
+				_STRING,
+				"The one entity this KPI is for, or LEAVE EMPTY FOR EVERY COMPANY — which is the "
+				"ordinary case. A current ratio is a current ratio wherever it is computed.",
+			),
+			"enabled": _field(_BOOLEAN, "Default TRUE. False authors it without computing it."),
+			"default_window_type": _field(
+				_STRING,
+				"Snapshot, TTM (the default), MTD, QTD, YTD or Custom. Snapshot is right for a "
+				"balance-sheet ratio, which is a position rather than a flow.",
+			),
+			"default_window_months": _field(_INTEGER, "Months in the default window. Default 12."),
+			"default_computation_step": _field(
+				_STRING,
+				"Daily, Weekly, Monthly (the default), Quarterly or Yearly. Daily is opt-in per "
+				"KPI: a five-year Daily history is over eighteen hundred full computations.",
+			),
+			"historical_averaging_enabled": _field(
+				_BOOLEAN, "Default TRUE. Whether compute_kpi builds the prior-window series."
+			),
+			"historical_lookback_years": _field(_INTEGER, "Default 5, maximum 10."),
+			"threshold_warning_low": _field(
+				_NUMBER,
+				"Warning at or below this value. OMIT IT WHERE LOW IS NOT BAD — an omitted "
+				"threshold and a threshold of zero are different claims.",
+			),
+			"threshold_critical_low": _field(
+				_NUMBER, "Critical at or below this value. Must be at or below the warning floor."
+			),
+			"threshold_warning_high": _field(_NUMBER, "Warning at or above this value."),
+			"threshold_critical_high": _field(
+				_NUMBER, "Critical at or above this value. Must be at or above the warning ceiling."
+			),
+			"dashboard_visible": _field(
+				_BOOLEAN,
+				"Default TRUE. Separate from `enabled`: a KPI that is enabled and not visible is "
+				"still computed, cached and alerting — it is an input to another KPI or a covenant "
+				"test nobody wants on the front page.",
+			),
+			"display_order": _field(_INTEGER, "Where it sits in its category, lowest first."),
+		},
+		required=("kpi_id", "title"),
+		mutating=True,
+		title="Define a financial KPI",
+		available=_needs_doctype("Financial KPI Definition"),
+		requires="the Financial KPI Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_financial_kpi_definition": _tool(
+		kpidefs.update_financial_kpi_definition,
+		"MUTATING (default OFF). Edit one KPI definition in place — thresholds, "
+		"window, order, description, the switch.\n\n"
+		"IT EDITS RATHER THAN SUPERSEDING, unlike update_compliance_rule, and the "
+		"reason is what the two records are behind: a rule is a definition behind "
+		"an EVENT, and a KPI is a definition behind a LINE. Two live versions of "
+		"one KPI would mean a chart whose points came from two different "
+		"formulas.\n\n"
+		"SO CHANGING THE ARITHMETIC IS REPORTED AS A DECISION, with the cached "
+		"row count in front of you. The usual right move is a NEW kpi_id beside "
+		"the old one, so both series stay readable; where it is genuinely a "
+		"correction, refresh_kpi_cache(force=true) rebuilds the series under the "
+		"new formula.\n\n"
+		"`kpi_id` CANNOT BE CHANGED. It is the cache key on every history row, "
+		"and renaming it orphans the series.\n\n"
+		"The result carries the field-by-field diff WITH THE PREVIOUS VALUES, so "
+		"the MCP Action Log row answers 'who changed this and what did it say "
+		"before' without anybody reading a git history.",
+		{
+			"kpi_id": _field(_STRING, "Which definition — by kpi_id or by docname. REQUIRED."),
+			"title": _field(_STRING, "New title."),
+			"description": _field(_STRING, "New description."),
+			"enabled": _field(
+				_BOOLEAN,
+				"OFF IS NOT DELETED: a disabled KPI keeps every cached snapshot and simply stops "
+				"being extended and stops raising threshold alerts.",
+			),
+			"company": _field(_STRING, "Scope it to one entity, or pass empty to widen to all."),
+			"category": _field(_STRING, "New category."),
+			"unit": _field(_STRING, "New unit."),
+			"formula_type": _field(_STRING, "'Built-in' or 'Expression'. Changing this is an arithmetic change."),
+			"builtin_function": _field(_STRING, "New built-in computer. An arithmetic change."),
+			"expression": _field(_STRING, "New expression. An arithmetic change."),
+			"expression_inputs": _field(_OBJECT, "New input map. An arithmetic change."),
+			"default_window_type": _field(_STRING, "New default window type."),
+			"default_window_months": _field(_INTEGER, "New default window length."),
+			"default_computation_step": _field(_STRING, "New default step."),
+			"historical_averaging_enabled": _field(_BOOLEAN, "Whether to build the prior-window series."),
+			"historical_lookback_years": _field(_INTEGER, "New lookback, 0 to 10."),
+			"threshold_warning_low": _field(_NUMBER, "New warning floor."),
+			"threshold_critical_low": _field(_NUMBER, "New critical floor."),
+			"threshold_warning_high": _field(_NUMBER, "New warning ceiling."),
+			"threshold_critical_high": _field(_NUMBER, "New critical ceiling."),
+			"dashboard_visible": _field(_BOOLEAN, "Whether it appears on the dashboard."),
+			"display_order": _field(_INTEGER, "New position in its category."),
+		},
+		required=("kpi_id",),
+		mutating=True,
+		idempotent=True,
+		title="Update a financial KPI definition",
+		available=_needs_doctype("Financial KPI Definition"),
+		requires="the Financial KPI Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_financial_kpi_definitions": _tool(
+		kpidefs.list_financial_kpi_definitions,
+		"The KPI register: what this site computes, how, over what window, and "
+		"what it alerts on. Read-only.\n\n"
+		"THIS IS THE MAP OF THE FINANCIAL DASHBOARD. Every field on a definition "
+		"is editable through update_financial_kpi_definition with no code "
+		"release — the window, the step, the lookback, the four thresholds, the "
+		"order and the switch. What is NOT editable is the engine: formula_type "
+		"has exactly two values, both deterministic, and nothing on the record "
+		"holds Python.\n\n"
+		"`builtin_functions_available` NAMES THE SHIPPED COMPUTERS this site has, "
+		"which is what a Built-in definition may point at.\n\n"
+		"`thresholded_count` IS THE NUMBER WORTH READING FIRST: a KPI with no "
+		"thresholds is one nothing is watching for anybody, and it can never "
+		"appear in compute_all_kpis's `breached` list however bad it gets.",
+		{
+			"company": _COMPANY,
+			"category": _field(
+				_STRING,
+				"Profitability, Liquidity, Leverage, Efficiency, Operational or Custom. Optional.",
+			),
+			"formula_type": _field(_STRING, "'Built-in' or 'Expression'. Optional."),
+			"enabled": _field(_BOOLEAN, "Only enabled, or only disabled. Optional — omit for both."),
+			"dashboard_only": _field(_BOOLEAN, "Default FALSE. True returns only dashboard-visible ones."),
+			"limit": _LIMIT,
+		},
+		title="List financial KPI definitions",
+		available=_needs_doctype("Financial KPI Definition"),
+		requires="the Financial KPI Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_financial_kpi_definition": _tool(
+		kpidefs.get_financial_kpi_definition,
+		"One KPI definition in full, with how much history is cached under it "
+		"and whether it would compute at all. Read-only.\n\n"
+		"`problems` IS THE FIELD TO READ. A Built-in naming a computer this site "
+		"has not got, an expression that no longer parses, an input the "
+		"expression never reads: each produces nothing at compute time and says "
+		"so in a warning rather than reporting a zero, and this is where to see "
+		"it before somebody quotes the KPI.\n\n"
+		"A DEFINITION HOLDS THE QUESTION AND NEVER AN ANSWER. Nothing on this "
+		"record came out of the ledger — the thresholds are lines somebody drew "
+		"and the window fields say which period to ask about. compute_kpi runs "
+		"it.",
+		{
+			"kpi_id": _field(
+				_STRING, "By kpi_id ('sustainable_cf_per_acre') or docname ('KPID-2026-0001'). REQUIRED."
+			),
+		},
+		required=("kpi_id",),
+		title="Get a financial KPI definition",
+		available=_needs_doctype("Financial KPI Definition"),
+		requires="the Financial KPI Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"compute_kpi": _tool(
+		kpidefs.compute_kpi,
+		"One defined KPI, over its own window, with its history and its "
+		"threshold verdict beside it. Read-only.\n\n"
+		"IT GOES THROUGH THE SAME WINDOW STANDARD get_windowed_report DOES, so a "
+		"KPI somebody typed into a form this morning and the one that shipped in "
+		"v0.19.5 behave identically at the fiscal year boundary, on a partial "
+		"ledger, and against the cache. THE WINDOW COMES FROM THE DEFINITION by "
+		"default — trailing twelve months unless it says otherwise — which is "
+		"what keeps a dashboard, its alerts and its cache agreeing without "
+		"anybody passing anything.\n\n"
+		"FOUR BLOCKS. `point_in_time` is the period just finished, which on a "
+		"farm flatters harvest and demonizes pruning. `window` is the rolling "
+		"figure with its components — for an Expression KPI, every input with "
+		"what it matched and how it was read. `historical_averages` is what that "
+		"window has been worth before. `threshold_status` is where the value "
+		"sits against the lines somebody drew, and `No thresholds` means NOBODY "
+		"DREW ANY — which is not the same as being inside them.\n\n"
+		"A NULL VALUE IS AN ANSWER. A ratio whose denominator was zero is a "
+		"division nobody performed, and a zero there would be read as a result. "
+		"Read `computation_warnings` before quoting anything.\n\n"
+		"IT WARMS A CACHE AND THAT IS THE ONE THING IT WRITES: no Account, no GL "
+		"Entry, no Journal Entry, no Asset, no Field.",
+		{
+			"kpi_id": _field(_STRING, "Which KPI — by kpi_id or docname. REQUIRED."),
+			"company": _COMPANY,
+			"as_of": _field(
+				_STRING,
+				"The reporting moment, YYYY-MM-DD. Defaults to today. The window ends at the last "
+				"COMPLETED computation step on or before it.",
+			),
+			"window_type": _field(
+				_STRING, "Override the definition's window: Snapshot, TTM, MTD, QTD, YTD or Custom."
+			),
+			"window_months": _field(_INTEGER, "Override the definition's window length."),
+			"computation_step": _field(_STRING, "Override the definition's step."),
+			"historical_lookback_years": _field(_INTEGER, "Override the lookback. 0 to 10."),
+			"include_historical_averages": _field(
+				_BOOLEAN, "Override the definition's setting. False answers faster."
+			),
+		},
+		required=("kpi_id", "company"),
+		title="Compute a financial KPI",
+		available=_needs_doctype("Financial KPI Definition"),
+		requires="the Financial KPI Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"compute_all_kpis": _tool(
+		kpidefs.compute_all_kpis,
+		"The whole financial dashboard in one call: every enabled KPI for one "
+		"company, in order, each with its value, its history and its threshold "
+		"verdict. Read-only.\n\n"
+		"ONE CALL RATHER THAN N, for the reason get_windowed_report is one tool "
+		"rather than one per report: a framework whose every KPI costs a round "
+		"trip is a framework with six KPIs in it.\n\n"
+		"ONE BROKEN DEFINITION DOES NOT EMPTY THE DASHBOARD. Each KPI is "
+		"computed independently and a failure becomes a null value with a "
+		"warning on that row — the same promise the compliance sweep makes about "
+		"one rule that throws.\n\n"
+		"READ `breached` FIRST, AND READ `unwatched_note` SECOND. An empty "
+		"`breached` list is not a healthy operation: a KPI with no thresholds can "
+		"never appear there however bad it gets, and the note says which ones "
+		"those are.\n\n"
+		"IT WARMS A CACHE AND WRITES NOTHING ELSE.",
+		{
+			"company": _COMPANY,
+			"dashboard_only": _field(
+				_BOOLEAN,
+				"Default FALSE. True computes only the dashboard-visible KPIs, skipping the ones "
+				"that exist as inputs to others.",
+			),
+			"category": _field(_STRING, "Only one category. Optional."),
+			"as_of": _field(_STRING, "The reporting moment, YYYY-MM-DD. Defaults to today."),
+			"window_type": _field(_STRING, "Override every definition's window type. Optional."),
+			"window_months": _field(_INTEGER, "Override every definition's window length. Optional."),
+			"computation_step": _field(_STRING, "Override every definition's step. Optional."),
+			"historical_lookback_years": _field(_INTEGER, "Override the lookback. 0 to 10."),
+			"include_historical_averages": _field(
+				_BOOLEAN,
+				"Default is each definition's own setting. FALSE across the board answers much "
+				"faster on a dashboard with many KPIs.",
+			),
+		},
+		required=("company",),
+		title="Compute every financial KPI",
+		available=_needs_doctype("Financial KPI Definition"),
+		requires="the Financial KPI Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"refresh_kpi_cache": _tool(
+		kpidefs.refresh_kpi_cache,
+		"MUTATING (default OFF). Fill the cached history for one defined KPI, or "
+		"for every enabled one, across one or every company. IDEMPOTENT unless "
+		"`force`, which clears the series and builds it again.\n\n"
+		"THE ONLY THING IT CAN CHANGE IS A CACHE. Every row it writes is what the "
+		"live computation would have produced for that window, and every row it "
+		"deletes comes back on the next read or the next overnight run. Nothing "
+		"here is the only copy of anything, so the worst outcome of running it at "
+		"the wrong moment is time spent.\n\n"
+		"IT IS THE ANSWER TO A CHANGED FORMULA. Editing the arithmetic of a KPI "
+		"that has history leaves the old rows in place, and a series holding two "
+		"definitions of one number is a line with an unmarked join in it. "
+		"`force=true` rebuilds the whole series under the current definition.\n\n"
+		"THE OTHER CASE IS A NEW KPI. A definition created this morning has no "
+		"history at all until this runs or until the overnight job at three "
+		"o'clock reaches it, and a chart with one point on it is not a trend.\n\n"
+		"THIS IS THE FRAMEWORK'S COUNTERPART TO recompute_kpi_history, which "
+		"rebuilds the three SHIPPED reports by kpi_key. Either tool will take a "
+		"kpi_id that names a definition.",
+		{
+			"kpi_id": _field(
+				_STRING,
+				"Which KPI — by kpi_id or docname. OMIT for every enabled definition, which is "
+				"what the overnight job does.",
+			),
+			"company": _COMPANY,
+			"back_years": _field(_INTEGER, "How many years of history to build. Default 5, maximum 10."),
+			"force": _field(
+				_BOOLEAN,
+				"Default FALSE, which fills only what is missing. TRUE deletes the series first "
+				"and rebuilds every snapshot under the current definition.",
+			),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Refresh the KPI cache",
+		available=_needs_doctype("Financial KPI Definition"),
+		requires="the Financial KPI Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

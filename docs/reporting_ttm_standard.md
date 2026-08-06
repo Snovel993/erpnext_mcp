@@ -194,15 +194,33 @@ the ones nobody can recompute from memory.
 Every row is derivable. Dropping the whole table changes no answer, only how long
 the next report takes.
 
-## Roadmap: KPIs as data
+## KPIs as data — shipped in v0.39.0
 
-The window fields here are Python arguments and the computer registry is a Python
-dict, because a computer is a function. The **Financial KPI Framework** (Phase 2)
-makes a KPI a *record*: a `KPI Definition` carrying `default_window_type`,
-`default_window_months`, `default_computation_step`,
+*This section was the roadmap until v0.39.0. It is now a pointer.*
+
+The window fields on this page are Python arguments and the computer registry is
+a Python dict, because a computer is a function. The **Financial KPI Framework**
+makes a KPI a *record*: a `Financial KPI Definition` carrying
+`default_window_type`, `default_window_months`, `default_computation_step`,
 `historical_averaging_enabled` and `historical_lookback_years` as first-class
-fields, so an operator defines a KPI once and the dashboard chart, the MCP output,
-the alerts and the budget comparison all consume the same shape without code.
-`Financial KPI History.kpi_key` becomes the link to it, and every row written
-today keeps its meaning. It is the same rules-as-data move the configurable
-compliance framework makes, applied to money.
+fields, so an operator defines a KPI once and the dashboard, the MCP output and
+the threshold alerts all consume the same shape without code.
+
+**Everything on this page still holds, unchanged.** `compute_kpi` does not
+compute a window — it builds a computer and hands it to the same
+`compute_windowed` described above, so the boundary rule, the fiscal anchoring,
+the merge, the cache, the statistics and the partial-window warnings are
+identical for a defined KPI and for a shipped report. There is a test asserting
+the two produce the same figure for the same window. A framework whose new KPIs
+got a second, simpler window implementation is one where the new KPIs are quietly
+wrong at the fiscal year boundary.
+
+`Financial KPI History.kpi_key` is the link to the definition, and **every row
+written before v0.39.0 keeps its meaning**: the seeded Sustainable CF/Acre
+definition adopts the `kpi_key` the cache has been using since v0.19.6 rather
+than starting a second series beside it.
+
+Full notes: **[financial_kpi_framework.md](financial_kpi_framework.md)**. It is
+the same rules-as-data move the configurable compliance framework makes, applied
+to money — with one deliberate difference, argued there: a KPI definition holds
+no Python at all.

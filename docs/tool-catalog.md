@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 339 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 346 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 156 read tools are **on** by default and can be switched off individually. A
+All 160 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7597,6 +7597,236 @@ for as a habit.
 
 ---
 
+# The Financial KPI Framework (v0.39.0)
+
+**v0.19.6 made the window standard generalize across three *shipped* reports.
+This makes the KPI itself a record.**
+
+Before this release, adding a KPI meant a Python function, a registration call, a
+test, a review, a release and a deploy — a perfectly good process for a KPI this
+app's authors chose, and no process at all for a KPI somebody's lender asked
+about on a Tuesday. Every operation has two or three ratios that are genuinely
+its own: a packing house watches cost per bin, an operation carrying an equipment
+note watches debt service coverage on the *covenant's* definition and not on
+anybody else's. None of those belong in a shipped app and all of them belong on
+the dashboard of the farm that needs them.
+
+So a KPI is now a `Financial KPI Definition`, and the seven tools below author
+and run one.
+
+**The engine does not move.** `formula_type` has exactly two values and both are
+deterministic. `Built-in` delegates to a computer that ships with this app,
+reviewed like any other code, while the record still owns the window, the step,
+the lookback, the thresholds, the dashboard order and the switch. `Expression`
+evaluates arithmetic over named inputs in a sandbox that parses to an AST and
+checks every node against an allowlist. **There is no third value and there is no
+field on the record that holds Python** — which is a deliberate difference from
+`Compliance Rule.custom_python`, because a compliance rule can need to express a
+shape no set of fields captures, and a financial KPI is a number divided by
+another number.
+
+**A definition holds the question and never an answer.** Every figure is computed
+from the ledger when somebody asks, cached in `Financial KPI History` *with the
+components that produced it*, and derivable again by rerunning the same
+computation. Nothing on a definition is a number that came out of the books.
+
+**`kpi_id` is the cache key, so it is unique and it cannot move.** A Compliance
+Rule is versioned by copy — an alert raised in April can still be read against
+the definition that raised it. A KPI is a *line*, and a line assembled from two
+definitions of one number is a chart with an unmarked join in it. Changing the
+arithmetic of a live KPI is a new `kpi_id` beside the old one.
+
+**Thresholds go to the compliance calendar, not to a second alerting system.** A
+KPI past its critical threshold raises a `Compliance Alert` under the new
+`Finance` category, through the same sweep, with the same dismissal, the same
+snooze and the same auto-clear when the value comes back inside. An operation
+with two alerting systems reads neither. The threshold scan **reads the cache and
+never computes**: the alert sweep runs hourly beside somebody's real work, so it
+reads the newest cached snapshot — which is the same figure the dashboard is
+showing, so an alert and a dashboard can never disagree about the number.
+
+**The overnight refresh is at 03:00**, between the shipped-report sweep at 02:00
+and the regulation feed at 04:00. It is *one job that iterates*, which here is
+load-bearing rather than tidy: the whole point of the release is that an operator
+adds a KPI without a code release, and a KPI that needed its own scheduler entry
+would be one they could not add. It shares `enable_kpi_history_sweep` with the
+02:00 job rather than getting a second checkbox.
+
+## 253. `create_financial_kpi_definition`
+
+**MUTATING (default OFF).** `kpi_id` and `title` required; everything else
+optional.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `kpi_id` | yes | Lower-case letters, digits and underscores. The cache key — it cannot be changed later |
+| `title` | yes | What it is called on a dashboard |
+| `description` | | What it means and which direction is good |
+| `category` | | Profitability, Liquidity, Leverage, Efficiency, Operational or Custom (default) |
+| `unit` | | Currency (default), Percentage, Ratio, Days, Acres or Units |
+| `formula_type` | | `Built-in` (default) or `Expression` |
+| `builtin_function` | | For Built-in: `sustainable_cf_per_acre`, `ocf` or `revenue` |
+| `expression` | | For Expression: the arithmetic over the input variable names |
+| `expression_inputs` | | For Expression: a JSON object mapping each variable to its source |
+| `company` | | One entity, or **empty for every company** — the ordinary case |
+| `enabled` | | Default true |
+| `default_window_type` | | Snapshot, TTM (default), MTD, QTD, YTD, Custom |
+| `default_window_months` | | Default 12 |
+| `default_computation_step` | | Daily, Weekly, Monthly (default), Quarterly, Yearly |
+| `historical_averaging_enabled` | | Default true |
+| `historical_lookback_years` | | Default 5, maximum 10 |
+| `threshold_warning_low` | | Warning at or below. **Omit where low is not bad** |
+| `threshold_critical_low` | | Critical at or below. Must be at or below the warning floor |
+| `threshold_warning_high` | | Warning at or above |
+| `threshold_critical_high` | | Critical at or above. Must be at or above the warning ceiling |
+| `dashboard_visible` | | Default true |
+| `display_order` | | Position within the category, lowest first |
+
+**`expression_inputs` has four sources.**
+
+```json
+{
+  "current_assets":      {"source": "gl", "root_type": "Asset", "balance": true},
+  "current_liabilities": {"source": "gl", "root_type": "Liability", "balance": true},
+  "sales":               {"source": "report", "report_name": "revenue", "path": "total"},
+  "cf_per_acre":         {"source": "kpi", "kpi_id": "sustainable_cf_per_acre"},
+  "sqft_per_acre":       {"source": "constant", "value": 43560}
+}
+```
+
+`gl` sums ledger movement over the window; narrow it with `root_type`,
+`account_type`, `accounts` or `account_number_prefix`. **`"balance": true` makes
+it a position at the window's end rather than a movement across it** — a current
+ratio built from twelve months of movement in a cash account is not a current
+ratio, it is a cash flow with a ratio's name on it. `report` reads a component
+off a shipped computer. `kpi` is another definition's value, with cycles refused
+at save time. `constant` is a number with a name, which is what a magic number in
+a formula should always have been.
+
+**What the expression grammar allows:** `+ - * / // % **` on numbers and variable
+names, unary minus, parentheses, comparisons inside a conditional, and calls to
+`min`, `max`, `abs`, `round`. **What it refuses, by name, at save time:** imports,
+attribute access, subscripts, lambdas, comprehensions, assignment, string
+constants, and any call to anything else. A division by zero is not an error — it
+is a null value with a warning naming the variables that were zero, because a
+farm with no acres in production has no cash flow per acre and a zero there would
+be read as one.
+
+**Enabled on creation**, unlike a Compliance Rule, and the difference is what the
+two do when wrong: a rule that fires wrongly accuses somebody of a compliance
+failure; a KPI that is wrong reports a number beside its own ingredients and its
+own warnings, which a reader can check.
+
+## 254. `update_financial_kpi_definition`
+
+**MUTATING (default OFF).** `kpi_id` required; every field above optional.
+
+**It edits rather than superseding.** See the note above on why a KPI is not
+versioned by copy. `kpi_id` cannot be changed at all — renaming it orphans the
+whole cached series.
+
+**Changing the arithmetic is reported as a decision**, with the cached row count
+in front of you. The usual right move is a new `kpi_id` beside the old one; where
+it is genuinely a correction rather than a redefinition,
+`refresh_kpi_cache(force=true)` rebuilds the whole series under the new formula
+so the line holds one definition again.
+
+The result carries the field-by-field diff **with the previous values**, so the
+MCP Action Log row answers "who changed this and what did it say before" without
+anybody reading a git history they have no access to.
+
+## 255. `list_financial_kpi_definitions`
+
+**Read-only.** Optional `company`, `category`, `formula_type`, `enabled`,
+`dashboard_only`, `limit`.
+
+The register: what this site computes, how, and what it alerts on.
+`builtin_functions_available` names the shipped computers a Built-in definition
+may point at.
+
+**`thresholded_count` is the number worth reading first.** A KPI with no
+thresholds is one nothing is watching for anybody, and it can never appear in
+`compute_all_kpis`'s `breached` list however bad it gets.
+
+## 256. `get_financial_kpi_definition`
+
+**Read-only.** `kpi_id` (by kpi_id or docname) required.
+
+One definition in full, with how much history is cached under it and whether it
+would compute at all. **`problems` is the field to read:** a Built-in naming a
+computer this site has not got, an expression that no longer parses, an input the
+expression never reads — each produces nothing at compute time and says so in a
+warning rather than reporting a zero, and this is where to see it before somebody
+quotes the KPI.
+
+## 257. `compute_kpi`
+
+**Read-only.** `kpi_id` and `company` required; optional `as_of`, `window_type`,
+`window_months`, `computation_step`, `historical_lookback_years`,
+`include_historical_averages`.
+
+**It goes through the same window standard `get_windowed_report` does**, so a KPI
+somebody typed into a form this morning and the one that shipped in v0.19.5
+behave identically at the fiscal year boundary, on a partial ledger, and against
+the cache. **The window comes from the definition by default**, which is what
+keeps a dashboard, its alerts and its cache agreeing without anybody passing
+anything.
+
+**Four blocks.** `point_in_time` is the period just finished, which on a farm
+flatters harvest and demonizes pruning. `window` is the rolling figure with its
+components — for an Expression KPI, every input with what it matched, how many
+accounts, how many entries, and whether it was read as a balance or a movement.
+`historical_averages` is what that window has been worth before. `threshold_status`
+is where the value sits against the lines somebody drew, and **`No thresholds`
+means nobody drew any**, which is not the same as being inside them.
+
+**A null value is an answer.** A ratio whose denominator was zero is a division
+nobody performed. Read `computation_warnings` before quoting anything.
+
+**It warms a cache and that is the one thing it writes:** no Account, no GL Entry,
+no Journal Entry, no Asset, no Field.
+
+## 258. `compute_all_kpis`
+
+**Read-only.** `company` required; optional `dashboard_only`, `category`,
+`as_of`, the window overrides, `include_historical_averages`.
+
+The whole financial dashboard in one call. **One call rather than N**, for the
+reason `get_windowed_report` is one tool rather than one per report: a framework
+whose every KPI costs a round trip is a framework with six KPIs in it.
+
+**One broken definition does not empty the dashboard.** Each KPI is computed
+independently and a failure becomes a null value with a warning on that row — the
+same promise the compliance sweep makes about one rule that throws.
+
+**Read `breached` first and `unwatched_note` second.** An empty `breached` list is
+not a healthy operation: a KPI with no thresholds can never appear there, and the
+note says which ones those are.
+
+`include_historical_averages=false` across the board answers much faster on a
+dashboard with many KPIs.
+
+## 259. `refresh_kpi_cache`
+
+**MUTATING (default OFF).** Optional `kpi_id` (omit for every enabled
+definition), `company`, `back_years` (default 5), `force` (default false).
+
+**The only thing it can change is a cache** — the same promise
+`recompute_kpi_history` makes, extended to KPIs that are records rather than
+code. Every row it writes is what the live computation would have produced for
+that window; every row it deletes comes back on the next read or the next
+overnight run.
+
+**It is the answer to a changed formula**, and to a KPI created this morning,
+which has no history at all until this runs or until the 03:00 job reaches it —
+and a chart with one point on it is not a trend.
+
+`recompute_kpi_history` will also take a `kpi_key` that names a definition and
+delegates here, so a caller who already knows that tool does not have to learn
+this one.
+
+---
+
 ## v0.26.0 — field-initiated task creation from asset scan
 
 Worker scans an asset's QR tag and taps "Flag needs repair" to create a Farm Task
@@ -8344,8 +8574,8 @@ Everything a tool needs is in two places:
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
-   `shifts`, `heat`, `kpi`, `visits`, `sessions`, `rules`, `asset_tags`,
-   `feeds` or `fieldwork` —
+   `shifts`, `heat`, `kpi`, `kpidefs`, `visits`, `sessions`, `rules`,
+   `asset_tags`, `feeds` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and
    `docs/development.md` has the recipe.

@@ -166,6 +166,21 @@ with the number of their cabins. Turning it off costs speed and nothing else:
 every report still answers, from a cold cache, saying how much history it had to
 leave out.
 
+THE EIGHTH ARRIVED IN v0.39.0 AND IS THE SIXTH'S COUNTERPART FOR KPIS THAT ARE
+RECORDS. `services.kpi_engine.refresh_all_kpi_caches` walks every enabled
+`Financial KPI Definition` and every company and fills the trailing snapshots
+that definition's own window, step and lookback ask for — which is the one thing
+the two o'clock job cannot do, because a shipped report has no record to read
+those from and therefore assumes a monthly TTM.
+
+IT IS AT `0 3 * * *`, BETWEEN THE OTHER TWO, and it is one job that iterates for
+a reason that is load-bearing rather than tidy: the whole point of v0.39.0 is
+that an operator adds a KPI without a code release, and a KPI that needed its own
+scheduler entry would be one they could not add. It shares
+`enable_kpi_history_sweep` with the two o'clock job rather than getting a second
+checkbox — they cache the same doctype for the same reason, and a second setting
+called something almost identical is how a setting stops being read.
+
 THE SEVENTH ARRIVED IN v0.38.0 AND IS THE OTHER JOB THAT TALKS TO SOMEBODY
 ELSE'S SERVER. `services.regulation_feed.sweep_due_feeds` fetches every
 registered regulatory source that is due, hashes its normalised text and compares
@@ -251,6 +266,26 @@ scheduler_events = {
 		#: exactly as `Weather Settings.fetch_interval_minutes` is: the sweep cannot
 		#: run more often than it is scheduled, and a Monthly feed is skipped on the
 		#: twenty-nine mornings it is not due.
+		#: v0.39.0. The Financial KPI Framework's cache refresh, at three in the
+		#: morning — after the shipped-report sweep at two and before the
+		#: regulation feed at four. THE SAME JOB SHAPE AS THE TWO O'CLOCK ONE and
+		#: for the same reasons: it is arithmetic over somebody's whole ledger, so
+		#: it goes where it competes with nothing; it is incremental against what
+		#: is already cached, so a run with nothing missing does nothing at all;
+		#: and it writes only this app's own `Financial KPI History`.
+		#:
+		#: ONE ENTRY THAT ITERATES, and here that is not merely tidy — it is
+		#: load-bearing. The whole point of v0.39.0 is that an operator adds a KPI
+		#: without a code release, and a KPI that needed its own scheduler entry
+		#: would be one they could not add.
+		#:
+		#: IT SHARES `enable_kpi_history_sweep` WITH THE TWO O'CLOCK JOB rather
+		#: than getting a second checkbox. They cache the same doctype for the
+		#: same reason, and an operator who turned one off to get their nights
+		#: back would be surprised to find the other still running for minutes.
+		"0 3 * * *": [
+			"erpnext_mcp.services.kpi_engine.refresh_all_kpi_caches",
+		],
 		"0 4 * * *": [
 			"erpnext_mcp.services.regulation_feed.sweep_due_feeds",
 		],

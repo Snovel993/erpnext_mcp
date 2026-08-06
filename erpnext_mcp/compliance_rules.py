@@ -172,6 +172,9 @@ CATEGORIES = (
 	"Audits",
 	"Certifications",
 	"Filings",
+	# v0.39.0. A financial KPI past its threshold, on the same calendar as
+	# everything else — see `alerts/rules.py::financial_kpi_threshold_breach`.
+	"Finance",
 	"Housing",
 	"Policies",
 	"Records",

@@ -935,11 +935,15 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		self.assertEqual(live[0]["default_severity"], "Critical")
 		self.assertEqual(int(live[0]["version"]), 2)
 
-	def test_the_split_is_thirteen_declarative_two_builtin_and_no_custom_python(self):
+	def test_the_split_is_eighteen_declarative_three_builtin_and_no_custom_python(self):
 		self.seed_rules()
 		shapes: dict = {}
 		for row in compliance_rules.rule_rows():
 			shapes.setdefault(compliance_rules.shape_of(row), []).append(row["rule_id"])
 		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 18)
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 2)
+		# Three since v0.39.0: `financial_kpi_threshold_breach` joined the two
+		# permanent built-ins, and it is permanent for a reason neither of those
+		# has — its thresholds are not on its own row, they are on each
+		# Financial KPI Definition, per KPI and per unit.
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 3)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])

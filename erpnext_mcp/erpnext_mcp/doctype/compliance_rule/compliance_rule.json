@@ -110,13 +110,13 @@
   },
   {
    "default": "Records",
-   "description": "Which shelf of the compliance calendar this rule's alerts land on. The calendar groups by it, and a category nobody uses is a group nobody opens.",
+   "description": "Which shelf of the compliance calendar this rule's alerts land on. The calendar groups by it, and a category nobody uses is a group nobody opens. `Finance` arrived in v0.39.0 with the Financial KPI Framework, and it is on this list rather than on a second board because an operation with two alerting systems reads neither: a covenant about to be breached is exactly as much a Monday-morning problem as a cabin with a dead carbon monoxide detector, and both want the same dismissal, the same snooze and the same auto-clear when the condition stops being true.",
    "fieldname": "category",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Category",
-   "options": "Audits\nCertifications\nFilings\nHousing\nPolicies\nRecords\nWater and Sanitation\nWorkforce",
+   "options": "Audits\nCertifications\nFilings\nFinance\nHousing\nPolicies\nRecords\nWater and Sanitation\nWorkforce",
    "reqd": 1
   },
   {

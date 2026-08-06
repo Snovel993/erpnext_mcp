@@ -397,12 +397,19 @@
   "allow_list_normalization_adjustments",
   "allow_get_windowed_report",
   "allow_list_financial_kpi_history",
+  "allow_list_financial_kpi_definitions",
+  "allow_get_financial_kpi_definition",
+  "allow_compute_kpi",
+  "allow_compute_all_kpis",
   "kpi_write_section",
   "allow_create_normalization_adjustment",
   "allow_approve_normalization_adjustment",
   "allow_reject_normalization_adjustment",
   "allow_backfill_asset_capex_type",
   "allow_recompute_kpi_history",
+  "allow_create_financial_kpi_definition",
+  "allow_update_financial_kpi_definition",
+  "allow_refresh_kpi_cache",
   "enable_kpi_history_sweep",
   "mobile_write_section",
   "allow_create_mobile_user",
@@ -3026,6 +3033,34 @@
    "label": "List Financial KPI History"
   },
   {
+   "default": "1",
+   "description": "READ. The KPI register: what this site computes, how, over what window, and what it alerts on. v0.39.0 made a KPI a RECORD rather than a Python function, so every field on one \u2014 the window, the step, the lookback, the four thresholds, the dashboard order and the switch \u2014 is editable with no code release. What is NOT editable is the engine: formula_type has exactly two values, both deterministic, and nothing on the record holds Python.",
+   "fieldname": "allow_list_financial_kpi_definitions",
+   "fieldtype": "Check",
+   "label": "List Financial KPI Definitions"
+  },
+  {
+   "default": "1",
+   "description": "READ. One KPI definition in full, with how much history is cached under it and whether it would compute at all. `problems` is the field to read: a Built-in naming a computer this site has not got, or an expression that no longer parses, produces nothing at compute time and says so in a warning rather than reporting a zero.",
+   "fieldname": "allow_get_financial_kpi_definition",
+   "fieldtype": "Check",
+   "label": "Get Financial KPI Definition"
+  },
+  {
+   "default": "1",
+   "description": "READ. One defined KPI over its own window, with the period just finished, the prior-window history and the threshold verdict beside it. It goes through the same window standard get_windowed_report does, so a KPI somebody typed into a form this morning behaves identically at the fiscal year boundary and on a partial ledger. A null value is an ANSWER \u2014 a division nobody could perform \u2014 and never a zero. It warms the Financial KPI History cache and writes nothing else.",
+   "fieldname": "allow_compute_kpi",
+   "fieldtype": "Check",
+   "label": "Compute KPI"
+  },
+  {
+   "default": "1",
+   "description": "READ. The whole financial dashboard in one call: every enabled KPI for one company, in order, each with its value, its history and its threshold verdict. One broken definition does not empty the dashboard \u2014 it becomes a null value with a warning on that row. Read `breached` first and `unwatched_note` second: a KPI with no thresholds can never appear in `breached` however bad it gets.",
+   "fieldname": "allow_compute_all_kpis",
+   "fieldtype": "Check",
+   "label": "Compute All KPIs"
+  },
+  {
    "fieldname": "kpi_write_section",
    "fieldtype": "Section Break",
    "label": "Normalization and Capex Classification"
@@ -3064,6 +3099,27 @@
    "fieldname": "allow_recompute_kpi_history",
    "fieldtype": "Check",
    "label": "Recompute KPI History"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Define one financial KPI as a record \u2014 what it is called, how it is computed, over what window, and what values are worth an alert. Two formula types and no third: Built-in delegates to a computer that ships with this app, and Expression evaluates arithmetic in a sandbox that parses to an AST and refuses every node that is not arithmetic. NOTHING ON THE RECORD HOLDS PYTHON, which is the deliberate difference from create_compliance_rule.",
+   "fieldname": "allow_create_financial_kpi_definition",
+   "fieldtype": "Check",
+   "label": "Create Financial KPI Definition"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Edit one KPI definition in place \u2014 thresholds, window, order, description, the switch. It edits rather than superseding, unlike update_compliance_rule, because a rule is a definition behind an EVENT and a KPI is a definition behind a LINE. Changing the arithmetic is reported as a decision with the cached row count in front of the caller; kpi_id cannot be changed at all, because it is the cache key on every history row.",
+   "fieldname": "allow_update_financial_kpi_definition",
+   "fieldtype": "Check",
+   "label": "Update Financial KPI Definition"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, and the only thing it can change is a CACHE. Fills the cached history for one defined KPI or every enabled one; every row it writes is what the live computation would have produced, and every row it deletes comes back on the next read or the next overnight run. The answer to a changed formula (force=true rebuilds the series) and to a KPI created this morning, which has no history until the three-o'clock job reaches it.",
+   "fieldname": "allow_refresh_kpi_cache",
+   "fieldtype": "Check",
+   "label": "Refresh KPI Cache"
   },
   {
    "default": "1",

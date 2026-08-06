@@ -123,6 +123,7 @@ def after_install() -> None:
 	_compliance_rules()
 	_i9_document_types()
 	_federal_tax_table()
+	_kpi_definitions()
 	frappe.db.commit()
 
 
@@ -143,6 +144,7 @@ def after_migrate() -> None:
 	_compliance_rules()
 	_i9_document_types()
 	_federal_tax_table()
+	_kpi_definitions()
 
 
 def _i9_settings() -> None:
@@ -915,3 +917,53 @@ def _compliance_field_losses() -> list:
 			except Exception:
 				continue
 	return out
+
+
+def _kpi_definitions() -> None:
+	"""Seed Sustainable CF/Acre as the first Financial KPI Definition. v0.39.0.
+
+	THE FOURTEENTH JOB, AND IT SEEDS EXACTLY ONE RECORD. That is the argument
+	rather than a starting point somebody has not got round to finishing.
+
+	A seeded KPI is a claim that this app knows what an operation should watch,
+	and it can only honestly make that claim about a metric it also ships the
+	computer for. Sustainable CF/Acre qualifies: the computer is tested, the
+	reasoning is four pages in `docs/kpi_sustainable_cf_per_acre.md`, and the KPI
+	is the reason v0.19.5 exists. A current ratio does not — not because it is a
+	bad metric, but because the accounts that make it up are named differently on
+	every chart, and a seeded definition pointing at the wrong ones would put a
+	confident, precise, WRONG number on somebody's dashboard from the day they
+	installed the app. `create_financial_kpi_definition` is how the rest arrive,
+	authored by the operation whose accounts they are about.
+
+	IT SEEDS NO THRESHOLDS EITHER, for the same reason. A defensible floor under
+	cash flow per acre is a number about one operation's own cost structure and
+	debt service, and a seeded one would be a line somebody had not drawn being
+	enforced on a compliance calendar.
+
+	THE `kpi_id` IS THE ONE THE CACHE ALREADY USES. Every Financial KPI History
+	row written since v0.19.6 carries `kpi_key = "sustainable_cf_per_acre"`, so
+	the seeded definition adopts that series rather than starting a second one
+	beside it — which would be the unmarked join the whole framework is written
+	against.
+
+	Checked by `kpi_id` and idempotent, like every seeder here: an operator who
+	disabled it stays disabled, one who set thresholds keeps them, one who moved
+	it down the dashboard does not find it back at the top after every migrate.
+	"""
+	try:
+		from .services import kpi_engine
+
+		report = kpi_engine.seed_kpi_definitions()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the KPI definitions were not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['created'])} financial KPI definition(s) — a KPI is "
+			"now a record, so its window, thresholds and dashboard position are editable with "
+			"update_financial_kpi_definition and new ones need no code release. "
+			"list_financial_kpi_definitions has the register."
+		)
+	for failure in report.get("failed") or ():
+		print(f"erpnext_mcp: could not seed KPI {failure.get('name')} — {failure.get('reason')}")

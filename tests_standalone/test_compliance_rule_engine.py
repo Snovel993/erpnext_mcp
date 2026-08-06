@@ -249,10 +249,15 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 
 		v0.27.0 added three I-9 rules: `i9_verification_overdue`,
 		`work_authorization_expiring`, `i9_retention_destruction_eligible`.
+
+		v0.39.0 added `financial_kpi_threshold_breach`, and it is the first rule
+		here that is about money rather than about a regulator. It lands on this
+		calendar rather than on a finance board of its own because an operation
+		with two alerting systems reads neither.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 20)
-		self.assertEqual(len(compliance_rules.rule_rows()), 20)
+		self.assertEqual(len(report["created"]), 21)
+		self.assertEqual(len(compliance_rules.rule_rows()), 21)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
@@ -318,7 +323,22 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 			for row in compliance_rules.rule_rows()
 			if compliance_rules.shape_of(row) == compliance_rules.SHAPE_BUILTIN
 		)
-		self.assertEqual(builtin, ["audit_action_overdue", "supervisor_review_lapsed"])
+		self.assertEqual(
+			builtin,
+			[
+				"audit_action_overdue",
+				# v0.39.0, and the third permanent built-in. Its thresholds are
+				# not on its own row at all: they live on each Financial KPI
+				# Definition, because a ratio's warning line and a dollar
+				# figure's warning line are not values that can share a column.
+				# And the comparison is against a DERIVED value — the newest
+				# cached snapshot for a (KPI, company, window) tuple, against
+				# four nullable bounds whose meaning depends on which are set.
+				# That is arithmetic, not a filter.
+				"financial_kpi_threshold_breach",
+				"supervisor_review_lapsed",
+			],
+		)
 
 	def test_every_migrated_rule_keeps_its_kairotic_gate_and_its_citation_verbatim(self):
 		"""The two fields an auditor reads. Neither may be paraphrased by a migration."""
@@ -915,12 +935,12 @@ class TheApprovalGate(RuleEngineTestCase):
 
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
-	def test_seeding_twice_writes_twenty_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 20)
+	def test_seeding_twice_writes_twenty_one_rules_once(self):
+		self.assertEqual(len(self.seed_rules()["created"]), 21)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 20)
-		self.assertEqual(len(compliance_rules.rule_rows()), 20)
+		self.assertEqual(len(again["present"]), 21)
+		self.assertEqual(len(compliance_rules.rule_rows()), 21)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -968,7 +988,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 20)
+		self.assertEqual(data["rule_count"], 21)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)

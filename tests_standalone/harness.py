@@ -1001,6 +1001,9 @@ APP_DOCTYPES = {
 	"Normalization Adjustment": "normalization_adjustment",
 	# ── v0.19.6: the precomputed history every windowed report reads from ────
 	"Financial KPI History": "financial_kpi_history",
+	# v0.39.0. The KPIs themselves, as records — what is computed, over what
+	# window, and what values are worth an alert.
+	"Financial KPI Definition": "financial_kpi_definition",
 	# ── v0.21.0: the visit as a shape of data, and one worker's execution of it ─
 	"Inspection Template": "inspection_template",
 	"Inspection Template Section": "inspection_template_section",

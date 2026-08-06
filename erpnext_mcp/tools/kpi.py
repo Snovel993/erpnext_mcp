@@ -1071,11 +1071,21 @@ def list_financial_kpi_history(args: dict) -> ToolResult:
 			}
 		)
 
+	# v0.39.0. Every kpi_key in the result joined to the DEFINITION that owns it,
+	# where there is one. A cached series is a column of numbers and a date, and
+	# the thing a reader needs beside it is what the number IS: 0.42 is a
+	# catastrophe as a current ratio, a fine margin as a percentage and a rounding
+	# error as dollars, and before the framework the only place the unit lived was
+	# a Python constant on a registered computer. Sites that have not migrated the
+	# definition doctype get exactly what they got in v0.38.0.
+	definitions = _definitions_for({entry["kpi_key"] for entry in records if entry.get("kpi_key")})
+
 	values = [entry["value"] for entry in records if entry["value"] is not None]
 	data = {
 		"actor": actor,
 		"company": scope["company"],
 		"kpi_key": kpi_key or None,
+		"definitions": definitions,
 		"count": len(records),
 		"limit": limit,
 		"truncated": truncated,
@@ -1117,6 +1127,17 @@ def list_financial_kpi_history(args: dict) -> ToolResult:
 			f"More than {limit} row(s) matched and this is the newest {limit}. Narrow with "
 			"kpi_key, company, computation_step or a from_date/to_date range before treating the "
 			"series above as complete."
+		)
+	orphaned = sorted(
+		{entry["kpi_key"] for entry in records if entry.get("kpi_key")} - set(definitions)
+	)
+	if orphaned and definitions:
+		data["orphan_note"] = (
+			f"{len(orphaned)} kpi_key(s) in this series have no Financial KPI Definition on this "
+			f"site: {', '.join(orphaned)}. That is not a broken series — the three reports this "
+			"app ships have always cached under their own keys and still do — but where the key "
+			"was a definition that has since been renamed, these rows are the orphaned half and "
+			"nothing will ever extend them. list_financial_kpi_definitions has the register."
 		)
 	if not records:
 		data["empty_note"] = (
@@ -1171,10 +1192,26 @@ def recompute_kpi_history(args: dict) -> ToolResult:
 		None,
 	)
 	if not entry:
+		# v0.39.0. A kpi_key that is not a SHIPPED computer may still be a KPI
+		# DEFINITION, and this tool is the one somebody already knows the name of.
+		# Delegating rather than refusing is what makes the framework reachable
+		# from the tool that was here first — the alternative is a caller told
+		# "no registered report computes this" about a KPI that is on their own
+		# dashboard, which is true and useless.
+		from ..services import kpi_engine
+
+		if kpi_engine.definition_row(kpi_key):
+			return _refresh_defined_kpi(actor, kpi_key, args)
 		raise ToolError(
-			f"no registered report computes {kpi_key!r}. This site has: "
-			f"{', '.join(sorted(item['kpi_key'] for item in windows.COMPUTERS.values())) or '<none>'}. "
-			"Nothing was changed."
+			f"no registered report and no KPI definition computes {kpi_key!r}. The shipped "
+			f"reports are: "
+			f"{', '.join(sorted(item['kpi_key'] for item in windows.COMPUTERS.values())) or '<none>'}"
+			+ (
+				f"; the defined KPIs are: {', '.join(sorted(str(row.get('kpi_id')) for row in kpi_engine.rows())) or '<none>'}"
+				if kpi_engine.available()
+				else ""
+			)
+			+ ". Nothing was changed."
 		)
 
 	back_years = as_int(args, "back_years", windows.DEFAULT_LOOKBACK_YEARS)
@@ -1257,3 +1294,94 @@ def recompute_kpi_history(args: dict) -> ToolResult:
 			else f"{written} cached snapshot(s) written"
 		),
 	)
+
+
+def _refresh_defined_kpi(actor: str, kpi_id: str, args: dict) -> ToolResult:
+	"""`recompute_kpi_history` for a kpi_key that names a Financial KPI Definition.
+
+	v0.39.0, and it is a delegation rather than a second implementation. The
+	framework's own `refresh_kpi_cache` does the work — it reads the definition's
+	own window type, window length and step, which a shipped report does not
+	have and which `windows._sweep_one` therefore hardcodes. Reimplementing that
+	here would be two functions that fill one cache and could disagree about
+	which windows belong in it.
+	"""
+	from ..services import kpi_engine
+
+	back_years = as_int(args, "back_years", windows.DEFAULT_LOOKBACK_YEARS)
+	if back_years is None:
+		back_years = windows.DEFAULT_LOOKBACK_YEARS
+	if back_years < 1 or back_years > windows.MAX_LOOKBACK_YEARS:
+		raise ToolError(
+			f"back_years must be between 1 and {windows.MAX_LOOKBACK_YEARS}; got {back_years}. "
+			"Nothing was changed."
+		)
+	force = as_bool(args, "force", False)
+	company = resolve_company(as_str(args, "company"), required=False)
+	if company:
+		employee_tool.require_company_scope(actor, company)
+
+	report = kpi_engine.refresh_kpi_cache(
+		kpi_id=kpi_id, company=company or "", back_years=back_years, force=bool(force)
+	)
+	return ToolResult(
+		data={
+			"actor": actor,
+			"kpi_key": kpi_id,
+			"defined_kpi": True,
+			**report,
+			"note": (
+				f"{kpi_id} is a Financial KPI Definition rather than one of the three reports this "
+				"app ships, so this call was handled by the framework — which reads the "
+				"definition's own window type, window length and step rather than assuming a "
+				"monthly TTM. refresh_kpi_cache is the same operation named for what it does."
+			),
+		},
+		summary=(
+			f"{'rebuilt' if force else 'filled'} {report['written']} cached snapshot(s) of the "
+			f"defined KPI {kpi_id}, {back_years} year(s) back"
+			+ (f"; {report['cleared']} cleared first" if report["cleared"] else "")
+		),
+		docstatus_delta=(
+			f"{report['cleared']} cached snapshot(s) deleted, {report['written']} written"
+			if report["cleared"]
+			else f"{report['written']} cached snapshot(s) written"
+		),
+	)
+
+
+def _definitions_for(kpi_keys) -> dict:
+	"""`{kpi_id: headline}` for the keys in a cached series that have a definition.
+
+	v0.39.0. What a reader needs beside a column of numbers is what the number
+	IS — its title, its unit, its category and whether anything is watching it —
+	and until the framework the only place the unit lived was a Python constant
+	on a registered computer.
+
+	NEVER RAISES AND RETURNS `{}` ON A SITE WITHOUT THE DOCTYPE, so a bench
+	between the app landing and `bench migrate` finishing gets exactly the payload
+	v0.38.0 gave rather than an error about a doctype it has not got yet.
+	"""
+	try:
+		from ..services import kpi_engine
+
+		if not kpi_engine.available():
+			return {}
+		out = {}
+		for key in sorted(kpi_keys or ()):
+			row = kpi_engine.definition_row(str(key))
+			if not row:
+				continue
+			described = kpi_engine.describe(row)
+			out[str(key)] = {
+				"name": described["name"],
+				"title": described["title"],
+				"unit": described["unit"],
+				"category": described["category"],
+				"enabled": described["enabled"],
+				"formula_type": described["formula_type"],
+				"thresholds": described["thresholds"],
+			}
+		return out
+	except Exception:  # pragma: no cover - an annotation is never worth failing a read over
+		return {}

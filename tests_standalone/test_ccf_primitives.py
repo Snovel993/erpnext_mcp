@@ -1237,7 +1237,7 @@ class TheUpgradeFromV0220(PrimitiveTestCase):
 		self.assertEqual(self.run_the_patch()["migrated"], [])
 		# Twenty since v0.28.0 — the three I-9 and two W-4 rules are declarative
 		# records the patch has nothing to say about and leaves exactly alone.
-		self.assertEqual(len(compliance_rules.rule_rows()), 20)
+		self.assertEqual(len(compliance_rules.rule_rows()), 21)
 
 	def test_an_operator_edited_threshold_survives_the_migration(self):
 		"""The question the patch exists to answer well. A site that contracted its

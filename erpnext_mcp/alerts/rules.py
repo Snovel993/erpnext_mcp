@@ -2434,6 +2434,230 @@ shape(
 )
 
 
+# ── 21. financial_kpi_threshold_breach ──────────────────────────────────────
+#
+# v0.39.0, AND IT IS THE FIRST RULE IN THIS FILE THAT IS ABOUT MONEY RATHER THAN
+# ABOUT A REGULATOR. It is here, on the same calendar as the expiring certificate
+# and the untested water, rather than on a finance board of its own — and that is
+# the whole argument for the way v0.39.0 raises threshold alerts. An operation
+# with two alerting systems reads neither. A covenant about to be breached is
+# exactly as much a Monday-morning problem as a cabin with a dead carbon monoxide
+# detector, and it wants the same dismissal, the same snooze, and the same
+# auto-clear the moment the condition stops being true.
+#
+# IT READS THE CACHE AND NEVER COMPUTES. The alert sweep runs hourly beside
+# somebody's real work; a scan that recomputed every KPI for every company would
+# put minutes of GL arithmetic on that path, every hour, for a figure that moves
+# once a month. `refresh_all_kpi_caches` fills the cache overnight and this reads
+# the newest snapshot it finds — which is at most a day old and is the SAME
+# figure the dashboard is showing, so an alert and a dashboard can never disagree
+# about the number.
+#
+# A KPI WITH NO CACHED VALUE RAISES NOTHING AND DISMISSES NOTHING, which is the
+# reading every rule in this file gives to an absent record. A definition created
+# this morning has no history until the overnight job reaches it, and treating
+# that silence as a pass would be as wrong as treating it as a breach.
+KPI_SOURCE_DOCTYPE = "Financial KPI Definition"
+
+
+def _scan_kpi_thresholds(context: dict) -> list:
+	"""Enabled KPI definitions whose newest cached value is past a threshold.
+
+	THE GATE IS THE VALUE, NOT A DATE, and that makes this the most purely
+	kairotic rule in the file: nothing here counts days. A KPI inside its
+	thresholds raises nothing however many times the sweep runs; the same KPI
+	raises Warning the month it crosses the warning line and Critical when it
+	crosses the critical one, and the alert clears by itself when the next
+	month's figure comes back inside. Nobody closes it, because there was never
+	a task — there was a number.
+
+	ONE ALERT PER (DEFINITION, COMPANY), keyed on the definition docname with the
+	company in the message. A KPI that applies to every company is genuinely
+	several conditions, and merging them would mean Highland's breach dismissing
+	Constancy's.
+	"""
+	try:
+		from ..services import kpi_engine
+	except Exception:  # pragma: no cover - a bench mid-upgrade
+		return []
+	if not kpi_engine.available():
+		return []
+
+	critical_severity = _severity_of(context, "severity_critical", SEVERITY_CRITICAL)
+	warning_severity = _severity_of(context, "severity_warning", SEVERITY_WARNING)
+	scoped_company = str(context.get("company") or "")
+
+	try:
+		companies = (
+			[scoped_company]
+			if scoped_company
+			else (frappe.db.get_all("Company", pluck="name", limit=200) or [])
+		)
+	except Exception:  # pragma: no cover
+		return []
+
+	out = []
+	for row in kpi_engine.enabled_rows():
+		if not kpi_engine.thresholds_of(row)["has_any"]:
+			# Nothing is watching this KPI, which is a legitimate state and not a
+			# silent pass — compute_all_kpis reports it in `unwatched_note`. It is
+			# simply not this rule's business.
+			continue
+		if not _scoped(context, row):
+			continue
+		for company in companies:
+			company = str(company)
+			if row.get("company") and row["company"] != company:
+				continue
+			cached = _newest_cached_kpi(kpi_engine, row, company)
+			if not cached or cached.get("value") is None:
+				continue
+			verdict = kpi_engine.threshold_status(row, cached["value"])
+			if not verdict["breached"]:
+				continue
+
+			severity = critical_severity if verdict["status"] == "Critical" else warning_severity
+			direction = "below" if verdict["direction"] == "low" else "above"
+			out.append(
+				Observation(
+					source_doctype=KPI_SOURCE_DOCTYPE,
+					source_docname=str(row["name"]),
+					message=(
+						f"{row.get('title')} at {company} is {cached['value']}"
+						# The unit rides in parentheses rather than as a suffix,
+						# because it is a category name and not a symbol: "50.0
+						# Currency" reads as a typo where "50.0 (Currency)" reads
+						# as what it is. And it belongs in the sentence at all
+						# because 0.42 is a catastrophe as a ratio, a fine margin
+						# as a percentage and a rounding error as dollars.
+						+ (f" ({row.get('unit')})" if row.get("unit") else "")
+						+ f", {direction} the {verdict['status'].lower()} threshold of "
+						f"{verdict['threshold']}, as of {cached['as_of']}. "
+						"THIS IS A CACHED FIGURE, not a fresh computation — it is the same number "
+						"the dashboard is showing, and compute_kpi recomputes it live with its "
+						"components if the figure itself is what is in question. The alert clears "
+						"by itself when the value comes back inside the line; there is nothing to "
+						"close, because there was never a task, there was a number."
+					),
+					severity=severity,
+					# NO DUE DATE, and that is not an omission. Every other rule in
+					# this file has a date by which something must be done; a KPI
+					# past its threshold has no such date, because the remedy is a
+					# season of trading rather than a form. A fabricated due date
+					# would sort this above genuine deadlines on the calendar.
+					due_date="",
+					company=company,
+					category="Finance",
+					# A covenant answers to a lender rather than to an agency, and
+					# `Internal` is this file's honest third answer for real work
+					# with a real consequence and nobody coming to inspect it.
+					regimes=["Internal"],
+				)
+			)
+	return out
+
+
+def _newest_cached_kpi(kpi_engine, row: dict, company: str) -> dict:
+	"""The most recent cached snapshot for one definition on one company, or {}.
+
+	Read against the definition's OWN window type, length and step, because a KPI
+	declared as a quarterly snapshot and one declared as a monthly TTM cache under
+	different keys — and matching on kpi_key alone would compare a value against a
+	threshold that was drawn for a different window.
+	"""
+	try:
+		from ..services import windowed_reports as windows
+
+		if not windows.cache_available():
+			return {}
+		options = kpi_engine.window_options(row)
+		found = frappe.db.get_all(
+			windows.DOCTYPE,
+			filters={
+				"kpi_key": str(row.get("kpi_id")),
+				"company": company,
+				"computation_step": options["computation_step"],
+				"window_type": options["window_type"],
+				"window_months": options["window_months"],
+			},
+			fields=compat.existing_fields(windows.DOCTYPE, ("name", "value", "as_of")),
+			order_by="as_of desc",
+			limit=1,
+		)
+		return dict(found[0]) if found else {}
+	except Exception:  # pragma: no cover - a cache that cannot be read is a miss
+		return {}
+
+
+register(
+	Rule(
+		key="financial_kpi_threshold_breach",
+		title="A financial KPI is past a threshold somebody drew",
+		category="Finance",
+		requires=(KPI_SOURCE_DOCTYPE, "Financial KPI History"),
+		framework=(
+			"No statute. Lender covenants, and this operation's own judgement about what its "
+			"numbers may not do — recorded as thresholds on a Financial KPI Definition rather "
+			"than remembered."
+		),
+		purpose=(
+			"A covenant is breached weeks before anybody notices, because the number that "
+			"breached it lives in a report somebody runs at month end and the covenant lives "
+			"in a document nobody has opened since it was signed. This rule puts the two in "
+			"the same place: the threshold is a field on the KPI, and crossing it lands on "
+			"the same calendar as everything else that needs doing this week."
+		),
+		kairotic_gate=(
+			"THE GATE IS THE VALUE AND NOT A DATE — nothing in this rule counts days, which "
+			"makes it the purest ripeness test in the file. A KPI inside its thresholds "
+			"raises nothing however often the sweep runs; the same KPI raises Warning the "
+			"month its cached figure crosses the warning line and Critical when it crosses "
+			"the critical one, and it AUTO-DISMISSES when the next month's figure comes back "
+			"inside. Nobody closes it, because there was never a task — there was a number. "
+			"It reads the CACHED figure and never computes: the sweep runs hourly beside "
+			"somebody's real work, the overnight refresh fills the cache, and reading it is "
+			"what guarantees an alert and a dashboard can never disagree about the value. A "
+			"KPI with no cached snapshot raises nothing AND DISMISSES NOTHING, which is the "
+			"same reading an absent record gets everywhere else here: a definition created "
+			"this morning is not evidence of anything yet."
+		),
+		regimes=("Internal",),
+		scan=_scan_kpi_thresholds,
+	)
+)
+
+# BUILT-IN, AND THERE IS ONE REASON THAT DECIDES IT: THE THRESHOLDS ARE NOT ON
+# THIS ROW. Every other rule here is tuned by numbers on its own Compliance Rule
+# record — days remaining, days elapsed, a cadence. This rule's thresholds live
+# on each Financial KPI Definition, because they are per-KPI and per-unit: a
+# ratio's warning line and a dollar figure's warning line are not values that can
+# share a column. The record still owns everything an operator would change ABOUT
+# THE RULE — the two severities, the scope filters, the switch — and the numbers
+# that decide a breach are edited where they belong, with
+# update_financial_kpi_definition.
+#
+# THE SECOND REASON IS THAT THE COMPARISON IS AGAINST A DERIVED VALUE. A
+# declarative scan filters and compares fields on a target row; this reads the
+# newest cached snapshot for a (KPI, company, window) tuple and compares it
+# against four nullable bounds whose meaning depends on which of them are set.
+# That is arithmetic, not a filter.
+shape(
+	"financial_kpi_threshold_breach",
+	target_doctype=KPI_SOURCE_DOCTYPE,
+	builtin_scanner="financial_kpi_threshold_breach",
+	requires_doctypes=f"{KPI_SOURCE_DOCTYPE}, Financial KPI History",
+	date_field="",
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_critical=SEVERITY_CRITICAL,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_WARNING,
+	due_date_mode="None",
+	category="Finance",
+	retention_years=7,
+)
+
+
 # ── the scanner registry ────────────────────────────────────────────────────
 #
 # EVERY SHIPPED RULE'S SCAN IS AVAILABLE AS A NAMED SCANNER, not only the seven
