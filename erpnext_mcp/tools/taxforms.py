@@ -21,6 +21,14 @@ because a draft payroll has not been paid, and `Cancelled` because it was not.
 The entry's own two dates are stamped onto every slip on the way through, which
 is what lets the quarterly forms bucket by month.
 
+v0.36.0 ADDED THE PAGE. `render_tax_form_pdf` draws the stored values on the
+face of the form and attaches the result to `generated_pdf`. It reads
+`form_data_json` and never recomputes: a rendering that recalculated would
+produce a page that disagrees with the record it claims to render, which is the
+whole reason the values are stored in the first place. Rendering is therefore a
+read of the arithmetic and a write of one attachment — it moves no status and
+changes no figure.
+
 WHAT THIS DOES NOT DO. File anything. Render an official scannable Copy A.
 Compute a deposit schedule. `mark_tax_form_filed` records that a human filed it
 and what the agency gave back — it is a bookkeeping act, not a transmission.
@@ -32,6 +40,7 @@ import json
 import frappe
 from frappe.utils import now, today
 
+from .. import form_pdf_renderer
 from ..args import as_date, as_int, as_str, resolve_company
 from ..compat import existing_fields
 from ..errors import ToolError
@@ -43,6 +52,7 @@ from ..form_generators import (
 	year_period,
 )
 from ..result import ToolResult
+from . import artifacts
 
 TAX_FORM = "Tax Form"
 PAYROLL_ENTRY = "Farm Payroll Entry"
@@ -59,6 +69,14 @@ FORM_STATE = {"OR-WR": "OR", "OQ": "OR", "WA-ESD": "WA"}
 
 #: Status transitions this app will make. Anything else is refused by name.
 FILEABLE_STATUSES = ("Generated", "Draft")
+
+#: How many forms one bulk render covers. A year of W-2s for a large crew is
+#: the case the default is sized for; the hard maximum matches what
+#: `list_tax_forms` will return, so a caller cannot select more than they can
+#: see. Exceeding either is refused by name rather than truncated — see
+#: `_bulk_selection`.
+BULK_RENDER_DEFAULT_LIMIT = 100
+BULK_RENDER_MAX_LIMIT = 500
 
 
 # ── Read tools ────────────────────────────────────────────────────────────
@@ -336,6 +354,258 @@ def mark_tax_form_filed(args: dict) -> ToolResult:
 		        + (f" (confirmation {confirmation})" if confirmation else ""),
 		docstatus_delta=f"{status} → Filed",
 	)
+
+
+# ── Mutating tools: the printed page ──────────────────────────────────────
+
+
+def render_tax_form_pdf(args: dict) -> ToolResult:
+	"""Draw a Tax Form's stored values on the face of the form and attach it.
+
+	Reads `form_data_json` and renders it. Nothing is recomputed — see the
+	module docstring. The only thing this writes is one private File and the
+	`generated_pdf` link to it.
+	"""
+	form_pdf_renderer.require()
+	name = _resolve_form(args)
+	doc = frappe.get_doc(TAX_FORM, name)
+	overwrite = bool(args.get("overwrite"))
+
+	existing_pdf = str(doc.get("generated_pdf") or "").strip()
+	if existing_pdf and not overwrite:
+		raise ToolError(
+			f"tax form {name} already has a PDF attached at {existing_pdf}. The most "
+			f"likely thing in that field is the copy somebody already reviewed — or the "
+			f"one the agency issued, which nothing here can reproduce. Pass "
+			f"overwrite=true to render a fresh page and repoint the field; the existing "
+			f"File stays attached to the record either way. Nothing was changed."
+		)
+
+	result = _render(doc, args)
+	attachment = artifacts.attach_bytes(
+		TAX_FORM, name, result["file_name"], result["pdf"], field="generated_pdf",
+	)
+
+	data = {
+		"name": name,
+		"form_type": doc.form_type,
+		"company": doc.company,
+		"fiscal_year": str(doc.fiscal_year),
+		"quarter": doc.get("quarter") or None,
+		"status": doc.status,
+		"subject": result["subject"] or None,
+		"warning_count": result["warning_count"],
+		"replaced": existing_pdf or None,
+		"attachment": artifacts.describe_attachment(attachment, result["pdf"]),
+		"note": _RENDER_NOTE,
+	}
+	return ToolResult(
+		data=data,
+		summary=f"{doc.form_type} {name} rendered to {result['file_name']} "
+		        f"({len(result['pdf']):,} bytes) and attached"
+		        + (f", replacing {existing_pdf}" if existing_pdf else "")
+		        + (f" — {result['warning_count']} note(s) printed on it"
+		           if result["warning_count"] else ""),
+	)
+
+
+def bulk_render_tax_form_pdfs(args: dict) -> ToolResult:
+	"""Render PDFs for a set of Tax Forms — every W-2 for a year, say.
+
+	Selection is the same filters `list_tax_forms` takes, or an explicit
+	`names` list. A form that already has a PDF is SKIPPED rather than refused,
+	because one already-rendered form in a batch of ninety should not stop the
+	other eighty-nine; `overwrite` renders it anyway. A form that fails to
+	render is recorded by name with its reason and the run continues, so the
+	result says which ones came out and which did not.
+	"""
+	form_pdf_renderer.require()
+	overwrite = bool(args.get("overwrite"))
+	names, selection = _bulk_selection(args)
+
+	rendered = []
+	skipped = []
+	failed = []
+	for name in names:
+		doc = frappe.get_doc(TAX_FORM, name)
+		existing_pdf = str(doc.get("generated_pdf") or "").strip()
+		if existing_pdf and not overwrite:
+			skipped.append({
+				"name": name,
+				"form_type": doc.form_type,
+				"reason": f"already has a PDF at {existing_pdf}; pass overwrite=true to replace it",
+			})
+			continue
+		try:
+			result = _render(doc, args)
+			attachment = artifacts.attach_bytes(
+				TAX_FORM, name, result["file_name"], result["pdf"], field="generated_pdf",
+			)
+		except Exception as error:
+			failed.append({
+				"name": name,
+				"form_type": doc.form_type,
+				"reason": str(error) or type(error).__name__,
+			})
+			continue
+		rendered.append({
+			"name": name,
+			"form_type": doc.form_type,
+			"subject": result["subject"] or None,
+			"warning_count": result["warning_count"],
+			"replaced": existing_pdf or None,
+			"attachment": artifacts.describe_attachment(attachment, result["pdf"]),
+		})
+
+	parts = [f"{len(rendered)} rendered"]
+	if skipped:
+		parts.append(f"{len(skipped)} skipped")
+	if failed:
+		parts.append(f"{len(failed)} failed")
+
+	return ToolResult(
+		data={
+			"selection": selection,
+			"matched": len(names),
+			"rendered": rendered,
+			"rendered_count": len(rendered),
+			"skipped": skipped,
+			"skipped_count": len(skipped),
+			"failed": failed,
+			"failed_count": len(failed),
+			"note": _RENDER_NOTE,
+		},
+		summary=f"{len(names)} tax form(s) selected — " + ", ".join(parts),
+	)
+
+
+#: Said on every render result, because a page that looks like a W-2 is the
+#: thing somebody is most likely to mistake for a filing.
+_RENDER_NOTE = (
+	"Every page is stamped a working copy and says so twice. It is not a filing, it is "
+	"not an official scannable form, and rendering it moved no status: the form is still "
+	"whatever it was. Use mark_tax_form_filed once a person has actually filed."
+)
+
+
+def _render(doc, args: dict) -> dict:
+	"""One form's PDF and the metadata a result carries about it.
+
+	The stored `form_data_json` IS the input. `company_info` and the recipient
+	block are read fresh only so an address that reached the site after the form
+	was computed can fill a hole the record has — they never displace a figure.
+	"""
+	form_data = _load_form_data(doc.get("form_data_json"))
+	if not form_data:
+		raise ToolError(
+			f"tax form {doc.name} has no computed values, so there is nothing to draw. "
+			f"Run regenerate_tax_form first — a page rendered from an empty record would "
+			f"be a form with every box zero and no way to tell that from a real zero."
+		)
+	if doc.form_type not in form_pdf_renderer.RENDERERS:
+		raise ToolError(
+			f"no PDF layout for form type {doc.form_type!r}. Known forms: "
+			f"{', '.join(sorted(form_pdf_renderer.RENDERERS))}."
+		)
+
+	company_info = _company_info(doc.company, args)
+	subject_info: dict = {}
+	subject = ""
+	if doc.form_type == "W-2" and doc.get("employee"):
+		subject = str(doc.employee)
+		subject_info = _employee_info(subject)
+	elif doc.form_type == "1099-NEC" and doc.get("related_party"):
+		subject = str(doc.related_party)
+		subject_info = _related_party_info(subject)
+
+	pdf = form_pdf_renderer.render_form_pdf(
+		doc.form_type, form_data, company_info, subject_info,
+	)
+	if not pdf.startswith(b"%PDF"):  # pragma: no cover - defensive
+		raise ToolError(
+			f"the renderer produced {len(pdf)} byte(s) that are not a PDF. Nothing was attached."
+		)
+
+	return {
+		"pdf": pdf,
+		"file_name": form_pdf_renderer.file_name_for(doc.form_type, form_data, subject),
+		"subject": subject,
+		"warning_count": len(form_data.get("warnings") or []),
+	}
+
+
+def _bulk_selection(args: dict) -> tuple[list[str], dict]:
+	"""Which forms a bulk run covers, and the filters that chose them.
+
+	A selection that matches nothing is an error rather than an empty success:
+	the likeliest cause is a filter that named a year or a quarter this site has
+	no forms for, and a run that reports "0 rendered" reads like "nothing needed
+	rendering".
+	"""
+	explicit = args.get("names") or args.get("tax_forms")
+	if isinstance(explicit, str):
+		explicit = [part.strip() for part in explicit.split(",") if part.strip()]
+	if explicit:
+		names = [str(item) for item in explicit]
+		missing = [name for name in names if not frappe.db.exists(TAX_FORM, name)]
+		if missing:
+			raise ToolError(
+				f"no Tax Form called {', '.join(repr(name) for name in missing)}. "
+				f"Nothing was rendered."
+			)
+		return names, {"names": names}
+
+	filters: dict = {}
+	selection: dict = {}
+	company = as_str(args, "company")
+	if company:
+		filters["company"] = selection["company"] = resolve_company(company)
+	form_type = as_str(args, "form_type")
+	if form_type:
+		filters["form_type"] = selection["form_type"] = _check_form_type(form_type)
+	fiscal_year = as_str(args, "fiscal_year") or as_str(args, "year")
+	if fiscal_year:
+		filters["fiscal_year"] = selection["fiscal_year"] = str(fiscal_year)
+	quarter = as_str(args, "quarter")
+	if quarter:
+		filters["quarter"] = selection["quarter"] = _check_quarter(quarter)
+	status = as_str(args, "status")
+	if status:
+		filters["status"] = selection["status"] = status
+	employee = as_str(args, "employee")
+	if employee:
+		filters["employee"] = selection["employee"] = _resolve_employee({"employee": employee})
+
+	if not filters:
+		raise ToolError(
+			"bulk_render_tax_form_pdfs needs something to select on — names, or at least "
+			"one of company, form_type, fiscal_year, quarter, status or employee. "
+			"Rendering every form on the site because nobody said which is not a "
+			"reasonable default. Nothing was rendered."
+		)
+
+	limit = as_int(args, "limit", BULK_RENDER_DEFAULT_LIMIT) or BULK_RENDER_DEFAULT_LIMIT
+	limit = min(int(limit), BULK_RENDER_MAX_LIMIT)
+	selection["limit"] = limit
+
+	rows = frappe.db.get_all(
+		TAX_FORM, filters=filters, fields=["name"],
+		limit_page_length=limit + 1,
+		order_by="fiscal_year asc, quarter asc, form_type asc, name asc",
+	)
+	if not rows:
+		raise ToolError(
+			f"no Tax Form matches {selection}. Nothing was rendered — check the year, "
+			f"the quarter and the form type with list_tax_forms."
+		)
+	if len(rows) > limit:
+		raise ToolError(
+			f"more than {limit} Tax Form(s) match {selection}. A bulk render that "
+			f"silently stopped at the limit would look like it had covered everything, "
+			f"so this refuses instead. Raise limit (hard maximum "
+			f"{BULK_RENDER_MAX_LIMIT}) or narrow the filter. Nothing was rendered."
+		)
+	return [str(row["name"]) for row in rows], selection
 
 
 # ── Internal: computation ─────────────────────────────────────────────────

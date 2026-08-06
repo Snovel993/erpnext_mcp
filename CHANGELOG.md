@@ -3,6 +3,68 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.36.0 — 2026-08-05
+
+**Tax Form PDF Rendering.** v0.34.0 computed the boxes. This draws them: a
+letter-size portrait page per form, in the official box and line numbering, with
+the computed value in each box, attached privately to the Tax Form record's
+`generated_pdf` field. Six layouts — **W-2** (Copy B), **1099-NEC** (Copy B),
+**Form 941**, **OR-WR**, **OQ** and the **Washington ESD quarterly report**.
+
+**`erpnext_mcp/form_pdf_renderer.py` is pure**, on the same contract as
+`form_generators.py` and `payroll_calc.py` before it: a form dict and two blocks
+of identifying text go in, PDF bytes come out, no database read and no side
+effect. Which is what lets a test assert that box 1 says `4,000.00` against a
+fixture, rather than that a renderer ran without raising.
+
+**Nothing is recomputed.** The page renders `form_data_json` exactly as it was
+calculated at generation time. That is the whole reason v0.34.0 stored those
+values instead of recomputing them on read, and a renderer that recalculated
+would produce a page disagreeing with the record it claims to render. Rendering
+moves no status and changes no figure — a Filed form can be rendered and stays
+Filed.
+
+**Every page is a working copy and says so twice.** A header note on every page,
+and a footer block naming the agency and the channel the form is really filed
+through: Copy A of a W-2 or a 1099 is red-ink scannable stock or an electronic
+filing (BSO, IRIS/FIRE); 941 goes on the official form with deposits through
+EFTPS; OR-WR through Revenue Online, OQ through Frances Online, the ESD report
+through EAMS. A page that only exists because a forty-employee wage detail
+overflowed carries both as well — the disclaimer is drawn as the last act of
+every page, so a page cannot exist without it.
+
+**The generator's `warnings` print in full**, under *Before this form is filed*
+at the foot of each form. They are the only place a form says which of its
+figures is a floor rather than a figure, and a page that dropped them would look
+more certain than the arithmetic behind it. Four digits of a Social Security
+number and never nine, exactly as v0.34.0 computes them.
+
+**Two tools, both default OFF.** `render_tax_form_pdf` renders one form;
+`bulk_render_tax_form_pdfs` renders a set — every W-2 for a tax year, every 941
+for a company — selected by `names` or by the same filters `list_tax_forms`
+takes. Three refusals worth naming:
+
+* **A form that already has a PDF is refused** unless `overwrite` is passed. That
+  field may hold the copy somebody reviewed, or the one the agency issued, which
+  nothing here can reproduce. Overwriting repoints the field and leaves the
+  earlier File attached — the record gains and never loses.
+* **A form with no computed values is refused** rather than drawn. A page of
+  zeroes from an empty record is indistinguishable from a page of real zeroes.
+* **A bulk selection larger than `limit` is refused, not truncated**, and a bulk
+  run with no selector at all is refused outright. A batch that silently stopped
+  short would look like it had covered everything. Inside a batch the opposite
+  rule applies: a form that already has a PDF is skipped and counted, and one
+  that fails is recorded by name and the run continues, so `rendered`, `skipped`
+  and `failed` between them account for every form matched.
+
+**One new dependency, imported defensively.** `reportlab` draws the pages, and
+joins `shapely`, `h3` and `segno` in being optional at import time: a bench
+without it loses exactly these two tools — which say so by name with the pip
+command to fix it — and every tax form's computed values stay readable through
+`get_tax_form`. The numbers are the deliverable; the page is a convenience. CI
+runs the whole suite without it first, for the same reason it does for the
+geospatial pair.
+
 ## 0.35.0 — 2026-08-05
 
 **Payroll Integration.** v0.30.0 built an engine that could compute a payroll

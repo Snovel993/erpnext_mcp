@@ -135,14 +135,16 @@ bench --site yoursite.localhost migrate
 bench restart          # in development, `bench start` picks it up on its own
 ```
 
-`bench get-app` installs the two declared dependencies (`shapely` and `h3`) into
-the bench's environment along with the app. If yours did not — an offline
-install, a locked-down environment — the five field-boundary tools go quietly
+`bench get-app` installs the declared dependencies (`shapely`, `h3`, `segno` and
+`reportlab`) into the bench's environment along with the app. If yours did not —
+an offline install, a locked-down environment — the affected tools go quietly
 unavailable and say so by name when a client asks for them; everything else
-works. To add them afterwards:
+works. Without `shapely` and `h3` that is the six boundary tools; without
+`reportlab` it is the two that draw a tax form onto a page, and the numbers stay
+readable through `get_tax_form` either way. To add them afterwards:
 
 ```bash
-./env/bin/pip install "shapely>=2.0" "h3>=4.0.0" && bench restart
+./env/bin/pip install "shapely>=2.0" "h3>=4.0.0" "reportlab>=4.0" && bench restart
 ```
 
 `install-app` syncs this app's doctypes and seeds their defaults, so after step 3

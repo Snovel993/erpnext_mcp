@@ -312,6 +312,8 @@
   "allow_generate_tax_form",
   "allow_regenerate_tax_form",
   "allow_mark_tax_form_filed",
+  "allow_render_tax_form_pdf",
+  "allow_bulk_render_tax_form_pdfs",
   "expense_receipt_section",
   "allow_list_expense_receipts",
   "allow_get_expense_receipt",
@@ -2460,6 +2462,20 @@
    "fieldname": "allow_mark_tax_form_filed",
    "fieldtype": "Check",
    "label": "Mark Tax Form Filed"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Draw a Tax Form's stored values on the face of the form and attach the PDF to the record. Recomputes nothing, moves no status, and every page is stamped a working copy — it is not a filing and not an official scannable form.",
+   "fieldname": "allow_render_tax_form_pdf",
+   "fieldtype": "Check",
+   "label": "Render Tax Form PDF"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Render PDFs for a set of Tax Forms at once — every W-2 for a year, say. Skips forms that already have one unless overwrite is passed, and refuses a selection larger than the limit rather than truncating it.",
+   "fieldname": "allow_bulk_render_tax_form_pdfs",
+   "fieldtype": "Check",
+   "label": "Bulk Render Tax Form PDFs"
   },
   {
    "fieldname": "expense_receipt_section",

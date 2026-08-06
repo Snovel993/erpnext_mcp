@@ -34,16 +34,27 @@ classifiers = [
 # written by `render/qr.py` in thirty lines of zlib, so the image an operator
 # archives is byte-identical whichever encoder a bench happens to have.
 #
-# ALL THREE ARE IMPORTED DEFENSIVELY. A bench missing shapely or h3 loses the
-# five geospatial tools; a bench missing every QR encoder loses exactly one —
-# `generate_mobile_login_qr` — and each says so BY NAME with the pip command to
-# fix it, rather than failing to load the other two hundred. `qrcode` is
-# accepted in segno's place where a bench already has it. That is the same
-# promise the rest of the app makes: installing it cannot break a site.
+# The fourth arrived in v0.36.0 with the tax form PDFs. `reportlab` draws a
+# letter-size page of labelled boxes with the computed values in them — a W-2's
+# twenty boxes, Form 941's fifteen lines, the Washington wage detail. The app's
+# own `render/pdf.py` writes flowing text documents and would have had to grow a
+# second layout engine to place a grid; this is the library whose whole job that
+# is, and the six layouts are the only thing in the app that needs it.
+#
+# ALL FOUR ARE IMPORTED DEFENSIVELY. A bench missing shapely or h3 loses the
+# six geospatial tools; a bench missing every QR encoder loses exactly one —
+# `generate_mobile_login_qr`; a bench missing reportlab loses exactly two —
+# `render_tax_form_pdf` and `bulk_render_tax_form_pdfs`, with every tax form's
+# computed values still readable through `get_tax_form`. Each says so BY NAME
+# with the pip command to fix it, rather than failing to load the other three
+# hundred. `qrcode` is accepted in segno's place where a bench already has it.
+# That is the same promise the rest of the app makes: installing it cannot break
+# a site.
 dependencies = [
   "shapely>=2.0",
   "h3>=4.0.0",
   "segno>=1.5",
+  "reportlab>=4.0",
 ]
 
 [project.urls]

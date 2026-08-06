@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 329 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 331 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -7875,6 +7875,85 @@ Identification Number, Washington's ESD account number. It is printed in W-2 box
 15 and at the head of every state return. Without it those print blank, and the
 alternative — an argument the model must be told each time — is worse than a
 field an operator sets once per state.
+
+---
+
+## v0.36.0 — tax form PDF rendering
+
+v0.34.0 computed the boxes. These two draw them: a letter-size portrait page per
+form, in the official box and line numbering, attached privately to the Tax Form
+record's `generated_pdf` field. Six layouts — **W-2** (Copy B), **1099-NEC**
+(Copy B), **Form 941**, **OR-WR**, **OQ** and the **Washington ESD quarterly
+report**.
+
+**Nothing is recomputed.** The page is a rendering of `form_data_json` exactly as
+it was calculated at generation time, so it cannot disagree with the record it
+claims to render — which is the whole reason v0.34.0 stored the values instead of
+recomputing them on read. Rendering moves no status and changes no figure.
+
+**Every page is a working copy and says so twice**: a header note on every page,
+and a footer block naming the agency and the channel the form is really filed
+through. Copy A of a W-2 or a 1099 is red-ink scannable stock or an electronic
+filing (BSO, IRIS/FIRE); 941 goes on the official form with deposits through
+EFTPS; OR-WR through Revenue Online, OQ through Frances Online, the ESD report
+through EAMS. These pages are for the farmer's records, for review before filing,
+and for keying into the portal that does the filing.
+
+**The generator's `warnings` print in full** at the foot of every form, under
+*Before this form is filed*. They are the only place a form says which of its
+figures is a floor rather than a figure, and a page that dropped them would look
+more certain than the arithmetic behind it.
+
+### `render_tax_form_pdf`
+
+**MUTATING (default OFF).** Renders one Tax Form and attaches the PDF.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Tax Form docname (`tax_form` is an alias) |
+| `overwrite` | | Render even though `generated_pdf` is set, repointing the field |
+| `company_address` | | The employer address to print, where the stored form data has none |
+
+**A form that already has a PDF is refused** unless `overwrite` is passed: that
+field may hold the copy somebody reviewed, or the one the agency issued, which
+nothing here can reproduce. Overwriting repoints the field and **leaves the
+earlier File attached** — the record gains and never loses.
+
+**A form with no computed values is refused** rather than drawn. A page of zeroes
+from an empty record is indistinguishable from a page of real zeroes.
+
+### `bulk_render_tax_form_pdfs`
+
+**MUTATING (default OFF).** Renders a set — every W-2 for a tax year, every 941
+for a company.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `names` | | Explicit Tax Form docnames, instead of filters |
+| `company`, `form_type`, `fiscal_year`, `quarter`, `status`, `employee` | | The same filters `list_tax_forms` takes |
+| `overwrite` | | Render forms that already have a PDF |
+| `company_address` | | The employer address to print |
+| `limit` | | Default 100, hard maximum 500 |
+
+**At least one selector is required.** Rendering every form on the site because
+nobody said which is not a default this offers.
+
+**A form that already has a PDF is skipped and counted, not refused** — one
+rendered form should not stop a batch of ninety. A form that fails to render is
+recorded by name with its reason and the run continues, so `rendered`, `skipped`
+and `failed` between them account for every form matched.
+
+**A selection larger than `limit` is refused, not truncated.** A bulk render that
+silently stopped short would look like it had covered everything.
+
+### One optional dependency
+
+`reportlab` draws the pages. It is a declared dependency and a normal install has
+it, but it is imported defensively like `shapely`, `h3` and `segno` before it: a
+bench without it loses exactly these two tools — which say so by name, with the
+pip command to fix it — and nothing else. Every generator and every other tax
+form tool works without it, because the numbers are the deliverable and the page
+is a convenience.
 
 ---
 

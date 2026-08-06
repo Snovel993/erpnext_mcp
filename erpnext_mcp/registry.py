@@ -35,7 +35,7 @@ import json
 
 import frappe
 
-from . import audit, geo, settings
+from . import audit, form_pdf_renderer, geo, settings
 from .compat import doctype_exists, traceback_text
 from .errors import ToolError
 from .render import qr
@@ -182,6 +182,31 @@ def _geo_ready(*doctypes: str):
 	def predicate() -> bool:
 		try:
 			return bool(needs_doctype() and geo.available())
+		except Exception:
+			return False
+
+	return predicate
+
+
+#: v0.36.0. What drawing a tax form needs beyond the doctype. Same shape and
+#: the same reason as `_GEO_REQUIRES`: a bench without reportlab loses these
+#: two tools by name — with the computed values still readable through
+#: `get_tax_form`, because the numbers are the deliverable and the page is a
+#: convenience.
+_TAX_FORM_PDF_REQUIRES = (
+	"the Tax Form DocType (run `bench migrate`) and the reportlab Python package, which "
+	"this app declares as a dependency — install it into the bench's environment with "
+	"`./env/bin/pip install 'reportlab>=4.0'` and restart"
+)
+
+
+def _pdf_form_ready(*doctypes: str):
+	"""Predicate: this site has the doctype AND can draw a PDF form."""
+	needs_doctype = _needs_doctype(*doctypes)
+
+	def predicate() -> bool:
+		try:
+			return bool(needs_doctype() and form_pdf_renderer.available())
 		except Exception:
 			return False
 
@@ -11582,6 +11607,78 @@ TOOLS = {
 		title="Mark tax form filed",
 		available=_needs_doctype("Tax Form"),
 		requires="the Tax Form doctype (run bench migrate after installing v0.34.0)",
+	),
+	# ── v0.36.0: Tax Form PDF rendering ─────────────────────────────────────
+	"render_tax_form_pdf": _tool(
+		taxforms.render_tax_form_pdf,
+		"MUTATING (default OFF). Draw a Tax Form's STORED values on the face "
+		"of the form — official box and line numbering, letter size — and "
+		"attach the PDF privately to the record's generated_pdf field.\n\n"
+		"NOTHING IS RECOMPUTED. The page is a rendering of form_data_json as "
+		"it was calculated at generation time, so it cannot disagree with the "
+		"record it claims to render. Rendering moves no status.\n\n"
+		"WORKING COPY ONLY. Every page is stamped as one and names where the "
+		"form is really filed. Copy A of a W-2 or 1099 is red-ink scannable "
+		"stock or an electronic filing; the state returns go through Frances "
+		"Online and EAMS. This produces the copy a person reviews and keys "
+		"from.\n\n"
+		"REFUSES a form that already has a PDF unless overwrite is passed — "
+		"that field may hold the copy somebody reviewed, or the one the agency "
+		"issued. The existing File stays attached either way.",
+		{
+			"name": _field(_STRING, "The Tax Form docname."),
+			"tax_form": _field(_STRING, "Alias for name."),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Render even though generated_pdf is already set, repointing the field. "
+				"The File that was there stays attached to the record.",
+			),
+			"company_address": _field(
+				_STRING,
+				"The employer address to print, where the stored form data has none. "
+				"ERPNext does not keep an address on Company.",
+			),
+		},
+		mutating=True,
+		title="Render tax form PDF",
+		available=_pdf_form_ready("Tax Form"),
+		requires=_TAX_FORM_PDF_REQUIRES,
+	),
+	"bulk_render_tax_form_pdfs": _tool(
+		taxforms.bulk_render_tax_form_pdfs,
+		"MUTATING (default OFF). Render PDFs for a set of Tax Forms at once — "
+		"every W-2 for a tax year, every 941 for a company — and attach each "
+		"to its own record.\n\n"
+		"SELECTION is `names`, or the same filters list_tax_forms takes. At "
+		"least one is required: rendering every form on the site because "
+		"nobody said which is not a default this offers.\n\n"
+		"A form that already has a PDF is SKIPPED and counted, not refused — "
+		"one rendered form should not stop a batch. One that fails to render "
+		"is recorded by name with its reason and the run continues, so the "
+		"result says which came out and which did not.\n\n"
+		"REFUSES a selection larger than `limit` rather than truncating it: a "
+		"bulk render that silently stopped short would look like it had "
+		"covered everything.",
+		{
+			"names": _field(_STRING_ARRAY, "Explicit Tax Form docnames, instead of filters."),
+			"company": _COMPANY,
+			"form_type": _field(_STRING, "W-2, 1099-NEC, 941, OR-WR, OQ, or WA-ESD."),
+			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias."),
+			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Quarterly forms only."),
+			"status": _field(_STRING, "Draft, Generated, Filed, or Amended."),
+			"employee": _field(_STRING, "Only the forms for one employee."),
+			"overwrite": _field(_BOOLEAN, "Render forms that already have a PDF, repointing the field."),
+			"company_address": _field(_STRING, "The employer address to print, where the form data has none."),
+			"limit": _field(
+				_INTEGER,
+				"Maximum forms one run covers. Default 100, hard maximum 500. A larger "
+				"selection is refused, not truncated.",
+			),
+		},
+		mutating=True,
+		title="Bulk render tax form PDFs",
+		available=_pdf_form_ready("Tax Form"),
+		requires=_TAX_FORM_PDF_REQUIRES,
 	),
 }
 

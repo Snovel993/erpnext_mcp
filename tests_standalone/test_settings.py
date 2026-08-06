@@ -9,7 +9,7 @@ build.
 
 import json
 
-from erpnext_mcp import geo, packets, registry, settings
+from erpnext_mcp import form_pdf_renderer, geo, packets, registry, settings
 from erpnext_mcp.erpnext_mcp.doctype.erpnext_mcp_settings.erpnext_mcp_settings import (
 	TOKEN_LENGTH,
 )
@@ -33,6 +33,16 @@ GEO_TOOLS = (
 	"find_fields_containing_point",
 	"find_fields_by_h3_cell",
 	"import_field_boundary_geojson",
+)
+
+#: v0.36.0. Tools that need reportlab, for the same reason and with the same
+#: promise: a declared dependency a normal install has, and two tools that go
+#: quietly unavailable on a bench that does not. Every other tax form tool keeps
+#: working there — the computed values are the deliverable and the page is a
+#: convenience — which is what makes this a two-name list rather than a section.
+PDF_TOOLS = (
+	"render_tax_form_pdf",
+	"bulk_render_tax_form_pdfs",
 )
 
 
@@ -514,6 +524,8 @@ class SelfTest(SeededTestCase):
 		out = list(HR_TOOLS)
 		if not geo.available():
 			out += list(GEO_TOOLS)
+		if not form_pdf_renderer.available():
+			out += list(PDF_TOOLS)
 		return out
 
 	def test_it_reports_not_ready_when_disabled(self):
