@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_three_hundred_twenty_one_tools_one_hundred_forty_nine_read_one_hundred_seventy_two_write(
+	def test_catalogue_is_three_hundred_twenty_six_tools_one_hundred_fifty_one_read_one_hundred_seventy_five_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -581,6 +581,14 @@ class Catalogue(SeededTestCase):
 		on every single call: a parcel had no boundary, so nothing checked that
 		the block sat inside its parcel.
 
+		v0.34.0 ADDED FIVE — two reads and three writes — for the tax form
+		generators: list_tax_forms and get_tax_form read; generate_tax_form,
+		regenerate_tax_form and mark_tax_form_filed write. `regenerate` is a
+		separate tool from `generate` rather than an argument on it because
+		recomputing a form REPLACES what an employer told an agency, and a
+		switch an operator can leave off is the only honest way to express
+		that.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -588,9 +596,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 321)
-		self.assertEqual(len(registry.READ_TOOLS), 149)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 172)
+		self.assertEqual(len(registry.TOOLS), 326)
+		self.assertEqual(len(registry.READ_TOOLS), 151)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 175)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

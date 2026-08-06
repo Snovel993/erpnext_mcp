@@ -3,6 +3,82 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.34.0 — 2026-08-05
+
+**Tax Form Generators.** Three releases put the arithmetic in place — federal
+withholding (v0.28.0), the Oregon and Washington engines (v0.29.0), salary
+structures and the payroll engine (v0.30.0). This one turns a year or a quarter
+of it into the six forms an agricultural employer in those two states actually
+files: **W-2**, **1099-NEC**, **Form 941**, **Oregon OR-WR**, **Oregon OQ** and
+the **Washington ESD quarterly report**.
+
+**`erpnext_mcp/form_generators.py` is pure**, on the same contract as
+`payroll_calc.py` and `withholding.py`: no database reads, no side effects,
+every input an argument. A W-2 can be computed from a fixture and checked
+against a number somebody worked out on paper, which is the only way an
+arithmetic claim about somebody's wages is worth making.
+
+**Every form carries a `warnings` list, and it is the part to read first.**
+Three things a generator cannot work out for itself, each of which is a real
+limit rather than an unfinished edge, and each of which says so on the form
+rather than quietly picking a number:
+
+* **Which state a dollar was earned in.** A slip carries one `work_state` — the
+  state the worker spent the most hours in — but a cross-state pay period
+  allocates gross between the two. The slip's `state_wages` is that allocation
+  when the caller has it; without it the whole gross lands on `work_state`, and
+  only a slip that genuinely ran two engines raises the flag.
+* **Year-to-date wages before the first slip in hand.** The Social Security wage
+  base and Washington's UI taxable wage base are annual per-employee caps, and a
+  quarterly form cannot see the quarters before it. Absent
+  `ytd_wages_by_employee` the cap is applied to the quarter alone — exactly
+  right for Q1, and an overstatement in every quarter after it. The form says
+  which it was.
+* **Additional Medicare, separately.** A slip's `medicare` is the ordinary 1.45%
+  and the 0.9% surcharge added together, because that is what comes out of a
+  paycheck. Form 941 line 5d needs the surcharge on its own, and where the two
+  were never stored apart the line is zero and the form says why.
+
+**The wage bases are consumed employee by employee, not against the company
+total.** Two workers at $100,000 each are $200,000 of Social Security wages on a
+941, not $176,100 — applying an annual per-person ceiling to a company's grand
+total would let one high earner's headroom absorb everybody else's excess. It is
+the kind of mistake that produces a plausible number and an assessment letter.
+
+**`form_data_json` is written once and read back verbatim.** A filed form is a
+statement about what an employer told an agency, on a date. Payroll gets
+corrected — a slip is amended, a shift's hours are fixed, a rate changes — and a
+`get_tax_form` that recomputed from today's data would quietly return a
+different W-2 than the one in the envelope. `regenerate_tax_form` is a separate
+tool behind a separate switch, and it reports what moved: which value, from
+what, to what. It refuses a Filed form unless `allow_filed` is passed, because
+recomputing one replaces the record of what was actually sent.
+
+**Only `Calculated` and `Submitted` payroll entries are counted.** A `Draft`
+payroll has not been paid and a `Cancelled` one was not.
+
+**Nothing here files anything.** No transmission, no official scannable Copy A,
+no deposit schedule. The tools compute box and line values; a person reads them
+onto the real form or into the agency's portal, and `mark_tax_form_filed`
+records that they did, with whatever confirmation number came back. Filing the
+same form twice is refused — it would overwrite the date and confirmation of the
+filing that actually happened.
+
+**Social Security numbers stay four digits.** Every form prints `XXX-XX-1234`,
+read off the I-9 — the one record on this site that legitimately holds any of
+it — and the person filing completes the rest from the paper. Same judgement as
+`generate_1099_prefill` made in v0.11.0, for the same reason.
+
+**One new DocType, `Tax Form`**, and one new field on `State Tax Configuration`:
+`employer_account_number`, which is Oregon's BIN and Washington's ESD account
+number. Without it every state return prints a blank where its account number
+goes, and the alternative — an argument the model must be told each time — is
+worse than a field an operator sets once.
+
+**Five new tools** (326 total: 151 read, 175 mutating): `list_tax_forms` and
+`get_tax_form` read; `generate_tax_form`, `regenerate_tax_form` and
+`mark_tax_form_filed` write, all three default OFF.
+
 ## 0.33.0 — 2026-08-05
 
 **Interactive Map Drawing + Wasco County GIS Import.** v0.32.0 put a map on seven

@@ -11,6 +11,7 @@
   "state",
   "tax_year",
   "status",
+  "employer_account_number",
   "or_section",
   "or_income_tax_enabled",
   "or_transit_tax_rate",
@@ -75,6 +76,12 @@
    "in_standard_filter": 1,
    "label": "Status",
    "options": "Active\nSuperseded"
+  },
+  {
+   "description": "The employer's account number with this state's revenue agency — Oregon's Business Identification Number (BIN), Washington's ESD account number. Printed on W-2 box 15 and at the head of every state return. v0.34.0.",
+   "fieldname": "employer_account_number",
+   "fieldtype": "Data",
+   "label": "Employer Account Number"
   },
   {
    "depends_on": "eval:doc.state=='OR'",

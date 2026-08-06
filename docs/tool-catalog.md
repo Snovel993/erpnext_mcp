@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 321 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 326 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 149 read tools are **on** by default and can be switched off individually. A
+All 151 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7708,6 +7708,173 @@ boundary by hand needs no network at all. Leaflet, Leaflet.draw and both
 stylesheets are still fetched from a CDN when a form that needs them is opened —
 there is no `app_include_js` or `app_include_css`, so the draw plugin is not
 fetched at all on the four read-only map forms.
+
+---
+
+## v0.34.0 — tax form generators
+
+Three releases put the arithmetic in place: federal withholding (v0.28.0), the
+Oregon and Washington engines (v0.29.0), salary structures and the payroll engine
+(v0.30.0). These turn a year or a quarter of it into the six forms an
+agricultural employer in those two states actually files.
+
+| Form | Scope | Agency | Due |
+| --- | --- | --- | --- |
+| `W-2` | one employee, one calendar year | IRS | 31 January |
+| `1099-NEC` | one contractor, one calendar year | IRS | 31 January |
+| `941` | one company, one quarter | IRS | 30 Apr / 31 Jul / 31 Oct / **31 Jan** |
+| `OR-WR` | one company, one year | Oregon DOR | 31 January |
+| `OQ` | one company, one quarter | Oregon DOR / OED | as 941 |
+| `WA-ESD` | one company, one quarter | WA Employment Security | as 941 |
+
+**Nothing here files anything.** No transmission, no official scannable Copy A,
+no deposit schedule. What comes out is box and line values with the inputs that
+made them; a person reads them onto the real form or into the agency's portal.
+
+### The generators are pure
+
+`erpnext_mcp/form_generators.py` reads no database and has no side effects, on
+the same contract as `payroll_calc.py`. A W-2 can be computed from a fixture and
+checked against a number somebody worked out on paper — which is the only way an
+arithmetic claim about somebody's wages is worth making.
+
+### `warnings` is the part to read first
+
+Every form returns one, and it is where the form says which of its numbers is a
+floor rather than a figure. Three things a generator cannot work out for itself:
+
+* **Which state a dollar was earned in.** A slip carries one `work_state`, but a
+  cross-state pay period splits gross between two. The slip's `state_wages` is
+  that allocation where the caller has it; without it the whole gross lands on
+  `work_state`. Only a slip that genuinely ran two state engines raises the flag
+   — a single-state slip has nothing to get wrong.
+* **Year-to-date wages before the first slip in hand.** The Social Security wage
+  base and Washington's UI taxable wage base are annual per-employee caps, and a
+  quarterly form cannot see the quarters before it. Pass
+  `ytd_wages_by_employee`; without it the cap applies to the quarter alone,
+  which is exactly right for Q1 and an overstatement after it.
+* **Additional Medicare, separately.** A slip's `medicare` is the ordinary 1.45%
+  and the 0.9% surcharge added together, because that is what comes out of a
+  paycheck. Line 5d needs the surcharge alone, and where the two were never
+  stored apart the line is zero and says so.
+
+### The wage bases are consumed per employee
+
+Two workers at $100,000 each are **$200,000** of Social Security wages on a 941,
+not $176,100. An annual per-person ceiling applied to a company's grand total
+would let one high earner's headroom absorb everybody else's excess — a mistake
+that produces a plausible number and an assessment letter.
+
+### What is stored is what was computed, then
+
+`form_data_json` is written once at generation and read back verbatim. A filed
+form is a statement about what an employer told an agency, on a date; payroll
+gets corrected afterwards, and a `get_tax_form` that recomputed from today's
+data would quietly return a different W-2 than the one in the envelope.
+
+### `list_tax_forms`
+
+**READ (default ON).** Forms filtered by `form_type`, `fiscal_year`, `quarter`,
+`employee`, `company` and `status`. Returns `by_status` alongside the rows, which
+is the answer to "what is still outstanding for this quarter".
+
+| Parameter | Required | Description |
+|---|---|---|
+| `company` | | Company name or abbreviation |
+| `form_type` | | `W-2`, `1099-NEC`, `941`, `OR-WR`, `OQ` or `WA-ESD` |
+| `fiscal_year` | | Calendar year as `YYYY` (`year` is an alias) |
+| `quarter` | | `Q1`–`Q4` |
+| `employee` | | Only the forms for one employee |
+| `status` | | `Draft`, `Generated`, `Filed` or `Amended` |
+| `limit` | | Default 100, hard maximum 500 |
+
+### `get_tax_form`
+
+**READ (default ON).** One form in full, including every computed box and line
+value **as it was calculated at generation time**. `form_data.warnings` first.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Tax Form docname (`tax_form` is an alias) |
+
+### `generate_tax_form`
+
+**MUTATING (default OFF).** Computes a form from the payroll already in the
+system and records it as a Tax Form in `Generated` status.
+
+Only **`Calculated` and `Submitted`** payroll entries are counted — a `Draft`
+payroll has not been paid and a `Cancelled` one was not.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `form_type` | yes | `W-2`, `1099-NEC`, `941`, `OR-WR`, `OQ` or `WA-ESD` |
+| `fiscal_year` | yes | Calendar year as `YYYY` (`year` is an alias) |
+| `company` | | Required on a multi-company site |
+| `quarter` | | Required for `941`, `OQ` and `WA-ESD`; refused on the annual forms |
+| `employee` | | Required for a `W-2` |
+| `related_party` | | Required for a `1099-NEC` |
+| `company_address` | | The employer address to print — ERPNext does not store one on Company |
+| `state_ids` | | `{"OR": "1234567-8"}`, overriding the State Tax Configuration |
+| `ui_rate` | | The state's assigned unemployment-insurance rate, as a percent |
+| `deposits` | | Form 941 line 13 — total federal deposits for the quarter |
+| `ytd_wages_by_employee` | | `{"HR-EMP-00001": 42000}` — prior-period wages, for the wage bases |
+| `oq_reported` | | `OR-WR` only: what was actually filed on each OQ, the thing it reconciles against |
+| `notes` | | Stored on the form |
+
+**A quarter on an annual form is refused rather than ignored.** Ignoring it would
+produce a year's figures under a quarter's label, which is the one way this tool
+could be wrong and look right.
+
+**A second form for the same period and recipient is refused** while the first is
+not `Amended`, and the error names the existing docname. The guard is per
+recipient, so two employees get their own W-2s and each quarter gets its own 941.
+
+### `regenerate_tax_form`
+
+**MUTATING (default OFF).** Recomputes an existing form from current payroll —
+after a slip was corrected, a rate changed, or a missing shift was added. Returns
+`changes`: which values moved, `was`, `now` and `delta`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Tax Form docname (`tax_form` is an alias) |
+| `allow_filed` | | Recompute even though the form is `Filed` |
+| everything `generate_tax_form` takes bar the identifying ones | | Re-supplied per run |
+
+**A `Filed` form is refused unless `allow_filed` is passed**, because recomputing
+one replaces the record of what was actually sent to the agency. An `Amended`
+form is refused outright — regenerate its successor.
+
+### `mark_tax_form_filed`
+
+**MUTATING (default OFF).** Records that a form was filed: status to `Filed`, the
+filing date, and whatever the agency gave back.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Tax Form docname (`tax_form` is an alias) |
+| `filed_date` | | `YYYY-MM-DD`. Defaults to today |
+| `confirmation_number` | | An EFTPS trace number, a Frances Online confirmation, an ESD receipt |
+| `notes` | | Stored on the form |
+
+**This transmits nothing.** Filing the same form twice is refused: it would
+overwrite the date and confirmation number of the filing that actually happened.
+
+### Four digits, never nine
+
+Every form prints `XXX-XX-1234`, read off the I-9 — the one record on this site
+that legitimately holds any of a Social Security number, and even there it stores
+four digits. The person filing completes the rest from the paper. Same judgement
+`generate_1099_prefill` made in v0.11.0, for the same reason: nine stored digits
+would trade a real breach risk for a saved minute.
+
+### One field on an existing doctype
+
+`State Tax Configuration` gains `employer_account_number` — Oregon's Business
+Identification Number, Washington's ESD account number. It is printed in W-2 box
+15 and at the head of every state return. Without it those print blank, and the
+alternative — an argument the model must be told each time — is worse than a
+field an operator sets once per state.
 
 ---
 

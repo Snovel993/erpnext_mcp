@@ -302,6 +302,13 @@
   "allow_deactivate_salary_structure",
   "allow_calculate_payroll",
   "allow_submit_payroll",
+  "tax_form_section",
+  "allow_list_tax_forms",
+  "allow_get_tax_form",
+  "tax_form_col",
+  "allow_generate_tax_form",
+  "allow_regenerate_tax_form",
+  "allow_mark_tax_form_filed",
   "expense_receipt_section",
   "allow_list_expense_receipts",
   "allow_get_expense_receipt",
@@ -2385,6 +2392,50 @@
    "fieldname": "allow_submit_payroll",
    "fieldtype": "Check",
    "label": "Submit Payroll"
+  },
+  {
+   "fieldname": "tax_form_section",
+   "fieldtype": "Section Break",
+   "label": "Tax Form Generators"
+  },
+  {
+   "default": "1",
+   "description": "READ. List generated tax forms with filters by type, year, quarter, employee and status.",
+   "fieldname": "allow_list_tax_forms",
+   "fieldtype": "Check",
+   "label": "List Tax Forms"
+  },
+  {
+   "default": "1",
+   "description": "READ. Get one tax form with every computed box and line value as it was calculated at generation time.",
+   "fieldname": "allow_get_tax_form",
+   "fieldtype": "Check",
+   "label": "Get Tax Form"
+  },
+  {
+   "fieldname": "tax_form_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Compute a W-2, 1099-NEC, 941, OR-WR, OQ or WA-ESD from the payroll already in the system and record it as a Tax Form. Files nothing.",
+   "fieldname": "allow_generate_tax_form",
+   "fieldtype": "Check",
+   "label": "Generate Tax Form"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Recompute an existing tax form from current payroll data and report which values moved. Refuses a Filed form unless allow_filed is passed.",
+   "fieldname": "allow_regenerate_tax_form",
+   "fieldtype": "Check",
+   "label": "Regenerate Tax Form"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Record that a form was filed with the agency — status, filing date and confirmation number. Transmits nothing.",
+   "fieldname": "allow_mark_tax_form_filed",
+   "fieldtype": "Check",
+   "label": "Mark Tax Form Filed"
   },
   {
    "fieldname": "expense_receipt_section",

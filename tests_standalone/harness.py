@@ -1036,6 +1036,8 @@ APP_DOCTYPES = {
 	# v0.32.0. The crew's track. Standalone rather than a child table of the
 	# shift, and `shift_location_log.py` argues why.
 	"Shift Location Log": "shift_location_log",
+	# v0.34.0. The filing register.
+	"Tax Form": "tax_form",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -1459,6 +1461,11 @@ CHILD_TABLES = {
 	# `get_expense_receipt` returning the same four keys on a freshly built
 	# document and on one re-read from the store a test rather than a hope.
 	("Expense Receipt", "items"): "Expense Receipt Item",
+	# v0.34.0. The tax form generators read a pay period's slips back off the
+	# entry with `frappe.get_doc`, so the double has to store them as child rows
+	# of the doctype they belong to or a W-2 built from a seeded payroll entry
+	# would be testing a list of dicts the framework would never have produced.
+	("Farm Payroll Entry", "slips"): "Farm Payroll Slip",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as

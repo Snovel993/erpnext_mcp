@@ -740,6 +740,14 @@ _PRECIOUS_DOCTYPES = (
 		"is what answers a re-entry-interval question and a disputed timesheet alike, and "
 		"a measurement nobody kept cannot be taken again",
 	),
+	(
+		"Tax Form",
+		"the filing register — every W-2, 1099-NEC, 941, OR-WR, OQ and WA-ESD that was "
+		"computed, holding the box and line values exactly as they stood when it was "
+		"generated rather than as today's payroll would recompute them, when it was "
+		"filed, and what the agency gave back. The record of what an employer told the "
+		"IRS and two states, on a date",
+	),
 )
 
 #: Doctypes that go with the app and are NOT worth warning about, with why. The

@@ -86,6 +86,7 @@ from .tools import (
 	shifts,
 	state_tax,
 	tax,
+	taxforms,
 	trade,
 	training,
 	uploads,
@@ -11358,6 +11359,137 @@ TOOLS = {
 		title="List asset state change history",
 		available=_needs_doctype("Asset Register"),
 		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.34.0: Tax Form Generators ────────────────────────────────────────
+	"list_tax_forms": _tool(
+		taxforms.list_tax_forms,
+		"Generated tax forms, filtered by form type, tax year, quarter, "
+		"employee and status. Returns each form's period, recipient and "
+		"filing state, plus a count by status — which is the answer to "
+		"'what is still outstanding for this quarter'. Read-only.",
+		{
+			"company": _COMPANY,
+			"form_type": _field(_STRING, "W-2, 1099-NEC, 941, OR-WR, OQ, or WA-ESD."),
+			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias."),
+			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Quarterly forms only."),
+			"employee": _field(_STRING, "Only the forms for one employee."),
+			"status": _field(_STRING, "Draft, Generated, Filed, or Amended."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("Tax Form"),
+		requires="the Tax Form doctype (run bench migrate after installing v0.34.0)",
+		title="List tax forms",
+	),
+	"get_tax_form": _tool(
+		taxforms.get_tax_form,
+		"One tax form in full, including EVERY computed box and line value as "
+		"it was calculated at generation time — not recomputed from today's "
+		"payroll. Read `form_data.warnings` first: it names every figure the "
+		"generator had to assume rather than know. Read-only.",
+		{
+			"name": _field(_STRING, "The Tax Form docname."),
+			"tax_form": _field(_STRING, "Alias for name."),
+		},
+		available=_needs_doctype("Tax Form"),
+		requires="the Tax Form doctype (run bench migrate after installing v0.34.0)",
+		title="Get tax form",
+	),
+	"generate_tax_form": _tool(
+		taxforms.generate_tax_form,
+		"MUTATING (default OFF). Compute a tax form from the payroll already "
+		"in the system and record it as a Tax Form in Generated status.\n\n"
+		"W-2 and 1099-NEC are per recipient per calendar year; 941, OQ and "
+		"WA-ESD are per company per quarter; OR-WR is per company per year. "
+		"Only Calculated and Submitted payroll entries are counted — a Draft "
+		"payroll has not been paid.\n\n"
+		"REFUSES: a second form for the same period and recipient while the "
+		"first is not Amended (use regenerate_tax_form); a quarter on an "
+		"annual form, or an annual form with no quarter.\n\n"
+		"FILES NOTHING. It computes box and line values. A person reads them "
+		"onto the real form or into the agency's portal.",
+		{
+			"form_type": _field(_STRING, "W-2, 1099-NEC, 941, OR-WR, OQ, or WA-ESD."),
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias."),
+			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Required for 941, OQ and WA-ESD."),
+			"employee": _field(_STRING, "Employee docname or name. Required for a W-2."),
+			"related_party": _field(_STRING, "Related Party docname. Required for a 1099-NEC."),
+			"company_address": _field(_STRING, "The employer address to print. Not stored on Company."),
+			"state_ids": _field(
+				_OBJECT,
+				"Employer state account numbers, e.g. {\"OR\": \"1234567-8\"}. "
+				"Overrides what is on the State Tax Configuration.",
+			),
+			"ui_rate": _field(_NUMBER, "The state's assigned unemployment-insurance rate, as a percent."),
+			"deposits": _field(_NUMBER, "Form 941 line 13 — total federal deposits made for the quarter."),
+			"ytd_wages_by_employee": _field(
+				_OBJECT,
+				"Prior-period wages per employee, e.g. {\"HR-EMP-00001\": 42000}. Lets "
+				"the Social Security and UI wage bases be applied correctly in Q2 onward.",
+			),
+			"oq_reported": _field(
+				_OBJECT,
+				"OR-WR only. What was actually filed on each OQ, e.g. "
+				"{\"Q1\": {\"or_income_tax\": 1200, \"or_transit_tax\": 40}} — the thing "
+				"OR-WR reconciles against.",
+			),
+			"notes": _field(_STRING, "Optional notes stored on the form."),
+		},
+		required=("form_type", "fiscal_year"),
+		mutating=True,
+		title="Generate tax form",
+		available=_needs_doctype("Tax Form"),
+		requires="the Tax Form doctype (run bench migrate after installing v0.34.0)",
+	),
+	"regenerate_tax_form": _tool(
+		taxforms.regenerate_tax_form,
+		"MUTATING (default OFF). Recompute an existing tax form from current "
+		"payroll data — after a slip was corrected, a rate changed, or a "
+		"missing shift was added. Returns `changes`: which values moved, from "
+		"what to what.\n\n"
+		"REFUSES a Filed form unless allow_filed is passed, because "
+		"recomputing one replaces the record of what was actually sent to the "
+		"agency. Refuses an Amended form outright — regenerate its successor.",
+		{
+			"name": _field(_STRING, "The Tax Form docname."),
+			"tax_form": _field(_STRING, "Alias for name."),
+			"allow_filed": _field(_BOOLEAN, "Recompute even though the form is Filed."),
+			"company_address": _field(_STRING, "The employer address to print."),
+			"state_ids": _field(_OBJECT, "Employer state account numbers."),
+			"ui_rate": _field(_NUMBER, "The state's assigned unemployment-insurance rate, as a percent."),
+			"deposits": _field(_NUMBER, "Form 941 line 13 — total federal deposits for the quarter."),
+			"ytd_wages_by_employee": _field(_OBJECT, "Prior-period wages per employee."),
+			"oq_reported": _field(_OBJECT, "OR-WR only. What was filed on each OQ."),
+		},
+		mutating=True,
+		title="Regenerate tax form",
+		available=_needs_doctype("Tax Form"),
+		requires="the Tax Form doctype (run bench migrate after installing v0.34.0)",
+	),
+	"mark_tax_form_filed": _tool(
+		taxforms.mark_tax_form_filed,
+		"MUTATING (default OFF). Record that a form was filed with the agency: "
+		"sets status to Filed, stores the filing date and whatever confirmation "
+		"the agency gave back.\n\n"
+		"THIS TRANSMITS NOTHING. It is the bookkeeping act after a human filed. "
+		"Only a Generated or Draft form can be marked Filed, and filing one "
+		"twice is refused — it would overwrite the date and confirmation of the "
+		"filing that actually happened.",
+		{
+			"name": _field(_STRING, "The Tax Form docname."),
+			"tax_form": _field(_STRING, "Alias for name."),
+			"filed_date": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"confirmation_number": _field(
+				_STRING,
+				"Whatever the agency returned — an EFTPS trace number, a Frances "
+				"Online confirmation, an ESD receipt. `confirmation` is an alias.",
+			),
+			"notes": _field(_STRING, "Optional notes stored on the form."),
+		},
+		mutating=True,
+		title="Mark tax form filed",
+		available=_needs_doctype("Tax Form"),
+		requires="the Tax Form doctype (run bench migrate after installing v0.34.0)",
 	),
 }
 
