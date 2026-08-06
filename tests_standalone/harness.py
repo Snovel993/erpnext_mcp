@@ -1058,6 +1058,9 @@ APP_DOCTYPES = {
 	"Budget": "budget",
 	"Budget Line Item": "budget_line_item",
 	"Budget KPI Target": "budget_kpi_target",
+	# v0.43.0. Which trained model is deployed for which company and which
+	# piecework activity.
+	"ML Model": "ml_model",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

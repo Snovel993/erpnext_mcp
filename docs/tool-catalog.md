@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 362 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 369 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 167 read tools are **on** by default and can be switched off individually. A
+All 170 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -8954,6 +8954,89 @@ overnight or scanned for variance alerts.
 
 ---
 
+## v0.43.0 — ML Model Registry
+
+Seven tools. Volume Vision (the training side) trains models and holds the
+weights; this app never sees a weight and never computes a metric. What ERPNext
+adds is the one fact Volume Vision has no reason to know: which trained model
+is **deployed** for one company and one piecework activity — the record
+`get_active_model` is queried against by an iOS app (BucketLog, Farm Ops)
+deciding what to pull.
+
+**The arithmetic is not in the tool layer.** `model_registry.py` is pure and
+reads no database, the same split `budget_engine.py` keeps:
+`validate_model_registration` checks a candidate record's shape,
+`build_model_manifest` reshapes an ERPNext record into Volume Vision's own
+`to_dict()` shape (`uuid`/`name`/`class_names`/`metadata`), and
+`check_model_conflicts` says what activating a candidate would supersede.
+`tools/ml_model.py` is the only place that reads or writes an ML Model
+document.
+
+### `register_model`
+
+```json
+{"model_name": "Cherry Fill Detection", "version": "3.2",
+ "company": "Highland Orchards", "piecework_activity": "bucket_fill_detection",
+ "source_uuid": "4b6f6e1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
+ "source_server": "http://umbrel.local:8095",
+ "model_kind": "Detection", "model_format": "CoreML",
+ "class_names": ["empty", "partial", "full"],
+ "metrics": {"accuracy": 0.94}}
+```
+
+**MUTATING (default OFF).** Creates an ML Model record. Starts as `Draft` —
+`activate_model` is what makes it the model an iOS app pulls. Refuses a
+duplicate `(company, model_name, version)`; `update_model` edits the existing
+record instead.
+
+### `update_model`
+
+Edits metadata in place. `status`, `company` and `piecework_activity` **cannot
+be changed here** — `activate_model`/`deprecate_model` own status, and a
+model's company and activity are the identity a caller resolves the record by,
+not a field being renamed out from under an in-flight lookup. `class_names`
+and `metrics`, if passed, replace the whole value.
+
+### `get_model` / `list_models`
+
+Read-only. `get_model` returns one record in full, resolved by docname or by
+`model_name` (narrowed with `company`/`version` when more than one matches);
+`list_models` is the register, filterable by `company`, `status` and
+`piecework_activity`.
+
+### `activate_model`
+
+**MUTATING (default OFF).** Sets `status=Active` and `deployed_at=now`.
+Whichever **other** model was Active for the same `(company,
+piecework_activity)` auto-transitions to `Deprecated` — never more than one
+model is Active for one activity at one company, which is what
+`get_active_model` reads. The invariant is enforced twice: this tool computes
+and reports what it is superseding before saving, and the DocType controller
+separately guarantees the database cannot disagree, regardless of which door a
+save came through. Activating an already-Active model is a no-op that still
+refreshes `deployed_at`.
+
+### `deprecate_model`
+
+**MUTATING (default OFF).** Sets `status=Deprecated`. Nothing is deleted — a
+deprecated model keeps every field it had and simply stops being returned by
+`get_active_model`.
+
+### `get_active_model`
+
+Read-only. **The tool an iOS app queries** to find out which model to pull for
+one company and one piecework activity:
+
+```json
+{"company": "Highland Orchards", "piecework_activity": "bucket_fill_detection"}
+```
+
+Returns the full record and its manifest when a model is Active; a clear
+`"active": false` result — **not an error** — when none is, so a scanning app
+polling at startup does not have to treat "nothing deployed yet" as a failure.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -8965,7 +9048,7 @@ Everything a tool needs is in two places:
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
    `shifts`, `heat`, `kpi`, `kpidefs`, `payroll`, `payroll_gl`, `visits`,
-   `sessions`, `rules`, `tasktemplates`, `budget`,
+   `sessions`, `rules`, `tasktemplates`, `budget`, `ml_model`,
    `asset_tags`, `feeds` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and

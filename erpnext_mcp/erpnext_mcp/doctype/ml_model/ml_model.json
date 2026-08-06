@@ -1,0 +1,260 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One trained model Volume Vision produced, and the one fact Volume Vision has no reason to hold: whether it is the model an iOS app should be pulling right now for one company and one piecework activity. get_active_model is what a scanning app queries to find out; activate_model is what moves the flag, and it auto-deprecates whichever model held it before — only one model per (company, piecework_activity) is ever Active at a time.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "model_name",
+  "version",
+  "status",
+  "identity_col",
+  "company",
+  "piecework_activity",
+  "deployment_targets",
+  "source_section",
+  "source_uuid",
+  "source_server",
+  "source_col",
+  "model_kind",
+  "model_format",
+  "taxonomy_section",
+  "taxonomy_schema",
+  "taxonomy_version",
+  "taxonomy_col",
+  "class_names",
+  "training_section",
+  "metrics",
+  "file_size_bytes",
+  "training_col",
+  "training_completed_at",
+  "deployed_at",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "MLM-.YYYY.-.####",
+   "description": "The series an ML Model is named from, expanded by the controller rather than by Frappe's naming_series hook so a docname is the same shape on a bench and in the standalone suite — MLM-2026-0001. The year is the year the model was registered.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "MLM-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The human name for this model — 'Cherry Fill Detection'. Several versions of the same model share this name; version is what tells them apart.",
+   "fieldname": "model_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Model Name",
+   "reqd": 1
+  },
+  {
+   "description": "Digits and dots — '3.2', '1' — matching Volume Vision's own TrainedModel.version, which is a training counter rather than a package version.",
+   "fieldname": "version",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Version",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "description": "Draft is registered but not deployed. Active is the one model of its (company, piecework_activity) pair that get_active_model returns — activate_model is the only way in, and it auto-deprecates whatever was Active before. Deprecated is a superseded model, kept for the record. Archived is retired by hand and excluded from get_active_model even if nothing ever replaced it.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nActive\nDeprecated\nArchived",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The company this deployment decision belongs to. The same trained model can be registered once per company that runs it, each activated independently.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "What this model is used for — 'bucket_fill_detection', 'harvest_quality', 'inspection_aid'. Together with company this is the pair get_active_model is queried by, and the pair activate_model enforces one Active model against.",
+   "fieldname": "piecework_activity",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Piecework Activity",
+   "reqd": 1
+  },
+  {
+   "description": "Which apps pull this model — comma-separated: 'BucketLog', 'FarmOps', or 'Both'.",
+   "fieldname": "deployment_targets",
+   "fieldtype": "Data",
+   "label": "Deployment Targets"
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Source (Volume Vision)"
+  },
+  {
+   "description": "The Volume Vision TrainedModel.uuid this record tracks — the key iOS apps use to identify a locally cached model. Empty for a model registered without a Volume Vision source.",
+   "fieldname": "source_uuid",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Source UUID",
+   "search_index": 1
+  },
+  {
+   "description": "The Volume Vision instance this model was trained on, e.g. 'http://umbrel.local:8095'. Not where an iOS app downloads it from — that is GET /api/sync/models/<uuid>/download against whichever server the app already syncs with.",
+   "fieldname": "source_server",
+   "fieldtype": "Data",
+   "label": "Source Server"
+  },
+  {
+   "fieldname": "source_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "What kind of model this is.",
+   "fieldname": "model_kind",
+   "fieldtype": "Select",
+   "label": "Model Kind",
+   "options": "Classification\nSegmentation\nDetection\nOther"
+  },
+  {
+   "default": "CoreML",
+   "description": "The file format an iOS app expects to load. CoreML is what BucketLog and Farm Ops run on-device.",
+   "fieldname": "model_format",
+   "fieldtype": "Select",
+   "label": "Model Format",
+   "options": "CoreML\nONNX\nTensorFlow\nOther"
+  },
+  {
+   "fieldname": "taxonomy_section",
+   "fieldtype": "Section Break",
+   "label": "Taxonomy"
+  },
+  {
+   "description": "The taxonomy schema_name class_names belongs to — which controlled vocabulary of labels this model's outputs are drawn from.",
+   "fieldname": "taxonomy_schema",
+   "fieldtype": "Data",
+   "label": "Taxonomy Schema"
+  },
+  {
+   "description": "The taxonomy schema's version, so a caller can tell whether this model's labels match the taxonomy a client currently has cached.",
+   "fieldname": "taxonomy_version",
+   "fieldtype": "Data",
+   "label": "Taxonomy Version"
+  },
+  {
+   "fieldname": "taxonomy_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The ordered label array this model was trained to predict, as a JSON array — matches Volume Vision's class_names_json and is what an iOS client's manifest parser reads to map an output index back to a label.",
+   "fieldname": "class_names",
+   "fieldtype": "JSON",
+   "label": "Class Names"
+  },
+  {
+   "fieldname": "training_section",
+   "fieldtype": "Section Break",
+   "label": "Training"
+  },
+  {
+   "description": "Training metrics as a JSON object — accuracy, mAP, loss, whatever Volume Vision recorded for this training run.",
+   "fieldname": "metrics",
+   "fieldtype": "JSON",
+   "label": "Metrics"
+  },
+  {
+   "description": "The model file's size in bytes, as reported by Volume Vision.",
+   "fieldname": "file_size_bytes",
+   "fieldtype": "Int",
+   "label": "File Size (Bytes)"
+  },
+  {
+   "fieldname": "training_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "When training finished in Volume Vision.",
+   "fieldname": "training_completed_at",
+   "fieldtype": "Datetime",
+   "label": "Training Completed At"
+  },
+  {
+   "description": "When activate_model last set this record's status to Active. Empty for a model that has never been activated.",
+   "fieldname": "deployed_at",
+   "fieldtype": "Datetime",
+   "label": "Deployed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Anything about this model's rollout worth reading later — why it was activated, what regressed in the version before it, what to watch for in the field.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "ML Model",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Farm Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "model_name,version,company,piecework_activity,status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "model_name",
+ "track_changes": 1
+}

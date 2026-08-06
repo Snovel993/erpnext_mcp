@@ -433,6 +433,15 @@
   "allow_update_budget",
   "allow_refresh_budget",
   "allow_close_budget",
+  "ml_model_read_section",
+  "allow_get_model",
+  "allow_list_models",
+  "allow_get_active_model",
+  "ml_model_write_section",
+  "allow_register_model",
+  "allow_update_model",
+  "allow_activate_model",
+  "allow_deprecate_model",
   "mobile_write_section",
   "allow_create_mobile_user",
   "allow_create_employee",
@@ -3290,6 +3299,65 @@
    "fieldname": "allow_close_budget",
    "fieldtype": "Check",
    "label": "Close Budget"
+  },
+  {
+   "fieldname": "ml_model_read_section",
+   "fieldtype": "Section Break",
+   "label": "ML Model Registry — Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. One ML Model record in full — every field, its parsed class_names and metrics.",
+   "fieldname": "allow_get_model",
+   "fieldtype": "Check",
+   "label": "Get Model"
+  },
+  {
+   "default": "1",
+   "description": "READ. The model register: every ML Model matching the filters, newest first.",
+   "fieldname": "allow_list_models",
+   "fieldtype": "Check",
+   "label": "List Models"
+  },
+  {
+   "default": "1",
+   "description": "READ. THE TOOL AN iOS APP QUERIES to find out which model to pull for one company and one piecework activity. Returns the record and its manifest when a model is Active, or a clear 'nothing deployed yet' result — not an error — when none is.",
+   "fieldname": "allow_get_active_model",
+   "fieldtype": "Check",
+   "label": "Get Active Model"
+  },
+  {
+   "fieldname": "ml_model_write_section",
+   "fieldtype": "Section Break",
+   "label": "ML Model Registry — Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Registers a trained model from Volume Vision: which model it is, what it predicts, and which piecework activity it is for. Starts as Draft — activate_model is what makes it the model an iOS app pulls.",
+   "fieldname": "allow_register_model",
+   "fieldtype": "Check",
+   "label": "Register Model"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Edits metadata on an existing ML Model record. status, company and piecework_activity cannot be changed here — activate_model/deprecate_model own status.",
+   "fieldname": "allow_update_model",
+   "fieldtype": "Check",
+   "label": "Update Model"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Sets status=Active and deployed_at=now. Whichever other model was Active for the same (company, piecework_activity) auto-transitions to Deprecated — never more than one model is Active for one activity at one company.",
+   "fieldname": "allow_activate_model",
+   "fieldtype": "Check",
+   "label": "Activate Model"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Sets status=Deprecated. Nothing is deleted — a deprecated model keeps every field it had and simply stops being returned by get_active_model.",
+   "fieldname": "allow_deprecate_model",
+   "fieldtype": "Check",
+   "label": "Deprecate Model"
   },
   {
    "fieldname": "mobile_write_section",

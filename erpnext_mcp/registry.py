@@ -72,6 +72,7 @@ from .tools import (
 	kpi,
 	kpidefs,
 	meta,
+	ml_model,
 	mobile,
 	mutate,
 	newhire,
@@ -11904,6 +11905,159 @@ TOOLS = {
 		title="Close a budget",
 		available=_needs_doctype("Budget"),
 		requires="the Budget DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.43.0: ML Model Registry ──────────────────────────────────────────
+	"register_model": _tool(
+		ml_model.register_model,
+		"MUTATING (default OFF). Register a trained model from Volume Vision: "
+		"which model it is, what it predicts, and which piecework activity it "
+		"is for. Starts as Draft — activate_model is what makes it the model "
+		"an iOS app pulls.\n\n"
+		"REFUSES A DUPLICATE (company, model_name, version) — update_model "
+		"edits the existing record instead.",
+		{
+			"model_name": _field(_STRING, "REQUIRED. Human name, e.g. 'Cherry Fill Detection'."),
+			"version": _field(_STRING, "REQUIRED. Digits and dots, e.g. '3.2' or '1'."),
+			"company": _field(_STRING, "REQUIRED. Which company this deployment decision belongs to."),
+			"piecework_activity": _field(
+				_STRING,
+				"REQUIRED. What this model is used for — 'bucket_fill_detection', 'harvest_quality', "
+				"'inspection_aid'. Paired with company as the key get_active_model is queried by.",
+			),
+			"source_uuid": _field(_STRING, "Volume Vision's TrainedModel.uuid, if this came from there."),
+			"source_server": _field(_STRING, "The Volume Vision instance URL this was trained on."),
+			"model_kind": _field(_STRING, "Classification, Segmentation, Detection or Other."),
+			"model_format": _field(_STRING, "CoreML (default), ONNX, TensorFlow or Other."),
+			"class_names": _field(
+				{"type": "array", "items": _STRING},
+				"Ordered label array, matching Volume Vision's class_names_json.",
+			),
+			"taxonomy_schema": _field(_STRING, "The taxonomy schema_name the labels belong to."),
+			"taxonomy_version": _field(_STRING, "The taxonomy schema's version."),
+			"metrics": _field(_OBJECT, "Training metrics — accuracy, mAP, loss — as a JSON object."),
+			"file_size_bytes": _field(_INTEGER, "The model file's size in bytes."),
+			"deployment_targets": _field(_STRING, "Comma-separated: 'BucketLog', 'FarmOps', or 'Both'."),
+			"training_completed_at": _field(_STRING, "When training finished in Volume Vision."),
+			"status": _field(_STRING, "Draft (default), Active, Deprecated or Archived."),
+			"notes": _field(_STRING, "Anything about this model's rollout worth reading later."),
+		},
+		required=("model_name", "version", "company", "piecework_activity"),
+		mutating=True,
+		title="Register a model",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_model": _tool(
+		ml_model.update_model,
+		"MUTATING (default OFF). Edit metadata on an existing ML Model record. "
+		"status, company and piecework_activity CANNOT be changed here — "
+		"activate_model/deprecate_model own status, and company/"
+		"piecework_activity are the identity a caller resolves the record by.",
+		{
+			"model": _field(_STRING, "REQUIRED. By docname (e.g. MLM-2026-0001) or model_name."),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version_hint": _field(_STRING, "Narrows a model_name lookup by the CURRENT version, before editing it."),
+			"model_name": _field(_STRING, "New name."),
+			"version": _field(_STRING, "New version. Refused if it collides with another record."),
+			"source_uuid": _field(_STRING, "New Volume Vision TrainedModel.uuid."),
+			"source_server": _field(_STRING, "New source server URL."),
+			"model_kind": _field(_STRING, "New model_kind."),
+			"model_format": _field(_STRING, "New model_format."),
+			"class_names": _field({"type": "array", "items": _STRING}, "REPLACES the whole label array."),
+			"taxonomy_schema": _field(_STRING, "New taxonomy schema_name."),
+			"taxonomy_version": _field(_STRING, "New taxonomy schema version."),
+			"metrics": _field(_OBJECT, "REPLACES the whole metrics object."),
+			"file_size_bytes": _field(_INTEGER, "New file size in bytes."),
+			"deployment_targets": _field(_STRING, "New deployment_targets."),
+			"training_completed_at": _field(_STRING, "New training_completed_at."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		required=("model",),
+		mutating=True,
+		title="Update a model",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_model": _tool(
+		ml_model.get_model,
+		"One ML Model record in full — every field, its parsed class_names "
+		"and metrics. Read-only.",
+		{
+			"model": _field(_STRING, "REQUIRED. By docname or model_name."),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+		},
+		required=("model",),
+		title="Get a model",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_models": _tool(
+		ml_model.list_models,
+		"The model register: every ML Model matching the filters, newest "
+		"first. Read-only.",
+		{
+			"company": _COMPANY,
+			"status": _field(_STRING, "Draft, Active, Deprecated or Archived."),
+			"piecework_activity": _field(_STRING, "Filter to one activity."),
+			"limit": _LIMIT,
+		},
+		title="List models",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"activate_model": _tool(
+		ml_model.activate_model,
+		"MUTATING (default OFF). Set status=Active and deployed_at=now. "
+		"WHICHEVER OTHER MODEL WAS ACTIVE FOR THE SAME (company, "
+		"piecework_activity) AUTO-TRANSITIONS TO DEPRECATED — never more than "
+		"one model is Active for one activity at one company, and this is "
+		"what get_active_model reads. Activating an already-Active model is a "
+		"no-op that still refreshes deployed_at.",
+		{
+			"model": _field(_STRING, "REQUIRED. By docname or model_name."),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+		},
+		required=("model",),
+		mutating=True,
+		idempotent=True,
+		title="Activate a model",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"deprecate_model": _tool(
+		ml_model.deprecate_model,
+		"MUTATING (default OFF). Set status=Deprecated. Nothing is deleted — "
+		"a deprecated model keeps every field it had and simply stops being "
+		"returned by get_active_model.",
+		{
+			"model": _field(_STRING, "REQUIRED. By docname or model_name."),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+		},
+		required=("model",),
+		mutating=True,
+		title="Deprecate a model",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_active_model": _tool(
+		ml_model.get_active_model,
+		"THE TOOL AN iOS APP QUERIES to find out which model to pull for one "
+		"company and one piecework activity. Returns the full record and its "
+		"manifest (uuid/name/class_names/metadata, matching Volume Vision's "
+		"own to_dict() shape) when a model is Active; a clear "
+		"'nothing deployed yet' result — not an error — when none is. "
+		"Read-only.",
+		{
+			"company": _COMPANY,
+			"piecework_activity": _field(_STRING, "REQUIRED. Which activity to look up."),
+		},
+		required=("piecework_activity",),
+		title="Get the active model",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

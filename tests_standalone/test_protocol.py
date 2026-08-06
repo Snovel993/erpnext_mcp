@@ -689,6 +689,19 @@ class Catalogue(SeededTestCase):
 		reads the KPI cache, so ONE alerting engine still decides what reaches the
 		calendar.
 
+		v0.43.0 ADDED SEVEN — three reads and four writes — for the ML Model
+		Registry: which trained model Volume Vision produced is DEPLOYED for
+		which company and which piecework activity, which is the one fact
+		Volume Vision itself has no reason to hold. `model_registry.py` is pure,
+		the same discipline as `budget_engine.py`; `tools/ml_model.py` is the
+		only place that reads or writes an ML Model document. `get_active_model`
+		is what an iOS app queries to find out what to pull, and
+		`activate_model` is the only door that reaches Active — activating one
+		model AUTO-DEPRECATES whichever other model held Active for the same
+		(company, piecework_activity), enforced twice: reported by the tool via
+		`check_model_conflicts`, and held true in the database regardless of
+		which door a save came through, by the DocType controller.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -696,9 +709,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 362)
-		self.assertEqual(len(registry.READ_TOOLS), 167)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 195)
+		self.assertEqual(len(registry.TOOLS), 369)
+		self.assertEqual(len(registry.READ_TOOLS), 170)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 199)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

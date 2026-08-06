@@ -3,6 +3,40 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.43.0 — 2026-08-06
+
+**ML Model Registry.** Volume Vision trains models and holds the weights; this
+app never sees a weight and never computes a metric. What was missing was the
+one fact Volume Vision has no reason to know: which of its trained models is
+**deployed** — for which company, for which piecework activity — so an iOS app
+(BucketLog, Farm Ops) has somewhere to ask instead of guessing or shipping the
+answer baked into the app. Seven tools (369 total: 170 read, 199 mutating), one
+DocType.
+
+**The arithmetic is pure.** `model_registry.py` reads no database, the same
+split `budget_engine.py` and `payroll_gl.py` keep: `validate_model_registration`
+checks a candidate record's shape, `build_model_manifest` reshapes an ERPNext
+record into **Volume Vision's own `to_dict()` shape**
+(`uuid`/`name`/`class_names`/`metadata`) so an iOS client's existing manifest
+parser reads this too, and `check_model_conflicts` says what activating a
+candidate would supersede. `tools/ml_model.py` is the only place that reads or
+writes an ML Model document.
+
+**Only one model per (company, piecework_activity) is ever Active.**
+`activate_model` sets `status=Active` and `deployed_at=now`; whichever other
+model held Active for the same pair auto-transitions to `Deprecated`. The
+invariant is enforced twice, deliberately: the tool computes and reports what
+it is superseding before saving, using a database read `check_model_conflicts`
+cannot do itself, and the DocType controller separately guarantees the
+database cannot disagree — regardless of whether a save came through the tool,
+the Desk, or a data import.
+
+**`get_active_model` answers with data, not an error, when nothing is
+deployed.** An iOS app polling at startup for "what should I be running" gets
+`{"active": false, "model": null}` rather than a tool error when a company
+has not activated a model for an activity yet — the honest state for a
+farm that has not turned a feature on, not a failure.
+
 ## 0.42.0 — 2026-08-06
 
 **Budget + Variance Alerts.** A `Budget` is one company's plan for one fiscal
