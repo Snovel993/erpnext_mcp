@@ -253,6 +253,12 @@ def get_payroll_entry(args: dict) -> ToolResult:
 			"medicare": float(_g("medicare") or 0),
 			"total_deductions": float(_g("total_deductions") or 0),
 			"net_pay": float(_g("net_pay") or 0),
+			"social_security_employer": float(_g("social_security_employer") or 0),
+			"medicare_employer": float(_g("medicare_employer") or 0),
+			"futa": float(_g("futa") or 0),
+			"state_unemployment": float(_g("state_unemployment") or 0),
+			"state_employer_other": float(_g("state_employer_other") or 0),
+			"total_employer_taxes": float(_g("total_employer_taxes") or 0),
 			"salary_structure": _g("salary_structure"),
 			"minimum_wage_check": bool(int(_g("minimum_wage_check") or 0)),
 			"effective_hourly_rate": float(_g("effective_hourly_rate") or 0),
@@ -459,6 +465,12 @@ def calculate_payroll(args: dict) -> ToolResult:
 			"net_pay": slip["net_pay"],
 			"minimum_wage_check": 1 if slip["minimum_wage_check"] else 0,
 			"effective_hourly_rate": slip["effective_hourly_rate"],
+			"social_security_employer": slip.get("social_security_employer") or 0,
+			"medicare_employer": slip.get("medicare_employer") or 0,
+			"futa": slip.get("futa") or 0,
+			"state_unemployment": slip.get("state_unemployment") or 0,
+			"state_employer_other": slip.get("state_employer_other") or 0,
+			"total_employer_taxes": slip.get("total_employer_taxes") or 0,
 		})
 
 		total_gross += slip["gross_pay"]
@@ -697,6 +709,13 @@ def _slip_view(slip: dict, verbose: bool) -> dict:
 		"medicare": slip.get("medicare"),
 		"total_deductions": slip.get("total_deductions"),
 		"net_pay": slip.get("net_pay"),
+		"social_security_employer": slip.get("social_security_employer"),
+		"medicare_employer": slip.get("medicare_employer"),
+		"futa": slip.get("futa"),
+		"state_unemployment": slip.get("state_unemployment"),
+		"state_employer_other": slip.get("state_employer_other"),
+		"total_employer_taxes": slip.get("total_employer_taxes"),
+		"total_cost_of_employment": slip.get("total_cost_of_employment"),
 		"effective_hourly_rate": slip.get("effective_hourly_rate"),
 		"minimum_wage_check": slip.get("minimum_wage_check"),
 		"minimum_wage_detail": slip.get("minimum_wage_detail"),
@@ -855,6 +874,16 @@ def _slip_row(slip: dict) -> dict:
 		"net_pay": slip.get("net_pay"),
 		"minimum_wage_check": 1 if meets else 0,
 		"effective_hourly_rate": slip.get("effective_hourly_rate"),
+		# v0.40.0. Computed since v0.28.0 and stored nowhere until now. None of
+		# it is deducted from anybody — it is what the farm owes on top — and
+		# without it a payroll journal entry books the wages and leaves the
+		# employer's own taxes off the ledger entirely.
+		"social_security_employer": slip.get("social_security_employer") or 0,
+		"medicare_employer": slip.get("medicare_employer") or 0,
+		"futa": slip.get("futa") or 0,
+		"state_unemployment": slip.get("state_unemployment") or 0,
+		"state_employer_other": slip.get("state_employer_other") or 0,
+		"total_employer_taxes": slip.get("total_employer_taxes") or 0,
 	}
 
 

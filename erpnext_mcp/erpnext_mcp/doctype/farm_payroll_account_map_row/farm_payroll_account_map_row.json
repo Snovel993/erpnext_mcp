@@ -1,0 +1,63 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One payroll component and the account(s) it posts to. A component knows which side of the entry it lands on; this row says which account.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "component",
+  "debit_account",
+  "credit_account",
+  "notes"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "component",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Component",
+   "options": "Gross Pay\nFederal Tax\nSS Employee\nSS Employer\nMedicare Employee\nMedicare Employer\nFUTA\nSUTA\nState Tax\nState Employer Other\nNet Pay",
+   "reqd": 1,
+   "description": "Which part of a payroll slip this row is about. The six employee-side components (Gross Pay, Federal Tax, SS Employee, Medicare Employee, State Tax, Net Pay) are together the two sides of gross pay and are all required; the five employer-side ones are required only where the run has an amount for them."
+  },
+  {
+   "columns": 3,
+   "fieldname": "debit_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Debit Account",
+   "options": "Account",
+   "description": "Where the expense side goes. Required for Gross Pay (the wage expense) and for every employer-side component (the payroll tax expense). Left blank on a withholding component, which has no debit side."
+  },
+  {
+   "columns": 3,
+   "fieldname": "credit_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Credit Account",
+   "options": "Account",
+   "description": "Where the liability side goes. Required for every withheld amount, for Net Pay (a payroll clearing, bank or cash account) and for every employer-side component. Left blank on Gross Pay, which has no credit side."
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes",
+   "description": "Why this component points where it does. The place to record that the SUTA account is reconciled against the quarterly state return, or that Net Pay clears rather than paying."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Payroll Account Map Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

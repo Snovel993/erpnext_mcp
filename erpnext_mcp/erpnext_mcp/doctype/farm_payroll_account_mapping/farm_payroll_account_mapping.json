@@ -1,0 +1,119 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:company",
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "Which general ledger accounts one company's payroll posts to. One record per company, one row per payroll component. No account name is shipped with this app: a default would be right on the site it was written on and quietly wrong everywhere else.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "is_active",
+  "col_break_defaults",
+  "default_posting_mode",
+  "cost_center",
+  "components_section",
+  "components",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "unique": 1,
+   "search_index": 1,
+   "description": "The one company this mapping is for. A chart of accounts belongs to a company, so a mapping does too — a second entity on the same site gets its own record and its own accounts."
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Active",
+   "description": "Unticked, this mapping is ignored and payroll cannot be posted for the company. The way to stop posting without deleting the accounts somebody chose."
+  },
+  {
+   "fieldname": "col_break_defaults",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Consolidated",
+   "fieldname": "default_posting_mode",
+   "fieldtype": "Select",
+   "label": "Default Posting Mode",
+   "options": "Consolidated\nPer Employee",
+   "description": "Consolidated writes ONE journal entry for a whole payroll run; Per Employee writes one per worker. Consolidated is the default because a forty-person biweekly payroll is forty entries otherwise and the ledger wants one. Per Employee earns its keep where labour is costed by person or a single slip has to be reversed on its own. Either way the run's own record keeps the per-person detail. Overridable per call."
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "description": "Set on every line of every payroll entry, where given. A farm that costs labour to one operations center wants it here; one that splits labour by block should leave it blank and split in the journal entry."
+  },
+  {
+   "fieldname": "components_section",
+   "fieldtype": "Section Break",
+   "label": "Component Accounts"
+  },
+  {
+   "fieldname": "components",
+   "fieldtype": "Table",
+   "label": "Components",
+   "options": "Farm Payroll Account Map Row",
+   "description": "One row per payroll component. get_payroll_account_mapping reports which are still missing and what each one is for."
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes",
+   "description": "Who decided this mapping and against what. The question asked of a payroll journal entry a year later is usually why the wages went to that account rather than the other one."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Payroll Account Mapping",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "search_fields": "company",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "company",
+ "track_changes": 1
+}

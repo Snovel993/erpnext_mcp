@@ -12,6 +12,9 @@
   "tax_year",
   "status",
   "employer_account_number",
+  "suta_section",
+  "suta_rate",
+  "suta_wage_base",
   "or_section",
   "or_income_tax_enabled",
   "or_transit_tax_rate",
@@ -82,6 +85,25 @@
    "fieldname": "employer_account_number",
    "fieldtype": "Data",
    "label": "Employer Account Number"
+  },
+  {
+   "fieldname": "suta_section",
+   "fieldtype": "Section Break",
+   "label": "State Unemployment (SUTA)"
+  },
+  {
+   "default": "0",
+   "description": "This employer's own assigned state unemployment insurance rate, as a percentage of taxable wages. EMPLOYER-ONLY and EMPLOYER-ENTERED: the rate comes from the state agency out of this employer's experience rating, so there is no table this app could ship. Left at zero, no SUTA is computed and nothing about the payroll changes. v0.40.0.",
+   "fieldname": "suta_rate",
+   "fieldtype": "Percent",
+   "label": "SUTA Rate"
+  },
+  {
+   "default": "0",
+   "description": "Taxable wage base per employee per year, consumed by year-to-date gross the way FUTA's $7,000 is. Oregon's 2025 base is 54300 and Washington's is 72800; both move every year, which is why this is a field. ZERO MEANS NO CAP — every dollar of gross is taxable — which is the honest reading of a rate entered with no base beside it. v0.40.0.",
+   "fieldname": "suta_wage_base",
+   "fieldtype": "Currency",
+   "label": "SUTA Wage Base"
   },
   {
    "depends_on": "eval:doc.state=='OR'",
@@ -246,7 +268,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-05 09:00:00.000000",
+ "modified": "2026-08-06 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "State Tax Configuration",

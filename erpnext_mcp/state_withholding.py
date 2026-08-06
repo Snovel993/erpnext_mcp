@@ -13,6 +13,18 @@ Paid Leave Oregon (ORS 657B), Workers' Compensation (employer-entered rate).
 
 Washington: Paid Family & Medical Leave (RCW 50A), WA Cares Fund (RCW 50B),
 Labor & Industries (workers' comp, employer-entered rates). NO income tax.
+
+v0.40.0 adds STATE UNEMPLOYMENT (SUTA) to both, and it is employer-entered for
+the same reason workers' compensation is: a SUTA rate is assigned to one
+employer by one state agency out of that employer's own experience rating, and
+there is no table anybody could ship. The rate defaults to ZERO, which means a
+site that has not entered one computes exactly what it computed before this
+release — the addition is a place to put a number, not a new charge.
+
+It sits beside FUTA rather than inside it on purpose: FUTA is federal, filed on
+the 940, and its credit already assumes state unemployment tax was paid. The
+two are separate liabilities to separate agencies and they reconcile against
+each other, which they cannot do from one account.
 """
 from __future__ import annotations
 
@@ -54,12 +66,63 @@ OR_FILING_STATUS_MAP = {
 }
 
 
+def calculate_suta(
+    gross_pay: float,
+    ytd_gross: float,
+    state_config: dict,
+) -> tuple[float, dict]:
+    """State unemployment insurance: employer-only, rated, wage-based.
+
+    Zero unless the employer has entered its own assigned rate, because there is
+    no rate this app could know. Oregon's 2025 taxable wage base is $54,300 and
+    Washington's is $72,800, but both move every year and both are per-employer
+    facts once the experience rating is applied — so the base is a field too,
+    and a base of zero means "no cap", which is the honest reading of a site that
+    entered a rate and left the base blank.
+
+    The wage base is consumed by YEAR-TO-DATE GROSS, exactly as FUTA's is in
+    `withholding._calc_futa`. A period computed in isolation would restart it and
+    over-collect on anybody who has already crossed it.
+    """
+    rate = float(state_config.get("suta_rate", 0) or 0) / 100.0
+    wage_base = float(state_config.get("suta_wage_base", 0) or 0)
+
+    if rate <= 0:
+        return 0.0, {
+            "rate": 0.0,
+            "wage_base": wage_base,
+            "taxable_wages": 0.0,
+            "tax": 0.0,
+            "note": (
+                "no SUTA rate configured for this state, so none is computed. The rate "
+                "is assigned to this employer by the state agency and cannot be inferred."
+            ),
+        }
+
+    if wage_base > 0:
+        remaining = max(wage_base - float(ytd_gross or 0), 0.0)
+        taxable = min(gross_pay, remaining)
+    else:
+        taxable = gross_pay
+
+    tax = round(max(taxable, 0.0) * rate, 2)
+    return tax, {
+        "rate": rate * 100,
+        "wage_base": wage_base,
+        "ytd_gross": round(float(ytd_gross or 0), 2),
+        "taxable_wages": round(max(taxable, 0.0), 2),
+        "tax": tax,
+        "wage_base_exhausted": bool(wage_base > 0 and taxable < gross_pay),
+    }
+
+
 def calculate_oregon_withholding(
     gross_pay: float,
     pay_frequency: str,
     filing_status: str,
     state_config: dict,
     state_tax_table: list[dict],
+    ytd_gross: float = 0.0,
 ) -> dict:
     """Calculate all Oregon payroll taxes for one pay period.
 
@@ -71,6 +134,9 @@ def calculate_oregon_withholding(
         state_config: Dict with OR-specific config fields.
         state_tax_table: List of bracket dicts for the matching filing_status,
             sorted by bracket_floor ascending.
+        ytd_gross: Year-to-date gross BEFORE this period, for the SUTA wage
+            base. Zero — the default — is right for the first period of a year
+            and understates how much of the base is already consumed after it.
 
     Returns:
         Dict with all OR tax amounts and a computation_detail breakdown.
@@ -127,8 +193,12 @@ def calculate_oregon_withholding(
         "tax": or_workers_comp,
     }
 
+    # ── State Unemployment (employer-only, employer-rated) ────────────
+    or_suta, suta_detail = calculate_suta(gross_pay, ytd_gross, state_config)
+    detail["suta"] = suta_detail
+
     total_employee = round(or_income_tax + or_transit_tax + or_paid_leave_employee, 2)
-    total_employer = round(or_paid_leave_employer + or_workers_comp, 2)
+    total_employer = round(or_paid_leave_employer + or_workers_comp + or_suta, 2)
 
     return {
         "state": "OR",
@@ -137,6 +207,13 @@ def calculate_oregon_withholding(
         "or_paid_leave_employee": or_paid_leave_employee,
         "or_paid_leave_employer": or_paid_leave_employer,
         "or_workers_comp": or_workers_comp,
+        "or_suta": or_suta,
+        # `suta` unprefixed as well as `or_suta`, so a caller aggregating across
+        # states reads one key rather than switching on the state code. Same
+        # figure, and the prefixed one stays because every other amount here is
+        # prefixed and dropping the pattern for one field would be the surprise.
+        "suta": or_suta,
+        "employer_other": round(or_paid_leave_employer + or_workers_comp, 2),
         "total_or_employee": total_employee,
         "total_or_employer": total_employer,
         "computation_detail": detail,
@@ -146,6 +223,7 @@ def calculate_oregon_withholding(
 def calculate_washington_withholding(
     gross_pay: float,
     state_config: dict,
+    ytd_gross: float = 0.0,
 ) -> dict:
     """Calculate all Washington payroll taxes for one pay period.
 
@@ -154,6 +232,7 @@ def calculate_washington_withholding(
     Args:
         gross_pay: Gross pay for this pay period.
         state_config: Dict with WA-specific config fields.
+        ytd_gross: Year-to-date gross BEFORE this period, for the SUTA wage base.
 
     Returns:
         Dict with all WA tax amounts and a computation_detail breakdown.
@@ -198,8 +277,12 @@ def calculate_washington_withholding(
         "employer_tax": wa_li_employer,
     }
 
+    # ── State Unemployment (employer-only, employer-rated) ────────────
+    wa_suta, suta_detail = calculate_suta(gross_pay, ytd_gross, state_config)
+    detail["suta"] = suta_detail
+
     total_employee = round(wa_pfml_employee + wa_cares_employee + wa_li_employee, 2)
-    total_employer = round(wa_pfml_employer + wa_li_employer, 2)
+    total_employer = round(wa_pfml_employer + wa_li_employer + wa_suta, 2)
 
     return {
         "state": "WA",
@@ -208,6 +291,9 @@ def calculate_washington_withholding(
         "wa_cares_employee": wa_cares_employee,
         "wa_li_employee": wa_li_employee,
         "wa_li_employer": wa_li_employer,
+        "wa_suta": wa_suta,
+        "suta": wa_suta,
+        "employer_other": round(wa_pfml_employer + wa_li_employer, 2),
         "total_wa_employee": total_employee,
         "total_wa_employer": total_employer,
         "computation_detail": detail,
@@ -221,6 +307,7 @@ def calculate_state_withholding(
     filing_status: str,
     state_config: dict,
     state_tax_table: list[dict] | None = None,
+    ytd_gross: float = 0.0,
 ) -> dict:
     """Route to the correct state engine. The dispatch function.
 
@@ -231,6 +318,7 @@ def calculate_state_withholding(
         filing_status: Tax-table filing status.
         state_config: State-specific config dict.
         state_tax_table: Income tax brackets (OR only; ignored for WA).
+        ytd_gross: Year-to-date gross BEFORE this period, for the SUTA wage base.
 
     Returns:
         State withholding result dict.
@@ -238,16 +326,18 @@ def calculate_state_withholding(
     if state == "OR":
         return calculate_oregon_withholding(
             gross_pay, pay_frequency, filing_status,
-            state_config, state_tax_table or [],
+            state_config, state_tax_table or [], ytd_gross,
         )
     elif state == "WA":
-        return calculate_washington_withholding(gross_pay, state_config)
+        return calculate_washington_withholding(gross_pay, state_config, ytd_gross)
     else:
         return {
             "state": state,
             "error": f"unsupported state: {state}",
             "total_employee": 0.0,
             "total_employer": 0.0,
+            "suta": 0.0,
+            "employer_other": 0.0,
         }
 
 
@@ -278,7 +368,7 @@ def calculate_all_payroll_taxes(
 
     state = calculate_state_withholding(
         gross_pay, pay_frequency, work_state, filing_status,
-        state_config, state_tax_table,
+        state_config, state_tax_table, ytd_gross,
     )
 
     state_ee_key = f"total_{work_state.lower()}_employee"

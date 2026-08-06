@@ -29,7 +29,15 @@
   "state_taxes_detail",
   "totals_section",
   "total_deductions",
-  "net_pay"
+  "net_pay",
+  "employer_section",
+  "social_security_employer",
+  "medicare_employer",
+  "col_break_employer",
+  "futa",
+  "state_unemployment",
+  "state_employer_other",
+  "total_employer_taxes"
  ],
  "fields": [
   {
@@ -199,12 +207,65 @@
    "in_list_view": 1,
    "label": "Net Pay",
    "read_only": 1
+  },
+  {
+   "description": "What the farm owes ON TOP of gross pay. Not deducted from anybody — every figure here is an expense and a liability, and none of it changes net pay. Recorded from v0.40.0; slips written before that release carry zeros because the engine computed these and the record had nowhere to keep them.",
+   "fieldname": "employer_section",
+   "fieldtype": "Section Break",
+   "label": "Employer Taxes"
+  },
+  {
+   "default": "0",
+   "description": "The farm's matching 6.2% share.",
+   "fieldname": "social_security_employer",
+   "fieldtype": "Currency",
+   "label": "Social Security (Employer)"
+  },
+  {
+   "default": "0",
+   "description": "The farm's matching 1.45%. Additional Medicare is employee-only and has no match.",
+   "fieldname": "medicare_employer",
+   "fieldtype": "Currency",
+   "label": "Medicare (Employer)"
+  },
+  {
+   "fieldname": "col_break_employer",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Federal unemployment, employer-only, on the first $7,000 of each worker's annual gross.",
+   "fieldname": "futa",
+   "fieldtype": "Currency",
+   "label": "FUTA"
+  },
+  {
+   "default": "0",
+   "description": "State unemployment insurance at this employer's own assigned rate. Zero unless a SUTA rate is set on the State Tax Configuration.",
+   "fieldname": "state_unemployment",
+   "fieldtype": "Currency",
+   "label": "State Unemployment (SUTA)"
+  },
+  {
+   "default": "0",
+   "description": "State employer taxes that are not unemployment: Paid Leave Oregon's employer share, Oregon workers' compensation, WA PFML's employer share and the WA L&I employer rate.",
+   "fieldname": "state_employer_other",
+   "fieldtype": "Currency",
+   "label": "Other State Employer Taxes"
+  },
+  {
+   "default": "0",
+   "description": "The four above plus the state employer total. Gross pay plus this is what the worker actually costs.",
+   "fieldname": "total_employer_taxes",
+   "fieldtype": "Currency",
+   "label": "Total Employer Taxes",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,
  "links": [],
- "modified": "2026-08-05 09:00:00.000000",
+ "modified": "2026-08-06 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Farm Payroll Slip",

@@ -1,0 +1,90 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One draft Journal Entry this payroll run produced. The link that makes posting idempotent: a run that already has live postings is refused rather than posted twice.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "journal_entry",
+  "posting_mode",
+  "employee",
+  "employee_name",
+  "posting_date",
+  "total_debit",
+  "posted_on",
+  "posted_by"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "journal_entry",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Journal Entry",
+   "options": "Journal Entry",
+   "reqd": 1,
+   "description": "The draft entry. It is a DRAFT — it affects no balance until a human submits it."
+  },
+  {
+   "columns": 1,
+   "fieldname": "posting_mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Mode",
+   "options": "Consolidated\nPer Employee"
+  },
+  {
+   "columns": 2,
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "description": "Whose slip this entry is. Empty on a consolidated posting, which is the whole run."
+  },
+  {
+   "columns": 2,
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name"
+  },
+  {
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Posting Date"
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "fieldname": "total_debit",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Debit"
+  },
+  {
+   "fieldname": "posted_on",
+   "fieldtype": "Datetime",
+   "label": "Posted On"
+  },
+  {
+   "fieldname": "posted_by",
+   "fieldtype": "Data",
+   "label": "Posted By"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Payroll GL Posting",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -79,6 +79,7 @@ from .tools import (
 	packets,
 	parties,
 	payroll,
+	payroll_gl,
 	printing,
 	read,
 	realestate,
@@ -9397,6 +9398,181 @@ TOOLS = {
 		title="Run payroll for period",
 		available=_needs_doctype("Farm Payroll Entry"),
 		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+	),
+	# ── v0.40.0: Payroll → the general ledger ───────────────────────────────
+	#
+	# FOUR TOOLS AND ONE OPEN LOOP CLOSED. v0.30.0 computed payroll, v0.35.0 fed
+	# it the shift register's hours, v0.36.0 drew the tax forms — and a completed
+	# run produced Farm Payroll Slips and no Journal Entries. Wages are the
+	# largest number on a farm's income statement and they were the one number
+	# somebody had to key into the ledger by hand, every fortnight, off a report.
+	#
+	# NO ACCOUNT NAME IS SHIPPED. The mapping between a payroll component and an
+	# account is a RECORD, per company, because a default would be right on the
+	# chart of accounts it was written against and quietly wrong everywhere else
+	# — and "quietly wrong" in a chart of accounts means a year of wages in the
+	# wrong expense line that nobody notices until the tax preparer asks.
+	#
+	# DRAFTS ONLY, and the same split as everywhere else in this app:
+	# post_payroll_to_gl produces drafts that affect no balance, and submitting
+	# them is submit_journal_entry behind its own switch.
+	"get_payroll_account_mapping": _tool(
+		payroll_gl.get_payroll_account_mapping,
+		"Which general ledger accounts one company's payroll posts to, which of "
+		"the eleven payroll components are still unmapped, and what each "
+		"component is for. Call this before preview_payroll_gl on a company "
+		"whose mapping you have not seen — it is the difference between "
+		"'payroll cannot post' and knowing which two accounts are missing. "
+		"Read-only.",
+		{"company": _COMPANY},
+		available=_needs_doctype("Farm Payroll Account Mapping"),
+		requires="the Farm Payroll Account Mapping doctype (run bench migrate after installing v0.40.0)",
+		title="Get payroll account mapping",
+	),
+	"preview_payroll_gl": _tool(
+		payroll_gl.preview_payroll_gl,
+		"What the Journal Entries for a Farm Payroll Entry WOULD be — every "
+		"line, every account, both totals and the balance check — with NOTHING "
+		"written. Same mapping function and same code path as "
+		"post_payroll_to_gl; the only difference is that nothing is inserted. "
+		"It refuses nothing: an incomplete account mapping, a run already "
+		"posted, a slip that does not balance are all reported in `blockers` "
+		"with `would_post: false`, because an unpostable run is exactly what "
+		"somebody calls a preview to find out about. Read-only.",
+		{
+			"payroll_entry": _field(_STRING, "The Farm Payroll Entry docname (`name` is an alias)."),
+			"name": _field(_STRING, "Alias for payroll_entry."),
+			"mode": _field(
+				_STRING,
+				"'consolidated' — one journal entry for the whole run — or 'per_employee', "
+				"one each. Defaults to the company mapping's own default, which ships as "
+				"consolidated: a forty-person payroll is forty entries otherwise.",
+			),
+			"posting_date": _field(
+				_STRING,
+				"Posting date as YYYY-MM-DD. Defaults to the run's pay period end.",
+			),
+			"cost_center": _field(
+				_STRING,
+				"Set on every line. Defaults to the one on the company's mapping, if any.",
+			),
+			"include_employer": _field(
+				_BOOLEAN,
+				"Default TRUE. False posts the wage half only — gross, withholding and net — "
+				"and leaves the employer's own taxes (FICA match, FUTA, SUTA, state employer "
+				"programmes) off the entry. For a farm that books those from another system.",
+			),
+		},
+		required=("payroll_entry",),
+		available=_needs_doctype("Farm Payroll Account Mapping"),
+		requires="the Farm Payroll Account Mapping doctype (run bench migrate after installing v0.40.0)",
+		title="Preview payroll GL entries",
+	),
+	"configure_payroll_accounts": _tool(
+		payroll_gl.configure_payroll_accounts,
+		"MUTATING (default OFF). Set which general ledger accounts one "
+		"company's payroll posts to. One row per payroll component; rows merge "
+		"into what is already there unless replace=true, so a mapping can be "
+		"built up a few accounts at a time.\n\n"
+		"THE ELEVEN COMPONENTS. Six are employee-side and all six are required, "
+		"because together they are the two sides of gross pay: `Gross Pay` "
+		"(debit — the wage expense), `Federal Tax`, `SS Employee`, "
+		"`Medicare Employee`, `State Tax` and `Net Pay` (credits — what is "
+		"withheld, and what is left to pay). Five are employer-side, each an "
+		"expense AND a liability so each takes both accounts: `SS Employer`, "
+		"`Medicare Employer`, `FUTA`, `SUTA` and `State Employer Other` (Paid "
+		"Leave Oregon's employer share, Oregon workers' compensation, WA PFML's "
+		"employer share, WA L&I). They are required only where the run has an "
+		"amount for them.\n\n"
+		"GROUP ACCOUNTS ARE REFUSED HERE rather than at posting time — a "
+		"mapping is written once and posted from every fortnight afterwards, so "
+		"a group account stored now is a payroll refused in six weeks by "
+		"somebody who did not configure it.",
+		{
+			"company": _COMPANY,
+			"components": _field(
+				{"type": "array", "items": _OBJECT},
+				"The rows to set. A list of objects, each with `component` and the "
+				'account(s) it posts to: [{"component": "Gross Pay", "debit_account": '
+				'"5300 - Field Labor"}, {"component": "Net Pay", "credit_account": '
+				'"2210 - Payroll Clearing"}, {"component": "FUTA", "debit_account": '
+				'"5390 - Payroll Taxes", "credit_account": "2230 - FUTA Payable"}]. An '
+				"object keyed by component name is accepted too. Accounts resolve by "
+				"docname, number or name, as everywhere else.",
+			),
+			"accounts": _field({"type": "array", "items": _OBJECT}, "Alias for components."),
+			"mapping": _field(_OBJECT, "Alias for components, keyed by component name."),
+			"replace": _field(
+				_BOOLEAN,
+				"Default FALSE — the rows sent are merged into the existing mapping. True "
+				"discards every row not in this call, which is how a component is removed.",
+			),
+			"default_posting_mode": _field(
+				_STRING,
+				"'Consolidated' (the default) or 'Per Employee'. What post_payroll_to_gl does "
+				"when it is not told. Consolidated is one entry per run; per-employee earns "
+				"its keep where labour is costed by person.",
+			),
+			"cost_center": _field(
+				_STRING,
+				"Set on every payroll line. Leave empty on a farm that splits labour across "
+				"cost centers — one blanket cost center is worse than none there.",
+			),
+			"is_active": _field(
+				_BOOLEAN,
+				"Default TRUE on creation. False stops payroll posting for this company "
+				"without deleting the accounts somebody chose.",
+			),
+			"notes": _field(_STRING, "Who decided this mapping and against what."),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Configure payroll accounts",
+		available=_needs_doctype("Farm Payroll Account Mapping"),
+		requires="the Farm Payroll Account Mapping doctype (run bench migrate after installing v0.40.0)",
+	),
+	"post_payroll_to_gl": _tool(
+		payroll_gl.post_payroll_to_gl,
+		"MUTATING (default OFF). Turn a Farm Payroll Entry into DRAFT Journal "
+		"Entries — gross pay debited to the wage expense, every withheld amount "
+		"and the net credited to their liabilities, and the employer's own "
+		"taxes booked as expense and liability both. It NEVER submits: the "
+		"drafts affect no balance until a human posts them, in ERPNext or with "
+		"submit_journal_entry.\n\n"
+		"FIVE REFUSALS, ALL REPORTED AT ONCE rather than one per round trip: a "
+		"payroll entry that is not Calculated or Submitted, a company with no "
+		"account mapping, a mapping with a hole in it, a run that already has "
+		"live journal entries against it, and an entry that does not balance. "
+		"The idempotency check is about the LEDGER, not the link table — a run "
+		"whose drafts were deleted or whose entries were cancelled can be "
+		"posted again, because then there is genuinely nothing in the books.\n\n"
+		"Every entry names the Farm Payroll Entry and the Farm Payroll Slip it "
+		"came out of in its remark, and is linked back onto the run's GL "
+		"Postings table. preview_payroll_gl shows exactly this, and writes "
+		"nothing.",
+		{
+			"payroll_entry": _field(_STRING, "The Farm Payroll Entry docname (`name` is an alias)."),
+			"name": _field(_STRING, "Alias for payroll_entry."),
+			"mode": _field(
+				_STRING,
+				"'consolidated' (one entry for the run) or 'per_employee' (one each). "
+				"Defaults to the company mapping's own default.",
+			),
+			"posting_date": _field(
+				_STRING, "Posting date as YYYY-MM-DD. Defaults to the run's pay period end."
+			),
+			"cost_center": _field(_STRING, "Set on every line. Defaults to the mapping's."),
+			"include_employer": _field(
+				_BOOLEAN,
+				"Default TRUE. False books the wage half only and leaves the employer's own "
+				"taxes off the entry.",
+			),
+		},
+		required=("payroll_entry",),
+		mutating=True,
+		title="Post payroll to GL",
+		available=_needs_doctype("Farm Payroll Account Mapping"),
+		requires="the Farm Payroll Account Mapping doctype (run bench migrate after installing v0.40.0)",
 	),
 	# ── v0.31.0: Expense Receipt Capture ────────────────────────────────────
 	"list_expense_receipts": _tool(

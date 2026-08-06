@@ -305,6 +305,12 @@
   "allow_calculate_payroll",
   "allow_submit_payroll",
   "allow_run_payroll_for_period",
+  "payroll_gl_section",
+  "allow_get_payroll_account_mapping",
+  "allow_preview_payroll_gl",
+  "payroll_gl_write_col",
+  "allow_configure_payroll_accounts",
+  "allow_post_payroll_to_gl",
   "tax_form_section",
   "allow_list_tax_forms",
   "allow_get_tax_form",
@@ -2437,6 +2443,43 @@
    "label": "Run Payroll For Period"
   },
   {
+   "fieldname": "payroll_gl_section",
+   "fieldtype": "Section Break",
+   "label": "Payroll to the General Ledger"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which general ledger accounts a company's payroll posts to, which of the eleven payroll components are still unmapped, and what each component is for.",
+   "fieldname": "allow_get_payroll_account_mapping",
+   "fieldtype": "Check",
+   "label": "Get Payroll Account Mapping"
+  },
+  {
+   "default": "1",
+   "description": "READ. What the Journal Entries for a payroll run would be — every line, every account, both totals and the balance check — with nothing written. It refuses nothing: an incomplete account mapping or a run already posted is reported as a blocker rather than raised, because an unpostable run is exactly what somebody calls a preview to find out about.",
+   "fieldname": "allow_preview_payroll_gl",
+   "fieldtype": "Check",
+   "label": "Preview Payroll GL"
+  },
+  {
+   "fieldname": "payroll_gl_write_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Sets which general ledger accounts a company's payroll posts to, one row per payroll component, merging into what is already there unless replace=true. No account name ships as a default: one that is right on this chart of accounts would be quietly wrong on the next farm's. Group accounts are refused when the mapping is written rather than when it is posted from.",
+   "fieldname": "allow_configure_payroll_accounts",
+   "fieldtype": "Check",
+   "label": "Configure Payroll Accounts"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Turns a Farm Payroll Entry into DRAFT Journal Entries — gross pay debited to the wage expense, every withheld amount and the net credited to their liabilities, and the employer's own taxes booked as expense and liability both. It NEVER submits. Refuses a run that is not Calculated or Submitted, a company with no account mapping or an incomplete one, a run that already has live journal entries against it, and any entry that does not balance.",
+   "fieldname": "allow_post_payroll_to_gl",
+   "fieldtype": "Check",
+   "label": "Post Payroll To GL"
+  },
+  {
    "fieldname": "tax_form_section",
    "fieldtype": "Section Break",
    "label": "Tax Form Generators"
@@ -3552,7 +3595,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-05 13:00:00.000000",
+ "modified": "2026-08-06 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

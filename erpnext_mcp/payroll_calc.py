@@ -245,6 +245,7 @@ def calculate_full_payroll(
 	state_results = {}
 	total_state_employee = 0.0
 	total_state_employer = 0.0
+	total_state_suta = 0.0
 
 	if len(state_hours) <= 1:
 		# Single-state: apply to full gross
@@ -253,12 +254,14 @@ def calculate_full_payroll(
 				gross_pay, pay_frequency, primary_state, filing_status,
 				state_configs[primary_state],
 				state_tax_tables.get(primary_state),
+				ytd_gross,
 			)
 			state_results[primary_state] = state_result
 			ee_key = f"total_{primary_state.lower()}_employee"
 			er_key = f"total_{primary_state.lower()}_employer"
 			total_state_employee += state_result.get(ee_key, 0.0)
 			total_state_employer += state_result.get(er_key, 0.0)
+			total_state_suta += state_result.get("suta", 0.0)
 	else:
 		# Cross-state: allocate gross by hours proportion
 		for ws, info in state_hours.items():
@@ -273,15 +276,18 @@ def calculate_full_payroll(
 					state_gross, pay_frequency, ws, filing_status,
 					state_configs[ws],
 					state_tax_tables.get(ws),
+					ytd_gross,
 				)
 				state_results[ws] = state_result
 				ee_key = f"total_{ws.lower()}_employee"
 				er_key = f"total_{ws.lower()}_employer"
 				total_state_employee += state_result.get(ee_key, 0.0)
 				total_state_employer += state_result.get(er_key, 0.0)
+				total_state_suta += state_result.get("suta", 0.0)
 
 	total_state_employee = round(total_state_employee, 2)
 	total_state_employer = round(total_state_employer, 2)
+	total_state_suta = round(total_state_suta, 2)
 
 	# ── Aggregate deductions ──────────────────────────────────────────
 	federal_withholding = federal["federal_income_tax"]
@@ -292,6 +298,26 @@ def calculate_full_payroll(
 		federal_withholding + social_security + medicare + total_state_employee, 2,
 	)
 	net_pay = round(gross_pay - total_deductions, 2)
+
+	# ── Employer taxes ────────────────────────────────────────────────
+	#
+	# v0.40.0. COMPUTED SINCE v0.28.0 AND REPORTED ONLY IN `federal_detail`
+	# UNTIL NOW, which meant the slip written to the database carried the
+	# employee's deductions and none of what the employer owed on top of them.
+	# The GL posting needs them as figures rather than as a nested breakdown,
+	# and so does anybody asking what a worker actually costs — the employer
+	# share of FICA alone is 7.65% of gross that never appeared on a slip.
+	#
+	# Nothing here is a new charge and no total moves: these are the same
+	# numbers `calculate_federal_withholding` and the state engines already
+	# returned, lifted to the top level where they can be stored.
+	social_security_employer = federal["social_security_employer"]
+	medicare_employer = federal["medicare_employer"]
+	futa = federal["futa_employer"]
+	state_employer_other = round(total_state_employer - total_state_suta, 2)
+	total_employer_taxes = round(
+		social_security_employer + medicare_employer + futa + total_state_employer, 2,
+	)
 
 	return {
 		"employee": employee_data.get("employee", ""),
@@ -312,6 +338,14 @@ def calculate_full_payroll(
 		"state_taxes_detail": state_results,
 		"total_deductions": total_deductions,
 		"net_pay": net_pay,
+		"social_security_employer": social_security_employer,
+		"medicare_employer": medicare_employer,
+		"futa": futa,
+		"state_unemployment": total_state_suta,
+		"state_employer_other": state_employer_other,
+		"state_employer_taxes": total_state_employer,
+		"total_employer_taxes": total_employer_taxes,
+		"total_cost_of_employment": round(gross_pay + total_employer_taxes, 2),
 		"minimum_wage_check": min_wage_result["meets_minimum_wage"],
 		"effective_hourly_rate": effective_rate,
 		"gross_detail": gross_result,

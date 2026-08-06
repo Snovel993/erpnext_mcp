@@ -1033,6 +1033,11 @@ APP_DOCTYPES = {
 	"Farm Salary Structure": "farm_salary_structure",
 	"Farm Payroll Entry": "farm_payroll_entry",
 	"Farm Payroll Slip": "farm_payroll_slip",
+	# v0.40.0. Payroll to the general ledger: which accounts a company's payroll
+	# posts to, and the draft Journal Entries a run produced.
+	"Farm Payroll Account Mapping": "farm_payroll_account_mapping",
+	"Farm Payroll Account Map Row": "farm_payroll_account_map_row",
+	"Farm Payroll GL Posting": "farm_payroll_gl_posting",
 	# v0.31.0. Expense Receipt Capture.
 	"Expense Receipt": "expense_receipt",
 	"Expense Receipt Item": "expense_receipt_item",
@@ -1472,6 +1477,12 @@ CHILD_TABLES = {
 	# of the doctype they belong to or a W-2 built from a seeded payroll entry
 	# would be testing a list of dicts the framework would never have produced.
 	("Farm Payroll Entry", "slips"): "Farm Payroll Slip",
+	# v0.40.0. `post_payroll_to_gl` appends one row per draft Journal Entry it
+	# created and `_live_postings` reads them back to decide whether this run has
+	# already been posted — which is the idempotency check, so the rows have to
+	# survive a re-read as the rows they were.
+	("Farm Payroll Entry", "gl_postings"): "Farm Payroll GL Posting",
+	("Farm Payroll Account Mapping", "components"): "Farm Payroll Account Map Row",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1510,6 +1521,11 @@ REHYDRATED_CHILD_FIELDS = (
 	# tidying names and order indexes — which needs them to be documents on the
 	# second read as well as on the first.
 	"sections",
+	# v0.40.0. `configure_payroll_accounts` re-reads a mapping it did not write
+	# and merges rows into it, and `post_payroll_to_gl` re-reads its own GL
+	# postings to decide whether the run is already in the ledger.
+	"components",
+	"gl_postings",
 )
 
 

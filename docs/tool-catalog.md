@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 346 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 350 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 160 read tools are **on** by default and can be switched off individually. A
+All 162 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -8564,6 +8564,152 @@ would restart it.
 
 ---
 
+## v0.40.0 — payroll into the general ledger
+
+Four tools. v0.30.0 computed payroll, v0.35.0 fed it the shift register's hours
+and v0.36.0 drew the tax forms — and a completed run produced Farm Payroll Slips
+and **no Journal Entries**. Wages are the largest number on a farm's income
+statement and they were the one number somebody keyed into the ledger by hand,
+off a report, every fortnight.
+
+### No account name is shipped, and that is the design
+
+The mapping from a payroll component to a general ledger account is a **record**,
+per company: `Farm Payroll Account Mapping`, one row per component. A shipped
+default would be right on the chart of accounts it was written against and
+quietly wrong everywhere else — and "quietly wrong" in a chart of accounts means
+a year of wages in an expense line nobody notices until the tax preparer asks.
+
+### The eleven components
+
+Six are **employee-side**, and together they are the two sides of gross pay, so
+all six are required whatever the amounts are:
+
+| Component | Side | What it is |
+|---|---|---|
+| `Gross Pay` | debit | Total earnings — the wage expense itself |
+| `Federal Tax` | credit | Federal income tax withheld |
+| `SS Employee` | credit | The worker's 6.2% share |
+| `Medicare Employee` | credit | The worker's 1.45% plus Additional Medicare |
+| `State Tax` | credit | Everything a state withholds from the worker |
+| `Net Pay` | credit | What is actually paid — clearing, bank or cash |
+
+Five are **employer-side**. Each is an expense *and* a liability, so each takes
+both accounts, and each is required only where the run has an amount for it:
+
+| Component | Sides | What it is |
+|---|---|---|
+| `SS Employer` | debit + credit | The farm's matching 6.2% |
+| `Medicare Employer` | debit + credit | The farm's matching 1.45% |
+| `FUTA` | debit + credit | Federal unemployment, first $7,000 per worker |
+| `SUTA` | debit + credit | State unemployment at this employer's own rate |
+| `State Employer Other` | debit + credit | Paid Leave Oregon employer share, OR workers' comp, WA PFML employer share, WA L&I |
+
+They stay five rather than one because they are remitted to five different
+places on five different schedules — the 941, the 940, the quarterly state
+return, and two more besides. A farm that genuinely wants them in one account
+can point five components at one account, which is a decision it made rather
+than one this app made for it.
+
+`State Employer Other` is the component the release specification did not name.
+It exists because the state engines compute employer amounts that are **not**
+unemployment insurance, and a mapping with nowhere to put them would drop real
+money out of the books quietly.
+
+### `get_payroll_account_mapping`
+
+**READ (default ON).** Which accounts a company's payroll posts to, which
+components are still unmapped, and what each one is for.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `company` | | Company name or abbreviation |
+
+### `preview_payroll_gl`
+
+**READ (default ON).** Every line of every entry the run would produce, both
+totals and the balance check, with nothing written. **It refuses nothing** — an
+incomplete mapping, a run already posted, a slip that does not balance are all
+reported in `blockers` with `would_post: false`, because an unpostable run is
+exactly what somebody calls a preview to find out about.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `payroll_entry` | yes | The Farm Payroll Entry docname (`name` is an alias) |
+| `mode` | | `consolidated` (default) or `per_employee` |
+| `posting_date` | | `YYYY-MM-DD`. Defaults to the run's pay period end |
+| `cost_center` | | Set on every line. Defaults to the mapping's |
+| `include_employer` | | Default true. False books the wage half only |
+
+### `configure_payroll_accounts`
+
+**MUTATING (default OFF).** Sets the mapping. Rows **merge** into what is there
+unless `replace=true`, so a mapping is built up a few accounts at a time.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `company` | | Company name or abbreviation |
+| `components` | yes | List of `{component, debit_account, credit_account, notes}` (`accounts`, `mapping` are aliases) |
+| `replace` | | Default false. True discards every row not in this call |
+| `default_posting_mode` | | `Consolidated` (default) or `Per Employee` |
+| `cost_center` | | Set on every payroll line |
+| `is_active` | | Default true on creation |
+| `notes` | | Who decided this mapping and against what |
+
+**Group accounts are refused here**, not at posting time. A mapping is written
+once and posted from every fortnight afterwards, so a group account stored now
+is a payroll refused in six weeks by somebody who did not configure it.
+
+### `post_payroll_to_gl`
+
+**MUTATING (default OFF).** Turns a Farm Payroll Entry into **DRAFT** Journal
+Entries and stops. Submitting stays `submit_journal_entry`, behind its own
+switch, exactly as it does for `create_journal_entry`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `payroll_entry` | yes | The Farm Payroll Entry docname |
+| `mode` | | `consolidated` (default) or `per_employee` |
+| `posting_date` | | Defaults to the run's pay period end |
+| `cost_center` | | Defaults to the mapping's |
+| `include_employer` | | Default true |
+
+**Five refusals, all reported at once** rather than one per round trip: a
+payroll entry that is not Calculated or Submitted, a company with no account
+mapping, a mapping with a hole in it, a run that already has live journal
+entries against it, and an entry that does not balance.
+
+**The idempotency check is about the ledger, not the link table.** Every draft
+is linked back onto the run's `gl_postings`, and a run with live entries against
+it is refused by name. A run whose drafts were *deleted*, or whose entries were
+*cancelled*, can be posted again — because then there is genuinely nothing in
+the books.
+
+### What the payroll engine got out of it
+
+Employer taxes have been computed since v0.28.0 and stored nowhere: the slip
+carried the worker's deductions and none of what the farm owed on top. Farm
+Payroll Slip now holds `social_security_employer`, `medicare_employer`, `futa`,
+`state_unemployment`, `state_employer_other` and `total_employer_taxes`, and
+`calculate_full_payroll` returns them plus `total_cost_of_employment`. No total
+moved — these are the same figures the engines already returned, lifted to where
+they can be kept.
+
+**Slips written before v0.40.0 carry zeros**, so posting such a run books the
+wages and leaves the employer's taxes off the ledger. That is reported as a
+warning rather than inferred from four zeros: an employer with no employer taxes
+is a real thing, and an entry that quietly left them out is not.
+
+**State unemployment is new and defaults to zero.** `State Tax Configuration`
+gains `suta_rate` and `suta_wage_base`, both employer-entered for the same
+reason workers' compensation is — a SUTA rate is assigned to one employer by one
+agency out of that employer's own experience rating, and there is no table
+anybody could ship. A site that enters no rate computes exactly what it computed
+before this release. The wage base is consumed by year-to-date gross, the way
+FUTA's $7,000 is; a base of zero means no cap.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -8574,7 +8720,8 @@ Everything a tool needs is in two places:
    `meta`, `packets`, `realestate`, `parties`, `investment_report`, `tax`,
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
-   `shifts`, `heat`, `kpi`, `kpidefs`, `visits`, `sessions`, `rules`,
+   `shifts`, `heat`, `kpi`, `kpidefs`, `payroll`, `payroll_gl`, `visits`,
+   `sessions`, `rules`,
    `asset_tags`, `feeds` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and

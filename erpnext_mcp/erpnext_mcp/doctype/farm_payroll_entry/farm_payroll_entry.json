@@ -21,7 +21,10 @@
   "total_net",
   "employee_count",
   "slips_section",
-  "slips"
+  "slips",
+  "gl_section",
+  "gl_status",
+  "gl_postings"
  ],
  "fields": [
   {
@@ -129,11 +132,33 @@
    "fieldtype": "Table",
    "label": "Slips",
    "options": "Farm Payroll Slip"
+  },
+  {
+   "fieldname": "gl_section",
+   "fieldtype": "Section Break",
+   "label": "General Ledger"
+  },
+  {
+   "default": "Not Posted",
+   "description": "Whether post_payroll_to_gl has produced draft Journal Entries for this run. It never says Submitted: this app creates drafts and a human posts them, so the ledger's own docstatus is the only place that fact lives.",
+   "fieldname": "gl_status",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "GL Status",
+   "options": "Not Posted\nDraft Entries Created",
+   "read_only": 1
+  },
+  {
+   "description": "Every draft Journal Entry this run produced. Also the idempotency check — a run whose postings are still live is refused a second posting, with their names.",
+   "fieldname": "gl_postings",
+   "fieldtype": "Table",
+   "label": "GL Postings",
+   "options": "Farm Payroll GL Posting"
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-05 09:00:00.000000",
+ "modified": "2026-08-06 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Farm Payroll Entry",

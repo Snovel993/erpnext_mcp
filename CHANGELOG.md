@@ -3,6 +3,91 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.40.0 — 2026-08-06
+
+**Payroll into the general ledger.** v0.30.0 built an engine that computed a
+payroll slip. v0.35.0 fed it the hours the foreman had already written down.
+v0.36.0 drew the tax forms the slips add up to. And a completed payroll run
+produced Farm Payroll Slips, correct to the cent, and a general ledger that had
+never heard of any of it. Wages are the largest number on a farm's income
+statement and they were the one number somebody keyed in twice — out of a
+report, into a journal entry, by hand, every fortnight, with a transposition
+waiting in it. Four new tools (350 total: 162 read, 188 mutating), three new
+DocTypes, and one open loop closed.
+
+**NO ACCOUNT NAME IS SHIPPED, AND THAT IS THE DESIGN RATHER THAN AN OMISSION.**
+The mapping from a payroll component to a general ledger account is a RECORD —
+`Farm Payroll Account Mapping`, one per company, one row per component. A
+default would be right on the chart of accounts it was written against and
+quietly wrong everywhere else, and "quietly wrong" in a chart of accounts is not
+an error message: it is a year of wages sitting in an expense line nobody looks
+at until the tax preparer asks why field labour halved. `configure_payroll_accounts`
+writes the mapping, `get_payroll_account_mapping` reads it back with the gaps
+named, and neither of them has an account name in its source.
+
+**ELEVEN COMPONENTS, AND THE SPLIT IS ABOUT WHO OWES WHAT.** Six are
+employee-side and together they are the two sides of gross pay, so all six are
+required whatever the amounts are: gross pay debited to the wage expense, and
+federal tax, employee Social Security, employee Medicare, state tax and net pay
+credited to their liabilities. Five are employer-side — employer Social
+Security, employer Medicare, FUTA, SUTA and the other state employer programmes
+— and each of those is an expense AND a liability, because it is money the farm
+owes on top of gross rather than money carved out of it. They stay five rather
+than one because they are remitted to five different places on five different
+schedules, and one "payroll tax payable" account makes every one of those
+reconciliations a spreadsheet exercise.
+
+**DRAFTS ONLY, THE SAME AS EVERY OTHER JOURNAL ENTRY THIS APP WRITES.**
+`post_payroll_to_gl` inserts through `mutate.insert_draft_journal_entry` — the
+one function in this app that writes a Journal Entry, with its never-submitted
+assertion — and stops. There is no `submit_payroll_journal_entries` and there is
+not going to be one, for the same reason there is no `post_journal_entry`:
+arithmetic anybody can redo and a statement about money leaving the farm are
+different acts, and they want different people in front of them.
+
+**POSTING TWICE IS THE FAILURE THIS GUARDS HARDEST AGAINST.** A payroll posted
+twice is a doubled wage expense against a doubled liability, and it is the
+easiest mistake in the world to make from a chat client that lost its
+scrollback. Every draft is linked back onto the run's `gl_postings` table and a
+run with live entries against it is refused BY NAME. The check is about what is
+in the LEDGER rather than what the table remembers: a run whose drafts were
+deleted, or whose entries were cancelled, can be posted again, because then
+there is genuinely nothing in the books. Four other refusals sit beside it — a
+run that is not Calculated or Submitted, a company with no mapping, a mapping
+with a hole in it, and an entry that does not balance — and all five are
+reported AT ONCE rather than one per round trip.
+
+**THE PREVIEW REFUSES NOTHING, ON PURPOSE.** `preview_payroll_gl` returns every
+line of every entry, both totals and the balance check, with `would_post: false`
+and the blockers listed. An incomplete mapping is exactly what somebody calls a
+preview to find out about, and a preview that raised instead of reporting would
+be useless for the one job it has. It and the posting go through one pure
+function, so the entry described and the entry inserted cannot drift.
+
+**THE PAYROLL ENGINE NOW KEEPS WHAT IT ALWAYS COMPUTED.** Employer taxes have
+been calculated since v0.28.0 and stored nowhere: the slip carried the worker's
+deductions and none of what the farm owed on top, so the employer share of FICA
+alone — 7.65% of gross — never appeared on a record. Farm Payroll Slip gains
+`social_security_employer`, `medicare_employer`, `futa`, `state_unemployment`,
+`state_employer_other` and `total_employer_taxes`, and `calculate_full_payroll`
+returns them plus `total_cost_of_employment`. No total moved; these are the same
+figures the engines already returned, lifted to where they can be kept. Slips
+written before this release carry zeros, and posting such a run says so in a
+warning rather than leaving somebody to infer it from four zeros — an employer
+with no employer taxes is a real thing, and an entry that quietly left them out
+is not.
+
+**STATE UNEMPLOYMENT IS NEW AND DEFAULTS TO ZERO.** State Tax Configuration
+gains `suta_rate` and `suta_wage_base`, both employer-entered for exactly the
+reason workers' compensation is: a SUTA rate is assigned to one employer by one
+state agency out of that employer's own experience rating, and there is no table
+anybody could ship. A site that enters no rate computes precisely what it
+computed before this release — the addition is a place to put a number, not a
+new charge. The wage base is consumed by year-to-date gross the way FUTA's
+$7,000 is, and a base of zero means no cap.
+
+**101 new standalone tests**, 5,478 in total.
+
 ## 0.39.0 — 2026-08-06
 
 **Financial KPI Framework.** v0.19.5 shipped one KPI. v0.19.6 put it under a
