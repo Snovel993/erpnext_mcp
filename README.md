@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **350 tools** — 162 read-only, 188 mutating.
+- **355 tools** — 164 read-only, 191 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -56,6 +56,15 @@ site at call time.
   declarative and none uses the sandboxed escape hatch** — the remaining two are
   argued as permanent rather than pending. See
   [docs/configurable_compliance_framework.md](docs/configurable_compliance_framework.md).
+- **The shape of a recurring job is data too, added in v0.41.0.** A `Farm Task
+  Template` says what one piece of work looks like — its type, its skill, its
+  duration, whether it is dispatched or self-picked, what evidence closing it
+  requires, what record completing it produces, and the items a worker ticks off
+  — and a foreman or a compliance rule raises tasks from it. A task **snapshots**
+  its template at creation, so editing one changes what future tasks look like
+  and cannot reach a task already claimed or half-worked; a required checklist
+  item left unticked refuses the completion by name, before any compliance record
+  is written.
 - MIT. Three runtime dependencies beyond Frappe/ERPNext (`shapely` and `h3` for
   field boundaries, `segno` for the mobile login QR), and the app still loads
   without any of them — each missing one costs its own tools BY NAME, with the

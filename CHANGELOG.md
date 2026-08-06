@@ -3,6 +3,116 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.41.0 — 2026-08-06
+
+**The job had a shape and three places kept it.** The template concept has been
+in this app since v0.16.0 and has never had a record. What one recurring piece of
+work looks like — its type, its skill, its duration, whether a foreman sends
+somebody or a worker picks it up, what evidence closing it requires, what
+compliance record completing it produces, and what a worker is actually meant to
+check — lived in `ALERT_TASK_MAP`, a Python dict of thirteen recipes where moving
+a habitability walk from forty-five minutes to sixty was a code release; in three
+loose `producer_*` fields on every Compliance Rule, which worked but could not be
+shared, so two rules asking for the same job stated it twice and drifted the
+first time one was edited; and in whatever a foreman typed that morning. Five
+tools (355 total: 164 read, 191 mutating), two DocTypes, one field repointed,
+five seeded templates, and nothing wired.
+
+**IT IS NOT AN INSPECTION TEMPLATE, AND THE DIFFERENCE IS LOAD-BEARING.** A
+Cabin Opening is one trip producing a Housing Inspection, two Detector Tests and
+a Water Test, out of one claim, at four separate regulated cadences — that is an
+Inspection Template, and it is versioned by copy because a session submits
+against its pinned version weeks after starting. A smoke detector test is one
+job. Collapsing the two would make every detector test carry a sections table
+with a single row in it, and make `sections[0].produces_record_doctype` the
+answer to a question the Farm Task already has a field for.
+
+**A TASK SNAPSHOTS ITS TEMPLATE, AND THAT IS THE LOAD-BEARING RULE.**
+`create_task_from_template` copies the type, the skill, the duration, the
+dispatch mode, the evidence contract, the produced record and its defaults, the
+instructions and the whole checklist onto the task. After that the task is
+self-contained — there is a test that deletes the template and completes the task
+anyway. So editing a template changes what FUTURE tasks look like and nothing
+else: a worker halfway through a five-item walk whose template lost an item does
+not find their evidence attached to a list that no longer contains it, and
+nobody's evidence contract tightens under them mid-job. It also means the record
+needs no versioning by copy — nothing reads back from it, so versioning would buy
+an audit trail `track_changes` already keeps at the cost of a register where the
+eight templates an operation runs are lost among forty superseded rows.
+`update_farm_task_template` edits in place and reports how many tasks the edit
+cannot reach.
+
+**THE CHECKLIST HAS TEETH, AND MOST TEMPLATES SHOULD NOT HAVE ONE.** A detector
+test is a checklist; "renew the certificate before it lapses" is not, and a
+one-item list saying *do the task* is a form people learn to tick without
+reading — once that habit is formed the required flag stops meaning anything on
+every template, so the tool warns when you author one without a checklist rather
+than nagging for one. Where there is one, `complete_farm_task` REFUSES a
+completion with a required item unticked, by name, before any compliance record
+is written. The checklist is checked BEFORE the evidence contract: an unticked
+required item says part of the WORK was not done, and the contract is about what
+the work PRODUCED — telling somebody their photograph is missing when the real
+answer is that they never tested the CO detector sends them back for the wrong
+thing. An optional item left undone does not refuse, which is what keeps a
+template covering more than today needs usable. A tick naming an item the task
+does not hold is refused rather than ignored: a typo that silently marks nothing
+looks exactly like a tick right up until the completion is refused for a
+different item.
+
+**`producer_task_template` WAS REPOINTED, AND IT HAD NO BEHAVIOUR TO LOSE.** It
+linked to Inspection Template from v0.22.0 to v0.40.0 and nothing on the dispatch
+side ever read it — multi-section visits are raised by matching a template's
+sections against the records a place's pending alerts ask for, which never
+consults this column. It now names a Farm Task Template and has behaviour for the
+first time. Where a rule names one, the template is the WHOLE recipe and the
+rule's inline `producer_farm_task_type`, `producer_skill_required` and
+`evidence_contract_json` are not read; those three stay as the fallback for a
+rule without one, which is most of them.
+`generate_tasks_from_compliance_alerts` resolves in three steps — the rule's
+template, then `ALERT_TASK_MAP`, then the rule's inline fields — at a cost of one
+query for the whole sweep rather than four per alert. The alert still supplies
+what only it knows: the severity that becomes urgency, the place, and its own
+message, which lands AFTER the template's standing instructions because a worker
+needs "how this job is done" before "what is wrong with this cabin". The
+`repoint_producer_task_template` patch clears any value naming an Inspection
+Template and prints each one by name — it has to, because a Link whose target
+moved refuses the next save of any row holding an old value, which would turn a
+rule an operator set into a rule nobody can edit. It clears rather than converts:
+there is no honest automatic translation from a four-section visit to a single
+task shape, and picking one section would be this app inventing an operator's
+intent and then generating work from the invention.
+
+**FIVE SEEDED TEMPLATES, AND SEEDING WIRES NOTHING.** Cabin Habitability
+Inspection, Smoke Detector Test, Water Quality Test, Certification Renewal and
+Training Record. Every task type, skill, duration, dispatch mode and evidence
+contract on the first three matches `ALERT_TASK_MAP` to the letter and a test
+asserts the equality — so pointing a shipped rule at its template raises exactly
+the task it raised in v0.16.0, plus a checklist, and the day somebody edits one
+table and not the other the build says so. `producer_task_template` is left
+exactly as it was on every rule, so an upgrade changes no task any sweep
+produces; pointing a rule at a template is a deliberate act by somebody who has
+read what the template asks for. An upgrade that silently changed the shape of
+the work a compliance calendar dispatches is the one thing this app will not do.
+Seeded, not fixtured — the seeder checks by template name across every row, so an
+operator who added an item to the detector checklist keeps it and one who
+disabled a template their operation does not run keeps it disabled.
+
+**`evidence_required` IS MANDATORY ON A TEMPLATE**, for exactly the reason it is
+mandatory on a task: a template with no contract raises tasks with no contract,
+`create_farm_task` refuses those, and the failure would land in front of whoever
+is stood in the cabin rather than in front of whoever wrote the template. What is
+NOT refused is a `creates_record` naming a DocType this site has not got — this
+app installs doctypes over time and refusing here would make a template
+unsaveable today for a spelling that will be right in a month; the refusal that
+matters is at task creation, where somebody is about to be sent somewhere, and it
+is there.
+
+**THERE IS NO `delete_farm_task_template`.** A template that has raised work is
+the answer to "what did this job ask for last season", and every task raised from
+one links back to it. `enabled=false` retires one while keeping all of that
+readable — the same doctrine `deactivate_inspection_template` and Training Type's
+`active` flag follow.
+
 ## 0.40.0 — 2026-08-06
 
 **Payroll into the general ledger.** v0.30.0 built an engine that computed a

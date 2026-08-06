@@ -76,14 +76,14 @@ from ..erpnext_mcp.doctype.farm_task.farm_task import (
 	MAX_CONCURRENT_CLAIMS,
 	ORIGIN_COMPLIANCE_RULE,
 	ORIGIN_FIELD_REPORTED,
-	ORIGIN_FOREMAN_DISPATCH,
-	ORIGINS,
 	REJECTED,
 	SELF_PICKABLE,
 	STATES,
 	TERMINAL_STATES,
+	checklist_items,
 	evidence_contract,
 	parse_json_object,
+	unmet_checklist,
 )
 from ..erpnext_mcp.doctype.farm_task_assignment.farm_task_assignment import (
 	concurrent_claims,
@@ -129,6 +129,8 @@ _TASK_FIELDS = (
 	"produced_record",
 	"notes",
 	"asset",
+	"template",
+	"checklist_status",
 	"creation",
 	"modified",
 	"owner",
@@ -216,6 +218,17 @@ def _describe_task(row: dict) -> dict:
 		"open": (row.get("state") or DRAFT) not in TERMINAL_STATES,
 		"self_pickable": (row.get("dispatch_mode") or "Either") in SELF_PICKABLE,
 	}
+	# v0.41.0. The template is PROVENANCE and the checklist is the task's own
+	# snapshot — both reported only when there is one, so the shape of a plain
+	# hand-raised task's payload is exactly what it was before this release.
+	if row.get("template"):
+		out["template"] = row["template"]
+	items = checklist_items(row.get("checklist_status"))
+	if items:
+		out["checklist"] = items
+		outstanding = unmet_checklist(row.get("checklist_status"))
+		out["checklist_done"] = len([item for item in items if item.get("done")])
+		out["checklist_outstanding_required"] = outstanding
 	if row.get("asset"):
 		out["asset"] = row["asset"]
 	if row.get("reported_by"):
@@ -752,6 +765,28 @@ def complete_farm_task(args: dict) -> ToolResult:
 			"is the one thing an auditor cannot act on. Write what was wrong. Nothing was changed."
 		)
 
+	# v0.41.0. THE CHECKLIST IS CHECKED BEFORE THE EVIDENCE CONTRACT and both are
+	# reported before anything is written. The order is deliberate: an unticked
+	# required item is a statement that part of the WORK was not done, and the
+	# evidence contract is about what the work PRODUCED — telling somebody their
+	# photograph is missing when the real answer is that they never tested the CO
+	# detector sends them back for the wrong thing.
+	checklist_state = _marked_checklist(task, args)
+	outstanding = unmet_checklist(checklist_state)
+	if outstanding:
+		raise ToolError(
+			f"{assignment['task']} cannot be completed: "
+			f"{len(outstanding)} required checklist item(s) are not marked done.\n"
+			+ "\n".join(f"  - {item}" for item in outstanding)
+			+ "\n\nThe checklist came off the template this task was raised from and was "
+			"snapshotted onto the task at creation, so it is the list the worker was shown. Mark "
+			"them with the `checklist` argument — a list of item names, or "
+			'[{"item_name": "…", "done": true, "note": "…"}] where you want to record what was '
+			"found. An item that genuinely does not apply should be OPTIONAL on the template "
+			"rather than falsely ticked here. Nothing was changed and no compliance record was "
+			"written."
+		)
+
 	unmet = _unmet_evidence(contract, evidence, signature, findings_given, witness)
 	if unmet:
 		raise ToolError(
@@ -827,7 +862,12 @@ def complete_farm_task(args: dict) -> ToolResult:
 	doc.save(ignore_permissions=True)
 
 	final_state = AWAITING_REVIEW if record_state == records.CORRECTIVE_ACTION_REQUIRED else COMPLETED
-	_set_task_state(assignment["task"], final_state, produced_record=produced or "")
+	task_fields = {"produced_record": produced or ""}
+	# The ticks are written back ONLY where there is a checklist, so a task
+	# without one never has an empty blob stamped over the default.
+	if checklist_items(checklist_state):
+		task_fields["checklist_status"] = json.dumps(checklist_state)
+	_set_task_state(assignment["task"], final_state, **task_fields)
 
 	data = {
 		"task": _describe_task(task_row(assignment["task"])),
@@ -838,6 +878,7 @@ def complete_farm_task(args: dict) -> ToolResult:
 		"produced_record_doctype": task.get("creates_record") or None,
 		"produced_record_state": record_state,
 		"final_state": final_state,
+		"checklist": checklist_items(checklist_state),
 		# v0.20.1. ALWAYS PRESENT, AND FALSE HERE. A client that has to test
 		# whether the key exists before reading it has two code paths where it
 		# needs one, and the one it exercises least is the one that breaks — this
@@ -1001,6 +1042,76 @@ def clean_pass_flag(args: dict):
 		f"clean_pass must be true or false, got {raw!r}. It is the worker's own answer to "
 		"whether the walk was clean, and a value nobody can read is not an answer."
 	)
+
+
+def _marked_checklist(task: dict, args: dict) -> dict:
+	"""The task's snapshotted checklist with this submission's ticks applied.
+
+	v0.41.0. NOTHING IS WRITTEN HERE — the caller decides whether the completion
+	survives its other refusals before any of this reaches the database, which is
+	what makes a refused completion leave the checklist exactly as the worker's
+	last successful call left it.
+
+	THE ARGUMENT ACCEPTS BOTH SHAPES, and the bare-string one is the reason: a
+	handset marking five items sends five names, and making it send five objects
+	to say the same thing is how a client ends up sending none. An entry may be:
+
+        "Press the smoke alarm"                          → done
+        {"item_name": "…", "done": true, "note": "…"}    → done, with what was found
+        {"item_name": "…", "done": false}                → explicitly NOT done
+
+    A NAME THE TASK'S CHECKLIST DOES NOT HOLD IS REFUSED, rather than ignored. A
+    typo that silently marks nothing looks exactly like a tick right up until the
+    completion is refused for an item the worker believes they ticked — and the
+    second refusal names a different item from the one they got wrong, which is
+    the worst possible place to spend somebody's afternoon.
+
+    TICKS ARE CUMULATIVE. An item marked done on an earlier call stays done: a
+    worker who marks three items, walks out of signal, and completes later is one
+    worker doing one job.
+	"""
+	items = checklist_items(task.get("checklist_status"))
+	raw = args.get("checklist")
+	if raw in (None, ""):
+		return {"items": items}
+	if not isinstance(raw, list):
+		raise ToolError(
+			"checklist must be a JSON list — either of item names, or of objects with "
+			'`item_name`, `done` and an optional `note`. Nothing was changed.'
+		)
+	if not items:
+		raise ToolError(
+			f"{task.get('name')} has no checklist, so there is nothing for the `checklist` "
+			"argument to mark. A task raised from a Farm Task Template carrying one has its own "
+			"snapshot; this task was raised without. Nothing was changed."
+		)
+
+	by_name = {str(item.get("item_name") or "").casefold(): item for item in items}
+	for index, entry in enumerate(raw):
+		if isinstance(entry, dict):
+			name = str(entry.get("item_name") or "").strip()
+			done = bool(entry.get("done", True))
+			note = str(entry.get("note") or "").strip()
+		else:
+			name, done, note = str(entry or "").strip(), True, ""
+		if not name:
+			raise ToolError(
+				f"checklist entry {index + 1} names no item. Nothing was changed."
+			)
+		item = by_name.get(name.casefold())
+		if item is None:
+			raise ToolError(
+				f"this task's checklist has no item called {name!r}. Its items are: "
+				+ ", ".join(repr(str(row.get('item_name') or '')) for row in items)
+				+ ". A name that marks nothing looks exactly like a tick right up until the "
+				"completion is refused for an item you believe you ticked. Nothing was changed."
+			)
+		# Cumulative: an explicit done=false may un-tick, but omitting an item
+		# never clears a tick an earlier call made.
+		item["done"] = done
+		if note:
+			item["note"] = note
+	return {"items": items}
 
 
 def _unmet_evidence(
@@ -1600,40 +1711,164 @@ ALERT_TASK_MAP = {
 }
 
 
-def _recipe_for(alert_type: str) -> dict | None:
-	"""The shape of work one alert type becomes: the table first, then the RECORD.
-
-	v0.22.5, AND IT IS THE HALF OF THE CCF'S PRODUCER STORY THAT WAS MISSING. Since
-	v0.22.0 every Compliance Rule has carried `producer_farm_task_type`,
-	`producer_skill_required` and `evidence_contract` — seeded FROM this table, so
-	the two could not disagree — but nothing read them back. A rule authored after
-	the framework shipped therefore had a producer recipe on its record and landed
-	in `skipped_unmapped` anyway, which is a framework that lets you define a rule
-	and not the work it asks for.
-
-	`ALERT_TASK_MAP` STAYS FIRST, and that ordering is the backward-compatibility
-	guarantee: the thirteen shipped rules produce exactly the tasks they produced
-	in v0.22.1, out of the same reviewed table, whatever a site has since edited
-	onto their records. The record is consulted only where the table has nothing to
-	say — which is precisely the case the table cannot cover, because the rule did
-	not exist when it was written.
-
-	Returns None where the record has no producer definition either, and None
-	still means "reported by name, not turned into a generic task".
-	"""
-	recipe = ALERT_TASK_MAP.get(alert_type)
-	if recipe is not None:
-		return recipe
-
+def _rule_row_for(alert_type: str) -> dict:
+	"""The live Compliance Rule behind one alert type, or {}. Never raises."""
 	try:
 		from .. import compliance_rules
 
 		name = compliance_rules.resolve(alert_type)
-		row = compliance_rules.rule_row(name) if name else {}
+		return compliance_rules.rule_row(name) if name else {}
 	except Exception:  # pragma: no cover - a site mid-migrate
+		return {}
+
+
+def producer_templates() -> dict:
+	"""alert type → the live rule row that names a Farm Task Template. v0.41.0.
+
+	ONE QUERY FOR THE WHOLE SWEEP, and that is why it exists rather than
+	`_recipe_for` asking per alert. `generate_tasks_from_compliance_alerts` walks
+	up to five hundred alerts; resolving each one's rule and reading its row would
+	be four queries an alert for a fact almost every alert does not have — no rule
+	this app seeds names a producer template, so on an ordinary site this returns
+	an empty dict off one query and the whole template path costs nothing.
+
+	Only ENABLED, UNSUPERSEDED rows are read. A rule somebody switched off should
+	not be quietly deciding the shape of the work a different rule asks for, and a
+	superseded row is a definition that has already been replaced.
+	"""
+	if not compat.doctype_exists("Compliance Rule"):
+		return {}
+	try:
+		rows = frappe.db.get_all(
+			"Compliance Rule",
+			filters={
+				"producer_task_template": ("not in", ("", None)),
+				"enabled": 1,
+				"superseded_by": ("in", ("", None)),
+			},
+			fields=[
+				"name",
+				"rule_id",
+				"title",
+				"producer_task_template",
+				"producer_assigned_to_expression",
+			],
+			limit=500,
+		)
+	except Exception:  # pragma: no cover - a site mid-migrate
+		return {}
+	return {str(row["rule_id"]): dict(row) for row in rows or [] if row.get("rule_id")}
+
+
+def _recipe_from_template(template: str, row: dict) -> dict | None:
+	"""The shape of work one Farm Task Template defines. v0.41.0.
+
+	THE TEMPLATE IS THE WHOLE RECIPE where a rule names one — the type, the skill,
+	the minutes, the dispatch mode, the evidence contract, the record it produces
+	and the checklist — and the rule's inline `producer_*` fields are not
+	consulted at all. That is the point of the release: two rules asking for the
+	same job state it once, in one record, instead of twice in full and drifting.
+
+	The rule still owns TWO things the template cannot know, and both are facts
+	about the RULE rather than about the job: `producer_assigned_to_expression`,
+	because who gets sent depends on the row that tripped, and the alert's own
+	message, which becomes the task's case-specific note. Everything else comes
+	off the template.
+
+	Returns None where the template has gone missing or been disabled, and None
+	falls the caller through to the ordinary paths — a rule pointing at a deleted
+	template raising a table-shaped task is better than a rule raising nothing.
+	"""
+	from .. import task_templates
+
+	resolved = task_templates.resolve(template)
+	if not resolved:
 		return None
+	shape = task_templates.snapshot(resolved)
+	if not shape or not compat.checked(task_templates.template_row(resolved).get("enabled")):
+		return None
+	expression = str(row.get("producer_assigned_to_expression") or "").strip()
+	return {
+		"task_type": shape["task_type"],
+		"creates_record": shape["creates_record"],
+		"skill": shape["skill_required"],
+		# A named holder wins over the template's own mode, exactly as it does on
+		# the table path: `Dispatched` is this app's word for "somebody has to be
+		# SENT to this by name", and a task with a named holder is not in a pool.
+		"dispatch": DISPATCH_DISPATCHED if expression else shape["dispatch_mode"],
+		"minutes": shape["estimated_duration_minutes"],
+		"evidence": dict(shape["evidence_required"]),
+		"what": str(row.get("title") or "").strip() or shape["template"],
+		"assigned_to_expression": expression,
+		"template": shape["template"],
+		"checklist_status": shape["checklist_status"],
+		"creates_record_data": dict(shape["creates_record_data"]),
+		"instructions": shape["notes"],
+	}
+
+
+def _recipe_for(alert_type: str, producers: dict | None = None) -> dict | None:
+	"""The shape of work one alert type becomes: the TEMPLATE, then the table, then the record.
+
+	v0.22.5 added the second and third of those. v0.41.0 added the first, and the
+	ordering is the whole of what changed.
+
+	1. **THE RULE'S `producer_task_template`, WHERE IT HAS ONE.** A Farm Task
+	   Template is an explicit statement, by whoever authored the rule, that this
+	   work has a defined shape somewhere else — and a statement that specific has
+	   to outrank a table this app wrote before the operation existed. It is also
+	   how the seeded templates become useful to the shipped rules: point
+	   `housing_inspection_overdue` at "Cabin Habitability Inspection" and the
+	   generated task carries the checklist.
+
+	   THIS DOES NOT BREAK THE BACKWARD-COMPATIBILITY GUARANTEE BELOW, and the
+	   reason is worth stating: no rule this app seeds has a producer template, so
+	   nothing moves until somebody deliberately points a rule at one. The five
+	   seeded templates match `ALERT_TASK_MAP` field for field on purpose — same
+	   type, same skill, same minutes, same dispatch mode, same evidence contract
+	   — so even after the wiring the task is the task it always was, plus a
+	   checklist. `test_task_templates.py` asserts that equality so the day
+	   somebody edits one table the other cannot quietly stay behind.
+
+	2. **`ALERT_TASK_MAP`.** The thirteen shipped rules produce exactly the tasks
+	   they produced in v0.22.1, out of the same reviewed table, whatever a site
+	   has since edited onto their records.
+
+	3. **THE RULE'S OWN INLINE `producer_*` FIELDS.** The case the table cannot
+	   cover, because the rule did not exist when it was written. Since v0.22.0
+	   every Compliance Rule has carried `producer_farm_task_type`,
+	   `producer_skill_required` and `evidence_contract`; until v0.22.5 nothing
+	   read them back, so a rule authored after the framework shipped had a
+	   producer recipe on its record and landed in `skipped_unmapped` anyway.
+
+	`producers` is the map `producer_templates()` builds once per sweep, so five
+	hundred alerts cost one query for step 1 rather than four apiece. Omitting it
+	is correct for a one-off caller and simply asks for the map here.
+
+	Returns None where none of the three has anything to say, and None still means
+	"reported by name, not turned into a generic task".
+	"""
+	if producers is None:
+		producers = producer_templates()
+
+	producer = producers.get(alert_type) or {}
+	template = str(producer.get("producer_task_template") or "").strip()
+	if template:
+		from_template = _recipe_from_template(template, producer)
+		if from_template is not None:
+			return from_template
+
+	recipe = ALERT_TASK_MAP.get(alert_type)
+	if recipe is not None:
+		return recipe
+
+	row = _rule_row_for(alert_type)
 	if not row:
 		return None
+
+	# Reaching here means `_rule_row_for` imported the module and read a row, so
+	# this import cannot be the thing that fails on a site mid-migrate.
+	from .. import compliance_rules
 
 	task_type = str(row.get("producer_farm_task_type") or "").strip()
 	evidence = compliance_rules._quietly(
@@ -1781,6 +2016,10 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 	rows = rows[:limit]
 
 	answered = _already_answered([row["name"] for row in rows])
+	# v0.41.0. ONE QUERY FOR THE WHOLE SWEEP — see `producer_templates`. On a site
+	# where no rule names a Farm Task Template this is an empty dict and every
+	# alert takes exactly the path it took before this release.
+	producers = producer_templates()
 	report = {
 		"company": company,
 		"dry_run": dry_run,
@@ -1796,7 +2035,7 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 	# where SEVERAL different things are overdue at once and one template covers
 	# all of them. Those become one visit rather than N trips. Everything this
 	# does not bundle falls through to the unchanged per-alert path below.
-	bundled = _bundle_into_sessions(rows, answered, report, dry_run)
+	bundled = _bundle_into_sessions(rows, answered, report, dry_run, producers)
 
 	for row in rows:
 		alert_type = str(row.get("alert_type") or "")
@@ -1807,7 +2046,7 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 				{"alert": row["name"], "alert_type": alert_type, "task": answered[row["name"]]}
 			)
 			continue
-		recipe = _recipe_for(alert_type)
+		recipe = _recipe_for(alert_type, producers)
 		if recipe is None:
 			report["skipped_unmapped"].append(
 				{
@@ -1874,7 +2113,9 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 	)
 
 
-def _bundle_into_sessions(rows: list, answered: dict, report: dict, dry_run: bool) -> set:
+def _bundle_into_sessions(
+	rows: list, answered: dict, report: dict, dry_run: bool, producers: dict | None = None
+) -> set:
 	"""One templated visit per place where a template covers everything overdue.
 
 	THE RULE, IN FULL, BECAUSE AN AUDITOR WILL ASK WHY THREE THINGS BECAME ONE JOB:
@@ -1947,7 +2188,7 @@ def _bundle_into_sessions(rows: list, answered: dict, report: dict, dry_run: boo
 		wanted = set()
 		coverable = True
 		for row in alerts_here:
-			recipe = _recipe_for(str(row.get("alert_type") or ""))
+			recipe = _recipe_for(str(row.get("alert_type") or ""), producers)
 			produced = str((recipe or {}).get("creates_record") or "").strip()
 			if not produced:
 				coverable = False
@@ -2112,6 +2353,14 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 		"evidence_required": dict(recipe["evidence"]),
 		"task": None,
 	}
+	# v0.41.0. A recipe that came off a Farm Task Template says so, in the dry run
+	# as well as in the write — "which template decided this task's shape" is the
+	# first question anybody asks of a board that changed shape overnight.
+	if recipe.get("template"):
+		entry["template"] = recipe["template"]
+		entry["checklist"] = [
+			dict(item) for item in (recipe.get("checklist_status") or {}).get("items") or []
+		]
 	if routing_notes:
 		entry["routing_notes"] = routing_notes
 	if dry_run:
@@ -2128,7 +2377,19 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 	doc.estimated_duration_minutes = int(recipe.get("minutes") or 0)
 	doc.source_alert = row["name"]
 	doc.evidence_required = json.dumps(recipe["evidence"])
-	doc.notes = str(row.get("alert_message") or "")
+	# v0.41.0. WHERE A TEMPLATE DECIDED THE SHAPE, its standing instructions come
+	# FIRST and the alert's own message follows, because that is the order a
+	# worker needs them in: how this job is done, then what is wrong with this
+	# particular cabin. A recipe with no template leaves the notes exactly what
+	# they were before this release — the alert message and nothing else.
+	doc.notes = "\n\n".join(
+		part
+		for part in (str(recipe.get("instructions") or ""), str(row.get("alert_message") or ""))
+		if part.strip()
+	).strip()
+	if recipe.get("template"):
+		doc.template = recipe["template"]
+		doc.checklist_status = json.dumps(recipe.get("checklist_status") or {"items": []})
 	if assignee:
 		doc.assigned_to = assignee
 		doc.assigned_to_name = _worker_name(assignee, "")
@@ -2148,9 +2409,16 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 	if recipe["creates_record"] and compat.doctype_exists(recipe["creates_record"]):
 		spec = inspections.SPECS.get(recipe["creates_record"])
 		doc.creates_record = recipe["creates_record"]
+		# The template's defaults sit UNDER the subject this alert points at: the
+		# template states what is usually true of the record, and the alert states
+		# which cabin, block or zone this one is about. The alert wins, because it
+		# is the more specific claim.
+		defaults = dict(recipe.get("creates_record_data") or {})
 		if spec and subject and spec.subject_doctype == str(row.get("source_doctype") or ""):
-			doc.creates_record_data = json.dumps({spec.subject_field: subject})
-		elif spec:
+			doc.creates_record_data = json.dumps({**defaults, spec.subject_field: subject})
+		elif defaults:
+			doc.creates_record_data = json.dumps(defaults)
+		if spec and not (subject and spec.subject_doctype == str(row.get("source_doctype") or "")):
 			# The alert points at one kind of thing and the record is about
 			# another — a block against an irrigation zone. Nothing is prefilled
 			# and the worker is told what they have to name.
@@ -2319,7 +2587,7 @@ def report_field_task(args: dict) -> ToolResult:
 	asset_name = as_str(args, "asset")
 	asset_doc = None
 	if asset_name:
-		from .asset_tags import ASSET_REGISTER, ASSET_TYPE_SKILL_MAP, asset_row
+		from .asset_tags import ASSET_TYPE_SKILL_MAP, asset_row
 		asset_doc = asset_row(asset_name)
 		if not location and not location_doctype:
 			location_doctype = asset_doc.get("location_doctype") or None

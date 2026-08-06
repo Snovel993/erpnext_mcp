@@ -238,9 +238,11 @@ class ComplianceRule(Document):
 			if str(self.producer_task_template or "").strip():
 				frappe.throw(
 					_(
-						"This rule names both an Inspection Template ({0}) and an assignee "
-						"expression. A templated visit is claimed out of the pool by whoever holds "
-						"the template's skill; there is nowhere on it for a named holder to go."
+						"This rule names both a Farm Task Template ({0}) and an assignee "
+						"expression, and the template already states how the work is routed — its "
+						"own dispatch_mode and skill. A task with a named holder is not in a pool, "
+						"so the two are answers to one question and the holder would depend on "
+						"which the dispatcher read first."
 					).format(self.producer_task_template),
 					title=_("Two routings"),
 				)

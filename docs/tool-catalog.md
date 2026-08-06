@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 350 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 355 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 162 read tools are **on** by default and can be switched off individually. A
+All 164 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -8708,6 +8708,161 @@ anybody could ship. A site that enters no rate computes exactly what it computed
 before this release. The wage base is consumed by year-to-date gross, the way
 FUTA's $7,000 is; a base of zero means no cap.
 
+## v0.41.0 — farm task templates
+
+Five tools. Since v0.16.0 the shape of a recurring job — its type, its skill, its
+duration, its evidence contract, what its completion produces — has lived in
+three places that could not be edited together: a Python dict called
+`ALERT_TASK_MAP`, three loose `producer_*` fields on each Compliance Rule, and
+whatever a foreman typed into `create_farm_task` that morning. Two rules asking
+for the same job stated it twice, in full, and drifted.
+
+A **Farm Task Template** is the missing record. It says what one job looks like,
+once, and a rule, a foreman or a worker raises tasks from it.
+
+### It is not an Inspection Template
+
+They are different sizes of thing and the difference is load-bearing:
+
+| | Inspection Template (v0.21.0) | Farm Task Template (v0.41.0) |
+|---|---|---|
+| What it defines | a **multi-section visit** | the shape of **one task** |
+| What one produces | several compliance records, at their own cadences | at most one |
+| Versioned | by copy — a session submits against its pinned version weeks later | **edited in place** — a task copies it once and is self-contained |
+| Raised by | `_bundle_into_sessions`, matching sections against pending alerts | `create_task_from_template`, or a rule's `producer_task_template` |
+
+Collapsing them would make every smoke detector test carry a sections table with
+one row in it.
+
+### A task snapshots its template
+
+`create_task_from_template` **copies** the task type, the skill, the duration,
+the dispatch mode, the evidence contract, the produced record and its defaults,
+the instructions and the whole checklist onto the task. After that the task is
+self-contained — it can be claimed, worked, evidenced and closed with the
+template deleted.
+
+Three things follow, and they are the reason the design is worth having:
+
+* **Editing a template changes what future tasks look like and nothing else.** A
+  worker halfway through a five-item walk whose template lost an item does not
+  find their evidence attached to a list that no longer contains it. Nobody's
+  contract tightens under them mid-job.
+* **The template needs no versioning by copy.** Nothing reads back from it, so
+  there is no live document an edit could change underneath. Versioning would
+  buy an audit trail `track_changes` already keeps, at the cost of a register in
+  which the eight templates an operation runs are lost among forty superseded
+  rows.
+* **`Farm Task.template` is provenance, never a lookup.**
+
+### The checklist
+
+Optional, and most templates should have none — a detector test is a checklist
+and "renew the certificate" is not, and a one-item list saying *do the task* is a
+form people learn to tick without reading. Where there is one, it is snapshotted
+onto the task as `checklist_status` and `complete_farm_task` **refuses a
+completion with a required item unticked**, by name, before any compliance
+record is written. An optional item left undone does not refuse: that is what
+optional means, and it is what keeps a template that covers more than today needs
+usable.
+
+Mark items with the completion's `checklist` argument — a list of item names, or
+objects carrying `item_name`, `done` and a `note`. A name the task's checklist
+does not hold is **refused rather than ignored**: a typo that silently marks
+nothing looks exactly like a tick right up until the completion is refused for a
+different item.
+
+### `create_farm_task_template`
+
+```json
+{"template_name": "Smoke Detector Test",
+ "task_type": "Test",
+ "skill_required": "camp_maintenance",
+ "estimated_duration_minutes": 20,
+ "dispatch_mode": "Self-pick",
+ "evidence_required": {"photos": true, "findings_text": true},
+ "creates_record": "Detector Test",
+ "instructions": "Test every detector in the unit, not a sample.",
+ "checklist": [{"item_name": "Every smoke detector pressed and heard", "evidence_type": "Photo"},
+               {"item_name": "Every CO detector pressed and heard", "evidence_type": "Photo"},
+               {"item_name": "Batteries replaced where it chirped", "required": false}],
+ "compliance_regimes": ["OR-OSHA"]}
+```
+
+`evidence_required` is **mandatory**, for exactly the reason it is mandatory on a
+task: a template with no contract raises tasks with no contract, `create_farm_task`
+refuses those, and the failure would land in front of whoever is stood in the
+cabin rather than in front of whoever wrote the template.
+
+A checklist of bare strings is accepted and means *required, no evidence, in this
+order* — the commonest checklist anybody writes through a chat client.
+
+### `create_task_from_template`
+
+```json
+{"template": "Smoke Detector Test",
+ "location_doctype": "Housing Unit", "location": "MC-Cabin-01 - MC",
+ "assigned_to": "HR-EMP-00002", "urgency": "High"}
+```
+
+`location`, `assigned_to` and `urgency` are the three overrides, because they are
+the three things that are true of the **case** rather than of the job. The task
+name defaults to the template name and the place — `Smoke Detector Test —
+MC-Cabin-01` — because *Smoke Detector Test* fifty-four times is a board nobody
+can work from.
+
+### `producer_task_template` was repointed
+
+`Compliance Rule.producer_task_template` linked to Inspection Template from
+v0.22.0 to v0.40.0, and **nothing on the dispatch side ever read it**:
+multi-section visits are raised by matching a template's sections against the
+records a place's pending alerts ask for, which never consults this column. It
+now names a Farm Task Template, and it has behaviour for the first time.
+
+Where a rule names one, the template is the **whole recipe** and the rule's
+inline `producer_farm_task_type`, `producer_skill_required` and
+`evidence_contract_json` are not read. Those three stay as the fallback for a
+rule with no template, which is most of them.
+
+`generate_tasks_from_compliance_alerts` therefore resolves a recipe in three
+steps: the rule's template, then `ALERT_TASK_MAP`, then the rule's inline fields.
+The alert still supplies what only it knows — the severity that becomes urgency,
+the place, and its own message, which goes on the task **after** the template's
+standing instructions because that is the order a worker needs them in.
+
+The `repoint_producer_task_template` patch clears any value naming an Inspection
+Template and prints every one by name. It clears rather than converts: there is
+no honest automatic translation from a four-section visit to a single task shape,
+and picking one section would be this app inventing an operator's intent and then
+generating work from the invention.
+
+### Five seeded templates, and nothing wired
+
+`bench migrate` seeds *Cabin Habitability Inspection*, *Smoke Detector Test*,
+*Water Quality Test*, *Certification Renewal* and *Training Record*. Every type,
+skill, duration, dispatch mode and evidence contract on them matches
+`ALERT_TASK_MAP` to the letter — asserted by a test — so pointing a shipped rule
+at its template raises exactly the task it raised in v0.16.0, plus a checklist.
+
+**Seeding wires no rule.** `producer_task_template` is left exactly as it was on
+every rule, so an upgrade changes no task any sweep produces. Pointing a rule at
+a template is a deliberate act, by somebody who has read what the template asks
+for:
+
+```bash
+update_compliance_rule
+  {"rule": "housing_detector_test_stale",
+   "producer_task_template": "Smoke Detector Test"}
+```
+
+The seeder checks by template name and creates only what is not there, so an
+operator who added an item to the detector checklist keeps it and one who
+disabled a template their operation does not run keeps it disabled. There is no
+`delete_farm_task_template`: `enabled=false` retires one while keeping every task
+it ever raised readable, which is what an auditor asking *what did this job ask
+for last season* needs.
+
+
 ---
 
 # Adding a tool
@@ -8721,7 +8876,7 @@ Everything a tool needs is in two places:
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
    `shifts`, `heat`, `kpi`, `kpidefs`, `payroll`, `payroll_gl`, `visits`,
-   `sessions`, `rules`,
+   `sessions`, `rules`, `tasktemplates`,
    `asset_tags`, `feeds` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and

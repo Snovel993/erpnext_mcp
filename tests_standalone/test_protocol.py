@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_three_hundred_fifty_tools_one_hundred_sixty_two_read_one_hundred_eighty_eight_write(
+	def test_catalogue_is_three_hundred_fifty_five_tools_one_hundred_sixty_four_read_one_hundred_ninety_one_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -682,9 +682,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 350)
-		self.assertEqual(len(registry.READ_TOOLS), 162)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 188)
+		self.assertEqual(len(registry.TOOLS), 355)
+		self.assertEqual(len(registry.READ_TOOLS), 164)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 191)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

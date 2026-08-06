@@ -1049,6 +1049,10 @@ APP_DOCTYPES = {
 	# v0.38.0. Where the regulations live, and what they said last time.
 	"Regulation Feed": "regulation_feed",
 	"Regulation Feed Rule Link": "regulation_feed_rule_link",
+	# v0.41.0. The shape of ONE recurring job, as data — and the items a worker
+	# ticks off inside it.
+	"Farm Task Template": "farm_task_template",
+	"Farm Task Template Checklist Item": "farm_task_template_checklist_item",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -1483,6 +1487,14 @@ CHILD_TABLES = {
 	# survive a re-read as the rows they were.
 	("Farm Payroll Entry", "gl_postings"): "Farm Payroll GL Posting",
 	("Farm Payroll Account Mapping", "components"): "Farm Payroll Account Map Row",
+	# v0.41.0. `task_templates.checklist_of` and `regimes_of` read both child
+	# doctypes directly with a `parent` filter, because a template is read from a
+	# docname rather than from a document somebody already loaded — the snapshot
+	# `create_task_from_template` copies onto a task goes through it, and so does
+	# the recipe the compliance sweep builds. Without these, every template would
+	# look checklist-less and the enforcement would silently never fire.
+	("Farm Task Template", "checklist"): "Farm Task Template Checklist Item",
+	("Farm Task Template", "compliance_regimes"): "Compliance Regime Link",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1526,6 +1538,12 @@ REHYDRATED_CHILD_FIELDS = (
 	# postings to decide whether the run is already in the ledger.
 	"components",
 	"gl_postings",
+	# v0.41.0. `update_farm_task_template` re-reads a template it did not write
+	# and replaces its checklist whole, so the Farm Task Template controller walks
+	# the rows checking names and filling in sort orders — which needs them to be
+	# documents on the second read as well as on the first.
+	"checklist",
+	"compliance_regimes",
 )
 
 
@@ -2781,6 +2799,9 @@ CHILD_TABLE_SOURCES = {
 		# and to every regime-filtered packet, which is the one failure a
 		# compliance calendar must not have quietly.
 		("Compliance Rule", "regimes"),
+		# v0.41.0. A fifth parent. `task_templates.regimes_of` filters on
+		# `parenttype` for the same reason every reader above does.
+		("Farm Task Template", "compliance_regimes"),
 	),
 	# v0.19.3. `shifts.crew_of`, `events_of` and `weather_of` all query the child
 	# doctype directly with a `parent` filter, because the Attendance bridge and
@@ -2799,6 +2820,9 @@ CHILD_TABLE_SOURCES = {
 	"Inspection Template Section": (("Inspection Template", "sections"),),
 	"Inspection Session Evidence": (("Inspection Session", "evidence_files"),),
 	"Inspection Session Section Submission": (("Inspection Session", "section_submissions"),),
+	# v0.41.0. Read with a `parent` filter by `task_templates.checklist_of`,
+	# which the snapshot and the compliance recipe both go through.
+	"Farm Task Template Checklist Item": (("Farm Task Template", "checklist"),),
 }
 
 

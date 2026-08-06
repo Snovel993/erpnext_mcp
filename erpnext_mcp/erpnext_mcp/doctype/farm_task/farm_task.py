@@ -118,6 +118,12 @@ ORIGINS = (
 	ORIGIN_WORKER_SELF_PICK,
 )
 
+#: v0.41.0. The keys one snapshotted checklist item carries. The first four are
+#: copied off the Farm Task Template at creation and never change afterwards —
+#: that snapshot is what makes editing a template safe — and the last two are
+#: the worker's own answer, written by `complete_farm_task`.
+CHECKLIST_ITEM_KEYS = ("item_name", "required", "evidence_type", "sort_order", "done", "note")
+
 
 class FarmTask(Document):
 	def autoname(self):
@@ -164,6 +170,7 @@ class FarmTask(Document):
 		self.creates_record_data = json.dumps(
 			parse_json_object(self.creates_record_data, "Creates Record Data")
 		)
+		self.checklist_status = json.dumps(parse_checklist_status(self.checklist_status))
 
 		self.assigned_to = str(self.assigned_to or "").strip()
 		self.assigned_to_name = str(self.assigned_to_name or "").strip() or self.assigned_to
@@ -220,6 +227,121 @@ def parse_evidence_required(raw) -> dict:
 			).format(", ".join(sorted(EVIDENCE_KEYS)))
 		)
 	return out
+
+
+def parse_checklist_status(raw) -> dict:
+	"""The snapshotted checklist and its ticks, or a refusal saying why.
+
+	v0.41.0. THE SHAPE IS `{"items": [...]}` AND NOT A BARE LIST, because a bare
+	list has nowhere to put the next thing anybody wants on it — who ticked an
+	item, when — and a field whose shape changes in a later release is one every
+	client has to handle twice.
+
+	AN EMPTY CHECKLIST IS THE ORDINARY CASE and is not refused. That is the whole
+	difference between this field and `evidence_required`, which is mandatory: an
+	evidence contract states what closing a task PRODUCES, and every task produces
+	something checkable; a checklist states how the work is subdivided, and most
+	work is not. A one-item checklist saying 'do the task' is a form somebody
+	learns to tick without reading, which is worse than no form.
+
+	What it refuses is a list whose items are unusable: not an object, no name, a
+	duplicate name — the same three refusals the template's own controller makes,
+	restated here because a snapshot can arrive from a client rather than from a
+	template.
+	"""
+	value = parse_json_object(raw, "Checklist Status")
+	if not value:
+		return {"items": []}
+
+	unknown = sorted(set(value) - {"items"})
+	if unknown:
+		frappe.throw(
+			_("Checklist Status names {0}, which nothing reads. The only key is 'items'.").format(
+				", ".join(repr(key) for key in unknown)
+			),
+			title=_("Unknown checklist key"),
+		)
+
+	raw_items = value.get("items") or []
+	if not isinstance(raw_items, list):
+		frappe.throw(
+			_("Checklist Status 'items' must be a JSON list, got {0}.").format(type(raw_items).__name__),
+			title=_("Malformed checklist"),
+		)
+
+	items = []
+	seen: dict = {}
+	for index, entry in enumerate(raw_items):
+		if not isinstance(entry, dict):
+			frappe.throw(
+				_("Checklist item {0} is a {1}, not an object.").format(index + 1, type(entry).__name__),
+				title=_("Malformed checklist"),
+			)
+		name = str(entry.get("item_name") or "").strip()
+		if not name:
+			frappe.throw(
+				_(
+					"Checklist item {0} has no item_name. The name is what a completion marks done, "
+					"so an unnamed item is one nobody can ever tick and nobody can ever close a "
+					"task past."
+				).format(index + 1),
+				title=_("Unnamed checklist item"),
+			)
+		key = name.casefold()
+		if key in seen:
+			frappe.throw(
+				_(
+					"Checklist items {0} and {1} are both called {2}. The item name is the key a "
+					"completion marks, so two of them mean a tick lands on whichever was read first."
+				).format(seen[key], index + 1, repr(name)),
+				title=_("Duplicate checklist item"),
+			)
+		seen[key] = index + 1
+		items.append(
+			{
+				"item_name": name,
+				"required": bool(entry.get("required", True)),
+				"evidence_type": str(entry.get("evidence_type") or "None").strip() or "None",
+				"sort_order": int(entry.get("sort_order") or index + 1),
+				"done": bool(entry.get("done")),
+				"note": str(entry.get("note") or "").strip(),
+			}
+		)
+	return {"items": items}
+
+
+def checklist_items(raw) -> list:
+	"""The snapshotted checklist, tolerant of a stored value nobody can now parse.
+
+	The READ side, exactly as `evidence_contract` is to `parse_evidence_required`:
+	a document that somehow holds bad JSON should be reported rather than made
+	unreadable. The write side goes through `parse_checklist_status`, which refuses.
+	"""
+	try:
+		value = json.loads(raw) if isinstance(raw, str) and raw.strip() else (raw or {})
+	except Exception:
+		return []
+	if not isinstance(value, dict):
+		return []
+	items = value.get("items")
+	if not isinstance(items, list):
+		return []
+	return [dict(entry) for entry in items if isinstance(entry, dict)]
+
+
+def unmet_checklist(raw) -> list:
+	"""The names of the REQUIRED checklist items nobody has marked done.
+
+	v0.41.0, and it is what `complete_farm_task` refuses on. An OPTIONAL item left
+	undone is not reported: that is what optional means, and a template that
+	covers more than today needs stays usable precisely because the propane check
+	on a cabin with no propane can be left rather than falsely ticked.
+	"""
+	return [
+		str(item.get("item_name") or "")
+		for item in checklist_items(raw)
+		if item.get("required", True) and not item.get("done")
+	]
 
 
 def parse_json_object(raw, label: str) -> dict:

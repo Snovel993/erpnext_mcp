@@ -88,6 +88,7 @@ from .tools import (
 	sessions,
 	shifts,
 	state_tax,
+	tasktemplates,
 	tax,
 	taxforms,
 	trade,
@@ -317,7 +318,13 @@ _RULE_DRAFT_ARGUMENTS = {
 		"Comma-separated fields that must exist on the target — `i9_status`. A rule "
 		"whose column is absent scans nothing rather than reporting everybody clean.",
 	),
-	"producer_task_template": _field(_STRING, "An Inspection Template the work is done through."),
+	"producer_task_template": _field(
+		_STRING,
+		"A Farm Task Template the work is done through. WHERE IT IS SET IT IS THE WHOLE "
+		"RECIPE — type, skill, duration, dispatch mode, evidence contract, produced record "
+		"and checklist all come off it, and the three producer_* fields below are not read. "
+		"list_farm_task_templates has the register.",
+	),
 	"producer_farm_task_type": _field(_STRING, "The Farm Task type raised where no template is set."),
 	"producer_skill_required": _field(_STRING, "The crew skill the producer task needs."),
 	"evidence_contract": _field(
@@ -6428,7 +6435,11 @@ TOOLS = {
 			"requires_doctypes": _field(_STRING, "Change the DocTypes the rule needs."),
 			"requires_fields": _field(_STRING, "Change the fields the rule needs."),
 			"producer_task_template": _field(
-				_STRING, "Change the Inspection Template the work is done through."
+				_STRING,
+				"Change the Farm Task Template the work is done through, or pass empty to fall "
+				"back to the inline producer fields. v0.41.0 repointed this from Inspection "
+				"Template — that one is a multi-section VISIT, and multi-section visits are "
+				"matched by their sections rather than by this field.",
 			),
 			"producer_farm_task_type": _field(_STRING, "Change the Farm Task type raised."),
 			"producer_skill_required": _field(_STRING, "Change the crew skill."),
@@ -7600,6 +7611,269 @@ TOOLS = {
 		title="Generate tasks from compliance alerts",
 		available=_needs_doctype("Farm Task"),
 		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.41.0: Farm Task Templates — the shape of one job, as data ─────────
+	#
+	# FIVE TOOLS, and they are to a SINGLE TASK what the eleven inspection-template
+	# tools are to a multi-section VISIT. The two sit side by side because a cabin
+	# opening and a smoke detector test are genuinely different sizes of thing:
+	# collapsing them would make every detector test carry a sections table with
+	# one row in it.
+	#
+	# A TASK SNAPSHOTS ITS TEMPLATE AT CREATION and is self-contained afterwards,
+	# which is why — unlike a Compliance Rule and an Inspection Template, both
+	# versioned by copy — this record is EDITED IN PLACE. Nothing reads back from
+	# it, so an edit changes what FUTURE tasks look like and cannot reach a task
+	# already raised, claimed or half-worked. See `erpnext_mcp/task_templates.py`.
+	"create_farm_task_template": _tool(
+		tasktemplates.create_farm_task_template,
+		"MUTATING (default OFF). Define the shape of one recurring job as a "
+		"RECORD: what it is called, what type of work it is, what skill it needs, "
+		"how long it takes, whether it is dispatched or self-picked, what evidence "
+		"closing it requires, what record completing it produces, what the worker "
+		"is told, and the items they have to tick.\n\n"
+		"THE NEXT TASK RAISED FROM IT HAS THAT SHAPE, with no app release and no "
+		"DocType edit — by a foreman through create_task_from_template, or by the "
+		"nightly sweep through a Compliance Rule naming it as "
+		"`producer_task_template`.\n\n"
+		"`evidence_required` IS MANDATORY, for exactly the reason it is mandatory "
+		"on a task: a template with no contract would raise tasks with no "
+		"contract, create_farm_task refuses those, and the failure would land in "
+		"front of whoever is stood in the cabin rather than in front of whoever "
+		"wrote the template.\n\n"
+		"THE CHECKLIST IS OPTIONAL AND MOST TEMPLATES SHOULD HAVE NONE. A detector "
+		"test is a checklist; 'renew the certificate' is not, and a one-item list "
+		"saying 'do the task' is a form people learn to tick without reading. "
+		"Where there is one, complete_farm_task refuses a completion with a "
+		"required item unticked.\n\n"
+		"NOT AN INSPECTION TEMPLATE. That one is a MULTI-SECTION VISIT producing "
+		"several compliance records from one trip to one place. This is the shape "
+		"of a SINGLE TASK.",
+		{
+			"template_name": _field(
+				_STRING,
+				"REQUIRED, and the docname. What a foreman calls the job out loud: 'Cabin "
+				"Habitability Inspection', 'Smoke Detector Test'.",
+			),
+			"task_type": _field(
+				_STRING,
+				"REQUIRED. Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
+				"Housing-Cleanup, Water-Sampling or Other — the same vocabulary Farm Task uses.",
+			),
+			"evidence_required": _field(
+				_OBJECT,
+				"REQUIRED. JSON object. Keys: photos, signature, findings_text, witness. At least "
+				"one must be true.",
+			),
+			"description": _field(
+				_STRING, "What this job is and when it is done — read by whoever is CHOOSING a template."
+			),
+			"skill_required": _field(_STRING, "e.g. 'camp_maintenance', 'applicator_license'."),
+			"estimated_duration_minutes": _field(_INTEGER, "How long one of these takes."),
+			"dispatch_mode": _field(
+				_STRING, "Either (default), Dispatched or Self-pick."
+			),
+			"default_urgency": _field(
+				_STRING,
+				"Low, Normal (default), High or Critical. A DEFAULT, not a ceiling: a task "
+				"generated from a compliance alert takes its urgency from the alert's severity.",
+			),
+			"creates_record": _field(
+				_STRING,
+				"The DocType a completion produces: 'Housing Inspection', 'Detector Test', 'Water "
+				"Test'. Blank is a real answer — renewing a certificate produces no record this "
+				"app writes.",
+			),
+			"creates_record_data": _field(
+				_OBJECT, "Default field values for that record, merged under whatever the task and the "
+				"completion supply."
+			),
+			"instructions": _field(
+				_STRING,
+				"What the WORKER reads once they have it: where the key is, which breaker, who to "
+				"ask, what 'done' looks like.",
+			),
+			"checklist": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}},
+				"The items a worker ticks, in order. Either a list of sentences — [\"Press the "
+				"smoke alarm\", \"Press the CO alarm\"], which means required with no evidence — or "
+				"a list of objects with `item_name`, `required` and `evidence_type` (None, Photo, "
+				"Text or Measurement). OPTIONAL, and usually right to omit.",
+			),
+			"company": _field(
+				_STRING,
+				"The one entity this template is for, or LEAVE EMPTY FOR EVERY COMPANY, which is "
+				"the ordinary case.",
+			),
+			"enabled": _field(_BOOLEAN, "Default TRUE. False authors it without allowing work from it."),
+			"compliance_regimes": _field(
+				_STRING_ARRAY, "The audits this work is evidence for: OR-OSHA, FSMA, WPS, NOP …"
+			),
+		},
+		required=("template_name", "task_type", "evidence_required"),
+		mutating=True,
+		title="Create a farm task template",
+		available=_needs_doctype("Farm Task Template"),
+		requires="the Farm Task Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_farm_task_template": _tool(
+		tasktemplates.update_farm_task_template,
+		"MUTATING (default OFF). Edit one template — its skill, its duration, its "
+		"evidence contract, its instructions, its checklist, the switch.\n\n"
+		"IT EDITS IN PLACE, unlike update_compliance_rule and "
+		"update_inspection_template, which supersede by copy. The difference is "
+		"what reads back from each: a SESSION submits against its template's "
+		"sections weeks after starting, and an ALERT is read against the rule that "
+		"raised it — so both need the old row intact. A TASK copies its template "
+		"exactly once, at creation, and is self-contained afterwards.\n\n"
+		"SO THIS EDIT REACHES FUTURE TASKS ONLY. Every task already raised keeps "
+		"the type, skill, duration, evidence contract, instructions and checklist "
+		"it snapshotted. Nobody's contract tightens under them mid-job, and a "
+		"worker halfway through a five-item walk does not find their evidence "
+		"attached to a list that no longer contains it. The result says how many "
+		"tasks that is.\n\n"
+		"THE CHECKLIST IS REPLACED WHOLE, never edited by index — a list edited "
+		"one row at a time by position is one somebody reorders by accident, and "
+		"in an ordered checklist the order is content.\n\n"
+		"There is no delete. `enabled=false` retires a template while keeping "
+		"every task it ever raised readable, which is what an auditor asking "
+		"'what did this job ask for last season' needs.",
+		{
+			"template": _field(_STRING, "Which template — by name or docname. REQUIRED."),
+			"task_type": _field(_STRING, "New task type."),
+			"description": _field(_STRING, "New description."),
+			"skill_required": _field(_STRING, "New crew skill."),
+			"estimated_duration_minutes": _field(_INTEGER, "New estimate, in minutes."),
+			"dispatch_mode": _field(_STRING, "Either, Dispatched or Self-pick."),
+			"default_urgency": _field(_STRING, "Low, Normal, High or Critical."),
+			"evidence_required": _field(_OBJECT, "Replace the evidence contract. At least one key true."),
+			"creates_record": _field(_STRING, "New produced-record DocType, or empty for none."),
+			"creates_record_data": _field(_OBJECT, "Replace the produced-record defaults."),
+			"instructions": _field(_STRING, "Replace what the worker reads."),
+			"checklist": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}},
+				"Replace the checklist whole. Pass [] to remove it.",
+			),
+			"company": _field(_STRING, "Scope it to one entity, or pass empty to widen to all."),
+			"enabled": _field(
+				_BOOLEAN,
+				"OFF IS NOT DELETED: every task already raised stays completable and every record "
+				"they produced stays in the register. It stops NEW work being raised.",
+			),
+			"compliance_regimes": _field(_STRING_ARRAY, "Replace the regime tags."),
+		},
+		required=("template",),
+		mutating=True,
+		idempotent=True,
+		title="Update a farm task template",
+		available=_needs_doctype("Farm Task Template"),
+		requires="the Farm Task Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_farm_task_templates": _tool(
+		tasktemplates.list_farm_task_templates,
+		"The register: every shape of recurring job this operation has defined, "
+		"with its skill, duration, evidence contract and checklist size. "
+		"Read-only.\n\n"
+		"THIS IS THE MAP OF WHAT THE OPERATION KNOWS HOW TO ASK FOR. Every field "
+		"on a template is editable with update_farm_task_template and no code "
+		"release — which is the whole templates-as-data claim, stated as a "
+		"register.\n\n"
+		"A disabled template is still listed, because every task ever raised from "
+		"it is still readable and an auditor asking 'what did this job ask for "
+		"last season' is asking about one of those. `enabled_templates` is the set "
+		"new work can be raised from.",
+		{
+			"task_type": _field(_STRING, "Only this type of work. Optional."),
+			"skill_required": _field(_STRING, "Only templates needing this skill. Optional."),
+			"enabled": _field(_BOOLEAN, "Only enabled, or only disabled. Omit for both."),
+			"regime": _field(
+				_STRING,
+				"Only templates answering this audit: OR-OSHA, FSMA, WPS, NOP … Matched by token, "
+				"never substring.",
+			),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="List farm task templates",
+		available=_needs_doctype("Farm Task Template"),
+		requires="the Farm Task Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_farm_task_template": _tool(
+		tasktemplates.get_farm_task_template,
+		"One template in full: its evidence contract, its checklist item by item, "
+		"which Compliance Rules raise their work through it, and how many tasks it "
+		"has produced. Read-only.\n\n"
+		"`tasks_raised` IS THE NUMBER TO READ BEFORE EDITING ONE. A template "
+		"nothing has ever used is a template nobody has noticed is wrong; one that "
+		"has raised two hundred is one whose evidence contract an audit is already "
+		"resting on.\n\n"
+		"`problems` NAMES WHAT WOULD FAIL: a `creates_record` this site has no "
+		"DocType for, or one erpnext_mcp has no completion builder for, or an "
+		"evidence contract that no longer parses — each seen here rather than at "
+		"the moment somebody tries to raise work.",
+		{"template": _field(_STRING, "By template name or docname. REQUIRED.")},
+		required=("template",),
+		title="Get a farm task template",
+		available=_needs_doctype("Farm Task Template"),
+		requires="the Farm Task Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_task_from_template": _tool(
+		tasktemplates.create_task_from_template,
+		"MUTATING (default OFF). Raise one Farm Task pre-filled from a template.\n\n"
+		"EVERYTHING ABOUT THE JOB COMES OFF THE TEMPLATE — the task type, the "
+		"skill, the duration, the dispatch mode, the evidence contract, the record "
+		"the completion produces and its defaults, the instructions and the whole "
+		"checklist. `location`, `assigned_to` and `urgency` are the three things "
+		"that are true of THIS CASE rather than of the job, and they are the three "
+		"overrides.\n\n"
+		"THE TASK SNAPSHOTS THE TEMPLATE and is self-contained afterwards. Editing "
+		"the template from here on changes what future tasks look like and cannot "
+		"reach this one.\n\n"
+		"REFUSES: a disabled template — every task already raised from it stays "
+		"completable, but no new work comes out of one the operation has stopped "
+		"doing; a location that does not exist; a `creates_record` this site has "
+		"no DocType for, because a task promising a record nobody can write is a "
+		"promise that fails in front of a worker stood in a cabin; a `source_alert` "
+		"that already has a task, because one alert is one job.\n\n"
+		"The task name defaults to the template name and the place — 'Smoke "
+		"Detector Test — MC-Cabin-01' — because 'Smoke Detector Test' fifty-four "
+		"times is a board nobody can work from.",
+		{
+			"template": _field(_STRING, "Which template — by name or docname. REQUIRED."),
+			"location_doctype": _field(
+				_STRING, "The register the place is in: Housing Unit, Field, Irrigation Zone or Parcel."
+			),
+			"location": _field(_STRING, "The docname of the cabin, block, zone or parcel."),
+			"assigned_to": _field(
+				_STRING, "Dispatch it to this Employee id straight away, rather than leaving it in the pool."
+			),
+			"assigned_to_name": _field(_STRING, "Their name, where no HR app can resolve it."),
+			"urgency": _field(
+				_STRING, "Override the template's default urgency for this case: Low, Normal, High or Critical."
+			),
+			"task_name": _field(
+				_STRING, "Override the name. Defaults to the template name and the location."
+			),
+			"notes": _field(
+				_STRING,
+				"Anything true of THIS case, added AFTER the template's standing instructions — "
+				"which is the order a worker needs them in.",
+			),
+			"creates_record_data": _field(
+				_OBJECT, "Extra produced-record defaults for this case, layered over the template's."
+			),
+			"source_alert": _field(_STRING, "The Compliance Alert this answers, if any."),
+			"company": _COMPANY,
+			"draft": _field(_BOOLEAN, "Hold it in Draft rather than publishing to the pool. Default false."),
+		},
+		required=("template",),
+		mutating=True,
+		title="Create a task from a template",
+		available=_needs_doctype("Farm Task Template", "Farm Task"),
+		requires=(
+			"the Farm Task Template and Farm Task DocTypes, which ship with erpnext_mcp — run "
+			"`bench migrate`"
+		),
 	),
 	# ── v0.16.0: the compliance records a completion produces ───────────────
 	"list_housing_inspections": _tool(

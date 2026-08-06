@@ -478,8 +478,52 @@ The same release also made the producer path read the **record** where
 seeded *from* that table, so the two could not disagree — and nothing read them
 back. A rule authored after the framework shipped therefore had a producer recipe
 on its record and landed in `skipped_unmapped` anyway. The table is still
-consulted first, which is what keeps the thirteen shipped rules producing exactly
-the tasks they always did.
+consulted before the record's inline fields, which is what keeps the thirteen
+shipped rules producing exactly the tasks they always did.
+
+#### v0.41.0: the producer recipe became a record of its own
+
+The three inline fields work, and what they cannot do is be **shared**. Two rules
+asking for the same job state it twice, in full, and drift the first time one of
+them is edited.
+
+`producer_task_template` now names a **Farm Task Template** — a record holding
+the shape of one job: its type, its skill, its duration, its dispatch mode, its
+evidence contract, the compliance record its completion produces, the
+instructions a worker reads and the items they tick off. Where a rule names one,
+**the template is the whole recipe** and the three inline fields are not read at
+all. They stay as the fallback for a rule with no template, which is most of
+them.
+
+So the producer path resolves in three steps, in this order:
+
+1. the rule's `producer_task_template`;
+2. `ALERT_TASK_MAP`;
+3. the rule's own inline `producer_*` fields.
+
+Step 1 costs **one query for the whole sweep**, not four per alert; on a site
+where no rule names a template it is an empty dict and every alert takes exactly
+the path it took before.
+
+The alert still supplies what only it knows — the severity that becomes urgency,
+the place the work happens, and its own message, which goes on the task *after*
+the template's standing instructions, because a worker needs "how this job is
+done" before "what is wrong with this particular cabin".
+
+**The field used to point at an Inspection Template and nothing ever read it.**
+Multi-section visits are raised by `_bundle_into_sessions`, which matches a
+template's sections against the records a place's pending alerts are asking for,
+and never consulted this column. Repointing it gave the field behaviour for the
+first time; the `repoint_producer_task_template` patch clears any value still
+naming an Inspection Template and prints each one by name, because a Link whose
+target moved refuses the next save of any row holding an old value. Bundling is
+unchanged.
+
+**Seeding wires nothing.** `bench migrate` seeds five Farm Task Templates whose
+type, skill, duration, dispatch mode and evidence contract match `ALERT_TASK_MAP`
+to the letter — asserted by a test — and leaves `producer_task_template` exactly
+as it was on every rule. Pointing a rule at a template is a deliberate act, by
+somebody who has read what the template asks for.
 
 #### One more operator, and the trap it exists for
 

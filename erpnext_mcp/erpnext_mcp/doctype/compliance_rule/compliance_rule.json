@@ -407,11 +407,11 @@
    "label": "What it asks somebody to do"
   },
   {
-   "description": "An Inspection Template this rule's work is done through, where the answer to the alert is a multi-section visit rather than one task. Set it and the dispatch side raises a session from this template instead of a bare Farm Task.",
+   "description": "The Farm Task Template this rule's work is done through. v0.41.0 REPOINTED THIS FIELD, and the reason is that it was aimed at the wrong size of thing: it used to name an Inspection Template, which is a MULTI-SECTION VISIT producing several compliance records from one trip, and a rule whose answer is 'test the smoke detector' has no sections. WHERE IT IS SET, THE TEMPLATE IS THE WHOLE RECIPE — the task type, the skill, the duration, the dispatch mode, the evidence contract, the record the completion produces and the checklist all come off it, and the `producer_farm_task_type`, `producer_skill_required` and `evidence_contract_json` fields beside it are not read at all. Those three stay as the FALLBACK for a rule with no template, which is most of them. Multi-section visits did not move and never depended on this field: the sweep bundles several overdue things at one place into one Inspection Session by matching the sections against the records the alerts ask for, deterministically, in _bundle_into_sessions.",
    "fieldname": "producer_task_template",
    "fieldtype": "Link",
    "label": "Producer Template",
-   "options": "Inspection Template"
+   "options": "Farm Task Template"
   },
   {
    "description": "The Farm Task type raised for this rule where no template is set — 'Inspection', 'Repair'. Same free-text vocabulary Farm Task.task_type uses, so the board filters without translation.",

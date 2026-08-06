@@ -28,6 +28,7 @@
   "source_alert",
   "source_workorder",
   "inspection_session",
+  "template",
   "asset_section",
   "asset",
   "field_report_section",
@@ -37,6 +38,8 @@
   "report_photo",
   "evidence_section",
   "evidence_required",
+  "checklist_section",
+  "checklist_status",
   "record_section",
   "creates_record",
   "produced_record",
@@ -204,6 +207,14 @@
    "search_index": 1
   },
   {
+   "description": "The Farm Task Template this task was raised from, blank for one somebody raised by hand. v0.41.0. PROVENANCE AND NOT A LOOKUP: everything the task needs was COPIED off the template at creation — the type, the skill, the duration, the dispatch mode, the evidence contract, the record it produces, the instructions and the checklist — so this link is read to answer 'where did this shape come from', never to work out what the task requires. That is what makes editing a template safe: it changes what future tasks look like and touches nothing already raised.",
+   "fieldname": "template",
+   "fieldtype": "Link",
+   "label": "Template",
+   "options": "Farm Task Template",
+   "search_index": 1
+  },
+  {
    "fieldname": "asset_section",
    "fieldtype": "Section Break",
    "label": "Asset"
@@ -258,6 +269,19 @@
    "label": "Evidence Required",
    "options": "JSON",
    "reqd": 1
+  },
+  {
+   "fieldname": "checklist_section",
+   "fieldtype": "Section Break",
+   "label": "Checklist"
+  },
+  {
+   "default": "{\"items\": []}",
+   "description": "JSON: the checklist SNAPSHOTTED off the template at creation, with each item's done state beside it — {\"items\": [{\"item_name\": \"…\", \"required\": true, \"evidence_type\": \"Photo\", \"sort_order\": 1, \"done\": false, \"note\": \"\"}]}. v0.41.0. THE SNAPSHOT AND THE STATUS ARE ONE FIELD ON PURPOSE, and that is a database decision worth defending: two fields would let a task's list of items and its list of ticks drift apart, and a third table would be table sprawl in exchange for a list that is never queried across tasks. THE SNAPSHOT IS WHY EDITING A TEMPLATE IS SAFE — a worker halfway through a five-item walk whose template lost an item does not find their evidence attached to a list that no longer contains it. `{\"items\": []}` is the ordinary case: most tasks have no checklist. complete_farm_task refuses a completion with a required item unticked.",
+   "fieldname": "checklist_status",
+   "fieldtype": "Code",
+   "label": "Checklist Status",
+   "options": "JSON"
   },
   {
    "fieldname": "record_section",

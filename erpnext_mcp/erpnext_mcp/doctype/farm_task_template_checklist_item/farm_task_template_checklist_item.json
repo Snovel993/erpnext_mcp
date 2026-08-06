@@ -1,0 +1,67 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-06 12:00:00.000000",
+ "description": "One thing a worker has to check or do inside one templated task. THE CHECKLIST IS OPTIONAL AND THAT IS DELIBERATE: a smoke detector test is a checklist, and 'renew the certificate before it lapses' is not, and forcing the second into the shape of the first produces a one-item list that says 'do the task'. What a row buys where it is right is a completion that cannot be filed with the third item unlooked-at — `item_name` is the KEY the completion names, and `required` is what `complete_farm_task` refuses on. `evidence_type` is a HINT the handset draws from and the backend does not enforce, for the same reason `Inspection Template Section.renderer_hint` is: the refusal lives in the task's evidence contract, where one reader can find all of it.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_name",
+  "required",
+  "evidence_type",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "columns": 6,
+   "description": "What to check or do, in the words the worker reads on the phone — 'Press the smoke alarm test button and hear it sound', not 'item 3'. IT IS ALSO THE KEY A COMPLETION NAMES, so two items on one template may not share a name: a completion marking 'Test the alarm' done when the template has two of them marks whichever one was read first, and the other stays open for reasons nobody can see.",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "default": "1",
+   "description": "Whether the task can be completed without this item. A REQUIRED item that is not marked done is refused by complete_farm_task, by name — that is the whole of what a checklist adds over instructions somebody reads and forgets. An OPTIONAL item is how a template that covers more than today needs stays usable: the propane check on a cabin with no propane is skipped rather than falsely ticked.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required"
+  },
+  {
+   "columns": 2,
+   "default": "None",
+   "description": "What the worker is expected to capture alongside the tick. A HINT AND NOT A CONTRACT: the handset draws a camera for Photo and a number pad for Measurement, and a client that does not know one of these values falls back to a plain tick and the completion is still valid. THE REFUSAL LIVES IN THE TASK'S `evidence_required`, which is checked against what was actually filed — putting a second, weaker evidence gate on a child row would give an operation two places to state one requirement and no way to know which one an auditor is reading.",
+   "fieldname": "evidence_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Evidence",
+   "options": "None\nPhoto\nText\nMeasurement"
+  },
+  {
+   "columns": 1,
+   "description": "The order the items are worked in, filled in by the controller when nothing sets it. A real ordering rather than decoration: a detector test that signs the sheet before the alarm is pressed is a sheet signed about an alarm nobody heard.",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Order"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-06 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Task Template Checklist Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

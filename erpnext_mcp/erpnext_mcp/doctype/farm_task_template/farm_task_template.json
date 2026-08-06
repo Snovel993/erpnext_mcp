@@ -1,0 +1,248 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:template_name",
+ "creation": "2026-08-06 12:00:00.000000",
+ "description": "What one recurring piece of work LOOKS LIKE, defined once as data: its type, its skill, how long it takes, whether it is dispatched or self-picked, what evidence closing it requires, what record completing it produces, what the worker is told, and the items they have to tick. A TEMPLATE IS A RECORD ANYBODY CAN ADD — create_farm_task_template writes one and the next task raised from it has that shape, with no app release and no DocType edit. WHAT IT IS NOT IS AN INSPECTION TEMPLATE: that one is a MULTI-SECTION VISIT producing several compliance records from one trip, and this one is the shape of a SINGLE TASK. The two sit side by side because a cabin opening and a smoke detector test are genuinely different sizes of thing, and collapsing them would make every single-task template carry a sections table with one row in it. A TASK SNAPSHOTS THIS RECORD AT CREATION, which is why — unlike an Inspection Template or a Compliance Rule — this one is EDITED IN PLACE rather than versioned by copy: there is no live document reading back from it, so an edit changes what FUTURE tasks look like and touches nothing already raised, already claimed or already closed.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "template_name",
+  "task_type",
+  "default_urgency",
+  "identity_col",
+  "company",
+  "enabled",
+  "description_section",
+  "description",
+  "work_section",
+  "skill_required",
+  "estimated_duration_minutes",
+  "work_col",
+  "dispatch_mode",
+  "evidence_section",
+  "evidence_required",
+  "record_section",
+  "creates_record",
+  "record_col",
+  "creates_record_data",
+  "instructions_section",
+  "instructions",
+  "checklist_section",
+  "checklist",
+  "regime_section",
+  "compliance_regimes"
+ ],
+ "fields": [
+  {
+   "description": "What this piece of work is called, in the words a foreman uses — 'Cabin Habitability Inspection', 'Smoke Detector Test'. IT IS THE DOCNAME, which is the deliberate difference from Inspection Template: this record is edited in place rather than versioned by copy, so there is never a second row with this name to disambiguate, and a Compliance Rule naming its producer template names something a human can read.",
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Template Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "The kind of work every task from this template is. THE SAME VOCABULARY Farm Task.task_type uses, word for word, because a template whose type the Farm Task Select does not hold is a template that fails at the moment somebody tries to raise work from it — which is the moment it exists for.",
+   "fieldname": "task_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Task Type",
+   "options": "Inspection\nTest\nSpray\nRepair\nHarvest\nTraining\nCompliance-Audit\nHousing-Cleanup\nWater-Sampling\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Normal",
+   "description": "How urgent a task from this template is BEFORE anything about the particular case is known. A DEFAULT AND NOT A CEILING: a task generated from a compliance alert takes its urgency from the alert's severity instead, because 'this cabin's detector has been dead for six weeks' is a fact about the cabin and not about detector tests in general.",
+   "fieldname": "default_urgency",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Default Urgency",
+   "options": "Low\nNormal\nHigh\nCritical"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The one entity this template is for, or LEAVE IT EMPTY FOR EVERY COMPANY — which is the ordinary case. A smoke detector test is a smoke detector test whoever owns the cabin. Set it where an operation genuinely does something its sister company does not.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "default": "1",
+   "description": "Whether new tasks may be raised from this template. OFF IS NOT DELETED: every task ever raised from it keeps its snapshot and stays completable, every compliance record they produced stays in the register, and the template itself stays readable — which is what an auditor asking 'what did the detector test ask for last season' needs. A template is disabled when the operation stops doing it that way, and the tasks are the record that it used to.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What this task involves and when it is done — the paragraph somebody reads when deciding whether this is the template for the job in front of them. Distinct from `instructions`, which is what the WORKER reads once they have it: this one is for whoever is choosing.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "work_section",
+   "fieldtype": "Section Break",
+   "label": "The work"
+  },
+  {
+   "description": "What somebody has to be able to do: 'camp_maintenance', 'applicator_license', 'harvest_labor'. Free text, and the same free-text vocabulary Farm Task.skill_required uses, so the pool filter matches without translation — the skills an operation recognises are its own.",
+   "fieldname": "skill_required",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Skill Required",
+   "search_index": 1
+  },
+  {
+   "description": "How long one of these takes, in minutes. Copied onto the task, where it is compared against the actual on the assignment afterwards — which is how an estimate on a template stops being a guess somebody made once and becomes a number with a season of evidence behind it.",
+   "fieldname": "estimated_duration_minutes",
+   "fieldtype": "Int",
+   "label": "Estimated Duration (Minutes)"
+  },
+  {
+   "fieldname": "work_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "Either",
+   "description": "Dispatched means a foreman picks the person — specialised, licensed or safety-critical work where the named holder matters. Self-pick means workers take it from the pool. Either means both doors are open, which is right for most general labour. THE OPTIONS ARE IN FARM TASK'S ORDER, not alphabetical and not the order a specification listed them in, because two Selects holding one vocabulary in two orders is how a default drifts between them.",
+   "fieldname": "dispatch_mode",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Dispatch Mode",
+   "options": "Either\nDispatched\nSelf-pick"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence Required to Close It"
+  },
+  {
+   "default": "{}",
+   "description": "JSON: which of photos, signature, findings_text and witness closing a task from this template requires. REQUIRED, for exactly the reason Farm Task.evidence_required is required: a template with no contract would raise tasks with no contract, and Farm Task refuses those — so an optional field here would be a template that saves happily and fails the first time anybody tries to use it, in front of whoever is stood in the cabin.",
+   "fieldname": "evidence_required",
+   "fieldtype": "Code",
+   "label": "Evidence Required",
+   "options": "JSON",
+   "reqd": 1
+  },
+  {
+   "fieldname": "record_section",
+   "fieldtype": "Section Break",
+   "label": "What Completing It Produces"
+  },
+  {
+   "description": "The DocType a completion creates: 'Housing Inspection', 'Detector Test', 'Water Test'. BLANK IS A REAL ANSWER AND A COMMON ONE — renewing a certificate produces no record this app writes, and a template that named one would promise a document nobody can produce. Data rather than a Link so a template naming a record a later release adds still saves today.",
+   "fieldname": "creates_record",
+   "fieldtype": "Data",
+   "label": "Creates Record",
+   "search_index": 1
+  },
+  {
+   "fieldname": "record_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "{}",
+   "description": "JSON: default field values for the record a completion produces — anything the template already knows and the worker should not have to retype. Merged UNDER whatever the task itself carries and under whatever the completion supplies, in that order: the template states what is usually true, the task states what is true of this case, and the submission states what actually happened.",
+   "fieldname": "creates_record_data",
+   "fieldtype": "Code",
+   "label": "Creates Record Data",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "instructions_section",
+   "fieldtype": "Section Break",
+   "label": "Instructions"
+  },
+  {
+   "description": "What the worker needs to know before they get there: where the key is, which breaker, who to ask, what 'done' looks like. Copied onto the task's own instructions, where anything specific to the particular case is added after it. This is the field that decides whether a task is doable by somebody who was not in the room when the template was written.",
+   "fieldname": "instructions",
+   "fieldtype": "Text",
+   "label": "Instructions"
+  },
+  {
+   "fieldname": "checklist_section",
+   "fieldtype": "Section Break",
+   "label": "Checklist"
+  },
+  {
+   "description": "The items a worker ticks off, in order. OPTIONAL, AND MOST TEMPLATES SHOULD HAVE NONE: a detector test is a checklist and 'renew the certificate' is not, and a one-item list saying 'do the task' is a form somebody learns to tick without reading. Where there IS one, a task snapshots it at creation and complete_farm_task refuses a completion with a required item unticked.",
+   "fieldname": "checklist",
+   "fieldtype": "Table",
+   "label": "Checklist",
+   "options": "Farm Task Template Checklist Item"
+  },
+  {
+   "fieldname": "regime_section",
+   "fieldtype": "Section Break",
+   "label": "What it answers"
+  },
+  {
+   "description": "The audits this template's work is evidence for. Same vocabulary as every other regime tag in this app — seeded from erpnext_mcp/training.py, picked rather than typed, so nobody writes OSHA where the vocabulary says OR-OSHA. It is what makes a template a compliance artefact rather than a convenience: it states, before anybody works one, which regulator the job answers.",
+   "fieldname": "compliance_regimes",
+   "fieldtype": "Table MultiSelect",
+   "label": "Compliance Regimes",
+   "options": "Compliance Regime Link"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-06 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Task Template",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "task_type,skill_required,creates_record",
+ "sort_field": "template_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "template_name",
+ "track_changes": 1
+}

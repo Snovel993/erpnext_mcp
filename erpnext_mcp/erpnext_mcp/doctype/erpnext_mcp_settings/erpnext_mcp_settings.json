@@ -370,6 +370,13 @@
   "allow_complete_farm_task",
   "allow_reject_farm_task",
   "allow_generate_tasks_from_compliance_alerts",
+  "task_templates_section",
+  "allow_list_farm_task_templates",
+  "allow_get_farm_task_template",
+  "task_templates_col",
+  "allow_create_farm_task_template",
+  "allow_update_farm_task_template",
+  "allow_create_task_from_template",
   "records_read_section",
   "allow_list_housing_inspections",
   "allow_get_housing_inspection",
@@ -2863,6 +2870,51 @@
    "fieldname": "allow_generate_tasks_from_compliance_alerts",
    "fieldtype": "Check",
    "label": "Generate Tasks from Compliance Alerts"
+  },
+  {
+   "fieldname": "task_templates_section",
+   "fieldtype": "Section Break",
+   "label": "Farm Task Templates"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every shape of recurring job this operation has defined \u2014 its skill, duration, evidence contract and checklist size. The map of what the operation knows how to ask for.",
+   "fieldname": "allow_list_farm_task_templates",
+   "fieldtype": "Check",
+   "label": "List Farm Task Templates"
+  },
+  {
+   "default": "1",
+   "description": "READ. One template in full: its evidence contract, its checklist item by item, which Compliance Rules raise work through it, and how many tasks it has produced.",
+   "fieldname": "allow_get_farm_task_template",
+   "fieldtype": "Check",
+   "label": "Get Farm Task Template"
+  },
+  {
+   "fieldname": "task_templates_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Define the shape of one recurring job as a record \u2014 type, skill, duration, dispatch mode, evidence contract, produced record, instructions and checklist. The next task raised from it has that shape, with no app release.",
+   "fieldname": "allow_create_farm_task_template",
+   "fieldtype": "Check",
+   "label": "Create Farm Task Template"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Edit a template in place. It changes what FUTURE tasks look like and reaches nothing already raised \u2014 a task snapshots its template at creation.",
+   "fieldname": "allow_update_farm_task_template",
+   "fieldtype": "Check",
+   "label": "Update Farm Task Template"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Raise one Farm Task pre-filled from a template. Location, assignee and urgency are the three overrides; everything else comes off the template.",
+   "fieldname": "allow_create_task_from_template",
+   "fieldtype": "Check",
+   "label": "Create Task from Template"
   },
   {
    "fieldname": "records_read_section",

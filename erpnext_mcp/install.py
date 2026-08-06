@@ -124,6 +124,7 @@ def after_install() -> None:
 	_i9_document_types()
 	_federal_tax_table()
 	_kpi_definitions()
+	_farm_task_templates()
 	frappe.db.commit()
 
 
@@ -145,6 +146,7 @@ def after_migrate() -> None:
 	_i9_document_types()
 	_federal_tax_table()
 	_kpi_definitions()
+	_farm_task_templates()
 
 
 def _i9_settings() -> None:
@@ -967,3 +969,50 @@ def _kpi_definitions() -> None:
 		)
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not seed KPI {failure.get('name')} — {failure.get('reason')}")
+
+
+def _farm_task_templates() -> None:
+	"""Seed the five shapes of single task. v0.41.0.
+
+	THE FIVE ARE THE SHIPPED COMPLIANCE RULES WHOSE WORK REPEATS: a cabin
+	habitability inspection, a smoke detector test, a water quality test, a
+	certification renewal and a training record. Every type, skill, duration,
+	dispatch mode and evidence contract on them matches `ALERT_TASK_MAP` in
+	`tools/dispatch.py` to the letter, which is the backward-compatibility
+	guarantee: a site that points its rules at these templates raises exactly the
+	tasks it raised in v0.16.0, plus a checklist.
+
+	NOTHING IS WIRED BY THIS JOB. Seeding a template does not point any rule at
+	one — `Compliance Rule.producer_task_template` is left exactly as it was, so
+	an upgrade changes no task any sweep produces. Pointing a rule at a template
+	is a deliberate act, through `update_compliance_rule`, by somebody who has
+	read what the template asks for. An upgrade that silently changed the shape of
+	the work a calendar dispatches is the one thing this app will not do.
+
+	IT ONLY EVER CREATES WHAT IS NOT THERE, checked by template name — the same
+	contract `_inspection_templates` and `_compliance_rules` keep, and the same
+	reason `test_hooks.py` forbids the word `fixtures` by name. An operator who
+	added an item to the detector checklist keeps it. One who disabled a template
+	their operation does not run keeps it disabled.
+
+	Runs on install AND after every migrate, so a site upgrading from any earlier
+	version gets the five on its next migrate rather than needing a bespoke patch.
+	"""
+	try:
+		from . import task_templates
+
+		report = task_templates.seed_farm_task_templates()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the farm task templates were not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['created'])} farm task template(s) — the shape of a "
+			"recurring job is now a record, so its skill, duration, evidence contract and "
+			"checklist are editable with update_farm_task_template and new ones need no code "
+			"release. list_farm_task_templates has the register. NOTHING WAS WIRED: point a "
+			"Compliance Rule at one with update_compliance_rule(producer_task_template=...) when "
+			"you have read what it asks for."
+		)
+	for failure in report.get("failed") or ():
+		print(f"erpnext_mcp: could not seed farm task template {failure.get('name')} — {failure.get('reason')}")

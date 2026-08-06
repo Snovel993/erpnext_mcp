@@ -31,6 +31,7 @@ from erpnext_mcp.patches import (
 	migrate_declarative_rules,
 	migrate_training_types,
 	register_custom_party_types,
+	repoint_producer_task_template,
 	set_default_tool_switches,
 )
 from erpnext_mcp.tools import company
@@ -46,6 +47,7 @@ PATCHES = (
 	("erpnext_mcp.patches.migrate_training_types", migrate_training_types),
 	("erpnext_mcp.patches.backfill_completion_signatures", backfill_completion_signatures),
 	("erpnext_mcp.patches.migrate_declarative_rules", migrate_declarative_rules),
+	("erpnext_mcp.patches.repoint_producer_task_template", repoint_producer_task_template),
 )
 
 
