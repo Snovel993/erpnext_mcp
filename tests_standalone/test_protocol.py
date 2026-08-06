@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_three_hundred_thirty_one_tools_one_hundred_fifty_three_read_one_hundred_seventy_eight_write(
+	def test_catalogue_is_three_hundred_thirty_two_tools_one_hundred_fifty_three_read_one_hundred_seventy_nine_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -480,13 +480,14 @@ class Catalogue(SeededTestCase):
 		    `list_inspection_sessions` and `get_inspection_session` read it all
 		    back. The second is what a handset renders a sectioned form from,
 		    which is why a new template needs no app update;
-		  * `propose_inspection_template_from_regulation` is DECLARED AND REFUSES.
-		    It is the surface an AI template proposer will occupy, reserved now so
-		    the shape is fixed before anything fills it, and inert now because at
-		    runtime this app is deterministic. It counts as a tool because it has
-		    a switch, a schema and a catalogue entry — everything a tool has
-		    except an implementation — and a surface an operator cannot see in the
-		    settings form is a surface nobody can refuse.
+		  * `propose_inspection_template_from_regulation` WAS DECLARED AND
+		    REFUSED. It was the surface an AI template proposer would occupy,
+		    reserved so the shape was fixed before anything filled it, and inert
+		    because at runtime this app is deterministic. It counted as a tool
+		    because it had a switch, a schema and a catalogue entry — everything a
+		    tool has except an implementation — and a surface an operator cannot
+		    see in the settings form is a surface nobody can refuse. v0.37.0
+		    filled it, and the count did not move.
 
 		The five doctypes, the Farm Task link, the four seeded templates and the
 		rule engine's bundling — several overdue things at one cabin become ONE
@@ -523,11 +524,12 @@ class Catalogue(SeededTestCase):
 		  * `get_compliance_rule` reads one definition in full, including a
 		    superseded one — which is how the rule an old alert was raised under
 		    stays inspectable;
-		  * `propose_compliance_rule` is DECLARED AND REFUSES, for the same
+		  * `propose_compliance_rule` WAS DECLARED AND REFUSED, for the same
 		    reasons and on the same terms as v0.21.0's template proposer. AI
 		    belongs at authoring time behind a human approval and never in the
 		    trigger path, and a surface an operator cannot see in the settings
-		    form is a surface nobody can refuse.
+		    form is a surface nobody can refuse. v0.37.0 filled it, and the count
+		    did not move.
 
 		`list_compliance_rules` was RETROFITTED rather than replaced: it now reads
 		the records and takes filters, and every key it returned before means what
@@ -607,6 +609,30 @@ class Catalogue(SeededTestCase):
 		`get_tax_form` there — the arithmetic is the deliverable and the page is
 		a convenience.
 
+		v0.37.0 ADDED ONE, A WRITE — approve_inspection_template — and FILLED THE
+		TWO SURFACES v0.21.0 AND v0.22.0 HAD DECLARED AND LEFT REFUSING.
+		`propose_compliance_rule` and
+		`propose_inspection_template_from_regulation` now write records instead of
+		sentences, and the catalogue count did not move for either of them: they
+		were always tools, because they always had a switch, a schema and an
+		entry, and a surface an operator cannot see in the settings form is a
+		surface nobody can refuse. That is the whole argument for counting a
+		declared-and-refusing tool, tested by the fact that filling one changes no
+		number here.
+
+		Neither of them calls a model. THE PROPOSER IS THE CLIENT: an AI reads a
+		regulation and hands over a drafted record, and the tool is the validator
+		and the gate — it lands the draft DISABLED, stamps `AI-proposed` with the
+		source, refuses to sign its own approval, and flags model-written code for
+		an acknowledgement the approver has to make by name. The runtime is
+		exactly as deterministic as it was.
+
+		The one NEW tool is the counterpart the templates half was missing.
+		`approve_compliance_rule` had existed since v0.22.0; there was no way to
+		turn an inactive template on with somebody's name against it, which is
+		fine while every template is typed by the person who wants it and is not
+		fine the moment a model can draft one.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -614,9 +640,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 331)
+		self.assertEqual(len(registry.TOOLS), 332)
 		self.assertEqual(len(registry.READ_TOOLS), 153)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 178)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 179)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

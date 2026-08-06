@@ -43,9 +43,12 @@ open at this place, this template's sections produce a superset of the records
 they asked for, it was the tightest fit, here is its version.
 
 AI's role is at AUTHORING time — drafting a template from a regulation for a
-human to review and enable — and `propose_inspection_template_from_regulation` is
-the surface that will carry it. It is declared in v0.21.0 and refuses; wiring it
-is Phase 2 of the CCF.
+human to review and enable — and `propose_inspection_template_from_regulation`
+carries it. Declared and refusing in v0.21.0, wired in v0.37.0, and it calls no
+model: the proposer is the MCP client, and the tool is the validator and the gate
+that lands the draft INACTIVE with `AI-proposed` and its source on the record.
+`approve_inspection_template` is the only door from there to a handset, and it
+writes the approver's name onto the row. See `erpnext_mcp/proposals.py`.
 
 ────────────────────────────────────────────────────────────────────────────
 VERSIONING IS BY COPY, AND IT IS WHY A SESSION STAYS READABLE
@@ -92,7 +95,7 @@ import json
 
 import frappe
 
-from . import compat
+from . import compat, proposals
 from . import training as regimes_vocabulary
 
 TEMPLATE_DOCTYPE = "Inspection Template"
@@ -287,6 +290,11 @@ TEMPLATE_FIELDS = (
 	"active",
 	"version",
 	"superseded_by",
+	"authored_by",
+	"ai_source_citation",
+	"ai_review_flags",
+	"human_approved_by",
+	"human_approved_on",
 	"creation",
 	"modified",
 	"owner",
@@ -856,7 +864,11 @@ def seed_inspection_templates() -> dict:
 			if frappe.db.exists(TEMPLATE_DOCTYPE, {"template_name": name}):
 				report["present"].append(name)
 				continue
-			build_template(spec).insert(ignore_permissions=True)
+			# `System`, because a template this app ships is answerable to whoever
+			# shipped it. v0.37.0 gave the DocType the same three-word provenance
+			# the Compliance Rule carries, and a seeded row reading `Operator`
+			# would put the words in somebody's mouth.
+			build_template({**spec, "authored_by": proposals.AUTHOR_SYSTEM}).insert(ignore_permissions=True)
 			report["created"].append(name)
 		except Exception as exc:  # pragma: no cover - reported, never raised
 			report["failed"].append({"name": name, "reason": f"{type(exc).__name__}: {exc}"})
@@ -880,6 +892,15 @@ def build_template(spec: dict):
 	doc.regulation_citations = str(spec.get("regulation_citations") or "").strip()
 	doc.active = 1 if spec.get("active", 1) else 0
 	doc.version = int(spec.get("version") or 1)
+	# v0.37.0. Provenance is written by the same builder the seeder uses, so a
+	# template this app ships, one an operator typed and one a model drafted are
+	# the same shape of record — and the difference between them is a field
+	# somebody can filter on rather than a thing you have to know.
+	doc.authored_by = str(spec.get("authored_by") or proposals.AUTHOR_OPERATOR).strip()
+	doc.ai_source_citation = str(spec.get("ai_source_citation") or "").strip()
+	doc.ai_review_flags = str(spec.get("ai_review_flags") or "").strip()
+	doc.human_approved_by = spec.get("human_approved_by") or None
+	doc.human_approved_on = spec.get("human_approved_on") or None
 	for regime in regimes_vocabulary.to_rows(spec.get("regimes") or []):
 		doc.append("regimes", dict(regime))
 	for index, section in enumerate(spec.get("sections") or ()):

@@ -54,9 +54,20 @@ human reads the citation against the regulation and approves it. Once approved i
 executes the identical deterministic path as every other rule. `authored_by` is
 provenance, not behaviour.
 
-`propose_compliance_rule` is declared and refuses in v0.22.0. Phase 2 (v0.23.5)
-wires it, and it will write drafts with `enabled = 0`, never edit or disable an
-existing rule, and flag any proposal carrying `custom_python` for extra review.
+`propose_compliance_rule` was declared and refused in v0.22.0. **v0.37.0 wires
+it**, on exactly the terms that paragraph promised: drafts land with
+`enabled = 0`, an existing rule is never edited or disabled — a proposal against a
+live `rule_id` is written at version+1 and touches nothing, and the supersession
+happens at approval, by the person approving — and any proposal carrying
+`custom_python` is flagged on the record, with `approve_compliance_rule` refusing
+it until the approver passes `accept_ai_authored_code` and reads the program the
+refusal prints back at them.
+
+**It calls no model.** The AI doing the proposing is the MCP client; the tool is a
+validator and a gate. The four rails it enforces, and the reasoning behind each,
+are in `erpnext_mcp/proposals.py`. `propose_inspection_template_from_regulation`
+and `approve_inspection_template` are the same pattern one layer up, for the forms
+a worker fills in.
 
 ---
 

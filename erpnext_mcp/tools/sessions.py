@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Inspection templates and the sessions worked from them — the v0.21.0 tools.
 
-TEN TOOLS AND ONE ARGUMENT. Nine of them make templates authorable and sessions
-workable through MCP; the tenth is declared and refuses, because the surface an
-AI proposer will occupy is worth reserving before anything occupies it.
+ELEVEN TOOLS. Ten of them make templates authorable and sessions workable through
+MCP. The eleventh, `propose_inspection_template_from_regulation`, was declared in
+v0.21.0 and refused — the surface an AI proposer would occupy, reserved before
+anything occupied it — and v0.37.0 filled it, along with the
+`approve_inspection_template` it needed: a template is live the instant it is
+written, so a draft nobody approved has to land INACTIVE, and inactive is only
+useful if there is a way to turn it on with somebody's name against it.
 
 WHAT `submit_inspection_session` ACTUALLY DOES, IN ORDER, BECAUSE IT IS THE ONE
 TOOL HERE WITH TEETH:
@@ -43,7 +47,7 @@ import json
 
 import frappe
 
-from .. import compat, sessions
+from .. import compat, proposals, sessions
 from .. import training as regimes_vocabulary
 from ..args import as_bool, as_date, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
@@ -129,6 +133,14 @@ def _describe_template(name: str, with_sections: bool = False) -> dict:
 		"version": int(row.get("version") or 1),
 		"superseded_by": row.get("superseded_by") or None,
 		"created": str(row.get("creation") or "") or None,
+		# v0.37.0. Who wrote this form, where they read it, and who let it reach a
+		# handset. On every template rather than only on the proposed ones, because
+		# "AI-proposed" only means anything if the other two words are also said.
+		"authored_by": row.get("authored_by") or proposals.AUTHOR_OPERATOR,
+		"ai_source_citation": row.get("ai_source_citation") or None,
+		"ai_review_flags": proposals.read_flags(row.get("ai_review_flags")),
+		"human_approved_by": row.get("human_approved_by") or None,
+		"human_approved_on": str(row.get("human_approved_on") or "") or None,
 	}
 	section_rows = sessions.sections_of(name)
 	out["section_count"] = len(section_rows)
@@ -509,6 +521,19 @@ def _template_spec_from_args(args: dict, required: bool, current: dict | None = 
 			raise ToolError(f"{exc} Nothing was written.") from None
 	else:
 		spec["regimes"] = current.get("regimes") or []
+
+	# v0.37.0. PROVENANCE IS CARRIED, NEVER TAKEN FROM ARGUMENTS. An edit to a
+	# template a model drafted is still a template a model drafted, and the review
+	# flags go with it — otherwise superseding a flagged draft would be a way to
+	# launder it clean, which is a hole shaped exactly like the gate it bypasses.
+	# `propose_inspection_template_from_regulation` sets these AFTER this reader,
+	# which is the one door they are written through.
+	if current:
+		spec["authored_by"] = current.get("authored_by") or proposals.AUTHOR_OPERATOR
+		spec["ai_source_citation"] = current.get("ai_source_citation") or ""
+		spec["ai_review_flags"] = proposals.dump_flags(current.get("ai_review_flags"))
+		spec["human_approved_by"] = current.get("human_approved_by") or None
+		spec["human_approved_on"] = current.get("human_approved_on") or None
 
 	if "sections" in args:
 		spec["sections"] = _sections_from_args(args.get("sections"))
@@ -1071,19 +1096,239 @@ def _file_the_tray(doc, submitted: dict) -> None:
 			)
 
 
-# ── the surface Phase 2 will occupy ─────────────────────────────────────────
+# ── v0.37.0: the surface Phase 2 reserved, filled ───────────────────────────
 def propose_inspection_template_from_regulation(args: dict) -> ToolResult:
-	"""Declared in v0.21.0 and refuses. The AI authoring hook, reserved not wired."""
-	raise ToolError(
-		"propose_inspection_template_from_regulation is declared and not implemented in v0.21.0. "
-		"It is the surface an AI template proposer will occupy — read a regulation, draft an "
-		"Inspection Template with its sections and citations, leave it INACTIVE for a human to "
-		"read and enable — and it is declared now so that the shape is fixed before anything "
-		"fills it.\n\n"
-		"Nothing about that is available yet, and a tool that returned a plausible draft from a "
-		"model nobody reviewed would be the exact failure the Configurable Compliance Framework "
-		"is written to prevent: at runtime this app is deterministic, and AI belongs at authoring "
-		"time behind a human approval. Phase 2 of the CCF wires it.\n\n"
-		"Until then, author templates with create_inspection_template — a template is a record, "
-		"and writing one takes one call."
+	"""Draft a template read off a regulation. It lands INACTIVE and marked AI-proposed.
+
+	DECLARED IN v0.21.0, WIRED IN v0.37.0, AND IT CALLS NO MODEL. The AI doing
+	the proposing IS THE CLIENT — a model that has read a regulation and drafted
+	the sections it asks for, handing them over as arguments. This tool is the
+	validator and the gate: it refuses the draft where it is the wrong shape,
+	stamps `AI-proposed` and the source it was read from, lands it INACTIVE so no
+	handset can fetch it, and flags what needs more than a skim. The rails, and
+	the reasoning behind each of them, are in `erpnext_mcp/proposals.py`.
+
+	A DRAFT FOR A NAME THAT IS ALREADY LIVE IS AN UPDATE PROPOSAL. It is written
+	at version+1 and the live template is untouched — a worker starting a visit
+	this afternoon gets the form somebody approved, not the one a model wrote an
+	hour ago. `approve_inspection_template` is where the swap happens, by a
+	person, with the supersession recorded.
+	"""
+	_require()
+
+	offered = proposals.offered_approval_fields(args)
+	if offered:
+		raise ToolError(
+			f"a proposal cannot fill in {', '.join(offered)}. Those fields ARE the approval, and the "
+			"approval is the whole of what separates a form a model drafted from a form this "
+			"operation asks a worker to fill in. approve_inspection_template is the one door they go "
+			"through, and it records whoever is authenticated on that call. Nothing was written."
+		)
+	authored = as_str(args, "authored_by")
+	if authored and authored != proposals.AUTHOR_AI:
+		raise ToolError(
+			f"propose_inspection_template_from_regulation writes authored_by={proposals.AUTHOR_AI!r} "
+			f"and will not write {authored!r}. A proposal that could describe itself as "
+			"operator-authored would make the provenance field mean nothing on exactly the rows it "
+			"exists for. If a person authored this template, let them author it: "
+			"create_inspection_template. Nothing was written."
+		)
+
+	try:
+		citation = proposals.citation(
+			url=as_str(args, "regulation_url"),
+			section=as_str(args, "regulation_section"),
+			explicit=as_str(args, "ai_source_citation"),
+			text=as_str(args, "regulation_text"),
+			read_on=as_date(args, "read_on") or frappe.utils.today(),
+		)
+	except ValueError as exc:
+		raise ToolError(f"{exc}. Nothing was written.") from None
+
+	spec = _template_spec_from_args(args, required=True)
+	live = sessions.live_template(spec["template_name"]) or ""
+	spec["version"] = _next_template_version(spec["template_name"])
+	spec["authored_by"] = proposals.AUTHOR_AI
+	spec["ai_source_citation"] = citation
+	# Forced, all three. A template that arrived active would be on a handset
+	# before anybody had read it against the regulation it claims to answer.
+	spec["active"] = 0
+	spec["human_approved_by"] = None
+	spec["human_approved_on"] = None
+	flags = proposals.template_flags(spec["sections"], supersedes_live=bool(live))
+	spec["ai_review_flags"] = proposals.dump_flags(flags)
+
+	doc = sessions.build_template(spec)
+	doc.insert(ignore_permissions=True)
+	described = _describe_template(doc.name, with_sections=True)
+
+	data = {
+		**described,
+		"proposal": True,
+		"review_flags": proposals.notes_for(flags),
+		"supersedes_on_approval": live or None,
+		"next": ["get_inspection_template", "approve_inspection_template"],
+	}
+	if live:
+		data["proposed_against"] = _describe_template(live, with_sections=True)
+	data["note"] = _template_proposal_note(described, flags, live)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"proposed inspection template {doc.name} ({doc.template_name} v{spec['version']}, "
+			f"{len(spec['sections'])} section(s), AI-proposed, inactive"
+			f"{f', {len(flags)} review flag(s)' if flags else ''})"
+		),
+		docstatus_delta="none → 0 (created)",
 	)
+
+
+def approve_inspection_template(args: dict) -> ToolResult:
+	"""Read a drafted template, accept it, and turn it on — with a name against it.
+
+	THE COUNTERPART TO `approve_compliance_rule`, and it exists for the same
+	reason: v0.37.0 let a model draft a form, and a form a worker is asked to
+	fill in is a compliance artefact whether a person or a model wrote it. The
+	name and the date go on the record rather than into a log, so an auditor
+	asking who decided the close-down should ask for the propane reading gets the
+	answer off the template.
+
+	It is also where a proposed replacement swaps in: if a live template already
+	holds this name at a lower version, that row is deactivated and pointed here
+	— never edited, so every session already worked from it stays readable
+	against the sections the worker actually saw.
+	"""
+	name = _template_or_refuse(as_str(args, "name") or as_str(args, "template", required=True), "name")
+	row = sessions.template_row(name)
+	if str(row.get("superseded_by") or "").strip():
+		raise ToolError(
+			f"Inspection Template {name} was superseded by {row['superseded_by']} and cannot be "
+			"activated — two live templates with one name are two answers to 'start a "
+			f"{row.get('template_name')} here'. Approve that one instead. Nothing was written."
+		)
+	if compat.checked(row.get("active")):
+		raise ToolError(
+			f"Inspection Template {name} ({row.get('template_name')}) is already active. Nothing was written."
+		)
+
+	approver = as_str(args, "approver") or _calling_user()
+	superseded = _stand_down_the_live_template(row)
+
+	doc = frappe.get_doc(TEMPLATE, name)
+	doc.active = 1
+	doc.human_approved_by = approver
+	doc.human_approved_on = frappe.utils.now()
+	doc.save(ignore_permissions=True)
+	if superseded:
+		frappe.db.set_value(TEMPLATE, superseded, "superseded_by", name, update_modified=False)
+
+	described = _describe_template(name, with_sections=True)
+	return ToolResult(
+		data={
+			**described,
+			"supersedes": superseded or None,
+			"was_proposed_by": row.get("authored_by") or proposals.AUTHOR_OPERATOR,
+			"note": (
+				f"{described['template_name']} v{described['version']} is live: it reaches the "
+				f"handset on the next fetch and the rule engine can match it on the next sweep. "
+				f"{approver} accepted it, and that is on the record."
+				+ (
+					" It was AI-proposed, so what was accepted is a person's reading of the sections "
+					"against the regulation, not the model's."
+					if described["authored_by"] == proposals.AUTHOR_AI
+					else ""
+				)
+				+ (
+					f" {superseded} held this name and is now inactive and pointing here. It was NOT "
+					"edited — every session worked from it is still readable against the sections "
+					"the worker actually saw, and every compliance record they produced is still in "
+					"the register."
+					if superseded
+					else ""
+				)
+			),
+		},
+		summary=(
+			f"approved and activated {name} ({described['template_name']} v{described['version']})"
+			+ (f", superseding {superseded}" if superseded else "")
+		),
+		docstatus_delta="0 → 0 (updated)",
+	)
+
+
+def _next_template_version(template_name: str) -> int:
+	"""One past the highest version any row holding this name has.
+
+	ANY row: a second proposal made while a first is still in the queue is a
+	third version, and two drafts sharing a number would make the queue
+	unreadable at the moment somebody is comparing them.
+	"""
+	rows = frappe.db.get_all(
+		TEMPLATE,
+		filters={"template_name": template_name},
+		fields=["version"],
+		order_by="version desc",
+		limit=1,
+	)
+	return (int(rows[0]["version"] or 1) + 1) if rows else 1
+
+
+def _stand_down_the_live_template(row: dict) -> str:
+	"""Deactivate the live template holding this name. Only a LATER over an EARLIER.
+
+	`superseded_by` is set by the caller AFTER the new row saves, so a save that
+	fails leaves the old row pointing at nothing rather than at a template that
+	was never activated — and the dispatcher's rollback puts it back either way.
+	"""
+	name = str(row.get("name") or "")
+	template_name = str(row.get("template_name") or "")
+	if not (name and template_name):
+		return ""
+	live = sessions.live_template(template_name)
+	if not live or live == name:
+		return ""
+	live_row = sessions.template_row(live)
+	if int(live_row.get("version") or 1) >= int(row.get("version") or 1):
+		return ""
+	frappe.db.set_value(TEMPLATE, live, "active", 0, update_modified=False)
+	return live
+
+
+def _template_proposal_note(described: dict, flags: list, live: str) -> str:
+	lines = [
+		"THIS TEMPLATE IS INACTIVE AND NO HANDSET WILL FETCH IT. It is marked AI-proposed with the "
+		"source it was read from, and it stays marked that way after approval — what approval adds "
+		"is a person's name, not a change of authorship.",
+		"Read the sections against the regulation, then approve_inspection_template. What to look "
+		"at first: whether each section asks for evidence somebody can actually produce standing in "
+		"the place, and whether the ones that produce a compliance record point at the right "
+		"doctype — a section producing the wrong record files a real document about the wrong thing.",
+	]
+	if live:
+		lines.append(
+			f"There is already a LIVE template with this name: {live}. It is untouched, and a worker "
+			"starting a visit this afternoon gets that one. Approving this draft deactivates it and "
+			"points it here, at that point, by a person's decision."
+		)
+	if flags:
+		lines.append("REVIEW FLAGS: " + ", ".join(flags) + ". `review_flags` says what each one means.")
+	return "\n\n".join(lines)
+
+
+def _calling_user() -> str:
+	"""Whoever Frappe authenticated, else the session user, else Administrator.
+
+	The same reader `tools/rules.py` uses for an approval, and for the same
+	reason: an approver named in the ARGUMENTS is a name anybody can type, and
+	the point of the field is that somebody is answerable for what it says.
+	"""
+	try:
+		from ..security import caller_identity
+
+		user = str(caller_identity() or "").strip()
+		if user:
+			return user
+	except Exception:
+		pass
+	user = str(getattr(frappe.session, "user", "") or "").strip()
+	return user if user and user != "Guest" else "Administrator"

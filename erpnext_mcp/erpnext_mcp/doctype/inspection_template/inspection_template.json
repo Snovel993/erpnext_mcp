@@ -26,7 +26,14 @@
   "sections",
   "regime_section",
   "regulation_citations",
-  "regimes"
+  "regimes",
+  "provenance_section",
+  "authored_by",
+  "ai_source_citation",
+  "ai_review_flags",
+  "provenance_col",
+  "human_approved_by",
+  "human_approved_on"
  ],
  "fields": [
   {
@@ -163,6 +170,52 @@
    "fieldtype": "Table MultiSelect",
    "label": "Regimes",
    "options": "Compliance Regime Link"
+  },
+  {
+   "fieldname": "provenance_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "default": "Operator",
+   "description": "Who wrote this template. `System` is one this app shipped; `Operator` is one somebody here authored; `AI-proposed` is one a model drafted from a regulation and A HUMAN HAS NOT NECESSARILY READ YET. The same three words the Compliance Rule DocType uses, and for the same reason: at runtime a template is rendered and worked identically whoever wrote it, and the only thing that differs is who is answerable for what it asks.",
+   "fieldname": "authored_by",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Authored By",
+   "options": "System\nOperator\nAI-proposed"
+  },
+  {
+   "description": "Where an AI-proposed template was read from — the URL and section of the regulation. It is what turns 'a model suggested this' into something a human can check against the text, and a proposal without it is a claim with no source.",
+   "fieldname": "ai_source_citation",
+   "fieldtype": "Small Text",
+   "label": "AI Source Citation"
+  },
+  {
+   "description": "What about an AI-proposed template needs a second pair of eyes, as a JSON list of flags written by `propose_inspection_template_from_regulation` and never typed. `sections_without_evidence_contract` names sections that ask a worker for nothing checkable — a form that can be filed empty and still looks complete. `supersedes_live_template` means approving it will stand a template somebody is already working from down.",
+   "fieldname": "ai_review_flags",
+   "fieldtype": "Small Text",
+   "label": "AI Review Flags",
+   "read_only": 1
+  },
+  {
+   "fieldname": "provenance_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The person who read this template and enabled it. An AI-proposed template lands INACTIVE and can only be activated through approve_inspection_template, which fills this in — so no form a model drafted reaches a handset without somebody's name against it.",
+   "fieldname": "human_approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User",
+   "search_index": 1
+  },
+  {
+   "description": "When they enabled it. Beside the approver rather than instead of them: a review date with nobody attached is one an auditor is trained to disbelieve.",
+   "fieldname": "human_approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On"
   }
  ],
  "index_web_pages_for_search": 0,

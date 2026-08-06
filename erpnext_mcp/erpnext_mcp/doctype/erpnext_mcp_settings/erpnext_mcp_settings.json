@@ -434,6 +434,7 @@
   "allow_start_inspection_session",
   "allow_submit_inspection_session",
   "allow_propose_inspection_template_from_regulation",
+  "allow_approve_inspection_template",
   "compliance_rule_section",
   "allow_get_compliance_rule",
   "allow_test_compliance_rule",
@@ -3251,10 +3252,17 @@
   },
   {
    "default": "0",
-   "description": "MUTATING, DECLARED AND NOT IMPLEMENTED IN v0.21.0 \u2014 every call refuses. It is the surface an AI template proposer will occupy: read a regulation, draft a template, leave it inactive for a human to enable. Declared now so the shape is fixed before anything fills it, and inert now because at runtime this app is deterministic \u2014 AI belongs at authoring time behind a human approval, never in the trigger path.",
+   "description": "MUTATING. An AI client that has read a regulation drafts an Inspection Template through this tool \u2014 its sections, their evidence contracts, the records they produce. The draft lands INACTIVE and marked `AI-proposed` with the source it was read from, so no handset fetches it until somebody approves it. No model is called here: the proposer IS the client, and this tool is the validator and the gate.",
    "fieldname": "allow_propose_inspection_template_from_regulation",
    "fieldtype": "Check",
-   "label": "Propose Template From Regulation (not implemented)"
+   "label": "Propose Template From Regulation"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING, AND IT IS THE GATE FOR TEMPLATES. An inactive template \u2014 one a model proposed, or one somebody withdrew \u2014 is turned on here and nowhere else, with the approver and the date written onto the record. Where a live template already holds the name at a lower version it is deactivated and pointed at this one: superseded, never edited, so the sessions already worked from it stay readable.",
+   "fieldname": "allow_approve_inspection_template",
+   "fieldtype": "Check",
+   "label": "Approve Inspection Template"
   },
   {
    "fieldname": "compliance_rule_section",
@@ -3310,10 +3318,10 @@
   },
   {
    "default": "0",
-   "description": "MUTATING, DECLARED AND NOT IMPLEMENTED IN v0.22.0 \u2014 every call refuses. It is the surface an AI rule proposer will occupy: read a regulation, draft a Compliance Rule with its citation and thresholds, mark it AI-proposed, and leave it DISABLED for a human to check against the regulation and approve. Declared now so the shape is fixed before anything fills it, and inert now because at runtime this app is deterministic \u2014 AI belongs at authoring time behind a human approval, never in the trigger path.",
+   "description": "MUTATING. An AI client that has read a regulation drafts a Compliance Rule through this tool \u2014 target doctype, thresholds, scope, citation, kairotic gate. The draft lands DISABLED and marked `AI-proposed` with the source it was read from, and it fires nothing until a person approves it. A draft for a rule_id that is already live is written at version+1 and touches nothing; a draft carrying `custom_python` is flagged, and the approval refuses it until the approver acknowledges the code by name.",
    "fieldname": "allow_propose_compliance_rule",
    "fieldtype": "Check",
-   "label": "Propose Compliance Rule (not implemented)"
+   "label": "Propose Compliance Rule"
   },
   {
    "fieldname": "asset_tag_section",

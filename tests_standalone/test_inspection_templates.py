@@ -1148,15 +1148,40 @@ class TheAuditPacket(SessionTestCase):
 
 
 # ── 9 ───────────────────────────────────────────────────────────────────────
-class TheDeclaredSurface(SessionTestCase):
-	def test_the_proposer_refuses_and_says_what_it_will_be(self):
-		message = self.tool_error(
-			"propose_inspection_template_from_regulation", {"regulation_text": "OAR 437-004-1120"}
-		)
-		self.assertIn("not implemented in v0.21.0", message)
-		self.assertIn("create_inspection_template", message)
+class TheSurfaceThatWasDeclaredFirst(SessionTestCase):
+	"""v0.21.0 reserved the AI proposer and left it refusing. v0.37.0 filled it.
 
-	def test_it_writes_nothing(self):
+	The rails are taken apart one at a time in `test_ai_proposals.py`; what is
+	asserted here is what THIS file is responsible for — that a form a model
+	drafted is not a form any handset can fetch, which is the templates-as-data
+	claim's other half. A template is live the moment it is written, so the only
+	thing standing between a plausible draft and a worker's screen is that a
+	proposal lands inactive.
+	"""
+
+	def test_a_drafted_template_is_not_a_live_template(self):
+		data = self.tool_data(
+			"propose_inspection_template_from_regulation",
+			{
+				"template_name": "Shade and Water Check",
+				"description": "The hot-afternoon walk.",
+				"regulation_section": "OAR 437-004-1131",
+				"sections": [{"section_name": "Shade", "evidence_contract": {"photos": True}}],
+			},
+		)
+		self.assertFalse(data["active"])
+		self.assertEqual(data["authored_by"], "AI-proposed")
+		self.assertNotIn(data["name"], self.tool_data("list_inspection_templates", {})["live_templates"])
+
+	def test_a_draft_with_no_source_writes_nothing(self):
 		before = len(STORE.rows(sessions.TEMPLATE_DOCTYPE))
-		self.tool_error("propose_inspection_template_from_regulation", {"regulation_text": "x"})
+		message = self.tool_error(
+			"propose_inspection_template_from_regulation",
+			{
+				"template_name": "Shade and Water Check",
+				"description": "The hot-afternoon walk.",
+				"sections": [{"section_name": "Shade", "evidence_contract": {"photos": True}}],
+			},
+		)
+		self.assertIn("where it was read from", message)
 		self.assertEqual(len(STORE.rows(sessions.TEMPLATE_DOCTYPE)), before)

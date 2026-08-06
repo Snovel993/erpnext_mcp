@@ -3,6 +3,75 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.37.0 — 2026-08-05
+
+**AI-Proposed Compliance Rules.** v0.21.0 declared
+`propose_inspection_template_from_regulation` and left it refusing; v0.22.0 did
+the same for `propose_compliance_rule`. Both said in the sentence they refused
+with exactly what would fill them. This is that. One new tool
+(`approve_inspection_template`, 332 total: 153 read, 179 mutating), two declared
+surfaces filled — which moved no count, because they were always tools.
+
+**Nothing here calls a model, and that is the whole design.** The AI doing the
+proposing is the MCP client: it reads the regulation, it drafts the record, it
+passes the record here as structured arguments. What the tools do is the part a
+proposer cannot do for itself — refuse the wrong shape, stamp the provenance it
+does not get to choose, land the draft OFF, and put what needs a second pair of
+eyes onto the row where the approver will see it. A validator and a gate, not an
+author. The runtime is exactly as deterministic as it was: every alert still
+traces to a rule, a citation, an approver and the field that crossed a threshold.
+
+**Four rails, written once in `erpnext_mcp/proposals.py`** so a rule proposal and
+a template proposal cannot be safe in different amounts. *It lands off* —
+`enabled`/`active` forced to 0 whatever was passed. *It says who wrote it* —
+`authored_by` forced to `AI-proposed`, and a caller passing `Operator` is refused
+rather than quietly corrected, because that argument is an attempt to launder
+provenance. *It says where it was read* — `ai_source_citation` required, built
+from a URL and a section or written out, with a short excerpt of the regulation's
+own words quoted beside it. *It cannot sign itself* — the approver, the approval
+date, the approver's employee and their signature are refused as arguments.
+
+**Propose new, or propose an update. Never a delete and never a disable.** A
+proposal for a `rule_id` that already exists is drafted at version+1 and touches
+nothing: the live rule goes on running on its own definition until a person
+approves the replacement, and the result carries the field-by-field diff, because
+what a reviewer of an edit needs is what changed. The supersession happens at
+approval, by the person approving — old row disabled, pointed at the new one,
+never edited, every alert it raised left exactly where it was. The two tools that
+stand something down still take a written reason from a person; a model that has
+decided a rule is obsolete can say so, and cannot act on it.
+
+**`custom_python` is flagged, and the flag has teeth.** The sandbox refuses what
+it refuses; what it cannot say is whether a program that runs perfectly asks the
+right question. So a draft carrying one — or a producer assignee expression,
+which is the same sandbox and the same judgement — gets a flag on a new read-only
+`ai_review_flags` field, and `approve_compliance_rule` refuses it until the
+approver passes `accept_ai_authored_code`. The refusal prints the program back at
+them: an acknowledgement of code nobody displayed is not one. The gate is on code
+a *model* wrote; gating rules somebody typed here would train everybody to pass
+the argument every time, which is how a gate stops being one. The flags travel
+across an edit, so superseding a flagged draft is not a way to launder it clean.
+
+**`approve_inspection_template` is the counterpart the templates half was
+missing.** A template is live the instant it is written, so the only thing between
+a plausible draft and a worker's screen is that a proposal lands inactive — and
+the only thing that makes inactive useful is a way to turn it on with a name
+against it. It records the approver and the date on the record, and where a live
+template already holds the name at a lower version it deactivates that one and
+points it here: superseded, never edited, so every session already worked from it
+stays readable against the sections the worker actually saw.
+
+**Six new fields, no new DocTypes.** Compliance Rule gains `ai_review_flags`.
+Inspection Template gains the same three-word provenance and the same two
+approval columns the Compliance Rule has carried since v0.22.0 — `authored_by`,
+`ai_source_citation`, `ai_review_flags`, `human_approved_by`,
+`human_approved_on` — and the templates this app seeds now say `System`, because
+a seeded row reading `Operator` puts the words in somebody's mouth. All additive:
+every existing row reads exactly as it did.
+
+**All three tools ship OFF**, separately, because "let the model draft rules" and
+"let somebody turn a drafted form on" are two decisions.
+
 ## 0.36.0 — 2026-08-05
 
 **Tax Form PDF Rendering.** v0.34.0 computed the boxes. This draws them: a

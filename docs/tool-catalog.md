@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 331 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 332 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -7216,19 +7216,47 @@ from a single-task completion.
 
 ## 237. `propose_inspection_template_from_regulation`
 
-**MUTATING, declared and not implemented in v0.21.0 — every call refuses.**
+**MUTATING (default off).** Declared in v0.21.0, **wired in v0.37.0.** Draft an
+Inspection Template read off a regulation — its sections, their evidence
+contracts, the compliance records they produce. It lands **inactive**, marked
+`AI-proposed` with the source it was read from, and no handset fetches it until a
+person approves it with `approve_inspection_template`.
 
-It is the surface an AI template proposer will occupy: read a regulation, draft a
-template with its sections, contracts and citations, leave it **inactive** for a
-human to read and enable. It is declared now so the shape is fixed before
-anything fills it, and inert now because at runtime this app is deterministic —
-AI belongs at authoring time behind a human approval, never in the trigger path.
-Phase 2 of the Configurable Compliance Framework wires it.
+**It calls no model.** The AI doing the proposing is the *client*: you read the
+regulation, you draft the sections, you pass them here. The tool is the validator
+and the gate — it refuses the wrong shape, stamps the provenance you do not get
+to choose, lands it off, and flags what needs more than a skim.
 
-Until then, author templates with `create_inspection_template`. A template is a
-record and writing one takes one call.
+Takes every argument `create_inspection_template` takes, plus `regulation_url`,
+`regulation_section`, `regulation_text` (a short excerpt is quoted onto the
+record) and `read_on`. One of the url, the section or an explicit
+`ai_source_citation` is **required**: a draft that does not name the text it read
+cannot be checked against it, which is the whole of what the approval does.
 
-## 238. `get_compliance_rule`
+It will not write `active`, will not write `authored_by` as anything but
+`AI-proposed` (passing `Operator` is refused, not corrected), and will not fill in
+the approver or the approval date. A draft for a `template_name` that is already
+live is written at version+1 and **touches nothing** — the worker starting a visit
+this afternoon gets the form somebody approved.
+
+Flags a section with an **empty evidence contract** (it can be filed empty and
+still looks complete) and a draft whose approval will stand a live template down.
+
+## 238. `approve_inspection_template`
+
+**MUTATING (default off).** Accept an inactive template and turn it on, recording
+**who** and **when** on the record itself. The counterpart to
+`approve_compliance_rule`, and it exists for the same reason: a form a worker is
+asked to fill in is a compliance artefact whoever wrote it.
+
+Where a live template already holds the name at a lower version, that row is
+deactivated and pointed here — superseded, never edited, so every session already
+worked from it stays readable against the sections the worker actually saw.
+
+Works on any inactive template, not only a proposed one: reinstating one somebody
+withdrew is the same act and deserves the same name against it.
+
+## 239. `get_compliance_rule`
 
 Read-only. One rule in full: the condition it evaluates, the thresholds and scope
 filters it evaluates it against, the regulation it cites, the regimes it answers
@@ -7241,7 +7269,7 @@ today means. Pass the docname of a **superseded** row to read the definition an
 older alert was raised under; those rows are never edited and never deleted,
 which is the whole point of versioning by copy.
 
-## 239. `test_compliance_rule`
+## 240. `test_compliance_rule`
 
 Read-only. Runs ONE rule against the data as it stands and reports every
 observation it WOULD make — with the alert docname each would take — writing
@@ -7256,7 +7284,7 @@ condition is wrong — almost always a field that is empty everywhere rather tha
 stale on a few. `computation_warnings` names anything the engine worked around,
 such as a scope filter on a column this site has not got.
 
-## 240. `create_compliance_rule`
+## 241. `create_compliance_rule`
 
 **MUTATING (default off).** Authors a new compliance rule — a condition the
 nightly sweep evaluates against this site's records — with no code release. It
@@ -7296,7 +7324,7 @@ Twelve of the fourteen shipped rules are now fully declarative and none uses
 `custom_python` — `docs/configurable_compliance_framework.md` §4 has the table of
 questions that are already fields.
 
-## 241. `approve_compliance_rule`
+## 242. `approve_compliance_rule`
 
 **MUTATING (default off).** Accepts a rule and turns it on, recording who
 accepted it and when **on the record itself**.
@@ -7306,7 +7334,15 @@ without an approver and a date. So no rule — least of all one a model proposed
 starts firing without a person having put their name to it. Also reactivates a
 rule that was disabled. Optionally attaches the approver's signature as a File.
 
-## 242. `update_compliance_rule`
+**Since v0.37.0 it does two more things, both for AI-proposed drafts.** It refuses
+a draft carrying model-written code — `custom_python`, or a producer assignee
+expression — until the approver passes `accept_ai_authored_code`, and the refusal
+prints the program back at them. And where the draft is a proposed *replacement*
+for a rule that is already live, approving it supersedes that rule: disabled,
+pointing at the new row, never edited, and every alert it raised left exactly as
+it was.
+
+## 243. `update_compliance_rule`
 
 **MUTATING (default off).** Changes a rule by **superseding** it: a new record at
 version+1, the old one disabled and pointing at it. The old row is never edited.
@@ -7323,7 +7359,7 @@ records what the rule said **before** rather than only what was asked for.
 **The most common edit this exists for**: when OR-OSHA renumbered heat illness
 from -1130 to -1131, `regulation_citations` was the only thing that had to move.
 
-## 243. `deactivate_compliance_rule`
+## 244. `deactivate_compliance_rule`
 
 **MUTATING (default off).** Stops a rule firing, and records why.
 
@@ -7338,22 +7374,42 @@ reason on the record — so the operator who asks next season why the calendar
 stopped mentioning the thing that then went wrong gets an answer from the record
 rather than from somebody's memory.
 
-## 244. `propose_compliance_rule`
+## 245. `propose_compliance_rule`
 
-**MUTATING, declared and not implemented in v0.22.0 — every call refuses.**
+**MUTATING (default off).** Declared in v0.22.0, **wired in v0.37.0.** Draft a
+compliance rule read off a regulation. It lands **disabled**, marked
+`AI-proposed`, with the source on the record, and sits in the review queue until a
+person approves it.
 
-It is the surface an AI rule proposer will occupy: read a regulation, draft a
-Compliance Rule with its target doctype, thresholds, scope, citation and kairotic
-gate, mark it `AI-proposed` with the URL and section it was read from, and leave
-it **disabled** for a human to check against the regulation and approve.
+**It calls no model, and that is the whole design.** The AI doing the proposing is
+the *client*: you read the regulation, you draft the record, you pass it here as
+arguments. What the tool does is the part a proposer cannot do for itself —
+refuse the wrong shape, stamp the provenance, land it off, and put what needs a
+second pair of eyes where the approver will see it. A validator and a gate, not an
+author.
 
-Declared now so the shape is fixed before anything fills it; inert now because
-the architecture is explicit about where AI is allowed to be — at authoring time,
-behind a human approval, never in the trigger path. Phase 2 of the Configurable
-Compliance Framework wires it.
+Takes every argument `create_compliance_rule` takes, plus `regulation_url`,
+`regulation_section`, `regulation_text` and `read_on`. Draft **declaratively** —
+`target_doctype`, `date_field`, `cadence_days`, the thresholds, `scope_filters`,
+`message_template` — because a rule that is a set of fields is a rule an approver
+can check against the regulation in a minute.
 
-Until then, author rules with `create_compliance_rule` and check them with
-`test_compliance_rule` before approving.
+**Four things it will not let you do.** Write `enabled`. Write `authored_by` as
+anything but `AI-proposed` — passing `Operator` is refused rather than corrected,
+because that argument is an attempt to launder provenance. Fill in the approver,
+the approval date, the approver's employee or their signature. And there is no
+propose-a-delete and no propose-a-disable anywhere in this app: a proposal for a
+`rule_id` that already exists is drafted at version+1 and **touches nothing**, so
+the live rule goes on running on its own definition until a person approves the
+replacement. The result carries the field-by-field diff, because what a reviewer
+of an edit needs is what changed.
+
+**`custom_python` is flagged for extra review.** The sandbox refuses what it
+refuses at authoring time; what it cannot say is whether the program asks the
+right question. A draft carrying one — or carrying a producer assignee expression
+— gets `ai_review_flags` on the record, and `approve_compliance_rule` refuses it
+until the approver passes `accept_ai_authored_code`. The refusal prints the
+program back at them: an acknowledgement of code nobody displayed is not one.
 
 ---
 

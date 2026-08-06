@@ -1499,6 +1499,11 @@ REHYDRATED_CHILD_FIELDS = (
 	# v0.19.4. The Weather Settings form re-reads its own override rows and the
 	# controller walks them looking for two rows naming one company.
 	"per_company_overrides",
+	# v0.37.0. `approve_inspection_template` re-reads a template it did not write
+	# and saves it, so the Inspection Template controller walks the section rows
+	# tidying names and order indexes — which needs them to be documents on the
+	# second read as well as on the first.
+	"sections",
 )
 
 

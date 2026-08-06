@@ -29,6 +29,18 @@ FOUR PROPERTIES THEY ALL SHARE, AND EACH ONE IS A REFUSAL SOMEWHERE:
     it say before" reads the answer off this app rather than off a git history
     they have no access to.
 
+THE SIXTH TOOL WAS A REFUSAL UNTIL v0.37.0. `propose_compliance_rule` was
+declared in v0.22.0 and raised the sentence saying what would fill it; it is now
+filled, and every one of the four properties above holds for it unchanged — which
+is the point. A proposal is a DRAFT (property one), a proposal against a live
+rule_id is a new version that touches nothing (property two), there is still no
+way for anything to propose a deletion (property three), and the proposal and its
+approval are both MCP Action Log rows (property four). What it adds is a fifth
+property that only applies to drafts a MODEL wrote: they say so on the record,
+they say where they were read from, they cannot sign themselves, and a draft
+carrying a program cannot be approved by somebody who has not said they read it.
+See `erpnext_mcp/proposals.py` for the rails and `propose_compliance_rule` below.
+
 WHO MAY CALL THEM. The Compliance Rule DocType is granted to System Manager, to
 Compliance Officer and to Farm Manager, and to nobody else — see
 `erpnext_mcp/roles.py`. A Foreman reads the calendar and cannot rewrite what
@@ -43,7 +55,7 @@ import json
 
 import frappe
 
-from .. import compat, compliance_rules
+from .. import compat, compliance_rules, proposals
 from .. import training as regimes_vocabulary
 from ..alerts import engine, sandbox
 from ..args import as_bool, as_date, as_int, as_limit, as_str
@@ -288,6 +300,32 @@ def approve_compliance_rule(args: dict) -> ToolResult:
 			"version. Nothing was written."
 		)
 
+	# v0.37.0. A DRAFT A MODEL WROTE THAT CONTAINS A PROGRAM IS NOT APPROVED BY
+	# CLICKING. The sandbox has already refused what it refuses; what it cannot
+	# tell anybody is whether the program asks the right question, and that is a
+	# reading job. So the approver has to say the words — one argument, named for
+	# what it acknowledges — and the refusal prints the program back at them,
+	# because an acknowledgement of code nobody displayed is not one.
+	flags = proposals.read_flags(row.get("ai_review_flags"))
+	unacknowledged = proposals.code_flags(flags)
+	if unacknowledged and not as_bool(args, "accept_ai_authored_code", False):
+		raise ToolError(
+			f"{name} ({row.get('rule_id')}) is AI-proposed and carries "
+			f"{', '.join(unacknowledged)} — a PROGRAM this app's restricted interpreter will run, "
+			"drafted by a model. Approving it is accepting the code, so this tool will not do it "
+			"until you say so: pass accept_ai_authored_code=true.\n\n"
+			+ "\n\n".join(
+				f"{entry['flag']}: {entry['note']}" for entry in proposals.notes_for(unacknowledged)
+			)
+			+ "\n\nWhat it would run:\n"
+			+ "\n".join(
+				f"  [{flag}]\n"
+				+ "\n".join(f"    {line}" for line in str(row.get(flag) or "").strip().splitlines())
+				for flag in unacknowledged
+			)
+			+ "\n\nNothing was written."
+		)
+
 	approver = as_str(args, "approver") or _calling_user()
 	employee = as_str(args, "approver_employee")
 	if employee and compat.doctype_exists("Employee") and not frappe.db.exists("Employee", employee):
@@ -302,6 +340,13 @@ def approve_compliance_rule(args: dict) -> ToolResult:
 		"human_approved_by": row.get("human_approved_by"),
 		"human_approved_on": str(row.get("human_approved_on") or "") or None,
 	}
+	# v0.37.0. APPROVING A REPLACEMENT IS WHAT STANDS THE OLD ONE DOWN. A proposal
+	# against a rule_id that is already live is drafted at version+1 and touches
+	# nothing; the moment somebody accepts it, the running row is superseded here
+	# — same mechanism `update_compliance_rule` uses, same order, and for the same
+	# reason: the controller allows exactly one live row per rule_id, so the field
+	# has to be clear before the new one is enabled. The decision is the person's.
+	superseded = _stand_down_the_live_sibling(row)
 	doc = frappe.get_doc(DOCTYPE, name)
 	doc.human_approved_by = approver
 	doc.human_approved_on = frappe.utils.now()
@@ -318,6 +363,8 @@ def approve_compliance_rule(args: dict) -> ToolResult:
 		data={
 			**described,
 			"was": before,
+			"supersedes": superseded or None,
+			"acknowledged_review_flags": unacknowledged or None,
 			"note": (
 				f"{described['rule_id']} is live from the next sweep. It was approved by "
 				f"{approver} on {described['human_approved_on']}, and both of those are on the "
@@ -329,11 +376,61 @@ def approve_compliance_rule(args: dict) -> ToolResult:
 					if described["authored_by"] == compliance_rules.AUTHOR_AI
 					else ""
 				)
+				+ (
+					f" {superseded} held this rule_id and is now disabled and pointing here. It was "
+					"NOT edited: the alerts it raised can still be read against the definition that "
+					"raised them, and nothing it already put on the calendar was dismissed."
+					if superseded
+					else ""
+				)
+				+ (
+					f" The approver acknowledged {', '.join(unacknowledged)} — the program a model "
+					"drafted was accepted by a person who said so."
+					if unacknowledged
+					else ""
+				)
 			),
 		},
-		summary=f"approved and enabled {name} ({described['rule_id']} v{described['version']})",
+		summary=(
+			f"approved and enabled {name} ({described['rule_id']} v{described['version']})"
+			+ (f", superseding {superseded}" if superseded else "")
+		),
 		docstatus_delta="0 → 0 (updated)",
 	)
+
+
+def _stand_down_the_live_sibling(row: dict) -> str:
+	"""Disable the live row holding this rule_id, and point it at this one.
+
+	Only ever a LATER version standing down an EARLIER one. Two rows for one
+	rule_id where the older is live means the newer is a proposed replacement
+	waiting in the queue; the reverse would mean somebody is re-approving a
+	definition that was already superseded, and the right answer there is the
+	controller's refusal rather than a quiet demotion of the current rule.
+	"""
+	name = str(row.get("name") or "")
+	rule_id = str(row.get("rule_id") or "")
+	if not (name and rule_id) or compat.checked(row.get("enabled")):
+		return ""
+	siblings = frappe.db.get_all(
+		DOCTYPE,
+		filters={"rule_id": rule_id, "active_row_flag": 1, "name": ("!=", name)},
+		fields=["name", "version"],
+		order_by="version desc",
+		limit=1,
+	)
+	if not siblings:
+		return ""
+	live = siblings[0]
+	if int(live.get("version") or 1) >= int(row.get("version") or 1):
+		return ""
+	frappe.db.set_value(
+		DOCTYPE,
+		str(live["name"]),
+		{"enabled": 0, "active_row_flag": 0, "superseded_by": name},
+		update_modified=False,
+	)
+	return str(live["name"])
 
 
 def update_compliance_rule(args: dict) -> ToolResult:
@@ -464,23 +561,147 @@ def deactivate_compliance_rule(args: dict) -> ToolResult:
 
 
 def propose_compliance_rule(args: dict) -> ToolResult:
-	"""Declared in v0.22.0 and refuses. The AI authoring hook, reserved not wired."""
-	raise ToolError(
-		"propose_compliance_rule is declared and not implemented in v0.22.0. It is the surface an "
-		"AI rule proposer will occupy — read a regulation, draft a Compliance Rule with its target "
-		"doctype, thresholds, scope, citation and kairotic gate, mark it `AI-proposed` with the "
-		"URL and section it was read from, and leave it DISABLED for a human to check against the "
-		"regulation and approve.\n\n"
-		"It is declared now so the shape is fixed before anything fills it, and it is inert now "
-		"because the architecture it belongs to is explicit about where AI is allowed to be: at "
-		"AUTHORING TIME, behind a human approval, and never in the trigger path. At runtime this "
-		"app evaluates declarative expressions against record state and nothing else, which is "
-		"what lets every alert be traced to a rule, a citation, an approver and a field that "
-		"crossed a threshold. Phase 2 of the Configurable Compliance Framework (v0.23.5) wires "
-		"this.\n\n"
-		"Until then, author rules with create_compliance_rule — a rule is a record, and writing "
-		"one takes one call. test_compliance_rule shows what it would raise before you approve it."
+	"""Draft a rule read off a regulation. It lands DISABLED and marked AI-proposed.
+
+	DECLARED IN v0.22.0, WIRED IN v0.37.0, AND IT CALLS NO MODEL. The AI doing the
+	proposing IS THE CLIENT — a model that has read a regulation and drafted a
+	record, handing it over as arguments. What this tool adds is everything the
+	proposer cannot do for itself: refuse the draft where it is the wrong shape,
+	stamp the provenance it does not get to choose, land it OFF, and put what
+	needs a second pair of eyes on the row where the approver will see it. See
+	`erpnext_mcp/proposals.py` for the four rails and why each one is a refusal.
+
+	A PROPOSAL FOR A rule_id THAT ALREADY EXISTS IS AN UPDATE PROPOSAL, and it is
+	drafted at version+1 WITHOUT touching the live row. The running rule goes on
+	running, on its own definition, until a person approves the replacement — an
+	AI proposal can add a draft to the queue and it cannot stand anything down.
+	The result carries the field-by-field diff, because what a reviewer of an edit
+	needs is not the draft, it is what changed.
+	"""
+	_require()
+	rule_id = as_str(args, "rule_id", required=True)
+
+	offered = proposals.offered_approval_fields(args)
+	if offered:
+		raise ToolError(
+			f"a proposal cannot fill in {', '.join(offered)}. Those fields ARE the approval, and the "
+			"approval is the whole of what separates a draft a model wrote from a rule this "
+			"operation stands behind. approve_compliance_rule is the one door they go through, and "
+			"it records whoever is authenticated on that call rather than whoever is named in these "
+			"arguments. Nothing was written."
+		)
+	authored = as_str(args, "authored_by")
+	if authored and authored != proposals.AUTHOR_AI:
+		raise ToolError(
+			f"propose_compliance_rule writes authored_by={proposals.AUTHOR_AI!r} and will not write "
+			f"{authored!r}. A proposal that could describe itself as operator-authored would make "
+			"the provenance field mean nothing on exactly the rows it exists for. If a person "
+			"authored this rule, let them author it: create_compliance_rule. Nothing was written."
+		)
+
+	try:
+		citation = proposals.citation(
+			url=as_str(args, "regulation_url"),
+			section=as_str(args, "regulation_section"),
+			explicit=as_str(args, "ai_source_citation"),
+			text=as_str(args, "regulation_text"),
+			read_on=as_date(args, "read_on") or frappe.utils.today(),
+		)
+	except ValueError as exc:
+		raise ToolError(f"{exc}. Nothing was written.") from None
+
+	existing = compliance_rules.resolve(rule_id)
+	current = compliance_rules.rule_row(existing) if existing else {}
+	live = bool(current) and bool(compat.checked(current.get("enabled")))
+
+	spec = _spec_from_args(args, required=True)
+	spec["rule_id"] = rule_id
+	spec["version"] = _next_version(rule_id)
+	spec["authored_by"] = proposals.AUTHOR_AI
+	spec["ai_source_citation"] = citation
+	# All three forced, and none of them a default the caller can pass past. A
+	# rule that arrived enabled, or carrying an approver nobody asked, would make
+	# "a model wrote a rule and it started firing" a true sentence about this app.
+	spec["enabled"] = 0
+	spec["human_approved_by"] = None
+	spec["human_approved_on"] = None
+	flags = proposals.rule_flags(spec, supersedes_live=live)
+	spec["ai_review_flags"] = proposals.dump_flags(flags)
+
+	doc = _insert(compliance_rules.build_rule(spec))
+	described = compliance_rules.describe(compliance_rules.rule_row(doc.name), with_definition=True)
+
+	data = {
+		**described,
+		"proposal": True,
+		"review_flags": proposals.notes_for(flags),
+		"supersedes_on_approval": current.get("name") if live else None,
+		"next": ["test_compliance_rule", "approve_compliance_rule"],
+	}
+	if current:
+		before = compliance_rules.describe(current, with_definition=True)
+		changes = _diff(before["definition"], described["definition"])
+		changes.update(_diff(_headline(before), _headline(described)))
+		# `enabled` differs by construction — the draft is off and the rule it is
+		# proposed against may not be. Reporting it as a change would bury the
+		# ones somebody has to read.
+		changes.pop("enabled", None)
+		data["proposed_against"] = {
+			"name": current.get("name"),
+			"version": int(current.get("version") or 1),
+			"enabled": live,
+		}
+		data["changes"] = changes
+	data["note"] = _proposal_note(described, flags, live, current)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"proposed compliance rule {doc.name} ({rule_id} v{spec['version']}, AI-proposed, "
+			f"disabled{f', {len(flags)} review flag(s)' if flags else ''})"
+		),
+		docstatus_delta="none → 0 (created)",
 	)
+
+
+def _next_version(rule_id: str) -> int:
+	"""One past the highest version any row of this rule_id holds.
+
+	ANY row, not the live one: a second proposal made while a first is still in
+	the queue is a third version, and two drafts sharing a number would make the
+	queue unreadable at exactly the moment somebody is trying to compare them.
+	"""
+	rows = frappe.db.get_all(
+		DOCTYPE, filters={"rule_id": rule_id}, fields=["version"], order_by="version desc", limit=1
+	)
+	return (int(rows[0]["version"] or 1) + 1) if rows else 1
+
+
+def _proposal_note(described: dict, flags: list, live: bool, current: dict) -> str:
+	lines = [
+		"THIS RULE IS A DRAFT, IT IS DISABLED, AND IT IS FIRING NOTHING. It is marked AI-proposed "
+		"with the source it was read from, and it stays marked that way after approval — what "
+		"approval adds is a person's name, not a change of authorship.",
+		"Read the citation against the regulation, run test_compliance_rule to see what it would "
+		"raise against today's data, then approve_compliance_rule. A rule that observes four "
+		"hundred rows is a rule whose condition is wrong — usually a field that is empty everywhere "
+		"rather than stale on a few — and finding that out before approval costs nothing.",
+	]
+	if live and current:
+		lines.append(
+			f"There is already a LIVE version of {described['rule_id']}: {current.get('name')} "
+			f"v{current.get('version')}. It is untouched and still running — a proposal adds a draft "
+			"to the queue and stands nothing down. Approving this one supersedes it, at that point, "
+			"by a person's decision. `changes` is the field-by-field diff, which is what a reviewer "
+			"of an edit actually needs."
+		)
+	if flags:
+		lines.append(
+			"REVIEW FLAGS: "
+			+ ", ".join(flags)
+			+ ". `review_flags` says what each one means. The code-shaped ones cannot be approved "
+			"until the approver acknowledges them by name."
+		)
+	return "\n\n".join(lines)
 
 
 # ── the shared reader ───────────────────────────────────────────────────────
@@ -519,6 +740,15 @@ def _spec_from_args(args: dict, required: bool, current: dict | None = None) -> 
 		spec["regimes"] = _regimes(args.get("regimes"))
 	elif current:
 		spec["regimes"] = current.get("regimes") or []
+
+	# v0.37.0. REVIEW FLAGS ARE CARRIED, NEVER TAKEN FROM ARGUMENTS. An edit to a
+	# rule a model drafted is still a rule a model drafted, and the flags saying
+	# what about it needs reading go with it — otherwise superseding a flagged
+	# draft would be a way to launder it clean, which is a hole shaped exactly
+	# like the gate it bypasses. `propose_compliance_rule` sets them AFTER this
+	# reader, which is the one door they are written through.
+	if current:
+		spec["ai_review_flags"] = proposals.dump_flags(current.get("ai_review_flags"))
 
 	if required:
 		for fieldname, what in (

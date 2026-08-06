@@ -1014,8 +1014,29 @@ class TheRuleTools(RuleEngineTestCase):
 		)
 		self.assertEqual(len(STORE.rows("Compliance Alert")), before)
 
-	def test_the_ai_proposer_is_declared_and_refuses(self):
-		self.assertIn("not implemented", self.tool_error("propose_compliance_rule", {"regulation_text": "x"}))
+	def test_the_ai_proposer_no_longer_refuses_but_still_will_not_author_alone(self):
+		"""v0.22.0 declared this surface and left it refusing; v0.37.0 wired it.
+
+		What is asserted here is the ONE property this file is responsible for —
+		that a proposal is still a draft, still off, and still not a rule the
+		sweep runs. `test_ai_proposals.py` is where the rails are taken apart one
+		at a time; this is the line that would fail if the CCF's approval gate
+		were ever quietly moved out of the way by the release that filled it.
+		"""
+		self.configure(enabled=1, **{**ALL_ON, **RULE_TOOLS, "allow_propose_compliance_rule": 1})
+		data = self.tool_data(
+			"propose_compliance_rule",
+			{
+				"rule_id": "a_model_wrote_this",
+				"title": "A rule a model drafted",
+				"target_doctype": "Compliance Policy",
+				"kairotic_gate_description": "Ripe when a policy is past its review date.",
+				"regulation_section": "OAR 437-004-1131",
+			},
+		)
+		self.assertFalse(data["enabled"])
+		self.assertEqual(data["authored_by"], compliance_rules.AUTHOR_AI)
+		self.assertNotIn("a_model_wrote_this", alerts.rule_map())
 
 	def test_every_rule_change_lands_in_the_mcp_action_log(self):
 		"""An auditor asking 'who changed this rule and when' gets an answer

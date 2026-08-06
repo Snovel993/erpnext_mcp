@@ -213,6 +213,282 @@ def _pdf_form_ready(*doctypes: str):
 	return predicate
 
 
+#: THE RULE-DEFINITION ARGUMENTS, WRITTEN ONCE. `create_compliance_rule` takes
+#: them from a person and `propose_compliance_rule` takes the same ones from a
+#: model, and the two must not drift into accepting different spellings of one
+#: rule — the drift that would let a proposal describe something the authoring
+#: tool cannot, or the reverse, which is how a review queue starts holding
+#: records nobody can edit. One table, for the same reason `rules._TEXT_FIELDS`
+#: is one table.
+_RULE_DRAFT_ARGUMENTS = {
+	"rule_id": _field(
+		_STRING,
+		"The stable key its alerts are filed under, lower_snake_case — "
+		"`heat_training_lapsed`. It becomes the first segment of every alert docname "
+		"and must never change afterwards.",
+	),
+	"title": _field(_STRING, "What the rule says, in the words somebody reads on a phone."),
+	"category": _field(
+		_STRING,
+		"Audits, Certifications, Filings, Housing, Policies, Records, Water and Sanitation or Workforce.",
+	),
+	"target_doctype": _field(_STRING, "The DocType whose rows this rule walks."),
+	"kairotic_gate_description": _field(
+		_STRING,
+		"REQUIRED. What STATE makes this rule ripe — and what keeps it quiet. It is "
+		"the paragraph an auditor is read when they ask why an alert fired.",
+	),
+	"date_field": _field(
+		_STRING,
+		"The field the clock runs from. LEAVE EMPTY for a rule with no clock, whose "
+		"whole condition is a scope filter; every matching row then raises at "
+		"`severity_expired`.",
+	),
+	"cadence_days": _field(
+		_INTEGER,
+		"How often the activity must recur. The due date is date_field + this, so 365 "
+		"on a last-inspection date is the annual walk and 0 means the date field IS "
+		"the deadline.",
+	),
+	"threshold_critical_days": _field(
+		_INTEGER,
+		"Fire critical at this many days remaining or fewer. NEGATIVE means the band "
+		"never fires, which is how a rule says it has nothing to say until the date "
+		"has passed.",
+	),
+	"threshold_warning_days": _field(
+		_INTEGER,
+		"Fire warning at this many days remaining or fewer. Also the OUTER window: "
+		"outside it the rule says nothing at all.",
+	),
+	"severity_critical": _field(_STRING, "Critical, Warning or Info. Default Critical."),
+	"severity_warning": _field(_STRING, "Critical, Warning or Info. Default Warning."),
+	"severity_expired": _field(
+		_STRING,
+		"What a row raises once the date has PASSED — and, for a rule with no "
+		"date_field, what every matching row raises. Default Critical.",
+	),
+	"missing_date_behaviour": _field(
+		_STRING,
+		"Skip or Raise. Skip is right for an expiry (a training with no expiry does "
+		"not lapse); Raise is right for a cadence (a cabin nobody has ever inspected "
+		"is the most overdue cabin there is).",
+	),
+	"due_date_mode": _field(_STRING, "'From Anchor' (default), 'Today' or 'None'."),
+	"window_field": _field(
+		_STRING,
+		"A field on the row carrying its own lead time in days, used instead of "
+		"threshold_warning_days where set — `renewal_window_days` on a certificate.",
+	),
+	"scope_filters": _field(
+		{"type": "array", "items": _OBJECT},
+		'ANDed filters: [{"field", "op", "value", "default"}]. Ops: eq, ne, gt, lt, '
+		"gte, lte, in, nin, isnull, isnotnull, contains, ncontains. `default` is what "
+		"an EMPTY column is read as, and it matters more than it looks: in SQL "
+		"`status != 'Active'` excludes every row whose status was never set.",
+	),
+	"message_template": _field(
+		_STRING,
+		"Jinja, rendered in a sandbox with no framework in it. The row is available "
+		"by field name, plus days_remaining, days_overdue, days_since_anchor, "
+		"due_date, today, regimes and the thresholds.",
+	),
+	"regimes": _field(_STRING_ARRAY, "The audits it answers: OR-OSHA, FSMA, WPS, NOP …"),
+	"regimes_from_field": _field(
+		_STRING,
+		"A field on the row carrying its OWN regime tags, copied onto each alert "
+		"instead of the rule's — `regimes` on a training record, because the record "
+		"says what that afternoon actually covered.",
+	),
+	"regulation_citations": _field(
+		_STRING,
+		"The regulations this rule enforces, comma-separated. The field an auditor asks about.",
+	),
+	"requires_doctypes": _field(
+		_STRING,
+		"Comma-separated DocTypes that must exist for the rule to run. Defaults to the target.",
+	),
+	"requires_fields": _field(
+		_STRING,
+		"Comma-separated fields that must exist on the target — `i9_status`. A rule "
+		"whose column is absent scans nothing rather than reporting everybody clean.",
+	),
+	"producer_task_template": _field(_STRING, "An Inspection Template the work is done through."),
+	"producer_farm_task_type": _field(_STRING, "The Farm Task type raised where no template is set."),
+	"producer_skill_required": _field(_STRING, "The crew skill the producer task needs."),
+	"evidence_contract": _field(
+		_OBJECT,
+		"What the producer task's completion must submit: photos, signature, "
+		"findings_text, witness, checklist_items, measurements.",
+	),
+	"retention_years": _field(_INTEGER, "The regulatory retention window for the records it watches."),
+	"audit_packet_types": _field(
+		_STRING_ARRAY,
+		"Which audit packets carry this rule's alerts: FSMA, GAP, GlobalGAP, OSHA, DOL …",
+	),
+	"custom_python": _field(
+		_STRING,
+		"THE ESCAPE HATCH. A restricted program returning observations. No imports, "
+		"no exec/eval/open, no dunder attributes, no while, no def/class/lambda, "
+		"bounded in steps and seconds. Prefer the fields above.",
+	),
+	"extra_parameters": _field(
+		_OBJECT, 'Named intervals a built-in scanner reads, e.g. {"spray_season_days": 120}.'
+	),
+	# ── v0.22.1's primitives. Every one is optional; a rule that uses none
+	# of them is the rule v0.22.0 could already express. ────────────────
+	"superseded_by_later_clean": _field(
+		_OBJECT,
+		"THE ONE GATE THAT IS A QUESTION ABOUT OTHER ROWS. A finding stops being true "
+		"when a LATER CLEAN RECORD FOR THE SAME SUBJECT supersedes it — a cabin "
+		're-inspected in September with nothing found. {"subject_field": "unit", '
+		'"clean_state_field": "workflow_state", "clean_state_values": ["Recorded"], '
+		'"unreadable_counts_as_dirty": true}. `doctype` and `date_field` default to '
+		"the target's. Leave `unreadable_counts_as_dirty` at true unless you mean it: "
+		"a record whose state nobody can read is not evidence that anything was fixed.",
+	),
+	"gate_date_field": _field(
+		_STRING,
+		"A SECOND date used only as a gate — the rule considers a row only where this "
+		"date is inside `gate_within_days`. It is a conjunction over two independent "
+		"dates, which one cadence anchor cannot express: a block raises a water-test "
+		"alert when it was sprayed inside the season AND its water was tested outside "
+		"the cadence, and neither half fires alone. A row whose gate date is EMPTY is "
+		"gated OUT — the gate is a claim that the condition matters now, and no date "
+		"is no claim.",
+	),
+	"gate_within_days": _field(_INTEGER, "How recent `gate_date_field` must be."),
+	"gate_scope": _field(_STRING, "'Direct' (a column on the scanned row, the default) or 'Latest Related'."),
+	"gate_related_table": _field(
+		_OBJECT,
+		'For a Latest Related gate: {"doctype", "subject_field", "date_field", '
+		'"subject_key", "scope_filters"} — the newest date on another doctype pointing '
+		"back at this row. Read once per sweep and folded to a per-subject maximum, "
+		"not once per candidate.",
+	),
+	"date_fields": _field(
+		{"type": "array", "items": _OBJECT},
+		"SEVERAL anchors of the same kind, where either being stale fires and the "
+		'message must name which — [{"field": "smoke_detector_last_test", "label": '
+		'"smoke"}, {"field": "co_detector_last_test", "label": "CO"}]. The severity '
+		"folds to the worst; the template gets `stale_dates` (only the fields actually "
+		"stale, each with its label, date and age) and `first_stale_label`. Overrides "
+		"`date_field`. Labels are FRAGMENTS the sentence around them completes.",
+	),
+	"date_field_role": _field(
+		_STRING,
+		"'Clock' (default) or 'Timestamp'. Timestamp says the date is WHEN THE THING "
+		"WAS FOUND rather than a deadline: it is read for the message and bands "
+		"nothing, every matching row raises at `severity_expired`, and a row with no "
+		"date raises too. Use it for a finding — a corrective action is not more or "
+		"less open for being three weeks old, and as a clock it would stop firing on "
+		"the day it was written.",
+	),
+	"target_doctypes": _field(
+		{"type": "array", "items": _OBJECT},
+		"Additional doctypes this ONE rule walks, for a rule genuinely about more than "
+		'one kind of record — [{"doctype": "Detector Test", "date_field": "test_date", '
+		'"label": "the detector test"}]. `label` is what the message says instead of '
+		"the doctype name. Rare and deliberate: two rule_ids would be two lists for "
+		"one afternoon's work.",
+	),
+	"regime_heuristics": _field(
+		{"type": "array", "items": _OBJECT},
+		"An ORDERED lookup that reads the regimes off a NAME rather than a column, for "
+		"the case `regimes_from_field` cannot reach — a certificate's audits come from "
+		"its type, and there is no tags column on it. First match wins and THE ORDER "
+		"IS THE CONTENT: check `globalgap` before `gap`, because 'GlobalGAP' contains "
+		"'GAP'. Where entries name several fields the FIELD ORDER IS THE OUTER LOOP — "
+		"the whole table is tried against the type before any of it is tried against "
+		'the name. [{"if_field_contains": {"field": ["cert_type", "cert_name"], '
+		'"value": ["wps"]}, "then_regimes": ["WPS"]}, {"default_regimes": ["Internal"]}]',
+	),
+	"category_heuristics": _field(
+		{"type": "array", "items": _OBJECT},
+		"The same shape producing the alert's CATEGORY, for a rule whose rows belong "
+		'under different headings — [{"if_field_in": {"field": "cert_type", "value": '
+		'["Applicator License"]}, "then_category": "Workforce"}, {"default_category": '
+		'"Certifications"}]',
+	),
+	# ── v0.22.5: firing on a data state rather than on a date ───────────
+	"latest_child_field_threshold": _field(
+		_OBJECT,
+		"THE NEWEST CHILD ROW OF EACH SCANNED RECORD, AND A NUMBER READ OFF IT. Sibling "
+		"of gate_related_table rather than an extension of it: that one folds a related "
+		"doctype to one VALUE per subject (the maximum date) and asks how old it is; this "
+		"folds to one ROW, the latest, and asks about its other columns — which a maximum "
+		'cannot answer. {"child_doctype": "Farm Shift Weather Reading", "parent_field": '
+		'"parent", "parentfield": "weather_timeline", "order_by": "reading_datetime", '
+		'"context_key": "latest_weather", "match": "any", "conditions": [{"field": '
+		'"temp_f", "op": "gte", "threshold": 80, "threshold_source": '
+		'"weather.heat_threshold_temp_f"}]}. `threshold_source` reads the number from a '
+		"per-company setting instead of the literal, so the alert layer and the "
+		"operational sweep cannot disagree about what hot means on the same afternoon. "
+		"Ops: gte, gt, lte, lt, eq, ne. `match` is any (OR, default) or all (AND). The "
+		"whole latest row goes into the message template under `context_key`. A SUBJECT "
+		"WITH NO CHILD ROW IS GATED OUT — a shift with an empty timeline is not a cool "
+		"shift, it is a shift nobody has a reading for.",
+	),
+	"default_severity": _field(
+		_STRING,
+		"Critical, Warning (default) or Info — what a rule whose date_field_role is "
+		"'State' raises at. A state-driven rule has no band to be in and no expiry to be "
+		"past, so none of the three band severities applies to it.",
+	),
+	"producer_assigned_to_expression": _field(
+		_STRING,
+		"A safe expression over the alert's SOURCE ROW producing an Employee — "
+		"`row.foreman`. Where it is set the producer task is assigned to that person "
+		"directly and dispatch_mode is Dispatched; where it is empty the task routes by "
+		"skill exactly as before. THE TWO ARE EXCLUSIVE and passing both is refused: a "
+		"skill is a pool and an assignee is a person, and a task that is both is a task "
+		"whose holder depends on which one the dispatcher read first. Evaluated under "
+		"the same sandbox as custom_python, and vetted here rather than on the afternoon "
+		"somebody needed the task.",
+	),
+	"purpose": _field(_STRING, "What goes wrong in the world if nobody acts on this."),
+	"authored_by": _field(_STRING, "System, Operator (default) or AI-proposed."),
+	"ai_source_citation": _field(_STRING, "If AI-proposed: the URL and section it was read from."),
+}
+
+
+#: THE SAME TABLE FOR TEMPLATES. `create_inspection_template` takes these from a
+#: person, `propose_inspection_template_from_regulation` takes them from a model,
+#: and a field one of them accepts and the other does not is a review queue
+#: holding forms the authoring tool cannot edit.
+_TEMPLATE_DRAFT_ARGUMENTS = {
+	"template_name": _field(_STRING, "What the visit is called, e.g. 'Post-harvest Cabin Close-down'."),
+	"description": _field(
+		_STRING,
+		"What the visit is for and when it is done. Required — a template with "
+		"sections and no statement of purpose is a form somebody has to reverse-engineer.",
+	),
+	"applies_to_asset_type": _field(
+		_STRING,
+		"Housing Unit, Field, Irrigation Zone, Sprayer, Cabin or General. The first "
+		"three name registers on this site and are ENFORCED against a session's location; "
+		"the last three are labels and are not, and are never matched automatically by "
+		"the rule engine.",
+	),
+	"sections": _field(
+		{"type": "array", "items": _OBJECT},
+		'Ordered list of {"section_name", "section_description", '
+		'"produces_record_doctype", "renderer_hint", "required", "evidence_contract", '
+		'"produces_record_data", "field_prompts"}. At least one.',
+	),
+	"skill_required": _field(_STRING, "The crew skill, e.g. 'camp_maintenance'."),
+	"estimated_duration_minutes": _field(_INTEGER, "The WHOLE visit, not the sum of the parts."),
+	"cadence_trigger_expression": _field(
+		_STRING,
+		"Prose for a reader saying when this template should fire. NOT parsed — matching "
+		"is deterministic on what the sections produce against what the pending alerts "
+		"ask for.",
+	),
+	"regulation_citations": _field(_STRING, "The regulations this visit is evidence for, comma-separated."),
+	"regimes": _field(_STRING_ARRAY, "The audits it answers: OR-OSHA, FSMA, WPS, NOP …"),
+}
+
+
 def _tool(
 	handler,
 	description: str,
@@ -6030,241 +6306,7 @@ TOOLS = {
 		"gate (that is a calendar reminder, not a compliance rule); a malformed "
 		"scope filter or an unknown operator; and any custom_python the sandbox "
 		"would not run.",
-		{
-			"rule_id": _field(
-				_STRING,
-				"The stable key its alerts are filed under, lower_snake_case — "
-				"`heat_training_lapsed`. It becomes the first segment of every alert docname "
-				"and must never change afterwards.",
-			),
-			"title": _field(_STRING, "What the rule says, in the words somebody reads on a phone."),
-			"category": _field(
-				_STRING,
-				"Audits, Certifications, Filings, Housing, Policies, Records, Water and "
-				"Sanitation or Workforce.",
-			),
-			"target_doctype": _field(_STRING, "The DocType whose rows this rule walks."),
-			"kairotic_gate_description": _field(
-				_STRING,
-				"REQUIRED. What STATE makes this rule ripe — and what keeps it quiet. It is "
-				"the paragraph an auditor is read when they ask why an alert fired.",
-			),
-			"date_field": _field(
-				_STRING,
-				"The field the clock runs from. LEAVE EMPTY for a rule with no clock, whose "
-				"whole condition is a scope filter; every matching row then raises at "
-				"`severity_expired`.",
-			),
-			"cadence_days": _field(
-				_INTEGER,
-				"How often the activity must recur. The due date is date_field + this, so 365 "
-				"on a last-inspection date is the annual walk and 0 means the date field IS "
-				"the deadline.",
-			),
-			"threshold_critical_days": _field(
-				_INTEGER,
-				"Fire critical at this many days remaining or fewer. NEGATIVE means the band "
-				"never fires, which is how a rule says it has nothing to say until the date "
-				"has passed.",
-			),
-			"threshold_warning_days": _field(
-				_INTEGER,
-				"Fire warning at this many days remaining or fewer. Also the OUTER window: "
-				"outside it the rule says nothing at all.",
-			),
-			"severity_critical": _field(_STRING, "Critical, Warning or Info. Default Critical."),
-			"severity_warning": _field(_STRING, "Critical, Warning or Info. Default Warning."),
-			"severity_expired": _field(
-				_STRING,
-				"What a row raises once the date has PASSED — and, for a rule with no "
-				"date_field, what every matching row raises. Default Critical.",
-			),
-			"missing_date_behaviour": _field(
-				_STRING,
-				"Skip or Raise. Skip is right for an expiry (a training with no expiry does "
-				"not lapse); Raise is right for a cadence (a cabin nobody has ever inspected "
-				"is the most overdue cabin there is).",
-			),
-			"due_date_mode": _field(_STRING, "'From Anchor' (default), 'Today' or 'None'."),
-			"window_field": _field(
-				_STRING,
-				"A field on the row carrying its own lead time in days, used instead of "
-				"threshold_warning_days where set — `renewal_window_days` on a certificate.",
-			),
-			"scope_filters": _field(
-				{"type": "array", "items": _OBJECT},
-				'ANDed filters: [{"field", "op", "value", "default"}]. Ops: eq, ne, gt, lt, '
-				"gte, lte, in, nin, isnull, isnotnull, contains, ncontains. `default` is what "
-				"an EMPTY column is read as, and it matters more than it looks: in SQL "
-				"`status != 'Active'` excludes every row whose status was never set.",
-			),
-			"message_template": _field(
-				_STRING,
-				"Jinja, rendered in a sandbox with no framework in it. The row is available "
-				"by field name, plus days_remaining, days_overdue, days_since_anchor, "
-				"due_date, today, regimes and the thresholds.",
-			),
-			"regimes": _field(_STRING_ARRAY, "The audits it answers: OR-OSHA, FSMA, WPS, NOP …"),
-			"regimes_from_field": _field(
-				_STRING,
-				"A field on the row carrying its OWN regime tags, copied onto each alert "
-				"instead of the rule's — `regimes` on a training record, because the record "
-				"says what that afternoon actually covered.",
-			),
-			"regulation_citations": _field(
-				_STRING,
-				"The regulations this rule enforces, comma-separated. The field an auditor asks about.",
-			),
-			"requires_doctypes": _field(
-				_STRING,
-				"Comma-separated DocTypes that must exist for the rule to run. Defaults to the target.",
-			),
-			"requires_fields": _field(
-				_STRING,
-				"Comma-separated fields that must exist on the target — `i9_status`. A rule "
-				"whose column is absent scans nothing rather than reporting everybody clean.",
-			),
-			"producer_task_template": _field(_STRING, "An Inspection Template the work is done through."),
-			"producer_farm_task_type": _field(_STRING, "The Farm Task type raised where no template is set."),
-			"producer_skill_required": _field(_STRING, "The crew skill the producer task needs."),
-			"evidence_contract": _field(
-				_OBJECT,
-				"What the producer task's completion must submit: photos, signature, "
-				"findings_text, witness, checklist_items, measurements.",
-			),
-			"retention_years": _field(
-				_INTEGER, "The regulatory retention window for the records it watches."
-			),
-			"audit_packet_types": _field(
-				_STRING_ARRAY,
-				"Which audit packets carry this rule's alerts: FSMA, GAP, GlobalGAP, OSHA, DOL …",
-			),
-			"custom_python": _field(
-				_STRING,
-				"THE ESCAPE HATCH. A restricted program returning observations. No imports, "
-				"no exec/eval/open, no dunder attributes, no while, no def/class/lambda, "
-				"bounded in steps and seconds. Prefer the fields above.",
-			),
-			"extra_parameters": _field(
-				_OBJECT, 'Named intervals a built-in scanner reads, e.g. {"spray_season_days": 120}.'
-			),
-			# ── v0.22.1's primitives. Every one is optional; a rule that uses none
-			# of them is the rule v0.22.0 could already express. ────────────────
-			"superseded_by_later_clean": _field(
-				_OBJECT,
-				"THE ONE GATE THAT IS A QUESTION ABOUT OTHER ROWS. A finding stops being true "
-				"when a LATER CLEAN RECORD FOR THE SAME SUBJECT supersedes it — a cabin "
-				're-inspected in September with nothing found. {"subject_field": "unit", '
-				'"clean_state_field": "workflow_state", "clean_state_values": ["Recorded"], '
-				'"unreadable_counts_as_dirty": true}. `doctype` and `date_field` default to '
-				"the target's. Leave `unreadable_counts_as_dirty` at true unless you mean it: "
-				"a record whose state nobody can read is not evidence that anything was fixed.",
-			),
-			"gate_date_field": _field(
-				_STRING,
-				"A SECOND date used only as a gate — the rule considers a row only where this "
-				"date is inside `gate_within_days`. It is a conjunction over two independent "
-				"dates, which one cadence anchor cannot express: a block raises a water-test "
-				"alert when it was sprayed inside the season AND its water was tested outside "
-				"the cadence, and neither half fires alone. A row whose gate date is EMPTY is "
-				"gated OUT — the gate is a claim that the condition matters now, and no date "
-				"is no claim.",
-			),
-			"gate_within_days": _field(_INTEGER, "How recent `gate_date_field` must be."),
-			"gate_scope": _field(
-				_STRING, "'Direct' (a column on the scanned row, the default) or 'Latest Related'."
-			),
-			"gate_related_table": _field(
-				_OBJECT,
-				'For a Latest Related gate: {"doctype", "subject_field", "date_field", '
-				'"subject_key", "scope_filters"} — the newest date on another doctype pointing '
-				"back at this row. Read once per sweep and folded to a per-subject maximum, "
-				"not once per candidate.",
-			),
-			"date_fields": _field(
-				{"type": "array", "items": _OBJECT},
-				"SEVERAL anchors of the same kind, where either being stale fires and the "
-				'message must name which — [{"field": "smoke_detector_last_test", "label": '
-				'"smoke"}, {"field": "co_detector_last_test", "label": "CO"}]. The severity '
-				"folds to the worst; the template gets `stale_dates` (only the fields actually "
-				"stale, each with its label, date and age) and `first_stale_label`. Overrides "
-				"`date_field`. Labels are FRAGMENTS the sentence around them completes.",
-			),
-			"date_field_role": _field(
-				_STRING,
-				"'Clock' (default) or 'Timestamp'. Timestamp says the date is WHEN THE THING "
-				"WAS FOUND rather than a deadline: it is read for the message and bands "
-				"nothing, every matching row raises at `severity_expired`, and a row with no "
-				"date raises too. Use it for a finding — a corrective action is not more or "
-				"less open for being three weeks old, and as a clock it would stop firing on "
-				"the day it was written.",
-			),
-			"target_doctypes": _field(
-				{"type": "array", "items": _OBJECT},
-				"Additional doctypes this ONE rule walks, for a rule genuinely about more than "
-				'one kind of record — [{"doctype": "Detector Test", "date_field": "test_date", '
-				'"label": "the detector test"}]. `label` is what the message says instead of '
-				"the doctype name. Rare and deliberate: two rule_ids would be two lists for "
-				"one afternoon's work.",
-			),
-			"regime_heuristics": _field(
-				{"type": "array", "items": _OBJECT},
-				"An ORDERED lookup that reads the regimes off a NAME rather than a column, for "
-				"the case `regimes_from_field` cannot reach — a certificate's audits come from "
-				"its type, and there is no tags column on it. First match wins and THE ORDER "
-				"IS THE CONTENT: check `globalgap` before `gap`, because 'GlobalGAP' contains "
-				"'GAP'. Where entries name several fields the FIELD ORDER IS THE OUTER LOOP — "
-				"the whole table is tried against the type before any of it is tried against "
-				'the name. [{"if_field_contains": {"field": ["cert_type", "cert_name"], '
-				'"value": ["wps"]}, "then_regimes": ["WPS"]}, {"default_regimes": ["Internal"]}]',
-			),
-			"category_heuristics": _field(
-				{"type": "array", "items": _OBJECT},
-				"The same shape producing the alert's CATEGORY, for a rule whose rows belong "
-				'under different headings — [{"if_field_in": {"field": "cert_type", "value": '
-				'["Applicator License"]}, "then_category": "Workforce"}, {"default_category": '
-				'"Certifications"}]',
-			),
-			# ── v0.22.5: firing on a data state rather than on a date ───────────
-			"latest_child_field_threshold": _field(
-				_OBJECT,
-				"THE NEWEST CHILD ROW OF EACH SCANNED RECORD, AND A NUMBER READ OFF IT. Sibling "
-				"of gate_related_table rather than an extension of it: that one folds a related "
-				"doctype to one VALUE per subject (the maximum date) and asks how old it is; this "
-				"folds to one ROW, the latest, and asks about its other columns — which a maximum "
-				'cannot answer. {"child_doctype": "Farm Shift Weather Reading", "parent_field": '
-				'"parent", "parentfield": "weather_timeline", "order_by": "reading_datetime", '
-				'"context_key": "latest_weather", "match": "any", "conditions": [{"field": '
-				'"temp_f", "op": "gte", "threshold": 80, "threshold_source": '
-				'"weather.heat_threshold_temp_f"}]}. `threshold_source` reads the number from a '
-				"per-company setting instead of the literal, so the alert layer and the "
-				"operational sweep cannot disagree about what hot means on the same afternoon. "
-				"Ops: gte, gt, lte, lt, eq, ne. `match` is any (OR, default) or all (AND). The "
-				"whole latest row goes into the message template under `context_key`. A SUBJECT "
-				"WITH NO CHILD ROW IS GATED OUT — a shift with an empty timeline is not a cool "
-				"shift, it is a shift nobody has a reading for.",
-			),
-			"default_severity": _field(
-				_STRING,
-				"Critical, Warning (default) or Info — what a rule whose date_field_role is "
-				"'State' raises at. A state-driven rule has no band to be in and no expiry to be "
-				"past, so none of the three band severities applies to it.",
-			),
-			"producer_assigned_to_expression": _field(
-				_STRING,
-				"A safe expression over the alert's SOURCE ROW producing an Employee — "
-				"`row.foreman`. Where it is set the producer task is assigned to that person "
-				"directly and dispatch_mode is Dispatched; where it is empty the task routes by "
-				"skill exactly as before. THE TWO ARE EXCLUSIVE and passing both is refused: a "
-				"skill is a pool and an assignee is a person, and a task that is both is a task "
-				"whose holder depends on which one the dispatcher read first. Evaluated under "
-				"the same sandbox as custom_python, and vetted here rather than on the afternoon "
-				"somebody needed the task.",
-			),
-			"purpose": _field(_STRING, "What goes wrong in the world if nobody acts on this."),
-			"authored_by": _field(_STRING, "System, Operator (default) or AI-proposed."),
-			"ai_source_citation": _field(_STRING, "If AI-proposed: the URL and section it was read from."),
-		},
+		dict(_RULE_DRAFT_ARGUMENTS),
 		required=("rule_id", "title", "target_doctype", "kairotic_gate_description"),
 		mutating=True,
 		title="Create a compliance rule",
@@ -6284,10 +6326,25 @@ TOOLS = {
 		"a log they have no access to.\n\n"
 		"Also reactivates a rule that was previously disabled. Optionally attaches "
 		"the approver's signature as a File, for schemes that ask for signed rule "
-		"sets.",
+		"sets.\n\n"
+		"SINCE v0.37.0 IT DOES TWO MORE THINGS, both for AI-proposed drafts. It "
+		"REFUSES a draft carrying model-written code — `custom_python`, or a "
+		"producer assignee expression — until the approver passes "
+		"`accept_ai_authored_code`, and the refusal prints the program back at "
+		"them, because an acknowledgement of code nobody displayed is not one. And "
+		"where the draft is a proposed REPLACEMENT for a rule that is already "
+		"live, approving it supersedes that rule — disabled, pointing here, never "
+		"edited, and every alert it raised left exactly as it was.",
 		{
 			"name": _field(_STRING, "Compliance Rule docname, or the rule_id."),
 			"rule": _field(_STRING, "Alias for name."),
+			"accept_ai_authored_code": _field(
+				_BOOLEAN,
+				"Acknowledge that this AI-proposed rule contains a program you have READ. Needed "
+				"only where the draft carries `custom_python` or a producer assignee expression, "
+				"and refused-by-default there: the sandbox can say a program is safe to run and "
+				"cannot say it asks the right question.",
+			),
 			"approver": _field(
 				_STRING,
 				"The User accepting the rule. Defaults to whoever the request authenticated "
@@ -6465,29 +6522,68 @@ TOOLS = {
 	),
 	"propose_compliance_rule": _tool(
 		rules.propose_compliance_rule,
-		"MUTATING, DECLARED AND NOT IMPLEMENTED IN v0.22.0 — every call refuses "
-		"with the sentence saying so.\n\n"
-		"It is the surface an AI rule proposer will occupy: read a regulation, "
-		"draft a Compliance Rule with its target doctype, thresholds, scope, "
-		"citation and kairotic gate, mark it `AI-proposed` with the URL and section "
-		"it was read from, and leave it DISABLED for a human to check against the "
-		"regulation and approve.\n\n"
-		"It is declared now so the shape is fixed before anything fills it, and it "
-		"is inert now because the architecture is explicit about where AI is "
-		"allowed to be: at AUTHORING TIME, behind a human approval, never in the "
-		"trigger path. At runtime this app evaluates declarative expressions "
-		"against record state and nothing else, which is what lets every alert be "
-		"traced to a rule, a citation, an approver and a field that crossed a "
-		"threshold. Phase 2 of the Configurable Compliance Framework wires it.\n\n"
-		"Until then, author rules with create_compliance_rule and check them with "
-		"test_compliance_rule before approving.",
+		"MUTATING (default OFF). Declared in v0.22.0, WIRED IN v0.37.0. Draft a "
+		"compliance rule read off a regulation. It lands DISABLED, marked "
+		"`AI-proposed`, with the source it was read from on the record, and it sits "
+		"in the review queue until a person approves it.\n\n"
+		"THIS TOOL CALLS NO MODEL, AND THAT IS THE WHOLE DESIGN. The AI doing the "
+		"proposing is YOU, the client: you read the regulation, you draft the "
+		"record, you pass it here as arguments. What the tool does is the part a "
+		"proposer cannot do for itself — refuse the draft where it is the wrong "
+		"shape, stamp the provenance it does not get to choose, land it off, and put "
+		"what needs a second pair of eyes on the row where the approver will see it. "
+		"So: a validator and a gate, not an author.\n\n"
+		"IT TAKES EVERY ARGUMENT `create_compliance_rule` TAKES, and four more that "
+		"say where the draft came from. Draft declaratively — target_doctype, "
+		"date_field, cadence_days, the thresholds, scope_filters, "
+		"message_template — because a rule that is a set of fields is a rule an "
+		"approver can check against the regulation in a minute.\n\n"
+		"FOUR THINGS IT WILL NOT LET YOU DO. It will not write `enabled` (a draft "
+		"fires nothing; approve_compliance_rule is the only door). It will not write "
+		"`authored_by` as anything but `AI-proposed` — passing 'Operator' is refused "
+		"rather than corrected, because that argument is an attempt to launder "
+		"provenance. It will not fill in the approver, the approval date, the "
+		"approver's employee or their signature. And there is no propose-a-delete "
+		"and no propose-a-disable in this app at all: a proposal for a rule_id that "
+		"already exists is drafted at version+1 and TOUCHES NOTHING — the live rule "
+		"goes on running on its own definition until a person approves the "
+		"replacement, and the result carries the field-by-field diff so the reviewer "
+		"reads what changed rather than the whole draft.\n\n"
+		"`custom_python` IS FLAGGED FOR EXTRA REVIEW. The sandbox refuses what it "
+		"refuses at authoring time — no imports, no filesystem, no network, bounded "
+		"in steps and wall clock — and what it cannot say is whether the program "
+		"asks the right question. A draft carrying one, or carrying a producer "
+		"assignee expression, gets a flag on the record that approve_compliance_rule "
+		"refuses to pass until the approver acknowledges it by name.",
 		{
-			"regulation_text": _field(_STRING, "The regulation's text."),
-			"regulation_url": _field(_STRING, "Where it was read from — the citation on the draft."),
-			"target_doctype": _field(_STRING, "What the drafted rule should scan, where it is known."),
+			**_RULE_DRAFT_ARGUMENTS,
+			"regulation_text": _field(
+				_STRING,
+				"The regulation's own words, as read. A short excerpt is quoted onto the "
+				"record beside the citation — enough for the approver to find the passage "
+				"again without going looking for it.",
+			),
+			"regulation_url": _field(
+				_STRING, "Where it was read from. Goes on the draft as `ai_source_citation`."
+			),
+			"regulation_section": _field(
+				_STRING,
+				"The section or rule number — 'OAR 437-004-1131(3)(b)'. A URL and a section "
+				"together are what makes a proposal checkable; either alone will do, and "
+				"neither is refused.",
+			),
+			"ai_source_citation": _field(
+				_STRING,
+				"The whole citation line, written out, where you would rather say it yourself "
+				"than have it assembled from the url and the section. REQUIRED IF NEITHER OF "
+				"THOSE IS GIVEN: a proposal that does not name the text it read cannot be "
+				"checked against it, which is the whole of what the human approval does.",
+			),
+			"read_on": _field(_STRING, "YYYY-MM-DD, when the regulation was read. Defaults to today."),
 		},
+		required=("rule_id", "title", "target_doctype", "kairotic_gate_description"),
 		mutating=True,
-		title="Propose a compliance rule from a regulation (not implemented)",
+		title="Propose a compliance rule from a regulation",
 		available=_needs_doctype("Compliance Rule"),
 		requires="the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
@@ -10990,41 +11086,7 @@ TOOLS = {
 		"`signature`, `findings_text`, `witness`, `checklist_items`, "
 		'`measurements` — because `{"photo": true}` asks for nothing and looks '
 		"like it asks for something.",
-		{
-			"template_name": _field(
-				_STRING, "What the visit is called, e.g. 'Post-harvest Cabin Close-down'."
-			),
-			"description": _field(
-				_STRING,
-				"What the visit is for and when it is done. Required — a template with "
-				"sections and no statement of purpose is a form somebody has to reverse-engineer.",
-			),
-			"applies_to_asset_type": _field(
-				_STRING,
-				"Housing Unit, Field, Irrigation Zone, Sprayer, Cabin or General. The first "
-				"three name registers on this site and are ENFORCED against a session's location; "
-				"the last three are labels and are not, and are never matched automatically by "
-				"the rule engine.",
-			),
-			"sections": _field(
-				{"type": "array", "items": _OBJECT},
-				'Ordered list of {"section_name", "section_description", '
-				'"produces_record_doctype", "renderer_hint", "required", "evidence_contract", '
-				'"produces_record_data", "field_prompts"}. At least one.',
-			),
-			"skill_required": _field(_STRING, "The crew skill, e.g. 'camp_maintenance'."),
-			"estimated_duration_minutes": _field(_INTEGER, "The WHOLE visit, not the sum of the parts."),
-			"cadence_trigger_expression": _field(
-				_STRING,
-				"Prose for a reader saying when this template should fire. NOT parsed — matching "
-				"is deterministic on what the sections produce against what the pending alerts "
-				"ask for.",
-			),
-			"regulation_citations": _field(
-				_STRING, "The regulations this visit is evidence for, comma-separated."
-			),
-			"regimes": _field(_STRING_ARRAY, "The audits it answers: OR-OSHA, FSMA, WPS, NOP …"),
-		},
+		dict(_TEMPLATE_DRAFT_ARGUMENTS),
 		required=("template_name", "description", "sections"),
 		mutating=True,
 		title="Create an inspection template",
@@ -11208,24 +11270,85 @@ TOOLS = {
 	),
 	"propose_inspection_template_from_regulation": _tool(
 		sessions.propose_inspection_template_from_regulation,
-		"MUTATING, DECLARED AND NOT IMPLEMENTED IN v0.21.0 — every call refuses "
-		"with the sentence saying so.\n\n"
-		"It is the surface an AI template proposer will occupy: read a "
-		"regulation, draft an Inspection Template with its sections, contracts "
-		"and citations, and leave it INACTIVE for a human to read and enable. It "
-		"is declared now so the shape is fixed before anything fills it, and it "
-		"is inert now because at runtime this app is deterministic — AI belongs "
-		"at authoring time behind a human approval, never in the trigger path. "
-		"Phase 2 of the Configurable Compliance Framework wires it.\n\n"
-		"Until then, author templates with create_inspection_template. A template "
-		"is a record and writing one takes one call.",
+		"MUTATING (default OFF). Declared in v0.21.0, WIRED IN v0.37.0. Draft an "
+		"Inspection Template read off a regulation — its sections, their evidence "
+		"contracts, the compliance records they produce. It lands INACTIVE, marked "
+		"`AI-proposed` with the source it was read from, and no handset will fetch "
+		"it until a person approves it with approve_inspection_template.\n\n"
+		"THIS TOOL CALLS NO MODEL. The AI doing the proposing is YOU, the client: "
+		"you read the regulation, you draft the sections, you pass them here. The "
+		"tool validates the shape, stamps the provenance, lands it off and flags "
+		"what needs more than a skim — the same four rails "
+		"propose_compliance_rule runs on, written once in "
+		"`erpnext_mcp/proposals.py` so a form proposal and a rule proposal cannot "
+		"be safe in different amounts.\n\n"
+		"IT TAKES EVERY ARGUMENT `create_inspection_template` TAKES, and four more "
+		"saying where the draft came from. It will not write `active`, it will not "
+		"write `authored_by` as anything but `AI-proposed`, and it will not fill in "
+		"the approver or the approval date. A draft for a template_name that is "
+		"already live is written at version+1 and TOUCHES NOTHING: the worker "
+		"starting a visit this afternoon gets the form somebody approved, and the "
+		"swap happens at approval, by a person.\n\n"
+		"WHAT GETS FLAGGED: a section with an EMPTY evidence contract, because a "
+		"section that asks for nothing can be filed empty and still looks complete "
+		"— which is the failure an inspection template exists to prevent — and a "
+		"draft whose approval will stand a live template down.",
 		{
-			"regulation_text": _field(_STRING, "The regulation's text."),
-			"regulation_url": _field(_STRING, "Where it was read from — the citation on the draft."),
-			"applies_to_asset_type": _field(_STRING, "What the drafted template should apply to."),
+			**_TEMPLATE_DRAFT_ARGUMENTS,
+			"regulation_text": _field(
+				_STRING,
+				"The regulation's own words, as read. A short excerpt is quoted onto the record "
+				"beside the citation, so the approver can find the passage again.",
+			),
+			"regulation_url": _field(
+				_STRING, "Where it was read from. Goes on the draft as `ai_source_citation`."
+			),
+			"regulation_section": _field(
+				_STRING, "The section or rule number — 'OAR 437-004-1120(2)'."
+			),
+			"ai_source_citation": _field(
+				_STRING,
+				"The whole citation line, written out. REQUIRED IF NEITHER the url NOR the "
+				"section is given: a proposal that does not name the text it read cannot be "
+				"checked against it.",
+			),
+			"read_on": _field(_STRING, "YYYY-MM-DD, when the regulation was read. Defaults to today."),
 		},
+		required=("template_name", "description", "sections"),
 		mutating=True,
-		title="Propose a template from a regulation (not implemented)",
+		title="Propose a template from a regulation",
+		available=_needs_doctype("Inspection Template"),
+		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"approve_inspection_template": _tool(
+		sessions.approve_inspection_template,
+		"MUTATING (default OFF). Accept an inactive Inspection Template and turn it "
+		"on, recording WHO accepted it and WHEN on the record itself.\n\n"
+		"THE COUNTERPART TO approve_compliance_rule, and it exists for the same "
+		"reason: v0.37.0 let a model draft a form, and a form a worker is asked to "
+		"fill in is a compliance artefact whoever wrote it. An auditor asking who "
+		"decided the close-down should ask for the propane reading reads the answer "
+		"off the template rather than out of a log.\n\n"
+		"IT IS ALSO WHERE A PROPOSED REPLACEMENT SWAPS IN. Where a live template "
+		"already holds this name at a lower version, that row is DEACTIVATED and "
+		"pointed here — never edited, so every session already worked from it stays "
+		"readable against the sections the worker actually saw, and every "
+		"compliance record they produced stays in the register.\n\n"
+		"Works on any inactive template, not only a proposed one: reinstating a "
+		"template somebody withdrew is the same act and deserves the same name "
+		"against it.",
+		{
+			"name": _field(_STRING, "Inspection Template docname."),
+			"template": _field(_STRING, "Alias for name."),
+			"approver": _field(
+				_STRING,
+				"The User accepting it. Defaults to whoever the request authenticated as, "
+				"which is the honest answer where the caller is a person.",
+			),
+		},
+		required=("name",),
+		mutating=True,
+		title="Approve an inspection template",
 		available=_needs_doctype("Inspection Template"),
 		requires="the Inspection Template DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

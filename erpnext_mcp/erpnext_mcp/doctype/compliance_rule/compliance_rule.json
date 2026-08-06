@@ -73,6 +73,7 @@
   "provenance_section",
   "authored_by",
   "ai_source_citation",
+  "ai_review_flags",
   "provenance_col",
   "human_approved_by",
   "human_approved_on",
@@ -514,6 +515,13 @@
    "fieldname": "ai_source_citation",
    "fieldtype": "Small Text",
    "label": "AI Source Citation"
+  },
+  {
+   "description": "What about an AI-proposed rule needs a second pair of eyes, as a JSON list of flags written by `propose_compliance_rule` and never typed. `custom_python` means the model drafted a PROGRAM rather than a set of fields — the sandbox has already refused what it refuses, and this says a person still has to read what it left. `producer_assigned_to_expression` means the draft routes work to one named person. `supersedes_live_rule` means approving it will stand a running rule down. `approve_compliance_rule` refuses the code-shaped flags until the approver acknowledges them by name, which is the difference between reading a program and clicking past one.",
+   "fieldname": "ai_review_flags",
+   "fieldtype": "Small Text",
+   "label": "AI Review Flags",
+   "read_only": 1
   },
   {
    "fieldname": "provenance_col",

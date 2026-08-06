@@ -67,7 +67,7 @@ import json
 
 import frappe
 
-from . import compat
+from . import compat, proposals
 from . import training as regimes_vocabulary
 
 DOCTYPE = "Compliance Rule"
@@ -295,6 +295,7 @@ RULE_FIELDS = (
 	"purpose",
 	"authored_by",
 	"ai_source_citation",
+	"ai_review_flags",
 	"human_approved_by",
 	"human_approved_on",
 	"approver_employee",
@@ -1150,6 +1151,11 @@ def describe(row: dict, with_definition: bool = False) -> dict:
 		# would be reading a trap.
 		"regulation_citations": str(row.get("regulation_citations") or ""),
 		"authored_by": row.get("authored_by"),
+		# v0.37.0. On the LIST shape rather than only in `definition`, because a
+		# draft carrying a program is a different thing to review from a draft
+		# that moved a threshold, and somebody scanning the review queue should
+		# not have to open each one to find out which.
+		"ai_review_flags": proposals.read_flags(row.get("ai_review_flags")),
 		"human_approved_by": row.get("human_approved_by"),
 		"human_approved_on": str(row.get("human_approved_on") or "") or None,
 		"retention_years": int(row.get("retention_years") or 0) or None,
@@ -1270,6 +1276,7 @@ RULE_DEFAULTS = {
 	"purpose": "",
 	"authored_by": AUTHOR_OPERATOR,
 	"ai_source_citation": "",
+	"ai_review_flags": "",
 	"human_approved_by": None,
 	"human_approved_on": None,
 	"approver_employee": None,
