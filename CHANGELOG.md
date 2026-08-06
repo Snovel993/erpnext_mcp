@@ -3,6 +3,104 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.35.0 — 2026-08-05
+
+**Payroll Integration.** v0.30.0 built an engine that could compute a payroll
+slip and v0.19.3 built a shift register that recorded the hours, and the join
+between them was a stub: `_load_shifts` returned the crew's whole span for every
+worker, zero overtime and zero piece units. Every figure past "how long was the
+shift" had to be keyed in by hand, which is a payroll with two sources of truth
+and one of them wrong. This release is the join.
+
+**`erpnext_mcp/payroll_integration.py` is pure**, on the same contract as
+`payroll_calc.py`, `form_generators.py` and `withholding.py`: no database reads,
+no side effects, every input an argument. `aggregate_shifts_for_period` turns
+shifts into per-employee timesheet totals, `build_payroll_inputs` marries those
+to salary structures and tax configuration, and `run_integrated_payroll` runs
+the whole thing end to end.
+
+**The unit of work is a segment, not a shift.** A shift is crew-shaped and
+payroll is person-shaped, and v0.19.3 already resolved that — every crew row
+carries its own `joined_at` and `left_at`. So the thing that gets aggregated is
+one person's own span on one shift. "The crew worked 06:00 to 15:00" and "Ana
+joined at 07:10 and left at 13:00" stay two different facts, and the one payroll
+reads is Ana's. Paying her the crew's nine hours would be paying her for two she
+was not there for; paying the crew her six would be the wage claim.
+
+**Overtime is a weekly question, answered chronologically.** Oregon HB 4002 and
+Washington SB 5172 both put agricultural overtime at 40 hours in a workweek,
+both fully phased, both at 1.5x. A pay period is not a workweek: forty-five
+hours in week one and thirty-five in week two is five hours of overtime, and
+comparing an eighty-hour biweekly total to eighty finds none of it. Segments are
+bucketed into seven-day weeks anchored at the period start — `workweek_anchor`
+moves it for an employer whose declared week does not line up — and each week is
+walked in time order.
+
+Chronological rather than proportional, because it also decides **which state**
+the overtime was worked in. A picker who spends Monday to Thursday in Oregon and
+Friday in Washington crossed forty on Friday, so the premium is Washington's
+hours and Washington's tax allocation. Splitting it pro rata would be tidier
+arithmetic about a day that did not happen.
+
+**Breaks come in two kinds and they do not behave the same.** `break_hours` is
+paid rest: it stays inside the hours worked and is handed to the engine
+separately so a piece-rate worker's break is paid at the average hourly the
+period earned (WAC 296-131-020, OAR 839-020-0050). `unpaid_break_hours` is the
+meal period: it comes off the span, and counts toward neither hours worked nor
+the overtime threshold. Conflating the two is the standard way a farm ends up
+owing back wages.
+
+**Minimum wage is checked per state, and reported rather than remedied.**
+Washington's $16.66 against Oregon's $14.70 are different floors, and an average
+across both would let a compliant Washington week paper over an Oregon week that
+was not. Each state's shortfall is priced — what it would cost to bring those
+hours up to that floor — and stops there. A payroll engine that quietly inflated
+gross pay would hide the fact that a piece rate is set too low to be lawful.
+
+**Piece units come from whichever source the site has, and the result says
+which.** The BucketLog bridge's Bucket Log Entry, a count column on Farm Task
+Assignment, a count column a site has added to the crew row — all three are
+looked for, all three are summed rather than preferred, and every source that is
+*absent* is named. A piece-rate run that found no bucket log has produced a set
+of zeros, and whether that means nobody picked or means the bridge is not
+installed is the whole difference between a payroll and a mistake. A bucket log
+row with no count column is **one bucket**: the row is the record of the bucket.
+Piece work on a day with no shift behind it is still paid, carries no hours, and
+is counted in `piece_rows_without_a_shift`.
+
+**Three new tools.** `get_employee_timesheet_summary` (READ, default ON) is the
+hours without the money — the answer to "why is my cheque this?", and it needs
+none of the payroll switches because the hours are not the payroll.
+`preview_payroll_for_period` (READ, default ON) computes a whole company's
+period and writes nothing. `run_payroll_for_period` (MUTATING, default OFF) does
+the identical calculation through the identical code path and stores it as a
+Farm Payroll Entry in Calculated status. Submitting stays `submit_payroll`,
+behind its own switch: arithmetic anybody can redo and a statement about what
+the farm is paying are two different acts.
+
+**A run with problems in it is not refused.** A worker below minimum wage, a
+shift nobody ended, a picker with no salary structure — all reported on the
+result, none of them a reason to hold up everybody else's pay. The same posture
+`end_shift` takes towards a shift with an unmet obligation: state it, keep it.
+The one refusal is a run where *nobody* can be paid, and it names them.
+
+**An employee with hours and no salary structure is never zeroed.** They come
+back in `employees_missing_structures`, by name, with their hours. Zero is a
+number, and a number nobody questions.
+
+**The v0.30.0 tools were rewired, not left behind.** `preview_payroll` and
+`calculate_payroll` read through the same aggregation, so the single-employee
+preview now reports the same hours, the same overtime and the same piece units
+as the company-wide run. `_load_shifts` also carried a real bug — the same
+filter key twice in a Frappe dict, where only the second survives, so the
+start-date bound was silently discarded — which is fixed by passing a list of
+conditions.
+
+**Year-to-date carries across periods.** The Social Security wage base is an
+annual per-person cap, so a period run in isolation would restart it and
+over-withhold on anybody who has crossed it. Prior `Calculated` and `Submitted`
+entries in the same calendar year are read first.
+
 ## 0.34.0 — 2026-08-05
 
 **Tax Form Generators.** Three releases put the arithmetic in place — federal

@@ -410,7 +410,8 @@ def _load_slips(
 	for entry in entries:
 		# The two-sided date range is applied here rather than in the filter
 		# because the same key twice in a Frappe filter dict keeps only the
-		# second — the bug `payroll._load_shifts` still carries.
+		# second. `payroll._load_shifts` carried exactly that bug until v0.35.0,
+		# where the fix was to pass a LIST of conditions instead of a dict.
 		entry_end = str(entry.get("pay_period_end") or "")
 		if not entry_end or entry_end > period_end:
 			continue

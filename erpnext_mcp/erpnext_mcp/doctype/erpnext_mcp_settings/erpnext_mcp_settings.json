@@ -297,11 +297,14 @@
   "allow_preview_payroll",
   "allow_get_payroll_entry",
   "allow_list_payroll_entries",
+  "allow_get_employee_timesheet_summary",
+  "allow_preview_payroll_for_period",
   "payroll_col",
   "allow_create_salary_structure",
   "allow_deactivate_salary_structure",
   "allow_calculate_payroll",
   "allow_submit_payroll",
+  "allow_run_payroll_for_period",
   "tax_form_section",
   "allow_list_tax_forms",
   "allow_get_tax_form",
@@ -2362,6 +2365,20 @@
    "label": "List Payroll Entries"
   },
   {
+   "default": "1",
+   "description": "READ. One employee's hours in a date range as payroll reads them \u2014 their own span on each shift rather than the crew's, overtime resolved week by week at the 40-hour agricultural threshold, hours split by work state, and piece units from whichever source this site records them in. No money, and nothing written.",
+   "fieldname": "allow_get_employee_timesheet_summary",
+   "fieldtype": "Check",
+   "label": "Employee Timesheet Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. Dry-run a whole company's payroll for a pay period off Farm Shift hours. Identical arithmetic to Run Payroll For Period with nothing written, including the three lists to read before the totals: workers with no salary structure, states below their minimum wage, and shifts with no end time.",
+   "fieldname": "allow_preview_payroll_for_period",
+   "fieldtype": "Check",
+   "label": "Preview Payroll For Period"
+  },
+  {
    "fieldname": "payroll_col",
    "fieldtype": "Column Break"
   },
@@ -2392,6 +2409,13 @@
    "fieldname": "allow_submit_payroll",
    "fieldtype": "Check",
    "label": "Submit Payroll"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Compute a whole company's payroll from Farm Shift hours and store it as a Farm Payroll Entry in Calculated status. Overtime is resolved per workweek at 40 hours and wages are split by work state. Reports minimum wage shortfalls, unclosed shifts and workers with no salary structure rather than refusing over them; submitting is a separate switch.",
+   "fieldname": "allow_run_payroll_for_period",
+   "fieldtype": "Check",
+   "label": "Run Payroll For Period"
   },
   {
    "fieldname": "tax_form_section",

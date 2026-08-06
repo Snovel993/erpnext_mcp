@@ -8944,6 +8944,98 @@ TOOLS = {
 		available=_needs_doctype("Farm Payroll Entry"),
 		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
 	),
+	# ── v0.35.0: Payroll off the shift register ─────────────────────────────
+	"get_employee_timesheet_summary": _tool(
+		payroll.get_employee_timesheet_summary,
+		"One employee's hours in a date range, aggregated the way payroll reads "
+		"them: their OWN span on each shift (not the crew's), overtime resolved "
+		"week by week at the 40-hour agricultural threshold, hours split by work "
+		"state, paid rest breaks separated from unpaid meal breaks, and piece "
+		"units from whichever source this site records them in. No money, no "
+		"records written — the answer to 'why are my hours what they are'. "
+		"Read-only.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"start_date": _field(_STRING, "Start date as YYYY-MM-DD (pay_period_start is an alias)."),
+			"end_date": _field(_STRING, "End date as YYYY-MM-DD (pay_period_end is an alias)."),
+			"pay_period_start": _field(_STRING, "Alias for start_date."),
+			"pay_period_end": _field(_STRING, "Alias for end_date."),
+			"company": _COMPANY,
+			"overtime_threshold": _field(
+				_NUMBER, "Hours in a workweek before overtime. Default 40 — the OR and WA "
+				"agricultural threshold, both fully phased.",
+			),
+			"workweek_anchor": _field(
+				_STRING, "First day of the employer's declared workweek as YYYY-MM-DD. "
+				"Defaults to the period start, which is right whenever the period is a "
+				"whole number of workweeks.",
+			),
+		},
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift doctype (run bench migrate after installing v0.19.3)",
+		title="Employee timesheet summary",
+	),
+	"preview_payroll_for_period": _tool(
+		payroll.preview_payroll_for_period,
+		"Dry-run a whole company's payroll for a pay period, computed from Farm "
+		"Shift hours rather than hand entry. Same arithmetic and same code path "
+		"as run_payroll_for_period, with NOTHING written. Returns one slip per "
+		"employee plus three lists to read before the totals: workers with no "
+		"salary structure, states that fell below their minimum wage, and shifts "
+		"with no end time. Read-only.",
+		{
+			"company": _COMPANY,
+			"pay_period_start": _field(_STRING, "Start date as YYYY-MM-DD."),
+			"pay_period_end": _field(_STRING, "End date as YYYY-MM-DD."),
+			"pay_frequency": _field(_STRING, "Weekly, Biweekly, Semimonthly, or Monthly. Default Biweekly."),
+			"employee": _field(_STRING, "Limit the run to one employee."),
+			"include_unworked": _field(
+				_BOOLEAN, "Keep employees with a salary structure and no shift on the run — "
+				"zero for hourly and piece rate, their salary for Salary. Default true.",
+			),
+			"overtime_threshold": _field(_NUMBER, "Hours in a workweek before overtime. Default 40."),
+			"workweek_anchor": _field(_STRING, "First day of the declared workweek as YYYY-MM-DD."),
+			"detail": _field(
+				_BOOLEAN, "Include the per-shift timesheet, the state tax breakdown and the "
+				"federal working behind each slip. Large; off by default.",
+			),
+		},
+		required=("pay_period_start", "pay_period_end"),
+		available=_needs_doctype("Farm Salary Structure"),
+		requires="the Farm Salary Structure doctype (run bench migrate after installing v0.30.0)",
+		title="Preview payroll for period",
+	),
+	"run_payroll_for_period": _tool(
+		payroll.run_payroll_for_period,
+		"MUTATING (default OFF). Compute a whole company's payroll for a pay "
+		"period from Farm Shift hours and store it as a Farm Payroll Entry in "
+		"Calculated status, one slip per employee. Overtime is resolved per "
+		"workweek at 40 hours, hours and wages are split by work state for "
+		"cross-state workers, and piece units come off the shift register. It "
+		"does NOT refuse a run with problems in it — a worker below minimum "
+		"wage, an unclosed shift, a picker with no salary structure are all "
+		"reported on the result and none of them holds up everybody else's pay. "
+		"Submitting is submit_payroll, behind its own switch.",
+		{
+			"company": _COMPANY,
+			"pay_period_start": _field(_STRING, "Start date as YYYY-MM-DD."),
+			"pay_period_end": _field(_STRING, "End date as YYYY-MM-DD."),
+			"pay_frequency": _field(_STRING, "Weekly, Biweekly, Semimonthly, or Monthly. Default Biweekly."),
+			"employee": _field(_STRING, "Limit the run to one employee."),
+			"include_unworked": _field(
+				_BOOLEAN, "Keep employees with a salary structure and no shift on the run. Default true.",
+			),
+			"overtime_threshold": _field(_NUMBER, "Hours in a workweek before overtime. Default 40."),
+			"workweek_anchor": _field(_STRING, "First day of the declared workweek as YYYY-MM-DD."),
+		},
+		required=("pay_period_start", "pay_period_end"),
+		mutating=True,
+		title="Run payroll for period",
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+	),
 	# ── v0.31.0: Expense Receipt Capture ────────────────────────────────────
 	"list_expense_receipts": _tool(
 		expenses.list_expense_receipts,

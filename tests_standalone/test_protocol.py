@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_three_hundred_twenty_six_tools_one_hundred_fifty_one_read_one_hundred_seventy_five_write(
+	def test_catalogue_is_three_hundred_twenty_nine_tools_one_hundred_fifty_three_read_one_hundred_seventy_six_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -589,6 +589,24 @@ class Catalogue(SeededTestCase):
 		switch an operator can leave off is the only honest way to express
 		that.
 
+		v0.35.0 ADDED THREE — two reads and one write — for payroll off the shift
+		register: get_employee_timesheet_summary and preview_payroll_for_period
+		read; run_payroll_for_period writes. The timesheet summary is its own
+		tool rather than a field on the preview because the hours are not the
+		payroll: "why is my cheque this?" is answered by somebody's own spans and
+		their own overtime, and answering it should not require the switches that
+		let a caller see everybody's pay.
+
+		v0.36.0 ADDED TWO, BOTH WRITES — render_tax_form_pdf and
+		bulk_render_tax_form_pdfs — which draw a Tax Form's already-stored
+		values on the face of the form and attach the PDF. They are writes
+		because they attach a file, not because they compute anything: the page
+		is a rendering of `form_data_json` and recomputes nothing, so it cannot
+		disagree with the record it claims to render. Both go unavailable by
+		name on a bench without reportlab, and the numbers stay readable through
+		`get_tax_form` there — the arithmetic is the deliverable and the page is
+		a convenience.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -596,9 +614,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 326)
-		self.assertEqual(len(registry.READ_TOOLS), 151)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 175)
+		self.assertEqual(len(registry.TOOLS), 329)
+		self.assertEqual(len(registry.READ_TOOLS), 153)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 176)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

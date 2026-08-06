@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 326 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 329 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 151 read tools are **on** by default and can be switched off individually. A
+All 153 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7875,6 +7875,143 @@ Identification Number, Washington's ESD account number. It is printed in W-2 box
 15 and at the head of every state return. Without it those print blank, and the
 alternative — an argument the model must be told each time — is worse than a
 field an operator sets once per state.
+
+---
+
+## v0.35.0 — payroll off the shift register
+
+v0.30.0 built a payroll engine and v0.19.3 built a shift register. The join
+between them was a stub: it returned the **crew's** whole span for every worker,
+zero overtime and zero piece units, so every figure past "how long was the
+shift" had to be keyed in by hand. This release is the join.
+
+`erpnext_mcp/payroll_integration.py` is pure — no database reads, no side
+effects — on the same contract as `payroll_calc.py` and `form_generators.py`.
+
+### The unit is a segment, not a shift
+
+A shift is crew-shaped and payroll is person-shaped. Every crew row already
+carries its own `joined_at` and `left_at`, so what gets aggregated is one
+person's own stretch of one shift. The crew worked 06:00 to 15:00 **and** Ana
+joined at 07:10 and left at 13:00; the one payroll reads is Ana's.
+
+### Overtime is weekly, and walked in time order
+
+Oregon HB 4002 and Washington SB 5172 both put agricultural overtime at 40 hours
+in a **workweek**, fully phased, at 1.5x. A biweekly period is two workweeks:
+
+| | hours | overtime |
+| --- | --- | --- |
+| Week 1 | 45 | **5** |
+| Week 2 | 35 | 0 |
+| Period | 80 | **5**, not 0 |
+
+Weeks are anchored at `pay_period_start` unless `workweek_anchor` says
+otherwise. Walking each week chronologically rather than allocating pro rata is
+what decides **which state** the overtime happened in: four ten-hour Oregon days
+plus a Washington Friday is eight hours of Washington overtime.
+
+### Two kinds of break
+
+| | inside `total_hours`? | counts toward 40? |
+| --- | --- | --- |
+| `break_hours` — paid rest | yes | yes |
+| `unpaid_break_hours` — meal | no, subtracted | no |
+
+Paid rest is handed to the engine separately so the piece-rate path pays it at
+the average hourly the period earned (WAC 296-131-020). Five nine-hour shifts
+with a half-hour lunch each is 42.5 hours, so 2.5 of overtime rather than five.
+
+### Minimum wage is per state, and reported rather than remedied
+
+Washington's $16.66 and Oregon's $14.70 are different floors, and a single check
+against the period total would let a compliant Washington week paper over an
+Oregon week that was not. `total_shortfall` prices what it would cost to bring
+each state's hours up to its floor — and nothing adds it to gross. A payroll
+engine that quietly topped pay up would hide the fact that a piece rate is set
+too low to be lawful.
+
+### Piece units, and saying where they did not come from
+
+Bucket Log Entry, a count column on Farm Task Assignment, and a count column a
+site has added to the crew row are all looked for and all **summed** rather than
+preferred. A bucket log row with no count column is **one bucket** — the row is
+the record of the bucket. Piece work matched to no shift is still paid, carries
+no hours, and is counted in `piece_rows_without_a_shift`.
+
+Every absent source is named in `sources.notes`, because a piece-rate run that
+found nothing has produced zeros, and whether that means nobody picked or means
+the bridge is not installed is the difference between a payroll and a mistake.
+
+### `get_employee_timesheet_summary`
+
+**READ (default ON).** One employee's hours in a date range: their own spans, the
+weekly overtime breakdown, the state split, breaks by kind, piece units, and
+every shift behind the total. **No money** — which is why it needs none of the
+payroll switches. "Why is my cheque this?" is answered by the timesheet.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `employee` | yes | Docname or employee name (`name`, `employee_name` are aliases) |
+| `start_date` | yes | `YYYY-MM-DD` (`pay_period_start` is an alias) |
+| `end_date` | yes | `YYYY-MM-DD` (`pay_period_end` is an alias) |
+| `company` | | Scopes the shift read |
+| `overtime_threshold` | | Hours in a workweek before the premium. Default 40 |
+| `workweek_anchor` | | First day of the declared workweek |
+
+### `preview_payroll_for_period`
+
+**READ (default ON).** A whole company's period computed and **not written** —
+the same arithmetic through the same code path as the run. Read the three lists
+before the totals: `employees_missing_structures`, `totals.below_minimum_wage`
+and `totals.with_open_shifts`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `company` | | Company name or abbreviation |
+| `pay_period_start` | yes | `YYYY-MM-DD` |
+| `pay_period_end` | yes | `YYYY-MM-DD` |
+| `pay_frequency` | | `Weekly`, `Biweekly`, `Semimonthly`, `Monthly`. Default `Biweekly` |
+| `employee` | | Limit the run to one person |
+| `include_unworked` | | Keep structures with no shift on the run. Default true |
+| `overtime_threshold` | | Default 40 |
+| `workweek_anchor` | | First day of the declared workweek |
+| `detail` | | Add the per-shift timesheet and the tax working. Large; off by default |
+
+### `run_payroll_for_period`
+
+**MUTATING (default OFF).** The identical calculation, stored as a Farm Payroll
+Entry in **Calculated** status. Submitting stays `submit_payroll`, behind its own
+switch: arithmetic anybody can redo and a statement about what the farm is paying
+are two different acts.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `company` | | Company name or abbreviation |
+| `pay_period_start` | yes | `YYYY-MM-DD` |
+| `pay_period_end` | yes | `YYYY-MM-DD` |
+| `pay_frequency` | | Default `Biweekly` |
+| `employee` | | Limit the run to one person |
+| `include_unworked` | | Default true |
+| `overtime_threshold` | | Default 40 |
+| `workweek_anchor` | | First day of the declared workweek |
+
+**A run with problems in it is not refused.** A worker below minimum wage, a
+shift nobody ended, a picker with no salary structure — all reported, none of
+them a reason to hold up everybody else's pay. The one refusal is a run where
+*nobody* can be paid, and it names them.
+
+### What the v0.30.0 tools got out of it
+
+`preview_payroll` and `calculate_payroll` read through the same aggregation, so
+the single-employee preview now reports the same hours, the same overtime and
+the same piece units as the company-wide run. `_load_shifts` also carried a real
+bug — the same filter key twice in a Frappe dict, where only the second
+survives, so the start-date bound was silently discarded — and it is fixed.
+
+Year-to-date carries across periods too: the Social Security wage base is an
+annual per-person cap, and a period run that could not see the ones before it
+would restart it.
 
 ---
 
