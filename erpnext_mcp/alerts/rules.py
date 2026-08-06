@@ -2657,6 +2657,212 @@ shape(
 	retention_years=7,
 )
 
+# ── 22. budget_variance_breach ───────────────────────────────────────────────
+#
+# v0.42.0, AND IT IS THE SAME MOVE AS RULE 21 POINTED AT A DIFFERENT CACHE. A
+# Budget's `refresh_budget` tool writes actual and variance figures onto the
+# budget's own line items and KPI targets — see `budget_engine.py` for the
+# arithmetic — and this rule reads what was written, exactly as
+# `financial_kpi_threshold_breach` reads the KPI history cache rather than
+# recomputing. ONE RULE ENGINE DECIDES WHAT REACHES THE COMPLIANCE CALENDAR,
+# so a budget that is off-plan gets the same dismissal, snooze and auto-clear
+# machinery a lapsing certificate does, instead of a second alerting path that
+# none of that applies to.
+#
+# ONE ALERT PER BUDGET, not per breaching line — unlike every rule above this
+# one, which raise one alert per row they scan. A Budget commonly breaches on
+# several accounts and KPI targets at once, and `alert_key` is built from the
+# RULE and the SOURCE RECORD alone; multiple observations naming the same
+# record would collide on one key and the sweep would keep only the last one
+# written. So this rule aggregates every breach on one budget into ONE
+# Observation, worst severity first, with every breaching line named in the
+# message — the same choice `preview_payroll_gl` makes about reporting every
+# blocker at once rather than the first.
+BUDGET_SOURCE_DOCTYPE = "Budget"
+BUDGET_REQUIRES = (BUDGET_SOURCE_DOCTYPE, "Budget Line Item", "Budget KPI Target")
+
+
+def _budget_result_from_rows(line_items: list, kpi_targets: list) -> dict:
+	"""One budget's STORED computed fields, in the shape `budget_engine` reads.
+
+	Never computes — every figure here was written by `refresh_budget` or by
+	the overnight sweep, and reading it again is what guarantees this rule and
+	`get_budget_variance_report` can never disagree about a breach.
+	"""
+	return {
+		"line_items": [
+			{
+				"account": row.get("account"),
+				"budgeted_amount": row.get("budgeted_amount"),
+				"actual_amount": row.get("actual_amount"),
+				"variance_amount": row.get("variance_amount"),
+				"variance_pct": row.get("variance_pct"),
+				"threshold_pct": row.get("threshold_pct"),
+			}
+			for row in line_items or []
+		],
+		"kpi_targets": [
+			{
+				"kpi_definition": row.get("kpi_definition"),
+				"target_value": row.get("target_value"),
+				"actual_value": row.get("actual_value"),
+				"variance_pct": row.get("variance_pct"),
+				"threshold_pct": row.get("threshold_pct"),
+			}
+			for row in kpi_targets or []
+		],
+	}
+
+
+def _scan_budget_variances(context: dict) -> list:
+	"""Every ACTIVE budget whose stored figures show at least one breach.
+
+	A Draft budget is still being built and a Closed one is finished; neither
+	is refreshed by the overnight sweep, so scanning them would either raise
+	on numbers nobody has filled in yet or keep re-raising on a budget that is
+	done and is not going to be corrected. `refresh_all_active_budgets` and
+	this rule agree on exactly one status: Active.
+	"""
+	try:
+		from .. import budget_engine
+	except Exception:  # pragma: no cover - a bench mid-upgrade
+		return []
+	if not all(compat.doctype_exists(doctype) for doctype in BUDGET_REQUIRES):
+		return []
+
+	scoped_company = str(context.get("company") or "")
+	filters = {"status": "Active"}
+	if scoped_company:
+		filters["company"] = scoped_company
+
+	try:
+		budgets = frappe.db.get_all(
+			BUDGET_SOURCE_DOCTYPE,
+			filters=filters,
+			fields=["name", "budget_name", "company", "fiscal_year"],
+			limit=500,
+		)
+	except Exception:  # pragma: no cover
+		return []
+
+	out = []
+	for row in budgets:
+		if not _scoped(context, row):
+			continue
+		line_items = _rows(
+			"Budget Line Item",
+			{"parent": row["name"], "parenttype": BUDGET_SOURCE_DOCTYPE},
+			("account", "budgeted_amount", "actual_amount", "variance_amount", "variance_pct", "threshold_pct"),
+			limit=500,
+		)
+		kpi_targets = _rows(
+			"Budget KPI Target",
+			{"parent": row["name"], "parenttype": BUDGET_SOURCE_DOCTYPE},
+			("kpi_definition", "target_value", "actual_value", "variance_pct", "threshold_pct"),
+			limit=500,
+		)
+		result = _budget_result_from_rows(line_items, kpi_targets)
+		breaches = budget_engine.check_budget_variances(result)
+		if not breaches:
+			continue
+
+		critical = [b for b in breaches if b["severity"] == SEVERITY_CRITICAL]
+		severity = SEVERITY_CRITICAL if critical else SEVERITY_WARNING
+		sentences = "; ".join(budget_engine.breach_message(b) for b in breaches)
+		out.append(
+			Observation(
+				source_doctype=BUDGET_SOURCE_DOCTYPE,
+				source_docname=str(row["name"]),
+				message=(
+					f"{row.get('budget_name')} ({row.get('company')}, FY {row.get('fiscal_year')}) "
+					f"has {len(breaches)} variance breach(es) ({len(critical)} critical): "
+					f"{sentences}. THESE ARE CACHED FIGURES from this budget's last refresh_budget "
+					"call — get_budget_variance_report shows the same breakdown with every "
+					"threshold and ratio; refresh_budget recomputes it live from the ledger and "
+					"the KPI framework if the figures themselves are what is in question. The "
+					"alert clears by itself when the next refresh comes back inside every "
+					"threshold; there is nothing to close by hand."
+				),
+				severity=severity,
+				# NO DUE DATE, for the same reason rule 21 has none: the remedy for an
+				# off-plan budget is a decision about spending or a season of trading,
+				# not a form with a deadline. A fabricated due date would sort this
+				# above genuine deadlines on the calendar.
+				due_date="",
+				company=row.get("company") or "",
+				category="Finance",
+				regimes=["Internal"],
+			)
+		)
+	return out
+
+
+register(
+	Rule(
+		key="budget_variance_breach",
+		title="A budget line or KPI target is past its variance threshold",
+		category="Finance",
+		requires=BUDGET_REQUIRES,
+		framework=(
+			"No statute. This operation's own budget and the tolerance it set for drift from it — "
+			"recorded as threshold_pct on each Budget Line Item and Budget KPI Target rather than "
+			"remembered."
+		),
+		purpose=(
+			"A budget that has quietly drifted 40% over on fertilizer or fallen well short of a "
+			"lender's covenant is exactly as much a Monday-morning problem as an expiring "
+			"certificate, and until this rule it lived only in whatever spreadsheet built the "
+			"budget. This rule puts it on the same calendar, with the same dismissal, snooze and "
+			"auto-clear."
+		),
+		kairotic_gate=(
+			"THE GATE IS THE VARIANCE, NOT A DATE — nothing here counts days. A budget inside "
+			"every line's threshold raises nothing however often the sweep runs; the same budget "
+			"raises Warning the refresh its variance first crosses a threshold and Critical past "
+			"twice that threshold, and it AUTO-DISMISSES the refresh a line comes back inside. It "
+			"reads the STORED figures refresh_budget wrote and never computes: the sweep runs "
+			"hourly beside somebody's real work, refresh_budget (or the overnight sweep, for every "
+			"Active budget) fills the fields, and reading them is what guarantees this alert and "
+			"get_budget_variance_report can never disagree. A budget that has never been refreshed "
+			"raises nothing AND DISMISSES NOTHING — an unrefreshed budget is not evidence that "
+			"nothing is wrong, the same reading an absent record gets everywhere else here. Only "
+			"ACTIVE budgets are scanned; a Draft budget is still being built and a Closed one is "
+			"finished."
+		),
+		regimes=("Internal",),
+		scan=_scan_budget_variances,
+	)
+)
+
+# BUILT-IN, FOR THE SAME REASON RULE 21 IS: THE THRESHOLDS ARE NOT ON THIS ROW.
+# Every other rule here is tuned by numbers on its own Compliance Rule record.
+# This rule's thresholds live on each Budget Line Item and Budget KPI Target,
+# because they are per-line — a fertilizer line watched to 5% and a discretionary
+# line watched to 25% are not values one column on a Compliance Rule could hold.
+# The record still owns everything an operator would change ABOUT THE RULE — the
+# two severities, the scope filters, the switch — and the per-line numbers that
+# decide a breach are edited where they belong, with update_budget.
+#
+# THE SECOND REASON IS THAT THE COMPARISON IS AGAINST DERIVED, MULTI-ROW STATE. A
+# declarative scan filters and compares fields on a target row; this reads every
+# child row on a budget and runs `budget_engine.check_budget_variances` over all
+# of them at once. That is arithmetic across a table, not a filter on one row.
+shape(
+	"budget_variance_breach",
+	target_doctype=BUDGET_SOURCE_DOCTYPE,
+	builtin_scanner="budget_variance_breach",
+	requires_doctypes=", ".join(BUDGET_REQUIRES),
+	date_field="",
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_critical=SEVERITY_CRITICAL,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_WARNING,
+	due_date_mode="None",
+	category="Finance",
+	retention_years=7,
+)
+
 
 # ── the scanner registry ────────────────────────────────────────────────────
 #

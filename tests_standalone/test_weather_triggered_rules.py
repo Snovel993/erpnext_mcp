@@ -935,7 +935,7 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		self.assertEqual(live[0]["default_severity"], "Critical")
 		self.assertEqual(int(live[0]["version"]), 2)
 
-	def test_the_split_is_eighteen_declarative_three_builtin_and_no_custom_python(self):
+	def test_the_split_is_eighteen_declarative_four_builtin_and_no_custom_python(self):
 		self.seed_rules()
 		shapes: dict = {}
 		for row in compliance_rules.rule_rows():
@@ -944,6 +944,9 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		# Three since v0.39.0: `financial_kpi_threshold_breach` joined the two
 		# permanent built-ins, and it is permanent for a reason neither of those
 		# has — its thresholds are not on its own row, they are on each
-		# Financial KPI Definition, per KPI and per unit.
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 3)
+		# Financial KPI Definition, per KPI and per unit. Four since v0.42.0:
+		# `budget_variance_breach` is permanent for the same class of reason —
+		# its thresholds are on each Budget Line Item and Budget KPI Target,
+		# and the comparison is against every child row on a budget at once.
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 4)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])

@@ -286,6 +286,21 @@ scheduler_events = {
 		"0 3 * * *": [
 			"erpnext_mcp.services.kpi_engine.refresh_all_kpi_caches",
 		],
+		#: v0.42.0. Budget actual/variance refresh, at 3:15 — fifteen minutes after
+		#: the KPI cache job rather than beside it, and DELIBERATELY AFTER IT: a
+		#: budget's KPI targets read `compute_kpi(..., use_cache=True)`, so a
+		#: budget refreshed before the night's KPI figures land would save
+		#: yesterday's cached value under tonight's date. ONE ENTRY THAT ITERATES,
+		#: same shape as the two jobs on either side of it: it walks every ACTIVE
+		#: budget, so adding a budget adds no line to this file. It writes only
+		#: this app's own `Budget` — no Account, no GL Entry, no Financial KPI
+		#: History — and it never raises; see `tools/budget.refresh_all_active_budgets`.
+		#: The hourly alert sweep immediately below is what turns a budget's
+		#: freshly-written breach into a Compliance Alert, through
+		#: `alerts.rules.budget_variance_breach`.
+		"15 3 * * *": [
+			"erpnext_mcp.tools.budget.refresh_all_active_budgets",
+		],
 		"0 4 * * *": [
 			"erpnext_mcp.services.regulation_feed.sweep_due_feeds",
 		],

@@ -1053,6 +1053,11 @@ APP_DOCTYPES = {
 	# ticks off inside it.
 	"Farm Task Template": "farm_task_template",
 	"Farm Task Template Checklist Item": "farm_task_template_checklist_item",
+	# v0.42.0. Budget + Variance Alerts: what was planned per account and per
+	# KPI, and what refresh_budget found when it checked.
+	"Budget": "budget",
+	"Budget Line Item": "budget_line_item",
+	"Budget KPI Target": "budget_kpi_target",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

@@ -194,7 +194,7 @@ class Catalogue(SeededTestCase):
 			["company", "posting_date", "accounts", "user_remark"],
 		)
 
-	def test_catalogue_is_three_hundred_fifty_five_tools_one_hundred_sixty_four_read_one_hundred_ninety_one_write(
+	def test_catalogue_is_three_hundred_sixty_two_tools_one_hundred_sixty_seven_read_one_hundred_ninety_five_write(
 		self,
 	):
 		"""v0.13.0 added two writes: convey_parcel and update_journal_entry_party,
@@ -675,6 +675,20 @@ class Catalogue(SeededTestCase):
 		`submit_payroll_journal_entries` here and there is not going to be one,
 		for the same reason there is no `post_journal_entry`.
 
+		v0.41.0 ADDED FIVE — one read and four writes — for Farm Task Templates:
+		the shape of one recurring job, as a record, with a five-tool surface
+		matching the thirteen-recipe `ALERT_TASK_MAP` it now sits beside rather
+		than replaces.
+
+		v0.42.0 ADDED SEVEN — three reads and four writes — for Budget +
+		Variance Alerts. THE ARITHMETIC IS PURE, same discipline as `payroll_gl.py`:
+		`budget_engine.py` reads no database, and `tools/budget.py` is the only
+		place that reads GL Entry or the KPI cache. `refresh_budget` writes no
+		Compliance Alert directly — it saves the computed fields, and the
+		`budget_variance_breach` rule reads them the way `financial_kpi_threshold_breach`
+		reads the KPI cache, so ONE alerting engine still decides what reaches the
+		calendar.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -682,9 +696,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 355)
-		self.assertEqual(len(registry.READ_TOOLS), 164)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 191)
+		self.assertEqual(len(registry.TOOLS), 362)
+		self.assertEqual(len(registry.READ_TOOLS), 167)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 195)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

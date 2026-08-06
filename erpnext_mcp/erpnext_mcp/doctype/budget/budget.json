@@ -1,0 +1,156 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:budget_name",
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One operating budget for one company in one fiscal year: what was budgeted per account and per KPI, what actually happened, and how far apart the two are. Nothing here is typed twice — refresh_budget fills the actual and variance columns from the general ledger and the KPI framework, and check_budget_variances is the same arithmetic a Compliance Alert is raised from.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "budget_name",
+  "status",
+  "identity_col",
+  "company",
+  "fiscal_year",
+  "last_refreshed",
+  "line_items_section",
+  "line_items",
+  "kpi_targets_section",
+  "kpi_targets",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this budget is called — 'FY2026 Operating Budget' or 'FY2026 Highland Block Budget'. Unique across the site, since it is also the docname: two budgets sharing a name would be two answers to 'which budget' with nothing telling them apart.",
+   "fieldname": "budget_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Budget Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "Draft",
+   "description": "Draft is being built and is never refreshed or alerted on. Active is refreshed by the overnight sweep and its variance breaches reach the compliance calendar. Closed is a finished budget kept for the record — still readable, no longer refreshed.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nActive\nClosed",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The company this budget belongs to. A general ledger belongs to one company, so a budget reading actuals off it does too.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "Which fiscal year this budget covers. refresh_budget reads GL movement from the fiscal year's start date through today (or its end date, whichever is sooner) as the year-to-date actual, compared against each line's full-year budgeted amount.",
+   "fieldname": "fiscal_year",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Fiscal Year",
+   "options": "Fiscal Year",
+   "reqd": 1
+  },
+  {
+   "description": "The last time refresh_budget filled in the actual and variance columns. Empty means this budget has never been refreshed and every actual/variance field below is a placeholder rather than a figure.",
+   "fieldname": "last_refreshed",
+   "fieldtype": "Datetime",
+   "label": "Last Refreshed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "line_items_section",
+   "fieldtype": "Section Break",
+   "label": "Account Line Items"
+  },
+  {
+   "description": "One row per general ledger account this budget tracks. refresh_budget fills in actual_amount, variance_amount and variance_pct; get_budget_variance_report reads them back without touching the ledger.",
+   "fieldname": "line_items",
+   "fieldtype": "Table",
+   "label": "Line Items",
+   "options": "Budget Line Item"
+  },
+  {
+   "fieldname": "kpi_targets_section",
+   "fieldtype": "Section Break",
+   "label": "KPI Targets"
+  },
+  {
+   "description": "One row per Financial KPI Definition this budget holds a target for — a debt service coverage covenant, a cost per bin ceiling. refresh_budget fills in actual_value and variance_pct from the KPI's own cached figure.",
+   "fieldname": "kpi_targets",
+   "fieldtype": "Table",
+   "label": "KPI Targets",
+   "options": "Budget KPI Target"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Who built this budget and against what — last year's actuals, a lender's covenant, a planting plan. The question asked of a budget a year later is usually where the numbers came from.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Budget",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Farm Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "company,fiscal_year,status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "budget_name",
+ "track_changes": 1
+}

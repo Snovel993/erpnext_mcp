@@ -1,0 +1,84 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One ledger account this budget tracks: what was budgeted, what actually happened, and how far apart the two are. The last three columns are computed by refresh_budget — nothing here is typed by hand.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "account",
+  "budgeted_amount",
+  "actual_amount",
+  "variance_amount",
+  "variance_pct",
+  "threshold_pct"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Account",
+   "options": "Account",
+   "reqd": 1,
+   "description": "The general ledger account this line tracks. One row per account — get_budget_variance_report reports a duplicate rather than silently summing two rows into one answer."
+  },
+  {
+   "columns": 2,
+   "fieldname": "budgeted_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Budgeted Amount",
+   "reqd": 1,
+   "description": "What this account was planned to move by, for the whole fiscal year."
+  },
+  {
+   "columns": 2,
+   "fieldname": "actual_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Actual Amount",
+   "read_only": 1,
+   "description": "Year-to-date GL movement on this account, as of the last refresh_budget call. Read-only — computed, never typed."
+  },
+  {
+   "columns": 2,
+   "fieldname": "variance_amount",
+   "fieldtype": "Currency",
+   "label": "Variance Amount",
+   "read_only": 1,
+   "description": "actual_amount minus budgeted_amount. Positive means the account moved MORE than budgeted; negative means less."
+  },
+  {
+   "columns": 2,
+   "fieldname": "variance_pct",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Variance %",
+   "read_only": 1,
+   "description": "variance_amount as a percentage of budgeted_amount. Zero when budgeted_amount is zero, since a percentage of nothing is undefined rather than zero — read variance_amount for the honest figure on a line with no budget."
+  },
+  {
+   "columns": 1,
+   "default": "10",
+   "fieldname": "threshold_pct",
+   "fieldtype": "Percent",
+   "label": "Threshold %",
+   "description": "How far variance_pct may move before this line counts as a breach. Warning at 1-2x this number, Critical past 2x. Ten percent is the shipped default and any line may set its own."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Budget Line Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

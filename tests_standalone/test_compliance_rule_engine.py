@@ -254,10 +254,13 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		here that is about money rather than about a regulator. It lands on this
 		calendar rather than on a finance board of its own because an operation
 		with two alerting systems reads neither.
+
+		v0.42.0 added `budget_variance_breach`, the second finance rule, on the
+		same argument.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 21)
-		self.assertEqual(len(compliance_rules.rule_rows()), 21)
+		self.assertEqual(len(report["created"]), 22)
+		self.assertEqual(len(compliance_rules.rule_rows()), 22)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
@@ -327,6 +330,14 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 			builtin,
 			[
 				"audit_action_overdue",
+				# v0.42.0, and the fourth permanent built-in, for the same reason
+				# the third is: its thresholds are not on its own row — they live
+				# on each Budget Line Item and Budget KPI Target, per-line rather
+				# than per-rule — and the comparison is against DERIVED,
+				# MULTI-ROW state: every child row on an Active budget, checked
+				# at once by `budget_engine.check_budget_variances`. That is
+				# arithmetic across a table, not a filter on one row.
+				"budget_variance_breach",
 				# v0.39.0, and the third permanent built-in. Its thresholds are
 				# not on its own row at all: they live on each Financial KPI
 				# Definition, because a ratio's warning line and a dollar
@@ -935,12 +946,12 @@ class TheApprovalGate(RuleEngineTestCase):
 
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
-	def test_seeding_twice_writes_twenty_one_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 21)
+	def test_seeding_twice_writes_twenty_two_rules_once(self):
+		self.assertEqual(len(self.seed_rules()["created"]), 22)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 21)
-		self.assertEqual(len(compliance_rules.rule_rows()), 21)
+		self.assertEqual(len(again["present"]), 22)
+		self.assertEqual(len(compliance_rules.rule_rows()), 22)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -988,7 +999,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 21)
+		self.assertEqual(data["rule_count"], 22)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)

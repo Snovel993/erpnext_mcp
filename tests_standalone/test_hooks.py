@@ -397,8 +397,8 @@ class TheScheduledJobs(unittest.TestCase):
 			with self.subTest(hook=hook, path=path):
 				self.assertTrue(callable(resolve(path)))
 
-	def test_they_are_these_eight_and_nothing_else(self):
-		"""Eight jobs. Three write only this app's own doctypes or nothing at all;
+	def test_they_are_these_nine_and_nothing_else(self):
+		"""Nine jobs. Three write only this app's own doctypes or nothing at all;
 		the fourth writes two credential fields on Frappe's User and had to argue
 		for it — see hooks.py and tools/mobile.sweep_idle_grants — the fifth makes
 		an outbound request to somebody else's server, which is a bar none of the
@@ -450,6 +450,17 @@ class TheScheduledJobs(unittest.TestCase):
 		job rather than getting a second checkbox — they cache the same doctype
 		for the same reason, and a second setting called something almost
 		identical is how a setting stops being read.
+
+		The budget refresh arrived in v0.42.0 as the ninth, at 3:15 — fifteen
+		minutes after the KPI cache job and DELIBERATELY AFTER IT, since a
+		budget's KPI targets read `compute_kpi(..., use_cache=True)` and a
+		budget refreshed before the night's KPI figures land would save
+		yesterday's cached value under tonight's date. It is one entry that
+		iterates over every ACTIVE Budget, writes only this app's own `Budget`,
+		and never raises — the same three-part contract every job on this list
+		keeps. It carries no kill switch of its own: unlike the KPI history job,
+		its cost scales with the number of accounts and KPIs one budget names
+		rather than with the size of the whole ledger.
 		"""
 		self.assertEqual(
 			hooks.scheduler_events,
@@ -458,6 +469,7 @@ class TheScheduledJobs(unittest.TestCase):
 					"*/15 * * * *": ["erpnext_mcp.services.weather.sweep_open_shifts"],
 					"0 2 * * *": ["erpnext_mcp.services.windowed_reports.recompute_kpi_history_incremental"],
 					"0 3 * * *": ["erpnext_mcp.services.kpi_engine.refresh_all_kpi_caches"],
+					"15 3 * * *": ["erpnext_mcp.tools.budget.refresh_all_active_budgets"],
 					"0 4 * * *": ["erpnext_mcp.services.regulation_feed.sweep_due_feeds"],
 				},
 				"hourly": ["erpnext_mcp.alerts.sweep"],

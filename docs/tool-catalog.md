@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 355 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 362 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 164 read tools are **on** by default and can be switched off individually. A
+All 167 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -8865,6 +8865,95 @@ for last season* needs.
 
 ---
 
+## v0.42.0 — budget + variance alerts
+
+Seven tools. A **Budget** is one company's plan for one fiscal year: which
+general ledger accounts and which Financial KPI Definitions it tracks, what it
+planned for each, and — once `refresh_budget` has run — what actually
+happened and how far apart the two are.
+
+**The arithmetic is not in the tool layer.** `budget_engine.py` is pure and
+reads no database, the same split `payroll_gl.py` keeps: `compute_budget_actuals`
+fills in `actual`/`variance` from plain dicts, `check_budget_variances` finds
+the rows whose variance has crossed their own threshold, and `refresh_budget`
+is the two run together. `tools/budget.py` is the only place that reads the
+ledger or the KPI cache.
+
+### Severity is a ratio of the variance to its own threshold
+
+Every line item and every KPI target carries its own `threshold_pct` (default
+10). A breach is **Warning** at 1×–2× that number and **Critical** past 2× —
+so a tightly-watched line and a loosely-watched one escalate on the same rule
+wherever their own threshold was set, rather than against one shared number
+that would be too tight for one line and too loose for another.
+
+### `create_budget`
+
+```json
+{"budget_name": "FY2026 Operating Budget", "company": "Highland Orchards",
+ "fiscal_year": "2026",
+ "line_items": [{"account": "5300 - Field Labor", "budgeted_amount": 180000, "threshold_pct": 10},
+                {"account": "5400 - Fertilizer", "budgeted_amount": 42000}],
+ "kpi_targets": [{"kpi_definition": "cost_per_bin", "target_value": 25, "threshold_pct": 15}]}
+```
+
+Every actual and variance column starts at zero — nothing here touches the
+ledger or the KPI framework. `threshold_pct` is optional on either kind of row
+and defaults to 10.
+
+### `update_budget`
+
+Edits a budget in place. `line_items` and `kpi_targets`, if passed, **replace
+the whole table** — including every figure already computed on it, which
+`refresh_budget` then rebuilds. Everything else — `budget_name`, `company`,
+`fiscal_year`, `status`, `notes` — is a normal partial update.
+
+### `get_budget` / `list_budgets`
+
+Read-only. `get_budget` returns one budget in full with its breach state as of
+its last refresh; `list_budgets` is the register, filterable by `company`,
+`fiscal_year` and `status`, with each row's line item and KPI target counts.
+`last_refreshed` is the field to check first — empty means every actual and
+variance figure is a placeholder, not a figure.
+
+### `refresh_budget`
+
+**MUTATING (default OFF).** Recomputes one budget's actual/variance columns
+and saves them.
+
+* **Account actuals** are year-to-date GL movement within the budget's own
+  fiscal year — from its start date through today, or its end date, whichever
+  is sooner — compared against the line's full-year `budgeted_amount`. A
+  budget six months into its year is not "50% under" on every line; it has
+  simply not finished yet.
+* **KPI actuals read the KPI framework's own cache** (`compute_kpi(...,
+  use_cache=true)`) rather than recomputing — the same figure the dashboard is
+  showing, filled by the 03:00 KPI history sweep.
+
+**It does not write a Compliance Alert directly.** It saves the computed
+fields; the `budget_variance_breach` compliance rule reads them the way
+`financial_kpi_threshold_breach` reads the KPI cache, and the hourly sweep is
+what turns a breaching **Active** budget into an alert on the calendar — with
+the same dismissal, snooze and auto-clear every other alert gets. A Draft or
+Closed budget's breaches never reach the calendar, and the overnight cron
+(`erpnext_mcp.tools.budget.refresh_all_active_budgets`, 03:15 — fifteen
+minutes after the KPI cache job, so every KPI target reads a same-night
+figure) only ever touches budgets whose `status` is Active.
+
+### `get_budget_variance_report`
+
+Read-only. The full breakdown — every line item, every KPI target, which of
+them breach, worst first — read from whatever `refresh_budget` last computed.
+Never touches the ledger.
+
+### `close_budget`
+
+**MUTATING (default OFF).** Sets `status=Closed`. Nothing is deleted; a closed
+budget keeps every figure it last computed and simply stops being refreshed
+overnight or scanned for variance alerts.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -8876,7 +8965,7 @@ Everything a tool needs is in two places:
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
    `shifts`, `heat`, `kpi`, `kpidefs`, `payroll`, `payroll_gl`, `visits`,
-   `sessions`, `rules`, `tasktemplates`,
+   `sessions`, `rules`, `tasktemplates`, `budget`,
    `asset_tags`, `feeds` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and

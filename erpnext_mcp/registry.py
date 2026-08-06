@@ -46,6 +46,7 @@ from .tools import (
 	assets,
 	auditpacket,
 	banking,
+	budget,
 	calendar,
 	collab,
 	company,
@@ -11748,6 +11749,161 @@ TOOLS = {
 		title="Refresh the KPI cache",
 		available=_needs_doctype("Financial KPI Definition"),
 		requires="the Financial KPI Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.42.0: Budget + Variance Alerts ──────────────────────────────────
+	"create_budget": _tool(
+		budget.create_budget,
+		"MUTATING (default OFF). Define one budget: which general ledger "
+		"accounts and which Financial KPI Definitions it tracks, and what it "
+		"planned for each, for one company and one fiscal year.\n\n"
+		"EVERY ACTUAL AND VARIANCE COLUMN STARTS AT ZERO. Nothing here reads "
+		"the ledger or the KPI framework — refresh_budget is what fills them "
+		"in, and it can be called immediately after creating a budget or left "
+		"for the overnight sweep once the budget's status is Active.\n\n"
+		"`line_items` IS A LIST OF {account, budgeted_amount, threshold_pct}. "
+		"`kpi_targets` IS A LIST OF {kpi_definition, target_value, "
+		"threshold_pct}. Both are optional and both may be added later with "
+		"update_budget. threshold_pct defaults to 10 on either kind of row: "
+		"how far variance_pct may move before that line counts as a breach.",
+		{
+			"budget_name": _field(_STRING, "REQUIRED. Unique across the site — it is also the docname."),
+			"company": _field(_STRING, "REQUIRED. Which company's ledger this budget reads."),
+			"fiscal_year": _field(_STRING, "REQUIRED. Which fiscal year this budget covers."),
+			"status": _field(_STRING, "Draft (default), Active or Closed. Only Active budgets are refreshed overnight."),
+			"notes": _field(_STRING, "Who built this budget and against what."),
+			"line_items": _field(
+				{"type": "array", "items": _OBJECT},
+				'List of {"account", "budgeted_amount", "threshold_pct"}. threshold_pct optional, default 10.',
+			),
+			"kpi_targets": _field(
+				{"type": "array", "items": _OBJECT},
+				'List of {"kpi_definition", "target_value", "threshold_pct"}. threshold_pct optional, default 10.',
+			),
+		},
+		required=("budget_name", "company", "fiscal_year"),
+		mutating=True,
+		title="Create a budget",
+		available=_needs_doctype("Budget"),
+		requires="the Budget DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_budget": _tool(
+		budget.update_budget,
+		"MUTATING (default OFF). Edit one budget in place — its name, company, "
+		"fiscal year, status, notes, or its line items and KPI targets.\n\n"
+		"`line_items` AND `kpi_targets`, IF PASSED, REPLACE THE WHOLE TABLE — "
+		"including every actual and variance figure already computed on it. "
+		"refresh_budget rebuilds them afterwards. Omit either argument entirely "
+		"to leave that table untouched.\n\n"
+		"The result carries the field-by-field previous state, so the MCP "
+		"Action Log answers 'what did this say before' without a git history.",
+		{
+			"budget": _field(_STRING, "REQUIRED. Which budget — by docname or budget_name."),
+			"budget_name": _field(_STRING, "New name. Must still be unique across the site."),
+			"company": _field(_STRING, "New company."),
+			"fiscal_year": _field(_STRING, "New fiscal year."),
+			"status": _field(_STRING, "Draft, Active or Closed."),
+			"notes": _field(_STRING, "New notes."),
+			"line_items": _field(
+				{"type": "array", "items": _OBJECT},
+				"REPLACES the whole table. See create_budget for the row shape.",
+			),
+			"kpi_targets": _field(
+				{"type": "array", "items": _OBJECT},
+				"REPLACES the whole table. See create_budget for the row shape.",
+			),
+		},
+		required=("budget",),
+		mutating=True,
+		idempotent=True,
+		title="Update a budget",
+		available=_needs_doctype("Budget"),
+		requires="the Budget DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_budget": _tool(
+		budget.get_budget,
+		"One budget in full — every line item, every KPI target, and the "
+		"breach state read from whatever was computed at its last refresh. "
+		"Read-only.\n\n"
+		"`last_refreshed` IS THE FIELD TO CHECK FIRST. Empty means every "
+		"actual and variance figure below is a placeholder rather than a "
+		"figure — refresh_budget has never run against this budget.",
+		{"budget": _field(_STRING, "REQUIRED. By docname or budget_name.")},
+		required=("budget",),
+		title="Get a budget",
+		available=_needs_doctype("Budget"),
+		requires="the Budget DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_budgets": _tool(
+		budget.list_budgets,
+		"The budget register: every budget matching the filters, newest "
+		"first, with its line item and KPI target counts. Read-only.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "Only this fiscal year. Optional."),
+			"status": _field(_STRING, "Draft, Active or Closed. Optional."),
+			"limit": _LIMIT,
+		},
+		title="List budgets",
+		available=_needs_doctype("Budget"),
+		requires="the Budget DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"refresh_budget": _tool(
+		budget.refresh_budget,
+		"MUTATING (default OFF). Recompute one budget's actual and variance "
+		"columns from the general ledger and the KPI framework, and save "
+		"them onto the budget.\n\n"
+		"ACCOUNT ACTUALS ARE YEAR-TO-DATE GL MOVEMENT within the budget's own "
+		"fiscal year, through today (or the fiscal year's end, whichever is "
+		"sooner), compared against the line's full-year budgeted_amount. KPI "
+		"actuals READ THE KPI FRAMEWORK'S OWN CACHE (compute_kpi with "
+		"use_cache=true) rather than recomputing — the same figure the "
+		"dashboard is showing, filled by the 3am KPI history sweep.\n\n"
+		"THIS TOOL DOES NOT WRITE A COMPLIANCE ALERT DIRECTLY. It saves the "
+		"computed fields; the hourly compliance sweep (or "
+		"refresh_compliance_alerts) is what turns a breaching ACTIVE budget "
+		"into an alert on the calendar, through the budget_variance_breach "
+		"rule — the same path an expiring certificate or a breached KPI "
+		"threshold takes, with the same dismissal, snooze and auto-clear. A "
+		"Draft or Closed budget's breaches never reach the calendar.\n\n"
+		"The overnight sweep calls this for every Active budget automatically; "
+		"call it directly to see a change immediately rather than waiting for "
+		"morning.",
+		{"budget": _field(_STRING, "REQUIRED. By docname or budget_name.")},
+		required=("budget",),
+		mutating=True,
+		idempotent=True,
+		title="Refresh a budget",
+		available=_needs_doctype("Budget"),
+		requires="the Budget DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_budget_variance_report": _tool(
+		budget.get_budget_variance_report,
+		"The full variance breakdown for one budget: every line item and "
+		"every KPI target, and which of them breach their own threshold, "
+		"worst first. Read-only — reads whatever refresh_budget last "
+		"computed and never touches the ledger.\n\n"
+		"SEVERITY IS A RATIO OF THE VARIANCE TO ITS OWN THRESHOLD. Warning at "
+		"1-2x the line's threshold_pct, Critical past 2x — so a "
+		"tightly-watched line and a loosely-watched one escalate on the same "
+		"rule wherever their thresholds were set.",
+		{"budget": _field(_STRING, "REQUIRED. By docname or budget_name.")},
+		required=("budget",),
+		title="Get a budget's variance report",
+		available=_needs_doctype("Budget"),
+		requires="the Budget DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"close_budget": _tool(
+		budget.close_budget,
+		"MUTATING (default OFF). Set status=Closed. A closed budget keeps "
+		"every figure it last computed — nothing is deleted — and simply "
+		"stops being refreshed by the overnight sweep and stops being "
+		"scanned for variance alerts.",
+		{"budget": _field(_STRING, "REQUIRED. By docname or budget_name.")},
+		required=("budget",),
+		mutating=True,
+		title="Close a budget",
+		available=_needs_doctype("Budget"),
+		requires="the Budget DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

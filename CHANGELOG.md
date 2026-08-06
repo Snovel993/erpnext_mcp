@@ -3,6 +3,40 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.42.0 — 2026-08-06
+
+**Budget + Variance Alerts.** A `Budget` is one company's plan for one fiscal
+year: which general ledger accounts and which Financial KPI Definitions it
+tracks, what it planned for each, and — once `refresh_budget` has run — what
+actually happened and how far apart the two are. Seven tools (362 total: 167
+read, 195 mutating), three DocTypes, one compliance rule, one overnight sweep.
+
+**The arithmetic is pure.** `budget_engine.py` reads no database, the same
+split `payroll_gl.py` keeps: `compute_budget_actuals` fills in actual and
+variance from plain dicts, `check_budget_variances` finds the rows whose
+variance has crossed their own threshold, and `refresh_budget` is the two run
+together. `tools/budget.py` is the only place that reads GL Entry — year-to-date
+movement within the budget's own fiscal year, against the line's full-year
+budgeted amount — or the KPI framework, which it reads from
+`compute_kpi(..., use_cache=True)` rather than recomputing, so a budget and the
+KPI dashboard can never disagree about a figure.
+
+**Severity is a ratio of the variance to its own threshold.** Every line item
+and KPI target carries its own `threshold_pct` (default 10): Warning at 1×–2×
+that number, Critical past 2×, so a tightly-watched line and a loosely-watched
+one escalate on the same rule wherever their own line was drawn.
+
+**`refresh_budget` does not write a Compliance Alert directly.** It saves the
+computed fields onto the budget; the new `budget_variance_breach` rule reads
+them the way `financial_kpi_threshold_breach` reads the KPI cache, and the
+hourly sweep is what turns a breaching **Active** budget into an alert on the
+calendar — with the same dismissal, snooze and auto-clear every other alert
+gets, rather than a second alerting path none of that machinery knows about. A
+Draft or Closed budget's breaches never reach the calendar. The overnight cron
+(`refresh_all_active_budgets`, 03:15 — fifteen minutes after the KPI cache job,
+so every KPI target reads a same-night figure) only ever touches Active
+budgets.
+
 ## 0.41.0 — 2026-08-06
 
 **The job had a shape and three places kept it.** The template concept has been

@@ -424,6 +424,15 @@
   "allow_update_financial_kpi_definition",
   "allow_refresh_kpi_cache",
   "enable_kpi_history_sweep",
+  "budget_read_section",
+  "allow_get_budget",
+  "allow_list_budgets",
+  "allow_get_budget_variance_report",
+  "budget_write_section",
+  "allow_create_budget",
+  "allow_update_budget",
+  "allow_refresh_budget",
+  "allow_close_budget",
   "mobile_write_section",
   "allow_create_mobile_user",
   "allow_create_employee",
@@ -3222,6 +3231,65 @@
    "fieldname": "enable_kpi_history_sweep",
    "fieldtype": "Check",
    "label": "Enable KPI History Overnight Sweep"
+  },
+  {
+   "fieldname": "budget_read_section",
+   "fieldtype": "Section Break",
+   "label": "Budget + Variance Alerts \u2014 Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. One budget in full \u2014 every line item, every KPI target, and the breach state read from whatever was computed at its last refresh. `last_refreshed` is the field to check first: empty means every actual and variance figure is a placeholder rather than a figure.",
+   "fieldname": "allow_get_budget",
+   "fieldtype": "Check",
+   "label": "Get Budget"
+  },
+  {
+   "default": "1",
+   "description": "READ. The budget register: every budget matching the filters, newest first, with its line item and KPI target counts.",
+   "fieldname": "allow_list_budgets",
+   "fieldtype": "Check",
+   "label": "List Budgets"
+  },
+  {
+   "default": "1",
+   "description": "READ. The full variance breakdown for one budget \u2014 every line item and every KPI target, and which of them breach their own threshold, worst first. Reads whatever refresh_budget last computed and never touches the ledger.",
+   "fieldname": "allow_get_budget_variance_report",
+   "fieldtype": "Check",
+   "label": "Get Budget Variance Report"
+  },
+  {
+   "fieldname": "budget_write_section",
+   "fieldtype": "Section Break",
+   "label": "Budget + Variance Alerts \u2014 Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Defines one budget: which general ledger accounts and which Financial KPI Definitions it tracks, and what it planned for each, for one company and one fiscal year. Every actual and variance column starts at zero \u2014 refresh_budget is what fills them in.",
+   "fieldname": "allow_create_budget",
+   "fieldtype": "Check",
+   "label": "Create Budget"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Edits one budget in place. line_items and kpi_targets, if passed, REPLACE the whole table \u2014 including every figure already computed on it \u2014 which refresh_budget then rebuilds.",
+   "fieldname": "allow_update_budget",
+   "fieldtype": "Check",
+   "label": "Update Budget"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Recomputes one budget's actual and variance columns from the general ledger (year-to-date GL movement within the fiscal year) and the KPI framework's own cache, and saves them onto the budget. Does not itself write a Compliance Alert \u2014 the budget_variance_breach rule reads these same stored fields the way financial_kpi_threshold_breach reads the KPI cache, and the hourly sweep is what reaches the calendar. The overnight sweep calls this for every Active budget automatically.",
+   "fieldname": "allow_refresh_budget",
+   "fieldtype": "Check",
+   "label": "Refresh Budget"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Sets status=Closed. Nothing is deleted \u2014 a closed budget keeps every figure it last computed and simply stops being refreshed overnight or scanned for variance alerts.",
+   "fieldname": "allow_close_budget",
+   "fieldtype": "Check",
+   "label": "Close Budget"
   },
   {
    "fieldname": "mobile_write_section",

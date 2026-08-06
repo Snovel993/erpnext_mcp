@@ -1,0 +1,75 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One Financial KPI Definition this budget holds a target for — a debt service coverage covenant, a cost-per-bin ceiling. The last two columns are computed by refresh_budget from the KPI's own cached figure.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "kpi_definition",
+  "target_value",
+  "actual_value",
+  "variance_pct",
+  "threshold_pct"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "fieldname": "kpi_definition",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "KPI Definition",
+   "options": "Financial KPI Definition",
+   "reqd": 1,
+   "description": "Which defined KPI this target is for. One row per KPI — get_budget_variance_report reports a duplicate rather than silently overwriting one target with another."
+  },
+  {
+   "columns": 2,
+   "fieldname": "target_value",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Target Value",
+   "reqd": 1,
+   "description": "The value this budget wants the KPI to hold, in the KPI's own unit."
+  },
+  {
+   "columns": 2,
+   "fieldname": "actual_value",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Actual Value",
+   "read_only": 1,
+   "description": "The KPI's own cached value, as of the last refresh_budget call. Read from compute_kpi's cache rather than recomputed here, so a budget and the KPI dashboard never disagree about the number."
+  },
+  {
+   "columns": 2,
+   "fieldname": "variance_pct",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Variance %",
+   "read_only": 1,
+   "description": "actual_value minus target_value, as a percentage of target_value. Zero when the KPI has no cached value yet or target_value is zero — read actual_value for the honest figure."
+  },
+  {
+   "columns": 1,
+   "default": "10",
+   "fieldname": "threshold_pct",
+   "fieldtype": "Percent",
+   "label": "Threshold %",
+   "description": "How far variance_pct may move before this target counts as a breach. Warning at 1-2x this number, Critical past 2x."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Budget KPI Target",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
