@@ -8493,9 +8493,10 @@ TOOLS = {
 		"thing on a Frappe site that says which somebody a login is. An account with "
 		"no Employee behind it enrols perfectly and then gets refused, correctly, "
 		"with 'set user_id on their Employee record to this email address'.\n\n"
-		"IT WRITES FOURTEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME. Identity and "
-		"assignment only: who this person is, which entity hired them, what they do, "
-		"when they started, how to reach them. Payroll, tax and banking fields — "
+		"IT WRITES SEVENTEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME. Identity and "
+		"assignment: who this person is, which entity hired them, what they do, "
+		"when they started, how to reach them — plus the three compliance statuses "
+		"erpnext_mcp itself installs on Employee as mandatory. Payroll, tax and banking fields — "
 		"salary structure, income tax slab, bank account, CTC — are refused with "
 		"their own message, because each has a form, an approval and a retention "
 		"rule this app knows nothing about, and a tool that set `ctc` because it "
@@ -8507,6 +8508,14 @@ TOOLS = {
 		"If Frappe HR here marks a field mandatory — stock installs require `gender` "
 		"and `date_of_birth` — the refusal names it rather than passing a controller "
 		"traceback back.\n\n"
+		"THE THREE FIELDS THIS APP MADE MANDATORY GET A DEFAULT RATHER THAN A "
+		"REFUSAL. `compliance_fields.py` installs `i9_status`, `w4_status` and "
+		"`jurisdiction` with `reqd=True`, so refusing for want of them was this app "
+		"refusing its own schema. A person hired ten seconds ago starts at i9_status "
+		"Pending, w4_status Missing and the hiring entity's own state (Oregon when "
+		"the address does not say). All three are overridable, every default is "
+		"named in `defaults_applied` and in the note, and create_i9_form / submit_w4 "
+		"/ update_employee are what move them afterwards.\n\n"
 		"IT REFUSES A SECOND RECORD for the same name at the same company, naming "
 		"the one that exists. Two Employee records for one person puts them on the "
 		"dispatch board twice and in the payroll register once, and is far easier to "
@@ -8550,6 +8559,25 @@ TOOLS = {
 			),
 			"personal_email": _field(_STRING, "A personal address for the record. Not the login."),
 			"cell_number": _field(_STRING, "A mobile number for the Employee record."),
+			"i9_status": _field(
+				_STRING,
+				"Verified, Pending, Expired or N-A — whatever this site's options are. Defaults "
+				"to Pending: the I-9 is a separate form with a three-business-day clock, and "
+				"create_i9_form is what starts it.",
+			),
+			"w4_status": _field(
+				_STRING,
+				"On-File, Missing or Requires-Update. Defaults to Missing, which is what the "
+				"field's own documentation calls somebody whose W-4 has not been filed — the "
+				"employer withholds at the default single rate. submit_w4 moves it to On-File.",
+			),
+			"jurisdiction": _field(
+				_STRING,
+				"The two-letter state whose wage law this person is paid under. Defaults to the "
+				"hiring entity's own address, or OR when the site does not say. Wage law follows "
+				"where the WORK is performed, so a crew that crossed into Washington is a "
+				"correction for update_employee.",
+			),
 			"allow_unenrolled_user": _field(
 				_BOOLEAN,
 				"Link a user_id that has no Farm Ops role or grant yet. Default false. Right "
@@ -8569,9 +8597,12 @@ TOOLS = {
 	),
 	"update_employee": _tool(
 		employee.update_employee,
-		"MUTATING (default OFF). Change the identity and assignment fields on an "
-		"Employee that already exists — the same fourteen create_employee writes, "
-		"and nothing else.\n\n"
+		"MUTATING (default OFF). Change the identity, assignment and compliance-status "
+		"fields on an Employee that already exists — the same seventeen "
+		"create_employee writes, and nothing else. `jurisdiction` is here for the "
+		"reason it is defaulted there: wage law follows where the work is PERFORMED, "
+		"and a crew that crossed the river onto a Washington block is paid under a "
+		"different rule that day.\n\n"
 		"THE COMMON USE IS `user_id` ON A RECORD THAT WAS MADE WITHOUT ONE, which is "
 		"what stands between a working mobile credential and a task board. "
 		"link_employee_to_user does that one job with the linkage checks spelled "
@@ -8579,7 +8610,7 @@ TOOLS = {
 		"PAYROLL, TAX AND BANKING FIELDS ARE REFUSED BY NAME — salary structure, "
 		"income tax slab, bank account, CTC. Those need the HR module's own form, "
 		"where its approvals and retention rules run. A field that is real on this "
-		"site but outside the fourteen gets a different refusal from a field that "
+		"site but outside the seventeen gets a different refusal from a field that "
 		"does not exist at all, because they are different mistakes.\n\n"
 		"IT REPORTS WHAT ACTUALLY CHANGED, field by field, with the previous value — "
 		"a value that was already what you asked for lands in `unchanged` rather "
@@ -8617,6 +8648,17 @@ TOOLS = {
 			),
 			"personal_email": _field(_STRING, "A personal address. Not the login."),
 			"cell_number": _field(_STRING, "A mobile number."),
+			"i9_status": _field(
+				_STRING,
+				"Verified, Pending, Expired or N-A. This is how a hire created at Pending "
+				"becomes Verified once the I-9 is complete.",
+			),
+			"w4_status": _field(_STRING, "On-File, Missing or Requires-Update."),
+			"jurisdiction": _field(
+				_STRING,
+				"The two-letter state whose wage law this person is paid under. Set it when the "
+				"work moved, not when the office did.",
+			),
 			"replace_user": _field(
 				_BOOLEAN, "Re-point an Employee that is already linked to a different login. Default false."
 			),

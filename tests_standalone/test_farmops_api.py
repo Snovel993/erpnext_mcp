@@ -766,6 +766,68 @@ class TheIdentityStepAnswersOverTheFunnel(FarmOpsAPITestCase):
 		self.message(f"{PREFIX}/mobile/reactivate_employee", {"docname": created["name"]})
 		self.assertEqual(frappe.db.get_value("Employee", created["name"], "status"), "Active")
 
+	def install_compliance_fields(self):
+		"""Employee as `compliance_fields.py` really leaves a migrated site: three
+		of its five columns MANDATORY. Built from that module's own specs so a flag
+		changed there cannot pass unnoticed here."""
+		from erpnext_mcp import compliance_fields
+
+		from .harness import add_field
+
+		for spec in compliance_fields.targets_by_doctype()["Employee"].fields:
+			add_field(
+				"Employee",
+				spec.fieldname,
+				fieldtype=spec.fieldtype,
+				options=spec.options or None,
+				label=spec.label,
+				reqd=1 if spec.reqd else 0,
+			)
+
+	def test_the_wizards_own_payload_hires_somebody_on_a_site_with_the_compliance_fields(self):
+		"""v0.46.1, and the second wall in front of step one. The path 404'd until
+		v0.46.0; then it answered, and refused with 'this site's Frappe HR marks
+		i9_status, w4_status, jurisdiction mandatory on Employee' — which Frappe HR
+		had nothing to do with. Those are erpnext_mcp's own Custom Fields, installed
+		`reqd=True` by its own `after_migrate`, so the app was refusing its own
+		schema on every path it has: this one, `onboard_employee` and the MCP tool.
+
+		The payload is `OnboardingIdentity.employeePayload` verbatim, which names
+		none of the three and never will — the I-9 and the W-4 are steps 3 and 4 of
+		the same wizard."""
+		self.install_compliance_fields()
+		created = self.message(
+			f"{PREFIX}/mobile/create_employee",
+			{
+				"first_name": "Elena",
+				"last_name": "Marquez",
+				"employee_name": "Elena Marquez",
+				"gender": "Female",
+				"date_of_birth": "1994-03-11",
+				"date_of_joining": "2026-08-07",
+				"employment_type": "Seasonal Worker",
+				"company": MAIN,
+				"status": "Active",
+			},
+		)
+		self.assertTrue(created["name"])
+		row = frappe.db.get_value(
+			"Employee", created["name"], ["i9_status", "w4_status", "jurisdiction"], as_dict=True
+		)
+		self.assertEqual(row["i9_status"], "Pending")
+		self.assertEqual(row["w4_status"], "Missing")
+		self.assertEqual(row["jurisdiction"], "OR")
+
+	def test_a_build_that_does_ask_the_foreman_which_state_is_honoured(self):
+		"""The three are forwarded rather than defaulted in the wrapper, so a later
+		handset build that asks where the crew is working needs no server change."""
+		self.install_compliance_fields()
+		created = self.message(
+			f"{PREFIX}/mobile/create_employee",
+			{"first_name": "Elena", "last_name": "Marquez", "company": MAIN, "jurisdiction": "WA"},
+		)
+		self.assertEqual(frappe.db.get_value("Employee", created["name"], "jurisdiction"), "WA")
+
 	def test_an_employee_of_another_entity_reads_as_not_found_rather_than_refused(self):
 		"""The rule every docname argument on this surface follows. A phone that
 		could tell "no such record" from "not yours" could enumerate the holding

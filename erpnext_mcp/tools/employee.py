@@ -26,13 +26,17 @@ and the QR; it is the tool to reach for when the person is new. These are the
 tools for when they are not.
 
 ────────────────────────────────────────────────────────────────────────────
-IT WRITES FOURTEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME
+IT WRITES SEVENTEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME
 ────────────────────────────────────────────────────────────────────────────
 
 `WRITABLE` is a closed list. Not a filter over the doctype, not "everything
 except" — a list, written out, that a reader can check against what they expected.
 Everything on it is an identity or assignment fact: who this person is, which
 entity hired them, what they do, when they started, how to reach them.
+
+Fourteen until v0.46.1, when the three below joined them. See the next section:
+they are on the list because this app is the reason they are mandatory, and a
+list that cannot write them is a list that cannot hire.
 
 Everything NOT on it is refused, and the payroll, tax and banking fields are
 refused with their OWN message, because those are the ones somebody will actually
@@ -63,6 +67,42 @@ And the mandatory fields are the site's, not this file's. `_mandatory_gaps` read
 as a wall of HTML from a controller — into a sentence naming the fields this site
 wants. That is the difference between "tell me what to send" and "something went
 wrong in hrms".
+
+────────────────────────────────────────────────────────────────────────────
+EXCEPT FOR THE THREE THIS APP MADE MANDATORY ITSELF
+────────────────────────────────────────────────────────────────────────────
+
+v0.46.1. The mandatory-field message read "this site's Frappe HR marks i9_status,
+w4_status, jurisdiction mandatory on Employee", and it was wrong about whose
+decision that was. Frappe HR has never heard of those three: `compliance_fields.py`
+installs them as Custom Fields with `reqd=True`, so the sentence "which fields are
+required is an operator's decision on the doctype, not this app's" was this app
+telling a caller to go argue with itself.
+
+It was not a message problem. It was a wall in front of EVERY creation path —
+`create_employee`, `onboard_employee`, and the iOS wizard's first step, which is
+where it finally surfaced — and it had one correct answer, which is that a person
+hired ten seconds ago has a known state on all three:
+
+  * `i9_status` is `Pending`. The I-9 is a separate form with a three-business-day
+    clock on it, and `create_i9_form` is a later step of the same wizard. Pending
+    is what the alert engine watches for and what an unverified hire actually is.
+  * `w4_status` is `Missing` — not "Pending", which is not one of the three
+    options the field carries. `docs/compliance_fields.md` defines Missing as "the
+    employer withholds at the default single rate", which is precisely true of
+    somebody whose W-4 has not been submitted yet. `submit_w4` moves it to On-File.
+  * `jurisdiction` is read off the hiring entity's own address, falling back to
+    `DEFAULT_JURISDICTION`. Wage law follows where the WORK is, which no record
+    knows at hire time; the entity's state is the closest honest starting value.
+
+THE SAFETY NET IS NOT REMOVED. `_mandatory_gaps` still runs and still refuses,
+which is what should happen when an operator marks `date_of_birth` or `gender`
+required — those are facts about a person that nobody can default, and inventing
+one would be worse than the refusal. What changed is only that this app fills in
+the fields this app required. All three are on `WRITABLE`, so a caller who knows
+better passes their own value and no default is applied; every default that IS
+applied is named in `defaults_applied` and in the note, because a record that
+quietly acquired a compliance status is exactly the record nobody goes back to fix.
 
 ────────────────────────────────────────────────────────────────────────────
 ONE PERSON, ONE EMPLOYEE, ONE LOGIN
@@ -142,9 +182,15 @@ LINK_TARGETS = {
 
 DATE_FIELDS = ("date_of_joining", "date_of_birth")
 
-SELECT_FIELDS = ("status",)
+SELECT_FIELDS = ("status", "i9_status", "w4_status")
 
-#: The fourteen. Ordered as somebody filling in a form would read them, because
+#: The three fields `compliance_fields.py` installs on Employee with `reqd=True`,
+#: in the order the mandatory-field refusal used to list them. This app is the
+#: reason a site has them and the reason they are required, so this app is what
+#: has to have an answer for them — see the module docstring.
+COMPLIANCE_FIELDS = ("i9_status", "w4_status", "jurisdiction")
+
+#: The seventeen. Ordered as somebody filling in a form would read them, because
 #: this tuple is what the refusal messages list.
 WRITABLE = (
 	"employee_name",
@@ -161,6 +207,7 @@ WRITABLE = (
 	"user_id",
 	"personal_email",
 	"cell_number",
+	*COMPLIANCE_FIELDS,
 )
 
 #: Fields refused with their own sentence rather than the generic one. Not a
@@ -186,6 +233,88 @@ SENSITIVE_FIELDS = frozenset(
 
 #: What a new Employee is unless the caller says otherwise.
 DEFAULT_STATUS = "Active"
+
+#: What a person hired ten seconds ago IS on the two Select fields this app made
+#: mandatory. Both are the option that means "the form has not been filed yet",
+#: matched to the options `compliance_fields.py` installs — `w4_status` has no
+#: `Pending`, and `Missing` is the one its own documentation defines as "the
+#: employer withholds at the default single rate", which is the true state of a
+#: hire whose W-4 step has not run. Checked against the SITE's options anyway, by
+#: `_clean`, because an operator may have edited them.
+COMPLIANCE_DEFAULTS = {
+	"i9_status": "Pending",
+	"w4_status": "Missing",
+}
+
+#: The wage-law state when the hiring entity's own address does not say. Oregon,
+#: because ORS 653 is the law `state_withholding.py` was built against and this
+#: app's operations are there. An entity anywhere else records an address and gets
+#: its own state; an entity with no address at all gets a value an operator can
+#: see and correct, which beats a hire that cannot happen.
+DEFAULT_JURISDICTION = "OR"
+
+#: Full state names to the two-letter codes `jurisdiction` is documented to carry.
+#: ERPNext's Address stores whichever form the operator typed, and a Washington
+#: entity recorded as "Washington" and then paid under ORS 653 is exactly the
+#: mistake this map exists to stop — the two states differ on agricultural
+#: overtime, on rest breaks and on minimum wage regions.
+US_STATE_CODES = {
+	state.lower(): code
+	for code, state in (
+		("AL", "Alabama"),
+		("AK", "Alaska"),
+		("AZ", "Arizona"),
+		("AR", "Arkansas"),
+		("CA", "California"),
+		("CO", "Colorado"),
+		("CT", "Connecticut"),
+		("DE", "Delaware"),
+		("DC", "District of Columbia"),
+		("FL", "Florida"),
+		("GA", "Georgia"),
+		("HI", "Hawaii"),
+		("ID", "Idaho"),
+		("IL", "Illinois"),
+		("IN", "Indiana"),
+		("IA", "Iowa"),
+		("KS", "Kansas"),
+		("KY", "Kentucky"),
+		("LA", "Louisiana"),
+		("ME", "Maine"),
+		("MD", "Maryland"),
+		("MA", "Massachusetts"),
+		("MI", "Michigan"),
+		("MN", "Minnesota"),
+		("MS", "Mississippi"),
+		("MO", "Missouri"),
+		("MT", "Montana"),
+		("NE", "Nebraska"),
+		("NV", "Nevada"),
+		("NH", "New Hampshire"),
+		("NJ", "New Jersey"),
+		("NM", "New Mexico"),
+		("NY", "New York"),
+		("NC", "North Carolina"),
+		("ND", "North Dakota"),
+		("OH", "Ohio"),
+		("OK", "Oklahoma"),
+		("OR", "Oregon"),
+		("PA", "Pennsylvania"),
+		("PR", "Puerto Rico"),
+		("RI", "Rhode Island"),
+		("SC", "South Carolina"),
+		("SD", "South Dakota"),
+		("TN", "Tennessee"),
+		("TX", "Texas"),
+		("UT", "Utah"),
+		("VT", "Vermont"),
+		("VA", "Virginia"),
+		("WA", "Washington"),
+		("WV", "West Virginia"),
+		("WI", "Wisconsin"),
+		("WY", "Wyoming"),
+	)
+}
 
 
 # ── the guards every tool in this file runs first ───────────────────────────
@@ -362,7 +491,7 @@ def _reject_unknown(args: dict, allowed: tuple, reserved: tuple = ()) -> None:
 			)
 		raise ToolError(
 			f"{key!r} is a real Employee field on this site but is not one this tool writes. "
-			f"The fourteen it does are: {', '.join(WRITABLE)}. Anything else belongs in the "
+			f"The seventeen it does are: {', '.join(WRITABLE)}. Anything else belongs in the "
 			"Desk, where the HR module's own validation runs. Nothing was changed."
 		)
 
@@ -511,11 +640,17 @@ def create_employee(args: dict) -> ToolResult:
 		"employment_type",
 		"personal_email",
 		"cell_number",
+		*COMPLIANCE_FIELDS,
 	)
 	for key in optional:
 		value = _clean(key, args.get(key))
 		if value:
 			payload[key] = value
+
+	# The three fields THIS APP marks mandatory get a starting value rather than a
+	# refusal — see the module docstring. Applied after the loop above, so anything
+	# the caller passed has already been cleaned into `payload` and wins.
+	payload.update(_compliance_defaults(payload, company))
 
 	user_id = _clean("user_id", args.get("user_id"), "user_id")
 	linkage = None
@@ -540,7 +675,7 @@ def create_employee(args: dict) -> ToolResult:
 		"fields_set": {key: value for key, value in writable.items() if key != "doctype" and value},
 		"defaults_applied": sorted(
 			key
-			for key in ("first_name", "last_name", "date_of_joining", "status")
+			for key in ("first_name", "last_name", "date_of_joining", "status", *COMPLIANCE_FIELDS)
 			if not str(args.get(key) or "").strip() and writable.get(key)
 		),
 		"fields_not_on_this_site": absent,
@@ -549,6 +684,7 @@ def create_employee(args: dict) -> ToolResult:
 			"This is an identity and assignment record only. Payroll, tax and banking fields are "
 			"refused by name — they have forms, approvals and retention rules this app knows "
 			"nothing about."
+			+ _compliance_note({key: writable.get(key) for key in COMPLIANCE_FIELDS if key in writable}, args)
 			+ (
 				""
 				if not absent
@@ -568,6 +704,99 @@ def create_employee(args: dict) -> ToolResult:
 		summary=f"created Employee {name} — {employee_name} at {company}"
 		+ (f", linked to {user_id}" if user_id else ""),
 		docstatus_delta="none → 0 (Employee created)",
+	)
+
+
+def _compliance_defaults(payload: dict, company: str) -> dict:
+	"""Starting values for the fields this app made mandatory, for the ones still empty.
+
+	Read off `payload` rather than `args`, so what the CALLER passed has already
+	been through `_clean` and validated against this site's own Select options
+	before it counts as supplied. A field this site's Employee does not carry gets
+	nothing — `_supported` would drop it a moment later, and a default that is
+	silently discarded is worse than no default.
+
+	Deliberately NOT conditional on the field being `reqd` here. An operator who
+	cleared the flag has said "do not refuse for want of this", not "leave it
+	blank": `Pending` and `Missing` are the true state of a new hire either way,
+	and the compliance backlog counts a null as an unanswered question.
+	"""
+	defaults = {}
+	for key in COMPLIANCE_FIELDS:
+		if str(payload.get(key) or "").strip() or not compat.has_field(EMPLOYEE, key):
+			continue
+		value = _jurisdiction_for(company) if key == "jurisdiction" else COMPLIANCE_DEFAULTS.get(key, "")
+		if not value:
+			continue
+		# Through `_clean` as well, so a site that edited the Select options gets a
+		# refusal naming its own choices rather than a row carrying a value the
+		# doctype does not offer.
+		defaults[key] = _clean(key, value)
+	return defaults
+
+
+def _jurisdiction_for(company: str) -> str:
+	"""The wage-law state to start this person on, off the hiring entity's own address.
+
+	A STARTING VALUE, NOT A FINDING. Wage law follows where the work is PERFORMED,
+	which nothing on a site knows at hire time — a crew that crossed the river to a
+	Washington block is paid under RCW 49.46 that day and `jurisdiction` is the
+	field that has to say so. The entity's own address is the closest honest guess,
+	and `update_employee` is how it gets corrected.
+
+	Falls back to `DEFAULT_JURISDICTION` rather than raising, because a blank here
+	is precisely what the create was refusing on: a value an operator can see on
+	the record and fix beats a hire that cannot happen.
+	"""
+	state = ""
+	try:
+		if (
+			compat.doctype_exists("Address")
+			and compat.doctype_exists("Dynamic Link")
+			and compat.has_field("Address", "state")
+		):
+			addresses = (
+				frappe.db.get_all(
+					"Dynamic Link",
+					filters={"link_doctype": "Company", "link_name": company, "parenttype": "Address"},
+					pluck="parent",
+					limit=5,
+				)
+				or []
+			)
+			for address in addresses:
+				state = str(frappe.db.get_value("Address", address, "state") or "").strip()
+				if state:
+					break
+	except Exception:  # pragma: no cover - a site without ERPNext's address schema
+		state = ""
+
+	if not state:
+		return DEFAULT_JURISDICTION
+	if len(state) == 2 and state.isalpha():
+		return state.upper()
+	return US_STATE_CODES.get(state.lower(), DEFAULT_JURISDICTION)
+
+
+def _compliance_note(written: dict, args: dict) -> str:
+	"""Say which compliance statuses this call INVENTED, and what moves each one.
+
+	A record that quietly acquired an I-9 status is the record nobody goes back to
+	fix, so the values that were not asked for are named in the result rather than
+	left for somebody to notice in the Desk.
+	"""
+	defaulted = sorted(
+		f"{key}={value}" for key, value in written.items() if value and not str(args.get(key) or "").strip()
+	)
+	if not defaulted:
+		return ""
+	return (
+		f" This app marks {', '.join(COMPLIANCE_FIELDS)} mandatory on Employee and the call did not "
+		f"supply {'them' if len(defaulted) > 1 else 'it'}, so it started this person at "
+		f"{', '.join(defaulted)}. Those are starting values, not findings: create_i9_form and "
+		"submit_i9_section_2 move i9_status, submit_w4 moves w4_status, and jurisdiction follows "
+		"where the work is performed rather than where the entity sits — update_employee corrects "
+		"it. Nothing else was assumed."
 	)
 
 
@@ -632,11 +861,30 @@ def _insert(payload: dict) -> str:
 
 
 def _mandatory_message(gaps: list) -> str:
-	"""What to say when this site wants a field the call did not supply."""
+	"""What to say when this site wants a field the call did not supply.
+
+	It used to say "this site's Frappe HR marks …", which was wrong about whose
+	decision it was whenever a gap was one of `COMPLIANCE_FIELDS` — those are
+	erpnext_mcp's own Custom Fields, installed `reqd=True` by
+	`compliance_fields.py`, and telling a caller to take it up with their operator
+	sent them to argue with this app. Those three are defaulted now rather than
+	refused; the sentence is kept honest anyway, because a site can end up with one
+	of them required and unwritable in ways this file should not have to predict.
+	"""
+	ours = [gap for gap in gaps if gap in COMPLIANCE_FIELDS]
+	theirs = [gap for gap in gaps if gap not in COMPLIANCE_FIELDS]
+	whose = (
+		f"this site's Frappe HR marks {', '.join(theirs)} mandatory on Employee"
+		if theirs and not ours
+		else f"erpnext_mcp installs {', '.join(ours)} on Employee as mandatory"
+		if ours and not theirs
+		else f"this site's Frappe HR marks {', '.join(theirs)} mandatory on Employee and "
+		f"erpnext_mcp installs {', '.join(ours)} the same way"
+	)
 	return (
-		f"this site's Frappe HR marks {', '.join(gaps)} mandatory on Employee, and the call did "
-		"not supply " + ("it" if len(gaps) == 1 else "them") + ". Which fields are required is an "
-		"operator's decision on the doctype, not this app's: pass "
+		f"{whose}, and the call did not supply "
+		+ ("it" if len(gaps) == 1 else "them")
+		+ ". Pass "
 		+ ("the value" if len(gaps) == 1 else "the values")
 		+ ", or clear the `reqd` flag in the Desk. Nothing was created."
 	)
@@ -740,7 +988,8 @@ def update_employee(args: dict) -> ToolResult:
 		"fields_not_on_this_site": absent,
 		"linkage": linkage,
 		"note": (
-			"Only the fourteen identity and assignment fields are writable here. Payroll, tax "
+			"Only the seventeen identity, assignment and compliance-status fields are writable "
+			"here. Payroll, tax "
 			"and banking fields are refused by name and belong in the Desk, where the HR "
 			"module's own validation runs."
 		),

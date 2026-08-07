@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.46.1 — 2026-08-07
+
+**The second wall in front of step one, and it was this app's.** v0.46.0 gave the
+wizard's Identity step a route that answers; it then refused every hire with
+"this site's Frappe HR marks i9_status, w4_status, jurisdiction mandatory on
+Employee, and the call did not supply them". Frappe HR has never heard of those
+three. `compliance_fields.py` installs them as Custom Fields with `reqd=True`
+from this app's own `after_migrate`, so `_mandatory_gaps` was reading a
+requirement erpnext_mcp itself wrote and the message was sending the caller off
+to argue with their operator about it. It blocked `create_employee`,
+`onboard_employee` and the wizard alike — the phone is simply where somebody
+finally noticed.
+
+**A hire has a known state on all three, so it gets one.** `i9_status` starts at
+`Pending` — the I-9 is a separate form with §1324a's three-business-day clock on
+it and `create_i9_form` is step 3 of the same wizard. `w4_status` starts at
+`Missing`, **not** the `Pending` the analogy suggests: that field's options are
+On-File, Missing and Requires-Update, and `docs/compliance_fields.md` defines
+Missing as "the employer withholds at the default single rate", which is exactly
+true of somebody whose W-4 step has not run. `jurisdiction` is read off the
+hiring entity's own Address and falls back to `OR`; a Washington entity gets
+`WA` rather than being quietly paid under ORS 653.
+
+**The defaults are in `tools/employee.py`, not in the wrapper.** Three lines in
+`api/mobile.py` would have fixed the phone and left `onboard_employee` and the
+MCP tool refusing, and a wrapper cannot pass a field the fourteen-field
+allowlist does not carry anyway. So the allowlist is now seventeen — the three
+compliance statuses joined it — and the defaults live next to the check they
+answer. `api/mobile.py` gained the three as arguments and forwards them when the
+app sends them, which it does not yet; a later build that asks the foreman which
+state the crew is working needs no server change.
+
+**The safety net is untouched.** `_mandatory_gaps` still runs and still refuses,
+which is the right answer when an operator marks `date_of_birth` or `gender`
+required: nobody can default a date of birth, and inventing one would be worse
+than the refusal. What changed is only that this app fills in the fields this app
+required. Every default it applies is named in `defaults_applied` and in the
+note, because a record that quietly acquired an I-9 status is the record nobody
+goes back to fix. `_mandatory_message` now says whose requirement it is reporting.
+
+**The double could not have caught this.** `harness.add_field` dropped `reqd`, so
+a Custom Field installed as mandatory read as optional and `_mandatory_gaps` was
+unreachable for exactly the fields this app is the reason for. It carries the
+flag now, and the new tests build the Employee columns from
+`compliance_fields.py`'s own specs rather than restating them — a fourth field
+marked required there and not defaulted here rebuilds the wall, and
+`test_the_three_are_exactly_the_three_the_installer_marks_required` is what says
+so.
+
 ## 0.46.0 — 2026-08-07
 
 **The step before the nine.** v0.45.0 published onboarding, the crew clock and

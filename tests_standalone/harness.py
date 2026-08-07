@@ -1345,12 +1345,23 @@ def register_doctype(doctype: str, fields, issingle: bool = False, autoname: str
 	INSTALLED_DOCTYPES.add(doctype)
 
 
-def add_field(doctype: str, fieldname: str, fieldtype: str = "Data", options=None, label=None) -> None:
-	"""Make a field exist on a DocType, as inserting a Custom Field does."""
+def add_field(
+	doctype: str, fieldname: str, fieldtype: str = "Data", options=None, label=None, reqd=0
+) -> None:
+	"""Make a field exist on a DocType, as inserting a Custom Field does.
+
+	`reqd` is carried because `compliance_fields.py` installs three of its Employee
+	columns MANDATORY, and a double that dropped the flag made
+	`employee._mandatory_gaps` unreachable for exactly the fields this app is
+	itself the reason for — the wall the iOS wizard hit in v0.46.0 and the suite
+	could not have seen.
+	"""
 	meta = META.get(doctype)
 	if meta is None:
 		raise ValidationError(f"stub has no meta for {doctype!r}, so it cannot take a custom field")
-	meta.add(Field(fieldname=fieldname, fieldtype=fieldtype, options=options, label=label))
+	meta.add(
+		Field(fieldname=fieldname, fieldtype=fieldtype, options=options, label=label, reqd=int(reqd or 0))
+	)
 
 
 # ── filters ─────────────────────────────────────────────────────────────────
@@ -2054,6 +2065,7 @@ class CustomFieldDocument(Document):
 			fieldtype=str(self.get("fieldtype") or "Data"),
 			options=self.get("options"),
 			label=self.get("label"),
+			reqd=self.get("reqd") or 0,
 		)
 
 

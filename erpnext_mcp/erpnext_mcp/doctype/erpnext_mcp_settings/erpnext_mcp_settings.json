@@ -3449,14 +3449,14 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Creates one Employee record \u2014 the register every Farm Ops mobile method scopes work by. Writes fourteen identity and assignment fields and refuses everything else by name; payroll, tax and banking fields get their own refusal, because each has a form, an approval and a retention rule this app knows nothing about. Every Link and Select is checked against this site's own schema, and a second record for a name this company already has is refused with the existing docname.",
+   "description": "MUTATING. Creates one Employee record \u2014 the register every Farm Ops mobile method scopes work by. Writes seventeen identity, assignment and compliance-status fields and refuses everything else by name; payroll, tax and banking fields get their own refusal, because each has a form, an approval and a retention rule this app knows nothing about. The three statuses erpnext_mcp itself installs as mandatory — i9_status, w4_status, jurisdiction — start at Pending, Missing and the hiring entity's own state rather than blocking the hire, and every default is named in the result. Every Link and Select is checked against this site's own schema, and a second record for a name this company already has is refused with the existing docname.",
    "fieldname": "allow_create_employee",
    "fieldtype": "Check",
    "label": "Create Employee"
   },
   {
    "default": "0",
-   "description": "MUTATING. Changes the same fourteen identity and assignment fields on an Employee that already exists, and reports field by field what actually changed with the previous value. Payroll, tax and banking fields are refused by name. Re-pointing an existing login needs replace_user=true \u2014 it moves that person's whole task history with it.",
+   "description": "MUTATING. Changes the same seventeen identity, assignment and compliance-status fields on an Employee that already exists, and reports field by field what actually changed with the previous value. Payroll, tax and banking fields are refused by name. Re-pointing an existing login needs replace_user=true \u2014 it moves that person's whole task history with it.",
    "fieldname": "allow_update_employee",
    "fieldtype": "Check",
    "label": "Update Employee"

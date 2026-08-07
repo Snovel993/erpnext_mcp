@@ -71,8 +71,10 @@ would describe out loud:
   5. the first-day tasks
 
 Every step still delegates. Step 1 goes through `employee.create_employee`, so the
-fourteen-field allowlist, the schema checks and the mandatory-field message are
-the same code an operator gets calling that tool directly.
+seventeen-field allowlist, the schema checks, the compliance defaults and the
+mandatory-field message are the same code an operator gets calling that tool
+directly — including the v0.46.1 fix, which is why `onboard_employee` was refusing
+every hire on a migrated site and is not any more.
 
 IT IS IDEMPOTENT, AND THAT IS A PROPERTY OF THE LOOKUPS RATHER THAN OF A FLAG.
 Called twice with the same arguments, the second run finds the Employee (by login,
@@ -252,9 +254,11 @@ def _employee(args: dict, full_name: str, company: str, report: dict) -> str:
 	covers a re-run with no email at all, where the first two have nothing to
 	match on.
 
-	CREATION DELEGATES to `create_employee`, so the fourteen-field allowlist, the
-	Link and Select checks against this site's own schema, and the mandatory-field
-	message are the same code an operator gets calling that tool by hand. NO
+	CREATION DELEGATES to `create_employee`, so the seventeen-field allowlist, the
+	Link and Select checks against this site's own schema, the starting values for
+	the three compliance statuses this app installs as mandatory, and the
+	mandatory-field message are the same code an operator gets calling that tool by
+	hand. NO
 	`user_id` IS PASSED — the login does not exist yet, and `Employee.user_id` is
 	a Link that Frappe validates. The link is step 3.
 	"""

@@ -908,6 +908,9 @@ def create_employee(
 	department=None,
 	personal_email=None,
 	cell_number=None,
+	i9_status=None,
+	w4_status=None,
+	jurisdiction=None,
 ) -> dict:
 	"""The person. Step 1 of the wizard, and the record the other four steps fill in.
 
@@ -919,7 +922,7 @@ def create_employee(
 
 	IT DELEGATES RATHER THAN INSERTING. `frappe.get_doc({...}).insert()` here would
 	be four lines and would step around every rule `tools/employee.py` has held
-	since v0.18.1: the fourteen-field allowlist that refuses `ctc` and
+	since v0.18.1: the seventeen-field allowlist that refuses `ctc` and
 	`salary_structure` by name, the second-record check that keeps one person off
 	the dispatch board twice, the mandatory fields read off THIS site's meta rather
 	than assumed, and `require_hr_role`. Those rules stay where they are for the
@@ -937,6 +940,25 @@ def create_employee(
 	it in the Desk behind a check that the account is actually enrolled. A phone
 	that could set it in passing could point somebody else's task history at an
 	account it names.
+
+	THE THREE COMPLIANCE STATUSES ARE FORWARDED, NOT DEFAULTED HERE. v0.46.1: the
+	wizard reached this path and got "this site's Frappe HR marks i9_status,
+	w4_status, jurisdiction mandatory on Employee, and the call did not supply
+	them" — which was not Frappe HR's doing at all. `compliance_fields.py` installs
+	those three as Custom Fields with `reqd=True`, so the wall was erpnext_mcp's
+	own, and it stood in front of `onboard_employee` and the MCP tool exactly as
+	much as it stood in front of the phone.
+
+	The obvious fix was three lines HERE — Pending, Missing, OR — and it would have
+	been the wrong file. `tools/employee.py` owns the fourteen-field allowlist and
+	the mandatory check, so a wrapper cannot pass a field the allowlist does not
+	carry, and a wrapper that could would be a second set of hiring defaults to
+	keep in step with `onboard_employee`'s. The defaults live in the tool, next to
+	the check they answer; all three are on `WRITABLE` now, so what this wrapper
+	adds is the ABILITY TO OVERRIDE. The wizard sends none of them today and gets
+	the tool's values back in `defaults_applied`; a later build that asks the
+	foreman which state the crew is working can send `jurisdiction` and have it
+	honoured without a server change.
 	"""
 	allowed = guard.require_scope(user)
 
@@ -955,6 +977,9 @@ def create_employee(
 		("department", department),
 		("personal_email", personal_email),
 		("cell_number", cell_number),
+		("i9_status", i9_status),
+		("w4_status", w4_status),
+		("jurisdiction", jurisdiction),
 	):
 		if value not in (None, ""):
 			inner[key] = value

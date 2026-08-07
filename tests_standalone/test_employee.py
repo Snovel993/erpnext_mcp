@@ -334,6 +334,203 @@ class TheSchemaIsTheArbiter(EmployeeTestCase):
 		self.assertIn("no Department records at all", self.create_error(department="Operations"))
 
 
+# ── 2b ──────────────────────────────────────────────────────────────────────
+class TheFieldsThisAppMadeMandatory(EmployeeTestCase):
+	"""v0.46.1. The wall the iOS wizard hit on step one, and whose it was.
+
+	`compliance_fields.py` installs `i9_status`, `w4_status` and `jurisdiction` on
+	Employee with `reqd=True`. `_mandatory_gaps` then refused every create that did
+	not supply them — the MCP tool, `onboard_employee` and the wizard alike — with
+	a message blaming "this site's Frappe HR", which had nothing to do with it.
+	This app required the fields, so this app has to have an answer for them.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.install_compliance_fields()
+
+	def install_compliance_fields(self):
+		"""The three Employee columns as `compliance_fields.py` really leaves them.
+
+		Built from that module's own specs rather than restated here, so a fieldtype,
+		an option or a `reqd` flag that changes there cannot pass this suite unnoticed.
+		"""
+		from erpnext_mcp import compliance_fields
+
+		from .harness import add_field
+
+		for spec in compliance_fields.targets_by_doctype()["Employee"].fields:
+			add_field(
+				"Employee",
+				spec.fieldname,
+				fieldtype=spec.fieldtype,
+				options=spec.options or None,
+				label=spec.label,
+				reqd=1 if spec.reqd else 0,
+			)
+
+	def test_a_hire_that_supplies_none_of_them_is_created_rather_than_refused(self):
+		"""The bug itself: nothing the wizard sends names these three, and step one
+		404'd its way to a 'mandatory' refusal instead of a person."""
+		data = self.create()
+		self.assertTrue(data["employee"])
+		self.assertEqual(data["fields_set"]["i9_status"], "Pending")
+		self.assertEqual(data["fields_set"]["w4_status"], "Missing")
+		self.assertEqual(data["fields_set"]["jurisdiction"], "OR")
+
+	def test_every_default_it_invented_is_named_in_the_result(self):
+		"""A record that quietly acquired an I-9 status is the record nobody goes
+		back to fix."""
+		data = self.create()
+		self.assertEqual(
+			sorted(set(data["defaults_applied"]) & {"i9_status", "w4_status", "jurisdiction"}),
+			["i9_status", "jurisdiction", "w4_status"],
+		)
+		self.assertIn("i9_status=Pending", data["note"])
+		self.assertIn("w4_status=Missing", data["note"])
+		self.assertIn("starting values, not findings", data["note"])
+
+	def test_what_the_caller_passed_wins_and_is_not_reported_as_a_default(self):
+		data = self.create(i9_status="Verified", w4_status="On-File", jurisdiction="WA")
+		self.assertEqual(data["fields_set"]["i9_status"], "Verified")
+		self.assertEqual(data["fields_set"]["w4_status"], "On-File")
+		self.assertEqual(data["fields_set"]["jurisdiction"], "WA")
+		self.assertNotIn("i9_status", data["defaults_applied"])
+		self.assertNotIn("w4_status", data["defaults_applied"])
+		self.assertNotIn("jurisdiction", data["defaults_applied"])
+		self.assertNotIn("i9_status=", data["note"])
+
+	def test_a_status_this_site_does_not_offer_is_still_refused(self):
+		"""They are on the allowlist, not exempt from it. `_clean` checks a Select
+		against the site's own options exactly as it does for `status`."""
+		message = self.create_error(i9_status="Probationary")
+		self.assertIn("Probationary", message)
+		self.assertIn("Verified", message)
+
+	def test_every_default_is_an_option_the_installer_actually_offers(self):
+		"""The drift guard, and the reason `w4_status` defaults to Missing rather
+		than the Pending somebody will reach for by analogy with `i9_status`: that
+		field's three options are On-File, Missing and Requires-Update, and Pending
+		is not among them."""
+		from erpnext_mcp import compliance_fields
+		from erpnext_mcp.args import select_options
+
+		specs = {spec.fieldname: spec for spec in compliance_fields.targets_by_doctype()["Employee"].fields}
+		for fieldname, default in employee_tool.COMPLIANCE_DEFAULTS.items():
+			self.assertIn(default, select_options("Employee", fieldname))
+			self.assertIn(default, specs[fieldname].options.split("\n"))
+
+	def test_the_three_are_exactly_the_three_the_installer_marks_required(self):
+		"""Read off `compliance_fields.py` rather than agreed by hand. A fourth
+		field marked `reqd` there and not defaulted here would rebuild the wall."""
+		from erpnext_mcp import compliance_fields
+
+		required = tuple(
+			spec.fieldname for spec in compliance_fields.targets_by_doctype()["Employee"].fields if spec.reqd
+		)
+		self.assertEqual(required, employee_tool.COMPLIANCE_FIELDS)
+
+	def test_a_field_this_site_does_not_carry_gets_no_default(self):
+		"""`_supported` would drop it a moment later, and a default that is
+		silently discarded is worse than no default at all."""
+		from .harness import META
+
+		META["Employee"].fields = [
+			field for field in META["Employee"].fields if field.fieldname != "jurisdiction"
+		]
+		META["Employee"]._by_name.pop("jurisdiction", None)
+		data = self.create()
+		self.assertNotIn("jurisdiction", data["fields_set"])
+		self.assertNotIn("jurisdiction", data["defaults_applied"])
+
+	def address_for(self, company, state):
+		"""ERPNext's address linkage, which is an Address joined through a Dynamic
+		Link rather than a field on the Company. Registered per test — neither
+		doctype is in the standalone double, which is itself a real configuration:
+		a Frappe site that never installed ERPNext's address module."""
+		from .harness import register_doctype
+
+		register_doctype("Address", [{"fieldname": name} for name in ("name", "state", "address_title")])
+		register_doctype(
+			"Dynamic Link",
+			[{"fieldname": name} for name in ("name", "parent", "parenttype", "link_doctype", "link_name")],
+		)
+		STORE.seed("Address", [{"name": "ADDR-1", "state": state, "address_title": company}])
+		STORE.seed(
+			"Dynamic Link",
+			[
+				{
+					"name": "DL-1",
+					"parent": "ADDR-1",
+					"parenttype": "Address",
+					"link_doctype": "Company",
+					"link_name": company,
+				}
+			],
+		)
+
+	def test_the_jurisdiction_follows_the_hiring_entitys_own_address(self):
+		"""Wage law follows where the work is, and the entity's address is the
+		closest a site gets to knowing that at hire time. An entity in Washington
+		must not start under ORS 653 — the two states differ on agricultural
+		overtime, on rest breaks and on minimum wage regions."""
+		self.address_for(MAIN, "Washington")
+		self.assertEqual(self.create()["fields_set"]["jurisdiction"], "WA")
+
+	def test_a_two_letter_state_is_taken_as_written(self):
+		"""ERPNext stores whichever form the operator typed."""
+		self.address_for(MAIN, "id")
+		self.assertEqual(self.create()["fields_set"]["jurisdiction"], "ID")
+
+	def test_an_address_that_names_no_state_falls_back_rather_than_writing_blank(self):
+		"""A blank is what the create was refusing on in the first place."""
+		self.address_for(MAIN, "")
+		self.assertEqual(self.create()["fields_set"]["jurisdiction"], "OR")
+
+	def test_a_site_with_no_address_schema_at_all_still_hires(self):
+		"""The standalone double has neither Address nor Dynamic Link, which is
+		also a real Frappe site that never installed ERPNext's address module. The
+		fallback is a value an operator can see and correct, not an exception."""
+		self.assertEqual(self.create()["fields_set"]["jurisdiction"], "OR")
+
+	def test_a_field_the_operator_made_mandatory_is_still_refused(self):
+		"""The safety net is not removed, and this is the line it holds. Nobody can
+		default a date of birth, and inventing one would be worse than the refusal."""
+		from .harness import META
+
+		field = META["Employee"].get_field("date_of_birth")
+		field["reqd"] = 1
+		try:
+			message = self.create_error()
+		finally:
+			field["reqd"] = 0
+		self.assertIn("date_of_birth", message)
+		self.assertIn("Frappe HR", message)
+		self.assertIn("Nothing was created", message)
+
+	def test_the_refusal_no_longer_blames_frappe_hr_for_this_apps_own_field(self):
+		"""The sentence the wizard actually got. `jurisdiction` is a Custom Field
+		erpnext_mcp installs; sending the caller to argue with their operator about
+		it was this app pointing at itself."""
+		message = employee_tool._mandatory_message(["jurisdiction"])
+		self.assertIn("erpnext_mcp installs jurisdiction", message)
+		self.assertNotIn("Frappe HR", message)
+		both = employee_tool._mandatory_message(["gender", "jurisdiction"])
+		self.assertIn("Frappe HR marks gender", both)
+		self.assertIn("erpnext_mcp installs jurisdiction", both)
+
+	def test_update_employee_is_how_a_pending_i9_becomes_a_verified_one(self):
+		"""They are on `WRITABLE`, so the field a hire starts at Pending is the
+		field the I-9 step can move without leaving this app."""
+		created = self.create()
+		data = self.tool_data(
+			"update_employee", {"name": created["employee"], "i9_status": "Verified", "jurisdiction": "WA"}
+		)
+		changed = {entry["field"]: entry for entry in data["changed"]}
+		self.assertEqual(changed["i9_status"]["to"], "Verified")
+		self.assertEqual(changed["jurisdiction"]["to"], "WA")
+
+
 # ── 3 ───────────────────────────────────────────────────────────────────────
 class WhatItRefusesToWrite(EmployeeTestCase):
 	def test_a_payroll_field_is_refused_with_its_own_sentence(self):
@@ -722,10 +919,16 @@ class OnboardingEndToEnd(EmployeeTestCase):
 
 # ── the module's own claims ─────────────────────────────────────────────────
 class TheAllowlistIsClosed(EmployeeTestCase):
-	def test_the_fourteen_are_the_fourteen(self):
+	def test_the_seventeen_are_the_seventeen(self):
 		"""Asserted by name. `WRITABLE` is what every refusal message lists, and a
 		field added to it without a decision is a field this app writes without
-		one."""
+		one.
+
+		Fourteen until v0.46.1. The last three are the Custom Fields
+		`compliance_fields.py` installs with `reqd=True` — this app is the reason
+		the site has them and the reason they are mandatory, so a create that could
+		not write them was this app refusing its own schema on every path,
+		`onboard_employee` and the iOS wizard's first step included."""
 		self.assertEqual(
 			employee_tool.WRITABLE,
 			(
@@ -743,6 +946,9 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 				"user_id",
 				"personal_email",
 				"cell_number",
+				"i9_status",
+				"w4_status",
+				"jurisdiction",
 			),
 		)
 
