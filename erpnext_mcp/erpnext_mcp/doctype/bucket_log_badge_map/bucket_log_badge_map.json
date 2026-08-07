@@ -1,0 +1,112 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:badge_id",
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One QR badge, and the Employee it was issued to. The only fact link_badge_to_employee owns: resolve_badge_to_employee (bucket_bridge.py) reads this register, pre-fetched into a plain {badge_id: employee} map, to fill in a Bucket Log Entry's employee from the worker_badge a device scanned. A separate table rather than a field on Employee — Employee is a core doctype this app edits only through employee.py's own closed WRITABLE list (see its module docstring), and a badge is reassignable (a lost card, a re-printed one) independent of anything else about the person.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "badge_id",
+  "company",
+  "employee",
+  "identity_col",
+  "active",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The QR badge ID as BucketLog scans it and sends it in worker_badge. The docname.",
+   "fieldname": "badge_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Badge ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Which company issued this badge.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "Who this badge currently belongs to.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Unticked retires a badge without deleting the record — a lost or reissued card stops resolving to anybody while keeping the history of who held it.",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "description": "Why this badge was mapped, reassigned or retired — worth reading later.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Bucket Log Badge Map",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Farm Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "badge_id,company,employee",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "badge_id",
+ "track_changes": 1
+}

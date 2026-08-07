@@ -80,8 +80,8 @@ def list_audit_packet_types(args: dict) -> ToolResult:
 			"note": (
 				"A section listed under `sections_that_will_be_empty_here` has no DocType behind "
 				"it on this site, and the packet will SAY SO rather than omit the section. An "
-				"absent traceability section reads as an operation with nothing to declare; a "
-				"section that says the BucketLog bridge is not installed reads as the truth."
+				"absent spray-records section reads as an operation with nothing to declare; a "
+				"section that says farm_precision_ag is not installed reads as the truth."
 			),
 			"kairotic_gate": (
 				"Every type refuses on a period that is not genuinely closed: one that has not "

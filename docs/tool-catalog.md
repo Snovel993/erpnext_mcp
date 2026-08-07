@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 369 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 377 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 170 read tools are **on** by default and can be switched off individually. A
+All 175 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -9037,6 +9037,105 @@ polling at startup does not have to treat "nothing deployed yet" as a failure.
 
 ---
 
+## v0.44.0 — BucketLog → ERPNext Piecework Bridge
+
+Eight tools. `payroll_integration.py` has read a `bucket_logs` row off a shift
+since v0.35.0 and `tools/payroll.py` has speculatively queried a doctype
+called `Bucket Log Entry` since the same release — this release creates it,
+as erpnext_mcp's **own** doctype, and everything that gets a capture from an
+iPhone in an orchard into it: the sync endpoint, the badge → Employee
+register, and the reads a foreman or a payroll run asks afterward.
+
+**Bucket Log Entry is no longer a hypothetical external app's doctype.**
+Through v0.43.0, `compliance_fields.py` grafted five FSMA traceability
+columns onto it the way it grafts columns onto Spray Log
+(`farm_precision_ag`) or Employee (`farm_hr`/`hrms`). Now that erpnext_mcp
+ships the doctype itself, its `Target` entry moved to `mode="verify"` —
+declared fields, checked present, the same treatment Housing Unit and Field
+already get — and `picker_id` retired in favour of a proper `employee` Link
+resolved from `worker_badge`. `crew_id`/`block_id`/`bin_id`/`shipment_id`
+ship as declared fields, so the FSMA chain of custody did not regress.
+
+**The arithmetic is not in the tool layer.** `bucket_bridge.py` is pure and
+reads no database, the same split `model_registry.py` keeps:
+`validate_bucket_entry` checks a capture's shape, `resolve_badge_to_employee`
+reads a pre-fetched `{badge_id: employee}` map, `aggregate_session` computes
+a session's totals from its own entries, and `entries_to_payroll_shape`
+reshapes captures into exactly the `bucket_logs` row
+`payroll_integration._piece_units_for` already reads — **no change to that
+function was needed**. `tools/bucket_log.py` is the only place that reads or
+writes a Bucket Log Entry, Bucket Log Session or Bucket Log Badge Map
+document.
+
+**Only an Accepted verdict is piece work.** A Rejected capture is the
+on-device ML model saying the bucket was not actually filled;
+`entries_to_payroll_shape` filters it out at the one place every
+payroll-facing read passes through, and `tools/payroll.py`'s own bucket-log
+loader filters the same way for the production path — it also now recognises
+`timestamp` as this doctype's own date column.
+
+### `sync_bucket_entries`
+
+```json
+{"entries": [
+  {"entry_uuid": "e1a2...", "session_uuid": "s9c1...", "company": "Highland Orchards",
+   "worker_badge": "QR-0042", "timestamp": "2026-06-01 08:12:00", "verdict": "Accepted",
+   "coverage_percent": 94.2, "model_uuid": "4b6f6e1a-...", "gps_lat": 45.31, "gps_lon": -123.02,
+   "h3_cell": "8a2830828447fff", "device_id": "iPhone-Ana"}
+]}
+```
+
+**MUTATING (default OFF).** Creates Bucket Log Entry records, resolves each
+one's `employee` from `worker_badge` against the Bucket Log Badge Map
+register, and keeps the Bucket Log Session each belongs to up to date.
+**Deduplicates by `entry_uuid`** — resyncing a batch already on the site is a
+no-op, not a duplicate record. An entry that fails validation (bad verdict,
+no timestamp, no badge or employee) is reported and **skipped** rather than
+failing the whole call, up to 500 entries per batch.
+
+### `list_bucket_entries` / `list_bucket_sessions`
+
+Read-only registers, filterable by `company`, `employee`, `status` and a
+date range; entries additionally by `badge`, `session` and `verdict`.
+
+### `get_bucket_session`
+
+Read-only. One session, by docname or `session_uuid`, with its totals
+**computed live** from its own current entries (`bucket_bridge.aggregate_session`)
+rather than only the stored counters — the two can drift if a badge resolves
+after the session was last synced.
+
+### `link_badge_to_employee`
+
+**MUTATING (default OFF).** Maps a QR badge ID to an Employee. Repoints an
+existing mapping (a lost card reissued to somebody else) rather than
+refusing. **Backfills `employee`** onto any already-synced entry and session
+carrying that badge with none resolved yet — a badge mapped after the fact
+still pays for what was already picked.
+
+### `link_entries_to_shift`
+
+**MUTATING (default OFF).** Associates Bucket Log Entries with a Farm Shift
+— pass `entries` (a list of entry_uuid/docname) or `session` (every
+not-yet-Paid entry in it) — so they are picked up as piece units when that
+shift's payroll runs. An entry already `Paid` is left untouched: status only
+ever advances Pending → Linked → Paid.
+
+### `get_piecework_summary`
+
+Read-only. The payroll-ready summary for one employee over a date range:
+accepted buckets, sessions worked, acceptance rate.
+
+### `reconcile_bucket_payroll`
+
+Read-only. Compares accepted Bucket Log Entries against what Farm Payroll
+Slips actually paid for the same company and period, per employee. **A
+discrepancy is not necessarily an error** — a bucket entry with no slip
+covering it yet is simply unpaid so far, the same posture
+`check_minimum_wage_by_state` takes.
+
+---
+
 # Adding a tool
 
 Everything a tool needs is in two places:
@@ -9048,7 +9147,7 @@ Everything a tool needs is in two places:
    `company`, `farm`, `housing`, `compliance`, `evidence`, `calendar`,
    `auditpacket`, `dispatch`, `inspections`, `mobile`, `funnel`, `training`,
    `shifts`, `heat`, `kpi`, `kpidefs`, `payroll`, `payroll_gl`, `visits`,
-   `sessions`, `rules`, `tasktemplates`, `budget`, `ml_model`,
+   `sessions`, `rules`, `tasktemplates`, `budget`, `ml_model`, `bucket_log`,
    `asset_tags`, `feeds` or `fieldwork` —
    returning a `ToolResult(data, summary, docstatus_delta="")`. A new *compliance
    packet type* is not a new tool: it is one file in `erpnext_mcp/packets/`, and

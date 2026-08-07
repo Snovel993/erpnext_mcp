@@ -18,9 +18,9 @@ three places:
     written.
 
   * **It says what it could not find.** A section with no records says so, in the
-    packet, with the reason. An FSMA packet whose traceability section is silently
+    packet, with the reason. An EPA packet whose spray-records section is silently
     absent reads as an operation with nothing to declare rather than one whose
-    BucketLog bridge is not installed, and an auditor will find the difference
+    farm_precision_ag is not installed, and an auditor will find the difference
     faster than the operator will.
 
 THE KAIROTIC GATE, AND WHY IT IS A REFUSAL RATHER THAN A WARNING.
@@ -1053,23 +1053,25 @@ def _water(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
 
 
 def _traceability(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
-	"""The bucket-to-shipment chain, or a plain statement that it is not here."""
+	"""The bucket-to-shipment chain: every Bucket Log Entry in the period.
+
+	Bucket Log Entry is erpnext_mcp's own doctype as of v0.44.0 (`bucket_log.py`,
+	`bucket_bridge.py`) rather than an external app's — see
+	`compliance_fields.py`'s Target entry for it, `mode="verify"`. So this reads
+	`employee` (resolved from `worker_badge` by `link_badge_to_employee`) for the
+	picker, and `verdict` for the disposition, rather than assuming columns a
+	third-party doctype might or might not carry.
+	"""
 	doctype = "Bucket Log Entry"
-	if not compat.doctype_exists(doctype):
-		return _section(
-			"Harvest traceability",
-			"Bucket → picker → crew → block → bin → shipment, the FSMA critical tracking events.",
-			[],
-			("entry", "date", "picker_id", "crew_id", "block_id", "bin_id", "shipment_id"),
-			absent=(
-				"The BucketLog bridge is not installed on this site, so the bucket-level chain "
-				"of custody is not in this packet. Traceability for this period exists in the "
-				"BucketLog app's own export and has to be supplied separately. Saying so is "
-				"more use than an empty table, which reads as an operation with nothing to "
-				"declare."
-			),
-		)
-	date_field = compat.first_field(doctype, "logged_at", "log_date", "date", "posting_date", "creation")
+	date_field = compat.first_field(
+		doctype,
+		"timestamp",
+		"logged_at",
+		"log_date",
+		"date",
+		"posting_date",
+		"creation",
+	)
 	filters = _company_filter(company)
 	if date_field and date_field != "creation":
 		filters[date_field] = ("between", (start, end))
@@ -1080,12 +1082,13 @@ def _traceability(spec: AuditPacketType, company: str, start: str, end: str) -> 
 		(
 			"name",
 			date_field or "creation",
-			"picker_id",
+			"employee",
+			"worker_badge",
 			"crew_id",
 			"block_id",
 			"bin_id",
 			"shipment_id",
-			"disposition",
+			"verdict",
 		),
 		order_by=f"{date_field} asc" if date_field else "creation asc",
 	):
@@ -1093,12 +1096,12 @@ def _traceability(spec: AuditPacketType, company: str, start: str, end: str) -> 
 			{
 				"entry": row["name"],
 				"date": str(row.get(date_field) or row.get("creation") or "")[:10] or None,
-				"picker_id": row.get("picker_id") or "(unlinked)",
+				"picker": row.get("employee") or row.get("worker_badge") or "(unlinked)",
 				"crew_id": row.get("crew_id") or "(unlinked)",
 				"block_id": row.get("block_id") or "(unlinked)",
 				"bin_id": row.get("bin_id") or "(unlinked)",
 				"shipment_id": row.get("shipment_id") or "(unlinked)",
-				"disposition": row.get("disposition"),
+				"disposition": row.get("verdict"),
 			}
 		)
 	section = _section(
@@ -1109,7 +1112,7 @@ def _traceability(spec: AuditPacketType, company: str, start: str, end: str) -> 
 			"weakest link — unlinked columns are shown as such."
 		),
 		rows,
-		("entry", "date", "picker_id", "crew_id", "block_id", "bin_id", "shipment_id"),
+		("entry", "date", "picker", "crew_id", "block_id", "bin_id", "shipment_id"),
 	)
 	broken = [
 		row["entry"] for row in rows if "(unlinked)" in (row["block_id"], row["bin_id"], row["shipment_id"])

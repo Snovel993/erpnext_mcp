@@ -8,12 +8,15 @@ app gets their site back exactly as it was. v0.7.0's asset tooling keeps its cos
 split in an `Asset Cost Profile` beside ERPNext's Asset for precisely that
 reason: a doctype of ours goes with the app, a field on theirs does not.
 
-Sprint 7 adds fields to Spray Log, to Employee and to Bucket Log Entry — three
-doctypes belonging to other apps — and it does so **on purpose**, because the
-alternative is worse in a way that matters more than the promise. v0.19.3 adds a
-fourth target, `Attendance`, for the same reason and with the same argument: the
-shift-close bridge writes payroll rows, and a row that cannot say which shift it
-came from is a row nobody can reach the working conditions through.
+Sprint 7 adds fields to Spray Log, to Employee and (through v0.43.0) to Bucket
+Log Entry — doctypes belonging to other apps — and it does so **on purpose**,
+because the alternative is worse in a way that matters more than the promise.
+v0.19.3 adds a fourth target, `Attendance`, for the same reason and with the
+same argument: the shift-close bridge writes payroll rows, and a row that
+cannot say which shift it came from is a row nobody can reach the working
+conditions through. v0.44.0 makes Bucket Log Entry erpnext_mcp's OWN doctype —
+see its `Target` entry below, `mode="verify"` rather than `mode="extend"`, the
+same treatment Housing Unit and Field already get.
 
 WHY. Compliance is a lens on operational data, not a duplicate set of records.
 Every spray IS an EPA and Worker Protection Standard record; every hire IS an
@@ -391,28 +394,23 @@ _EMPLOYEE_FIELDS = (
 )
 
 
-# ── Bucket Log Entry — the BucketLog bridge ─────────────────────────────────
+# ── Bucket Log Entry — erpnext_mcp's own doctype as of v0.44.0 ──────────────
 #
 # Traceability is a chain, and a chain is only as good as its weakest link. The
 # FSMA Food Traceability Rule (21 CFR 1 Subpart S) wants a Traceability Lot Code
-# that survives from the field to the shipment; these five columns are the links.
-# All are audited rather than assumed, because the BucketLog bridge doctype is
-# written by whichever version of the iPad app is in the field this season.
+# that survives from the field to the shipment; these four columns are the
+# links from the bucket to the shipment. "Picker" is not among them — Bucket
+# Log Entry's own `employee` (resolved from `worker_badge` by
+# `link_badge_to_employee`) already carries that fact as a proper Employee
+# Link, which a Data column of the same name would only duplicate.
+#
+# THIS TARGET IS `mode="verify"`, NOT `mode="extend"`, unlike every other
+# entry in TARGETS. Through v0.43.0 this doctype belonged to a hypothetical
+# external "BucketLog bridge" app this file grafted onto; v0.44.0 makes it
+# erpnext_mcp's own — the sync endpoint, the badge register and the doctype
+# all ship together — so these four columns are declared in its shipped JSON
+# and verified here, the same as Housing Unit's and Field's below.
 _BUCKET_FIELDS = (
-	ComplianceField(
-		fieldname="picker_id",
-		label="Picker",
-		fieldtype="Data",
-		framework="FSMA 21 CFR 1 Subpart S; GAP worker hygiene traceback",
-		why=(
-			"A worker health or hygiene investigation traces from a lot back to the "
-			"people who handled it. Without the picker the trace stops at the crew."
-		),
-		operational=(
-			"Piecework pay. Every bucket is somebody's money, and an unattributed "
-			"bucket is a payroll dispute at the end of the week."
-		),
-	),
 	ComplianceField(
 		fieldname="crew_id",
 		label="Crew",
@@ -660,17 +658,19 @@ TARGETS = (
 	),
 	Target(
 		doctype="Bucket Log Entry",
-		owner_app="the BucketLog bridge",
+		owner_app="erpnext_mcp",
+		mode="verify",
 		purpose=(
-			"Harvest chain of custody: bucket → picker → crew → block → bin → shipment. "
-			"The FSMA Food Traceability Rule's critical tracking events, in the record "
-			"the iPad already writes."
+			"Harvest chain of custody: bucket → employee → crew → block → bin → shipment. "
+			"The FSMA Food Traceability Rule's critical tracking events. `employee` is a "
+			"declared field of the doctype itself (resolved from worker_badge by "
+			"link_badge_to_employee); crew_id/block_id/bin_id/shipment_id, verified here, "
+			"are the rest of the chain. Shipped as declared fields in v0.44.0."
 		),
 		fields=_BUCKET_FIELDS,
 		absent_note=(
-			"The BucketLog bridge doctype is not on this site. The columns are audited "
-			"rather than assumed because the bridge is written by whichever version of "
-			"the iPad app is in the field this season."
+			"Bucket Log Entry is not on this site, which means the DocType did not "
+			"migrate — it ships with erpnext_mcp. Run `bench --site <site> migrate`."
 		),
 	),
 	Target(

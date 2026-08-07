@@ -1,0 +1,181 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One BucketLog scanning session, grouping the Bucket Log Entry captures it produced. Kept separate from the entries themselves (rather than computed on the fly every time) because a foreman or a payroll run wants 'how did this session go' as one row, not an aggregation query — total_accepted/total_rejected are filled in by sync_bucket_entries as entries arrive, from bucket_bridge.aggregate_session.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "session_uuid",
+  "company",
+  "status",
+  "identity_section",
+  "worker_badge",
+  "employee",
+  "device_id",
+  "time_section",
+  "started_at",
+  "ended_at",
+  "totals_section",
+  "total_accepted",
+  "total_rejected"
+ ],
+ "fields": [
+  {
+   "default": "BLS-.YYYY.-.####",
+   "description": "The series a Bucket Log Session is named from, expanded by the controller (year is the session's own started_at year) so a docname is the same shape on a bench and in the standalone suite — BLS-2026-0001.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "BLS-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The iOS session's own UUID — the key Bucket Log Entry.session_uuid joins back to.",
+   "fieldname": "session_uuid",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Session UUID",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "description": "Which company this session's picking belongs to.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "default": "Open",
+   "description": "Open is still receiving entries. Closed means the device ended the session. Linked means every entry in it has been attributed to a shift.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Open\nClosed\nLinked",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Identity"
+  },
+  {
+   "description": "The QR badge ID scanned for this session.",
+   "fieldname": "worker_badge",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Worker Badge",
+   "search_index": 1
+  },
+  {
+   "description": "Who worked this session, resolved from worker_badge the same way a Bucket Log Entry's own employee is.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "The device this session ran on.",
+   "fieldname": "device_id",
+   "fieldtype": "Data",
+   "label": "Device ID"
+  },
+  {
+   "fieldname": "time_section",
+   "fieldtype": "Section Break",
+   "label": "Time"
+  },
+  {
+   "description": "When the session opened on-device.",
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Started At"
+  },
+  {
+   "description": "When the session closed, or the latest entry's timestamp for a session still Open.",
+   "fieldname": "ended_at",
+   "fieldtype": "Datetime",
+   "label": "Ended At"
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break",
+   "label": "Totals"
+  },
+  {
+   "default": "0",
+   "description": "Computed by sync_bucket_entries from this session's own entries — bucket_bridge.aggregate_session, not a running counter a client increments.",
+   "fieldname": "total_accepted",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Total Accepted",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Computed the same way as total_accepted.",
+   "fieldname": "total_rejected",
+   "fieldtype": "Int",
+   "label": "Total Rejected",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Bucket Log Session",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Farm Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "session_uuid,worker_badge,employee,status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "session_uuid",
+ "track_changes": 1
+}

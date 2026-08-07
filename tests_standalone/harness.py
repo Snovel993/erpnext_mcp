@@ -1061,6 +1061,11 @@ APP_DOCTYPES = {
 	# v0.43.0. Which trained model is deployed for which company and which
 	# piecework activity.
 	"ML Model": "ml_model",
+	# v0.44.0. BucketLog -> ERPNext piecework bridge: synced captures, the
+	# sessions that group them, and the badge -> Employee register.
+	"Bucket Log Entry": "bucket_log_entry",
+	"Bucket Log Session": "bucket_log_session",
+	"Bucket Log Badge Map": "bucket_log_badge_map",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -2921,6 +2926,7 @@ INSTALLED_DOCTYPES = set(ERPNEXT_SCHEMA) | set(APP_DOCTYPES)
 
 # ── utils ───────────────────────────────────────────────────────────────────
 _now_counter = 0
+
 
 def _now() -> str:
 	global _now_counter

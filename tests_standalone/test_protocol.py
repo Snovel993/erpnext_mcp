@@ -702,6 +702,19 @@ class Catalogue(SeededTestCase):
 		`check_model_conflicts`, and held true in the database regardless of
 		which door a save came through, by the DocType controller.
 
+		v0.44.0 ADDED EIGHT — five reads and three writes — for the BucketLog →
+		ERPNext Piecework Bridge. `payroll_integration.py` has read a
+		`bucket_logs` row off a shift since v0.35.0 and `tools/payroll.py` has
+		speculatively queried a doctype called "Bucket Log Entry" since the same
+		release; this is what finally creates it, as erpnext_mcp's OWN doctype
+		rather than a hypothetical external app's — `compliance_fields.py`'s
+		Target entry for it moves from `mode="extend"` to `mode="verify"`
+		accordingly. `bucket_bridge.py` is pure, the same discipline as
+		`model_registry.py`: `entries_to_payroll_shape` reshapes synced
+		captures into exactly the row `_piece_units_for` already reads, and
+		ONLY an Accepted verdict earns a unit. `sync_bucket_entries` dedupes a
+		resynced batch by `entry_uuid` rather than failing it.
+
 		THE THREE NUMBERS BELOW WERE RED FOR A RELEASE. v0.30.0 shipped its nine
 		tools without touching them, so this test, `test_read_tools.py`'s copy of
 		the read count and the three in `test_tool_catalog_count.py` all failed on
@@ -709,9 +722,9 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 369)
-		self.assertEqual(len(registry.READ_TOOLS), 170)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 199)
+		self.assertEqual(len(registry.TOOLS), 377)
+		self.assertEqual(len(registry.READ_TOOLS), 175)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 202)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

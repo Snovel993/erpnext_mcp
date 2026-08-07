@@ -1,0 +1,278 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-06 09:00:00.000000",
+ "description": "One synced capture from BucketLog: a photo of a picked bucket, scored by an on-device ML model, at a place and a time, against whoever's badge was scanned. verdict=Accepted is the one fact that turns a capture into piece work — entries_to_payroll_shape (bucket_bridge.py) and payroll_integration.py's _piece_units_for are what a Rejected capture never reaches. company/worker_badge/employee/timestamp/verdict arrive from the device; shift, synced_at and status are filled in on this side as the record moves from synced, to linked to a shift, to paid.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "entry_uuid",
+  "session_uuid",
+  "company",
+  "verdict",
+  "identity_section",
+  "worker_badge",
+  "employee",
+  "timestamp",
+  "capture_col",
+  "coverage_percent",
+  "model_uuid",
+  "traceability_section",
+  "crew_id",
+  "block_id",
+  "traceability_col",
+  "bin_id",
+  "shipment_id",
+  "location_section",
+  "gps_lat",
+  "gps_lon",
+  "h3_cell",
+  "location_col",
+  "device_id",
+  "payroll_section",
+  "shift",
+  "status",
+  "synced_at"
+ ],
+ "fields": [
+  {
+   "default": "BLE-.YYYY.-.####",
+   "description": "The series a Bucket Log Entry is named from, expanded by the controller (year is the capture's own timestamp year, not the sync date) so a docname is the same shape on a bench and in the standalone suite — BLE-2026-0001.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "BLE-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The iOS BucketLogEntry's own UUID. sync_bucket_entries deduplicates a sync batch by this field — resending an entry ERPNext already has is a no-op, not a duplicate record.",
+   "fieldname": "entry_uuid",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Entry UUID",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "description": "The iOS session this capture belongs to — groups entries the same way Bucket Log Session does, before or independent of that record existing.",
+   "fieldname": "session_uuid",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Session UUID",
+   "search_index": 1
+  },
+  {
+   "description": "Which company this capture belongs to — the same field get_piecework_summary and reconcile_bucket_payroll scope by.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "What the on-device model decided. Accepted is the only verdict entries_to_payroll_shape turns into a paid unit — a Rejected capture is the model saying the bucket was not actually filled.",
+   "fieldname": "verdict",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Verdict",
+   "options": "Accepted\nRejected",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Identity"
+  },
+  {
+   "description": "The QR badge ID scanned on-device. Resolved to employee via link_badge_to_employee's Bucket Log Badge Map register; kept even after resolution as the device's own record of what was scanned.",
+   "fieldname": "worker_badge",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Worker Badge",
+   "search_index": 1
+  },
+  {
+   "description": "Who picked this bucket, resolved from worker_badge. Nullable until link_badge_to_employee has mapped this badge, or the badge was never mapped at all — an entry with no employee earns nothing (see entries_to_payroll_shape) until this is filled in.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "When the bucket was captured on-device — the fact payroll cares about, not when ERPNext received it (see synced_at).",
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Timestamp",
+   "reqd": 1
+  },
+  {
+   "fieldname": "capture_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The ML model's own fill-coverage score for this bucket, 0-100.",
+   "fieldname": "coverage_percent",
+   "fieldtype": "Float",
+   "label": "Coverage %"
+  },
+  {
+   "description": "Which ML Model (by source_uuid, joining to model_registry.py's ML Model.source_uuid) produced this verdict — the same UUID Volume Vision and get_active_model's manifest use.",
+   "fieldname": "model_uuid",
+   "fieldtype": "Data",
+   "label": "Model UUID"
+  },
+  {
+   "fieldname": "traceability_section",
+   "fieldtype": "Section Break",
+   "label": "Traceability"
+  },
+  {
+   "description": "FSMA 21 CFR 1 Subpart S; MSPA crew records. The crew a hygiene training record, a field sanitation inspection and a wage-law jurisdiction all attach to.",
+   "fieldname": "crew_id",
+   "fieldtype": "Data",
+   "label": "Crew"
+  },
+  {
+   "description": "FSMA Subpart S critical tracking event; spray REI/PHI linkage. The join to the spray record — how a residue question becomes an answerable question.",
+   "fieldname": "block_id",
+   "fieldtype": "Data",
+   "label": "Block"
+  },
+  {
+   "fieldname": "traceability_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "FSMA Subpart S — commingling/transformation event. Where buckets from several pickers become one lot.",
+   "fieldname": "bin_id",
+   "fieldtype": "Data",
+   "label": "Bin"
+  },
+  {
+   "description": "FSMA Subpart S — shipping event. Closes the chain of custody a buyer's mock recall is timed against.",
+   "fieldname": "shipment_id",
+   "fieldtype": "Data",
+   "label": "Shipment"
+  },
+  {
+   "fieldname": "location_section",
+   "fieldtype": "Section Break",
+   "label": "Location"
+  },
+  {
+   "fieldname": "gps_lat",
+   "fieldtype": "Float",
+   "label": "GPS Latitude",
+   "precision": "8"
+  },
+  {
+   "fieldname": "gps_lon",
+   "fieldtype": "Float",
+   "label": "GPS Longitude",
+   "precision": "8"
+  },
+  {
+   "description": "The H3 cell this capture fell in, at whatever resolution BucketLog logs — the same indexing the geospatial field/zone tools use, so a bucket count and a field boundary can be joined without a spatial query.",
+   "fieldname": "h3_cell",
+   "fieldtype": "Data",
+   "label": "H3 Cell",
+   "search_index": 1
+  },
+  {
+   "fieldname": "location_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The device this capture came from, as BucketLog identifies itself — not an ERPNext identity.",
+   "fieldname": "device_id",
+   "fieldtype": "Data",
+   "label": "Device ID"
+  },
+  {
+   "fieldname": "payroll_section",
+   "fieldtype": "Section Break",
+   "label": "Payroll"
+  },
+  {
+   "description": "The Farm Shift this bucket has been attributed to for payroll, set by link_entries_to_shift. Empty until then.",
+   "fieldname": "shift",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Shift",
+   "options": "Farm Shift"
+  },
+  {
+   "default": "Pending",
+   "description": "Pending is synced and unlinked. Linked carries a shift. Paid has appeared on a payroll slip. Moves forward only — link_entries_to_shift never moves an entry out of Paid.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nLinked\nPaid",
+   "reqd": 1
+  },
+  {
+   "description": "When ERPNext received this record via sync_bucket_entries — distinct from timestamp, which is when the bucket was actually picked.",
+   "fieldname": "synced_at",
+   "fieldtype": "Datetime",
+   "label": "Synced At",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Bucket Log Entry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Farm Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "entry_uuid,session_uuid,worker_badge,employee,verdict,status",
+ "sort_field": "timestamp",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "entry_uuid",
+ "track_changes": 1
+}

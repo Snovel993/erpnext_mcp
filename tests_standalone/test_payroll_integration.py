@@ -168,66 +168,98 @@ class IntegrationTestCase(V12TestCase):
 				for bracket in annual:
 					floor = bracket["bracket_floor"] / periods
 					ceiling = bracket["bracket_ceiling"] / periods if bracket["bracket_ceiling"] else None
-					brackets.append({
-						"name": f"FTB-{filing_status[:3]}-{period_name[:3]}-{floor:.0f}",
-						"tax_year": 2025,
-						"filing_status": filing_status,
-						"payroll_period": period_name,
-						"bracket_floor": round(floor, 2),
-						"bracket_ceiling": round(ceiling, 2) if ceiling else None,
-						"base_tax": round(bracket["base_tax"] / periods, 2),
-						"marginal_rate": bracket["marginal_rate"],
-					})
+					brackets.append(
+						{
+							"name": f"FTB-{filing_status[:3]}-{period_name[:3]}-{floor:.0f}",
+							"tax_year": 2025,
+							"filing_status": filing_status,
+							"payroll_period": period_name,
+							"bracket_floor": round(floor, 2),
+							"bracket_ceiling": round(ceiling, 2) if ceiling else None,
+							"base_tax": round(bracket["base_tax"] / periods, 2),
+							"marginal_rate": bracket["marginal_rate"],
+						}
+					)
 		STORE.seed("Federal Tax Table", brackets)
 
 	def _seed_employees(self):
-		STORE.seed("Employee", [
-			{"name": WORKER, "employee_name": "Ana Reyes", "company": MAIN,
-			 "status": "Active", "date_of_joining": "2025-01-15"},
-			{"name": PICKER, "employee_name": "Beto Cruz", "company": MAIN,
-			 "status": "Active", "date_of_joining": "2025-03-01"},
-			{"name": DRIVER, "employee_name": "Carla Mota", "company": MAIN,
-			 "status": "Active", "date_of_joining": "2025-02-01"},
-		])
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": WORKER,
+					"employee_name": "Ana Reyes",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-01-15",
+				},
+				{
+					"name": PICKER,
+					"employee_name": "Beto Cruz",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-03-01",
+				},
+				{
+					"name": DRIVER,
+					"employee_name": "Carla Mota",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-02-01",
+				},
+			],
+		)
 
 	def _seed_state_configs(self):
-		STORE.seed("State Tax Configuration", [
-			{
-				"name": "STC-OR-2025", "company": MAIN, "state": "OR",
-				"tax_year": 2025, "status": "Active",
-				"or_income_tax_enabled": 0,
-				"or_transit_tax_rate": 0.1,
-				"or_paid_leave_rate": 1.0,
-				"or_paid_leave_employee_share": 60,
-				"or_paid_leave_employer_share": 40,
-				"or_paid_leave_small_employer": 0,
-				"or_workers_comp_rate": 1.5,
-			},
-			{
-				"name": "STC-WA-2025", "company": MAIN, "state": "WA",
-				"tax_year": 2025, "status": "Active",
-				"wa_pfml_rate": 0.92,
-				"wa_pfml_employee_share": 72.76,
-				"wa_pfml_employer_share": 27.24,
-				"wa_pfml_wage_base": 176100,
-				"wa_cares_rate": 0.58,
-				"wa_cares_employee_only": 1,
-				"wa_cares_exempt_employees": "",
-				"wa_li_rate_employee": 0.25,
-				"wa_li_rate_employer": 0.35,
-			},
-		])
+		STORE.seed(
+			"State Tax Configuration",
+			[
+				{
+					"name": "STC-OR-2025",
+					"company": MAIN,
+					"state": "OR",
+					"tax_year": 2025,
+					"status": "Active",
+					"or_income_tax_enabled": 0,
+					"or_transit_tax_rate": 0.1,
+					"or_paid_leave_rate": 1.0,
+					"or_paid_leave_employee_share": 60,
+					"or_paid_leave_employer_share": 40,
+					"or_paid_leave_small_employer": 0,
+					"or_workers_comp_rate": 1.5,
+				},
+				{
+					"name": "STC-WA-2025",
+					"company": MAIN,
+					"state": "WA",
+					"tax_year": 2025,
+					"status": "Active",
+					"wa_pfml_rate": 0.92,
+					"wa_pfml_employee_share": 72.76,
+					"wa_pfml_employer_share": 27.24,
+					"wa_pfml_wage_base": 176100,
+					"wa_cares_rate": 0.58,
+					"wa_cares_employee_only": 1,
+					"wa_cares_exempt_employees": "",
+					"wa_li_rate_employee": 0.25,
+					"wa_li_rate_employer": 0.35,
+				},
+			],
+		)
 
 	# ── helpers ───────────────────────────────────────────────────────
 
 	def structure(self, employee, pay_type="Hourly", rate=20.0, company=MAIN):
-		return self.tool_data("create_salary_structure", {
-			"employee": employee,
-			"company": company,
-			"pay_type": pay_type,
-			"base_rate": rate,
-			"effective_from": "2025-01-01",
-		})
+		return self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": employee,
+				"company": company,
+				"pay_type": pay_type,
+				"base_rate": rate,
+				"effective_from": "2025-01-01",
+			},
+		)
 
 	def seed_shifts(self, *rows):
 		STORE.seed("Farm Shift", list(rows))
@@ -255,12 +287,15 @@ class IntegrationTestCase(V12TestCase):
 			STORE.seed("Bucket Log Entry", list(rows))
 
 	def preview(self, **extra):
-		return self.tool_data("preview_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-			**extra,
-		})
+		return self.tool_data(
+			"preview_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+				**extra,
+			},
+		)
 
 
 # ── Claim 1: the segment is the unit ──────────────────────────────────
@@ -274,12 +309,18 @@ class TheSegmentIsTheUnit(IntegrationTestCase):
 
 		Both are true, both are stored, and the one payroll reads is Ana's.
 		"""
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", crew=[
-				member(WORKER, joined="2025-06-02 07:10:00", left="2025-06-02 13:00:00"),
-				member(PICKER),
-			]),
-		])
+		rows = self.aggregate(
+			[
+				shift(
+					"S1",
+					"2025-06-02",
+					crew=[
+						member(WORKER, joined="2025-06-02 07:10:00", left="2025-06-02 13:00:00"),
+						member(PICKER),
+					],
+				),
+			]
+		)
 		self.assertAlmostEqual(rows[WORKER]["total_hours"], 5.83, places=2)
 		self.assertEqual(rows[PICKER]["total_hours"], 9.0)
 
@@ -288,11 +329,13 @@ class TheSegmentIsTheUnit(IntegrationTestCase):
 		self.assertEqual(rows[PICKER]["total_hours"], 9.0)
 
 	def test_several_employees_across_several_shifts_and_two_states(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", state="OR", crew=[member(WORKER), member(PICKER)]),
-			shift("S2", "2025-06-03", state="OR", crew=[member(WORKER)]),
-			shift("S3", "2025-06-04", state="WA", crew=[member(PICKER), member(DRIVER)]),
-		])
+		rows = self.aggregate(
+			[
+				shift("S1", "2025-06-02", state="OR", crew=[member(WORKER), member(PICKER)]),
+				shift("S2", "2025-06-03", state="OR", crew=[member(WORKER)]),
+				shift("S3", "2025-06-04", state="WA", crew=[member(PICKER), member(DRIVER)]),
+			]
+		)
 		self.assertEqual(sorted(rows), [WORKER, PICKER, DRIVER])
 		self.assertEqual(rows[WORKER]["hours_by_state"], {"OR": 18.0})
 		self.assertEqual(rows[PICKER]["hours_by_state"], {"OR": 9.0, "WA": 9.0})
@@ -300,29 +343,40 @@ class TheSegmentIsTheUnit(IntegrationTestCase):
 		self.assertEqual(rows[WORKER]["shift_count"], 2)
 
 	def test_the_employee_name_survives_onto_the_aggregate(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", crew=[member(WORKER, name="Ana Reyes")]),
-		])
+		rows = self.aggregate(
+			[
+				shift("S1", "2025-06-02", crew=[member(WORKER, name="Ana Reyes")]),
+			]
+		)
 		self.assertEqual(rows[WORKER]["employee_name"], "Ana Reyes")
 
 	def test_a_shift_outside_the_period_is_excluded_and_reported(self):
 		"""Excluded rather than dropped. A shift the aggregator ignored is a fact
 		somebody may need to see when the totals look short."""
-		rows = self.aggregate([
-			shift("IN", "2025-06-02", crew=[member(WORKER)]),
-			shift("BEFORE", "2025-05-30", crew=[member(WORKER)]),
-			shift("AFTER", "2025-06-20", crew=[member(WORKER)]),
-		])
+		rows = self.aggregate(
+			[
+				shift("IN", "2025-06-02", crew=[member(WORKER)]),
+				shift("BEFORE", "2025-05-30", crew=[member(WORKER)]),
+				shift("AFTER", "2025-06-20", crew=[member(WORKER)]),
+			]
+		)
 		self.assertEqual(rows[WORKER]["total_hours"], 9.0)
 		names = {row["shift"] for row in rows[WORKER]["shifts_outside_period"]}
 		self.assertEqual(names, {"BEFORE", "AFTER"})
 
 	def test_a_flat_single_worker_shift_still_works(self):
 		"""The v0.30.0 shape: `employee` and `hours` on the shift itself."""
-		rows = self.aggregate([
-			{"name": "S1", "employee": WORKER, "work_state": "OR",
-			 "start_datetime": "2025-06-02 06:00:00", "hours": 7.5},
-		])
+		rows = self.aggregate(
+			[
+				{
+					"name": "S1",
+					"employee": WORKER,
+					"work_state": "OR",
+					"start_datetime": "2025-06-02 06:00:00",
+					"hours": 7.5,
+				},
+			]
+		)
 		self.assertEqual(rows[WORKER]["total_hours"], 7.5)
 
 
@@ -338,11 +392,15 @@ class OvertimeIsWeekly(IntegrationTestCase):
 			day = f"2025-06-{start_day + index:02d}"
 			end_hour = 6 + int(hours)
 			minutes = round((hours - int(hours)) * 60)
-			rows.append(shift(
-				f"S{start_day + index}", day, state=state,
-				end=f"{end_hour:02d}:{minutes:02d}:00",
-				crew=[member(WORKER)],
-			))
+			rows.append(
+				shift(
+					f"S{start_day + index}",
+					day,
+					state=state,
+					end=f"{end_hour:02d}:{minutes:02d}:00",
+					crew=[member(WORKER)],
+				)
+			)
 		return rows
 
 	def test_thirty_two_hours_is_no_overtime(self):
@@ -423,16 +481,20 @@ class BreaksAreTwoKinds(IntegrationTestCase):
 	"""Paid rest stays on the clock; the unpaid meal comes off it."""
 
 	def test_an_unpaid_meal_comes_off_the_span(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", crew=[member(WORKER)], unpaid_break_hours=0.5),
-		])
+		rows = self.aggregate(
+			[
+				shift("S1", "2025-06-02", crew=[member(WORKER)], unpaid_break_hours=0.5),
+			]
+		)
 		self.assertEqual(rows[WORKER]["total_hours"], 8.5)
 		self.assertEqual(rows[WORKER]["unpaid_break_hours"], 0.5)
 
 	def test_a_paid_rest_break_stays_inside_the_hours(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", crew=[member(WORKER)], break_hours=0.25),
-		])
+		rows = self.aggregate(
+			[
+				shift("S1", "2025-06-02", crew=[member(WORKER)], break_hours=0.25),
+			]
+		)
 		self.assertEqual(rows[WORKER]["total_hours"], 9.0)
 		self.assertEqual(rows[WORKER]["break_hours"], 0.25)
 
@@ -448,12 +510,19 @@ class BreaksAreTwoKinds(IntegrationTestCase):
 		self.assertEqual(rows[WORKER]["overtime_hours"], 2.5)
 
 	def test_a_crew_row_overrides_the_shifts_breaks(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", unpaid_break_hours=0.5, crew=[
-				member(WORKER),
-				member(PICKER, unpaid_break_hours=0.0),
-			]),
-		])
+		rows = self.aggregate(
+			[
+				shift(
+					"S1",
+					"2025-06-02",
+					unpaid_break_hours=0.5,
+					crew=[
+						member(WORKER),
+						member(PICKER, unpaid_break_hours=0.0),
+					],
+				),
+			]
+		)
 		self.assertEqual(rows[WORKER]["total_hours"], 8.5)
 		self.assertEqual(rows[PICKER]["total_hours"], 9.0)
 
@@ -461,9 +530,11 @@ class BreaksAreTwoKinds(IntegrationTestCase):
 		"""The clock is the harder fact. A rest period recorded as longer than
 		the span it sat in is a data entry error, and paying it at face value
 		would pay somebody for time the record says they were not there."""
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", end="08:00:00", break_hours=5.0, crew=[member(WORKER)]),
-		])
+		rows = self.aggregate(
+			[
+				shift("S1", "2025-06-02", end="08:00:00", break_hours=5.0, crew=[member(WORKER)]),
+			]
+		)
 		self.assertEqual(rows[WORKER]["total_hours"], 2.0)
 		self.assertEqual(rows[WORKER]["break_hours"], 2.0)
 
@@ -471,10 +542,17 @@ class BreaksAreTwoKinds(IntegrationTestCase):
 		"""Eight paid hours of which half an hour is rest: 7.5 picking hours,
 		300 buckets at $1 is $300, so the average is $40/h and the rest break is
 		worth $20. WAC 296-131-020, computed from the shift rather than typed."""
-		agg = self.aggregate([
-			shift("S1", "2025-06-02", end="14:00:00", break_hours=0.5,
-			      crew=[member(WORKER, piece_units=300)]),
-		])[WORKER]
+		agg = self.aggregate(
+			[
+				shift(
+					"S1",
+					"2025-06-02",
+					end="14:00:00",
+					break_hours=0.5,
+					crew=[member(WORKER, piece_units=300)],
+				),
+			]
+		)[WORKER]
 		slip = calculate_full_payroll(
 			{"employee": WORKER},
 			pi.engine_shift_rows(agg),
@@ -493,44 +571,67 @@ class PieceUnitsReachThePayroll(IntegrationTestCase):
 	"""Three ways in, one place they land."""
 
 	def test_units_on_the_crew_row(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", crew=[member(WORKER, piece_units=120)]),
-		])
+		rows = self.aggregate(
+			[
+				shift("S1", "2025-06-02", crew=[member(WORKER, piece_units=120)]),
+			]
+		)
 		self.assertEqual(rows[WORKER]["piece_units"], 120.0)
 
 	def test_units_in_a_per_employee_map(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", crew=[member(WORKER), member(PICKER)],
-			      piece_units_by_employee={WORKER: 90, PICKER: 140}),
-		])
+		rows = self.aggregate(
+			[
+				shift(
+					"S1",
+					"2025-06-02",
+					crew=[member(WORKER), member(PICKER)],
+					piece_units_by_employee={WORKER: 90, PICKER: 140},
+				),
+			]
+		)
 		self.assertEqual(rows[WORKER]["piece_units"], 90.0)
 		self.assertEqual(rows[PICKER]["piece_units"], 140.0)
 
 	def test_units_from_attached_piece_rows(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", crew=[member(WORKER)], piece_rows=[
-				{"picker_id": WORKER, "piece_units": 30},
-				{"picker_id": WORKER},           # a bucket log with no count IS one bucket
-				{"picker_id": PICKER, "piece_units": 99},
-			]),
-		])
+		rows = self.aggregate(
+			[
+				shift(
+					"S1",
+					"2025-06-02",
+					crew=[member(WORKER)],
+					piece_rows=[
+						{"picker_id": WORKER, "piece_units": 30},
+						{"picker_id": WORKER},  # a bucket log with no count IS one bucket
+						{"picker_id": PICKER, "piece_units": 99},
+					],
+				),
+			]
+		)
 		self.assertEqual(rows[WORKER]["piece_units"], 31.0)
 
 	def test_the_three_sources_add_rather_than_shadow_each_other(self):
 		"""A farm that changes how it records buckets mid-season should be paid
 		for both halves, not for whichever the code checked first."""
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", crew=[member(WORKER, piece_units=10)],
-			      piece_units_by_employee={WORKER: 20},
-			      piece_rows=[{"employee": WORKER, "units": 5}]),
-		])
+		rows = self.aggregate(
+			[
+				shift(
+					"S1",
+					"2025-06-02",
+					crew=[member(WORKER, piece_units=10)],
+					piece_units_by_employee={WORKER: 20},
+					piece_rows=[{"employee": WORKER, "units": 5}],
+				),
+			]
+		)
 		self.assertEqual(rows[WORKER]["piece_units"], 35.0)
 
 	def test_units_are_split_by_state_like_the_hours(self):
-		rows = self.aggregate([
-			shift("S1", "2025-06-02", state="OR", crew=[member(WORKER, piece_units=100)]),
-			shift("S2", "2025-06-03", state="WA", crew=[member(WORKER, piece_units=60)]),
-		])
+		rows = self.aggregate(
+			[
+				shift("S1", "2025-06-02", state="OR", crew=[member(WORKER, piece_units=100)]),
+				shift("S2", "2025-06-03", state="WA", crew=[member(WORKER, piece_units=60)]),
+			]
+		)
 		self.assertEqual(rows[WORKER]["piece_units_by_state"], {"OR": 100.0, "WA": 60.0})
 
 	def test_a_piece_rate_run_turns_bucket_logs_into_gross(self):
@@ -614,11 +715,15 @@ class TheCrossStateWorker(IntegrationTestCase):
 			shift("WA1", "2025-06-04", state="WA", crew=[member(WORKER)]),
 		)
 		self.slip = next(
-			s for s in self.tool_data("preview_payroll_for_period", {
-				"company": MAIN,
-				"pay_period_start": PERIOD_START,
-				"pay_period_end": PERIOD_END,
-			})["slips"]
+			s
+			for s in self.tool_data(
+				"preview_payroll_for_period",
+				{
+					"company": MAIN,
+					"pay_period_start": PERIOD_START,
+					"pay_period_end": PERIOD_END,
+				},
+			)["slips"]
 			if s["employee"] == WORKER
 		)
 
@@ -658,7 +763,8 @@ class MinimumWageIsPerState(IntegrationTestCase):
 		"""THE REASON IT IS PER STATE. Averaged across both the worker clears
 		$16.68 an hour and looks fine; Oregon's ten hours earned $5 an hour."""
 		result = pi.check_minimum_wage_by_state(
-			{"OR": 10.0, "WA": 30.0}, {"OR": 50.0, "WA": 1000.0},
+			{"OR": 10.0, "WA": 30.0},
+			{"OR": 50.0, "WA": 1000.0},
 		)
 		self.assertEqual(result["states_below_minimum"], ["OR"])
 		self.assertTrue(result["by_state"]["WA"]["meets_minimum_wage"])
@@ -666,7 +772,9 @@ class MinimumWageIsPerState(IntegrationTestCase):
 	def test_the_portland_region_raises_the_floor(self):
 		passing = pi.check_minimum_wage_by_state({"OR": 10.0}, {"OR": 150.0})
 		metro = pi.check_minimum_wage_by_state(
-			{"OR": 10.0}, {"OR": 150.0}, {"OR": "portland_metro"},
+			{"OR": 10.0},
+			{"OR": 150.0},
+			{"OR": "portland_metro"},
 		)
 		self.assertTrue(passing["meets_minimum_wage"])
 		self.assertFalse(metro["meets_minimum_wage"])
@@ -705,17 +813,22 @@ class EndToEnd(IntegrationTestCase):
 		super().setUp()
 		self.structure(WORKER, pay_type="Hourly", rate=20.0)
 		self.structure(PICKER, pay_type="Piece Rate", rate=1.50)
-		self.tool_data("submit_w4", {
-			"employee": WORKER, "company": MAIN, "tax_year": 2025,
-			"filing_status": "Single or Married Filing Separately",
-		})
+		self.tool_data(
+			"submit_w4",
+			{
+				"employee": WORKER,
+				"company": MAIN,
+				"tax_year": 2025,
+				"filing_status": "Single or Married Filing Separately",
+			},
+		)
 		# Week one: Ana works five nines (45h — five of overtime). Beto picks two
 		# days at 250 buckets.
-		self.seed_shifts(*[
-			shift(f"S{d}", f"2025-06-{d:02d}", crew=[member(WORKER)])
-			for d in range(2, 7)
-		], shift("P1", "2025-06-09", crew=[member(PICKER)]),
-		   shift("P2", "2025-06-10", crew=[member(PICKER)]))
+		self.seed_shifts(
+			*[shift(f"S{d}", f"2025-06-{d:02d}", crew=[member(WORKER)]) for d in range(2, 7)],
+			shift("P1", "2025-06-09", crew=[member(PICKER)]),
+			shift("P2", "2025-06-10", crew=[member(PICKER)]),
+		)
 		self.install_bucket_log(
 			bucket("BL1", PICKER, "2025-06-09", 250),
 			bucket("BL2", PICKER, "2025-06-10", 250),
@@ -742,11 +855,14 @@ class EndToEnd(IntegrationTestCase):
 
 	def test_the_run_writes_a_calculated_entry_whose_slips_match_the_preview(self):
 		preview = self.preview()
-		run = self.tool_data("run_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-		})
+		run = self.tool_data(
+			"run_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+			},
+		)
 		self.assertEqual(run["status"], "Calculated")
 		self.assertEqual(run["totals"]["total_gross"], preview["totals"]["total_gross"])
 		self.assertEqual(run["totals"]["total_net"], preview["totals"]["total_net"])
@@ -759,20 +875,26 @@ class EndToEnd(IntegrationTestCase):
 		self.assertEqual(by_employee[PICKER]["piece_units"], 500.0)
 
 	def test_a_calculated_run_can_be_submitted(self):
-		run = self.tool_data("run_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-		})
+		run = self.tool_data(
+			"run_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+			},
+		)
 		data = self.tool_data("submit_payroll", {"name": run["name"]})
 		self.assertEqual(data["status"], "Submitted")
 
 	def test_the_timesheet_summary_agrees_with_the_slip(self):
-		summary = self.tool_data("get_employee_timesheet_summary", {
-			"employee": WORKER,
-			"start_date": PERIOD_START,
-			"end_date": PERIOD_END,
-		})
+		summary = self.tool_data(
+			"get_employee_timesheet_summary",
+			{
+				"employee": WORKER,
+				"start_date": PERIOD_START,
+				"end_date": PERIOD_END,
+			},
+		)
 		self.assertEqual(summary["total_hours"], 45.0)
 		self.assertEqual(summary["overtime_hours"], 5.0)
 		self.assertEqual(summary["shift_count"], 5)
@@ -782,38 +904,50 @@ class EndToEnd(IntegrationTestCase):
 	def test_the_v0_30_0_single_employee_preview_now_sees_the_same_hours(self):
 		"""The old tool, rewired. Before v0.35.0 it reported the crew span with
 		no overtime; the number it gives now is the number the run gives."""
-		data = self.tool_data("preview_payroll", {
-			"employee": WORKER,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-			"company": MAIN,
-		})
+		data = self.tool_data(
+			"preview_payroll",
+			{
+				"employee": WORKER,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+				"company": MAIN,
+			},
+		)
 		self.assertEqual(data["total_hours"], 45.0)
 		self.assertEqual(data["overtime_hours"], 5.0)
 		self.assertEqual(data["gross_pay"], 950.0)
 
 	def test_the_run_is_limited_to_one_employee_when_asked(self):
-		run = self.tool_data("run_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-			"employee": PICKER,
-		})
+		run = self.tool_data(
+			"run_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+				"employee": PICKER,
+			},
+		)
 		self.assertEqual([s["employee"] for s in run["slips"]], [PICKER])
 
 	def test_a_second_period_carries_the_first_periods_ytd(self):
 		"""The Social Security wage base is an annual per-person cap, so a run
 		that could not see the periods before it would restart it."""
-		self.tool_data("run_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-		})
-		ytd = self.tool_data("preview_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": "2025-06-16",
-			"pay_period_end": "2025-06-29",
-		})
+		self.tool_data(
+			"run_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+			},
+		)
+		ytd = self.tool_data(
+			"preview_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": "2025-06-16",
+				"pay_period_end": "2025-06-29",
+			},
+		)
 		self.assertEqual(ytd["totals"]["total_hours"], 0.0)
 		self.assertEqual(ytd["pay_period_start"], "2025-06-16")
 
@@ -823,7 +957,6 @@ class EndToEnd(IntegrationTestCase):
 		self.assertNotIn("timesheet", plain)
 		self.assertIn("timesheet", detailed)
 		self.assertTrue(detailed["timesheet"])
-
 
 
 # ── Claim 8: edge cases ───────────────────────────────────────────────
@@ -847,20 +980,20 @@ class EdgeCases(IntegrationTestCase):
 
 	def test_include_unworked_off_leaves_the_unworked_out(self):
 		self.structure(WORKER, pay_type="Hourly", rate=20.0)
-		data = self.tool_data("preview_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-			"include_unworked": 0,
-		})
+		data = self.tool_data(
+			"preview_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+				"include_unworked": 0,
+			},
+		)
 		self.assertEqual(data["slips"], [])
 
 	def test_a_partial_week_is_not_overtime(self):
 		self.structure(WORKER, pay_type="Hourly", rate=20.0)
-		self.seed_shifts(*[
-			shift(f"S{d}", f"2025-06-{d:02d}", crew=[member(WORKER)])
-			for d in (13, 14, 15)
-		])
+		self.seed_shifts(*[shift(f"S{d}", f"2025-06-{d:02d}", crew=[member(WORKER)]) for d in (13, 14, 15)])
 		data = self.preview()
 		slip = next(s for s in data["slips"] if s["employee"] == WORKER)
 		self.assertEqual(slip["total_hours"], 27.0)
@@ -880,11 +1013,14 @@ class EdgeCases(IntegrationTestCase):
 
 	def test_a_run_where_nobody_can_be_paid_refuses_and_says_who(self):
 		self.seed_shifts(shift("S1", "2025-06-02", crew=[member(PICKER)]))
-		error = self.tool_error("run_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-		})
+		error = self.tool_error(
+			"run_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+			},
+		)
 		self.assertIn("Beto Cruz", error)
 		self.assertIn("create_salary_structure", error)
 		self.assertEqual(STORE.rows("Farm Payroll Entry"), [])
@@ -906,8 +1042,7 @@ class EdgeCases(IntegrationTestCase):
 		self.structure(WORKER, pay_type="Hourly", rate=20.0)
 		self.seed_shifts(
 			shift("GOOD", "2025-06-02", crew=[member(WORKER)]),
-			shift("GONE", "2025-06-03", cancelled=1, status="Cancelled",
-			      crew=[member(WORKER)]),
+			shift("GONE", "2025-06-03", cancelled=1, status="Cancelled", crew=[member(WORKER)]),
 		)
 		data = self.preview()
 		slip = next(s for s in data["slips"] if s["employee"] == WORKER)
@@ -925,43 +1060,53 @@ class EdgeCases(IntegrationTestCase):
 		self.assertEqual(slip["total_hours"], 9.0)
 
 	def test_backwards_dates_are_refused_before_anything_is_written(self):
-		error = self.tool_error("run_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_END,
-			"pay_period_end": PERIOD_START,
-		})
+		error = self.tool_error(
+			"run_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_END,
+				"pay_period_end": PERIOD_START,
+			},
+		)
 		self.assertIn("before", error)
 		self.assertEqual(STORE.rows("Farm Payroll Entry"), [])
 
 	def test_an_unknown_pay_frequency_is_refused_by_name(self):
-		error = self.tool_error("preview_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-			"pay_frequency": "Fortnightly",
-		})
+		error = self.tool_error(
+			"preview_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+				"pay_frequency": "Fortnightly",
+			},
+		)
 		self.assertIn("Biweekly", error)
 
 	def test_a_timesheet_summary_for_somebody_with_no_structure_says_so(self):
-		summary = self.tool_data("get_employee_timesheet_summary", {
-			"employee": PICKER,
-			"start_date": PERIOD_START,
-			"end_date": PERIOD_END,
-		})
+		summary = self.tool_data(
+			"get_employee_timesheet_summary",
+			{
+				"employee": PICKER,
+				"start_date": PERIOD_START,
+				"end_date": PERIOD_END,
+			},
+		)
 		self.assertIsNone(summary["salary_structure"])
 		self.assertIn("create_salary_structure", summary["no_salary_structure"])
 
 	def test_the_result_says_where_the_piece_units_did_not_come_from(self):
-		"""A run that found no bucket log has produced zeros, and whether that
-		means nobody picked or means the bridge is not installed is the whole
-		difference between a payroll and a mistake."""
+		"""Bucket Log Entry ships with erpnext_mcp as of v0.44.0, so it is always
+		queried — a run with no captures in the period has produced zeros
+		because nobody's bucket fell in it, not because the source is absent."""
 		self.structure(WORKER, pay_type="Piece Rate", rate=1.0)
 		self.seed_shifts(shift("S1", "2025-06-02", crew=[member(WORKER)]))
 		data = self.preview()
+		self.assertIn("Bucket Log Entry", data["sources"]["sources"])
 		notes = " ".join(data["sources"]["notes"])
-		self.assertIn("Bucket Log Entry", notes)
-		self.assertIn("not on this site", notes)
-		self.assertNotIn("Bucket Log Entry", data["sources"]["sources"])
+		self.assertIn("only Accepted captures were counted", notes)
+		slip = next(s for s in data["slips"] if s["employee"] == WORKER)
+		self.assertEqual(slip["piece_units"], 0.0)
 
 	def test_an_empty_aggregate_is_a_real_aggregate(self):
 		agg = pi.empty_aggregate(WORKER, "Ana Reyes")
@@ -972,27 +1117,35 @@ class EdgeCases(IntegrationTestCase):
 	def test_build_payroll_inputs_skips_the_structureless_rather_than_guessing(self):
 		aggregates = pi.aggregate_shifts_for_period(
 			[shift("S1", "2025-06-02", crew=[member(WORKER), member(PICKER)])],
-			PERIOD_START, PERIOD_END,
+			PERIOD_START,
+			PERIOD_END,
 		)
 		inputs = pi.build_payroll_inputs(
 			aggregates,
 			{WORKER: {"name": "FSS-1", "pay_type": "Hourly", "base_rate": 20.0}},
-			{}, {}, {},
+			{},
+			{},
+			{},
 		)
 		self.assertEqual([row["employee"] for row in inputs], [WORKER])
 		missing = pi.employees_missing_structures(
-			aggregates, {WORKER: {"name": "FSS-1", "pay_type": "Hourly", "base_rate": 20.0}},
+			aggregates,
+			{WORKER: {"name": "FSS-1", "pay_type": "Hourly", "base_rate": 20.0}},
 		)
 		self.assertEqual([row["employee"] for row in missing], [PICKER])
 
 	def test_a_w4_absent_falls_back_to_single_no_adjustments(self):
 		aggregates = pi.aggregate_shifts_for_period(
-			[shift("S1", "2025-06-02", crew=[member(WORKER)])], PERIOD_START, PERIOD_END,
+			[shift("S1", "2025-06-02", crew=[member(WORKER)])],
+			PERIOD_START,
+			PERIOD_END,
 		)
 		inputs = pi.build_payroll_inputs(
 			aggregates,
 			[{"employee": WORKER, "name": "FSS-1", "pay_type": "Hourly", "base_rate": 20.0}],
-			{}, {}, {},
+			{},
+			{},
+			{},
 		)
 		self.assertEqual(inputs[0]["tax_config"]["w4_data"]["filing_status"], "Single")
 
@@ -1005,10 +1158,8 @@ class TheTools(IntegrationTestCase):
 
 	def test_the_two_reads_are_on_by_default_and_the_run_is_not(self):
 		from erpnext_mcp import registry
-		fields = {
-			field["fieldname"]: field
-			for field in self.settings_meta()["fields"]
-		}
+
+		fields = {field["fieldname"]: field for field in self.settings_meta()["fields"]}
 		self.assertEqual(fields["allow_get_employee_timesheet_summary"]["default"], "1")
 		self.assertEqual(fields["allow_preview_payroll_for_period"]["default"], "1")
 		self.assertEqual(fields["allow_run_payroll_for_period"]["default"], "0")
@@ -1019,10 +1170,14 @@ class TheTools(IntegrationTestCase):
 	def settings_meta(self):
 		import json
 		import pathlib
+
 		path = (
 			pathlib.Path(__file__).resolve().parents[1]
-			/ "erpnext_mcp" / "erpnext_mcp" / "doctype"
-			/ "erpnext_mcp_settings" / "erpnext_mcp_settings.json"
+			/ "erpnext_mcp"
+			/ "erpnext_mcp"
+			/ "doctype"
+			/ "erpnext_mcp_settings"
+			/ "erpnext_mcp_settings.json"
 		)
 		return json.loads(path.read_text())
 
@@ -1034,12 +1189,15 @@ class TheTools(IntegrationTestCase):
 		):
 			with self.subTest(tool=tool):
 				self.configure(enabled=1, **{**ON, f"allow_{tool}": 0})
-				error = self.tool_error(tool, {
-					"company": MAIN,
-					"employee": WORKER,
-					"pay_period_start": PERIOD_START,
-					"pay_period_end": PERIOD_END,
-				})
+				error = self.tool_error(
+					tool,
+					{
+						"company": MAIN,
+						"employee": WORKER,
+						"pay_period_start": PERIOD_START,
+						"pay_period_end": PERIOD_END,
+					},
+				)
 				self.assertIn(tool, error)
 
 	def test_the_kill_switch_stops_all_three(self):
@@ -1050,10 +1208,16 @@ class TheTools(IntegrationTestCase):
 			"run_payroll_for_period",
 		):
 			with self.subTest(tool=tool):
-				_body, status = self.call("tools/call", {
-					"name": tool,
-					"arguments": {"company": MAIN, "employee": WORKER,
-					              "pay_period_start": PERIOD_START,
-					              "pay_period_end": PERIOD_END},
-				})
+				_body, status = self.call(
+					"tools/call",
+					{
+						"name": tool,
+						"arguments": {
+							"company": MAIN,
+							"employee": WORKER,
+							"pay_period_start": PERIOD_START,
+							"pay_period_end": PERIOD_END,
+						},
+					},
+				)
 				self.assertEqual(status, 404)

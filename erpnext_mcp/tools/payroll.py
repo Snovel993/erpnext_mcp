@@ -25,6 +25,7 @@ not carry a count; `_load_piece_rows` looks for both, uses what is there, and
 NAMES what is not rather than reporting a piece-rate worker's day as zero
 buckets without comment.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,7 @@ import json
 import frappe
 from frappe.utils import today
 
-from .. import compat, payroll_integration
+from .. import bucket_bridge, compat, payroll_integration
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..payroll_calc import (
@@ -122,15 +123,25 @@ def get_salary_structure(args: dict) -> ToolResult:
 		filters["company"] = resolve_company(company)
 
 	name = frappe.db.get_value(
-		SALARY_STRUCTURE, filters, "name",
+		SALARY_STRUCTURE,
+		filters,
+		"name",
 		order_by="effective_from desc",
 	)
 	if not name:
 		raise ToolError(f"no active salary structure for employee {employee!r}.")
 
 	fields = [
-		"name", "employee", "employee_name", "company", "pay_type",
-		"base_rate", "effective_from", "effective_to", "is_active", "notes",
+		"name",
+		"employee",
+		"employee_name",
+		"company",
+		"pay_type",
+		"base_rate",
+		"effective_from",
+		"effective_to",
+		"is_active",
+		"notes",
 	]
 	row = frappe.db.get_value(SALARY_STRUCTURE, name, fields, as_dict=True)
 	data = {k: (str(v) if v is not None else None) for k, v in row.items()}
@@ -163,8 +174,15 @@ def list_salary_structures(args: dict) -> ToolResult:
 		SALARY_STRUCTURE,
 		filters=filters,
 		fields=[
-			"name", "employee", "employee_name", "company", "pay_type",
-			"base_rate", "effective_from", "effective_to", "is_active",
+			"name",
+			"employee",
+			"employee_name",
+			"company",
+			"pay_type",
+			"base_rate",
+			"effective_from",
+			"effective_to",
+			"is_active",
 		],
 		limit_page_length=limit,
 		order_by="modified desc",
@@ -191,13 +209,17 @@ def preview_payroll(args: dict) -> ToolResult:
 	if company:
 		ss_filters["company"] = company
 	ss_name = frappe.db.get_value(
-		SALARY_STRUCTURE, ss_filters, "name", order_by="effective_from desc",
+		SALARY_STRUCTURE,
+		ss_filters,
+		"name",
+		order_by="effective_from desc",
 	)
 	if not ss_name:
 		raise ToolError(f"no active salary structure for {employee}.")
 
 	ss = frappe.db.get_value(
-		SALARY_STRUCTURE, ss_name,
+		SALARY_STRUCTURE,
+		ss_name,
 		["name", "pay_type", "base_rate", "employee_name"],
 		as_dict=True,
 	)
@@ -208,7 +230,9 @@ def preview_payroll(args: dict) -> ToolResult:
 	# Load tax config
 	tax_config = _build_tax_config(employee, pay_frequency, company)
 
-	employee_name = ss.get("employee_name") or frappe.db.get_value(EMPLOYEE, employee, "employee_name") or employee
+	employee_name = (
+		ss.get("employee_name") or frappe.db.get_value(EMPLOYEE, employee, "employee_name") or employee
+	)
 
 	result = calculate_full_payroll(
 		{"employee": employee, "employee_name": employee_name},
@@ -220,7 +244,7 @@ def preview_payroll(args: dict) -> ToolResult:
 	return ToolResult(
 		data=result,
 		summary=f"Payroll preview for {employee_name}: gross ${result['gross_pay']}, "
-		        f"net ${result['net_pay']}, {len(shifts)} shift(s)",
+		f"net ${result['net_pay']}, {len(shifts)} shift(s)",
 	)
 
 
@@ -287,7 +311,7 @@ def get_payroll_entry(args: dict) -> ToolResult:
 	return ToolResult(
 		data=data,
 		summary=f"Payroll entry {name}: {doc.status}, {len(slips)} slip(s), "
-		        f"gross ${doc.total_gross}, net ${doc.total_net}",
+		f"gross ${doc.total_gross}, net ${doc.total_net}",
 	)
 
 
@@ -311,9 +335,16 @@ def list_payroll_entries(args: dict) -> ToolResult:
 		PAYROLL_ENTRY,
 		filters=filters,
 		fields=[
-			"name", "company", "pay_period_start", "pay_period_end",
-			"pay_frequency", "status", "total_gross", "total_deductions",
-			"total_net", "employee_count",
+			"name",
+			"company",
+			"pay_period_start",
+			"pay_period_end",
+			"pay_frequency",
+			"status",
+			"total_gross",
+			"total_deductions",
+			"total_net",
+			"employee_count",
 		],
 		limit_page_length=limit,
 		order_by="pay_period_start desc",
@@ -339,17 +370,19 @@ def create_salary_structure(args: dict) -> ToolResult:
 	effective_to = as_date(args, "effective_to")
 	notes = as_str(args, "notes")
 
-	doc = frappe.get_doc({
-		"doctype": SALARY_STRUCTURE,
-		"employee": employee,
-		"company": company,
-		"pay_type": pay_type,
-		"base_rate": base_rate,
-		"effective_from": effective_from,
-		"effective_to": effective_to or None,
-		"is_active": 1,
-		"notes": notes or None,
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": SALARY_STRUCTURE,
+			"employee": employee,
+			"company": company,
+			"pay_type": pay_type,
+			"base_rate": base_rate,
+			"effective_from": effective_from,
+			"effective_to": effective_to or None,
+			"is_active": 1,
+			"notes": notes or None,
+		}
+	)
 	doc.flags.ignore_permissions = True
 	doc.insert()
 
@@ -385,10 +418,14 @@ def deactivate_salary_structure(args: dict) -> ToolResult:
 	if not frappe.db.exists(SALARY_STRUCTURE, name):
 		raise ToolError(f"no Farm Salary Structure called {name!r}.")
 
-	frappe.db.set_value(SALARY_STRUCTURE, name, {
-		"is_active": 0,
-		"effective_to": today(),
-	})
+	frappe.db.set_value(
+		SALARY_STRUCTURE,
+		name,
+		{
+			"is_active": 0,
+			"effective_to": today(),
+		},
+	)
 
 	emp = frappe.db.get_value(SALARY_STRUCTURE, name, "employee")
 	emp_name = frappe.db.get_value(EMPLOYEE, emp, "employee_name") if emp else name
@@ -417,14 +454,16 @@ def calculate_payroll(args: dict) -> ToolResult:
 		raise ToolError(f"no active salary structures for company {company}.")
 
 	# Create the payroll entry
-	entry = frappe.get_doc({
-		"doctype": PAYROLL_ENTRY,
-		"company": company,
-		"pay_period_start": pay_period_start,
-		"pay_period_end": pay_period_end,
-		"pay_frequency": pay_frequency,
-		"status": "Draft",
-	})
+	entry = frappe.get_doc(
+		{
+			"doctype": PAYROLL_ENTRY,
+			"company": company,
+			"pay_period_start": pay_period_start,
+			"pay_period_end": pay_period_end,
+			"pay_frequency": pay_frequency,
+			"status": "Draft",
+		}
+	)
 
 	total_gross = 0.0
 	total_deductions = 0.0
@@ -444,34 +483,37 @@ def calculate_payroll(args: dict) -> ToolResult:
 
 		state_detail = json.dumps(slip.get("state_taxes_detail", {}), default=str)
 
-		entry.append("slips", {
-			"employee": employee,
-			"employee_name": ss.employee_name,
-			"salary_structure": ss.name,
-			"pay_type": slip["pay_type"],
-			"work_state": slip["work_state"],
-			"total_hours": slip["total_hours"],
-			"regular_hours": slip["regular_hours"],
-			"overtime_hours": slip["overtime_hours"],
-			"piece_units": slip["piece_units"],
-			"piece_rate": slip["piece_rate"],
-			"gross_pay": slip["gross_pay"],
-			"federal_withholding": slip["federal_withholding"],
-			"state_withholding": slip["state_withholding"],
-			"social_security": slip["social_security"],
-			"medicare": slip["medicare"],
-			"state_taxes_detail": state_detail,
-			"total_deductions": slip["total_deductions"],
-			"net_pay": slip["net_pay"],
-			"minimum_wage_check": 1 if slip["minimum_wage_check"] else 0,
-			"effective_hourly_rate": slip["effective_hourly_rate"],
-			"social_security_employer": slip.get("social_security_employer") or 0,
-			"medicare_employer": slip.get("medicare_employer") or 0,
-			"futa": slip.get("futa") or 0,
-			"state_unemployment": slip.get("state_unemployment") or 0,
-			"state_employer_other": slip.get("state_employer_other") or 0,
-			"total_employer_taxes": slip.get("total_employer_taxes") or 0,
-		})
+		entry.append(
+			"slips",
+			{
+				"employee": employee,
+				"employee_name": ss.employee_name,
+				"salary_structure": ss.name,
+				"pay_type": slip["pay_type"],
+				"work_state": slip["work_state"],
+				"total_hours": slip["total_hours"],
+				"regular_hours": slip["regular_hours"],
+				"overtime_hours": slip["overtime_hours"],
+				"piece_units": slip["piece_units"],
+				"piece_rate": slip["piece_rate"],
+				"gross_pay": slip["gross_pay"],
+				"federal_withholding": slip["federal_withholding"],
+				"state_withholding": slip["state_withholding"],
+				"social_security": slip["social_security"],
+				"medicare": slip["medicare"],
+				"state_taxes_detail": state_detail,
+				"total_deductions": slip["total_deductions"],
+				"net_pay": slip["net_pay"],
+				"minimum_wage_check": 1 if slip["minimum_wage_check"] else 0,
+				"effective_hourly_rate": slip["effective_hourly_rate"],
+				"social_security_employer": slip.get("social_security_employer") or 0,
+				"medicare_employer": slip.get("medicare_employer") or 0,
+				"futa": slip.get("futa") or 0,
+				"state_unemployment": slip.get("state_unemployment") or 0,
+				"state_employer_other": slip.get("state_employer_other") or 0,
+				"total_employer_taxes": slip.get("total_employer_taxes") or 0,
+			},
+		)
 
 		total_gross += slip["gross_pay"]
 		total_deductions += slip["total_deductions"]
@@ -499,7 +541,7 @@ def calculate_payroll(args: dict) -> ToolResult:
 			"total_net": entry.total_net,
 		},
 		summary=f"Payroll entry {entry.name}: {len(structures)} employee(s), "
-		        f"gross ${entry.total_gross}, net ${entry.total_net}",
+		f"gross ${entry.total_gross}, net ${entry.total_net}",
 	)
 
 
@@ -513,9 +555,7 @@ def submit_payroll(args: dict) -> ToolResult:
 
 	status = frappe.db.get_value(PAYROLL_ENTRY, name, "status")
 	if status != "Calculated":
-		raise ToolError(
-			f"payroll entry {name} is {status!r}. Only Calculated entries can be submitted."
-		)
+		raise ToolError(f"payroll entry {name} is {status!r}. Only Calculated entries can be submitted.")
 
 	frappe.db.set_value(PAYROLL_ENTRY, name, "status", "Submitted")
 
@@ -550,14 +590,16 @@ def get_employee_timesheet_summary(args: dict) -> ToolResult:
 
 	shifts, provenance = _load_period_shifts(company, start, end, employees=[employee])
 	aggregates = payroll_integration.aggregate_shifts_for_period(
-		shifts, start, end, overtime_threshold=threshold, workweek_anchor=anchor,
+		shifts,
+		start,
+		end,
+		overtime_threshold=threshold,
+		workweek_anchor=anchor,
 	)
 	aggregate = aggregates.get(employee) or payroll_integration.empty_aggregate(employee)
 
 	employee_name = (
-		aggregate.get("employee_name")
-		or frappe.db.get_value(EMPLOYEE, employee, "employee_name")
-		or employee
+		aggregate.get("employee_name") or frappe.db.get_value(EMPLOYEE, employee, "employee_name") or employee
 	)
 	aggregate["employee_name"] = employee_name
 
@@ -566,11 +608,17 @@ def get_employee_timesheet_summary(args: dict) -> ToolResult:
 	if company:
 		ss_filters["company"] = company
 	ss_name = frappe.db.get_value(
-		SALARY_STRUCTURE, ss_filters, "name", order_by="effective_from desc",
+		SALARY_STRUCTURE,
+		ss_filters,
+		"name",
+		order_by="effective_from desc",
 	)
 	if ss_name:
 		row = frappe.db.get_value(
-			SALARY_STRUCTURE, ss_name, ["name", "pay_type", "base_rate"], as_dict=True,
+			SALARY_STRUCTURE,
+			ss_name,
+			["name", "pay_type", "base_rate"],
+			as_dict=True,
 		)
 		structure = {
 			"name": row.get("name"),
@@ -634,11 +682,7 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 	# structure. The union rather than either half, because a worker with no
 	# structure has to be reported and a salaried employee with no shift has to
 	# be paid.
-	worked = sorted({
-		member["employee"]
-		for shift in shifts
-		for member in shift.get("crew") or []
-	})
+	worked = sorted({member["employee"] for shift in shifts for member in shift.get("crew") or []})
 	known = sorted(set(worked) | set(structures))
 
 	slips = payroll_integration.run_integrated_payroll(
@@ -660,7 +704,11 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 	)
 
 	aggregates = payroll_integration.aggregate_shifts_for_period(
-		shifts, start, end, overtime_threshold=threshold, workweek_anchor=anchor,
+		shifts,
+		start,
+		end,
+		overtime_threshold=threshold,
+		workweek_anchor=anchor,
 	)
 	missing = payroll_integration.employees_missing_structures(aggregates, structures)
 	for row in missing:
@@ -759,11 +807,13 @@ def preview_payroll_for_period(args: dict) -> ToolResult:
 			f"gross ${totals['total_gross']}, net ${totals['total_net']}"
 			+ (
 				f" — {len(context['employees_missing_structures'])} worker(s) with no salary structure"
-				if context["employees_missing_structures"] else ""
+				if context["employees_missing_structures"]
+				else ""
 			)
 			+ (
 				f" — {len(totals['below_minimum_wage'])} below minimum wage"
-				if totals["below_minimum_wage"] else ""
+				if totals["below_minimum_wage"]
+				else ""
 			)
 		),
 	)
@@ -798,14 +848,16 @@ def run_payroll_for_period(args: dict) -> ToolResult:
 			)
 		)
 
-	entry = frappe.get_doc({
-		"doctype": PAYROLL_ENTRY,
-		"company": context["company"],
-		"pay_period_start": context["pay_period_start"],
-		"pay_period_end": context["pay_period_end"],
-		"pay_frequency": context["pay_frequency"],
-		"status": "Draft",
-	})
+	entry = frappe.get_doc(
+		{
+			"doctype": PAYROLL_ENTRY,
+			"company": context["company"],
+			"pay_period_start": context["pay_period_start"],
+			"pay_period_end": context["pay_period_end"],
+			"pay_frequency": context["pay_frequency"],
+			"status": "Draft",
+		}
+	)
 
 	for slip in slips:
 		entry.append("slips", _slip_row(slip))
@@ -834,7 +886,8 @@ def run_payroll_for_period(args: dict) -> ToolResult:
 			f"net ${totals['total_net']}"
 			+ (
 				f" — {len(totals['below_minimum_wage'])} below minimum wage"
-				if totals["below_minimum_wage"] else ""
+				if totals["below_minimum_wage"]
+				else ""
 			)
 		),
 		docstatus_delta="none → Calculated",
@@ -925,8 +978,15 @@ def _load_period_shifts(
 		FARM_SHIFT,
 		filters=filters,
 		fields=[
-			"name", "company", "work_state", "start_datetime", "end_datetime",
-			"status", "cancelled", "shift_type", "location",
+			"name",
+			"company",
+			"work_state",
+			"start_datetime",
+			"end_datetime",
+			"status",
+			"cancelled",
+			"shift_type",
+			"location",
 		],
 		order_by="start_datetime asc",
 		limit_page_length=SHIFT_CAP,
@@ -957,7 +1017,12 @@ def _load_period_shifts(
 	# so it is read where it exists rather than ignored in favour of a bridge
 	# doctype that may not be installed.
 	units_field = compat.first_field(
-		CREW_MEMBER, "piece_units", "units", "bins", "bucket_count", "quantity",
+		CREW_MEMBER,
+		"piece_units",
+		"units",
+		"bins",
+		"bucket_count",
+		"quantity",
 	)
 	break_field = compat.first_field(CREW_MEMBER, "break_hours", "paid_break_hours")
 	meal_field = compat.first_field(CREW_MEMBER, "unpaid_break_hours", "meal_break_hours")
@@ -997,16 +1062,18 @@ def _load_period_shifts(
 		crew = crew_by_shift.get(row["name"])
 		if not crew:
 			continue
-		shifts.append({
-			"name": row["name"],
-			"company": row.get("company"),
-			"work_state": row.get("work_state") or "",
-			"shift_type": row.get("shift_type"),
-			"location": row.get("location"),
-			"start_datetime": row.get("start_datetime"),
-			"end_datetime": row.get("end_datetime"),
-			"crew": crew,
-		})
+		shifts.append(
+			{
+				"name": row["name"],
+				"company": row.get("company"),
+				"work_state": row.get("work_state") or "",
+				"shift_type": row.get("shift_type"),
+				"location": row.get("location"),
+				"start_datetime": row.get("start_datetime"),
+				"end_datetime": row.get("end_datetime"),
+				"crew": crew,
+			}
+		)
 
 	provenance["sources"].append(FARM_SHIFT)
 	provenance["shift_count"] = len(shifts)
@@ -1072,11 +1139,29 @@ def _bucket_log_rows(company, start, end, wanted, provenance) -> list[dict]:
 		return []
 
 	date_field = compat.first_field(
-		BUCKET_LOG, "logged_at", "log_date", "date", "posting_date", "creation",
+		BUCKET_LOG,
+		"timestamp",
+		"logged_at",
+		"log_date",
+		"date",
+		"posting_date",
+		"creation",
 	)
 	unit_field = compat.first_field(
-		BUCKET_LOG, "piece_units", "units", "quantity", "qty", "bucket_count", "count", "bins",
+		BUCKET_LOG,
+		"piece_units",
+		"units",
+		"quantity",
+		"qty",
+		"bucket_count",
+		"count",
+		"bins",
 	)
+	# `verdict` is this app's own Bucket Log Entry field — bucket_bridge.py's
+	# canonical name for "the ML model kept this one". A site running an older
+	# or third-party bucket log with no such column has nothing to filter on,
+	# and every row is read the way it always was: as a bucket, full stop.
+	verdict_field = compat.first_field(BUCKET_LOG, "verdict")
 
 	filters: list = []
 	if date_field:
@@ -1084,6 +1169,8 @@ def _bucket_log_rows(company, start, end, wanted, provenance) -> list[dict]:
 		filters.append([date_field, "<=", f"{end} 23:59:59"])
 	if company and compat.has_field(BUCKET_LOG, "company"):
 		filters.append(["company", "=", company])
+	if verdict_field:
+		filters.append([verdict_field, "=", bucket_bridge.VERDICT_ACCEPTED])
 
 	fields = ["name", picker_field]
 	if date_field:
@@ -1092,7 +1179,10 @@ def _bucket_log_rows(company, start, end, wanted, provenance) -> list[dict]:
 		fields.append(unit_field)
 
 	rows = frappe.db.get_all(
-		BUCKET_LOG, filters=filters, fields=fields, limit_page_length=0,
+		BUCKET_LOG,
+		filters=filters,
+		fields=fields,
+		limit_page_length=0,
 	)
 
 	out = []
@@ -1103,14 +1193,21 @@ def _bucket_log_rows(company, start, end, wanted, provenance) -> list[dict]:
 		# A row with no count column IS one bucket. The row is the record of the
 		# bucket, so counting it as one is reading it, not guessing at it.
 		units = 1.0 if not unit_field else _num(row.get(unit_field), 1.0)
-		out.append({
-			"employee": employee,
-			"date": str(row.get(date_field) or "")[:10] if date_field else "",
-			"units": units,
-			"source": BUCKET_LOG,
-		})
+		out.append(
+			{
+				"employee": employee,
+				"date": str(row.get(date_field) or "")[:10] if date_field else "",
+				"units": units,
+				"source": BUCKET_LOG,
+			}
+		)
 
 	provenance["sources"].append(BUCKET_LOG)
+	if verdict_field:
+		provenance["notes"].append(
+			f"{BUCKET_LOG} carries a verdict column, so only Accepted captures were counted — a "
+			"Rejected one is the model saying the bucket was not actually filled."
+		)
 	if not unit_field:
 		provenance["notes"].append(
 			f"{BUCKET_LOG} carries no count column on this site, so each entry was counted as "
@@ -1127,7 +1224,13 @@ def _task_assignment_rows(company, start, end, wanted, provenance) -> list[dict]
 
 	unit_field = compat.first_field(
 		FARM_TASK_ASSIGNMENT,
-		"piece_units", "units", "units_completed", "quantity", "qty", "bins", "bucket_count",
+		"piece_units",
+		"units",
+		"units_completed",
+		"quantity",
+		"qty",
+		"bins",
+		"bucket_count",
 	)
 	if not unit_field:
 		provenance["notes"].append(
@@ -1157,12 +1260,14 @@ def _task_assignment_rows(company, start, end, wanted, provenance) -> list[dict]
 		employee = str(row.get("assigned_to") or "")
 		if not employee or (wanted is not None and employee not in wanted):
 			continue
-		out.append({
-			"employee": employee,
-			"date": str(row.get("completed_at") or "")[:10],
-			"units": _num(row.get(unit_field), 0.0),
-			"source": FARM_TASK_ASSIGNMENT,
-		})
+		out.append(
+			{
+				"employee": employee,
+				"date": str(row.get("completed_at") or "")[:10],
+				"units": _num(row.get(unit_field), 0.0),
+				"source": FARM_TASK_ASSIGNMENT,
+			}
+		)
 
 	provenance["sources"].append(FARM_TASK_ASSIGNMENT)
 	return out
@@ -1189,10 +1294,12 @@ def _attach_piece_rows(shifts: list[dict], piece_rows: list[dict]) -> list[dict]
 		if shift is None:
 			unmatched.append(row)
 			continue
-		shift.setdefault("piece_rows", []).append({
-			"employee": row["employee"],
-			"piece_units": row["units"],
-		})
+		shift.setdefault("piece_rows", []).append(
+			{
+				"employee": row["employee"],
+				"piece_units": row["units"],
+			}
+		)
 	return unmatched
 
 
@@ -1228,14 +1335,16 @@ def _orphan_piece_shifts(unmatched: list[dict], shifts: list[dict]) -> list[dict
 		tally = dominant.get(employee) or {}
 		state = max(tally, key=tally.get) if tally else ""
 		when = f"{day} 00:00:00" if day else None
-		out.append({
-			"name": "",
-			"work_state": state,
-			"start_datetime": when,
-			"end_datetime": when,
-			"piece_units_only": True,
-			"crew": [{"employee": employee, "hours": 0.0, "piece_units": units}],
-		})
+		out.append(
+			{
+				"name": "",
+				"work_state": state,
+				"start_datetime": when,
+				"end_datetime": when,
+				"piece_units_only": True,
+				"crew": [{"employee": employee, "hours": 0.0, "piece_units": units}],
+			}
+		)
 	return out
 
 
@@ -1383,10 +1492,7 @@ def _load_ytd(company: str, period_start: str, employees: list[str]) -> dict:
 			bucket["ytd_gross"] += _num(get("gross_pay"))
 			bucket["ytd_ss_withheld"] += _num(get("social_security"))
 
-	return {
-		employee: {k: round(v, 2) for k, v in bucket.items()}
-		for employee, bucket in ytd.items()
-	}
+	return {employee: {k: round(v, 2) for k, v in bucket.items()} for employee, bucket in ytd.items()}
 
 
 def _build_tax_config(employee: str, pay_frequency: str, company: str | None = None) -> dict:
@@ -1395,7 +1501,9 @@ def _build_tax_config(employee: str, pay_frequency: str, company: str | None = N
 	fica_config = _load_fica_config()
 	filing_status = w4_data.get("filing_status", "Single")
 	federal_tax_table = _load_federal_tax_table(
-		w4_data.get("_tax_year", 2025), filing_status, pay_frequency,
+		w4_data.get("_tax_year", 2025),
+		filing_status,
+		pay_frequency,
 	)
 
 	state_configs = {}
@@ -1424,7 +1532,9 @@ def _build_tax_config(employee: str, pay_frequency: str, company: str | None = N
 def _load_w4_data(employee: str) -> dict:
 	"""Load the active W-4 for an employee."""
 	name = frappe.db.get_value(
-		W4_FORM, {"employee": employee, "status": "Active"}, "name",
+		W4_FORM,
+		{"employee": employee, "status": "Active"},
+		"name",
 		order_by="tax_year desc, effective_date desc",
 	)
 	if not name:
@@ -1442,10 +1552,15 @@ def _load_w4_data(employee: str) -> dict:
 		}
 
 	fields = [
-		"tax_year", "filing_status", "multiple_jobs",
+		"tax_year",
+		"filing_status",
+		"multiple_jobs",
 		"additional_income_from_other_jobs",
-		"dependents_under_17_count", "other_dependents_count",
-		"total_dependents_credit", "other_income", "deductions",
+		"dependents_under_17_count",
+		"other_dependents_count",
+		"total_dependents_credit",
+		"other_income",
+		"deductions",
 		"extra_withholding_per_period",
 	]
 	row = frappe.db.get_value(W4_FORM, name, fields, as_dict=True)

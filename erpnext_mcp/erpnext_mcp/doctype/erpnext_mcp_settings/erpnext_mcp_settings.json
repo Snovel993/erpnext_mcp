@@ -442,6 +442,16 @@
   "allow_update_model",
   "allow_activate_model",
   "allow_deprecate_model",
+  "bucket_log_read_section",
+  "allow_list_bucket_entries",
+  "allow_get_bucket_session",
+  "allow_list_bucket_sessions",
+  "allow_get_piecework_summary",
+  "allow_reconcile_bucket_payroll",
+  "bucket_log_write_section",
+  "allow_sync_bucket_entries",
+  "allow_link_badge_to_employee",
+  "allow_link_entries_to_shift",
   "mobile_write_section",
   "allow_create_mobile_user",
   "allow_create_employee",
@@ -3358,6 +3368,72 @@
    "fieldname": "allow_deprecate_model",
    "fieldtype": "Check",
    "label": "Deprecate Model"
+  },
+  {
+   "fieldname": "bucket_log_read_section",
+   "fieldtype": "Section Break",
+   "label": "BucketLog \u2192 Piecework Bridge \u2014 Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every Bucket Log Entry matching the filters, newest first.",
+   "fieldname": "allow_list_bucket_entries",
+   "fieldtype": "Check",
+   "label": "List Bucket Entries"
+  },
+  {
+   "default": "1",
+   "description": "READ. One Bucket Log Session, with totals computed live from its own current entries.",
+   "fieldname": "allow_get_bucket_session",
+   "fieldtype": "Check",
+   "label": "Get Bucket Session"
+  },
+  {
+   "default": "1",
+   "description": "READ. The session register: every Bucket Log Session matching the filters, newest first.",
+   "fieldname": "allow_list_bucket_sessions",
+   "fieldtype": "Check",
+   "label": "List Bucket Sessions"
+  },
+  {
+   "default": "1",
+   "description": "READ. The payroll-ready summary for one employee over a date range: accepted buckets, sessions worked, acceptance rate.",
+   "fieldname": "allow_get_piecework_summary",
+   "fieldtype": "Check",
+   "label": "Get Piecework Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. Compares accepted Bucket Log Entries against what Farm Payroll Slips actually paid for the same company and period, and flags discrepancies.",
+   "fieldname": "allow_reconcile_bucket_payroll",
+   "fieldtype": "Check",
+   "label": "Reconcile Bucket Payroll"
+  },
+  {
+   "fieldname": "bucket_log_write_section",
+   "fieldtype": "Section Break",
+   "label": "BucketLog \u2192 Piecework Bridge \u2014 Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Receives a batch of bucket captures synced from a BucketLog device: creates Bucket Log Entry records, resolves employee from worker_badge, keeps the Bucket Log Session up to date. Deduplicates by entry_uuid.",
+   "fieldname": "allow_sync_bucket_entries",
+   "fieldtype": "Check",
+   "label": "Sync Bucket Entries"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Maps a QR badge ID to an Employee, and backfills employee onto already-synced entries and sessions carrying that badge.",
+   "fieldname": "allow_link_badge_to_employee",
+   "fieldtype": "Check",
+   "label": "Link Badge To Employee"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Associates Bucket Log Entries with a Farm Shift so they are picked up as piece units when that shift's payroll runs.",
+   "fieldname": "allow_link_entries_to_shift",
+   "fieldtype": "Check",
+   "label": "Link Entries To Shift"
   },
   {
    "fieldname": "mobile_write_section",

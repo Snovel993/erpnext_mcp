@@ -91,10 +91,12 @@ WHO IS OWED ANYTHING AT ALL. An employee with shifts and no salary structure is
 not paid zero — they are REPORTED, by name, in `employees_missing_structures`.
 Zero is a number, and a number nobody questions.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
+from . import bucket_bridge
 from .payroll_calc import MINIMUM_WAGE_RATES, calculate_full_payroll
 
 #: Hours in a workweek before the ag overtime premium starts. Oregon HB 4002 and
@@ -214,6 +216,62 @@ def _row_units(row: dict) -> float:
 	return 1.0 if units is None else units
 
 
+# ── BucketLog attachment ─────────────────────────────────────────────────
+
+
+def attach_bucket_log_entries(shifts: list[dict], entries: list[dict]) -> tuple[list[dict], list[dict]]:
+	"""Bucket Log Entry rows, matched onto the shift each was worked on and
+	attached as `bucket_logs` — the key `_piece_units_for` already reads.
+
+	PURE: both `shifts` and `entries` arrive already fetched; the caller
+	(`tools/bucket_log.py`, or a caller assembling a shift dict by hand) is what
+	queries Bucket Log Entry out of the database. `bucket_bridge.py` owns the
+	Accepted-only filter and the reshape into a `bucket_logs` row; this
+	function's own job is the join a Bucket Log Entry cannot do for itself — it
+	carries an employee and a timestamp, not a shift, until
+	`link_entries_to_shift` sets one, and even then this still matches by
+	(employee, date) rather than trusting that field, for the same reason
+	`tools/payroll.py::_attach_piece_rows` does for its other piece sources:
+	neither carries a link this app did not add itself.
+
+	Entries matching no shift in the list are NOT dropped. The second return
+	value is what was left over, for the caller to decide what to do with —
+	`tools/payroll.py::_orphan_piece_shifts` already knows how to turn an
+	unmatched piece row into a zero-hour stand-in shift, and this module does
+	not repeat that pattern for a second source.
+
+	Returns `(shifts, unmatched)`. `shifts` is a NEW list — the input shift
+	dicts are not mutated — each one carrying a `bucket_logs` list where at
+	least one entry matched it.
+	"""
+	shifts = [dict(shift) for shift in shifts or []]
+
+	index: dict[tuple, dict] = {}
+	for shift in shifts:
+		day = str(shift.get("start_datetime") or shift.get("start") or "")[:10]
+		for row in _crew_of(shift):
+			employee = str(row.get("employee") or "")
+			if employee:
+				index.setdefault((employee, day), shift)
+
+	by_key: dict[tuple, list[dict]] = {}
+	for entry in entries or []:
+		employee = str(entry.get("employee") or "")
+		day = str(entry.get("timestamp") or "")[:10]
+		if employee and day:
+			by_key.setdefault((employee, day), []).append(entry)
+
+	unmatched: list[dict] = []
+	for key, rows in by_key.items():
+		shift = index.get(key)
+		if shift is None:
+			unmatched.extend(rows)
+			continue
+		shift.setdefault("bucket_logs", []).extend(bucket_bridge.entries_to_payroll_shape(rows))
+
+	return shifts, unmatched
+
+
 # ── Segments: one person's own span on one shift ──────────────────────────
 
 
@@ -221,8 +279,17 @@ class _Segment:
 	"""One employee's own stretch of one shift. The unit everything counts."""
 
 	__slots__ = (
-		"break_hours", "employee", "employee_name", "end", "hours", "open_ended",
-		"piece_units", "shift", "start", "unpaid_break_hours", "work_state",
+		"break_hours",
+		"employee",
+		"employee_name",
+		"end",
+		"hours",
+		"open_ended",
+		"piece_units",
+		"shift",
+		"start",
+		"unpaid_break_hours",
+		"work_state",
 	)
 
 	def __init__(self, **kwargs):
@@ -257,12 +324,14 @@ def _crew_of(shift: dict) -> list[dict]:
 	if crew:
 		return [dict(row) for row in crew]
 	if shift.get("employee"):
-		return [{
-			"employee": shift.get("employee"),
-			"employee_name": shift.get("employee_name"),
-			"joined_at": shift.get("joined_at"),
-			"left_at": shift.get("left_at"),
-		}]
+		return [
+			{
+				"employee": shift.get("employee"),
+				"employee_name": shift.get("employee_name"),
+				"joined_at": shift.get("joined_at"),
+				"left_at": shift.get("left_at"),
+			}
+		]
 	return []
 
 
@@ -304,10 +373,12 @@ def _segments_of(shift: dict) -> list[_Segment]:
 		open_ended = end is None
 
 		paid_break = _as_float(
-			row.get("break_hours", shift.get("break_hours")), 0.0,
+			row.get("break_hours", shift.get("break_hours")),
+			0.0,
 		)
 		unpaid_break = _as_float(
-			row.get("unpaid_break_hours", shift.get("unpaid_break_hours")), 0.0,
+			row.get("unpaid_break_hours", shift.get("unpaid_break_hours")),
+			0.0,
 		)
 
 		# An explicit `hours` short-circuits the span arithmetic. That is the
@@ -327,19 +398,21 @@ def _segments_of(shift: dict) -> list[_Segment]:
 		# than paying a rest period longer than the shift.
 		paid_break = min(max(paid_break, 0.0), hours)
 
-		segments.append(_Segment(
-			employee=employee,
-			employee_name=row.get("employee_name") or shift.get("employee_name") or "",
-			shift=shift_name,
-			work_state=work_state,
-			start=start,
-			end=end,
-			hours=hours,
-			break_hours=paid_break,
-			unpaid_break_hours=max(unpaid_break, 0.0),
-			piece_units=_as_float(row.get("piece_units"), 0.0) + _piece_units_for(shift, employee),
-			open_ended=open_ended,
-		))
+		segments.append(
+			_Segment(
+				employee=employee,
+				employee_name=row.get("employee_name") or shift.get("employee_name") or "",
+				shift=shift_name,
+				work_state=work_state,
+				start=start,
+				end=end,
+				hours=hours,
+				break_hours=paid_break,
+				unpaid_break_hours=max(unpaid_break, 0.0),
+				piece_units=_as_float(row.get("piece_units"), 0.0) + _piece_units_for(shift, employee),
+				open_ended=open_ended,
+			)
+		)
 	return segments
 
 
@@ -434,13 +507,16 @@ def aggregate_shifts_for_period(
 			key=lambda s: (s.start or datetime.min, s.shift or ""),
 		)
 		aggregates[employee] = _aggregate_one(
-			employee, entry["name"], segments, anchor, start, overtime_threshold,
+			employee,
+			entry["name"],
+			segments,
+			anchor,
+			start,
+			overtime_threshold,
 		)
 
 	for agg in aggregates.values():
-		agg["shifts_outside_period"] = [
-			row for row in outside if row["employee"] == agg["employee"]
-		]
+		agg["shifts_outside_period"] = [row for row in outside if row["employee"] == agg["employee"]]
 	return aggregates
 
 
@@ -498,15 +574,17 @@ def _aggregate_one(
 			detail.append(row)
 
 		week_start = anchor + timedelta(days=index * WORKWEEK_DAYS) if anchor else None
-		week_rows.append({
-			"workweek": index + 1,
-			"week_start": str(week_start) if week_start else None,
-			"week_end": str(week_start + timedelta(days=WORKWEEK_DAYS - 1)) if week_start else None,
-			"hours": round(week_hours, 2),
-			"regular_hours": round(week_hours - week_overtime, 2),
-			"overtime_hours": round(week_overtime, 2),
-			"over_threshold": week_overtime > 0,
-		})
+		week_rows.append(
+			{
+				"workweek": index + 1,
+				"week_start": str(week_start) if week_start else None,
+				"week_end": str(week_start + timedelta(days=WORKWEEK_DAYS - 1)) if week_start else None,
+				"hours": round(week_hours, 2),
+				"regular_hours": round(week_hours - week_overtime, 2),
+				"overtime_hours": round(week_overtime, 2),
+				"over_threshold": week_overtime > 0,
+			}
+		)
 
 	return {
 		"employee": employee,
@@ -656,13 +734,15 @@ def engine_shift_rows(aggregate: dict) -> list[dict]:
 	if not hours_by_state:
 		# No shifts, or shifts with no state on them. One stateless row keeps a
 		# salaried employee's slip computable and an hourly employee's zero.
-		return [{
-			"work_state": "",
-			"hours": aggregate.get("total_hours", 0.0),
-			"overtime_hours": aggregate.get("overtime_hours", 0.0),
-			"piece_units": aggregate.get("piece_units", 0.0),
-			"break_hours": aggregate.get("break_hours", 0.0),
-		}]
+		return [
+			{
+				"work_state": "",
+				"hours": aggregate.get("total_hours", 0.0),
+				"overtime_hours": aggregate.get("overtime_hours", 0.0),
+				"piece_units": aggregate.get("piece_units", 0.0),
+				"break_hours": aggregate.get("break_hours", 0.0),
+			}
+		]
 
 	overtime = aggregate.get("overtime_hours_by_state") or {}
 	breaks = aggregate.get("break_hours_by_state") or {}
@@ -722,37 +802,38 @@ def build_payroll_inputs(
 		w4 = _w4_for(w4_data, employee)
 		ytd = (ytd_by_employee or {}).get(employee) or {}
 
-		inputs.append({
-			"employee": employee,
-			"employee_data": {
+		inputs.append(
+			{
 				"employee": employee,
-				"employee_name": (
-					aggregate.get("employee_name")
-					or structure.get("employee_name")
-					or employee
-				),
-			},
-			"shifts": engine_shift_rows(aggregate),
-			"salary_structure": {
-				"name": structure.get("name", ""),
-				"pay_type": structure.get("pay_type", "Hourly"),
-				"base_rate": _as_float(structure.get("base_rate")),
-			},
-			"tax_config": {
-				"w4_data": w4,
-				"fica_config": dict(fica_config or {}),
-				"federal_tax_table": _federal_table_for(
-					federal_tax_tables, w4.get("filing_status", "Single"),
-				),
-				"pay_frequency": pay_frequency,
-				"ytd_gross": _as_float(ytd.get("ytd_gross")),
-				"ytd_ss_withheld": _as_float(ytd.get("ytd_ss_withheld")),
-				"state_configs": dict(state_configs or {}),
-				"state_tax_tables": dict(state_tax_tables or {}),
-			},
-			"aggregate": aggregate,
-			"min_wage_regions": structure.get("min_wage_regions") or {},
-		})
+				"employee_data": {
+					"employee": employee,
+					"employee_name": (
+						aggregate.get("employee_name") or structure.get("employee_name") or employee
+					),
+				},
+				"shifts": engine_shift_rows(aggregate),
+				"salary_structure": {
+					"name": structure.get("name", ""),
+					"pay_type": structure.get("pay_type", "Hourly"),
+					"base_rate": _as_float(structure.get("base_rate")),
+				},
+				"tax_config": {
+					"w4_data": w4,
+					"fica_config": dict(fica_config or {}),
+					"federal_tax_table": _federal_table_for(
+						federal_tax_tables,
+						w4.get("filing_status", "Single"),
+					),
+					"pay_frequency": pay_frequency,
+					"ytd_gross": _as_float(ytd.get("ytd_gross")),
+					"ytd_ss_withheld": _as_float(ytd.get("ytd_ss_withheld")),
+					"state_configs": dict(state_configs or {}),
+					"state_tax_tables": dict(state_tax_tables or {}),
+				},
+				"aggregate": aggregate,
+				"min_wage_regions": structure.get("min_wage_regions") or {},
+			}
+		)
 	return inputs
 
 
@@ -768,13 +849,15 @@ def employees_missing_structures(employee_aggregates: dict, salary_structures) -
 		if _structure_for(salary_structures, employee):
 			continue
 		aggregate = employee_aggregates[employee]
-		missing.append({
-			"employee": employee,
-			"employee_name": aggregate.get("employee_name", ""),
-			"total_hours": aggregate.get("total_hours", 0.0),
-			"piece_units": aggregate.get("piece_units", 0.0),
-			"shift_count": aggregate.get("shift_count", 0),
-		})
+		missing.append(
+			{
+				"employee": employee,
+				"employee_name": aggregate.get("employee_name", ""),
+				"total_hours": aggregate.get("total_hours", 0.0),
+				"piece_units": aggregate.get("piece_units", 0.0),
+				"shift_count": aggregate.get("shift_count", 0),
+			}
+		)
 	return missing
 
 
@@ -793,10 +876,7 @@ def _state_wages(slip: dict) -> dict:
 	gross = _as_float(slip.get("gross_pay"))
 	if len(state_hours) == 1:
 		return {next(iter(state_hours)): round(gross, 2)}
-	return {
-		state: round(_as_float(info.get("gross")), 2)
-		for state, info in state_hours.items()
-	}
+	return {state: round(_as_float(info.get("gross")), 2) for state, info in state_hours.items()}
 
 
 def run_integrated_payroll(
@@ -832,7 +912,9 @@ def run_integrated_payroll(
 		employee so two runs of the same period produce the same order.
 	"""
 	aggregates = aggregate_shifts_for_period(
-		shifts, pay_period_start, pay_period_end,
+		shifts,
+		pay_period_start,
+		pay_period_end,
 		overtime_threshold=overtime_threshold,
 		workweek_anchor=workweek_anchor,
 	)
@@ -842,11 +924,16 @@ def run_integrated_payroll(
 			employee = str(row.get("employee") or "")
 			if employee and employee not in aggregates:
 				aggregates[employee] = empty_aggregate(
-					employee, row.get("employee_name") or "",
+					employee,
+					row.get("employee_name") or "",
 				)
 
 	inputs = build_payroll_inputs(
-		aggregates, salary_structures, w4_data, state_configs, fica_config,
+		aggregates,
+		salary_structures,
+		w4_data,
+		state_configs,
+		fica_config,
 		federal_tax_tables=federal_tax_tables,
 		state_tax_tables=state_tax_tables,
 		pay_frequency=pay_frequency,
@@ -857,8 +944,10 @@ def run_integrated_payroll(
 	for item in inputs:
 		aggregate = item["aggregate"]
 		slip = calculate_full_payroll(
-			item["employee_data"], item["shifts"],
-			item["salary_structure"], item["tax_config"],
+			item["employee_data"],
+			item["shifts"],
+			item["salary_structure"],
+			item["tax_config"],
 		)
 
 		wages_by_state = _state_wages(slip)
@@ -920,17 +1009,21 @@ def summarize_payroll_run(slips: list[dict]) -> dict:
 		total_units += _as_float(slip.get("piece_units"))
 		detail = slip.get("minimum_wage_detail") or {}
 		if detail.get("states_below_minimum"):
-			below.append({
-				"employee": slip.get("employee"),
-				"employee_name": slip.get("employee_name"),
-				"states": detail["states_below_minimum"],
-				"shortfall": detail.get("total_shortfall", 0.0),
-			})
+			below.append(
+				{
+					"employee": slip.get("employee"),
+					"employee_name": slip.get("employee_name"),
+					"states": detail["states_below_minimum"],
+					"shortfall": detail.get("total_shortfall", 0.0),
+				}
+			)
 		if slip.get("open_shifts"):
-			open_shifts.append({
-				"employee": slip.get("employee"),
-				"shifts": slip["open_shifts"],
-			})
+			open_shifts.append(
+				{
+					"employee": slip.get("employee"),
+					"shifts": slip["open_shifts"],
+				}
+			)
 
 	return {
 		"employee_count": len(slips or []),

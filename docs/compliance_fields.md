@@ -125,13 +125,18 @@ Employment eligibility, tax withholding, the wage law that governs this person's
 | `flc_license_status` | Data | no | MSPA 29 USC 1801; ORS 658.405 farm labor contractor licensing | Anyone recruiting, supervising or transporting agricultural workers for a fee needs a farm labor contractor licence, federally and in Oregon. Using an unlicensed contractor is the grower's violation as well as theirs. | Whether this person may lawfully run a crew or drive the bus. An expired licence takes a crew boss off the schedule that morning. |
 | `flc_license_expiration` | Date | no | MSPA 29 USC 1801; ORS 658.405 | A licence is only a defence while it is current. The expiration date is the fact. | Feeds the renewal alert. A crew boss whose licence lapses mid-harvest is a crew with nobody who can lawfully supervise it. |
 
-### `Bucket Log Entry` — the BucketLog bridge
+### `Bucket Log Entry` — erpnext_mcp
 
-Harvest chain of custody: bucket → picker → crew → block → bin → shipment. The FSMA Food Traceability Rule's critical tracking events, in the record the iPad already writes.
+Harvest chain of custody: bucket → employee → crew → block → bin → shipment. The FSMA Food Traceability Rule's critical tracking events. `employee` is a declared field of the doctype itself (resolved from worker_badge by link_badge_to_employee); crew_id/block_id/bin_id/shipment_id, verified here, are the rest of the chain. Shipped as declared fields in v0.44.0.
+
+**Verified, not added.** Through v0.43.0 this doctype belonged to a
+hypothetical external "BucketLog bridge" app and these columns were grafted
+on. v0.44.0 makes it erpnext_mcp's own — the sync endpoint (`sync_bucket_entries`),
+the badge register and the doctype ship together — so these are declared
+fields of a DocType this app ships, the same as Housing Unit's and Field's.
 
 | Field | Type | Required | Framework | Why the regulator wants it | What breaks in the WORK without it |
 | --- | --- | --- | --- | --- | --- |
-| `picker_id` | Data | no | FSMA 21 CFR 1 Subpart S; GAP worker hygiene traceback | A worker health or hygiene investigation traces from a lot back to the people who handled it. Without the picker the trace stops at the crew. | Piecework pay. Every bucket is somebody's money, and an unattributed bucket is a payroll dispute at the end of the week. |
 | `crew_id` | Data | no | FSMA Subpart S; MSPA crew records | The crew is the unit a hygiene training record, a field sanitation inspection and a wage-law jurisdiction all attach to. | Who to pay, who to send where tomorrow, and which crew boss answers for the block. Harvest is organised by crew, not by picker. |
 | `block_id` | Data | no | FSMA Subpart S critical tracking event; spray REI/PHI linkage | The block is where the lot came from, and it is the join to the spray record — which is how a residue question becomes an answerable question. | Yield by block, cost by block, and the REI check that says whether the block could lawfully be picked at all. |
 | `bin_id` | Data | no | FSMA Subpart S — commingling / transformation event | A bin is where buckets from several pickers become one lot. It is the transformation event the rule asks to be recorded. | What actually goes on the truck. The bin is the physical unit the packing house receives and pays against. |

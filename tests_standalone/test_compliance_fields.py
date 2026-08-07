@@ -341,11 +341,6 @@ class WovenNotShadow(V12TestCase):
 		self.assertIn("minimum wage", spec.operational)
 		self.assertIn("ORS 653", spec.framework)
 
-	def test_the_picker_id_is_piecework_pay_before_it_is_fsma_traceability(self):
-		spec = self._field("Bucket Log Entry", "picker_id")
-		self.assertIn("Piecework", spec.operational)
-		self.assertIn("Subpart S", spec.framework)
-
 	def test_the_shipment_id_is_a_receivable_before_it_is_a_mock_recall(self):
 		spec = self._field("Bucket Log Entry", "shipment_id")
 		self.assertIn("paid", spec.operational)

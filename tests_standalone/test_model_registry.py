@@ -76,9 +76,7 @@ class ValidatingRegistration(unittest.TestCase):
 		self.assertTrue(any("piecework_activity is required" in e for e in errors))
 
 	def test_a_well_formed_source_uuid_is_valid(self):
-		errors = engine.validate_model_registration(
-			model(source_uuid="4b6f6e1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b")
-		)
+		errors = engine.validate_model_registration(model(source_uuid="4b6f6e1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b"))
 		self.assertEqual(errors, [])
 
 	def test_a_malformed_source_uuid_is_refused(self):
@@ -165,9 +163,7 @@ class BuildingTheManifest(unittest.TestCase):
 		self.assertEqual(manifest["class_names"], ["a", "b"])
 
 	def test_metadata_carries_version_kind_format_and_activity(self):
-		manifest = engine.build_model_manifest(
-			model(model_kind="Detection", model_format="CoreML")
-		)
+		manifest = engine.build_model_manifest(model(model_kind="Detection", model_format="CoreML"))
 		metadata = manifest["metadata"]
 		self.assertEqual(metadata["version"], "3.2")
 		self.assertEqual(metadata["kind"], "Detection")
@@ -218,7 +214,11 @@ class CheckingConflicts(unittest.TestCase):
 		self.assertEqual(result["supersedes"], "Cherry Fill Detection v3")
 
 	def test_supersedes_falls_back_to_the_docname_when_there_is_no_model_name(self):
-		existing = {"name": "MLM-2026-0001", "company": "Highland Orchards", "piecework_activity": "bucket_fill_detection"}
+		existing = {
+			"name": "MLM-2026-0001",
+			"company": "Highland Orchards",
+			"piecework_activity": "bucket_fill_detection",
+		}
 		candidate = model(name="MLM-2026-0002")
 		result = engine.check_model_conflicts(candidate, existing)
 		self.assertEqual(result["supersedes"], "MLM-2026-0001")
@@ -277,9 +277,11 @@ class ToolRegistration(unittest.TestCase):
 				self.assertNotIn(name, self.registry.DEFAULT_ON_MUTATING_TOOLS)
 
 	def test_the_registry_totals_include_the_seven(self):
-		self.assertEqual(len(self.registry.TOOLS), 369)
-		self.assertEqual(len(self.registry.READ_TOOLS), 170)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 199)
+		# 369/170/199 as of v0.43.0, plus v0.44.0's eight BucketLog bridge tools
+		# (five read, three write) — see test_bucket_bridge.py's ToolRegistration.
+		self.assertEqual(len(self.registry.TOOLS), 377)
+		self.assertEqual(len(self.registry.READ_TOOLS), 175)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 202)
 
 
 if __name__ == "__main__":

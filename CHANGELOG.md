@@ -3,6 +3,54 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.44.0 — 2026-08-06
+
+**BucketLog → ERPNext Piecework Bridge.** `payroll_integration.py` has read a
+`bucket_logs` row off a shift since v0.35.0, and `tools/payroll.py` has
+speculatively queried a doctype called `Bucket Log Entry` since the same
+release — waiting on the one piece that was missing: the doctype itself, and
+everything that gets a capture from an iPhone in an orchard into it. Eight
+tools (377 total: 175 read, 202 mutating), three DocTypes.
+
+**Bucket Log Entry is erpnext_mcp's OWN doctype now, not a hypothetical
+external app's.** Through v0.43.0, `compliance_fields.py` grafted five FSMA
+traceability columns onto a `Bucket Log Entry` it assumed belonged to a
+separate "BucketLog bridge" app — the same pattern it uses for Spray Log
+(`farm_precision_ag`) and Employee (`farm_hr`/`hrms`). v0.44.0 makes it
+erpnext_mcp's own: the sync endpoint, the badge register and the doctype ship
+together, so its Target entry moves from `mode="extend"` (Custom Fields
+grafted on) to `mode="verify"` (declared fields, checked present) — the same
+treatment Housing Unit and Field already get. `picker_id` is retired in
+favour of a proper `employee` Link, resolved from `worker_badge`;
+`crew_id`/`block_id`/`bin_id`/`shipment_id` ship as declared fields.
+
+**The arithmetic is pure.** `bucket_bridge.py` reads no database, the same
+split `model_registry.py` and `budget_engine.py` keep:
+`validate_bucket_entry` checks a capture's shape, `resolve_badge_to_employee`
+reads a pre-fetched badge map, `aggregate_session` computes a session's
+totals from its own entries, and `entries_to_payroll_shape` reshapes synced
+captures into exactly the `bucket_logs` row `payroll_integration._piece_units_for`
+already reads — no change to that module's aggregation logic was needed, only
+a new `attach_bucket_log_entries` helper that matches entries onto the shift
+each employee worked that day. `tools/bucket_log.py` is the only place that
+reads or writes a Bucket Log Entry, Bucket Log Session or Bucket Log Badge
+Map document.
+
+**Only an Accepted verdict is piece work.** A Rejected capture is the
+on-device ML model saying the bucket was not actually filled;
+`entries_to_payroll_shape` filters it out at the one place every
+payroll-facing read of this data passes through, and `tools/payroll.py`'s
+own bucket-log loader now does the same filtering for the production path.
+
+**`sync_bucket_entries` deduplicates a resynced batch by `entry_uuid` rather
+than failing it**, and an entry that fails validation is reported and skipped
+rather than taking the other forty-nine captures in the batch down with it —
+a device that never heard back for a batch it already delivered can resend
+it safely. `link_badge_to_employee` backfills `employee` onto any
+already-synced entry and session that carries the badge and had none
+resolved yet, so a badge mapped after the fact still pays for what was
+already picked.
+
 ## 0.43.0 — 2026-08-06
 
 **ML Model Registry.** Volume Vision trains models and holds the weights; this

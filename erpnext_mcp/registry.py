@@ -46,6 +46,7 @@ from .tools import (
 	assets,
 	auditpacket,
 	banking,
+	bucket_log,
 	budget,
 	calendar,
 	collab,
@@ -237,7 +238,7 @@ _RULE_DRAFT_ARGUMENTS = {
 	"category": _field(
 		_STRING,
 		"Audits, Certifications, Filings, Finance, Housing, Policies, Records, Water and Sanitation "
-				"or Workforce.",
+		"or Workforce.",
 	),
 	"target_doctype": _field(_STRING, "The DocType whose rows this rule walks."),
 	"kairotic_gate_description": _field(
@@ -6832,9 +6833,7 @@ TOOLS = {
 		"paying for as a habit.",
 		{
 			"company": _COMPANY,
-			"force": _field(
-				_BOOLEAN, "Ignore each feed's frequency and check them all. Default false."
-			),
+			"force": _field(_BOOLEAN, "Ignore each feed's frequency and check them all. Default false."),
 		},
 		mutating=True,
 		idempotent=True,
@@ -7350,14 +7349,12 @@ TOOLS = {
 			"skill_required": _field(_STRING, "e.g. 'camp_maintenance', 'applicator_license'."),
 			"urgency": _field(
 				_STRING,
-				"Normal or High for field workers. Critical restricted to Foreman/Manager. "
-				"Default Normal.",
+				"Normal or High for field workers. Critical restricted to Foreman/Manager. Default Normal.",
 			),
 			"description": _field(_STRING, "What the problem is, in the worker's words."),
 			"photo_file_token": _field(
 				_STRING,
-				"REQUIRED. The File docname from finalize_staged_file — the 'before' photo "
-				"of the problem.",
+				"REQUIRED. The File docname from finalize_staged_file — the 'before' photo of the problem.",
 			),
 			"reported_by": _field(_STRING, "The Employee id of the worker reporting. REQUIRED."),
 			"asset": _field(
@@ -7388,13 +7385,11 @@ TOOLS = {
 			"description": _field(_STRING, "What the problem is, in the worker's words."),
 			"urgency": _field(
 				_STRING,
-				"Normal or High for field workers. Critical restricted to Foreman/Manager. "
-				"Default Normal.",
+				"Normal or High for field workers. Critical restricted to Foreman/Manager. Default Normal.",
 			),
 			"photo_file_token": _field(
 				_STRING,
-				"REQUIRED. The File docname from finalize_staged_file — the 'before' photo "
-				"of the problem.",
+				"REQUIRED. The File docname from finalize_staged_file — the 'before' photo of the problem.",
 			),
 			"reported_by": _field(_STRING, "The Employee id of the worker reporting. REQUIRED."),
 			"task_type": _field(
@@ -7672,9 +7667,7 @@ TOOLS = {
 			),
 			"skill_required": _field(_STRING, "e.g. 'camp_maintenance', 'applicator_license'."),
 			"estimated_duration_minutes": _field(_INTEGER, "How long one of these takes."),
-			"dispatch_mode": _field(
-				_STRING, "Either (default), Dispatched or Self-pick."
-			),
+			"dispatch_mode": _field(_STRING, "Either (default), Dispatched or Self-pick."),
 			"default_urgency": _field(
 				_STRING,
 				"Low, Normal (default), High or Critical. A DEFAULT, not a ceiling: a task "
@@ -7687,8 +7680,9 @@ TOOLS = {
 				"app writes.",
 			),
 			"creates_record_data": _field(
-				_OBJECT, "Default field values for that record, merged under whatever the task and the "
-				"completion supply."
+				_OBJECT,
+				"Default field values for that record, merged under whatever the task and the "
+				"completion supply.",
 			),
 			"instructions": _field(
 				_STRING,
@@ -7697,8 +7691,8 @@ TOOLS = {
 			),
 			"checklist": _field(
 				{"type": "array", "items": {"type": ["string", "object"]}},
-				"The items a worker ticks, in order. Either a list of sentences — [\"Press the "
-				"smoke alarm\", \"Press the CO alarm\"], which means required with no evidence — or "
+				'The items a worker ticks, in order. Either a list of sentences — ["Press the '
+				'smoke alarm", "Press the CO alarm"], which means required with no evidence — or '
 				"a list of objects with `item_name`, `required` and `evidence_type` (None, Photo, "
 				"Text or Measurement). OPTIONAL, and usually right to omit.",
 			),
@@ -7851,7 +7845,8 @@ TOOLS = {
 			),
 			"assigned_to_name": _field(_STRING, "Their name, where no HR app can resolve it."),
 			"urgency": _field(
-				_STRING, "Override the template's default urgency for this case: Low, Normal, High or Critical."
+				_STRING,
+				"Override the template's default urgency for this case: Low, Normal, High or Critical.",
 			),
 			"task_name": _field(
 				_STRING, "Override the name. Defaults to the template name and the location."
@@ -7873,8 +7868,7 @@ TOOLS = {
 		title="Create a task from a template",
 		available=_needs_doctype("Farm Task Template", "Farm Task"),
 		requires=(
-			"the Farm Task Template and Farm Task DocTypes, which ship with erpnext_mcp — run "
-			"`bench migrate`"
+			"the Farm Task Template and Farm Task DocTypes, which ship with erpnext_mcp — run `bench migrate`"
 		),
 	),
 	# ── v0.16.0: the compliance records a completion produces ───────────────
@@ -9064,9 +9058,7 @@ TOOLS = {
 			"employee": _field(_STRING, "Employee docname or employee_name."),
 			"employee_name": _field(_STRING, "Alias for employee."),
 			"name": _field(_STRING, "Alias for employee."),
-			"destruction_certificate": _field(
-				_STRING, "Attach URL for the destruction certificate."
-			),
+			"destruction_certificate": _field(_STRING, "Attach URL for the destruction certificate."),
 		},
 		mutating=True,
 		destructive=True,
@@ -9273,8 +9265,7 @@ TOOLS = {
 	),
 	"list_state_tax_configs": _tool(
 		state_tax.list_state_tax_configs,
-		"All state tax configurations with optional filtering by company, "
-		"state, and status. Read-only.",
+		"All state tax configurations with optional filtering by company, state, and status. Read-only.",
 		{
 			"company": _COMPANY,
 			"state": _field(_STRING, "Filter by state: OR or WA."),
@@ -9502,8 +9493,7 @@ TOOLS = {
 	),
 	"list_payroll_entries": _tool(
 		payroll.list_payroll_entries,
-		"List Farm Payroll Entries with optional filtering by company, status, "
-		"and pay frequency. Read-only.",
+		"List Farm Payroll Entries with optional filtering by company, status, and pay frequency. Read-only.",
 		{
 			"company": _COMPANY,
 			"status": _field(_STRING, "Filter by status: Draft, Calculated, Submitted, Cancelled."),
@@ -9603,11 +9593,13 @@ TOOLS = {
 			"pay_period_end": _field(_STRING, "Alias for end_date."),
 			"company": _COMPANY,
 			"overtime_threshold": _field(
-				_NUMBER, "Hours in a workweek before overtime. Default 40 — the OR and WA "
+				_NUMBER,
+				"Hours in a workweek before overtime. Default 40 — the OR and WA "
 				"agricultural threshold, both fully phased.",
 			),
 			"workweek_anchor": _field(
-				_STRING, "First day of the employer's declared workweek as YYYY-MM-DD. "
+				_STRING,
+				"First day of the employer's declared workweek as YYYY-MM-DD. "
 				"Defaults to the period start, which is right whenever the period is a "
 				"whole number of workweeks.",
 			),
@@ -9631,13 +9623,15 @@ TOOLS = {
 			"pay_frequency": _field(_STRING, "Weekly, Biweekly, Semimonthly, or Monthly. Default Biweekly."),
 			"employee": _field(_STRING, "Limit the run to one employee."),
 			"include_unworked": _field(
-				_BOOLEAN, "Keep employees with a salary structure and no shift on the run — "
+				_BOOLEAN,
+				"Keep employees with a salary structure and no shift on the run — "
 				"zero for hourly and piece rate, their salary for Salary. Default true.",
 			),
 			"overtime_threshold": _field(_NUMBER, "Hours in a workweek before overtime. Default 40."),
 			"workweek_anchor": _field(_STRING, "First day of the declared workweek as YYYY-MM-DD."),
 			"detail": _field(
-				_BOOLEAN, "Include the per-shift timesheet, the state tax breakdown and the "
+				_BOOLEAN,
+				"Include the per-shift timesheet, the state tax breakdown and the "
 				"federal working behind each slip. Large; off by default.",
 			),
 		},
@@ -9664,7 +9658,8 @@ TOOLS = {
 			"pay_frequency": _field(_STRING, "Weekly, Biweekly, Semimonthly, or Monthly. Default Biweekly."),
 			"employee": _field(_STRING, "Limit the run to one employee."),
 			"include_unworked": _field(
-				_BOOLEAN, "Keep employees with a salary structure and no shift on the run. Default true.",
+				_BOOLEAN,
+				"Keep employees with a salary structure and no shift on the run. Default true.",
 			),
 			"overtime_threshold": _field(_NUMBER, "Hours in a workweek before overtime. Default 40."),
 			"workweek_anchor": _field(_STRING, "First day of the declared workweek as YYYY-MM-DD."),
@@ -11409,16 +11404,16 @@ TOOLS = {
 		"and refuses every node that is not arithmetic: no imports, no attribute "
 		"access, no subscripts, no comprehensions, no calls except min, max, abs "
 		"and round. NOTHING ON THIS RECORD HOLDS PYTHON.\n\n"
-		"`expression_inputs` HAS FOUR SOURCES. `{\"source\": \"gl\", \"root_type\": "
-		"\"Income\"}` sums GL movement over the window; add `account_type`, "
+		'`expression_inputs` HAS FOUR SOURCES. `{"source": "gl", "root_type": '
+		'"Income"}` sums GL movement over the window; add `account_type`, '
 		"`accounts` or `account_number_prefix` to narrow it, and "
-		"`\"balance\": true` for a balance-sheet figure, which is a POSITION at "
+		'`"balance": true` for a balance-sheet figure, which is a POSITION at '
 		"the window's end rather than a movement across it — a current ratio "
 		"built from twelve months of movement in a cash account is not a current "
-		"ratio. `{\"source\": \"report\", \"report_name\": \"revenue\", \"path\": "
-		"\"total\"}` reads a component off a built-in computer. `{\"source\": "
-		"\"kpi\", \"kpi_id\": \"...\"}` is another definition's value, with cycles "
-		"refused. `{\"source\": \"constant\", \"value\": 43560}` is a number with a "
+		'ratio. `{"source": "report", "report_name": "revenue", "path": '
+		'"total"}` reads a component off a built-in computer. `{"source": '
+		'"kpi", "kpi_id": "..."}` is another definition\'s value, with cycles '
+		'refused. `{"source": "constant", "value": 43560}` is a number with a '
 		"name.\n\n"
 		"`kpi_id` IS THE CACHE KEY AND CANNOT BE CHANGED LATER. Every "
 		"Financial KPI History row carries it, so it must be unique and must "
@@ -11548,7 +11543,9 @@ TOOLS = {
 			"company": _field(_STRING, "Scope it to one entity, or pass empty to widen to all."),
 			"category": _field(_STRING, "New category."),
 			"unit": _field(_STRING, "New unit."),
-			"formula_type": _field(_STRING, "'Built-in' or 'Expression'. Changing this is an arithmetic change."),
+			"formula_type": _field(
+				_STRING, "'Built-in' or 'Expression'. Changing this is an arithmetic change."
+			),
 			"builtin_function": _field(_STRING, "New built-in computer. An arithmetic change."),
 			"expression": _field(_STRING, "New expression. An arithmetic change."),
 			"expression_inputs": _field(_OBJECT, "New input map. An arithmetic change."),
@@ -11770,7 +11767,9 @@ TOOLS = {
 			"budget_name": _field(_STRING, "REQUIRED. Unique across the site — it is also the docname."),
 			"company": _field(_STRING, "REQUIRED. Which company's ledger this budget reads."),
 			"fiscal_year": _field(_STRING, "REQUIRED. Which fiscal year this budget covers."),
-			"status": _field(_STRING, "Draft (default), Active or Closed. Only Active budgets are refreshed overnight."),
+			"status": _field(
+				_STRING, "Draft (default), Active or Closed. Only Active budgets are refreshed overnight."
+			),
 			"notes": _field(_STRING, "Who built this budget and against what."),
 			"line_items": _field(
 				{"type": "array", "items": _OBJECT},
@@ -11956,7 +11955,9 @@ TOOLS = {
 		{
 			"model": _field(_STRING, "REQUIRED. By docname (e.g. MLM-2026-0001) or model_name."),
 			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
-			"version_hint": _field(_STRING, "Narrows a model_name lookup by the CURRENT version, before editing it."),
+			"version_hint": _field(
+				_STRING, "Narrows a model_name lookup by the CURRENT version, before editing it."
+			),
 			"model_name": _field(_STRING, "New name."),
 			"version": _field(_STRING, "New version. Refused if it collides with another record."),
 			"source_uuid": _field(_STRING, "New Volume Vision TrainedModel.uuid."),
@@ -11980,8 +11981,7 @@ TOOLS = {
 	),
 	"get_model": _tool(
 		ml_model.get_model,
-		"One ML Model record in full — every field, its parsed class_names "
-		"and metrics. Read-only.",
+		"One ML Model record in full — every field, its parsed class_names and metrics. Read-only.",
 		{
 			"model": _field(_STRING, "REQUIRED. By docname or model_name."),
 			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
@@ -11994,8 +11994,7 @@ TOOLS = {
 	),
 	"list_models": _tool(
 		ml_model.list_models,
-		"The model register: every ML Model matching the filters, newest "
-		"first. Read-only.",
+		"The model register: every ML Model matching the filters, newest first. Read-only.",
 		{
 			"company": _COMPANY,
 			"status": _field(_STRING, "Draft, Active, Deprecated or Archived."),
@@ -12058,6 +12057,167 @@ TOOLS = {
 		title="Get the active model",
 		available=_needs_doctype("ML Model"),
 		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.44.0: BucketLog → ERPNext Piecework Bridge ──────────────────────
+	"sync_bucket_entries": _tool(
+		bucket_log.sync_bucket_entries,
+		"MUTATING (default OFF). Receive a batch of bucket captures synced "
+		"from a BucketLog device: create Bucket Log Entry records, resolve "
+		"each one's employee from its worker_badge against the Bucket Log "
+		"Badge Map register, and keep the Bucket Log Session each belongs to "
+		"up to date.\n\n"
+		"DEDUPLICATES BY entry_uuid — resyncing a batch already on the site "
+		"is a no-op, not a duplicate record. An entry that fails validation "
+		"(bad verdict, no timestamp, no badge or employee) is reported and "
+		"SKIPPED rather than failing the whole call — the response names "
+		"which ones and why.",
+		{
+			"entries": _field(
+				{"type": "array", "items": _OBJECT},
+				"REQUIRED. Up to 500 objects, each: entry_uuid (required), company "
+				"(required), timestamp (required), verdict (required, Accepted or "
+				"Rejected), session_uuid, worker_badge, employee (skips badge "
+				"resolution if already known), coverage_percent (0-100), model_uuid, "
+				"gps_lat, gps_lon, h3_cell, device_id.",
+			),
+		},
+		required=("entries",),
+		mutating=True,
+		idempotent=True,
+		title="Sync bucket entries",
+		available=_needs_doctype("Bucket Log Entry"),
+		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_bucket_entries": _tool(
+		bucket_log.list_bucket_entries,
+		"Every Bucket Log Entry matching the filters, newest first. Read-only.",
+		{
+			"company": _COMPANY,
+			"employee": _field(_STRING, "Only this employee's captures."),
+			"badge": _field(_STRING, "Only captures scanned against this worker_badge."),
+			"session": _field(_STRING, "Only this session_uuid's captures."),
+			"verdict": _field(_STRING, "Accepted or Rejected."),
+			"status": _field(_STRING, "Pending, Linked or Paid."),
+			"from_date": _field(_STRING, "Start of the timestamp range, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "End of the timestamp range, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List bucket entries",
+		available=_needs_doctype("Bucket Log Entry"),
+		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_bucket_session": _tool(
+		bucket_log.get_bucket_session,
+		"One Bucket Log Session, by docname or session_uuid, WITH ITS TOTALS "
+		"COMPUTED LIVE from its own current entries rather than only the "
+		"stored counters — the two can drift if a badge resolves after the "
+		"session was last synced. Read-only.",
+		{
+			"session": _field(_STRING, "REQUIRED. Docname or session_uuid."),
+		},
+		required=("session",),
+		title="Get a bucket session",
+		available=_needs_doctype("Bucket Log Session"),
+		requires="the Bucket Log Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_bucket_sessions": _tool(
+		bucket_log.list_bucket_sessions,
+		"The session register: every Bucket Log Session matching the filters, newest first. Read-only.",
+		{
+			"company": _COMPANY,
+			"employee": _field(_STRING, "Only this employee's sessions."),
+			"status": _field(_STRING, "Open, Closed or Linked."),
+			"from_date": _field(_STRING, "Start of the started_at range, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "End of the started_at range, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List bucket sessions",
+		available=_needs_doctype("Bucket Log Session"),
+		requires="the Bucket Log Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"link_badge_to_employee": _tool(
+		bucket_log.link_badge_to_employee,
+		"MUTATING (default OFF). Map a QR badge ID to an Employee — creates "
+		"the Bucket Log Badge Map record if the badge is new, or repoints an "
+		"existing one (a lost card reissued to somebody else).\n\n"
+		"BACKFILLS employee ONTO ANY ALREADY-SYNCED Bucket Log Entry and "
+		"Bucket Log Session that carries this badge and had none resolved "
+		"yet — a badge mapped after the fact still pays for what was "
+		"already picked.",
+		{
+			"badge_id": _field(_STRING, "REQUIRED. The QR badge ID BucketLog scans."),
+			"employee": _field(_STRING, "REQUIRED. Employee docname."),
+			"company": _field(_STRING, "REQUIRED. Which company issued this badge."),
+			"active": _field(_BOOLEAN, "Default true. False retires the badge without deleting it."),
+			"notes": _field(_STRING, "Why this badge was mapped, reassigned or retired."),
+		},
+		required=("badge_id", "employee", "company"),
+		mutating=True,
+		idempotent=True,
+		title="Link a badge to an employee",
+		available=_needs_doctype("Bucket Log Badge Map"),
+		requires="the Bucket Log Badge Map DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"link_entries_to_shift": _tool(
+		bucket_log.link_entries_to_shift,
+		"MUTATING (default OFF). Associate Bucket Log Entries with a Farm "
+		"Shift so they are picked up as piece units when that shift's "
+		"payroll runs. Pass EITHER entries (a list of entry_uuid or "
+		"docname) or session (session_uuid — every not-yet-Paid entry in "
+		"it).\n\n"
+		"AN ENTRY ALREADY Paid IS LEFT UNTOUCHED — status only ever "
+		"advances Pending → Linked → Paid, never back, so re-linking a paid "
+		"bucket cannot detach it from the slip that already paid for it.",
+		{
+			"shift": _field(_STRING, "REQUIRED. Farm Shift docname."),
+			"entries": _field(
+				{"type": "array", "items": _STRING},
+				"Bucket Log Entry docnames or entry_uuids. Exclusive with session in the "
+				"sense that either is enough — pass whichever you have.",
+			),
+			"session": _field(_STRING, "session_uuid — links every not-yet-Paid entry in the session."),
+		},
+		required=("shift",),
+		mutating=True,
+		idempotent=True,
+		title="Link bucket entries to a shift",
+		available=_needs_doctype("Bucket Log Entry"),
+		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_piecework_summary": _tool(
+		bucket_log.get_piecework_summary,
+		"The payroll-ready summary for one employee over a date range: "
+		"accepted buckets (what entries_to_payroll_shape turns into piece "
+		"units on a payroll run), sessions worked, and acceptance rate. "
+		"Read-only.",
+		{
+			"employee": _field(_STRING, "REQUIRED. Employee docname."),
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "REQUIRED. Start of the range, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "REQUIRED. End of the range, YYYY-MM-DD."),
+		},
+		required=("employee", "from_date", "to_date"),
+		title="Get a piecework summary",
+		available=_needs_doctype("Bucket Log Entry"),
+		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"reconcile_bucket_payroll": _tool(
+		bucket_log.reconcile_bucket_payroll,
+		"Compares accepted Bucket Log Entries against what Farm Payroll "
+		"Slips actually paid for the same company and period, per employee, "
+		"and flags where they disagree. A discrepancy is not necessarily an "
+		"error — a bucket entry with no slip covering it yet is simply "
+		"unpaid so far. Read-only, reads no ledger.",
+		{
+			"company": _field(_STRING, "REQUIRED. Which company to reconcile."),
+			"from_date": _field(_STRING, "REQUIRED. Start of the period, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "REQUIRED. End of the period, YYYY-MM-DD."),
+			"employee": _field(_STRING, "Narrow to one employee."),
+		},
+		required=("company", "from_date", "to_date"),
+		title="Reconcile bucket entries against payroll",
+		available=_needs_doctype("Bucket Log Entry"),
+		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,
@@ -12673,9 +12833,7 @@ TOOLS = {
 			"regulation_url": _field(
 				_STRING, "Where it was read from. Goes on the draft as `ai_source_citation`."
 			),
-			"regulation_section": _field(
-				_STRING, "The section or rule number — 'OAR 437-004-1120(2)'."
-			),
+			"regulation_section": _field(_STRING, "The section or rule number — 'OAR 437-004-1120(2)'."),
 			"ai_source_citation": _field(
 				_STRING,
 				"The whole citation line, written out. REQUIRED IF NEITHER the url NOR the "
@@ -13027,20 +13185,20 @@ TOOLS = {
 			"company_address": _field(_STRING, "The employer address to print. Not stored on Company."),
 			"state_ids": _field(
 				_OBJECT,
-				"Employer state account numbers, e.g. {\"OR\": \"1234567-8\"}. "
+				'Employer state account numbers, e.g. {"OR": "1234567-8"}. '
 				"Overrides what is on the State Tax Configuration.",
 			),
 			"ui_rate": _field(_NUMBER, "The state's assigned unemployment-insurance rate, as a percent."),
 			"deposits": _field(_NUMBER, "Form 941 line 13 — total federal deposits made for the quarter."),
 			"ytd_wages_by_employee": _field(
 				_OBJECT,
-				"Prior-period wages per employee, e.g. {\"HR-EMP-00001\": 42000}. Lets "
+				'Prior-period wages per employee, e.g. {"HR-EMP-00001": 42000}. Lets '
 				"the Social Security and UI wage bases be applied correctly in Q2 onward.",
 			),
 			"oq_reported": _field(
 				_OBJECT,
 				"OR-WR only. What was actually filed on each OQ, e.g. "
-				"{\"Q1\": {\"or_income_tax\": 1200, \"or_transit_tax\": 40}} — the thing "
+				'{"Q1": {"or_income_tax": 1200, "or_transit_tax": 40}} — the thing '
 				"OR-WR reconciles against.",
 			),
 			"notes": _field(_STRING, "Optional notes stored on the form."),
@@ -13161,7 +13319,9 @@ TOOLS = {
 			"status": _field(_STRING, "Draft, Generated, Filed, or Amended."),
 			"employee": _field(_STRING, "Only the forms for one employee."),
 			"overwrite": _field(_BOOLEAN, "Render forms that already have a PDF, repointing the field."),
-			"company_address": _field(_STRING, "The employer address to print, where the form data has none."),
+			"company_address": _field(
+				_STRING, "The employer address to print, where the form data has none."
+			),
 			"limit": _field(
 				_INTEGER,
 				"Maximum forms one run covers. Default 100, hard maximum 500. A larger "

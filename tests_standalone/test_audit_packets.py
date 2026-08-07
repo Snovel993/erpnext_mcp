@@ -16,10 +16,14 @@ override exists, it is awkward, and what it produces is tested too: the open ite
 end up in a section at the FRONT, which is the honest way to hand over an
 unfinished period.
 
-SECTIONS SAY WHY THEY ARE EMPTY. An FSMA packet on a site with no BucketLog
-bridge has to say the bridge is not installed, not silently omit traceability —
-because an absent section reads as an operation with nothing to declare, and an
-auditor will find the difference faster than the operator will.
+SECTIONS SAY WHY THEY ARE EMPTY. An EPA packet on a site with no
+farm_precision_ag has to say the app is not installed, not silently omit spray
+records — because an absent section reads as an operation with nothing to
+declare, and an auditor will find the difference faster than the operator
+will. Bucket Log Entry is erpnext_mcp's own doctype since v0.44.0 (it is no
+longer possible for it to be "not installed" on a site running this app), so
+its traceability section is empty-for-the-period rather than absent-by-app —
+see `TraceabilityIsErpnextMcpsOwnDoctype`.
 
 THE COMMAND CENTER IS AN INSTALLER, NOT A FIXTURE, and `TheCommandCenter` runs
 it three times. A fixture cannot look at what is already there, so an operator who
@@ -488,14 +492,17 @@ class Staging(PacketTestCase):
 class EmptySectionsExplainThemselves(PacketTestCase):
 	"""An absent section reads as an operation with nothing to declare."""
 
-	def test_traceability_says_the_bucketlog_bridge_is_not_installed(self):
+	def test_traceability_is_empty_for_the_period_not_absent_by_app(self):
+		"""Bucket Log Entry ships with erpnext_mcp since v0.44.0 — it cannot be
+		"not installed" on a site running this app, so an FSMA packet with no
+		bucket captures in the period says THAT, not that a bridge app is
+		missing. See TraceabilityIsErpnextMcpsOwnDoctype for the populated case."""
 		self.a_full_operation()
 		section = next(
 			entry for entry in self.generate("FSMA")["packet"]["sections"] if entry["key"] == "traceability"
 		)
 		self.assertEqual(section["row_count"], 0)
-		self.assertIn("BucketLog bridge is not installed", section["empty_note"])
-		self.assertIn("supplied separately", section["empty_note"])
+		self.assertIn("No records matched for this period", section["empty_note"])
 
 	def test_spray_records_say_farm_precision_ag_is_not_installed(self):
 		self.a_full_operation()
@@ -540,10 +547,57 @@ class EmptySectionsExplainThemselves(PacketTestCase):
 
 	def test_the_type_listing_says_which_sections_will_be_empty_here(self):
 		data = self.tool_data("list_audit_packet_types", {})
+		epa = next(entry for entry in data["audit_types"] if entry["audit_type"] == "EPA")
+		self.assertTrue(any("Spray Log" in entry for entry in epa["sections_that_will_be_empty_here"]))
+
+	def test_bucket_log_entry_is_never_listed_as_a_section_that_will_be_empty(self):
+		"""It ships with erpnext_mcp — it is always here, the same as Housing Unit
+		and Field, neither of which is predicted empty either."""
+		data = self.tool_data("list_audit_packet_types", {})
 		fsma = next(entry for entry in data["audit_types"] if entry["audit_type"] == "FSMA")
-		self.assertTrue(
+		self.assertFalse(
 			any("Bucket Log Entry" in entry for entry in fsma["sections_that_will_be_empty_here"])
 		)
+
+
+class TraceabilityIsErpnextMcpsOwnDoctype(PacketTestCase):
+	"""v0.44.0: Bucket Log Entry ships with erpnext_mcp, so a genuine capture in
+	the period shows up in the FSMA packet's traceability section — reading the
+	doctype's own `employee` and `verdict` fields rather than columns a
+	third-party doctype might or might not carry."""
+
+	def test_a_bucket_log_entry_in_the_period_appears_in_the_section(self):
+		STORE.seed(
+			"Bucket Log Entry",
+			[
+				{
+					"name": "BLE-2026-0001",
+					"entry_uuid": "11111111-1111-1111-1111-111111111111",
+					"company": MAIN,
+					"timestamp": "2026-03-15 09:00:00",
+					"verdict": "Accepted",
+					"employee": "HR-EMP-00001",
+					"crew_id": "CREW-1",
+					"block_id": "BLOCK-9",
+					"bin_id": "BIN-4",
+					"shipment_id": "",
+					"status": "Pending",
+				}
+			],
+		)
+		self.a_full_operation()
+		section = next(
+			entry for entry in self.generate("FSMA")["packet"]["sections"] if entry["key"] == "traceability"
+		)
+		self.assertEqual(section["row_count"], 1)
+		row = section["rows"][0]
+		self.assertEqual(row["picker"], "HR-EMP-00001")
+		self.assertEqual(row["crew_id"], "CREW-1")
+		self.assertEqual(row["disposition"], "Accepted")
+		# shipment_id was never set — the chain breaks there, and the packet
+		# says so rather than silently dropping the row.
+		self.assertEqual(row["shipment_id"], "(unlinked)")
+		self.assertIn("BLE-2026-0001", section["chain_breaks"])
 
 
 class TheEvidenceIsTheOperationalRecord(PacketTestCase):
