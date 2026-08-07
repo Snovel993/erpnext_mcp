@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The twenty-four methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The twenty-seven methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -50,11 +50,12 @@ second set of compliance rules to keep in step, and they would drift.
 THE ONBOARDING, CREW-CLOCK AND BUCKET METHODS CARRY A SECOND ROLE GATE
 ────────────────────────────────────────────────────────────────────────────
 
-v0.45.0 published nine more, and they are not like the first fifteen. Every
-tool the original wrappers delegate to is field work with no role check of its
-own; these nine reach `tools/i9.py`, `tools/w4.py`, `tools/shifts.py` and
-`tools/bucket_log.py`, and each of THOSE calls `employee.require_hr_role()` or
-`kpi.require_kpi_role()` before it writes a row.
+v0.45.0 published nine more and v0.46.0 three more again, and they are not like
+the first fifteen. Every tool the original wrappers delegate to is field work
+with no role check of its own; these twelve reach `tools/employee.py`,
+`tools/i9.py`, `tools/w4.py`, `tools/shifts.py` and `tools/bucket_log.py`, and
+each of THOSE calls `employee.require_hr_role()` or `kpi.require_kpi_role()`
+before it writes a row.
 
 THAT GATE IS LEFT EXACTLY WHERE IT IS, and the consequence is stated here
 rather than discovered in an orchard: of the roles `guard.FARM_OPS_ROLES`
@@ -75,8 +76,10 @@ from __future__ import annotations
 
 import frappe
 
+from .. import compat
 from ..errors import ToolError
 from ..tools import asset_tags, bucket_log, dispatch, fieldwork, i9, shifts, w4
+from ..tools import employee as personnel
 from ..tools import mobile as mobile_tools
 from . import guard, shape
 
@@ -89,6 +92,28 @@ FARM_SHIFT = "Farm Shift"
 #: the tool's own limit and is read rather than restated, so a phone and a Desk
 #: import cannot come to disagree about how big a batch is.
 BUCKET_BATCH_CAP = bucket_log.BATCH_CAP
+
+#: Most rows `search_employees` will hand back. The number iOS asks Frappe's REST
+#: list endpoint for in `OnboardingAPI.searchEmployees`, kept exactly: the search
+#: field on the wizard's Identity step shows a scrolling list a person picks one
+#: name out of, and a longer answer is a bigger payload nobody reads to the end.
+#: A search that hits the cap is a search that needs another letter typed into it.
+EMPLOYEE_SEARCH_LIMIT = 20
+
+#: What `search_employees` reports about each match, in the order
+#: `ExistingEmployee` (`Models/OnboardingModels.swift:273`) declares them.
+#: `company` is not in that struct and is emitted anyway — `guard.scoped` checks
+#: the result against the caller's entities on the way out, and it needs the
+#: column to check.
+EMPLOYEE_SEARCH_FIELDS = (
+	"name",
+	"employee_name",
+	"employee_number",
+	"status",
+	"date_of_joining",
+	"employment_type",
+	"company",
+)
 
 
 def _employee(user: str) -> str:
@@ -284,6 +309,55 @@ def _bucket_entries(raw, company: str) -> list:
 				row[key] = value
 		out.append(row)
 	return out
+
+
+def _full_name(first, last, given) -> str:
+	"""One `employee_name`, from whichever halves the wizard filled in.
+
+	`OnboardingIdentity.employeePayload` already joins the two and sends all three
+	keys, so this is the fallback for a client that sends only the halves rather
+	than the usual path. The one-word case is NOT patched over here: a record
+	carrying "Rosa" and nothing else names nobody findable on an I-9, a payroll
+	register or a dispatch board, and `create_employee` refuses it with that
+	sentence. Composing something plausible instead would put the refusal off
+	until the person had filled in four more screens.
+	"""
+	whole = str(given or "").strip()
+	if whole:
+		return whole
+	return " ".join(part for part in (str(first or "").strip(), str(last or "").strip()) if part)
+
+
+def _employee_identity(name: str) -> dict:
+	"""The two facts the wizard holds on to after step 1, read back off the record.
+
+	`OnboardingAPI.CreatedEmployee` decodes `name` with `try c.decode(String.self)`
+	— absent or null and the whole row throws, mid-flow, on a person who has just
+	been hired — and `employee_id` as an optional it falls back to the docname for.
+
+	`employee_id` IS `employee_number` AND IS OFTEN EMPTY. Frappe HR's Employee
+	carries the docname as its identity and `employee_number` as the payroll number
+	an operator may or may not keep; a site that keeps none gets null here rather
+	than a docname echoed into a second key, because the app already writes that
+	fallback itself and a server that guessed would hide which sites actually
+	number their people.
+	"""
+	row = (
+		frappe.db.get_value(
+			EMPLOYEE,
+			name,
+			compat.existing_fields(EMPLOYEE, ["employee_name", "employee_number", "company", "status"]),
+			as_dict=True,
+		)
+		or {}
+	)
+	return {
+		"name": name,
+		"employee_id": str(row.get("employee_number") or "") or None,
+		"employee_name": row.get("employee_name"),
+		"company": row.get("company"),
+		"status": row.get("status"),
+	}
 
 
 def _crew(raw, allowed: list) -> list:
@@ -817,7 +891,200 @@ def report_asset_issue(
 	return shape.task(data, None)
 
 
-# ── 17. create_i9_form ──────────────────────────────────────────────────────
+# ── 17. create_employee ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_employee", mutating=True, limit=guard.WRITE_LIMIT)
+def create_employee(
+	user: str,
+	first_name=None,
+	last_name=None,
+	employee_name=None,
+	company=None,
+	gender=None,
+	date_of_birth=None,
+	date_of_joining=None,
+	employment_type=None,
+	designation=None,
+	department=None,
+	personal_email=None,
+	cell_number=None,
+) -> dict:
+	"""The person. Step 1 of the wizard, and the record the other four steps fill in.
+
+	v0.46.0, and the same failure v0.45.0 fixed nine of: `OnboardingAPI` reached
+	for `POST /api/resource/Employee`, the Tailscale funnel publishes
+	`/farmops/api/…` and nothing else, and the wizard 404'd on its FIRST step —
+	so none of the nine paths that release published was ever reached from a
+	phone. `MobileAPI.createEmployee` has named this path since Sprint 9.
+
+	IT DELEGATES RATHER THAN INSERTING. `frappe.get_doc({...}).insert()` here would
+	be four lines and would step around every rule `tools/employee.py` has held
+	since v0.18.1: the fourteen-field allowlist that refuses `ctc` and
+	`salary_structure` by name, the second-record check that keeps one person off
+	the dispatch board twice, the mandatory fields read off THIS site's meta rather
+	than assumed, and `require_hr_role`. Those rules stay where they are for the
+	reason the dispatch rules do — a wrapper with its own copy is a second set of
+	personnel rules to keep in step, and they drift.
+
+	`status` IS NOT ACCEPTED, and the app sends it. `OnboardingIdentity.employeePayload`
+	carries `"status": "Active"`, which is what `create_employee` writes anyway;
+	what the argument would ALSO buy is a phone that can file somebody as Left or
+	Suspended on the day they were hired. It is dropped rather than forwarded, and
+	the record comes out Active because that is the tool's default.
+
+	`user_id` IS NOT ACCEPTED EITHER. Linking an Employee to a login is what turns
+	a login into a person on the dispatch board, and `link_employee_to_user` does
+	it in the Desk behind a check that the account is actually enrolled. A phone
+	that could set it in passing could point somebody else's task history at an
+	account it names.
+	"""
+	allowed = guard.require_scope(user)
+
+	inner = {
+		"employee_name": _full_name(first_name, last_name, employee_name),
+		"company": _company(user, company, allowed),
+	}
+	for key, value in (
+		("first_name", first_name),
+		("last_name", last_name),
+		("gender", gender),
+		("date_of_birth", date_of_birth),
+		("date_of_joining", date_of_joining),
+		("employment_type", employment_type),
+		("designation", designation),
+		("department", department),
+		("personal_email", personal_email),
+		("cell_number", cell_number),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	result = personnel.create_employee(inner)
+	return _employee_identity(result.data["employee"])
+
+
+# ── 18. search_employees ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("search_employees", limit=guard.READ_LIMIT)
+def search_employees(user: str, query=None, company=None) -> dict:
+	"""Who this entity has already hired, by name. The step before creating a second record.
+
+	The wizard runs this before its Identity step writes anything: a picker who
+	worked last season is an Employee record that already exists, and hiring them
+	again as a NEW record is the mistake `create_employee` refuses at the end and
+	this method prevents at the beginning. A match the foreman recognises becomes
+	`reactivate_employee`; no match becomes `create_employee`.
+
+	IT CARRIES THE HR ROLE GATE ITSELF, which no other read on this surface does.
+	The rest of the file reads field work — a task board, an asset, a compliance
+	alert — and a picker holding a phone is entitled to all of it. This reads the
+	personnel register: every name, hire date and employment type an entity has,
+	including the people who have LEFT. `tools/hr.list_employees` has no gate of
+	its own because the MCP transport is an operator's console; this transport
+	faces the open internet with a phone on the other end, so the same gate the
+	writing methods inherit from `tools/employee.py` is applied here by hand.
+
+	STATUS IS NOT FILTERED, on purpose. A Left or Inactive employee is exactly who
+	this search is for, and `hr.list_employees` defaults to Active — which is why
+	this reads the register directly rather than calling it. `ExistingEmployee`
+	carries `status` and the wizard branches on it: Active means "you already have
+	them", anything else means "reactivate".
+
+	The company filter is the caller's own entities when the app does not name one,
+	never the whole site — the rule `list_available_tasks` states at length — and
+	`guard.scoped` checks the answer again on the way out.
+	"""
+	allowed = guard.require_scope(user)
+	personnel.require_hr_role()
+	wanted = guard.require_company(user, company, allowed)
+
+	text = str(query or "").strip()
+	if not text:
+		frappe.throw(
+			"query is required — a search with nothing in it would return the entity's whole "
+			"personnel register.",
+			frappe.ValidationError,
+		)
+
+	rows = frappe.db.get_all(
+		EMPLOYEE,
+		filters={
+			"company": ("in", [wanted] if wanted else allowed),
+			"employee_name": ("like", f"%{text}%"),
+		},
+		fields=compat.existing_fields(EMPLOYEE, list(EMPLOYEE_SEARCH_FIELDS)),
+		order_by="employee_name asc",
+		limit_page_length=EMPLOYEE_SEARCH_LIMIT,
+	)
+
+	found = guard.scoped(
+		[
+			{
+				"name": row.get("name"),
+				"employee_name": row.get("employee_name"),
+				"employee_id": str(row.get("employee_number") or "") or None,
+				"status": row.get("status"),
+				"date_of_joining": row.get("date_of_joining"),
+				"employment_type": row.get("employment_type"),
+				"company": row.get("company"),
+			}
+			for row in rows or []
+		],
+		allowed,
+	)
+	return {
+		"employees": found,
+		"count": len(found),
+		"company": wanted or None,
+		"limit": EMPLOYEE_SEARCH_LIMIT,
+	}
+
+
+# ── 19. reactivate_employee ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("reactivate_employee", mutating=True, limit=guard.WRITE_LIMIT)
+def reactivate_employee(user: str, employee=None, docname=None) -> dict:
+	"""Put a returning picker back on the payroll: Active, joined today.
+
+	The other half of `search_employees`. A worker who left in November and is
+	standing in the yard in June is one Employee record with a status, not two
+	records with one history between them — and the wizard's own flow takes this
+	branch before it will consider creating anything.
+
+	IT WRITES `date_of_joining` AND THAT OVERWRITES THE ORIGINAL HIRE DATE. This is
+	what `OnboardingAPI.reactivateEmployee` already did through the REST path it
+	could not reach, and it is deliberate rather than incidental: the I-9 opened a
+	few screens later is checked against the hire date, and 8 U.S.C. §1324a's
+	three-business-day clock counts from the day this person started THIS time. The
+	date it replaced is not lost — `update_employee` reports every field it changed
+	with its before-value, and that lands in the MCP Action Log row this call
+	writes.
+
+	TODAY IS NOT AN ARGUMENT. A rehire date is a wage fact — it decides which
+	season's tenure a person is credited with — and the phone in the yard knows
+	exactly one true answer to it, which is the day it is being held. A backdated
+	rehire is a correction, and corrections are made in the Desk by somebody who
+	can see what they are correcting.
+
+	`docname` IS ACCEPTED AS A SECOND SPELLING of `employee`, because the Swift
+	function's own parameter is called `docname` and the two names for one docname
+	is the cheapest possible way to not ship a build over a key. Both are checked
+	the same way — `_employee_argument` proves the record is inside this caller's
+	entities, so an Employee of an entity this account cannot see reads as not
+	found rather than as refused.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+
+	result = personnel.update_employee({
+		"employee": person,
+		"status": "Active",
+		"date_of_joining": frappe.utils.today(),
+	})
+	return {**_employee_identity(person), "changed": result.data.get("changed") or []}
+
+
+# ── 20. create_i9_form ──────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("create_i9_form", mutating=True, limit=guard.WRITE_LIMIT)
 def create_i9_form(user: str, employee=None, company=None, hire_date=None) -> dict:
@@ -840,7 +1107,7 @@ def create_i9_form(user: str, employee=None, company=None, hire_date=None) -> di
 	return result.data
 
 
-# ── 18. submit_i9_section_1 ─────────────────────────────────────────────────
+# ── 21. submit_i9_section_1 ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("submit_i9_section_1", mutating=True, limit=guard.WRITE_LIMIT)
 def submit_i9_section_1(
@@ -918,7 +1185,7 @@ def submit_i9_section_1(
 	return result.data
 
 
-# ── 19. submit_i9_section_2 ─────────────────────────────────────────────────
+# ── 22. submit_i9_section_2 ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("submit_i9_section_2", mutating=True, limit=guard.WRITE_LIMIT)
 def submit_i9_section_2(
@@ -997,7 +1264,7 @@ def submit_i9_section_2(
 	return result.data
 
 
-# ── 20. submit_w4 ───────────────────────────────────────────────────────────
+# ── 23. submit_w4 ───────────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("submit_w4", mutating=True, limit=guard.WRITE_LIMIT)
 def submit_w4(
@@ -1053,7 +1320,7 @@ def submit_w4(
 	return result.data
 
 
-# ── 21. link_badge_to_employee ──────────────────────────────────────────────
+# ── 24. link_badge_to_employee ──────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("link_badge_to_employee", mutating=True, limit=guard.WRITE_LIMIT)
 def link_badge_to_employee(user: str, badge_id=None, employee=None, company=None, notes=None) -> dict:
@@ -1094,7 +1361,7 @@ def link_badge_to_employee(user: str, badge_id=None, employee=None, company=None
 	return result.data
 
 
-# ── 22. sync_bucket_entries ─────────────────────────────────────────────────
+# ── 25. sync_bucket_entries ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("sync_bucket_entries", mutating=True, limit=guard.UPLOAD_LIMIT)
 def sync_bucket_entries(user: str, entries=None, company=None) -> dict:
@@ -1120,7 +1387,7 @@ def sync_bucket_entries(user: str, entries=None, company=None) -> dict:
 	return result.data
 
 
-# ── 23. start_shift ─────────────────────────────────────────────────────────
+# ── 26. start_shift ─────────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("start_shift", mutating=True, limit=guard.WRITE_LIMIT)
 def start_shift(
@@ -1176,7 +1443,7 @@ def start_shift(
 	return result.data
 
 
-# ── 24. add_worker_to_shift ─────────────────────────────────────────────────
+# ── 27. add_worker_to_shift ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("add_worker_to_shift", mutating=True, limit=guard.WRITE_LIMIT)
 def add_worker_to_shift(
@@ -1207,7 +1474,7 @@ def add_worker_to_shift(
 	return result.data
 
 
-# ── 25. end_shift ───────────────────────────────────────────────────────────
+# ── 28. end_shift ───────────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("end_shift", mutating=True, limit=guard.WRITE_LIMIT)
 def end_shift(

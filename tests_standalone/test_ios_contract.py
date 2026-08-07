@@ -30,6 +30,11 @@ crash in a worker's hands:
              is not on the screen — which is why they are checked too. An
              inspection whose "Why this task exists" card is quietly missing
              looks like an inspection nobody could justify.
+    NULLABLE `let x: String?` on a struct with a synthesized `init(from:)` and
+             no lenient helper. Absence is fine, the WRONG TYPE throws. Between
+             the two, and it is what `ExistingEmployee` and `CreatedEmployee`
+             actually do — calling either of them LENIENT would claim a
+             tolerance the app does not have.
 
 Each mirror carries the Swift file and line the rule is transcribed from, and a
 failure quotes it, so somebody reading a red test is one click from the source of
@@ -86,6 +91,13 @@ class Codable:
 	STRICT = ()
 	#: `(json_key, python_type, swift_line)` — `c.lenient*`, nil on a miss.
 	LENIENT = ()
+	#: `(json_key, python_type, swift_line)` — a `String?`/`Int?` on a struct with
+	#: SYNTHESIZED `init(from:)` and no lenient helper. Absent or null is fine and
+	#: the field is simply nil; the WRONG TYPE throws exactly as a strict field
+	#: does, because Swift's generated decoder calls `decodeIfPresent`, which is
+	#: forgiving about presence and not about type. Between STRICT and LENIENT, and
+	#: neither of them would be a true transcription of `ExistingEmployee`.
+	NULLABLE = ()
 	#: `(json_key, swift_line)` — `c.lenientDate`, nil on an unparseable string.
 	DATES = ()
 	#: `(json_key, allowed_values, swift_line)` — a Swift enum with an `unknown`
@@ -108,6 +120,8 @@ class Codable:
 			cls._strict(payload, key, wanted, where, line)
 		for key, wanted, line in cls.LENIENT:
 			cls._lenient(payload, key, wanted, where, line)
+		for key, wanted, line in cls.NULLABLE:
+			cls._nullable(payload, key, wanted, where, line)
 		for key, line in cls.DATES:
 			cls._date(payload, key, where, line)
 		for key, allowed, line in cls.ENUMS:
@@ -155,6 +169,21 @@ class Codable:
 				f"that returns nil on a type mismatch. Nothing crashes — the field just "
 				f"silently is not there, which is why this is asserted rather than "
 				f"trusted."
+			)
+
+	@classmethod
+	def _nullable(cls, payload, key, wanted, where, line) -> None:
+		value = payload.get(key)
+		if value is None:
+			# `decodeIfPresent` on an absent or null key is nil, and the struct
+			# declares the property optional. Nothing to answer for.
+			return
+		if not isinstance(value, wanted):
+			raise ContractError(
+				f"{where} emitted {key!r} as {type(value).__name__} ({value!r}). "
+				f"{cls.SWIFT}:{line} declares {wanted.__name__}? on a struct with a synthesized "
+				f"decoder, so a wrong TYPE throws the whole row even though a missing key would "
+				f"not — this crashes in a worker's hand exactly as a strict field does."
 			)
 
 	@classmethod
@@ -427,13 +456,58 @@ class AvailableActionsModel(Codable):
 	)
 
 
-class VoidResponseModel(Codable):
-	"""The five onboarding methods, which the app decodes NOTHING out of.
+class CreatedEmployeeModel(Codable):
+	"""`OnboardingAPI.CreatedEmployee` — what step 1 of the wizard keeps.
 
-	`OnboardingAPI` calls every one of them through `FrappeClient.callVoid`, which
-	returns the raw `Data` and throws it away — the flow advances on the HTTP
-	status and on nothing else. So there is no struct to transcribe, and a mirror
-	that invented one would be asserting a contract neither side has.
+	THE ONE STRICT FIELD IS THE ONE EVERY LATER STEP IS ADDRESSED TO. `employeeName`
+	becomes `employee` on `create_i9_form`, on both I-9 sections, on the W-4 and on
+	the badge map; a null or absent `name` here throws on the person's first
+	morning, after their date of birth has been typed in and before anything has
+	been filed. This is the v0.18.2 class of bug with four more screens behind it.
+
+	`employee_id` is `String?` — a site that does not keep payroll numbers sends
+	null and the app falls back to the docname (`OnboardingWizardViewModel:181`).
+	NULLABLE rather than LENIENT because the struct has no lenient decoding: an
+	`employee_id` that arrived as a NUMBER would throw.
+	"""
+
+	SWIFT = "OnboardingAPI.swift"
+	STRICT = (("name", str, 16),)
+	NULLABLE = (("employee_id", str, 17),)
+
+
+class ExistingEmployeeModel(Codable):
+	"""`ExistingEmployee` — one row of the search the Identity step opens with.
+
+	`name` and `employee_name` are non-optional `String`s on a synthesized decoder,
+	so either one missing throws the WHOLE LIST and the foreman sees an error where
+	the returning picker's name should be — and then hires them a second time,
+	which is the duplicate `create_employee` exists to refuse.
+
+	`status` is what the wizard branches on (`OnboardingWizardViewModel:171`):
+	anything other than "Active" routes to `reactivate_employee`. It is a plain
+	optional String rather than a Swift enum, so an unexpected value does not
+	degrade to `.unknown` — it reactivates.
+	"""
+
+	SWIFT = "OnboardingModels.swift"
+	STRICT = (("name", str, 274), ("employee_name", str, 275))
+	NULLABLE = (
+		("employee_id", str, 276),
+		("status", str, 277),
+		("date_of_joining", str, 278),
+		("employment_type", str, 279),
+	)
+
+
+class VoidResponseModel(Codable):
+	"""The onboarding methods whose answer the app decodes NOTHING out of.
+
+	`OnboardingAPI` calls the five through `FrappeClient.callVoid`, which returns
+	the raw `Data` and throws it away — the flow advances on the HTTP status and on
+	nothing else. `reactivateEmployee` discards its answer the same way. So there
+	is no struct to transcribe, and a mirror that invented one would be asserting a
+	contract neither side has.
 
 	WHAT IS STILL WORTH ASSERTING is that the answer is a JSON OBJECT. `callRaw`
 	unwraps Frappe's `message` envelope for every other call in the app, and a
@@ -906,6 +980,81 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		UndecodedResponseModel.decode(row, "end_shift")
 		self.assertEqual(row["attendance_created"], 2)
 
+	# ── v0.46.0: the Identity step the wizard 404'd on ──────────────────────
+	def test_27_create_employee(self):
+		"""THE CALL THE WHOLE FLOW WAS STUCK BEHIND. Step 1 of five."""
+		self.the_hr_furniture()
+		row = self.wire(
+			"create_employee",
+			first_name="Elena",
+			last_name="Marquez",
+			employee_name="Elena Marquez",
+			gender="Female",
+			date_of_birth="1994-03-11",
+			company=MAIN,
+		)
+		CreatedEmployeeModel.decode(row, "create_employee")
+		filed = STORE.tables["Employee"][row["name"]]
+		self.assertEqual(filed["employee_name"], "Elena Marquez")
+		self.assertEqual(filed["company"], MAIN)
+		self.assertEqual(filed["status"], "Active")
+
+	def test_28_search_employees(self):
+		"""The list the foreman picks a returning picker out of, Left ones included."""
+		self.the_hr_furniture()
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "EMP-RETURNED",
+					"employee_name": "Rosa Aguilar",
+					"first_name": "Rosa",
+					"last_name": "Aguilar",
+					"company": MAIN,
+					"status": "Left",
+					"date_of_joining": "2025-06-02",
+					"employment_type": "Seasonal",
+				}
+			],
+		)
+		body = self.wire("search_employees", query="Rosa", company=MAIN)
+		self.assertTrue(body["employees"], "the fixture seeded two Rosas and the search came back empty")
+		for index, row in enumerate(body["employees"]):
+			ExistingEmployeeModel.decode(row, "search_employees", f".employees[{index}]")
+		found = {row["name"]: row for row in body["employees"]}
+		# The one who LEFT is the one this search exists to find.
+		self.assertEqual(found["EMP-RETURNED"]["status"], "Left")
+		self.assertEqual(found["EMP-RETURNED"]["employment_type"], "Seasonal")
+		self.assertIn(self.NEW_HIRE, found)
+
+	def test_29_reactivate_employee(self):
+		"""The other branch: one record with a history, not two with one between them."""
+		self.the_hr_furniture()
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "EMP-RETURNED",
+					"employee_name": "Rosa Aguilar",
+					"first_name": "Rosa",
+					"last_name": "Aguilar",
+					"company": MAIN,
+					"status": "Left",
+					"date_of_joining": "2025-06-02",
+				}
+			],
+		)
+		row = self.wire("reactivate_employee", employee="EMP-RETURNED")
+		VoidResponseModel.decode(row, "reactivate_employee")
+		filed = STORE.tables["Employee"]["EMP-RETURNED"]
+		self.assertEqual(filed["status"], "Active")
+		self.assertEqual(str(filed["date_of_joining"]), frappe.utils.today())
+		# The date it replaced is reported rather than lost — see the wrapper.
+		self.assertIn(
+			{"field": "status", "from": "Left", "to": "Active"},
+			[dict(entry) for entry in row["changed"]],
+		)
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -965,6 +1114,33 @@ class TheMirrorsAreStrictEnough(ContractTestCase):
 			FarmTaskModel.decode(broken, "get_task")
 		self.assertIn("silently", str(caught.exception))
 
+	def test_a_created_employee_with_no_name_is_refused_by_the_step_that_needs_it(self):
+		"""Five later calls are addressed to this string. Null here is v0.18.2 again."""
+		with self.assertRaises(ContractError) as caught:
+			CreatedEmployeeModel.decode({"name": None, "employee_id": "042"}, "create_employee")
+		self.assertIn("v0.18.2", str(caught.exception))
+		self.assertIn("OnboardingAPI.swift:16", str(caught.exception))
+
+	def test_a_numeric_employee_id_is_refused_even_though_the_field_is_optional(self):
+		"""The NULLABLE rule earning its place. `employee_number` is a Data field on
+		a stock site and an Int on one where somebody made it a number — and
+		`decodeIfPresent(String.self)` throws on the second, optional or not."""
+		with self.assertRaises(ContractError) as caught:
+			CreatedEmployeeModel.decode({"name": "HR-EMP-00042", "employee_id": 42}, "create_employee")
+		self.assertIn("synthesized decoder", str(caught.exception))
+		self.assertIn("OnboardingAPI.swift:17", str(caught.exception))
+
+	def test_an_absent_employee_id_is_accepted_because_the_app_accepts_it(self):
+		"""Not stricter than the app: a site that keeps no payroll numbers is fine,
+		and the wizard falls back to the docname."""
+		CreatedEmployeeModel.decode({"name": "HR-EMP-00042", "employee_id": None}, "create_employee")
+
+	def test_a_search_row_with_no_employee_name_takes_the_whole_list_down(self):
+		with self.assertRaises(ContractError) as caught:
+			ExistingEmployeeModel.decode({"name": "EMP-1"}, "search_employees", ".employees[0]")
+		self.assertIn("OnboardingModels.swift:275", str(caught.exception))
+		self.assertIn("employees[0]", str(caught.exception))
+
 	def test_a_finalize_with_neither_handle_is_refused(self):
 		with self.assertRaises(ContractError) as caught:
 			FinalizedFileModel.decode({"file_name": "x.jpg"}, "finalize_staged_file")
@@ -1016,6 +1192,9 @@ class TheContractIsComplete(ContractTestCase):
 		"start_shift": "test_24",
 		"add_worker_to_shift": "test_25",
 		"end_shift": "test_26",
+		"create_employee": "test_27",
+		"search_employees": "test_28",
+		"reactivate_employee": "test_29",
 	}
 
 	def _published(self, module):

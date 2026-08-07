@@ -70,7 +70,7 @@ from erpnext_mcp.farmops_api import app as farmops_app
 from erpnext_mcp.farmops_api import routes as farmops_routes
 from erpnext_mcp.farmops_api import session as farmops_session
 
-from .fixtures import MAIN, OTHER
+from .fixtures import MAIN, OTHER, install_hrms
 from .harness import ROLES, STORE, set_roles
 from .test_api_mobile import OUTSIDER, WORKER, MobileAPITestCase
 
@@ -160,6 +160,10 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/log_asset_state_change",
 		"/mobile/get_available_actions",
 		"/mobile/report_asset_issue",
+		# v0.46.0 — the Identity step the wizard 404'd on.
+		"/mobile/create_employee",
+		"/mobile/search_employees",
+		"/mobile/reactivate_employee",
 		# v0.45.0 — onboarding, the bucket sync and the crew clock.
 		"/mobile/create_i9_form",
 		"/mobile/submit_i9_section_1",
@@ -670,6 +674,18 @@ class TheArgumentFilter(FarmOpsAPITestCase):
 				with self.subTest(argument=refused, path=route.path):
 					self.assertNotIn(refused, farmops_routes.accepted_arguments(route.handler))
 
+	def test_the_status_the_identity_step_sends_never_reaches_the_personnel_register(self):
+		"""`OnboardingIdentity.employeePayload` sends `"status": "Active"` on every
+		hire, which is what `create_employee` writes anyway. What the argument would
+		ALSO buy is a phone that can file somebody as Left on the day they started,
+		so it is dropped here rather than forwarded — and `user_id`, which would
+		point somebody else's task history at an account the body names, with it."""
+		route = farmops_routes.BY_PATH["/mobile/create_employee"]
+		for refused in ("status", "user_id"):
+			with self.subTest(argument=refused):
+				self.assertNotIn(refused, farmops_routes.accepted_arguments(route.handler))
+				self.assertEqual(farmops_routes.bind(route, {refused: "Left"}), {})
+
 	def test_a_body_naming_another_user_is_answered_as_the_caller(self):
 		"""An account that can name somebody else in a request body is not
 		scoped to anything. Dropped here AND in `guard` — two locks, one door."""
@@ -698,6 +714,78 @@ class TheArgumentFilter(FarmOpsAPITestCase):
 					fallback_auth.BODY_KEY,
 					farmops_routes.bind(route, {fallback_auth.BODY_KEY: dict(self.credential)}),
 				)
+
+
+class TheIdentityStepAnswersOverTheFunnel(FarmOpsAPITestCase):
+	"""v0.46.0, and the whole of it: these three paths, over this transport, 200.
+
+	The wizard asked Frappe's own `/api/resource/Employee` for all three, the
+	funnel publishes `/farmops/api/…` and nothing else, and step 1 of five 404'd —
+	so the nine methods v0.45.0 published were never reached from a phone either.
+	A test that only checked the route table would have passed on the day the bug
+	shipped; this one calls them the way the handset does.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		install_hrms()
+		# The role an operator has to grant before a phone can touch the personnel
+		# register. See `api/mobile.py` — Farm Manager is the only role in both
+		# `guard.FARM_OPS_ROLES` and `employee.HR_ROLES`.
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+
+	def test_the_three_paths_the_wizard_opens_with_are_reachable(self):
+		created = self.message(
+			f"{PREFIX}/mobile/create_employee",
+			{
+				"first_name": "Elena",
+				"last_name": "Marquez",
+				"employee_name": "Elena Marquez",
+				"gender": "Female",
+				"date_of_birth": "1994-03-11",
+				"company": MAIN,
+				"status": "Active",
+			},
+		)
+		self.assertTrue(created["name"])
+		self.assertEqual(frappe.db.get_value("Employee", created["name"], "company"), MAIN)
+
+		found = self.message(f"{PREFIX}/mobile/search_employees", {"query": "Marquez", "company": MAIN})
+		self.assertEqual([row["name"] for row in found["employees"]], [created["name"]])
+
+		frappe.db.set_value("Employee", created["name"], "status", "Left")
+		self.message(f"{PREFIX}/mobile/reactivate_employee", {"employee": created["name"]})
+		self.assertEqual(frappe.db.get_value("Employee", created["name"], "status"), "Active")
+
+	def test_the_docname_spelling_the_swift_function_uses_works_too(self):
+		created = self.message(
+			f"{PREFIX}/mobile/create_employee",
+			{"first_name": "Elena", "last_name": "Marquez", "company": MAIN},
+		)
+		frappe.db.set_value("Employee", created["name"], "status", "Inactive")
+		self.message(f"{PREFIX}/mobile/reactivate_employee", {"docname": created["name"]})
+		self.assertEqual(frappe.db.get_value("Employee", created["name"], "status"), "Active")
+
+	def test_an_employee_of_another_entity_reads_as_not_found_rather_than_refused(self):
+		"""The rule every docname argument on this surface follows. A phone that
+		could tell "no such record" from "not yours" could enumerate the holding
+		company's payroll one docname at a time."""
+		STORE.seed(
+			"Employee",
+			[{"name": "EMP-ELSEWHERE", "employee_name": "Ben Ortiz", "company": OTHER, "status": "Left"}],
+		)
+		status, body = self.refusal(f"{PREFIX}/mobile/reactivate_employee", {"employee": "EMP-ELSEWHERE"})
+		self.assertEqual(status, 404)
+		self.assertIn("was not found", body["error"].lower())
+		self.assertEqual(frappe.db.get_value("Employee", "EMP-ELSEWHERE", "status"), "Left")
+
+	def test_a_search_never_answers_with_an_entity_this_caller_cannot_reach(self):
+		STORE.seed(
+			"Employee",
+			[{"name": "EMP-ELSEWHERE", "employee_name": "Elena Ortiz", "company": OTHER}],
+		)
+		found = self.message(f"{PREFIX}/mobile/search_employees", {"query": "Elena"})
+		self.assertNotIn("EMP-ELSEWHERE", [row["name"] for row in found["employees"]])
 
 
 # ── 8. the row and the secrets ──────────────────────────────────────────────

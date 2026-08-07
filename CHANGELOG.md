@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.46.0 — 2026-08-07
+
+**The step before the nine.** v0.45.0 published onboarding, the crew clock and
+the bucket sync, and the wizard still could not reach any of it: its Identity
+step asks for `POST /api/resource/Employee`, `GET /api/resource/Employee?…` and
+`PUT /api/resource/Employee/<name>`, the Tailscale funnel publishes
+`/farmops/api/…` and nothing else, and a flow that 404s on step 1 never gets to
+steps 2 through 5. `create_employee`, `search_employees` and
+`reactivate_employee` are now guarded wrappers with routes —
+`MobileAPI.swift` has named all three paths since Sprint 9.
+
+**None of them writes an Employee itself.** `frappe.get_doc({...}).insert()` in
+the wrapper would have been four lines and would have stepped around every rule
+`tools/employee.py` has held since v0.18.1: the fourteen-field allowlist that
+refuses `ctc` and `salary_structure` by name, the second-record check that keeps
+one person off the dispatch board twice, this site's own mandatory fields read
+off the meta rather than assumed, and `require_hr_role`. So `create_employee`
+delegates to `employee.create_employee` and `reactivate_employee` to
+`employee.update_employee`, exactly as the nine before them delegate to
+`tools/i9.py` and `tools/shifts.py`.
+
+**`status` is dropped and the app keeps sending it.**
+`OnboardingIdentity.employeePayload` carries `"status": "Active"`, which is what
+the tool writes anyway; what the argument would also buy is a phone that can
+file somebody as Left on the day they were hired. `user_id` is refused for the
+same shape of reason — a body that could link a login could point somebody
+else's task history at an account it names.
+
+**The one read on this surface with a role gate of its own.** Every other read
+here is field work a picker is entitled to. `search_employees` is the entity's
+personnel register — names, hire dates, employment types, and the people who
+have LEFT, which is the whole point of it — so it calls
+`employee.require_hr_role()` by hand rather than inheriting one. Status is
+deliberately not filtered: a Left employee is who the search is for, and
+`hr.list_employees` defaults to Active, which is why this reads the register
+directly instead of calling it.
+
+**A rehire overwrites `date_of_joining` with today, on purpose.** The I-9 opened
+four screens later is checked against the hire date and §1324a's three-day clock
+counts from the day this person started *this* time. The date it replaced is
+reported in `changed` and lands in the audit row rather than being lost, and the
+date is not an argument — a backdated rehire is a correction, made in the Desk.
+
+**A mirror kind the contract suite did not have.** `ExistingEmployee` and
+`CreatedEmployee` decode `String?` through Swift's synthesized `init(from:)`,
+which is forgiving about a missing key and not about a wrong type — between
+STRICT and LENIENT, and calling either of them LENIENT would have claimed a
+tolerance the app does not have. `test_ios_contract.py` grew `NULLABLE` for it.
+
 ## 0.45.0 — 2026-08-07
 
 **The nine methods iOS already knew how to call.** `MobileAPI.swift` has named

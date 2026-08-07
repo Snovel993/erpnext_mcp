@@ -15,7 +15,10 @@ function, and every guarded function has a route — so another method cannot
 arrive quietly and a route cannot come to point at something ungated. v0.45.0
 added nine at once (onboarding, the crew clock and the bucket sync) and that
 assertion is what made adding them a two-file change rather than a 404 in a
-field.
+field. v0.46.0 added the three the wizard reaches BEFORE any of those nine —
+`create_employee`, `search_employees` and `reactivate_employee`, which were
+still being asked for at Frappe's own `/api/resource/Employee` and are the
+reason the onboarding flow got no further than its Identity step.
 
 ────────────────────────────────────────────────────────────────────────────
 WHY THE ARGUMENT FILTER IS HERE
@@ -84,7 +87,7 @@ class Route:
 
 
 #: The mobile methods and the two file methods. ORDER IS THE APP'S ORDER —
-#: identity, lists, detail, lifecycle, field reports, compliance, upload —
+#: the caller, lists, detail, lifecycle, field reports, compliance, upload —
 #: because this table is the first thing somebody reads to learn what a phone
 #: can do.
 ROUTES = (
@@ -103,6 +106,14 @@ ROUTES = (
 	Route("/mobile", mobile_api.log_asset_state_change),
 	Route("/mobile", mobile_api.get_available_actions),
 	Route("/mobile", mobile_api.report_asset_issue),
+	# v0.46.0. The Identity step, which comes before all of it and which the
+	# wizard 404'd on: the foreman searches for somebody who has worked here
+	# before, and either puts that record back on the payroll or creates a new
+	# one. Every path below this line was unreachable in practice until these
+	# three existed, because the flow stops at step 1.
+	Route("/mobile", mobile_api.create_employee),
+	Route("/mobile", mobile_api.search_employees),
+	Route("/mobile", mobile_api.reactivate_employee),
 	# v0.45.0. Onboarding, in the order `OnboardingFlow` walks it: the I-9 is
 	# opened, the worker fills their half, the employer verifies the documents,
 	# the W-4 is signed, and the badge that will carry their piece-rate is mapped

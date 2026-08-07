@@ -205,6 +205,10 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"log_asset_state_change",
 		"get_available_actions",
 		"report_asset_issue",
+		# v0.46.0 — the Identity step the wizard 404'd on.
+		"create_employee",
+		"search_employees",
+		"reactivate_employee",
 		# v0.45.0 — onboarding, the bucket sync and the crew clock.
 		"create_i9_form",
 		"submit_i9_section_1",
@@ -311,6 +315,38 @@ class TheGatesRefuseWhatTheyShould(MobileAPITestCase):
 				mobile_api.list_my_tasks()
 			messages.add(str(caught.exception))
 		self.assertEqual(len(messages), 1, messages)
+
+
+class ThePersonnelRegisterIsNotAPickersToRead(MobileAPITestCase):
+	"""v0.46.0. `search_employees` is the only READ on this surface with a role
+	gate of its own, and the reason is worth a test rather than a comment: every
+	other read is field work a picker is entitled to, and this one is the entity's
+	whole personnel register — names, hire dates, employment types, and the people
+	who have left. The writing methods inherit the same gate from
+	`tools/employee.py`; this one applies it by hand, so it is the one that can
+	quietly stop applying."""
+
+	def test_a_field_worker_with_a_perfectly_good_grant_is_still_refused(self):
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.search_employees(query="Ramos")
+		self.assertIn("personnel register", str(caught.exception))
+
+	def test_and_a_farm_manager_is_not(self):
+		"""The role an operator actually enrols an onboarding phone as."""
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.be()
+		self.assertIn("employees", mobile_api.search_employees(query="Ramos"))
+
+	def test_a_field_worker_cannot_create_or_reactivate_one_either(self):
+		self.be()
+		for call in (
+			lambda: mobile_api.create_employee(first_name="Elena", last_name="Marquez", company=MAIN),
+			lambda: mobile_api.reactivate_employee(employee="EMP-ANA"),
+		):
+			with self.assertRaises(Exception) as caught:
+				call()
+			self.assertIn("personnel register", str(caught.exception))
 
 
 class AnAdminIsNotEnrolled(MobileAPITestCase):
