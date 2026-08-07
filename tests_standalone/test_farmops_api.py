@@ -160,6 +160,16 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/log_asset_state_change",
 		"/mobile/get_available_actions",
 		"/mobile/report_asset_issue",
+		# v0.45.0 — onboarding, the bucket sync and the crew clock.
+		"/mobile/create_i9_form",
+		"/mobile/submit_i9_section_1",
+		"/mobile/submit_i9_section_2",
+		"/mobile/submit_w4",
+		"/mobile/link_badge_to_employee",
+		"/mobile/sync_bucket_entries",
+		"/mobile/start_shift",
+		"/mobile/add_worker_to_shift",
+		"/mobile/end_shift",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

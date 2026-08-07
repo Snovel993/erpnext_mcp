@@ -3,6 +3,69 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.45.0 — 2026-08-07
+
+**The nine methods iOS already knew how to call.** `MobileAPI.swift` has named
+paths for onboarding, the crew clock and the bucket sync since Sprint 9;
+`api/mobile.py` published fifteen wrappers and `farmops_api/routes.py` fifteen
+routes, so all nine of those paths 404'd. This release closes the gap:
+`create_i9_form`, `submit_i9_section_1`, `submit_i9_section_2`, `submit_w4`,
+`link_badge_to_employee`, `sync_bucket_entries`, `start_shift`,
+`add_worker_to_shift` and `end_shift` are now guarded wrappers with routes. No
+new MCP tools — every one delegates to the tool that already existed.
+
+**Four renames, so no phone has to be rebuilt.** `OnboardingI9Section1.apiParams`
+sends `work_authorization_expiry` and the column is
+`alien_work_authorization_expiry`; Section 2 sends `list_?_doc_type`,
+`list_?_authority` and `list_?_expiry` against columns spelled `_doc_title`,
+`_doc_authority` and `_doc_expiry`; the W-4 sends `dependents_under_17`,
+`other_dependents` and `extra_withholding` against `_count`, `_count` and
+`_per_period`. The backend moves, which is the trade `api/shape.py` already
+states: the alternative is a new build on every phone in the valley to rename a
+key.
+
+**Section 1's legal names fall back to the Employee record.** The tool requires
+`legal_first_name` and `legal_last_name` and the shipped app sends neither —
+step 1 of its own flow already created the Employee with them, and asking
+somebody to type their name twice on a phone in a packing shed is how a form
+gets abandoned. Sent explicitly they win; a legal name and a payroll name
+genuinely differ for some people.
+
+**What the wrappers take away.** `foreman` is not accepted on `start_shift` and
+is filled from the authenticated caller — OAR 437-004-1131 puts the water, shade
+and rest obligations on a NAMED responsible person and §112.161(b) asks that
+person to sign, and the phone in the hand at the start of the shift is that
+person. `active` is not accepted on `link_badge_to_employee`, because
+deactivating a badge is a decision about somebody's piece-rate made in the Desk.
+`status` and `effective_date` are not accepted on `submit_w4`, because the
+Active → Superseded chain is what answers "which W-4 was in force the day this
+cheque was cut". `sync_bucket_entries` takes ONE company for the whole batch,
+checked once against the caller's scope and stamped over whatever each entry
+claimed, and refuses an entry that names its own picker — the badge is what
+attributes a bucket and the Bucket Log Badge Map is what resolves it.
+
+**A field worker cannot call these, and that is the design.** All nine reach
+tools that gate on `employee.require_hr_role` or `kpi.require_kpi_role`, and the
+only role in both those lists and `guard.FARM_OPS_ROLES` is Farm Manager. A
+Field Worker or Foreman with a perfectly good grant clears all seven of
+`guard`'s gates and is then refused by the tool with its own sentence. An I-9 is
+a personnel record and a shift is a wage record; copying the gate up into the
+wrapper, or widening it, would be two sets of personnel rules to keep in step.
+
+**`sync_bucket_entries` is metered as an upload, not as a write.** A picker
+works a morning with no signal and the queue drains in a burst when the phone
+finds the yard's wifi; ten calls a minute would refuse most of it, and a refused
+sync is a morning of somebody's piece-rate sitting on a device that might not
+come back. The batch cap and the tool's own `entry_uuid` deduplication bound it
+instead, so a client retrying because it never saw the answer is a no-op rather
+than a double payment.
+
+**Nine more mirrors in `test_ios_contract.py`.** The five onboarding methods go
+through `FrappeClient.callVoid`, which throws the body away — so the mirror
+records that honestly and asserts only that the answer is a JSON object, which
+is the shape a later decoder can be added to without a server change. The crew
+clock and bucket sync have no Swift decoder yet and say so.
+
 ## 0.44.0 — 2026-08-06
 
 **BucketLog → ERPNext Piecework Bridge.** `payroll_integration.py` has read a

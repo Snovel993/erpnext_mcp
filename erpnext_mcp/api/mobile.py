@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The sixteen methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The twenty-four methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -15,7 +15,7 @@ identical session. Every gate below runs unchanged on whichever door was used.
 One function per method, named exactly as
 `FarmOpsKit/Sources/FarmOpsKit/Networking/MobileAPI.swift` names it. THERE IS NO
 DISPATCHER HERE ON PURPOSE: a method exists as a function or its path 404s, so
-the whole reachable surface is the ten `@frappe.whitelist()` lines below and an
+the whole reachable surface is the `@frappe.whitelist()` lines below and an
 auditor establishes that by reading them. A generic `call(tool_name, args)`
 would have been fewer lines and would have published all two hundred MCP tools —
 including `create_journal_entry`, `convey_parcel` and `import_chart_of_accounts`
@@ -45,6 +45,30 @@ to self-pick Dispatched work, the evidence contract and the refusal of a
 completion filed by somebody who was not there are all still enforced by Sprint
 8's code, because it IS Sprint 8's code. A wrapper with its own copy would be a
 second set of compliance rules to keep in step, and they would drift.
+
+────────────────────────────────────────────────────────────────────────────
+THE ONBOARDING, CREW-CLOCK AND BUCKET METHODS CARRY A SECOND ROLE GATE
+────────────────────────────────────────────────────────────────────────────
+
+v0.45.0 published nine more, and they are not like the first fifteen. Every
+tool the original wrappers delegate to is field work with no role check of its
+own; these nine reach `tools/i9.py`, `tools/w4.py`, `tools/shifts.py` and
+`tools/bucket_log.py`, and each of THOSE calls `employee.require_hr_role()` or
+`kpi.require_kpi_role()` before it writes a row.
+
+THAT GATE IS LEFT EXACTLY WHERE IT IS, and the consequence is stated here
+rather than discovered in an orchard: of the roles `guard.FARM_OPS_ROLES`
+admits, only **Farm Manager** is also in `employee.HR_ROLES` and
+`kpi.KPI_ROLES`. A Field Worker or a Foreman holding a perfectly good grant
+gets through all seven of `guard`'s gates and is then refused by the tool with
+its own sentence. That is the correct refusal — an I-9 is a personnel record
+and a shift is a wage record, and neither is a picker's to write — but it means
+an operator enrolling somebody to run onboarding or the crew clock must enrol
+them as a Farm Manager, or grant the account one of the HR roles in the Desk.
+
+Copying the gate up here, or widening it, would be the same mistake the
+paragraph above refuses for the dispatch rules: two sets of personnel rules to
+keep in step.
 """
 
 from __future__ import annotations
@@ -52,12 +76,19 @@ from __future__ import annotations
 import frappe
 
 from ..errors import ToolError
-from ..tools import asset_tags, dispatch, fieldwork
+from ..tools import asset_tags, bucket_log, dispatch, fieldwork, i9, shifts, w4
 from ..tools import mobile as mobile_tools
 from . import guard, shape
 
 FARM_TASK = "Farm Task"
 FARM_TASK_ASSIGNMENT = "Farm Task Assignment"
+EMPLOYEE = "Employee"
+FARM_SHIFT = "Farm Shift"
+
+#: Most bucket captures one sync call carries. `tools/bucket_log.BATCH_CAP` is
+#: the tool's own limit and is read rather than restated, so a phone and a Desk
+#: import cannot come to disagree about how big a batch is.
+BUCKET_BATCH_CAP = bucket_log.BATCH_CAP
 
 
 def _employee(user: str) -> str:
@@ -71,6 +102,31 @@ def _employee(user: str) -> str:
 			frappe.ValidationError,
 		)
 	return employee
+
+
+def _company(user: str, company, allowed: list) -> str:
+	"""One company argument, validated, falling back to the caller's first entity.
+
+	`guard.require_company` answers "" for "nothing was asked for", which every
+	READ in this file reads as "all of mine". A write has to name exactly one, and
+	the app sends it on every onboarding call — so the fallback is for the phone
+	that does not, and it can only ever pick an entity this account already
+	reaches, because `guard.require_scope` refused it otherwise.
+	"""
+	return guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+
+def _employee_argument(employee, allowed: list, label: str = "employee") -> str:
+	"""An Employee docname from the body, proved to exist inside the caller's entities.
+
+	NOT the caller's own Employee — that is `_employee`, and the two are different
+	on purpose. Onboarding and the crew clock are things somebody does TO another
+	person's record, so the docname has to come from the body; what makes that
+	safe is that it is checked against `Employee.company` the same way a task
+	docname is, and an Employee of an entity this account cannot see reads as not
+	found rather than as refused.
+	"""
+	return guard.require_scoped_doc(EMPLOYEE, employee, label, allowed)
 
 
 def _assignment(task: str, assignment, allowed: list) -> str:
@@ -163,6 +219,113 @@ def _location(given, latitude, longitude) -> str:
 		return f"{float(latitude):.7f},{float(longitude):.7f}"
 	except (TypeError, ValueError):
 		return ""
+
+
+def _bucket_entries(raw, company: str) -> list:
+	"""The handset's capture queue, translated to what `sync_bucket_entries` takes.
+
+	THE COMPANY IS STAMPED ON EVERY ENTRY FROM THE CALL, NEVER READ OFF ONE. The
+	tool resolves `company` per entry, which is right for a Desk import that may
+	legitimately carry two entities in one file. On this transport it would be a
+	hole: one batch could write Bucket Log Entry rows against an entity the caller
+	cannot see, and a picking record is a payroll record. So the wrapper takes ONE
+	company argument, checks it against the caller's scope once, and overwrites
+	whatever each entry claimed.
+
+	`employee` IS NOT ACCEPTED ON AN ENTRY, for the same reason `list_my_tasks`
+	fills `worker_id` from the session. The badge is what attributes a bucket, the
+	Bucket Log Badge Map is what resolves it, and `link_badge_to_employee` is the
+	deliberate act that populates that register — a phone that could name the
+	picker directly would be able to move somebody else's piece-rate onto its own
+	badge without ever touching the map an operator reads.
+
+	The rest is a rename. `FarmOpsKit/Capture/BucketEntry.swift` encodes `id`,
+	`session_id`, `badge_id` and `accepted`; the doctype's columns are
+	`entry_uuid`, `session_uuid`, `worker_badge` and `verdict`. Both spellings are
+	accepted so a Desk-shaped payload and the handset's own both work, and
+	`accepted` is translated to the Select's two options rather than passed
+	through — the app has a boolean and the register has words.
+	"""
+	if raw in (None, ""):
+		raise ToolError('entries is required — a sync with nothing in it is not a sync.')
+	if isinstance(raw, dict):
+		raw = [raw]
+	if not isinstance(raw, list):
+		raise ToolError('entries must be a list of objects like {"entry_uuid": "...", "verdict": "Accepted"}.')
+	if not raw:
+		raise ToolError("entries is required — a sync with nothing in it is not a sync.")
+	if len(raw) > BUCKET_BATCH_CAP:
+		raise ToolError(
+			f"{len(raw)} captures is more than one sync call accepts ({BUCKET_BATCH_CAP}). Send the "
+			"queue in slices. Nothing was changed."
+		)
+
+	out = []
+	for index, entry in enumerate(raw):
+		if not isinstance(entry, dict):
+			raise ToolError(f"entries[{index}] must be an object.")
+		verdict = str(entry.get("verdict") or "").strip()
+		if not verdict and entry.get("accepted") is not None:
+			verdict = "Accepted" if entry.get("accepted") in (True, 1, "1", "true", "True") else "Rejected"
+		row = {
+			"company": company,
+			"entry_uuid": str(entry.get("entry_uuid") or entry.get("id") or "").strip(),
+			"session_uuid": str(entry.get("session_uuid") or entry.get("session_id") or "").strip(),
+			"worker_badge": str(entry.get("worker_badge") or entry.get("badge_id") or "").strip(),
+			"timestamp": entry.get("timestamp"),
+			"verdict": verdict,
+		}
+		for key in ("coverage_percent", "gps_lat", "gps_lon"):
+			if entry.get(key) not in (None, ""):
+				row[key] = entry[key]
+		for key in ("model_uuid", "h3_cell", "device_id"):
+			value = str(entry.get(key) or "").strip()
+			if value:
+				row[key] = value
+		out.append(row)
+	return out
+
+
+def _crew(raw, allowed: list) -> list:
+	"""The crew a foreman rostered when opening a shift, each name checked here.
+
+	`shifts._crew_argument` accepts docnames, employee ids and names and resolves
+	them, and `start_shift` then refuses any crew member employed by another
+	entity. Both still run. What this adds is the check the mobile surface always
+	adds and the tool layer deliberately does not: a name that resolves to an
+	Employee of an entity THIS CALLER cannot reach reads as not found, so a phone
+	cannot enumerate the holding company's payroll by watching which names roster.
+
+	A bare string, a comma-joined string and a list of `{"employee", "role"}`
+	objects all arrive in practice — the handset sends the last of those — so all
+	three are normalised here rather than argued about downstream.
+	"""
+	if raw in (None, "", []):
+		return []
+	if isinstance(raw, str):
+		raw = [part.strip() for part in raw.split(",") if part.strip()]
+	if isinstance(raw, dict):
+		raw = [raw]
+	if not isinstance(raw, list):
+		raise ToolError('crew_employees must be a list of employees, or of objects like {"employee": "..."}.')
+
+	out = []
+	for index, entry in enumerate(raw):
+		if isinstance(entry, dict):
+			person = entry.get("employee") or entry.get("name")
+			role = str(entry.get("role") or "").strip()
+			joined = str(entry.get("joined_at") or "").strip()
+		else:
+			person, role, joined = entry, "", ""
+		if not str(person or "").strip():
+			raise ToolError(f"crew_employees[{index}] names nobody.")
+		row = {"employee": _employee_argument(person, allowed, f"crew_employees[{index}]")}
+		if role:
+			row["role"] = role
+		if joined:
+			row["joined_at"] = joined
+		out.append(row)
+	return out
 
 
 # ── 1. get_current_user_context ─────────────────────────────────────────────
@@ -652,3 +815,433 @@ def report_asset_issue(
 	result = asset_tags.report_asset_issue(inner)
 	data = result.data
 	return shape.task(data, None)
+
+
+# ── 17. create_i9_form ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_i9_form", mutating=True, limit=guard.WRITE_LIMIT)
+def create_i9_form(user: str, employee=None, company=None, hire_date=None) -> dict:
+	"""Open a Draft I-9 for somebody who has just been hired.
+
+	The first of the five onboarding methods, and the only one that creates the
+	record the other four fill in. `OnboardingAPI.createI9Form` sends today as the
+	hire date because the app's flow runs on the person's first morning; it is NOT
+	defaulted here when absent, because the three-business-day clock Section 2 is
+	checked against counts from it and a guessed hire date would silently move a
+	statutory deadline.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+	result = i9.create_i9_form({
+		"employee": person,
+		"company": _company(user, company, allowed),
+		"hire_date": hire_date,
+	})
+	return result.data
+
+
+# ── 18. submit_i9_section_1 ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("submit_i9_section_1", mutating=True, limit=guard.WRITE_LIMIT)
+def submit_i9_section_1(
+	user: str,
+	employee=None,
+	citizenship_status=None,
+	ssn_last_four=None,
+	address_street=None,
+	address_city=None,
+	address_state=None,
+	address_zip=None,
+	alien_registration_number=None,
+	work_authorization_expiry=None,
+	legal_first_name=None,
+	legal_last_name=None,
+	legal_middle_name=None,
+	date_of_birth=None,
+	email=None,
+	phone=None,
+	section_1_signature=None,
+) -> dict:
+	"""The employee's own half of the I-9: who they are and how they may work.
+
+	THE LEGAL NAMES FALL BACK TO THE EMPLOYEE RECORD, which is what makes this
+	callable from the shipped app at all. `submit_i9_section_1` requires
+	`legal_first_name` and `legal_last_name`; `OnboardingI9Section1.apiParams`
+	sends neither, because step 1 of the app's own flow already created the
+	Employee with them and asking a person to type their name twice on a phone in
+	a packing shed is how a form gets abandoned. Sent explicitly they win — a
+	legal name and a payroll name genuinely differ for some people, and the I-9
+	wants the legal one.
+
+	`work_authorization_expiry` IS RENAMED, not forwarded. The doctype's column is
+	`alien_work_authorization_expiry` and the app's key is the shorter one; a
+	rename here is one line, and the alternative is a build shipped to every phone
+	in the valley. The tool reads it only for "Alien Authorized to Work", so a
+	value sent alongside any other citizenship status is dropped there rather than
+	here — that is the tool's rule about its own field.
+
+	`preparer_used` and the three preparer fields ARE NOT ACCEPTED. A preparer or
+	translator signs their own attestation on paper, and a phone that could set
+	`preparer_used` without carrying that signature would record an attestation
+	nobody made. An operator files those in the Desk.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+	row = (
+		frappe.db.get_value(EMPLOYEE, person, ["first_name", "middle_name", "last_name"], as_dict=True) or {}
+	)
+
+	inner = {
+		"employee": person,
+		"citizenship_status": citizenship_status,
+		"legal_first_name": legal_first_name or row.get("first_name"),
+		"legal_last_name": legal_last_name or row.get("last_name"),
+		"legal_middle_name": legal_middle_name or row.get("middle_name"),
+		"alien_work_authorization_expiry": work_authorization_expiry,
+	}
+	for key, value in (
+		("ssn_last_four", ssn_last_four),
+		("address_street", address_street),
+		("address_city", address_city),
+		("address_state", address_state),
+		("address_zip", address_zip),
+		("alien_registration_number", alien_registration_number),
+		("date_of_birth", date_of_birth),
+		("email", email),
+		("phone", phone),
+		("section_1_signature", section_1_signature),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = i9.submit_i9_section_1(inner)
+	return result.data
+
+
+# ── 19. submit_i9_section_2 ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("submit_i9_section_2", mutating=True, limit=guard.WRITE_LIMIT)
+def submit_i9_section_2(
+	user: str,
+	employee=None,
+	document_path=None,
+	verifier_name=None,
+	verifier_title=None,
+	verification_date=None,
+	list_a_doc_type=None,
+	list_a_doc_number=None,
+	list_a_authority=None,
+	list_a_expiry=None,
+	list_b_doc_type=None,
+	list_b_doc_number=None,
+	list_b_authority=None,
+	list_b_expiry=None,
+	list_c_doc_type=None,
+	list_c_doc_number=None,
+	list_c_authority=None,
+	list_c_expiry=None,
+	document_copies_stored=None,
+	section_2_signature=None,
+) -> dict:
+	"""The employer's half: what documents were examined, by whom, on what day.
+
+	THREE KEYS PER DOCUMENT ARE RENAMED. `OnboardingI9Section2.apiParams` sends
+	`list_a_doc_type`, `list_a_authority` and `list_a_expiry`; the doctype's
+	columns are `list_a_doc_title`, `list_a_doc_authority` and `list_a_doc_expiry`.
+	Same for B and C. Renaming here rather than in Swift is the same trade
+	`api/shape.py` makes and states: the backend moves, because the alternative is
+	a new build on every phone.
+
+	BOTH DOCUMENT PATHS ARE FORWARDED WHOLE and the tool picks. It requires
+	`list_a_doc_title` on the List A path and both `list_b_doc_title` and
+	`list_c_doc_title` on the other, refuses a `document_path` that is neither,
+	and refuses a verification more than three business days after the hire date —
+	all of which is 8 U.S.C. §1324a's rule rather than this transport's, so none
+	of it is restated here.
+
+	`verifier_name` IS THE TYPED ONE, not the caller's. The person examining the
+	documents signs their own name to the attestation, and the account that made
+	the HTTP call is recorded regardless — every mobile call writes an MCP Action
+	Log row naming it.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+
+	inner = {
+		"employee": person,
+		"document_path": document_path,
+		"verifier_name": verifier_name,
+		"verifier_title": verifier_title,
+		"verification_date": verification_date,
+	}
+	for key, value in (
+		("list_a_doc_title", list_a_doc_type),
+		("list_a_doc_number", list_a_doc_number),
+		("list_a_doc_authority", list_a_authority),
+		("list_a_doc_expiry", list_a_expiry),
+		("list_b_doc_title", list_b_doc_type),
+		("list_b_doc_number", list_b_doc_number),
+		("list_b_doc_authority", list_b_authority),
+		("list_b_doc_expiry", list_b_expiry),
+		("list_c_doc_title", list_c_doc_type),
+		("list_c_doc_number", list_c_doc_number),
+		("list_c_doc_authority", list_c_authority),
+		("list_c_doc_expiry", list_c_expiry),
+		("document_copies_stored", document_copies_stored),
+		("section_2_signature", section_2_signature),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = i9.submit_i9_section_2(inner)
+	return result.data
+
+
+# ── 20. submit_w4 ───────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("submit_w4", mutating=True, limit=guard.WRITE_LIMIT)
+def submit_w4(
+	user: str,
+	employee=None,
+	company=None,
+	tax_year=None,
+	filing_status=None,
+	multiple_jobs=None,
+	dependents_under_17=None,
+	other_dependents=None,
+	other_income=None,
+	deductions=None,
+	extra_withholding=None,
+	additional_income_from_other_jobs=None,
+) -> dict:
+	"""Federal withholding, as the worker filled it in. Supersedes their last one.
+
+	THREE MORE RENAMES, and they run the same way as Section 2's.
+	`OnboardingW4.apiParams` sends `dependents_under_17`, `other_dependents` and
+	`extra_withholding`; the doctype counts and periods, so its columns are
+	`dependents_under_17_count`, `other_dependents_count` and
+	`extra_withholding_per_period`.
+
+	`status` IS NOT ACCEPTED AND NEITHER IS `effective_date`. `submit_w4` always
+	writes an Active W-4 dated today and marks the previous one Superseded with a
+	pointer to its replacement — that chain is what answers "which W-4 was in
+	force on the day this cheque was cut", and a phone that could set either field
+	could break it.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+
+	inner = {
+		"employee": person,
+		"company": _company(user, company, allowed),
+		"tax_year": tax_year,
+		"filing_status": filing_status,
+	}
+	for key, value in (
+		("multiple_jobs", multiple_jobs),
+		("dependents_under_17_count", dependents_under_17),
+		("other_dependents_count", other_dependents),
+		("other_income", other_income),
+		("deductions", deductions),
+		("extra_withholding_per_period", extra_withholding),
+		("additional_income_from_other_jobs", additional_income_from_other_jobs),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = w4.submit_w4(inner)
+	return result.data
+
+
+# ── 21. link_badge_to_employee ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("link_badge_to_employee", mutating=True, limit=guard.WRITE_LIMIT)
+def link_badge_to_employee(user: str, badge_id=None, employee=None, company=None, notes=None) -> dict:
+	"""Point a scanned QR badge at the person holding it. The last onboarding step.
+
+	`active` IS NOT ACCEPTED, which is the one thing this wrapper takes away.
+	`link_badge_to_employee` uses it to DEACTIVATE a mapping, and a deactivated
+	badge stops resolving on every bucket that scans it from that moment on —
+	which is a decision about somebody's piece-rate pay, made in the Desk by
+	somebody who can see the register. The wrapper always maps a badge live, which
+	is the only thing the onboarding flow means by scanning one.
+
+	Repointing a badge already mapped to somebody else IS allowed, because a lost
+	card reissued to the next picker is the ordinary case rather than an attack —
+	the tool records the previous holder on the row it returns, and the audit row
+	names the account that did it.
+
+	The backfill is the tool's and it matters here: a badge mapped after a morning
+	of picking claims the buckets already synced against it that had nobody
+	attached. A badge is scanned before the map exists more often than after.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+	badge = str(badge_id or "").strip()
+	if not badge:
+		frappe.throw("badge_id is required.", frappe.ValidationError)
+
+	inner = {
+		"badge_id": badge,
+		"employee": person,
+		"company": _company(user, company, allowed),
+		"active": True,
+	}
+	if notes:
+		inner["notes"] = str(notes).strip()
+
+	result = bucket_log.link_badge_to_employee(inner)
+	return result.data
+
+
+# ── 22. sync_bucket_entries ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("sync_bucket_entries", mutating=True, limit=guard.UPLOAD_LIMIT)
+def sync_bucket_entries(user: str, entries=None, company=None) -> dict:
+	"""A handset's capture queue, filed as Bucket Log Entry rows.
+
+	`UPLOAD_LIMIT` RATHER THAN `WRITE_LIMIT`, and for the reason that limit exists.
+	A picker works through a morning with no signal and the queue drains in a
+	burst when the phone finds the yard's wifi; ten calls a minute would refuse
+	most of it, and a refused sync is a morning of somebody's piece-rate sitting
+	on a device that might not come back. The batch cap and the tool's own
+	deduplication are what bound this instead — resending a batch the site already
+	has creates nothing, so a client that retries because it never saw the answer
+	is a no-op rather than a double payment.
+
+	ONE COMPANY FOR THE WHOLE BATCH, checked once — see `_bucket_entries`, which
+	also says why an entry may not name its own picker.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = _company(user, company, allowed)
+	result = bucket_log.sync_bucket_entries({
+		"entries": _bucket_entries(entries, wanted),
+	})
+	return result.data
+
+
+# ── 23. start_shift ─────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("start_shift", mutating=True, limit=guard.WRITE_LIMIT)
+def start_shift(
+	user: str,
+	company=None,
+	location=None,
+	farm_location_gps=None,
+	shift_type=None,
+	start_datetime=None,
+	crew_employees=None,
+	latitude=None,
+	longitude=None,
+) -> dict:
+	"""Open a shift: a crew, a place, and the exposure period compliance is read against.
+
+	`foreman` IS NOT ACCEPTED AND IS FILLED FROM THE CALLER. This is the strongest
+	version of the rule `report_field_task` and `list_my_tasks` already follow, and
+	here it is more than scoping hygiene: OAR 437-004-1131 puts the water, shade
+	and rest obligations on a NAMED responsible person and FSMA §112.161(b) asks
+	that person to sign the close. The phone in the hand at the start of the shift
+	is that person. A body key naming somebody else would put another human's name
+	against obligations they did not know they had.
+
+	`farm_location_gps` TAKES A TYPED PLACE OVER A FIX, exactly as a completion
+	does — `_location` is shared rather than re-argued. It matters more here: a
+	shift with no coordinates gets no weather timeline at all, and a heat-illness
+	defence built on a point-in-time temperature is not a defence.
+
+	The crew may be empty and that is not an error. A foreman opening a shift
+	before the pickers arrive is the ordinary case; `add_worker_to_shift` rosters
+	them as they turn up, and the tool's own answer says so.
+	"""
+	allowed = guard.require_scope(user)
+	foreman = _employee(user)
+
+	inner = {
+		"foreman": foreman,
+		"company": _company(user, company, allowed),
+		"crew_employees": _crew(crew_employees, allowed),
+	}
+	for key, value in (
+		("location", location),
+		("shift_type", shift_type),
+		("start_datetime", start_datetime),
+	):
+		if value is not None:
+			inner[key] = value
+	gps = _location(farm_location_gps, latitude, longitude)
+	if gps:
+		inner["farm_location_gps"] = gps
+
+	result = shifts.start_shift(inner)
+	return result.data
+
+
+# ── 24. add_worker_to_shift ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("add_worker_to_shift", mutating=True, limit=guard.WRITE_LIMIT)
+def add_worker_to_shift(
+	user: str, shift=None, employee=None, role=None, joined_at=None, notes=None
+) -> dict:
+	"""Roster a late arrival onto a shift that is already running.
+
+	`joined_at` DEFAULTS TO NOW IN THE TOOL and is forwarded when sent, because a
+	phone that queued the clock-in offline knows a truer time than the moment its
+	sync landed. It is the start of that person's own Attendance span when the
+	shift closes, so a value half an hour late is half an hour of somebody's day.
+
+	A shift that is already closed, a second row for somebody already on the crew,
+	and a worker employed by another entity are all refused by the tool with their
+	own sentences — the second of those is the one that would otherwise become two
+	Attendance days for one person.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+	person = _employee_argument(employee, allowed)
+
+	inner = {"shift": name, "employee": person}
+	for key, value in (("role", role), ("joined_at", joined_at), ("notes", notes)):
+		if value is not None:
+			inner[key] = value
+
+	result = shifts.add_worker_to_shift(inner)
+	return result.data
+
+
+# ── 25. end_shift ───────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("end_shift", mutating=True, limit=guard.WRITE_LIMIT)
+def end_shift(
+	user: str,
+	shift=None,
+	end_datetime=None,
+	supervisor_signature_file_token=None,
+	reviewed_on=None,
+	foreman_notes=None,
+) -> dict:
+	"""Close a shift with the supervisor's signature, and write the crew's payroll rows.
+
+	THE SIGNATURE IS A FILE TOKEN AND THE TOOL WILL NOT CLOSE WITHOUT ONE. It is
+	the docname `finalize_staged_file` handed back after the phone uploaded the
+	drawn signature in chunks — the same token `complete_task_via_mobile` carries
+	for its evidence, resolved the same way. An unsigned close is an UPDATE
+	setting a timestamp; §112.161(b) asks for a review that is dated AND signed.
+
+	The close is what writes one Attendance record per crew member, each spanning
+	that person's own joined_at to their own left_at. It happens once: the tool
+	refuses a shift that is already closed rather than writing a second set.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	inner = {"shift": name}
+	for key, value in (
+		("end_datetime", end_datetime),
+		("supervisor_signature_file_token", supervisor_signature_file_token),
+		("reviewed_on", reviewed_on),
+		("foreman_notes", foreman_notes),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = shifts.end_shift(inner)
+	return result.data

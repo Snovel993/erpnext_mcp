@@ -205,6 +205,16 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"log_asset_state_change",
 		"get_available_actions",
 		"report_asset_issue",
+		# v0.45.0 — onboarding, the bucket sync and the crew clock.
+		"create_i9_form",
+		"submit_i9_section_1",
+		"submit_i9_section_2",
+		"submit_w4",
+		"link_badge_to_employee",
+		"sync_bucket_entries",
+		"start_shift",
+		"add_worker_to_shift",
+		"end_shift",
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 

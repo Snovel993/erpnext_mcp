@@ -57,9 +57,9 @@ import frappe
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import mobile as mobile_api
 
-from .fixtures import MAIN
-from .harness import STORE
-from .test_api_mobile import MobileAPITestCase
+from .fixtures import MAIN, install_hrms
+from .harness import STORE, set_roles
+from .test_api_mobile import WORKER, MobileAPITestCase
 
 #: Frappe's own timestamp renderings, from `FrappeDate.formatters` +
 #: `ISO8601DateFormatter` in `LenientDecoding.swift:70-85`. A date the app cannot
@@ -427,6 +427,40 @@ class AvailableActionsModel(Codable):
 	)
 
 
+class VoidResponseModel(Codable):
+	"""The five onboarding methods, which the app decodes NOTHING out of.
+
+	`OnboardingAPI` calls every one of them through `FrappeClient.callVoid`, which
+	returns the raw `Data` and throws it away — the flow advances on the HTTP
+	status and on nothing else. So there is no struct to transcribe, and a mirror
+	that invented one would be asserting a contract neither side has.
+
+	WHAT IS STILL WORTH ASSERTING is that the answer is a JSON OBJECT. `callRaw`
+	unwraps Frappe's `message` envelope for every other call in the app, and a
+	wrapper that answered a bare list or a string would be the shape no later
+	decoder could be added to without a server change — which is exactly the drift
+	this file exists to catch early. The onboarding screens will grow a decoder the
+	first time one of them wants to show the I-9's docname back to the person who
+	filled it in.
+	"""
+
+	SWIFT = "OnboardingAPI.swift"
+
+
+class UndecodedResponseModel(Codable):
+	"""A method `MobileAPI.swift` names and no Swift struct decodes yet.
+
+	The crew clock and the bucket sync: v0.45.0 publishes the endpoints, and
+	`MobileAPI` carries their paths, but `CrewClockSession` still keeps its shift
+	on the handset and `BucketEntry` is still only ever written to the local queue.
+	The mirror records that honestly rather than pretending to a contract, and
+	holds the one line that IS already true — the answer is an object — so that
+	whoever writes `Shift.swift` starts from a payload that can carry a struct.
+	"""
+
+	SWIFT = "MobileAPI.swift"
+
+
 # ── the wire ────────────────────────────────────────────────────────────────
 def on_the_wire(value):
 	"""What `frappe.as_json` would put on the phone's socket.
@@ -458,6 +492,70 @@ class ContractTestCase(MobileAPITestCase):
 
 	def files_wire(self, method, **kwargs):
 		return on_the_wire(getattr(files_api, method)(**kwargs))
+
+	#: The person v0.45.0's onboarding methods are run against. Carries
+	#: `first_name`/`last_name` and NOT `legal_*`, because the fallback in
+	#: `submit_i9_section_1` reading them off the Employee row is the one thing
+	#: that makes the shipped `OnboardingI9Section1.apiParams` — which sends
+	#: neither legal name — a call that succeeds rather than a required-field
+	#: refusal on a phone.
+	NEW_HIRE = "EMP-NEWHIRE"
+	SECOND_HAND = "EMP-SECOND"
+
+	def the_hr_furniture(self):
+		"""Everything the nine v0.45.0 methods need, and the role that reaches them.
+
+		THE ROLE IS THE POINT OF THIS HELPER. `tools/i9.py`, `tools/w4.py`,
+		`tools/shifts.py` and `tools/bucket_log.py` each gate on
+		`employee.require_hr_role` or `kpi.require_kpi_role`, and the only role in
+		BOTH those lists and `guard.FARM_OPS_ROLES` is Farm Manager. Ana is enrolled
+		as a Field Worker like every other test in this file, so she is granted the
+		second role here — which is exactly what an operator has to do on a real
+		site before a phone can open a shift or file an I-9. A fixture that widened
+		the gate instead would be testing a site nobody runs.
+		"""
+		install_hrms()
+		STORE.singles["I-9 Settings"] = {
+			"doctype": "I-9 Settings",
+			"store_document_copies": "0",
+			"enrolled_in_e_verify": "0",
+			"business_legal_name": "Test Farm LLC",
+			"business_address": "123 Orchard Rd",
+			"business_ein": "12-3456789",
+			"reminder_days_before_doc_expiration": "90",
+			"reminder_days_before_destruction": "60",
+		}
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": self.NEW_HIRE,
+					"employee_name": "Rosa Delgado",
+					"first_name": "Rosa",
+					"last_name": "Delgado",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": frappe.utils.today(),
+				},
+				{
+					"name": self.SECOND_HAND,
+					"employee_name": "Marco Vega",
+					"first_name": "Marco",
+					"last_name": "Vega",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": frappe.utils.today(),
+				},
+			],
+		)
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.be()
+
+	def a_shift(self, **overrides):
+		"""One open shift, started by Ana from her own phone."""
+		payload = {"location": "Block 7 North", "shift_type": "Harvest", "company": MAIN}
+		payload.update(overrides)
+		return self.wire("start_shift", **payload)
 
 	def upload(self, kind="photo", name="FT_photo.jpg"):
 		import base64
@@ -650,6 +748,164 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		)
 		FarmTaskModel.decode(row, "report_asset_issue")
 
+	# ── v0.45.0: onboarding ─────────────────────────────────────────────────
+	def test_18_create_i9_form(self):
+		self.the_hr_furniture()
+		row = self.wire(
+			"create_i9_form",
+			employee=self.NEW_HIRE,
+			company=MAIN,
+			hire_date=frappe.utils.today(),
+		)
+		VoidResponseModel.decode(row, "create_i9_form")
+		self.assertEqual(row["status"], "Draft")
+
+	def test_19_submit_i9_section_1(self):
+		"""THE LEGAL NAMES ARE NOT SENT, exactly as the shipped app does not send them.
+
+		`OnboardingI9Section1.apiParams` has no `legal_first_name` and no
+		`legal_last_name`, and the tool requires both. If this test ever passes them
+		it stops testing the call the phone actually makes.
+		"""
+		self.the_hr_furniture()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		row = self.wire(
+			"submit_i9_section_1",
+			employee=self.NEW_HIRE,
+			citizenship_status="US Citizen",
+			ssn_last_four="6789",
+			address_street="14 Orchard Lane",
+			address_city="Hood River",
+			address_state="OR",
+			address_zip="97031",
+		)
+		VoidResponseModel.decode(row, "submit_i9_section_1")
+		self.assertEqual(row["status"], "Section 1 Complete")
+		filed = next(iter(STORE.rows("I-9 Form")))
+		self.assertEqual(filed["legal_first_name"], "Rosa")
+		self.assertEqual(filed["legal_last_name"], "Delgado")
+
+	def test_20_submit_i9_section_2(self):
+		"""The three renames per document list, run through the List B + C path."""
+		self.the_hr_furniture()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire("submit_i9_section_1", employee=self.NEW_HIRE, citizenship_status="US Citizen")
+		row = self.wire(
+			"submit_i9_section_2",
+			employee=self.NEW_HIRE,
+			document_path="List B + C",
+			verifier_name="Ana Ramos",
+			verifier_title="Farm Manager",
+			verification_date=frappe.utils.today(),
+			list_b_doc_type="Driver's License",
+			list_b_doc_number="OR-4417",
+			list_b_authority="Oregon DMV",
+			list_c_doc_type="Social Security Card (Unrestricted)",
+			list_c_doc_number="***-**-6789",
+			list_c_authority="SSA",
+		)
+		VoidResponseModel.decode(row, "submit_i9_section_2")
+		self.assertEqual(row["status"], "Complete")
+		filed = next(iter(STORE.rows("I-9 Form")))
+		self.assertEqual(filed["list_b_doc_title"], "Driver's License")
+		self.assertEqual(filed["list_c_doc_authority"], "SSA")
+
+	def test_21_submit_w4(self):
+		self.the_hr_furniture()
+		row = self.wire(
+			"submit_w4",
+			employee=self.NEW_HIRE,
+			company=MAIN,
+			tax_year=2026,
+			filing_status="Married Filing Jointly",
+			multiple_jobs=False,
+			dependents_under_17=2,
+			other_dependents=1,
+			extra_withholding=25,
+		)
+		VoidResponseModel.decode(row, "submit_w4")
+		self.assertEqual(row["status"], "Active")
+		filed = next(iter(STORE.rows("W-4 Form")))
+		self.assertEqual(int(filed["dependents_under_17_count"]), 2)
+		self.assertEqual(float(filed["extra_withholding_per_period"]), 25.0)
+
+	def test_22_link_badge_to_employee(self):
+		self.the_hr_furniture()
+		row = self.wire(
+			"link_badge_to_employee",
+			badge_id="QR-0042",
+			employee=self.NEW_HIRE,
+			company=MAIN,
+		)
+		VoidResponseModel.decode(row, "link_badge_to_employee")
+		self.assertEqual(row["badge"]["employee"], self.NEW_HIRE)
+		self.assertTrue(row["badge"]["active"])
+
+	# ── v0.45.0: the capture queue and the crew clock ───────────────────────
+	def test_23_sync_bucket_entries(self):
+		"""The handset's own spelling — `id`, `session_id`, `badge_id`, `accepted`."""
+		self.the_hr_furniture()
+		self.wire("link_badge_to_employee", badge_id="QR-0042", employee=self.NEW_HIRE, company=MAIN)
+		row = self.wire(
+			"sync_bucket_entries",
+			company=MAIN,
+			entries=[
+				{
+					"id": "1E4A0C7A-0001",
+					"session_id": "SESSION-A",
+					"badge_id": "QR-0042",
+					"timestamp": f"{frappe.utils.today()} 07:12:00",
+					"accepted": True,
+					"coverage_percent": 94.5,
+					"device_id": "iPad-7",
+				},
+				{
+					"id": "1E4A0C7A-0002",
+					"session_id": "SESSION-A",
+					"badge_id": "QR-0042",
+					"timestamp": f"{frappe.utils.today()} 07:19:00",
+					"accepted": False,
+					"coverage_percent": 41.0,
+					"device_id": "iPad-7",
+				},
+			],
+		)
+		UndecodedResponseModel.decode(row, "sync_bucket_entries")
+		self.assertEqual(row["created_count"], 2)
+		self.assertEqual(row["invalid_count"], 0, row["invalid"])
+		filed = {entry["verdict"] for entry in STORE.rows("Bucket Log Entry")}
+		self.assertEqual(filed, {"Accepted", "Rejected"})
+		# The badge resolved through the map rather than through the body.
+		self.assertTrue(all(entry["employee"] == self.NEW_HIRE for entry in STORE.rows("Bucket Log Entry")))
+
+	def test_24_start_shift(self):
+		"""`foreman` IS NOT IN THE SIGNATURE — it comes off the authenticated caller."""
+		self.the_hr_furniture()
+		row = self.a_shift(crew_employees=[self.NEW_HIRE, self.SECOND_HAND])
+		UndecodedResponseModel.decode(row, "start_shift")
+		self.assertEqual(row["foreman"], "EMP-ANA")
+		self.assertEqual(row["crew_size"], 2)
+
+	def test_25_add_worker_to_shift(self):
+		self.the_hr_furniture()
+		shift = self.a_shift(crew_employees=[self.NEW_HIRE])
+		row = self.wire("add_worker_to_shift", shift=shift["name"], employee=self.SECOND_HAND)
+		UndecodedResponseModel.decode(row, "add_worker_to_shift")
+		self.assertEqual(row["added"]["employee"], self.SECOND_HAND)
+		self.assertEqual(row["crew_size"], 2)
+
+	def test_26_end_shift(self):
+		self.the_hr_furniture()
+		shift = self.a_shift(crew_employees=[self.NEW_HIRE, self.SECOND_HAND])
+		_staged, signature = self.upload("signature", "shift_signature.png")
+		row = self.wire(
+			"end_shift",
+			shift=shift["name"],
+			supervisor_signature_file_token=signature["file_token"],
+		)
+		UndecodedResponseModel.decode(row, "end_shift")
+		self.assertEqual(row["attendance_created"], 2)
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -751,6 +1007,15 @@ class TheContractIsComplete(ContractTestCase):
 		"log_asset_state_change": "test_15",
 		"get_available_actions": "test_16",
 		"report_asset_issue": "test_17",
+		"create_i9_form": "test_18",
+		"submit_i9_section_1": "test_19",
+		"submit_i9_section_2": "test_20",
+		"submit_w4": "test_21",
+		"link_badge_to_employee": "test_22",
+		"sync_bucket_entries": "test_23",
+		"start_shift": "test_24",
+		"add_worker_to_shift": "test_25",
+		"end_shift": "test_26",
 	}
 
 	def _published(self, module):
@@ -813,6 +1078,8 @@ class TheContractIsComplete(ContractTestCase):
 			CompletionResultModel,
 			StagedChunkModel,
 			FinalizedFileModel,
+			VoidResponseModel,
+			UndecodedResponseModel,
 		)
 		for mirror in mirrors:
 			with self.subTest(mirror=mirror.__name__):

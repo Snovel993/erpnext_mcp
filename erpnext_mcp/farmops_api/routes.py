@@ -11,25 +11,29 @@ caller.
 
 `test_farmops_api.py` asserts that table against `api/mobile.py` and
 `api/files.py` in both directions — every route resolves to a real guarded
-function, and every guarded function has a route — so a twelfth method cannot
-arrive quietly and a route cannot come to point at something ungated.
+function, and every guarded function has a route — so another method cannot
+arrive quietly and a route cannot come to point at something ungated. v0.45.0
+added nine at once (onboarding, the crew clock and the bucket sync) and that
+assertion is what made adding them a two-file change rather than a 404 in a
+field.
 
 ────────────────────────────────────────────────────────────────────────────
 WHY THE ARGUMENT FILTER IS HERE
 ────────────────────────────────────────────────────────────────────────────
 
 Frappe's own handler binds a request body to a whitelisted method by KEEPING THE
-KEYS THAT MATCH THE SIGNATURE AND DROPPING THE REST. Every one of the eleven
-wrappers was written against that behaviour — `api/mobile.py` says so at length,
-because naming every accepted argument instead of taking `**kwargs` is what
-makes `record_data` and `worker_id` unreachable from a phone.
+KEYS THAT MATCH THE SIGNATURE AND DROPPING THE REST. Every one of the wrappers
+was written against that behaviour — `api/mobile.py` says so at length, because
+naming every accepted argument instead of taking `**kwargs` is what makes
+`record_data`, `worker_id`, `foreman` and a W-4's `status` unreachable from a
+phone.
 
 This transport does not go through Frappe's handler, so that filter is not
 happening any more, and `function(**body)` would be two different bugs at once:
 a phone sending a key the server does not know would get a 500 instead of an
 answer, and a wrapper that ever did grow a `**kwargs` would silently start
-accepting whatever the body carried. Reproducing the filter keeps the eleven
-signatures meaning exactly what they meant on the old path — which is also what
+accepting whatever the body carried. Reproducing the filter keeps every
+signature meaning exactly what it meant on the old path — which is also what
 lets the byte-identical cross-check in the test suite be a real comparison
 rather than a coincidence.
 
@@ -99,6 +103,20 @@ ROUTES = (
 	Route("/mobile", mobile_api.log_asset_state_change),
 	Route("/mobile", mobile_api.get_available_actions),
 	Route("/mobile", mobile_api.report_asset_issue),
+	# v0.45.0. Onboarding, in the order `OnboardingFlow` walks it: the I-9 is
+	# opened, the worker fills their half, the employer verifies the documents,
+	# the W-4 is signed, and the badge that will carry their piece-rate is mapped
+	# to them last.
+	Route("/mobile", mobile_api.create_i9_form),
+	Route("/mobile", mobile_api.submit_i9_section_1),
+	Route("/mobile", mobile_api.submit_i9_section_2),
+	Route("/mobile", mobile_api.submit_w4),
+	Route("/mobile", mobile_api.link_badge_to_employee),
+	# The capture queue and the crew clock.
+	Route("/mobile", mobile_api.sync_bucket_entries),
+	Route("/mobile", mobile_api.start_shift),
+	Route("/mobile", mobile_api.add_worker_to_shift),
+	Route("/mobile", mobile_api.end_shift),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )
@@ -115,10 +133,10 @@ def accepted_arguments(handler) -> set:
 	is always what the function actually declares, and a signature change cannot
 	leave a stale allowlist behind it.
 
-	A `**kwargs` in one of the eleven would make this return the empty set and
-	take every argument away, which is the safe direction to fail and is
-	asserted as a property of the surface in `test_farmops_api.py`. None of them
-	has one, on purpose.
+	A `**kwargs` in one of them would make this return the empty set and take
+	every argument away, which is the safe direction to fail and is asserted as
+	a property of the surface in `test_farmops_api.py`. None of them has one, on
+	purpose.
 	"""
 	try:
 		parameters = inspect.signature(handler).parameters
