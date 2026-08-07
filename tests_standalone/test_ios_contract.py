@@ -500,6 +500,46 @@ class ExistingEmployeeModel(Codable):
 	)
 
 
+class EmployeeDetailModel(Codable):
+	"""`EmployeeDetail` — the record the returning-worker path skips steps on.
+
+	`name` and `employee_name` are non-optional `String`s on a synthesized decoder,
+	so either one missing throws and the foreman is left on the Identity step with
+	a person standing in front of them who demonstrably exists — they were just
+	picked out of `search_employees`.
+
+	THE THREE STATUS FIELDS ARE WHY THIS MIRROR IS STRICTER THAN IT LOOKS.
+	`satisfiedSteps` (`OnboardingModels.swift:352`) reads `i9_status`, `w4_status`
+	and `badge_id` and marks whole wizard steps done from them. A wrong TYPE
+	throws the row like any other; a wrong VALUE does not throw at all, it just
+	silently re-collects an I-9 — or, far worse in the other direction, skips one.
+	They are plain optional Strings rather than Swift enums, so there is no
+	`.unknown` case to degrade into and nothing on the handset would report it.
+	The value side is asserted in `test_30`, against the site's own Select options.
+
+	`jurisdiction` is NOT on `ExistingEmployee` and is here: it arrived with the
+	same iOS change that moved this call onto the sidecar, and the W-4 step needs
+	it the moment a crew works across a state line.
+	"""
+
+	SWIFT = "OnboardingModels.swift"
+	STRICT = (("name", str, 294), ("employee_name", str, 295))
+	NULLABLE = (
+		("first_name", str, 296),
+		("last_name", str, 297),
+		("employee_id", str, 298),
+		("status", str, 299),
+		("gender", str, 300),
+		("date_of_birth", str, 301),
+		("date_of_joining", str, 302),
+		("company", str, 303),
+		("i9_status", str, 304),
+		("w4_status", str, 305),
+		("badge_id", str, 306),
+		("jurisdiction", str, 307),
+	)
+
+
 class VoidResponseModel(Codable):
 	"""The onboarding methods whose answer the app decodes NOTHING out of.
 
@@ -1055,6 +1095,153 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			[dict(entry) for entry in row["changed"]],
 		)
 
+	# ── v0.46.2: the branch a returning seasonal worker takes ───────────────
+	def the_compliance_columns(self):
+		"""Employee as `compliance_fields.py` leaves a migrated site.
+
+		Built from that module's own specs rather than restated, for the reason
+		`test_farmops_api.py` gives: a flag or an option changed there has to be
+		able to fail here."""
+		from erpnext_mcp import compliance_fields
+
+		from .harness import add_field
+
+		for spec in compliance_fields.targets_by_doctype()["Employee"].fields:
+			add_field(
+				"Employee",
+				spec.fieldname,
+				fieldtype=spec.fieldtype,
+				options=spec.options or None,
+				label=spec.label,
+				reqd=1 if spec.reqd else 0,
+			)
+
+	def a_documented_returning_picker(self, i9_status="Pending", w4_status="Missing"):
+		"""Somebody who worked last season: an I-9 verified, a W-4 filed, a badge.
+
+		THE COLUMNS ARE LEFT WHERE `create_employee` PUT THEM, because that is
+		where a real site's are: nothing in this app has ever moved them. The
+		records are Complete and Active, which is the disagreement the endpoint
+		exists to resolve."""
+		self.the_compliance_columns()
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "EMP-RETURNED",
+					"employee_name": "Rosa Aguilar",
+					"first_name": "Rosa",
+					"last_name": "Aguilar",
+					"company": MAIN,
+					"status": "Left",
+					"gender": "Female",
+					"date_of_birth": "1991-04-18",
+					"date_of_joining": "2025-06-02",
+					"employment_type": "Seasonal Worker",
+					"i9_status": i9_status,
+					"w4_status": w4_status,
+					"jurisdiction": "OR",
+				}
+			],
+		)
+		STORE.seed(
+			"I-9 Form",
+			[
+				{
+					"name": "I9-2025-RETURNED",
+					"employee": "EMP-RETURNED",
+					"company": MAIN,
+					"status": "Complete",
+					"hire_date": "2025-06-02",
+					"verification_date": "2025-06-03",
+				}
+			],
+		)
+		STORE.seed(
+			"W-4 Form",
+			[
+				{
+					"name": "W4-2025-RETURNED",
+					"employee": "EMP-RETURNED",
+					"company": MAIN,
+					"status": "Active",
+					"tax_year": "2025",
+					"effective_date": "2025-06-02",
+				}
+			],
+		)
+		STORE.seed(
+			"Bucket Log Badge Map",
+			[
+				{
+					"name": "BADGE-0042",
+					"badge_id": "BADGE-0042",
+					"employee": "EMP-RETURNED",
+					"company": MAIN,
+					"active": 1,
+				}
+			],
+		)
+
+	def test_30_get_employee(self):
+		"""The record the wizard skips steps on, and the reconciliation it needs.
+
+		THE VALUES ARE ASSERTED, NOT JUST THE TYPES. `satisfiedSteps`
+		(`OnboardingModels.swift:352`) marks the I-9, the W-4 and the badge done
+		from these three strings and nothing else — a type is what crashes, a
+		value is what quietly re-collects an I-9 from somebody who has one."""
+		self.the_hr_furniture()
+		self.a_documented_returning_picker()
+
+		row = self.wire("get_employee", employee="EMP-RETURNED")
+		EmployeeDetailModel.decode(row, "get_employee")
+
+		self.assertEqual(row["name"], "EMP-RETURNED")
+		self.assertEqual(row["employee_name"], "Rosa Aguilar")
+		self.assertEqual(row["status"], "Left")
+		self.assertEqual(row["jurisdiction"], "OR")
+		self.assertEqual(row["badge_id"], "BADGE-0042")
+		# The columns say Pending/Missing on the stored row; the records answered.
+		self.assertEqual(row["i9_status"], "Verified")
+		self.assertEqual(row["w4_status"], "On-File")
+		self.assertEqual(row["i9_status_recorded"], "Pending")
+		self.assertEqual(row["w4_status_recorded"], "Missing")
+		self.assertEqual(sorted(row["reconciled"]), ["i9_status", "w4_status"])
+		self.assertEqual(row["i9"]["name"], "I9-2025-RETURNED")
+		self.assertEqual(row["w4"]["name"], "W4-2025-RETURNED")
+
+	def test_30_an_expired_i9_is_never_written_over_by_an_old_complete_record(self):
+		"""The one direction that must not be reconciled. §1324a wants a returning
+		worker re-verified when their authorization lapsed, and the record that
+		says Complete is the very form that expired."""
+		self.the_hr_furniture()
+		self.a_documented_returning_picker(i9_status="Expired", w4_status="Requires-Update")
+
+		row = self.wire("get_employee", employee="EMP-RETURNED")
+		EmployeeDetailModel.decode(row, "get_employee")
+		self.assertEqual(row["i9_status"], "Expired")
+		self.assertEqual(row["w4_status"], "Requires-Update")
+		self.assertEqual(row["reconciled"], [])
+		# The records are still reported — the disagreement is visible, not hidden.
+		self.assertTrue(row["i9_on_file"])
+		self.assertTrue(row["w4_on_file"])
+
+	def test_30_a_worker_with_no_history_needs_every_step(self):
+		"""The other common case, and the one the columns are already right about."""
+		self.the_hr_furniture()
+		self.the_compliance_columns()
+		frappe.db.set_value("Employee", self.NEW_HIRE, "i9_status", "Pending")
+		frappe.db.set_value("Employee", self.NEW_HIRE, "w4_status", "Missing")
+
+		row = self.wire("get_employee", employee=self.NEW_HIRE)
+		EmployeeDetailModel.decode(row, "get_employee")
+		self.assertEqual(row["i9_status"], "Pending")
+		self.assertEqual(row["w4_status"], "Missing")
+		self.assertIsNone(row["badge_id"])
+		self.assertIsNone(row["i9"])
+		self.assertIsNone(row["w4"])
+		self.assertEqual(row["reconciled"], [])
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -1195,6 +1382,7 @@ class TheContractIsComplete(ContractTestCase):
 		"create_employee": "test_27",
 		"search_employees": "test_28",
 		"reactivate_employee": "test_29",
+		"get_employee": "test_30",
 	}
 
 	def _published(self, module):

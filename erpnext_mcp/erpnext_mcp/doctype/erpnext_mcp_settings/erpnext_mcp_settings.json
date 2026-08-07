@@ -102,6 +102,7 @@
   "allow_create_todo",
   "hr_tools_section",
   "allow_list_employees",
+  "allow_get_employee",
   "allow_get_attendance_summary",
   "allow_get_leave_balance",
   "trade_tools_section",
@@ -1136,6 +1137,13 @@
    "fieldname": "allow_list_employees",
    "fieldtype": "Check",
    "label": "List Employees"
+  },
+  {
+   "default": "1",
+   "description": "READ. One Employee record with the onboarding state a returning worker arrives with \u2014 identity and assignment, the compliance columns, and the live I-9, W-4 and badge records those columns are reconciled against. Nothing in this app writes i9_status or w4_status after the hire, so a completed form fills a column still at its hire-time default; Expired and Requires-Update are never written over.",
+   "fieldname": "allow_get_employee",
+   "fieldtype": "Check",
+   "label": "Get Employee"
   },
   {
    "default": "1",

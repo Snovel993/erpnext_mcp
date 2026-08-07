@@ -278,9 +278,10 @@ class ToolRegistration(unittest.TestCase):
 
 	def test_the_registry_totals_include_the_seven(self):
 		# 369/170/199 as of v0.43.0, plus v0.44.0's eight BucketLog bridge tools
-		# (five read, three write) — see test_bucket_bridge.py's ToolRegistration.
-		self.assertEqual(len(self.registry.TOOLS), 377)
-		self.assertEqual(len(self.registry.READ_TOOLS), 175)
+		# (five read, three write) — see test_bucket_bridge.py's ToolRegistration —
+		# plus v0.46.2's `get_employee`, one more read.
+		self.assertEqual(len(self.registry.TOOLS), 378)
+		self.assertEqual(len(self.registry.READ_TOOLS), 176)
 		self.assertEqual(len(self.registry.MUTATING_TOOLS), 202)
 
 

@@ -209,6 +209,8 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"create_employee",
 		"search_employees",
 		"reactivate_employee",
+		# v0.46.2 — the returning worker's branch, between the search and the rehire.
+		"get_employee",
 		# v0.45.0 — onboarding, the bucket sync and the crew clock.
 		"create_i9_form",
 		"submit_i9_section_1",
@@ -347,6 +349,70 @@ class ThePersonnelRegisterIsNotAPickersToRead(MobileAPITestCase):
 			with self.assertRaises(Exception) as caught:
 				call()
 			self.assertIn("personnel register", str(caught.exception))
+
+	def test_a_field_worker_cannot_read_somebody_elses_record(self):
+		"""v0.46.2. `get_employee` is the one read here whose gate has a hole in
+		it, so this is the half of the hole that must stay shut."""
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "EMP-COLLEAGUE",
+					"employee_name": "Rosa Aguilar",
+					"company": MAIN,
+					"status": "Active",
+				}
+			],
+		)
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.get_employee(employee="EMP-COLLEAGUE")
+		self.assertIn("personnel register", str(caught.exception))
+
+	def test_and_can_read_their_own_without_the_hr_role(self):
+		"""The other half, and the reason the exception is there: a picker checking
+		what their own onboarding still needs is not browsing the register."""
+		self.be()
+		row = mobile_api.get_employee(employee=WORKER_EMPLOYEE)
+		self.assertEqual(row["name"], WORKER_EMPLOYEE)
+		self.assertEqual(row["employee_name"], "Ana Ramos")
+
+	def test_the_self_exception_cannot_be_claimed_by_naming_somebody(self):
+		"""The caller's own record is resolved through `Employee.user_id` and never
+		from the body, so there is nothing in a request that can assert it.
+
+		Ben is enrolled into MAIN here, so entity scoping is NOT what refuses him —
+		he can reach Ana's company perfectly well. The only thing between him and
+		her record is the HR role he does not hold."""
+		self.enrol(email=OUTSIDER, name="Ben Ortiz", entities=[MAIN])
+		self.be(OUTSIDER)
+		with self.assertRaises(Exception) as caught:
+			mobile_api.get_employee(employee=WORKER_EMPLOYEE)
+		self.assertIn("personnel register", str(caught.exception))
+
+	def test_a_farm_manager_reads_anybody_in_their_own_entities(self):
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "EMP-COLLEAGUE",
+					"employee_name": "Rosa Aguilar",
+					"company": MAIN,
+					"status": "Active",
+				}
+			],
+		)
+		self.be()
+		self.assertEqual(mobile_api.get_employee(employee="EMP-COLLEAGUE")["name"], "EMP-COLLEAGUE")
+
+	def test_but_not_outside_them_even_holding_every_hr_role(self):
+		"""Entity scoping is not the role gate and does not bend to it."""
+		set_roles(WORKER, ["Field Worker", "Farm Manager", "HR Manager"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.get_employee(employee=OUTSIDER_EMPLOYEE)
+		self.assertIn("not found", str(caught.exception).lower())
 
 
 class AnAdminIsNotEnrolled(MobileAPITestCase):

@@ -21,6 +21,14 @@ the gap, and these three tools are it:
   * `update_employee`      — the fields on it that a new hire's first week changes.
   * `link_employee_to_user` — the one field that turns a login into a person.
 
+v0.46.2 added a fourth, and it is the only READ here: `get_employee`, one record
+with the onboarding state a RETURNING worker arrives with. It is in this file
+rather than in `hr.py` with `list_employees` because answering it means knowing
+that `i9_status` and `w4_status` are this app's own columns, that nothing here
+ever moves them, and which values may therefore be reconciled against the I-9
+and W-4 records — all of which is this module's business and none of which is
+the HR register's. See its own docstring; the argument is the long one.
+
 `onboard_employee` in `newhire.py` orchestrates all three plus the mobile account
 and the QR; it is the tool to reach for when the person is new. These are the
 tools for when they are not.
@@ -1087,6 +1095,250 @@ def link_employee_to_user(args: dict) -> ToolResult:
 		},
 		summary=f"linked Employee {employee} ({row.get('employee_name')}) to {user}",
 		docstatus_delta="0 → 0 (Employee amended)",
+	)
+
+
+# ── 4. get_employee ─────────────────────────────────────────────────────────
+#: What `employee_detail` reads off the Employee row, in the order somebody
+#: filling in a form would meet them. `employee_number` is here under its own
+#: name and is re-emitted as `employee_id`, because that is what the app calls
+#: it — see `_employee_identity` in `api/mobile.py`, which made the same rename
+#: for the same reason.
+DETAIL_FIELDS = (
+	"employee_name",
+	"first_name",
+	"middle_name",
+	"last_name",
+	"employee_number",
+	"status",
+	"gender",
+	"date_of_birth",
+	"date_of_joining",
+	"relieving_date",
+	"company",
+	"employment_type",
+	"designation",
+	"department",
+	"personal_email",
+	"cell_number",
+	"user_id",
+	*COMPLIANCE_FIELDS,
+)
+
+#: The doctype `link_badge_to_employee` writes, read here for `badge_id`. Named
+#: rather than imported from `tools/bucket_log.py` because importing it would
+#: make the personnel register depend on the bucket queue in the wrong
+#: direction; the constant is asserted against that module's own in
+#: `test_employee.py`, so the two cannot drift apart silently.
+BADGE_MAP = "Bucket Log Badge Map"
+
+#: The I-9 and W-4 records the wizard's later steps create, and the state each
+#: reaches when that step is genuinely done. `I-9 Form.status` runs Draft →
+#: Section 1 Complete → Awaiting Verification → Complete; `W-4 Form.status` runs
+#: Draft → Active → Superseded.
+I9_FORM = "I-9 Form"
+W4_FORM = "W-4 Form"
+I9_COMPLETE = "Complete"
+W4_ACTIVE = "Active"
+
+#: The column values a completed record is allowed to WRITE OVER, and nothing
+#: else. Empty is a record that predates the Custom Field; `Pending` and
+#: `Missing` are the hire-time defaults `COMPLIANCE_DEFAULTS` sets, which is to
+#: say "nobody has answered this yet" — and a live Complete I-9 or Active W-4 is
+#: the answer. Every OTHER value is somebody's deliberate statement and is left
+#: alone: `Expired` above all, which is the one case where a returning worker
+#: must be re-verified before working and where a stale `Complete` from an
+#: earlier season is exactly the wrong thing to trust.
+I9_UNANSWERED = ("", "Pending")
+W4_UNANSWERED = ("", "Missing")
+
+#: What the column reads once the record has answered it. Options of the Selects
+#: `compliance_fields.py` installs, and the two values `EmployeeDetail`
+#: (`OnboardingModels.swift:319`) treats as "nothing to collect today".
+I9_ANSWERED = "Verified"
+W4_ANSWERED = "On-File"
+
+
+def employee_detail(name: str) -> dict:
+	"""One Employee, with the compliance state the onboarding wizard skips steps on.
+
+	NO ROLE GATE AND NO SCOPE CHECK. This is the read and the shaping, split out
+	so `get_employee` below and `api/mobile.get_employee` can share one answer
+	while gating it differently — the tool wants `require_hr_role`, and the phone
+	additionally lets somebody read their OWN record without it. A helper that
+	carried a gate could not serve both, and a second copy of the shaping would
+	be a second contract for iOS's `EmployeeDetail` to drift away from. Both
+	callers gate BEFORE they call this; nothing else in the app may call it.
+
+	THE TWO COMPLIANCE COLUMNS ARE STALE BY CONSTRUCTION, AND THIS RECONCILES
+	THEM. `i9_status` and `w4_status` are Custom Fields `compliance_fields.py`
+	installs on Employee; `create_employee` starts a hire at Pending/Missing and
+	NOTHING IN THIS APP MOVES THEM AFTERWARDS. `submit_i9_section_2` sets
+	`I-9 Form.status = "Complete"` and `submit_w4` sets `W-4 Form.status =
+	"Active"`, each on its own doctype, and neither writes back to the Employee
+	row. So a picker whose I-9 was verified last June still reads
+	`i9_status = "Pending"` in the column — and `EmployeeDetail.satisfiedSteps`
+	(`OnboardingModels.swift:352`) branches on exactly that column, so a wrapper
+	that handed it over raw would walk a fully documented worker through an I-9
+	and a W-4 they already have. That is the precise failure this endpoint exists
+	to prevent, so the answer would have been worse than no answer.
+
+	The record wins over an UNANSWERED column and over nothing else. A live
+	Complete I-9 fills a column reading empty or `Pending`; every other value —
+	`Expired` above all — is somebody's deliberate statement and stands, because
+	an expired I-9 is the one case where a returning worker must be re-verified
+	before working. `W4_UNANSWERED` says the same for `Missing` against
+	`Requires-Update`.
+
+	NOTHING IS HIDDEN BY THE RECONCILIATION. `i9_status_recorded` and
+	`w4_status_recorded` carry the column exactly as stored, `i9` and `w4` carry
+	the record that answered it, and `reconciled` names the fields the record
+	moved. An operator reading this and an alert rule reading the column will
+	disagree, and both need to be able to see why.
+
+	THE REAL FIX IS ELSEWHERE AND IS NOT THIS. `submit_i9_section_2` and
+	`submit_w4` should write the column through when they close a form. Doing it
+	here as well would still be right for the records that already exist — every
+	season already worked was filed before any such release — but a read that
+	repairs its own inputs is a patch, and it is documented as one.
+
+	THE COMPLETENESS FLAGS ARE NOT COMPUTED HERE. `EmployeeDetail.needsI9`,
+	`.needsW4` and `.needsBadge` are three lines of Swift over the fields below,
+	and a server that also decided which step to skip would be a second rule for
+	the skipping to drift away from — the same argument `api/mobile.py` makes
+	about the dispatch rules. What this owes the wizard is every fact those three
+	properties read, which is what it returns.
+	"""
+	row = (
+		frappe.db.get_value(
+			EMPLOYEE, name, compat.existing_fields(EMPLOYEE, list(DETAIL_FIELDS)), as_dict=True
+		)
+		or {}
+	)
+	detail = {"name": name, "employee_id": str(row.get("employee_number") or "") or None}
+	for field in DETAIL_FIELDS:
+		if field == "employee_number":
+			continue
+		detail[field] = row.get(field) if field in row else None
+
+	i9 = _latest(I9_FORM, name, ("status", "hire_date", "verification_date"), "hire_date")
+	w4 = _latest(W4_FORM, name, ("status", "tax_year", "effective_date"), "effective_date")
+	detail["i9"] = i9
+	detail["w4"] = w4
+	detail["badge_id"] = _active_badge(name)
+	detail["i9_on_file"] = bool(i9 and i9.get("status") == I9_COMPLETE)
+	detail["w4_on_file"] = bool(w4 and w4.get("status") == W4_ACTIVE)
+
+	detail["i9_status_recorded"] = detail.get("i9_status")
+	detail["w4_status_recorded"] = detail.get("w4_status")
+	reconciled = []
+	for field, answered, unanswered, on_file in (
+		("i9_status", I9_ANSWERED, I9_UNANSWERED, detail["i9_on_file"]),
+		("w4_status", W4_ANSWERED, W4_UNANSWERED, detail["w4_on_file"]),
+	):
+		if not on_file or not compat.has_field(EMPLOYEE, field):
+			continue
+		if str(detail.get(field) or "").strip() not in unanswered:
+			continue
+		# The site's options are the arbiter here as everywhere else in this file:
+		# an operator who edited the Select gets their own value or none, never a
+		# value invented from this module's idea of what the options are.
+		options = select_options(EMPLOYEE, field)
+		if options and answered not in options:
+			continue
+		detail[field] = answered
+		reconciled.append(field)
+	detail["reconciled"] = reconciled
+	return detail
+
+
+def _latest(doctype: str, employee: str, fields: tuple, order_field: str) -> dict | None:
+	"""The most recent record of `doctype` for this employee, or None.
+
+	MOST RECENT BY THE DOCTYPE'S OWN DATE, falling back to `creation` where this
+	site's copy has no such column. A returning picker has an I-9 from every
+	season they worked and a W-4 from every year they filed one, and the one the
+	wizard branches on is the current one — ordering by `modified` instead would
+	put a record somebody merely corrected in front of the one that supersedes it.
+
+	Returns None where the doctype is not installed at all, which is a site that
+	never migrated this app rather than an error: the columns above still answer
+	and the caller sees a null rather than a traceback.
+	"""
+	if not compat.doctype_exists(doctype):
+		return None
+	wanted = compat.existing_fields(doctype, ["name", *fields])
+	order_by = f"{order_field} desc" if compat.has_field(doctype, order_field) else "creation desc"
+	try:
+		rows = frappe.db.get_all(
+			doctype, filters={"employee": employee}, fields=wanted, order_by=order_by, limit_page_length=1
+		)
+	except Exception:  # pragma: no cover - a site whose copy has no `employee` column
+		return None
+	return dict(rows[0]) if rows else None
+
+
+def _active_badge(employee: str) -> str | None:
+	"""The scanning badge mapped to this person, or None.
+
+	`badge_id` IS NOT A FIELD ON EMPLOYEE. `link_badge_to_employee` writes a
+	`Bucket Log Badge Map` row — one badge, one employee, one company, and an
+	`active` flag that a reissued badge clears rather than deletes. So the answer
+	is a lookup rather than a column, and an INACTIVE mapping is not it: a badge
+	that was handed back is exactly the badge the wizard's step 5 needs to issue
+	again.
+	"""
+	if not compat.doctype_exists(BADGE_MAP):
+		return None
+	rows = (
+		frappe.db.get_all(
+			BADGE_MAP,
+			filters={"employee": employee, "active": 1},
+			fields=["badge_id"],
+			order_by="modified desc",
+			limit_page_length=1,
+		)
+		or []
+	)
+	if not rows:
+		return None
+	return str(rows[0].get("badge_id") or "") or None
+
+
+def get_employee(args: dict) -> ToolResult:
+	"""One Employee record, with the onboarding state a returning worker arrives with."""
+	compat.require_doctype(EMPLOYEE, "It comes with the Frappe HR (hrms) app.")
+	actor = require_hr_role()
+
+	name = resolve_employee(as_str(args, "employee") or as_str(args, "name", required=True))
+	detail = employee_detail(name)
+	require_company_scope(actor, str(detail.get("company") or ""))
+
+	return ToolResult(
+		data={
+			**detail,
+			"employee": name,
+			"actor": actor,
+			"note": (
+				"`i9_status` and `w4_status` are RECONCILED: nothing in this app writes those "
+				"columns after the hire, so a live Complete I-9 or Active W-4 fills a column "
+				"still reading its hire-time default. `i9_status_recorded` and "
+				"`w4_status_recorded` are the columns as stored, `i9` and `w4` are the records "
+				"that answered them, and `reconciled` names what moved. Expired and "
+				"Requires-Update are deliberate statements and are never written over. "
+				"update_employee is what makes the stored column agree."
+			),
+		},
+		summary=(
+			f"{name} — {detail.get('employee_name')} at {detail.get('company')}, "
+			f"{detail.get('status')}; I-9 "
+			+ ((detail["i9"] or {}).get("status") or "none")
+			+ ", W-4 "
+			+ ((detail["w4"] or {}).get("status") or "none")
+			+ ", badge "
+			+ (detail["badge_id"] or "none")
+		),
+		docstatus_delta="none",
 	)
 
 

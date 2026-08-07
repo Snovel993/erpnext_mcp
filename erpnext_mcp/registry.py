@@ -8483,6 +8483,48 @@ TOOLS = {
 		available=_needs_doctype("Mobile Access Grant"),
 		requires="the Mobile Access Grant DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"get_employee": _tool(
+		employee.get_employee,
+		"One Employee record, with how far through onboarding that person already "
+		"is. Read-only.\n\n"
+		"THE QUESTION IT ANSWERS IS 'WHAT DOES THIS RETURNING WORKER STILL NEED?'. "
+		"Identity and assignment — name, date of birth, hire date, entity, "
+		"employment type, the login it is linked to — plus the three compliance "
+		"columns erpnext_mcp installs on Employee, plus the records that actually "
+		"say where the paperwork got to.\n\n"
+		"`i9_status` AND `w4_status` ARE RECONCILED AGAINST THE RECORDS. Both are "
+		"Custom Fields this app installs; create_employee starts a hire at "
+		"Pending/Missing and NOTHING IN THIS APP WRITES THEM AFTERWARDS — "
+		"submit_i9_section_2 sets `I-9 Form.status` and submit_w4 sets "
+		"`W-4 Form.status`, each on its own doctype. So a picker documented last "
+		"season reads Pending in the column and Complete in the record, and the "
+		"column alone would say a fully documented worker needs a fresh I-9. A "
+		"live Complete/Active record fills a column still at its hire-time "
+		"default and NOTHING ELSE: Expired and Requires-Update are deliberate "
+		"statements and stand. `i9_status_recorded`, `w4_status_recorded`, `i9`, "
+		"`w4`, `i9_on_file`, `w4_on_file` and `reconciled` report the "
+		"unreconciled truth beside it; update_employee is what makes the stored "
+		"column agree.\n\n"
+		"`badge_id` IS A LOOKUP RATHER THAN A FIELD. link_badge_to_employee writes "
+		"a Bucket Log Badge Map row, and only an ACTIVE mapping counts — a badge "
+		"handed back at the end of a season is exactly the one that has to be "
+		"issued again.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager on the "
+		"account this app acts as, and refuses an employee whose company that "
+		"account cannot see. list_employees is the register; this is one person.",
+		{
+			"employee": _field(
+				_STRING,
+				"Docname, employee number, employee name or linked login. An ambiguous name is "
+				"reported with the candidates rather than resolved by guessing.",
+			),
+			"name": _field(_STRING, "A second spelling of `employee`."),
+		},
+		required=("employee",),
+		title="Get an employee",
+		available=_needs_doctype("Employee"),
+		requires="the Employee DocType, which Frappe HR ships",
+	),
 	"create_employee": _tool(
 		employee.create_employee,
 		"MUTATING (default OFF). One Employee record — the register every Farm Ops "

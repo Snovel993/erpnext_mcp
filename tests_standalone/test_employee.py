@@ -56,6 +56,7 @@ ON = {
 	f"allow_{name}": 1
 	for name in (
 		"create_employee",
+		"get_employee",
 		"update_employee",
 		"link_employee_to_user",
 		"onboard_employee",
@@ -529,6 +530,209 @@ class TheFieldsThisAppMadeMandatory(EmployeeTestCase):
 		changed = {entry["field"]: entry for entry in data["changed"]}
 		self.assertEqual(changed["i9_status"]["to"], "Verified")
 		self.assertEqual(changed["jurisdiction"]["to"], "WA")
+
+
+# ── 2b ──────────────────────────────────────────────────────────────────────
+class ReadingOneRecord(EmployeeTestCase):
+	"""v0.46.2. `get_employee`, and the disagreement it exists to settle.
+
+	THE ENDPOINT IS FOR THE RETURNING SEASONAL WORKER, which in tree fruit is the
+	common case rather than the exception: the same pickers come back each June,
+	and the wizard has to know which of its five steps they have already done.
+
+	It cannot know that from `Employee.i9_status` and `Employee.w4_status` alone,
+	and this class is where that is pinned down. Those two columns are Custom
+	Fields THIS APP installs; `create_employee` sets them to Pending/Missing and
+	nothing in the app ever moves them again — `submit_i9_section_2` writes
+	`I-9 Form.status` and `submit_w4` writes `W-4 Form.status`, each on its own
+	doctype. So the column and the record disagree for every worker who has ever
+	completed a form, and `EmployeeDetail.satisfiedSteps` on the handset branches
+	on the COLUMN.
+
+	The reconciliation is therefore load-bearing, and so is its one limit: a live
+	Complete record fills a column still at its hire-time default and NOTHING
+	else. `Expired` is the case §1324a actually cares about, and the form that
+	says Complete is the very one that expired.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		from erpnext_mcp import compliance_fields
+
+		from .harness import add_field
+
+		for spec in compliance_fields.targets_by_doctype()["Employee"].fields:
+			add_field(
+				"Employee",
+				spec.fieldname,
+				fieldtype=spec.fieldtype,
+				options=spec.options or None,
+				label=spec.label,
+				reqd=1 if spec.reqd else 0,
+			)
+
+	def documented(self, employee, i9="Complete", w4="Active"):
+		"""The records a worker who did a season leaves behind."""
+		STORE.seed(
+			"I-9 Form",
+			[
+				{
+					"name": "I9-LAST-SEASON",
+					"employee": employee,
+					"company": MAIN,
+					"status": i9,
+					"hire_date": "2025-06-02",
+				}
+			],
+		)
+		STORE.seed(
+			"W-4 Form",
+			[
+				{
+					"name": "W4-LAST-SEASON",
+					"employee": employee,
+					"company": MAIN,
+					"status": w4,
+					"tax_year": "2025",
+					"effective_date": "2025-06-02",
+				}
+			],
+		)
+
+	def test_it_reads_the_identity_and_assignment_facts_off_the_record(self):
+		created = self.create(
+			first_name="Ana",
+			last_name="Ramos",
+			date_of_birth="1990-05-04",
+			gender="Female",
+			designation="Picker",
+			employment_type="Seasonal Worker",
+			cell_number="555-0100",
+		)
+		data = self.tool_data("get_employee", {"employee": created["employee"]})
+		self.assertEqual(data["name"], created["employee"])
+		self.assertEqual(data["employee_name"], "Ana Ramos")
+		self.assertEqual(data["first_name"], "Ana")
+		self.assertEqual(data["date_of_birth"], "1990-05-04")
+		self.assertEqual(data["gender"], "Female")
+		self.assertEqual(data["designation"], "Picker")
+		self.assertEqual(data["company"], MAIN)
+
+	def test_a_hire_with_no_forms_reads_exactly_what_create_employee_wrote(self):
+		"""Nothing to reconcile against, so nothing is reconciled — a new hire
+		genuinely does need all five steps."""
+		created = self.create()
+		data = self.tool_data("get_employee", {"employee": created["employee"]})
+		self.assertEqual(data["i9_status"], "Pending")
+		self.assertEqual(data["w4_status"], "Missing")
+		self.assertFalse(data["i9_on_file"])
+		self.assertFalse(data["w4_on_file"])
+		self.assertIsNone(data["i9"])
+		self.assertIsNone(data["w4"])
+		self.assertEqual(data["reconciled"], [])
+
+	def test_a_completed_form_fills_the_column_nobody_ever_wrote_back_to(self):
+		"""THE BUG THIS ENDPOINT WOULD HAVE SHIPPED. The columns still read
+		Pending/Missing because nothing in the app moves them; handing those over
+		raw takes a fully documented picker through a fresh I-9 and a fresh W-4."""
+		created = self.create()
+		self.documented(created["employee"])
+		data = self.tool_data("get_employee", {"employee": created["employee"]})
+
+		self.assertEqual(data["i9_status"], "Verified")
+		self.assertEqual(data["w4_status"], "On-File")
+		self.assertEqual(sorted(data["reconciled"]), ["i9_status", "w4_status"])
+		# And the stored values are still on the wire, because an operator and an
+		# alert rule reading the column will disagree with this and need to see why.
+		self.assertEqual(data["i9_status_recorded"], "Pending")
+		self.assertEqual(data["w4_status_recorded"], "Missing")
+		self.assertEqual(data["i9"]["name"], "I9-LAST-SEASON")
+		self.assertEqual(data["w4"]["status"], "Active")
+
+	def test_an_expired_i9_stands_against_a_complete_record(self):
+		"""The limit of the reconciliation, and the one with a statute behind it."""
+		created = self.create()
+		self.documented(created["employee"])
+		self.tool_data("update_employee", {"name": created["employee"], "i9_status": "Expired"})
+
+		data = self.tool_data("get_employee", {"employee": created["employee"]})
+		self.assertEqual(data["i9_status"], "Expired")
+		self.assertNotIn("i9_status", data["reconciled"])
+		self.assertTrue(data["i9_on_file"], "the record is still reported — it is the column that wins")
+
+	def test_a_requires_update_w4_stands_too(self):
+		created = self.create()
+		self.documented(created["employee"])
+		self.tool_data("update_employee", {"name": created["employee"], "w4_status": "Requires-Update"})
+		data = self.tool_data("get_employee", {"employee": created["employee"]})
+		self.assertEqual(data["w4_status"], "Requires-Update")
+		self.assertNotIn("w4_status", data["reconciled"])
+		# The I-9 beside it is still reconciled — one refusal is not a blanket one.
+		self.assertEqual(data["i9_status"], "Verified")
+
+	def test_a_draft_form_is_not_a_completed_one(self):
+		created = self.create()
+		self.documented(created["employee"], i9="Section 1 Complete", w4="Draft")
+		data = self.tool_data("get_employee", {"employee": created["employee"]})
+		self.assertEqual(data["i9_status"], "Pending")
+		self.assertEqual(data["w4_status"], "Missing")
+		self.assertEqual(data["reconciled"], [])
+
+	def test_the_badge_comes_off_the_map_and_only_while_it_is_active(self):
+		created = self.create()
+		STORE.seed(
+			"Bucket Log Badge Map",
+			[
+				{
+					"name": "BADGE-9",
+					"badge_id": "BADGE-9",
+					"employee": created["employee"],
+					"company": MAIN,
+					"active": 1,
+				}
+			],
+		)
+		self.assertEqual(
+			self.tool_data("get_employee", {"employee": created["employee"]})["badge_id"], "BADGE-9"
+		)
+
+		frappe.db.set_value("Bucket Log Badge Map", "BADGE-9", "active", 0)
+		self.assertIsNone(self.tool_data("get_employee", {"employee": created["employee"]})["badge_id"])
+
+	def test_the_badge_doctype_is_the_one_the_badge_tool_actually_writes(self):
+		"""`tools/employee.py` names the doctype rather than importing it, so that
+		the personnel register does not depend on the bucket queue. This is the
+		assertion that keeps the two spellings the same string."""
+		from erpnext_mcp.tools import bucket_log
+
+		self.assertEqual(employee_tool.BADGE_MAP, bucket_log.BADGE_DOCTYPE)
+
+	def test_it_resolves_the_four_things_somebody_calls_the_employee(self):
+		created = self.create()
+		# Not through `create_employee` — `employee_number` is outside the seventeen
+		# it writes on purpose. `resolve_employee` still has to find a record by it.
+		frappe.db.set_value("Employee", created["employee"], "employee_number", "1042")
+		for spelling in (created["employee"], "1042", "Ana Ramos"):
+			with self.subTest(spelling=spelling):
+				self.assertEqual(
+					self.tool_data("get_employee", {"employee": spelling})["name"], created["employee"]
+				)
+
+	def test_it_wants_the_hr_role_like_everything_else_in_this_file(self):
+		created = self.create()
+		set_roles("Administrator", ["Accounts User"])
+		self.assertIn(
+			"may not change the personnel register",
+			self.tool_error("get_employee", {"employee": created["employee"]}),
+		)
+
+	def test_it_refuses_an_employee_of_an_entity_this_principal_cannot_see(self):
+		created = self.create()
+		self.scope_actor_to(OTHER)
+		self.assertIn(
+			"has no access to company",
+			self.tool_error("get_employee", {"employee": created["employee"]}),
+		)
 
 
 # ── 3 ───────────────────────────────────────────────────────────────────────

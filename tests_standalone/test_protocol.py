@@ -722,8 +722,8 @@ class Catalogue(SeededTestCase):
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
 		"""
-		self.assertEqual(len(registry.TOOLS), 377)
-		self.assertEqual(len(registry.READ_TOOLS), 175)
+		self.assertEqual(len(registry.TOOLS), 378)
+		self.assertEqual(len(registry.READ_TOOLS), 176)
 		self.assertEqual(len(registry.MUTATING_TOOLS), 202)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):

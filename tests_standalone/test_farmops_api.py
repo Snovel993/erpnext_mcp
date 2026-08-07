@@ -164,6 +164,8 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/create_employee",
 		"/mobile/search_employees",
 		"/mobile/reactivate_employee",
+		# v0.46.2 — the returning worker's branch, between the search and the rehire.
+		"/mobile/get_employee",
 		# v0.45.0 — onboarding, the bucket sync and the crew clock.
 		"/mobile/create_i9_form",
 		"/mobile/submit_i9_section_1",
@@ -848,6 +850,65 @@ class TheIdentityStepAnswersOverTheFunnel(FarmOpsAPITestCase):
 		)
 		found = self.message(f"{PREFIX}/mobile/search_employees", {"query": "Elena"})
 		self.assertNotIn("EMP-ELSEWHERE", [row["name"] for row in found["employees"]])
+
+	def test_the_returning_workers_own_path_is_reachable_over_this_transport(self):
+		"""v0.46.2. `getEmployeeDetail` was still asking Frappe's
+		`/api/resource/Employee/<name>`, which the funnel does not carry, so the
+		wizard could find a returning picker and then had nothing to decide with."""
+		self.install_compliance_fields()
+		created = self.message(
+			f"{PREFIX}/mobile/create_employee",
+			{"first_name": "Elena", "last_name": "Marquez", "company": MAIN},
+		)
+		detail = self.message(f"{PREFIX}/mobile/get_employee", {"employee": created["name"]})
+		self.assertEqual(detail["name"], created["name"])
+		self.assertEqual(detail["employee_name"], "Elena Marquez")
+		# A brand-new hire: the columns are their hire-time defaults and there is
+		# nothing on file to reconcile them against, so every step still needs doing.
+		self.assertEqual(detail["i9_status"], "Pending")
+		self.assertEqual(detail["w4_status"], "Missing")
+		self.assertEqual(detail["jurisdiction"], "OR")
+		self.assertIsNone(detail["badge_id"])
+		self.assertEqual(detail["reconciled"], [])
+
+	def test_the_docname_spelling_works_on_the_detail_call_too(self):
+		created = self.message(
+			f"{PREFIX}/mobile/create_employee",
+			{"first_name": "Elena", "last_name": "Marquez", "company": MAIN},
+		)
+		detail = self.message(f"{PREFIX}/mobile/get_employee", {"docname": created["name"]})
+		self.assertEqual(detail["name"], created["name"])
+
+	def test_a_detail_read_never_answers_for_an_entity_this_caller_cannot_reach(self):
+		STORE.seed(
+			"Employee",
+			[{"name": "EMP-ELSEWHERE", "employee_name": "Elena Ortiz", "company": OTHER}],
+		)
+		status, body = self.refusal(f"{PREFIX}/mobile/get_employee", {"employee": "EMP-ELSEWHERE"})
+		self.assertEqual(status, 404)
+		self.assertIn("was not found", body["error"].lower())
+
+	def test_the_badge_step_is_answered_from_the_map_rather_than_a_column(self):
+		"""`link_badge_to_employee` writes a Bucket Log Badge Map row; there is no
+		`badge_id` on Employee to read, and an INACTIVE mapping is a badge that has
+		to be issued again."""
+		created = self.message(
+			f"{PREFIX}/mobile/create_employee",
+			{"first_name": "Elena", "last_name": "Marquez", "company": MAIN},
+		)
+		self.message(
+			f"{PREFIX}/mobile/link_badge_to_employee",
+			{"badge_id": "BADGE-77", "employee": created["name"], "company": MAIN},
+		)
+		self.assertEqual(
+			self.message(f"{PREFIX}/mobile/get_employee", {"employee": created["name"]})["badge_id"],
+			"BADGE-77",
+		)
+
+		frappe.db.set_value("Bucket Log Badge Map", "BADGE-77", "active", 0)
+		self.assertIsNone(
+			self.message(f"{PREFIX}/mobile/get_employee", {"employee": created["name"]})["badge_id"]
+		)
 
 
 # ── 8. the row and the secrets ──────────────────────────────────────────────

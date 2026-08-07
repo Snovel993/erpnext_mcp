@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.46.2 — 2026-08-07
+
+**The returning picker, which in tree fruit is the common case.** v0.46.0 gave
+the wizard's Identity step a search and a rehire; what it still had no way to ask
+was *what does this person already have on file*. `OnboardingAPI.getEmployeeDetail`
+was reaching `GET /api/resource/Employee/<name>` — the same path the funnel does
+not carry credentials through, and the same 404 the other three had. So the
+foreman could find Rosa, who has picked here four seasons running, and then had
+to walk her through an I-9, a W-4 and a badge she already holds.
+`get_employee` is now a guarded wrapper with a route, and `tools/employee.py` has
+the read behind it.
+
+**It found a second bug, and answering it raw would have shipped one.**
+`i9_status` and `w4_status` are Custom Fields *this app* installs on Employee;
+`create_employee` starts a hire at Pending/Missing and **nothing in this app ever
+moves them again** — `submit_i9_section_2` writes `I-9 Form.status` and
+`submit_w4` writes `W-4 Form.status`, each on its own doctype, and neither writes
+back to the Employee row. `EmployeeDetail.satisfiedSteps` on the handset branches
+on the *column*. Handing it over as stored would have told the wizard that every
+worker who has ever completed a form still needs to complete it.
+
+**So the columns are reconciled against the records, in one direction only.** A
+live `Complete` I-9 or `Active` W-4 fills a column still sitting at its hire-time
+default, and nothing else: `Expired` and `Requires-Update` are somebody's
+deliberate statement and stand — an expired I-9 is precisely the case §1324a
+wants re-verified, and the form that says Complete is the one that expired. The
+site's own Select options are still the arbiter of the value written, so an
+operator who edited them gets their value or none. `i9_status_recorded`,
+`w4_status_recorded`, `i9`, `w4`, `i9_on_file`, `w4_on_file` and `reconciled`
+carry the unreconciled truth beside it, because an alert rule reading the column
+will disagree with this and somebody has to be able to see why. The real fix —
+`submit_i9_section_2` and `submit_w4` writing the column through — is a separate
+release, and would not help the seasons already worked.
+
+**`badge_id` is a lookup, not a column.** `link_badge_to_employee` writes a
+Bucket Log Badge Map row rather than a field on Employee, and only an **active**
+mapping counts: a badge handed back in November is exactly the one step 5 has to
+issue again in June.
+
+**The one read on the mobile surface whose gate has an exception in it.**
+`search_employees` applies `require_hr_role` flatly and should — it hands back an
+entity's whole personnel register. This names one record, and a worker asking for
+their own hire date, I-9 status and badge is not browsing the register. So the HR
+role is required for anybody else's record and not for the caller's own, and the
+caller's own is resolved through `Employee.user_id` rather than from the body, so
+the exception cannot be claimed by naming somebody. Entity scoping does not bend
+to it either: an Employee of an entity this account cannot reach reads as not
+found whatever roles the account holds.
+
 ## 0.46.1 — 2026-08-07
 
 **The second wall in front of step one, and it was this app's.** v0.46.0 gave the

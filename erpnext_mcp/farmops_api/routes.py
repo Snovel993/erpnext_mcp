@@ -18,7 +18,9 @@ assertion is what made adding them a two-file change rather than a 404 in a
 field. v0.46.0 added the three the wizard reaches BEFORE any of those nine —
 `create_employee`, `search_employees` and `reactivate_employee`, which were
 still being asked for at Frappe's own `/api/resource/Employee` and are the
-reason the onboarding flow got no further than its Identity step.
+reason the onboarding flow got no further than its Identity step. v0.46.2 added
+the fourth of that set, `get_employee`: the same 404 at the same doctype's
+detail path, on the branch a returning seasonal worker takes.
 
 ────────────────────────────────────────────────────────────────────────────
 WHY THE ARGUMENT FILTER IS HERE
@@ -113,6 +115,12 @@ ROUTES = (
 	# three existed, because the flow stops at step 1.
 	Route("/mobile", mobile_api.create_employee),
 	Route("/mobile", mobile_api.search_employees),
+	# v0.46.2. The step between the search and the rehire, and the last of the
+	# Identity step's four calls to be answering at Frappe's own
+	# `/api/resource/Employee/<name>` — which the funnel does not publish. It is
+	# what tells the wizard which of its five steps a returning picker has already
+	# done, and in tree fruit the returning picker is the common case.
+	Route("/mobile", mobile_api.get_employee),
 	Route("/mobile", mobile_api.reactivate_employee),
 	# v0.45.0. Onboarding, in the order `OnboardingFlow` walks it: the I-9 is
 	# opened, the worker fills their half, the employer verifies the documents,
