@@ -1,0 +1,137 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-07 09:00:00.000000",
+ "description": "One Section 3 entry on an I-9 — what Form I-9's Supplement B calls Reverification and Rehire. A child table rather than a doctype of its own because a reverification has no existence apart from the I-9 it reverifies, and because there is no fixed number of them: a seasonal worker on a renewing work authorization is reverified every season for as long as they keep coming back, and each entry has to survive the next one. Overwriting Section 2's own document columns with the new document would erase what was examined on the day of hire, which is the record 8 U.S.C. 1324a actually asks the employer to have kept.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "reverification_date",
+  "reason",
+  "rehire_date",
+  "document_col",
+  "document_title",
+  "issuing_authority",
+  "document_number",
+  "document_expiry",
+  "signature_section",
+  "verifier_name",
+  "verifier_title",
+  "signature_col",
+  "section_3_signature",
+  "signed_at",
+  "signed_ip",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The day the employer examined the new document and signed this entry. Not the day the old authorization expired — a gap between the two is a period the person was working unauthorised, and it does not disappear because the reverification was recorded late.",
+   "fieldname": "reverification_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Reverification Date",
+   "reqd": 1
+  },
+  {
+   "description": "Why this entry exists. 'Work Authorization Expired' is the reverification 8 CFR 274a.2(b)(1)(vii) requires; 'Rehire' is a worker returning within three years of the date the original I-9 was signed, whom the employer may reverify on the existing form rather than starting a new one; 'Receipt Replaced' is the actual document arriving to stand in place of a receipt Section 2 accepted; 'Name Change' records a legal name that changed, which the employer may record and is not required to.",
+   "fieldname": "reason",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Reason",
+   "options": "Work Authorization Expired\nRehire\nReceipt Replaced\nName Change",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.reason=='Rehire'",
+   "description": "The date of rehire, where this entry records one. Supplement B asks for it by name, and it is the date the three-business-day clock would have run from had a fresh I-9 been started instead.",
+   "fieldname": "rehire_date",
+   "fieldtype": "Date",
+   "label": "Date of Rehire"
+  },
+  {
+   "fieldname": "document_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The document examined for THIS entry. A List A or List C document — reverification establishes continuing employment authorization, and List B establishes identity, which does not expire and is not re-examined.",
+   "fieldname": "document_title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Document Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "issuing_authority",
+   "fieldtype": "Data",
+   "label": "Issuing Authority"
+  },
+  {
+   "fieldname": "document_number",
+   "fieldtype": "Data",
+   "label": "Document Number"
+  },
+  {
+   "description": "When the new authorization runs out. Written back onto the parent I-9's Work Authorization Expiry when this entry reverifies an expiring authorization, so list_expiring_work_authorizations follows the current document rather than the one it replaced.",
+   "fieldname": "document_expiry",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Expiration Date"
+  },
+  {
+   "fieldname": "signature_section",
+   "fieldtype": "Section Break",
+   "label": "Employer Attestation"
+  },
+  {
+   "description": "The person who examined the document and is attesting to it — their own name, not the account that made the call. The account is recorded separately on every I-9 Audit Log row.",
+   "fieldname": "verifier_name",
+   "fieldtype": "Data",
+   "label": "Verifier Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "verifier_title",
+   "fieldtype": "Data",
+   "label": "Verifier Title"
+  },
+  {
+   "fieldname": "signature_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_3_signature",
+   "fieldtype": "Attach",
+   "label": "Section 3 Signature"
+  },
+  {
+   "fieldname": "signed_at",
+   "fieldtype": "Datetime",
+   "label": "Signed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "signed_ip",
+   "fieldtype": "Data",
+   "label": "Signed IP",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Additional Information"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-07 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "I-9 Reverification",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

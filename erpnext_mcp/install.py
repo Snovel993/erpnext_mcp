@@ -702,9 +702,11 @@ _PRECIOUS_DOCTYPES = (
 	),
 	(
 		"I-9 Form",
-		"every structured Form I-9 on the site — Section 1, Section 2, retention dates, "
-		"and the status workflow from Draft through Complete to Destroyed. The only record "
-		"of employment eligibility verification for every employee who has one",
+		"every structured Form I-9 on the site — Section 1, Section 2, the Section 3 "
+		"reverification history carried on the form itself, retention dates, and the status "
+		"workflow from Draft through Complete to Destroyed. The only record of employment "
+		"eligibility verification for every employee who has one, and for a seasonal worker "
+		"on a renewing authorization the only record of every season they were reverified",
 	),
 	(
 		"I-9 Audit Log",

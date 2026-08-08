@@ -268,6 +268,7 @@
   "allow_submit_i9_section_2",
   "allow_update_i9_settings",
   "allow_flag_i9_reverification",
+  "allow_reverify_i9",
   "allow_destroy_i9",
   "w4_section",
   "allow_get_w4",
@@ -2231,6 +2232,13 @@
    "fieldname": "allow_flag_i9_reverification",
    "fieldtype": "Check",
    "label": "Flag I-9 Reverification"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Record a Section 3 entry (Form I-9 Supplement B) on an existing I-9 — reverification, rehire, or the document a receipt stood in for. Appends; never overwrites Section 2.",
+   "fieldname": "allow_reverify_i9",
+   "fieldtype": "Check",
+   "label": "Reverify I-9 (Section 3)"
   },
   {
    "default": "0",

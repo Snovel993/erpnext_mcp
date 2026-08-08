@@ -1,16 +1,30 @@
 # SPDX-License-Identifier: MIT
-"""Structured I-9 workflow — the 14 tools, the audit trail, the SSN rule.
+"""Structured I-9 workflow — the 15 tools, the audit trail, the SSN rule.
 
-SEVEN CLAIMS.
+ELEVEN CLAIMS.
 
 1. `ReadTools` — every read tool returns the right data in the right shape.
 2. `CreateAndFill` — the happy path: create, Section 1, Section 2.
-3. `SSNIsStrippedToLastFour` — the full SSN never touches the database.
+3. `SSNIsStrippedToLastFour` — the last four are all that is kept by default.
 4. `ThreeBusinessDayRule` — Section 2 is refused when verification is late.
 5. `AuditTrail` — every mutating action writes an immutable I-9 Audit Log row.
 6. `RetentionAndDestruction` — retention dates, destruction eligibility, and
    the refusal to destroy before the retention date.
 7. `OnboardCreatesI9` — onboard_employee auto-creates a Draft I-9 Form.
+
+v0.47.0, and each of the four is a federal requirement the app did not meet:
+
+8. `Section1ImmigrationIdentifiers` — an Alien Authorized to Work answers with
+   an A-Number, an I-94 number, or a foreign passport WITH its country, and a
+   Section 1 answering with none of the three is refused.
+9. `FullSSNIsOptInOnly` — nine digits reach the encrypted column only where the
+   site switched `store_full_ssn` on, and the switch going off blanks it.
+10. `Section2DocumentsAndReceipts` — a title is checked against the list it
+    claims to be from, and a receipt completes the form while leaving the
+    document owed on a 90-day clock.
+11. `Section3Reverification` — `reverify_i9` appends without overwriting
+    Section 2, moves the work-authorization expiry forward, refuses a document
+    that had already expired, and closes an outstanding receipt.
 """
 import json
 from datetime import date, timedelta
@@ -20,7 +34,7 @@ import frappe
 from erpnext_mcp.tools import i9, newhire
 
 from .fixtures import MAIN, V12TestCase, install_hrms
-from .harness import STORE
+from .harness import STORE, add_field
 
 I9_TOOLS_ON = {
     f"allow_{name}": 1
@@ -38,6 +52,7 @@ I9_TOOLS_ON = {
         "submit_i9_section_2",
         "update_i9_settings",
         "flag_i9_reverification",
+        "reverify_i9",
         "destroy_i9",
     )
 }
@@ -96,6 +111,20 @@ class I9TestCase(V12TestCase):
                     "enabled": 1,
                     "description": "Social Security Account Number card",
                 },
+                # The document a seasonal worker on a renewing authorization
+                # actually presents at reverification, and the reason it is in
+                # the fixture rather than only in `i9_documents.py`: Section 3
+                # takes List A or List C, and without one of each the tests
+                # below could not tell "wrong list" from "unknown document".
+                {
+                    "name": "Employment Authorization Document (Form I-766)",
+                    "doc_title": "Employment Authorization Document (Form I-766)",
+                    "list_category": "A",
+                    "uscis_code": "i-766",
+                    "requires_photo": 1,
+                    "enabled": 1,
+                    "description": "Unexpired Employment Authorization Document with photograph",
+                },
             ],
         )
 
@@ -142,12 +171,32 @@ class ReadTools(I9TestCase):
 
     def test_list_i9_document_types_returns_all(self):
         data = self.tool_data("list_i9_document_types", {})
-        self.assertEqual(data["count"], 3)
+        self.assertEqual(data["count"], 4)
 
     def test_list_i9_document_types_filters_by_category(self):
-        data = self.tool_data("list_i9_document_types", {"list_category": "A"})
+        data = self.tool_data("list_i9_document_types", {"list_category": "B"})
         self.assertEqual(data["count"], 1)
-        self.assertEqual(data["documents"][0]["doc_title"], "U.S. Passport")
+        self.assertEqual(data["documents"][0]["doc_title"], "Driver's License")
+
+    def test_list_i9_document_types_groups_by_list(self):
+        """The grouped shape, which is the one Section 2's own question has."""
+        data = self.tool_data("list_i9_document_types", {})
+        self.assertEqual(
+            [d["doc_title"] for d in data["by_list"]["A"]],
+            ["Employment Authorization Document (Form I-766)", "U.S. Passport"],
+        )
+        self.assertEqual([d["doc_title"] for d in data["by_list"]["B"]], ["Driver's License"])
+        self.assertEqual(
+            [d["doc_title"] for d in data["by_list"]["C"]],
+            ["Social Security Card (Unrestricted)"],
+        )
+
+    def test_grouping_carries_every_category_even_when_empty(self):
+        """A caller drawing the form needs three keys, not however many happen
+        to have rows — an absent 'B' is a KeyError on a phone."""
+        data = self.tool_data("list_i9_document_types", {"list_category": "A"})
+        self.assertEqual(sorted(data["by_list"]), ["A", "B", "C"])
+        self.assertEqual(data["by_list"]["B"], [])
 
     def test_list_i9_forms_empty(self):
         data = self.tool_data("list_i9_forms", {})
@@ -428,6 +477,7 @@ class RetentionAndDestruction(I9TestCase):
         self._create_draft()
         self._submit_section_1(
             citizenship_status="Alien Authorized to Work",
+            alien_registration_number="A012345678",
             alien_work_authorization_expiry=str(date.today() + timedelta(days=30)),
         )
         self._submit_section_2()
@@ -461,6 +511,503 @@ class OnboardCreatesI9(I9TestCase):
             {"full_name": "Ana Ramos", "company": MAIN},
         )
         self.assertEqual(data2["i9_form"], i9_name)
+
+
+# ── 8 ─────────────────────────────────────────────────────────────────────────
+class Section1ImmigrationIdentifiers(I9TestCase):
+    """Section 1 asks an Alien Authorized to Work for ONE of three identifiers.
+
+    Until v0.47.0 the form could store only the first, so a worker whose answer
+    was an I-94 number or a foreign passport had it dropped on the floor and the
+    form was filed looking answered.
+    """
+
+    def _alien(self, **overrides):
+        self._create_draft()
+        return self._submit_section_1(citizenship_status="Alien Authorized to Work", **overrides)
+
+    def _filed(self):
+        return next(iter(STORE.rows("I-9 Form")))
+
+    def test_a_number_alone_is_enough(self):
+        self._alien(alien_registration_number="A012345678")
+        self.assertEqual(self._filed()["alien_registration_number"], "A012345678")
+
+    def test_i94_number_alone_is_enough(self):
+        self._alien(i94_admission_number="94123456789")
+        self.assertEqual(self._filed()["i94_admission_number"], "94123456789")
+
+    def test_foreign_passport_with_country_is_enough(self):
+        self._alien(foreign_passport_number="X1234567", foreign_passport_country="Mexico")
+        row = self._filed()
+        self.assertEqual(row["foreign_passport_number"], "X1234567")
+        self.assertEqual(row["foreign_passport_country"], "Mexico")
+
+    def test_none_of_the_three_is_refused(self):
+        self._create_draft()
+        msg = self.tool_error(
+            "submit_i9_section_1",
+            {
+                "employee": "HR-EMP-00001",
+                "legal_first_name": "Ada",
+                "legal_last_name": "Orchard",
+                "citizenship_status": "Alien Authorized to Work",
+            },
+        )
+        self.assertIn("needs ONE of", msg)
+
+    def test_a_passport_number_without_a_country_is_refused(self):
+        self._create_draft()
+        msg = self.tool_error(
+            "submit_i9_section_1",
+            {
+                "employee": "HR-EMP-00001",
+                "legal_first_name": "Ada",
+                "legal_last_name": "Orchard",
+                "citizenship_status": "Alien Authorized to Work",
+                "foreign_passport_number": "X1234567",
+            },
+        )
+        self.assertIn("foreign_passport_country", msg)
+
+    def test_a_citizen_needs_none_of_them(self):
+        """The refusal is Section 1's rule about ONE status, not a new required
+        field on every I-9 this site files."""
+        self._create_draft()
+        data = self._submit_section_1(citizenship_status="US Citizen")
+        self.assertEqual(data["status"], "Section 1 Complete")
+
+    def test_a_permanent_resident_keeps_the_a_number(self):
+        self._create_draft()
+        self._submit_section_1(
+            citizenship_status="Lawful Permanent Resident",
+            alien_registration_number="A987654321",
+        )
+        self.assertEqual(self._filed()["alien_registration_number"], "A987654321")
+
+    def test_the_identifiers_come_back_on_get(self):
+        self._alien(i94_admission_number="94123456789")
+        data = self.tool_data("get_i9_form", {"employee": "HR-EMP-00001"})
+        self.assertEqual(data["i94_admission_number"], "94123456789")
+
+    def test_the_audit_row_names_which_identifier_and_not_its_value(self):
+        """The log answers "was this answered and how". An A-number copied into
+        a JSON blob on a second doctype is one more place it lives."""
+        self._alien(alien_registration_number="A012345678")
+        row = next(r for r in STORE.rows("I-9 Audit Log") if r["action"] == "Section 1 Submitted")
+        details = json.loads(row["details"])
+        self.assertEqual(details["identifiers"], ["alien_registration_number"])
+        self.assertNotIn("A012345678", row["details"])
+
+
+# ── 9 ─────────────────────────────────────────────────────────────────────────
+class FullSSNIsOptInOnly(I9TestCase):
+    """Nine digits are kept only where the site asked, and only encrypted.
+
+    E-Verify submits the whole number and cannot be run from four, which is the
+    only reason the column exists. A site not running E-Verify should not be
+    holding SSNs, so the switch is off and the controller enforces it on every
+    save rather than only on the path through the tool.
+    """
+
+    def _stored_full(self, name=None):
+        if name is None:
+            name = next(iter(STORE.rows("I-9 Form")))["name"]
+        return STORE.passwords.get(("I-9 Form", name, "ssn_full"))
+
+    def test_off_by_default(self):
+        data = self.tool_data("get_i9_settings", {})
+        self.assertFalse(data["store_full_ssn"])
+
+    def test_a_full_ssn_is_not_kept_while_the_switch_is_off(self):
+        self._create_draft()
+        self._submit_section_1(ssn="123-45-6789")
+        self.assertEqual(next(iter(STORE.rows("I-9 Form")))["ssn_last_four"], "6789")
+        self.assertIsNone(self._stored_full())
+
+    def test_a_full_ssn_is_kept_encrypted_once_the_switch_is_on(self):
+        self.tool_data("update_i9_settings", {"store_full_ssn": True})
+        self._create_draft()
+        self._submit_section_1(ssn="123-45-6789")
+        self.assertEqual(self._stored_full(), "123456789")
+
+    def test_the_last_four_are_written_either_way(self):
+        self.tool_data("update_i9_settings", {"store_full_ssn": True})
+        self._create_draft()
+        self._submit_section_1(ssn="123-45-6789")
+        self.assertEqual(next(iter(STORE.rows("I-9 Form")))["ssn_last_four"], "6789")
+
+    def test_a_partial_number_never_reaches_the_full_column(self):
+        """Four digits are not an SSN and would be a useless E-Verify submission."""
+        self.tool_data("update_i9_settings", {"store_full_ssn": True})
+        self._create_draft()
+        self._submit_section_1(ssn_last_four="6789")
+        self.assertIsNone(self._stored_full())
+
+    def test_get_i9_form_never_returns_it(self):
+        self.tool_data("update_i9_settings", {"store_full_ssn": True})
+        self._create_draft()
+        self._submit_section_1(ssn="123-45-6789")
+        data = self.tool_data("get_i9_form", {"employee": "HR-EMP-00001"})
+        self.assertNotIn("ssn_full", data)
+
+    def test_turning_the_switch_off_blanks_it_on_the_next_save(self):
+        """The switch is a fact about the next save rather than a promise about
+        the past, and this is the test that says which."""
+        self.tool_data("update_i9_settings", {"store_full_ssn": True})
+        self._create_draft()
+        self._submit_section_1(ssn="123-45-6789")
+        self.assertEqual(self._stored_full(), "123456789")
+
+        self.tool_data("update_i9_settings", {"store_full_ssn": False})
+        self._submit_section_2()
+        self.assertIsNone(self._stored_full())
+
+
+# ── 10 ────────────────────────────────────────────────────────────────────────
+class Section2DocumentsAndReceipts(I9TestCase):
+    def test_a_list_b_document_in_the_list_a_slot_is_refused(self):
+        """The form would be asserting one document proved both identity and
+        work authorization when it proved neither."""
+        self._create_draft()
+        self._submit_section_1()
+        msg = self.tool_error(
+            "submit_i9_section_2",
+            {
+                "employee": "HR-EMP-00001",
+                "document_path": "List A",
+                "list_a_doc_title": "Driver's License",
+                "verifier_name": "Tim Polehn",
+                "verification_date": str(date.today()),
+            },
+        )
+        self.assertIn("not a List A document", msg)
+
+    def test_an_unknown_document_is_refused_and_the_refusal_names_the_list(self):
+        self._create_draft()
+        self._submit_section_1()
+        msg = self.tool_error(
+            "submit_i9_section_2",
+            {
+                "employee": "HR-EMP-00001",
+                "document_path": "List A",
+                "list_a_doc_title": "Costco Membership",
+                "verifier_name": "Tim Polehn",
+                "verification_date": str(date.today()),
+            },
+        )
+        self.assertIn("U.S. Passport", msg)
+
+    def test_a_title_is_stored_in_the_tables_own_spelling(self):
+        """A phone that sent lowercase meant the U.S. Passport, and a federal
+        form should not carry a title that does not match the list it is from."""
+        self._create_draft()
+        self._submit_section_1()
+        self._submit_section_2(list_a_doc_title="u.s. passport")
+        self.assertEqual(next(iter(STORE.rows("I-9 Form")))["list_a_doc_title"], "U.S. Passport")
+
+    def test_every_seeded_list_a_document_is_accepted(self):
+        for title in ("U.S. Passport", "Employment Authorization Document (Form I-766)"):
+            with self.subTest(document=title):
+                self.setUp()
+                self._create_draft()
+                self._submit_section_1()
+                data = self._submit_section_2(list_a_doc_title=title)
+                self.assertEqual(data["status"], "Complete")
+
+    def test_a_receipt_still_completes_the_form(self):
+        """8 CFR 274a.2(b)(1)(vi): the person may lawfully work while the
+        replacement comes, so the status is Complete and the debt is a column."""
+        self._create_draft()
+        self._submit_section_1()
+        data = self._submit_section_2(list_a_is_receipt=True)
+        self.assertEqual(data["status"], "Complete")
+        self.assertTrue(data["receipt_pending"])
+
+    def test_the_receipt_deadline_is_ninety_days_from_hire(self):
+        hire = date.today() - timedelta(days=1)
+        self._create_draft(hire_date=str(hire))
+        self._submit_section_1()
+        data = self._submit_section_2(list_a_is_receipt=True)
+        self.assertEqual(data["receipt_expires_on"], str(hire + timedelta(days=90)))
+
+    def test_no_receipt_leaves_the_columns_clear(self):
+        self._create_draft()
+        self._submit_section_1()
+        data = self._submit_section_2()
+        self.assertFalse(data["receipt_pending"])
+        self.assertIsNone(data["receipt_expires_on"])
+
+    def test_a_receipt_is_reported_as_outstanding_work(self):
+        self._create_draft()
+        self._submit_section_1()
+        self._submit_section_2(list_a_is_receipt=True)
+        data = self.tool_data("list_pending_i9_verifications", {})
+        self.assertEqual(data["count"], 0)
+        self.assertEqual(data["receipts_count"], 1)
+        self.assertEqual(data["receipts_outstanding"][0]["receipt_lists"], ["A"])
+
+    def test_an_overdue_receipt_says_so(self):
+        hire = date.today() - timedelta(days=120)
+        self._create_draft(hire_date=str(hire))
+        self._submit_section_1()
+        self._submit_section_2(verification_date=str(hire), list_a_is_receipt=True)
+        data = self.tool_data("list_pending_i9_verifications", {})
+        row = data["receipts_outstanding"][0]
+        self.assertTrue(row["overdue"])
+        self.assertLess(row["days_until_receipt_expiry"], 0)
+
+    def test_a_receipt_writes_its_own_audit_row(self):
+        self._create_draft()
+        self._submit_section_1()
+        self._submit_section_2(list_c_is_receipt=True, document_path="List B + C",
+                               list_b_doc_title="Driver's License",
+                               list_c_doc_title="Social Security Card (Unrestricted)")
+        accepted = [r for r in STORE.rows("I-9 Audit Log") if r["action"] == "Receipt Accepted"]
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(json.loads(accepted[0]["details"])["receipt_lists"], ["C"])
+
+
+# ── 11 ────────────────────────────────────────────────────────────────────────
+class Section3Reverification(I9TestCase):
+    """Form I-9's Supplement B, and the branch that had no call.
+
+    `flag_i9_reverification` could say an I-9 needed re-examining and nothing
+    could record the re-examination — which left a second I-9 (refused) or a Desk
+    edit over the day-of-hire columns (destroys the record §1324a asks for).
+    """
+
+    NEXT_YEAR = str(date.today() + timedelta(days=365))
+
+    def _verified_alien(self, expiry=None):
+        self._create_draft()
+        self._submit_section_1(
+            citizenship_status="Alien Authorized to Work",
+            alien_registration_number="A012345678",
+            alien_work_authorization_expiry=expiry or str(date.today() + timedelta(days=10)),
+        )
+        self._submit_section_2()
+
+    def _reverify(self, **overrides):
+        payload = {
+            "employee": "HR-EMP-00001",
+            "reason": "Work Authorization Expired",
+            "document_title": "Employment Authorization Document (Form I-766)",
+            "document_number": "SRC1234567890",
+            "issuing_authority": "USCIS",
+            "document_expiry": self.NEXT_YEAR,
+            "verifier_name": "Tim Polehn",
+            "verifier_title": "Farm Manager",
+        }
+        payload.update(overrides)
+        return self.tool_data("reverify_i9", payload)
+
+    def test_it_appends_a_section_3_entry(self):
+        self._verified_alien()
+        data = self._reverify()
+        self.assertEqual(data["reverification_count"], 1)
+        self.assertEqual(data["status"], "Complete")
+
+    def test_section_2_is_not_overwritten(self):
+        """THE CLAIM THIS WHOLE FEATURE EXISTS FOR. What was examined on the day
+        of hire is the record the statute asks the employer to have kept."""
+        self._verified_alien()
+        self._reverify()
+        row = next(iter(STORE.rows("I-9 Form")))
+        self.assertEqual(row["list_a_doc_title"], "U.S. Passport")
+        self.assertEqual(row["list_a_doc_number"], "123456789")
+
+    def test_a_second_reverification_does_not_replace_the_first(self):
+        """A seasonal picker on a renewing authorization gets one a season."""
+        self._verified_alien()
+        self._reverify()
+        data = self._reverify(document_expiry=str(date.today() + timedelta(days=730)))
+        self.assertEqual(data["reverification_count"], 2)
+        history = self.tool_data("get_i9_form", {"employee": "HR-EMP-00001"})["reverifications"]
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["document_expiry"], self.NEXT_YEAR)
+
+    def test_it_moves_the_work_authorization_expiry_forward(self):
+        """Leaving it on the replaced document goes on raising `i9_expired` about
+        an authorization that was renewed, which is how a finding becomes noise."""
+        self._verified_alien()
+        data = self._reverify()
+        self.assertEqual(data["work_authorization_expiry"], self.NEXT_YEAR)
+        self.assertEqual(
+            next(iter(STORE.rows("I-9 Form")))["alien_work_authorization_expiry"],
+            self.NEXT_YEAR,
+        )
+
+    def test_the_renewed_worker_drops_off_the_expiring_list(self):
+        self._verified_alien()
+        before = self.tool_data("list_expiring_work_authorizations", {"days_ahead": 90})
+        self.assertEqual(before["count"], 1)
+        self._reverify()
+        after = self.tool_data("list_expiring_work_authorizations", {"days_ahead": 90})
+        self.assertEqual(after["count"], 0)
+
+    def test_a_flagged_i9_can_be_reverified(self):
+        self._verified_alien()
+        self.tool_data(
+            "flag_i9_reverification",
+            {"employee": "HR-EMP-00001", "reason": "Work auth expiring"},
+        )
+        data = self._reverify()
+        self.assertEqual(data["status"], "Complete")
+
+    def test_a_draft_cannot_be_reverified(self):
+        self._create_draft()
+        msg = self.tool_error(
+            "reverify_i9",
+            {"employee": "HR-EMP-00001", "reason": "Rehire", "rehire_date": str(date.today()),
+             "document_title": "U.S. Passport", "verifier_name": "Tim Polehn"},
+        )
+        self.assertIn("needs a first one to follow", msg)
+
+    def test_an_already_expired_document_is_refused(self):
+        self._verified_alien()
+        msg = self.tool_error(
+            "reverify_i9",
+            {
+                "employee": "HR-EMP-00001",
+                "reason": "Work Authorization Expired",
+                "document_title": "Employment Authorization Document (Form I-766)",
+                "document_expiry": str(date.today() - timedelta(days=1)),
+                "verifier_name": "Tim Polehn",
+            },
+        )
+        self.assertIn("CONTINUING work authorization", msg)
+
+    def test_a_list_b_document_is_refused_with_its_own_sentence(self):
+        self._verified_alien()
+        msg = self.tool_error(
+            "reverify_i9",
+            {"employee": "HR-EMP-00001", "reason": "Work Authorization Expired",
+             "document_title": "Driver's License", "verifier_name": "Tim Polehn"},
+        )
+        self.assertIn("establishes IDENTITY", msg)
+
+    def test_an_unknown_document_is_refused(self):
+        self._verified_alien()
+        msg = self.tool_error(
+            "reverify_i9",
+            {"employee": "HR-EMP-00001", "reason": "Work Authorization Expired",
+             "document_title": "Library Card", "verifier_name": "Tim Polehn"},
+        )
+        self.assertIn("not an accepted I-9 document", msg)
+
+    def test_an_unrecognised_reason_names_the_ones_that_work(self):
+        self._verified_alien()
+        msg = self.tool_error(
+            "reverify_i9",
+            {"employee": "HR-EMP-00001", "reason": "Because",
+             "document_title": "U.S. Passport", "verifier_name": "Tim Polehn"},
+        )
+        self.assertIn("Work Authorization Expired", msg)
+
+    def test_a_rehire_needs_its_date(self):
+        self._verified_alien()
+        msg = self.tool_error(
+            "reverify_i9",
+            {"employee": "HR-EMP-00001", "reason": "Rehire",
+             "document_title": "U.S. Passport", "verifier_name": "Tim Polehn"},
+        )
+        self.assertIn("rehire_date", msg)
+
+    def test_a_rehire_is_recorded_with_its_date(self):
+        self._verified_alien()
+        rehire = str(date.today())
+        self._reverify(reason="Rehire", rehire_date=rehire, document_expiry=None)
+        history = self.tool_data("get_i9_form", {"employee": "HR-EMP-00001"})["reverifications"]
+        self.assertEqual(history[0]["reason"], "Rehire")
+        self.assertEqual(history[0]["rehire_date"], rehire)
+
+    def test_a_document_with_no_expiry_is_accepted(self):
+        """An unexpiring document is a real answer, and refusing a lawful
+        reverification for lacking a date that does not exist is not one."""
+        self._verified_alien()
+        data = self._reverify(
+            reason="Rehire", rehire_date=str(date.today()),
+            document_title="U.S. Passport", document_expiry=None,
+        )
+        self.assertIsNone(data["document_expiry"])
+
+    def test_replacing_a_receipt_clears_it(self):
+        self._create_draft()
+        self._submit_section_1()
+        self._submit_section_2(list_a_is_receipt=True)
+        data = self._reverify(reason="Receipt Replaced", document_title="U.S. Passport",
+                              document_expiry=None)
+        self.assertFalse(data["receipt_pending"])
+        self.assertEqual(
+            self.tool_data("list_pending_i9_verifications", {})["receipts_count"], 0
+        )
+
+    def test_replacing_a_receipt_that_is_not_outstanding_is_refused(self):
+        self._verified_alien()
+        msg = self.tool_error(
+            "reverify_i9",
+            {"employee": "HR-EMP-00001", "reason": "Receipt Replaced",
+             "document_title": "U.S. Passport", "verifier_name": "Tim Polehn"},
+        )
+        self.assertIn("no receipt outstanding", msg)
+
+    def test_it_writes_an_audit_row(self):
+        self._verified_alien()
+        self._reverify()
+        rows = [r for r in STORE.rows("I-9 Audit Log") if r["action"] == "Section 3 Reverified"]
+        self.assertEqual(len(rows), 1)
+        details = json.loads(rows[0]["details"])
+        self.assertEqual(details["reason"], "Work Authorization Expired")
+        self.assertEqual(details["document_expiry"], self.NEXT_YEAR)
+
+    def _the_compliance_column(self):
+        """`i9_status` as `compliance_fields.py` installs it on a real site.
+
+        Installed here rather than in the shared fixture because it is a Custom
+        Field this app ADDS to Frappe HR's Employee, and every other test in this
+        module has to go on running against a site where nobody ran
+        `install_compliance_fields` — which is the state the column-absent branch
+        of `_clear_expired_i9_column` exists for.
+        """
+        add_field(
+            "Employee",
+            "i9_status",
+            fieldtype="Select",
+            options="\nPending\nVerified\nExpired\nRejected",
+            label="I-9 Status",
+        )
+
+    def test_it_moves_the_employee_column_off_expired(self):
+        """The only write this app makes to `i9_status`, and the reason for it:
+        leave it and the wizard routes a just-reverified worker to a second I-9,
+        which `create_i9_form` then refuses."""
+        self._the_compliance_column()
+        self._verified_alien()
+        frappe.db.set_value("Employee", "HR-EMP-00001", "i9_status", "Expired")
+        data = self._reverify()
+        self.assertEqual(data["employee_i9_status"], "Verified")
+        self.assertEqual(
+            frappe.db.get_value("Employee", "HR-EMP-00001", "i9_status"), "Verified"
+        )
+
+    def test_it_does_not_touch_a_column_saying_anything_else(self):
+        """`Pending` is `employee_detail`'s to reconcile and not this tool's. Two
+        things writing one column is how they come to disagree."""
+        self._the_compliance_column()
+        self._verified_alien()
+        frappe.db.set_value("Employee", "HR-EMP-00001", "i9_status", "Pending")
+        data = self._reverify()
+        self.assertIsNone(data["employee_i9_status"])
+        self.assertEqual(frappe.db.get_value("Employee", "HR-EMP-00001", "i9_status"), "Pending")
+
+    def test_the_history_is_empty_on_a_form_that_was_never_reverified(self):
+        self._create_draft()
+        self._submit_section_1()
+        self._submit_section_2()
+        data = self.tool_data("get_i9_form", {"employee": "HR-EMP-00001"})
+        self.assertEqual(data["reverifications"], [])
+        self.assertEqual(data["reverification_count"], 0)
 
 
 class UpdateI9Settings(I9TestCase):

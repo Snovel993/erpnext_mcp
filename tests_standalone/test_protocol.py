@@ -721,10 +721,15 @@ class Catalogue(SeededTestCase):
 		main until v0.31.0. The counts are cheap to update and the failure is
 		loud; what it cost was the signal — six red tests that everybody had
 		learned to expect are six tests that cannot tell you about the seventh.
+
+		v0.47.0 ADDED ONE — `reverify_i9`, Section 3 of Form I-9. It is a write
+		and there is no matching read, because `get_i9_form` already returns the
+		reverification history and a second read would be a second answer to the
+		same question.
 		"""
-		self.assertEqual(len(registry.TOOLS), 378)
+		self.assertEqual(len(registry.TOOLS), 379)
 		self.assertEqual(len(registry.READ_TOOLS), 176)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 202)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 203)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

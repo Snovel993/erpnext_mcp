@@ -2848,6 +2848,14 @@ CHILD_TABLE_SOURCES = {
 	# v0.41.0. Read with a `parent` filter by `task_templates.checklist_of`,
 	# which the snapshot and the compliance recipe both go through.
 	"Farm Task Template Checklist Item": (("Farm Task Template", "checklist"),),
+	# v0.47.0. `i9._reverification_history` reads this child doctype directly
+	# with a `parent` filter rather than loading the parent, and deliberately:
+	# loading an I-9 Form to reach its Section 3 rows would pull the Section 1
+	# columns — the encrypted SSN among them — into memory for a caller who asked
+	# for a reverification history. Without this entry every I-9 would report
+	# itself as never reverified, which is exactly the answer that gets a lawfully
+	# reverified worker walked through a second I-9.
+	"I-9 Reverification": (("I-9 Form", "reverifications"),),
 }
 
 

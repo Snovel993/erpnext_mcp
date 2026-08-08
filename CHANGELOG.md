@@ -3,6 +3,88 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.47.0 — 2026-08-07
+
+**The I-9 could be opened and completed and never re-examined.** v0.27.0 built
+Section 1 and Section 2 as a structured record with an immutable audit trail, and
+that is most of Form I-9. What it had no shape for was the third of it: 8 CFR
+274a.2(b)(1)(vii) requires an employer to reverify an employee whose work
+authorization expires, and `flag_i9_reverification` could say a form needed
+re-examining while nothing in the app could record that it had been. On a real
+site that left two doors, and both are wrong — a second I-9, which
+`create_i9_form` refuses outright, or a Desk edit over Section 2's own columns,
+which erases what was examined on the day of hire. `reverify_i9` is the call, and
+it **appends**: each one adds a row to an `I-9 Reverification` child table and
+touches nothing Section 2 wrote. A seasonal picker on a renewing EAD accumulates
+one a season, in order, and the entry from four seasons ago still says what was
+examined four seasons ago.
+
+**It moves two columns and no others, and the second is the interesting one.**
+`alien_work_authorization_expiry` goes forward to the new document's date, so
+`list_expiring_work_authorizations` follows the document currently in force
+rather than the one just replaced. And **`Employee.i9_status` moves off
+`Expired`** — the only write this app makes to that column. v0.46.2 established
+that no I-9 tool writes it and that `employee_detail` reconciles a stale
+`Pending` on the way out while leaving `Expired` strictly alone, because an
+expired I-9 is somebody's deliberate statement and a Complete form from an
+earlier season is the wrong thing to trust against it. A reverification is the
+one event that *answers* that statement: leave the column and the wizard goes on
+routing the worker to `create_i9_form`, which refuses because they have one, and
+the `i9_expired` alert goes on firing about an authorization renewed this
+morning. So a deliberate statement is answered by an equally deliberate action
+and by nothing else — a column reading anything other than `Expired` is not
+touched, and the write is best-effort, because losing a convenience column must
+not lose a federal record.
+
+It refuses a document that had already expired on the day it was examined — that
+is not evidence of *continuing* authorization — and refuses List B outright,
+because List B establishes identity and identity does not expire.
+
+**Section 1 asks for one of three identifiers and could store one.** An Alien
+Authorized to Work gives a USCIS/A-Number, **or** a Form I-94 admission number,
+**or** a foreign passport number with its country of issuance. The form had a
+column for the first, so the other two arrived at a record with nowhere to put
+them and were dropped — and the resulting Section 1 looked answered. All three
+are stored now, a passport number without its country is refused because a
+passport number alone identifies nobody, and a status of Alien Authorized to Work
+carrying none of the three is refused as the unfiled Section 1 it is.
+
+**Section 2 accepted free text against a table of 24 documents it never
+consulted.** `i9_documents.py` has seeded every USCIS-accepted document since
+v0.27.0. Nothing checked a title against it, so nothing stopped a driver's licence
+being recorded in the List A slot — a form asserting one document proved both
+identity and work authorization when it proved neither. Titles are now checked
+against the list they claim to be from and stored in that list's own spelling. A
+site whose table is empty is not checked at all: the alternative is an upgrade
+that turns into a compliance outage between install and migrate.
+
+**A receipt is temporarily acceptable, and the form still completes.** Under
+8 CFR 274a.2(b)(1)(vi) an employee whose document was lost, stolen or damaged may
+present a receipt and work while the replacement comes. So the status stays
+**Complete** — the person may lawfully work, and a status that said otherwise
+would have the wizard collecting a whole new I-9 — and `receipt_pending` with
+`receipt_expires_on` (hire date + 90 days) carry what is still owed.
+`list_pending_i9_verifications` reports them in their own list beside the
+unsigned Section 2s, because "never verified" and "verified against a receipt"
+are different obligations. `reverify_i9` with reason `Receipt Replaced` closes one.
+
+**Two routes, and one of them is the first read on the onboarding surface.**
+`list_i9_document_types` publishes the table grouped by List A / List B / List C,
+which is the shape Section 2's own question has; the app has been drawing that
+picker off a hardcoded Swift array that goes stale the next time USCIS revises
+the list, and goes stale silently. `reverify_i9` is the branch the wizard has been
+able to *see* since v0.46.2, when `get_employee` began reporting a returning
+picker's expired I-9 as expired, and has had no call to take.
+
+**The full SSN is storable now, and off.** E-Verify submits nine digits and
+cannot be run from four, so a site that runs it needs somewhere to keep them —
+and a site that does not should not be holding them. `store_full_ssn` on I-9
+Settings is off by default; the column is a Frappe Password field, so Frappe
+writes it to the encrypted `__Auth` table rather than to a row; no tool reads it
+back and `get_i9_form` does not return it. Turning the switch off blanks it on
+each form's next save, which is a fact about the next save rather than a promise
+about the past, and the test suite says which.
+
 ## 0.46.2 — 2026-08-07
 
 **The returning picker, which in tree fruit is the common case.** v0.46.0 gave

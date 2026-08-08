@@ -129,6 +129,14 @@ ROUTES = (
 	Route("/mobile", mobile_api.create_i9_form),
 	Route("/mobile", mobile_api.submit_i9_section_1),
 	Route("/mobile", mobile_api.submit_i9_section_2),
+	# v0.47.0. The two the I-9 half was missing. `list_i9_document_types` is the
+	# only READ on the onboarding path and it replaces a Swift array: the server
+	# has seeded all 24 USCIS-accepted documents since v0.27.0 and no phone could
+	# ask for them. `reverify_i9` is Section 3 — the branch the wizard has been
+	# able to SEE since v0.46.2, when `get_employee` began reporting a returning
+	# picker's expired I-9 as expired, and has had no call to take.
+	Route("/mobile", mobile_api.list_i9_document_types),
+	Route("/mobile", mobile_api.reverify_i9),
 	Route("/mobile", mobile_api.submit_w4),
 	Route("/mobile", mobile_api.link_badge_to_employee),
 	# The capture queue and the crew clock.

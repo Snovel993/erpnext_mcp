@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The twenty-eight methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The thirty methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -1367,7 +1367,125 @@ def submit_i9_section_2(
 	return result.data
 
 
-# ── 24. submit_w4 ───────────────────────────────────────────────────────────
+# ── 24. list_i9_document_types ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_i9_document_types", limit=guard.READ_LIMIT)
+def list_i9_document_types(user: str, list_category=None) -> dict:
+	"""What USCIS accepts, grouped the way Section 2 asks the question.
+
+	THE APP HAD THIS LIST HARDCODED AND THE SERVER HAS HAD THE REAL ONE SINCE
+	v0.27.0. `i9_documents.py` seeds all 24 accepted documents as records, an
+	operator may deactivate any of them for their own site, and none of that could
+	reach a phone — so the picker a foreman scrolls in the orchard was a Swift
+	array that goes stale the next time USCIS revises the list, and goes stale
+	silently. This is the read that makes it a lookup, and it is the FIRST read on
+	the onboarding half of this surface: everything else here writes.
+
+	GROUPED BY LIST, because that is the shape of the choice rather than a
+	convenience. Section 2 is "one from List A" OR "one from List B and one from
+	List C", and a form that has to make that split itself is a form with its own
+	copy of which document is in which category — which is exactly the copy that
+	was wrong. `documents` carries the flat list beside it for a caller that
+	wants to search across all three.
+
+	VIEW-ONLY AND NOT SCOPED TO AN ENTITY. The federal list of acceptable
+	documents is not a fact about a company, and there is nothing on one of these
+	rows that belongs to a person: a title, its USCIS code, whether it carries a
+	photograph. `guard.endpoint` still runs the kill switch, the role gate, the
+	enrolment gate and the rate limit, which is the whole of what this read needs.
+	"""
+	guard.require_scope(user)
+	inner = {}
+	category = str(list_category or "").strip().upper()
+	if category:
+		if category not in ("A", "B", "C"):
+			frappe.throw(
+				f"list_category {list_category!r} is not an I-9 list. Pass A, B, C, or "
+				"nothing at all for the whole table.",
+				frappe.ValidationError,
+			)
+		inner["list_category"] = category
+
+	result = i9.list_i9_document_types(inner)
+	grouped = result.data.get("by_list") or {}
+	return {
+		"documents": result.data.get("documents") or [],
+		"count": result.data.get("count") or 0,
+		"list_a": grouped.get("A") or [],
+		"list_b": grouped.get("B") or [],
+		"list_c": grouped.get("C") or [],
+		"list_category": category or None,
+	}
+
+
+# ── 25. reverify_i9 ─────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("reverify_i9", mutating=True, limit=guard.WRITE_LIMIT)
+def reverify_i9(
+	user: str,
+	employee=None,
+	reason=None,
+	document_title=None,
+	document_number=None,
+	issuing_authority=None,
+	document_expiry=None,
+	reverification_date=None,
+	rehire_date=None,
+	verifier_name=None,
+	verifier_title=None,
+	section_3_signature=None,
+	notes=None,
+) -> dict:
+	"""Section 3, for the returning worker whose authorization ran out.
+
+	THIS IS THE BRANCH THE WIZARD COULD SEE AND COULD NOT TAKE. v0.46.2 gave
+	`get_employee` the reconciliation that reports a returning picker's I-9 as
+	`Expired` rather than as done — deliberately, because an expired I-9 is
+	precisely the case §1324a wants re-examined. What the handset could then do
+	about it was nothing: `create_i9_form` refuses a second form for somebody who
+	has one, and the only other door was a Desk edit over the columns recording
+	what was examined on the day of hire. So the wizard's own answer to its
+	hardest case was "find an operator with a laptop".
+
+	`document_expiry` IS RENAMED ON NEITHER SIDE and the argument names are the
+	tool's, because there is no shipped Swift struct for this call to be
+	compatible with — this endpoint precedes the screen rather than following it.
+	Where the app grows one, the renaming trade `submit_i9_section_2` makes is the
+	one to make again: the backend moves.
+
+	`verifier_name` IS THE TYPED ONE, not the caller's, for the reason Section 2
+	states — the person who examined the document signs their own name, and the
+	account that made the call is on the MCP Action Log row regardless.
+
+	EVERY RULE IS THE TOOL'S. That reverification needs a signed Section 2 to
+	follow, that List B is not a reverification document, that a document already
+	expired on the day it was examined is not evidence of continuing
+	authorization, that 'Rehire' needs a rehire date — all of it is 8 CFR
+	274a.2(b)(1)(vii)'s and lives in `tools/i9.py`, so none of it is restated here.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+
+	inner = {"employee": person, "reason": reason, "document_title": document_title,
+	         "verifier_name": verifier_name}
+	for key, value in (
+		("document_number", document_number),
+		("issuing_authority", issuing_authority),
+		("document_expiry", document_expiry),
+		("reverification_date", reverification_date),
+		("rehire_date", rehire_date),
+		("verifier_title", verifier_title),
+		("section_3_signature", section_3_signature),
+		("notes", notes),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = i9.reverify_i9(inner)
+	return result.data
+
+
+# ── 26. submit_w4 ───────────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("submit_w4", mutating=True, limit=guard.WRITE_LIMIT)
 def submit_w4(
@@ -1423,7 +1541,7 @@ def submit_w4(
 	return result.data
 
 
-# ── 25. link_badge_to_employee ──────────────────────────────────────────────
+# ── 27. link_badge_to_employee ──────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("link_badge_to_employee", mutating=True, limit=guard.WRITE_LIMIT)
 def link_badge_to_employee(user: str, badge_id=None, employee=None, company=None, notes=None) -> dict:
@@ -1464,7 +1582,7 @@ def link_badge_to_employee(user: str, badge_id=None, employee=None, company=None
 	return result.data
 
 
-# ── 26. sync_bucket_entries ─────────────────────────────────────────────────
+# ── 28. sync_bucket_entries ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("sync_bucket_entries", mutating=True, limit=guard.UPLOAD_LIMIT)
 def sync_bucket_entries(user: str, entries=None, company=None) -> dict:
@@ -1490,7 +1608,7 @@ def sync_bucket_entries(user: str, entries=None, company=None) -> dict:
 	return result.data
 
 
-# ── 27. start_shift ─────────────────────────────────────────────────────────
+# ── 29. start_shift ─────────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("start_shift", mutating=True, limit=guard.WRITE_LIMIT)
 def start_shift(
@@ -1546,7 +1664,7 @@ def start_shift(
 	return result.data
 
 
-# ── 28. add_worker_to_shift ─────────────────────────────────────────────────
+# ── 30. add_worker_to_shift ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("add_worker_to_shift", mutating=True, limit=guard.WRITE_LIMIT)
 def add_worker_to_shift(
@@ -1577,7 +1695,7 @@ def add_worker_to_shift(
 	return result.data
 
 
-# ── 29. end_shift ───────────────────────────────────────────────────────────
+# ── 31. end_shift ───────────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("end_shift", mutating=True, limit=guard.WRITE_LIMIT)
 def end_shift(

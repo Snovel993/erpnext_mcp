@@ -8,6 +8,7 @@
   "document_handling_section",
   "store_document_copies",
   "enrolled_in_e_verify",
+  "store_full_ssn",
   "employer_section",
   "business_legal_name",
   "business_address",
@@ -35,6 +36,13 @@
    "fieldname": "enrolled_in_e_verify",
    "fieldtype": "Check",
    "label": "Enrolled in E-Verify"
+  },
+  {
+   "default": "0",
+   "description": "OFF, and leaving it off is a real answer rather than a gap. With it off this site stores the last four digits of an SSN and nothing more, which is everything the forms it prints need. Switch it on ONLY if this operation runs E-Verify: E-Verify submits nine digits and cannot be run from four. The number is written to Frappe's encrypted password table, no tool reads it back, and turning this switch off blanks it on the next save of each form rather than at the moment of the switch.",
+   "fieldname": "store_full_ssn",
+   "fieldtype": "Check",
+   "label": "Store Full SSN (Encrypted)"
   },
   {
    "fieldname": "employer_section",

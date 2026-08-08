@@ -570,6 +570,16 @@ class UndecodedResponseModel(Codable):
 	The mirror records that honestly rather than pretending to a contract, and
 	holds the one line that IS already true — the answer is an object — so that
 	whoever writes `Shift.swift` starts from a payload that can carry a struct.
+
+	v0.47.0 puts two more here, and they are the case this class was written for
+	rather than an exception to it. `list_i9_document_types` and `reverify_i9`
+	PRECEDE their screens: the app's Section 2 picker is a hardcoded Swift array
+	today and its wizard has no reverification step at all, so there is no struct
+	to transcribe and inventing one would assert a contract neither side has —
+	the sentence `VoidResponseModel` above already refuses to write. What the two
+	tests covering them do instead is assert the PAYLOAD, key by key, because the
+	shape is the thing being published and a picker built against it is the next
+	thing anybody writes.
 	"""
 
 	SWIFT = "MobileAPI.swift"
@@ -1116,6 +1126,57 @@ class EveryMobileMethodDecodes(ContractTestCase):
 				reqd=1 if spec.reqd else 0,
 			)
 
+	def the_i9_document_table(self):
+		"""Four of the 24 `i9_documents.py` seeds, one per branch these tests take.
+
+		SEEDED HERE RATHER THAN INSTALLED, because `install.py` runs against a
+		bench and this suite does not. Four rather than 24 for the reason every
+		fixture in this file is minimal: the tests below assert which list a
+		document came back in, and 24 rows would make the assertion a transcription
+		of `i9_documents.py` rather than a check of the grouping.
+		"""
+		STORE.seed(
+			"I-9 Document Type",
+			[
+				{
+					"name": "U.S. Passport",
+					"doc_title": "U.S. Passport",
+					"list_category": "A",
+					"uscis_code": "passport",
+					"requires_photo": 1,
+					"enabled": 1,
+					"description": "Unexpired U.S. passport",
+				},
+				{
+					"name": "Employment Authorization Document (Form I-766)",
+					"doc_title": "Employment Authorization Document (Form I-766)",
+					"list_category": "A",
+					"uscis_code": "i-766",
+					"requires_photo": 1,
+					"enabled": 1,
+					"description": "Unexpired Employment Authorization Document",
+				},
+				{
+					"name": "Driver's License",
+					"doc_title": "Driver's License",
+					"list_category": "B",
+					"uscis_code": "drivers-license",
+					"requires_photo": 1,
+					"enabled": 1,
+					"description": "State-issued driver's license",
+				},
+				{
+					"name": "Social Security Card (Unrestricted)",
+					"doc_title": "Social Security Card (Unrestricted)",
+					"list_category": "C",
+					"uscis_code": "ssn-card",
+					"requires_photo": 0,
+					"enabled": 1,
+					"description": "Social Security Account Number card",
+				},
+			],
+		)
+
 	def a_documented_returning_picker(self, i9_status="Pending", w4_status="Missing"):
 		"""Somebody who worked last season: an I-9 verified, a W-4 filed, a badge.
 
@@ -1241,6 +1302,115 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertIsNone(row["i9"])
 		self.assertIsNone(row["w4"])
 		self.assertEqual(row["reconciled"], [])
+
+	# ── v0.47.0: the I-9's two missing calls ────────────────────────────────
+	def test_31_list_i9_document_types(self):
+		"""The list the Section 2 picker has been hardcoding, as records.
+
+		THE THREE LIST KEYS ARE THE CONTRACT, not `documents`. Section 2 asks
+		"one from List A" OR "one from B and one from C", so a picker draws three
+		sections and needs three keys it can rely on being there — including an
+		empty one, because a missing `list_b` is a crash and an empty `list_b` is
+		a section with nothing in it. That is asserted below against a site that
+		has only List A documents enabled.
+		"""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+
+		row = self.wire("list_i9_document_types")
+		UndecodedResponseModel.decode(row, "list_i9_document_types")
+
+		self.assertEqual(row["count"], 4)
+		self.assertEqual(
+			[d["doc_title"] for d in row["list_a"]],
+			["Employment Authorization Document (Form I-766)", "U.S. Passport"],
+		)
+		self.assertEqual([d["doc_title"] for d in row["list_b"]], ["Driver's License"])
+		self.assertEqual(
+			[d["doc_title"] for d in row["list_c"]], ["Social Security Card (Unrestricted)"]
+		)
+		self.assertIsNone(row["list_category"])
+		# What a picker cell renders. A title with no `requires_photo` beside it
+		# is a row the foreman cannot tell a photo document from.
+		passport = next(d for d in row["list_a"] if d["doc_title"] == "U.S. Passport")
+		self.assertEqual(passport["uscis_code"], "passport")
+		self.assertEqual(passport["requires_photo"], 1)
+
+	def test_31_a_filtered_list_still_carries_all_three_keys(self):
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+
+		row = self.wire("list_i9_document_types", list_category="a")
+		self.assertEqual(row["list_category"], "A")
+		self.assertEqual(row["count"], 2)
+		self.assertEqual(row["list_b"], [])
+		self.assertEqual(row["list_c"], [])
+
+	def test_31_a_list_that_is_not_a_list_is_refused(self):
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		with self.assertRaises(Exception) as caught:
+			self.wire("list_i9_document_types", list_category="D")
+		self.assertIn("is not an I-9 list", str(caught.exception))
+
+	def test_32_reverify_i9(self):
+		"""Section 3, on the record `get_employee` reports as expired.
+
+		THIS IS THE PAIR test_30 LEFT OPEN. That test asserts a returning picker's
+		expired I-9 is reported as expired and never written over; this is the call
+		the wizard makes about it, and until v0.47.0 there was not one.
+		"""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.a_documented_returning_picker(i9_status="Expired")
+
+		row = self.wire(
+			"reverify_i9",
+			employee="EMP-RETURNED",
+			reason="Work Authorization Expired",
+			document_title="Employment Authorization Document (Form I-766)",
+			document_number="SRC1234567890",
+			issuing_authority="USCIS",
+			document_expiry="2027-06-01",
+			verifier_name="Ana Ramos",
+			verifier_title="Farm Manager",
+		)
+		UndecodedResponseModel.decode(row, "reverify_i9")
+
+		self.assertEqual(row["name"], "I9-2025-RETURNED")
+		self.assertEqual(row["status"], "Complete")
+		self.assertEqual(row["reverification_count"], 1)
+		self.assertEqual(row["work_authorization_expiry"], "2027-06-01")
+		self.assertFalse(row["receipt_pending"])
+
+		# It APPENDED. The 2025 verification is still what the form says was
+		# examined on the day of hire — the claim the child table exists for.
+		filed = next(r for r in STORE.rows("I-9 Form") if r["name"] == "I9-2025-RETURNED")
+		self.assertEqual(filed["verification_date"], "2025-06-03")
+		self.assertEqual(len(filed["reverifications"]), 1)
+
+		# THE ROUND TRIP, and the reason the whole feature exists. test_30 asserts
+		# `get_employee` reports this picker's I-9 as Expired and refuses to
+		# reconcile it away. After the reverification the same read has to stop
+		# saying so, or the wizard sends a lawfully reverified worker to
+		# `create_i9_form` — which refuses, because she has one.
+		self.assertEqual(row["employee_i9_status"], "Verified")
+		detail = self.wire("get_employee", employee="EMP-RETURNED")
+		self.assertEqual(detail["i9_status"], "Verified")
+
+	def test_32_a_reverification_of_a_form_with_no_section_2_is_refused(self):
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		with self.assertRaises(Exception) as caught:
+			self.wire(
+				"reverify_i9",
+				employee=self.NEW_HIRE,
+				reason="Work Authorization Expired",
+				document_title="U.S. Passport",
+				verifier_name="Ana Ramos",
+			)
+		self.assertIn("needs a first one to follow", str(caught.exception))
 
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
@@ -1383,6 +1553,8 @@ class TheContractIsComplete(ContractTestCase):
 		"search_employees": "test_28",
 		"reactivate_employee": "test_29",
 		"get_employee": "test_30",
+		"list_i9_document_types": "test_31",
+		"reverify_i9": "test_32",
 	}
 
 	def _published(self, module):

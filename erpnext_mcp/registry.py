@@ -9008,8 +9008,14 @@ TOOLS = {
 		i9.submit_i9_section_1,
 		"MUTATING (default OFF). Fill Section 1 of a Draft I-9 — the employee's "
 		"personal information, citizenship status, and signature.\n\n"
-		"SSN: ONLY THE LAST FOUR DIGITS ARE STORED. Pass a full SSN if you must — "
-		"it is stripped to the last four before it touches the database.\n\n"
+		"SSN: THE LAST FOUR DIGITS ARE WHAT THIS APP READS. Pass a full SSN if you "
+		"must — it is stripped to the last four for ssn_last_four. The whole number "
+		"is kept, encrypted, ONLY where store_full_ssn is on in I-9 Settings, which "
+		"is off by default and exists for sites running E-Verify.\n\n"
+		"'Alien Authorized to Work' NEEDS ONE OF THREE IDENTIFIERS — a USCIS/A-Number, "
+		"a Form I-94 admission number, or a foreign passport number with its country "
+		"of issuance. Section 1 asks for one of the three; a call carrying none is "
+		"refused, and a passport number without a country is refused too.\n\n"
 		"Moves the I-9 from Draft to 'Section 1 Complete'. Logged to I-9 Audit Log.",
 		{
 			"employee": _field(_STRING, "Employee docname or employee_name."),
@@ -9025,6 +9031,13 @@ TOOLS = {
 			"address_zip": _field(_STRING, "ZIP code."),
 			"date_of_birth": _field(_STRING, "YYYY-MM-DD."),
 			"ssn_last_four": _field(_STRING, "Last 4 digits of SSN. Full SSN is stripped to last 4."),
+			"ssn": _field(
+				_STRING,
+				"The full 9-digit SSN. Its last four are stored as ssn_last_four either way; "
+				"the whole number reaches the encrypted ssn_full column ONLY where "
+				"store_full_ssn is on in I-9 Settings, which is off by default and is meant "
+				"for sites running E-Verify.",
+			),
 			"email": _field(_STRING, "Email address."),
 			"phone": _field(_STRING, "Phone number."),
 			"citizenship_status": _field(
@@ -9032,8 +9045,21 @@ TOOLS = {
 				"US Citizen, Noncitizen National, Lawful Permanent Resident, or Alien Authorized to Work.",
 			),
 			"alien_registration_number": _field(
-				_STRING, "USCIS number. Required for LPR and Alien Authorized to Work."
+				_STRING,
+				"USCIS / Alien Registration Number. Section 1 asks an Alien Authorized to "
+				"Work for THIS or i94_admission_number or the foreign passport pair — one of "
+				"the three, and the call is refused carrying none of them.",
 			),
+			"i94_admission_number": _field(
+				_STRING, "Form I-94 / I-94A admission number. One of the three Section 1 identifiers."
+			),
+			"foreign_passport_number": _field(
+				_STRING,
+				"Foreign passport number. The third Section 1 identifier, and it must be sent "
+				"WITH foreign_passport_country — a passport number without its issuer "
+				"identifies nobody.",
+			),
+			"foreign_passport_country": _field(_STRING, "Country that issued the foreign passport."),
 			"alien_work_authorization_expiry": _field(
 				_STRING, "YYYY-MM-DD. Required for Alien Authorized to Work."
 			),
@@ -9057,6 +9083,13 @@ TOOLS = {
 		"3 business days of the hire date. Refused if overdue.\n\n"
 		"document_path is 'List A' (one document proves both) or 'List B + C' "
 		"(one identity document plus one employment authorization document).\n\n"
+		"THE TITLES ARE CHECKED AGAINST THE LIST THEY CLAIM TO BE FROM. All 24 "
+		"USCIS-accepted documents are seeded; what is refused is a title in the wrong "
+		"slot. A site whose I-9 Document Type table is empty is not checked.\n\n"
+		"RECEIPTS ARE ACCEPTED. Set list_x_is_receipt where what was examined was a "
+		"receipt for a lost, stolen or damaged document — the form still completes, "
+		"and receipt_pending / receipt_expires_on (hire date + 90 days) carry the "
+		"document still owed. reverify_i9 is where it lands.\n\n"
 		"Moves the I-9 to 'Complete'. Logged to I-9 Audit Log.",
 		{
 			"employee": _field(_STRING, "Employee docname or employee_name."),
@@ -9067,14 +9100,26 @@ TOOLS = {
 			"list_a_doc_authority": _field(_STRING, "List A issuing authority."),
 			"list_a_doc_number": _field(_STRING, "List A document number."),
 			"list_a_doc_expiry": _field(_STRING, "YYYY-MM-DD. List A expiration date."),
+			"list_a_is_receipt": _field(
+				_BOOLEAN,
+				"What was examined is a RECEIPT for a lost, stolen or damaged List A document. "
+				"Acceptable for 90 days from the hire date (8 CFR 274a.2(b)(1)(vi)); the form "
+				"still completes and receipt_pending carries what is owed.",
+			),
 			"list_b_doc_title": _field(_STRING, "List B document title."),
 			"list_b_doc_authority": _field(_STRING, "List B issuing authority."),
 			"list_b_doc_number": _field(_STRING, "List B document number."),
 			"list_b_doc_expiry": _field(_STRING, "YYYY-MM-DD. List B expiration date."),
+			"list_b_is_receipt": _field(
+				_BOOLEAN, "What was examined is a receipt for a lost/stolen/damaged List B document."
+			),
 			"list_c_doc_title": _field(_STRING, "List C document title."),
 			"list_c_doc_authority": _field(_STRING, "List C issuing authority."),
 			"list_c_doc_number": _field(_STRING, "List C document number."),
 			"list_c_doc_expiry": _field(_STRING, "YYYY-MM-DD. List C expiration date."),
+			"list_c_is_receipt": _field(
+				_BOOLEAN, "What was examined is a receipt for a lost/stolen/damaged List C document."
+			),
 			"document_copies_stored": _field(_BOOLEAN, "Whether document copies are stored on file."),
 			"verifier_name": _field(_STRING, "Name of the person who verified the documents."),
 			"verifier_title": _field(_STRING, "Title of the verifier."),
@@ -9099,6 +9144,13 @@ TOOLS = {
 				"Store copies for ALL employees (uniformity rule). Mixing is a discrimination claim.",
 			),
 			"enrolled_in_e_verify": _field(_BOOLEAN, "E-Verify enrolment. Forces store_document_copies on."),
+			"store_full_ssn": _field(
+				_BOOLEAN,
+				"Keep the full 9-digit SSN, encrypted, beside the last four. OFF by default "
+				"and meant only for sites running E-Verify, which submits nine digits and "
+				"cannot be run from four. Switching it off blanks the stored number on the "
+				"next save of each I-9.",
+			),
 			"business_legal_name": _field(_STRING, "Employer legal name for Section 2."),
 			"business_address": _field(_STRING, "Employer address for Section 2."),
 			"business_ein": _field(_STRING, "Employer EIN."),
@@ -9131,6 +9183,60 @@ TOOLS = {
 		title="Flag I-9 for reverification",
 		available=_needs_doctype("I-9 Form"),
 		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+	),
+	# ── v0.47.0: Section 3 — Form I-9's Supplement B ────────────────────────
+	"reverify_i9": _tool(
+		i9.reverify_i9,
+		"MUTATING (default OFF). Record a Section 3 entry on an existing I-9 — "
+		"Form I-9's Supplement B, Reverification and Rehire.\n\n"
+		"APPENDS, NEVER OVERWRITES. Each call adds one row to the form's "
+		"reverification table; Section 2's own columns keep saying what was examined "
+		"on the day of hire, which is the record 8 U.S.C. §1324a asks an employer to "
+		"have kept. A seasonal worker on a renewing authorization accumulates one "
+		"entry a season.\n\n"
+		"LIST A OR LIST C ONLY. Reverification establishes continuing employment "
+		"authorization; List B establishes identity, which does not expire.\n\n"
+		"MOVES alien_work_authorization_expiry to the new document's date, so "
+		"list_expiring_work_authorizations follows the document currently in force. "
+		"Refused where the new document had already expired on the day it was "
+		"examined, and refused where the form has no signed Section 2 to follow.\n\n"
+		"reason 'Receipt Replaced' also clears receipt_pending — it is how the "
+		"document a Section 2 receipt stood in for gets recorded. Logged to I-9 Audit Log.",
+		{
+			"employee": _field(_STRING, "Employee docname or employee_name."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"name": _field(_STRING, "Alias for employee."),
+			"reason": _field(
+				_STRING,
+				"Work Authorization Expired, Rehire, Receipt Replaced, or Name Change.",
+			),
+			"document_title": _field(
+				_STRING,
+				"The List A or List C document examined. Checked against the I-9 Document "
+				"Type table — list_i9_document_types has the accepted titles.",
+			),
+			"issuing_authority": _field(_STRING, "Who issued the document."),
+			"document_number": _field(_STRING, "Document number."),
+			"document_expiry": _field(
+				_STRING,
+				"YYYY-MM-DD. When the new authorization runs out. Omit for a document that "
+				"does not expire. Refused if before reverification_date.",
+			),
+			"reverification_date": _field(
+				_STRING, "YYYY-MM-DD. The day the document was examined. Defaults to today."
+			),
+			"rehire_date": _field(_STRING, "YYYY-MM-DD. Required when reason is 'Rehire'."),
+			"verifier_name": _field(_STRING, "Name of the person who examined the document."),
+			"verifier_title": _field(_STRING, "Title of the verifier."),
+			"section_3_signature": _field(_STRING, "Attach URL or base64 of the verifier signature."),
+			"notes": _field(_STRING, "Additional information for this entry."),
+		},
+		required=("reason", "document_title", "verifier_name"),
+		mutating=True,
+		idempotent=False,
+		title="Reverify an I-9 (Section 3)",
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.47.0)",
 	),
 	"destroy_i9": _tool(
 		i9.destroy_i9,

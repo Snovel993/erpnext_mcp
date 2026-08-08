@@ -215,6 +215,10 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"create_i9_form",
 		"submit_i9_section_1",
 		"submit_i9_section_2",
+		# v0.47.0 — the I-9's document lookup, replacing a hardcoded Swift array,
+		# and Section 3, which is the branch a returning worker's expired I-9 takes.
+		"list_i9_document_types",
+		"reverify_i9",
 		"submit_w4",
 		"link_badge_to_employee",
 		"sync_bucket_entries",

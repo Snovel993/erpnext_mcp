@@ -3,7 +3,7 @@
  "allow_rename": 0,
  "autoname": "naming_series:",
  "creation": "2026-08-04 09:00:00.000000",
- "description": "Structured Form I-9 — Employment Eligibility Verification. Tracks Section 1 (employee), Section 2 (employer verification), retention dates, and destruction. Every action is logged to I-9 Audit Log.",
+ "description": "Structured Form I-9 — Employment Eligibility Verification. Tracks Section 1 (employee), Section 2 (employer verification), Section 3 / Supplement B (reverification and rehire), receipts, retention dates, and destruction. Every action is logged to I-9 Audit Log.",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -27,11 +27,16 @@
   "personal_section",
   "date_of_birth",
   "ssn_last_four",
+  "ssn_full",
   "email",
   "phone",
   "citizenship_section",
   "citizenship_status",
   "alien_registration_number",
+  "i94_admission_number",
+  "immigration_col",
+  "foreign_passport_number",
+  "foreign_passport_country",
   "alien_work_authorization_expiry",
   "section_1_signature_section",
   "section_1_signature",
@@ -49,16 +54,22 @@
   "list_a_doc_authority",
   "list_a_doc_number",
   "list_a_doc_expiry",
+  "list_a_is_receipt",
   "list_b_section",
   "list_b_doc_title",
   "list_b_doc_authority",
   "list_b_doc_number",
   "list_b_doc_expiry",
+  "list_b_is_receipt",
   "list_c_section",
   "list_c_doc_title",
   "list_c_doc_authority",
   "list_c_doc_number",
   "list_c_doc_expiry",
+  "list_c_is_receipt",
+  "receipt_section",
+  "receipt_pending",
+  "receipt_expires_on",
   "document_copies_stored",
   "verifier_section",
   "verifier_name",
@@ -67,6 +78,8 @@
   "section_2_signed_at",
   "section_2_signed_ip",
   "verification_date",
+  "section_3_break",
+  "reverifications",
   "retention_section",
   "retention_until",
   "destruction_eligible_date",
@@ -193,10 +206,16 @@
    "label": "Date of Birth"
   },
   {
-   "description": "Only the last four digits. The full SSN is never stored.",
+   "description": "Only the last four digits. Everything that prints an SSN on this site prints XXX-XX-1234 off this column, and it is written whether or not the full number is stored beside it.",
    "fieldname": "ssn_last_four",
    "fieldtype": "Data",
    "label": "SSN (Last 4)"
+  },
+  {
+   "description": "The full nine digits, encrypted at rest in Frappe's own password table — WRITTEN ONLY WHERE I-9 Settings has 'Store Full SSN' switched on, and blanked on save the moment that switch goes off. E-Verify submits the whole number and cannot be run from the last four, which is the only reason this column exists. No tool reads it back: get_i9_form does not return it, and nothing in this app prints it.",
+   "fieldname": "ssn_full",
+   "fieldtype": "Password",
+   "label": "SSN (Full, Encrypted)"
   },
   {
    "fieldname": "email",
@@ -223,12 +242,38 @@
   },
   {
    "depends_on": "eval:['Lawful Permanent Resident','Alien Authorized to Work'].includes(doc.citizenship_status)",
+   "description": "A Lawful Permanent Resident gives this one. An Alien Authorized to Work gives THIS or the I-94 number or the foreign passport pair below — Section 1 asks for one of the three, not all of them.",
    "fieldname": "alien_registration_number",
    "fieldtype": "Data",
    "label": "Alien Registration / USCIS Number"
   },
   {
    "depends_on": "eval:doc.citizenship_status=='Alien Authorized to Work'",
+   "description": "Form I-94 / I-94A Arrival-Departure Record number. The second of the three identifiers an Alien Authorized to Work may give in Section 1.",
+   "fieldname": "i94_admission_number",
+   "fieldtype": "Data",
+   "label": "Form I-94 Admission Number"
+  },
+  {
+   "fieldname": "immigration_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.citizenship_status=='Alien Authorized to Work'",
+   "description": "The third identifier, and it is a PAIR: a foreign passport number means nothing without the country that issued it, and Section 1 asks for both together.",
+   "fieldname": "foreign_passport_number",
+   "fieldtype": "Data",
+   "label": "Foreign Passport Number"
+  },
+  {
+   "depends_on": "eval:doc.foreign_passport_number",
+   "fieldname": "foreign_passport_country",
+   "fieldtype": "Data",
+   "label": "Country of Issuance"
+  },
+  {
+   "depends_on": "eval:doc.citizenship_status=='Alien Authorized to Work'",
+   "description": "When the authorization runs out. Reverification moves this forward to the new document's date, so it always names the document currently in force.",
    "fieldname": "alien_work_authorization_expiry",
    "fieldtype": "Date",
    "label": "Work Authorization Expiry"
@@ -326,6 +371,14 @@
    "label": "List A Expiration Date"
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.document_path=='List A'",
+   "description": "What was examined was a RECEIPT for a lost, stolen or damaged document rather than the document itself. Acceptable under 8 CFR 274a.2(b)(1)(vi) for 90 days from the hire date, after which the actual document must be recorded through reverify_i9.",
+   "fieldname": "list_a_is_receipt",
+   "fieldtype": "Check",
+   "label": "List A Document Is a Receipt"
+  },
+  {
    "depends_on": "eval:doc.document_path=='List B + C'",
    "fieldname": "list_b_section",
    "fieldtype": "Section Break",
@@ -356,6 +409,14 @@
    "label": "List B Expiration Date"
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "description": "What was examined was a receipt for a lost, stolen or damaged identity document. Same 90-day window as List A.",
+   "fieldname": "list_b_is_receipt",
+   "fieldtype": "Check",
+   "label": "List B Document Is a Receipt"
+  },
+  {
    "depends_on": "eval:doc.document_path=='List B + C'",
    "fieldname": "list_c_section",
    "fieldtype": "Section Break",
@@ -384,6 +445,35 @@
    "fieldname": "list_c_doc_expiry",
    "fieldtype": "Date",
    "label": "List C Expiration Date"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.document_path=='List B + C'",
+   "description": "What was examined was a receipt for a lost, stolen or damaged employment authorization document. Same 90-day window as List A.",
+   "fieldname": "list_c_is_receipt",
+   "fieldtype": "Check",
+   "label": "List C Document Is a Receipt"
+  },
+  {
+   "depends_on": "eval:doc.receipt_pending",
+   "fieldname": "receipt_section",
+   "fieldtype": "Section Break",
+   "label": "Receipt"
+  },
+  {
+   "default": "0",
+   "description": "Set on save whenever any examined document above is a receipt, and cleared when reverify_i9 records the document it stood in for. THE FORM IS STILL Complete while this is ticked — a receipt is temporarily acceptable and the person may work — so this column rather than the status is what carries the outstanding obligation. list_pending_i9_verifications reports the ones running out.",
+   "fieldname": "receipt_pending",
+   "fieldtype": "Check",
+   "label": "Receipt Pending",
+   "read_only": 1
+  },
+  {
+   "description": "Auto-calculated: hire_date + 90 days. The last day a receipt stands in for the document it replaces.",
+   "fieldname": "receipt_expires_on",
+   "fieldtype": "Date",
+   "label": "Receipt Valid Until",
+   "read_only": 1
   },
   {
    "default": "0",
@@ -427,6 +517,18 @@
    "fieldname": "verification_date",
    "fieldtype": "Date",
    "label": "Verification Date"
+  },
+  {
+   "description": "Form I-9's Supplement B. Every reverification and every rehire recorded against this form, oldest first — the ones ABOVE this line record the day of hire and are never overwritten by one of these.",
+   "fieldname": "section_3_break",
+   "fieldtype": "Section Break",
+   "label": "Section 3 — Reverification and Rehire"
+  },
+  {
+   "fieldname": "reverifications",
+   "fieldtype": "Table",
+   "label": "Reverifications",
+   "options": "I-9 Reverification"
   },
   {
    "fieldname": "retention_section",

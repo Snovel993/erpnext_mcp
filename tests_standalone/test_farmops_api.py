@@ -170,6 +170,9 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/create_i9_form",
 		"/mobile/submit_i9_section_1",
 		"/mobile/submit_i9_section_2",
+		# v0.47.0 — the I-9's document lookup and its Section 3.
+		"/mobile/list_i9_document_types",
+		"/mobile/reverify_i9",
 		"/mobile/submit_w4",
 		"/mobile/link_badge_to_employee",
 		"/mobile/sync_bucket_entries",
