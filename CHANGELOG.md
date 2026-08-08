@@ -3,6 +3,46 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.48.2 — 2026-08-07
+
+**The piecework pay rules now have the scenario tests they never had, and three
+of them found something.** `test_payroll.py` tested the engine one function at a
+time and `test_payroll_integration.py` tested the join from the shift register to
+the slip. Neither walked a whole day of picking end to end and asserted the
+dollar figure, so the places where the code and a reader's assumption come apart
+were nowhere in the suite. `tests_standalone/test_piecework_rules.py` is
+sixty-one tests over eight claims, and it is a test-only release: NO
+CALCULATION CHANGED.
+
+**Three gaps are now pinned rather than latent.** First, *there is no higher-of
+rule* — forty-seven buckets at $1.50 in an eight-hour Oregon day pays $70.50, not
+the $117.60 the minimum wage would have. That is deliberate and documented in
+`payroll_integration.py`'s header: the $47.10 shortfall is priced and reported,
+and topping gross up quietly would hide the fact that a rate is set below the
+lawful floor. Second, *the minimum wage check ignores the overtime premium* —
+`check_minimum_wage_by_state` compares gross against `minimum_wage × hours`, flat,
+so fifty hours and four hundred buckets grosses $780 and PASSES a floor of $735
+while the real floor with the premium is $808.50. Nothing computes that $28.50.
+Third, *a slip carries two minimum wage verdicts that can disagree*:
+`minimum_wage_check` tests the whole period against the state holding the most
+hours, `minimum_wage_detail` tests each state against its own, and for thirty
+Oregon hours and ten Washington ones at $15.00 the first says pass and the second
+names Washington. `tools/payroll.py::_slip_row` already resolves that in favour
+of the per-state answer, which is the right one — now asserted.
+
+**And one thing that does not exist:** a worker cannot be part piece-rate and part
+hourly in one period. `pay_type` is one field on one salary structure, so a picker
+who spent Monday on buckets and Tuesday on irrigation is paid for Tuesday at the
+piece rate — which is nothing, because Tuesday produced no buckets. The tests
+assert the current behaviour and name it rather than asserting a wish.
+
+**Two shipped tools had a registration test and nothing else.**
+`get_piecework_summary` and `reconcile_bucket_payroll` arrived in v0.44.0 with
+their names asserted in `registry.TOOLS` and no test of what they return. Both now
+have one: accepted-versus-rejected counting, employee and date scoping, and the
+three reconciliation verdicts including a cancelled payroll run counting as having
+paid nothing.
+
 ## 0.48.1 — 2026-08-07
 
 **The 2026 Form W-4 credits $2,200 a qualifying child and this app credited
