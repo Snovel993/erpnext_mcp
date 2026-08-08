@@ -1657,6 +1657,113 @@ def resolve_badge(user: str, badge_id=None, company=None, shift=None) -> dict:
 	return result.data
 
 
+# ── 27c. generate_employee_badge_qr ─────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("generate_employee_badge_qr", mutating=True, limit=guard.WRITE_LIMIT)
+def generate_employee_badge_qr(user: str, employee=None, docname=None, company=None, regenerate=None, notes=None) -> dict:
+	"""Issue (or reprint) this hire's badge and hand back the QR to show them.
+
+	THE TOOL HAS EXISTED SINCE v0.50.0 AND THE PHONE COULD NOT REACH IT. That is
+	the whole of what this wrapper is. `generate_employee_badge_qr` mints a
+	readable `CF-0001`, writes the register row a bucket scan resolves through
+	and draws the code — and the only surface it was published on was the MCP
+	tool registry, which the handset does not speak. So the wizard's badge step
+	could map a card somebody had already printed elsewhere and could not
+	produce one, on a hire day, in a yard, for a worker standing there waiting to
+	be told their number.
+
+	`badge_id` IS NOT ACCEPTED, and that is the one thing taken away here. The
+	tool lets a caller name the identifier — a Desk operator adopting a card from
+	the old `farm_app` uuid stock — and letting a handset do it would put the
+	uniqueness of a payroll key in the hands of whatever a foreman typed. The
+	phone's job is to ask for a badge; minting is the server's.
+
+	`regenerate` IS ACCEPTED, because the lost-card path is a field problem and
+	not a Desk one. Without it the call is IDEMPOTENT: somebody who already holds
+	a live badge gets that badge's QR back rather than a second identifier, which
+	is what makes the wizard's button safe to press twice on a bad connection.
+	With it the old card is retired in the same call — a replacement that leaves
+	its predecessor resolving is how a found badge keeps earning.
+
+	THE HR ROLE AND THE ENTITY SCOPE ARE THE TOOL'S OWN. It calls
+	`require_hr_role` and `require_company_scope` itself, and it refuses a
+	worker who is not Active by name.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+
+	inner = {"employee": person, "company": _company(user, company, allowed)}
+	if regenerate is not None:
+		inner["regenerate"] = regenerate
+	if notes:
+		inner["notes"] = str(notes).strip()
+
+	result = badges.generate_employee_badge_qr(inner)
+	data = result.data or {}
+	return {
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+		"company": data.get("company"),
+		"badge_id": data.get("badge_id"),
+		"created": data.get("created"),
+		"reused": data.get("reused"),
+		"retired_badges": data.get("retired_badges") or [],
+		"designation": data.get("designation"),
+		# What a card needs to be drawn on the handset: the code, the face (or
+		# the initials that stand in for one) and the entity's mark.
+		"png_base64": data.get("png_base64"),
+		"png_bytes": data.get("png_bytes"),
+		"photo_url": data.get("photo_url"),
+		"photo_placeholder": data.get("photo_placeholder"),
+		"company_logo_url": data.get("company_logo_url"),
+	}
+
+
+# ── 27d. set_employee_photo ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("set_employee_photo", mutating=True, limit=guard.WRITE_LIMIT)
+def set_employee_photo(user: str, employee=None, docname=None, file_token=None) -> dict:
+	"""File a headshot against the Employee and make it the photo on the record.
+
+	THE BADGE CARD READS `Employee.image` AND NOTHING WAS EVER WRITING IT.
+	`attach_onboarding_document` files evidence — the bytes land as a private
+	File pointing at the Employee and the Employee points nowhere — which is
+	right for a List B photograph and leaves a badge printing initials. This is
+	the same staged upload followed by the field update that closes the loop.
+
+	IT TAKES A `file_token`, NOT BYTES, exactly like every other upload on this
+	surface: `stage_file_chunk` then `finalize_staged_file`, and this call names
+	what that produced. One upload path, and it is the one that authenticates.
+
+	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, the same posture
+	`attach_onboarding_document` takes and for the same reason: an account that
+	could set its own photograph is an account that could put somebody else's
+	face on its own badge.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+	personnel.require_hr_role()
+
+	if not str(file_token or "").strip():
+		frappe.throw(
+			"file_token is required — upload the photograph with stage_file_chunk and "
+			"finalize_staged_file first, then send the token that returns.",
+			frappe.ValidationError,
+		)
+
+	result = personnel.set_employee_photo({"employee": person, "file_token": file_token})
+	data = result.data or {}
+	return {
+		"employee": data.get("employee"),
+		"photo_url": data.get("photo_url"),
+		"file_token": data.get("file_token"),
+		"file_name": data.get("file_name"),
+		"image_set": data.get("image_set"),
+		"replaced": data.get("replaced"),
+		"already_attached": data.get("already_attached"),
+	}
+
+
 # ── 28. sync_bucket_entries ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("sync_bucket_entries", mutating=True, limit=guard.UPLOAD_LIMIT)

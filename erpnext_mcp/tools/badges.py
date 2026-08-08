@@ -76,6 +76,18 @@ SHEET_CAP = 100
 #: and a race that has not settled in fifty tries is a bug, not contention.
 MINT_ATTEMPTS = 50
 
+#: The Company field a card's logo comes from. NOT A COMPLIANCE FIELD, which is
+#: why it is installed from here rather than declared in `compliance_fields.py`:
+#: that table requires a regulator and a citation for every column it adds, and
+#: a farm's logo on a badge has neither. It is a print detail, and it lives with
+#: the printer.
+#:
+#: An Attach Image rather than a Data URL because an operator uploads a PNG from
+#: a laptop and Frappe's own field type is what gives them the picker, the
+#: preview and the File row; a URL field would give them a box to paste a path
+#: into and no way to tell whether it resolved.
+BADGE_LOGO_FIELD = "badge_logo"
+
 #: What a badge card carries, and the label printed above the QR. Kept here
 #: rather than in the caller so the sheet and the single card agree.
 _EMPLOYEE_FIELDS = ("name", "employee_name", "employee_number", "designation", "status", "company", "image")
@@ -138,6 +150,56 @@ def _company_prefix(company: str) -> str:
 			"badge_id explicitly. Nothing was changed."
 		)
 	return prefix
+
+
+def _company_logo(company: str) -> str:
+	"""The company's badge logo URL, or "" — never a refusal.
+
+	A SITE WITHOUT THE FIELD STILL PRINTS BADGES. The field arrives on the next
+	`bench migrate` and a card is perfectly legible without a logo, so every
+	failure here — no field, no value, a Company row that has gone — is the
+	empty string rather than an exception. A badge nobody can print because a
+	logo is missing is a worse outcome than a badge with no logo on it.
+	"""
+	if not company or not compat.has_field("Company", BADGE_LOGO_FIELD):
+		return ""
+	return str(frappe.db.get_value("Company", company, BADGE_LOGO_FIELD) or "")
+
+
+def install_badge_logo_field() -> dict:
+	"""Add `Company.badge_logo` if this site has not got it. Idempotent.
+
+	Called from `install.after_migrate`, so an operator upgrading gets the field
+	without a bespoke patch, and re-running finds it present and does nothing.
+	"""
+	report = {"created": False, "existed": False, "skipped": ""}
+	if not compat.doctype_exists("Company"):
+		report["skipped"] = "no Company doctype on this site"
+		return report
+	if compat.has_field("Company", BADGE_LOGO_FIELD):
+		report["existed"] = True
+		return report
+
+	doc = frappe.get_doc(
+		{
+			"doctype": "Custom Field",
+			"dt": "Company",
+			"fieldname": BADGE_LOGO_FIELD,
+			"label": "Badge Logo",
+			"fieldtype": "Attach Image",
+			"insert_after": "company_logo" if compat.has_field("Company", "company_logo") else "abbr",
+			"description": (
+				"The mark printed on this entity's employee badge cards. Separate from the "
+				"letterhead logo on purpose: a badge is a 2x3 card read across a bin trailer, "
+				"and the wordmark that works on an invoice is usually unreadable at that size."
+			),
+			"module": "ERPNext MCP",
+		}
+	)
+	doc.flags.ignore_permissions = True
+	doc.insert(ignore_permissions=True)
+	report["created"] = True
+	return report
 
 
 def _issued_badge_ids() -> list:
@@ -306,6 +368,10 @@ def _card(row: dict, badge_id: str, company: str, rendered: dict) -> dict:
 		# should not have to ask this app a second question to lay out a card.
 		"photo_url": row.get("image") or None,
 		"photo_placeholder": _initials(row.get("employee_name") or row["name"]),
+		# The entity's mark, for the same reason the photo and the initials are
+		# both here: a print template should not have to ask this app a second
+		# question to lay out a card. None where the site has no logo set.
+		"company_logo_url": _company_logo(company) or None,
 		"png_base64": base64.b64encode(rendered["png"]).decode("ascii"),
 		"png_bytes": len(rendered["png"]),
 		"modules": rendered["modules"],

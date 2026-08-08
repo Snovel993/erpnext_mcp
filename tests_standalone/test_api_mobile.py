@@ -239,6 +239,8 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# until this existed the crew clock could scan a crew and roster none of
 		# it, and the capture loop could show a foreman a code but never a name.
 		"resolve_badge",
+		"generate_employee_badge_qr",
+		"set_employee_photo",
 		"sync_bucket_entries",
 		"start_shift",
 		"add_worker_to_shift",

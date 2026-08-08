@@ -42,6 +42,30 @@ def custom_fields(doctype=None) -> list:
 	return [row for row in rows if doctype is None or row.get("dt") == doctype]
 
 
+def compliance_custom_fields(doctype=None) -> list:
+	"""Only the fields the compliance table declares.
+
+	`after_migrate` ADDS CUSTOM FIELDS THAT ARE NOT COMPLIANCE FIELDS, and since
+	v0.51.0 it adds one: `Company.badge_logo`, which the badge printer owns and
+	which has no regulator behind it — `TheTable` above refuses a field that
+	cannot name one, so it could not live in that table even if somebody wanted
+	it to. Counting every row in `Custom Field` made these tests a running total
+	of everything the hook has ever installed, which fails on the next feature
+	that needs a column and says nothing about the compliance installer either
+	way. This filter is what keeps them about their own subject.
+	"""
+	declared = {
+		(target.doctype, field.fieldname)
+		for target in compliance_fields.TARGETS
+		for field in target.fields
+	}
+	return [
+		row
+		for row in custom_fields(doctype)
+		if (row.get("dt"), row.get("fieldname")) in declared
+	]
+
+
 class TheTable(V12TestCase):
 	"""Properties of the declaration itself, before anything is installed."""
 
@@ -249,7 +273,7 @@ class MigrateThreeTimes(V12TestCase):
 		counts = []
 		for _ in range(3):
 			install.after_migrate()
-			counts.append(len(custom_fields()))
+			counts.append(len(compliance_custom_fields()))
 		# Five on Employee, the v0.19.3 Attendance bridge column, and the four
 		# v0.19.5 capex columns on ERPNext's Asset. Spray Log and Bucket Log Entry
 		# are genuinely absent from the fixture site, so they add nothing here and
@@ -260,18 +284,32 @@ class MigrateThreeTimes(V12TestCase):
 		self.assertEqual(counts, [counts[0]] * 3, f"custom fields multiplied across migrations: {counts}")
 
 	def test_three_migrations_leave_no_duplicate_fieldname_on_any_doctype(self):
+		# Deliberately every Custom Field, not just the compliance ones: the
+		# property is that the hook is idempotent, and a second `badge_logo`
+		# would be exactly the bug this is looking for.
 		for _ in range(3):
 			install.after_migrate()
 		seen = [(row["dt"], row["fieldname"]) for row in custom_fields()]
 		self.assertEqual(len(seen), len(set(seen)), f"duplicate custom fields: {seen}")
 
-	def test_a_migration_with_the_switch_off_adds_nothing_and_still_seeds_settings(self):
+	def test_a_migration_with_the_switch_off_adds_no_compliance_fields(self):
 		"""The other jobs in `after_migrate` have to keep running. An operator who
 		declined the compliance fields did not decline their settings defaults."""
 		self.configure(enabled=1, allow_install_compliance_fields=0)
 		install.after_migrate()
-		self.assertEqual(custom_fields(), [])
+		self.assertEqual(compliance_custom_fields(), [])
 		self.assertTrue(STORE.singles["ERPNext MCP Settings"])
+
+	def test_the_badge_logo_is_not_behind_the_compliance_switch(self):
+		"""`install_compliance_fields` exists so an operator can decline having
+		their Spray Log extended. It is not a switch for every column this app
+		has ever added, and a farm that turned it off did not thereby decide to
+		print badges with no logo on them."""
+		self.configure(enabled=1, allow_install_compliance_fields=0)
+		install.after_migrate()
+		self.assertEqual(
+			[row["fieldname"] for row in custom_fields("Company")], ["badge_logo"]
+		)
 
 
 class TheTools(V12TestCase):

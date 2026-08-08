@@ -54,6 +54,7 @@ enough to have caught the bug it was written for, so
 from the release that shipped it and asserts the mirror refuses it.
 """
 
+import base64
 import json
 import unittest
 from typing import ClassVar
@@ -63,8 +64,9 @@ import frappe
 from erpnext_mcp import i9_pdf, w4_pdf
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import mobile as mobile_api
+from erpnext_mcp.tools import badges as badges_tool
 
-from .fixtures import MAIN, install_hrms
+from .fixtures import MAIN, MAIN_ABBR, install_hrms
 from .harness import STORE, set_roles
 from .test_api_mobile import WORKER, MobileAPITestCase
 
@@ -638,6 +640,73 @@ class ResolvedBadgeModel(Codable):
 		("shift", str, 41),
 		("on_shift", bool, 45),
 		("joined_at", str, 46),
+	)
+
+
+class IssuedBadgeModel(Codable):
+	"""`IssuedBadge` — v0.51.0, the card the wizard's badge step now issues.
+
+	TWO STRICT FIELDS. Without `badge_id` there is nothing to write on a card or
+	into the register and without `employee` there is nobody it belongs to, so a
+	payload missing either throws rather than degrading into a badge that names
+	nobody. Everything else is decoration on that, and the decoration is exactly
+	where a site legitimately differs: a farm that has not set `badge_logo` and
+	a hire who declined a photograph both produce a perfectly good card, which
+	is why `photo_placeholder` is on the wire beside `photo_url`.
+
+	`png_base64` IS NULLABLE AND ITS ABSENCE IS NOT "A BADGE WITH NO QR". A
+	bench with no encoder refuses the whole call — `registry` gates the tool on
+	`_qr_available` and the direct path raises — so nothing here can answer with
+	a badge and no code. Nullable records that an older server might not send
+	the key, not that the card can ship without one.
+
+	`created` AND `reused` ARE BOTH SENT and are not redundant on the wire even
+	though one is the other's negation: the screen says "Badge Issued" or "Badge
+	Reprinted", and a client inferring the second from the absence of the first
+	would call every payload it failed to parse a reprint.
+	"""
+
+	SWIFT = "IssuedBadge.swift"
+	STRICT = (
+		("badge_id", str, 20),
+		("employee", str, 21),
+	)
+	NULLABLE = (
+		("employee_name", str, 23),
+		("company", str, 24),
+		("designation", str, 25),
+		("created", bool, 31),
+		("reused", bool, 32),
+		("png_base64", str, 40),
+		("png_bytes", int, 41),
+		("photo_url", str, 46),
+		("photo_placeholder", str, 47),
+		("company_logo_url", str, 51),
+	)
+
+
+class EmployeePhotoModel(Codable):
+	"""`EmployeePhoto` — v0.51.0, the headshot that makes a card carry a face.
+
+	EVERY FIELD IS NULLABLE INCLUDING `image_set`, AND THAT IS THE CONTRACT.
+	`image_set` is the one the caller acts on and it is NOT the same as success:
+	a site whose Employee doctype has no `image` column files the photograph and
+	answers `false`, meaning the bytes are on the record and the badge will
+	still print initials. Reading a 200 as "the badge has a face on it now" is
+	precisely the class of mistake that lost every onboarding upload before
+	v0.48.3, and a strict field here would invite the opposite error — throwing
+	away a successful file because an older server did not send the key.
+	"""
+
+	SWIFT = "IssuedBadge.swift"
+	NULLABLE = (
+		("employee", str, 82),
+		("photo_url", str, 83),
+		("file_token", str, 84),
+		("file_name", str, 85),
+		("image_set", bool, 86),
+		("replaced", bool, 88),
+		("already_attached", bool, 89),
 	)
 
 
@@ -2117,6 +2186,181 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		for absent in ("data", "file_content", "content_base64", "image", "is_private"):
 			self.assertNotIn(absent, taken)
 
+	# ── v0.51.0: issuing a badge, and the face that goes on it ──────────────
+
+	def test_44_set_employee_photo(self):
+		"""`EmployeePhoto` — the headshot, and the field update that is the point.
+
+		THE DEFECT THIS CLOSES. `attach_onboarding_document` files evidence: the
+		bytes land as a private File pointing at the Employee and NOTHING on the
+		Employee points back. `generate_employee_badge_sheet` lays a card out
+		from `Employee.image` and falls back to initials where it is empty — so
+		every badge printed for somebody onboarded through the wizard showed two
+		letters where a face should be. This is the same staged upload followed
+		by the one field write that closes the loop, and what the test proves is
+		that write.
+		"""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="profile-photo", name="employee_photo.jpg")
+
+		row = self.wire(
+			"set_employee_photo",
+			employee=self.NEW_HIRE,
+			file_token=finalized["file_token"],
+		)
+		EmployeePhotoModel.decode(row, "set_employee_photo")
+
+		self.assertIs(row["image_set"], True)
+		self.assertTrue(row["photo_url"])
+		# The whole point: the Employee now points AT the file.
+		self.assertEqual(
+			frappe.db.get_value("Employee", self.NEW_HIRE, "image"), row["photo_url"]
+		)
+		# And it is still private — a workforce's faces on a guessable public
+		# URL is a breach nobody needs a password for.
+		filed = frappe.db.get_value(
+			"File",
+			finalized["file_token"],
+			["attached_to_doctype", "attached_to_name", "is_private"],
+			as_dict=True,
+		)
+		self.assertEqual(filed["attached_to_doctype"], "Employee")
+		self.assertEqual(filed["attached_to_name"], self.NEW_HIRE)
+		self.assertEqual(int(filed["is_private"] or 0), 1)
+
+	def test_44_a_retaken_photo_supersedes_the_previous_one(self):
+		"""A retake moves `image` and leaves the old file attached. The record
+		keeps what it was shown; the card prints what is current."""
+		self.the_hr_furniture()
+		# Distinct names because this double derives `file_url` from the name
+		# alone. Frappe deduplicates a repeated upload by suffixing the URL, so
+		# two retakes really do land on two URLs on a live site; naming them the
+		# same here would test the double's shortcut rather than the retake.
+		_s1, first = self.upload(kind="profile-photo", name="employee_photo.jpg")
+		_s2, second = self.upload(kind="profile-photo", name="employee_photo_2.jpg")
+
+		one = self.wire("set_employee_photo", employee=self.NEW_HIRE, file_token=first["file_token"])
+		two = self.wire("set_employee_photo", employee=self.NEW_HIRE, file_token=second["file_token"])
+		EmployeePhotoModel.decode(two, "set_employee_photo")
+
+		self.assertIs(one["replaced"], False)
+		self.assertIs(two["replaced"], True)
+		self.assertEqual(
+			frappe.db.get_value("Employee", self.NEW_HIRE, "image"), two["photo_url"]
+		)
+		self.assertNotEqual(one["photo_url"], two["photo_url"])
+
+	def test_44_a_pdf_is_not_a_face(self):
+		"""`Employee.image` is rendered in an `<img>` by Desk, by the badge
+		template and by the phone. A PDF is a fine scan of a signed W-4 and is
+		refused here BEFORE the attach, so a mistake does not leave a file filed
+		against the record with the field unset."""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="profile-photo", name="scan.pdf")
+		with self.assertRaises(Exception) as caught:
+			self.wire("set_employee_photo", employee=self.NEW_HIRE, file_token=finalized["file_token"])
+		self.assertIn("photograph is an image", str(caught.exception))
+		self.assertFalse(frappe.db.get_value("Employee", self.NEW_HIRE, "image"))
+
+	def test_44_a_call_with_no_token_says_what_to_upload_first(self):
+		self.the_hr_furniture()
+		with self.assertRaises(Exception) as caught:
+			self.wire("set_employee_photo", employee=self.NEW_HIRE)
+		self.assertIn("finalize_staged_file", str(caught.exception))
+
+	def test_45_generate_employee_badge_qr(self):
+		"""`IssuedBadge` — the card the wizard could not produce.
+
+		THE DEFECT. `generate_employee_badge_qr` has minted readable `CF-0001`
+		identifiers since v0.50.0 and was published on the MCP tool registry
+		ONLY, which a handset does not speak. So the badge step could map a card
+		somebody had printed elsewhere and could not issue one — on a hire day,
+		in a yard, to a worker standing there waiting to be told their number.
+
+		The identifier is the server's to mint and the shape is the contract:
+		the abbreviation and a sequence, readable off a scuffed card.
+		"""
+		self.the_hr_furniture()
+		row = self.wire("generate_employee_badge_qr", employee=self.NEW_HIRE, company=MAIN)
+		IssuedBadgeModel.decode(row, "generate_employee_badge_qr")
+
+		self.assertEqual(row["badge_id"], f"{MAIN_ABBR}-0001")
+		self.assertEqual(row["employee"], self.NEW_HIRE)
+		self.assertIs(row["created"], True)
+		self.assertIs(row["reused"], False)
+		self.assertEqual(row["retired_badges"], [])
+		# The QR is drawn, and it is what the screen shows the worker.
+		self.assertTrue(row["png_base64"])
+		base64.b64decode(row["png_base64"])
+		# Initials stand in until a headshot is filed — both are always sent so
+		# a card is laid out from one answer.
+		self.assertTrue(row["photo_placeholder"])
+
+	def test_45_pressing_generate_twice_reprints_rather_than_issuing_a_second(self):
+		"""The property that makes the wizard's button safe on a bad connection.
+
+		A phone in a yard that never hears the answer presses again, and a call
+		that minted a second identifier each time would put two live cards in
+		one picker's pocket — which is a lost card that still resolves, paying
+		one person's piecework to whoever found it.
+		"""
+		self.the_hr_furniture()
+		first = self.wire("generate_employee_badge_qr", employee=self.NEW_HIRE, company=MAIN)
+		second = self.wire("generate_employee_badge_qr", employee=self.NEW_HIRE, company=MAIN)
+		IssuedBadgeModel.decode(second, "generate_employee_badge_qr")
+
+		self.assertEqual(first["badge_id"], second["badge_id"])
+		self.assertIs(second["created"], False)
+		self.assertIs(second["reused"], True)
+
+	def test_45_the_handset_cannot_name_the_identifier(self):
+		"""`badge_id` is not a body key, and that is deliberate. The tool lets a
+		Desk operator adopt a card from the old `farm_app` uuid stock; letting a
+		handset do it would put the uniqueness of a payroll key in the hands of
+		whatever a foreman typed into a box."""
+		import inspect
+
+		taken = set(inspect.signature(mobile_api.generate_employee_badge_qr).parameters)
+		self.assertNotIn("badge_id", taken)
+		# The lost-card path IS the phone's, because that is a field problem.
+		self.assertIn("regenerate", taken)
+
+	def test_45_the_card_carries_the_company_logo_when_the_site_has_one(self):
+		"""`company_logo_url` — v0.51.0's Company field. A print template should
+		not have to ask this app a second question to lay out a card, which is
+		the same reason the photo and the initials are both on the wire."""
+		self.the_hr_furniture()
+		badges_tool.install_badge_logo_field()
+		frappe.db.set_value("Company", MAIN, "badge_logo", "/files/farm_mark.png")
+
+		row = self.wire("generate_employee_badge_qr", employee=self.NEW_HIRE, company=MAIN)
+		IssuedBadgeModel.decode(row, "generate_employee_badge_qr")
+		self.assertEqual(row["company_logo_url"], "/files/farm_mark.png")
+
+	def test_45_a_site_with_no_logo_still_gets_a_badge(self):
+		"""The field arrives on the next migrate and a card is perfectly legible
+		without a mark on it. A badge nobody can print because a logo is missing
+		would be a worse outcome by a wide margin."""
+		self.the_hr_furniture()
+		row = self.wire("generate_employee_badge_qr", employee=self.NEW_HIRE, company=MAIN)
+		IssuedBadgeModel.decode(row, "generate_employee_badge_qr")
+		self.assertIsNone(row["company_logo_url"])
+		self.assertTrue(row["badge_id"])
+
+	def test_45_the_photo_and_the_badge_meet_on_the_card(self):
+		"""The two halves of this release, in the order the wizard walks them:
+		the headshot is filed, and the badge issued after it carries the URL the
+		print template reads. This is the join the feature is for."""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="profile-photo", name="employee_photo.jpg")
+		photo = self.wire(
+			"set_employee_photo", employee=self.NEW_HIRE, file_token=finalized["file_token"]
+		)
+
+		row = self.wire("generate_employee_badge_qr", employee=self.NEW_HIRE, company=MAIN)
+		IssuedBadgeModel.decode(row, "generate_employee_badge_qr")
+		self.assertEqual(row["photo_url"], photo["photo_url"])
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -2276,6 +2520,12 @@ class TheContractIsComplete(ContractTestCase):
 		# v0.50.0 — the read between a scan and a name, which every other
 		# badge-shaped feature was blocked on.
 		"resolve_badge": "test_43",
+		# v0.51.0 — the headshot the badge template reads, and the issuer the
+		# handset could not reach. The tool minted CF-0001 from v0.50.0 and was
+		# published on the MCP registry only, so the wizard could map a card
+		# printed elsewhere and could not produce one.
+		"set_employee_photo": "test_44",
+		"generate_employee_badge_qr": "test_45",
 	}
 
 	def _published(self, module):

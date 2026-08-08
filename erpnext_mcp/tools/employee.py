@@ -1363,8 +1363,14 @@ ONBOARDING_KINDS = (
 	"i9_list_c_document",
 	"w4_signed",
 	"identity_document",
+	"profile_photo",
 	"other",
 )
+
+#: What a badge photograph may be. A SUBSET of `ONBOARDING_EXTENSIONS`: a PDF is
+#: a perfectly good scan of a signed W-4 and is not a face, and `Employee.image`
+#: is rendered in an `<img>` by Desk, by the badge template and by the phone.
+PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp")
 
 
 def attach_employee_document(args: dict) -> ToolResult:
@@ -1498,6 +1504,103 @@ def attach_employee_document(args: dict) -> ToolResult:
 			"already_attached": False,
 		},
 		summary=f"filed {stored_name} ({kind}) against {employee} as a private attachment",
+		docstatus_delta="none",
+	)
+
+
+def set_employee_photo(args: dict) -> ToolResult:
+	"""MUTATING (default OFF). File a headshot against an Employee and make it
+	the photograph on their record — the one a badge card prints.
+
+	WHY THIS IS NOT JUST `attach_employee_document`. That call files evidence:
+	the bytes land as a private File pointing at the Employee, and nothing on
+	the Employee points back. That is exactly right for a List B photograph,
+	which an inspector goes looking for, and exactly wrong for a headshot, which
+	a badge template reads off `Employee.image` and finds empty. Every card
+	printed for somebody onboarded through the wizard fell back to their
+	initials for that reason. This is the same attach followed by the one field
+	update that closes the loop.
+
+	IT STAYS PRIVATE. `attach_employee_document` moves the file into
+	`private/files` and this does not undo that: a workforce's faces served from
+	a guessable public URL is a breach nobody needs a password for. Desk, the
+	print template and the phone all read it through the permission check, which
+	is the access this warrants.
+
+	`db.set_value` RATHER THAN THE DOCUMENT, on purpose. `image` carries no side
+	effects — the bytes were already moved by the attach — and saving the whole
+	Employee would run its validation, which on a half-filled wizard record can
+	refuse for a reason that has nothing to do with a photograph. A hire whose
+	badge photo cannot be set because their designation is blank is not a
+	trade worth making.
+
+	A RETAKE SUPERSEDES RATHER THAN DELETES. The previous File stays attached to
+	the Employee and `image` moves to the new one, so the record keeps what it
+	was shown and the card prints what is current.
+
+	THE ROLE GATE IS THE CALLER'S, as everywhere else in this file — the mobile
+	wrapper runs `require_hr_role` and the entity scoping before it gets here.
+	"""
+	employee = resolve_employee(as_str(args, "employee", required=True))
+
+	reference = as_str(args, "file_token") or as_str(args, "file") or as_str(args, "file_url")
+	if not reference:
+		raise ToolError(
+			"file_token is required — it is what finalize_staged_file hands back. Upload the "
+			"photograph with stage_file_chunk and finalize_staged_file first; this call only "
+			"names it. Nothing was changed."
+		)
+
+	# Refuse a non-image BEFORE the attach, so a PDF sent by mistake does not
+	# end up filed against the record with the field left unset.
+	stored_name = ""
+	if frappe.db.exists("File", reference):
+		stored_name = str(frappe.db.get_value("File", reference, "file_name") or "")
+	elif reference.startswith("/") or reference.startswith("http"):
+		stored_name = str(frappe.db.get_value("File", {"file_url": reference}, "file_name") or "")
+	if stored_name:
+		extension = ("." + stored_name.rsplit(".", 1)[-1].lower()) if "." in stored_name else ""
+		if extension not in PHOTO_EXTENSIONS:
+			raise ToolError(
+				f"{stored_name!r} is a {extension or 'file with no extension'} and a badge "
+				f"photograph is an image: {', '.join(PHOTO_EXTENSIONS)}. Nothing was changed."
+			)
+
+	attached = attach_employee_document(
+		{"employee": employee, "file_token": reference, "document_kind": "profile_photo"}
+	)
+	data = dict(attached.data or {})
+	photo_url = str(data.get("file_url") or "")
+
+	if not compat.has_field(EMPLOYEE, "image"):
+		# The file IS filed; only the pointer could not be written. Say both,
+		# because "photo set" would be a lie and "failed" would send somebody
+		# looking for bytes that are on the record.
+		return ToolResult(
+			data={**data, "photo_url": photo_url, "image_set": False},
+			summary=(
+				f"filed {data.get('file_name')} against {employee}, but this site's Employee has "
+				"no `image` field, so the badge card will still print initials"
+			),
+			docstatus_delta="none",
+		)
+
+	previous = str(frappe.db.get_value(EMPLOYEE, employee, "image") or "")
+	if previous != photo_url:
+		frappe.db.set_value(EMPLOYEE, employee, "image", photo_url)
+
+	return ToolResult(
+		data={
+			**data,
+			"photo_url": photo_url,
+			"image_set": True,
+			"previous_photo_url": previous or None,
+			"replaced": bool(previous and previous != photo_url),
+		},
+		summary=(
+			f"{employee}'s badge photograph is now {data.get('file_name')}"
+			+ (" (replacing the previous one)" if previous and previous != photo_url else "")
+		),
 		docstatus_delta="none",
 	)
 

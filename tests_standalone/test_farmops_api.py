@@ -189,6 +189,10 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/link_badge_to_employee",
 		# v0.50.0 — the read between a scan and a name.
 		"/mobile/resolve_badge",
+		# v0.51.0. Issuing a badge from the handset, and the headshot that makes
+		# the printed card carry a face instead of two initials.
+		"/mobile/generate_employee_badge_qr",
+		"/mobile/set_employee_photo",
 		"/mobile/sync_bucket_entries",
 		"/mobile/start_shift",
 		"/mobile/add_worker_to_shift",

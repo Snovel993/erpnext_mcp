@@ -171,6 +171,15 @@ ROUTES = (
 	# existed the crew clock could scan a whole crew and roster none of it, and
 	# the bucket loop could show a foreman a code but never the picker.
 	Route("/mobile", mobile_api.resolve_badge),
+	# v0.51.0. The other half of that gap. `generate_employee_badge_qr` has
+	# minted readable `CF-0001` badges since v0.50.0 and was published only on
+	# the MCP tool registry, which a handset does not speak — so the wizard's
+	# badge step could map a card printed elsewhere and could not issue one, on
+	# a hire day, to a worker standing there waiting for their number.
+	# `set_employee_photo` is what makes the printed card carry a face: the
+	# template reads `Employee.image` and nothing on this surface wrote it.
+	Route("/mobile", mobile_api.generate_employee_badge_qr),
+	Route("/mobile", mobile_api.set_employee_photo),
 	# The capture queue and the crew clock.
 	Route("/mobile", mobile_api.sync_bucket_entries),
 	Route("/mobile", mobile_api.start_shift),

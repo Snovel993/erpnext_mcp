@@ -628,6 +628,11 @@ ERPNEXT_SCHEMA = {
 		"last_name",
 		"gender",
 		"date_of_birth",
+		# Standard on ERPNext's Employee and absent from this double until
+		# v0.51.0, which made the badge card's photograph untestable: `_card`
+		# reads it through `existing_fields`, so the double answered "no such
+		# column" and every test saw a card falling back to initials.
+		"image",
 		"personal_email",
 		"cell_number",
 		"department",

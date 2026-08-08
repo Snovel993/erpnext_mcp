@@ -112,7 +112,7 @@ from . import (
 	withholding,
 )
 from .patches import backfill_completion_signatures, migrate_training_types
-from .tools import company
+from .tools import badges, company
 
 
 def after_install() -> None:
@@ -135,6 +135,7 @@ def after_install() -> None:
 	_federal_tax_table()
 	_kpi_definitions()
 	_farm_task_templates()
+	_badge_logo_field()
 	frappe.db.commit()
 
 
@@ -158,6 +159,7 @@ def after_migrate() -> None:
 	_federal_tax_table()
 	_kpi_definitions()
 	_farm_task_templates()
+	_badge_logo_field()
 
 
 def _i9_settings() -> None:
@@ -305,6 +307,24 @@ def _compliance_fields() -> None:
 		return
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not add {failure['doctype']}.{failure['fieldname']} — {failure['reason']}")
+
+
+def _badge_logo_field() -> None:
+	"""Add `Company.badge_logo`, the mark a printed badge card carries.
+
+	Not a compliance field and deliberately not in that table — see
+	`badges.BADGE_LOGO_FIELD`. Its own job here for the same reason the I-9
+	print format has one: it belongs to a feature, the feature owns the spec,
+	and a site upgrading gets it on the next migrate rather than on a patch
+	somebody has to remember.
+
+	A FAILURE HERE IS PRINTED, NOT RAISED. Badges print without a logo, so
+	taking a migration down over one would be the wrong trade by a wide margin.
+	"""
+	try:
+		badges.install_badge_logo_field()
+	except Exception as exc:  # pragma: no cover - reported rather than fatal
+		print(f"erpnext_mcp: Company.badge_logo was not added — {type(exc).__name__}: {exc}")
 
 
 def _command_center() -> None:
