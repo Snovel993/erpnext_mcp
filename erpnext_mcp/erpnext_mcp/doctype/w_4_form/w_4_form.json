@@ -161,7 +161,7 @@
   },
   {
    "default": "0",
-   "description": "Count × $2,000. Computed automatically.",
+   "description": "Count × $2,200 for a 2026 form ($2,000 for 2025 and earlier). Computed automatically.",
    "fieldname": "dependents_under_17_amount",
    "fieldtype": "Currency",
    "label": "Under-17 Credit Amount",

@@ -3,6 +3,45 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.48.1 — 2026-08-07
+
+**The 2026 Form W-4 credits $2,200 a qualifying child and this app credited
+$2,000.** Step 3 of the 2020-2025 editions said "Multiply the number of
+qualifying children under age 17 by $2,000"; the 2026 edition says $2,200. The
+W-4 Form controller multiplied by a flat 2000, so every W-4 filed for tax year
+2026 was $200 a child short in `total_dependents_credit`.
+
+**It was short in two places at once, which is the part worth reading.** The
+credit is a STORED column, computed once in `validate` — and two unrelated things
+read the stored number rather than recomputing it. `withholding.py` subtracts it
+from the tentative tax, so the employee was over-withheld every period.
+`w4_pdf.py` prints it into box 3 of the government form, so the copy USCIS-style
+retention keeps had the wrong number on it. v0.48.0 shipped the fillable W-4 and
+its test fixtures were hand-written at $2,200 — the printed form and the engine
+filling it disagreed, and nothing failed, because no test ran a count through the
+controller and into the PDF.
+
+**The amount is now keyed to the form's own `tax_year`, not to the calendar.** A
+W-4 is filed against an edition, and this app keeps one Active W-4 per employee
+per tax year, so a 2025 form re-saved today must still restate itself at $2,000 —
+a flat constant would rewrite a prior-year filing on the next save. The schedule
+is two tuples at the top of `w_4_form.py`; a year later than every entry takes
+the newest, so 2027 needs no edit unless the IRS moves the number again. **The
+other-dependent credit was already right** and is unchanged: $500 on both
+editions.
+
+**A new patch restates the rows that were already filed.** Fixing the controller
+fixes the next save and nothing else, and nobody re-saves an Active W-4 — the
+design is that a change supersedes rather than edits, so the stale total would
+have outlived the fix on every existing row.
+`erpnext_mcp.patches.recompute_2026_dependents_credit` recomputes the three Step
+3 columns on every W-4 for 2026 or later, from the counts and the year, and
+**prints each restated form by name with what it held and what it now holds**. It
+leaves 2025 and earlier alone, counts and skips rows already correct, and is a
+no-op on a second run. It also says out loud what it cannot fix: **a payroll slip
+already posted from the old credit over-withheld and is not rewritten**, and the
+W-4 PDF on file needs reprinting with `render_w4_pdf`.
+
 ## 0.48.0 — 2026-08-07
 
 **Three gaps in the federal employment forms, and they are three different kinds

@@ -30,6 +30,7 @@ from erpnext_mcp.patches import (
 	backfill_completion_signatures,
 	migrate_declarative_rules,
 	migrate_training_types,
+	recompute_2026_dependents_credit,
 	register_custom_party_types,
 	repoint_producer_task_template,
 	set_default_tool_switches,
@@ -48,6 +49,7 @@ PATCHES = (
 	("erpnext_mcp.patches.backfill_completion_signatures", backfill_completion_signatures),
 	("erpnext_mcp.patches.migrate_declarative_rules", migrate_declarative_rules),
 	("erpnext_mcp.patches.repoint_producer_task_template", repoint_producer_task_template),
+	("erpnext_mcp.patches.recompute_2026_dependents_credit", recompute_2026_dependents_credit),
 )
 
 

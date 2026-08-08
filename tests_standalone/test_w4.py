@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """W-4 + Federal Withholding Engine — the 10 tools, the calc engine, the supersession chain.
 
-EIGHT CLAIMS.
+NINE CLAIMS.
 
 1. `PureCalcEngine` — the withholding function is pure and deterministic.
 2. `SSWageBaseCap` — Social Security stops at the wage base, mid-year.
@@ -11,6 +11,8 @@ EIGHT CLAIMS.
 6. `SubmitAndSupersede` — the W-4 superseding pattern works.
 7. `CalcToolsEndToEnd` — the calc/preview tools read a W-4 and produce results.
 8. `EdgeCases` — zero income, multiple jobs, extra withholding, head of household.
+9. `The2026DependentsCredit` — $2,200 a qualifying child on the 2026 form, and
+   the patch that restates the rows filed at $2,000 before v0.48.1.
 """
 from datetime import date
 
@@ -218,7 +220,7 @@ class PureCalcEngine(W4TestCase):
         no_deps = self._default_w4_data()
         with_deps = self._default_w4_data()
         with_deps["dependents_under_17_count"] = 2
-        with_deps["total_dependents_credit"] = 4000  # 2 × $2,000
+        with_deps["total_dependents_credit"] = 4400  # 2 × $2,200
 
         brackets = ANNUAL_BRACKETS["Single"]
         r_no = calculate_federal_withholding(3000, "Biweekly", no_deps, 0, 0, fica, brackets)
@@ -403,11 +405,26 @@ class SubmitAndSupersede(W4TestCase):
         self.assertEqual(after["count"], 1)
 
     def test_dependents_computed(self):
-        self._submit_w4(dependents_under_17_count=3, other_dependents_count=1)
+        """The 2025 edition of Step 3: $2,000 a child under 17, $500 an other."""
+        self._submit_w4(tax_year=2025, dependents_under_17_count=3, other_dependents_count=1)
         data = self.tool_data("get_w4", {"employee": "HR-EMP-00001"})
         self.assertEqual(data["dependents_under_17_amount"], "6000")
         self.assertEqual(data["other_dependents_amount"], "500")
         self.assertEqual(data["total_dependents_credit"], "6500")
+
+    def test_dependents_computed_on_the_2026_form(self):
+        """v0.48.1. The IRS raised the under-17 credit to $2,200 for 2026.
+
+        THE YEAR IS WHAT PICKS THE AMOUNT, not the calendar — a 2025 form
+        re-saved today still restates itself at $2,000, which the test above
+        pins. Only the qualifying-child figure moved; the other-dependent credit
+        is still $500 on the 2026 form.
+        """
+        self._submit_w4(tax_year=2026, dependents_under_17_count=3, other_dependents_count=1)
+        data = self.tool_data("get_w4", {"employee": "HR-EMP-00001"})
+        self.assertEqual(data["dependents_under_17_amount"], "6600")
+        self.assertEqual(data["other_dependents_amount"], "500")
+        self.assertEqual(data["total_dependents_credit"], "7100")
 
 
 # ── Claim 7: calc tools end to end ───────────────────────────────────────
@@ -554,3 +571,84 @@ class EdgeCases(W4TestCase):
             self._default_fica(), [],
         )
         self.assertEqual(result["federal_income_tax"], 0)
+
+
+# ── Claim 9: the 2026 credit, and the rows filed before it was right ─────
+
+
+class The2026DependentsCredit(W4TestCase):
+    """v0.48.1. $2,200 a qualifying child on the 2026 form, and the backfill.
+
+    The controller computed a flat $2,000 — the 2020-2025 figure — so a 2026 W-4
+    filed before this release holds a Step 3 total that is $200 a child short.
+    Two things read that STORED number rather than recomputing it: the
+    withholding engine, which subtracts it from the tentative tax, and
+    `w4_pdf`, which prints it into box 3 of the government form.
+    """
+
+    def _w4_row(self):
+        return next(iter(STORE.rows("W-4 Form")))
+
+    def test_a_2026_form_credits_2200_a_child(self):
+        self._submit_w4(tax_year=2026, dependents_under_17_count=2)
+        self.assertEqual(float(self._w4_row()["dependents_under_17_amount"]), 4400.0)
+
+    def test_a_2025_form_still_credits_2000_a_child(self):
+        """The amount belongs to the edition, not to the calendar."""
+        self._submit_w4(tax_year=2025, dependents_under_17_count=2)
+        self.assertEqual(float(self._w4_row()["dependents_under_17_amount"]), 4000.0)
+
+    def test_the_other_dependent_credit_is_500_on_both_editions(self):
+        """The 2026 form did not move this one — only the under-17 figure."""
+        self._submit_w4(tax_year=2025, other_dependents_count=3)
+        self._submit_w4(tax_year=2026, other_dependents_count=3)
+        for year in (2025, 2026):
+            with self.subTest(tax_year=year):
+                row = next(r for r in STORE.rows("W-4 Form") if int(r["tax_year"]) == year)
+                self.assertEqual(float(row["other_dependents_amount"]), 1500.0)
+
+    def test_the_patch_restates_a_row_filed_at_the_old_amount(self):
+        from erpnext_mcp.patches import recompute_2026_dependents_credit as patch
+
+        self._submit_w4(tax_year=2026, dependents_under_17_count=2, other_dependents_count=1)
+        name = self._w4_row()["name"]
+        # The row exactly as v0.48.0 wrote it: 2 × $2,000 + 1 × $500.
+        frappe.db.set_value("W-4 Form", name, "dependents_under_17_amount", 4000, update_modified=False)
+        frappe.db.set_value("W-4 Form", name, "total_dependents_credit", 4500, update_modified=False)
+
+        report = patch.recompute_2026_dependents_credit()
+
+        row = self._w4_row()
+        self.assertEqual(float(row["dependents_under_17_amount"]), 4400.0)
+        self.assertEqual(float(row["total_dependents_credit"]), 4900.0)
+        self.assertEqual(len(report["restated"]), 1)
+        self.assertEqual(report["restated"][0]["was"], 4500.0)
+        self.assertEqual(report["restated"][0]["now"], 4900.0)
+
+    def test_the_patch_leaves_a_2025_row_alone(self):
+        from erpnext_mcp.patches import recompute_2026_dependents_credit as patch
+
+        self._submit_w4(tax_year=2025, dependents_under_17_count=2)
+        patch.recompute_2026_dependents_credit()
+        self.assertEqual(float(self._w4_row()["dependents_under_17_amount"]), 4000.0)
+
+    def test_the_patch_is_a_no_op_on_a_row_that_is_already_right(self):
+        from erpnext_mcp.patches import recompute_2026_dependents_credit as patch
+
+        self._submit_w4(tax_year=2026, dependents_under_17_count=2)
+        report = patch.recompute_2026_dependents_credit()
+        self.assertEqual(report["restated"], [])
+        self.assertEqual(report["already_right"], 1)
+
+    def test_the_migrate_names_every_restated_form_and_warns_about_posted_slips(self):
+        """Silence would leave an operator with money already withheld and no notice."""
+        from erpnext_mcp.patches import recompute_2026_dependents_credit as patch
+
+        self._submit_w4(tax_year=2026, dependents_under_17_count=2)
+        name = self._w4_row()["name"]
+        frappe.db.set_value("W-4 Form", name, "total_dependents_credit", 4000, update_modified=False)
+        lines = patch.report_lines(patch.recompute_2026_dependents_credit())
+        printed = "\n".join(lines)
+        self.assertIn(name, printed)
+        self.assertIn("ALREADY POSTED", printed)
+        self.assertIn("$2,200", printed)
