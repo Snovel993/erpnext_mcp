@@ -1342,6 +1342,166 @@ def get_employee(args: dict) -> ToolResult:
 	)
 
 
+#: What an onboarding attachment is allowed to be. The same list
+#: `api/files._ALLOWED_EXTENSIONS` will accept on the way up, minus nothing:
+#: a file that could not be staged cannot arrive here, and a list that differed
+#: would be a refusal at the second of two calls, after the bytes had already
+#: crossed the link.
+ONBOARDING_EXTENSIONS = (".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".pdf")
+
+#: What the phone is filing, and it is a LABEL rather than a field name. The
+#: wizard collects six kinds of evidence and every one of them lands on the
+#: Employee as an ordinary private attachment; the kind is recorded in the
+#: File's name and in the audit row so an inspection can tell a List B photo
+#: from a Section 1 signature without opening either.
+ONBOARDING_KINDS = (
+	"i9_section_1_signature",
+	"i9_section_2_document",
+	"i9_section_3_signature",
+	"i9_list_a_document",
+	"i9_list_b_document",
+	"i9_list_c_document",
+	"w4_signed",
+	"identity_document",
+	"other",
+)
+
+
+def attach_employee_document(args: dict) -> ToolResult:
+	"""File an already-uploaded File against an Employee, privately.
+
+	THE SECOND HALF OF THE ONBOARDING UPLOAD, and the reason this exists at all.
+	`api/files.finalize_staged_file` commits evidence UNATTACHED on purpose — its
+	module docstring is emphatic about it, because forwarding an attachment target
+	from a phone would let a field worker hang a file off any document on the
+	site. So the staged path produces a private File and nothing that points at it.
+	For task evidence that is fine: `complete_task_via_mobile` takes the token and
+	the tool it delegates to does the attaching. For the onboarding wizard's six
+	photographs and signatures there was no such call, and the app was reaching
+	Frappe's own `/api/method/upload_file` instead — a path the funnel strips the
+	credential from, which answered 200 with a login page and lost every one of
+	them silently. This is the narrow, scoped equivalent.
+
+	NO BYTES CROSS THIS BOUNDARY. It takes a `file_token` — the File docname
+	`finalize_staged_file` handed back — or a `file_url` for a File already on the
+	site, exactly as `i9.attach_signed_i9` does and for the same reason: a second
+	upload path would have its own size limit and its own way of failing halfway
+	up a hill.
+
+	THE FILE IS MADE PRIVATE ON THE WAY IN, whatever it was, and through the
+	document rather than through `db.set_value`. `is_private` is not a flag on a
+	row — flipping it MOVES the bytes between `public/files` and `private/files`
+	and rewrites `file_url`, and Frappe's File controller is what does the moving.
+	A photograph of somebody's passport served from a public URL is a breach
+	nobody has to guess a password for.
+
+	A FILE ALREADY ATTACHED SOMEWHERE ELSE IS REFUSED. Re-pointing an existing
+	attachment would silently take evidence off the record it was filed against,
+	and the two records are federal ones. A file already on THIS employee is a
+	no-op, because a phone that retried a call it did not hear the answer to must
+	not produce a second copy.
+
+	THE ROLE GATE IS THE CALLER'S TO RUN, not this function's — `require_hr_role`
+	and the entity scoping both belong to whoever is calling, and the mobile
+	wrapper runs them before it gets here. Every other tool in this file does the
+	same.
+	"""
+	employee = resolve_employee(as_str(args, "employee", required=True))
+	kind = (as_str(args, "document_kind") or "other").strip().lower()
+	if kind not in ONBOARDING_KINDS:
+		raise ToolError(
+			f"document_kind must be one of: {', '.join(ONBOARDING_KINDS)}. Got {kind!r}. "
+			f"It is a label on the audit row, not a field name — 'other' is the honest "
+			f"answer for anything not on the list. Nothing was changed."
+		)
+
+	reference = as_str(args, "file_token") or as_str(args, "file") or as_str(args, "file_url")
+	if not reference:
+		raise ToolError(
+			"file_token is required — it is what finalize_staged_file hands back. Upload the "
+			"photograph with stage_file_chunk and finalize_staged_file first; this call only "
+			"names it. Nothing was changed."
+		)
+
+	docname = ""
+	if frappe.db.exists("File", reference):
+		docname = reference
+	elif reference.startswith("/") or reference.startswith("http"):
+		docname = str(frappe.db.get_value("File", {"file_url": reference}, "name") or "")
+	if not docname:
+		raise ToolError(
+			f"no File called {reference!r} on this site. Upload the file first — "
+			f"stage_file_chunk then finalize_staged_file — and pass the file_token that "
+			f"returns. Nothing was changed."
+		)
+
+	row = (
+		frappe.db.get_value(
+			"File",
+			docname,
+			["file_name", "file_url", "attached_to_doctype", "attached_to_name"],
+			as_dict=True,
+		)
+		or {}
+	)
+	stored_name = str(row.get("file_name") or "")
+	extension = ("." + stored_name.rsplit(".", 1)[-1].lower()) if "." in stored_name else ""
+	if extension not in ONBOARDING_EXTENSIONS:
+		raise ToolError(
+			f"{stored_name or reference!r} is a {extension or 'file with no extension'} and an "
+			f"onboarding document is a photograph or a scan: "
+			f"{', '.join(ONBOARDING_EXTENSIONS)}. Nothing was changed."
+		)
+
+	already = str(row.get("attached_to_doctype") or ""), str(row.get("attached_to_name") or "")
+	if already == (EMPLOYEE, employee):
+		# The retry case. A phone whose call timed out does not know whether it
+		# landed, and the only safe answer is the one it would have got.
+		return ToolResult(
+			data={
+				"employee": employee,
+				"document_kind": kind,
+				"file_token": docname,
+				"file_url": str(row.get("file_url") or ""),
+				"file_name": stored_name,
+				"is_private": True,
+				"already_attached": True,
+			},
+			summary=f"{stored_name} is already filed against {employee} — nothing changed",
+			docstatus_delta="none",
+		)
+	if already[0] and already != (EMPLOYEE, employee):
+		raise ToolError(
+			f"File {docname} is already attached to {already[0]} {already[1]}. Moving it would "
+			f"take that evidence off the record it was filed against. Upload the photograph "
+			f"again and file the new one. Nothing was changed."
+		)
+
+	handle = frappe.get_doc("File", docname)
+	handle.attached_to_doctype = EMPLOYEE
+	handle.attached_to_name = employee
+	handle.is_private = 1
+	handle.flags.ignore_permissions = True
+	handle.save()
+
+	# The URL AFTER the move, not the one that was read a moment ago: a file that
+	# has just changed directory has a different URL.
+	stored_url = str(handle.get("file_url") or row.get("file_url") or "")
+	return ToolResult(
+		data={
+			"employee": employee,
+			"document_kind": kind,
+			"file_token": docname,
+			"file_url": stored_url,
+			"file_name": stored_name,
+			"is_private": True,
+			"already_attached": False,
+		},
+		summary=f"filed {stored_name} ({kind}) against {employee} as a private attachment",
+		docstatus_delta="none",
+	)
+
+
 def _readiness_note(state: dict, row: dict) -> str:
 	"""Whether the phone will actually get a task list now, and what is missing if not.
 

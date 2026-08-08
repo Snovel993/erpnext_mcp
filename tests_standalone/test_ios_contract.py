@@ -563,6 +563,48 @@ class VoidResponseModel(Codable):
 	SWIFT = "OnboardingAPI.swift"
 
 
+class AttachedDocumentModel(Codable):
+	"""`OnboardingAPI.AttachedDocument` — v0.48.3, and the reason it is a struct.
+
+	Every OTHER onboarding call the wizard makes goes through `callVoid` and the
+	flow advances on the HTTP status alone (`VoidResponseModel` says why). This
+	one does not, and must not: the whole defect this release closes is a call
+	that answered 200 and stored nothing. `file_token` comes back non-optional
+	precisely so that "the server said it worked" and "there is a File on the
+	site" stop being the same sentence — a payload without it throws rather than
+	letting a wizard report a document filed that is not.
+	"""
+
+	SWIFT = "OnboardingAPI.swift"
+	STRICT = (("file_token", str, 228),)
+	NULLABLE = (
+		("file_url", str, 229),
+		("file_name", str, 230),
+		("is_private", bool, 231),
+		("already_attached", bool, 234),
+	)
+
+
+class SignedI9Model(Codable):
+	"""`OnboardingAPI.SignedI9` — the photograph of the signed sheet, filed.
+
+	v0.48.3 gave this a struct. Until then the app called `upload_signed_i9`'s
+	predecessor — a multipart POST at Frappe's own upload path — and read nothing
+	back, which is how the file went nowhere without anybody hearing about it.
+	Every field is optional because the screen shows a tick or an error and
+	nothing else; `signed_pdf` is the one worth having, because it is the URL the
+	I-9 Form now points at.
+	"""
+
+	SWIFT = "OnboardingAPI.swift"
+	NULLABLE = (
+		("name", str, 284),
+		("status", str, 285),
+		("signed_pdf", str, 287),
+		("file_token", str, 288),
+	)
+
+
 class UndecodedResponseModel(Codable):
 	"""A method `MobileAPI.swift` names and no Swift struct decodes yet.
 
@@ -583,14 +625,22 @@ class UndecodedResponseModel(Codable):
 	shape is the thing being published and a picker built against it is the next
 	thing anybody writes.
 
-	v0.47.1 puts three more here for the same reason and one more besides. The
-	I-9 review screen, the Print button and the "photograph the signed sheet"
-	step do not exist in the shipped app, so `get_i9_form`, `generate_i9_pdf` and
-	`upload_signed_i9` have no struct to mirror — and `generate_i9_pdf`'s answer
-	is deliberately a NARROWED reshape of the tool's, not the tool's own dict, so
-	the Swift written against it later is written against a stable dozen keys
-	rather than against everything `render_i9_pdf` happens to return. The tests
-	assert those keys one by one.
+	v0.47.1 puts two more here for the same reason and one more besides. The I-9
+	review screen and the Print button do not exist in the shipped app, so
+	`get_i9_form` and `generate_i9_pdf` have no struct to mirror — and
+	`generate_i9_pdf`'s answer is deliberately a NARROWED reshape of the tool's,
+	not the tool's own dict, so the Swift written against it later is written
+	against a stable dozen keys rather than against everything `render_i9_pdf`
+	happens to return. The tests assert those keys one by one.
+
+	v0.48.3 TOOK ONE BACK OUT, and the reason is worth reading before adding
+	another. `upload_signed_i9` sat here because the app read nothing back from
+	the call that filed a signed I-9 — and the call it was actually making,
+	`FrappeClient.uploadFile`, checked the HTTP status and not the body. Frappe
+	answers an unauthenticated API request with 200 and the Desk login page, so
+	"reads nothing back" was not a gap in coverage, it was the bug: the phone
+	could not tell a filed document from a lost one. It has `SignedI9Model` now.
+	A method whose answer nobody decodes is a method whose failure nobody sees.
 	"""
 
 	SWIFT = "MobileAPI.swift"
@@ -1605,7 +1655,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		row = self.wire(
 			"upload_signed_i9", employee=self.NEW_HIRE, file_token=finalized["file_token"]
 		)
-		UndecodedResponseModel.decode(row, "upload_signed_i9")
+		SignedI9Model.decode(row, "upload_signed_i9")
 
 		self.assertEqual(row["file_token"], finalized["file_token"])
 		self.assertTrue(row["signed_pdf"])
@@ -1869,6 +1919,109 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		for absent in ("employer_name", "employer_address", "employer_ein", "first_date_of_employment"):
 			self.assertNotIn(absent, taken)
 
+	# ── v0.48.3: the onboarding evidence that was never being stored ─────────
+	def test_42_attach_onboarding_document(self):
+		"""The call the wizard's six photographs and signatures had no route for.
+
+		THE DEFECT. `OnboardingAPI.attachDocument` POSTed multipart to Frappe's
+		own `/api/method/upload_file`, which `fallback_auth._is_mobile_path` does
+		not match, so the `X-FarmOps-Token` header was never read on it. Through
+		the funnel — which strips `Authorization` — the request arrived as Guest
+		and Frappe answered 200 with the Desk login page; the old `uploadFile`
+		returned on any 2xx without looking at the body. Every I-9 document
+		photo, both signatures and the photographed W-4 were reported filed and
+		stored nowhere.
+
+		The fix is this endpoint plus the staged path in front of it, and what
+		this test proves is the part that matters legally: after the call there
+		is a File, it is PRIVATE, and it is attached to the Employee.
+		"""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="list-b", name="i9_list_b_doc.jpg")
+
+		row = self.wire(
+			"attach_onboarding_document",
+			employee=self.NEW_HIRE,
+			file_token=finalized["file_token"],
+			document_kind="i9_list_b_document",
+		)
+		AttachedDocumentModel.decode(row, "attach_onboarding_document")
+
+		self.assertEqual(row["file_token"], finalized["file_token"])
+		self.assertEqual(row["document_kind"], "i9_list_b_document")
+		self.assertIs(row["already_attached"], False)
+
+		filed = frappe.db.get_value(
+			"File",
+			finalized["file_token"],
+			["attached_to_doctype", "attached_to_name", "is_private"],
+			as_dict=True,
+		)
+		self.assertEqual(filed["attached_to_doctype"], "Employee")
+		self.assertEqual(filed["attached_to_name"], self.NEW_HIRE)
+		self.assertEqual(int(filed["is_private"] or 0), 1)
+
+	def test_42_a_retried_attach_is_a_no_op_rather_than_a_second_copy(self):
+		"""A phone whose call timed out does not know whether it landed, and the
+		only safe answer is the one it would have got."""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="sig", name="i9_signature.png")
+		first = self.wire(
+			"attach_onboarding_document",
+			employee=self.NEW_HIRE,
+			file_token=finalized["file_token"],
+			document_kind="i9_section_1_signature",
+		)
+		second = self.wire(
+			"attach_onboarding_document",
+			employee=self.NEW_HIRE,
+			file_token=finalized["file_token"],
+			document_kind="i9_section_1_signature",
+		)
+		AttachedDocumentModel.decode(second, "attach_onboarding_document")
+		self.assertIs(first["already_attached"], False)
+		self.assertIs(second["already_attached"], True)
+		self.assertEqual(first["file_token"], second["file_token"])
+
+	def test_42_a_file_filed_against_somebody_else_is_refused(self):
+		"""Re-pointing an attachment would take evidence off the record it was
+		filed against, and both records are federal ones."""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="passport", name="i9_list_a_doc.jpg")
+		self.wire(
+			"attach_onboarding_document",
+			employee=self.NEW_HIRE,
+			file_token=finalized["file_token"],
+			document_kind="i9_list_a_document",
+		)
+		with self.assertRaises(Exception) as caught:
+			self.wire(
+				"attach_onboarding_document",
+				employee=self.SECOND_HAND,
+				file_token=finalized["file_token"],
+				document_kind="i9_list_a_document",
+			)
+		self.assertIn("already attached", str(caught.exception))
+
+	def test_42_a_call_with_no_token_says_what_to_upload_first(self):
+		"""No bytes cross this endpoint, and the refusal has to say so — an app
+		that could send a body here would be the second upload path this release
+		exists to remove."""
+		self.the_hr_furniture()
+		with self.assertRaises(Exception) as caught:
+			self.wire("attach_onboarding_document", employee=self.NEW_HIRE)
+		self.assertIn("finalize_staged_file", str(caught.exception))
+
+	def test_42_no_bytes_are_an_argument_this_endpoint_takes(self):
+		"""The property that keeps there being ONE upload path. A base64 body here
+		would have its own size limit and its own way of failing halfway up a
+		hill, which is the argument `api/files.py` has made since v0.14.0."""
+		import inspect
+
+		taken = set(inspect.signature(mobile_api.attach_onboarding_document).parameters)
+		for absent in ("data", "file_content", "content_base64", "image", "is_private"):
+			self.assertNotIn(absent, taken)
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -2022,6 +2175,9 @@ class TheContractIsComplete(ContractTestCase):
 		"update_authorized_signer": "test_39",
 		"remove_authorized_signer": "test_40",
 		"generate_w4_pdf": "test_41",
+		# v0.48.3 — the onboarding evidence that had no route and was being
+		# posted to a Frappe path this app's auth hook does not cover.
+		"attach_onboarding_document": "test_42",
 	}
 
 	def _published(self, module):
@@ -2086,6 +2242,8 @@ class TheContractIsComplete(ContractTestCase):
 			FinalizedFileModel,
 			VoidResponseModel,
 			UndecodedResponseModel,
+			AttachedDocumentModel,
+			SignedI9Model,
 		)
 		for mirror in mirrors:
 			with self.subTest(mirror=mirror.__name__):

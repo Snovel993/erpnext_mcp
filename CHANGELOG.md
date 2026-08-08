@@ -3,6 +3,58 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.48.3 — 2026-08-08
+
+**Every photograph and signature the onboarding wizard collected was reported as
+filed and stored nowhere.** `FrappeClient.uploadFile` POSTed to Frappe's own
+`/api/method/upload_file`, which is not under
+`fallback_auth._PATH_PREFIX` (`/api/method/erpnext_mcp.api.`), so the
+`X-FarmOps-Token` header was never read on it. Behind the Tailscale funnel —
+which strips `Authorization` — the request arrived as Guest, Frappe answered
+HTTP 200 with the Desk login page, and the client returned success on any 2xx
+without looking at the body. Six files per hire: the Section 1 signature, the
+List A photograph or the List B/C pair, the Section 3 signature and the
+photographed W-4. The I-9 Form reached Complete with nothing behind it, which
+under 8 U.S.C. §1324a(b)(3) is worse than an empty file because it asserts
+something.
+
+**Uploads now take one path, and it is the one that authenticates.** The staged
+route — `stage_file_chunk` then `finalize_staged_file` under `/farmops/api/files/`
+— has carried task evidence since v0.14.0. `ChunkUploader` grew an entry point
+for bytes the app is holding rather than a file it has stored, which is what the
+wizard's captures are and why the multipart path existed. `FrappeClient.uploadFile`
+is deleted.
+
+**`attach_onboarding_document` is the call whose absence caused it.**
+`finalize_staged_file` commits evidence unattached on purpose — forwarding an
+attachment target from a handset would let a field worker hang a file off a
+Journal Entry — so onboarding had nothing to file its photographs with. The new
+endpoint names one parent doctype in code, proves the Employee is inside the
+caller's entities, requires the HR role with no exception, takes a `file_token`
+rather than bytes, forces the File private through the document controller,
+refuses a File already filed against another record, and treats a repeat of the
+same file as a no-op. The signed paper I-9 goes to `upload_signed_i9` instead,
+which puts it on the I-9 Form and points `signed_pdf` at it — an endpoint that
+has existed since v0.47.1 while the app carried a comment saying it did not.
+
+**A 200 is no longer evidence that anything happened.** `FrappeClient` refuses
+any 2xx whose body is not a JSON object, on every path, and reports HTML as
+`unauthorized` rather than as a decoding error — because that is what it has
+meant every time. This closes a wider hole than the one it was written for:
+`callVoid` discards the body by design and every onboarding write goes through
+it, so all of them would have reported success on a login page in the same way.
+`attach_onboarding_document`'s answer is decoded rather than discarded, with a
+non-optional `file_token`.
+
+**What is not fixed:** a handset running an older build still loses its
+evidence, because the fix is that the app stops calling `/api/method/upload_file`
+and a shipped build goes on calling it. Adding that path to
+`_is_mobile_path` would rescue it and would extend this app's auth hook over a
+Frappe core endpoint none of `guard.py`'s checks cover; that is deliberately not
+done here. Evidence already lost is not recoverable — the bytes never arrived.
+
+See `RELEASES/v0.48.3.md`.
+
 ## 0.48.2 — 2026-08-07
 
 **The piecework pay rules now have the scenario tests they never had, and three

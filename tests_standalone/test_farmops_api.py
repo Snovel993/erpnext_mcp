@@ -191,6 +191,10 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/start_shift",
 		"/mobile/add_worker_to_shift",
 		"/mobile/end_shift",
+		# v0.48.3 — the second half of an onboarding upload, and the route whose
+		# absence sent the wizard's evidence to a Frappe path the funnel strips
+		# the credential from.
+		"/mobile/attach_onboarding_document",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}
@@ -927,6 +931,179 @@ class TheIdentityStepAnswersOverTheFunnel(FarmOpsAPITestCase):
 
 
 # ── 8. the row and the secrets ──────────────────────────────────────────────
+class TheOnboardingEvidenceActuallyLands(FarmOpsAPITestCase):
+	"""v0.48.3, over HTTP, because in-process the bug was invisible.
+
+	THE DEFECT WAS A PATH, NOT A FUNCTION. `OnboardingAPI.attachDocument` posted
+	multipart to Frappe's own `/api/method/upload_file`. Every server-side test in
+	this repo would have passed on the day that shipped, because no server-side
+	test can see which URL a phone chose — and `fallback_auth._is_mobile_path`
+	matches `/api/method/erpnext_mcp.api.` and nothing else, so the
+	`X-FarmOps-Token` header was never read on that path. Behind the Tailscale
+	funnel, which strips `Authorization`, the request arrived as Guest, Frappe
+	answered HTTP 200 with the Desk login page, and the app returned on any 2xx
+	without reading the body. Six pieces of I-9 and W-4 evidence per hire were
+	reported filed and stored nowhere.
+
+	SO THE CLAIM HERE IS THE ONE THAT MATTERS LEGALLY: the whole path a phone now
+	takes — stage, finalize, attach — works over this transport with a
+	credential, and every step of it is refused without one. Not "the function
+	returns a dict": a File on the site, private, attached to the Employee, and
+	an unauthenticated caller who gets 401 rather than a cheerful nothing.
+	"""
+
+	EMPLOYEE = "EMP-EVIDENCE"
+
+	def setUp(self):
+		super().setUp()
+		install_hrms()
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": self.EMPLOYEE,
+					"employee_name": "Rosa Delgado",
+					"first_name": "Rosa",
+					"last_name": "Delgado",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": frappe.utils.today(),
+				}
+			],
+		)
+
+	def stage_and_finalize(self, name="i9_list_b_doc.jpg", **kwargs):
+		"""The two file calls, over HTTP, exactly as `ChunkUploader` makes them."""
+		import base64
+		import hashlib
+
+		body = b"evidence-bytes"
+		upload_id = f"funnel-{name}"
+		self.message(
+			f"{PREFIX}/files/stage_file_chunk",
+			{
+				"upload_id": upload_id,
+				"file_name": name,
+				"chunk_index": 0,
+				"chunk_count": 1,
+				"total_bytes": len(body),
+				"data": base64.b64encode(body).decode(),
+			},
+			**kwargs,
+		)
+		return self.message(
+			f"{PREFIX}/files/finalize_staged_file",
+			{
+				"upload_id": upload_id,
+				"file_name": name,
+				"sha256": hashlib.sha256(body).hexdigest(),
+				"total_bytes": len(body),
+			},
+			**kwargs,
+		)
+
+	def test_the_whole_upload_path_works_over_the_funnel_with_a_credential(self):
+		finalized = self.stage_and_finalize()
+		attached = self.message(
+			f"{PREFIX}/mobile/attach_onboarding_document",
+			{
+				"employee": self.EMPLOYEE,
+				"file_token": finalized["file_token"],
+				"document_kind": "i9_list_b_document",
+			},
+		)
+		self.assertEqual(attached["file_token"], finalized["file_token"])
+
+		row = frappe.db.get_value(
+			"File",
+			finalized["file_token"],
+			["attached_to_doctype", "attached_to_name", "is_private"],
+			as_dict=True,
+		)
+		self.assertEqual(row["attached_to_doctype"], "Employee")
+		self.assertEqual(row["attached_to_name"], self.EMPLOYEE)
+		self.assertEqual(int(row["is_private"] or 0), 1)
+
+	def test_an_upload_with_no_credential_is_refused_rather_than_silently_accepted(self):
+		"""THE ASSERTION THIS RELEASE IS ABOUT. The old path answered 200 to
+		exactly this request. Every step of the new one answers 401, and 401 is
+		what the app treats as "this credential is dead" rather than as success."""
+		for path, body in (
+			(f"{PREFIX}/files/stage_file_chunk", {"upload_id": "x", "file_name": "a.jpg"}),
+			(f"{PREFIX}/files/finalize_staged_file", {"upload_id": "x", "file_name": "a.jpg"}),
+			(
+				f"{PREFIX}/mobile/attach_onboarding_document",
+				{"employee": self.EMPLOYEE, "file_token": "whatever"},
+			),
+		):
+			with self.subTest(path=path):
+				status, parsed = self.refusal(path, body, credential=False)
+				self.assertEqual(status, 401)
+				# And it is JSON, not a login page. The v0.17.x symptom in one line.
+				self.assertIn("error", parsed)
+
+	def test_nothing_is_attached_when_the_credential_is_refused(self):
+		"""A 401 that had already written would be worse than the silent success
+		it replaces. The staged upload happens as the worker; the unauthenticated
+		attach must not move the File it produced."""
+		finalized = self.stage_and_finalize()
+		status, _ = self.refusal(
+			f"{PREFIX}/mobile/attach_onboarding_document",
+			{"employee": self.EMPLOYEE, "file_token": finalized["file_token"]},
+			credential=False,
+		)
+		self.assertEqual(status, 401)
+		self.assertFalse(
+			frappe.db.get_value("File", finalized["file_token"], "attached_to_name")
+		)
+
+	def test_a_worker_without_the_hr_role_cannot_file_onboarding_evidence(self):
+		"""These are the photographs an employer is inspected on, and a picker is
+		not who files them.
+
+		400 AND NOT 401, which is the part that matters to a handset:
+		`employee.require_hr_role` raises `ToolError`, `guard.endpoint` turns that
+		into a `frappe.ValidationError` so its sentence reaches the phone in
+		`_server_messages`, and `app._status_for` answers 400. The same shape as
+		every other HR-gated method on this surface. The credential is real, the
+		app stays signed in, and the day's queued work is not discarded — which
+		is what a 401 would do.
+		"""
+		finalized = self.stage_and_finalize()
+		set_roles(WORKER, ["Field Worker"])
+		status, parsed = self.refusal(
+			f"{PREFIX}/mobile/attach_onboarding_document",
+			{"employee": self.EMPLOYEE, "file_token": finalized["file_token"]},
+		)
+		self.assertEqual(status, 400)
+		self.assertIn("personnel register", parsed["error"])
+		self.assertFalse(
+			frappe.db.get_value("File", finalized["file_token"], "attached_to_name")
+		)
+
+	def test_an_employee_outside_the_callers_entities_is_not_found(self):
+		"""`require_scoped_doc` makes "does not exist" and "not yours" the same
+		answer, and a file cannot be hung on another entity's personnel record."""
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "EMP-ELSEWHERE",
+					"employee_name": "Somebody Else",
+					"company": OTHER,
+					"status": "Active",
+				}
+			],
+		)
+		finalized = self.stage_and_finalize()
+		status, _ = self.refusal(
+			f"{PREFIX}/mobile/attach_onboarding_document",
+			{"employee": "EMP-ELSEWHERE", "file_token": finalized["file_token"]},
+		)
+		self.assertEqual(status, 404)
+
+
 class TheAuditRow(FarmOpsAPITestCase):
 	def test_a_call_over_this_transport_writes_the_same_mobile_row(self):
 		self.message(CONTEXT)

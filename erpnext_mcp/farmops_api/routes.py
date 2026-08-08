@@ -171,6 +171,13 @@ ROUTES = (
 	Route("/mobile", mobile_api.start_shift),
 	Route("/mobile", mobile_api.add_worker_to_shift),
 	Route("/mobile", mobile_api.end_shift),
+	# v0.48.3. The second half of an onboarding upload, and the route whose
+	# absence was sending the wizard's six photographs to Frappe's own
+	# `/api/method/upload_file` — a path this app's auth hook does not look at, so
+	# the funnel-stripped request arrived as Guest and got 200 and a login page.
+	# `finalize_staged_file` commits evidence unattached on purpose; this is the
+	# scoped call that files it against the Employee it belongs to.
+	Route("/mobile", mobile_api.attach_onboarding_document),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

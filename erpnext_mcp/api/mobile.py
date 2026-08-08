@@ -2124,3 +2124,67 @@ def generate_w4_pdf(user: str, employee=None, docname=None, tax_year=None, overw
 		"replaced": data.get("replaced"),
 		"note": data.get("note"),
 	}
+
+
+# ── 40. attach_onboarding_document ──────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("attach_onboarding_document", mutating=True, limit=guard.UPLOAD_LIMIT)
+def attach_onboarding_document(user: str, employee=None, docname=None, file_token=None, document_kind=None) -> dict:
+	"""File an uploaded photograph or signature against the Employee record.
+
+	v0.48.3. THE CALL WHOSE ABSENCE LOST EVERY PIECE OF ONBOARDING EVIDENCE.
+	The wizard collects six files — the Section 1 signature, the List A or List
+	B/C document photographs, the Section 3 signature and the photographed W-4 —
+	and this surface published no way to file any of them. So the app sent them
+	to Frappe's own `/api/method/upload_file`, which is not one of this app's
+	paths, which means `fallback_auth._is_mobile_path` never looked at the
+	`X-FarmOps-Token` header, which means the funnel-stripped request arrived as
+	Guest and Frappe answered 200 with the Desk login page. The app checked the
+	status and not the body, so the wizard advanced and the I-9 read Complete
+	with nothing behind it. That is the failure this endpoint ends, and the
+	§1324a(b)(3) inspection is the reason it mattered.
+
+	IT TAKES A `file_token`, NOT BYTES — the docname `finalize_staged_file` hands
+	back, exactly like `upload_signed_i9` and `complete_task_via_mobile`. The
+	photograph goes up in 512 KB slices, hashed at capture and verified on
+	assembly, and this call names what that produced. There is now ONE upload
+	path from this app and it is the one that authenticates.
+
+	WHY NOT JUST LET `finalize_staged_file` ATTACH. Because it deliberately
+	refuses an attachment target: `api/files.py` argues it at length, and the
+	argument is that a field worker who could name the parent could hang a file
+	off a Journal Entry or somebody else's lease. This endpoint names ONE parent
+	doctype, in code, and proves the docname is an Employee inside the caller's
+	own entities before it goes near the File.
+
+	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, not even for the caller's own
+	record. These are the photographs an employer is inspected on, and an account
+	that could file its own would be an account that could file anything as its
+	own identity documents.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+	personnel.require_hr_role()
+
+	if not str(file_token or "").strip():
+		frappe.throw(
+			"file_token is required — upload the photograph with stage_file_chunk and "
+			"finalize_staged_file first, then send the token that returns.",
+			frappe.ValidationError,
+		)
+
+	inner = {"employee": person, "file_token": file_token}
+	if document_kind is not None:
+		inner["document_kind"] = document_kind
+
+	result = personnel.attach_employee_document(inner)
+	data = result.data
+	return {
+		"employee": data.get("employee"),
+		"document_kind": data.get("document_kind"),
+		"file_token": data.get("file_token"),
+		"file_url": data.get("file_url"),
+		"file_name": data.get("file_name"),
+		"is_private": data.get("is_private"),
+		"already_attached": data.get("already_attached"),
+	}

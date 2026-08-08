@@ -2184,16 +2184,28 @@ would go and try to fix.
 Everything above describes one endpoint,
 `/api/method/erpnext_mcp.mcp.handle`, which is what an AI client calls. **The
 Farm Ops iOS app does not use it, and since v0.18.0 it does not use Frappe's
-request handler at all.** It calls eleven routes on a separate process:
+request handler at all.** It calls a closed list of routes on a separate process
+— eleven at v0.18.0, forty-one as of v0.48.3, and `routes.py` is the list:
 
 ```
-POST /farmops/api/mobile/<one of nine>
+POST /farmops/api/mobile/<one of thirty-nine>
 POST /farmops/api/files/<one of two>
 X-FarmOps-Token: <api_key>:<api_secret>
 ```
 
 served by `erpnext_mcp/farmops_api/` — a Werkzeug WSGI service on port 5250
 inside the same container, published to the host's loopback only.
+
+**NOTHING IN THE APP MAY POST TO `/api/method/…`, INCLUDING FRAPPE'S OWN
+ENDPOINTS.** v0.48.3 is what that rule costs when it is broken: the onboarding
+wizard uploaded its I-9 and W-4 photographs to Frappe's `/api/method/upload_file`
+because there was no route to attach a staged file with. `fallback_auth`'s path
+check covers `/api/method/erpnext_mcp.api.` and nothing else, so the token was
+never read there, the request arrived as Guest, and Frappe answered 200 with the
+login page — the exact failure the paragraph below describes, reproduced on the
+one call that had been left behind. Every photograph and signature was lost
+silently for as long as the wizard existed. `attach_onboarding_document` is the
+route that was missing; see `RELEASES/v0.48.3.md`.
 
 **Why it is not just another Frappe endpoint.** v0.17.1 put these eleven methods
 at `/api/method/erpnext_mcp.api.mobile.*` and every call from a phone came back

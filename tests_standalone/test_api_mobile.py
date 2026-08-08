@@ -238,6 +238,11 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"start_shift",
 		"add_worker_to_shift",
 		"end_shift",
+		# v0.48.3 — the second half of an onboarding upload. Without it the
+		# wizard's six photographs and signatures went to Frappe's own
+		# `/api/method/upload_file`, which this app's auth hook does not look at,
+		# and every one of them was lost against a 200 and a login page.
+		"attach_onboarding_document",
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 
