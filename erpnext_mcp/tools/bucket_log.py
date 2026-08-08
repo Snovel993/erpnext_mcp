@@ -422,7 +422,17 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 		doc.h3_cell = str(entry.get("h3_cell") or "").strip() or None
 		doc.device_id = str(entry.get("device_id") or "").strip() or None
 		doc.flags.ignore_permissions = True
-		doc.insert(ignore_permissions=True)
+		try:
+			doc.insert(ignore_permissions=True)
+		except frappe.exceptions.UniqueValidationError:
+			# The `existing` set above is a snapshot from before this loop ran —
+			# it cannot see a row a CONCURRENT retry of this same batch inserted
+			# a moment ago. That race is real: a phone that timed out waiting for
+			# a response and resent the batch is the ordinary case, not an
+			# exotic one. Losing that race is not a failure to report, it is the
+			# duplicate this function already promises to skip.
+			duplicates.append(entry_uuid)
+			continue
 
 		created.append(_describe_entry(doc))
 		existing.add(entry_uuid)

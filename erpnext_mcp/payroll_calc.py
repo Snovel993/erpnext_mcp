@@ -62,7 +62,7 @@ eight hours.
 from __future__ import annotations
 
 from .state_withholding import calculate_state_withholding
-from .withholding import PERIODS_PER_YEAR, calculate_federal_withholding
+from .withholding import calculate_federal_withholding
 
 MINIMUM_WAGE_RATES = {
 	"OR": {"standard": 14.70, "non_urban": 13.70, "portland_metro": 15.95},

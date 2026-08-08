@@ -527,7 +527,6 @@ def fill_w4_pdf(record: dict, employee: dict, employer: dict,
 	# no signature widget here to cover it, but Step 5's Date column and the
 	# Employers Only row are close enough that keeping the two modules in step
 	# is worth more than the reasoning saved.
-	stamped = None
 	should_flatten = flatten
 	if should_flatten is None:
 		should_flatten = bool(signature) and pdf_signing.ink_only(signature) is not None
@@ -535,8 +534,7 @@ def fill_w4_pdf(record: dict, employee: dict, employer: dict,
 		pdf_signing.flatten(writer)
 	if signature:
 		x0, y0, x1, y1 = SIGNATURE_BOX
-		stamped = pdf_signing.stamp(writer, PAGE_FORM, [x0, y0, x1, y1], signature,
-		                            max_height=y1 - y0)
+		pdf_signing.stamp(writer, PAGE_FORM, [x0, y0, x1, y1], signature, max_height=y1 - y0)
 
 	buffer = io.BytesIO()
 	writer.write(buffer)

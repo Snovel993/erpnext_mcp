@@ -37,10 +37,7 @@ from .. import bucket_bridge, compat, payroll_integration
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..payroll_calc import (
-	MINIMUM_WAGE_RATES,
 	calculate_full_payroll,
-	calculate_gross_pay,
-	check_minimum_wage,
 )
 from ..result import ToolResult
 from ..state_withholding import SUPPORTED_STATES
@@ -557,6 +554,13 @@ def calculate_payroll(args: dict) -> ToolResult:
 	entry.flags.ignore_permissions = True
 	entry.insert()
 
+	# Every bucket that just fed a slip is spoken for. Without this, the exact
+	# same Accepted captures are still sitting there Pending/Linked for the next
+	# run — a correction, a re-run, a later period whose window laps this one —
+	# to read and pay a second time.
+	for ss in structures:
+		_mark_bucket_entries_paid(ss.employee, pay_period_start, pay_period_end, company)
+
 	return ToolResult(
 		data={
 			"name": entry.name,
@@ -909,6 +913,14 @@ def run_payroll_for_period(args: dict) -> ToolResult:
 	entry.flags.ignore_permissions = True
 	entry.insert()
 
+	# See the sibling note in calculate_payroll: a bucket this run just paid
+	# must not still read as payable to the next one.
+	for slip in slips:
+		if slip.get("employee"):
+			_mark_bucket_entries_paid(
+				slip["employee"], context["pay_period_start"], context["pay_period_end"], context["company"]
+			)
+
 	data = dict(context)
 	data["name"] = entry.name
 	data["status"] = "Calculated"
@@ -1228,6 +1240,13 @@ def _bucket_log_rows(company, start, end, wanted, provenance) -> list[dict]:
 	# or third-party bucket log with no such column has nothing to filter on,
 	# and every row is read the way it always was: as a bucket, full stop.
 	verdict_field = compat.first_field(BUCKET_LOG, "verdict")
+	# `status` is this app's own Pending/Linked/Paid lifecycle — see
+	# bucket_bridge.STATUS_PAID. A bucket already paid on an earlier run must
+	# not be read again by a later or overlapping one, which is what
+	# `_mark_bucket_entries_paid` below stamps once this run commits. A
+	# third-party bucket log with no such column is read the way it always
+	# was: there is nothing here to say a row was paid already.
+	status_field = compat.first_field(BUCKET_LOG, "status")
 
 	filters: list = []
 	if date_field:
@@ -1235,6 +1254,8 @@ def _bucket_log_rows(company, start, end, wanted, provenance) -> list[dict]:
 		filters.append([date_field, "<=", f"{end} 23:59:59"])
 	if company and compat.has_field(BUCKET_LOG, "company"):
 		filters.append(["company", "=", company])
+	if status_field:
+		filters.append([status_field, "!=", bucket_bridge.STATUS_PAID])
 	if verdict_field:
 		filters.append([verdict_field, "=", bucket_bridge.VERDICT_ACCEPTED])
 
@@ -1265,6 +1286,7 @@ def _bucket_log_rows(company, start, end, wanted, provenance) -> list[dict]:
 				"date": str(row.get(date_field) or "")[:10] if date_field else "",
 				"units": units,
 				"source": BUCKET_LOG,
+				"entry_name": row.get("name"),
 			}
 		)
 
@@ -1281,6 +1303,43 @@ def _bucket_log_rows(company, start, end, wanted, provenance) -> list[dict]:
 			"logs a bin per row is being paid per bin at the per-bucket rate."
 		)
 	return out
+
+
+def _mark_bucket_entries_paid(employee: str, start: str, end: str, company: str | None) -> None:
+	"""Stamp every Bucket Log Entry this run just paid as `status=Paid`.
+
+	Without this, `_bucket_log_rows` above has nothing to exclude and a second
+	run over an overlapping period — a correction, a re-preview turned into a
+	commit, a semi-monthly run whose window laps a prior weekly one — reads and
+	pays the same bucket twice. The filter is the same one `_bucket_log_rows`
+	queried with (date window, company, verdict, not already Paid), scoped to
+	this one employee so a slip only claims the buckets it actually paid for.
+	Best-effort and silent about a site with no BucketLog bridge, for the same
+	reason `_bucket_log_rows` is: an absent doctype is not a bug in this run.
+	"""
+	if not compat.doctype_exists(BUCKET_LOG):
+		return
+	picker_field = compat.first_field(BUCKET_LOG, "picker_id", "employee", "picker", "worker")
+	status_field = compat.first_field(BUCKET_LOG, "status")
+	if not picker_field or not status_field:
+		return
+	date_field = compat.first_field(
+		BUCKET_LOG, "timestamp", "logged_at", "log_date", "date", "posting_date", "creation"
+	)
+	verdict_field = compat.first_field(BUCKET_LOG, "verdict")
+
+	filters: list = [[picker_field, "=", employee], [status_field, "!=", bucket_bridge.STATUS_PAID]]
+	if date_field:
+		filters.append([date_field, ">=", f"{start} 00:00:00"])
+		filters.append([date_field, "<=", f"{end} 23:59:59"])
+	if company and compat.has_field(BUCKET_LOG, "company"):
+		filters.append(["company", "=", company])
+	if verdict_field:
+		filters.append([verdict_field, "=", bucket_bridge.VERDICT_ACCEPTED])
+
+	names = frappe.db.get_all(BUCKET_LOG, filters=filters, pluck="name", limit_page_length=0)
+	for name in names:
+		frappe.db.set_value(BUCKET_LOG, name, status_field, bucket_bridge.STATUS_PAID)
 
 
 def _task_assignment_rows(company, start, end, wanted, provenance) -> list[dict]:
@@ -1580,11 +1639,23 @@ def _build_tax_config(employee: str, pay_frequency: str, company: str | None = N
 	w4_data = _load_w4_data(employee)
 	fica_config = _load_fica_config()
 	filing_status = w4_data.get("filing_status", "Single")
+	tax_year = w4_data.get("_tax_year", 2025)
 	federal_tax_table = _load_federal_tax_table(
-		w4_data.get("_tax_year", 2025),
+		tax_year,
 		filing_status,
 		pay_frequency,
 	)
+	if not federal_tax_table:
+		# `calculate_federal_withholding` treats an empty table as "no brackets
+		# available" and returns $0 federal income tax — a silent wrong number
+		# rather than a missing one, and the one direction a payroll calculation
+		# must never guess in. Refusing here is what makes the failure loud
+		# instead of a paycheck nobody can trust the withholding line on.
+		raise ToolError(
+			f"no Federal Tax Table rows for tax_year={tax_year}, filing_status="
+			f"{filing_status!r}, payroll_period={pay_frequency!r}. import_federal_tax_table "
+			"loads a year's brackets; nothing was calculated."
+		)
 
 	state_configs = {}
 	state_tax_tables = {}

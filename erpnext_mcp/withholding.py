@@ -113,6 +113,23 @@ def _calc_federal_income_tax(
     """The percentage method for a 2020+ W-4."""
     detail: dict = {}
 
+    # Step 2(c): the box asking the IRS's Higher Withholding Rate Schedule to
+    # be used instead of the standard percentage-method table below — NOT
+    # implemented. This app has one table per filing_status/pay_frequency/
+    # tax_year and no second, higher-rate variant, so a W-4 with the box
+    # checked is computed exactly as if it were unchecked. That under-withholds
+    # a two-income household, silently, unless a caller reads this flag: the
+    # checkbox exists on the form (w4_data["multiple_jobs"]), is stored
+    # (tools/w4.py), and is simply not read past this point.
+    if w4_data.get("multiple_jobs"):
+        detail["step_2c_checkbox_not_applied"] = (
+            "Step 2(c) is checked on this employee's W-4. This app's percentage-method "
+            "tables do not yet implement the IRS Higher Withholding Rate Schedule Step 2(c) "
+            "calls for, so federal income tax below was computed on the standard table as if "
+            "the box were unchecked — which under-withholds. Have the employee use Step 4(c) "
+            "extra withholding until this is implemented."
+        )
+
     # Step 1: Annualize gross pay
     annual_gross = gross_pay * periods
     detail["annual_gross"] = round(annual_gross, 2)

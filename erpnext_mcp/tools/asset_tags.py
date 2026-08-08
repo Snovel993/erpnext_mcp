@@ -22,8 +22,8 @@ import json
 
 import frappe
 
-from .. import compat, settings
-from ..args import as_bool, as_date, as_float, as_int, as_limit, as_str, resolve_company
+from .. import compat
+from ..args import as_bool, as_date, as_float, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..render import qr
 from ..result import ToolResult

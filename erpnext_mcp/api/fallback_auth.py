@@ -133,7 +133,7 @@ HEADER = "X-FarmOps-Token"
 
 #: The POST body key carrying the same pair. Leading underscore so it sorts and
 #: reads as envelope rather than argument, and so it cannot collide with a
-#: current or future argument name on any of the eleven methods.
+#: current or future argument name on any method under `erpnext_mcp.api.*`.
 BODY_KEY = "_auth"
 
 SOURCE_HEADER = "header"
@@ -172,7 +172,7 @@ _MAX_BODY = 2_000_000
 def authenticate() -> str:
 	"""`auth_hooks` entry point. Runs on EVERY request to this site.
 
-	Cheap and silent for everything that is not one of this app's eleven mobile
+	Cheap and silent for everything that is not one of this app's mobile
 	paths, and incapable of raising: `validate_auth` calls this before the
 	handler, so an exception here would be an exception on every request to the
 	site rather than a failure of one endpoint.

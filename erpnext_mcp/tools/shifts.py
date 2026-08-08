@@ -207,6 +207,45 @@ def _crew_argument(raw, label: str = "crew_employees") -> list:
 	return out
 
 
+#: `i9_status` values that mean the person may lawfully work. Everything else —
+#: `Pending`, `Expired`, `N-A`, or the column simply absent on a site that has
+#: not run `install_compliance_fields` — is not evidence of readiness.
+_I9_CLEARED = ("Verified",)
+
+
+def _i9_unverified(employees: list[str]) -> list[dict]:
+	"""Who on this list has no Verified I-9 on file, or [] where nobody knows.
+
+	NOT A GATE. `start_shift` and `add_worker_to_shift` still put the crew on
+	the clock — a hard refusal here would strand a harvest crew mid-morning
+	over a paperwork column most sites do not even read. It is a WARNING a
+	foreman sees at the moment they can still do something about it, which is
+	the gap the 2026-08-07 cross-system review named: nothing downstream of
+	onboarding ever consulted `i9_status`, so a person with no I-9 at all could
+	be rostered, badged and paid without anyone being told.
+
+	Silent (returns []) where the column is not installed, exactly like every
+	other `compat.has_field` guard in this app — an absent column is not
+	evidence that everyone is unverified, it is a site that has not opted in.
+	"""
+	if not employees or not compat.has_field("Employee", "i9_status"):
+		return []
+	rows = frappe.db.get_all(
+		"Employee",
+		filters={"name": ("in", employees)},
+		fields=["name", "employee_name", "i9_status"],
+	)
+	return [
+		{
+			"employee": row["name"],
+			"employee_name": row.get("employee_name") or row["name"],
+			"i9_status": row.get("i9_status") or "",
+		}
+		for row in rows
+		if (row.get("i9_status") or "") not in _I9_CLEARED
+	]
+
+
 def _crew_note(described: dict) -> str:
 	size = described.get("crew_size") or 0
 	if not size:
@@ -301,11 +340,23 @@ def start_shift(args: dict) -> ToolResult:
 			"there is no place here. A point-in-time temperature is a data point and a timeline is "
 			"a defence; set the coordinates while the shift is still open."
 		)
+	unverified = _i9_unverified([entry["employee"] for entry in crew])
+	summary_suffix = ""
+	if unverified:
+		data["i9_unverified"] = unverified
+		names = ", ".join(f"{row['employee_name']} ({row['i9_status'] or 'no I-9'})" for row in unverified)
+		data["i9_note"] = (
+			f"{len(unverified)} of this crew has no Verified I-9 on file: {names}. This is a "
+			"WARNING, not a block — the shift was still opened, because a hard refusal here would "
+			"strand a crew mid-harvest over a paperwork column. Verify or reverify before this "
+			"person's next shift."
+		)
+		summary_suffix = f" — {len(unverified)} without a Verified I-9"
 	return ToolResult(
 		data=data,
 		summary=(
 			f"started {doc.shift_type} shift {doc.name} at {doc.location or 'an unnamed location'} "
-			f"under {described['foreman_name']} with {described['crew_size']} on the crew"
+			f"under {described['foreman_name']} with {described['crew_size']} on the crew{summary_suffix}"
 		),
 		docstatus_delta="none → 0 (created)",
 	)
@@ -387,11 +438,21 @@ def add_worker_to_shift(args: dict) -> ToolResult:
 			"none of the morning's water breaks and none of the acclimatization the crew has "
 			"— OAR 437-004-1131(g) is about exactly this person."
 		)
+	summary_suffix = ""
+	unverified = _i9_unverified([person])
+	if unverified:
+		data["i9_unverified"] = unverified
+		data["i9_note"] = (
+			f"{theirs.get('employee_name') or person} has no Verified I-9 on file "
+			f"(status: {unverified[0]['i9_status'] or 'no I-9'}). This is a WARNING, not a block — "
+			"they were still rostered. Verify or reverify before their next shift."
+		)
+		summary_suffix = " — no Verified I-9"
 	return ToolResult(
 		data=data,
 		summary=(
 			f"added {theirs.get('employee_name') or person} to {row['name']} at {joined} "
-			f"({described['crew_size']} on the crew)"
+			f"({described['crew_size']} on the crew){summary_suffix}"
 		),
 		docstatus_delta="0 → 0 (amended)",
 	)
