@@ -53,7 +53,18 @@ classifiers = [
 # is published, completed and retained exactly the same way. Two templates in
 # that directory now, one library, and no second layout engine.
 #
-# ALL FIVE ARE IMPORTED DEFENSIVELY. A bench missing shapely or h3 loses the
+# The sixth arrived in v0.51.0 with the stamped signature. `Pillow` does one
+# job: turning the handset's signature capture into ink. That capture is a white
+# rectangle with a stroke in the middle of it — `SignatureCanvas.renderPNG`
+# renders opaque — so drawing it onto a federal form as-is paints a white box
+# over the signature rule and everything printed around it. Pillow keys the
+# paper out and crops to the stroke, and reportlab then places the result.
+# Frappe itself depends on Pillow, so a bench that runs this app already has it;
+# it is declared because this app now genuinely uses it rather than inheriting
+# it, and a dependency you rely on and do not name is one that vanishes on the
+# upgrade that drops it upstream.
+#
+# ALL SIX ARE IMPORTED DEFENSIVELY. A bench missing shapely or h3 loses the
 # six geospatial tools; a bench missing every QR encoder loses exactly one —
 # `generate_mobile_login_qr`; a bench missing reportlab loses exactly two —
 # `render_tax_form_pdf` and `bulk_render_tax_form_pdfs`, with every tax form's
@@ -71,6 +82,7 @@ dependencies = [
   "segno>=1.5",
   "reportlab>=4.0",
   "pypdf>=4.0",
+  "Pillow>=9.0",
 ]
 
 [project.urls]

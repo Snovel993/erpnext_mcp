@@ -3,6 +3,89 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.51.0 — 2026-08-08
+
+**The signature the worker made is now on the form they signed.** The I-9 record
+has held `section_1_signature` and `section_2_signature` — real strokes captured
+on the handset's canvas, with `signed_at` and `signed_ip` beside them — since
+v0.45.0, and `render_i9_pdf` printed an empty signature line every time. The
+employer held the signature and the retained page did not show it. Same on the
+W-4, where "This form is not valid unless you sign it" is printed on the page:
+what came out was an invalid W-4 with all the right numbers on it.
+
+**What is refused has not changed.** A NAME typed into a signature box still
+never happens. That was the earlier module's argument and it was right — a
+string this app typed would render as a signature and would not be one. The
+capture is a different thing: it is the attestation itself, and printing an
+empty box beside it was the gap.
+
+**It goes in as page content, which is the whole point.** A field value is
+deletable by anybody who opens the form and an annotation is deletable in
+Preview with one click; both would satisfy a screenshot and neither would
+satisfy an inspection. `pdf_signing.stamp` merges the ink into the content
+stream, and `pdf_signing.flatten` then burns every remaining field in and
+deletes the AcroForm, so a signed copy has no fields at all — `get_fields()`
+answers None. Order matters and is asserted: fill, flatten, then stamp. Stamping
+first lets the signature box's own empty appearance paint over the signature.
+
+**The capture is white paper, not ink on glass.** `SignatureCanvas.renderPNG`
+renders opaque and fills white before it strokes, so the PNG on the record is a
+white rectangle with a signature in the middle. Drawn as-is it covers the
+signature rule and everything printed around it. `pdf_signing.ink_only` keys the
+paper out by luminance and crops to the stroke — which is also worth about 25%
+more ink on the page, because the I-9's employee signature line is 25:1 and an
+uncropped capture is 3.5:1. Pillow is declared for this and imported
+defensively; a bench without it renders the form unsigned rather than failing.
+
+**Geometry is read, not guessed.** `pdf_signing.box_for` takes USCIS's own
+widget rectangle and measures the clear space above it, so the ink grows into
+the gap instead of into the A-Number row, on any template revision. The W-4 has
+no widget on its signature rule — the IRS printed a line, not a field — so that
+one constant is measured, documented against the landmarks it came from, and
+re-derived from the shipped file by its own test.
+
+**Signing metadata is the part a picture cannot carry.** 8 CFR 274a.2(h)(2)
+asks for a record verifying who produced the signature and when; "attested
+electronically on 1 April" verifies nobody. Additional Information now names the
+signer, the timestamp, the IP the attestation came from, and closes with
+"Electronically signed pursuant to 8 CFR 274a.2." A record with a timestamp and
+no image still gets the sentence — the attestation happened — and only claims
+the image was affixed where one was.
+
+**Unsigned renders are untouched.** No capture means no stamping and no
+flattening: every field stays live, which is the page an employer prints and
+signs with a pen, and it is what this app produced for its whole life until now.
+
+### The badge a phone could not issue
+
+**`generate_employee_badge_qr` was published on the MCP tool registry only.** It
+has minted readable `CF-0001` identifiers since v0.50.0 and the handset does not
+speak that surface, so the onboarding wizard's badge step could map a card
+printed somewhere else and could not produce one — on a hire day, in a yard, for
+a worker standing there waiting to be told their number. It now has an
+`api/mobile.py` wrapper and a `farmops_api` route. `badge_id` is deliberately
+NOT a body key: the tool lets a Desk operator adopt a card from the old
+`farm_app` uuid stock, and letting a handset name it would put the uniqueness of
+a payroll key in whatever a foreman typed. `regenerate` IS accepted, because a
+lost card is a field problem.
+
+**`set_employee_photo`, and the reason every badge printed initials.**
+`generate_employee_badge_sheet` lays a card out from `Employee.image` and falls
+back to two letters where it is empty. `attach_onboarding_document` files
+evidence — the bytes land as a private File pointing at the Employee and nothing
+on the Employee points back — which is right for a List B photograph and left
+the badge with no face on it. The new tool does the same attach and the one
+field write that closes the loop. It stays private, refuses a PDF before the
+attach rather than after, and uses `db.set_value` so a half-filled wizard record
+cannot fail validation over a photograph.
+
+**`Company.badge_logo`.** An Attach Image custom field, installed from its own
+`install.py` job and NOT from `compliance_fields.py` — that table refuses any
+field that cannot name a regulator, and a farm's logo has none. It is also not
+behind the compliance switch: an operator who declined having their Spray Log
+extended did not thereby decide to print logo-less badges. `_card` now carries
+`company_logo_url`, so the single card and the printed sheet both have it.
+
 ## 0.50.1 — 2026-08-08
 
 **A bucket is full or it is not.** Full counts as 1, not-full counts as 0, and

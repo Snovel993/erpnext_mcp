@@ -40,12 +40,27 @@ nothing else on the site records it.
 FOUR THINGS THIS DOES NOT PUT ON THE PAGE, AND WHY
 ────────────────────────────────────────────────────────────────────────────
 
-**NO SIGNATURE, AND HERE THERE IS NOT EVEN A BOX TO LEAVE EMPTY.** Step 5's
-"Employee's signature" and "Date" are printed rules on the IRS page with NO
-AcroForm widget behind them — asserted by name in `test_w4_pdf.py`. So unlike
-the I-9, where three signature fields exist and are deliberately skipped, there
-is nothing here to write into even by accident. The page is printed and signed
-with a pen, which is what "This form is not valid unless you sign it" means.
+**THE SIGNATURE IS STAMPED, AND THERE IS NO BOX TO STAMP IT INTO.** v0.51.0.
+Step 5's "Employee's signature" and "Date" are printed rules on the IRS page
+with NO AcroForm widget behind them — still true, still asserted by name in
+`test_w4_pdf.py`, and it is the whole difficulty. `i9_pdf` reads USCIS's own
+widget rectangle and never hardcodes a coordinate; here there is no rectangle to
+read, so `SIGNATURE_BOX` is measured off the page's own text and documented
+against the landmarks it was measured from. That makes it the one piece of
+geometry in either module that a template revision could move silently, which is
+why `test_w4_pdf.py` re-derives those landmarks from the shipped file rather
+than trusting the constant.
+
+What goes in it is the capture on `W-4 Form.signature` — the employee's own
+stroke, taken with `signed_at` and `signed_ip` beside it. "This form is not
+valid unless you sign it" is exactly why: the app held the signature and the
+printed page did not show it, so what came out was an invalid W-4 with all the
+right numbers on it.
+
+The page is flattened once anything is stamped, so the retained copy cannot be
+edited afterwards. A record with no capture renders precisely as it always did —
+every field live, nothing flattened — because that page is one somebody prints
+and signs with a pen.
 
 **NO SOCIAL SECURITY NUMBER.** `i9_pdf` prints nine digits when a caller asks
 for them by name AND the site switched `store_full_ssn` on, because Form I-9 is
@@ -101,6 +116,7 @@ import hashlib
 import io
 import os
 
+from . import pdf_signing
 from .errors import ToolError
 
 try:  # pragma: no cover - exercised by whichever branch the test bench has
@@ -449,7 +465,20 @@ def plan(record: dict, employee: dict, employer: dict) -> dict:
 	return {PAGE_FORM: page_one}
 
 
-def fill_w4_pdf(record: dict, employee: dict, employer: dict) -> bytes:
+#: Step 5's signature rule, in PDF user space on page 1. MEASURED, NOT READ,
+#: because the IRS put no widget there — see the module docstring.
+#:
+#: The landmarks it was measured from, all on page 1 of the shipped 2026 file:
+#: the "Sign Here" flag occupies x 36-60 at y 87-99; the caption "Employee's
+#: signature (This form is not valid unless you sign it.)" is drawn at x 102.8,
+#: y 81.7, so the rule sits just above it; and the Employers Only row's first
+#: widget `f1_12[0]` starts at y 66. The band below is clear of all three and
+#: stops short of the Date column on the right.
+SIGNATURE_BOX = (102.0, 86.0, 400.0, 104.0)
+
+
+def fill_w4_pdf(record: dict, employee: dict, employer: dict,
+                signature: bytes | None = None, flatten: bool | None = None) -> bytes:
 	"""The shipped IRS form with this record's values in its boxes.
 
 	Args:
@@ -459,6 +488,14 @@ def fill_w4_pdf(record: dict, employee: dict, employer: dict) -> bytes:
 			"city", "state", "zip"}` — Step 1(a). No SSN; see the module docstring.
 		employer: `{"name", "address", "ein"}`, as `tools/i9._employer_block`
 			returns it. The Employers Only row.
+		signature: the employee's captured signature as image BYTES, or None.
+			Bytes rather than a file URL for the reason `i9_pdf` takes bytes:
+			this module reads nothing. An unreadable capture is skipped and the
+			rule is left for a pen.
+		flatten: None — the default — means "flatten when the signature was
+			stamped". A signed W-4 must not be editable afterwards; an unsigned
+			one is the page somebody prints and signs, so flattening it would
+			take away the only thing it is for.
 
 	Returns:
 		PDF bytes. The template on disk is never modified.
@@ -484,6 +521,22 @@ def fill_w4_pdf(record: dict, employee: dict, employer: dict) -> bytes:
 		writer.update_page_form_field_values(
 			writer.pages[page_index], values, auto_regenerate=False
 		)
+
+	# Flatten BEFORE stamping, the same order and for the same reason as the
+	# I-9: a widget's appearance painted after the ink covers the ink. There is
+	# no signature widget here to cover it, but Step 5's Date column and the
+	# Employers Only row are close enough that keeping the two modules in step
+	# is worth more than the reasoning saved.
+	stamped = None
+	should_flatten = flatten
+	if should_flatten is None:
+		should_flatten = bool(signature) and pdf_signing.ink_only(signature) is not None
+	if should_flatten:
+		pdf_signing.flatten(writer)
+	if signature:
+		x0, y0, x1, y1 = SIGNATURE_BOX
+		stamped = pdf_signing.stamp(writer, PAGE_FORM, [x0, y0, x1, y1], signature,
+		                            max_height=y1 - y0)
 
 	buffer = io.BytesIO()
 	writer.write(buffer)

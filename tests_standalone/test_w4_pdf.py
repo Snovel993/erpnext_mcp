@@ -36,11 +36,12 @@ EVERY CLASS THAT NEEDS pypdf SKIPS WITHOUT IT, the same posture
 the half most likely to be got wrong.
 """
 
+import io
 import unittest
 
 import frappe
 
-from erpnext_mcp import w4_pdf
+from erpnext_mcp import pdf_signing, w4_pdf
 
 from .fixtures import MAIN
 from .harness import STORE
@@ -346,14 +347,15 @@ class TheFieldTableIsCheckedAgainstGeometry(unittest.TestCase):
 				"the Employers Only row is below every box the employee fills in",
 			)
 
-	def test_step_5_has_no_signature_field_to_leave_blank(self):
+	def test_step_5_has_no_signature_field_to_stamp_into(self):
 		"""The module says so; this is the file saying it.
 
-		`i9_pdf` leaves three signature boxes deliberately empty. Here there is
-		nothing to leave empty — Step 5's signature and date are printed rules
-		between the exempt tick and the Employers Only row, with no widget
-		between them. If a future year makes them fillable, this fails and the
-		module needs an explicit "never written" rule like the I-9's.
+		Step 5's signature and date are printed rules between the exempt tick
+		and the Employers Only row, with no widget between them. That is why
+		`SIGNATURE_BOX` is measured rather than read off a rectangle, and it is
+		the one piece of geometry in either PDF module that a template revision
+		could move silently — so if a future year makes them fillable, this
+		fails and the module should read the widget instead of the constant.
 		"""
 		floor = self.bottom(w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS) + self.rects[
 			w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS
@@ -681,3 +683,99 @@ class RenderTool(I9TestCase):
 	def test_rendering_moves_no_status(self):
 		self.render()
 		self.assertEqual(frappe.db.get_value("W-4 Form", "W4-2026-0001", "status"), "Active")
+
+
+
+# ── 8 ─────────────────────────────────────────────────────────────────────────
+def a_capture(width=700, height=200) -> bytes:
+	"""What `SignatureCanvas.renderPNG` produces: opaque, white paper, black ink."""
+	from PIL import Image, ImageDraw
+
+	image = Image.new("RGB", (width, height), (255, 255, 255))
+	ImageDraw.Draw(image).line(
+		[(150, 130), (200, 70), (250, 130), (300, 60), (360, 120), (420, 80), (470, 110)],
+		fill=(0, 0, 0), width=5, joint="curve")
+	buffer = io.BytesIO()
+	image.save(buffer, format="PNG")
+	return buffer.getvalue()
+
+
+@unittest.skipUnless(pdf_signing.available() and w4_pdf.available(),
+                     "needs Pillow, reportlab, pypdf and the shipped template")
+class TheSignatureIsStampedIntoStep5(unittest.TestCase):
+	"""v0.51.0. "This form is not valid unless you sign it" is on the page.
+
+	The app held the employee's captured signature and the rendered W-4 did not
+	show it, so what came out was an invalid W-4 with all the right numbers on
+	it. The signature now goes into the page content and the form is flattened.
+	"""
+
+	def rendered(self, **kwargs):
+		from pypdf import PdfReader
+
+		payload = w4_pdf.fill_w4_pdf(a_record(), EMPLOYEE, EMPLOYER, **kwargs)
+		return payload, PdfReader(io.BytesIO(payload))
+
+	def test_a_signed_w4_has_no_editable_field_left(self):
+		_payload, reader = self.rendered(signature=a_capture())
+		self.assertIsNone(reader.get_fields())
+		self.assertNotIn("/AcroForm", reader.trailer["/Root"])
+
+	def test_flattening_keeps_the_values(self):
+		"""The failure that would matter most: a flatten that loses the
+		appearance streams produces a beautifully blank federal form."""
+		_payload, reader = self.rendered(signature=a_capture())
+		text = reader.pages[w4_pdf.PAGE_FORM].extract_text()
+		self.assertIn("Maria", text)
+		self.assertIn("Garcia", text)
+		self.assertIn("Yakima", text)
+
+	def test_the_signature_reaches_the_page_content(self):
+		_payload, reader = self.rendered(signature=a_capture())
+		page = reader.pages[w4_pdf.PAGE_FORM]
+		images = [key for key, value in (page["/Resources"].get("/XObject") or {}).items()
+		          if value.get_object().get("/Subtype") == "/Image"]
+		self.assertTrue(images, "the signature did not reach the page")
+
+	def test_an_unsigned_w4_is_still_the_page_somebody_prints_and_signs(self):
+		_payload, reader = self.rendered()
+		self.assertTrue(reader.get_fields())
+		self.assertIn("/AcroForm", reader.trailer["/Root"])
+
+	def test_an_unreadable_capture_costs_the_signature_and_not_the_form(self):
+		payload, reader = self.rendered(signature=b"not a png")
+		self.assertTrue(payload.startswith(b"%PDF"))
+		# Nothing stamped, so nothing flattened: still a form somebody can sign.
+		self.assertTrue(reader.get_fields())
+
+	def test_the_measured_box_still_matches_the_shipped_page(self):
+		"""THE ONE HARDCODED RECTANGLE IN EITHER PDF MODULE, re-derived here from
+		the landmarks its comment names — so a template revision that moves the
+		Step 5 rule fails this instead of stamping a signature into empty space.
+		"""
+		from pypdf import PdfReader
+
+		captions = []
+
+		def visit(text, cm, tm, font, size):
+			body = (text or "").strip()
+			if body:
+				captions.append((round(tm[4], 1), round(tm[5], 1), body))
+
+		PdfReader(w4_pdf.TEMPLATE_PATH).pages[w4_pdf.PAGE_FORM].extract_text(visitor_text=visit)
+		# "signature", not "Employee" — the form's own TITLE is "Employee's
+		# Withholding Certificate" and it is at the top of the page.
+		caption = [c for c in captions if "signature" in c[2].lower()]
+		self.assertTrue(caption, "the Step 5 caption moved or was reworded")
+		caption_x, caption_y, _ = caption[0]
+
+		x0, y0, x1, y1 = w4_pdf.SIGNATURE_BOX
+		self.assertGreater(x1, x0)
+		self.assertGreater(y1, y0)
+		# Sits above the caption it belongs to...
+		self.assertGreaterEqual(y0, caption_y)
+		# ...starts roughly where that caption starts...
+		self.assertAlmostEqual(x0, caption_x, delta=6.0)
+		# ...and clears the Employers Only row underneath it.
+		employers = template_widgets()[w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS]
+		self.assertGreater(y0, employers[3])

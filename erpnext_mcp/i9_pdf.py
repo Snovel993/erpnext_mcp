@@ -40,15 +40,37 @@ own label is "Address, City or Town, State, ZIP Code" — a box that would then
 hold something that is not an address, on a form an inspector reads box by box.
 An unlabelled number in an address box is worse than no number at all.
 
-**NO SIGNATURE, EVER.** Three of the four signature boxes are `/Tx` text
-fields, so a name typed into one would render as a signature and would be
-indistinguishable from one. It would not BE one: an electronic I-9 signature
-has to meet 8 CFR 274a.2(h)'s own requirements, and a string this app typed
-into a PDF meets none of them. What the app genuinely holds is a signature
-CAPTURE and a timestamp, and those go into Additional Information as what they
-are — attested on this date, from this address, through this app — so an
-auditor reads a fact instead of a picture of one. The boxes stay empty for a
-pen.
+**NO TYPED SIGNATURE, EVER — BUT THE CAPTURED ONE IS STAMPED IN.** v0.51.0
+changed half of this and left the other half exactly as it was, and the
+distinction is the whole point.
+
+What is still refused: typing a NAME into one of the four `/Tx` signature
+boxes. A string this app typed would render as a signature and would be
+indistinguishable from one, and it would not be one — 8 CFR 274a.2(h) asks for
+an electronic signature system, not for a name in a box, and a name in a box
+meets none of it.
+
+What is now drawn: the SIGNATURE THE PERSON ACTUALLY MADE. `section_1_signature`
+and `section_2_signature` hold a capture from the handset's canvas — the
+employee's own stroke, taken at the moment they attested, alongside
+`section_1_signed_at` and `section_1_signed_ip`. That is not a picture of an
+attestation, it IS the attestation, and leaving it on the record while printing
+an empty box was the gap: the employer held the signature and the retained form
+did not show it. The earlier draft of this module argued the boxes should "stay
+empty for a pen", which is the right answer for a form nobody signed and the
+wrong one for a form somebody did.
+
+It goes in as PAGE CONTENT, not as a field value and not as an annotation —
+`pdf_signing` says why at length — so the retained copy cannot be edited back
+into an unsigned one. The metadata that makes it an electronic signature rather
+than an image goes in Additional Information beside it: who signed, when, from
+where, and the regulation it was made under. `_attestation_lines` writes it.
+
+THE ORDER IS FILL, FLATTEN, THEN STAMP. Stamping before flattening paints the
+signature box's own (empty, sometimes opaque) appearance over the signature.
+
+A form with no capture on it behaves exactly as it always did: boxes empty, no
+flattening, a page to print and sign with a pen.
 
 **NO SOCIAL SECURITY NUMBER UNLESS ASKED FOR BY NAME.** `tools/i9.py` keeps the
 last four digits in a column and the nine in Frappe's encrypted `__Auth` table,
@@ -116,6 +138,7 @@ import hashlib
 import io
 import os
 
+from . import pdf_signing
 from .errors import ToolError
 
 try:  # pragma: no cover - exercised by whichever branch the test bench has
@@ -509,24 +532,45 @@ def _section_2(record: dict, employer: dict) -> dict:
 	return values
 
 
-def _attestation_lines(record: dict) -> list[str]:
-	"""What this app actually holds in place of the two empty signature boxes.
+#: 8 CFR 274a.2(h) is the rule an electronic I-9 signature is made under, and
+#: (h)(2) is the part that asks for a record verifying WHO signed and WHEN. The
+#: citation goes on the page because an inspector reading the retained form
+#: should not have to be told separately what the signature above it is.
+SIGNING_CITATION = "Electronically signed pursuant to 8 CFR 274a.2."
 
-	Said as prose, in the box the form provides for prose, because that is what
-	it is. A capture and a timestamp are evidence that somebody attested; they
-	are not the attestation, and the difference is the whole reason the
-	signature boxes above are empty.
+
+def _attestation_lines(record: dict) -> list[str]:
+	"""Who signed, when, from where — the record 8 CFR 274a.2(h)(2) asks for.
+
+	Said as prose, in the box the form provides for prose. The SIGNATURE itself
+	is on the signature line now (v0.51.0); this is the part a picture cannot
+	carry — the identity, the timestamp, the address the attestation came from,
+	and the regulation it was made under.
+
+	NAMED, NOT JUST DATED. (h)(2)(ii) asks for a record verifying the identity
+	of the person who produced the signature, and "Section 1 attested
+	electronically on 3 March" verifies nobody. The employee's own legal name
+	and the verifier's name are on the record already and go in the sentence.
 	"""
 	lines = []
-	for label, stamp, address, capture in (
+	employee = " ".join(
+		part for part in (
+			_text(record.get("legal_first_name")),
+			_text(record.get("legal_last_name")),
+		) if part
+	) or _text(record.get("employee_name"))
+
+	for label, who, stamp, address, capture in (
 		(
 			"Section 1",
+			employee,
 			record.get("section_1_signed_at"),
 			record.get("section_1_signed_ip"),
 			record.get("section_1_signature"),
 		),
 		(
 			"Section 2",
+			_text(record.get("verifier_name")),
 			record.get("section_2_signed_at"),
 			record.get("section_2_signed_ip"),
 			record.get("section_2_signature"),
@@ -535,14 +579,23 @@ def _attestation_lines(record: dict) -> list[str]:
 		when = _timestamp(stamp)
 		if not when:
 			continue
-		sentence = f"{label} attested electronically {when}"
+		sentence = f"{label} signed"
+		if who:
+			sentence += f" by {who}"
+		sentence += f" {when}"
 		where = _text(address)
 		if where:
-			sentence += f" from {where}"
+			sentence += f" from IP {where}"
 		sentence += " via the Farm Ops app"
 		if _text(capture):
-			sentence += "; signature capture retained on the record"
+			# Only claimable when there is a capture to have stamped. A record
+			# with a timestamp and no image still gets the sentence above,
+			# because the attestation happened; it just has an empty line.
+			sentence += "; signature image affixed above"
 		lines.append(sentence + ".")
+
+	if lines:
+		lines.append(SIGNING_CITATION)
 	return lines
 
 
@@ -926,8 +979,22 @@ def _split_shared_title(writer) -> bool:
 	return False  # pragma: no cover - a template whose duplicate name was fixed
 
 
+#: Which AcroForm signature box each captured signature belongs on. The keys are
+#: the I-9 Form fieldnames with `_signature` dropped; the values are USCIS's own
+#: widget names, which `pdf_signing.box_for` reads the geometry from rather than
+#: this module hardcoding coordinates that a template revision would silently
+#: move. `preparer` is deliberately absent — the doctype holds ONE
+#: `preparer_signature` and Supplement A has four numbered rows, so which row it
+#: belongs on is a guess, and a signature on the wrong row is worse than none.
+SIGNATURE_BOXES = {
+	"section_1": "Signature of Employee",
+	"section_2": "Signature of Employer or AR",
+}
+
+
 def fill_i9_pdf(record: dict, employer: dict, reverifications: list | None = None,
-                full_ssn: str = "", notes: list | None = None) -> bytes:
+                full_ssn: str = "", notes: list | None = None,
+                signatures: dict | None = None, flatten: bool | None = None) -> bytes:
 	"""The shipped USCIS form with this record's values in its boxes.
 
 	Args:
@@ -940,6 +1007,17 @@ def fill_i9_pdf(record: dict, employer: dict, reverifications: list | None = Non
 		full_ssn: nine digits, or "". See the module docstring — this is never
 			looked up here, and anything that is not nine digits is dropped.
 		notes: extra lines for the Additional Information box.
+		signatures: `{"section_1": png_bytes, "section_2": png_bytes}`. BYTES,
+			NOT FILE URLS — this module reads nothing, and the caller
+			(`tools/i9.render_i9_pdf`) is what turns the record's Attach fields
+			into bytes. An entry that is empty, unreadable or all paper is
+			skipped and its box is left for a pen.
+		flatten: whether to burn the form fields into the page so nothing is
+			editable. None — the default — means "flatten when at least one
+			signature was stamped", which is the honest rule: a SIGNED form must
+			not be editable afterwards, and an UNSIGNED one is the page somebody
+			prints and fills in, so flattening it would take away the only thing
+			it is for. True and False force it either way.
 
 	Returns:
 		PDF bytes. The template on disk is never modified.
@@ -963,6 +1041,25 @@ def fill_i9_pdf(record: dict, employer: dict, reverifications: list | None = Non
 		# /DA that is on the widget at the moment the value is set.
 		_prepare_widgets(writer, page_index, values)
 		writer.update_page_form_field_values(writer.pages[page_index], values, auto_regenerate=False)
+
+	# The geometry is read while the widgets still exist, the form is burned in,
+	# and only then is the ink laid down — see `pdf_signing`, which argues the
+	# order at length. Getting it backwards paints an empty signature box over
+	# the signature.
+	pending = {key: data for key, data in (signatures or {}).items()
+	           if key in SIGNATURE_BOXES and data}
+	boxes = pdf_signing.box_for(writer, {SIGNATURE_BOXES[key] for key in pending}) if pending else {}
+
+	should_flatten = flatten if flatten is not None else bool(pending)
+	if should_flatten:
+		pdf_signing.flatten(writer)
+
+	for key, data in pending.items():
+		box = boxes.get(SIGNATURE_BOXES[key])
+		if not box:  # pragma: no cover - a template whose box was renamed
+			continue
+		pdf_signing.stamp(writer, box["page"], box["rect"], data,
+		                  max_height=box["max_height"])
 
 	buffer = io.BytesIO()
 	writer.write(buffer)

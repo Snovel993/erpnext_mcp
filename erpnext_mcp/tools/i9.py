@@ -102,7 +102,7 @@ from .. import compat, i9_pdf
 from ..args import as_bool, as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
-from . import artifacts, signers
+from . import artifacts, files, signers
 
 I9_FORM = "I-9 Form"
 I9_AUDIT_LOG = "I-9 Audit Log"
@@ -1448,7 +1448,9 @@ def render_i9_pdf(args: dict) -> ToolResult:
     ssn = _full_ssn(name, args)
     notes = _render_notes(args)
 
-    pdf = i9_pdf.fill_i9_pdf(record, employer, reverifications, full_ssn=ssn, notes=notes)
+    signatures = _signature_captures(record)
+    pdf = i9_pdf.fill_i9_pdf(record, employer, reverifications, full_ssn=ssn, notes=notes,
+                             signatures=signatures)
     file_name = i9_pdf.file_name_for(record)
     attachment = artifacts.attach_bytes(I9_FORM, name, file_name, pdf, field="generated_pdf")
     frappe.db.set_value(I9_FORM, name, "generated_pdf_on", frappe.utils.now(), update_modified=False)
@@ -1488,13 +1490,45 @@ def render_i9_pdf(args: dict) -> ToolResult:
     return ToolResult(data=data, summary=summary)
 
 
+def _signature_captures(record: dict) -> dict:
+    """The two signature images off the record, as bytes, for `fill_i9_pdf`.
+
+    THE READING HAPPENS HERE BECAUSE `i9_pdf` IS A PURE FUNCTION. That module
+    takes dicts and returns bytes and touches no database, which is what makes
+    it checkable against a fixture; resolving an Attach field to a File row is a
+    site read and belongs on this side of the line.
+
+    A CAPTURE THAT CANNOT BE READ IS NOT AN ERROR. A File deleted out from under
+    the record, a permission that has changed, a path that moved between private
+    and public — each of those costs the SIGNATURE and leaves the box empty for
+    a pen, which is the page this app produced for its whole life before
+    v0.51.0. Failing the render instead would mean an employer who lost one
+    image cannot print the form at all.
+    """
+    captures: dict = {}
+    for key in i9_pdf.SIGNATURE_BOXES:
+        url = str(record.get(f"{key}_signature") or "").strip()
+        if not url:
+            continue
+        try:
+            docname = frappe.db.get_value("File", {"file_url": url}, "name")
+            if not docname:
+                continue
+            captures[key] = files.read_file_bytes(str(docname))
+        except Exception:
+            continue
+    return captures
+
+
 #: Said on every render, because a filled federal form is the thing somebody is
 #: most likely to mistake for a completed one.
 _RENDER_NOTE = (
-    "Both signature boxes are deliberately empty: an electronic I-9 signature has to meet "
-    "8 CFR 274a.2(h)'s own requirements and a name typed into a PDF does not. Print the page, "
-    "have the employee and the verifier sign it, and file the scan back with "
-    "attach_signed_i9. Rendering moved no status — the form is still whatever it was."
+    "Signatures captured in the app are stamped into the page content itself and the form is "
+    "then flattened, so the retained copy cannot be edited back into an unsigned one. Who "
+    "signed, when and from what address are printed in Additional Information — the record "
+    "8 CFR 274a.2(h) asks for, since a signature image on its own is not an electronic "
+    "signature. A box with no capture behind it is left empty for a pen: print the page, have "
+    "it signed, and file the scan back with attach_signed_i9. Rendering moved no status."
 )
 
 #: Which of the boxes a complete I-9 needs are empty on this record, and what

@@ -47,7 +47,7 @@ from ..withholding import (
     SEED_TAX_YEAR,
     calculate_federal_withholding,
 )
-from . import artifacts, signers
+from . import artifacts, files, signers
 
 W4_FORM = "W-4 Form"
 FEDERAL_TAX_TABLE = "Federal Tax Table"
@@ -507,6 +507,25 @@ def _employer_for(company: str) -> dict:
         return {"name": str(company or "").strip(), "address": "", "ein": ""}
 
 
+def _signature_capture(record: dict) -> bytes | None:
+    """The employee's signature image off the record, as bytes, for `fill_w4_pdf`.
+
+    Site read on this side of the line because `w4_pdf` is a pure function, and
+    a capture that cannot be read costs the SIGNATURE rather than the render —
+    the same posture, and the same reasoning, as `i9._signature_captures`.
+    """
+    url = str(record.get("signature") or "").strip()
+    if not url:
+        return None
+    try:
+        docname = frappe.db.get_value("File", {"file_url": url}, "name")
+        if not docname:
+            return None
+        return files.read_file_bytes(str(docname))
+    except Exception:
+        return None
+
+
 def render_w4_pdf(args: dict) -> ToolResult:
     """Fill the IRS Form W-4 from this record and attach it to the record.
 
@@ -562,7 +581,7 @@ def render_w4_pdf(args: dict) -> ToolResult:
     person = _employee_for(employee)
     employer = _employer_for(str(row.get("company") or ""))
 
-    pdf = w4_pdf.fill_w4_pdf(record, person, employer)
+    pdf = w4_pdf.fill_w4_pdf(record, person, employer, signature=_signature_capture(record))
     file_name = w4_pdf.file_name_for(record, person)
     attachment = artifacts.attach_bytes(W4_FORM, name, file_name, pdf, field="generated_pdf")
     frappe.db.set_value(W4_FORM, name, "generated_pdf_on", now(), update_modified=False)

@@ -43,12 +43,13 @@ EVERY CLASS THAT NEEDS pypdf SKIPS WITHOUT IT, the same posture
 and is the half most likely to be got wrong.
 """
 
+import io
 import unittest
 from datetime import date, timedelta
 
 import frappe
 
-from erpnext_mcp import i9_pdf
+from erpnext_mcp import i9_pdf, pdf_signing
 
 from .fixtures import MAIN
 from .harness import STORE
@@ -485,11 +486,34 @@ class AdditionalInformation(unittest.TestCase):
 		planned = i9_pdf.plan(record or a_record(), employer, reverifications or [], notes=notes)
 		return planned[i9_pdf.PAGE_FORM].get("Additional Information", "")
 
-	def test_the_attestations_are_recorded_as_what_they_are(self):
+	def test_the_attestations_name_who_signed_and_under_what_rule(self):
+		"""v0.51.0. 8 CFR 274a.2(h)(2)(ii) asks for a record verifying the
+		IDENTITY of whoever produced the signature, and "attested electronically
+		on 1 April" verifies nobody. The name, the timestamp, the address and
+		the citation are the record; the signature itself is on the line above."""
 		body = self.note()
-		self.assertIn("Section 1 attested electronically 04/01/2026 07:14 from 10.0.0.5", body)
-		self.assertIn("Section 2 attested electronically 04/02/2026 16:02", body)
-		self.assertIn("signature capture retained on the record", body)
+		self.assertIn("Section 1 signed by Maria Garcia 04/01/2026 07:14 from IP 10.0.0.5", body)
+		self.assertIn("Section 2 signed by Ana Ramos 04/02/2026 16:02 from IP 10.0.0.9", body)
+		self.assertIn("Electronically signed pursuant to 8 CFR 274a.2.", body)
+
+	def test_the_page_only_claims_a_signature_it_actually_has(self):
+		"""The sentence says the image was affixed. It may only say that where
+		there IS a capture — a record with a timestamp and no image attested
+		perfectly well and has an empty signature line, and claiming otherwise
+		on a federal form is the kind of small lie an audit is built to find."""
+		with_capture = self.note()
+		self.assertIn("signature image affixed above", with_capture)
+
+		without = self.note(a_record(section_1_signature="", section_2_signature=""))
+		self.assertNotIn("signature image affixed above", without)
+		# The attestation still happened, so it is still recorded.
+		self.assertIn("Section 1 signed by Maria Garcia", without)
+		self.assertIn("Electronically signed pursuant to 8 CFR 274a.2.", without)
+
+	def test_a_form_nobody_signed_gets_no_attestation_and_no_citation(self):
+		body = self.note(a_record(section_1_signed_at="", section_2_signed_at=""))
+		self.assertNotIn("signed by", body)
+		self.assertNotIn("8 CFR 274a.2.", body)
 
 	def test_a_receipt_names_the_list_and_the_deadline(self):
 		"""M-274 §4.3: the receipt goes in the document boxes, the fact goes here."""
@@ -994,6 +1018,180 @@ class AttachSignedTool(I9PdfToolTestCase):
 		after = self.tool_data("get_i9_form", {"employee": "HR-EMP-00001"})
 		self.assertTrue(after["signed_pdf"])
 		self.assertTrue(after["signed_pdf_on"])
+
+
+# ── the signature, stamped into the page ──────────────────────────────────────
+
+
+def a_capture(width=700, height=200, opaque=True) -> bytes:
+	"""What `SignatureCanvas.renderPNG` produces: OPAQUE, white paper, black ink,
+	and a wide empty margin around a signature written in the middle of it."""
+	from PIL import Image, ImageDraw
+
+	mode, background = ("RGB", (255, 255, 255)) if opaque else ("RGBA", (0, 0, 0, 0))
+	image = Image.new(mode, (width, height), background)
+	ink = (0, 0, 0) if opaque else (0, 0, 0, 255)
+	ImageDraw.Draw(image).line(
+		[(150, 130), (200, 70), (250, 130), (300, 60), (360, 120), (420, 80), (470, 110)],
+		fill=ink, width=5, joint="curve")
+	buffer = io.BytesIO()
+	image.save(buffer, format="PNG")
+	return buffer.getvalue()
+
+
+@unittest.skipUnless(pdf_signing.available(), "needs Pillow and reportlab")
+class TheCaptureBecomesInk(unittest.TestCase):
+	"""`ink_only` — the difference between a signature and a white sticker.
+
+	The handset renders with `format.opaque = true` and fills the canvas white
+	before it strokes, so the PNG on the record is a white rectangle with a
+	signature in the middle. Drawn as-is it covers the signature rule, the
+	caption under it and whatever the form printed either side.
+	"""
+
+	def test_the_paper_is_keyed_out_and_the_ink_is_cropped_to(self):
+		png, width, height = pdf_signing.ink_only(a_capture())
+		# 700x200 of mostly paper becomes the bounding box of the stroke.
+		self.assertLess(width, 400)
+		self.assertLess(height, 100)
+		from PIL import Image
+
+		out = Image.open(io.BytesIO(png)).convert("RGBA")
+		# The corners are now transparent — that is the paper, gone.
+		self.assertEqual(out.getpixel((0, 0))[3], 0)
+		# And something opaque survived, which is the ink.
+		self.assertEqual(out.getchannel("A").getextrema()[1], 255)
+
+	def test_the_crop_is_what_makes_the_signature_legible(self):
+		"""Aspect ratio is the whole argument. The I-9's employee signature box
+		is 25:1; ink that arrives at 3.5:1 uncropped and 4.4:1 cropped is scaled
+		to the box HEIGHT either way, so the crop is worth about 25% more ink."""
+		raw = a_capture()
+		_png, cropped_w, cropped_h = pdf_signing.ink_only(raw)
+		from PIL import Image
+
+		original = Image.open(io.BytesIO(raw))
+		self.assertGreater(cropped_w / cropped_h, original.width / original.height)
+
+	def test_an_already_transparent_capture_is_left_alone_and_cropped(self):
+		png, width, height = pdf_signing.ink_only(a_capture(opaque=False))
+		self.assertLess(width, 400)
+		self.assertTrue(png.startswith(b"\x89PNG"))
+
+	def test_a_blank_canvas_is_no_signature_rather_than_a_white_box(self):
+		from PIL import Image
+
+		buffer = io.BytesIO()
+		Image.new("RGB", (400, 120), (255, 255, 255)).save(buffer, format="PNG")
+		self.assertIsNone(pdf_signing.ink_only(buffer.getvalue()))
+
+	def test_rubbish_bytes_cost_the_signature_and_not_the_render(self):
+		self.assertIsNone(pdf_signing.ink_only(b"this is not a png"))
+		self.assertIsNone(pdf_signing.ink_only(b""))
+
+
+@unittest.skipUnless(pdf_signing.available(), "needs Pillow and reportlab")
+class TheSignedFormCannotBeEdited(unittest.TestCase):
+	"""v0.51.0. The signature goes into the page, and the form goes away.
+
+	THE CLAIM IS NOT "THE SIGNATURE IS VISIBLE" — it is that the retained copy
+	cannot be edited back into an unsigned one. An image dropped in as a field
+	value is deletable by anybody who opens the form and an annotation is
+	deletable in Preview with one click, so both would satisfy a screenshot and
+	neither would satisfy an inspection.
+	"""
+
+	def rendered(self, **kwargs):
+		from pypdf import PdfReader
+
+		pdf = i9_pdf.fill_i9_pdf(a_record(), EMPLOYER, [], **kwargs)
+		return pdf, PdfReader(io.BytesIO(pdf))
+
+	def test_a_signed_render_has_no_form_left_in_it(self):
+		signatures = {"section_1": a_capture(), "section_2": a_capture()}
+		_pdf, reader = self.rendered(signatures=signatures)
+
+		self.assertIsNone(reader.get_fields())
+		self.assertNotIn("/AcroForm", reader.trailer["/Root"])
+		for page in reader.pages:
+			widgets = [a for a in (page.get("/Annots") or [])
+			           if a.get_object().get("/Subtype") == "/Widget"]
+			self.assertEqual(widgets, [], "a widget survived the flatten")
+
+	def test_flattening_keeps_every_value_that_was_filled_in(self):
+		"""The failure mode that would matter most: a flatten that drops the
+		appearance streams produces a beautiful blank federal form."""
+		_pdf, reader = self.rendered(signatures={"section_1": a_capture()})
+		text = "\n".join(page.extract_text() for page in reader.pages)
+		self.assertIn("Garcia", text)
+		self.assertIn("Maria", text)
+		self.assertIn("Yakima", text)
+		self.assertIn("SRC1234567890", text)
+
+	def test_the_signature_is_page_content_rather_than_an_annotation(self):
+		_pdf, reader = self.rendered(signatures={"section_1": a_capture()})
+		page = reader.pages[i9_pdf.PAGE_FORM]
+		images = [key for key, value in (page["/Resources"].get("/XObject") or {}).items()
+		          if value.get_object().get("/Subtype") == "/Image"]
+		self.assertTrue(images, "the signature did not reach the page's resources")
+		# No widget survives. USCIS's own /Link annotations to uscis.gov DO —
+		# they are the government's page furniture, not this app's form fields,
+		# and stripping them would be editing the form rather than filling it.
+		kinds = [str(a.get_object().get("/Subtype")) for a in (page.get("/Annots") or [])]
+		self.assertNotIn("/Widget", kinds)
+		self.assertEqual(set(kinds), {"/Link"})
+
+	def test_an_unsigned_render_is_still_a_fillable_form(self):
+		"""The page an employer prints and signs with a pen. Flattening it would
+		take away the only thing it is for, so a render with no capture behind
+		it keeps every field exactly as it always did."""
+		_pdf, reader = self.rendered()
+		fields = reader.get_fields()
+		self.assertTrue(fields)
+		self.assertIn("Signature of Employee", fields)
+		self.assertIn("/AcroForm", reader.trailer["/Root"])
+
+	def test_flatten_can_be_forced_either_way(self):
+		from pypdf import PdfReader
+
+		forced = PdfReader(io.BytesIO(i9_pdf.fill_i9_pdf(
+			a_record(), EMPLOYER, [], flatten=True)))
+		self.assertIsNone(forced.get_fields())
+
+		kept = PdfReader(io.BytesIO(i9_pdf.fill_i9_pdf(
+			a_record(), EMPLOYER, [], signatures={"section_1": a_capture()}, flatten=False)))
+		self.assertTrue(kept.get_fields())
+
+	def test_an_unreadable_capture_costs_the_signature_and_not_the_form(self):
+		"""A File that moved, a truncated upload, a format Pillow will not open.
+		The employer still gets a printable I-9 with an empty signature line."""
+		pdf = i9_pdf.fill_i9_pdf(a_record(), EMPLOYER, [],
+		                         signatures={"section_1": b"not a png at all"})
+		self.assertTrue(pdf.startswith(b"%PDF"))
+
+	def test_the_signature_lands_on_its_own_line_and_not_the_next_row(self):
+		"""`box_for` reads USCIS's own widget rectangle and measures the clear
+		space above it, so the ink grows into the gap rather than into the
+		A-Number row. Hardcoded coordinates would move under a template
+		revision; this does not."""
+		from pypdf import PdfWriter
+
+		writer = PdfWriter(clone_from=i9_pdf.TEMPLATE_PATH)
+		boxes = pdf_signing.box_for(writer, set(i9_pdf.SIGNATURE_BOXES.values()))
+		employee = boxes["Signature of Employee"]
+
+		self.assertEqual(employee["page"], i9_pdf.PAGE_FORM)
+		x0, y0, x1, y1 = employee["rect"]
+		# Taller than the widget, because a 12.9pt signature on a 323pt line is
+		# a smudge — and still clear of the row above, which starts at 444.2.
+		self.assertGreater(employee["max_height"], y1 - y0)
+		self.assertLessEqual(y0 + employee["max_height"], 444.2)
+
+	def test_the_preparer_box_is_deliberately_not_wired(self):
+		"""One `preparer_signature` on the record, four numbered rows on
+		Supplement A. Which row it belongs on is a guess, and a signature on the
+		wrong row is worse than an empty one."""
+		self.assertNotIn("preparer", i9_pdf.SIGNATURE_BOXES)
 
 
 if __name__ == "__main__":
