@@ -1624,6 +1624,132 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			self.wire("upload_signed_i9", employee=self.NEW_HIRE)
 		self.assertIn("finalize_staged_file", str(caught.exception))
 
+	# ── v0.47.2: what v0.47.0 taught the tool and the transport dropped ──────
+	def test_36_the_i94_admission_number_reaches_the_record(self):
+		"""v0.47.0 gave Section 1 three ways to identify an alien authorized to
+		work and this wrapper carried one of them. A worker holding an I-94 and
+		no A-Number filled the form on a phone and was refused for a field the
+		transport had thrown away before the tool ever saw it."""
+		self.the_hr_furniture()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		row = self.wire(
+			"submit_i9_section_1",
+			employee=self.NEW_HIRE,
+			citizenship_status="Alien Authorized to Work",
+			i94_admission_number="94123456789",
+			work_authorization_expiry="2027-05-01",
+		)
+		self.assertEqual(row["status"], "Section 1 Complete")
+		filed = next(iter(STORE.rows("I-9 Form")))
+		self.assertEqual(filed["i94_admission_number"], "94123456789")
+		self.assertEqual(str(filed["alien_work_authorization_expiry"]), "2027-05-01")
+
+	def test_36_the_foreign_passport_pair_reaches_the_record_together(self):
+		"""Both halves or neither. The tool refuses a passport number with no
+		issuing country, and that refusal is only reachable if BOTH keys survive
+		the transport — a wrapper carrying the number alone would turn a complete
+		form into a permanent refusal."""
+		self.the_hr_furniture()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire(
+			"submit_i9_section_1",
+			employee=self.NEW_HIRE,
+			citizenship_status="Alien Authorized to Work",
+			foreign_passport_number="X1234567",
+			foreign_passport_country="Mexico",
+			work_authorization_expiry="2027-05-01",
+		)
+		filed = next(iter(STORE.rows("I-9 Form")))
+		self.assertEqual(filed["foreign_passport_number"], "X1234567")
+		self.assertEqual(filed["foreign_passport_country"], "Mexico")
+
+	def test_36_a_passport_with_no_country_is_still_the_tools_refusal(self):
+		"""The point of forwarding the pair is that the tool gets to judge it."""
+		self.the_hr_furniture()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		with self.assertRaises(Exception) as caught:
+			self.wire(
+				"submit_i9_section_1",
+				employee=self.NEW_HIRE,
+				citizenship_status="Alien Authorized to Work",
+				foreign_passport_number="X1234567",
+			)
+		self.assertIn("foreign_passport_country", str(caught.exception))
+
+	def test_37_a_receipt_examined_on_a_phone_is_recorded_as_a_receipt(self):
+		"""THE ONE THAT MATTERS. Dropping the flag did not lose a nicety: it
+		filed a receipt as though the document itself had been examined, which is
+		a false attestation on a federal form, and the 90-day clock that says when
+		the real document is owed never started."""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire("submit_i9_section_1", employee=self.NEW_HIRE, citizenship_status="US Citizen")
+		row = self.wire(
+			"submit_i9_section_2",
+			employee=self.NEW_HIRE,
+			document_path="List A",
+			list_a_doc_type="U.S. Passport",
+			list_a_authority="US Dept of State",
+			list_a_doc_number="P1234567",
+			list_a_is_receipt=True,
+			verifier_name="Ana Ramos",
+			verifier_title="Farm Manager",
+			verification_date=frappe.utils.today(),
+		)
+		self.assertEqual(row["status"], "Complete")
+		filed = next(iter(STORE.rows("I-9 Form")))
+		self.assertTrue(int(filed["list_a_is_receipt"] or 0))
+		self.assertTrue(int(filed["receipt_pending"] or 0))
+		self.assertTrue(filed["receipt_expires_on"])
+
+	def test_37_the_b_and_c_receipt_flags_travel_independently(self):
+		"""Two documents, two answers. A worker may present the real driver's
+		licence and a receipt for the replacement Social Security card, and a
+		transport that carried one flag for both would record the wrong one."""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire("submit_i9_section_1", employee=self.NEW_HIRE, citizenship_status="US Citizen")
+		self.wire(
+			"submit_i9_section_2",
+			employee=self.NEW_HIRE,
+			document_path="List B + C",
+			list_b_doc_type="Driver's License",
+			list_b_authority="Oregon DMV",
+			list_b_is_receipt=False,
+			list_c_doc_type="Social Security Card (Unrestricted)",
+			list_c_authority="SSA",
+			list_c_is_receipt=True,
+			verifier_name="Ana Ramos",
+			verifier_title="Farm Manager",
+			verification_date=frappe.utils.today(),
+		)
+		filed = next(iter(STORE.rows("I-9 Form")))
+		self.assertFalse(int(filed["list_b_is_receipt"] or 0))
+		self.assertTrue(int(filed["list_c_is_receipt"] or 0))
+
+	def test_37_a_section_2_that_sends_no_flag_records_no_receipt(self):
+		"""The pre-v0.47.2 caller, unchanged. An app that has not grown the
+		checkbox sends nothing and gets the honest answer rather than a default
+		that quietly asserts a receipt nobody saw."""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire("submit_i9_section_1", employee=self.NEW_HIRE, citizenship_status="US Citizen")
+		self.wire(
+			"submit_i9_section_2",
+			employee=self.NEW_HIRE,
+			document_path="List A",
+			list_a_doc_type="U.S. Passport",
+			list_a_authority="US Dept of State",
+			verifier_name="Ana Ramos",
+			verification_date=frappe.utils.today(),
+		)
+		filed = next(iter(STORE.rows("I-9 Form")))
+		self.assertFalse(int(filed["list_a_is_receipt"] or 0))
+		self.assertFalse(int(filed["receipt_pending"] or 0))
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):

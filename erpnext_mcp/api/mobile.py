@@ -1223,6 +1223,9 @@ def submit_i9_section_1(
 	address_state=None,
 	address_zip=None,
 	alien_registration_number=None,
+	i94_admission_number=None,
+	foreign_passport_number=None,
+	foreign_passport_country=None,
 	work_authorization_expiry=None,
 	legal_first_name=None,
 	legal_last_name=None,
@@ -1250,6 +1253,17 @@ def submit_i9_section_1(
 	value sent alongside any other citizenship status is dropped there rather than
 	here — that is the tool's rule about its own field.
 
+	THE OTHER TWO ALIEN IDENTIFIERS ARE FORWARDED UNRENAMED. v0.47.0 taught the
+	tool that Section 1 takes an A-Number, an I-94 admission number, OR a foreign
+	passport with the country that issued it — any one of the three answers the
+	question — and this wrapper carried only the first, so a worker holding an
+	I-94 and no A-Number could fill the form on a phone and be refused for a field
+	the transport had dropped. `i94_admission_number`, `foreign_passport_number`
+	and `foreign_passport_country` go through under the tool's own names because
+	the doctype's columns and USCIS's wording agree, so there is nothing to
+	rename. That a passport number without its country is refused, and that all
+	three are read only for "Alien Authorized to Work", are the tool's rules.
+
 	`preparer_used` and the three preparer fields ARE NOT ACCEPTED. A preparer or
 	translator signs their own attestation on paper, and a phone that could set
 	`preparer_used` without carrying that signature would record an attestation
@@ -1276,6 +1290,9 @@ def submit_i9_section_1(
 		("address_state", address_state),
 		("address_zip", address_zip),
 		("alien_registration_number", alien_registration_number),
+		("i94_admission_number", i94_admission_number),
+		("foreign_passport_number", foreign_passport_number),
+		("foreign_passport_country", foreign_passport_country),
 		("date_of_birth", date_of_birth),
 		("email", email),
 		("phone", phone),
@@ -1302,14 +1319,17 @@ def submit_i9_section_2(
 	list_a_doc_number=None,
 	list_a_authority=None,
 	list_a_expiry=None,
+	list_a_is_receipt=None,
 	list_b_doc_type=None,
 	list_b_doc_number=None,
 	list_b_authority=None,
 	list_b_expiry=None,
+	list_b_is_receipt=None,
 	list_c_doc_type=None,
 	list_c_doc_number=None,
 	list_c_authority=None,
 	list_c_expiry=None,
+	list_c_is_receipt=None,
 	document_copies_stored=None,
 	section_2_signature=None,
 ) -> dict:
@@ -1328,6 +1348,21 @@ def submit_i9_section_2(
 	and refuses a verification more than three business days after the hire date —
 	all of which is 8 U.S.C. §1324a's rule rather than this transport's, so none
 	of it is restated here.
+
+	THE THREE RECEIPT FLAGS ARE NOT RENAMED and they are the reason this wrapper
+	changed. v0.47.0 taught the tool 8 CFR 274a.2(b)(1)(vi) — a worker whose
+	document was lost, stolen or damaged presents a receipt for the replacement
+	and may lawfully work while it comes — and the transport dropped the flag, so
+	every receipt examined on a phone was filed as though the document itself had
+	been seen. That is a false attestation on a federal form, and the 90-day clock
+	`receipt_expires_on` starts never started. `list_a_is_receipt`,
+	`list_b_is_receipt` and `list_c_is_receipt` are booleans; unsent, the tool
+	defaults each to false, which is the pre-v0.47.0 behaviour for a caller that
+	has not grown the checkbox yet.
+
+	A RECEIPT STILL COMPLETES THE FORM AND STILL NEEDS ITS TITLE. Neither is this
+	transport's rule: the tool sets Complete because the person may work, and
+	checks the title because a receipt is a receipt FOR a named document.
 
 	`verifier_name` IS THE TYPED ONE, not the caller's. The person examining the
 	documents signs their own name to the attestation, and the account that made
@@ -1349,14 +1384,17 @@ def submit_i9_section_2(
 		("list_a_doc_number", list_a_doc_number),
 		("list_a_doc_authority", list_a_authority),
 		("list_a_doc_expiry", list_a_expiry),
+		("list_a_is_receipt", list_a_is_receipt),
 		("list_b_doc_title", list_b_doc_type),
 		("list_b_doc_number", list_b_doc_number),
 		("list_b_doc_authority", list_b_authority),
 		("list_b_doc_expiry", list_b_expiry),
+		("list_b_is_receipt", list_b_is_receipt),
 		("list_c_doc_title", list_c_doc_type),
 		("list_c_doc_number", list_c_doc_number),
 		("list_c_doc_authority", list_c_authority),
 		("list_c_doc_expiry", list_c_expiry),
+		("list_c_is_receipt", list_c_is_receipt),
 		("document_copies_stored", document_copies_stored),
 		("section_2_signature", section_2_signature),
 	):

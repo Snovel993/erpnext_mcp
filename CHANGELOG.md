@@ -3,6 +3,45 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.47.2 — 2026-08-07
+
+**v0.47.0 taught the tool six fields and the transport dropped every one of
+them.** The mobile wrappers in `api/mobile.py` declare their arguments one by
+one, and `farmops_api/routes.py` reads the accepted body keys straight off those
+signatures with `inspect` — which is the right design, because an allowlist that
+cannot go stale is better than one somebody has to remember to edit. What it
+means is that a field the tool learned and the wrapper did not is not a
+half-working field: it is dropped silently, before the tool ever sees it, and the
+call succeeds. Six of v0.47.0's new fields were in that state.
+
+**Three of them made a lawful worker unfileable.** Section 1 of Form I-9 asks an
+Alien Authorized to Work for **one** of three identifiers, and v0.47.0 gave the
+tool all three — A-Number, I-94 admission number, or foreign passport with its
+country of issuance. `submit_i9_section_1` carried only the A-Number. A picker
+holding an I-94 and no A-Number filled in the form on a phone, sent the number,
+and was refused for a missing identifier they had just provided; the same for a
+passport. Both keys of the passport pair are now forwarded together, so the
+tool's own refusal of a number with no country is reachable rather than
+pre-empted.
+
+**The other three filed a false attestation.** 8 CFR 274a.2(b)(1)(vi) lets an
+employee whose document was lost, stolen or damaged present a receipt for the
+replacement and work while it comes. v0.47.0 recorded that — `list_a_is_receipt`
+and its two siblings set `receipt_pending` and start a 90-day clock in
+`receipt_expires_on`. Dropped at the transport, every receipt a foreman examined
+in an orchard was filed as though the document itself had been examined, and the
+clock that says when the real one is owed never started. The three flags travel
+independently, because a worker may present a real driver's licence alongside a
+receipt for a replacement Social Security card and the form has to say which is
+which.
+
+**Nothing else was missing.** `reverify_i9` already declares every field its tool
+accepts, and all seven I-9 routes — including v0.47.1's `get_i9_form`,
+`generate_i9_pdf` and `upload_signed_i9` — are published. Six tests cover the
+pass-through end to end; five of them fail against v0.47.1. No doctype changed,
+no migration is needed, and a caller that has not grown the new inputs behaves
+exactly as it did.
+
 ## 0.47.1 — 2026-08-07
 
 **Four releases collected the data and nothing produced the form.** v0.27.0
