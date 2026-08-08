@@ -272,6 +272,12 @@
   "allow_destroy_i9",
   "allow_render_i9_pdf",
   "allow_attach_signed_i9",
+  "signers_section",
+  "allow_list_authorized_signers",
+  "allow_add_authorized_signer",
+  "signers_col",
+  "allow_update_authorized_signer",
+  "allow_remove_authorized_signer",
   "w4_section",
   "allow_get_w4",
   "allow_list_w4_forms",
@@ -284,6 +290,7 @@
   "allow_submit_w4",
   "allow_update_fica_config",
   "allow_import_federal_tax_table",
+  "allow_render_w4_pdf",
   "state_tax_section",
   "allow_get_state_tax_config",
   "allow_list_state_tax_configs",
@@ -2264,6 +2271,43 @@
    "label": "Attach Signed I-9"
   },
   {
+   "fieldname": "signers_section",
+   "fieldtype": "Section Break",
+   "label": "Authorized Signers (I-9 and W-4)"
+  },
+  {
+   "default": "1",
+   "description": "READ. Who this employer has authorised to sign a federal employment form, and whether the roster is configured at all. AN EMPTY ROSTER MEANS UNRESTRICTED — which is what every site is until somebody adds the first signer, and is why this switch is on by default: a caller has to be able to find out which case a site is in.",
+   "fieldname": "allow_list_authorized_signers",
+   "fieldtype": "Check",
+   "label": "List Authorized Signers"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Authorize one User account to sign Form I-9 Section 2 and/or Form W-4's employer block. THE FIRST ROW TURNS ENFORCEMENT ON for the whole site — from then on an account not on the roster cannot complete a Section 2, so add everybody who verifies documents, including yourself.",
+   "fieldname": "allow_add_authorized_signer",
+   "fieldtype": "Check",
+   "label": "Add Authorized Signer"
+  },
+  {
+   "fieldname": "signers_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Change one signer's printed name, title, which of the two forms they may sign, or whether the authorisation is live. active=true is how somebody deactivated is put back.",
+   "fieldname": "allow_update_authorized_signer",
+   "fieldtype": "Check",
+   "label": "Update Authorized Signer"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Deactivate one authorized signer. The row is KEPT and its active flag cleared — a form signed in a prior season was signed by whoever was authorised then, and a deleted row makes that unanswerable. There is no delete tool.",
+   "fieldname": "allow_remove_authorized_signer",
+   "fieldtype": "Check",
+   "label": "Remove Authorized Signer"
+  },
+  {
    "fieldname": "w4_section",
    "fieldtype": "Section Break",
    "label": "W-4 / Federal Withholding"
@@ -2342,6 +2386,13 @@
    "fieldname": "allow_import_federal_tax_table",
    "fieldtype": "Check",
    "label": "Import Federal Tax Table"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Fill the official IRS Form W-4 from a record and attach the PDF privately to generated_pdf. The Employers Only block — name and address, first date of employment, EIN — is resolved from I-9 Settings, the Company and Employee.date_of_joining, so no caller supplies it. The signature line and the SSN box are left for a pen.",
+   "fieldname": "allow_render_w4_pdf",
+   "fieldtype": "Check",
+   "label": "Render W-4 PDF"
   },
   {
    "fieldname": "state_tax_section",

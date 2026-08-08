@@ -281,10 +281,12 @@ class ToolRegistration(unittest.TestCase):
 		# (five read, three write) — see test_bucket_bridge.py's ToolRegistration —
 		# plus v0.46.2's `get_employee`, one more read, plus v0.47.0's
 		# `reverify_i9`, one more write, plus v0.47.1's `render_i9_pdf` and
-		# `attach_signed_i9` — two more writes, and no more reads.
-		self.assertEqual(len(self.registry.TOOLS), 381)
-		self.assertEqual(len(self.registry.READ_TOOLS), 176)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 205)
+		# `attach_signed_i9` — two more writes, and no more reads — plus
+		# v0.48.0's authorized signer roster (one read, three writes) and
+		# `render_w4_pdf`, a fourth write.
+		self.assertEqual(len(self.registry.TOOLS), 386)
+		self.assertEqual(len(self.registry.READ_TOOLS), 177)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 209)
 
 
 if __name__ == "__main__":

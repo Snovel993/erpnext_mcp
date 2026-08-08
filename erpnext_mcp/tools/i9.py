@@ -102,7 +102,7 @@ from .. import compat, i9_pdf
 from ..args import as_bool, as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
-from . import artifacts
+from . import artifacts, signers
 
 I9_FORM = "I-9 Form"
 I9_AUDIT_LOG = "I-9 Audit Log"
@@ -733,6 +733,17 @@ def submit_i9_section_2(args: dict) -> ToolResult:
     receipt FOR a named document and the document it replaces is what has to be
     on the list. A receipt whose slot is empty of a title is a form recording
     that something was examined without saying what.
+
+    v0.48.0: THE VERIFIER IS CHECKED AGAINST A ROSTER, WHERE THERE IS ONE.
+    Section 2 is an attestation under penalty of perjury that a named person
+    examined the documents, and `verifier_name` was a string on a JSON body with
+    nothing behind it. Where I-9 Settings has authorized signers configured, the
+    calling account has to be one of them, and their own printed name and title
+    are what go on the form — `signers.resolve_signature` decides, and its
+    docstring carries the whole rule including when an explicit name is still
+    accepted. Where NO signers are configured the tool behaves exactly as it did
+    before, `verifier_name` included, which is what every site is on the day it
+    upgrades.
     """
     employee = _resolve_employee(args)
     i9_name = frappe.db.get_value(
@@ -790,8 +801,12 @@ def submit_i9_section_2(args: dict) -> ToolResult:
         doc.list_a_is_receipt = 0
 
     doc.document_copies_stored = as_bool(args, "document_copies_stored", False)
-    doc.verifier_name = as_str(args, "verifier_name", required=True)
-    doc.verifier_title = as_str(args, "verifier_title")
+    # Resolved BEFORE the save and after the documents, so a caller who is not
+    # authorized to sign is refused having changed nothing — `doc` is still in
+    # memory at this point and the record on disk is untouched.
+    signature = signers.resolve_signature(args, "I-9", "verifier_name", "verifier_title")
+    doc.verifier_name = signature["name"]
+    doc.verifier_title = signature["title"]
     doc.verification_date = verification_date
 
     sig = as_str(args, "section_2_signature")
@@ -820,6 +835,11 @@ def submit_i9_section_2(args: dict) -> ToolResult:
         "verifier_name": doc.verifier_name,
         "verification_date": str(verification_date),
         "receipt_lists": receipt_lists,
+        # Whether the name on the form was checked against a roster, and whether
+        # it is the calling account's own. Both are facts an inspection asks
+        # about a signature and neither is recoverable from the form afterwards.
+        "signer_roster": bool(signature["configured"]),
+        "signed_on_behalf_of": (signature["override"] or {}).get("user") or None,
     })
     if receipt_lists:
         _log_action(doc.name, employee, "Receipt Accepted", {
@@ -833,6 +853,9 @@ def submit_i9_section_2(args: dict) -> ToolResult:
         "status": doc.status,
         "receipt_pending": bool(int(doc.receipt_pending or 0)),
         "receipt_expires_on": str(doc.receipt_expires_on) if doc.receipt_expires_on else None,
+        "verifier_name": doc.verifier_name,
+        "verifier_title": doc.verifier_title or None,
+        "signer_roster_enforced": bool(signature["configured"]),
     }
     summary = f"Section 2 completed for {employee} by {doc.verifier_name}"
     if receipt_lists:

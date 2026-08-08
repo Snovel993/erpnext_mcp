@@ -177,7 +177,15 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/get_i9_form",
 		"/mobile/generate_i9_pdf",
 		"/mobile/upload_signed_i9",
+		# v0.48.0 — who may put their name on Section 2, and the three calls
+		# that maintain that list.
+		"/mobile/list_authorized_signers",
+		"/mobile/add_authorized_signer",
+		"/mobile/update_authorized_signer",
+		"/mobile/remove_authorized_signer",
 		"/mobile/submit_w4",
+		# v0.48.0 — the W-4 as a federal form rather than a doctype.
+		"/mobile/generate_w4_pdf",
 		"/mobile/link_badge_to_employee",
 		"/mobile/sync_bucket_entries",
 		"/mobile/start_shift",

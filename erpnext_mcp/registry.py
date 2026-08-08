@@ -35,7 +35,7 @@ import json
 
 import frappe
 
-from . import audit, form_pdf_renderer, geo, i9_pdf, settings
+from . import audit, form_pdf_renderer, geo, i9_pdf, settings, w4_pdf
 from .compat import doctype_exists, traceback_text
 from .errors import ToolError
 from .render import qr
@@ -90,6 +90,7 @@ from .tools import (
 	rules,
 	sessions,
 	shifts,
+	signers,
 	state_tax,
 	tasktemplates,
 	tax,
@@ -240,6 +241,29 @@ def _i9_pdf_ready():
 	def predicate() -> bool:
 		try:
 			return bool(needs_doctype() and i9_pdf.available())
+		except Exception:
+			return False
+
+	return predicate
+
+
+#: v0.48.0. The same sentence for the W-4, and it is a separate one because the
+#: two forms fail separately: a bench can be missing the IRS template and have
+#: the USCIS one, and a site can have the W-4 doctype and not the I-9's.
+_W4_PDF_REQUIRES = (
+	"the W-4 Form DocType (run `bench migrate`) and the pypdf Python package, which this "
+	"app declares as a dependency — install it into the bench's environment with "
+	"`./env/bin/pip install 'pypdf>=4.0'` and restart"
+)
+
+
+def _w4_pdf_ready():
+	"""Predicate: this site has the W-4 doctype AND can fill the IRS form."""
+	needs_doctype = _needs_doctype("W-4 Form")
+
+	def predicate() -> bool:
+		try:
+			return bool(needs_doctype() and w4_pdf.available())
 		except Exception:
 			return False
 
@@ -9116,6 +9140,14 @@ TOOLS = {
 		"receipt for a lost, stolen or damaged document — the form still completes, "
 		"and receipt_pending / receipt_expires_on (hire date + 90 days) carry the "
 		"document still owed. reverify_i9 is where it lands.\n\n"
+		"THE VERIFIER IS CHECKED AGAINST THE AUTHORIZED SIGNER ROSTER where one is "
+		"configured in I-9 Settings: the calling account has to be on it, and their "
+		"own printed name and title are what go on the form — so verifier_name is "
+		"OPTIONAL there and is only needed to sign on behalf of another authorized "
+		"person, whose name must itself be on the roster. Where no signers are "
+		"configured the roster is not enforced at all and verifier_name is required, "
+		"which is the pre-v0.48.0 behaviour and what every site has on upgrade. "
+		"list_authorized_signers says which case a site is in.\n\n"
 		"Moves the I-9 to 'Complete'. Logged to I-9 Audit Log.",
 		{
 			"employee": _field(_STRING, "Employee docname or employee_name."),
@@ -9147,12 +9179,22 @@ TOOLS = {
 				_BOOLEAN, "What was examined is a receipt for a lost/stolen/damaged List C document."
 			),
 			"document_copies_stored": _field(_BOOLEAN, "Whether document copies are stored on file."),
-			"verifier_name": _field(_STRING, "Name of the person who verified the documents."),
-			"verifier_title": _field(_STRING, "Title of the verifier."),
+			"verifier_name": _field(
+				_STRING,
+				"Name of the person who examined the documents. Required where no authorized "
+				"signers are configured. Where they are, omit it to sign as yourself — pass it "
+				"only to file on behalf of another signer on the roster.",
+			),
+			"verifier_title": _field(_STRING, "Title of the verifier. Overrides the roster's."),
 			"section_2_signature": _field(_STRING, "Attach URL or base64 of the verifier signature."),
 			"verification_date": _field(_STRING, "YYYY-MM-DD. Must be within 3 business days of hire."),
 		},
-		required=("document_path", "verifier_name", "verification_date"),
+		# `verifier_name` is NOT required here any more, and the tool is what
+		# decides. A site with an authorized signer roster takes the name off the
+		# roster; a site without one still refuses a call that omits it, with a
+		# message that says which case the site is in — which a schema-level
+		# rejection could not.
+		required=("document_path", "verification_date"),
 		mutating=True,
 		title="Submit I-9 Section 2",
 		available=_needs_doctype("I-9 Form"),
@@ -9365,6 +9407,106 @@ TOOLS = {
 		available=_needs_doctype("I-9 Form"),
 		requires="the I-9 Form doctype (run bench migrate after installing v0.47.1)",
 	),
+	# ── v0.48.0: who may sign a federal employment form ───────────────────
+	"list_authorized_signers": _tool(
+		signers.list_authorized_signers,
+		"Who may complete and sign a federal employment form on this employer's "
+		"behalf — Section 2 of Form I-9, the employer block of Form W-4, or both. "
+		"Read-only.\n\n"
+		"AN EMPTY ROSTER MEANS UNRESTRICTED, and the result says so: a site that has "
+		"never added a signer behaves as every site did before v0.48.0, and "
+		"submit_i9_section_2 accepts whatever verifier_name it is given. Adding the "
+		"first signer turns enforcement on for every form it covers.\n\n"
+		"Inactive signers are listed by default. A row is never deleted — a form "
+		"signed last season was signed by whoever was authorised last season.",
+		{
+			"include_inactive": _field(
+				_BOOLEAN,
+				"List signers whose active flag is off. Default true — they are the answer "
+				"to who signed a form filed before they were removed.",
+			),
+			"form_type": _field(
+				_STRING, "Only signers authorized for 'I-9' or for 'W-4'. Omit for both."
+			),
+		},
+		available=_needs_doctype("I-9 Settings"),
+		requires="the I-9 Settings doctype (run bench migrate after installing v0.48.0)",
+		title="List authorized signers",
+	),
+	"add_authorized_signer": _tool(
+		signers.add_authorized_signer,
+		"MUTATING (default OFF). Authorize one User account to complete and sign "
+		"federal employment forms for this employer.\n\n"
+		"THE FIRST ROW IS THE SWITCH. While the roster is empty, any caller may sign; "
+		"from the first signer on, only an account listed here can complete Section 2 "
+		"of an I-9 or the employer block of a W-4. Add everybody who verifies "
+		"documents — INCLUDING YOURSELF — before the next hire, or those calls start "
+		"being refused. The result says when this call was the one that flipped it.\n\n"
+		"full_name is the name PRINTED ON THE FORM, not the login. It falls back to "
+		"the User's own full name. Refuses a second row for one account — change an "
+		"existing authorisation with update_authorized_signer.",
+		{
+			"user": _field(_STRING, "User docname (the account's email) being authorized."),
+			"email": _field(_STRING, "Alias for user."),
+			"full_name": _field(
+				_STRING,
+				"The name as it should appear on the form, e.g. 'Ana Ramos'. Defaults to the "
+				"User record's own full name.",
+			),
+			"title": _field(_STRING, "Job title as it goes on the form, e.g. 'HR Manager'."),
+			"can_sign_i9": _field(_BOOLEAN, "May sign Form I-9 Section 2. Default true."),
+			"can_sign_w4": _field(_BOOLEAN, "May complete Form W-4's employer block. Default true."),
+			"active": _field(_BOOLEAN, "Whether the authorisation is live. Default true."),
+		},
+		required=("user",),
+		mutating=True,
+		title="Add an authorized signer",
+		available=_needs_doctype("I-9 Settings"),
+		requires="the I-9 Settings doctype (run bench migrate after installing v0.48.0)",
+	),
+	"update_authorized_signer": _tool(
+		signers.update_authorized_signer,
+		"MUTATING (default OFF). Change one authorized signer's printed name, "
+		"title, which forms they may sign, or whether the authorisation is live.\n\n"
+		"Pass only the fields that changed. active=true is how somebody removed with "
+		"remove_authorized_signer is put back.",
+		{
+			"user": _field(_STRING, "User docname of the signer to change."),
+			"email": _field(_STRING, "Alias for user."),
+			"full_name": _field(_STRING, "New printed name for the form."),
+			"title": _field(_STRING, "New job title."),
+			"can_sign_i9": _field(_BOOLEAN, "May sign Form I-9 Section 2."),
+			"can_sign_w4": _field(_BOOLEAN, "May complete Form W-4's employer block."),
+			"active": _field(_BOOLEAN, "Whether the authorisation is live."),
+		},
+		required=("user",),
+		mutating=True,
+		idempotent=True,
+		title="Update an authorized signer",
+		available=_needs_doctype("I-9 Settings"),
+		requires="the I-9 Settings doctype (run bench migrate after installing v0.48.0)",
+	),
+	"remove_authorized_signer": _tool(
+		signers.remove_authorized_signer,
+		"MUTATING (default OFF). Deactivate one authorized signer.\n\n"
+		"THE ROW IS KEPT AND ITS ACTIVE FLAG IS CLEARED. There is no delete tool: a "
+		"form signed in a prior season was signed by whoever was authorised in that "
+		"season, and a roster that forgets its own history cannot answer the question "
+		"a federal inspection asks. update_authorized_signer(active=true) puts them "
+		"back.\n\n"
+		"WARNS WHEN IT LEAVES NOBODY. The roster stays configured with zero active "
+		"signers, which refuses every caller until one is reactivated.",
+		{
+			"user": _field(_STRING, "User docname of the signer to deactivate."),
+			"email": _field(_STRING, "Alias for user."),
+		},
+		required=("user",),
+		mutating=True,
+		idempotent=True,
+		title="Deactivate an authorized signer",
+		available=_needs_doctype("I-9 Settings"),
+		requires="the I-9 Settings doctype (run bench migrate after installing v0.48.0)",
+	),
 	# ── v0.28.0: W-4 / Federal Withholding Engine ─────────────────────────
 	"get_w4": _tool(
 		w4.get_w4,
@@ -9475,7 +9617,13 @@ TOOLS = {
 		"MUTATING (default OFF). Submit a W-4 for an employee. Creates a new "
 		"Active W-4 Form and supersedes any prior Active W-4 for the same employee "
 		"and tax year (sets old one to Superseded with a superseded_by link).\n\n"
-		"Only one Active W-4 per employee per tax_year.",
+		"Only one Active W-4 per employee per tax_year.\n\n"
+		"RECORDS WHO PROCESSED IT. Form W-4's Employers Only block is completed by "
+		"somebody acting for the employer, and employer_signer_name / "
+		"employer_signer_title are stored on the row. Where an authorized signer "
+		"roster is configured in I-9 Settings the calling account has to be on it "
+		"with can_sign_w4, and the roster supplies both; where there is none, the "
+		"calling account's own full name is recorded and nothing is refused.",
 		{
 			"employee": _field(_STRING, "Employee docname or employee_name."),
 			"employee_name": _field(_STRING, "Alias for employee."),
@@ -9497,12 +9645,64 @@ TOOLS = {
 			"extra_withholding_per_period": _field(
 				_NUMBER, "Step 4(c) — additional withholding per pay period."
 			),
+			"employer_signer_name": _field(
+				_STRING,
+				"Who processed this W-4 for the employer. Defaults to the calling account, or "
+				"to their authorized signer row where a roster is configured — pass it only "
+				"to record another signer on the roster.",
+			),
+			"employer_signer_title": _field(_STRING, "Their job title. Overrides the roster's."),
 		},
 		required=("tax_year", "filing_status"),
 		mutating=True,
 		title="Submit a W-4",
 		available=_needs_doctype("W-4 Form"),
 		requires="the W-4 Form doctype (run bench migrate after installing v0.28.0)",
+	),
+	# ── v0.48.0: the federal W-4, and the employer block it always had ────
+	"render_w4_pdf": _tool(
+		w4.render_w4_pdf,
+		"MUTATING (default OFF). Fill the OFFICIAL IRS Form W-4 from a record and "
+		"attach the result privately to the form's generated_pdf field.\n\n"
+		"THE GOVERNMENT'S OWN PAGE, not a reproduction of it. This app ships the IRS "
+		"fillable PDF (OMB No. 1545-0074) and writes the collected values into its "
+		"named fields — Step 1's identity and filing status, Step 2's multiple-jobs "
+		"tick, Step 3's dependents credits, Step 4's adjustments, and Step 5's "
+		"Employers Only block.\n\n"
+		"THE EMPLOYER BLOCK IS RESOLVED AT RENDER TIME, not stored: the employer's "
+		"name and address and EIN come from I-9 Settings or the Company — the same "
+		"source Section 2 of the I-9 uses — and the first date of employment from "
+		"Employee.date_of_joining. So a form rendered today carries today's "
+		"registered address rather than whatever was true when it was filled in.\n\n"
+		"THE SIGNATURE LINE IS BLANK BECAUSE THE IRS FORM HAS NO SIGNATURE FIELD — "
+		"Step 5's signature and date are printed rules, not boxes. THE SSN BOX IS "
+		"BLANK TOO: a W-4 is completed by the employee and the number is theirs to "
+		"write. Print, sign with a pen, and file with the employee's records.\n\n"
+		"A SNAPSHOT, NOT A VIEW. REFUSES a second render unless overwrite is passed, "
+		"because that field probably holds the copy somebody already had signed. "
+		"Rendering moves no status — a W-4 is retained, not filed. The result reports "
+		"whether the record's tax year matches the shipped template's edition; a "
+		"mismatch is not refused.",
+		{
+			"w4_form": _field(_STRING, "The W-4 Form docname, e.g. W4-2026-0001."),
+			"name": _field(_STRING, "A W-4 Form docname, or an employee."),
+			"employee": _field(_STRING, "Employee docname or employee_name, instead of the form."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"tax_year": _field(
+				_INTEGER,
+				"Which year's active W-4 to render, when resolving by employee. Defaults to "
+				"the most recent.",
+			),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Render even though generated_pdf is already set, repointing the field. "
+				"The File that was there stays attached to the record.",
+			),
+		},
+		mutating=True,
+		title="Render the federal W-4 PDF",
+		available=_w4_pdf_ready(),
+		requires=_W4_PDF_REQUIRES,
 	),
 	"update_fica_config": _tool(
 		w4.update_fica_config,

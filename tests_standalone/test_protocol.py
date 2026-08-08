@@ -734,10 +734,24 @@ class Catalogue(SeededTestCase):
 		"render" sounds like one — and the values on the page are already readable
 		through `get_i9_form`, which is what makes a `preview_i9_pdf` unnecessary
 		rather than missing.
+
+		v0.48.0 ADDED FIVE — one read and four writes. The read is
+		`list_authorized_signers`, and it has to be a read that anybody can call:
+		an EMPTY roster means federal-form signing is unrestricted, and a caller
+		with no way to ask which case a site is in would have to discover it by
+		being refused mid-Section-2. The four writes are the roster's three
+		maintenance calls — `add_authorized_signer`, `update_authorized_signer`,
+		`remove_authorized_signer`, all of which change who may make a federal
+		attestation — and `render_w4_pdf`, which is a write for exactly the
+		reason `render_i9_pdf` is: it attaches a File and sets an Attach column.
+
+		THERE IS NO `delete_authorized_signer` AND THERE WILL NOT BE. A form
+		signed in a prior season was signed by whoever was authorised then;
+		`remove_authorized_signer` clears a flag and keeps the row.
 		"""
-		self.assertEqual(len(registry.TOOLS), 381)
-		self.assertEqual(len(registry.READ_TOOLS), 176)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 205)
+		self.assertEqual(len(registry.TOOLS), 386)
+		self.assertEqual(len(registry.READ_TOOLS), 177)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 209)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

@@ -1519,6 +1519,12 @@ CHILD_TABLES = {
 	# look checklist-less and the enforcement would silently never fire.
 	("Farm Task Template", "checklist"): "Farm Task Template Checklist Item",
 	("Farm Task Template", "compliance_regimes"): "Compliance Regime Link",
+	# v0.48.0. The first child table on a SINGLE that this double has had to
+	# model. `signers._rows` reads the roster back off `frappe.get_doc` on every
+	# Section 2 and `add_authorized_signer` appends to it — so a double that left
+	# the rows as bare dicts would let `update_authorized_signer` appear to work
+	# against a row that never made it into the store.
+	("I-9 Settings", "authorized_signers"): "Authorized Signer",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as
@@ -1568,6 +1574,10 @@ REHYDRATED_CHILD_FIELDS = (
 	# documents on the second read as well as on the first.
 	"checklist",
 	"compliance_regimes",
+	# v0.48.0. The authorized signer roster, on a Single. `update_authorized_signer`
+	# and `remove_authorized_signer` re-read I-9 Settings, find one row and set a
+	# field on it — which is `.set()`, which a bare dict does not have.
+	"authorized_signers",
 )
 
 
@@ -3134,7 +3144,16 @@ def _build_frappe() -> types.ModuleType:
 			data = copy.deepcopy(STORE.singles.get(doctype) or {})
 			data["doctype"] = doctype
 			data.setdefault("name", doctype)
-			return _controller(doctype)(data)
+			single = _controller(doctype)(data)
+			# A Single's child tables are rehydrated the same way an ordinary
+			# document's are. Frappe loads them in one loop for both cases —
+			# `Document.load_from_db` runs `_get_table_fields` after the
+			# single/not-single branch — and v0.48.0 put a roster on a Single
+			# whose rows are read back and mutated in place.
+			for fieldname in REHYDRATED_CHILD_FIELDS:
+				if isinstance(single.get(fieldname), list):
+					single[fieldname] = [Document(item) for item in single[fieldname]]
+			return single
 		name = args[1] if len(args) > 1 else kwargs.get("name")
 		row = STORE.get_raw(doctype, name)
 		if row is None:

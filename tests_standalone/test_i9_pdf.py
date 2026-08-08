@@ -117,7 +117,19 @@ def a_record(**overrides) -> dict:
 	return record
 
 
-EMPLOYER = {"name": "Test Farm LLC", "address": "123 Orchard Rd, Yakima WA 98901"}
+#: The employer block as `tools/i9._employer_block` really returns it — three
+#: keys, not two. The EIN has been in that dict since v0.47.1 and reached the
+#: page for the first time in v0.48.0; it was absent from this fixture, which is
+#: part of why nobody noticed it went nowhere.
+EMPLOYER = {
+	"name": "Test Farm LLC",
+	"address": "123 Orchard Rd, Yakima WA 98901",
+	"ein": "12-3456789",
+}
+
+#: A site that has not filled the EIN in. Used where the claim under test is
+#: about what is NOT written.
+EMPLOYER_NO_EIN = {"name": "Test Farm LLC", "address": "123 Orchard Rd, Yakima WA 98901"}
 
 
 def a_reverification(**overrides) -> dict:
@@ -248,6 +260,31 @@ class TheShippedTemplate(unittest.TestCase):
 			"these field names are in i9_pdf's table and not in the shipped USCIS template. "
 			"Either the template was revised or a name was mistyped; the values would go "
 			"nowhere and the boxes would print empty.",
+		)
+
+	@needs_pypdf
+	def test_form_i9_has_no_employer_identification_number_box(self):
+		"""v0.48.0's premise, pinned to the file rather than to a comment.
+
+		`_employer_lines` writes the EIN into Additional Information BECAUSE the
+		form has nowhere else for it — the Section 2 employer block is a name, a
+		title, a signature, a date, a business name and a business address. If a
+		later edition grows an EIN box this fails, and the right response is a
+		field-table entry plus deleting the prose line, not a bug report.
+		"""
+		from pypdf import PdfReader
+
+		names = [str(name).lower() for name in (PdfReader(i9_pdf.TEMPLATE_PATH).get_fields() or {})]
+		suspects = [
+			name for name in names
+			if "ein" in name.replace("_", " ").split() or "identification number" in name
+		]
+		self.assertEqual(
+			suspects,
+			[],
+			"the shipped template has a field that looks like an employer EIN box. Map it in "
+			"i9_pdf._section_2 and drop the EIN line from _employer_lines — a number in a "
+			"labelled box beats the same number in a prose box.",
 		)
 
 	@needs_pypdf
@@ -444,8 +481,8 @@ class WhatIsDeliberatelyBlank(unittest.TestCase):
 class AdditionalInformation(unittest.TestCase):
 	"""The one box on the form that takes prose, and what this app puts in it."""
 
-	def note(self, record=None, reverifications=None, notes=None) -> str:
-		planned = i9_pdf.plan(record or a_record(), EMPLOYER, reverifications or [], notes=notes)
+	def note(self, record=None, reverifications=None, notes=None, employer=EMPLOYER) -> str:
+		planned = i9_pdf.plan(record or a_record(), employer, reverifications or [], notes=notes)
 		return planned[i9_pdf.PAGE_FORM].get("Additional Information", "")
 
 	def test_the_attestations_are_recorded_as_what_they_are(self):
@@ -486,7 +523,20 @@ class AdditionalInformation(unittest.TestCase):
 		bare = a_record(
 			section_1_signed_at=None, section_2_signed_at=None, receipt_pending=0, list_a_is_receipt=0
 		)
-		self.assertEqual(self.note(bare), "")
+		self.assertEqual(self.note(bare, employer=EMPLOYER_NO_EIN), "")
+
+	# v0.48.0. The EIN, and the reason it is here rather than in a box of its own.
+	def test_the_employer_ein_is_written_and_is_labelled(self):
+		self.assertIn("Employer EIN: 12-3456789.", self.note())
+
+	def test_a_site_that_has_not_filled_the_ein_in_writes_no_line_about_it(self):
+		self.assertNotIn("EIN", self.note(employer=EMPLOYER_NO_EIN))
+
+	def test_the_ein_never_reaches_the_address_box(self):
+		"""The box it would have been easiest to append to, and must not be."""
+		page = i9_pdf.plan(a_record(), EMPLOYER)[i9_pdf.PAGE_FORM]
+		self.assertEqual(page["Employers Business or Org Address"], EMPLOYER["address"])
+		self.assertNotIn("12-3456789", page["Employers Business or Org Name"])
 
 
 # ── 5 ─────────────────────────────────────────────────────────────────────────

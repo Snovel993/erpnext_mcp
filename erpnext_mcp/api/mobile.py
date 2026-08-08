@@ -86,7 +86,7 @@ import frappe
 
 from .. import compat
 from ..errors import ToolError
-from ..tools import asset_tags, bucket_log, dispatch, fieldwork, i9, shifts, w4
+from ..tools import asset_tags, bucket_log, dispatch, fieldwork, i9, shifts, signers, w4
 from ..tools import employee as personnel
 from ..tools import mobile as mobile_tools
 from . import guard, shape
@@ -1935,4 +1935,192 @@ def upload_signed_i9(user: str, employee=None, docname=None, file_token=None, ov
 		"signed_pdf": data.get("signed_pdf"),
 		"file_token": data.get("file_docname"),
 		"replaced": data.get("replaced"),
+	}
+
+
+# ── 35. list_authorized_signers ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_authorized_signers", limit=guard.READ_LIMIT)
+def list_authorized_signers(user: str, include_inactive=None, form_type=None) -> dict:
+	"""Who this employer has authorised to sign an I-9 or a W-4.
+
+	THE READ THE SECTION 2 SCREEN NEEDS BEFORE IT OFFERS A NAME. v0.48.0 made
+	the verifier a roster lookup rather than a free-text box, and a wizard that
+	could not read the roster would have to discover its own account's
+	authorisation by submitting a form and being refused — in an orchard, having
+	just examined somebody's documents.
+
+	`configured` IS THE FIELD THAT MATTERS TO THE APP. False means the site has
+	no roster and the old free-text box is still correct; true means the name is
+	the server's to supply and the field should be prefilled and read-only
+	unless the foreman is filing on somebody else's behalf.
+
+	THE HR ROLE IS REQUIRED. The roster names the people who can attest to a
+	federal form for this business, which is not a field worker's read.
+	"""
+	guard.require_scope(user)
+	personnel.require_hr_role()
+
+	inner = {}
+	if include_inactive is not None:
+		inner["include_inactive"] = include_inactive
+	if form_type is not None:
+		inner["form_type"] = form_type
+
+	result = signers.list_authorized_signers(inner)
+	return result.data
+
+
+# ── 36. add_authorized_signer ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("add_authorized_signer", mutating=True, limit=guard.WRITE_LIMIT)
+def add_authorized_signer(user: str, signer_user=None, full_name=None, title=None,
+                          can_sign_i9=None, can_sign_w4=None) -> dict:
+	"""Put one account on the roster from the app.
+
+	`signer_user` RATHER THAN `user`, and the rename is not cosmetic.
+	`guard.endpoint` injects the AUTHENTICATED caller into `user` and
+	`routes.accepted_arguments` drops any `user` a body carries, precisely so an
+	account cannot name somebody else in a request. The person being authorised
+	is a different argument and has to have a different name, or it would be
+	dropped on the way in and this endpoint would silently authorise the caller.
+
+	`active` IS NOT ACCEPTED. Adding somebody inactive is a configuration state
+	with no meaning on a phone — the app adds a signer in order to let them sign.
+	`update_authorized_signer` and `remove_authorized_signer` are what change it
+	afterwards.
+
+	EVERY REFUSAL IS THE TOOL'S: an account that is not on the site, a second row
+	for one account, a full name that can be found nowhere. So is the warning
+	that this row was the first and has just turned enforcement on for the whole
+	site — which the app should show, because the next foreman to file a Section
+	2 is the one it affects.
+	"""
+	guard.require_scope(user)
+	personnel.require_hr_role()
+
+	inner = {"user": signer_user}
+	for key, value in (
+		("full_name", full_name),
+		("title", title),
+		("can_sign_i9", can_sign_i9),
+		("can_sign_w4", can_sign_w4),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = signers.add_authorized_signer(inner)
+	return result.data
+
+
+# ── 37. update_authorized_signer ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("update_authorized_signer", mutating=True, limit=guard.WRITE_LIMIT)
+def update_authorized_signer(user: str, signer_user=None, full_name=None, title=None,
+                             can_sign_i9=None, can_sign_w4=None, active=None) -> dict:
+	"""Change one signer's printed name, title, or what they may sign.
+
+	`signer_user` for the same reason as above. `active` IS accepted here, and
+	it is the only way back from `remove_authorized_signer` — a roster with
+	nobody active refuses every Section 2 on the site, so the call that undoes
+	that has to be reachable from wherever the call that caused it was made.
+	"""
+	guard.require_scope(user)
+	personnel.require_hr_role()
+
+	inner = {"user": signer_user}
+	for key, value in (
+		("full_name", full_name),
+		("title", title),
+		("can_sign_i9", can_sign_i9),
+		("can_sign_w4", can_sign_w4),
+		("active", active),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = signers.update_authorized_signer(inner)
+	return result.data
+
+
+# ── 38. remove_authorized_signer ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("remove_authorized_signer", mutating=True, limit=guard.WRITE_LIMIT)
+def remove_authorized_signer(user: str, signer_user=None) -> dict:
+	"""Deactivate one signer. The row is kept — see `tools/signers.py`.
+
+	NOTHING IS DELETED HERE OR ANYWHERE. A form signed last season was signed by
+	whoever was authorised last season, and the tool clears a flag rather than
+	dropping a row so that stays answerable. The result carries the warning when
+	this call left the site with no active signers at all, which is a state that
+	refuses every subsequent Section 2 — the app should surface it rather than
+	let the next foreman find out in a field.
+	"""
+	guard.require_scope(user)
+	personnel.require_hr_role()
+
+	result = signers.remove_authorized_signer({"user": signer_user})
+	return result.data
+
+
+# ── 39. generate_w4_pdf ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("generate_w4_pdf", mutating=True, limit=guard.WRITE_LIMIT)
+def generate_w4_pdf(user: str, employee=None, docname=None, tax_year=None, overwrite=None) -> dict:
+	"""Fill the federal W-4 from the record and hand the phone a URL for it.
+
+	THE OTHER HALF OF `generate_i9_pdf`, and the last artefact the onboarding
+	flow was missing. The wizard has collected withholding elections since
+	v0.45.0 and had nothing to show for them: what an employer keeps for an
+	employee's withholding is Form W-4, and until v0.48.0 the only thing this app
+	produced was a doctype. `w4.render_w4_pdf` writes the collected values into
+	the IRS fillable PDF this app ships and attaches it privately to the record;
+	this hands back `file_url`, which is what the app opens, prints and hands to
+	the employee to sign.
+
+	THE EMPLOYER BLOCK NEEDS NOTHING FROM THE PHONE. Step 5's employer name,
+	address, EIN and first date of employment are resolved on the server from
+	I-9 Settings, the Company and `Employee.date_of_joining` — so a foreman in an
+	orchard is not typing an EIN into a handset, which is the failure mode that
+	would put a wrong one on a federal form.
+
+	`overwrite` IS FORWARDED, because the wizard's realistic second call is the
+	one after a correction — a filing status picked wrong, a dependent count off
+	by one — and refusing it would leave the phone holding a stale PDF with no
+	way to ask for a fresh one. The File that was there stays attached either way.
+
+	THE HR ROLE IS REQUIRED. A W-4 names a person's filing status, their
+	dependents and their other income; it is a payroll record and not a picker's
+	to render.
+
+	EVERY REFUSAL IS THE TOOL'S: that the site needs pypdf and the shipped
+	template, that a second render without `overwrite` is refused, that there is
+	no active W-4 for this person. None of it is restated here.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+	personnel.require_hr_role()
+
+	inner = {"employee": person}
+	if tax_year is not None:
+		inner["tax_year"] = tax_year
+	if overwrite is not None:
+		inner["overwrite"] = overwrite
+
+	result = w4.render_w4_pdf(inner)
+	data = result.data
+	return {
+		"name": data.get("name"),
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+		"tax_year": data.get("tax_year"),
+		"status": data.get("status"),
+		"file_url": data.get("file_url"),
+		"file_name": data.get("file_name"),
+		"bytes": data.get("bytes"),
+		"edition": data.get("edition"),
+		"template_tax_year_matches": data.get("template_tax_year_matches"),
+		"incomplete": data.get("incomplete") or [],
+		"replaced": data.get("replaced"),
+		"note": data.get("note"),
 	}

@@ -49,14 +49,18 @@ classifiers = [
 # honest output is the government's own page with values written into its own
 # fields, and redrawing it would produce a lookalike nobody asked for. The
 # template ships in `erpnext_mcp/templates/`; `pypdf` is what writes into it.
+# v0.48.0 gave it a second form on the same argument — the IRS's Form W-4, which
+# is published, completed and retained exactly the same way. Two templates in
+# that directory now, one library, and no second layout engine.
 #
 # ALL FIVE ARE IMPORTED DEFENSIVELY. A bench missing shapely or h3 loses the
 # six geospatial tools; a bench missing every QR encoder loses exactly one —
 # `generate_mobile_login_qr`; a bench missing reportlab loses exactly two —
 # `render_tax_form_pdf` and `bulk_render_tax_form_pdfs`, with every tax form's
 # computed values still readable through `get_tax_form`; a bench missing pypdf
-# loses exactly one — `render_i9_pdf`, with every I-9 value still readable
-# through `get_i9_form` and the I-9 Print Format still printing in the Desk.
+# loses exactly two — `render_i9_pdf` and `render_w4_pdf`, with every I-9 value
+# still readable through `get_i9_form`, every withholding election through
+# `get_w4`, and the I-9 Print Format still printing in the Desk.
 # Each says so BY NAME with the pip command to fix it, rather than failing to
 # load the other three hundred. `qrcode` is accepted in segno's place where a
 # bench already has it. That is the same promise the rest of the app makes:

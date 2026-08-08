@@ -60,7 +60,7 @@ from typing import ClassVar
 
 import frappe
 
-from erpnext_mcp import i9_pdf
+from erpnext_mcp import i9_pdf, w4_pdf
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import mobile as mobile_api
 
@@ -1750,6 +1750,125 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertFalse(int(filed["list_a_is_receipt"] or 0))
 		self.assertFalse(int(filed["receipt_pending"] or 0))
 
+	# ── v0.48.0: who may sign, and the W-4 as a document ─────────────────────
+	def test_38_list_authorized_signers(self):
+		"""The read the Section 2 screen needs BEFORE it offers a name.
+
+		`configured` IS THE KEY THE APP BRANCHES ON. False means this site has no
+		roster and the free-text verifier box is still correct; true means the
+		name is the server's to supply. A wizard that could not ask would have to
+		learn its own account's authorisation by submitting a form in an orchard
+		and being refused.
+		"""
+		self.the_hr_furniture()
+		row = self.wire("list_authorized_signers")
+		UndecodedResponseModel.decode(row, "list_authorized_signers")
+
+		self.assertEqual(row["signers"], [])
+		self.assertEqual(row["count"], 0)
+		self.assertFalse(row["configured"])
+		self.assertEqual(row["active_count"], 0)
+		self.assertIn("UNRESTRICTED", row["note"])
+
+	def test_38_the_roster_reads_back_the_row_the_phone_added(self):
+		self.the_hr_furniture()
+		added = self.wire(
+			"add_authorized_signer",
+			signer_user=WORKER,
+			full_name="Ana Ramos",
+			title="Farm Manager",
+		)
+		UndecodedResponseModel.decode(added, "add_authorized_signer")
+		self.assertTrue(added["first_signer"])
+		self.assertIn("FIRST signer", added["note"])
+
+		row = self.wire("list_authorized_signers")
+		self.assertTrue(row["configured"])
+		self.assertEqual(row["signers"][0]["user"], WORKER)
+		self.assertEqual(row["signers"][0]["full_name"], "Ana Ramos")
+		self.assertTrue(row["signers"][0]["can_sign_i9"])
+		self.assertTrue(row["signers"][0]["active"])
+
+	def test_38_the_account_being_authorized_is_not_called_user(self):
+		"""`signer_user`, and the rename is a gate rather than a preference.
+
+		`guard.endpoint` injects the AUTHENTICATED caller into `user` and
+		`routes.accepted_arguments` drops any `user` a body carries — so an
+		argument called `user` would be dropped on the way in and the endpoint
+		would silently authorise whoever called it.
+		"""
+		import inspect
+
+		for method in (
+			mobile_api.add_authorized_signer,
+			mobile_api.update_authorized_signer,
+			mobile_api.remove_authorized_signer,
+		):
+			with self.subTest(method=method.farm_ops_method):
+				self.assertIn("signer_user", inspect.signature(method).parameters)
+
+	def test_39_update_authorized_signer(self):
+		self.the_hr_furniture()
+		self.wire("add_authorized_signer", signer_user=WORKER, full_name="Ana Ramos")
+		row = self.wire("update_authorized_signer", signer_user=WORKER, title="Orchard Manager")
+		UndecodedResponseModel.decode(row, "update_authorized_signer")
+		self.assertEqual(row["signer"]["title"], "Orchard Manager")
+		self.assertEqual(row["updated"], ["title"])
+
+	def test_40_remove_authorized_signer(self):
+		"""Deactivation, and the warning that it left nobody able to sign."""
+		self.the_hr_furniture()
+		self.wire("add_authorized_signer", signer_user=WORKER, full_name="Ana Ramos")
+		row = self.wire("remove_authorized_signer", signer_user=WORKER)
+		UndecodedResponseModel.decode(row, "remove_authorized_signer")
+
+		self.assertFalse(row["active"])
+		self.assertFalse(row["deleted"])
+		self.assertEqual(row["remaining_active"], 0)
+		self.assertIn("NO ACTIVE SIGNERS REMAIN", row["warning"])
+		# The row is still there. A form signed before the removal still names
+		# somebody this employer had authorised.
+		self.assertEqual(self.wire("list_authorized_signers")["count"], 1)
+
+	@unittest.skipUnless(
+		w4_pdf.available(),
+		"filling the federal form needs pypdf and the shipped IRS template; this bench has "
+		"one or neither, which is what render_w4_pdf goes unavailable for.",
+	)
+	def test_41_generate_w4_pdf(self):
+		"""The W-4 as a page rather than a doctype, and no EIN typed on a phone."""
+		self.the_hr_furniture()
+		self.wire(
+			"submit_w4",
+			employee=self.NEW_HIRE,
+			company=MAIN,
+			tax_year=2026,
+			filing_status="Married Filing Jointly",
+			dependents_under_17=2,
+		)
+
+		row = self.wire("generate_w4_pdf", employee=self.NEW_HIRE)
+		UndecodedResponseModel.decode(row, "generate_w4_pdf")
+
+		self.assertTrue(str(row["file_url"]).endswith(".pdf"))
+		self.assertGreater(row["bytes"], 100_000)
+		self.assertIn("1545-0074", row["edition"])
+		self.assertEqual(row["tax_year"], 2026)
+		self.assertTrue(row["template_tax_year_matches"])
+		self.assertIn("NO signature field", row["note"])
+
+		# The URL the phone was handed is the one on the record.
+		name = frappe.db.get_value("W-4 Form", {"employee": self.NEW_HIRE}, "name")
+		self.assertEqual(frappe.db.get_value("W-4 Form", name, "generated_pdf"), row["file_url"])
+
+	def test_41_the_employer_block_is_not_an_argument_a_handset_has(self):
+		"""It would put a hand-typed EIN on a federal form. It is resolved server-side."""
+		import inspect
+
+		taken = set(inspect.signature(mobile_api.generate_w4_pdf).parameters)
+		for absent in ("employer_name", "employer_address", "employer_ein", "first_date_of_employment"):
+			self.assertNotIn(absent, taken)
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -1897,6 +2016,12 @@ class TheContractIsComplete(ContractTestCase):
 		"get_i9_form": "test_33",
 		"generate_i9_pdf": "test_34",
 		"upload_signed_i9": "test_35",
+		# v0.48.0 — who may sign, and the W-4 as a document.
+		"list_authorized_signers": "test_38",
+		"add_authorized_signer": "test_38",
+		"update_authorized_signer": "test_39",
+		"remove_authorized_signer": "test_40",
+		"generate_w4_pdf": "test_41",
 	}
 
 	def _published(self, module):

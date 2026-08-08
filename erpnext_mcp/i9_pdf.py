@@ -22,6 +22,24 @@ the reading and the attaching; this does the drawing and nothing else.
 FOUR THINGS THIS DOES NOT PUT ON THE PAGE, AND WHY
 ────────────────────────────────────────────────────────────────────────────
 
+**NO EIN BOX, BECAUSE FORM I-9 HAS NONE.** v0.48.0. `tools/i9._employer_block`
+has returned an `ein` since v0.47.1 — off I-9 Settings' `business_ein`, falling
+back to the Company's `tax_id` — and this module never wrote it anywhere, which
+read like a mapping somebody forgot. It is not. All 133 of the template's
+AcroForm fields are enumerated in `test_i9_pdf.py`, and Section 2's employer
+block is five boxes: the representative's name and title, their signature,
+today's date, `Employers Business or Org Name` and `Employers Business or Org
+Address`. THERE IS NO EMPLOYER IDENTIFICATION NUMBER FIELD ON FORM I-9. The EIN
+is an E-VERIFY datum — it is on the E-Verify case, not on the retained form —
+and the two are separate obligations that this app keeps separate.
+
+So the number goes where USCIS provides for an employer to write something the
+boxes do not ask for: Additional Information, LABELLED, by `_employer_lines`.
+The alternative was to append it to `Employers Business or Org Address`, whose
+own label is "Address, City or Town, State, ZIP Code" — a box that would then
+hold something that is not an address, on a form an inspector reads box by box.
+An unlabelled number in an address box is worse than no number at all.
+
 **NO SIGNATURE, EVER.** Three of the four signature boxes are `/Tx` text
 fields, so a name typed into one would render as a signature and would be
 indistinguishable from one. It would not BE one: an electronic I-9 signature
@@ -558,6 +576,23 @@ def _receipt_lines(record: dict) -> list[str]:
 	return lines
 
 
+def _employer_lines(employer: dict) -> list[str]:
+	"""The employer facts Section 2 collects and has no box for. Today: the EIN.
+
+	See the module docstring. `tools/i9._employer_block` resolves the number from
+	I-9 Settings' `business_ein` or the Company's `tax_id`; Form I-9 has nowhere
+	to put it, and this is the box the form provides for prose.
+
+	IT IS LABELLED. A bare `12-3456789` in a free-text box beside a receipt
+	deadline and two attestation timestamps is a number an inspector has to guess
+	the meaning of. `EIN: ` is four characters and removes the guess.
+	"""
+	ein = _text((employer or {}).get("ein"))
+	if not ein:
+		return []
+	return [f"Employer EIN: {ein}."]
+
+
 def _overflow_note(reverifications: list) -> list[str]:
 	"""Every Supplement B entry that did not fit on the page, named.
 
@@ -586,12 +621,14 @@ def _overflow_note(reverifications: list) -> list[str]:
 	return lines
 
 
-def _additional_information(record: dict, reverifications: list, notes: list | None) -> str:
+def _additional_information(record: dict, employer: dict, reverifications: list,
+                            notes: list | None) -> str:
 	"""The Section 2 free-text box, as one string the widget will take.
 
 	ORDER IS DELIBERATE: the receipt first, because it is the only entry that
 	names something still owed and has a deadline on it; then the attestations;
-	then anything the caller added; then the overflow.
+	then the employer facts the form has no box for; then anything the caller
+	added; then the overflow.
 
 	NEWLINE-SEPARATED, not space-separated. The box is the form's one multiline
 	field, and a viewer wraps a paragraph but does not invent the breaks between
@@ -601,6 +638,7 @@ def _additional_information(record: dict, reverifications: list, notes: list | N
 	lines: list[str] = []
 	lines.extend(_receipt_lines(record))
 	lines.extend(_attestation_lines(record))
+	lines.extend(_employer_lines(employer))
 	lines.extend(_text(note) for note in (notes or []) if _text(note))
 	lines.extend(_overflow_note(reverifications))
 
@@ -727,7 +765,7 @@ def plan(record: dict, employer: dict, reverifications: list | None = None,
 	entries = list(reverifications or [])
 	page_one = _section_1(record, full_ssn)
 	page_one.update(_section_2(record, employer))
-	additional = _additional_information(record, entries, notes)
+	additional = _additional_information(record, employer, entries, notes)
 	if additional:
 		page_one["Additional Information"] = additional
 
@@ -894,7 +932,10 @@ def fill_i9_pdf(record: dict, employer: dict, reverifications: list | None = Non
 
 	Args:
 		record: an I-9 Form row, as `tools/i9._i9_fields` reads it.
-		employer: `{"name": ..., "address": ...}` for Section 2's employer block.
+		employer: `{"name": ..., "address": ..., "ein": ...}` for Section 2's
+			employer block, as `tools/i9._employer_block` returns it. The EIN
+			has no box on Form I-9 and goes into Additional Information; see the
+			module docstring.
 		reverifications: Section 3 rows oldest first, as `get_i9_form` returns them.
 		full_ssn: nine digits, or "". See the module docstring — this is never
 			looked up here, and anything that is not nine digits is dropped.

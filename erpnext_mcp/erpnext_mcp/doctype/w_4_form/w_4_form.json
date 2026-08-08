@@ -34,7 +34,15 @@
   "signature_section",
   "signature",
   "signed_at",
-  "signed_ip"
+  "signed_ip",
+  "employer_section",
+  "employer_signer_name",
+  "employer_signer_title",
+  "employer_col",
+  "employer_signed_at",
+  "pdf_section",
+  "generated_pdf",
+  "generated_pdf_on"
  ],
  "fields": [
   {
@@ -232,6 +240,53 @@
    "fieldname": "signed_ip",
    "fieldtype": "Data",
    "label": "Signed IP",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employer_section",
+   "fieldtype": "Section Break",
+   "label": "Step 5 — Employers Only"
+  },
+  {
+   "description": "Who processed this W-4 for the employer. Taken from the authorized signer roster in I-9 Settings where one is configured; the calling account's own name otherwise. THE EMPLOYER'S NAME, ADDRESS AND EIN ARE NOT COLUMNS HERE — they are resolved at render time from I-9 Settings or the Company, so a farm that changes its registered address does not have a hundred W-4 rows carrying the old one.",
+   "fieldname": "employer_signer_name",
+   "fieldtype": "Data",
+   "label": "Employer Signer Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employer_signer_title",
+   "fieldtype": "Data",
+   "label": "Employer Signer Title",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employer_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "When the employer processed it. The FIRST DATE OF EMPLOYMENT the form asks for is not this and is not stored here either — it is Employee.date_of_joining, read at render time.",
+   "fieldname": "employer_signed_at",
+   "fieldtype": "Datetime",
+   "label": "Employer Signed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pdf_section",
+   "fieldtype": "Section Break",
+   "label": "Form W-4 PDF"
+  },
+  {
+   "description": "The IRS Form W-4 filled from this record by render_w4_pdf. Regenerate it with overwrite=true after any edit; it is a snapshot, not a live view. The employee's signature box is empty by design — the page is printed and signed with a pen, because the IRS form carries no signature field at all.",
+   "fieldname": "generated_pdf",
+   "fieldtype": "Attach",
+   "label": "Generated W-4 PDF",
+   "read_only": 1
+  },
+  {
+   "fieldname": "generated_pdf_on",
+   "fieldtype": "Datetime",
+   "label": "PDF Generated On",
    "read_only": 1
   }
  ],

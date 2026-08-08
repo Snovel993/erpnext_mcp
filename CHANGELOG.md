@@ -3,6 +3,82 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.48.0 — 2026-08-07
+
+**Three gaps in the federal employment forms, and they are three different kinds
+of gap.** One was a mapping that could not exist. One was a string the server
+believed because a client sent it. One was a whole half of a form.
+
+**The EIN had nowhere to go, and that is the finding.**
+`tools/i9._employer_block` has returned an `ein` since v0.47.1 and `i9_pdf` never
+wrote it anywhere, which read like a line somebody forgot. It is not: **Form I-9
+has no EIN box.** All 133 of the shipped template's AcroForm fields are
+enumerated by the test suite, and Section 2's employer block is a name and title,
+a signature, a date, a business name and a business address. The EIN is an
+E-Verify datum — it belongs to the E-Verify case, not to the retained form. So
+the number now goes where USCIS provides for an employer to write something the
+boxes do not ask for: **Additional Information**, labelled. Appending it to the
+address box, whose own label is "Address, City or Town, State, ZIP Code", would
+have put something that is not an address in a box an inspector reads by name. A
+test pins the premise to the file, so an edition that grows an EIN box fails
+loudly rather than leaving the prose line to rot.
+
+**`verifier_name` was a string on a JSON body.** Section 2 is an attestation
+under penalty of perjury that a NAMED PERSON examined the documents, and until
+now that name was whatever the caller typed — from a phone, in an orchard, with
+nothing on the server that said whether they had ever been authorised to make it.
+A new **Authorized Signer** child table on I-9 Settings carries the account, the
+printed name, a title, a flag per form and an active flag;
+`submit_i9_section_2` and `submit_w4` take the name and title off the roster row
+rather than off the request. The check reads `security.caller_identity()` and not
+`frappe.session.user`, which is the whole feature — `mcp.handle` becomes the MCP
+System User a line after it authenticates, so a roster matched against the
+effective user would authorise every caller identically.
+
+**An empty roster authorises everybody, and that is the design.** Every existing
+site migrates into one, and a version that started refusing signatures on migrate
+would break the I-9 flow on every farm running this app. **The first row is the
+switch:** adding one signer turns enforcement on for the whole site, and
+`add_authorized_signer` says so in its own result — because "I added myself and
+now my foreman can't file an I-9" is the surprise this design has to pay for.
+An explicit name is still accepted, because one authorised person filing for
+another is real (the foreman examined the documents, the office files the form),
+and it has to be on the roster too. **Nothing is ever deleted:**
+`remove_authorized_signer` clears a flag and keeps the row, there is no delete
+tool, and a form signed last season still names somebody this employer had
+authorised. Four tools, and all four are published to the phone as well — a
+roster that can only be edited in the Desk is one nobody fixes at 6am on a hire
+day.
+
+**The W-4 collected elections for four releases and never produced a form** —
+the same gap `render_i9_pdf` closed for the I-9 in v0.47.1. `render_w4_pdf`
+fills the IRS's own fillable Form W-4, now shipped at
+`erpnext_mcp/templates/w4_form.pdf`. **And the form has a block the app had
+nothing for:** Step 5's Employers Only row asks for the employer's name and
+address, the first date of employment, and the EIN — three facts the site already
+held and no W-4 could reach. They are resolved at render time from
+`i9._employer_block` and `Employee.date_of_joining`, not copied onto every row,
+so a farm that changes its registered address does not have a hundred W-4s
+carrying the old one. What IS stored is who processed it. Step 1(a)'s address is
+read off the employee's I-9, where it is already structured, rather than split
+out of `Employee.current_address` by guesswork.
+
+**The one structural edit is that XFA comes out of the copy.** The IRS file is a
+hybrid — an AcroForm plus an XML payload describing the same form — and Acrobat
+renders the XFA and ignores the AcroForm. A fill that left it in place would
+produce a file holding every right answer and printing blank in the reader an
+accountant is most likely to open it in. And because the IRS names its fields
+`f1_12[0]` rather than after the boxes, "every name exists" is not a strong
+enough test — a mistyped name would exist too — so the table is checked against
+the page's own **geometry**: the name boxes share a row, the filing-status ticks
+descend in the order the form prints them, and the Employers Only boxes are the
+bottom band left to right. The same class asserts that the Step 5 signature band
+holds no widget at all, which is why nothing has to be deliberately skipped there.
+
+Five new tools (386 total: 177 read, 209 mutating), five new mobile methods, one
+new DocType, 97 new tests. `bench migrate` and nothing changes behaviour on its
+own — see `RELEASES/v0.48.0.md`.
+
 ## 0.47.2 — 2026-08-07
 
 **v0.47.0 taught the tool six fields and the transport dropped every one of

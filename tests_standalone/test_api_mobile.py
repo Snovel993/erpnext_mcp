@@ -224,7 +224,15 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"get_i9_form",
 		"generate_i9_pdf",
 		"upload_signed_i9",
+		# v0.48.0 — the authorized signer roster the Section 2 screen reads
+		# before it offers a name, and the three calls that maintain it.
+		"list_authorized_signers",
+		"add_authorized_signer",
+		"update_authorized_signer",
+		"remove_authorized_signer",
 		"submit_w4",
+		# v0.48.0 — the W-4 as a federal form rather than a doctype.
+		"generate_w4_pdf",
 		"link_badge_to_employee",
 		"sync_bucket_entries",
 		"start_shift",

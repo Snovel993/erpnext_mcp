@@ -41,3 +41,54 @@ restated in `i9_pdf.EDITION`. A new edition means:
 
 Nothing else in the app hardcodes the layout. The field *names* are the whole
 interface, and they live in one table in `i9_pdf.py`.
+
+## `w4_form.pdf`
+
+The official **IRS Form W-4, Employee's Withholding Certificate**, downloaded
+unmodified from
+
+    https://www.irs.gov/pub/irs-pdf/fw4.pdf
+
+| | |
+|---|---|
+| Agency | Internal Revenue Service, Department of the Treasury |
+| OMB control number | 1545-0074 |
+| Edition | Form W-4 (2026), created 12/8/25 — Cat. No. 10220Q |
+| Pages | 5 — the form, General Instructions, the Multiple Jobs Worksheet, the Deductions Worksheet, the Multiple Jobs tables |
+| SHA-256 | `92444d8856ce55d9e25dca8b6d1420634fc68b11e1ab1f760916ea29ddd312b2` |
+| Bytes | 208,845 |
+| AcroForm fields | 54, **and an XFA payload** |
+
+**IT IS SHIPPED BYTE-FOR-BYTE AND IS NEVER EDITED IN PLACE**, the same promise
+`i9_form.pdf` makes above. `erpnext_mcp/w4_pdf.py` opens it read-only and writes
+into a copy.
+
+**THE COPY LOSES ITS XFA AND THE ORIGINAL KEEPS IT.** Unlike the USCIS form, the
+IRS file is a hybrid: an ordinary AcroForm plus an XML payload describing the
+same form. A viewer that understands XFA — Acrobat does — renders the XFA and
+IGNORES the AcroForm, so a filled copy that kept it would hold every right answer
+and print blank. `fill_w4_pdf` deletes `/XFA` from the copy. That the template on
+disk still HAS it is asserted too, so the day the IRS ships a year without one,
+the deletion can go rather than be carried forever.
+
+**A U.S. GOVERNMENT WORK**, on the same footing as the I-9 above (17 U.S.C. §105).
+
+### When the IRS revises it — which is every year
+
+Form W-4 is reissued annually and the year is printed in its masthead and in the
+bottom-right corner of page 1, restated in `w4_pdf.EDITION` and
+`w4_pdf.TEMPLATE_TAX_YEAR`. A new year means:
+
+1. Download the new PDF over this one.
+2. Re-run `python3 -m unittest tests_standalone.test_w4_pdf` — the checksum test
+   fails by design, and `TheFieldTableIsCheckedAgainstGeometry` says which names
+   moved. That class is the one that matters here: the IRS names its fields
+   `f1_12[0]` rather than after the boxes, so a renumbered form would otherwise
+   fill perfectly valid fields with the wrong values.
+3. Update `EDITION`, `TEMPLATE_TAX_YEAR`, the checksum in
+   `w4_pdf.TEMPLATE_SHA256`, and this file.
+
+**A W-4 for a year the template does not print is still rendered**, on the page
+that is here, and `render_w4_pdf` reports `template_tax_year_matches: false`. A
+prior year's election on this year's page is a readable record; no form at all is
+not.

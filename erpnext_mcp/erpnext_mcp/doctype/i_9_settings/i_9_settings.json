@@ -13,6 +13,8 @@
   "business_legal_name",
   "business_address",
   "business_ein",
+  "signers_section",
+  "authorized_signers",
   "reminders_section",
   "reminder_days_before_doc_expiration",
   "reminder_days_before_destruction"
@@ -63,6 +65,18 @@
    "fieldname": "business_ein",
    "fieldtype": "Data",
    "label": "Business EIN"
+  },
+  {
+   "fieldname": "signers_section",
+   "fieldtype": "Section Break",
+   "label": "Authorized Signers (I-9 and W-4)"
+  },
+  {
+   "description": "Who may sign a federal employment form on this employer's behalf. EMPTY MEANS UNRESTRICTED, which is what a fresh install is and is deliberate: a site that has never configured a roster keeps the pre-v0.48.0 behaviour and submit_i9_section_2 takes whatever verifier_name it is given. Add one row and the roster starts being enforced for every form it covers — so the first row is the switch, and adding a row that leaves out the person doing the verifying locks them out. It governs Form W-4's employer block as well as Form I-9's Section 2, which is why it lives beside the employer defaults rather than in a doctype of its own.",
+   "fieldname": "authorized_signers",
+   "fieldtype": "Table",
+   "label": "Authorized Signers",
+   "options": "Authorized Signer"
   },
   {
    "fieldname": "reminders_section",

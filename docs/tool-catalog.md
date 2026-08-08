@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 381 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 386 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 176 read tools are **on** by default and can be switched off individually. A
+All 177 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -9233,6 +9233,98 @@ status. Scans only: `.pdf`, `.jpg`, `.jpeg`, `.png`, `.heic`, `.heif`, `.tiff`,
 
 **A second signed copy is refused** unless `overwrite` is passed. It is the one
 write on this doctype that could not be undone from the record itself.
+
+## Authorized signers (v0.48.0)
+
+Section 2 of Form I-9 is an attestation **under penalty of perjury** that a named
+person examined the employee's documents, and until v0.48.0 `verifier_name` was
+whatever string the caller sent. Form W-4's Employers Only block had the same
+shape and the same gap. The roster is an **Authorized Signer** child table on
+**I-9 Settings**: an account, the printed name, a title, a flag per form, and an
+active flag.
+
+**An empty roster authorises everybody, and that is the design.** A site that has
+never added a signer behaves exactly as it did before this release — which is
+what every site is on the day it upgrades, and a version that started refusing
+signatures on migrate would break the I-9 flow on every farm running this app.
+**So the first row is the switch.** Adding one signer turns enforcement on for
+the whole site, and `add_authorized_signer` says so in its own result.
+
+**Who signs is not who calls.** The calling account is matched against `user`;
+the name written onto the form is `full_name`. `submit_i9_section_2` and
+`submit_w4` take both off the roster row, so `verifier_name` becomes optional —
+pass it only to file on behalf of **another signer on the roster**, which is a
+real workflow (the foreman examined the documents, the office files the form) and
+is checked against the roster rather than accepted as typed.
+
+**Nothing is ever deleted.** `remove_authorized_signer` clears `active` and keeps
+the row; there is no delete tool. A form signed last season was signed by whoever
+was authorised last season, and a roster that forgets its own history cannot
+answer the question a federal inspection asks. Deactivating the last active
+signer leaves the roster *configured and empty*, which refuses every caller — the
+tool warns when a call does that.
+
+| Tool | Default | What it does |
+|---|---|---|
+| `list_authorized_signers` | **on** | The roster, plus `configured` — false means signing is unrestricted. Filter by `form_type` or `include_inactive`. |
+| `add_authorized_signer` | off | Authorize one User. `full_name` falls back to the User's own. Refuses a second row for one account. |
+| `update_authorized_signer` | off | Printed name, title, `can_sign_i9`, `can_sign_w4`, `active`. `active=true` is the way back from a removal. |
+| `remove_authorized_signer` | off | Deactivate. Warns when it leaves nobody. |
+
+## Form W-4 as a document (v0.48.0)
+
+`render_w4_pdf` is `render_i9_pdf`'s counterpart and takes the same position: the
+IRS publishes Form W-4 as a plain-paper fillable PDF, the employer retains it
+rather than filing it, so the right output is **the government's own page with
+the boxes filled in**. The template ships at
+`erpnext_mcp/templates/w4_form.pdf`; `erpnext_mcp/w4_pdf.py` is the field table.
+
+**The employer block is resolved at render time, not stored.** Step 5's Employers
+Only row asks for three things the site already held and no W-4 could reach: the
+employer's name and address and EIN come from I-9 Settings or the Company — the
+*same* source Section 2 of the I-9 uses — and the first date of employment from
+`Employee.date_of_joining`. Resolved rather than copied onto every row, so a farm
+that changes its registered address does not have a hundred W-4s carrying the old
+one. What *is* stored is who processed it: `employer_signer_name`,
+`employer_signer_title` and `employer_signed_at`, written by `submit_w4` off the
+authorized signer roster.
+
+**Four things it does not put on the page.**
+
+| Left blank | Why |
+|---|---|
+| The signature and date | The IRS form has **no signature field at all** — Step 5's lines are printed rules, not boxes. There is nothing to leave empty even by accident. |
+| The SSN, Step 1(b) | A W-4 is completed by the *employee* and the number is theirs to write. `render_i9_pdf`'s gated decryption exists because the employer verified that number; adding a second call site to fill a box the employee is holding a pen over would be risk for no gain. |
+| The exempt tick | It claims exemption from withholding for a whole year under penalty of perjury, and nothing in the W-4 Form doctype records that claim. |
+| Pages 3 and 4 | The Multiple Jobs and Deductions worksheets. The IRS's own instruction is "keep the worksheet for your records" — the doctype stores the *result*, and the result is what goes on page 1. |
+
+**The XFA payload is removed from the generated copy.** The IRS file is a hybrid:
+an ordinary AcroForm plus an XML payload describing the same form. Acrobat renders
+the XFA and ignores the AcroForm, so a fill that left it in place would produce a
+file holding every right answer and printing blank in the reader an accountant is
+most likely to open. The template on disk keeps its XFA; the copy does not.
+
+### `render_w4_pdf`
+
+**MUTATING (default OFF).** Fills the IRS form from one W-4 Form record and
+attaches the PDF privately to `generated_pdf`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `w4_form` | yes* | The W-4 Form docname, e.g. `W4-2026-0001` |
+| `employee` | yes* | The person instead of the form (`employee_name`, `name` are aliases) |
+| `tax_year` | | Which year's active W-4, when resolving by employee. Defaults to the most recent |
+| `overwrite` | | Render even though `generated_pdf` is set, repointing the field |
+
+\* one of the two.
+
+**A snapshot, not a view**, and a second render is **refused** unless `overwrite`
+is passed — same reasoning as the I-9's. **Rendering moves no status.** The
+result names every required box the record left empty, reports
+`employer_block_truncated` when the name-and-address line had to be cut to fit,
+and reports `template_tax_year_matches`: the IRS revises W-4 every year, and a
+2025 election printed on the 2026 page is a readable record where no form at all
+is not, so a mismatch is reported rather than refused.
 
 ### One optional dependency, and a fallback that needs none
 

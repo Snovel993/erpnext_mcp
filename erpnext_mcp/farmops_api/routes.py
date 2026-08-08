@@ -148,7 +148,23 @@ ROUTES = (
 	Route("/mobile", mobile_api.get_i9_form),
 	Route("/mobile", mobile_api.generate_i9_pdf),
 	Route("/mobile", mobile_api.upload_signed_i9),
+	# v0.48.0. Who may put their name on Section 2, and the three calls that
+	# maintain that list. `list_authorized_signers` is the one the wizard needs
+	# on the Section 2 screen — v0.48.0 turned the verifier from a free-text box
+	# into a roster lookup, and an app that could not read the roster would have
+	# to learn whether its own account may sign by submitting a form in an
+	# orchard and being refused. The other three are here because a roster that
+	# can only be edited in the Desk is one nobody fixes at 6am on a hire day.
+	Route("/mobile", mobile_api.list_authorized_signers),
+	Route("/mobile", mobile_api.add_authorized_signer),
+	Route("/mobile", mobile_api.update_authorized_signer),
+	Route("/mobile", mobile_api.remove_authorized_signer),
 	Route("/mobile", mobile_api.submit_w4),
+	# v0.48.0. The W-4's own federal form, and the last artefact the onboarding
+	# flow was missing: the wizard has collected withholding elections since
+	# v0.45.0 and had nothing printable to show for them. The employer block it
+	# fills needs nothing from the phone — see the wrapper.
+	Route("/mobile", mobile_api.generate_w4_pdf),
 	Route("/mobile", mobile_api.link_badge_to_employee),
 	# The capture queue and the crew clock.
 	Route("/mobile", mobile_api.sync_bucket_entries),

@@ -1,0 +1,82 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-07 12:00:00.000000",
+ "description": "One person this employer has authorised to complete and sign a federal employment form on its behalf — Section 2 of Form I-9, the Employers Only block of Form W-4, or both. A child table on I-9 Settings rather than a doctype of its own because the roster has no existence apart from the site it belongs to and is read on every signature, and because a second Single holding six columns is table sprawl. WHO SIGNS IS NOT WHO CALLS. The row names the person whose name goes on the form; the account that made the call is on the I-9 Audit Log row regardless, and the two are different facts. A site with no rows at all is not policed — that is the pre-v0.48.0 behaviour and it is what an install does before anybody has configured anything.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "full_name",
+  "title",
+  "permissions_col",
+  "can_sign_i9",
+  "can_sign_w4",
+  "active"
+ ],
+ "fields": [
+  {
+   "description": "The account this authorisation belongs to. It is what the signature check matches on, so an account that is not here signs nothing once the roster has a single row in it.",
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "User",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "description": "The printed name as it should appear on the form — the name a federal inspector reads, not the account's login. 'Ana Ramos', not 'ana@example.com'.",
+   "fieldname": "full_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Full Name",
+   "reqd": 1
+  },
+  {
+   "description": "Job title as it goes on the form. Form I-9 asks for it in the same box as the name; Form W-4 does not print it, and it is recorded on the W-4 anyway so the record says who processed the form.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title"
+  },
+  {
+   "fieldname": "permissions_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "May complete and sign Section 2 of Form I-9 — the attestation that this person personally examined the employee's documents.",
+   "fieldname": "can_sign_i9",
+   "fieldtype": "Check",
+   "label": "Can Sign I-9"
+  },
+  {
+   "default": "1",
+   "description": "May complete the Employers Only block of Form W-4.",
+   "fieldname": "can_sign_w4",
+   "fieldtype": "Check",
+   "label": "Can Sign W-4"
+  },
+  {
+   "default": "1",
+   "description": "Off means this person no longer signs. THE ROW STAYS — remove_authorized_signer clears this flag rather than deleting, because a form signed in 2026 was signed by whoever was authorised in 2026 and a deleted row makes that unanswerable.",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Active"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Authorized Signer",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
