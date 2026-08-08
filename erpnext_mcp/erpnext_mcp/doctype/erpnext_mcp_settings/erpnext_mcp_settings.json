@@ -270,6 +270,8 @@
   "allow_flag_i9_reverification",
   "allow_reverify_i9",
   "allow_destroy_i9",
+  "allow_render_i9_pdf",
+  "allow_attach_signed_i9",
   "w4_section",
   "allow_get_w4",
   "allow_list_w4_forms",
@@ -2246,6 +2248,20 @@
    "fieldname": "allow_destroy_i9",
    "fieldtype": "Check",
    "label": "Destroy I-9"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Fill the official USCIS Form I-9 from a record and attach the PDF privately to generated_pdf. Signature boxes are left empty; the SSN box needs include_full_ssn and store_full_ssn.",
+   "fieldname": "allow_render_i9_pdf",
+   "fieldtype": "Check",
+   "label": "Render I-9 PDF"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. File an already-uploaded signed or scanned I-9 against its record as the official signed copy, and make the File private.",
+   "fieldname": "allow_attach_signed_i9",
+   "fieldtype": "Check",
+   "label": "Attach Signed I-9"
   },
   {
    "fieldname": "w4_section",

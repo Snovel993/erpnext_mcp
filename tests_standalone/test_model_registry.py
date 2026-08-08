@@ -280,10 +280,11 @@ class ToolRegistration(unittest.TestCase):
 		# 369/170/199 as of v0.43.0, plus v0.44.0's eight BucketLog bridge tools
 		# (five read, three write) — see test_bucket_bridge.py's ToolRegistration —
 		# plus v0.46.2's `get_employee`, one more read, plus v0.47.0's
-		# `reverify_i9`, one more write.
-		self.assertEqual(len(self.registry.TOOLS), 379)
+		# `reverify_i9`, one more write, plus v0.47.1's `render_i9_pdf` and
+		# `attach_signed_i9` — two more writes, and no more reads.
+		self.assertEqual(len(self.registry.TOOLS), 381)
 		self.assertEqual(len(self.registry.READ_TOOLS), 176)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 203)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 205)
 
 
 if __name__ == "__main__":

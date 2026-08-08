@@ -41,20 +41,32 @@ classifiers = [
 # second layout engine to place a grid; this is the library whose whole job that
 # is, and the six layouts are the only thing in the app that needs it.
 #
-# ALL FOUR ARE IMPORTED DEFENSIVELY. A bench missing shapely or h3 loses the
+# The fifth arrived in v0.47.1 with Form I-9. It is NOT a second reportlab and
+# does the opposite job: reportlab DRAWS a page this app laid out, and `pypdf`
+# FILLS one somebody else published. USCIS distributes Form I-9 as a plain-paper
+# fillable PDF with 133 named AcroForm fields, every employer in the country
+# completes that exact document, and it is retained rather than filed — so the
+# honest output is the government's own page with values written into its own
+# fields, and redrawing it would produce a lookalike nobody asked for. The
+# template ships in `erpnext_mcp/templates/`; `pypdf` is what writes into it.
+#
+# ALL FIVE ARE IMPORTED DEFENSIVELY. A bench missing shapely or h3 loses the
 # six geospatial tools; a bench missing every QR encoder loses exactly one —
 # `generate_mobile_login_qr`; a bench missing reportlab loses exactly two —
 # `render_tax_form_pdf` and `bulk_render_tax_form_pdfs`, with every tax form's
-# computed values still readable through `get_tax_form`. Each says so BY NAME
-# with the pip command to fix it, rather than failing to load the other three
-# hundred. `qrcode` is accepted in segno's place where a bench already has it.
-# That is the same promise the rest of the app makes: installing it cannot break
-# a site.
+# computed values still readable through `get_tax_form`; a bench missing pypdf
+# loses exactly one — `render_i9_pdf`, with every I-9 value still readable
+# through `get_i9_form` and the I-9 Print Format still printing in the Desk.
+# Each says so BY NAME with the pip command to fix it, rather than failing to
+# load the other three hundred. `qrcode` is accepted in segno's place where a
+# bench already has it. That is the same promise the rest of the app makes:
+# installing it cannot break a site.
 dependencies = [
   "shapely>=2.0",
   "h3>=4.0.0",
   "segno>=1.5",
   "reportlab>=4.0",
+  "pypdf>=4.0",
 ]
 
 [project.urls]

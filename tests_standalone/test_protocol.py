@@ -726,10 +726,18 @@ class Catalogue(SeededTestCase):
 		and there is no matching read, because `get_i9_form` already returns the
 		reverification history and a second read would be a second answer to the
 		same question.
+
+		v0.47.1 ADDED TWO, BOTH WRITES, AND THE READ COUNT IS UNCHANGED FOR THE
+		SAME REASON. `render_i9_pdf` fills the USCIS form from a record and attaches
+		the page; `attach_signed_i9` files the scan that comes back signed. Both
+		write an Attach column and a File, so neither is a read however much
+		"render" sounds like one — and the values on the page are already readable
+		through `get_i9_form`, which is what makes a `preview_i9_pdf` unnecessary
+		rather than missing.
 		"""
-		self.assertEqual(len(registry.TOOLS), 379)
+		self.assertEqual(len(registry.TOOLS), 381)
 		self.assertEqual(len(registry.READ_TOOLS), 176)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 203)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 205)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

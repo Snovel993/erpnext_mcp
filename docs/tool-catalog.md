@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 379 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 381 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -9133,6 +9133,117 @@ Slips actually paid for the same company and period, per employee. **A
 discrepancy is not necessarily an error** — a bucket entry with no slip
 covering it yet is simply unpaid so far, the same posture
 `check_minimum_wage_by_state` takes.
+
+## v0.47.1 — Form I-9 as a document
+
+Four releases collected the data. These two produce the **form**, and file the
+copy that comes back signed.
+
+Everything through v0.47.0 filled in an I-9 Form record: Section 1, Section 2's
+List A/B/C documents, receipts, Supplement B reverifications, a retention clock,
+an append-only audit log. What an operator could actually put in a folder was a
+Desk print of the doctype — a two-column dump of every field in the order the
+JSON declares them. That is not Form I-9, and an inspection under
+**8 U.S.C. §1324a(b)(3)** asks to see Form I-9.
+
+**The page is the government's own.** This app now ships the USCIS fillable PDF
+at `erpnext_mcp/templates/i9_form.pdf` — OMB No. 1615-0047, Edition 01/20/25,
+four pages, 133 named AcroForm fields — byte for byte, with its SHA-256 asserted
+by the test suite. `erpnext_mcp/i9_pdf.py` writes values into those fields and
+hands back a copy; the file on disk is never edited. So the output is Form I-9
+with the boxes filled, not a reproduction of it.
+
+**Four things are deliberately left blank**, and `i9_pdf.py` argues each at
+length:
+
+| Left blank | Why |
+|---|---|
+| Both signature boxes | An electronic I-9 signature has to meet 8 CFR 274a.2(h)'s own requirements. A name typed into a `/Tx` field would *render* as a signature and would not be one. The capture and timestamp this app really holds go into Additional Information as what they are. |
+| The SSN comb | Nine digits are printed only when `include_full_ssn` is passed **and** `store_full_ssn` is on. Otherwise the box is left for the employee's pen — which is how the paper form has always worked. |
+| The alternative-procedure tick | Nothing in this app records whether the employer used the DHS remote-examination procedure, and a tick nobody chose is a false attestation. |
+| Supplement B's new-name boxes | They are for a worker whose legal name changed. `I-9 Reverification` records the reason but not the new name. |
+
+**One field in the government's file is on two pages at once.** `Document Title 1`
+is a single AcroForm field with widgets in Section 2's List A block *and* in
+Supplement B's second reverification row — so filling either box fills both.
+`i9_pdf._split_shared_title` promotes the page-4 widget into a field of its own
+**in the generated copy** before any value is written. It is the only place this
+app edits the form's structure rather than its values, and it is asserted by name
+in the tests.
+
+### `render_i9_pdf`
+
+**MUTATING (default OFF).** Fills the USCIS form from one I-9 Form record and
+attaches the PDF privately to `generated_pdf`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `i9_form` | yes* | The I-9 Form docname, e.g. `I9-2026-0001` |
+| `employee` | yes* | The person instead of the form (`employee_name`, `name` are aliases) |
+| `overwrite` | | Render even though `generated_pdf` is set, repointing the field |
+| `include_full_ssn` | | Print the nine-digit SSN. Refused unless `store_full_ssn` is on **and** this form has one stored |
+| `additional_information` | | Extra lines for the form's Additional Information box |
+
+\* one of the two.
+
+**A snapshot, not a view.** Anything that edits the form afterwards leaves the
+PDF stale, so a second render is **refused** unless `overwrite` is passed — that
+field probably holds the copy somebody already printed and had signed.
+Overwriting repoints the field and **leaves the earlier File attached**.
+
+**Refused on a Destroyed I-9.** Reconstituting a printable copy of a record
+`destroy_i9` certified as disposed of is the one thing that certificate says did
+not happen.
+
+**Rendering moves no status**, because an I-9 is retained by the employer rather
+than filed with anybody. The result names every required box the record left
+empty, so `incomplete: []` is the check for "this page is ready to sign", and
+reports `reverifications_not_on_page` when a long-returning seasonal worker has
+more than Supplement B's three rows.
+
+`include_full_ssn` is the only read of the encrypted `ssn_full` column anywhere
+in this app, it needs the site switch as well as the argument, and it writes
+`full_ssn: true` into the I-9 Audit Log row so a page carrying somebody's number
+is findable afterwards.
+
+### `attach_signed_i9`
+
+**MUTATING (default OFF).** Files an already-uploaded signed or scanned I-9
+against its record as the official signed copy.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `i9_form` / `employee` | yes | Which form, by docname or by person |
+| `file_token` | yes* | The File docname, as `finalize_staged_file` hands it back |
+| `file_url` | yes* | The File's URL, for something attached through the Desk |
+| `overwrite` | | Replace a signed copy filed in error |
+
+\* one of the two.
+
+**This is the copy that matters.** Everything else on the record is the data that
+was collected; this is the page two people signed. `generated_pdf` is only the
+page it was printed from, and the doctype's own field descriptions say so.
+
+**The file is uploaded first and named here.** No bytes cross this boundary — a
+base64 body would be a second upload path with its own size limit and its own way
+of failing halfway up a hill. **It is made private on the way in**, whatever it
+was: a signed I-9 names a person, their date of birth and their immigration
+status. Scans only: `.pdf`, `.jpg`, `.jpeg`, `.png`, `.heic`, `.heif`, `.tiff`,
+`.tif`.
+
+**A second signed copy is refused** unless `overwrite` is passed. It is the one
+write on this doctype that could not be undone from the record itself.
+
+### One optional dependency, and a fallback that needs none
+
+`pypdf` fills the form. It is a declared dependency and a normal install has it,
+but it is imported defensively like `shapely`, `h3`, `segno` and `reportlab`
+before it: a bench without it — or without the shipped template — loses exactly
+`render_i9_pdf`, which says so by name with the pip command to fix it.
+`attach_signed_i9` is unaffected, every I-9 value stays readable through
+`get_i9_form`, and the **I-9 Form Print Format** (seeded on migrate, v0.47.1)
+still lays the record out as the form's own sections in the Desk with no PDF
+library involved at all.
 
 ---
 

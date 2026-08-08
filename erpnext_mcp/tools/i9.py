@@ -62,6 +62,33 @@ long as they keep coming back. Reverifying an expiring authorization moves
 rather than the one it replaced — and moves `Employee.i9_status` off `Expired`,
 which is the ONLY write this app makes to that column and the only one it should.
 `_clear_expired_i9_column` carries that argument in full.
+
+────────────────────────────────────────────────────────────────────────────
+v0.47.1: THE FORM ITSELF, AND THE COPY THAT COMES BACK SIGNED
+────────────────────────────────────────────────────────────────────────────
+
+EVERYTHING ABOVE COLLECTED THE DATA AND NOTHING PRODUCED THE FORM. Four
+sprints of Section 1, Section 2, receipts, Section 3 and a retention clock, and
+what an operator could actually put in a folder was a Desk print of a doctype —
+a two-column dump of every field on the record, in the order the JSON declares
+them, which is not Form I-9 and is not what an ICE inspection under 8 U.S.C.
+§1324a(b)(3) asks to see. `render_i9_pdf` fills the government's own fillable
+PDF, which this app now ships at `templates/i9_form.pdf`; `i9_pdf.py` is the
+field table and argues its own case, including the four things it leaves
+deliberately blank.
+
+`attach_signed_i9` CLOSES THE LOOP AND IS THE HALF THAT MATTERS. The rendered
+page is printed and signed by two people with a pen — the signature boxes are
+empty on purpose, because 8 CFR 274a.2(h) has requirements a string typed into
+a PDF does not meet — and the scan comes back to `signed_pdf`. That file is the
+retained federal record. `generated_pdf` is only the page it was printed from,
+and the doctype's own field descriptions say so.
+
+`_full_ssn` IS THE CALL SITE THE SSN PARAGRAPH ABOVE PREDICTED. It is the only
+code in this app that reads `ssn_full` back, it needs `include_full_ssn` from
+the caller AND `store_full_ssn` on the site, and it writes `full_ssn: true` into
+the audit row so a page carrying somebody's number is findable afterwards.
+`get_i9_form` still does not return it.
 """
 from __future__ import annotations
 
@@ -71,9 +98,11 @@ from datetime import date, timedelta
 import frappe
 from frappe.utils import getdate
 
+from .. import compat, i9_pdf
 from ..args import as_bool, as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
+from . import artifacts
 
 I9_FORM = "I-9 Form"
 I9_AUDIT_LOG = "I-9 Audit Log"
@@ -101,6 +130,16 @@ REVERIFICATION_REASONS = ("Work Authorization Expired", "Rehire", "Receipt Repla
 #: The three identifiers Section 1 will take from an Alien Authorized to Work,
 #: any ONE of which answers the question. USCIS calls them exactly this.
 ALIEN_IDENTIFIERS = ("alien_registration_number", "i94_admission_number", "foreign_passport_number")
+
+#: What a signed copy of an I-9 is allowed to arrive as. A wet-signed form comes
+#: back as a scan, and a scan is a PDF or a photograph of one — nothing here is
+#: a document format, because this file is never opened, only stored and handed
+#: back. `.html` and `.svg` are absent for the reason `api/files.py` states:
+#: both execute script when served.
+SIGNED_COPY_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".tiff", ".tif")
+
+#: The Company columns the employer block is built from, where they exist.
+COMPANY = "Company"
 
 
 def _log_action(i9_form: str, employee: str, action: str, details: dict | None = None) -> None:
@@ -170,6 +209,12 @@ def _i9_fields() -> list[str]:
         "document_copies_stored", "verifier_name", "verifier_title",
         "section_2_signed_at", "section_2_signed_ip", "verification_date",
         "retention_until", "destruction_eligible_date", "destroyed_at",
+        # v0.47.1. The two halves of the printed form: the page this app filled
+        # in and the page that came back with signatures on it. Both are Attach
+        # columns holding a private File URL, and both are on this list because
+        # a reader who cannot see whether a signed copy was ever filed cannot
+        # tell a complete I-9 file from an incomplete one.
+        "generated_pdf", "generated_pdf_on", "signed_pdf", "signed_pdf_on",
     ]
 
 
@@ -1175,3 +1220,441 @@ def destroy_i9(args: dict) -> ToolResult:
         summary=f"I-9 for {employee} destroyed",
         docstatus_delta=f"{old_status} → Destroyed",
     )
+
+
+# ── v0.47.1: the federal form itself ───────────────────────────────────────
+
+
+def _resolve_form(args: dict) -> str:
+    """One I-9 Form docname, from a docname or from whoever it belongs to.
+
+    THE DOCNAME IS TRIED FIRST AND `name` IS TRIED AS BOTH. Every other tool in
+    this module takes `name` as an alias for `employee`, because every other
+    tool is asked about a person; these two are asked about a form — `I9-2026-0001`
+    is what a Desk user has in front of them and what the iOS app was given back
+    when the form was created. Accepting only the employee would mean an operator
+    holding the docname has to go and find whose it is first.
+    """
+    explicit = as_str(args, "i9_form") or as_str(args, "form")
+    if explicit:
+        if frappe.db.exists(I9_FORM, explicit):
+            return explicit
+        raise ToolError(
+            f"no I-9 Form called {explicit!r} on this site. list_i9_forms has the register; "
+            f"pass employee= to look one up by the person it belongs to instead."
+        )
+    docname = as_str(args, "name")
+    if docname and frappe.db.exists(I9_FORM, docname):
+        return docname
+
+    employee = _resolve_employee(args)
+    found = frappe.db.get_value(I9_FORM, {"employee": employee}, "name")
+    if not found:
+        raise ToolError(f"no I-9 Form for employee {employee!r}.")
+    return str(found)
+
+
+def _employer_block(company: str) -> dict:
+    """Section 2's employer name and address, settings first, entity second.
+
+    I-9 SETTINGS WINS WHERE IT HAS AN ANSWER. `business_legal_name` and
+    `business_address` are there precisely so a farm whose Company record is
+    named `FAFO` can put `FAFO Farms LLC` — the name on the EIN — on a federal
+    form, and a site that has filled them in has said what it wants printed.
+    The Company and its linked Address are the fallback, so a site that has
+    filled in neither still gets an employer block rather than two empty boxes.
+
+    NEVER RAISES. An employer block is not a reason to refuse to render a form
+    that is otherwise complete; `render_i9_pdf` reports which parts came back
+    empty, and an empty box on a printed I-9 is a box somebody writes in.
+    """
+    block = {"name": "", "address": "", "ein": ""}
+    try:
+        settings = frappe.get_doc(I9_SETTINGS)
+        block["name"] = str(settings.get("business_legal_name") or "").strip()
+        block["address"] = str(settings.get("business_address") or "").strip()
+        block["ein"] = str(settings.get("business_ein") or "").strip()
+    except Exception:  # pragma: no cover - a site whose Single has not migrated
+        pass
+
+    if not block["name"]:
+        block["name"] = str(company or "").strip()
+    if not block["address"]:
+        block["address"] = _company_address(company)
+    return block
+
+
+def _company_address(company: str) -> str:
+    """The hiring entity's own address as one line, or "".
+
+    Read through ERPNext's Dynamic Link the same way `employee._jurisdiction_for`
+    reads it, and defensively for the same reason: a site without ERPNext's
+    address schema is a site that answers "" rather than one that cannot print
+    an I-9.
+    """
+    if not company:
+        return ""
+    try:
+        if not (compat.doctype_exists("Address") and compat.doctype_exists("Dynamic Link")):
+            return ""
+        names = frappe.db.get_all(
+            "Dynamic Link",
+            filters={"link_doctype": COMPANY, "link_name": company, "parenttype": "Address"},
+            pluck="parent",
+            limit=5,
+        ) or []
+        for name in names:
+            row = frappe.db.get_value(
+                "Address", name, ["address_line1", "city", "state", "pincode"], as_dict=True
+            ) or {}
+            parts = [str(row.get(key) or "").strip() for key in ("address_line1", "city")]
+            tail = " ".join(
+                part for part in (str(row.get("state") or "").strip(), str(row.get("pincode") or "").strip())
+                if part
+            )
+            line = ", ".join(part for part in [*parts, tail] if part)
+            if line:
+                return line
+    except Exception:  # pragma: no cover - a site without ERPNext's address schema
+        return ""
+    return ""
+
+
+def _full_ssn(i9_name: str, args: dict) -> str:
+    """The nine digits for the SSN box, and the two gates in front of them.
+
+    THIS IS THE ONLY PLACE IN THIS APP THAT READS `ssn_full` BACK, and the
+    module docstring said this day would come: a printed I-9 has an SSN box, so
+    a call site that genuinely needs the number exists, and it says so here
+    rather than inheriting the number from a general-purpose read. `get_i9_form`
+    still does not return it and never will.
+
+    BOTH GATES ARE REQUIRED. The caller has to pass `include_full_ssn`, and the
+    site has to have `store_full_ssn` switched on — a site that never agreed to
+    keep the nine digits has none to print, and a caller who did not ask for
+    them gets a blank comb. The read is logged, with `full_ssn: true` in the
+    audit row, because a printed page carrying somebody's Social Security
+    number is an event a retention audit should be able to find.
+    """
+    if not as_bool(args, "include_full_ssn", False):
+        return ""
+    if not _store_full_ssn_enabled():
+        raise ToolError(
+            "include_full_ssn was asked for and this site does not store full Social "
+            "Security numbers. store_full_ssn is off in I-9 Settings, so there are no nine "
+            "digits to print — only the last four, which the SSN box has no way to show as "
+            "four. Render without it and the employee writes the number on the printed page, "
+            "or switch store_full_ssn on and collect it first. Nothing was changed."
+        )
+    try:
+        # Imported HERE rather than at the top of the module, and it is the only
+        # import in this app that reaches into `frappe.utils`' submodules: the
+        # encrypted read belongs to this one function, and an import at module
+        # scope would put it in front of every tool in the file — including on a
+        # bench where `frappe.utils.password` is not what this version calls it.
+        from frappe.utils.password import get_decrypted_password
+
+        stored = get_decrypted_password(I9_FORM, i9_name, "ssn_full", raise_exception=False)
+    except Exception:  # pragma: no cover - a site whose __Auth row is gone
+        stored = ""
+    digits = "".join(character for character in str(stored or "") if character.isdigit())
+    if len(digits) != 9:
+        raise ToolError(
+            f"include_full_ssn was asked for and I-9 {i9_name} has no stored full Social "
+            f"Security number to print. store_full_ssn is on, but this form was filled in "
+            f"before it was — or was filled in without one. Render without it. Nothing was changed."
+        )
+    return digits
+
+
+def render_i9_pdf(args: dict) -> ToolResult:
+    """Fill the USCIS Form I-9 from this record and attach it to the record.
+
+    THE PAGE IS THE GOVERNMENT'S. `i9_pdf.py` opens the USCIS fillable PDF this
+    app ships, writes the collected values into its own named fields, and hands
+    back a copy — so what comes out is Form I-9 with the boxes filled, not a
+    reproduction of it and not a field dump. See that module for what it
+    deliberately leaves blank: both signature boxes, the alternative-procedure
+    tick, and the SSN unless it was asked for by name.
+
+    A SNAPSHOT, NOT A VIEW. The attached PDF is the record as it was when the
+    call was made. Anything that edits the form afterwards — a Section 2, a
+    reverification, a corrected address — leaves it stale, which is why a second
+    render REFUSES unless `overwrite=true` is passed: the likeliest thing in
+    that field is the copy somebody already printed and had signed, and
+    replacing it silently would repoint the record at a page nobody has seen.
+    The old File stays attached either way.
+
+    RENDERING IS NOT FILING AND MOVES NO STATUS. An I-9 is retained by the
+    employer rather than filed with anybody, so there is nothing to move; the
+    form is whatever it was. `attach_signed_i9` is what records that the printed
+    page came back signed.
+
+    Refused on a Destroyed I-9: `destroy_i9` recorded that the record was
+    disposed of at the end of its retention period, and reconstituting a
+    printable copy of it afterwards is the one thing that certificate says did
+    not happen.
+    """
+    i9_pdf.require()
+    name = _resolve_form(args)
+    row = frappe.db.get_value(I9_FORM, name, _i9_fields(), as_dict=True)
+    if not row:  # pragma: no cover - resolved a moment ago
+        raise ToolError(f"no I-9 Form called {name!r} on this site.")
+
+    if str(row.get("status") or "") == "Destroyed":
+        raise ToolError(
+            f"I-9 {name} was destroyed on {row.get('destroyed_at') or 'an unrecorded date'} "
+            f"at the end of its retention period. Rendering a fresh printable copy of a "
+            f"destroyed record would contradict the destruction it certifies. Nothing was changed."
+        )
+
+    overwrite = as_bool(args, "overwrite", False)
+    existing = str(frappe.db.get_value(I9_FORM, name, "generated_pdf") or "").strip()
+    if existing and not overwrite:
+        raise ToolError(
+            f"I-9 {name} already has a rendered PDF at {existing}. The likeliest thing in "
+            f"that field is the copy somebody printed and had signed. Pass overwrite=true to "
+            f"render a fresh page and repoint the field; the existing File stays attached to "
+            f"the record either way. Nothing was changed."
+        )
+
+    record = {key: value for key, value in row.items()}
+    record["name"] = name
+    reverifications = _reverification_history(name)
+    employer = _employer_block(str(row.get("company") or ""))
+    ssn = _full_ssn(name, args)
+    notes = _render_notes(args)
+
+    pdf = i9_pdf.fill_i9_pdf(record, employer, reverifications, full_ssn=ssn, notes=notes)
+    file_name = i9_pdf.file_name_for(record)
+    attachment = artifacts.attach_bytes(I9_FORM, name, file_name, pdf, field="generated_pdf")
+    frappe.db.set_value(I9_FORM, name, "generated_pdf_on", frappe.utils.now(), update_modified=False)
+
+    overflow = max(0, len(reverifications) - i9_pdf.SUPPLEMENT_B_ROWS)
+    _log_action(name, str(row.get("employee") or ""), "Printed", {
+        "file": attachment.get("file_url"),
+        "bytes": len(pdf),
+        "full_ssn": bool(ssn),
+        "replaced": existing or None,
+        "edition": i9_pdf.EDITION,
+    })
+
+    data = {
+        "name": name,
+        "employee": row.get("employee"),
+        "employee_name": row.get("employee_name"),
+        "status": row.get("status"),
+        "edition": i9_pdf.EDITION,
+        "file_name": file_name,
+        "file_url": attachment.get("file_url"),
+        "bytes": len(pdf),
+        "full_ssn_printed": bool(ssn),
+        "replaced": existing or None,
+        "reverifications": len(reverifications),
+        "reverifications_not_on_page": overflow,
+        "employer": employer,
+        "incomplete": _incomplete_boxes(record),
+        "note": _RENDER_NOTE,
+    }
+    summary = (
+        f"I-9 {name} rendered onto the USCIS form as {file_name} ({len(pdf):,} bytes) and attached"
+        + (f", replacing {existing}" if existing else "")
+    )
+    if data["incomplete"]:
+        summary += f" — {len(data['incomplete'])} box(es) left blank for a pen"
+    return ToolResult(data=data, summary=summary)
+
+
+#: Said on every render, because a filled federal form is the thing somebody is
+#: most likely to mistake for a completed one.
+_RENDER_NOTE = (
+    "Both signature boxes are deliberately empty: an electronic I-9 signature has to meet "
+    "8 CFR 274a.2(h)'s own requirements and a name typed into a PDF does not. Print the page, "
+    "have the employee and the verifier sign it, and file the scan back with "
+    "attach_signed_i9. Rendering moved no status — the form is still whatever it was."
+)
+
+#: Which of the boxes a complete I-9 needs are empty on this record, and what
+#: each one is called on the form. Reported rather than refused: a Draft I-9
+#: rendered on purpose — to hand a new hire a page with their own details
+#: already on it — is a real and useful thing to do.
+_REQUIRED_BOXES = (
+    ("legal_last_name", "Section 1: Last Name"),
+    ("legal_first_name", "Section 1: First Name"),
+    ("date_of_birth", "Section 1: Date of Birth"),
+    ("address_street", "Section 1: Address"),
+    ("citizenship_status", "Section 1: citizenship attestation"),
+    ("hire_date", "Section 2: First Day of Employment"),
+    ("verifier_name", "Section 2: employer representative"),
+)
+
+
+def _incomplete_boxes(record: dict) -> list[str]:
+    """The named boxes a printed copy of this record will have nothing in."""
+    missing = [label for column, label in _REQUIRED_BOXES if not str(record.get(column) or "").strip()]
+    documents = [
+        key for key in ("list_a", "list_b", "list_c") if str(record.get(f"{key}_doc_title") or "").strip()
+    ]
+    if not documents:
+        missing.append("Section 2: no List A or List B+C document recorded")
+    return missing
+
+
+def _render_notes(args: dict) -> list[str]:
+    """Extra lines for the form's Additional Information box.
+
+    Accepted as a list or as one string, because a JSON payload from a phone and
+    a hand-typed MCP argument are both reasonable ways to send one line.
+    """
+    raw = args.get("additional_information") or args.get("notes")
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, (list, tuple)):
+        return [str(item) for item in raw if str(item or "").strip()]
+    raise ToolError(
+        f"additional_information must be a string or a list of strings, got {type(raw).__name__}."
+    )
+
+
+def attach_signed_i9(args: dict) -> ToolResult:
+    """File the signed or scanned copy against the I-9 record it belongs to.
+
+    THIS IS THE COPY THAT MATTERS. Everything else on the record is the data
+    that was collected; this is the page two people put their names on, and
+    8 U.S.C. §1324a asks the employer to have kept exactly that for the
+    retention period. `render_i9_pdf` produces the page to print; this is the
+    other half of the loop.
+
+    THE FILE IS UPLOADED FIRST AND NAMED HERE. It arrives as a File that already
+    exists on the site — `stage_file_chunk` / `finalize_staged_file` for a
+    phone, a Desk upload for anybody else — and this call attaches it to the I-9
+    and points `signed_pdf` at it. Nothing is decoded here and no bytes cross
+    this boundary: an endpoint that took a base64 body would be a second upload
+    path with its own size limit, its own hash check and its own way of failing
+    halfway through a bad link in an orchard.
+
+    THE FILE IS MADE PRIVATE ON THE WAY IN, whatever it was. A signed I-9 names
+    a person, their date of birth and their immigration status, and a public URL
+    for it is a data breach that nobody has to guess a password for.
+
+    A SECOND SIGNED COPY REFUSES unless `overwrite=true`. Replacing the signed
+    original silently is the one write on this doctype that could not be undone
+    from the record itself.
+    """
+    name = _resolve_form(args)
+    row = frappe.db.get_value(
+        I9_FORM, name, ["employee", "employee_name", "status", "signed_pdf"], as_dict=True
+    )
+    if not row:  # pragma: no cover - resolved a moment ago
+        raise ToolError(f"no I-9 Form called {name!r} on this site.")
+
+    if str(row.get("status") or "") == "Destroyed":
+        raise ToolError(
+            f"I-9 {name} was destroyed at the end of its retention period. A signed copy "
+            f"filed against a destroyed record would contradict the destruction it certifies. "
+            f"Nothing was changed."
+        )
+
+    overwrite = as_bool(args, "overwrite", False)
+    existing = str(row.get("signed_pdf") or "").strip()
+    if existing and not overwrite:
+        raise ToolError(
+            f"I-9 {name} already has a signed copy at {existing}. That is the retained "
+            f"federal record for this hire. Pass overwrite=true only to replace a copy that "
+            f"was filed in error; the existing File stays attached to the record either way. "
+            f"Nothing was changed."
+        )
+
+    file_name, file_url = _signed_copy(args)
+    # THROUGH THE DOCUMENT, NOT THROUGH `db.set_value`, and the difference is the
+    # whole reason this file is worth attaching. `is_private` is not a flag on a
+    # row: making a public File private MOVES it from `public/files` to
+    # `private/files` and rewrites `file_url`, and Frappe's File controller is
+    # what does the moving. A `db.set_value` would flip the column, leave the
+    # bytes in the public directory, and leave `signed_pdf` pointing at a URL
+    # that says private and resolves public — which is the breach this is
+    # supposed to prevent, with a record that says it did not happen.
+    handle = frappe.get_doc("File", file_name)
+    handle.attached_to_doctype = I9_FORM
+    handle.attached_to_name = name
+    handle.attached_to_field = "signed_pdf"
+    handle.is_private = 1
+    handle.flags.ignore_permissions = True
+    handle.save()
+
+    # The URL AFTER the move, not the one the caller named. A file that has just
+    # changed directory has a different URL, and the form has to hold the one
+    # that now resolves.
+    stored = str(handle.get("file_url") or file_url)
+    frappe.db.set_value(
+        I9_FORM,
+        name,
+        {"signed_pdf": stored, "signed_pdf_on": frappe.utils.now()},
+        update_modified=False,
+    )
+
+    _log_action(name, str(row.get("employee") or ""), "Signed Copy Filed", {
+        "file": stored,
+        "file_docname": file_name,
+        "replaced": existing or None,
+    })
+
+    return ToolResult(
+        data={
+            "name": name,
+            "employee": row.get("employee"),
+            "employee_name": row.get("employee_name"),
+            "status": row.get("status"),
+            "signed_pdf": stored,
+            "file_docname": file_name,
+            "replaced": existing or None,
+        },
+        summary=f"signed I-9 filed against {name}"
+        + (f", replacing {existing}" if existing else ""),
+    )
+
+
+def _signed_copy(args: dict) -> tuple[str, str]:
+    """The File this call is about, as (docname, url), or the refusal.
+
+    Takes a docname or a URL, because the two transports hand back different
+    things: `finalize_staged_file` returns a `file_token` that IS the docname,
+    and a Desk Attach field holds the URL. `tools/inspections._file_docname`
+    makes the same accommodation for the same reason.
+    """
+    reference = (
+        as_str(args, "file_token")
+        or as_str(args, "file")
+        or as_str(args, "file_url")
+        or as_str(args, "signed_pdf")
+    )
+    if not reference:
+        raise ToolError(
+            "attach_signed_i9 needs the file to attach — file_token (what "
+            "finalize_staged_file hands back), or file_url for a File already on the site. "
+            "Upload the scan first; this call only names it. Nothing was changed."
+        )
+
+    docname = ""
+    if frappe.db.exists("File", reference):
+        docname = reference
+    elif reference.startswith("/") or reference.startswith("http"):
+        docname = str(frappe.db.get_value("File", {"file_url": reference}, "name") or "")
+    if not docname:
+        raise ToolError(
+            f"no File called {reference!r} on this site. Upload the signed copy first — "
+            f"stage_file_chunk then finalize_staged_file from the app, or the Desk's own "
+            f"attachment control — and pass what that hands back. Nothing was changed."
+        )
+
+    row = frappe.db.get_value("File", docname, ["file_name", "file_url"], as_dict=True) or {}
+    stored_name = str(row.get("file_name") or "")
+    extension = ("." + stored_name.rsplit(".", 1)[-1].lower()) if "." in stored_name else ""
+    if extension not in SIGNED_COPY_EXTENSIONS:
+        raise ToolError(
+            f"{stored_name or reference!r} is a {extension or 'file with no extension'} and a "
+            f"signed I-9 is a scan: {', '.join(SIGNED_COPY_EXTENSIONS)}. Nothing was changed."
+        )
+    return docname, str(row.get("file_url") or "")

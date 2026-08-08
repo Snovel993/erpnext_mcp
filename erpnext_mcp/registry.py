@@ -35,7 +35,7 @@ import json
 
 import frappe
 
-from . import audit, form_pdf_renderer, geo, settings
+from . import audit, form_pdf_renderer, geo, i9_pdf, settings
 from .compat import doctype_exists, traceback_text
 from .errors import ToolError
 from .render import qr
@@ -214,6 +214,32 @@ def _pdf_form_ready(*doctypes: str):
 	def predicate() -> bool:
 		try:
 			return bool(needs_doctype() and form_pdf_renderer.available())
+		except Exception:
+			return False
+
+	return predicate
+
+
+#: v0.47.1. What FILLING a federal form needs beyond the doctype, which is not
+#: what DRAWING one needs: `render_i9_pdf` writes into the government's own
+#: fillable PDF with pypdf rather than laying a page out with reportlab. A bench
+#: missing either the library or the shipped template loses exactly this one
+#: tool, by name — every I-9 value stays readable through `get_i9_form`, and the
+#: I-9 Form Print Format still prints in the Desk with no library at all.
+_I9_PDF_REQUIRES = (
+	"the I-9 Form DocType (run `bench migrate`) and the pypdf Python package, which this "
+	"app declares as a dependency — install it into the bench's environment with "
+	"`./env/bin/pip install 'pypdf>=4.0'` and restart"
+)
+
+
+def _i9_pdf_ready():
+	"""Predicate: this site has the I-9 doctype AND can fill the USCIS form."""
+	needs_doctype = _needs_doctype("I-9 Form")
+
+	def predicate() -> bool:
+		try:
+			return bool(needs_doctype() and i9_pdf.available())
 		except Exception:
 			return False
 
@@ -9255,6 +9281,89 @@ TOOLS = {
 		title="Destroy an I-9",
 		available=_needs_doctype("I-9 Form"),
 		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+	),
+	# ── v0.47.1: the federal form, and the copy that comes back signed ──────
+	"render_i9_pdf": _tool(
+		i9.render_i9_pdf,
+		"MUTATING (default OFF). Fill the OFFICIAL USCIS Form I-9 from a record "
+		"and attach the result privately to the form's generated_pdf field.\n\n"
+		"THE GOVERNMENT'S OWN PAGE, not a reproduction of it. This app ships the "
+		"USCIS fillable PDF (OMB No. 1615-0047) and writes the collected values into "
+		"its named fields — Section 1, Section 2's List A/B/C boxes, the employer "
+		"block, and up to three Supplement B reverification rows.\n\n"
+		"BOTH SIGNATURE BOXES ARE LEFT EMPTY, deliberately. An electronic I-9 "
+		"signature has to meet 8 CFR 274a.2(h)'s requirements and a name typed into a "
+		"PDF does not; what the app holds — a capture and a timestamp — is written "
+		"into Additional Information as what it is. Print, sign, and file the scan "
+		"back with attach_signed_i9.\n\n"
+		"THE SSN BOX IS EMPTY unless include_full_ssn is passed AND store_full_ssn "
+		"is on in I-9 Settings. This is the only tool in the app that reads the "
+		"encrypted full number back, and the read is recorded in the audit row.\n\n"
+		"A SNAPSHOT, NOT A VIEW. Anything that edits the form afterwards leaves the "
+		"PDF stale; REFUSES a second render unless overwrite is passed, because that "
+		"field probably holds the copy somebody already had signed. Refused on a "
+		"Destroyed I-9. Rendering moves no status — an I-9 is retained, not filed. "
+		"Logged to I-9 Audit Log as Printed.",
+		{
+			"i9_form": _field(_STRING, "The I-9 Form docname, e.g. I9-2026-0001."),
+			"name": _field(_STRING, "An I-9 Form docname, or an employee."),
+			"employee": _field(_STRING, "Employee docname or employee_name, instead of the form."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Render even though generated_pdf is already set, repointing the field. "
+				"The File that was there stays attached to the record.",
+			),
+			"include_full_ssn": _field(
+				_BOOLEAN,
+				"Print the employee's nine-digit SSN in the Section 1 comb. Refused unless "
+				"store_full_ssn is on in I-9 Settings and this form has one stored. Off by "
+				"default: the box is left for the employee to complete by hand.",
+			),
+			"additional_information": _field(
+				_STRING_ARRAY,
+				"Extra lines for the form's Additional Information box, after the receipt "
+				"note and the attestation timestamps this writes itself. A single string is "
+				"accepted too.",
+			),
+		},
+		mutating=True,
+		title="Render the federal I-9 PDF",
+		available=_i9_pdf_ready(),
+		requires=_I9_PDF_REQUIRES,
+	),
+	"attach_signed_i9": _tool(
+		i9.attach_signed_i9,
+		"MUTATING (default OFF). File an already-uploaded signed or scanned I-9 "
+		"against its record, as the official signed copy.\n\n"
+		"THIS IS THE COPY 8 U.S.C. §1324a ASKS THE EMPLOYER TO HAVE KEPT. Everything "
+		"else on the record is the data that was collected; this is the page two "
+		"people signed. generated_pdf is only the page it was printed from.\n\n"
+		"THE FILE IS UPLOADED FIRST AND NAMED HERE. Pass file_token (what "
+		"finalize_staged_file hands back) or file_url for a File already on the site. "
+		"No bytes cross this boundary — a base64 body would be a second upload path "
+		"with its own size limit and its own way of failing halfway.\n\n"
+		"MADE PRIVATE ON THE WAY IN, whatever it was: a signed I-9 names a person, "
+		"their date of birth and their immigration status. Scans only (.pdf, .jpg, "
+		".png, .heic, .tiff). REFUSES a second signed copy unless overwrite is passed. "
+		"Refused on a Destroyed I-9. Logged to I-9 Audit Log as Signed Copy Filed.",
+		{
+			"i9_form": _field(_STRING, "The I-9 Form docname, e.g. I9-2026-0001."),
+			"name": _field(_STRING, "An I-9 Form docname, or an employee."),
+			"employee": _field(_STRING, "Employee docname or employee_name, instead of the form."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"file_token": _field(_STRING, "The File docname, as finalize_staged_file returns it."),
+			"file_url": _field(_STRING, "The File's URL, for a file attached through the Desk."),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Replace a signed copy that was filed in error. The File that was there "
+				"stays attached to the record.",
+			),
+		},
+		mutating=True,
+		title="File the signed I-9",
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.47.1)",
 	),
 	# ── v0.28.0: W-4 / Federal Withholding Engine ─────────────────────────
 	"get_w4": _tool(

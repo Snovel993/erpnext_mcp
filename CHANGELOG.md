@@ -3,6 +3,93 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.47.1 — 2026-08-07
+
+**Four releases collected the data and nothing produced the form.** v0.27.0
+through v0.47.0 built Section 1, Section 2, receipts, Supplement B, a retention
+clock and an append-only audit log — and what an operator could actually put in a
+folder was a Desk print of the doctype: every one of its eighty-four fields, two
+to a row, in the order the JSON declares them, `naming_series` and `pdf_col`
+included. That is not Form I-9, and an inspection under 8 U.S.C. §1324a(b)(3)
+asks to see Form I-9.
+
+**So the app ships the government's page and fills it in.** The USCIS fillable
+PDF — OMB No. 1615-0047, Edition 01/20/25, four pages, 133 named AcroForm fields
+— is now a static asset at `erpnext_mcp/templates/i9_form.pdf`, byte for byte,
+with its SHA-256 asserted by the test suite so a template somebody re-saved in a
+PDF editor fails the suite rather than producing a form nobody can file.
+`render_i9_pdf` writes the collected values into its own named fields and
+attaches the copy privately to `generated_pdf`. **The file on disk is never
+edited.** This is deliberately not what v0.36.0 does for a W-2: the IRS's Copy A
+is red-ink scannable stock no laser printer makes, so a reproduction is the only
+honest output there — an I-9 is completed on plain paper by every employer in the
+country and retained rather than filed, so the honest output is the real form.
+
+**Four boxes are left blank on purpose, and each is argued in the code.** Neither
+signature box is ever written: an electronic I-9 signature has to meet 8 CFR
+274a.2(h)'s own requirements and a name typed into a `/Tx` field would *render*
+as a signature without being one. What the app genuinely holds — a capture and a
+timestamp — goes into Additional Information as what it is, beside the receipt
+deadline and any reverification that did not fit on the page. The SSN comb stays
+empty unless `include_full_ssn` is passed **and** `store_full_ssn` is on; that is
+the only read of the encrypted column anywhere in this app, v0.47.0 said the day
+would come, and the read is recorded in the audit row. The DHS
+alternative-procedure tick is never set, because nothing here records whether it
+was used. Supplement B's new-name boxes stay empty, because the child table
+records the reason `Name Change` and not the new name.
+
+**One field in USCIS's own file is on two pages at once.** `Document Title 1` is
+a single AcroForm field with a widget in Section 2's List A block *and* one in
+Supplement B's second reverification row — so filling either box fills both, and
+a hire-day document title would be silently overwritten by a reverification made
+two seasons later, on a form that looks perfectly plausible. The generated copy
+gets that widget promoted into a field of its own before any value is written.
+It is the only place this app edits the form's structure rather than its values,
+and the defect it works around is itself pinned by a test, so a USCIS edition
+that fixes it fails loudly and the surgery can be deleted.
+
+**`attach_signed_i9` closes the loop, and it is the half that matters.** The
+rendered page is printed, signed with a pen by two people, and photographed; that
+photograph is the record §1324a asks the employer to have kept. It arrives
+through the existing evidence path — `stage_file_chunk` then
+`finalize_staged_file`, hashed at capture and verified on assembly — and this
+call names the File and attaches it to `signed_pdf`, **making it private on the
+way in whatever it was**. No bytes cross the endpoint: a base64 body would be a
+second upload path with its own size limit and its own way of failing halfway up
+a hill. A second signed copy is refused without `overwrite`, being the one write
+on this doctype that could not be undone from the record itself.
+
+**Three routes, and the first is a read the wizard never had.** Every other I-9
+call hands back the record it just wrote, and `get_employee` reports a one-word
+status — so a foreman opening the flow on somebody already verified could be told
+`Verified` and nothing else. Which documents? Examined by whom? Is anything still
+owed? All on the server, none of it reachable. `get_i9_form` publishes it (SSN
+still the last four, and a worker may read their own record but nobody else's);
+`generate_i9_pdf` hands back a URL to print from; `upload_signed_i9` files the
+photograph back. `include_full_ssn` is **absent** from the handset endpoint
+rather than renamed — printing somebody's nine-digit number onto a page a phone
+could mail anywhere needs a retention decision an operator makes at a desk.
+
+**The Desk's Print button gets a format, and it fixes the wkhtmltopdf failure by
+not depending on anything.** The I-9 Print Format is seeded on migrate — created
+once, never overwritten, so an operator's edits survive every upgrade — and lays
+the record out as the form's own sections with the citizenship attestation as
+ticked boxes and the three document lists in their own columns. It references no
+image, no stylesheet, no webfont and no URL at all: wkhtmltopdf fetches every
+external resource synchronously and one that 404s blanks the page. The signature
+captures are private Files it could not authenticate to anyway, so the page
+reports whether one is on file, which is the fact rather than the picture. The
+*other* wkhtmltopdf failure — fontconfig aborting on a read-only
+`/var/cache/fontconfig` before it lays out a glyph — is fixed where it has to be,
+in the container image, because no template can work around a renderer that
+cannot start.
+
+**One new dependency, imported defensively like the four before it.** `pypdf`
+fills the form. A bench without it — or without the shipped template — loses
+exactly `render_i9_pdf`, which says so by name with the pip command to fix it.
+`attach_signed_i9` is unaffected, every I-9 value stays readable through
+`get_i9_form`, and the Print Format still prints with no PDF library at all.
+
 ## 0.47.0 — 2026-08-07
 
 **The I-9 could be opened and completed and never re-examined.** v0.27.0 built

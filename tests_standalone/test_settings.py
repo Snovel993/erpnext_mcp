@@ -9,7 +9,7 @@ build.
 
 import json
 
-from erpnext_mcp import form_pdf_renderer, geo, packets, registry, settings
+from erpnext_mcp import form_pdf_renderer, geo, i9_pdf, packets, registry, settings
 from erpnext_mcp.erpnext_mcp.doctype.erpnext_mcp_settings.erpnext_mcp_settings import (
 	TOKEN_LENGTH,
 )
@@ -44,6 +44,13 @@ PDF_TOOLS = (
 	"render_tax_form_pdf",
 	"bulk_render_tax_form_pdfs",
 )
+
+#: v0.47.1. The tool that needs pypdf AND the shipped USCIS template. A separate
+#: list from `PDF_TOOLS` because it is a separate dependency answering a separate
+#: question — reportlab DRAWS a page, pypdf FILLS the government's own — and a
+#: bench can have either without the other. `attach_signed_i9` is deliberately
+#: absent: filing a scan somebody else produced needs no PDF library at all.
+I9_PDF_TOOLS = ("render_i9_pdf",)
 
 
 class ShippedDefaults(SeededTestCase):
@@ -526,6 +533,8 @@ class SelfTest(SeededTestCase):
 			out += list(GEO_TOOLS)
 		if not form_pdf_renderer.available():
 			out += list(PDF_TOOLS)
+		if not i9_pdf.available():
+			out += list(I9_PDF_TOOLS)
 		return out
 
 	def test_it_reports_not_ready_when_disabled(self):

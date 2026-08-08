@@ -1733,3 +1733,168 @@ def end_shift(
 
 	result = shifts.end_shift(inner)
 	return result.data
+
+
+# ── 32. get_i9_form ─────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_i9_form", limit=guard.READ_LIMIT)
+def get_i9_form(user: str, employee=None, docname=None) -> dict:
+	"""The whole I-9 back, for the screen that shows what was collected.
+
+	THE ONLY WAY A HANDSET COULD READ AN I-9 BEFORE THIS WAS TO HAVE JUST WRITTEN
+	ONE. `create_i9_form`, `submit_i9_section_1`, `submit_i9_section_2` and
+	`reverify_i9` each hand back the record they changed, and `get_employee`
+	reports a one-word status — so a foreman who opened the wizard on somebody
+	already verified could be told `Verified` and nothing else. Which documents?
+	Examined by whom? Is there a receipt still owed? All on the server, none of it
+	reachable, and every one of those is a question an audit asks first.
+
+	THE SSN IS THE LAST FOUR AND NOTHING ELSE, which is not this wrapper's doing:
+	`i9._i9_fields` does not list `ssn_full` and argues at length why it never
+	will. The encrypted nine digits are read in exactly one place in this app —
+	`render_i9_pdf`, behind two switches — and not here.
+
+	THE HR ROLE IS REQUIRED FOR ANYBODY ELSE'S RECORD AND NOT FOR THE CALLER'S
+	OWN, the same exception `get_employee` carries and for the same reason: a
+	worker reading their own I-9 is reading their own immigration paperwork, not
+	the personnel file. `_employee` resolves the caller through `Employee.user_id`
+	and nothing in the body, so the exception cannot be claimed by naming
+	somebody else.
+
+	READING IS LOGGED. `i9.get_i9_form` writes a `Viewed` row to the I-9 Audit
+	Log on every call, which is the whole point of that log: who looked at this
+	person's immigration status, when, and from where.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+
+	if person != fieldwork._employee_for(user):
+		personnel.require_hr_role()
+
+	result = i9.get_i9_form({"employee": person})
+	return result.data
+
+
+# ── 33. generate_i9_pdf ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("generate_i9_pdf", mutating=True, limit=guard.WRITE_LIMIT)
+def generate_i9_pdf(user: str, employee=None, docname=None, overwrite=None,
+                    additional_information=None) -> dict:
+	"""Fill the federal form from the record and hand the phone a URL for it.
+
+	THE END OF THE ONBOARDING FLOW, and the step that was missing from it. The
+	wizard collects Section 1 and Section 2 in an orchard and then has nothing to
+	show for it: what an employer has to be able to produce for an inspection
+	under 8 U.S.C. §1324a(b)(3) is Form I-9, and until v0.47.1 the only artefact
+	this app made was a doctype. `i9.render_i9_pdf` writes the collected values
+	into the USCIS fillable PDF this app ships and attaches it privately to the
+	record; this hands back `file_url`, which is what the app opens, prints and
+	hands to the two people who have to sign it.
+
+	`include_full_ssn` IS NOT ACCEPTED HERE and is not a rename away — it is
+	absent. It would print somebody's nine-digit Social Security number onto a
+	page a phone in a packing shed could then mail anywhere, and it needs a
+	decision about the site's own retention policy that belongs to an operator
+	with the Desk in front of them rather than to whoever is holding the handset.
+	The rendered page leaves the box empty and the employee writes the number on
+	it, which is how the paper form has always worked.
+
+	`overwrite` IS FORWARDED, because the wizard's realistic second call is the
+	one after a correction — a misspelled name, a document number typed wrong —
+	and refusing it would leave the phone holding a stale PDF with no way to ask
+	for a fresh one. The File that was there stays attached to the record either
+	way, so nothing is lost by re-rendering.
+
+	EVERY REFUSAL IS THE TOOL'S: that a Destroyed I-9 is not re-rendered, that
+	the site needs pypdf and the shipped template, that a second render without
+	`overwrite` is refused. None of it is restated here.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+	personnel.require_hr_role()
+
+	inner = {"employee": person}
+	if overwrite is not None:
+		inner["overwrite"] = overwrite
+	if additional_information is not None:
+		inner["additional_information"] = additional_information
+
+	result = i9.render_i9_pdf(inner)
+	data = result.data
+	return {
+		"name": data.get("name"),
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+		"status": data.get("status"),
+		"file_url": data.get("file_url"),
+		"file_name": data.get("file_name"),
+		"bytes": data.get("bytes"),
+		"edition": data.get("edition"),
+		"incomplete": data.get("incomplete") or [],
+		"reverifications_not_on_page": data.get("reverifications_not_on_page") or 0,
+		"replaced": data.get("replaced"),
+		"note": data.get("note"),
+	}
+
+
+# ── 34. upload_signed_i9 ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("upload_signed_i9", mutating=True, limit=guard.UPLOAD_LIMIT)
+def upload_signed_i9(user: str, employee=None, docname=None, file_token=None, overwrite=None) -> dict:
+	"""File the photographed or scanned signed copy against the I-9 record.
+
+	THE OTHER HALF OF `generate_i9_pdf`, and the half that is the federal record.
+	The rendered page is printed, the employee signs Section 1 and the verifier
+	signs Section 2 — with a pen, because 8 CFR 274a.2(h) has requirements a name
+	typed into a PDF does not meet — and the phone photographs the signed sheet.
+	That photograph is what an inspection is shown.
+
+	IT TAKES A `file_token`, NOT BYTES. The photograph goes up through
+	`stage_file_chunk` / `finalize_staged_file` exactly like the evidence on a
+	completed task and the signature on a closed shift: 512 KB at a time, hashed
+	at capture and verified on assembly, resumable over a thin field link. This
+	call names the File that upload produced and attaches it. A second upload
+	path taking a base64 body would have its own size limit and its own way of
+	failing halfway up a hill.
+
+	`upload_id` IS NOT AN ARGUMENT AND `finalize_staged_file` IS NOT CALLED FOR
+	YOU. The app already finalises its own uploads and already holds the token;
+	doing it again here would mean this endpoint owning a staging session it did
+	not open, and a partial upload would fail inside a call that says it is
+	filing an I-9.
+
+	THE HR ROLE IS REQUIRED WITH NO EXCEPTION — not even for the caller's own
+	record. `get_i9_form` lets a worker read their own I-9 because reading it
+	harms nobody; this WRITES the document the employer will be inspected on, and
+	an account that could file its own signed I-9 could file one nobody signed.
+
+	Every other refusal is the tool's: a Destroyed I-9, a file that is not a scan,
+	a second signed copy without `overwrite`. The File is made private on the way
+	in whatever it was.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+	personnel.require_hr_role()
+
+	if not str(file_token or "").strip():
+		frappe.throw(
+			"file_token is required — upload the signed copy with stage_file_chunk and "
+			"finalize_staged_file first, then send the token that returns.",
+			frappe.ValidationError,
+		)
+
+	inner = {"employee": person, "file_token": file_token}
+	if overwrite is not None:
+		inner["overwrite"] = overwrite
+
+	result = i9.attach_signed_i9(inner)
+	data = result.data
+	return {
+		"name": data.get("name"),
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+		"status": data.get("status"),
+		"signed_pdf": data.get("signed_pdf"),
+		"file_token": data.get("file_docname"),
+		"replaced": data.get("replaced"),
+	}

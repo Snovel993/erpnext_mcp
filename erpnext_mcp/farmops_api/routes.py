@@ -137,6 +137,17 @@ ROUTES = (
 	# picker's expired I-9 as expired, and has had no call to take.
 	Route("/mobile", mobile_api.list_i9_document_types),
 	Route("/mobile", mobile_api.reverify_i9),
+	# v0.47.1. The I-9 as a document rather than as a doctype. `get_i9_form` is
+	# the read the wizard never had — every other I-9 call hands back the record
+	# it just wrote, so a foreman opening the flow on somebody already verified
+	# could be told `Verified` and nothing else. `generate_i9_pdf` fills the
+	# government's own fillable form and hands back a URL to print from, and
+	# `upload_signed_i9` files the photograph of the signed sheet back against
+	# the record. The three together are what turn four sprints of collected
+	# fields into the thing an inspection under §1324a(b)(3) actually asks for.
+	Route("/mobile", mobile_api.get_i9_form),
+	Route("/mobile", mobile_api.generate_i9_pdf),
+	Route("/mobile", mobile_api.upload_signed_i9),
 	Route("/mobile", mobile_api.submit_w4),
 	Route("/mobile", mobile_api.link_badge_to_employee),
 	# The capture queue and the crew clock.

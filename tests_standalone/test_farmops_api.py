@@ -173,6 +173,10 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# v0.47.0 — the I-9's document lookup and its Section 3.
 		"/mobile/list_i9_document_types",
 		"/mobile/reverify_i9",
+		# v0.47.1 — the I-9 read, the federal PDF, and the signed copy coming back.
+		"/mobile/get_i9_form",
+		"/mobile/generate_i9_pdf",
+		"/mobile/upload_signed_i9",
 		"/mobile/submit_w4",
 		"/mobile/link_badge_to_employee",
 		"/mobile/sync_bucket_entries",

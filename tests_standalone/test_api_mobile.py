@@ -219,6 +219,11 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# and Section 3, which is the branch a returning worker's expired I-9 takes.
 		"list_i9_document_types",
 		"reverify_i9",
+		# v0.47.1 — the I-9 read the wizard never had, the federal form filled from
+		# the record, and the signed sheet photographed back onto it.
+		"get_i9_form",
+		"generate_i9_pdf",
+		"upload_signed_i9",
 		"submit_w4",
 		"link_badge_to_employee",
 		"sync_bucket_entries",

@@ -101,7 +101,16 @@ the settings form, and there is no code path that makes it for them.
 
 import frappe
 
-from . import compliance_fields, dashboard, i9_documents, roles, settings, training, withholding
+from . import (
+	compliance_fields,
+	dashboard,
+	i9_documents,
+	i9_print_format,
+	roles,
+	settings,
+	training,
+	withholding,
+)
 from .patches import backfill_completion_signatures, migrate_training_types
 from .tools import company
 
@@ -122,6 +131,7 @@ def after_install() -> None:
 	_inspection_templates()
 	_compliance_rules()
 	_i9_document_types()
+	_i9_print_format()
 	_federal_tax_table()
 	_kpi_definitions()
 	_farm_task_templates()
@@ -144,6 +154,7 @@ def after_migrate() -> None:
 	_inspection_templates()
 	_compliance_rules()
 	_i9_document_types()
+	_i9_print_format()
 	_federal_tax_table()
 	_kpi_definitions()
 	_farm_task_templates()
@@ -179,6 +190,25 @@ def _i9_document_types() -> None:
 		print(f"erpnext_mcp: seeded {len(report['created'])} I-9 document type(s)")
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not seed I-9 document {failure.get('name')} — {failure.get('reason')}")
+
+
+def _i9_print_format() -> None:
+	"""Give the Desk's Print button an I-9 that looks like an I-9.
+
+	v0.47.1. Without it the button renders Frappe's standard format — every one of
+	the doctype's eighty-four fields, two to a row, `naming_series` and `pdf_col`
+	included. IT ONLY EVER CREATES WHAT IS NOT THERE, by name, so an operator who
+	edited the layout for their own printer keeps it through every future migrate.
+	"""
+	report = i9_print_format.seed_i9_print_format()
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded the {report['name']!r} Print Format for I-9 Form — the Desk's "
+			f"Print button now lays the record out as the form's own sections. It is a CUSTOM "
+			f"format, so anything you change about it survives the next migrate."
+		)
+	elif report.get("reason") not in ("already present", ""):
+		print(f"erpnext_mcp: the I-9 Print Format was not seeded — {report['reason']}")
 
 
 def _fica_settings() -> None:

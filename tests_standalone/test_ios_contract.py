@@ -55,10 +55,12 @@ from the release that shipped it and asserts the mirror refuses it.
 """
 
 import json
+import unittest
 from typing import ClassVar
 
 import frappe
 
+from erpnext_mcp import i9_pdf
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import mobile as mobile_api
 
@@ -580,6 +582,15 @@ class UndecodedResponseModel(Codable):
 	tests covering them do instead is assert the PAYLOAD, key by key, because the
 	shape is the thing being published and a picker built against it is the next
 	thing anybody writes.
+
+	v0.47.1 puts three more here for the same reason and one more besides. The
+	I-9 review screen, the Print button and the "photograph the signed sheet"
+	step do not exist in the shipped app, so `get_i9_form`, `generate_i9_pdf` and
+	`upload_signed_i9` have no struct to mirror — and `generate_i9_pdf`'s answer
+	is deliberately a NARROWED reshape of the tool's, not the tool's own dict, so
+	the Swift written against it later is written against a stable dozen keys
+	rather than against everything `render_i9_pdf` happens to return. The tests
+	assert those keys one by one.
 	"""
 
 	SWIFT = "MobileAPI.swift"
@@ -1412,6 +1423,207 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			)
 		self.assertIn("needs a first one to follow", str(caught.exception))
 
+	# ── v0.47.1: the I-9 as a document ──────────────────────────────────────
+	def test_33_get_i9_form(self):
+		"""The read the wizard never had, and the four questions an audit asks.
+
+		EVERY OTHER I-9 CALL HANDS BACK THE RECORD IT JUST WROTE. A foreman who
+		opens the flow on somebody already verified could be told `Verified` by
+		`get_employee` and nothing else — which documents, examined by whom, is
+		anything still owed. All of it was on the server and none of it was
+		reachable.
+		"""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire(
+			"submit_i9_section_1",
+			employee=self.NEW_HIRE,
+			citizenship_status="US Citizen",
+			ssn_last_four="6789",
+			address_street="1420 Orchard Road",
+			address_city="Yakima",
+			address_state="WA",
+			address_zip="98901",
+			date_of_birth="1994-03-11",
+		)
+		self.wire(
+			"submit_i9_section_2",
+			employee=self.NEW_HIRE,
+			document_path="List A",
+			list_a_doc_type="U.S. Passport",
+			list_a_authority="US Dept of State",
+			list_a_doc_number="P1234567",
+			verifier_name="Ana Ramos",
+			verifier_title="Farm Manager",
+			verification_date=frappe.utils.today(),
+		)
+
+		row = self.wire("get_i9_form", employee=self.NEW_HIRE)
+		UndecodedResponseModel.decode(row, "get_i9_form")
+
+		self.assertEqual(row["employee"], self.NEW_HIRE)
+		self.assertEqual(row["status"], "Complete")
+		self.assertEqual(row["list_a_doc_title"], "U.S. Passport")
+		self.assertEqual(row["verifier_name"], "Ana Ramos")
+		self.assertEqual(row["address_city"], "Yakima")
+		self.assertEqual(row["reverifications"], [])
+		self.assertEqual(row["reverification_count"], 0)
+
+	def test_33_the_ssn_comes_back_as_the_last_four_and_nothing_more(self):
+		"""`_i9_fields` does not list `ssn_full` and argues why it never will."""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire(
+			"submit_i9_section_1",
+			employee=self.NEW_HIRE,
+			citizenship_status="US Citizen",
+			ssn_last_four="123-45-6789",
+		)
+		row = self.wire("get_i9_form", employee=self.NEW_HIRE)
+		self.assertEqual(row["ssn_last_four"], "6789")
+		self.assertNotIn("ssn_full", row)
+
+	def test_33_a_worker_may_read_their_own_and_not_somebody_elses(self):
+		"""The same one-record exception `get_employee` carries, and its limit.
+
+		Ana is a Field Worker here — `the_hr_furniture` is deliberately NOT
+		called — so the HR role is absent, which is the state a picker's phone is
+		actually in.
+		"""
+		install_hrms()
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "EMP-ANA",
+					"employee_name": "Ana Ramos",
+					"user_id": WORKER,
+					"company": MAIN,
+					"status": "Active",
+				},
+				{
+					"name": "EMP-OTHER",
+					"employee_name": "Marco Vega",
+					"company": MAIN,
+					"status": "Active",
+				},
+			],
+		)
+		STORE.seed(
+			"I-9 Form",
+			[
+				{
+					"name": "I9-2026-ANA",
+					"employee": "EMP-ANA",
+					"company": MAIN,
+					"status": "Complete",
+					"hire_date": "2026-04-01",
+				},
+				{
+					"name": "I9-2026-OTHER",
+					"employee": "EMP-OTHER",
+					"company": MAIN,
+					"status": "Complete",
+					"hire_date": "2026-04-01",
+				},
+			],
+		)
+		self.be()
+
+		mine = self.wire("get_i9_form", employee="EMP-ANA")
+		self.assertEqual(mine["name"], "I9-2026-ANA")
+
+		with self.assertRaises(Exception):
+			self.wire("get_i9_form", employee="EMP-OTHER")
+
+	@unittest.skipUnless(
+		i9_pdf.available(),
+		"filling the federal form needs pypdf and the shipped USCIS template; this bench "
+		"has one or neither, which is what render_i9_pdf goes unavailable for.",
+	)
+	def test_34_generate_i9_pdf(self):
+		"""The end of the onboarding flow: a URL the phone can print from."""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire(
+			"submit_i9_section_1",
+			employee=self.NEW_HIRE,
+			citizenship_status="US Citizen",
+			ssn_last_four="6789",
+			date_of_birth="1994-03-11",
+			address_street="1420 Orchard Road",
+		)
+		self.wire(
+			"submit_i9_section_2",
+			employee=self.NEW_HIRE,
+			document_path="List A",
+			list_a_doc_type="U.S. Passport",
+			list_a_authority="US Dept of State",
+			list_a_doc_number="P1234567",
+			verifier_name="Ana Ramos",
+			verification_date=frappe.utils.today(),
+		)
+
+		row = self.wire("generate_i9_pdf", employee=self.NEW_HIRE)
+		UndecodedResponseModel.decode(row, "generate_i9_pdf")
+
+		self.assertTrue(str(row["file_url"]).endswith(".pdf"))
+		self.assertGreater(row["bytes"], 100_000)
+		self.assertIn("1615-0047", row["edition"])
+		self.assertEqual(row["incomplete"], [])
+		self.assertEqual(row["reverifications_not_on_page"], 0)
+		self.assertIn("8 CFR 274a.2(h)", row["note"])
+
+		# The URL the phone was handed is the one on the record.
+		name = frappe.db.get_value("I-9 Form", {"employee": self.NEW_HIRE}, "name")
+		self.assertEqual(frappe.db.get_value("I-9 Form", name, "generated_pdf"), row["file_url"])
+
+	def test_34_the_full_ssn_is_not_an_argument_a_handset_has(self):
+		"""It would print a nine-digit number onto a page a phone could mail
+		anywhere, and it needs a retention decision an operator makes."""
+		import inspect
+
+		self.assertNotIn(
+			"include_full_ssn", inspect.signature(mobile_api.generate_i9_pdf).parameters
+		)
+
+	def test_35_upload_signed_i9(self):
+		"""The photograph of the signed sheet, filed against the record.
+
+		THE UPLOAD IS THE EVIDENCE PATH, unchanged: `stage_file_chunk` then
+		`finalize_staged_file`, and the token that returns is what this call
+		names. No bytes cross this endpoint.
+		"""
+		self.the_hr_furniture()
+		self.the_i9_document_table()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		_staged, finalized = self.upload(kind="signed-i9", name="signed-i9.pdf")
+
+		row = self.wire(
+			"upload_signed_i9", employee=self.NEW_HIRE, file_token=finalized["file_token"]
+		)
+		UndecodedResponseModel.decode(row, "upload_signed_i9")
+
+		self.assertEqual(row["file_token"], finalized["file_token"])
+		self.assertTrue(row["signed_pdf"])
+		self.assertIsNone(row["replaced"])
+
+		name = frappe.db.get_value("I-9 Form", {"employee": self.NEW_HIRE}, "name")
+		self.assertEqual(frappe.db.get_value("I-9 Form", name, "signed_pdf"), row["signed_pdf"])
+		self.assertEqual(
+			int(frappe.db.get_value("File", finalized["file_token"], "is_private") or 0), 1
+		)
+
+	def test_35_a_call_with_no_token_says_what_to_upload_first(self):
+		self.the_hr_furniture()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		with self.assertRaises(Exception) as caught:
+			self.wire("upload_signed_i9", employee=self.NEW_HIRE)
+		self.assertIn("finalize_staged_file", str(caught.exception))
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -1555,6 +1767,10 @@ class TheContractIsComplete(ContractTestCase):
 		"get_employee": "test_30",
 		"list_i9_document_types": "test_31",
 		"reverify_i9": "test_32",
+		# v0.47.1 — the I-9 as a document.
+		"get_i9_form": "test_33",
+		"generate_i9_pdf": "test_34",
+		"upload_signed_i9": "test_35",
 	}
 
 	def _published(self, module):
