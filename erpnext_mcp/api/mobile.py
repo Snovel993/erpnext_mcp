@@ -905,6 +905,7 @@ def report_asset_issue(
 def create_employee(
 	user: str,
 	first_name=None,
+	middle_name=None,
 	last_name=None,
 	employee_name=None,
 	company=None,
@@ -976,6 +977,11 @@ def create_employee(
 	}
 	for key, value in (
 		("first_name", first_name),
+		# v0.51.0. Read off the licence barcode at the tailgate and dropped
+		# here until now — which also emptied the I-9's Legal Middle Name, since
+		# `submit_i9_section_1` fills that from `Employee.middle_name` when the
+		# caller sends none.
+		("middle_name", middle_name),
 		("last_name", last_name),
 		("gender", gender),
 		("date_of_birth", date_of_birth),

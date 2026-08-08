@@ -52,6 +52,7 @@ import frappe
 from erpnext_mcp import bucket_bridge as engine
 from erpnext_mcp import payroll_integration
 from erpnext_mcp.render import qr
+from erpnext_mcp.tools import badges
 
 from .fixtures import MAIN, MAIN_ABBR, OTHER, SeededTestCase, install_hrms
 from .harness import STORE
@@ -842,3 +843,94 @@ class ToolRegistration(unittest.TestCase):
 			with self.subTest(tool=name):
 				self.assertIn("segno", self.registry.TOOLS[name]["requires"])
 		self.assertNotIn("segno", self.registry.TOOLS["resolve_badge"]["requires"])
+
+
+# ── 8. the card has to survive an orchard ────────────────────────────────
+
+
+class TheBadgeQRIsBuiltForTheField(BadgeToolTestCase):
+	"""v0.51.0. A login QR is held up to a screen for ten seconds; a badge lives
+	in a picker's back pocket through a cherry harvest and is read at a bin
+	trailer in bright sun by a phone with a dusty lens. The settings differ.
+	"""
+
+	def test_a_badge_is_error_correction_H_and_the_app_default_is_not(self):
+		"""30% of the symbol recoverable rather than 15%. That is the difference
+		between a scuffed, creased, muddy card that still resolves and one a
+		foreman has to read out over a radio."""
+		self.assertEqual(badges.BADGE_ERROR_CORRECTION, "H")
+		self.assertEqual(self.issue()["error_correction"], "H")
+		# Not a change to every QR this app draws — the login QR is still M.
+		self.assertEqual(qr.render("anything")["error_correction"], "M")
+
+	def test_H_costs_no_extra_modules_for_a_badge_this_app_mints(self):
+		"""The reason H is affordable here. `CF-0001` is seven alphanumeric
+		characters and fits a version-1 symbol at H, so the denser correction
+		buys durability without buying a bigger card."""
+		self.assertEqual(
+			len(qr.qr_matrix(f"{MAIN_ABBR}-0001", error="H")),
+			len(qr.qr_matrix(f"{MAIN_ABBR}-0001", error="M")),
+		)
+
+	def test_the_png_carries_enough_pixels_for_a_crisp_inch_and_a_half(self):
+		"""A printer scaling a QR up from too few pixels softens the module
+		edges, and soft edges cost more scans than the dirt does."""
+		card = self.issue()
+		self.assertGreaterEqual(
+			card["print"]["dpi_at_min_width"],
+			300.0,
+			"a 1.5in badge would be printed below 300dpi and interpolated",
+		)
+		self.assertEqual(card["print"]["min_width_inches"], 1.5)
+
+	def test_the_scale_is_computed_from_the_symbol_and_not_hardcoded(self):
+		"""A longer company prefix pushes the badge into a version-2 symbol. A
+		fixed scale would print the same 1.5in card at two-thirds the
+		resolution and nobody would notice."""
+		small = badges._badge_scale(21)
+		larger = badges._badge_scale(25)
+		self.assertGreater(small, larger, "a denser symbol needs a smaller scale")
+		for modules in (21, 25, 29, 33):
+			with self.subTest(modules=modules):
+				pixels = (modules + 2 * qr.BORDER) * badges._badge_scale(modules)
+				self.assertGreaterEqual(pixels / badges.BADGE_PRINT_INCHES, 300.0)
+
+	def test_the_quiet_zone_is_four_modules_and_is_reported(self):
+		"""The specification's own minimum. A renderer that crops or insets the
+		image is destroying the thing that makes the symbol findable, so the
+		payload says how much white is load-bearing."""
+		card = self.issue()
+		self.assertEqual(card["print"]["quiet_zone_modules"], 4)
+		self.assertEqual(qr.BORDER, 4)
+
+	def test_the_card_states_black_on_white_because_the_card_may_not_be(self):
+		"""A colored badge card is fine; a colored QR is not. The symbol needs a
+		white box under it whatever is printed behind it."""
+		spec = self.issue()["print"]
+		self.assertEqual(spec["foreground"], "#000000")
+		self.assertEqual(spec["background"], "#FFFFFF")
+
+	def test_the_human_readable_id_travels_with_the_card_and_goes_below_it(self):
+		"""Every scanner eventually fails on a card that went through a wash
+		cycle, and a badge nobody can read aloud is a picker whose buckets go
+		unattributed for the morning. This is why the app mints CF-0001 rather
+		than adopting farm_app's uuid."""
+		card = self.issue()
+		self.assertEqual(card["print"]["caption"], card["badge_id"])
+		self.assertEqual(card["print"]["caption_position"], "below")
+
+	def test_the_printed_sheet_gets_the_same_treatment_as_the_single_card(self):
+		"""The sheet is what a hiring day actually prints, and it used to take
+		`_render`'s default while the single card took an argument."""
+		data = self.tool_data(
+			"generate_employee_badge_sheet", {"employees": [EMP], "company": MAIN}
+		)
+		card = data["cards"][0]
+		self.assertEqual(card["error_correction"], "H")
+		self.assertGreaterEqual(card["print"]["dpi_at_min_width"], 300.0)
+		self.assertEqual(card["print"]["caption"], card["badge_id"])
+
+	def test_a_site_may_still_choose_a_looser_correction_for_its_own_stock(self):
+		"""Overridable, because a site printing onto something smaller than a
+		badge may need the density back."""
+		self.assertEqual(self.issue(error_correction="Q")["error_correction"], "Q")

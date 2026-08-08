@@ -203,6 +203,14 @@ COMPLIANCE_FIELDS = ("i9_status", "w4_status", "jurisdiction")
 WRITABLE = (
 	"employee_name",
 	"first_name",
+	# v0.51.0. An identity fact, and the one that was missing. The handset has
+	# read a middle name off every AAMVA licence barcode since the ID scanner
+	# shipped — `DAD`, or `DBN` where a jurisdiction uses that — and it could
+	# not be written here, so it was parsed and dropped. That also silently cost
+	# the I-9: `submit_i9_section_1` fills Legal Middle Name from
+	# `Employee.middle_name` when the caller does not send one, and the column
+	# it read was always empty.
+	"middle_name",
 	"last_name",
 	"company",
 	"date_of_joining",
@@ -641,6 +649,12 @@ def create_employee(args: dict) -> ToolResult:
 		"status": _clean("status", args.get("status") or DEFAULT_STATUS, "status"),
 	}
 	optional = (
+		# Optional and never derived. `first_name` and `last_name` above fall
+		# back to the first and last tokens of the full name, which is what a
+		# hand-filled form produces; guessing a middle name out of the tokens
+		# between them would put "de la" in somebody's Legal Middle Name box on
+		# a federal form. It arrives from the licence barcode or not at all.
+		"middle_name",
 		"date_of_birth",
 		"gender",
 		"department",

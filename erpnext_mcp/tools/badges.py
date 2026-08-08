@@ -76,6 +76,32 @@ SHEET_CAP = 100
 #: and a race that has not settled in fifty tries is a bug, not contention.
 MINT_ATTEMPTS = 50
 
+#: Error correction for an EMPLOYEE BADGE, and it is not the app's default.
+#:
+#: `qr.render` defaults to M — 15% of the symbol recoverable — which is right
+#: for a login QR held up to a screen for ten seconds and wrong for a card that
+#: lives in a picker's back pocket through a cherry harvest. H recovers 30%,
+#: which is the difference between a scuffed, muddy, creased card that still
+#: resolves at a bin trailer and one a foreman has to read aloud over a radio.
+#:
+#: THE COST IS A DENSER SYMBOL, NOT A BIGGER CARD. `CF-0001` is seven
+#: alphanumeric characters and fits a version-1 symbol at H with room to spare,
+#: so the module count does not change for any badge this app mints. It is
+#: overridable per call because a site printing onto something smaller than a
+#: badge may need the density back.
+BADGE_ERROR_CORRECTION = "H"
+
+#: How large a badge QR must be PRINTED, in inches. Below about an inch a
+#: phone camera at arm's length in bright orchard sun hunts instead of locking,
+#: and the failure presents to a picker as "the scanner is broken".
+BADGE_PRINT_INCHES = 1.5
+
+#: The resolution that print size is sized for. A QR scaled UP by a printer
+#: from too few pixels gets soft module edges, which costs more scans than the
+#: dirt does — so the PNG carries enough pixels to be printed at 1.5" without
+#: interpolation.
+BADGE_PRINT_DPI = 300
+
 #: The Company field a card's logo comes from. NOT A COMPLIANCE FIELD, which is
 #: why it is installed from here rather than declared in `compliance_fields.py`:
 #: that table requires a regulator and a citation for every column it adds, and
@@ -253,7 +279,54 @@ def _mint(company: str, prefix: str) -> str:
 	)
 
 
-def _render(badge_id: str, error: str = "M") -> dict:
+def _badge_scale(modules: int) -> int:
+	"""Pixels per module, so the PNG prints at `BADGE_PRINT_INCHES` unscaled.
+
+	Computed from the symbol rather than hardcoded, because a longer company
+	prefix pushes the badge into a version-2 symbol and a fixed scale would then
+	print the same 1.5" card at two-thirds the resolution without anybody
+	noticing. Never below `qr.SCALE` — a smaller image than the app's own
+	default would be a regression on the screen as well as on paper.
+	"""
+	side = max(1, int(modules)) + 2 * qr.BORDER
+	needed = BADGE_PRINT_INCHES * BADGE_PRINT_DPI
+	return max(qr.SCALE, -(-int(needed) // side))  # ceil
+
+
+def _print_spec(rendered: dict, badge_id: str) -> dict:
+	"""What a card layout must honour, as numbers rather than as a paragraph.
+
+	THIS APP DOES NOT LAY THE CARD OUT. `generate_employee_badge_sheet` returns
+	card DATA and a template name — an Avery sheet, a label printer, the Desk's
+	print format, the handset's preview — so "print it at least an inch and a
+	half with a white box behind it" cannot be enforced by this module. What it
+	can do is state the requirement in the payload, in units a renderer can act
+	on, instead of leaving each one to guess and get a different answer.
+
+	`caption` is the human-readable fallback and belongs BELOW the symbol. Every
+	scanner eventually fails on a card that went through a wash cycle, and a
+	badge nobody can read out over a radio is a picker whose buckets go
+	unattributed for the rest of the morning. It is the whole reason this app
+	mints `CF-0001` rather than adopting `farm_app`'s uuid.
+	"""
+	return {
+		"min_width_inches": BADGE_PRINT_INCHES,
+		"min_width_points": round(BADGE_PRINT_INCHES * 72.0, 1),
+		"dpi_at_min_width": round(rendered["pixels"] / BADGE_PRINT_INCHES, 1),
+		# Four modules on every side, the specification's own minimum, already
+		# baked into `png_bytes`. Restated so a renderer that crops or insets
+		# the image knows what it would be destroying.
+		"quiet_zone_modules": rendered["border"],
+		# A colored badge card is fine; a colored QR is not. The symbol needs a
+		# white box under it whatever the card behind it looks like.
+		"foreground": "#000000",
+		"background": "#FFFFFF",
+		"caption": badge_id,
+		"caption_position": "below",
+	}
+
+
+def _render(badge_id: str, error: str = BADGE_ERROR_CORRECTION) -> dict:
 	"""The QR for one badge, with a missing encoder reported as a tool failure.
 
 	`registry.py` gates all three of these tools on `_qr_available`, so a bench
@@ -261,9 +334,17 @@ def _render(badge_id: str, error: str = "M") -> dict:
 	fix it. This is the direct-call path — a test, another tool — and turning the
 	renderer's `RuntimeError` into a `ToolError` keeps that failure a sentence
 	rather than a traceback.
+
+	TWO PASSES OVER THE ENCODER, ON PURPOSE. The scale that makes a 1.5" print
+	come out at 300 dpi depends on how many modules the symbol has, and the
+	module count depends on the payload and the error-correction level. So the
+	matrix is built first, sized, and then rendered at the scale that sizing
+	produced. Encoding `CF-0001` twice costs microseconds and is the difference
+	between a card that prints crisply and one whose scale was guessed.
 	"""
 	try:
-		return qr.render(badge_id, error=error)
+		modules = len(qr.qr_matrix(badge_id, error=error))
+		return qr.render(badge_id, error=error, scale=_badge_scale(modules))
 	except RuntimeError as exc:
 		raise ToolError(str(exc)) from None
 
@@ -376,6 +457,10 @@ def _card(row: dict, badge_id: str, company: str, rendered: dict) -> dict:
 		"png_bytes": len(rendered["png"]),
 		"modules": rendered["modules"],
 		"pixels": rendered["pixels"],
+		"error_correction": rendered["error_correction"],
+		# What a layout has to honour. See `_print_spec` — this app returns card
+		# data and a template NAME, so the requirement travels with the data.
+		"print": _print_spec(rendered, badge_id),
 	}
 
 
@@ -422,7 +507,7 @@ def generate_employee_badge_qr(args: dict) -> ToolResult:
 	# bench that cannot draw one refuses before it has issued a badge nobody can
 	# print.
 	badge_id, created = _choose_badge_id(row, company, args, as_str(args, "badge_id"))
-	rendered = _render(badge_id, as_str(args, "error_correction") or "M")
+	rendered = _render(badge_id, as_str(args, "error_correction") or BADGE_ERROR_CORRECTION)
 	recorded = _record_badge(row, company, badge_id, args)
 
 	data = {

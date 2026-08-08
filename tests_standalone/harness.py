@@ -625,6 +625,10 @@ ERPNEXT_SCHEMA = {
 		"employee_name",
 		"employee_number",
 		"first_name",
+		# Standard on ERPNext's Employee. Absent from this double until v0.51.0,
+		# which is part of why nobody noticed the middle name read off every
+		# licence barcode had nowhere to land.
+		"middle_name",
 		"last_name",
 		"gender",
 		"date_of_birth",

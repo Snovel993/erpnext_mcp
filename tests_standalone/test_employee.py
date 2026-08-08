@@ -1123,21 +1123,29 @@ class OnboardingEndToEnd(EmployeeTestCase):
 
 # ── the module's own claims ─────────────────────────────────────────────────
 class TheAllowlistIsClosed(EmployeeTestCase):
-	def test_the_seventeen_are_the_seventeen(self):
+	def test_the_eighteen_are_the_eighteen(self):
 		"""Asserted by name. `WRITABLE` is what every refusal message lists, and a
 		field added to it without a decision is a field this app writes without
 		one.
 
-		Fourteen until v0.46.1. The last three are the Custom Fields
+		Fourteen until v0.46.1. Three of the last four are the Custom Fields
 		`compliance_fields.py` installs with `reqd=True` — this app is the reason
 		the site has them and the reason they are mandatory, so a create that could
 		not write them was this app refusing its own schema on every path,
-		`onboard_employee` and the iOS wizard's first step included."""
+		`onboard_employee` and the iOS wizard's first step included.
+
+		`middle_name` is the eighteenth, added in v0.51.0. It is an identity fact
+		like the two names either side of it, the handset has read one off every
+		AAMVA licence barcode since the ID scanner shipped, and this list is
+		where it was being dropped — silently taking the I-9's Legal Middle Name
+		with it, because `submit_i9_section_1` fills that box from
+		`Employee.middle_name` when the caller sends none."""
 		self.assertEqual(
 			employee_tool.WRITABLE,
 			(
 				"employee_name",
 				"first_name",
+				"middle_name",
 				"last_name",
 				"company",
 				"date_of_joining",

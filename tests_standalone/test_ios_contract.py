@@ -1274,6 +1274,63 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertEqual(filed["company"], MAIN)
 		self.assertEqual(filed["status"], "Active")
 
+	def test_27_the_middle_name_off_the_licence_reaches_the_record(self):
+		"""v0.51.0. The handset has parsed AAMVA's `DAD` since the ID scanner
+		shipped and `middle_name` was not on `employee.WRITABLE`, so it was read
+		off the card at the tailgate and dropped on arrival."""
+		self.the_hr_furniture()
+		row = self.wire(
+			"create_employee",
+			first_name="Elena",
+			middle_name="Sofia",
+			last_name="Marquez",
+			employee_name="Elena Marquez",
+			company=MAIN,
+		)
+		filed = STORE.tables["Employee"][row["name"]]
+		self.assertEqual(filed["middle_name"], "Sofia")
+		# NOT folded into the display name: `employee_name` is what a dispatch
+		# board, a payroll register and the returning-worker search match on.
+		self.assertEqual(filed["employee_name"], "Elena Marquez")
+
+	def test_27_a_hire_with_no_middle_name_is_not_a_refusal(self):
+		"""Most people have none, and a wizard that stopped on the field would
+		stop on one the worker cannot fill."""
+		self.the_hr_furniture()
+		row = self.wire(
+			"create_employee", first_name="Elena", last_name="Marquez",
+			employee_name="Elena Marquez", company=MAIN,
+		)
+		self.assertFalse(STORE.tables["Employee"][row["name"]].get("middle_name"))
+
+	def test_27_the_middle_name_then_fills_the_i9s_legal_middle_name(self):
+		"""THE JOIN THAT MAKES IT WORTH DOING. `submit_i9_section_1` has filled
+		Legal Middle Name from `Employee.middle_name` since v0.45.0 when the
+		caller sends none — and the column it read could never be written, so
+		that fallback resolved to empty on every I-9 this app has ever filed."""
+		self.the_hr_furniture()
+		created = self.wire(
+			"create_employee",
+			first_name="Elena", middle_name="Sofia", last_name="Marquez",
+			employee_name="Elena Marquez", company=MAIN,
+		)
+		self.wire("create_i9_form", employee=created["name"], company=MAIN,
+		          hire_date=frappe.utils.today())
+		self.wire(
+			"submit_i9_section_1",
+			employee=created["name"],
+			citizenship_status="US Citizen",
+			address_street="1420 Orchard Road",
+			address_city="Yakima",
+			address_state="WA",
+			address_zip="98901",
+		)
+		form = next(
+			row for row in STORE.tables["I-9 Form"].values()
+			if row.get("employee") == created["name"]
+		)
+		self.assertEqual(form["legal_middle_name"], "Sofia")
+
 	def test_28_search_employees(self):
 		"""The list the foreman picks a returning picker out of, Left ones included."""
 		self.the_hr_furniture()

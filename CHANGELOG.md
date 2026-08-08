@@ -3,6 +3,63 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.51.1 — 2026-08-08
+
+**A badge QR is not a login QR, and it was being drawn like one.** `qr.render`
+defaults to error correction M — 15% of the symbol recoverable — which is right
+for a code held up to a screen for ten seconds and wrong for a card that lives
+in a picker's back pocket through a cherry harvest. Employee badges are H now:
+30% recoverable, which is the difference between a scuffed, creased, muddy card
+that still resolves at a bin trailer and one a foreman has to read out over a
+radio. It costs nothing in size — `CF-0001` is seven alphanumeric characters and
+fits a version-1 symbol at H, so the module count does not change for any badge
+this app mints. Still overridable per call.
+
+**The PNG now carries enough pixels to be printed at 1.5 inches without
+interpolation.** A printer scaling a QR up from too few pixels softens the module
+edges, and soft edges cost more scans than the dirt does. The scale is computed
+from the symbol rather than hardcoded, because a longer company prefix pushes
+the badge into a version-2 symbol and a fixed scale would then print the same
+card at two-thirds the resolution with nobody noticing. Every badge shape comes
+out above 300 dpi at 1.5"; there is a test that sweeps the module counts.
+
+**The print requirement travels with the card, because this app does not lay the
+card out.** `generate_employee_badge_sheet` returns card DATA and a template
+NAME — an Avery sheet, a label printer, the Desk, the handset's preview — so
+"at least an inch and a half, black on white, ID printed below" cannot be
+enforced here. It is stated instead, in units a renderer can act on: minimum
+width in inches and points, the quiet zone in modules, the two hex colours, and
+the caption with its position. The quiet zone was already the specification's
+four modules and now says so in the payload, so a renderer that crops or insets
+the image knows what it would be destroying. A colored badge card is fine; a
+colored QR is not.
+
+**The human-readable ID is the fallback the whole identifier scheme exists for.**
+Every scanner eventually fails on a card that went through a wash cycle, and a
+badge nobody can read aloud is a picker whose buckets go unattributed for the
+morning. `caption`/`caption_position` put `CF-0001` under the symbol.
+
+### The middle name that was read and thrown away
+
+**The handset has parsed AAMVA's `DAD` off every licence barcode since the ID
+scanner shipped, and there was nowhere for it to land.** `middle_name` was not
+on `employee.WRITABLE` and not in `create_employee`'s optional set, so it was
+read at the tailgate and dropped on arrival. `DBN` — the element some
+jurisdictions emit instead — was not read at all.
+
+**It silently emptied a box on a federal form.** `submit_i9_section_1` has
+filled Legal Middle Name from `Employee.middle_name` since v0.45.0 whenever the
+caller sends none, and the column it reads could never be written — so that
+fallback resolved to empty on every I-9 this app has ever filed. The join is
+now tested end to end: create with a middle name, open an I-9, submit Section 1
+without one, and the box has it.
+
+It is optional at every step. Most people have no middle name, and a wizard that
+stopped on the field would stop on one the worker cannot fill. It is also not
+folded into `employee_name`, which is what the dispatch board, the payroll
+register and the returning-worker search match on — widening that would stop
+everybody hired after this release matching the record they already have.
+
 ## 0.51.0 — 2026-08-08
 
 **The signature the worker made is now on the form they signed.** The I-9 record
