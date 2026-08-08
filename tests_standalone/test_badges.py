@@ -721,23 +721,30 @@ class EndToEnd(BadgeToolTestCase):
 		self.assertEqual(scanned["employee"], EMP)
 		self.assertTrue(scanned["on_shift"])
 
-		# 4. Two buckets are captured and synced under the strict policy.
+		# 4. Three captures, synced under the strict policy. THE COVERAGES ARE
+		# DELIBERATELY ALL DIFFERENT AND DELIBERATELY IRRELEVANT: the gate is
+		# binary, so the barely-full Accepted bucket at 51% and the brimming one
+		# at 99% are each worth exactly one, and the Rejected one at 97% is worth
+		# nothing however full the model thought it looked.
 		entries = [
 			_entry(
 				entry_uuid="e1111111-1111-1111-1111-111111111111",
 				worker_badge=badge,
 				timestamp="2026-06-01 08:00:00",
+				coverage_percent=51.0,
 			),
 			_entry(
 				entry_uuid="e2222222-2222-2222-2222-222222222222",
 				worker_badge=badge,
 				timestamp="2026-06-01 08:05:00",
+				coverage_percent=99.0,
 			),
 			_entry(
 				entry_uuid="e3333333-3333-3333-3333-333333333333",
 				worker_badge=badge,
 				verdict="Rejected",
 				timestamp="2026-06-01 08:10:00",
+				coverage_percent=97.0,
 			),
 		]
 		synced = self.tool_data(
@@ -771,9 +778,14 @@ class EndToEnd(BadgeToolTestCase):
 		self.assertEqual(len(shaped), 2)
 		self.assertEqual({row["employee"] for row in shaped}, {EMP})
 
-		# 9. Which is exactly the shape `payroll_integration` reads off a shift.
+		# 9. Which is exactly the shape `payroll_integration` reads off a shift —
+		# TWO WHOLE BUCKETS. Not 1.5, which is what 51% + 99% would come to if
+		# anything anywhere multiplied by coverage.
 		units = payroll_integration._piece_units_for({"bucket_logs": shaped}, EMP)
-		self.assertEqual(units, 2)
+		self.assertEqual(units, 2.0)
+		self.assertEqual(units, float(int(units)), "pay is a whole number of buckets")
+		for row in shaped:
+			self.assertNotIn("coverage_percent", row)
 
 		# 10. And the summary a foreman asks for agrees with all of it.
 		summary = self.tool_data(

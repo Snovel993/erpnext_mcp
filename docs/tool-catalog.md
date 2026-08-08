@@ -9109,6 +9109,27 @@ payroll-facing read passes through, and `tools/payroll.py`'s own bucket-log
 loader filters the same way for the production path — it also now recognises
 `timestamp` as this doctype's own date column.
 
+**The model is a binary gate — there is no partial credit anywhere.** A bucket
+is full or it is not, the phone decides that once on device, and the only thing
+that crosses to this app is which way it went:
+
+```
+Accepted → 1 bucket        Rejected → 0 buckets
+piecework pay = number of Accepted buckets × piece rate
+```
+
+A capture the model judged 51% full and one it judged 99% full are worth exactly
+the same thing if both were Accepted — one — and nothing if both were Rejected.
+`coverage_percent` is **diagnostic**: the model's own record of why the gate went
+that way, kept for the same reason `model_uuid` is, so somebody auditing a model
+version can see what it was looking at. **It is never an input to pay.** It is
+deliberately absent from `payroll_integration._UNIT_KEYS` and
+`entries_to_payroll_shape` deliberately does not emit it, and
+`test_bucket_bridge.TheGateIsBinary` asserts both directions against
+`_UNIT_KEYS` itself so the two cannot drift. Paying a partial bucket would be a
+change to the *gate* — a third verdict, priced deliberately — not a
+multiplication by a figure that was only ever evidence.
+
 ### `sync_bucket_entries`
 
 ```json

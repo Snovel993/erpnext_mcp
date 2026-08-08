@@ -22,6 +22,15 @@ SIX CLAIMS, PLUS THE REGISTRATION ITSELF.
    attributed entries, and what it produces is EXACTLY what
    `payroll_integration._piece_units_for` reads as bucket units — the contract
    the whole bridge exists to keep.
+
+4b. `TheGateIsBinary` — a bucket is full or it is not: Accepted is 1, Rejected
+   is 0, and pay is the Accepted count times the piece rate. A capture the model
+   judged 51% full and one it judged 99% full are worth the same thing, a
+   capture with no coverage at all is a whole bucket, and `coverage_percent`
+   reaches neither the payroll row nor `_UNIT_KEYS`. Asserted against
+   `payroll_integration`'s own tuple rather than a copy of it, because the
+   failure mode is silent: pay would still come out and would be wrong by a
+   fraction nobody could see without recomputing a period by hand.
 5. `LinkingToAShift` — `link_entries_to_shift` sets shift/status on everything
    except an entry already Paid, and returns new dicts rather than mutating.
 6. `AttachingOntoShifts` — `payroll_integration.attach_bucket_log_entries`
@@ -239,6 +248,97 @@ class ReshapingForPayroll(unittest.TestCase):
 		self.assertEqual(payroll_integration._piece_units_for(shift, "HR-EMP-00001"), 2.0)
 		self.assertEqual(payroll_integration._piece_units_for(shift, "HR-EMP-00002"), 1.0)
 		self.assertEqual(payroll_integration._piece_units_for(shift, "HR-EMP-00003"), 0.0)
+
+
+class TheGateIsBinary(unittest.TestCase):
+	"""A bucket is full or it is not. There is no partial credit anywhere.
+
+	THE RULE, WRITTEN OUT ONCE. The phone runs the model, reaches a verdict, and
+	the only thing that crosses to this app is which way it went:
+
+	    Accepted → 1 bucket        Rejected → 0 buckets
+	    piecework pay = Accepted bucket count × piece rate
+
+	`coverage_percent` is the model's own record of WHY the gate went that way.
+	It is evidence, it is worth keeping for anybody auditing a model version,
+	and it buys nothing. These tests are what stop it — or a future column named
+	`units` — quietly becoming a multiplier, because the failure would be
+	invisible: pay would still come out, and it would be wrong by a fraction
+	nobody could see without recomputing a period by hand.
+
+	They are written against `payroll_integration._UNIT_KEYS` ITSELF rather than
+	against a copy of it, so a key added on that side and a row grown on this
+	side cannot drift into agreement without failing here first.
+	"""
+
+	def _accepted(self, coverage, **overrides):
+		return entry(verdict="Accepted", employee="HR-EMP-00001", coverage_percent=coverage, **overrides)
+
+	def test_a_barely_full_bucket_and_a_brimming_one_are_worth_the_same(self):
+		"""THE ASSERTION TIM'S RULE LIVES OR DIES ON. 51% and 99% are both one
+		bucket, because both are Accepted and the gate already ran."""
+		shift = {
+			"bucket_logs": engine.entries_to_payroll_shape(
+				[self._accepted(51.0, entry_uuid="a"), self._accepted(99.0, entry_uuid="b")]
+			)
+		}
+		self.assertEqual(payroll_integration._piece_units_for(shift, "HR-EMP-00001"), 2.0)
+
+	def test_a_rejected_bucket_is_worth_nothing_however_full_the_model_thought_it_was(self):
+		shift = {
+			"bucket_logs": engine.entries_to_payroll_shape(
+				[entry(verdict="Rejected", employee="HR-EMP-00001", coverage_percent=99.9)]
+			)
+		}
+		self.assertEqual(payroll_integration._piece_units_for(shift, "HR-EMP-00001"), 0.0)
+
+	def test_a_capture_with_no_coverage_at_all_is_still_a_whole_bucket(self):
+		"""Coverage is not required and its absence costs nothing — which is the
+		same statement as "it is not an input to pay", made from the other side."""
+		shift = {
+			"bucket_logs": engine.entries_to_payroll_shape(
+				[entry(verdict="Accepted", employee="HR-EMP-00001", coverage_percent=None)]
+			)
+		}
+		self.assertEqual(payroll_integration._piece_units_for(shift, "HR-EMP-00001"), 1.0)
+
+	def test_units_are_always_a_whole_number_of_buckets(self):
+		"""Ten accepted captures at ten different coverages are ten buckets, not
+		some sum of tenths."""
+		coverages = [50.5, 61.0, 72.25, 80.0, 88.8, 91.0, 94.2, 96.5, 99.0, 100.0]
+		rows = engine.entries_to_payroll_shape(
+			[self._accepted(value, entry_uuid=f"e{index}") for index, value in enumerate(coverages)]
+		)
+		units = payroll_integration._piece_units_for({"bucket_logs": rows}, "HR-EMP-00001")
+		self.assertEqual(units, 10.0)
+		self.assertEqual(units, float(int(units)), "a fractional bucket means partial credit crept in")
+
+	def test_coverage_percent_never_reaches_the_payroll_row(self):
+		rows = engine.entries_to_payroll_shape([self._accepted(94.2)])
+		self.assertNotIn("coverage_percent", rows[0])
+
+	def test_the_payroll_row_carries_no_count_column_of_any_spelling(self):
+		"""Checked against payroll_integration's OWN tuple. A key added there
+		that this row happens to emit would turn one bucket into whatever that
+		column held, and nothing else in either module would notice."""
+		rows = engine.entries_to_payroll_shape([self._accepted(94.2)])
+		self.assertEqual(set(rows[0]), {"employee", "entry_uuid"})
+		for key in payroll_integration._UNIT_KEYS:
+			with self.subTest(unit_key=key):
+				self.assertNotIn(key, rows[0])
+
+	def test_coverage_is_not_a_unit_column_on_the_payroll_side_either(self):
+		"""The other direction: nobody may add coverage to `_UNIT_KEYS` and have
+		the production loader in `tools/payroll.py` start multiplying by it."""
+		self.assertNotIn("coverage_percent", payroll_integration._UNIT_KEYS)
+		self.assertNotIn("coverage", payroll_integration._UNIT_KEYS)
+
+	def test_a_row_that_did_carry_a_count_would_be_read_as_that_count(self):
+		"""Not a test of this app's behaviour — a test of WHY the two above
+		matter. `_row_units` honours a count column where one exists, so the
+		whole binary guarantee rests on the payroll row not having one."""
+		self.assertEqual(payroll_integration._row_units({"employee": "x"}), 1.0)
+		self.assertEqual(payroll_integration._row_units({"employee": "x", "units": 0.51}), 0.51)
 
 
 class LinkingToAShift(unittest.TestCase):

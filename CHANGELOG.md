@@ -3,6 +3,35 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.50.1 — 2026-08-08
+
+**A bucket is full or it is not.** Full counts as 1, not-full counts as 0, and
+piecework pay is `number_of_full_buckets × piece_rate`. No percentage, no partial
+credit, no fractional unit anywhere in that sum. **The code already did this** —
+both paths that turn a capture into piece units were already binary, and
+`coverage_percent` was already absent from `payroll_integration._UNIT_KEYS` and
+from the payroll row. Nothing here changes a figure on a slip.
+
+**What was missing was anything that said so.** The guarantee rested on two facts
+staying true in two modules that do not import each other's constants, and the
+failure would have been silent: pay would still come out, wrong by a fraction
+nobody could see without recomputing a period by hand. `TheGateIsBinary` asserts
+it against `_UNIT_KEYS` itself — 51% and 99% are both one bucket, a Rejected
+99.9% is nothing, a capture with no coverage at all is a whole bucket, and ten
+captures at ten coverages are ten units and a whole number. `BucketPipelineTests`
+carries the same claim on the phone.
+
+**Three places the interface implied partial credit.** The verdict pill read
+`Full — 94%` and now reads `Full — counts as 1 bucket`; the bucket history put
+coverage in the headline position beside each row and now shows `1` or `0` with a
+running count, coverage demoted to a `model read 94%` caption; the live aiming
+meter stays (it tells a picker when the model is about to fire) and now says
+`Full — will count as 1` once it crosses.
+
+**And the 0.50.0 note below is corrected.** The coverage scaling it describes was
+a real bug about the **model-audit trail** — an unscaled fraction would be stored
+as "0.94% full" — not about pay, which it never touched.
+
 ## 0.50.0 — 2026-08-08
 
 **A badge is issued here now, and a bucket leaves the phone.** The badge audit of
@@ -39,9 +68,11 @@ force-quit, and the launch sweep stops deleting its photograph), a
 `BucketSyncEngine` that treats a duplicate as landed and keeps a refusal visible,
 an on-device badge directory so a scan names the picker with no signal, and the
 crew clock wired to `start_shift` / `resolve_badge` / `add_worker_to_shift` /
-`end_shift`. Wiring the sync found a live bug: coverage was being held as a
-fraction and would have been filed as a percentage, recording a full bucket as
-0.94% full.
+`end_shift`. Wiring the sync found a live bug in the **model-audit trail**:
+`coverage_percent` was being held as a fraction and would have been filed into a
+column that stores a percentage, recording a full bucket's diagnostic as "0.94%
+full". It is a diagnostic and not a pay input — the gate is binary and pay is the
+count of Accepted buckets — so no figure on a slip was ever affected. See 0.50.1.
 
 ## 0.49.0 — 2026-08-08
 

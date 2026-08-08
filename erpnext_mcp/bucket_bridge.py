@@ -8,12 +8,42 @@ plain dict and everything returned is derivable again from the same dict.
 Entry, Bucket Log Session or Bucket Log Badge Map document.
 
 WHAT A BUCKET LOG ENTRY IS. BucketLog (the iOS app) runs an on-device ML model
-against a photo of a picked bucket and records a verdict — Accepted or
-Rejected — plus where, when, whose badge was scanned, and how much of the
-bucket the model judged full (`coverage_percent`). This app never touches the
-photo or the model; it holds the one fact BucketLog's own storage has no
+against a photo of a picked bucket and reaches a verdict — Accepted or
+Rejected — plus where, when and whose badge was scanned. This app never touches
+the photo or the model; it holds the one fact BucketLog's own storage has no
 reason to know: which of those captures is a piece of work somebody gets paid
 for.
+
+────────────────────────────────────────────────────────────────────────────
+THE MODEL IS A BINARY GATE. THERE IS NO PARTIAL CREDIT ANYWHERE
+────────────────────────────────────────────────────────────────────────────
+
+A bucket is full or it is not full. The phone makes that decision once, on
+device, and the ONLY thing that crosses to this app is which way it went:
+
+    Accepted  →  1 bucket
+    Rejected  →  0 buckets
+
+    piecework pay = number of Accepted buckets × the piece rate
+
+That is the whole arithmetic. **There is no partial bucket, no fractional
+unit, and no percentage anywhere in the pay calculation.** A bucket the model
+judged 51% full and one it judged 99% full are worth exactly the same thing if
+they were both Accepted — which is one — and both worth nothing if they were
+Rejected. The gate has already been applied by the time a capture gets here;
+this app does not re-derive it and must never second-guess it with a number.
+
+`coverage_percent` IS DIAGNOSTIC AND IS NOT AN INPUT TO PAY. It is the model's
+own record of why the gate went the way it did, kept so somebody auditing a
+model version can see what it was looking at — the same reason `model_uuid`
+rides along. Nothing in `payroll_integration.py` reads it: it is deliberately
+absent from `_UNIT_KEYS`, and `entries_to_payroll_shape` deliberately does not
+emit it. `test_bucket_bridge.TheGateIsBinary` asserts both directions, against
+`payroll_integration._UNIT_KEYS` itself so the two cannot drift apart.
+
+If a future release wants to pay a partial bucket, that is a change to the
+GATE — a third verdict, priced deliberately — and not a multiplication by a
+coverage figure that was only ever evidence.
 
 ────────────────────────────────────────────────────────────────────────────
 ONLY ACCEPTED BUCKETS ARE PIECE WORK
@@ -159,6 +189,13 @@ def validate_bucket_entry(entry: dict) -> list[str]:
 	`sync_bucket_entries` deduplicates a sync batch by) needs a database read
 	and lives in the tool layer, the same split `validate_model_registration`
 	keeps against `check_model_conflicts`.
+
+	THE VERDICT IS THE ONLY THING THAT DECIDES PAY, and it is checked as one of
+	exactly two words. `coverage_percent` is range-checked because a number
+	outside 0–100 means the sender's units are wrong and its diagnostics are
+	worthless — NOT because the figure buys anything. A capture with no coverage
+	at all is perfectly valid and is worth exactly what an Accepted capture with
+	94.2% is worth: one bucket. See the module docstring on the binary gate.
 	"""
 	entry = entry or {}
 	errors = []
@@ -274,11 +311,21 @@ def entries_to_payroll_shape(entries: list[dict]) -> list[dict]:
 	and a payroll run silently attributing it to nobody would be worse than a
 	bucket that goes uncounted until `link_badge_to_employee` fixes the map.
 
-	One row per accepted, attributed entry, and no unit-count key on the row —
-	`payroll_integration._row_units` reads a row with none of `_UNIT_KEYS` as
-	ONE bucket, which is exactly what a Bucket Log Entry row means. `entry_uuid`
-	rides along for traceability; `_piece_units_for` ignores keys it does not
-	recognise.
+	ONE ROW PER ACCEPTED ENTRY, AND NO COUNT KEY ON IT. That is the binary gate
+	expressed in the data rather than asserted in a comment:
+	`payroll_integration._row_units` reads a row carrying none of `_UNIT_KEYS`
+	as exactly ONE bucket, so a full bucket is 1 and a not-full bucket is not
+	here at all. `entry_uuid` rides along for traceability and
+	`_piece_units_for` ignores keys it does not recognise.
+
+	THE ROW IS BUILT KEY BY KEY RATHER THAN COPIED. Passing the entry through
+	and deleting what payroll must not see would be one forgotten field away
+	from a `coverage_percent` — or a future column named `units` — reaching
+	`_row_units` and turning a bucket into a fraction of one. Two keys go out
+	because two keys are what this means; `TheGateIsBinary` in
+	`test_bucket_bridge.py` checks the emitted keys against
+	`payroll_integration._UNIT_KEYS` itself, so neither side can drift into
+	paying partial credit.
 	"""
 	rows = []
 	for entry in entries or []:

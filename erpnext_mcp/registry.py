@@ -12596,6 +12596,13 @@ TOOLS = {
 		"each one's employee from its worker_badge against the Bucket Log "
 		"Badge Map register, and keep the Bucket Log Session each belongs to "
 		"up to date.\n\n"
+		"THE MODEL IS A BINARY GATE. A bucket is full or it is not: verdict "
+		"Accepted counts as ONE bucket, Rejected counts as none, and "
+		"piecework pay is the number of Accepted buckets times the piece "
+		"rate. There is no partial bucket and no fractional unit anywhere. "
+		"coverage_percent is a DIAGNOSTIC — the model's own record of why "
+		"the gate went that way, kept for auditing a model version — and is "
+		"never an input to pay.\n\n"
 		"DEDUPLICATES BY entry_uuid — resyncing a batch already on the site "
 		"is a no-op, not a duplicate record. An entry that fails validation "
 		"(bad verdict, no timestamp, no badge or employee) is reported and "
@@ -12606,9 +12613,10 @@ TOOLS = {
 				{"type": "array", "items": _OBJECT},
 				"REQUIRED. Up to 500 objects, each: entry_uuid (required), company "
 				"(required), timestamp (required), verdict (required, Accepted or "
-				"Rejected), session_uuid, worker_badge, employee (skips badge "
-				"resolution if already known), coverage_percent (0-100), model_uuid, "
-				"gps_lat, gps_lon, h3_cell, device_id.",
+				"Rejected — this is the whole of what a capture is worth), session_uuid, "
+				"worker_badge, employee (skips badge resolution if already known), "
+				"coverage_percent (0-100, DIAGNOSTIC ONLY — it does not scale pay), "
+				"model_uuid, gps_lat, gps_lon, h3_cell, device_id.",
 			),
 			"badge_policy": _field(
 				_STRING,
