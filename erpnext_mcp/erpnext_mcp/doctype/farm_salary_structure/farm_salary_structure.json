@@ -14,6 +14,7 @@
   "col_break_1",
   "pay_type",
   "base_rate",
+  "hourly_rate",
   "is_active",
   "dates_section",
   "effective_from",
@@ -79,6 +80,13 @@
    "in_list_view": 1,
    "label": "Base Rate",
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "What an hour of NON-PIECE work is worth to this worker — irrigation, tractor time, a morning spent moving bins. Only read where a shift or crew row says its hours were paid Hourly; a piece-rate day never touches it. Left at zero, those hours earn nothing at the rate and are carried up to the minimum wage by the makeup, which is visible on the slip.",
+   "fieldname": "hourly_rate",
+   "fieldtype": "Currency",
+   "label": "Hourly Rate (Non-Piece Work)"
   },
   {
    "default": "1",

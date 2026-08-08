@@ -10015,6 +10015,12 @@ TOOLS = {
 			"company": _COMPANY,
 			"pay_type": _field(_STRING, "Piece Rate, Hourly, or Salary."),
 			"base_rate": _field(_NUMBER, "Rate per unit/hour or periodic salary amount."),
+			"hourly_rate": _field(
+				_NUMBER,
+				"Optional. What an hour of NON-PIECE work pays this worker — irrigation, "
+				"tractor time — read only for a shift whose own pay_type says Hourly. "
+				"Leave unset for a worker who only ever does one kind of work.",
+			),
 			"effective_from": _field(_STRING, "Start date as YYYY-MM-DD. Defaults to today."),
 			"effective_to": _field(_STRING, "End date as YYYY-MM-DD. Leave blank for open-ended."),
 			"notes": _field(_STRING, "Optional notes."),

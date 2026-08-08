@@ -29,8 +29,8 @@ EIGHT CLAIMS.
    wages and taxes in both, allocated by the hours actually worked in each.
 
 6. `MinimumWageIsPerState` — checked against each state's own floor using the
-   real shift hours, reported with the shortfall priced, and NOT silently
-   topped up.
+   real shift hours, and PAID up to it since v0.49.0, with the top-up carried as
+   its own figure rather than folded into gross where nobody could see it.
 
 7. `EndToEnd` — shifts seeded on the site, read through the tools, computed and
    written as a Farm Payroll Entry whose slips match what the preview said.
@@ -667,7 +667,12 @@ class PieceUnitsReachThePayroll(IntegrationTestCase):
 		data = self.preview()
 		slip = next(s for s in data["slips"] if s["employee"] == WORKER)
 		self.assertEqual(slip["piece_units"], 3.0)
-		self.assertEqual(slip["gross_pay"], 6.0)
+		# Three buckets at $2.00 is $6.00 EARNED, and nine Oregon hours are owed
+		# $132.30, so the higher-of rule pays the floor and names the $126.30 as
+		# makeup. v0.49.0: gross used to stop at the $6.00.
+		self.assertEqual(slip["earned_gross"], 6.0)
+		self.assertEqual(slip["minimum_wage_makeup"], 126.30)
+		self.assertEqual(slip["gross_pay"], 132.30)
 		self.assertIn("ONE unit", " ".join(data["sources"]["notes"]))
 
 	def test_buckets_on_a_day_with_no_shift_are_still_paid_and_reported(self):
@@ -780,9 +785,18 @@ class MinimumWageIsPerState(IntegrationTestCase):
 		self.assertFalse(metro["meets_minimum_wage"])
 		self.assertEqual(metro["by_state"]["OR"]["shortfall"], 9.5)
 
-	def test_the_shortfall_is_not_added_to_gross(self):
-		"""Reported, never remedied. A payroll engine that quietly topped pay up
-		would hide the fact that a piece rate is set too low to be lawful."""
+	def test_the_shortfall_is_added_to_gross_and_still_named(self):
+		"""v0.49.0 REVERSED THIS TEST, and the reason it was written still holds.
+
+		It used to assert that gross stayed at $50 and the $97 was reported. The
+		higher-of rule pays the $97 now — FLSA §6 makes the minimum wage a floor
+		under the wage, not a figure to compare it against — but the fact that a
+		$1.00 bucket rate does not clear Oregon's floor is what the old posture
+		existed to keep visible, and it still is: `minimum_wage_makeup` on the slip,
+		and a named row in `topped_up_to_minimum_wage` on the run.
+
+		What is gone is the farm owing the money while the fact was on the screen.
+		"""
 		self.structure(PICKER, pay_type="Piece Rate", rate=1.0)
 		self.seed_shifts(
 			shift("S1", "2025-06-02", end="16:00:00", crew=[member(PICKER)]),
@@ -791,10 +805,21 @@ class MinimumWageIsPerState(IntegrationTestCase):
 		data = self.preview()
 		slip = next(s for s in data["slips"] if s["employee"] == PICKER)
 		self.assertEqual(slip["total_hours"], 10.0)
-		self.assertEqual(slip["gross_pay"], 50.0)
-		self.assertFalse(slip["minimum_wage_detail"]["meets_minimum_wage"])
-		self.assertEqual(slip["minimum_wage_detail"]["total_shortfall"], 97.0)
-		self.assertEqual(data["totals"]["below_minimum_wage"][0]["employee"], PICKER)
+		self.assertEqual(slip["earned_gross"], 50.0)
+		self.assertEqual(slip["minimum_wage_makeup"], 97.0)
+		self.assertEqual(slip["gross_pay"], 147.0)
+
+		# The independent check finds nothing now, because the pay it is checking
+		# has been brought up to the floor.
+		self.assertTrue(slip["minimum_wage_detail"]["meets_minimum_wage"])
+		self.assertEqual(slip["minimum_wage_detail"]["total_shortfall"], 0.0)
+		self.assertEqual(data["totals"]["below_minimum_wage"], [])
+
+		topped = data["totals"]["topped_up_to_minimum_wage"]
+		self.assertEqual([row["employee"] for row in topped], [PICKER])
+		self.assertEqual(topped[0]["minimum_wage_makeup"], 97.0)
+		self.assertEqual(topped[0]["states"], ["OR"])
+		self.assertEqual(data["totals"]["total_minimum_wage_makeup"], 97.0)
 
 	def test_a_stateless_shift_does_not_invent_a_failure(self):
 		"""A shift with no work_state has no floor to fall below. Reporting one

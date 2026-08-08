@@ -700,6 +700,14 @@ def _slip_warnings(slip: dict, amounts: dict, include_employer: bool) -> list[st
 			"computed — this module changes no amount — but the underlying pay is a wage "
 			"claim waiting to happen."
 		)
+	makeup = _as_float(slip.get("minimum_wage_makeup"))
+	if makeup > 0:
+		warnings.append(
+			f"{who} was paid ${_money(makeup)} of minimum wage makeup: what the work earned "
+			"did not reach what the hours are owed, and gross was raised to the floor. The "
+			"posting is correct and the whole of gross is wages — this is not a warning "
+			"about the entry. It is a warning about the rate that produced it."
+		)
 	return warnings
 
 

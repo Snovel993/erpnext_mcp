@@ -21,6 +21,8 @@
   "effective_hourly_rate",
   "pay_section",
   "gross_pay",
+  "earned_gross",
+  "minimum_wage_makeup",
   "col_break_deductions",
   "federal_withholding",
   "state_withholding",
@@ -146,6 +148,22 @@
    "fieldtype": "Currency",
    "in_list_view": 1,
    "label": "Gross Pay",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "What the work itself came to — piece units at the piece rate, hours at the hourly rate, break pay and the overtime premium — before the minimum wage floor was applied. Gross Pay is this plus Minimum Wage Makeup.",
+   "fieldname": "earned_gross",
+   "fieldtype": "Currency",
+   "label": "Earned Gross",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "What was added to reach the minimum wage for the hours worked, per state, with the overtime premium in the floor. FLSA §6, ORS 653.025, RCW 49.46.020. Anything other than zero here is a pay rate set below what the hours are owed — the worker is paid correctly and the rate is the thing to look at.",
+   "fieldname": "minimum_wage_makeup",
+   "fieldtype": "Currency",
+   "label": "Minimum Wage Makeup",
    "read_only": 1
   },
   {

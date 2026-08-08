@@ -73,23 +73,47 @@ did not happen.
 WHAT THIS DOES NOT DECIDE
 ────────────────────────────────────────────────────────────────────────────
 
-THE OVERTIME PREMIUM FOR PIECE WORK is `payroll_calc`'s, unchanged: it pays the
-full 1.5x of the effective hourly on top of piece earnings that already cover
-straight time for those hours. The strict FLSA method is a 0.5x premium on top,
-and the difference is in the worker's favour. It is left where it was because
-changing what a released engine pays is not a thing to do inside an integration
-release, and because erring high on somebody's overtime is the safe direction.
+THE OVERTIME PREMIUM FOR PIECE WORK is `payroll_calc`'s. As of v0.49.0 it is the
+FLSA half-time premium of 29 CFR 778.111 — the piece earnings already paid
+straight time for the overtime hours, so what is owed on top is half the regular
+rate. Releases through v0.48.2 paid the full 1.5x on top, which is more than the
+law asks and could not be reconciled with the weighted-average method a mixed
+piece-and-hourly day needs. Both are half-time now, and they agree.
 
-MAKEUP PAY FOR A MINIMUM-WAGE SHORTFALL is reported, not applied.
-`check_minimum_wage_by_state` says which state fell short, by how much per hour,
-and what it would cost to make whole — and stops there. Whether the top-up is
-paid this period, corrected on the piece rate, or disputed is a decision with a
-person's name on it, and a payroll engine that quietly inflated gross pay would
-hide the fact that a rate is set too low to be lawful.
+MAKEUP PAY FOR A MINIMUM-WAGE SHORTFALL IS PAID as of v0.49.0, and this module no
+longer decides it. `payroll_calc.calculate_full_payroll` applies the higher-of
+rule — gross is the greater of what the work earned and what the hours are owed,
+per state, with the overtime premium in the floor — and carries the difference as
+`minimum_wage_makeup`. `check_minimum_wage_by_state` is now the independent check
+on the result rather than the only place the floor appeared: it tests the wages as
+paid and should find nothing.
+
+The reason the old posture existed still holds and is still served. A top-up that
+vanished into gross would hide a piece rate set below the lawful floor, so it does
+not vanish: it is its own figure on the slip, its own column on the stored row,
+and its own list — `topped_up_to_minimum_wage` — at the top of the run summary.
+What changed is that the farm no longer owes the money while the fact is visible.
 
 WHO IS OWED ANYTHING AT ALL. An employee with shifts and no salary structure is
 not paid zero — they are REPORTED, by name, in `employees_missing_structures`.
 Zero is a number, and a number nobody questions.
+
+────────────────────────────────────────────────────────────────────────────
+A DAY CAN BE PAID TWO WAYS AND USUALLY IS AT SOME POINT IN A SEASON
+────────────────────────────────────────────────────────────────────────────
+
+`pay_type` was one field on one salary structure until v0.49.0, so a picker who
+spent the morning on buckets and the afternoon on irrigation was paid the piece
+rate for the afternoon — which is to say nothing, because irrigation produces no
+buckets. A segment now carries its own `pay_type` and its own `pay_rate` where the
+record says so, blank where it does not, and blank is the ordinary day.
+
+Segments are grouped for the engine by (state, pay type, rate) rather than by
+state alone, and the engine pays each group its own way and then takes ONE regular
+rate across the lot for the overtime premium — 29 CFR 778.115, the method for an
+employee working at two rates in one workweek. Six hours of picking at $1.50 a
+bucket and two hours of irrigation at $16.00 is $167, and the minimum wage floor
+is tested on all eight hours, not on the six that made buckets.
 """
 
 from __future__ import annotations
@@ -97,7 +121,11 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 from . import bucket_bridge
-from .payroll_calc import MINIMUM_WAGE_RATES, calculate_full_payroll
+from .payroll_calc import (
+	applicable_minimum_wage,
+	calculate_full_payroll,
+	minimum_wage_floor,
+)
 
 #: Hours in a workweek before the ag overtime premium starts. Oregon HB 4002 and
 #: Washington SB 5172 both landed here, both fully phased as of 2025.
@@ -130,6 +158,11 @@ _UNIT_KEYS = ("piece_units", "units", "quantity", "qty", "bucket_count", "count"
 #: Keys a piece-unit row might name its worker under. `picker_id` is the
 #: BucketLog bridge's; `assigned_to` is Farm Task Assignment's.
 _WORKER_KEYS = ("employee", "picker_id", "picker", "assigned_to", "worker")
+
+#: Keys a shift or crew row might carry a rate override under. Present only where
+#: the day was paid at something other than the salary structure's own rate —
+#: irrigation hours at $16.00 under a structure that pays $1.50 a bucket.
+_RATE_KEYS = ("pay_rate", "hourly_rate", "rate", "base_rate")
 
 
 # ── Parsing ───────────────────────────────────────────────────────────────
@@ -285,6 +318,8 @@ class _Segment:
 		"end",
 		"hours",
 		"open_ended",
+		"pay_rate",
+		"pay_type",
 		"piece_units",
 		"shift",
 		"start",
@@ -308,6 +343,8 @@ class _Segment:
 			"break_hours": round(self.break_hours, 2),
 			"unpaid_break_hours": round(self.unpaid_break_hours, 2),
 			"piece_units": round(self.piece_units, 2),
+			"pay_type": self.pay_type or "",
+			"pay_rate": self.pay_rate,
 			"open_ended": self.open_ended,
 		}
 
@@ -398,12 +435,23 @@ def _segments_of(shift: dict) -> list[_Segment]:
 		# than paying a rest period longer than the shift.
 		paid_break = min(max(paid_break, 0.0), hours)
 
+		# What this stretch was paid BY, where the record says. Blank is the
+		# ordinary case and means "the way this worker's salary structure says" —
+		# the field only has to be filled in on the day that was different, which
+		# is the day a picker spent on irrigation.
+		pay_type = str(row.get("pay_type") or shift.get("pay_type") or "").strip()
+		pay_rate = _first_present(row, _RATE_KEYS)
+		if pay_rate is None:
+			pay_rate = _first_present(shift, _RATE_KEYS)
+
 		segments.append(
 			_Segment(
 				employee=employee,
 				employee_name=row.get("employee_name") or shift.get("employee_name") or "",
 				shift=shift_name,
 				work_state=work_state,
+				pay_type=pay_type,
+				pay_rate=pay_rate,
 				start=start,
 				end=end,
 				hours=hours,
@@ -544,6 +592,7 @@ def _aggregate_one(
 	week_rows: list[dict] = []
 	open_shifts: list[str] = []
 	detail: list[dict] = []
+	pay_groups: dict[tuple, dict] = {}
 
 	for index in sorted(weeks):
 		members = weeks[index]
@@ -563,6 +612,28 @@ def _aggregate_one(
 			_bump(overtime_by_state, state, overtime)
 			_bump(break_hours_by_state, state, seg.break_hours)
 			_bump(piece_units_by_state, state, seg.piece_units)
+
+			# One group per (state, pay type, rate). The state because the tax
+			# allocation and the wage floor are both per state; the pay type and
+			# rate because a mixed day has to reach the engine as the two kinds of
+			# work it was, not as one total with one method assumed over it.
+			group_key = (state, seg.pay_type or "", seg.pay_rate)
+			group = pay_groups.setdefault(
+				group_key,
+				{
+					"work_state": state,
+					"pay_type": seg.pay_type or "",
+					"pay_rate": seg.pay_rate,
+					"hours": 0.0,
+					"overtime_hours": 0.0,
+					"piece_units": 0.0,
+					"break_hours": 0.0,
+				},
+			)
+			group["hours"] += seg.hours
+			group["overtime_hours"] += overtime
+			group["piece_units"] += seg.piece_units
+			group["break_hours"] += seg.break_hours
 
 			if seg.open_ended and seg.shift:
 				open_shifts.append(seg.shift)
@@ -599,6 +670,19 @@ def _aggregate_one(
 		"overtime_hours_by_state": {k: round(v, 2) for k, v in overtime_by_state.items()},
 		"break_hours_by_state": {k: round(v, 2) for k, v in break_hours_by_state.items()},
 		"piece_units_by_state": {k: round(v, 2) for k, v in piece_units_by_state.items()},
+		"pay_segments": [
+			{
+				"work_state": group["work_state"],
+				"pay_type": group["pay_type"],
+				"pay_rate": group["pay_rate"],
+				"hours": round(group["hours"], 2),
+				"overtime_hours": round(group["overtime_hours"], 2),
+				"piece_units": round(group["piece_units"], 2),
+				"break_hours": round(group["break_hours"], 2),
+			}
+			for group in pay_groups.values()
+		],
+		"mixed_pay_types": len({group["pay_type"] for group in pay_groups.values()}) > 1,
 		"shift_count": len({seg.shift for seg in segments if seg.shift}),
 		"segment_count": len(segments),
 		"shifts": detail,
@@ -627,6 +711,7 @@ def check_minimum_wage_by_state(
 	wages_by_state: dict,
 	region_by_state: dict | None = None,
 	min_wage_rates: dict | None = None,
+	overtime_hours_by_state: dict | None = None,
 ) -> dict:
 	"""Minimum wage tested state by state, with the shortfall priced.
 
@@ -635,11 +720,23 @@ def check_minimum_wage_by_state(
 	across both would let a compliant Washington week paper over an Oregon week
 	that was not. The wage floor is a floor in the state where the work happened.
 
-	Reports; does not remedy. `shortfall` is what it would cost to bring that
-	state's hours up to its minimum, and paying it is somebody's decision.
+	THE FLOOR CARRIES THE OVERTIME PREMIUM. `regular × minimum + overtime ×
+	minimum × 1.5`, not `hours × minimum`. Releases through v0.48.2 compared
+	against the flat product, which passed a fifty-hour Oregon week at $735 when
+	the statutory floor for it is $808.50 — the ten hours past forty are owed at
+	$22.05 whatever the buckets came to. `overtime_hours_by_state` is how many of
+	each state's hours were past the weekly threshold; omitting it tests the flat
+	floor, which is right only for a week with no overtime in it.
+
+	VERIFIES; the remedy is applied upstream. Since v0.49.0
+	`payroll_calc.calculate_full_payroll` pays the floor — gross is the greater of
+	what was earned and what the hours are owed — so on a slip computed by this
+	app `shortfall` is zero and this function is the independent check that says
+	so. A non-zero shortfall here means wages arrived from somewhere that did not
+	apply the rule, which is exactly when somebody wants to be told.
 	"""
-	rates = min_wage_rates or MINIMUM_WAGE_RATES
 	regions = region_by_state or {}
+	overtime = overtime_hours_by_state or {}
 
 	by_state = {}
 	total_shortfall = 0.0
@@ -648,19 +745,23 @@ def check_minimum_wage_by_state(
 		hours = _as_float(hours)
 		if hours <= 0:
 			continue
-		state_rates = rates.get(state, {})
 		region = regions.get(state, "standard")
-		minimum = state_rates.get(region, state_rates.get("standard", 0.0))
+		minimum = applicable_minimum_wage(state, region, min_wage_rates)
+		state_ot = min(max(_as_float(overtime.get(state)), 0.0), hours)
+		floor = minimum_wage_floor(hours, state_ot, minimum)
 		wages = _as_float((wages_by_state or {}).get(state))
 		effective = wages / hours
-		short = max(minimum * hours - wages, 0.0)
+		short = max(floor - wages, 0.0)
 		total_shortfall += short
 		row = {
 			"state": state,
 			"region": region,
 			"hours": round(hours, 2),
+			"regular_hours": round(hours - state_ot, 2),
+			"overtime_hours": round(state_ot, 2),
 			"wages": round(wages, 2),
 			"minimum_wage": minimum,
+			"minimum_wage_floor": floor,
 			"effective_hourly_rate": round(effective, 2),
 			"meets_minimum_wage": short <= 0.005,
 			"shortfall": round(short, 2),
@@ -729,7 +830,33 @@ def engine_shift_rows(aggregate: dict) -> list[dict]:
 	A row per state also preserves the cross-state allocation
 	`calculate_full_payroll` needs: it splits gross by hours proportion, and the
 	proportions are exactly these.
+
+	v0.49.0. WHERE ANY SEGMENT NAMED ITS OWN PAY TYPE OR RATE, the rows are one per
+	(state, pay type, rate) instead, each carrying that pay type and rate. That is
+	how a mixed day survives the trip: six hours of picking and two of irrigation
+	arrive as two rows, and the engine pays each by its own method rather than
+	paying eight hours by whichever method the salary structure happens to name.
+	Nothing changes for the ordinary day, where no row names anything and the rows
+	are per state exactly as before.
 	"""
+	pay_segments = aggregate.get("pay_segments") or []
+	if any(row.get("pay_type") or row.get("pay_rate") not in (None, "") for row in pay_segments):
+		rows = []
+		for group in pay_segments:
+			row = {
+				"work_state": group.get("work_state", ""),
+				"hours": round(_as_float(group.get("hours")), 2),
+				"overtime_hours": round(_as_float(group.get("overtime_hours")), 2),
+				"piece_units": round(_as_float(group.get("piece_units")), 2),
+				"break_hours": round(_as_float(group.get("break_hours")), 2),
+			}
+			if group.get("pay_type"):
+				row["pay_type"] = group["pay_type"]
+			if group.get("pay_rate") not in (None, ""):
+				row["base_rate"] = _as_float(group["pay_rate"])
+			rows.append(row)
+		return rows
+
 	hours_by_state = aggregate.get("hours_by_state") or {}
 	if not hours_by_state:
 		# No shifts, or shifts with no state on them. One stateless row keeps a
@@ -816,6 +943,12 @@ def build_payroll_inputs(
 					"name": structure.get("name", ""),
 					"pay_type": structure.get("pay_type", "Hourly"),
 					"base_rate": _as_float(structure.get("base_rate")),
+					# What an hour of non-piece work is worth to a piece-rate
+					# worker, and which region's floor applies to them. Both are
+					# the engine's business now that it pays the floor rather
+					# than reporting a distance from it.
+					"hourly_rate": structure.get("hourly_rate"),
+					"min_wage_regions": structure.get("min_wage_regions") or {},
 				},
 				"tax_config": {
 					"w4_data": w4,
@@ -952,11 +1085,31 @@ def run_integrated_payroll(
 
 		wages_by_state = _state_wages(slip)
 		slip["state_wages"] = wages_by_state
+		# The independent check, run on the wages as PAID — makeup included. It
+		# should now find nothing, and the day it finds something is the day the
+		# engine and the floor disagree about a slip somebody is about to be paid.
 		slip["minimum_wage_detail"] = check_minimum_wage_by_state(
 			aggregate.get("hours_by_state") or {},
 			wages_by_state,
 			item.get("min_wage_regions"),
+			overtime_hours_by_state=aggregate.get("overtime_hours_by_state") or {},
 		)
+		# What the floor added, on the slip and per state, so a report can show it
+		# as its own line rather than leaving it inside gross where nobody can see
+		# that a piece rate is set below what the hours are owed.
+		makeup_by_state = {
+			state: row.get("minimum_wage_makeup", 0.0)
+			for state, row in (slip.get("minimum_wage_by_state") or {}).items()
+			if row.get("minimum_wage_makeup", 0.0) > 0
+		}
+		slip["minimum_wage_makeup_by_state"] = makeup_by_state
+		slip["minimum_wage_states_topped_up"] = sorted(makeup_by_state)
+		for state, row in (slip.get("minimum_wage_by_state") or {}).items():
+			detail_row = slip["minimum_wage_detail"]["by_state"].get(state)
+			if detail_row is not None:
+				detail_row["minimum_wage_makeup"] = row.get("minimum_wage_makeup", 0.0)
+				detail_row["earned_wages"] = row.get("earned_wages", 0.0)
+		slip["minimum_wage_detail"]["total_makeup"] = slip.get("minimum_wage_makeup", 0.0)
 		slip["company"] = company
 		slip["pay_period_start"] = str(pay_period_start)
 		slip["pay_period_end"] = str(pay_period_end)
@@ -995,13 +1148,35 @@ def summarize_payroll_run(slips: list[dict]) -> dict:
 	hours did not clear its floor, and a shift that never got an end time so its
 	hours counted as zero. Both produce a slip that computes cleanly and is
 	wrong, which is the only kind of wrong worth putting at the top of a summary.
+
+	v0.49.0 adds a third and it is the one to read: `topped_up_to_minimum_wage`,
+	everybody whose piece earnings did not reach what their hours are owed and
+	whose gross was raised to the floor. Nobody on that list is underpaid — that
+	is the whole change — but every name on it is a rate set too low to be lawful
+	on the work that was actually done, and `below_minimum_wage` no longer catches
+	them because the makeup already did.
 	"""
 	total_gross = total_deductions = total_net = 0.0
 	total_hours = total_overtime = total_units = 0.0
+	total_makeup = 0.0
 	below = []
+	topped_up = []
 	open_shifts = []
 	for slip in slips or []:
 		total_gross += _as_float(slip.get("gross_pay"))
+		makeup = _as_float(slip.get("minimum_wage_makeup"))
+		total_makeup += makeup
+		if makeup > 0:
+			topped_up.append(
+				{
+					"employee": slip.get("employee"),
+					"employee_name": slip.get("employee_name"),
+					"states": slip.get("minimum_wage_states_topped_up") or [],
+					"earned_gross": _as_float(slip.get("earned_gross")),
+					"minimum_wage_makeup": round(makeup, 2),
+					"gross_pay": _as_float(slip.get("gross_pay")),
+				}
+			)
 		total_deductions += _as_float(slip.get("total_deductions"))
 		total_net += _as_float(slip.get("net_pay"))
 		total_hours += _as_float(slip.get("total_hours"))
@@ -1033,6 +1208,8 @@ def summarize_payroll_run(slips: list[dict]) -> dict:
 		"total_hours": round(total_hours, 2),
 		"total_overtime_hours": round(total_overtime, 2),
 		"total_piece_units": round(total_units, 2),
+		"total_minimum_wage_makeup": round(total_makeup, 2),
 		"below_minimum_wage": below,
+		"topped_up_to_minimum_wage": topped_up,
 		"with_open_shifts": open_shifts,
 	}

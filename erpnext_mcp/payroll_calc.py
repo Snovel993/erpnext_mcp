@@ -16,6 +16,48 @@ OVERTIME (both states, ag workers, fully phased):
   Oregon HB 4002: 40 hrs/wk threshold
   Washington SB 5172: 40 hrs/wk threshold
   1.5x the regular rate
+
+────────────────────────────────────────────────────────────────────────────
+v0.49.0 — THE HIGHER-OF RULE, AND THREE THINGS THAT FOLLOW FROM IT
+────────────────────────────────────────────────────────────────────────────
+
+THE FLOOR IS NOW PAID, NOT JUST PRICED. FLSA §6 and both state schemes make the
+minimum wage a floor under the WAGE, not a figure to compare the wage against:
+piece rate is a method of measuring pay, never a way to earn less than the hours
+were worth. So gross pay is `max(what was earned, what the hours are owed)`, and
+the difference is carried as `minimum_wage_makeup` — its own figure on the slip,
+its own column on the stored row, its own line in the run summary. Forty-seven
+buckets at $1.50 in an eight-hour Oregon day now pays $117.60, of which $47.10 is
+makeup, and the makeup is the number that says the piece rate is set too low.
+
+Paying it does not hide it. Every prior release reported the shortfall and left
+gross alone precisely so a rate below the lawful floor would stay visible; the
+makeup figure keeps that visibility and stops the farm owing back wages while it
+is visible.
+
+THE FLOOR KNOWS ABOUT OVERTIME. `regular_hours × minimum + overtime_hours ×
+minimum × 1.5`, not `total_hours × minimum`. Fifty hours in Oregon is a floor of
+$808.50, not $735 — the ten overtime hours are owed at $22.05 whatever the
+buckets came to.
+
+THE FLOOR IS PER STATE. A worker with Oregon hours and Washington hours has two
+floors, each over its own hours, and the makeup is computed and reported for each.
+Averaging them would let a Washington week paper over an Oregon one.
+
+THE OVERTIME PREMIUM ON PIECE WORK IS THE FLSA HALF-TIME PREMIUM. 29 CFR 778.111:
+the regular rate is all straight-time earnings divided by all hours worked, and
+because the piece earnings ALREADY paid straight time for the overtime hours, what
+is owed on top is one HALF the regular rate, not one and a half. Releases through
+v0.48.2 paid the full 1.5x on top — more than the law asks, and out of step with
+the mixed-rate arithmetic below, where a weighted average is the only method that
+works. Both now use half-time.
+
+A WORKER CAN BE PART PIECE-RATE AND PART HOURLY. `calculate_mixed_gross_pay`
+takes the day as segments — six hours picking, two hours on irrigation — pays each
+by its own method, and computes one regular rate across the lot the way 29 CFR
+778.115 says to for an employee working at two rates in one workweek. Six hours of
+buckets and two of irrigation is $167, and the minimum wage floor is tested on all
+eight hours.
 """
 from __future__ import annotations
 
@@ -27,7 +69,18 @@ MINIMUM_WAGE_RATES = {
 	"WA": {"standard": 16.66},
 }
 
+#: What an overtime hour is worth in total: one and a half times the regular rate.
 OT_MULTIPLIER = 1.5
+
+#: What is owed ON TOP where straight time for the overtime hours has already been
+#: paid — by the piece, or by an hourly segment that counted every hour. 29 CFR
+#: 778.111 (piece rates) and 778.115 (two or more rates in one workweek): the
+#: premium is half the regular rate, because the other one is already in hand.
+OT_PREMIUM_MULTIPLIER = OT_MULTIPLIER - 1.0
+
+#: The pay types a segment or a structure can name. "Salary" is period pay and has
+#: no per-hour or per-unit reading, so it never takes part in a mixed day.
+PAY_TYPES = ("Piece Rate", "Hourly", "Salary")
 
 
 def calculate_gross_pay(
@@ -52,8 +105,15 @@ def calculate_gross_pay(
 		piece_earnings = piece_units * base_rate
 		piece_hours = hours - break_hours
 		bp = calculate_break_pay(piece_earnings, piece_hours, break_hours)
+		# The FLSA regular rate: everything earned at straight time over every hour
+		# worked. Written as `piece_earnings / piece_hours` because that is
+		# identically `(piece_earnings + break_pay) / (piece_hours + break_hours)`
+		# — the break was paid at this very rate — and the short form does not
+		# divide by zero on a day that was all break.
 		effective_rate = (piece_earnings / piece_hours) if piece_hours > 0 else 0.0
-		ot = calculate_overtime(0, overtime_hours, effective_rate)
+		ot = calculate_overtime(
+			0, overtime_hours, effective_rate, multiplier=OT_PREMIUM_MULTIPLIER,
+		)
 		gross = piece_earnings + bp + ot
 		return {
 			"gross_pay": round(gross, 2),
@@ -65,6 +125,7 @@ def calculate_gross_pay(
 			"overtime_hours": round(overtime_hours, 2),
 			"piece_units": piece_units,
 			"piece_rate": base_rate,
+			"overtime_premium_multiplier": OT_PREMIUM_MULTIPLIER,
 			"pay_type": "Piece Rate",
 		}
 
@@ -112,16 +173,167 @@ def calculate_overtime(
 	regular_pay: float,
 	overtime_hours: float,
 	effective_rate: float,
+	multiplier: float = OT_MULTIPLIER,
 ) -> float:
-	"""Overtime pay at 1.5x the effective rate.
+	"""Overtime pay at `multiplier` times the effective rate.
 
 	Both OR (HB 4002) and WA (SB 5172) use a 40-hour threshold for ag
 	workers, fully phased. The caller is responsible for splitting hours
 	into regular and overtime at the 40-hour boundary.
+
+	The multiplier is the caller's because it depends on what has already been
+	paid for those hours. An hourly worker whose regular pay covered only the
+	regular hours is owed the whole 1.5x on the overtime ones — the default. A
+	piece-rate worker whose piece earnings already paid straight time for every
+	hour is owed the HALF-TIME premium on top, `OT_PREMIUM_MULTIPLIER`, which is
+	what 29 CFR 778.111 asks for. Both arrive at the same place; the difference is
+	only which half was already in the number.
 	"""
 	if overtime_hours <= 0:
 		return 0.0
-	return round(overtime_hours * effective_rate * OT_MULTIPLIER, 2)
+	return round(overtime_hours * effective_rate * multiplier, 2)
+
+
+def calculate_mixed_gross_pay(
+	segments: list[dict],
+	overtime_hours: float = 0.0,
+) -> dict:
+	"""Gross pay for a period whose segments were not all paid the same way.
+
+	THE DAY THIS EXISTS FOR: six hours picking at $1.50 a bucket and two hours on
+	irrigation at $16.00. `calculate_gross_pay` branches on ONE pay type for a
+	whole slip, so under a piece-rate structure those two irrigation hours earned
+	nothing — they produced no buckets — and under an hourly structure the ninety
+	buckets earned nothing. Neither is what the worker did.
+
+	THE METHOD IS 29 CFR 778.115, the one the FLSA gives for an employee working
+	at two or more rates in one workweek: pay each segment by its own method at
+	straight time, then take the REGULAR RATE as the whole lot divided by all the
+	hours worked, and pay the overtime premium at half that rate for the hours past
+	the threshold. The alternative — a premium per segment at that segment's own
+	rate — needs an agreement under 778.419 and is not what a farm has.
+
+	Args:
+		segments: One dict per stretch of work, each with `pay_type` ("Piece Rate"
+			or "Hourly"), `rate` (per unit or per hour, respectively), `hours`, and
+			optionally `piece_units`, `break_hours` (paid rest) and `work_state`.
+		overtime_hours: Hours in the period past the weekly threshold, already
+			resolved week by week by the caller. NOT re-derived here: a pay period
+			is not a workweek and this function cannot see the calendar.
+
+	Returns:
+		The same shape `calculate_gross_pay` returns, plus `hourly_earnings` and a
+		`segments` list carrying what each stretch came to.
+	"""
+	rows = []
+	piece_earnings = hourly_earnings = break_pay = 0.0
+	total_hours = piece_units = 0.0
+
+	for segment in segments or []:
+		seg_type = segment.get("pay_type") or "Hourly"
+		rate = float(segment.get("rate") or 0.0)
+		hours = float(segment.get("hours") or 0.0)
+		breaks = min(max(float(segment.get("break_hours") or 0.0), 0.0), max(hours, 0.0))
+		units = float(segment.get("piece_units") or 0.0)
+
+		if seg_type == "Piece Rate":
+			earned = units * rate
+			worked_hours = hours - breaks
+			rest = calculate_break_pay(earned, worked_hours, breaks)
+			piece_earnings += earned
+			break_pay += rest
+			piece_units += units
+			straight = earned + rest
+		else:
+			# Every hour of an hourly segment, overtime ones included. The premium
+			# for those is added once at the end, at the regular rate across all
+			# segments — adding 1.5x here would pay it twice and at the wrong rate.
+			earned = hours * rate
+			hourly_earnings += earned
+			straight = earned
+
+		total_hours += hours
+		rows.append(
+			{
+				"pay_type": seg_type,
+				"rate": rate,
+				"hours": round(hours, 2),
+				"break_hours": round(breaks, 2),
+				"piece_units": round(units, 2) if seg_type == "Piece Rate" else 0.0,
+				"work_state": segment.get("work_state", ""),
+				"straight_time_pay": round(straight, 2),
+			}
+		)
+
+	straight_time = piece_earnings + hourly_earnings + break_pay
+	regular_rate = (straight_time / total_hours) if total_hours > 0 else 0.0
+	overtime_hours = max(float(overtime_hours or 0.0), 0.0)
+	ot = calculate_overtime(
+		0, overtime_hours, regular_rate, multiplier=OT_PREMIUM_MULTIPLIER,
+	)
+
+	kinds = {row["pay_type"] for row in rows}
+	return {
+		"gross_pay": round(straight_time + ot, 2),
+		"piece_earnings": round(piece_earnings, 2),
+		"hourly_earnings": round(hourly_earnings, 2),
+		"piece_rate": next(
+			(row["rate"] for row in rows if row["pay_type"] == "Piece Rate"), 0.0,
+		),
+		"straight_time_pay": round(straight_time, 2),
+		"break_pay": round(break_pay, 2),
+		"overtime_pay": round(ot, 2),
+		"effective_hourly_rate": round(regular_rate, 2),
+		"regular_hours": round(max(total_hours - overtime_hours, 0.0), 2),
+		"overtime_hours": round(overtime_hours, 2),
+		"piece_units": round(piece_units, 2),
+		"overtime_premium_multiplier": OT_PREMIUM_MULTIPLIER,
+		# "Mixed" only where it actually was. A day of segments that all turned out
+		# to be piece work is a piece-rate day, and calling it mixed on a slip
+		# somebody reads would be describing the code path rather than the work.
+		"pay_type": kinds.pop() if len(kinds) == 1 else "Mixed",
+		"segments": rows,
+	}
+
+
+def minimum_wage_floor(
+	hours: float,
+	overtime_hours: float,
+	minimum_wage: float,
+) -> float:
+	"""What the hours are owed at the floor, overtime premium included.
+
+	`regular × minimum + overtime × minimum × 1.5`, and NOT `total × minimum`.
+	The statutory floor for somebody who worked fifty hours is not fifty hours of
+	minimum wage: the ten past forty are owed at one and a half of it, whatever
+	pay method produced the earnings being tested against it. Oregon HB 4002 and
+	Washington SB 5172 both put the ag threshold at forty in a workweek; FLSA §7
+	is the same arithmetic federally.
+	"""
+	hours = max(float(hours or 0.0), 0.0)
+	overtime_hours = min(max(float(overtime_hours or 0.0), 0.0), hours)
+	regular_hours = hours - overtime_hours
+	return round(
+		regular_hours * minimum_wage + overtime_hours * minimum_wage * OT_MULTIPLIER, 2,
+	)
+
+
+def applicable_minimum_wage(
+	state: str,
+	region: str = "standard",
+	min_wage_rates: dict | None = None,
+) -> float:
+	"""The floor for one state and region, or zero where none is named.
+
+	Zero for an unknown state is deliberate and is the same answer
+	`check_minimum_wage_by_state` gives: a shift with no work state on it has no
+	legislature behind it, and inventing a floor would be reporting a violation of
+	a law nobody named — or, now that the floor is PAID, topping somebody's pay up
+	to a number this app made up.
+	"""
+	rates = min_wage_rates or MINIMUM_WAGE_RATES
+	state_rates = rates.get(state, {})
+	return state_rates.get(region, state_rates.get("standard", 0.0))
 
 
 def check_minimum_wage(
@@ -130,34 +342,104 @@ def check_minimum_wage(
 	state: str,
 	min_wage_rates: dict | None = None,
 	region: str = "standard",
+	overtime_hours: float = 0.0,
 ) -> dict:
-	"""Check whether piece-rate or other pay meets minimum wage.
+	"""Check pay against the floor, and price what it would take to reach it.
+
+	v0.49.0 changed this from a verdict into a verdict AND a figure, because the
+	figure is what `calculate_full_payroll` now pays. `minimum_wage_makeup` is
+	`max(0, floor − gross)` — zero on a compliant slip, and on any other one the
+	amount that has to be added to gross for the hours to have been lawfully paid.
+
+	The floor is `minimum_wage_floor`, which carries the overtime premium. Passing
+	`overtime_hours` matters: fifty Oregon hours are owed $808.50, not $735, and a
+	check that compared against the flat number would pass a slip that is $73.50
+	short of the law.
+
+	Args:
+		gross_pay: What the period actually pays, before this makeup.
+		total_hours: Hours worked, paid rest included, unpaid meal excluded.
+		state: Two-letter code. One not in the table has no floor.
+		min_wage_rates: Override the shipped table — a rate change lands here.
+		region: "standard", "non_urban" or "portland_metro" in Oregon.
+		overtime_hours: Of `total_hours`, how many were past the weekly threshold.
 
 	Returns:
-		Dict with meets_minimum_wage (bool), effective_hourly_rate, and
-		the applicable minimum_wage for the state and region.
+		Dict with meets_minimum_wage (bool), effective_hourly_rate,
+		minimum_wage for the state and region, the minimum_wage_floor those
+		hours are owed, and the minimum_wage_makeup that closes the gap.
 	"""
-	rates = min_wage_rates or MINIMUM_WAGE_RATES
-	state_rates = rates.get(state, {})
-	min_wage = state_rates.get(region, state_rates.get("standard", 0.0))
+	min_wage = applicable_minimum_wage(state, region, min_wage_rates)
+	overtime_hours = min(max(float(overtime_hours or 0.0), 0.0), max(total_hours, 0.0))
+	floor = minimum_wage_floor(total_hours, overtime_hours, min_wage)
 
 	if total_hours <= 0:
 		return {
 			"meets_minimum_wage": True,
 			"effective_hourly_rate": 0.0,
 			"minimum_wage": min_wage,
+			"minimum_wage_floor": 0.0,
+			"minimum_wage_makeup": 0.0,
+			"regular_hours": 0.0,
+			"overtime_hours": 0.0,
 			"state": state,
 			"region": region,
 		}
 
+	makeup = round(max(floor - gross_pay, 0.0), 2)
 	effective_rate = gross_pay / total_hours
 	return {
-		"meets_minimum_wage": effective_rate >= min_wage,
+		# A cent of rounding is not a wage violation, and `floor - gross` on a slip
+		# that was topped up to the floor can land a hair either side of zero.
+		"meets_minimum_wage": makeup <= 0.005,
 		"effective_hourly_rate": round(effective_rate, 2),
 		"minimum_wage": min_wage,
+		"minimum_wage_floor": floor,
+		"minimum_wage_makeup": makeup,
+		"regular_hours": round(total_hours - overtime_hours, 2),
+		"overtime_hours": round(overtime_hours, 2),
 		"state": state,
 		"region": region,
 	}
+
+
+def _segment_rate(
+	row: dict,
+	row_pay_type: str,
+	structure_pay_type: str,
+	base_rate: float,
+	hourly_rate=None,
+) -> float:
+	"""What one stretch of work is paid at, per unit or per hour.
+
+	Three places to look, in this order, and the order is the whole content of
+	this function: the ROW's own rate, because a shift that says what it paid is
+	the most specific record there is; the structure's `hourly_rate`, which is what
+	a piece-rate worker's non-piece hours are worth and the field that exists for
+	exactly this; and the structure's `base_rate` where the segment is paid the
+	structure's own way after all.
+
+	A segment that matches none of them is rated at ZERO rather than at the
+	structure's rate, because the structure's rate is per BUCKET and paying
+	irrigation hours at $1.50 an hour would be worse than paying nothing — it would
+	look deliberate. Zero is loud, and the minimum wage makeup catches it: those
+	hours are still owed the floor, so the worker is paid and the run reports a
+	makeup that says a rate is missing.
+	"""
+	for key in ("base_rate", "pay_rate", "rate", "hourly_rate"):
+		if row.get(key) not in (None, ""):
+			try:
+				return float(row[key])
+			except (TypeError, ValueError):
+				break
+	if row_pay_type == structure_pay_type:
+		return base_rate
+	if row_pay_type == "Hourly" and hourly_rate not in (None, ""):
+		try:
+			return float(hourly_rate)
+		except (TypeError, ValueError):
+			return 0.0
+	return 0.0
 
 
 def calculate_full_payroll(
@@ -174,8 +456,13 @@ def calculate_full_payroll(
 	Args:
 		employee_data: Dict with employee, employee_name, etc.
 		shifts: List of shift dicts with work_state, hours, overtime_hours,
-			piece_units, break_hours.
-		salary_structure: Dict with pay_type, base_rate, name (docname).
+			piece_units, break_hours. A row may also carry its OWN `pay_type` and
+			`base_rate`, which is how a mixed day arrives — six hours of picking
+			and two of irrigation are two rows with two pay types, and the slip is
+			computed by `calculate_mixed_gross_pay` rather than by one branch.
+		salary_structure: Dict with pay_type, base_rate, name (docname), and
+			optionally `hourly_rate` (what non-piece hours pay under a piece-rate
+			structure) and `min_wage_regions` ({"OR": "portland_metro"}).
 		tax_config: Dict with w4_data, fica_config, federal_tax_table,
 			pay_frequency, ytd_gross, ytd_ss_withheld, and per-state
 			state_configs keyed by state code (e.g. {"OR": {...}, "WA": {...}})
@@ -186,6 +473,9 @@ def calculate_full_payroll(
 	"""
 	pay_type = salary_structure.get("pay_type", "Hourly")
 	base_rate = float(salary_structure.get("base_rate", 0))
+	hourly_rate = salary_structure.get("hourly_rate")
+	min_wage_regions = salary_structure.get("min_wage_regions") or {}
+	min_wage_rates = tax_config.get("min_wage_rates") or MINIMUM_WAGE_RATES
 	pay_frequency = tax_config.get("pay_frequency", "Biweekly")
 
 	# ── Aggregate shift data ──────────────────────────────────────────
@@ -195,35 +485,153 @@ def calculate_full_payroll(
 	piece_units = 0.0
 	break_hours = 0.0
 	state_hours = {}
+	segments = []
+	mixed = False
 
 	for shift in shifts:
 		h = float(shift.get("hours", 0))
 		ot = float(shift.get("overtime_hours", 0))
+		units = float(shift.get("piece_units", 0))
+		breaks = float(shift.get("break_hours", 0))
 		total_hours += h
 		overtime_hours += ot
 		regular_hours += max(h - ot, 0)
-		piece_units += float(shift.get("piece_units", 0))
-		break_hours += float(shift.get("break_hours", 0))
+		piece_units += units
+		break_hours += breaks
 
 		ws = shift.get("work_state", "")
 		if ws:
-			entry = state_hours.setdefault(ws, {"hours": 0.0, "gross": 0.0})
+			entry = state_hours.setdefault(
+				ws, {"hours": 0.0, "overtime_hours": 0.0, "gross": 0.0},
+			)
 			entry["hours"] += h
+			entry["overtime_hours"] += ot
+
+		# A row that names its own pay type is a stretch of work paid a different
+		# way from the rest of the structure. One such row anywhere makes the whole
+		# slip a mixed one, because the regular rate is a property of the WEEK and
+		# cannot be computed a segment at a time.
+		row_type = shift.get("pay_type") or pay_type
+		if shift.get("pay_type") or shift.get("base_rate") not in (None, ""):
+			mixed = True
+		segments.append(
+			{
+				"pay_type": row_type,
+				"rate": _segment_rate(shift, row_type, pay_type, base_rate, hourly_rate),
+				"hours": h,
+				"piece_units": units,
+				"break_hours": breaks,
+				"work_state": ws,
+			}
+		)
 
 	# ── Gross pay ─────────────────────────────────────────────────────
-	gross_result = calculate_gross_pay(
-		pay_type, base_rate, total_hours, overtime_hours, piece_units, break_hours,
-	)
-	gross_pay = gross_result["gross_pay"]
-	effective_rate = gross_result.get("effective_hourly_rate", 0.0)
+	#
+	# Salary is period pay: it has no per-hour or per-unit reading, so a segment
+	# claiming otherwise cannot be honoured and the structure wins.
+	if mixed and pay_type != "Salary":
+		gross_result = calculate_mixed_gross_pay(segments, overtime_hours)
+	else:
+		gross_result = calculate_gross_pay(
+			pay_type, base_rate, total_hours, overtime_hours, piece_units, break_hours,
+		)
+	earned_gross = gross_result["gross_pay"]
 
 	# ── Determine primary work state ─────────────────────────────────
 	primary_state = ""
 	if state_hours:
 		primary_state = max(state_hours, key=lambda s: state_hours[s]["hours"])
 
+	# ── The higher-of rule ────────────────────────────────────────────
+	#
+	# FLSA §6, ORS 653.025 and RCW 49.46.020: the minimum wage is a floor under
+	# the wage itself. Piece rate is a way of MEASURING pay, never a way to earn
+	# less than the hours were worth, so gross is the greater of what was earned
+	# and what the hours are owed — and the difference is carried as its own
+	# figure rather than folded silently into gross.
+	#
+	# Per state, because the floors differ and each one covers its own hours.
+	# Washington's $16.66 over the Washington hours and Oregon's $14.70 over the
+	# Oregon ones; one average across both would let a compliant week in one state
+	# pay for a short one in the other.
+	#
+	# NOT ON A SALARY STRUCTURE, and that is the one place the old posture is kept
+	# on purpose. Whether a salaried employee is exempt from the minimum wage at
+	# all — executive, administrative, professional, or one of the agricultural
+	# exemptions — is a fact about their job that this app does not hold, and
+	# raising an exempt supervisor's pay because a sixty-hour harvest week divided
+	# their salary below $14.70 would be inventing an obligation. So a salaried
+	# shortfall is computed and REPORTED, exactly as every shortfall was before
+	# v0.49.0, and somebody who knows the answer decides. Piece rate and hourly
+	# carry no such question: those hours are owed the floor.
+	applies = pay_type != "Salary"
+	minimum_wage_by_state = {}
+	total_makeup = 0.0
+	total_floor = 0.0
+	for state, info in state_hours.items():
+		if total_hours <= 0:
+			continue
+		region = min_wage_regions.get(state, "standard")
+		minimum = applicable_minimum_wage(state, region, min_wage_rates)
+		state_ot = min(info["overtime_hours"], info["hours"])
+		floor = minimum_wage_floor(info["hours"], state_ot, minimum)
+		# Rounded to the cent BEFORE the comparison, because the cent is what gets
+		# paid and stored. Comparing the unrounded share against the floor and then
+		# rounding the sum can land a hundredth under it, which is not a wage
+		# violation but would be reported as one by the independent check.
+		earned_share = round(earned_gross * (info["hours"] / total_hours), 2)
+		makeup = round(max(floor - earned_share, 0.0), 2) if applies else 0.0
+		total_makeup += makeup
+		total_floor += floor
+		info["earned"] = earned_share
+		info["makeup"] = makeup
+		paid = round(earned_share + makeup, 2)
+		minimum_wage_by_state[state] = {
+			"state": state,
+			"region": region,
+			"hours": round(info["hours"], 2),
+			"regular_hours": round(info["hours"] - state_ot, 2),
+			"overtime_hours": round(state_ot, 2),
+			"minimum_wage": minimum,
+			"minimum_wage_floor": floor,
+			"earned_wages": earned_share,
+			"minimum_wage_makeup": makeup,
+			"paid_wages": paid,
+			# True by construction wherever the rule applies, because it was just
+			# paid. On a Salary structure it is the honest verdict on a figure this
+			# function deliberately did not raise — see above.
+			"meets_minimum_wage": paid >= floor - 0.005,
+			"effective_hourly_rate": (
+				round(paid / info["hours"], 2) if info["hours"] > 0 else 0.0
+			),
+		}
+
+	total_makeup = round(total_makeup, 2)
+	gross_pay = round(earned_gross + total_makeup, 2)
+	effective_rate = (
+		round(gross_pay / total_hours, 2)
+		if total_hours > 0
+		else gross_result.get("effective_hourly_rate", 0.0)
+	)
+
 	# ── Minimum wage check ────────────────────────────────────────────
-	min_wage_result = check_minimum_wage(gross_pay, total_hours, primary_state)
+	#
+	# Against the PAID gross, and it passes wherever a floor was known — which is
+	# the point of the makeup above. Where no state was named on any shift there is
+	# no floor to test, and this says so rather than inventing one.
+	min_wage_result = check_minimum_wage(
+		gross_pay,
+		total_hours,
+		primary_state,
+		min_wage_rates=min_wage_rates,
+		region=min_wage_regions.get(primary_state, "standard"),
+		overtime_hours=overtime_hours,
+	)
+	meets_minimum_wage = (
+		all(row["meets_minimum_wage"] for row in minimum_wage_by_state.values())
+		if minimum_wage_by_state
+		else min_wage_result["meets_minimum_wage"]
+	)
 
 	# ── Federal taxes ─────────────────────────────────────────────────
 	w4_data = tax_config.get("w4_data", {})
@@ -248,7 +656,10 @@ def calculate_full_payroll(
 	total_state_suta = 0.0
 
 	if len(state_hours) <= 1:
-		# Single-state: apply to full gross
+		# Single-state: apply to full gross — makeup included, because a top-up to
+		# the minimum wage is wages and is taxed as wages.
+		if primary_state:
+			state_hours[primary_state]["gross"] = gross_pay
 		if primary_state and primary_state in state_configs:
 			state_result = calculate_state_withholding(
 				gross_pay, pay_frequency, primary_state, filing_status,
@@ -263,12 +674,15 @@ def calculate_full_payroll(
 			total_state_employer += state_result.get(er_key, 0.0)
 			total_state_suta += state_result.get("suta", 0.0)
 	else:
-		# Cross-state: allocate gross by hours proportion
+		# Cross-state: allocate what was EARNED by hours proportion, then add each
+		# state's own makeup to its own share. Allocating the topped-up total by
+		# proportion instead would send Washington's makeup partly to Oregon.
 		for ws, info in state_hours.items():
 			if total_hours <= 0:
 				continue
-			proportion = info["hours"] / total_hours
-			state_gross = round(gross_pay * proportion, 2)
+			# The same two figures the floor was tested against, so what a state is
+			# taxed on and what it was checked against are the same number.
+			state_gross = round(info.get("earned", 0.0) + info.get("makeup", 0.0), 2)
 			info["gross"] = state_gross
 
 			if ws in state_configs:
@@ -331,6 +745,13 @@ def calculate_full_payroll(
 		"piece_units": round(piece_units, 2),
 		"piece_rate": base_rate if pay_type == "Piece Rate" else 0,
 		"gross_pay": gross_pay,
+		# v0.49.0. The three figures the higher-of rule is made of, kept apart so a
+		# payroll report can say WHY somebody was paid what they were paid: what the
+		# work earned, what the hours were owed, and the difference that was added.
+		"earned_gross": round(earned_gross, 2),
+		"minimum_wage_floor": round(total_floor, 2),
+		"minimum_wage_makeup": total_makeup,
+		"minimum_wage_by_state": minimum_wage_by_state,
 		"federal_withholding": federal_withholding,
 		"state_withholding": total_state_employee,
 		"social_security": social_security,
@@ -346,7 +767,13 @@ def calculate_full_payroll(
 		"state_employer_taxes": total_state_employer,
 		"total_employer_taxes": total_employer_taxes,
 		"total_cost_of_employment": round(gross_pay + total_employer_taxes, 2),
-		"minimum_wage_check": min_wage_result["meets_minimum_wage"],
+		"minimum_wage_check": meets_minimum_wage,
+		# The old flat verdict — the whole period's gross against the floor of the
+		# state holding the most hours — kept because it is what releases before
+		# v0.49.0 stored and because a disagreement between it and the per-state
+		# answer is itself worth seeing. `minimum_wage_check` is the per-state one.
+		"minimum_wage_flat_check": min_wage_result["meets_minimum_wage"],
+		"minimum_wage_detail_flat": min_wage_result,
 		"effective_hourly_rate": effective_rate,
 		"gross_detail": gross_result,
 		"federal_detail": federal,

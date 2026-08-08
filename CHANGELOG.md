@@ -3,6 +3,56 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.49.0 — 2026-08-08
+
+**The minimum wage is now paid, not just priced.** v0.48.2's scenario tests found
+four gaps in the piecework rules and pinned each one as a passing assertion of the
+wrong behaviour. All four are closed. Gross pay is now the greater of what the
+work earned and what the hours are owed — FLSA §6, ORS 653.025, RCW 49.46.020 —
+so forty-seven buckets at $1.50 in an eight-hour Oregon day pays $117.60 rather
+than $70.50. **This changes what workers are paid; read `RELEASES/v0.49.0.md`
+before running a period.**
+
+**The top-up is never silent, because the old posture's reason still holds.** Pay
+that quietly inflated would hide a rate set below the lawful floor, so it does not
+inflate quietly: `earned_gross` and `minimum_wage_makeup` are separate figures on
+the slip and separate columns on Farm Payroll Slip, and
+`totals.topped_up_to_minimum_wage` names every worker whose rate needed one.
+Nobody on that list is underpaid — that is the change — and every name on it is a
+rate worth looking at. One exception on purpose: a **Salary** structure is
+reported and not topped up, because whether a salaried employee is exempt from the
+minimum wage at all is a fact about their job this app does not hold.
+
+**The floor carries the overtime premium.** `regular × minimum + overtime ×
+minimum × 1.5`, not `hours × minimum`. Fifty Oregon hours are owed $808.50, not
+$735 — and $780 of piece earnings used to clear the flat number while being $28.50
+short of the law. `check_minimum_wage` takes `overtime_hours` and
+`check_minimum_wage_by_state` takes `overtime_hours_by_state`; both compute the
+floor through the same `minimum_wage_floor()` so they cannot drift.
+
+**A worker can be part piece-rate and part hourly.** Farm Shift and Farm Shift
+Crew Member carry `pay_type` and `pay_rate`, blank on the ordinary day; Farm
+Salary Structure carries `hourly_rate`. Six hours picking at $1.50 a bucket and
+two of irrigation at $16.00 is $167, and the floor is tested on all eight hours.
+The premium is half of one regular rate blended across both kinds of work, which
+is the method 29 CFR 778.115 gives for two rates in one workweek.
+
+**The piece-rate overtime premium is now half-time, not time and a half.** The one
+figure here that goes down. 29 CFR 778.111: the piece earnings already paid
+straight time for the overtime hours, so what is owed on top is half the regular
+rate. In practice it rarely reduces a cheque, because the overtime-inclusive floor
+lands on the same slip — the fifty-hour week above pays $808.50, which is $28.50
+more than v0.48.2 paid, not $120 less.
+
+**Weekly overtime was verified and not changed.** A ten-hour day in a thirty-hour
+week is not overtime, a forty-five hour week is five hours of it, and each week of
+a multi-week period is its own threshold. All three were already right and are now
+asserted by name.
+
+**Run `bench migrate`** — five new columns across four doctypes. An unmigrated
+bench keeps working and loses the overrides; slips written earlier read back with
+zero makeup and `earned_gross` equal to gross, which is what they were.
+
 ## 0.48.3 — 2026-08-08
 
 **Every photograph and signature the onboarding wizard collected was reported as

@@ -13,6 +13,8 @@
   "crew_col",
   "joined_at",
   "left_at",
+  "pay_type",
+  "pay_rate",
   "notes_section",
   "notes"
  ],
@@ -62,6 +64,20 @@
    "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "Left"
+  },
+  {
+   "description": "Leave blank for the ordinary day, where this work is paid the way the worker's salary structure says. Fill it in on the day that was different — a picker moved onto irrigation is Hourly, whatever their structure says — and set Pay Rate, or the structure's Hourly Rate covers it.",
+   "fieldname": "pay_type",
+   "fieldtype": "Select",
+   "label": "Pay Type",
+   "options": "\nPiece Rate\nHourly"
+  },
+  {
+   "default": "0",
+   "description": "What this work paid, per hour or per unit depending on Pay Type. Zero or blank falls back to the salary structure — its Hourly Rate for hourly work, its Base Rate where the pay type matches the structure's own.",
+   "fieldname": "pay_rate",
+   "fieldtype": "Currency",
+   "label": "Pay Rate"
   },
   {
    "fieldname": "notes_section",

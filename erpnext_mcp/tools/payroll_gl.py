@@ -75,6 +75,8 @@ _SLIP_FIELDS = (
 	"state_employer_other",
 	"total_employer_taxes",
 	"minimum_wage_check",
+	"minimum_wage_makeup",
+	"earned_gross",
 )
 
 

@@ -138,6 +138,7 @@ def get_salary_structure(args: dict) -> ToolResult:
 		"company",
 		"pay_type",
 		"base_rate",
+		*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
 		"effective_from",
 		"effective_to",
 		"is_active",
@@ -180,6 +181,7 @@ def list_salary_structures(args: dict) -> ToolResult:
 			"company",
 			"pay_type",
 			"base_rate",
+			*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
 			"effective_from",
 			"effective_to",
 			"is_active",
@@ -220,7 +222,13 @@ def preview_payroll(args: dict) -> ToolResult:
 	ss = frappe.db.get_value(
 		SALARY_STRUCTURE,
 		ss_name,
-		["name", "pay_type", "base_rate", "employee_name"],
+		[
+			"name",
+			"pay_type",
+			"base_rate",
+			"employee_name",
+			*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
+		],
 		as_dict=True,
 	)
 
@@ -237,7 +245,12 @@ def preview_payroll(args: dict) -> ToolResult:
 	result = calculate_full_payroll(
 		{"employee": employee, "employee_name": employee_name},
 		shifts,
-		{"pay_type": ss.pay_type, "base_rate": float(ss.base_rate or 0), "name": ss_name},
+		{
+			"pay_type": ss.pay_type,
+			"base_rate": float(ss.base_rate or 0),
+			"hourly_rate": ss.get("hourly_rate"),
+			"name": ss_name,
+		},
 		tax_config,
 	)
 
@@ -271,6 +284,12 @@ def get_payroll_entry(args: dict) -> ToolResult:
 			"piece_units": float(_g("piece_units") or 0),
 			"piece_rate": float(_g("piece_rate") or 0),
 			"gross_pay": float(_g("gross_pay") or 0),
+			# Both halves of gross, so a stored run answers "why is this bigger
+			# than the buckets times the rate" without anybody recomputing it.
+			# Slips written before v0.49.0 have neither, and read back as zero and
+			# as gross — which is exactly what they were.
+			"earned_gross": float(_g("earned_gross") or _g("gross_pay") or 0),
+			"minimum_wage_makeup": float(_g("minimum_wage_makeup") or 0),
 			"federal_withholding": float(_g("federal_withholding") or 0),
 			"state_withholding": float(_g("state_withholding") or 0),
 			"social_security": float(_g("social_security") or 0),
@@ -366,6 +385,14 @@ def create_salary_structure(args: dict) -> ToolResult:
 	base_rate = _as_float(args, "base_rate", required=True)
 	if base_rate <= 0:
 		raise ToolError("base_rate must be positive.")
+	# What an hour of non-piece work pays this worker. Optional, and only ever read
+	# for a shift whose own pay type says Hourly — a picker moved onto irrigation
+	# for the afternoon. Zero is allowed and means "not set": those hours then earn
+	# nothing at the rate and are carried to the minimum wage by the makeup, which
+	# is a visible figure on the slip rather than a silent one.
+	hourly_rate = _as_float(args, "hourly_rate", 0.0)
+	if hourly_rate < 0:
+		raise ToolError("hourly_rate cannot be negative.")
 	effective_from = as_date(args, "effective_from") or today()
 	effective_to = as_date(args, "effective_to")
 	notes = as_str(args, "notes")
@@ -377,6 +404,7 @@ def create_salary_structure(args: dict) -> ToolResult:
 			"company": company,
 			"pay_type": pay_type,
 			"base_rate": base_rate,
+			"hourly_rate": hourly_rate or 0,
 			"effective_from": effective_from,
 			"effective_to": effective_to or None,
 			"is_active": 1,
@@ -394,6 +422,7 @@ def create_salary_structure(args: dict) -> ToolResult:
 			"employee_name": emp_name,
 			"pay_type": pay_type,
 			"base_rate": base_rate,
+			"hourly_rate": hourly_rate,
 			"effective_from": str(effective_from),
 		},
 		summary=f"Salary structure created for {emp_name}: {pay_type} at {base_rate}",
@@ -617,13 +646,19 @@ def get_employee_timesheet_summary(args: dict) -> ToolResult:
 		row = frappe.db.get_value(
 			SALARY_STRUCTURE,
 			ss_name,
-			["name", "pay_type", "base_rate"],
+			[
+				"name",
+				"pay_type",
+				"base_rate",
+				*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
+			],
 			as_dict=True,
 		)
 		structure = {
 			"name": row.get("name"),
 			"pay_type": row.get("pay_type"),
 			"base_rate": _num(row.get("base_rate")),
+			"hourly_rate": row.get("hourly_rate"),
 		}
 
 	data = dict(aggregate)
@@ -751,6 +786,9 @@ def _slip_view(slip: dict, verbose: bool) -> dict:
 		"overtime_hours_by_state": slip.get("overtime_hours_by_state"),
 		"state_wages": slip.get("state_wages"),
 		"gross_pay": slip.get("gross_pay"),
+		"earned_gross": slip.get("earned_gross"),
+		"minimum_wage_makeup": slip.get("minimum_wage_makeup"),
+		"minimum_wage_makeup_by_state": slip.get("minimum_wage_makeup_by_state"),
 		"federal_withholding": slip.get("federal_withholding"),
 		"state_withholding": slip.get("state_withholding"),
 		"social_security": slip.get("social_security"),
@@ -767,6 +805,7 @@ def _slip_view(slip: dict, verbose: bool) -> dict:
 		"effective_hourly_rate": slip.get("effective_hourly_rate"),
 		"minimum_wage_check": slip.get("minimum_wage_check"),
 		"minimum_wage_detail": slip.get("minimum_wage_detail"),
+		"minimum_wage_by_state": slip.get("minimum_wage_by_state"),
 		"weeks": slip.get("weeks"),
 		"open_shifts": slip.get("open_shifts"),
 	}
@@ -900,6 +939,9 @@ def _slip_row(slip: dict) -> dict:
 	detail["_wages_by_state"] = slip.get("state_wages") or {}
 	detail["_hours_by_state"] = slip.get("hours_by_state") or {}
 	detail["_minimum_wage"] = slip.get("minimum_wage_detail") or {}
+	detail["_minimum_wage_makeup"] = slip.get("minimum_wage_by_state") or {}
+	if slip.get("gross_detail", {}).get("segments"):
+		detail["_pay_segments"] = slip["gross_detail"]["segments"]
 
 	minimum = slip.get("minimum_wage_detail") or {}
 	meets = minimum.get("meets_minimum_wage")
@@ -918,6 +960,11 @@ def _slip_row(slip: dict) -> dict:
 		"piece_units": slip.get("piece_units"),
 		"piece_rate": slip.get("piece_rate"),
 		"gross_pay": slip.get("gross_pay"),
+		# v0.49.0. Gross is `earned_gross + minimum_wage_makeup` and both halves are
+		# stored, because "why is this bigger than the buckets times the rate" is a
+		# question the row has to be able to answer three years later in an audit.
+		"earned_gross": slip.get("earned_gross"),
+		"minimum_wage_makeup": slip.get("minimum_wage_makeup") or 0,
 		"federal_withholding": slip.get("federal_withholding"),
 		"state_withholding": slip.get("state_withholding"),
 		"social_security": slip.get("social_security"),
@@ -974,6 +1021,12 @@ def _load_period_shifts(
 	if company:
 		filters.append(["company", "=", company])
 
+	# `pay_type` and `pay_rate` ship on Farm Shift as of v0.49.0 — the day a
+	# picker spent on irrigation says so on the shift. Read through
+	# `existing_fields` anyway: a bench running this code against a database it
+	# has not migrated yet should lose the override, not the payroll run.
+	shift_pay_fields = compat.existing_fields(FARM_SHIFT, ("pay_type", "pay_rate"))
+
 	rows = frappe.db.get_all(
 		FARM_SHIFT,
 		filters=filters,
@@ -987,6 +1040,7 @@ def _load_period_shifts(
 			"cancelled",
 			"shift_type",
 			"location",
+			*shift_pay_fields,
 		],
 		order_by="start_datetime asc",
 		limit_page_length=SHIFT_CAP,
@@ -1026,6 +1080,7 @@ def _load_period_shifts(
 	)
 	break_field = compat.first_field(CREW_MEMBER, "break_hours", "paid_break_hours")
 	meal_field = compat.first_field(CREW_MEMBER, "unpaid_break_hours", "meal_break_hours")
+	crew_pay_fields = compat.existing_fields(CREW_MEMBER, ("pay_type", "pay_rate"))
 
 	names = [row["name"] for row in kept]
 	crew_by_shift: dict[str, list[dict]] = {}
@@ -1033,6 +1088,7 @@ def _load_period_shifts(
 		wanted = set(employees) if employees else None
 		fields = ["parent", "employee", "employee_name", "joined_at", "left_at"]
 		fields += [f for f in (units_field, break_field, meal_field) if f]
+		fields += list(crew_pay_fields)
 		for member in frappe.db.get_all(
 			CREW_MEMBER,
 			filters={"parent": ("in", names)},
@@ -1055,6 +1111,13 @@ def _load_period_shifts(
 				row["break_hours"] = _num(member.get(break_field))
 			if meal_field and member.get(meal_field) not in (None, ""):
 				row["unpaid_break_hours"] = _num(member.get(meal_field))
+			# Only where the row actually says something. An empty pay type means
+			# "paid the way this worker's structure says", which is every ordinary
+			# day, and writing a blank onto the segment would be indistinguishable.
+			if member.get("pay_type"):
+				row["pay_type"] = str(member["pay_type"])
+			if member.get("pay_rate") not in (None, "", 0, 0.0, "0"):
+				row["pay_rate"] = _num(member.get("pay_rate"))
 			crew_by_shift.setdefault(member["parent"], []).append(row)
 
 	shifts = []
@@ -1062,18 +1125,21 @@ def _load_period_shifts(
 		crew = crew_by_shift.get(row["name"])
 		if not crew:
 			continue
-		shifts.append(
-			{
-				"name": row["name"],
-				"company": row.get("company"),
-				"work_state": row.get("work_state") or "",
-				"shift_type": row.get("shift_type"),
-				"location": row.get("location"),
-				"start_datetime": row.get("start_datetime"),
-				"end_datetime": row.get("end_datetime"),
-				"crew": crew,
-			}
-		)
+		entry = {
+			"name": row["name"],
+			"company": row.get("company"),
+			"work_state": row.get("work_state") or "",
+			"shift_type": row.get("shift_type"),
+			"location": row.get("location"),
+			"start_datetime": row.get("start_datetime"),
+			"end_datetime": row.get("end_datetime"),
+			"crew": crew,
+		}
+		if row.get("pay_type"):
+			entry["pay_type"] = str(row["pay_type"])
+		if row.get("pay_rate") not in (None, "", 0, 0.0, "0"):
+			entry["pay_rate"] = _num(row.get("pay_rate"))
+		shifts.append(entry)
 
 	provenance["sources"].append(FARM_SHIFT)
 	provenance["shift_count"] = len(shifts)
@@ -1385,7 +1451,15 @@ def _load_structures(company: str, employees: list[str] | None = None) -> dict:
 	rows = frappe.db.get_all(
 		SALARY_STRUCTURE,
 		filters=filters,
-		fields=["name", "employee", "employee_name", "pay_type", "base_rate", "effective_from"],
+		fields=[
+			"name",
+			"employee",
+			"employee_name",
+			"pay_type",
+			"base_rate",
+			*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
+			"effective_from",
+		],
 		order_by="effective_from asc",
 		limit_page_length=0,
 	)
@@ -1401,6 +1475,12 @@ def _load_structures(company: str, employees: list[str] | None = None) -> dict:
 			"employee_name": row.get("employee_name") or "",
 			"pay_type": row.get("pay_type") or "Hourly",
 			"base_rate": _num(row.get("base_rate")),
+			# What non-piece hours are worth to a piece-rate worker. None rather
+			# than zero where the site has not set one: the engine treats None as
+			# "no rate on file" and pays those hours up to the minimum wage, and it
+			# should not be able to confuse that with a rate deliberately set to
+			# nothing.
+			"hourly_rate": row.get("hourly_rate"),
 		}
 	return structures
 

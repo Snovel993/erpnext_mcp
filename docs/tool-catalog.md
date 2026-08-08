@@ -8471,14 +8471,49 @@ Paid rest is handed to the engine separately so the piece-rate path pays it at
 the average hourly the period earned (WAC 296-131-020). Five nine-hour shifts
 with a half-hour lunch each is 42.5 hours, so 2.5 of overtime rather than five.
 
-### Minimum wage is per state, and reported rather than remedied
+### Minimum wage is per state, and PAID as of v0.49.0
 
 Washington's $16.66 and Oregon's $14.70 are different floors, and a single check
 against the period total would let a compliant Washington week paper over an
-Oregon week that was not. `total_shortfall` prices what it would cost to bring
-each state's hours up to its floor — and nothing adds it to gross. A payroll
-engine that quietly topped pay up would hide the fact that a piece rate is set
-too low to be lawful.
+Oregon week that was not. Each state's hours are tested against its own floor,
+with the overtime premium in it — `regular × minimum + overtime × minimum × 1.5`,
+so fifty Oregon hours are owed $808.50 and not $735.
+
+**Gross is the greater of what the work earned and what the hours are owed.**
+FLSA §6, ORS 653.025 and RCW 49.46.020 all make the minimum wage a floor under
+the wage: piece rate measures pay, it does not license paying less than the hours
+were worth. Forty-seven buckets at $1.50 in an eight-hour Oregon day pays
+$117.60.
+
+**And the top-up is never silent.** Through v0.48.2 the shortfall was reported
+and gross was left alone, so that a rate set below the lawful floor would stay
+visible; folding the makeup into gross would have lost exactly that. So it is not
+folded in — `earned_gross` and `minimum_wage_makeup` are separate figures on the
+slip and separate columns on the stored row, and `totals.topped_up_to_minimum_wage`
+names every worker whose rate needed one. Nobody on that list is underpaid. Every
+name on it is a rate worth looking at.
+
+**One exception, on purpose: a Salary structure is reported, not topped up.**
+Whether a salaried employee is exempt from the minimum wage at all is a fact
+about their job this app does not hold, so a salaried shortfall still appears in
+`totals.below_minimum_wage` for somebody who knows the answer to decide.
+
+### A day can be paid two ways
+
+`pay_type` and `pay_rate` on a Farm Shift — or on one crew row of it — say that
+this stretch of work was paid differently from the way the worker's salary
+structure says. Blank is the ordinary day and means "the structure's way".
+
+Six hours picking at $1.50 a bucket and two hours of irrigation at $16.00 is
+$167, not $135 and not $128. Each stretch is paid its own way at straight time,
+and the overtime premium is half of ONE regular rate blended across all of them
+(29 CFR 778.115). `hourly_rate` on the salary structure is the standing answer to
+"what is an hour of this worker's non-piece time worth"; the shift only has to
+carry a rate when the day was priced differently from the standing one.
+
+An hourly stretch with no rate anywhere earns nothing **at the rate** — paying it
+per bucket would look deliberate — and those hours are carried by the minimum
+wage makeup, where they are visible.
 
 ### Piece units, and saying where they did not come from
 
@@ -8545,9 +8580,9 @@ are two different acts.
 | `overtime_threshold` | | Default 40 |
 | `workweek_anchor` | | First day of the declared workweek |
 
-**A run with problems in it is not refused.** A worker below minimum wage, a
-shift nobody ended, a picker with no salary structure — all reported, none of
-them a reason to hold up everybody else's pay. The one refusal is a run where
+**A run with problems in it is not refused.** A rate that needed a minimum wage
+makeup, a shift nobody ended, a picker with no salary structure — all reported,
+none of them a reason to hold up everybody else's pay. The one refusal is a run where
 *nobody* can be paid, and it names them.
 
 ### What the v0.30.0 tools got out of it

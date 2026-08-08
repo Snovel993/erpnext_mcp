@@ -6,7 +6,10 @@ TEN CLAIMS.
 1. `PieceRateGross` — piece-rate gross pay includes piece earnings, break pay, and OT.
 2. `HourlyGrossWithOT` — hourly gross includes regular and overtime at 1.5x.
 3. `BreakPayAverage` — break pay is at the average piece-rate hourly.
-4. `MinimumWageCheck` — the minimum wage check passes and fails correctly.
+4. `MinimumWageCheck` — the minimum wage check passes and fails correctly, prices
+   the makeup that would close the gap, and puts the overtime premium in the floor.
+4b. `MixedPayTypes` — a day paid two ways, by the weighted-average method, and
+   agreeing with the single-pay-type path wherever both can answer.
 5. `CrossStatePayroll` — a worker with OR and WA shifts in the same period gets both states' taxes.
 6. `FullPayrollCalc` — the full orchestrator integrates federal + state + FICA.
 7. `SalaryStructureTools` — the CRUD tools for salary structures work.
@@ -23,8 +26,10 @@ from erpnext_mcp.payroll_calc import (
 	calculate_break_pay,
 	calculate_full_payroll,
 	calculate_gross_pay,
+	calculate_mixed_gross_pay,
 	calculate_overtime,
 	check_minimum_wage,
+	minimum_wage_floor,
 )
 from erpnext_mcp.tools import payroll
 from erpnext_mcp.withholding import ANNUAL_BRACKETS, PERIODS_PER_YEAR
@@ -227,14 +232,39 @@ class PieceRateGross(PayrollTestCase):
 		self.assertAlmostEqual(result["gross_pay"], 222.22, places=2)
 
 	def test_piece_rate_with_overtime(self):
-		"""OT is at 1.5x the effective piece-rate hourly."""
+		"""OT is the FLSA half-time premium on the effective piece-rate hourly.
+
+		v0.49.0 changed this figure. 29 CFR 778.111: the piece earnings ALREADY
+		paid straight time for all forty-five hours, so what the five overtime ones
+		are owed on top is half the regular rate, not one and a half of it.
+		Releases through v0.48.2 paid $33.33 here — more than the law asks, and
+		irreconcilable with the weighted-average method a mixed day needs.
+		"""
 		result = calculate_gross_pay("Piece Rate", 1.00, 45, 5, 200, 0)
 		# 200 * 1.00 = 200 piece earnings over 45 hours
-		# effective rate = 200/45 = 4.44/hr
-		# OT = 5 * 4.44 * 1.5 = 33.33
+		# regular rate = 200/45 = 4.44/hr
+		# OT premium = 5 * 4.44 * 0.5 = 11.11
 		self.assertEqual(result["piece_earnings"], 200.0)
-		self.assertAlmostEqual(result["overtime_pay"], 33.33, places=2)
-		self.assertAlmostEqual(result["gross_pay"], 233.33, places=2)
+		self.assertAlmostEqual(result["overtime_pay"], 11.11, places=2)
+		self.assertAlmostEqual(result["gross_pay"], 211.11, places=2)
+		self.assertEqual(result["overtime_premium_multiplier"], 0.5)
+
+	def test_the_piece_premium_and_the_hourly_premium_arrive_at_the_same_place(self):
+		"""The two multipliers are two halves of one rule, not two rules.
+
+		An hourly worker's regular pay covered only the regular hours, so the whole
+		1.5x lands on the overtime ones. A piece-rate worker's earnings covered all
+		of them, so half of it is already in hand. Same total, and this asserts it
+		rather than trusting two constants to stay in step: 400 buckets at $1.50
+		over fifty hours is $12.00 an hour, and fifty hours at $12.00 is the same
+		money by either road.
+		"""
+		piece = calculate_gross_pay("Piece Rate", 1.50, 50, 10, 400, 0)
+		self.assertEqual(piece["effective_hourly_rate"], 12.00)
+		hourly = calculate_gross_pay("Hourly", 12.00, 50, 10, 0)
+		# 40 × 12 + 10 × 12 × 1.5 = 660, and 600 of piece earnings + 10 × 12 × 0.5.
+		self.assertEqual(hourly["gross_pay"], 660.00)
+		self.assertEqual(piece["gross_pay"], 660.00)
 
 
 # ── Claim 2: hourly gross with OT ─────────────────────────────────────
@@ -329,6 +359,163 @@ class MinimumWageCheck(PayrollTestCase):
 		"""Zero hours means the check passes (no work done)."""
 		result = check_minimum_wage(0.0, 0.0, "OR")
 		self.assertTrue(result["meets_minimum_wage"])
+
+	# ── v0.49.0: the floor is a figure, and it knows about overtime ────
+
+	def test_the_check_prices_the_makeup_it_would_take_to_reach_the_floor(self):
+		"""$120 over ten Oregon hours is $27 short of $147, and it says so."""
+		result = check_minimum_wage(120.0, 10.0, "OR")
+		self.assertEqual(result["minimum_wage_floor"], 147.00)
+		self.assertEqual(result["minimum_wage_makeup"], 27.00)
+
+	def test_pay_that_clears_the_floor_needs_no_makeup(self):
+		result = check_minimum_wage(160.0, 10.0, "OR")
+		self.assertEqual(result["minimum_wage_makeup"], 0.0)
+		self.assertTrue(result["meets_minimum_wage"])
+
+	def test_the_floor_itself_is_met_and_not_a_cent_is_added(self):
+		"""Exactly $147.00 for ten Oregon hours. `>=` is the whole assertion."""
+		result = check_minimum_wage(147.00, 10.0, "OR")
+		self.assertTrue(result["meets_minimum_wage"])
+		self.assertEqual(result["minimum_wage_makeup"], 0.0)
+
+	def test_the_floor_carries_the_overtime_premium(self):
+		"""Fifty Oregon hours is $808.50, not $735.
+
+		THE GAP v0.48.2 PINNED. Forty at $14.70 is $588 and ten at $22.05 is
+		$220.50. A check that multiplied fifty by $14.70 would pass a slip that is
+		$73.50 short of what the law asks for the same hours.
+		"""
+		floor = minimum_wage_floor(50.0, 10.0, MINIMUM_WAGE_RATES["OR"]["standard"])
+		self.assertEqual(floor, 808.50)
+		self.assertNotEqual(floor, round(50.0 * MINIMUM_WAGE_RATES["OR"]["standard"], 2))
+
+		result = check_minimum_wage(600.0, 50.0, "OR", overtime_hours=10.0)
+		self.assertFalse(result["meets_minimum_wage"])
+		self.assertEqual(result["minimum_wage_floor"], 808.50)
+		self.assertEqual(result["minimum_wage_makeup"], 208.50)
+
+	def test_without_overtime_the_floor_is_the_flat_product(self):
+		"""Forty hours is forty hours. The premium only exists past the threshold."""
+		self.assertEqual(
+			minimum_wage_floor(40.0, 0.0, MINIMUM_WAGE_RATES["OR"]["standard"]), 588.00,
+		)
+
+	def test_overtime_hours_cannot_exceed_the_hours_they_came_out_of(self):
+		"""A bad input does not inflate the floor past the hours worked."""
+		self.assertEqual(
+			minimum_wage_floor(8.0, 40.0, 10.0),
+			minimum_wage_floor(8.0, 8.0, 10.0),
+		)
+
+	def test_a_state_with_no_floor_on_file_has_no_floor(self):
+		"""Idaho is not in the table, so nothing is owed under this rule and
+		nothing is invented. The alternative is topping somebody's pay up to a
+		number this app made up."""
+		result = check_minimum_wage(10.0, 8.0, "ID")
+		self.assertTrue(result["meets_minimum_wage"])
+		self.assertEqual(result["minimum_wage"], 0.0)
+		self.assertEqual(result["minimum_wage_makeup"], 0.0)
+
+
+# ── Claim 4b: mixed pay types in one period ───────────────────────────
+
+
+class MixedPayTypes(PayrollTestCase):
+	"""A day paid two ways, by the weighted-average method of 29 CFR 778.115."""
+
+	def test_a_picking_morning_and_an_irrigation_afternoon_are_both_paid(self):
+		"""Six hours of buckets at $1.50 and two of irrigation at $16.00."""
+		result = calculate_mixed_gross_pay(
+			[
+				{"pay_type": "Piece Rate", "rate": 1.50, "hours": 6.0, "piece_units": 90},
+				{"pay_type": "Hourly", "rate": 16.00, "hours": 2.0},
+			]
+		)
+		self.assertEqual(result["piece_earnings"], 135.00)
+		self.assertEqual(result["hourly_earnings"], 32.00)
+		self.assertEqual(result["gross_pay"], 167.00)
+		self.assertEqual(result["pay_type"], "Mixed")
+
+	def test_the_regular_rate_is_the_whole_lot_over_all_the_hours(self):
+		"""$167 over eight hours is $20.88 — not the piece rate and not the
+		hourly one. 29 CFR 778.115: one regular rate for the workweek."""
+		result = calculate_mixed_gross_pay(
+			[
+				{"pay_type": "Piece Rate", "rate": 1.50, "hours": 6.0, "piece_units": 90},
+				{"pay_type": "Hourly", "rate": 16.00, "hours": 2.0},
+			]
+		)
+		self.assertEqual(result["effective_hourly_rate"], 20.88)
+
+	def test_the_overtime_premium_is_half_the_blended_rate(self):
+		"""Forty-five hours of it: five past the threshold at half of $20.88."""
+		segments = [
+			{"pay_type": "Piece Rate", "rate": 1.50, "hours": 30.0, "piece_units": 450},
+			{"pay_type": "Hourly", "rate": 16.00, "hours": 15.0},
+		]
+		result = calculate_mixed_gross_pay(segments, overtime_hours=5.0)
+		# 675 + 240 = 915 straight over 45 hours = $20.3333/hr.
+		self.assertEqual(result["straight_time_pay"], 915.00)
+		self.assertEqual(result["effective_hourly_rate"], 20.33)
+		self.assertEqual(result["overtime_pay"], 50.83)  # 5 × 20.3333 × 0.5
+		self.assertEqual(result["gross_pay"], 965.83)
+
+	def test_one_pay_type_through_the_mixed_path_matches_the_single_path(self):
+		"""The mixed method is a GENERALISATION, not a second opinion.
+
+		Both branches on one input, hourly and piece rate, with overtime in each.
+		If these ever diverge, a worker's pay depends on which code path their
+		shift happened to take, which is the bug this asserts cannot exist.
+		"""
+		hourly_single = calculate_gross_pay("Hourly", 20.0, 45, 5, 0)
+		hourly_mixed = calculate_mixed_gross_pay(
+			[{"pay_type": "Hourly", "rate": 20.0, "hours": 45.0}], overtime_hours=5.0,
+		)
+		self.assertEqual(hourly_mixed["gross_pay"], hourly_single["gross_pay"])
+
+		piece_single = calculate_gross_pay("Piece Rate", 1.50, 50, 10, 400, 0)
+		piece_mixed = calculate_mixed_gross_pay(
+			[{"pay_type": "Piece Rate", "rate": 1.50, "hours": 50.0, "piece_units": 400}],
+			overtime_hours=10.0,
+		)
+		self.assertEqual(piece_mixed["gross_pay"], piece_single["gross_pay"])
+		self.assertEqual(
+			piece_mixed["effective_hourly_rate"], piece_single["effective_hourly_rate"],
+		)
+
+	def test_a_paid_rest_break_inside_a_piece_segment_is_still_paid(self):
+		"""WAC 296-131-020 does not stop applying because the day was mixed."""
+		result = calculate_mixed_gross_pay(
+			[
+				{
+					"pay_type": "Piece Rate",
+					"rate": 1.50,
+					"hours": 8.0,
+					"piece_units": 120,
+					"break_hours": 0.5,
+				},
+			]
+		)
+		self.assertEqual(result["break_pay"], 12.00)
+		self.assertEqual(result["gross_pay"], 192.00)
+
+	def test_an_hourly_segment_with_no_rate_earns_nothing_and_is_not_paid_per_bucket(self):
+		"""The loud failure. Zero is a number somebody asks about; $1.50 an hour
+		for irrigation would look like a decision."""
+		result = calculate_mixed_gross_pay(
+			[
+				{"pay_type": "Piece Rate", "rate": 1.50, "hours": 6.0, "piece_units": 90},
+				{"pay_type": "Hourly", "rate": 0.0, "hours": 2.0},
+			]
+		)
+		self.assertEqual(result["hourly_earnings"], 0.0)
+		self.assertEqual(result["gross_pay"], 135.00)
+
+	def test_no_segments_at_all_is_zero_and_not_a_division_by_zero(self):
+		result = calculate_mixed_gross_pay([], overtime_hours=0.0)
+		self.assertEqual(result["gross_pay"], 0.0)
+		self.assertEqual(result["effective_hourly_rate"], 0.0)
 
 
 # ── Claim 5: cross-state payroll ──────────────────────────────────────
