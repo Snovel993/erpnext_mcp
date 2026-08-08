@@ -35,6 +35,13 @@ Two requirements drive the shape of everything below:
 > supersession, or the year-end aggregation. Today two of those four links are
 > not recorded. Section 3 says which.
 
+> **Templates are managed through MCP, not through a redeploy.**
+> Swapping the I-9 template today means downloading a PDF over a file in the
+> repo, re-running a test, and editing three module constants. That is a
+> developer operation on a schedule set by USCIS and the IRS. Section 6 makes it
+> an operator operation: import, diff, map, validate, activate — each a tool
+> call, with the historical edition kept and the checksum verified.
+
 ---
 
 ## 1. What exists today
@@ -154,7 +161,7 @@ has to be migrated every time a form is added. One row per form, seeded by
 | `subject_scope` | `Employee` / `Contractor` / `Company` |
 | `period` | `Event` / `Quarter` / `Year` |
 | `source_doctype` | `I-9 Form`, `W-4 Form`, `Tax Form` — where the filled record lives |
-| `retention_rule` | see §6 |
+| `retention_rule` | see §7 |
 | `filed_electronically` | Check — true where paper is not the filing channel (OQ, WA ESD) |
 
 This table is also the inventory in §4, made queryable instead of prose.
@@ -515,9 +522,9 @@ byte-identical PDFs before and after.
   `signed_pdf` attachments, pointing at the migrated template row.
 - Replace the per-module checksum constant with a suite test walking every
   `Form Template`.
-- Tools: `list_form_templates`, `get_form_template`, `import_form_template`,
-  `diff_form_template_fields`, `validate_form_template`,
-  `activate_form_template`, `list_form_artifacts`, `get_form_artifact`.
+- Tools: the 16 Phase 1 entries in §6 — template CRUD, form types,
+  `render_form_pdf`, and the artifact readers. Enumerated there, not here, so
+  the list lives in one place.
 
 **Risk:** the I-9 field map is 133 fields with real subtlety. Mitigation is that
 Phase 1 changes *where the map lives*, not *what it says*, and the fixture tests
@@ -531,7 +538,7 @@ prove it.
 - Close Gaps 1–3 from §3.2: `w4_form`, `w4_snapshot_json`,
   `withholding_computed_on`, `w4_source` on `Farm Payroll Slip`; single W-4
   loader.
-- Add W-4 retention fields (§6).
+- Add W-4 retention fields (§7).
 - Backfill: existing slips get `w4_source = "Unknown (pre-v0.49)"` rather than a
   guess. An honest null beats a fabricated link.
 
@@ -571,7 +578,184 @@ prove it.
 
 ---
 
-## 6. Retention
+## 6. MCP tool surface
+
+The template repository is only useful if a government form can be swapped,
+inspected, and filled **through MCP calls** rather than by editing a Python
+module and redeploying. Today swapping the I-9 template means downloading a PDF
+over a file in the repo, re-running a test, and editing three constants. That is
+a developer operation. It should be an operator operation.
+
+### 6.1 Rules every tool below follows
+
+These are the codebase's existing conventions, not new ones. Stated here so a
+reviewer can check the proposal against them.
+
+1. **Read tools are on by default; every mutating tool is default OFF and
+   enabled individually.** `registry._tool(mutating=True)` sets
+   `readOnlyHint` by construction, and the mutating block carries the comment
+   *"every one default OFF"*. A tool that writes a government PDF onto the site
+   is exactly the kind an operator should have to turn on deliberately.
+2. **Descriptions lead with `MUTATING (default OFF).`** and end read-only ones
+   with `Read-only.` — the pattern `destroy_i9`, `render_i9_pdf`, and
+   `render_tax_form_pdf` already use.
+3. **No bytes cross the MCP boundary.** Files arrive by `file_token` from
+   `finalize_staged_file`, or `file_url` for a File already on the site.
+   `attach_signed_i9` states the reason: *"a base64 body would be a second
+   upload path with its own size limit and its own way of failing halfway."*
+   Template PDFs are 500 KB+ and follow the same road.
+4. **Every tool gates on its doctype** via `available=_needs_doctype(...)` with a
+   `requires` sentence naming the version and the `bench migrate`. A bench that
+   has not migrated loses these tools by name rather than erroring at call time.
+5. **Refusals say what was not changed.** Every mutating refusal in this app
+   ends with some form of *"Nothing was changed."* — keep it.
+6. **The tools are a DB shell over pure functions.** `form_fill.py` does the
+   filling and reads nothing; the tool loads the template, calls it, and attaches
+   the result. Same split as `withholding.py` / `tools/w4.py`.
+7. **Existing tool names are a contract and do not change.** `render_i9_pdf`,
+   `render_tax_form_pdf`, `list_employees_missing_w4`, and
+   `list_pending_i9_verifications` stay exactly as they are —
+   `tests_standalone/test_ios_contract.py` pins the tool surface the iOS app
+   sees. New tools are added alongside; nothing is renamed or removed.
+
+### 6.2 Template CRUD
+
+| Tool | Mutating | Phase | What it does |
+|---|---|---|---|
+| `list_form_templates` | no | 1 | Every template, filterable by `form_type`, `status`, `agency`, `jurisdiction`. Returns edition, effective dates, checksum, field count, and whether it is the Active one. |
+| `get_form_template` | no | 1 | One template in full, including `field_map_json` and the artifact count pointing at it — the number that says whether this edition is still load-bearing. |
+| `get_form_template_fields` | no | 1 | Introspect the attached PDF's AcroForm field names, types, flags, and page index. **The tool you call before writing a field map.** Reads the PDF, writes nothing. |
+| `import_form_template` | **yes** | 1 | Create a new template row in `Draft` from an uploaded PDF (`file_token`). Computes SHA-256 and byte count, introspects the field count. Does **not** activate. |
+| `update_form_template_field_map` | **yes** | 1 | Replace `field_map_json` on a `Draft` template. **Refused on any template that is Active, Superseded, or has artifacts.** Validates against the map schema and against the PDF's real field names before saving. |
+| `validate_form_template` | no | 1 | Dry fill against a synthetic record. Reports every mapped field name absent from the PDF, every required PDF field the map does not reach, and any transform that failed. **Writes nothing** — this is why it is read-only despite doing the work of a render. |
+| `activate_form_template` | **yes** | 1 | Promote a `Draft` to `Active`. Supersedes the prior Active row, stamps its `effective_through`, sets `superseded_by`. **Refused unless `validate_form_template` passes clean.** |
+| `withdraw_form_template` | **yes** | 1 | Mark a template `Withdrawn` — the agency pulled the edition, or it was imported in error. The row and its file stay. Refused if artifacts point at it, because a withdrawn template that forms were filled from is a `Superseded` one. |
+| `diff_form_template_fields` | no | 1 | Compare two editions' AcroForm field names: moved, added, vanished. **The report that says how much of the field map an edition change costs you.** |
+| `verify_form_templates` | no | 1 | Walk every template, recompute checksums, report drift. The generalized form of the I-9 checksum test, callable rather than only asserted in the suite. |
+
+**There is no `delete_form_template`, deliberately.** Deletion is blocked in
+`on_trash` (§2.1 invariant 3) and there is no tool to attempt it. Retiring an
+edition is `withdraw_form_template` or supersession by activation; both keep the
+row and the bytes. This is the "keep the historical ones on file" requirement
+expressed as an absent tool, which is more durable than a documented warning.
+
+**`import_form_template` is the one tool that puts a government PDF on the
+site.** It should be the last one an operator enables, and its description
+should say so. It also refuses a PDF whose AcroForm field count is zero — an
+XFA-only or flattened file cannot be filled, and finding that out at import is
+better than at year-end.
+
+### 6.3 Form type and inventory
+
+| Tool | Mutating | Phase | What it does |
+|---|---|---|---|
+| `list_form_types` | no | 1 | The §4 inventory, queryable: form code, agency, jurisdiction, category, subject scope, whether a template is stocked, whether it files electronically. |
+| `get_form_type` | no | 1 | One form type with its full template history, newest first, and its retention rule. |
+
+`list_form_types` is the tool that answers *"what can this system actually
+produce?"* without reading this document. Rows for forms with no template yet
+return `template_status: "none"` rather than being omitted — the gap is the
+answer.
+
+### 6.4 Generating filled PDFs
+
+| Tool | Mutating | Phase | What it does |
+|---|---|---|---|
+| `render_form_pdf` | **yes** | 1 | The generic filler. Takes a source record (`source_doctype` + `name`), resolves the Active template for its form type, fills, attaches to `generated_pdf`, writes a `Form Artifact`. Refuses if `generated_pdf` is set unless `overwrite` — and the old File stays attached either way. |
+| `bulk_render_form_pdfs` | **yes** | 3 | The same across a selection — every W-2 for a tax year, every W-4 for a company. Returns per-record success/failure; one failure does not abort the rest. Mirrors `bulk_render_tax_form_pdfs`. |
+| `attach_signed_form` | **yes** | 2 | File an uploaded signed scan against its record as the official signed copy, writing a `Signed Scan` artifact. The generic form of `attach_signed_i9`. |
+| `render_w4_pdf` | **yes** | 2 | W-4-specific wrapper — exists because the W-4 has its own signature and privacy semantics, the same reason `render_i9_pdf` is not just a call to the generic. |
+| `attach_signed_w4` | **yes** | 2 | W-4 counterpart to `attach_signed_i9`. |
+
+**`render_i9_pdf` and `render_tax_form_pdf` keep their names and their
+behavior.** They carry semantics the generic tool has no business inheriting:
+the I-9's full-SSN gate (the only tool in the app that reads the stored SSN, and
+it logs the read), its deliberately-empty signature boxes with the 8 CFR
+274a.2(h) reasoning, and the tax renderer's working-copy disclaimer. Internally
+they route through `form_fill.py` once a template exists for their form type;
+externally nothing moves.
+
+**Copy A enforcement lives in the tool layer.** `render_form_pdf` refuses a
+`copy_designation` of `Copy A` for any form type flagged `copy_a_prohibited`,
+and names the SSA or IRS electronic channel in the refusal (§2.5). A tool that
+can be talked into printing a black-and-white Copy A is a tool that produces a
+penalty.
+
+### 6.5 Coverage — what an employee has, and what is missing
+
+This is the half Tim asked for that does not exist in any form today, for any
+form type.
+
+| Tool | Mutating | Phase | What it does |
+|---|---|---|---|
+| `list_employee_forms` | no | 2 | Every government form on file for one employee, across `I-9 Form`, `W-4 Form`, `State W-4 Form`, and `Tax Form`, with status, effective dates, whether a generated PDF exists, whether a signed copy came back, and the supersession chain. **One call, one person, the whole picture.** |
+| `list_missing_forms` | no | 2 | The inverse, across a company: which employees are missing which required forms. Takes `form_type` to narrow, `as_of` to ask the question historically. |
+| `get_form_coverage_report` | no | 3 | The matrix — employees down, form types across, one cell each. Sections for missing, unsigned (generated but no signed copy back), and expiring (work authorization, W-4 tax year rollover). |
+
+**"Required" is a property of the employee, not a constant.** An I-9 and a W-4
+are required of every employee. An OR-W-4 is required only of one working in
+Oregon. A 1099-NEC is required of a contractor and never of an employee.
+`list_missing_forms` derives the requirement from `Form Type.jurisdiction` and
+`subject_scope` against the employee's work state and employment type, and
+**returns the reason each form is required** alongside the gap — otherwise the
+report is a list of assertions nobody can check.
+
+`list_employees_missing_w4` and `list_pending_i9_verifications` stay. They are
+the fast, specific, already-wired answers to the two most common questions, and
+the `w4-missing` compliance rule depends on the first. `list_missing_forms` is
+the general case, not their replacement.
+
+### 6.6 Artifacts and lineage
+
+| Tool | Mutating | Phase | What it does |
+|---|---|---|---|
+| `list_form_artifacts` | no | 1 | Generated PDFs, filterable by employee, form type, tax year, template edition. |
+| `get_form_artifact` | no | 1 | One artifact with its provenance: template edition, checksums, data snapshot, who generated it, supersession chain. |
+| `verify_form_artifact` | no | 1 | Recompute the artifact's file checksum, confirm the template it names still has the checksum recorded at fill time. **The tool that answers "is this the page we actually produced?"** four years later. |
+| `trace_form_lineage` | no | 3 | The §3.4 chain in one call: W-2 box → Tax Form snapshot → artifact + template edition → the payroll slips that summed to it → the W-4 on each slip → the audit rows for each W-4. |
+| `get_form_audit_log` | no | 2 | State-change history for a form record. Generic counterpart to `get_i9_audit_log`, which stays. |
+
+`trace_form_lineage` is the tool that makes Tim's requirement operational.
+*"Not for fault but to fix the problem"* means the answer to a wrong number has
+to arrive as a chain a person can read, in one call, without knowing which of
+five doctypes to query first.
+
+### 6.7 Retention
+
+| Tool | Mutating | Phase | What it does |
+|---|---|---|---|
+| `get_form_retention_report` | no | 2 | Approaching (≤ 90 days) and eligible-for-destruction, across all form types or one. Says which retention basis it applied, including the 4-vs-7-year W-2 setting. |
+| `destroy_form_record` | **yes**, destructive | 2 | Clear the payload, keep the record shell and the audit trail. **Refused before the retention date.** Generic counterpart to `destroy_i9`, which stays. |
+
+Both generalize tools that already exist and work. Neither auto-runs (§7).
+
+### 6.8 Count and phasing
+
+| Phase | New tools | Running total |
+|---|---|---|
+| 1 | **16** — template CRUD (10), form types (2), `render_form_pdf`, artifacts (`list_form_artifacts`, `get_form_artifact`, `verify_form_artifact`) | 16 |
+| 2 | **8** — `attach_signed_form`, `render_w4_pdf`, `attach_signed_w4`, `list_employee_forms`, `list_missing_forms`, `get_form_audit_log`, `get_form_retention_report`, `destroy_form_record` | 24 |
+| 3 | **3** — `bulk_render_form_pdfs`, `get_form_coverage_report`, `trace_form_lineage` | 27 |
+| 4–5 | **0** — 1099 and state forms are template rows and generator functions behind tools that already exist | 27 |
+
+**That Phases 4 and 5 add no tools is the design working.** Once the repository
+exists, a new government form is a `Form Type` row, a `Form Template` row, a
+field map, and (where the numbers are new) a generator function. Not a tool.
+
+Of the 27, **17 are read-only and on by default; 10 are mutating and each
+individually enabled.** The 10: `import_form_template`,
+`update_form_template_field_map`, `activate_form_template`,
+`withdraw_form_template`, `render_form_pdf`, `bulk_render_form_pdfs`,
+`attach_signed_form`, `render_w4_pdf`, `attach_signed_w4`,
+`destroy_form_record`.
+
+`tests_standalone/test_ios_contract.py` and `test_protocol.py` both assert over
+the tool surface; adding tools must leave their existing assertions passing,
+which is the check that nothing was renamed out from under the iOS app.
+
+---
+
+## 7. Retention
 
 Retention is a **policy per form type**, evaluated against a per-record anchor
 date. `Form Type.retention_rule` names the rule; the rule is implemented in
@@ -607,7 +791,7 @@ anyone who wants the shorter horizon. The report says which basis it used.
 
 ---
 
-## 7. What this design deliberately does not do
+## 8. What this design deliberately does not do
 
 - **Does not e-file anything.** No SSA BSO, no IRS FIRE, no Frances Online, no
   ESD portal integration. The app produces forms and records; a human files
@@ -624,12 +808,12 @@ anyone who wants the shorter horizon. The report says which basis it used.
 
 ---
 
-## 8. Open questions for review
+## 9. Open questions for review
 
 1. **Field map as JSON blob vs child table.** §2.3 argues for the blob. Worth a
    second opinion — the blob is developer-facing, and if operators ever need to
    touch it the calculus changes.
-2. **W-2 retention default: 4 or 7 years?** §6 recommends 7 with a toggle.
+2. **W-2 retention default: 4 or 7 years?** §7 recommends 7 with a toggle.
 3. **WA L&I risk class — per employee or per task?** A worker who prunes in
    March and drives forklift in September may fall in two classes. Per task is
    more correct and more work; per employee is simpler and occasionally wrong.
@@ -643,10 +827,26 @@ anyone who wants the shorter horizon. The report says which basis it used.
 6. **941 in Phase 3 or its own phase?** The data exists and the IRS PDF is
    fillable. It is quarterly, not year-end, so it does not fit Phase 3's shape
    cleanly.
+7. **Does `update_form_template_field_map` take the map inline or by
+   `file_token`?** The I-9's map is ~133 entries — a few KB, comfortably inline
+   in a tool argument. A form with a few hundred fields is not. Inline is
+   proposed (§6.2) because it keeps the edit reviewable in the call itself;
+   accepting either is cheap insurance and probably right.
+8. **Should `validate_form_template` be read-only or mutating?** It is proposed
+   read-only because it writes nothing — but it performs a full fill, which is
+   the most expensive operation in the system, and read-only tools are on by
+   default. If a bench wants that gated, it becomes mutating with
+   `readOnlyHint` lying, which is worse. Leaving it read-only and accepting the
+   cost is the recommendation.
+9. **Who can call `import_form_template`?** Putting a government PDF on the site
+   is the highest-consequence write in this design — a wrong template silently
+   produces unfileable forms for a year. Proposed: mutating, default OFF, and
+   additionally role-gated beyond the standard MCP enablement. Worth deciding
+   explicitly rather than inheriting the default.
 
 ---
 
-## 9. Summary of new schema
+## 10. Summary of new schema
 
 | Doctype | Purpose | Phase |
 |---|---|---|
@@ -667,3 +867,9 @@ anyone who wants the shorter horizon. The report says which basis it used.
 |---|---|---|
 | `form_fill.py` | Generic AcroForm filler, pure function | 1 |
 | `form_retention.py` | Retention rules per form type, pure function | 2 |
+| `tools/form_templates.py` | Template CRUD, validation, activation — 12 tools | 1 |
+| `tools/forms.py` | Render, coverage, artifacts, lineage, retention — 15 tools | 1–3 |
+
+Registry entries land in `registry.py` alongside the existing I-9 and tax-form
+blocks, gated by `available=_needs_doctype("Form Template")` with a `requires`
+sentence naming the release and the `bench migrate`.
