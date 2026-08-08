@@ -283,10 +283,12 @@ class ToolRegistration(unittest.TestCase):
 		# `reverify_i9`, one more write, plus v0.47.1's `render_i9_pdf` and
 		# `attach_signed_i9` — two more writes, and no more reads — plus
 		# v0.48.0's authorized signer roster (one read, three writes) and
-		# `render_w4_pdf`, a fourth write.
-		self.assertEqual(len(self.registry.TOOLS), 386)
-		self.assertEqual(len(self.registry.READ_TOOLS), 177)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 209)
+		# `render_w4_pdf`, a fourth write, plus v0.50.0's badge trio —
+		# `resolve_badge` (read) and the two issuers `generate_employee_badge_qr`
+		# and `generate_employee_badge_sheet` (writes), see test_badges.py.
+		self.assertEqual(len(self.registry.TOOLS), 389)
+		self.assertEqual(len(self.registry.READ_TOOLS), 178)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 211)
 
 
 if __name__ == "__main__":

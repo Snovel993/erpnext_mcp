@@ -748,10 +748,19 @@ class Catalogue(SeededTestCase):
 		THERE IS NO `delete_authorized_signer` AND THERE WILL NOT BE. A form
 		signed in a prior season was signed by whoever was authorised then;
 		`remove_authorized_signer` clears a flag and keeps the row.
+
+		v0.50.0 ADDED THREE — one read and two writes — and closed the gap that
+		made a badge a piece of paper this app had never seen. The read is
+		`resolve_badge`, the call between a scan and a name: `add_worker_to_shift`
+		takes an Employee docname and a camera produces a badge string, so a crew
+		clock could scan a whole crew and roster none of it. The two writes ISSUE
+		a badge — `generate_employee_badge_qr` and `generate_employee_badge_sheet`
+		— which nothing in this app did before: `link_badge_to_employee` recorded
+		a string somebody else had printed.
 		"""
-		self.assertEqual(len(registry.TOOLS), 386)
-		self.assertEqual(len(registry.READ_TOOLS), 177)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 209)
+		self.assertEqual(len(registry.TOOLS), 389)
+		self.assertEqual(len(registry.READ_TOOLS), 178)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 211)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

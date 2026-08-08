@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 386 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 389 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 177 read tools are **on** by default and can be switched off individually. A
+All 178 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -9168,6 +9168,103 @@ Slips actually paid for the same company and period, per employee. **A
 discrepancy is not necessarily an error** — a bucket entry with no slip
 covering it yet is simply unpaid so far, the same posture
 `check_minimum_wage_by_state` takes.
+
+## v0.50.0 — Issuing a badge, and refusing a soda can
+
+Three tools, and they close the two ends of the pipeline v0.44.0 built the
+middle of. The badge audit of 2026-08-07 found it about sixty per cent built,
+with the missing forty in two places: **nobody issued a badge** on this side, and
+**nobody sent a bucket capture** off the phone. These are the first of those; the
+second is the iOS half (`BucketEntryQueue`, `BucketSyncEngine`).
+
+**`link_badge_to_employee` never minted anything.** It *recorded* a string an
+operator typed or scanned. So the only real badge cards in the business were
+printed by `farm_app` (Flask) and encoded a uuid4 `QRToken` that ERPNext had
+never heard of, whose revocation lifecycle lived in another application, and
+which nobody can read off a scuffed card or say aloud over a radio at 6am.
+
+**A minted badge is `<company abbreviation>-<sequence>`** — `ETC-0001`. Piece-rate
+attribution is a payroll record, so the identifier that decides who gets paid for
+a bucket lives in the system that pays, with a retirement flag an HR manager can
+flip. **The cutover is incremental, not a reprint day:**
+`bucket_bridge.resolve_badge_to_employee` matches a badge as an exact string with
+no format assumption, so an old uuid mapped with `link_badge_to_employee` and a
+new `ETC-0042` both resolve to the same person for as long as the transition
+takes. `generate_employee_badge_qr(badge_id=…)` adopts an existing card outright.
+
+### `generate_employee_badge_qr`
+
+```json
+{"employee": "HR-EMP-00042", "company": "Example Trading Co"}
+```
+
+**MUTATING (default OFF).** Mints a readable badge ID if this person has none,
+records it in the Bucket Log Badge Map register, and returns the QR for the card
+as a base64 PNG (or `format: "matrix"` for the raw grid) alongside the name,
+designation, photograph URL and the initials that go where a photograph is
+missing.
+
+**Idempotent without `regenerate`** — somebody who already holds a live badge
+gets *that* badge's QR back. Reprinting a card that went through a wash cycle is
+the common request and must not consume an identifier. `regenerate: true` is the
+lost-card path: it mints a new ID and **retires the old one in the same call**,
+because a replacement that leaves its predecessor resolving is how a badge found
+in an orchard keeps earning. A retired number is never reissued.
+
+Refused: an employee who has left, an employee of another entity, a `badge_id`
+that is live for somebody else, and a `badge_id` that is not badge-shaped.
+
+### `generate_employee_badge_sheet`
+
+**MUTATING (default OFF).** The same thing for a crew — up to 100 cards per call,
+each carrying name, photograph (or initials), designation, badge ID and QR.
+Issues to anybody with no badge and reuses the live one where there is one.
+**One employee's failure does not lose the sheet**: a name that resolves to
+nobody is reported in `errors` and every other card is still printed.
+
+### `resolve_badge`
+
+```json
+{"badge_id": "ETC-0042", "shift": "SHIFT-2026-00019"}
+```
+
+**Read-only, on by default.** Who holds this badge: `employee`, `employee_name`,
+`designation`, `status`, `photo_url`. **The read that did not exist** —
+`add_worker_to_shift` takes an Employee docname and a camera produces a badge
+string, so a crew clock could scan a whole crew and roster none of it.
+
+**It refuses rather than answering empty.** Never issued, retired, and belonging
+to somebody who has left are three sentences, because they are three situations
+with three fixes. A string that is not badge-shaped at all is refused before the
+register is read.
+
+Pass `shift` and the answer carries `on_shift` and `joined_at` — whether this
+person is clocked in right now, which is what turns an identification into an
+admission.
+
+### The badge shape, and `badge_policy` on `sync_bucket_entries`
+
+Two layers, and they refuse different things.
+
+**The shape** (`bucket_bridge.validate_badge_id`) is a floor, not a grammar:
+letters, digits, `-`, `_` and `.`, between 4 and 64 characters, not starting a
+JSON document. That accepts a minted `ETC-0001` *and* a 36-character legacy uuid,
+and refuses every URL, every Wi-Fi join code and every `api_key:api_secret` —
+including a `generate_mobile_login_qr` payload held in front of a badge scanner,
+which used to become a badge ID with a secret inside it. It applies under both
+policies, because no later `link_badge_to_employee` will rescue a capture whose
+badge is a Wi-Fi code.
+
+**The register** is `badge_policy`. `lenient` is the default and is the v0.44.0
+behaviour: a capture whose badge is not mapped yet is filed with no employee and
+a later mapping backfills it — right for a Desk import of a morning taken before
+anybody got to the cards. `strict` refuses it, and is what
+`api/mobile.sync_bucket_entries` sends and does not let a handset relax: badges
+are minted here now, so a phone scanning a string this site never issued has
+scanned a barcode on a soda can. Under `strict`, a retired badge and one
+belonging to somebody who has left are refused too, and passing `shift` also
+refuses a picker who is not clocked in on that crew — each by name, with the
+rest of the batch still filed.
 
 ## v0.47.1 — Form I-9 as a document
 

@@ -187,6 +187,8 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# v0.48.0 — the W-4 as a federal form rather than a doctype.
 		"/mobile/generate_w4_pdf",
 		"/mobile/link_badge_to_employee",
+		# v0.50.0 — the read between a scan and a name.
+		"/mobile/resolve_badge",
 		"/mobile/sync_bucket_entries",
 		"/mobile/start_shift",
 		"/mobile/add_worker_to_shift",

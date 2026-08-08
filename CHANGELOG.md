@@ -3,6 +3,46 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.50.0 — 2026-08-08
+
+**A badge is issued here now, and a bucket leaves the phone.** The badge audit of
+2026-08-07 found the Badge → QR → Bucket pipeline about sixty per cent built,
+with the missing forty in two places: nothing *issued* a badge on this side —
+`link_badge_to_employee` recorded a string somebody else had printed — and
+nothing *sent* a capture off the handset, because `MobileAPI.syncBucketEntries`
+had zero call sites and `commitEntry` appended to an in-memory array. Everything
+between those two points already existed and was already tested. What was broken
+was the joins. Read `RELEASES/v0.50.0.md` before upgrading a fleet of phones.
+
+**Three tools (389 now, 178 read / 211 write).**
+`generate_employee_badge_qr` mints a readable `CF-0001`, records it, and returns
+the card's QR — idempotent without `regenerate`, and `regenerate` retires the
+badge it replaces, because a replacement that leaves its predecessor resolving is
+how a card found in an orchard keeps earning. `generate_employee_badge_sheet`
+does a crew at once and one bad name does not lose the sheet. `resolve_badge` is
+the read between a scan and a name: `add_worker_to_shift` takes an Employee
+docname and a camera produces a badge string, so until now a crew clock could
+scan a whole crew and roster none of it.
+
+**A soda can is no longer a badge.** Two layers. The shape check refuses every
+URL, Wi-Fi join code and `api_key:api_secret` — including a
+`generate_mobile_login_qr` payload, which scanned at a badge step used to become
+a badge ID with a live secret in it — while still accepting the 36-character
+uuids already in workers' pockets. The register check is the new `badge_policy`
+on `sync_bucket_entries`: `lenient` keeps v0.44.0's deliberate backfill for a
+Desk import, `strict` is what the phone sends and cannot relax, and with a
+`shift` it also refuses a picker who is not clocked in. **A refusal never repeats
+what it refused** — not in the message, and not in the audit row.
+
+**The phone half.** A durable `BucketEntryQueue` (a capture now survives a
+force-quit, and the launch sweep stops deleting its photograph), a
+`BucketSyncEngine` that treats a duplicate as landed and keeps a refusal visible,
+an on-device badge directory so a scan names the picker with no signal, and the
+crew clock wired to `start_shift` / `resolve_badge` / `add_worker_to_shift` /
+`end_shift`. Wiring the sync found a live bug: coverage was being held as a
+fraction and would have been filed as a percentage, recording a full bucket as
+0.94% full.
+
 ## 0.49.0 — 2026-08-08
 
 **The minimum wage is now paid, not just priced.** v0.48.2's scenario tests found

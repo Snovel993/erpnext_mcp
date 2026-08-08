@@ -234,6 +234,11 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# v0.48.0 — the W-4 as a federal form rather than a doctype.
 		"generate_w4_pdf",
 		"link_badge_to_employee",
+		# v0.50.0 — the read between a scan and a name. `add_worker_to_shift`
+		# takes an Employee docname and a camera produces a badge string, so
+		# until this existed the crew clock could scan a crew and roster none of
+		# it, and the capture loop could show a foreman a code but never a name.
+		"resolve_badge",
 		"sync_bucket_entries",
 		"start_shift",
 		"add_worker_to_shift",

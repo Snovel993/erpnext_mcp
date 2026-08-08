@@ -117,6 +117,108 @@ def _badge_map(company: str) -> dict:
 	return {row["badge_id"]: row["employee"] for row in rows if row.get("badge_id") and row.get("employee")}
 
 
+def _badge_row(badge_id: str, company: str, cache: dict) -> dict:
+	"""One badge's register row, cached for the batch.
+
+	Read DIRECTLY rather than out of `_badge_map`, which holds only active rows,
+	because "no badge with that ID" and "a badge that was retired" are two
+	different sentences to a foreman and only this read can tell them apart. A
+	row belonging to another entity is reported as absent — see `resolve_badge`
+	for why that is the right answer rather than "wrong company".
+	"""
+	key = (badge_id, company)
+	if key not in cache:
+		row = (
+			frappe.db.get_value(
+				BADGE_DOCTYPE, badge_id, ["badge_id", "company", "employee", "active"], as_dict=True
+			)
+			or {}
+		)
+		if row and company and str(row.get("company") or "") != company:
+			row = {}
+		cache[key] = dict(row)
+	return cache[key]
+
+
+def _employee_status(employee: str, cache: dict) -> str:
+	"""One Employee's `status` column, cached for the batch."""
+	if employee not in cache:
+		cache[employee] = str(frappe.db.get_value("Employee", employee, "status") or "")
+	return cache[employee]
+
+
+def _shift_roster(shift: str) -> set:
+	"""Who is currently clocked in on one Farm Shift.
+
+	Somebody with a `left_at` is NOT on it: a picker who clocked out at noon and
+	whose badge is scanned at three is either a mis-scan or a card somebody else
+	is holding, and both are exactly what the strict policy is for.
+	"""
+	if not compat.doctype_exists("Farm Shift"):
+		raise ToolError(
+			"shift validation was asked for and this site has no Farm Shift doctype. Run "
+			"`bench migrate`, or sync without a shift. Nothing was changed."
+		)
+	if not frappe.db.exists("Farm Shift", shift):
+		raise ToolError(f"no Farm Shift {shift!r} on this site. Nothing was changed.")
+	doc = frappe.get_doc("Farm Shift", shift)
+	if doc.get("end_datetime"):
+		raise ToolError(
+			f"shift {shift} closed at {doc.get('end_datetime')}. Captures cannot be validated "
+			"against a shift that is over — its Attendance rows are already written. Sync "
+			"without a shift and link them with link_entries_to_shift. Nothing was changed."
+		)
+	return {
+		str(entry.get("employee"))
+		for entry in (doc.get("crew") or [])
+		if entry.get("employee") and not entry.get("left_at")
+	}
+
+
+def _admission_errors(badge: str, employee: str, company: str, context: dict) -> list:
+	"""Why this capture may not be attributed, under the strict badge policy.
+
+	`context` carries the batch's caches and the shift being validated against;
+	the RULE itself is `bucket_bridge.badge_admission_errors`, which is pure and
+	reads no database. This function's whole job is turning a badge string into
+	the facts that rule needs.
+	"""
+	shift = context.get("shift") or ""
+	roster = context.get("roster") or set()
+
+	if badge:
+		row = _badge_row(badge, company, context["badges"])
+		resolved = str(row.get("employee") or "")
+		return bucket_bridge.badge_admission_errors(
+			badge,
+			{
+				"known": bool(row),
+				"active": bool(row.get("active")),
+				"employee": resolved,
+				"employee_status": (_employee_status(resolved, context["statuses"]) if resolved else ""),
+				"shift": shift,
+				"on_shift": (resolved in roster) if shift else None,
+			},
+		)
+
+	# No badge, so the entry named its picker directly — a Desk import, since
+	# the phone transport refuses an `employee` key outright. The badge
+	# sentences do not apply; the two facts about the person still do.
+	errors = []
+	status = _employee_status(employee, context["statuses"]) or "Active"
+	if status != "Active":
+		errors.append(
+			f"{employee} has employment status {status} — a capture cannot be paid to somebody "
+			"who is not employed"
+		)
+	if shift and employee not in roster:
+		errors.append(
+			f"{employee} is not clocked in on shift {shift} — add them with add_worker_to_shift "
+			"before their buckets can be attributed to it"
+		)
+	return errors
+
+
 def _describe_entry(doc) -> dict:
 	return {
 		"name": doc.name,
@@ -197,7 +299,16 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 
 	DEDUPLICATES BY entry_uuid — resyncing a batch the site already has is a
 	no-op, not a duplicate record. An entry that fails validation is reported
-	and skipped rather than failing the call; see the module docstring."""
+	and skipped rather than failing the call; see the module docstring.
+
+	`badge_policy` (v0.50.0) DECIDES WHAT AN UNRESOLVABLE BADGE MEANS.
+	`lenient`, the default, is the v0.44.0 behaviour: the capture is filed with
+	no employee and a later `link_badge_to_employee` backfills it — right for a
+	Desk import of captures taken before somebody got round to mapping the card.
+	`strict` refuses it, and is what the phone sends: badges are minted by this
+	app now, so a handset scanning a string this site never issued has scanned
+	something that is not a badge. The badge's SHAPE is checked under both —
+	nothing with a colon, a brace or a space in it was ever a badge."""
 	_require()
 	actor = kpi_tools.require_kpi_role()
 
@@ -209,6 +320,27 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 			f"{len(entries)} entries is more than one sync call accepts ({BATCH_CAP}). Split the "
 			"batch. Nothing was changed."
 		)
+
+	policy = (as_str(args, "badge_policy") or bucket_bridge.BADGE_POLICY_LENIENT).strip().lower()
+	if policy not in bucket_bridge.BADGE_POLICIES:
+		raise ToolError(
+			f"badge_policy must be one of {', '.join(bucket_bridge.BADGE_POLICIES)}; got "
+			f"{policy!r}. Nothing was changed."
+		)
+	shift = as_str(args, "shift")
+	if shift and policy != bucket_bridge.BADGE_POLICY_STRICT:
+		raise ToolError(
+			"shift is a strict-policy check — under badge_policy=lenient an entry is filed "
+			"whatever its badge resolves to, so validating it against a crew would be a rule "
+			"that never refuses anything. Pass badge_policy=strict, or drop shift. Nothing was "
+			"changed."
+		)
+	admission = {
+		"shift": shift,
+		"roster": _shift_roster(shift) if shift else set(),
+		"badges": {},
+		"statuses": {},
+	}
 
 	uuids = [str(e.get("entry_uuid") or "").strip() for e in entries if isinstance(e, dict)]
 	existing = set(
@@ -249,16 +381,34 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 
 		if company not in badge_maps:
 			badge_maps[company] = _badge_map(company)
+		badge = str(entry.get("worker_badge") or "").strip()
 		employee = str(entry.get("employee") or "").strip() or bucket_bridge.resolve_badge_to_employee(
-			entry.get("worker_badge"),
+			badge,
 			badge_maps[company],
 		)
+
+		# THE SHAPE CHECK RUNS UNDER BOTH POLICIES. A string with whitespace, a
+		# brace or a colon in it is a URL, a Wi-Fi join code or a login QR that
+		# was held in front of the badge scanner — filing it produces a row in
+		# the piecework register that nobody can ever claim, and no later
+		# `link_badge_to_employee` will rescue it because nobody will map it.
+		if badge:
+			shape = bucket_bridge.validate_badge_id(badge)
+			if shape:
+				invalid.append({"entry_uuid": entry_uuid or None, "errors": shape})
+				continue
+
+		if policy == bucket_bridge.BADGE_POLICY_STRICT:
+			refusals = _admission_errors(badge, employee, company, admission)
+			if refusals:
+				invalid.append({"entry_uuid": entry_uuid or None, "errors": refusals})
+				continue
 
 		doc = frappe.new_doc(ENTRY_DOCTYPE)
 		doc.entry_uuid = entry_uuid
 		doc.session_uuid = str(entry.get("session_uuid") or "").strip() or None
 		doc.company = company
-		doc.worker_badge = str(entry.get("worker_badge") or "").strip() or None
+		doc.worker_badge = badge or None
 		doc.employee = employee or None
 		doc.timestamp = entry.get("timestamp")
 		doc.verdict = entry.get("verdict")
@@ -291,6 +441,8 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 	return ToolResult(
 		data={
 			"actor": actor,
+			"badge_policy": policy,
+			"shift": shift or None,
 			"created_count": len(created),
 			"duplicate_count": len(duplicates),
 			"invalid_count": len(invalid),

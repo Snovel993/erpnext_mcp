@@ -166,6 +166,11 @@ ROUTES = (
 	# fills needs nothing from the phone — see the wrapper.
 	Route("/mobile", mobile_api.generate_w4_pdf),
 	Route("/mobile", mobile_api.link_badge_to_employee),
+	# v0.50.0. The read between a scan and a name. `add_worker_to_shift` takes
+	# an Employee docname and a camera produces a badge string; until this route
+	# existed the crew clock could scan a whole crew and roster none of it, and
+	# the bucket loop could show a foreman a code but never the picker.
+	Route("/mobile", mobile_api.resolve_badge),
 	# The capture queue and the crew clock.
 	Route("/mobile", mobile_api.sync_bucket_entries),
 	Route("/mobile", mobile_api.start_shift),

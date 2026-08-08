@@ -84,9 +84,9 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat
+from .. import bucket_bridge, compat
 from ..errors import ToolError
-from ..tools import asset_tags, bucket_log, dispatch, fieldwork, i9, shifts, signers, w4
+from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signers, w4
 from ..tools import employee as personnel
 from ..tools import mobile as mobile_tools
 from . import guard, shape
@@ -1620,10 +1620,47 @@ def link_badge_to_employee(user: str, badge_id=None, employee=None, company=None
 	return result.data
 
 
+# ── 27b. resolve_badge ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("resolve_badge", limit=guard.READ_LIMIT)
+def resolve_badge(user: str, badge_id=None, company=None, shift=None) -> dict:
+	"""Whose badge is this — the call between a scan and a name. v0.50.0.
+
+	THE ONE READ THE SCANNING SIDE NEVER HAD. `add_worker_to_shift` takes an
+	Employee docname and a camera produces a badge string, so the crew clock
+	could scan a whole crew and had no way to turn any of it into the argument
+	the roster call wants. The bucket loop had the same gap in a quieter form: it
+	could show a foreman the code it read and never the picker's name, so a
+	mis-scan looked exactly like a good one until the data reached a Desk.
+
+	IT IS A PII LOOKUP KEYED ON A STRING ANYBODY HOLDING A CARD CAN PRODUCE, and
+	that is why it is on `READ_LIMIT` rather than being cheap: sixty an hour is
+	a crew clocking in and is not a register being enumerated. It answers only
+	within the caller's own entities — `_company` is the same scope check every
+	other method here runs — so a badge belonging to another entity on the site
+	reads as "no such badge" rather than confirming it exists somewhere.
+
+	IT REFUSES RATHER THAN ANSWERING EMPTY. Unknown, retired, and belonging to
+	somebody who has left are three different sentences, because they are three
+	different situations with three different fixes and the phone shows whichever
+	one it got.
+
+	`shift` IS OPTIONAL AND IS THE SECOND HALF OF THE QUESTION. Given one, the
+	answer carries `on_shift` — whether this person is clocked in right now —
+	which is what a bin trailer's scanner needs before it accepts a bucket.
+	"""
+	allowed = guard.require_scope(user)
+	inner = {"badge_id": str(badge_id or "").strip(), "company": _company(user, company, allowed)}
+	if shift:
+		inner["shift"] = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+	result = badges.resolve_badge(inner)
+	return result.data
+
+
 # ── 28. sync_bucket_entries ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("sync_bucket_entries", mutating=True, limit=guard.UPLOAD_LIMIT)
-def sync_bucket_entries(user: str, entries=None, company=None) -> dict:
+def sync_bucket_entries(user: str, entries=None, company=None, shift=None) -> dict:
 	"""A handset's capture queue, filed as Bucket Log Entry rows.
 
 	`UPLOAD_LIMIT` RATHER THAN `WRITE_LIMIT`, and for the reason that limit exists.
@@ -1637,12 +1674,32 @@ def sync_bucket_entries(user: str, entries=None, company=None) -> dict:
 
 	ONE COMPANY FOR THE WHOLE BATCH, checked once — see `_bucket_entries`, which
 	also says why an entry may not name its own picker.
+
+	THE BADGE POLICY IS `strict` HERE AND IS NOT A BODY KEY. v0.50.0. The tool
+	defaults to `lenient` — file the capture, resolve the badge later — and that
+	is right for a Desk import of a morning taken before anybody mapped the
+	cards. It is wrong for a phone. Badges are minted by this app now
+	(`generate_employee_badge_qr` writes the register at the moment the card is
+	printed), so a handset scanning a string this site never issued has scanned a
+	barcode on a soda can, a Wi-Fi join code or an operator's login QR — and
+	filing that produces a piecework row nobody will ever claim, which is worse
+	than the refusal the picker's foreman can act on while still standing there.
+	A body key that could relax it would hand that decision to the handset.
+
+	`shift` IS OPTIONAL AND IS THE OTHER HALF OF IT. Given the shift the crew
+	clock has open, every capture is checked against its roster: a badge that
+	resolves to somebody who is not clocked in is refused with their name in the
+	sentence. Omitted, the badge still has to resolve to an employed person.
 	"""
 	allowed = guard.require_scope(user)
 	wanted = _company(user, company, allowed)
-	result = bucket_log.sync_bucket_entries({
+	inner = {
 		"entries": _bucket_entries(entries, wanted),
-	})
+		"badge_policy": bucket_bridge.BADGE_POLICY_STRICT,
+	}
+	if shift:
+		inner["shift"] = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+	result = bucket_log.sync_bucket_entries(inner)
 	return result.data
 
 

@@ -459,10 +459,13 @@
   "allow_list_bucket_sessions",
   "allow_get_piecework_summary",
   "allow_reconcile_bucket_payroll",
+  "allow_resolve_badge",
   "bucket_log_write_section",
   "allow_sync_bucket_entries",
   "allow_link_badge_to_employee",
   "allow_link_entries_to_shift",
+  "allow_generate_employee_badge_qr",
+  "allow_generate_employee_badge_sheet",
   "mobile_write_section",
   "allow_create_mobile_user",
   "allow_create_employee",
@@ -3493,6 +3496,13 @@
    "label": "Reconcile Bucket Payroll"
   },
   {
+   "default": "1",
+   "description": "READ. Who holds this badge — the string a scanner produced, answered with the Employee (docname, name, designation, status, photograph). An unissued, retired or left-employee badge is refused with its own sentence rather than answered empty.",
+   "fieldname": "allow_resolve_badge",
+   "fieldtype": "Check",
+   "label": "Resolve Badge"
+  },
+  {
    "fieldname": "bucket_log_write_section",
    "fieldtype": "Section Break",
    "label": "BucketLog \u2192 Piecework Bridge \u2014 Write"
@@ -3517,6 +3527,20 @@
    "fieldname": "allow_link_entries_to_shift",
    "fieldtype": "Check",
    "label": "Link Entries To Shift"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Issues (or reprints) one employee's scanning badge: mints a readable badge ID, records it in the Bucket Log Badge Map register, and returns the QR code for the card. regenerate=true retires the badge it replaces.",
+   "fieldname": "allow_generate_employee_badge_qr",
+   "fieldtype": "Check",
+   "label": "Generate Employee Badge QR"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. A printable sheet of badge cards for a crew at once — name, photograph, designation, badge ID and QR — issuing a badge to anybody who has none.",
+   "fieldname": "allow_generate_employee_badge_sheet",
+   "fieldtype": "Check",
+   "label": "Generate Employee Badge Sheet"
   },
   {
    "fieldname": "mobile_write_section",

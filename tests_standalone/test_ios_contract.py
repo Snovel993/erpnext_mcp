@@ -605,6 +605,42 @@ class SignedI9Model(Codable):
 	)
 
 
+class ResolvedBadgeModel(Codable):
+	"""`ResolvedBadge` — v0.50.0, the read between a scan and a name.
+
+	THREE STRICT FIELDS AND THE REST OPTIONAL, and the split is the contract.
+	`badge_id`, `employee` and `employee_name` are what every caller needs — the
+	docname `add_worker_to_shift` takes and the name that goes on screen — and a
+	payload missing any of them cannot identify anybody, so it throws rather than
+	degrading into a row that names nobody. Everything else is a decoration on
+	that: a missing `designation` is a blank line on a card, not a mis-scan.
+
+	`on_shift` IS A NULLABLE Bool AND NOT A LENIENT ONE, deliberately. Absent
+	means the question was not asked — the caller passed no `shift` — and that is
+	NOT the same as `false`. A client reading absence as false would refuse every
+	scan on every sync that did not name a shift, which is most of them.
+	"""
+
+	SWIFT = "ResolvedBadge.swift"
+	STRICT = (
+		("badge_id", str, 23),
+		("employee", str, 24),
+		("employee_name", str, 25),
+	)
+	NULLABLE = (
+		("employee_number", str, 27),
+		("designation", str, 28),
+		("status", str, 31),
+		("company", str, 32),
+		("photo_url", str, 33),
+		("photo_placeholder", str, 37),
+		("active", bool, 38),
+		("shift", str, 41),
+		("on_shift", bool, 45),
+		("joined_at", str, 46),
+	)
+
+
 class UndecodedResponseModel(Codable):
 	"""A method `MobileAPI.swift` names and no Swift struct decodes yet.
 
@@ -1025,6 +1061,65 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		VoidResponseModel.decode(row, "link_badge_to_employee")
 		self.assertEqual(row["badge"]["employee"], self.NEW_HIRE)
 		self.assertTrue(row["badge"]["active"])
+
+	# ── v0.50.0: the read between a scan and a name ─────────────────────────
+	def test_43_resolve_badge(self):
+		"""`ResolvedBadge` — three strict fields, and the refusals are sentences.
+
+		THE CALL EVERY BADGE-SHAPED FEATURE WAS BLOCKED ON. `add_worker_to_shift`
+		takes an Employee docname and `QRScannerModel.handleScan` produces the
+		raw scanned string, so the crew clock could scan a whole crew and roster
+		none of it — and the bucket loop could show a foreman the code it read
+		and never the picker's name.
+		"""
+		self.the_hr_furniture()
+		self.wire("link_badge_to_employee", badge_id="QR-0042", employee=self.NEW_HIRE, company=MAIN)
+
+		row = self.wire("resolve_badge", badge_id="QR-0042", company=MAIN)
+		ResolvedBadgeModel.decode(row, "resolve_badge")
+		self.assertEqual(row["employee"], self.NEW_HIRE)
+		self.assertEqual(row["employee_name"], "Rosa Delgado")
+		self.assertTrue(row["active"])
+		# The question was not asked, so the answer must not claim it was.
+		self.assertNotIn("on_shift", row)
+
+	def test_43_resolve_badge_on_a_shift_answers_whether_they_are_clocked_in(self):
+		self.the_hr_furniture()
+		self.wire("link_badge_to_employee", badge_id="QR-0042", employee=self.NEW_HIRE, company=MAIN)
+		shift = self.a_shift(crew_employees=[self.NEW_HIRE])
+
+		row = self.wire("resolve_badge", badge_id="QR-0042", company=MAIN, shift=shift["name"])
+		ResolvedBadgeModel.decode(row, "resolve_badge")
+		self.assertTrue(row["on_shift"])
+		self.assertEqual(row["shift"], shift["name"])
+
+	def test_43_resolve_badge_refuses_a_scan_that_is_not_a_badge(self):
+		"""A login QR held in front of the badge scanner used to become a badge
+		ID with an api_secret inside it. It is refused before the register is
+		even read."""
+		self.the_hr_furniture()
+		payload = '{"url":"https://erp.example.com","api_secret":"s3cr3t"}'
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.wire("resolve_badge", badge_id=payload, company=MAIN)
+		self.assertIn("is not a badge ID", str(caught.exception))
+		# THE REFUSAL DOES NOT ECHO WHAT IT REFUSED. This branch exists for a
+		# `generate_mobile_login_qr` payload scanned by mistake; quoting it back
+		# would put a live api_secret in a ValidationError, on a screen in an
+		# orchard, and in the audit row below.
+		self.assertNotIn("s3cr3t", str(caught.exception))
+		row = [
+			row
+			for row in STORE.rows("MCP Action Log")
+			if row.get("tool_name") == "mobile:resolve_badge"
+		][-1]
+		self.assertNotIn("s3cr3t", str(row.get("arguments_json")))
+		self.assertIn("redacted", str(row.get("arguments_json")))
+
+	def test_43_resolve_badge_refuses_an_unissued_badge_by_name(self):
+		self.the_hr_furniture()
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.wire("resolve_badge", badge_id="QR-9999", company=MAIN)
+		self.assertIn("QR-9999", str(caught.exception))
 
 	# ── v0.45.0: the capture queue and the crew clock ───────────────────────
 	def test_23_sync_bucket_entries(self):
@@ -2178,6 +2273,9 @@ class TheContractIsComplete(ContractTestCase):
 		# v0.48.3 — the onboarding evidence that had no route and was being
 		# posted to a Frappe path this app's auth hook does not cover.
 		"attach_onboarding_document": "test_42",
+		# v0.50.0 — the read between a scan and a name, which every other
+		# badge-shaped feature was blocked on.
+		"resolve_badge": "test_43",
 	}
 
 	def _published(self, module):

@@ -45,6 +45,7 @@ from .tools import (
 	asset_tags,
 	assets,
 	auditpacket,
+	badges,
 	banking,
 	bucket_log,
 	budget,
@@ -169,6 +170,30 @@ def _qr_available() -> bool:
 		return qr.available()
 	except Exception:  # pragma: no cover - an encoder that explodes on import
 		return False
+
+
+def _badge_qr_ready() -> bool:
+	"""Predicate: can this site both register a badge and draw one?
+
+	v0.50.0. Two prerequisites rather than one, and they fail for different
+	reasons: the register is a DocType `bench migrate` creates, the drawing needs
+	a QR encoder `pip` installs. `resolve_badge` deliberately does NOT carry this
+	— reading who holds a badge needs no encoder, and a bench without one should
+	keep the read that turns a scan into a name.
+	"""
+	try:
+		return bool(doctype_exists("Bucket Log Badge Map") and qr.available())
+	except Exception:  # pragma: no cover - an encoder that explodes on import
+		return False
+
+
+#: What issuing a badge needs beyond the register. Both halves named, because a
+#: bench that has one and not the other gets a sentence that is half wrong
+#: otherwise.
+_BADGE_QR_REQUIRES = (
+	"the Bucket Log Badge Map DocType, which ships with erpnext_mcp — run `bench migrate` — "
+	"AND " + qr.REQUIRES
+)
 
 
 #: What a geospatial tool needs beyond a DocType: the two libraries that do the
@@ -12585,6 +12610,19 @@ TOOLS = {
 				"resolution if already known), coverage_percent (0-100), model_uuid, "
 				"gps_lat, gps_lon, h3_cell, device_id.",
 			),
+			"badge_policy": _field(
+				_STRING,
+				"'lenient' (default) files a capture whose badge is not in the register yet "
+				"with no employee, for a later link_badge_to_employee to backfill — right for "
+				"a Desk import. 'strict' refuses it, which is what a handset sends: badges are "
+				"minted by this app, so an unissued string is not a badge. The badge's SHAPE "
+				"is checked either way.",
+			),
+			"shift": _field(
+				_STRING,
+				"Farm Shift docname. Strict policy only: every capture is checked against that "
+				"shift's roster and one whose picker is not clocked in is refused by name.",
+			),
 		},
 		required=("entries",),
 		mutating=True,
@@ -12660,6 +12698,102 @@ TOOLS = {
 		mutating=True,
 		idempotent=True,
 		title="Link a badge to an employee",
+		available=_needs_doctype("Bucket Log Badge Map"),
+		requires="the Bucket Log Badge Map DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.50.0: issuing a badge, printing a sheet of them, reading one back ──
+	"generate_employee_badge_qr": _tool(
+		badges.generate_employee_badge_qr,
+		"MUTATING (default OFF). ISSUE (or reprint) one employee's scanning "
+		"badge: mint a readable badge ID — the company's abbreviation and a "
+		"sequence, `CF-0001` — record it in the Bucket Log Badge Map register, "
+		"and hand back the QR code that goes on the card as a base64 PNG.\n\n"
+		"IDEMPOTENT WITHOUT `regenerate`: somebody who already holds a live "
+		"badge gets THAT badge's QR back rather than a second identifier, "
+		"because reprinting a card that went through a wash cycle must not "
+		"consume one. `regenerate=true` is the lost-card path — it mints a new "
+		"ID and RETIRES the old one in the same call, since a replacement that "
+		"leaves its predecessor resolving is how a found badge keeps earning.\n\n"
+		"An existing card from another system can be adopted rather than minted "
+		"by passing `badge_id`: badge matching is an exact string comparison "
+		"with no format assumption, so an old uuid and a new CF-0001 both "
+		"resolve for as long as a transition takes.",
+		{
+			"employee": _field(_STRING, "REQUIRED. Employee docname, number, name or login."),
+			"company": _field(_STRING, "Which company issues the badge. Defaults to the employee's."),
+			"badge_id": _field(
+				_STRING,
+				"Adopt this exact ID instead of minting one — an existing printed card. "
+				"Refused if it is live for somebody else.",
+			),
+			"regenerate": _field(
+				_BOOLEAN,
+				"Default false. True mints a NEW ID and retires every other live badge this "
+				"person holds — the lost-card path.",
+			),
+			"format": _field(_STRING, "'png' (default) for a base64 PNG, or 'matrix' for the raw 0/1 grid."),
+			"error_correction": _field(_STRING, "QR error-correction level L, M (default), Q or H."),
+			"notes": _field(_STRING, "Why this badge was issued or reissued — kept on the register row."),
+		},
+		required=("employee",),
+		mutating=True,
+		idempotent=True,
+		title="Issue an employee badge QR",
+		available=_badge_qr_ready,
+		requires=_BADGE_QR_REQUIRES,
+	),
+	"generate_employee_badge_sheet": _tool(
+		badges.generate_employee_badge_sheet,
+		"MUTATING (default OFF). A printable sheet of badge cards for a crew at "
+		"once — employee name, photograph (or the initials that go where one is "
+		"missing), designation, badge ID and QR, up to 100 per call. Issues a "
+		"badge to anybody who has none and reuses the live one where there is "
+		"one.\n\n"
+		"ONE EMPLOYEE'S FAILURE DOES NOT LOSE THE SHEET: a name that resolves "
+		"to nobody, somebody who has left, an entity this caller cannot reach "
+		"— each is reported by name in `errors` and every other card is still "
+		"printed.",
+		{
+			"employees": _field(
+				_STRING_ARRAY,
+				"REQUIRED. Up to 100 Employee docnames (numbers, names and logins resolve too).",
+			),
+			"company": _field(_STRING, "Issue every badge for this company. Defaults to each employee's."),
+			"regenerate": _field(
+				_BOOLEAN, "Default false. True mints a new ID for everybody named and retires the old."
+			),
+			"template": _field(_STRING, "Label template the caller will lay these out on. Default badge_card_2x3."),
+			"notes": _field(_STRING, "Kept on every register row this call writes."),
+		},
+		required=("employees",),
+		mutating=True,
+		idempotent=True,
+		title="Generate a badge sheet",
+		available=_badge_qr_ready,
+		requires=_BADGE_QR_REQUIRES,
+	),
+	"resolve_badge": _tool(
+		badges.resolve_badge,
+		"WHO HOLDS THIS BADGE — the read between a scan and a name. Takes the "
+		"string a scanner produced and answers with the Employee: docname, "
+		"employee_name, designation, status, photograph. Read-only.\n\n"
+		"IT REFUSES RATHER THAN ANSWERING EMPTY. A badge that was never "
+		"issued, one that was retired, and one belonging to somebody who has "
+		"left each get their own sentence — three different situations with "
+		"three different fixes, and 'not found' would collapse them into one. A "
+		"string that is not badge-shaped at all (a URL, a Wi-Fi join code, a "
+		"JSON login payload) is refused as such before the register is even "
+		"read.\n\n"
+		"Pass `shift` and the answer also carries `on_shift` — whether this "
+		"person is clocked in on that crew right now, which is what turns an "
+		"identification into an admission.",
+		{
+			"badge_id": _field(_STRING, "REQUIRED. The badge string as a scanner read it."),
+			"company": _field(_STRING, "Only resolve within this company's register."),
+			"shift": _field(_STRING, "Farm Shift docname — adds on_shift/joined_at to the answer."),
+		},
+		required=("badge_id",),
+		title="Resolve a badge",
 		available=_needs_doctype("Bucket Log Badge Map"),
 		requires="the Bucket Log Badge Map DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

@@ -415,6 +415,43 @@ def strip_secrets(value):
 	return value
 
 
+#: What makes a STRING VALUE look like a credential document rather than an
+#: argument. Deliberately narrow: a JSON object or array carrying one of these
+#: words. See `redact_payloads`.
+_PAYLOAD_HINTS = ("api_secret", "api_key", "password", "secret")
+
+
+def redact_payloads(value):
+	"""Credential-shaped string VALUES replaced, at any depth. v0.50.0.
+
+	`strip_secrets` removes credential-shaped KEYS on the way out, which is the
+	right shape for a response this app composed. An argument is the other
+	direction and the other risk: `resolve_badge` takes whatever a camera read,
+	and the thing a camera reads at a badge step by mistake is
+	`generate_mobile_login_qr`'s own payload — `{"url":…,"api_key":…,
+	"api_secret":…}` — under the perfectly innocent key `badge_id`.
+
+	Without this, one mis-scan writes a live credential into MCP Action Log's
+	`arguments` column, where it sits in the register an operator opens to audit
+	the phones. The refusal itself already declines to quote it
+	(`bucket_bridge._display`); this is the same decision one layer down.
+
+	NARROW ON PURPOSE. Only a string that opens a JSON document AND names one of
+	`_PAYLOAD_HINTS` is replaced, so an ordinary badge ID, a docname and a
+	free-text note all survive intact — an audit row that redacted its own
+	arguments would be worth nothing.
+	"""
+	if isinstance(value, dict):
+		return {key: redact_payloads(item) for key, item in value.items()}
+	if isinstance(value, (list, tuple)):
+		return [redact_payloads(item) for item in value]
+	if isinstance(value, str):
+		text = value.strip()
+		if text[:1] in ("{", "[") and any(hint in text.lower() for hint in _PAYLOAD_HINTS):
+			return f"<redacted credential-shaped payload, {len(value)} characters>"
+	return value
+
+
 def _set_status(code: int) -> None:
 	try:
 		frappe.local.response["http_status_code"] = code
@@ -563,7 +600,7 @@ def _record(method, arguments, status, outcome, user, ip, exc) -> None:
 			pass
 	audit.record(
 		f"mobile:{method}",
-		dict(arguments or {}),
+		redact_payloads(dict(arguments or {})),
 		status,
 		summary,
 		caller_ip=ip,
