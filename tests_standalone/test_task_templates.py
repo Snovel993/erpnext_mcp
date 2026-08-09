@@ -305,6 +305,39 @@ class AuthoringATemplate(TemplateTestCase):
 		self.assertIn("nearly right", message)
 
 
+# ── 1b ──────────────────────────────────────────────────────────────────────
+class TheTaskTypeVocabulary(TemplateTestCase):
+	"""One list of task types, held on two doctypes.
+
+	`create_farm_task_template` matches `task_type` against the FARM TASK select
+	— see `test_a_task_type_the_farm_task_select_does_not_hold_is_refused` — so a
+	value added to the template's own options and not to the task's would save a
+	template that fails at the moment somebody raises work from it. This is where
+	the two lists drifting apart is caught, and where a newly added type is proved
+	to survive the whole trip from template to task.
+	"""
+
+	def options(self, doctype):
+		from erpnext_mcp.args import select_options
+
+		return select_options(doctype, "task_type")
+
+	def test_both_doctypes_hold_the_same_options(self):
+		self.assertEqual(self.options("Farm Task"), self.options("Farm Task Template"))
+
+	def test_hiring_is_one_of_them(self):
+		"""Recruiting a crew is compliance-adjacent work somebody is dispatched to
+		do, so it sits next to Compliance-Audit rather than falling under Other."""
+		options = self.options("Farm Task")
+		self.assertIn("Hiring", options)
+		self.assertEqual(options[options.index("Compliance-Audit") + 1], "Hiring")
+
+	def test_a_hiring_template_raises_a_hiring_task(self):
+		self.a_template(template_name="Crew Interviews", task_type="Hiring")
+		task = self.a_task_from("Crew Interviews")
+		self.assertEqual(task["task_type"], "Hiring")
+
+
 # ── 2 ───────────────────────────────────────────────────────────────────────
 class ReadingTheRegister(TemplateTestCase):
 	def test_the_register_lists_what_the_operation_knows_how_to_ask_for(self):

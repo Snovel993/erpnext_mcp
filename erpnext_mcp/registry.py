@@ -7268,7 +7268,7 @@ TOOLS = {
 			"task_type": _field(
 				_STRING,
 				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
-				"Housing-Cleanup, Water-Sampling or Other.",
+				"Hiring, Housing-Cleanup, Water-Sampling or Other.",
 			),
 			"urgency": _field(_STRING, "Low, Normal, High or Critical."),
 			"company": _COMPANY,
@@ -7365,7 +7365,7 @@ TOOLS = {
 			"task_type": _field(
 				_STRING,
 				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
-				"Housing-Cleanup, Water-Sampling or Other.",
+				"Hiring, Housing-Cleanup, Water-Sampling or Other.",
 			),
 			"evidence_required": _field(
 				_OBJECT,
@@ -7426,7 +7426,7 @@ TOOLS = {
 			"task_type": _field(
 				_STRING,
 				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
-				"Housing-Cleanup, Water-Sampling or Other. Default Repair.",
+				"Hiring, Housing-Cleanup, Water-Sampling or Other. Default Repair.",
 			),
 			"skill_required": _field(_STRING, "e.g. 'camp_maintenance', 'applicator_license'."),
 			"urgency": _field(
@@ -7477,7 +7477,7 @@ TOOLS = {
 			"task_type": _field(
 				_STRING,
 				"Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
-				"Housing-Cleanup, Water-Sampling or Other. Default Repair.",
+				"Hiring, Housing-Cleanup, Water-Sampling or Other. Default Repair.",
 			),
 			"skill_required": _field(
 				_STRING,
@@ -7737,7 +7737,8 @@ TOOLS = {
 			"task_type": _field(
 				_STRING,
 				"REQUIRED. Inspection, Test, Spray, Repair, Harvest, Training, Compliance-Audit, "
-				"Housing-Cleanup, Water-Sampling or Other — the same vocabulary Farm Task uses.",
+				"Hiring, Housing-Cleanup, Water-Sampling or Other — the same vocabulary Farm Task "
+				"uses.",
 			),
 			"evidence_required": _field(
 				_OBJECT,

@@ -5503,7 +5503,7 @@ MUTATING (off). Raises one piece of work.
 | Argument | Meaning |
 | --- | --- |
 | `task_name` | What a foreman calls it out loud. **Required** |
-| `task_type` | Inspection / Test / Spray / Repair / Harvest / Training / Compliance-Audit / Housing-Cleanup / Water-Sampling / Other. **Required** |
+| `task_type` | Inspection / Test / Spray / Repair / Harvest / Training / Compliance-Audit / Hiring / Housing-Cleanup / Water-Sampling / Other. **Required** |
 | `evidence_required` | JSON: `photos`, `signature`, `findings_text`, `witness`. **Required** |
 | `location_doctype` + `location` | Housing Unit, Field, Irrigation Zone or Parcel, and the docname |
 | `skill_required`, `urgency`, `dispatch_mode`, `estimated_duration_minutes` | The shape of the job |
