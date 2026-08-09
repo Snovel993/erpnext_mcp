@@ -101,6 +101,7 @@ from .tools import (
 	uploads,
 	visits,
 	w4,
+	wallet,
 	weather,
 	workflow,
 )
@@ -12827,6 +12828,63 @@ TOOLS = {
 		title="Generate a badge sheet",
 		available=_badge_qr_ready,
 		requires=_BADGE_QR_REQUIRES,
+	),
+	# ── v0.53.0: the same badge, in the wallet the worker already carries ──
+	"generate_employee_badge_pass": _tool(
+		wallet.generate_employee_badge_pass,
+		"MUTATING (default OFF). The employee's badge as an APPLE WALLET "
+		"`.pkpass` file and a GOOGLE WALLET save link — the same badge ID, the "
+		"same QR payload and the same photograph as the printed card, in the "
+		"wallet already on the worker's phone. The foreman finishes onboarding, "
+		"calls this, and AirDrops the file to the worker standing in front of "
+		"them; it opens straight into Wallet with nothing installed on their "
+		"device.\n\n"
+		"IT IS THE SAME BADGE, NOT A SECOND CREDENTIAL. The identifier, the "
+		"minting and the Bucket Log Badge Map row are `generate_employee_badge_qr`'s, "
+		"called underneath — so this is IDEMPOTENT without `regenerate` in "
+		"exactly the same way, and a bucket scanned off a phone screen and one "
+		"scanned off a laminated card resolve through the identical "
+		"`resolve_badge` call.\n\n"
+		"A SITE WITH NO APPLE CERTIFICATE STILL GETS A PASS, complete and "
+		"correct, marked `apple.signed: false` with the `site_config.json` keys "
+		"it needs in the result — Apple Wallet will refuse to open that file "
+		"until a Pass Type ID certificate is installed. See "
+		"docs/wallet-passes.md. The Google half is the pass OBJECT always and a "
+		"signed save link once an issuer and service account are configured.\n\n"
+		"The `.pkpass` is attached PRIVATELY to the Employee; regenerating "
+		"replaces that one file rather than growing the attachment list.",
+		{
+			"employee": _field(_STRING, "REQUIRED. Employee docname, number, name or login."),
+			"company": _field(_STRING, "Which company issues the badge. Defaults to the employee's."),
+			"platform": _field(
+				_STRING,
+				"'both' (default), 'apple' for the .pkpass alone, or 'google' for the save link "
+				"alone. Building the Google object costs nothing, so 'both' is usually right.",
+			),
+			"regenerate": _field(
+				_BOOLEAN,
+				"Default false. True mints a NEW badge ID and retires every other live badge this "
+				"person holds — the lost-card path, identical to generate_employee_badge_qr's.",
+			),
+			"attach": _field(
+				_BOOLEAN,
+				"Default true. False builds the pass and returns it without filing a File against "
+				"the Employee — for a caller checking the shape.",
+			),
+			"include_base64": _field(
+				_BOOLEAN,
+				"Default false. True puts the .pkpass bytes in the result as base64, which is what "
+				"a handset needs because it cannot fetch a private file_url. The mobile route sets "
+				"this itself.",
+			),
+			"notes": _field(_STRING, "Why this badge was issued or reissued — kept on the register row."),
+		},
+		required=("employee",),
+		mutating=True,
+		idempotent=True,
+		title="Generate an employee wallet pass",
+		available=wallet.pass_available,
+		requires="the Bucket Log Badge Map DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"resolve_badge": _tool(
 		badges.resolve_badge,

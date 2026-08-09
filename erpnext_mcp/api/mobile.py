@@ -90,6 +90,7 @@ from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shi
 from ..tools import employee as personnel
 from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
+from ..tools import wallet as wallet_tools
 from . import guard, shape
 
 FARM_TASK = "Farm Task"
@@ -1743,7 +1744,104 @@ def generate_employee_badge_qr(user: str, employee=None, docname=None, company=N
 	}
 
 
-# ── 27d. set_employee_photo ─────────────────────────────────────────────────
+# ── 27d. get_employee_badge_pass ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("get_employee_badge_pass", mutating=True, limit=guard.WRITE_LIMIT)
+def get_employee_badge_pass(user: str, employee=None, docname=None, company=None, platform=None,
+                            regenerate=None) -> dict:
+	"""The badge as a file the foreman AirDrops into the worker's own wallet.
+
+	THE DELIVERY THIS SURFACE WAS MISSING. `generate_employee_badge_qr` hands
+	back a PNG, and a PNG has to be printed, laminated and carried — which is a
+	trip back to an office in the middle of a hire day, and a card that goes
+	through a wash cycle in August. Every worker in the orchard already has a
+	phone with a wallet on it. This returns a `.pkpass` the foreman shares
+	straight off the handset: it opens into Apple Wallet on the worker's device
+	with nothing installed there, and the Android half is a save link in the same
+	answer.
+
+	THE BYTES ARE IN THE RESULT AND THAT IS WHY THIS ROUTE EXISTS. The tool
+	attaches the pass to the Employee as a private File and hands back a
+	`file_url`, which is right for a Desk operator and useless to a handset — the
+	app authenticates against THIS door with `X-FarmOps-Token`, not with a Frappe
+	session, so a private file URL is a login page to it. `include_base64` is
+	therefore set here and is not a body key: a phone that could turn it off
+	would be a phone that cannot share what it just asked for.
+
+	`badge_id` IS NOT ACCEPTED, for the reason it is not accepted on
+	`generate_employee_badge_qr`: minting a payroll key is the server's job, not
+	whatever a foreman typed. `regenerate` IS, because the lost-card path happens
+	in a field — and without it the call is IDEMPOTENT, so the wizard's button is
+	safe to press twice on a bad connection.
+
+	`attach` IS NOT ACCEPTED EITHER. The pass is always filed against the
+	Employee, so a reissue has a record and a Desk operator can hand the same
+	file to somebody who lost their phone rather than reissuing a badge for it.
+
+	AN UNSIGNED PASS COMES BACK AS UNSIGNED. On a site with no Apple certificate
+	the file is complete and correct and `apple.signed` is false with the reason
+	in it — the app should say so rather than sharing a file Wallet will refuse.
+	Every other refusal is the tool's: an inactive worker, an entity this account
+	cannot reach, an employee of another company.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee or docname, allowed)
+
+	inner = {
+		"employee": person,
+		"company": _company(user, company, allowed),
+		# See the docstring: the handset cannot fetch a private File, so the
+		# bytes travel in the answer. Not a body key.
+		"include_base64": True,
+	}
+	if platform:
+		inner["platform"] = platform
+	if regenerate is not None:
+		inner["regenerate"] = regenerate
+
+	result = wallet_tools.generate_employee_badge_pass(inner)
+	data = result.data or {}
+	apple = data.get("apple") or {}
+	google = data.get("google") or {}
+	return {
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+		"company": data.get("company"),
+		"badge_id": data.get("badge_id"),
+		"created": data.get("created"),
+		"reused": data.get("reused"),
+		"retired_badges": data.get("retired_badges") or [],
+		"platform": data.get("platform"),
+		"warnings": data.get("warnings") or [],
+		# The Apple half, flattened to what a share sheet needs: the bytes, what
+		# to call the file, and the UTI that makes iOS open it in Wallet rather
+		# than in Files. `pass_json` is deliberately NOT forwarded — it is a
+		# debugging read for the Desk and the app has no use for a second copy of
+		# what is already inside the archive it was handed.
+		"apple": {
+			"pkpass_base64": apple.get("pkpass_base64"),
+			"file_name": apple.get("file_name"),
+			"content_type": apple.get("content_type"),
+			"bytes": apple.get("bytes"),
+			"sha256": apple.get("sha256"),
+			"signed": apple.get("signed"),
+			"configured": apple.get("configured"),
+			"warnings": apple.get("warnings") or [],
+		}
+		if data.get("apple")
+		else None,
+		"google": {
+			"save_url": google.get("save_url"),
+			"signed": google.get("signed"),
+			"configured": google.get("configured"),
+			"warnings": google.get("warnings") or [],
+		}
+		if data.get("google")
+		else None,
+	}
+
+
+# ── 27e. set_employee_photo ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("set_employee_photo", mutating=True, limit=guard.WRITE_LIMIT)
 def set_employee_photo(user: str, employee=None, docname=None, file_token=None) -> dict:

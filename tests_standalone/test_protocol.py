@@ -765,10 +765,19 @@ class Catalogue(SeededTestCase):
 		for anything too large for one call. `get_model_file_chunk` is the read
 		that serves it back, base64, in the same chunked shape `stage_file_chunk`
 		already takes uploads in.
+
+		v0.53.0 ADDED ONE WRITE — `generate_employee_badge_pass`, the badge in
+		the wallet the worker already carries. It is a WRITE for two reasons that
+		both matter: it issues a badge to somebody who has none, through
+		`generate_employee_badge_qr`'s own minting path, and it attaches the
+		`.pkpass` to the Employee as a File. There is no read counterpart and
+		there should not be — a pass is a derived artefact rebuilt
+		byte-identically from the register on demand, so "read the pass" and
+		"build the pass" are the same call.
 		"""
-		self.assertEqual(len(registry.TOOLS), 391)
+		self.assertEqual(len(registry.TOOLS), 392)
 		self.assertEqual(len(registry.READ_TOOLS), 179)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 212)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 213)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

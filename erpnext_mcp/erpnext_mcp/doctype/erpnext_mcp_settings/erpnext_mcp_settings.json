@@ -468,6 +468,7 @@
   "allow_link_entries_to_shift",
   "allow_generate_employee_badge_qr",
   "allow_generate_employee_badge_sheet",
+  "allow_generate_employee_badge_pass",
   "mobile_write_section",
   "allow_create_mobile_user",
   "allow_create_employee",
@@ -3557,6 +3558,13 @@
    "fieldname": "allow_generate_employee_badge_sheet",
    "fieldtype": "Check",
    "label": "Generate Employee Badge Sheet"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. The employee's badge as an Apple Wallet .pkpass file and a Google Wallet save link — the same badge ID, QR payload and photograph as the printed card. Issues a badge to anybody who has none, the same way Generate Employee Badge QR does. A site with no Apple Pass Type ID certificate in site_config.json still gets a complete pass, marked unsigned; Apple Wallet refuses to open it until the certificate is installed. See docs/wallet-passes.md.",
+   "fieldname": "allow_generate_employee_badge_pass",
+   "fieldtype": "Check",
+   "label": "Generate Employee Badge Pass"
   },
   {
    "fieldname": "mobile_write_section",

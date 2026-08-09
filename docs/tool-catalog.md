@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 391 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 392 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -9069,6 +9069,71 @@ one company and one piecework activity:
 Returns the full record and its manifest when a model is Active; a clear
 `"active": false` result — **not an error** — when none is, so a scanning app
 polling at startup does not have to treat "nothing deployed yet" as a failure.
+
+---
+
+## v0.53.0 — The badge in the worker's own wallet
+
+One tool. `generate_employee_badge_qr` has minted `ETC-0001` and drawn its QR
+since v0.50.0, and what came back was a **PNG somebody has to print**. That means
+a trip to an office in the middle of a hire day, a laminator, and a card that
+goes through a wash cycle in August. Every worker in the orchard is already
+carrying a phone with a wallet on it.
+
+**It is the same badge, not a second credential.** The identifier, the minting
+and the Bucket Log Badge Map row are `generate_employee_badge_qr`'s, called
+underneath — so a bucket scanned off a phone screen and one scanned off a
+laminated card produce the identical string and resolve through the identical
+`resolve_badge`. If this tool ever needed its own serial the design would have
+gone wrong.
+
+### `generate_employee_badge_pass`
+
+```json
+{"employee": "HR-EMP-00042", "company": "Example Trading Co", "platform": "both"}
+```
+
+**MUTATING (default OFF).** Builds an Apple Wallet `.pkpass` — farm logo,
+employee photograph, name, company, badge number and the QR — and a Google Wallet
+pass object with a save link. Issues a badge to anybody who has none and reuses
+the live one where there is one, so it is **idempotent without `regenerate`** for
+the same reason its QR counterpart is. `regenerate: true` mints a new ID and
+retires the old.
+
+The `.pkpass` is attached **privately to the Employee** and returned as
+`apple.file_url`; regenerating replaces that one file rather than growing the
+attachment list. `include_base64: true` puts the bytes in the result instead,
+which is what the mobile route sets — a handset authenticates with
+`X-FarmOps-Token` and a private `file_url` is a login page to it.
+
+| Argument | Meaning |
+| --- | --- |
+| `employee` | **Required.** Docname, number, name or login. |
+| `company` | Which entity issues it. Defaults to the employee's. |
+| `platform` | `both` (default), `apple`, or `google`. |
+| `regenerate` | Mint a new ID and retire the old — the lost-card path. |
+| `attach` | Default true. False builds without filing a File. |
+| `include_base64` | Default false. True returns the `.pkpass` bytes inline. |
+
+**A site with no Apple certificate still gets a pass.** It is complete and
+correct — right `pass.json`, right images, right manifest — with **no signature
+member**, and the result says `apple.signed: false` with the `site_config.json`
+keys it needs. Apple Wallet will refuse to open that file, and that refusal is
+the honest outcome: a self-signed blob with a `signature` in it fails just as
+hard while looking upstream like it worked. `docs/wallet-passes.md` is what to
+obtain and where to put it; nothing in this app changes the day the certificate
+lands.
+
+**Google fetches images; it is not sent them.** A Google Wallet pass is a signed
+JWT that becomes a `pay.google.com/gp/v/save/…` link, and Google builds the pass
+server-side — so a photograph at `/private/files/…` is a 403 to it and is simply
+not on the Android pass. Every image left out for that reason is named in
+`google.warnings` rather than written as a URL that renders as a grey box on a
+worker's phone. The Apple pass carries its pixels inside the file and has no such
+problem.
+
+Refused: an employee who has left, an employee of another entity, an entity this
+caller cannot reach.
 
 ---
 

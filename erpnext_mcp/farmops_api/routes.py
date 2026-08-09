@@ -180,6 +180,15 @@ ROUTES = (
 	# template reads `Employee.image` and nothing on this surface wrote it.
 	Route("/mobile", mobile_api.generate_employee_badge_qr),
 	Route("/mobile", mobile_api.set_employee_photo),
+	# v0.53.0. The same badge, delivered to the wallet the worker already has.
+	# `generate_employee_badge_qr` hands back a PNG somebody has to print and
+	# laminate; this hands back a `.pkpass` the foreman AirDrops off the handset,
+	# which opens straight into Apple Wallet on a device with nothing installed
+	# on it — plus the Google Wallet save link for the Android half. The bytes
+	# travel in the answer rather than as a `file_url`, because this door
+	# authenticates with `X-FarmOps-Token` and a private File is a login page to
+	# it.
+	Route("/mobile", mobile_api.get_employee_badge_pass),
 	# The capture queue and the crew clock.
 	Route("/mobile", mobile_api.sync_bucket_entries),
 	Route("/mobile", mobile_api.start_shift),

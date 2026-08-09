@@ -286,10 +286,11 @@ class ToolRegistration(unittest.TestCase):
 		# 389/178/211 as of v0.51.1, plus v0.52.0's `attach_model_file` (write)
 		# and `get_model_file_chunk` (read) — the file-serving pair that lets
 		# ERPNext hand an iOS app the model binary itself instead of the model
-		# only ever pointing at where Volume Vision keeps it.
-		self.assertEqual(len(self.registry.TOOLS), 391)
+		# only ever pointing at where Volume Vision keeps it. v0.53.0 adds one
+		# more write, `generate_employee_badge_pass`.
+		self.assertEqual(len(self.registry.TOOLS), 392)
 		self.assertEqual(len(self.registry.READ_TOOLS), 179)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 212)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 213)
 
 
 if __name__ == "__main__":

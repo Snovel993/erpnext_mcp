@@ -3,6 +3,57 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.53.0 — 2026-08-08
+
+**The badge goes in the wallet the worker already carries.**
+`generate_employee_badge_qr` has minted `CFL-0001` and drawn its QR since
+0.50.0, and what came back was a PNG somebody has to print — a trip back to an
+office in the middle of a hire day, a laminator, and a card that goes through a
+wash cycle in August. `generate_employee_badge_pass` is the same badge with a
+different delivery: an **Apple Wallet `.pkpass`** the foreman AirDrops straight
+off the handset, which opens into Wallet on the worker's device with nothing
+installed there, plus a **Google Wallet save link** for the Android half. Farm
+logo, employee photograph, name, company, badge number and the QR, exactly as on
+the printed card.
+
+**It is the same badge, not a second credential.** The identifier, the minting
+and the Bucket Log Badge Map row are `generate_employee_badge_qr`'s, called
+underneath — so it is idempotent without `regenerate` in the same way, and a
+bucket scanned off a phone screen and one scanned off a laminated card produce
+the identical string and resolve through the identical `resolve_badge`. If these
+could diverge, a bucket scanned off the phone would pay somebody the card does
+not.
+
+**A site with no Apple certificate still gets a pass, and is told it is
+unsigned.** The `.pkpass` is complete and correct — right `pass.json`, right
+images, right SHA-1 manifest — with no `signature` member, and the result says
+`apple.signed: false` with the `site_config.json` keys it needs named in the
+sentence. Apple Wallet will refuse to open it; that refusal is the honest
+outcome, where a self-signed blob with a `signature` in it would fail just as
+hard while looking upstream like it worked. **Nothing in the app changes the day
+the certificate arrives** — the same call starts signing.
+`docs/wallet-passes.md` is what to obtain from Apple (Pass Type ID, WWDR G4, a
+`.p12` from Keychain) and Google (issuer account, service account key), and
+where to put it.
+
+**Google fetches pass images; it is not sent them.** A Google Wallet pass is a
+JSON object signed into an RS256 JWT that becomes a `pay.google.com/gp/v/save/…`
+link, and Google builds the pass server-side — so a photograph at
+`/private/files/…`, which is what `set_employee_photo` correctly writes, cannot
+be on the Android pass at all. Every image left out for that reason is named in
+`google.warnings` rather than written as a URL that 403s. The Apple pass carries
+its pixels inside the archive and is unaffected.
+
+Reachable at `/farmops/api/mobile/get_employee_badge_pass`, where the bytes
+travel **in the answer** rather than as a `file_url` — the handset authenticates
+with `X-FarmOps-Token` and a private file URL is a login page to it. The iOS
+side is separate, tracked work; nothing in `fafo_ios` calls it yet.
+
+**There is no push update service, on purpose.** A pass already on a phone stays
+there. What makes that safe is that it carries only `badge_id` — revocation
+happens in the register, and a worker holding a retired pass scans a badge that
+resolves to nobody, exactly as with a retired laminated card.
+
 ## 0.52.0 — 2026-08-08
 
 **Models are served from ERPNext, not Volume Vision directly.** Through

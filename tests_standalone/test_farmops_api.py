@@ -193,6 +193,10 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# the printed card carry a face instead of two initials.
 		"/mobile/generate_employee_badge_qr",
 		"/mobile/set_employee_photo",
+		# v0.53.0. The same badge delivered to the wallet the worker already
+		# carries: a `.pkpass` the foreman AirDrops off the handset, and the
+		# Google Wallet save link for the Android half.
+		"/mobile/get_employee_badge_pass",
 		"/mobile/sync_bucket_entries",
 		"/mobile/start_shift",
 		"/mobile/add_worker_to_shift",

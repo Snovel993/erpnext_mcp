@@ -261,7 +261,18 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: Volume Vision directly to calling this route is separate, tracked work.
 	#: Listed by name, not folded into MOBILE, so this file does not claim
 	#: `MobileAPI.swift` names them until it actually does.
-	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {"get_active_model", "get_model_file_chunk"}
+	#:
+	#: v0.53.0 adds `get_employee_badge_pass` on the same footing and for the
+	#: same reason: the server builds the `.pkpass` and the Google save link, and
+	#: the handset side — a share sheet that writes the bytes to a temporary file
+	#: with the `com.apple.pkpass` type on it so AirDrop opens it in Wallet — is
+	#: separate, tracked work. Listing it here rather than in `MOBILE` keeps this
+	#: file from claiming `MobileAPI.swift` names a method it does not.
+	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
+		"get_active_model",
+		"get_model_file_chunk",
+		"get_employee_badge_pass",
+	}
 
 	def _whitelisted(self, module):
 		return {
