@@ -62,7 +62,7 @@ import json
 import frappe
 
 from .. import alerts, compat, completions, records, sessions
-from ..args import as_bool, as_choice, as_int, as_limit, as_str, resolve_company
+from ..args import as_bool, as_choice, as_int, as_limit, as_str, as_visit_id, resolve_company
 from ..erpnext_mcp.doctype.farm_task.farm_task import (
 	AVAILABLE,
 	AWAITING_REVIEW,
@@ -827,12 +827,17 @@ def complete_farm_task(args: dict) -> ToolResult:
 	# alone, and blanking it would turn a trip somebody can see in `list_visits`
 	# into five unrelated completions.
 	#
+	# WHAT IS GIVEN IS NOW CHECKED. `as_visit_id` refuses anything that is not the
+	# handset's UUID rather than writing it through — the format is confirmed, and
+	# a garbled identifier in this column does not look like an error downstream,
+	# it looks like a different visit.
+	#
 	# The signature is hashed from THE PAYLOAD AS IT ARRIVED — `as_str(args,
 	# "completed_at")` and not `doc.completed_at`, because the second one is the
 	# server's `now()` where the client sent nothing, and `now()` differs on every
 	# retry. Hashing it would make the record unmatchable by the very resubmission
 	# it exists to recognise. See `erpnext_mcp/completions.py`.
-	visit = as_str(args, "visit_id")
+	visit = as_visit_id(args)
 	if visit:
 		doc.visit_id = visit
 	doc.completion_signature = completions.signature(

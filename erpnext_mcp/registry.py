@@ -7616,8 +7616,10 @@ TOOLS = {
 			"visit_id": _field(
 				_STRING,
 				"The trip this completion belongs to. One identifier reused across every task "
-				"closed on one walk to one place; list_visits reports the rollup. Free text, "
-				"unvalidated, and not part of what makes a resubmission identical.",
+				"closed on one walk to one place; list_visits reports the rollup. A UUID as "
+				"8-4-4-4-12, either case — anything else is refused rather than stored, because "
+				"a garbled one reads as a second visit. Omit it to file outside any visit. Not "
+				"part of what makes a resubmission identical.",
 			),
 		},
 		required=("worker_id",),
@@ -13196,8 +13198,9 @@ TOOLS = {
 				_STRING,
 				"The trip this completion belongs to — one identifier the client mints when a "
 				"worker arrives somewhere and reuses for every task they close before they "
-				"leave. Five cabins on one walk is ONE visit and five completions. Free text; "
-				"unvalidated. list_visits reports the rollup.",
+				"leave. Five cabins on one walk is ONE visit and five completions. A UUID as "
+				"8-4-4-4-12, either case; anything else is refused. list_visits reports the "
+				"rollup.",
 			),
 			"user": _field(_STRING, "Only when the request carries no per-user credential."),
 		},
@@ -13474,7 +13477,7 @@ TOOLS = {
 			"visit_id": _field(
 				_STRING,
 				"The handset's trip identifier, shared with every task assignment closed on the "
-				"same walk — v0.20.1's visit_id.",
+				"same walk — v0.20.1's visit_id. A UUID as 8-4-4-4-12, either case.",
 			),
 			"farm_task": _field(
 				_STRING,
@@ -13549,7 +13552,9 @@ TOOLS = {
 			),
 			"foreman": _field(_STRING, "Who sent them, where the session does not already say."),
 			"visit_id": _field(
-				_STRING, "The handset's trip identifier, where the session does not already carry one."
+				_STRING,
+				"The handset's trip identifier, where the session does not already carry one. A "
+				"UUID as 8-4-4-4-12, either case.",
 			),
 		},
 		required=("name", "section_submissions"),

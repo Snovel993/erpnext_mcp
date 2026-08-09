@@ -7002,6 +7002,13 @@ opposite ends of the property are two — and no threshold gets both right.
 visit, not an "unassigned" bucket dressed as a trip. Everything filed before
 v0.20.1 has the column blank; `ungrouped_completions` says how many were skipped.
 
+**The identifier is checked where it is written.** A UUID as 8-4-4-4-12, matched
+in either case — anything else is refused at the completion, naming the value and
+the shape, rather than stored. The grouping is by exact value, so a garbled
+identifier would not read as a bad row here: it would read as a second visit, and
+the rollup would look complete while being wrong. Sending none is still fine and
+still counts as no visit.
+
 **One-task visits are returned.** Somebody drove out, did one job and drove back
 — which is precisely what a question about wasted travel is looking for. Filter
 on `total_tasks` if the question is about multi-stop rounds; `single_task_visits`

@@ -204,7 +204,7 @@
    "label": "Submission"
   },
   {
-   "description": "The visit this completion belongs to: one identifier the handset mints when a worker arrives somewhere and reuses for every task they close before they leave. Five cabins done in one trip to the north block is ONE visit and five completions, and without this the only way to see the trip is to guess it from timestamps. Free text and unvalidated on purpose in v0.20.1 — it is whatever the app mints, and a server that rejected an identifier it had opinions about would drop a completion over its least important field. Blank on any completion filed before v0.20.1, and on any filed by a client that does not mint one; list_visits reports only completions that carry one.",
+   "description": "The visit this completion belongs to: one identifier the handset mints when a worker arrives somewhere and reuses for every task they close before they leave. Five cabins done in one trip to the north block is ONE visit and five completions, and without this the only way to see the trip is to guess it from timestamps. A UUID as 8-4-4-4-12, matched either case — v0.20.1 accepted whatever arrived, because the app's format was not yet confirmed and refusing a completion over its least important field looked like the worse trade. It is not, now that the format is known: list_visits groups on this column by exact value, so an identifier nothing checked does not surface as a bad row, it surfaces as a SECOND VISIT, and the rollup is wrong rather than obviously incomplete. Blank on any completion filed before v0.20.1, and on any filed by a client that does not mint one; list_visits reports only completions that carry one.",
    "fieldname": "visit_id",
    "fieldtype": "Data",
    "label": "Visit",

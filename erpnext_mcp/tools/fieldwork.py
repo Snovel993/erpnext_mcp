@@ -632,11 +632,20 @@ def complete_task_via_mobile(args: dict) -> ToolResult:
 
 	# v0.20.1. `visit_id` joins the pass-through list. It is the handset's own
 	# identifier for one trip — five cabins closed on one walk to the north block
-	# is one visit and five completions — and it is forwarded UNVALIDATED beyond
-	# being a string, because the app mints it and a server with opinions about
-	# somebody else's UUID format would refuse a completion over the one field
-	# that carries no evidence. v0.20.2 can tighten it once the iOS format is
-	# confirmed; `list_visits` reads whatever is there.
+	# is one visit and five completions.
+	#
+	# IT IS FORWARDED, NOT CHECKED HERE, AND IT IS NOW CHECKED. The shape is
+	# confirmed — a UUID, 8-4-4-4-12 — and `args.as_visit_id` refuses anything
+	# else where `complete_farm_task` writes the column, which is the one place
+	# that can be true for every door into it: this wrapper, the REST endpoint
+	# behind it, and a direct tool call. A copy of the rule here would be a second
+	# one to keep in step for no reach it does not already have.
+	#
+	# The lenient reading this replaces was that refusing a completion over its
+	# least important field is worse than storing a value nobody can use. It is
+	# not: `list_visits` groups on exact value, so a garbled identifier does not
+	# read as a bad row, it reads as a SECOND VISIT — and the rollup somebody
+	# reports off is wrong rather than obviously incomplete.
 	for key in (
 		"signature_file",
 		"completion_narrative",

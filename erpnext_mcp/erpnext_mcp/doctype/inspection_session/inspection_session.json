@@ -176,7 +176,7 @@
    "label": ""
   },
   {
-   "description": "The trip identifier the handset minted when the worker arrived, shared with every Farm Task Assignment closed on the same visit — v0.20.1's `visit_id`. It is how a session and the plain completions filed on the same walk are read as one trip by list_visits.",
+   "description": "The trip identifier the handset minted when the worker arrived, shared with every Farm Task Assignment closed on the same visit — v0.20.1's `visit_id`. It is how a session and the plain completions filed on the same walk are read as one trip by list_visits, so it is checked on the way in: a UUID as 8-4-4-4-12, matched either case, and anything else is refused rather than stored as a visit of its own.",
    "fieldname": "visit_id",
    "fieldtype": "Data",
    "label": "Visit",

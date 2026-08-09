@@ -450,20 +450,62 @@ class TheVisitIdRoundTrips(IdempotencyTestCase):
 		self.assertIsNone(data["visit_id"])
 		self.assertFalse(self.assignment().get("visit_id"))
 
-	def test_its_shape_is_not_validated_in_v0201(self):
-		"""The app mints it. A server with opinions about somebody else's
-		identifier format would refuse a completion over the one field on it that
-		carries no evidence."""
+	def test_a_shape_no_handset_mints_is_refused(self):
+		"""v0.20.1 wrote whatever arrived, because the app's format was not yet
+		confirmed. It is now, and leniency here has one live cost: `list_visits`
+		groups on exact value, so a garbled identifier is not a bad row somebody
+		notices — it is a SECOND VISIT, and the rollup reads as complete."""
 		task = self.a_started_task()
-		data = self.worker_data("complete_task_via_mobile", self.payload(task, visit_id="north-block-am"))
-		self.assertEqual(data["visit_id"], "north-block-am")
+		message = self.worker_error("complete_task_via_mobile", self.payload(task, visit_id="north-block-am"))
+		self.assertIn("north-block-am", message)
+		self.assertIn("8-4-4-4-12", message)
+		self.assertFalse(self.assignment().get("visit_id"))
+
+	def test_a_refused_visit_id_files_no_completion(self):
+		"""The refusal is at the door. A completion half-filed against a rejected
+		identifier would be the reporting hole this check exists to close."""
+		task = self.a_started_task()
+		self.worker_error("complete_task_via_mobile", self.payload(task, visit_id="north-block-am"))
+		self.assertEqual(self.assignment()["state"], "In-Progress")
+		self.assertIsNone(self.assignment().get("completion_signature") or None)
+
+	def test_the_handsets_own_casing_and_the_other_one_both_pass(self):
+		"""iOS mints uppercase. Matching case-insensitively costs nothing and means
+		a second client is not refused over hex casing, which is not the part that
+		has to be right. What is stored is what was sent."""
+		task = self.a_started_task()
+		lower = VISIT.lower()
+		data = self.worker_data("complete_task_via_mobile", self.payload(task, visit_id=lower))
+		self.assertEqual(data["visit_id"], lower)
+
+	def test_whitespace_is_not_an_identifier_and_is_not_an_error(self):
+		"""A blank field on a handset means the client minted none — which is a
+		supported client, not a malformed one. It files outside any visit."""
+		task = self.a_started_task()
+		data = self.worker_data("complete_task_via_mobile", self.payload(task, visit_id="   "))
+		self.assertIsNone(data["visit_id"])
+		self.assertFalse(self.assignment().get("visit_id"))
 
 	def test_it_is_not_part_of_what_makes_a_resubmission_identical(self):
 		"""It groups completions; it does not identify one. A retry from a client
 		that has since re-minted its visit is still that same completion."""
 		task = self.a_started_task()
 		self.worker_data("complete_task_via_mobile", self.payload(task, visit_id=VISIT))
-		again = self.worker_data("complete_task_via_mobile", self.payload(task, visit_id="a-different-one"))
+		again = self.worker_data(
+			"complete_task_via_mobile",
+			self.payload(task, visit_id="A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D"),
+		)
+		self.assertTrue(again["x_idempotent"])
+		self.assertEqual(self.assignment()["visit_id"], VISIT)
+
+	def test_a_replay_is_not_refused_over_its_visit_id(self):
+		"""THE RETRY IS THE CASE THE STRICTNESS MUST NOT BREAK. A queued completion
+		the server already has writes nothing on its second arrival, so there is no
+		column for a bad identifier to corrupt — and refusing it would put back the
+		three-Failed-entries-per-task sync queue that v0.20.1 existed to fix."""
+		task = self.a_started_task()
+		self.worker_data("complete_task_via_mobile", self.payload(task, visit_id=VISIT))
+		again = self.worker_data("complete_task_via_mobile", self.payload(task, visit_id="north-block-am"))
 		self.assertTrue(again["x_idempotent"])
 		self.assertEqual(self.assignment()["visit_id"], VISIT)
 

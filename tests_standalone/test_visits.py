@@ -36,6 +36,15 @@ FIVE CLAIMS
 
 5. **IT WRITES NOTHING.** `TheGuards.test_it_writes_nothing` — a read tool that
    grew a side effect is the failure a read-only claim exists to prevent.
+
+6. **NOTHING BUT AN IDENTIFIER GETS INTO THE COLUMN.** `TheIdentifierIsChecked`.
+   The rollup above is only as good as the grouping key, and every claim on this
+   list is a claim about exact-value grouping: a `visit_id` that is not the UUID
+   the handset mints does not read as a bad row here, it reads as ANOTHER VISIT.
+   That is the failure this suite could not otherwise see — claim 1 still passes
+   while the report is wrong, because the wrong answer has the same shape as the
+   right one. v0.20.1 accepted whatever arrived, deliberately, while the app's
+   format was unconfirmed; it is confirmed now, and the check is at the doors.
 """
 
 import frappe
@@ -349,6 +358,70 @@ class TheGuards(VisitTestCase):
 	def test_the_limit_is_capped_rather_than_taken_on_trust(self):
 		self.a_completed_task(visit_id=MORNING)
 		self.assertEqual(self.tool_data("list_visits", {"limit": 100000})["limit"], 500)
+
+
+class TheIdentifierIsChecked(VisitTestCase):
+	"""Claim 6 — the shapes the grouping key will not take.
+
+	Each of these is a real client bug rather than an invented one: a UUID with
+	its hyphens stripped, one that lost a character on its way through a URL, one
+	still wearing the braces some platforms print, and a human label somebody
+	typed because the field looked like a note. Every one of them would have been
+	stored verbatim before this, and every one would have become its own visit.
+	"""
+
+	#: (what a client did, what arrived)
+	REFUSED = (
+		("hyphens stripped", "5C1F0A642B3D4E5F8A9B0C1D2E3F4A5B"),
+		("a character short", "5C1F0A64-2B3D-4E5F-8A9B-0C1D2E3F4A5"),
+		("a character over", "5C1F0A64-2B3D-4E5F-8A9B-0C1D2E3F4A5BC"),
+		("not hex", "5C1F0A64-2B3D-4E5F-8A9B-0C1D2E3F4A5Z"),
+		("regrouped", "5C1F0A642-B3D-4E5F-8A9B-0C1D2E3F4A5B"),
+		("braces kept", "{5C1F0A64-2B3D-4E5F-8A9B-0C1D2E3F4A5B}"),
+		("something appended", "5C1F0A64-2B3D-4E5F-8A9B-0C1D2E3F4A5B north"),
+		("a label somebody typed", "north-block-am"),
+	)
+
+	def a_started_task(self, title="Habitability walk"):
+		task = self.a_task(task_name=title, evidence_required={"findings_text": True})
+		self.worker_data("claim_task_via_mobile", {"task_name": task["name"]})
+		self.worker_data("start_task_via_mobile", {"task_name": task["name"]})
+		return task["name"]
+
+	def a_completion(self, task, visit_id):
+		return {
+			"task_name": task,
+			"findings_text": "",
+			"evidence": list(A_PHOTO),
+			"visit_id": visit_id,
+		}
+
+	def test_none_of_them_is_accepted_and_the_message_names_the_value(self):
+		"""ONE TASK, EIGHT ATTEMPTS. A refused completion writes nothing at all, so
+		the task is still in the worker's hands and still completable — which is
+		also the shape of the real failure: a handset retrying a bad payload has
+		not lost the work."""
+		task = self.a_started_task()
+		for what, value in self.REFUSED:
+			with self.subTest(what):
+				message = self.worker_error("complete_task_via_mobile", self.a_completion(task, value))
+				self.assertIn(value, message)
+				self.assertIn("8-4-4-4-12", message)
+
+	def test_and_so_none_of_them_becomes_a_visit(self):
+		"""The point of the whole class in one assertion: after eight refusals and
+		one good completion the rollup is ONE trip, not nine."""
+		task = self.a_started_task()
+		for _what, value in self.REFUSED:
+			self.worker_error("complete_task_via_mobile", self.a_completion(task, value))
+		self.assertEqual(self.visits(), [])
+		self.worker_data("complete_task_via_mobile", self.a_completion(task, MORNING))
+		self.assertEqual(self.sole()["visit_id"], MORNING)
+
+	def test_the_identifier_the_handset_mints_still_goes_straight_through(self):
+		"""The check is worth having only if it is invisible to the real client."""
+		self.a_completed_task(visit_id=MORNING, title="Cabin 1")
+		self.assertEqual(self.sole()["visit_id"], MORNING)
 
 
 if __name__ == "__main__":

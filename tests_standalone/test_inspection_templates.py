@@ -524,6 +524,27 @@ class StartingASession(SessionTestCase):
 		session = self.tool_data("start_inspection_session", {"template": name, "location": unit})
 		self.assertEqual(session["location_doctype"], "Housing Unit")
 
+	def test_the_handsets_visit_id_is_carried(self):
+		unit = self.a_camp()
+		session = self.a_session(unit=unit, visit_id="5C1F0A64-2B3D-4E5F-8A9B-0C1D2E3F4A5B")
+		self.assertEqual(session["visit_id"], "5C1F0A64-2B3D-4E5F-8A9B-0C1D2E3F4A5B")
+
+	def test_a_visit_id_no_handset_mints_is_refused_here_too(self):
+		"""A session and the plain completions filed on the same walk are read as
+		ONE trip, and they are read as one by matching this column exactly. A
+		session admitted with a garbled identifier does not join the trip it was
+		part of — it becomes a visit of its own, and `list_visits` reports both as
+		if that were the day's work."""
+		unit = self.a_camp()
+		name = self.a_template()["name"]
+		message = self.tool_error(
+			"start_inspection_session",
+			{"template": name, "location": unit, "visit_id": "north-block-am"},
+		)
+		self.assertIn("north-block-am", message)
+		self.assertIn("8-4-4-4-12", message)
+		self.assertEqual(STORE.rows("Inspection Session"), [])
+
 	def test_a_farm_task_gains_the_link_back(self):
 		"""The task stays the dispatch atom; the session is the form behind it."""
 		unit = self.a_camp()

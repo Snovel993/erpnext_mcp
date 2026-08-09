@@ -67,6 +67,10 @@ WORKER = "e2e-worker@test.local"
 WORKER_NAME = "E2E Worker"
 EMPLOYEE = "EMP-E2E"
 
+#: The trip identifier the handset mints. A UUID because that is what the
+#: doctypes accept — see `args.as_visit_id`.
+VISIT = "3D2C1B0A-9F8E-4D6C-B5A4-938271605F4E"
+
 #: Every switch this walk needs, on. An operator ticks each of these by hand;
 #: listing them here is also the shortest honest statement of what onboarding an
 #: entity and dispatching one inspection actually requires.
@@ -2333,7 +2337,7 @@ class OneVisitReachesTheOSHAPacketAsOneVisit(EndToEndWorkflow):
 				"name": session["name"],
 				"record_date": today,
 				"worker": self.employee,
-				"visit_id": "E2E-VISIT-01",
+				"visit_id": VISIT,
 				"section_submissions": [
 					{
 						"section_name": "Habitability walk",
@@ -2438,7 +2442,7 @@ class OneVisitReachesTheOSHAPacketAsOneVisit(EndToEndWorkflow):
 		listed = self.tool_data("list_inspection_sessions", {"company": COMPANY})
 		self.assertEqual(listed["count"], 1)
 		self.assertEqual(listed["compliance_records_produced"], 2)
-		self.assertEqual(listed["sessions"][0]["visit_id"], "E2E-VISIT-01")
+		self.assertEqual(listed["sessions"][0]["visit_id"], VISIT)
 
 
 class TheWholeSweepSaysWhatItSaidBeforeTheRulesBecameData(EndToEndWorkflow):

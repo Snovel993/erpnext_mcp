@@ -49,7 +49,7 @@ import frappe
 
 from .. import compat, proposals, sessions
 from .. import training as regimes_vocabulary
-from ..args import as_bool, as_date, as_int, as_limit, as_str, resolve_company
+from ..args import as_bool, as_date, as_int, as_limit, as_str, as_visit_id, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 from . import inspections
@@ -635,7 +635,7 @@ def start_inspection_session(args: dict) -> ToolResult:
 	doc.worker = _employee(as_str(args, "worker"), "worker")
 	doc.foreman = _employee(as_str(args, "foreman"), "foreman")
 	doc.company = resolve_company(as_str(args, "company"), required=False)
-	doc.visit_id = as_str(args, "visit_id")
+	doc.visit_id = as_visit_id(args)
 	doc.notes = as_str(args, "notes")
 	doc.state = sessions.STATE_IN_PROGRESS if as_bool(args, "in_progress", True) else sessions.STATE_DRAFT
 	farm_task = as_str(args, "farm_task")
@@ -797,7 +797,7 @@ def submit_inspection_session(args: dict) -> ToolResult:
 	for key, value in (
 		("worker", _employee(as_str(args, "worker"), "worker")),
 		("foreman", _employee(as_str(args, "foreman"), "foreman")),
-		("visit_id", as_str(args, "visit_id")),
+		("visit_id", as_visit_id(args)),
 	):
 		if value and not doc.get(key):
 			doc.set(key, value)

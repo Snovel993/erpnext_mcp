@@ -631,7 +631,10 @@ def complete_task_via_mobile(
 
 	`visit_id` IS THE HANDSET'S, forwarded as sent. It groups the completions of
 	one trip so `list_visits` can report the trip rather than five unrelated
-	tasks, and nothing on this side validates its shape — see the tool wrapper.
+	tasks. Its shape IS checked, one layer down where the column is written: a
+	UUID as 8-4-4-4-12, either case, or the call is refused with the format in
+	the message. Omitting it is not an error — it files the completion outside
+	any visit, which `list_visits` counts separately and says so.
 	"""
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)

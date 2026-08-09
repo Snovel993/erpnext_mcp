@@ -15,6 +15,8 @@ name, because those are three things a model will call "the account" and only
 one of them is the primary key.
 """
 
+import re
+
 import frappe
 
 from . import compat
@@ -34,6 +36,49 @@ def as_str(args: dict, key: str, required: bool = False, default: str = "") -> s
 			raise ToolError(f"{key} is required")
 		return default
 	return str(value).strip()
+
+
+#: The shape of a `visit_id`, confirmed against the iOS app: a UUID, 36
+#: characters, 8-4-4-4-12. The handset mints them uppercase; this matches either
+#: case, because the casing is not the part that has to be right.
+VISIT_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def as_visit_id(args: dict, key: str = "visit_id") -> str:
+	"""A handset's trip identifier, or `""` when the caller minted none.
+
+	WHY THIS IS STRICT WHEN v0.20.1 WAS DELIBERATELY NOT. The old reading was
+	that a server with opinions about somebody else's identifier format would
+	refuse a completion over its least important field, so anything that arrived
+	was written through and anything falsy was dropped. That trade was right only
+	while the format was unknown. Now that it is confirmed, the lenient path has
+	no upside left and one live cost: `list_visits` groups on this column by
+	exact value, so a `visit_id` the handset garbled is not a cosmetic blemish on
+	one row — it silently splits one trip into two, or drops a completion out of
+	the rollup entirely, and the resulting report is WRONG RATHER THAN OBVIOUSLY
+	MISSING. Nobody reading "four cabins" learns that a fifth was closed on that
+	walk.
+
+	Absent, `None` or empty is still no visit, and still not an error: a client
+	that does not mint one is a supported client, and `list_visits` counts those
+	completions separately and says so. Anything else present and unparseable is
+	refused HERE, at the door, where the message can name the value and the shape
+	— rather than accepted into a column somebody reports off a season later.
+	"""
+	raw = args.get(key)
+	if raw is None:
+		return ""
+	visit = str(raw).strip()
+	if not visit:
+		return ""
+	if not VISIT_ID_RE.match(visit):
+		raise ToolError(
+			f"{key} must be a UUID as 8-4-4-4-12 hex characters, e.g. "
+			f"'5C1F0A64-2B3D-4E5F-8A9B-0C1D2E3F4A5B'. Got {str(raw)!r}. Nothing was written — "
+			f"send the identifier the handset minted, or omit it entirely to file this outside "
+			f"any visit."
+		)
+	return visit
 
 
 def as_filter(args: dict, key: str, default: str = "") -> str:
