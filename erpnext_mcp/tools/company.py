@@ -112,6 +112,7 @@ _COMPANY_FIELDS = (
 	"cost_center",
 	"domain",
 	"date_of_establishment",
+	"company_logo",
 	"creation",
 )
 
@@ -628,7 +629,7 @@ def _ensure_fiscal_year(name: str, start: str, end: str, company: str) -> None:
 
 # ── 98. update_company ──────────────────────────────────────────────────────
 def update_company(args: dict) -> ToolResult:
-	"""Change a company's country, tax id or description. Refuses the three that re-key books."""
+	"""Change a company's country, tax id, description or logo. Refuses the three that re-key books."""
 	company = as_str(args, "company", required=True)
 	if not frappe.db.exists("Company", company):
 		match = frappe.db.get_value("Company", {"abbr": company}, "name")
@@ -702,10 +703,15 @@ def update_company(args: dict) -> ToolResult:
 			)
 		_stage(changes, unchanged, row, "company_description", as_str(args, "notes"))
 
+	if "company_logo" in args:
+		if not compat.has_field("Company", "company_logo"):
+			raise ToolError("this ERPNext's Company has no company_logo field. Nothing was changed.")
+		_stage(changes, unchanged, row, "company_logo", _file_url(as_str(args, "company_logo")))
+
 	if not changes and not unchanged:
 		raise ToolError(
-			"nothing to change. This tool takes country, tax_id, notes and — only on a company "
-			"with no postings — default_currency."
+			"nothing to change. This tool takes country, tax_id, notes, company_logo and — only "
+			"on a company with no postings — default_currency."
 		)
 
 	if changes:
@@ -740,6 +746,30 @@ def _stage(changes: dict, unchanged: list, row: dict, field: str, wanted: str) -
 		unchanged.append(field)
 	else:
 		changes[field] = [before, wanted]
+
+
+def _file_url(value: str) -> str:
+	"""A value for an Attach Image field, or a refusal naming the tool that produces one.
+
+	AN ATTACH FIELD HOLDS A URL ON THIS SITE, NOT A PATH ON THE CALLER'S DISK.
+	The two look alike enough that `/Users/me/logo.jpg` would be stored without
+	complaint and render as a broken image on every badge and print format that
+	reads it — a failure nobody sees until something is printed. The site's own
+	File records live under /files or /private/files, so anything else is either
+	a local path or a bare filename, and both mean the file was never uploaded.
+	A full http(s) URL is allowed: ERPNext accepts one, and a logo served from a
+	CDN is a deliberate choice rather than a mistake.
+	"""
+	if not value:
+		return ""
+	if value.startswith(("/files/", "/private/files/", "http://", "https://")):
+		return value
+	raise ToolError(
+		f"{value!r} is not a file URL on this site. company_logo holds the URL of a file "
+		"already uploaded here — '/files/…', '/private/files/…' or a full http(s) URL — not a "
+		"path on your own machine. Upload it with attach_file_to_document and pass the file_url "
+		"it returns. Nothing was changed."
+	)
 
 
 def _redact(field: str, value):

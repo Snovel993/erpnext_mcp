@@ -4439,7 +4439,7 @@ TOOLS = {
 	),
 	"update_company": _tool(
 		company.update_company,
-		"MUTATING (default OFF). Change a company's country, tax id, notes — and its "
+		"MUTATING (default OFF). Change a company's country, tax id, notes, logo — and its "
 		"default currency, but ONLY while it has no posted GL entries. Every change "
 		"is echoed as before → after, with the tax id redacted to its last four.\n\n"
 		"REFUSES THREE THINGS AND SAYS WHY. The abbreviation and the company name, "
@@ -4455,6 +4455,12 @@ TOOLS = {
 			"country": _field(_STRING, "New country."),
 			"tax_id": _field(_STRING, "New EIN. Empty string clears it."),
 			"notes": _field(_STRING, "New description. Empty string clears it."),
+			"company_logo": _field(
+				_STRING,
+				"URL of a file already on this site — '/files/…', '/private/files/…' or a full "
+				"http(s) URL. Upload with attach_file_to_document first and pass the file_url it "
+				"returns; a path on your own machine is refused. Empty string clears it.",
+			),
 			"default_currency": _field(
 				_STRING, "New ISO code. Refused outright once anything has been posted."
 			),

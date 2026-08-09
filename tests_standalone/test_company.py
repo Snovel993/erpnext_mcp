@@ -352,6 +352,34 @@ class UpdateCompany(CompanyTestCase):
 		self.assertIn("create_fiscal_year", error)
 		self.assertIn("same days", error)
 
+	def test_it_sets_the_company_logo_to_a_file_url(self):
+		"""The second half of attach-then-point: the file is uploaded with
+		attach_file_to_document, and this is what makes it the logo."""
+		data = self.tool_data(
+			"update_company", {"company": MAIN, "company_logo": "/private/files/orchard-logo.jpg"}
+		)
+		self.assertEqual(data["changed"]["company_logo"], ["", "/private/files/orchard-logo.jpg"])
+		self.assertEqual(STORE.get_raw("Company", MAIN)["company_logo"], "/private/files/orchard-logo.jpg")
+
+	def test_a_public_file_url_is_accepted_too(self):
+		data = self.tool_data("update_company", {"company": MAIN, "company_logo": "/files/mark.png"})
+		self.assertEqual(data["changed"]["company_logo"][1], "/files/mark.png")
+
+	def test_an_empty_company_logo_clears_it(self):
+		STORE.tables["Company"][MAIN]["company_logo"] = "/files/mark.png"
+		data = self.tool_data("update_company", {"company": MAIN, "company_logo": ""})
+		self.assertEqual(data["changed"]["company_logo"], ["/files/mark.png", ""])
+		self.assertFalse(STORE.get_raw("Company", MAIN)["company_logo"])
+
+	def test_a_path_on_the_callers_own_disk_is_refused_and_names_the_upload_tool(self):
+		"""A local path stores without complaint and renders as a broken image on
+		every badge — the failure would not surface until something is printed."""
+		error = self.tool_error(
+			"update_company", {"company": MAIN, "company_logo": "/Users/me/Desktop/logo.jpg"}
+		)
+		self.assertIn("attach_file_to_document", error)
+		self.assertFalse(STORE.get_raw("Company", MAIN).get("company_logo"))
+
 	def test_an_unknown_company_is_refused(self):
 		error = self.tool_error("update_company", {"company": "Nowhere LLC", "country": "Canada"})
 		self.assertIn("no Company called", error)

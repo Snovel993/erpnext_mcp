@@ -149,6 +149,7 @@ ERPNEXT_SCHEMA = {
 		"is_group",
 		"tax_id",
 		"cost_center",
+		"company_logo",
 		# The default-account fields `set_company_defaults` writes. Listed here
 		# rather than invented per test, because the tool asks the site whether
 		# each one exists and a fixture that answered "yes" to everything would
