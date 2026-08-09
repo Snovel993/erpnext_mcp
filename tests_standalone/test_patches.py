@@ -28,6 +28,7 @@ import unittest
 from erpnext_mcp import install, settings
 from erpnext_mcp.patches import (
 	backfill_completion_signatures,
+	fix_literal_newlines_in_instructions,
 	migrate_declarative_rules,
 	migrate_training_types,
 	recompute_2026_dependents_credit,
@@ -50,6 +51,10 @@ PATCHES = (
 	("erpnext_mcp.patches.migrate_declarative_rules", migrate_declarative_rules),
 	("erpnext_mcp.patches.repoint_producer_task_template", repoint_producer_task_template),
 	("erpnext_mcp.patches.recompute_2026_dependents_credit", recompute_2026_dependents_credit),
+	(
+		"erpnext_mcp.patches.fix_literal_newlines_in_instructions",
+		fix_literal_newlines_in_instructions,
+	),
 )
 
 
@@ -224,6 +229,110 @@ class TheRegressionItself(FreshSite):
 		stored = STORE.singles.get(settings.SETTINGS_DOCTYPE) or {}
 		self.assertEqual(stored.get("allow_list_fields"), "1")
 		self.assertEqual(stored.get("allow_set_field_boundary"), "0")
+
+
+class TheLiteralNewlineFix(FreshSite):
+	"""A worker reading instructions on the phone saw `Step 1\\nStep 2` instead
+	of two lines, because whatever wrote the template sent the two-character
+	escape sequence instead of a real line break. This is the fix, exercised
+	against both the template and a task already snapshotted from a bad one."""
+
+	def test_a_literal_backslash_n_in_template_instructions_becomes_a_real_newline(self):
+		STORE.seed(
+			"Farm Task Template",
+			[
+				{
+					"name": "Bad Template",
+					"template_name": "Bad Template",
+					"task_type": "Harvest",
+					"instructions": "Step 1\\nStep 2",
+					"evidence_required": "{}",
+				}
+			],
+		)
+		fix_literal_newlines_in_instructions.execute()
+		self.assertEqual(
+			frappe.db.get_value("Farm Task Template", "Bad Template", "instructions"),
+			"Step 1\nStep 2",
+		)
+
+	def test_a_literal_backslash_n_in_task_notes_becomes_a_real_newline(self):
+		"""A task already snapshotted from a bad template needs fixing too — a
+		worker looking at THIS task right now cannot wait for a re-snapshot that
+		may never happen."""
+		STORE.seed(
+			"Farm Task",
+			[
+				{
+					"name": "Bad Task",
+					"task_name": "Bad Task",
+					"task_type": "Harvest",
+					"state": "In-Progress",
+					"notes": "Step 1\\nStep 2",
+					"evidence_required": "{}",
+				}
+			],
+		)
+		fix_literal_newlines_in_instructions.execute()
+		self.assertEqual(frappe.db.get_value("Farm Task", "Bad Task", "notes"), "Step 1\nStep 2")
+
+	def test_a_real_newline_is_left_alone(self):
+		"""Nothing to fix here — a value with no literal escape sequence must
+		not be touched, or every already-correct template gets rewritten for
+		no reason on every migrate."""
+		STORE.seed(
+			"Farm Task Template",
+			[
+				{
+					"name": "Good Template",
+					"template_name": "Good Template",
+					"task_type": "Harvest",
+					"instructions": "Step 1\nStep 2",
+					"evidence_required": "{}",
+				}
+			],
+		)
+		fix_literal_newlines_in_instructions.execute()
+		self.assertEqual(
+			frappe.db.get_value("Farm Task Template", "Good Template", "instructions"),
+			"Step 1\nStep 2",
+		)
+
+	def test_an_empty_instructions_field_is_skipped_without_raising(self):
+		STORE.seed(
+			"Farm Task Template",
+			[
+				{
+					"name": "Empty Template",
+					"template_name": "Empty Template",
+					"task_type": "Harvest",
+					"instructions": "",
+					"evidence_required": "{}",
+				}
+			],
+		)
+		fix_literal_newlines_in_instructions.execute()  # must not raise
+		self.assertEqual(
+			frappe.db.get_value("Farm Task Template", "Empty Template", "instructions"), ""
+		)
+
+	def test_running_it_twice_only_reports_the_row_once(self):
+		STORE.seed(
+			"Farm Task Template",
+			[
+				{
+					"name": "Bad Template",
+					"template_name": "Bad Template",
+					"task_type": "Harvest",
+					"instructions": "Step 1\\nStep 2",
+					"evidence_required": "{}",
+				}
+			],
+		)
+		first = fix_literal_newlines_in_instructions.unescape_literal_newlines()
+		second = fix_literal_newlines_in_instructions.unescape_literal_newlines()
+		self.assertEqual(len(first["fixed"]), 1)
+		self.assertEqual(len(second["fixed"]), 0)
 
 
 class EveryLinkTargetExists(unittest.TestCase):

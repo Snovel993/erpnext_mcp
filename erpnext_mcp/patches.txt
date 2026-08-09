@@ -10,3 +10,4 @@ erpnext_mcp.patches.backfill_completion_signatures
 erpnext_mcp.patches.migrate_declarative_rules
 erpnext_mcp.patches.repoint_producer_task_template
 erpnext_mcp.patches.recompute_2026_dependents_credit
+erpnext_mcp.patches.fix_literal_newlines_in_instructions

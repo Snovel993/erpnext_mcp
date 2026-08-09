@@ -3,6 +3,22 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.51.2 — 2026-08-08
+
+**A template written with a literal backslash-n instead of a line break stayed
+a literal backslash-n all the way to the phone.** `create_farm_task_template`
+and `update_farm_task_template` store `instructions` byte-for-byte —
+`.strip()` and nothing else — and `task_templates.snapshot()` copies whatever
+is there straight onto `Farm Task.notes` for every task raised from that
+template. SwiftUI's `Text` renders a real newline as a line break but a
+literal `\n` as two visible characters, so a worker read "Step 1\nStep 2"
+instead of two lines. `fix_literal_newlines_in_instructions` finds every
+`Farm Task Template.instructions` and `Farm Task.notes` value carrying the
+literal sequence and replaces it with a real newline — templates and the
+tasks already snapshotted from them, so a worker looking at a task right now
+does not wait on a re-snapshot that may never happen. Idempotent: a value
+with no literal sequence is left alone.
+
 ## 0.51.1 — 2026-08-08
 
 **A badge QR is not a login QR, and it was being drawn like one.** `qr.render`
