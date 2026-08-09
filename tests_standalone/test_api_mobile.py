@@ -253,6 +253,16 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 
+	#: v0.52.0. `get_active_model` / `get_model_file_chunk` ship server-side
+	#: ahead of the client that will call them — `ModelDownloadService.swift`'s
+	#: own header still says "ERPNext's MCP server is only reachable by Claude
+	#: tooling, not by the iOS app at runtime", which is exactly the
+	#: assumption this route removes, and the Swift-side cutover from querying
+	#: Volume Vision directly to calling this route is separate, tracked work.
+	#: Listed by name, not folded into MOBILE, so this file does not claim
+	#: `MobileAPI.swift` names them until it actually does.
+	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {"get_active_model", "get_model_file_chunk"}
+
 	def _whitelisted(self, module):
 		return {
 			name
@@ -261,7 +271,7 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		}
 
 	def test_the_mobile_module_publishes_exactly_the_ten_the_app_calls(self):
-		self.assertEqual(self._whitelisted(mobile_api), self.MOBILE)
+		self.assertEqual(self._whitelisted(mobile_api) - self.PENDING_IOS_INTEGRATION, self.MOBILE)
 
 	def test_the_files_module_publishes_exactly_the_two_the_app_calls(self):
 		self.assertEqual(self._whitelisted(files_api), self.FILES)

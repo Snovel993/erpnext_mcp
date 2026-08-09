@@ -88,6 +88,7 @@ from .. import bucket_bridge, compat
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signers, w4
 from ..tools import employee as personnel
+from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
 from . import guard, shape
 
@@ -95,6 +96,7 @@ FARM_TASK = "Farm Task"
 FARM_TASK_ASSIGNMENT = "Farm Task Assignment"
 EMPLOYEE = "Employee"
 FARM_SHIFT = "Farm Shift"
+ML_MODEL = "ML Model"
 
 #: Most bucket captures one sync call carries. `tools/bucket_log.BATCH_CAP` is
 #: the tool's own limit and is read rather than restated, so a phone and a Desk
@@ -408,6 +410,22 @@ def _crew(raw, allowed: list) -> list:
 			row["joined_at"] = joined
 		out.append(row)
 	return out
+
+
+def _model_docname(model) -> str:
+	"""`model` resolved to an ML Model docname before `guard.require_scoped_doc`
+	checks it, so a phone naming the `uuid` off its own cached manifest — which
+	is `source_uuid`, not a docname, see `model_registry.build_model_manifest`
+	— still resolves to something the scoping check can run against.
+
+	A value that resolves to nothing is returned unchanged: `require_scoped_doc`
+	then does its own `frappe.db.exists` and answers the same 404 it would for
+	any other docname nobody has heard of.
+	"""
+	value = str(model or "").strip()
+	if not value or frappe.db.exists(ML_MODEL, value):
+		return value
+	return str(frappe.db.get_value(ML_MODEL, {"source_uuid": value}, "name") or value)
 
 
 # ── 1. get_current_user_context ─────────────────────────────────────────────
@@ -2358,3 +2376,53 @@ def attach_onboarding_document(user: str, employee=None, docname=None, file_toke
 		"is_private": data.get("is_private"),
 		"already_attached": data.get("already_attached"),
 	}
+
+
+# ── 41. get_active_model ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_active_model", limit=guard.READ_LIMIT)
+def get_active_model(user: str, company=None, piecework_activity=None) -> dict:
+	"""Which ML model is deployed for one piecework activity, and its manifest.
+
+	v0.52.0. THE MODEL BINARY IS NOT IN THIS ANSWER — `get_model_file_chunk` is
+	the second call, made only when the manifest's `uuid` no longer matches
+	whatever this app already has cached on disk. `manifest.metadata.downloadable`
+	says whether that second call has anything to read yet; when it does not,
+	the model is registered but `attach_model_file` has not run on this site.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+	activity = str(piecework_activity or "").strip()
+	if not activity:
+		frappe.throw("piecework_activity is required.", frappe.ValidationError)
+
+	result = ml_model_tools.get_active_model({"company": wanted, "piecework_activity": activity})
+	return result.data
+
+
+# ── 42. get_model_file_chunk ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("get_model_file_chunk", limit=guard.UPLOAD_LIMIT)
+def get_model_file_chunk(user: str, model=None, chunk_index=None, chunk_bytes=None) -> dict:
+	"""One base64 slice of an ML model's binary, in the same shape FarmOpsKit
+	already streams uploads in.
+
+	v0.52.0, AND THE WHOLE POINT OF THIS RELEASE: an iOS app reads the model
+	back from HERE, through the credential it already holds, rather than
+	opening a second connection to Volume Vision with a second credential —
+	see `tools/ml_model.py`'s module docstring.
+
+	`model` NAMES AN ML Model RECORD, SCOPED THE SAME WAY A TASK IS. A phone's
+	own cache is keyed on `uuid` from get_active_model's manifest, which is
+	`source_uuid` rather than a docname when this model came from Volume
+	Vision — `_model_docname` resolves that spelling before
+	`guard.require_scoped_doc` refuses one that belongs to an entity this
+	caller cannot reach as not found, same as any other docname argument here.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(ML_MODEL, _model_docname(model), "model", allowed)
+
+	result = ml_model_tools.get_model_file_chunk(
+		{"model": name, "chunk_index": chunk_index, "chunk_bytes": chunk_bytes}
+	)
+	return result.data

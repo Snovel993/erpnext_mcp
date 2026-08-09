@@ -192,6 +192,14 @@ ROUTES = (
 	# `finalize_staged_file` commits evidence unattached on purpose; this is the
 	# scoped call that files it against the Employee it belongs to.
 	Route("/mobile", mobile_api.attach_onboarding_document),
+	# v0.52.0. Models served from ERPNext, not Volume Vision directly:
+	# `get_active_model` is what BucketLog/Farm Ops asks to find out which
+	# model is deployed, `get_model_file_chunk` is how it then reads the
+	# binary back — through the same door and the same credential as every
+	# other call on this surface, rather than a second connection to Volume
+	# Vision.
+	Route("/mobile", mobile_api.get_active_model),
+	Route("/mobile", mobile_api.get_model_file_chunk),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

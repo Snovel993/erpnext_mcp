@@ -3,6 +3,27 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.52.0 — 2026-08-08
+
+**Models are served from ERPNext, not Volume Vision directly.** Through
+0.51.1 an ML Model record said which model was deployed and where it was
+trained, and `ModelDownloadService` on iOS read `source_server` off the
+manifest to query Volume Vision's own `/api/sync/models/...` endpoints and
+pull the binary from there — a second connection, with a second credential,
+that this app's farmops-api sidecar exists specifically to not need.
+`attach_model_file` is the new tool that gives an ML Model record the binary
+itself: a File docname already staged through `stage_file_chunk`/
+`commit_staged_file` for anything too large for one call, or base64 in the
+call for anything small — stored as `model_file`, a plain Attach field.
+`get_model_file_chunk` reads it back, base64, in the same chunked shape
+`stage_file_chunk` already takes uploads in, and refuses **by name** when
+nothing has been attached yet rather than reaching for `source_server` on a
+caller's behalf. Both are now reachable at `/farmops/api/mobile/`
+(`get_active_model`, `get_model_file_chunk`) through the same
+`X-FarmOps-Token` door every other mobile call uses. The iOS-side cutover —
+`ModelDownloadService` calling this route instead of Volume Vision — is
+separate, tracked work; nothing in `fafo_ios` calls it yet.
+
 ## 0.51.2 — 2026-08-08
 
 **A template written with a literal backslash-n instead of a line break stayed

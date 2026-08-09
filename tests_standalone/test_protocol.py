@@ -757,10 +757,18 @@ class Catalogue(SeededTestCase):
 		a badge — `generate_employee_badge_qr` and `generate_employee_badge_sheet`
 		— which nothing in this app did before: `link_badge_to_employee` recorded
 		a string somebody else had printed.
+
+		v0.52.0 ADDED TWO — one read, one write — so an ML Model record can own
+		its binary and serve it from ERPNext instead of an iOS app reaching
+		Volume Vision directly. `attach_model_file` is the write: an operator
+		uploads the model once, straight or through the staged-chunk machinery
+		for anything too large for one call. `get_model_file_chunk` is the read
+		that serves it back, base64, in the same chunked shape `stage_file_chunk`
+		already takes uploads in.
 		"""
-		self.assertEqual(len(registry.TOOLS), 389)
-		self.assertEqual(len(registry.READ_TOOLS), 178)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 211)
+		self.assertEqual(len(registry.TOOLS), 391)
+		self.assertEqual(len(registry.READ_TOOLS), 179)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 212)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

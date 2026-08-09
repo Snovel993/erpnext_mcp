@@ -448,11 +448,13 @@
   "allow_get_model",
   "allow_list_models",
   "allow_get_active_model",
+  "allow_get_model_file_chunk",
   "ml_model_write_section",
   "allow_register_model",
   "allow_update_model",
   "allow_activate_model",
   "allow_deprecate_model",
+  "allow_attach_model_file",
   "bucket_log_read_section",
   "allow_list_bucket_entries",
   "allow_get_bucket_session",
@@ -3423,6 +3425,13 @@
    "label": "Get Active Model"
   },
   {
+   "default": "1",
+   "description": "READ. One base64 slice of an ML Model's attached binary — the same shape stage_file_chunk takes, read backwards. Refuses by name when attach_model_file has not run yet.",
+   "fieldname": "allow_get_model_file_chunk",
+   "fieldtype": "Check",
+   "label": "Get Model File Chunk"
+  },
+  {
    "fieldname": "ml_model_write_section",
    "fieldtype": "Section Break",
    "label": "ML Model Registry — Write"
@@ -3454,6 +3463,13 @@
    "fieldname": "allow_deprecate_model",
    "fieldtype": "Check",
    "label": "Deprecate Model"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Gives an ML Model record the binary an iOS app pulls — the upload-once step that lets get_model_file_chunk serve it from ERPNext instead of an app reaching Volume Vision directly.",
+   "fieldname": "allow_attach_model_file",
+   "fieldtype": "Check",
+   "label": "Attach Model File"
   },
   {
    "fieldname": "bucket_log_read_section",

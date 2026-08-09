@@ -12588,6 +12588,54 @@ TOOLS = {
 		available=_needs_doctype("ML Model"),
 		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	# ── v0.52.0: ML Model file serving — ERPNext, not Volume Vision ────────
+	"attach_model_file": _tool(
+		ml_model.attach_model_file,
+		"MUTATING (default OFF). Give an ML Model record the binary an iOS app "
+		"pulls — the upload-once step that lets get_model_file_chunk serve it "
+		"from ERPNext instead of an app reaching Volume Vision directly.\n\n"
+		"EXACTLY ONE OF file_token OR file_content. file_token is a File "
+		"docname already on this site — what commit_staged_file "
+		"(stage_file_chunk/commit_staged_file, attach_to_doctype='ML Model') "
+		"hands back after a large binary went up in pieces, which is the path "
+		"any real .mlmodelc should take. file_content is base64 in the call "
+		"itself, for something small enough to fit one argument.\n\n"
+		"RE-ATTACHING REPLACES model_file; the previous File is left on the "
+		"site rather than deleted.",
+		{
+			"model": _field(_STRING, "REQUIRED. By docname or model_name."),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"file_token": _field(_STRING, "A File docname already on this site — see commit_staged_file."),
+			"file_content": _field(_STRING, "The model's bytes, base64. Small files only — see the ceiling."),
+			"file_name": _field(_STRING, "Required alongside file_content. Ignored with file_token."),
+		},
+		required=("model",),
+		mutating=True,
+		title="Attach a model file",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_model_file_chunk": _tool(
+		ml_model.get_model_file_chunk,
+		"One base64 slice of an ML Model's attached binary — the same shape "
+		"stage_file_chunk takes, read backwards. chunk_index counts from 0; a "
+		"caller that does not know total_chunks yet asks for index 0 and reads "
+		"it off the answer. Refuses by name when attach_model_file has not run "
+		"yet, rather than reaching for source_server on the caller's behalf. "
+		"Read-only.",
+		{
+			"model": _field(_STRING, "REQUIRED. By docname, model_name, or source_uuid."),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"chunk_index": _field(_INTEGER, "REQUIRED. Counts from 0."),
+			"chunk_bytes": _field(_INTEGER, "Raw bytes per piece, before base64. Capped at 512 KB."),
+		},
+		required=("model", "chunk_index"),
+		title="Get a model file chunk",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	# ── v0.44.0: BucketLog → ERPNext Piecework Bridge ──────────────────────
 	"sync_bucket_entries": _tool(
 		bucket_log.sync_bucket_entries,

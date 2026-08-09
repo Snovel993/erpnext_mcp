@@ -24,8 +24,8 @@ THREE CLAIMS, ONE CLASS EACH, PLUS THE REGISTRATION ITSELF.
    found to be Active — no existing Active model, an unrelated one, and the
    candidate's own record are all "not a conflict"; the true collision names
    what it would supersede.
-4. `ToolRegistration` — the seven tools exist in `registry.TOOLS`, split three
-   read / four write the way the release describes, and the registry's total
+4. `ToolRegistration` — the nine tools exist in `registry.TOOLS`, split four
+   read / five write the way the release describes, and the registry's total
    counts reflect them.
 """
 
@@ -241,10 +241,16 @@ class CheckingConflicts(unittest.TestCase):
 
 
 class ToolRegistration(unittest.TestCase):
-	"""Seven tools, three reads and four writes, wired into the catalogue."""
+	"""Nine tools, four reads and five writes, wired into the catalogue."""
 
-	READ_TOOLS = ("get_model", "list_models", "get_active_model")
-	MUTATING_TOOLS = ("register_model", "update_model", "activate_model", "deprecate_model")
+	READ_TOOLS = ("get_model", "list_models", "get_active_model", "get_model_file_chunk")
+	MUTATING_TOOLS = (
+		"register_model",
+		"update_model",
+		"activate_model",
+		"deprecate_model",
+		"attach_model_file",
+	)
 
 	def setUp(self):
 		from erpnext_mcp import registry
@@ -269,26 +275,21 @@ class ToolRegistration(unittest.TestCase):
 				self.assertIn(name, self.registry.MUTATING_TOOLS)
 				self.assertIn("MUTATING", self.registry.TOOLS[name]["description"])
 
-	def test_none_of_the_seven_are_on_by_default(self):
+	def test_none_of_the_five_are_on_by_default(self):
 		"""Mutating tools default off is the whole point of the switch — none of
-		these four belong in registry.DEFAULT_ON_MUTATING_TOOLS."""
+		these five belong in registry.DEFAULT_ON_MUTATING_TOOLS."""
 		for name in self.MUTATING_TOOLS:
 			with self.subTest(tool=name):
 				self.assertNotIn(name, self.registry.DEFAULT_ON_MUTATING_TOOLS)
 
-	def test_the_registry_totals_include_the_seven(self):
-		# 369/170/199 as of v0.43.0, plus v0.44.0's eight BucketLog bridge tools
-		# (five read, three write) — see test_bucket_bridge.py's ToolRegistration —
-		# plus v0.46.2's `get_employee`, one more read, plus v0.47.0's
-		# `reverify_i9`, one more write, plus v0.47.1's `render_i9_pdf` and
-		# `attach_signed_i9` — two more writes, and no more reads — plus
-		# v0.48.0's authorized signer roster (one read, three writes) and
-		# `render_w4_pdf`, a fourth write, plus v0.50.0's badge trio —
-		# `resolve_badge` (read) and the two issuers `generate_employee_badge_qr`
-		# and `generate_employee_badge_sheet` (writes), see test_badges.py.
-		self.assertEqual(len(self.registry.TOOLS), 389)
-		self.assertEqual(len(self.registry.READ_TOOLS), 178)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 211)
+	def test_the_registry_totals_include_the_nine(self):
+		# 389/178/211 as of v0.51.1, plus v0.52.0's `attach_model_file` (write)
+		# and `get_model_file_chunk` (read) — the file-serving pair that lets
+		# ERPNext hand an iOS app the model binary itself instead of the model
+		# only ever pointing at where Volume Vision keeps it.
+		self.assertEqual(len(self.registry.TOOLS), 391)
+		self.assertEqual(len(self.registry.READ_TOOLS), 179)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 212)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 389 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 391 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 178 read tools are **on** by default and can be switched off individually. A
+All 179 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -9069,6 +9069,45 @@ one company and one piecework activity:
 Returns the full record and its manifest when a model is Active; a clear
 `"active": false` result — **not an error** — when none is, so a scanning app
 polling at startup does not have to treat "nothing deployed yet" as a failure.
+
+---
+
+## v0.52.0 — ML Model File Serving
+
+Two tools. Through v0.51.1 an ML Model record said which model was deployed and
+where it was trained, and an iOS app read `source_server` off the manifest to
+pull the binary from Volume Vision directly. This release lets ERPNext own and
+serve the binary itself, so a phone reads it back through the same
+`X-FarmOps-Token` door — the farmops-api sidecar — it already authenticates
+every other call through, instead of opening a second connection to Volume
+Vision with a second credential.
+
+### `attach_model_file`
+
+```json
+{"model": "MLM-2026-0001", "file_token": "f7a2c8e1b3"}
+```
+
+**MUTATING (default OFF).** Gives an ML Model record the binary — the
+upload-once step that lets `get_model_file_chunk` serve it afterward. Exactly
+one of `file_token` (a File docname already on the site — what
+`commit_staged_file`, `tools/uploads.py`, hands back after a large binary went
+up in pieces) or `file_content` (base64 in the call itself, for something
+small) is required. Re-attaching **replaces** `model_file`; the previous File
+is left on the site rather than deleted.
+
+### `get_model_file_chunk`
+
+```json
+{"model": "MLM-2026-0001", "chunk_index": 0}
+```
+
+Read-only. One base64 slice of the attached binary — the same shape
+`stage_file_chunk` takes uploads in, read backwards. `chunk_index` counts from
+0; a caller that does not know `total_chunks` yet asks for index 0 and reads it
+off the answer. Refuses **by name** when `attach_model_file` has not run yet,
+rather than reaching for `source_server` on the caller's behalf — there is no
+proxy back to Volume Vision here, deliberately.
 
 ---
 

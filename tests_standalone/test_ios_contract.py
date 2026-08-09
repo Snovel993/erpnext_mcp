@@ -69,6 +69,7 @@ from erpnext_mcp.tools import badges as badges_tool
 from .fixtures import MAIN, MAIN_ABBR, install_hrms
 from .harness import STORE, set_roles
 from .test_api_mobile import WORKER, MobileAPITestCase
+from .test_api_mobile import TheSurfaceIsClosed as _MobileSurface
 
 #: Frappe's own timestamp renderings, from `FrappeDate.formatters` +
 #: `ISO8601DateFormatter` in `LenientDecoding.swift:70-85`. A date the app cannot
@@ -2593,8 +2594,14 @@ class TheContractIsComplete(ContractTestCase):
 		}
 
 	def test_every_published_method_has_a_mirror_test(self):
+		# v0.52.0's model-serving pair is exempted for the same reason
+		# `test_api_mobile.TheSurfaceIsClosed` excludes it from MOBILE — see
+		# `PENDING_IOS_INTEGRATION` there. There is no Swift Codable to
+		# transcribe yet because nothing in `fafo_ios` calls this route yet;
+		# writing a "mirror" here would invent the contract rather than copy
+		# one that exists.
 		published = self._published(mobile_api) | self._published(files_api)
-		missing = published - set(self.COVERED)
+		missing = published - set(self.COVERED) - _MobileSurface.PENDING_IOS_INTEGRATION
 		self.assertEqual(
 			missing,
 			set(),

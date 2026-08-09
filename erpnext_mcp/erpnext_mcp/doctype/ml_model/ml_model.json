@@ -3,7 +3,7 @@
  "allow_rename": 0,
  "autoname": "",
  "creation": "2026-08-06 09:00:00.000000",
- "description": "One trained model Volume Vision produced, and the one fact Volume Vision has no reason to hold: whether it is the model an iOS app should be pulling right now for one company and one piecework activity. get_active_model is what a scanning app queries to find out; activate_model is what moves the flag, and it auto-deprecates whichever model held it before — only one model per (company, piecework_activity) is ever Active at a time.",
+ "description": "One trained model Volume Vision produced, and the one fact Volume Vision has no reason to hold: whether it is the model an iOS app should be pulling right now for one company and one piecework activity. get_active_model is what a scanning app queries to find out; activate_model is what moves the flag, and it auto-deprecates whichever model held it before — only one model per (company, piecework_activity) is ever Active at a time. attach_model_file gives a record the binary itself, uploaded once from Volume Vision; get_model_file_chunk is how an iOS app then reads it back from ERPNext rather than from Volume Vision directly.",
  "doctype": "DocType",
  "editable_grid": 0,
  "engine": "InnoDB",
@@ -22,6 +22,8 @@
   "source_col",
   "model_kind",
   "model_format",
+  "storage_section",
+  "model_file",
   "taxonomy_section",
   "taxonomy_schema",
   "taxonomy_version",
@@ -142,6 +144,18 @@
    "options": "CoreML\nONNX\nTensorFlow\nOther"
   },
   {
+   "fieldname": "storage_section",
+   "fieldtype": "Section Break",
+   "label": "Model File"
+  },
+  {
+   "description": "The compiled model binary this record owns, uploaded once via attach_model_file (from Volume Vision or elsewhere) and served from ERPNext after — get_model_file_chunk is what an iOS app reads it back through. Empty until attach_model_file has run. Set programmatically; there is nothing to type here.",
+   "fieldname": "model_file",
+   "fieldtype": "Attach",
+   "label": "Model File",
+   "read_only": 1
+  },
+  {
    "fieldname": "taxonomy_section",
    "fieldtype": "Section Break",
    "label": "Taxonomy"
@@ -216,7 +230,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-06 09:00:00.000000",
+ "modified": "2026-08-08 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ML Model",

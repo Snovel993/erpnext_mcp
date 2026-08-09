@@ -185,6 +185,11 @@ def build_model_manifest(model_doc: dict) -> dict:
             "metrics": metrics_of(model_doc),
             "file_size_bytes": model_doc.get("file_size_bytes"),
             "source_server": model_doc.get("source_server"),
+            # v0.52.0. Whether get_model_file_chunk has something to serve. An
+            # iOS app checks this before ever asking for a chunk rather than
+            # discovering "not attached yet" on the first read call — and,
+            # deliberately, before it would ever fall back to source_server.
+            "downloadable": bool(_clean(model_doc.get("model_file"))),
             "deployment_targets": model_doc.get("deployment_targets"),
             "status": model_doc.get("status"),
             "deployed_at": model_doc.get("deployed_at"),

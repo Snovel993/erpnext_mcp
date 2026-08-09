@@ -201,6 +201,9 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# absence sent the wizard's evidence to a Frappe path the funnel strips
 		# the credential from.
 		"/mobile/attach_onboarding_document",
+		# v0.52.0 — models served from ERPNext, not Volume Vision directly.
+		"/mobile/get_active_model",
+		"/mobile/get_model_file_chunk",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}
