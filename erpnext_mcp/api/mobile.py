@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The thirty methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The forty-eight methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -88,6 +88,7 @@ from .. import bucket_bridge, compat
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signers, w4
 from ..tools import employee as personnel
+from ..tools import housing as housing_tools
 from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
 from ..tools import wallet as wallet_tools
@@ -98,6 +99,29 @@ FARM_TASK_ASSIGNMENT = "Farm Task Assignment"
 EMPLOYEE = "Employee"
 FARM_SHIFT = "Farm Shift"
 ML_MODEL = "ML Model"
+HOUSING_UNIT = "Housing Unit"
+
+#: The four HR masters the wizard's Assignment step offers as dropdowns, mapped
+#: to the field on each that carries a human label. `Branch` has no second
+#: column at all on a stock Frappe HR — the docname IS the branch name — which
+#: is why the value here may be empty and `label` falls back to the docname.
+REFERENCE_MASTERS = (
+	("branches", "Branch", "branch"),
+	("departments", "Department", "department_name"),
+	("designations", "Designation", "designation_name"),
+	("employment_types", "Employment Type", "employee_type_name"),
+)
+
+#: Most rows any one reference list hands back. A dropdown longer than this is a
+#: dropdown nobody scrolls, and every one of these masters is a hand-maintained
+#: table on a real site — a farm with two hundred designations has a data problem
+#: rather than a paging problem.
+REFERENCE_LIMIT = 200
+
+#: Most Housing Units `list_available_housing` reads. `tools/housing.REGISTER_CAP`
+#: is the register's own ceiling and is read rather than restated so a phone and
+#: a Desk report cannot come to disagree about how big a camp is.
+HOUSING_LIST_LIMIT = housing_tools.REGISTER_CAP
 
 #: Most bucket captures one sync call carries. `tools/bucket_log.BATCH_CAP` is
 #: the tool's own limit and is read rather than restated, so a phone and a Desk
@@ -937,6 +961,7 @@ def create_employee(
 	employment_type=None,
 	designation=None,
 	department=None,
+	branch=None,
 	personal_email=None,
 	cell_number=None,
 	i9_status=None,
@@ -953,7 +978,7 @@ def create_employee(
 
 	IT DELEGATES RATHER THAN INSERTING. `frappe.get_doc({...}).insert()` here would
 	be four lines and would step around every rule `tools/employee.py` has held
-	since v0.18.1: the seventeen-field allowlist that refuses `ctc` and
+	since v0.18.1: the nineteen-field allowlist that refuses `ctc` and
 	`salary_structure` by name, the second-record check that keeps one person off
 	the dispatch board twice, the mandatory fields read off THIS site's meta rather
 	than assumed, and `require_hr_role`. Those rules stay where they are for the
@@ -1011,6 +1036,12 @@ def create_employee(
 		("employment_type", employment_type),
 		("designation", designation),
 		("department", department),
+		# v0.54.0. The Assignment step's fourth dropdown, and the one that had
+		# nowhere to land: `tools/employee.WRITABLE` did not carry `branch`, so a
+		# wizard that asked which camp somebody was hired to could not record the
+		# answer. `list_onboarding_reference_data` is where the four choices come
+		# from, and `create_employee`'s Link check refuses one that names nothing.
+		("branch", branch),
 		("personal_email", personal_email),
 		("cell_number", cell_number),
 		("i9_status", i9_status),
@@ -2527,3 +2558,424 @@ def get_model_file_chunk(user: str, model=None, chunk_index=None, chunk_bytes=No
 		{"model": name, "chunk_index": chunk_index, "chunk_bytes": chunk_bytes}
 	)
 	return result.data
+
+
+# ── 43. list_onboarding_reference_data ──────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_onboarding_reference_data", limit=guard.READ_LIMIT)
+def list_onboarding_reference_data(user: str, company=None) -> dict:
+	"""The four dropdowns on the wizard's Assignment step, in one call.
+
+	v0.54.0, and the same failure `list_i9_document_types` fixed for the I-9's
+	document picker: a Swift array of employment types compiled into the app is a
+	copy of a table an operator maintains in the Desk, and it goes stale silently.
+	`create_employee` checks every one of these against THIS site's records and
+	refuses a value that names nothing — so a hardcoded list is not merely stale,
+	it is a wizard whose Assignment step fails at the end of a hire with "not a
+	Designation on this site" and no way to find out what is.
+
+	ONE CALL FOR FOUR LISTS, on purpose. They are read together, once, when the
+	step opens, and four round trips over a tailgate LTE connection is four
+	chances to half-populate a form. `list_i9_document_types` groups its answer
+	for the same reason.
+
+	A MASTER THIS SITE DOES NOT HAVE COMES BACK EMPTY AND IS NAMED IN
+	`masters_absent`, never omitted and never an error. Branch, Department,
+	Designation and Employment Type all ship with Frappe HR; a site without hrms
+	has none of them, and the honest answer there is a wizard that offers no
+	choices for that field rather than a hire that cannot start. `create_employee`
+	agrees — `_clean` does not check a Link whose target doctype is absent.
+
+	DEPARTMENTS ARE SCOPED TO THE CALLER'S ENTITIES, and the other three are not,
+	because Department is the only one of the four that carries a company on a
+	stock Frappe HR. Group departments are dropped: `is_group` marks a node in the
+	tree rather than somewhere a person is assigned, and an Employee pointed at
+	one is a report that double-counts them.
+
+	EVERY BRANCH ROW CARRIES ITS PARCELS, and that is what makes the Housing step
+	reachable from the Assignment step. An Employee carries a Branch and a Housing
+	Unit stands on a Parcel; `Parcel.branch` is the only column joining the two,
+	and without it a wizard that has just asked which camp somebody works at
+	cannot then show that camp's cabins.
+
+	`parcels` IS A LIST AND `parcel` IS THE SINGLE ONE WHEN THERE IS EXACTLY ONE.
+	A camp is a place rather than a deed — one that grew across a fence line is
+	two parcels — so the list is the real answer and the scalar is the
+	convenience for the ordinary case. `parcel` is null when a branch maps to
+	none OR to several, and a client that reads only the scalar must treat null as
+	"ask the server", which is what passing `branch` to `list_available_housing`
+	does. That endpoint resolves the same mapping through the same function, so
+	the phone never has to do the lookup itself and the two can never disagree.
+
+	A BRANCH WITH NO PARCELS IS REPORTED, NOT HIDDEN — empty `parcels`, and the
+	branch still in the list. It is a real operating unit somebody may legitimately
+	hire into; what it is not is a camp with housing, and `list_available_housing`
+	says so in its own words rather than returning an empty list that reads as a
+	full camp.
+
+	VIEW-ONLY AND NOT A PERSONNEL READ. There is nothing on these rows about a
+	person — a job title, a camp name, an employment class. `guard.endpoint` has
+	run the kill switch, the role gate, the enrolment gate and the rate limit,
+	which is the whole of what this needs; `search_employees`, which really does
+	read the register, carries the HR role gate and this deliberately does not.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed)
+	entities = [wanted] if wanted else allowed
+
+	out: dict = {"company": wanted or None}
+	absent = []
+	for key, doctype, label_field in REFERENCE_MASTERS:
+		if not compat.doctype_exists(doctype):
+			out[key] = []
+			absent.append(doctype)
+			continue
+
+		filters = {}
+		if doctype == "Department":
+			if compat.has_field(doctype, "company"):
+				filters["company"] = ("in", entities)
+			if compat.has_field(doctype, "is_group"):
+				filters["is_group"] = 0
+
+		fields = compat.existing_fields(doctype, ["name", label_field, "company"])
+		rows = frappe.db.get_all(
+			doctype,
+			filters=filters or None,
+			fields=fields,
+			order_by="name asc",
+			limit_page_length=REFERENCE_LIMIT,
+		)
+		listed = [
+			{
+				"name": row.get("name"),
+				"label": str(row.get(label_field) or "").strip() or row.get("name"),
+				"company": row.get("company") or None,
+			}
+			for row in rows or []
+		]
+		# The belt to the braces on the one master that has a company at all. It
+		# runs on all four because `scoped` keeps a row with no company, so a
+		# Designation is untouched and a Department that slipped the filter is not.
+		out[key] = guard.scoped(listed, allowed)
+
+	# The ground each branch holds, in ONE query for every row rather than one per
+	# row. Scoped to the entities this caller may reach, so a branch that also has
+	# parcels under a company they cannot see reports only the ones they can — the
+	# same rule every other read on this surface follows, applied to the join
+	# rather than only to the rows.
+	mapping = housing_tools.branch_parcel_map(
+		[row["name"] for row in out["branches"]], wanted or entities
+	)
+	for row in out["branches"]:
+		parcels = mapping.get(row["name"], [])
+		row["parcels"] = parcels
+		# Null for none AND for several. A scalar that silently picked the first
+		# of two parcels would send half a camp's cabins missing, and a client
+		# reading only this field has to fall back to asking the server — which
+		# is what passing `branch` to `list_available_housing` does.
+		row["parcel"] = parcels[0] if len(parcels) == 1 else None
+		row["parcel_count"] = len(parcels)
+
+	out["counts"] = {key: len(out[key]) for key, _doctype, _label in REFERENCE_MASTERS}
+	out["masters_absent"] = absent
+	out["branches_without_parcels"] = [
+		row["name"] for row in out["branches"] if not row["parcels"]
+	]
+	return out
+
+
+# ── 44. list_available_housing ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_available_housing", limit=guard.READ_LIMIT)
+def list_available_housing(user: str, company=None, parcel=None, branch=None, include_full=None) -> dict:
+	"""Which cabins have a bed free tonight, and how full each one already is.
+
+	v0.54.0. The wizard's Housing step, and the read `assign_housing` exists to be
+	the write for. Beds and bodies per unit, so a foreman standing at a tailgate
+	can put somebody somewhere without walking the camp or opening the Desk.
+
+	IT COUNTS OCCUPANTS AND DOES NOT NAME THEM. `list_housing_units` returns an
+	`occupants` list of employee names — who sleeps in which cabin, which is a
+	personnel fact and is exactly the sort of thing that has no business on a
+	picker's phone merely because the vacancy count does. The count is what fills
+	a dropdown; the names are read in the Desk, or through
+	`get_employee_housing_history` on the MCP console. That split is the reason
+	this read carries no HR role gate where `search_employees` does.
+
+	NON-RESIDENTIAL UNITS ARE NOT IN THE ANSWER AT ALL. A shower block and a shop
+	are Housing Units with a capacity of zero, `create_housing_assignment` refuses
+	an assignment into either by name, and a dropdown offering them is a dropdown
+	whose next screen is a refusal. Uninhabitable units are LISTED and marked
+	`assignable: false` with the reason — a foreman who cannot find the cabin they
+	expected needs to be told it is condemned, not shown a shorter list.
+
+	`include_full=true` KEEPS THE UNITS WITH NO BED LEFT, marked the same way. The
+	default drops them, because the question this answers is "where can somebody
+	sleep"; the flag is for the screen that shows the whole camp.
+
+	`branch` RESOLVES TO ITS PARCELS SERVER-SIDE, so the phone passes the camp it
+	just hired somebody into and gets that camp's cabins back. A Housing Unit
+	stands on a Parcel and carries no Branch of its own — a person REPORTS to a
+	branch, a cabin STANDS ON ground somebody owns — and `Parcel.branch` (v0.54.0)
+	is the column joining the two. It is resolved through
+	`housing.parcels_for_branch`, which is the same function
+	`list_onboarding_reference_data` fills its `parcels` field from, so the
+	mapping the wizard was shown and the mapping this filters on cannot disagree.
+
+	A BRANCH MAY HOLD SEVERAL PARCELS and every one of them is included. A camp
+	that grew across a fence line is two parcels, and a filter that took only the
+	first would hide half the beds on exactly the operations big enough to have
+	the problem.
+
+	THE THREE WAYS THIS CAN FAIL ARE THREE DIFFERENT ANSWERS, and none of them is
+	a silent empty list — an empty camp reads on a phone as "no room", which is
+	the one wrong answer here:
+
+	  * the branch names no Branch record → REFUSED, naming it. A typo resolves to
+	    no parcels and would otherwise look exactly like a full camp.
+	  * the branch is real but no parcel carries it → the whole list, with
+	    `branch_filter_applied: false` and `branch_note` saying that no ground is
+	    tagged with this branch and that `update_parcel(branch=…)` is the fix.
+	  * this site has no `Parcel.branch` column yet (not migrated) → the same,
+	    with `branch_note` naming the migration.
+
+	`parcel` IS STILL ACCEPTED and is narrower than `branch`. Passing both filters
+	to the intersection, which is what somebody asking for one parcel of a
+	two-parcel camp means.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed)
+	compat.require_doctype(
+		HOUSING_UNIT,
+		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
+	)
+
+	branch_wanted = str(branch or "").strip()
+	branch_parcels: list = []
+	branch_note = None
+	if branch_wanted:
+		# A branch that names nothing is refused BEFORE the register is read. It
+		# resolves to no parcels, and "no parcels" and "no beds" produce the same
+		# empty list from here on — so the mistake has to be caught while it can
+		# still be told apart from an answer.
+		if compat.doctype_exists("Branch") and not frappe.db.exists("Branch", branch_wanted):
+			frappe.throw(
+				f"branch {branch_wanted} is not one on this site. "
+				"list_onboarding_reference_data has the branches, each with the parcels it "
+				"holds. Nothing was read.",
+				frappe.DoesNotExistError,
+			)
+		if not compat.has_field("Parcel", "branch"):
+			branch_note = (
+				"This site's Parcel doctype has no branch column, so a branch cannot be "
+				"resolved to the ground it holds. Run `bench --site <site> migrate` after "
+				"upgrading to v0.54.0. Every unit is listed rather than none."
+			)
+		else:
+			branch_parcels = housing_tools.parcels_for_branch(branch_wanted, wanted or allowed)
+			if not branch_parcels:
+				branch_note = (
+					f"No parcel is tagged with branch {branch_wanted}, so there is no ground "
+					"to look for housing on. Set it with update_parcel(parcel=..., "
+					f"branch='{branch_wanted}'). Every unit is listed rather than none."
+				)
+
+	inner = {"limit": HOUSING_LIST_LIMIT}
+	if wanted:
+		inner["company"] = wanted
+	if str(parcel or "").strip():
+		inner["parcel"] = str(parcel).strip()
+
+	result = housing_tools.list_housing_units(inner)
+
+	branch_applied = bool(branch_parcels)
+	permitted_parcels = set(branch_parcels)
+
+	show_full = str(include_full or "").strip().lower() in ("1", "true", "yes")
+	units = []
+	for unit in result.data.get("units") or []:
+		if not unit.get("residential"):
+			continue
+		if branch_applied and unit.get("parcel") not in permitted_parcels:
+			continue
+
+		capacity = int(unit.get("capacity") or 0)
+		occupants = int(unit.get("currently_assigned") or 0)
+		# A unit nobody has given a capacity is NOT reported as full. Zero here
+		# means unmeasured, which `lawful_occupancy` produces for a cabin with no
+		# floor area on file, and a camp whose capacities were never entered would
+		# otherwise come back with every bed taken and no way to tell why.
+		open_beds = max(0, capacity - occupants) if capacity else None
+		condemned = unit.get("condition") == "Uninhabitable"
+		full = bool(capacity) and occupants >= capacity
+
+		if not show_full and (full or condemned):
+			continue
+
+		reason = None
+		if condemned:
+			reason = "Marked Uninhabitable. It has to be repaired and inspected before anybody is put in it."
+		elif full:
+			reason = f"All {capacity} bed(s) are taken."
+
+		units.append(
+			{
+				"name": unit.get("name"),
+				"unit_name": unit.get("unit_name"),
+				"unit_type": unit.get("unit_type"),
+				"parcel": unit.get("parcel"),
+				"company": unit.get("owning_entity"),
+				"capacity": capacity or None,
+				"current_occupants": occupants,
+				"open_beds": open_beds,
+				"status": "Uninhabitable" if condemned else ("Full" if full else "Available"),
+				"condition": unit.get("condition"),
+				"assignable": not (condemned or full),
+				"unassignable_reason": reason,
+				"max_occupants_per_or_law": unit.get("max_occupants_per_or_law"),
+				"capacity_over_lawful_occupancy": unit.get("capacity_over_lawful_occupancy"),
+				"inspection_overdue": unit.get("inspection_overdue"),
+				"gps": unit.get("gps"),
+			}
+		)
+
+	units = guard.scoped(units, allowed)
+	return {
+		"units": units,
+		"count": len(units),
+		"assignable_count": sum(1 for unit in units if unit["assignable"]),
+		"open_beds": sum(unit["open_beds"] or 0 for unit in units),
+		"company": wanted or None,
+		"parcel": str(parcel or "").strip() or None,
+		"branch": branch_wanted or None,
+		"branch_filter_applied": branch_applied,
+		# The ground the branch resolved to, echoed back. A foreman looking at an
+		# unexpectedly short list needs to see which parcels were searched, and a
+		# client that wants to cache the mapping gets it here rather than making a
+		# second call for it.
+		"branch_parcels": branch_parcels,
+		"branch_note": branch_note,
+		"include_full": show_full,
+	}
+
+
+# ── 45. assign_housing ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("assign_housing", mutating=True, limit=guard.WRITE_LIMIT)
+def assign_housing(
+	user: str,
+	employee=None,
+	housing_unit=None,
+	check_in_date=None,
+	end_date=None,
+	deposit_paid=None,
+	housing_deduction_from_wages=None,
+	notes=None,
+) -> dict:
+	"""Put one new hire in one cabin from one date. The wizard's Housing step.
+
+	v0.54.0. IT DELEGATES to `create_housing_assignment`, so the overlap rule, the
+	refusal of a shower block, the refusal of a condemned unit, the deposit
+	arithmetic and the Section 119 note are all the code an operator gets on the
+	MCP console — the reason `create_employee` delegates to `tools/employee.py`.
+
+	IT CARRIES THE HR ROLE GATE. A Housing Assignment names a person, a building
+	and the dates between them; it is the audit trail defending an IRS Section 119
+	exclusion and the record a wage claim about an ORS 653 housing deduction is
+	answered from. That is a personnel record, and the same gate `search_employees`
+	applies by hand applies here for the same reason — a picker holding a perfectly
+	good Farm Ops grant is refused, and the operator enrolling an onboarding phone
+	enrols it as a Farm Manager.
+
+	IT REFUSES TO OVERFILL A CABIN WHERE THE TOOL ONLY WARNS, and that difference
+	is deliberate rather than an oversight in one of them. `create_housing_assignment`
+	reports "now holds 5 against a recorded capacity of 4" in `warnings` and writes
+	the row, which is right on a console where an operator can see the warning,
+	weigh it and mean it — a barracks really does take a fifth bunk some seasons.
+	It is wrong on a phone: nothing on the Housing step displays a warning, the
+	foreman has already walked away, and a bed that does not exist becomes somebody
+	sleeping in a truck. So the count is taken BEFORE the write and the refusal
+	names the unit, its capacity and who is already in it.
+
+	`allow_multi_occupancy` IS NOT FORWARDED, and the wizard cannot send it. Under
+	capacity this method passes it as true on the caller's behalf — a four-bunk
+	cabin with one person in it is the ordinary case and the tool refuses a second
+	assignment without the flag — and AT capacity the check above has already
+	refused. Letting a phone send the flag itself would hand it the one argument
+	that turns the capacity refusal off.
+	"""
+	allowed = guard.require_scope(user)
+	personnel.require_hr_role()
+	compat.require_doctype(
+		"Housing Assignment",
+		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
+	)
+
+	person = guard.require_scoped_doc(EMPLOYEE, employee, "employee", allowed)
+	unit = guard.require_docname(HOUSING_UNIT, housing_unit, "housing_unit")
+	start = str(check_in_date or "").strip()
+	if not start:
+		frappe.throw(
+			"check_in_date is required — an assignment with no start date is not a record.",
+			frappe.ValidationError,
+		)
+	finish = str(end_date or "").strip()
+
+	# The unit is scoped by its OWNING ENTITY, which is what a Housing Unit calls
+	# its company. `require_scoped_doc` reads a field named `company` and there is
+	# not one, so the check is made here rather than skipped — a cabin belonging
+	# to an entity this caller cannot reach is not found, the same refusal as a
+	# docname that does not exist.
+	unit_row = frappe.db.get_value(HOUSING_UNIT, unit, ["owning_entity", "capacity"], as_dict=True) or {}
+	owner = str(unit_row.get("owning_entity") or "")
+	if owner and owner not in set(allowed):
+		frappe.throw(f"housing_unit {unit} was not found.", frappe.DoesNotExistError)
+
+	capacity = int(unit_row.get("capacity") or 0)
+	occupied = housing_tools.occupancy_for(unit, start, finish or None)
+	if capacity and len(occupied) >= capacity:
+		frappe.throw(
+			f"{unit} holds {capacity} and already has {len(occupied)} assigned over these dates. "
+			"Pick another unit, or end an assignment that has actually ended — "
+			"list_available_housing shows what has a bed free. Nothing was created.",
+			frappe.ValidationError,
+		)
+
+	inner = {
+		"unit": unit,
+		"employee": person,
+		"assigned_date": start,
+		# Under capacity by the check above, so a shared cabin is the ordinary
+		# case rather than the exception this flag was written for. See the
+		# docstring: the phone cannot send it, and this is not it being forwarded.
+		"allow_multi_occupancy": True,
+	}
+	for key, value in (
+		("end_date", finish),
+		("deposit_paid", deposit_paid),
+		("housing_deduction_from_wages", housing_deduction_from_wages),
+		("notes", notes),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	data = housing_tools.create_housing_assignment(inner).data
+	return {
+		"assignment": data.get("name"),
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+		"unit": data.get("unit"),
+		"parcel": data.get("parcel"),
+		"company": owner or None,
+		"check_in_date": data.get("assigned_date"),
+		"end_date": data.get("end_date"),
+		"status": data.get("status"),
+		"unit_capacity": data.get("unit_capacity"),
+		"current_occupants": data.get("occupants_after"),
+		"open_beds": max(0, capacity - int(data.get("occupants_after") or 0)) if capacity else None,
+		"housing_deduction_from_wages": data.get("housing_deduction_from_wages"),
+		"deposit_paid": data.get("deposit_paid"),
+		"warnings": data.get("warnings") or [],
+		"section_119_note": data.get("section_119_note"),
+	}

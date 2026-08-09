@@ -71,7 +71,7 @@ would describe out loud:
   5. the first-day tasks
 
 Every step still delegates. Step 1 goes through `employee.create_employee`, so the
-seventeen-field allowlist, the schema checks, the compliance defaults and the
+nineteen-field allowlist, the schema checks, the compliance defaults and the
 mandatory-field message are the same code an operator gets calling that tool
 directly — including the v0.46.1 fix, which is why `onboard_employee` was refusing
 every hire on a migrated site and is not any more.
@@ -254,7 +254,7 @@ def _employee(args: dict, full_name: str, company: str, report: dict) -> str:
 	covers a re-run with no email at all, where the first two have nothing to
 	match on.
 
-	CREATION DELEGATES to `create_employee`, so the seventeen-field allowlist, the
+	CREATION DELEGATES to `create_employee`, so the nineteen-field allowlist, the
 	Link and Select checks against this site's own schema, the starting values for
 	the three compliance statuses this app installs as mandatory, and the
 	mandatory-field message are the same code an operator gets calling that tool by
@@ -281,6 +281,15 @@ def _employee(args: dict, full_name: str, company: str, report: dict) -> str:
 		report["steps"].append({"step": "employee", "action": "reused", "name": str(same)})
 		return str(same)
 
+	# v0.54.0 added `department`, `employment_type` and `branch`. `designation`
+	# has been here since the tool shipped and the other three had not, which
+	# made "what do they do" answerable off an onboarding and "what are they
+	# hired AS, where, and under whom" not — and `employment_type` is the one
+	# that decides whether somebody is Seasonal, which is the fact an H-2A
+	# roster, an ACA hours count and a piece-rate wage statement all turn on.
+	# All four go through `create_employee`'s allowlist and its Link checks, so
+	# a value that names no record on this site is refused there with the site's
+	# own choices listed, not written blind here.
 	payload = {
 		"employee_name": full_name,
 		"company": company,
@@ -289,6 +298,9 @@ def _employee(args: dict, full_name: str, company: str, report: dict) -> str:
 		"date_of_birth": as_str(args, "date_of_birth"),
 		"gender": as_str(args, "gender"),
 		"designation": as_str(args, "designation"),
+		"department": as_str(args, "department"),
+		"employment_type": as_str(args, "employment_type"),
+		"branch": as_str(args, "branch"),
 		"cell_number": as_str(args, "phone"),
 		"personal_email": email,
 	}

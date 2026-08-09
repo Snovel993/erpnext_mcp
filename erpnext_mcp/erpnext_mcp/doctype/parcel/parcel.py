@@ -93,6 +93,49 @@ class Parcel(Document):
 		if float(self.appraised_value or 0) < 0:
 			frappe.throw(_("Appraised Value cannot be negative."))
 
+		self._check_branch()
+
+	def _check_branch(self) -> None:
+		"""The operating unit this ground belongs to, checked where it can be.
+
+		v0.54.0. `branch` is a Data field rather than a Link for the reason set
+		out on the field itself and on `Housing Assignment.employee`: Branch
+		belongs to Frappe HR, and a Link would make this doctype fail to migrate
+		on every site that has not installed it.
+
+		So the refusal is real ONLY WHERE THERE IS A TABLE TO CHECK AGAINST. A
+		branch naming nothing on a site that HAS Branch records is a typo, and it
+		is the expensive kind: `list_available_housing(branch=…)` resolves a
+		branch to its parcels and would return an empty camp for a name that is
+		one letter out. On a site with no Branch doctype the value is stored as
+		typed, because refusing there would refuse a perfectly good answer on a
+		site that simply never installed an HR app.
+		"""
+		self.branch = str(self.branch or "").strip()
+		if not self.branch:
+			return
+		try:
+			present = bool(frappe.db.exists("DocType", "Branch"))
+		except Exception:  # pragma: no cover - a site mid-migration
+			return
+		if not present:
+			return
+		if not frappe.db.exists("Branch", self.branch):
+			known = frappe.db.get_all("Branch", pluck="name", limit=12, order_by="name asc") or []
+			frappe.throw(
+				_(
+					"Branch {0} is not one on this site. A parcel tagged with a branch that "
+					"does not exist is a camp the hiring wizard will show as having no "
+					"cabins at all. {1}"
+				).format(
+					self.branch,
+					_("Known Branch: {0}.").format(", ".join(str(name) for name in known))
+					if known
+					else _("This site has no Branch records yet — create one first."),
+				),
+				title=_("Unknown Branch"),
+			)
+
 	def _set_abbr(self) -> None:
 		"""Fill in the short key, and refuse a collision only when it was chosen.
 

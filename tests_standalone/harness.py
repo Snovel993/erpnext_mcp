@@ -658,6 +658,11 @@ ERPNEXT_SCHEMA = {
 	"Department": ["name", "department_name", "company", "is_group"],
 	"Designation": ["name", "designation_name"],
 	"Employment Type": ["name", "employee_type_name"],
+	# v0.54.0. `Employee.branch` has been a column in this double since before
+	# anything wrote it, modelled as Data with no master behind it — so the link
+	# check below was skipped and `create_employee` would have accepted a branch
+	# naming nothing. Frappe HR's Branch carries one column beside the docname.
+	"Branch": ["name", "branch"],
 	"Gender": ["name", "gender"],
 	# v0.19.3 added the three span columns Frappe HR's own Attendance carries. The
 	# shift-close bridge writes them — a worker who joined an hour late and left
@@ -1177,6 +1182,7 @@ ERPNEXT_FIELD_LINKS = {
 	# it faithfully is what turned that into a failing test, and the fix is the
 	# ordering change in `newhire.py`: employee, then login, then link.
 	("Employee", "company"): ("Link", "Company"),
+	("Employee", "branch"): ("Link", "Branch"),
 	("Employee", "department"): ("Link", "Department"),
 	("Employee", "designation"): ("Link", "Designation"),
 	("Employee", "employment_type"): ("Link", "Employment Type"),

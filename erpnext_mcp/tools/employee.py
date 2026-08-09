@@ -34,7 +34,7 @@ and the QR; it is the tool to reach for when the person is new. These are the
 tools for when they are not.
 
 ────────────────────────────────────────────────────────────────────────────
-IT WRITES SEVENTEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME
+IT WRITES NINETEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME
 ────────────────────────────────────────────────────────────────────────────
 
 `WRITABLE` is a closed list. Not a filter over the doctype, not "everything
@@ -45,6 +45,13 @@ entity hired them, what they do, when they started, how to reach them.
 Fourteen until v0.46.1, when the three below joined them. See the next section:
 they are on the list because this app is the reason they are mandatory, and a
 list that cannot write them is a list that cannot hire.
+
+Eighteen until v0.54.0, when `branch` joined them. It is Frappe HR's own
+operating-unit dimension and the only field the hiring wizard's Assignment step
+asked for that this list did not carry — so every hire made through the wizard
+recorded which COMPANY employs somebody and nothing about which camp they report
+to, and a dispatcher looking for the Mill Creek crew had to read it off the
+housing assignment or ask.
 
 Everything NOT on it is refused, and the payroll, tax and banking fields are
 refused with their OWN message, because those are the ones somebody will actually
@@ -180,6 +187,7 @@ def _farm_ops_roles() -> frozenset:
 #: this site's meta does not say. See the module docstring on why this is a
 #: closed list rather than a filter.
 LINK_TARGETS = {
+	"branch": "Branch",
 	"company": "Company",
 	"department": "Department",
 	"designation": "Designation",
@@ -198,7 +206,7 @@ SELECT_FIELDS = ("status", "i9_status", "w4_status")
 #: has to have an answer for them — see the module docstring.
 COMPLIANCE_FIELDS = ("i9_status", "w4_status", "jurisdiction")
 
-#: The seventeen. Ordered as somebody filling in a form would read them, because
+#: The nineteen. Ordered as somebody filling in a form would read them, because
 #: this tuple is what the refusal messages list.
 WRITABLE = (
 	"employee_name",
@@ -219,6 +227,15 @@ WRITABLE = (
 	"department",
 	"designation",
 	"employment_type",
+	# v0.54.0. Frappe HR's own operating-unit dimension on Employee, and the one
+	# field the hiring wizard's Assignment step asked for that this allowlist did
+	# not carry — so a crew hired for the Mill Creek camp came out with the ranch
+	# in `company` and nothing saying which camp. It is a Link on a stock HR
+	# Employee; `_clean` asks THIS site's meta what it points at before it checks
+	# anything, so a site that customised it into a Data field is not refused, and
+	# a site without Frappe HR's Branch master reports it through
+	# `fields_not_on_this_site` rather than failing the hire.
+	"branch",
 	"status",
 	"user_id",
 	"personal_email",
@@ -507,7 +524,7 @@ def _reject_unknown(args: dict, allowed: tuple, reserved: tuple = ()) -> None:
 			)
 		raise ToolError(
 			f"{key!r} is a real Employee field on this site but is not one this tool writes. "
-			f"The seventeen it does are: {', '.join(WRITABLE)}. Anything else belongs in the "
+			f"The nineteen it does are: {', '.join(WRITABLE)}. Anything else belongs in the "
 			"Desk, where the HR module's own validation runs. Nothing was changed."
 		)
 
@@ -660,6 +677,11 @@ def create_employee(args: dict) -> ToolResult:
 		"department",
 		"designation",
 		"employment_type",
+		# v0.54.0. On `WRITABLE` beside the three above it, and it has to be here
+		# too — that tuple is what `_reject_unknown` accepts, and THIS one is what
+		# actually gets written. A field on the first and not the second is one
+		# the tool takes without complaint and silently drops.
+		"branch",
 		"personal_email",
 		"cell_number",
 		*COMPLIANCE_FIELDS,
@@ -1010,7 +1032,7 @@ def update_employee(args: dict) -> ToolResult:
 		"fields_not_on_this_site": absent,
 		"linkage": linkage,
 		"note": (
-			"Only the seventeen identity, assignment and compliance-status fields are writable "
+			"Only the nineteen identity, assignment and compliance-status fields are writable "
 			"here. Payroll, tax "
 			"and banking fields are refused by name and belong in the Desk, where the HR "
 			"module's own validation runs."

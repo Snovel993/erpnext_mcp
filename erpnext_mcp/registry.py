@@ -3726,6 +3726,13 @@ TOOLS = {
 				"Only this use: Orchard, Farmstead, Packing and Storage, Residential, "
 				"Labor Housing, Bare Land, Mixed or Other.",
 			),
+			"branch": _field(
+				_STRING,
+				"Only parcels belonging to this operating unit. This is the column that "
+				"joins a person to a camp — an Employee carries a Branch, a Housing Unit "
+				"stands on a Parcel — and it is what list_available_housing resolves "
+				"through to show one camp's cabins.",
+			),
 			"title_holder": _field(_STRING, "Only parcels whose title is held by this Related Party."),
 			"linked_to_asset": _field(
 				_BOOLEAN,
@@ -3790,6 +3797,14 @@ TOOLS = {
 				"Orchard, Farmstead, Packing and Storage, Residential, Labor Housing, "
 				"Bare Land, Mixed or Other.",
 			),
+			"branch": _field(
+				_STRING,
+				"The operating unit this ground belongs to, named as Frappe HR's Branch "
+				"names it. Refused if it is not a Branch on this site, because a parcel "
+				"tagged with a branch that does not exist is a camp the hiring wizard "
+				"shows as having no cabins at all. Stored as typed where the site has no "
+				"Branch doctype.",
+			),
 			"title_holder": _field(_STRING, "The Related Party holding title, when it is not the entity."),
 			"appraised_value": _field(_NUMBER, "Fee simple market value from the latest appraisal."),
 			"appraised_as_of": _field(_STRING, "The appraisal's effective date, YYYY-MM-DD."),
@@ -3827,6 +3842,11 @@ TOOLS = {
 			"address": _field(_STRING, "New address."),
 			"acreage": _field(_NUMBER, "New acreage."),
 			"use_type": _field(_STRING, "New use type. Empty string clears it."),
+			"branch": _field(
+				_STRING,
+				"New operating unit. Empty string clears it, which is how a camp folded "
+				"into another one is unassigned. Refused if it is not a Branch on this site.",
+			),
 			"appraised_value": _field(_NUMBER, "New appraised value."),
 			"appraised_as_of": _field(_STRING, "New appraisal date, YYYY-MM-DD."),
 			"appraiser": _field(_STRING, "New appraiser."),
@@ -8620,7 +8640,7 @@ TOOLS = {
 		"thing on a Frappe site that says which somebody a login is. An account with "
 		"no Employee behind it enrols perfectly and then gets refused, correctly, "
 		"with 'set user_id on their Employee record to this email address'.\n\n"
-		"IT WRITES SEVENTEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME. Identity and "
+		"IT WRITES NINETEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME. Identity and "
 		"assignment: who this person is, which entity hired them, what they do, "
 		"when they started, how to reach them — plus the three compliance statuses "
 		"erpnext_mcp itself installs on Employee as mandatory. Payroll, tax and banking fields — "
@@ -8629,7 +8649,7 @@ TOOLS = {
 		"rule this app knows nothing about, and a tool that set `ctc` because it "
 		"appeared in a sentence would be a tool that quietly moved money.\n\n"
 		"THE SCHEMA IS ASKED, NEVER ASSUMED. Every Link is checked against this "
-		"site's own records (Department, Designation, Employment Type, Gender), "
+		"site's own records (Branch, Department, Designation, Employment Type, Gender), "
 		"every Select against this site's own options, and a field this site's "
 		"Employee doctype does not carry is REPORTED rather than silently dropped. "
 		"If Frappe HR here marks a field mandatory — stock installs require `gender` "
@@ -8674,6 +8694,12 @@ TOOLS = {
 				_STRING,
 				"Full-time, Part-time, Seasonal Worker — whatever this site's Employment Type "
 				"records are. The refusal lists them.",
+			),
+			"branch": _field(
+				_STRING,
+				"The operating unit or camp they are hired to. Must be a Branch on this site; "
+				"the refusal lists what there is. `company` is the legal entity that pays "
+				"them and this is the place they report to, which is why both exist.",
 			),
 			"status": _field(_STRING, "Active (default), Inactive, Suspended or Left."),
 			"user_id": _field(
@@ -8725,7 +8751,7 @@ TOOLS = {
 	"update_employee": _tool(
 		employee.update_employee,
 		"MUTATING (default OFF). Change the identity, assignment and compliance-status "
-		"fields on an Employee that already exists — the same seventeen "
+		"fields on an Employee that already exists — the same nineteen "
 		"create_employee writes, and nothing else. `jurisdiction` is here for the "
 		"reason it is defaulted there: wage law follows where the work is PERFORMED, "
 		"and a crew that crossed the river onto a Washington block is paid under a "
@@ -8737,7 +8763,7 @@ TOOLS = {
 		"PAYROLL, TAX AND BANKING FIELDS ARE REFUSED BY NAME — salary structure, "
 		"income tax slab, bank account, CTC. Those need the HR module's own form, "
 		"where its approvals and retention rules run. A field that is real on this "
-		"site but outside the seventeen gets a different refusal from a field that "
+		"site but outside the nineteen gets a different refusal from a field that "
 		"does not exist at all, because they are different mistakes.\n\n"
 		"IT REPORTS WHAT ACTUALLY CHANGED, field by field, with the previous value — "
 		"a value that was already what you asked for lands in `unchanged` rather "
@@ -8764,6 +8790,11 @@ TOOLS = {
 			"department": _field(_STRING, "Must be a Department on this site."),
 			"designation": _field(_STRING, "Must be a Designation on this site."),
 			"employment_type": _field(_STRING, "Must be an Employment Type on this site."),
+			"branch": _field(
+				_STRING,
+				"The operating unit or camp they report to. Must be a Branch on this site. "
+				"Set it when somebody moves camps, which is a different fact from moving company.",
+			),
 			"status": _field(
 				_STRING,
 				"Active, Inactive, Suspended or Left. The mobile methods answer for Active employees.",
@@ -8926,6 +8957,17 @@ TOOLS = {
 			"date_of_joining": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
 			"date_of_birth": _field(_STRING, "YYYY-MM-DD."),
 			"designation": _field(_STRING, "Their job title."),
+			"department": _field(_STRING, "Must be a Department on this site."),
+			"employment_type": _field(
+				_STRING,
+				"Seasonal, Permanent, Contract — whatever this site's Employment Type records "
+				"are. The refusal lists them. This is the field an H-2A roster, an ACA hours "
+				"count and a piece-rate wage statement all read.",
+			),
+			"branch": _field(
+				_STRING,
+				"The operating unit or camp they report to. Must be a Branch on this site.",
+			),
 			"gender": _field(_STRING, "As the Employee doctype records it."),
 			"phone": _field(_STRING, "A mobile number for the Employee record."),
 			"housing_unit": _field(

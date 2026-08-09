@@ -3,6 +3,90 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.54.0 — 2026-08-09
+
+**The hiring wizard can say where somebody works and where they sleep.** The
+handset has scanned a driver's licence and matched a returning worker's name
+since v0.51.0, and the hire it produced recorded which *company* employs
+somebody and nothing else about the assignment. Three new mobile methods finish
+the Assignment and Housing steps.
+
+**The four dropdowns are read off the site instead of compiled into the app.**
+`list_onboarding_reference_data` returns Branch, Department, Designation and
+Employment Type in one call. This is the same staleness `list_i9_document_types`
+removed from the I-9's document picker, and the same consequence: `create_employee`
+checks every one of these against *this site's* records, so a Swift array is not
+merely out of date — it is a wizard whose Assignment step fails at the END of a
+hire with "not a Designation on this site" and no way to find out what is. A
+master the site does not have comes back empty and named in `masters_absent`,
+never as an error; departments are scoped to the caller's entities and group
+departments are dropped.
+
+**`branch` is now writable, and that is why the wizard could not record it.**
+`tools/employee.WRITABLE` carried designation, department and employment type
+and not Frappe HR's own operating-unit field, so the allowlist is nineteen now
+rather than eighteen. It reaches `create_employee` on the MCP registry, the
+mobile `create_employee`, and `onboard_employee` — which also gained
+`department` and `employment_type`, having carried only `designation` since it
+shipped. `employment_type` is the one that decides whether somebody is Seasonal,
+which is the fact an H-2A roster, an ACA hours count and a piece-rate wage
+statement all turn on.
+
+**The camp has a read and a write.** `list_available_housing` is beds and bodies
+per unit — capacity, current occupants, open beds, and whether the unit can take
+anybody — so a foreman at a tailgate can house somebody without walking the camp.
+It **counts occupants and never names them**: who sleeps in which cabin is a
+personnel fact, and `list_housing_units`' `occupants` array has no business on a
+picker's phone merely because the vacancy count does. Shower blocks and shops are
+not offered at all; a condemned cabin is listed with the reason rather than
+silently missing, because a foreman who cannot find the unit they expected needs
+to be told it is Uninhabitable.
+
+**`assign_housing` refuses to overfill a cabin where the MCP tool only warns**,
+and the difference is deliberate. `create_housing_assignment` reports "now holds
+5 against a recorded capacity of 4" and writes the row, which is right on a
+console where an operator can weigh it — a barracks really does take a fifth bunk
+some seasons. It is wrong on a phone: nothing on the Housing step displays a
+warning, the foreman has already walked away, and a bed that does not exist
+becomes somebody sleeping in a truck. `allow_multi_occupancy` is not in the
+signature, so the phone cannot turn that check off. The endpoint carries the HR
+role gate `search_employees` does, because a Housing Assignment is the audit
+trail defending an IRS Section 119 exclusion and the answer to an ORS 653 wage
+claim.
+
+**`Parcel.branch` is the join between a person and a cabin, and it did not
+exist.** An Employee carries a Branch and a Housing Unit stands on a Parcel, and
+no column connected the two — so a wizard that had just asked which camp somebody
+was hired to could not then show that camp's housing. Parcel gains a `branch`
+column: **Data, not a Link**, for the reason `Housing Assignment.employee` is
+one, because a Link to Frappe HR's Branch would make Parcel fail to migrate on
+every site without hrms. It is validated against the Branch table when there is
+one, and a parcel tagged with a branch that does not exist is refused at the
+record — that typo is a camp the wizard would show as having no cabins at all.
+It is carried across a `convey_parcel`, because the camp does not change because
+the deed did.
+
+**Every branch row now carries the parcels it holds**, and
+`list_available_housing` resolves `branch` to those parcels server-side, so the
+phone passes the camp and gets that camp's cabins with no lookup of its own. Both
+endpoints resolve through the same function, so the mapping the wizard was shown
+and the mapping the housing list filters on cannot come apart. A camp spanning
+two parcels returns both — `parcels` is the real answer and the scalar `parcel`
+is set only when there is exactly one.
+
+**The three ways a branch filter can fail are three different answers, and none
+is a silent empty list**, because an empty camp reads on a phone as "no room": a
+branch naming no Branch record is *refused*; a real branch with no ground tagged
+to it returns the whole list with `branch_note` naming `update_parcel` as the
+fix; a site that has not migrated the column returns the whole list with
+`branch_note` naming the migration. `parcel` is still accepted and intersects
+with `branch`.
+
+All three are routed at `/farmops/api/mobile/…` as well as
+`/api/method/erpnext_mcp.api.mobile.…`. **The iOS side is separate, tracked
+work** — `MobileAPI.swift` names none of them yet, so they sit in
+`PENDING_IOS_INTEGRATION` rather than claiming a Codable that does not exist.
+
 ## 0.53.0 — 2026-08-08
 
 **The badge goes in the wallet the worker already carries.**

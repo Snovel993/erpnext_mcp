@@ -208,6 +208,13 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# v0.52.0 — models served from ERPNext, not Volume Vision directly.
 		"/mobile/get_active_model",
 		"/mobile/get_model_file_chunk",
+		# v0.54.0 — the hiring wizard's Assignment and Housing steps. The four
+		# dropdowns read off the site rather than compiled into the app, and the
+		# read and write of one question: which cabin has a bed free, and put
+		# this person in it.
+		"/mobile/list_onboarding_reference_data",
+		"/mobile/list_available_housing",
+		"/mobile/assign_housing",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

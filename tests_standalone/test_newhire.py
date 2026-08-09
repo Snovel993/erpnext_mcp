@@ -304,3 +304,65 @@ class APartialRunSaysWhichPartRan(NewHireTestCase):
 		self.assertIn("Employee", message)
 		before = len(STORE.rows("Employee"))
 		self.assertEqual(len(STORE.rows("Employee")), before)
+
+
+# ── the assignment facts, v0.54.0 ───────────────────────────────────────────
+class ItRecordsWhatSomebodyWasHiredAs(NewHireTestCase):
+	"""v0.54.0. `onboard_employee` has taken `designation` since it shipped and
+	neither `department`, `employment_type` nor `branch` — so an onboarding could
+	answer "what do they do" and not "what are they hired as, and where".
+
+	`employment_type` is the one that matters most: it is the field that says
+	whether somebody is Seasonal, which is the fact an H-2A roster, an ACA hours
+	count and a piece-rate wage statement all turn on.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		STORE.seed("Branch", [{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"}])
+		STORE.seed("Designation", [{"name": "Picker", "designation_name": "Picker"}])
+		STORE.seed("Employment Type", [{"name": "Seasonal", "employee_type_name": "Seasonal"}])
+		STORE.seed(
+			"Department",
+			[{"name": "Harvest", "department_name": "Harvest", "company": MAIN, "is_group": 0}],
+		)
+
+	def test_all_four_assignment_fields_land_on_the_record(self):
+		data = self.hire(
+			designation="Picker",
+			department="Harvest",
+			employment_type="Seasonal",
+			branch="Mill Creek Camp",
+		)
+		row = frappe.db.get_value(
+			"Employee",
+			data["employee"],
+			["designation", "department", "employment_type", "branch"],
+			as_dict=True,
+		)
+		self.assertEqual(row["designation"], "Picker")
+		self.assertEqual(row["department"], "Harvest")
+		self.assertEqual(row["employment_type"], "Seasonal")
+		self.assertEqual(row["branch"], "Mill Creek Camp")
+
+	def test_an_employment_type_this_site_does_not_have_is_refused_with_its_choices(self):
+		"""The check is `create_employee`'s, which is the point of delegating —
+		a wrapper with its own copy would be a second set of hiring rules."""
+		message = self.tool_error(
+			"onboard_employee",
+			{"full_name": "Ana Ramos", "company": MAIN, "employment_type": "Casual"},
+		)
+		self.assertIn("Casual", message)
+		self.assertIn("Employment Type", message)
+
+	def test_a_branch_that_names_nothing_is_refused_rather_than_written_blind(self):
+		message = self.tool_error(
+			"onboard_employee",
+			{"full_name": "Ana Ramos", "company": MAIN, "branch": "Nowhere Camp"},
+		)
+		self.assertIn("Nowhere Camp", message)
+		self.assertIn("Branch", message)
+
+	def test_none_of_the_four_is_required(self):
+		"""A hire made at a tailgate with three facts is still a hire."""
+		self.assertTrue(self.hire()["employee"])

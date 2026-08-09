@@ -12,6 +12,7 @@
   "owning_entity",
   "parcel_id",
   "use_type",
+  "branch",
   "identity_col",
   "county",
   "state",
@@ -83,6 +84,14 @@
    "in_standard_filter": 1,
    "label": "Use Type",
    "options": "\nOrchard\nFarmstead\nPacking and Storage\nResidential\nLabor Housing\nBare Land\nMixed\nOther"
+  },
+  {
+   "description": "The operating unit this ground belongs to, named as Frappe HR's Branch names it. This is the ONLY thing tying a person to a camp: an Employee carries a Branch and a Housing Unit stands on a Parcel, and without this column the two halves of a hire — where somebody works and which cabin is theirs — cannot be joined. DATA RATHER THAN A LINK, deliberately, and for the reason Housing Assignment.employee is: Branch belongs to Frappe HR, a Link to it would make this doctype fail to migrate on every site without hrms, and a parcel register that cannot be installed without an HR app is a parcel register nobody keeps. It is validated against the Branch table when there is one.",
+   "fieldname": "branch",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Branch",
+   "search_index": 1
   },
   {
    "fieldname": "identity_col",

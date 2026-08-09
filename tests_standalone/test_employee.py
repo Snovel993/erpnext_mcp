@@ -44,7 +44,7 @@ import json
 
 import frappe
 
-from erpnext_mcp import roles
+from erpnext_mcp import compat, roles
 from erpnext_mcp.tools import employee as employee_tool
 
 from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
@@ -750,9 +750,17 @@ class WhatItRefusesToWrite(EmployeeTestCase):
 	def test_an_income_tax_slab_is_refused(self):
 		self.assertIn("payroll, tax or banking", self.create_error(income_tax_slab="Slab A"))
 
-	def test_a_real_employee_field_outside_the_fourteen_is_refused_differently(self):
-		"""'Real but not mine' and 'not a field at all' are different mistakes."""
-		message = self.create_error(branch="Packhouse")
+	def test_a_real_employee_field_outside_the_nineteen_is_refused_differently(self):
+		"""'Real but not mine' and 'not a field at all' are different mistakes.
+
+		This was `branch` until v0.54.0, which made branch writable — the hiring
+		wizard's Assignment step asks which camp somebody reports to and had
+		nowhere to put the answer. `reports_to` takes its place as the example
+		and is the better one: it is a real column on this site's Employee, it is
+		deliberately NOT writable here because a reporting line is an org-chart
+		decision rather than an identity fact, and it is the field somebody will
+		actually try."""
+		message = self.create_error(reports_to="E-00002")
 		self.assertIn("is not one this tool writes", message)
 		self.assertIn("employee_name", message)
 
@@ -763,7 +771,7 @@ class WhatItRefusesToWrite(EmployeeTestCase):
 
 	def test_none_of_the_refusals_create_anything(self):
 		before = len(STORE.rows("Employee"))
-		for payload in ({"ctc": 1}, {"branch": "x"}, {"nonsense": "y"}, {"employee_name": "Ana"}):
+		for payload in ({"ctc": 1}, {"reports_to": "x"}, {"nonsense": "y"}, {"employee_name": "Ana"}):
 			self.create_error(**payload)
 		self.assertEqual(len(STORE.rows("Employee")), before)
 
@@ -1123,7 +1131,7 @@ class OnboardingEndToEnd(EmployeeTestCase):
 
 # ── the module's own claims ─────────────────────────────────────────────────
 class TheAllowlistIsClosed(EmployeeTestCase):
-	def test_the_eighteen_are_the_eighteen(self):
+	def test_the_nineteen_are_the_nineteen(self):
 		"""Asserted by name. `WRITABLE` is what every refusal message lists, and a
 		field added to it without a decision is a field this app writes without
 		one.
@@ -1139,7 +1147,15 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 		AAMVA licence barcode since the ID scanner shipped, and this list is
 		where it was being dropped — silently taking the I-9's Legal Middle Name
 		with it, because `submit_i9_section_1` fills that box from
-		`Employee.middle_name` when the caller sends none."""
+		`Employee.middle_name` when the caller sends none.
+
+		`branch` is the nineteenth, added in v0.54.0. It is Frappe HR's own
+		operating-unit dimension and the last field the hiring wizard's Assignment
+		step asked for that this list did not carry — so a crew hired for a
+		particular camp recorded the COMPANY that employs them and nothing about
+		where they report. It sits beside `department`, `designation` and
+		`employment_type` because it is the same kind of fact and is checked the
+		same way: a Link, against this site's own Branch records."""
 		self.assertEqual(
 			employee_tool.WRITABLE,
 			(
@@ -1154,6 +1170,7 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 				"department",
 				"designation",
 				"employment_type",
+				"branch",
 				"status",
 				"user_id",
 				"personal_email",
@@ -1163,6 +1180,71 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 				"jurisdiction",
 			),
 		)
+
+	def test_every_field_on_the_allowlist_is_a_field_create_actually_writes(self):
+		"""The bug this exists for shipped once and was invisible.
+
+		`WRITABLE` is what `_reject_unknown` ACCEPTS. What `create_employee`
+		actually writes is a separate tuple inside the function — the derived
+		fields, then `optional`. v0.54.0 added `branch` to the first and not the
+		second, and the result was the worst shape a failure can take: the tool
+		took the argument without a word of complaint, reported success, and
+		dropped the value. No refusal, no warning, nothing in
+		`fields_not_on_this_site` — just a hire whose camp was blank.
+
+		Asserted through the tool rather than by reading the tuple, because the
+		tuple is a local and because what matters is the value landing on the
+		record. Every field gets a value this site's schema accepts; the two
+		derived off the full name and the ones with their own tests are covered
+		here anyway, since the point is that NOTHING on the list is silently
+		dropped."""
+		STORE.seed("Branch", [{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"}])
+		values = {
+			"employee_name": "Ana Ramos",
+			"first_name": "Ana",
+			"middle_name": "Luz",
+			"last_name": "Ramos",
+			"company": MAIN,
+			"date_of_joining": "2026-07-01",
+			"date_of_birth": "1994-03-12",
+			"gender": "Female",
+			"department": "Operations",
+			"designation": "Picker",
+			"employment_type": "Seasonal Worker",
+			"branch": "Mill Creek Camp",
+			"status": "Active",
+			"personal_email": "ana@example.test",
+			"cell_number": "5415550143",
+			"i9_status": "Verified",
+			"w4_status": "On-File",
+			"jurisdiction": "WA",
+		}
+		# `user_id` is the one field left out, and it is not an oversight: it has
+		# to name a User that exists and is enrolled, which is a fixture rather
+		# than a value, and `TheLinkage` covers it at length.
+		self.assertEqual(
+			set(employee_tool.WRITABLE) - set(values),
+			{"user_id"},
+			"a field joined WRITABLE and this test does not exercise it",
+		)
+
+		created = self.create(**{key: value for key, value in values.items() if key != "employee_name"})
+		row = frappe.db.get_value("Employee", created["employee"], list(values), as_dict=True)
+		for field, expected in values.items():
+			# A field this site's Employee does not carry is a different fact and
+			# already has its own contract: `_supported` splits it out and reports
+			# it in `fields_not_on_this_site` rather than dropping it quietly.
+			# The three `compliance_fields.py` installs are Custom Fields, and
+			# this fixture is a site that has not installed them.
+			if not compat.has_field("Employee", field):
+				self.assertIn(field, created["fields_not_on_this_site"])
+				continue
+			with self.subTest(field=field):
+				self.assertEqual(
+					str(row.get(field) or ""),
+					str(expected),
+					f"create_employee accepted {field} and did not write it",
+				)
 
 	def test_no_sensitive_field_is_also_writable(self):
 		self.assertFalse(set(employee_tool.WRITABLE) & employee_tool.SENSITIVE_FIELDS)

@@ -112,6 +112,12 @@ CONVEYED_FIELDS = (
 	"abbr",
 	"parcel_id",
 	"use_type",
+	# v0.54.0. Conveyed for the reason the rest of this tuple is: the camp this
+	# ground is part of does not change because the deed did. A parcel that moves
+	# from the trust to the LLC is the same forty acres with the same cabins on
+	# it, and dropping the branch would empty the hiring wizard's housing list
+	# for that camp on the day of a paper transaction nobody in the orchard saw.
+	"branch",
 	"county",
 	"state",
 	"acreage",
@@ -139,6 +145,14 @@ _PARCEL_FIELDS = (
 	"owning_entity",
 	"parcel_id",
 	"use_type",
+	# v0.54.0. The operating unit this ground belongs to, and the ONLY join
+	# between a person and a camp: an Employee carries a Branch, a Housing Unit
+	# stands on a Parcel, and nothing else connects the two.
+	# `list_available_housing` resolves a branch to its parcels through this
+	# column. Read through `compat.existing_fields`, so a site that has not
+	# migrated yet reads a parcel without it rather than failing on a column that
+	# is not there.
+	"branch",
 	"county",
 	"state",
 	"acreage",
@@ -246,6 +260,7 @@ def _describe_parcel(row: dict) -> dict:
 		"owning_entity": row.get("owning_entity"),
 		"parcel_id": row.get("parcel_id") or None,
 		"use_type": row.get("use_type") or None,
+		"branch": row.get("branch") or None,
 		"county": row.get("county") or None,
 		"state": row.get("state") or None,
 		"acreage": round(float(row.get("acreage") or 0), 2),
@@ -520,6 +535,11 @@ def create_parcel(args: dict) -> ToolResult:
 	for field, value in (
 		("parcel_id", parcel_id),
 		("use_type", use_type),
+		# v0.54.0. Checked against the Branch table by the controller, where the
+		# check can also be skipped on a site that has no Branch doctype — see
+		# `Parcel._check_branch`. Passing it through here rather than validating
+		# again keeps one rule in one place.
+		("branch", as_str(args, "branch")),
 		("county", as_str(args, "county")),
 		("state", as_str(args, "state")),
 		("address", as_str(args, "address")),
@@ -621,7 +641,12 @@ def update_parcel(args: dict) -> ToolResult:
 	changes: dict = {}
 	updates: dict = {}
 
-	for field in ("parcel_id", "county", "state", "address", "appraiser", "notes"):
+	# v0.54.0 puts `branch` in this loop rather than beside `use_type` below,
+	# because it is free text on this doctype and not a Select — the Branch check
+	# belongs to the controller, which is also the only place that can skip it on
+	# a site with no Branch doctype. Passing "" clears it, which is how a camp
+	# that was consolidated into another one is unassigned.
+	for field in ("parcel_id", "branch", "county", "state", "address", "appraiser", "notes"):
 		if field in args:
 			value = as_str(args, field)
 			if value != str(entry.get(field) or ""):
@@ -733,6 +758,12 @@ def list_parcels(args: dict) -> ToolResult:
 	title_holder = as_str(args, "title_holder")
 	if title_holder:
 		filters["title_holder"] = title_holder
+	# v0.54.0. Which ground belongs to one camp — the read `list_available_housing`
+	# does to turn a branch into a set of parcels, and the one an operator does to
+	# find out why a camp shows no cabins.
+	branch = as_str(args, "branch")
+	if branch and compat.has_field(PARCEL, "branch"):
+		filters["branch"] = branch
 
 	fields = compat.existing_fields(PARCEL, _PARCEL_FIELDS)
 	rows = frappe.db.get_all(PARCEL, filters=filters, fields=fields, order_by="parcel_name asc", limit=limit)

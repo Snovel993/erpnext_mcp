@@ -48,10 +48,11 @@ import base64
 import hashlib
 import json
 from typing import ClassVar
+from unittest import mock
 
 import frappe
 
-from erpnext_mcp import audit, roles, settings
+from erpnext_mcp import audit, compat, roles, settings
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import guard
 from erpnext_mcp.api import mobile as mobile_api
@@ -268,10 +269,22 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: with the `com.apple.pkpass` type on it so AirDrop opens it in Wallet — is
 	#: separate, tracked work. Listing it here rather than in `MOBILE` keeps this
 	#: file from claiming `MobileAPI.swift` names a method it does not.
+	#: v0.54.0 adds the hiring wizard's Assignment and Housing steps on the same
+	#: footing again. The handset already scans a licence and matches a name; the
+	#: four Assignment dropdowns are still a Swift array compiled into the app,
+	#: and there is no Housing step at all. These three are the server half, and
+	#: `MobileAPI.swift` names none of them yet — so they are listed HERE rather
+	#: than in `MOBILE`, and `test_ios_contract` transcribes no mirror for them,
+	#: because a mirror of a Codable that does not exist would invent the
+	#: contract instead of copying it. They move up to `MOBILE` in the release
+	#: that lands the Swift side.
 	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
 		"get_active_model",
 		"get_model_file_chunk",
 		"get_employee_badge_pass",
+		"list_onboarding_reference_data",
+		"list_available_housing",
+		"assign_housing",
 	}
 
 	def _whitelisted(self, module):
@@ -1194,3 +1207,652 @@ class RefusalsAreMeteredToo(MobileAPITestCase):
 		self.be("Guest", remote_addr="198.51.100.4")
 		with self.assertRaises(frappe.PermissionError):
 			mobile_api.list_my_tasks()
+
+
+# ── 8. the hiring wizard's Assignment and Housing steps ─────────────────────
+class TheWizardsDropdownsComeFromTheSite(MobileAPITestCase):
+	"""v0.54.0. `list_onboarding_reference_data`.
+
+	The four masters an operator maintains in the Desk, read by the phone instead
+	of compiled into it. The failure this prevents is the one
+	`list_i9_document_types` prevented for the I-9's document picker: a Swift
+	array that goes stale silently, and a wizard whose Assignment step fails at
+	the END of a hire with "not a Designation on this site" and no way to find
+	out what is.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		STORE.seed("Branch", [{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"}])
+		STORE.seed("Designation", [{"name": "Picker", "designation_name": "Picker"}])
+		STORE.seed(
+			"Employment Type",
+			[
+				{"name": "Seasonal", "employee_type_name": "Seasonal"},
+				{"name": "Permanent", "employee_type_name": "Permanent"},
+				{"name": "Contract", "employee_type_name": "Contract"},
+			],
+		)
+		STORE.seed(
+			"Department",
+			[
+				{"name": "Harvest", "department_name": "Harvest", "company": MAIN, "is_group": 0},
+				{"name": "All Departments", "department_name": "All", "company": MAIN, "is_group": 1},
+				{"name": "Packing", "department_name": "Packing", "company": OTHER, "is_group": 0},
+			],
+		)
+
+	def test_all_four_masters_come_back_in_one_call(self):
+		"""One call, because they are read together once when the step opens and
+		four round trips over a tailgate LTE connection is four chances to
+		half-populate a form."""
+		self.be()
+		answer = mobile_api.list_onboarding_reference_data()
+		for key in ("branches", "departments", "designations", "employment_types"):
+			with self.subTest(key=key):
+				self.assertTrue(answer[key], key)
+		self.assertEqual(answer["counts"]["employment_types"], 3)
+		self.assertEqual(answer["masters_absent"], [])
+
+	def test_the_three_employment_types_the_wizard_offers_are_the_sites_own(self):
+		self.be()
+		names = {row["name"] for row in mobile_api.list_onboarding_reference_data()["employment_types"]}
+		self.assertEqual(names, {"Seasonal", "Permanent", "Contract"})
+
+	def test_a_branch_with_no_second_column_still_has_a_label(self):
+		"""Frappe HR's Branch is a docname and nothing else on some sites, and a
+		dropdown row with a null label is a blank line somebody has to pick."""
+		STORE.seed("Branch", [{"name": "Bare Camp"}])
+		self.be()
+		labels = {
+			row["name"]: row["label"] for row in mobile_api.list_onboarding_reference_data()["branches"]
+		}
+		self.assertEqual(labels["Bare Camp"], "Bare Camp")
+		self.assertEqual(labels["Mill Creek Camp"], "Mill Creek Camp")
+
+	def test_another_entitys_department_is_not_offered(self):
+		"""Department is the only one of the four that carries a company, and the
+		scoping rule the rest of this surface follows applies to it too."""
+		self.be()
+		names = {row["name"] for row in mobile_api.list_onboarding_reference_data()["departments"]}
+		self.assertIn("Harvest", names)
+		self.assertNotIn("Packing", names)
+
+	def test_a_group_department_is_not_offered(self):
+		"""`is_group` marks a node in the tree rather than somewhere a person is
+		assigned, and an Employee pointed at one double-counts in every report."""
+		self.be()
+		names = {row["name"] for row in mobile_api.list_onboarding_reference_data()["departments"]}
+		self.assertNotIn("All Departments", names)
+
+	def test_a_master_this_site_does_not_have_is_empty_and_named_not_an_error(self):
+		"""A site without Frappe HR has none of the four, and the honest answer is
+		a wizard that offers no choices for that field rather than a hire that
+		cannot start. `create_employee` agrees: `_clean` does not check a Link
+		whose target doctype is absent."""
+		from .harness import INSTALLED_DOCTYPES
+
+		# Not seeded away — removed from the site's installed set, which is what
+		# "this bench has no hrms" actually looks like to `compat.doctype_exists`.
+		INSTALLED_DOCTYPES.discard("Branch")
+		self.addCleanup(INSTALLED_DOCTYPES.add, "Branch")
+
+		self.be()
+		answer = mobile_api.list_onboarding_reference_data()
+		self.assertEqual(answer["branches"], [])
+		self.assertIn("Branch", answer["masters_absent"])
+		self.assertTrue(answer["designations"])
+
+	def test_a_field_worker_may_read_it_because_nothing_on_it_is_about_a_person(self):
+		"""Deliberately unlike `search_employees`. A job title and a camp name are
+		not a personnel record, and gating them would mean the wizard's own
+		dropdowns needed a role the rest of the surface does not."""
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		self.assertTrue(mobile_api.list_onboarding_reference_data()["designations"])
+
+	def test_it_refuses_an_entity_this_phone_cannot_reach(self):
+		self.be()
+		with self.assertRaises(frappe.PermissionError):
+			mobile_api.list_onboarding_reference_data(company=OTHER)
+
+
+class TheCampHasARead(MobileAPITestCase):
+	"""v0.54.0. `list_available_housing` — beds and bodies, and no names."""
+
+	def setUp(self):
+		super().setUp()
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.a_camp("MC-Cabin-01")
+
+	def _units(self, **kwargs):
+		return {row["name"]: row for row in mobile_api.list_available_housing(**kwargs)["units"]}
+
+	def test_an_empty_cabin_reports_its_capacity_and_no_occupants(self):
+		self.be()
+		unit = self._units()[self.unit]
+		self.assertEqual(unit["capacity"], 4)
+		self.assertEqual(unit["current_occupants"], 0)
+		self.assertEqual(unit["open_beds"], 4)
+		self.assertEqual(unit["status"], "Available")
+		self.assertTrue(unit["assignable"])
+
+	def test_it_counts_who_is_in_a_cabin_and_never_names_them(self):
+		"""`list_housing_units` returns an `occupants` list of employee names.
+		Who sleeps in which cabin is a personnel fact, and it has no business on
+		a picker's phone merely because the vacancy count does."""
+		self.be()
+		mobile_api.assign_housing(
+			employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+		)
+
+		unit = self._units()[self.unit]
+		self.assertEqual(unit["current_occupants"], 1)
+		self.assertEqual(unit["open_beds"], 3)
+		self.assertNotIn("occupants", unit)
+		self.assertNotIn("Ana Ramos", json.dumps(unit))
+
+	def test_a_full_cabin_is_dropped_by_default_and_kept_with_a_reason_on_request(self):
+		self.be()
+		for index in range(4):
+			STORE.seed(
+				"Employee",
+				[
+					{
+						"name": f"EMP-FILL-{index}",
+						"employee_name": f"Filler {index}",
+						"company": MAIN,
+						"status": "Active",
+					}
+				],
+			)
+			mobile_api.assign_housing(
+				employee=f"EMP-FILL-{index}", housing_unit=self.unit, check_in_date="2026-08-01"
+			)
+
+		self.assertNotIn(self.unit, self._units())
+
+		unit = self._units(include_full=True)[self.unit]
+		self.assertEqual(unit["status"], "Full")
+		self.assertFalse(unit["assignable"])
+		self.assertIn("4 bed(s) are taken", unit["unassignable_reason"])
+
+	def test_a_shower_block_is_never_offered_at_all(self):
+		"""`create_housing_assignment` refuses one by name, and a dropdown that
+		offers it is a dropdown whose next screen is a refusal."""
+		self.tool_data(
+			"create_housing_unit",
+			{"parcel": "Mill Creek", "unit_name": "MC-Bath", "unit_type": "Toilet-Shower"},
+		)
+		self.be()
+		self.assertNotIn("MC-Bath - MC", self._units())
+
+	def test_a_condemned_cabin_is_hidden_by_default_and_says_why_when_shown(self):
+		"""A foreman who cannot find the cabin they expected needs to be told it
+		is condemned, not shown a shorter list."""
+		frappe.db.set_value("Housing Unit", self.unit, "condition", "Uninhabitable")
+		self.be()
+		self.assertNotIn(self.unit, self._units())
+
+		unit = self._units(include_full=True)[self.unit]
+		self.assertEqual(unit["status"], "Uninhabitable")
+		self.assertFalse(unit["assignable"])
+		self.assertIn("Uninhabitable", unit["unassignable_reason"])
+
+	def test_a_cabin_nobody_has_measured_is_not_reported_as_full(self):
+		"""Capacity zero means unmeasured, not "no beds" — a camp whose
+		capacities were never entered would otherwise come back with every bed
+		taken and nothing saying why."""
+		self.tool_data(
+			"create_housing_unit",
+			{"parcel": "Mill Creek", "unit_name": "MC-Cabin-09", "unit_type": "Cabin"},
+		)
+		self.be()
+		unit = self._units()["MC-Cabin-09 - MC"]
+		self.assertIsNone(unit["capacity"])
+		self.assertIsNone(unit["open_beds"])
+		self.assertEqual(unit["status"], "Available")
+		self.assertTrue(unit["assignable"])
+
+	def test_it_refuses_an_entity_this_phone_cannot_reach(self):
+		self.be()
+		with self.assertRaises(frappe.PermissionError):
+			mobile_api.list_available_housing(company=OTHER)
+
+
+class ABranchResolvesToItsGround(MobileAPITestCase):
+	"""v0.54.0. `Parcel.branch`, and the join it exists to make.
+
+	An Employee carries a Branch and a Housing Unit stands on a Parcel. Before
+	this column there was no join between them at all, so a wizard that had just
+	asked which camp somebody was hired to could not then show that camp's
+	cabins — the iOS side would have had to fetch every parcel, fetch every unit,
+	and work the mapping out itself.
+
+	The resolution happens server-side through one function that both
+	`list_onboarding_reference_data` and `list_available_housing` call, so the
+	mapping the wizard was SHOWN and the mapping the housing list FILTERS ON
+	cannot come apart.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		# `update_parcel` is how a branch is put on a parcel, and it is a mutating
+		# tool an operator switches on by hand like every other one.
+		self.configure(enabled=1, public_url="https://umbrel.tail4a2b.ts.net", **ON, allow_update_parcel=1)
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		STORE.seed(
+			"Branch",
+			[
+				{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"},
+				{"name": "Grande Camp", "branch": "Grande Camp"},
+				{"name": "Packhouse", "branch": "Packhouse"},
+			],
+		)
+		# Mill Creek Camp grew across a fence line: two parcels, one camp. Grande
+		# Camp is the ordinary single-parcel case. Packhouse is a real operating
+		# unit with no ground tagged to it at all, which is its own answer.
+		for parcel_name in ("Mill Creek", "Mill Creek North", "Grande Ronde"):
+			self.tool_data(
+				"create_parcel",
+				{"owning_entity": MAIN, "parcel_name": parcel_name, "acreage": 40.0},
+			)
+		for parcel_name, branch in (
+			("Mill Creek", "Mill Creek Camp"),
+			("Mill Creek North", "Mill Creek Camp"),
+			("Grande Ronde", "Grande Camp"),
+		):
+			self.tool_data("update_parcel", {"parcel": parcel_name, "branch": branch})
+
+		self.cabins = {}
+		for parcel_name, unit_name in (
+			("Mill Creek", "MC-Cabin-01"),
+			("Mill Creek North", "MCN-Cabin-01"),
+			("Grande Ronde", "GR-Cabin-01"),
+		):
+			self.cabins[unit_name] = self.tool_data(
+				"create_housing_unit",
+				{"parcel": parcel_name, "unit_name": unit_name, "unit_type": "Cabin", "capacity": 4},
+			)["name"]
+
+	def _names(self, **kwargs):
+		return {row["name"] for row in mobile_api.list_available_housing(**kwargs)["units"]}
+
+	# ── the reference read ──────────────────────────────────────────────────
+	def test_every_branch_row_carries_the_parcels_it_holds(self):
+		self.be()
+		rows = {row["name"]: row for row in mobile_api.list_onboarding_reference_data()["branches"]}
+		self.assertEqual(rows["Mill Creek Camp"]["parcels"], ["Mill Creek - ETC", "Mill Creek North - ETC"])
+		self.assertEqual(rows["Grande Camp"]["parcels"], ["Grande Ronde - ETC"])
+		self.assertEqual(rows["Packhouse"]["parcels"], [])
+
+	def test_the_scalar_parcel_is_set_only_when_there_is_exactly_one(self):
+		"""Null for none AND for several. A scalar that silently picked the first
+		of two parcels would send half a camp's cabins missing, and a client
+		reading only this field has to fall back to asking the server."""
+		self.be()
+		rows = {row["name"]: row for row in mobile_api.list_onboarding_reference_data()["branches"]}
+		self.assertEqual(rows["Grande Camp"]["parcel"], "Grande Ronde - ETC")
+		self.assertIsNone(rows["Mill Creek Camp"]["parcel"])
+		self.assertEqual(rows["Mill Creek Camp"]["parcel_count"], 2)
+		self.assertIsNone(rows["Packhouse"]["parcel"])
+
+	def test_a_branch_with_no_ground_is_listed_and_called_out_rather_than_hidden(self):
+		"""It is a real operating unit somebody may legitimately hire into. What
+		it is not is a camp with housing."""
+		self.be()
+		answer = mobile_api.list_onboarding_reference_data()
+		self.assertIn("Packhouse", {row["name"] for row in answer["branches"]})
+		self.assertEqual(answer["branches_without_parcels"], ["Packhouse"])
+
+	# ── the housing read ────────────────────────────────────────────────────
+	def test_passing_a_branch_returns_that_camps_cabins_and_no_others(self):
+		"""The whole point: the phone passes the branch it just hired somebody
+		into and does no parcel lookup of its own."""
+		self.be()
+		self.assertEqual(self._names(branch="Grande Camp"), {self.cabins["GR-Cabin-01"]})
+
+	def test_a_camp_spanning_two_parcels_returns_both(self):
+		"""A filter that took only the first parcel would hide half the beds on
+		exactly the operations big enough to have the problem."""
+		self.be()
+		self.assertEqual(
+			self._names(branch="Mill Creek Camp"),
+			{self.cabins["MC-Cabin-01"], self.cabins["MCN-Cabin-01"]},
+		)
+
+	def test_the_parcels_searched_are_echoed_back(self):
+		"""A foreman looking at an unexpectedly short list needs to see which
+		ground was searched."""
+		self.be()
+		answer = mobile_api.list_available_housing(branch="Mill Creek Camp")
+		self.assertTrue(answer["branch_filter_applied"])
+		self.assertEqual(answer["branch_parcels"], ["Mill Creek - ETC", "Mill Creek North - ETC"])
+		self.assertIsNone(answer["branch_note"])
+
+	def test_a_branch_that_names_nothing_is_refused_rather_than_answered_empty(self):
+		"""A typo resolves to no parcels, and "no parcels" and "no beds" produce
+		the same empty list — so the mistake has to be caught while it can still
+		be told apart from an answer."""
+		self.be()
+		with self.assertRaises(frappe.DoesNotExistError) as caught:
+			mobile_api.list_available_housing(branch="Mil Creek Camp")
+		self.assertIn("list_onboarding_reference_data", str(caught.exception))
+
+	def test_a_real_branch_with_no_ground_lists_everything_and_says_why(self):
+		"""Never a silent empty list. An empty camp reads on a phone as "no
+		room", which is the one wrong answer this endpoint can give."""
+		self.be()
+		answer = mobile_api.list_available_housing(branch="Packhouse")
+		self.assertFalse(answer["branch_filter_applied"])
+		self.assertEqual(answer["branch_parcels"], [])
+		self.assertIn("No parcel is tagged with branch Packhouse", answer["branch_note"])
+		self.assertIn("update_parcel", answer["branch_note"])
+		self.assertEqual(len(answer["units"]), 3)
+
+	def test_a_site_that_has_not_migrated_the_column_says_so_and_lists_everything(self):
+		"""The other way this can fail, and it is a different sentence: the
+		column is not there rather than nothing being tagged with it."""
+		real = compat.has_field
+
+		# Wraps rather than replaces: every other field answers truthfully, so
+		# `existing_fields` still builds a real column list and only the one
+		# column this site would be missing is missing.
+		def unmigrated(doctype, field):
+			return False if (doctype == "Parcel" and field == "branch") else real(doctype, field)
+
+		with mock.patch.object(compat, "has_field", unmigrated):
+			self.be()
+			answer = mobile_api.list_available_housing(branch="Mill Creek Camp")
+		self.assertFalse(answer["branch_filter_applied"])
+		self.assertIn("no branch column", answer["branch_note"])
+		self.assertIn("migrate", answer["branch_note"])
+		self.assertEqual(len(answer["units"]), 3)
+
+	def test_a_branch_and_a_parcel_together_intersect(self):
+		"""Which is what somebody asking for one parcel of a two-parcel camp
+		means."""
+		self.be()
+		self.assertEqual(
+			self._names(branch="Mill Creek Camp", parcel="Mill Creek"),
+			{self.cabins["MC-Cabin-01"]},
+		)
+
+	def test_the_branch_the_wizard_was_shown_is_the_one_the_housing_read_filters_on(self):
+		"""The two halves asserted together. If these ever disagree the wizard
+		shows a camp and then shows none of its cabins."""
+		self.be()
+		for row in mobile_api.list_onboarding_reference_data()["branches"]:
+			if not row["parcels"]:
+				continue
+			with self.subTest(branch=row["name"]):
+				answer = mobile_api.list_available_housing(branch=row["name"])
+				self.assertEqual(answer["branch_parcels"], row["parcels"])
+
+	# ── the mapping itself ──────────────────────────────────────────────────
+	def test_a_parcel_cannot_be_tagged_with_a_branch_that_does_not_exist(self):
+		"""The refusal is at the record, so nothing downstream has to defend
+		against a branch nobody can resolve."""
+		message = self.tool_error("update_parcel", {"parcel": "Grande Ronde", "branch": "Nowhere"})
+		self.assertIn("Nowhere", message)
+		self.assertIn("Branch", message)
+
+	def test_clearing_a_branch_unassigns_the_ground(self):
+		"""How a camp folded into another one is recorded."""
+		self.tool_data("update_parcel", {"parcel": "Grande Ronde", "branch": ""})
+		self.be()
+		answer = mobile_api.list_available_housing(branch="Grande Camp")
+		self.assertFalse(answer["branch_filter_applied"])
+		self.assertIn("No parcel is tagged", answer["branch_note"])
+
+	def test_another_entitys_ground_is_not_in_a_branchs_parcels(self):
+		"""The scoping rule applied to the JOIN rather than only to the rows —
+		a branch with parcels under a company this caller cannot see reports
+		only the ones they can."""
+		self.tool_data(
+			"create_parcel",
+			{"owning_entity": OTHER, "parcel_name": "Far Side", "acreage": 10.0},
+		)
+		self.tool_data("update_parcel", {"parcel": "Far Side", "branch": "Grande Camp"})
+		self.be()
+		rows = {row["name"]: row for row in mobile_api.list_onboarding_reference_data()["branches"]}
+		self.assertEqual(rows["Grande Camp"]["parcels"], ["Grande Ronde - ETC"])
+
+
+class TheCampHasAWrite(MobileAPITestCase):
+	"""v0.54.0. `assign_housing` — the wizard's Housing step."""
+
+	def setUp(self):
+		super().setUp()
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.a_camp("MC-Cabin-01")
+
+	def test_it_puts_one_person_in_one_cabin_from_one_date(self):
+		self.be()
+		answer = mobile_api.assign_housing(
+			employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+		)
+		self.assertTrue(answer["assignment"])
+		self.assertEqual(answer["employee"], WORKER_EMPLOYEE)
+		self.assertEqual(answer["unit"], self.unit)
+		self.assertEqual(answer["check_in_date"], "2026-08-01")
+		self.assertEqual(answer["status"], "Current")
+		self.assertEqual(answer["current_occupants"], 1)
+		self.assertEqual(answer["open_beds"], 3)
+		self.assertEqual(answer["company"], MAIN)
+
+	def test_a_second_person_into_a_four_bunk_cabin_is_the_ordinary_case(self):
+		"""The tool refuses an overlap without `allow_multi_occupancy` and this
+		method passes it under capacity on the caller's behalf — a shared cabin
+		is what a cabin IS, and a wizard that refused the second picker into a
+		four-bunk unit would be unusable in July."""
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "EMP-LUZ",
+					"employee_name": "Luz Herrera",
+					"company": MAIN,
+					"status": "Active",
+				}
+			],
+		)
+		self.be()
+		mobile_api.assign_housing(
+			employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+		)
+		answer = mobile_api.assign_housing(
+			employee="EMP-LUZ", housing_unit=self.unit, check_in_date="2026-08-02"
+		)
+		self.assertEqual(answer["current_occupants"], 2)
+
+	def test_it_refuses_to_overfill_a_cabin_where_the_tool_only_warns(self):
+		"""The difference is deliberate. A warning is right on a console where an
+		operator can weigh it; on a phone nothing displays it, the foreman has
+		walked away, and a bed that does not exist becomes somebody sleeping in a
+		truck."""
+		self.be()
+		for index in range(4):
+			STORE.seed(
+				"Employee",
+				[
+					{
+						"name": f"EMP-FILL-{index}",
+						"employee_name": f"Filler {index}",
+						"company": MAIN,
+						"status": "Active",
+					}
+				],
+			)
+			mobile_api.assign_housing(
+				employee=f"EMP-FILL-{index}", housing_unit=self.unit, check_in_date="2026-08-01"
+			)
+
+		with self.assertRaises(Exception) as caught:
+			mobile_api.assign_housing(
+				employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+			)
+		message = str(caught.exception)
+		self.assertIn("holds 4", message)
+		self.assertIn("list_available_housing", message)
+
+		# Asserted on the PERSON rather than on a row count. `guard._record`
+		# rolls back on every refusal — deliberately, so a failed call leaves
+		# nothing behind but its audit row — and in this suite the four fills
+		# above share that uncommitted transaction, so counting rows here would
+		# be measuring the rollback rather than the refusal.
+		self.assertFalse(
+			[row for row in STORE.rows("Housing Assignment") if row.get("employee") == WORKER_EMPLOYEE]
+		)
+
+	def test_the_phone_cannot_send_the_flag_that_turns_the_capacity_check_off(self):
+		"""`allow_multi_occupancy` is the one argument that would undo the check
+		above, so it is not in the signature at all — Frappe's own argument
+		filter drops a body key that matches nothing."""
+		self.be()
+		with self.assertRaises(TypeError):
+			mobile_api.assign_housing(
+				employee=WORKER_EMPLOYEE,
+				housing_unit=self.unit,
+				check_in_date="2026-08-01",
+				allow_multi_occupancy=True,
+			)
+
+	def test_a_field_worker_may_not_write_one(self):
+		"""A Housing Assignment names a person, a building and the dates between
+		them. It is the audit trail defending a Section 119 exclusion and the
+		answer to an ORS 653 wage claim, which is a personnel record."""
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.assign_housing(
+				employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+			)
+		self.assertIn("personnel register", str(caught.exception))
+
+	def test_a_check_in_date_is_required(self):
+		self.be()
+		with self.assertRaises(frappe.ValidationError) as caught:
+			mobile_api.assign_housing(employee=WORKER_EMPLOYEE, housing_unit=self.unit)
+		self.assertIn("check_in_date", str(caught.exception))
+
+	def test_an_employee_of_another_entity_is_not_found_rather_than_refused(self):
+		"""The same wording a docname that does not exist gets, so a caller
+		cannot map the site's employees by watching which error comes back."""
+		self.be()
+		with self.assertRaises(frappe.DoesNotExistError):
+			mobile_api.assign_housing(
+				employee=OUTSIDER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+			)
+
+	def test_a_cabin_belonging_to_another_entity_is_not_found_either(self):
+		"""A Housing Unit calls its company `owning_entity`, so
+		`require_scoped_doc` reads a field that is not there and the check is
+		made by hand. This is the test that it is made at all."""
+		frappe.db.set_value("Housing Unit", self.unit, "owning_entity", OTHER)
+		self.be()
+		with self.assertRaises(frappe.DoesNotExistError):
+			mobile_api.assign_housing(
+				employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+			)
+
+	def test_it_carries_the_section_119_note_and_the_unrecorded_deduction_warning(self):
+		"""Whether a housing charge came out of wages is the question ORS 653
+		constrains, and Unknown is the answer that cannot be defended."""
+		self.be()
+		answer = mobile_api.assign_housing(
+			employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+		)
+		self.assertEqual(answer["housing_deduction_from_wages"], "Unknown")
+		self.assertIn("Section 119", answer["section_119_note"])
+		self.assertTrue(any("ORS 653" in warning for warning in answer["warnings"]))
+
+	def test_the_deduction_answer_is_forwarded_when_the_wizard_asks_it(self):
+		self.be()
+		answer = mobile_api.assign_housing(
+			employee=WORKER_EMPLOYEE,
+			housing_unit=self.unit,
+			check_in_date="2026-08-01",
+			housing_deduction_from_wages="No",
+			deposit_paid=150,
+		)
+		self.assertEqual(answer["housing_deduction_from_wages"], "No")
+		self.assertEqual(answer["deposit_paid"], 150.0)
+
+	def test_every_call_leaves_an_audit_row(self):
+		self.be()
+		mobile_api.assign_housing(
+			employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+		)
+		self.assertEqual(len(self.audit_rows("assign_housing")), 1)
+
+
+class TheAssignmentStepCanRecordWhereSomebodyWorks(MobileAPITestCase):
+	"""v0.54.0. `create_employee` on the phone, and the field that had nowhere
+	to land.
+
+	`tools/employee.WRITABLE` carried designation, department and employment type
+	and not `branch`, so the wizard's Assignment step could ask which camp
+	somebody reports to and could not record the answer. The wrapper forwards it
+	like the other three and adds no rule of its own — the allowlist and the Link
+	check stay in `tools/employee.py`, which is why this asserts through the
+	published endpoint rather than around it.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		STORE.seed("Branch", [{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"}])
+		STORE.seed("Designation", [{"name": "Picker", "designation_name": "Picker"}])
+		STORE.seed("Employment Type", [{"name": "Seasonal", "employee_type_name": "Seasonal"}])
+		STORE.seed(
+			"Department",
+			[{"name": "Harvest", "department_name": "Harvest", "company": MAIN, "is_group": 0}],
+		)
+
+	def test_the_four_assignment_dropdowns_all_reach_the_record(self):
+		self.be()
+		created = mobile_api.create_employee(
+			first_name="Elena",
+			last_name="Marquez",
+			company=MAIN,
+			designation="Picker",
+			department="Harvest",
+			employment_type="Seasonal",
+			branch="Mill Creek Camp",
+		)
+		row = frappe.db.get_value(
+			"Employee",
+			created["name"],
+			["designation", "department", "employment_type", "branch"],
+			as_dict=True,
+		)
+		self.assertEqual(row["designation"], "Picker")
+		self.assertEqual(row["department"], "Harvest")
+		self.assertEqual(row["employment_type"], "Seasonal")
+		self.assertEqual(row["branch"], "Mill Creek Camp")
+
+	def test_a_branch_that_names_nothing_is_refused_by_the_tool_not_the_wrapper(self):
+		"""The refusal lists what this site has, which is the whole reason the
+		wizard reads its dropdowns from `list_onboarding_reference_data` rather
+		than from an array compiled into the app."""
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.create_employee(
+				first_name="Elena", last_name="Marquez", company=MAIN, branch="Nowhere Camp"
+			)
+		message = str(caught.exception)
+		self.assertIn("Nowhere Camp", message)
+		self.assertIn("Mill Creek Camp", message)
+
+	def test_the_branch_the_wizard_offers_is_one_the_reference_read_returned(self):
+		"""The two halves of the same step, asserted together: a value that came
+		out of the dropdown read is a value the create accepts. If these ever
+		disagree the wizard fails on its last screen."""
+		self.be()
+		offered = mobile_api.list_onboarding_reference_data()["branches"][0]["name"]
+		created = mobile_api.create_employee(
+			first_name="Elena", last_name="Marquez", company=MAIN, branch=offered
+		)
+		self.assertEqual(frappe.db.get_value("Employee", created["name"], "branch"), offered)

@@ -209,6 +209,18 @@ ROUTES = (
 	# Vision.
 	Route("/mobile", mobile_api.get_active_model),
 	Route("/mobile", mobile_api.get_model_file_chunk),
+	# v0.54.0. The hiring wizard's Assignment and Housing steps.
+	# `list_onboarding_reference_data` is the four dropdowns — Branch,
+	# Department, Designation, Employment Type — read off the site instead of
+	# compiled into the app, which is the same staleness `list_i9_document_types`
+	# removed from the I-9's document picker. The camp pair is the read and the
+	# write of one question: which cabin has a bed free, and put this person in
+	# it. Routed here rather than left on `/api/method/…` alone for the reason
+	# every method above is: the funnel publishes `/farmops/api/…` and nothing
+	# else, and a method with no route is a 404 in somebody's hands.
+	Route("/mobile", mobile_api.list_onboarding_reference_data),
+	Route("/mobile", mobile_api.list_available_housing),
+	Route("/mobile", mobile_api.assign_housing),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

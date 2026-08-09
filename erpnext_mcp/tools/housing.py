@@ -851,6 +851,82 @@ def create_housing_assignment(args: dict) -> ToolResult:
 	)
 
 
+def _entity_filter(companies) -> dict:
+	"""`{"owning_entity": …}` for one company, several, or none at all.
+
+	The two readers below are called from the mobile surface, where the caller's
+	scope is a LIST of entities and naming one is optional — so a helper that took
+	a single company would push the multi-entity case back to the caller and it
+	would be got wrong once per caller.
+	"""
+	if not companies:
+		return {}
+	if isinstance(companies, str):
+		return {"owning_entity": companies}
+	names = sorted({str(name) for name in companies if name})
+	if not names:
+		return {}
+	return {"owning_entity": ("in", names)}
+
+
+def parcels_for_branch(branch: str, company: str = "") -> list:
+	"""Every Parcel tagged with this operating unit, as docnames, sorted.
+
+	v0.54.0, AND IT IS THE ONLY JOIN BETWEEN A PERSON AND A CABIN. An Employee
+	carries a Branch and a Housing Unit stands on a Parcel; before `Parcel.branch`
+	existed there was no column connecting the two at all, so a wizard that asked
+	which camp somebody was hired to could not then show that camp's housing.
+
+	A BRANCH MAY HOLD SEVERAL PARCELS AND THE ANSWER IS A LIST, not a single
+	docname. A camp is a place, not a deed: a labor camp that grew across a fence
+	line is two parcels, and a mapping that could only hold one would drop half
+	the cabins on exactly the operations big enough to need the feature. The
+	reverse — two branches on one parcel — is a parcel that carries one of them,
+	which is the honest limit of a single column and is stated rather than
+	papered over.
+
+	An empty list means nobody has tagged any ground with this branch. That is a
+	different answer from "this camp is full" and every caller here is careful to
+	keep it different.
+	"""
+	branch = str(branch or "").strip()
+	if not branch or not compat.has_field(PARCEL, "branch"):
+		return []
+	filters = {"branch": branch, **_entity_filter(company)}
+	rows = frappe.db.get_all(PARCEL, filters=filters, pluck="name", limit=REGISTER_CAP) or []
+	return sorted(str(name) for name in rows)
+
+
+def branch_parcel_map(branches, company: str = "") -> dict:
+	"""`{branch: [parcel, …]}` for many branches in one read.
+
+	The list form of `parcels_for_branch`, because
+	`list_onboarding_reference_data` needs the mapping for every branch on the
+	site and one query per branch is one query per dropdown row.
+	"""
+	wanted = {str(name).strip() for name in (branches or []) if str(name or "").strip()}
+	if not wanted or not compat.has_field(PARCEL, "branch"):
+		return {}
+	filters = {"branch": ("in", sorted(wanted)), **_entity_filter(company)}
+	rows = frappe.db.get_all(PARCEL, filters=filters, fields=["name", "branch"], limit=REGISTER_CAP)
+	out: dict = {}
+	for row in rows or []:
+		out.setdefault(str(row.get("branch") or ""), []).append(str(row.get("name")))
+	return {branch: sorted(parcels) for branch, parcels in out.items() if branch}
+
+
+def occupancy_for(unit: str, start: str, end: str | None = None) -> list:
+	"""Who else is in this unit over these dates. The public name for `_clashes`.
+
+	v0.54.0. `api/mobile.assign_housing` has to know the answer BEFORE it writes,
+	because it refuses to overfill a cabin where `create_housing_assignment`
+	merely warns — see that endpoint's docstring for why the two differ. It reads
+	through this rather than reaching into `_clashes` so the overlap rule stays
+	one function: inclusive at both ends, blank end date meaning still there.
+	"""
+	return _clashes(unit, start, end)
+
+
 def _clashes(unit: str, start: str, end: str | None, exclude: str = "") -> list:
 	"""Assignments on this unit whose dates share a day with the given range."""
 	rows = frappe.db.get_all(
