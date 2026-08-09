@@ -1856,3 +1856,204 @@ class TheAssignmentStepCanRecordWhereSomebodyWorks(MobileAPITestCase):
 			first_name="Elena", last_name="Marquez", company=MAIN, branch=offered
 		)
 		self.assertEqual(frappe.db.get_value("Employee", created["name"], "branch"), offered)
+
+
+class TheReturningWorkersCabin(MobileAPITestCase):
+	"""v0.54.0. `list_available_housing(employee=…)` and `previous_assignment`.
+
+	A picker who worked last season had a cabin, and usually wants it again. The
+	wizard shows "Last year: MC-Cabin-07" at the top of the list so a returning
+	worker is one tap rather than a scroll through forty units nobody remembers
+	the numbers of.
+
+	IT IS THE ONE ARGUMENT ON THIS ENDPOINT THAT NAMES A PERSON, which is why it
+	carries a gate the rest of the method does not.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.a_camp("MC-Cabin-01")
+		self.second = self.tool_data(
+			"create_housing_unit",
+			{"parcel": "Mill Creek", "unit_name": "MC-Cabin-07", "unit_type": "Cabin", "capacity": 2},
+		)["name"]
+
+	def _previous(self, **kwargs):
+		return mobile_api.list_available_housing(employee=WORKER_EMPLOYEE, **kwargs)["previous_assignment"]
+
+	def _stay(self, unit, start, end, employee=WORKER_EMPLOYEE):
+		"""One finished stay, written the way a season that ended looks."""
+		self.be()
+		created = mobile_api.assign_housing(employee=employee, housing_unit=unit, check_in_date=start)
+		frappe.db.set_value("Housing Assignment", created["assignment"], "end_date", end)
+		frappe.db.set_value("Housing Assignment", created["assignment"], "status", "Ended")
+		return created["assignment"]
+
+	# ── what it returns ─────────────────────────────────────────────────────
+	def test_it_surfaces_last_seasons_cabin_with_both_dates(self):
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		self.be()
+		previous = self._previous()
+		self.assertEqual(previous["unit"], self.second)
+		self.assertEqual(previous["unit_name"], "MC-Cabin-07")
+		self.assertEqual(previous["check_in_date"], "2025-06-01")
+		self.assertEqual(previous["check_out_date"], "2025-10-15")
+		self.assertTrue(previous["available"])
+		self.assertIsNone(previous["unavailable_reason"])
+
+	def test_the_unit_name_is_what_is_painted_on_the_door(self):
+		"""Not the docname, which carries the parcel key on the end of it. A row
+		reading "MC-Cabin-07 - MC" is a row a foreman has to parse."""
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		self.be()
+		self.assertEqual(self._previous()["unit_name"], "MC-Cabin-07")
+		self.assertIn(" - ", self._previous()["unit"])
+
+	def test_the_most_recent_ended_stay_wins(self):
+		"""Three seasons in two cabins: the answer is the one they left last."""
+		self._stay(self.unit, "2023-06-01", "2023-10-01")
+		self._stay(self.second, "2024-06-01", "2024-10-01")
+		self._stay(self.unit, "2025-06-01", "2025-10-01")
+		self.be()
+		self.assertEqual(self._previous()["unit"], self.unit)
+		self.assertEqual(self._previous()["check_out_date"], "2025-10-01")
+
+	def test_a_first_season_hire_has_no_previous_assignment_and_that_is_not_an_error(self):
+		self.be()
+		self.assertIsNone(self._previous())
+
+	def test_it_is_absent_unless_an_employee_is_named(self):
+		"""The vacancy read is unchanged for every caller that does not ask."""
+		self.be()
+		self.assertIsNone(mobile_api.list_available_housing()["previous_assignment"])
+
+	# ── whether the cabin can actually be had ───────────────────────────────
+	def test_a_cabin_that_filled_up_since_is_reported_unavailable_with_the_reason(self):
+		"""The point of the field. Offering a one-tap re-assignment into a full
+		cabin is an offer whose next screen is a refusal."""
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		for index in range(2):
+			STORE.seed(
+				"Employee",
+				[
+					{
+						"name": f"EMP-NEW-{index}",
+						"employee_name": f"New {index}",
+						"company": MAIN,
+						"status": "Active",
+					}
+				],
+			)
+			self.be()
+			mobile_api.assign_housing(
+				employee=f"EMP-NEW-{index}",
+				housing_unit=self.second,
+				check_in_date=frappe.utils.today(),
+			)
+
+		self.be()
+		previous = self._previous()
+		self.assertEqual(previous["unit"], self.second)
+		self.assertFalse(previous["available"])
+		self.assertIn("2 bed(s) are taken", previous["unavailable_reason"])
+		self.assertEqual(previous["open_beds"], 0)
+
+	def test_a_cabin_condemned_since_they_left_says_so(self):
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		frappe.db.set_value("Housing Unit", self.second, "condition", "Uninhabitable")
+		self.be()
+		previous = self._previous()
+		self.assertFalse(previous["available"])
+		self.assertIn("Uninhabitable", previous["unavailable_reason"])
+
+	def test_availability_is_computed_even_when_the_list_filtered_that_cabin_out(self):
+		"""The field is computed for the unit itself rather than looked up in the
+		list beside it — that list drops full and condemned units by default, so
+		a lookup there would report every full cabin as available."""
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		frappe.db.set_value("Housing Unit", self.second, "condition", "Uninhabitable")
+		self.be()
+		answer = mobile_api.list_available_housing(employee=WORKER_EMPLOYEE)
+		self.assertNotIn(self.second, {row["name"] for row in answer["units"]})
+		self.assertEqual(answer["previous_assignment"]["unit"], self.second)
+		self.assertFalse(answer["previous_assignment"]["available"])
+
+	def test_somebody_still_housed_is_told_so_rather_than_offered_their_own_bed(self):
+		"""An open assignment means they are housed RIGHT NOW. Offering "last
+		year: Cabin 7" to somebody currently in Cabin 7 is an offer to
+		double-book them."""
+		self.be()
+		mobile_api.assign_housing(
+			employee=WORKER_EMPLOYEE, housing_unit=self.second, check_in_date="2026-06-01"
+		)
+		previous = self._previous()
+		self.assertTrue(previous["currently_housed"])
+		self.assertFalse(previous["available"])
+		self.assertIsNone(previous["check_out_date"])
+		self.assertIn("where they are housed now", previous["unavailable_reason"])
+
+	def test_an_open_stay_wins_over_a_finished_one_however_many_seasons_deep(self):
+		"""Somebody who had MC-Cabin-07 last season and is in MC-Cabin-01 tonight
+		has BOTH. Answering with last year's cabin would offer a one-tap
+		re-assignment to a person who already has a bed, so the open row wins —
+		"they are already housed" is true regardless of the history behind it."""
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		self.be()
+		mobile_api.assign_housing(
+			employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-06-01"
+		)
+
+		previous = self._previous()
+		self.assertTrue(previous["currently_housed"])
+		self.assertEqual(previous["unit"], self.unit)
+		self.assertFalse(previous["available"])
+
+	# ── the gate ────────────────────────────────────────────────────────────
+	def test_a_field_worker_may_read_vacancies_and_may_not_name_a_person(self):
+		"""The split this endpoint is built on, asserted in one test: the same
+		caller, the same method, one argument apart."""
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+
+		self.assertTrue(mobile_api.list_available_housing()["units"])
+		with self.assertRaises(Exception) as caught:
+			mobile_api.list_available_housing(employee=WORKER_EMPLOYEE)
+		self.assertIn("personnel register", str(caught.exception))
+
+	def test_an_employee_of_another_entity_is_not_found(self):
+		self.be()
+		with self.assertRaises(frappe.DoesNotExistError):
+			mobile_api.list_available_housing(employee=OUTSIDER_EMPLOYEE)
+
+	def test_a_cabin_of_an_entity_this_phone_cannot_reach_is_not_reported(self):
+		"""`guard.scoped` cannot do this one — a Housing Unit calls its company
+		`owning_entity` — so the check is made by hand and this is the test that
+		it is made at all."""
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		frappe.db.set_value("Housing Unit", self.second, "owning_entity", OTHER)
+		self.be()
+		self.assertIsNone(self._previous())
+
+	def test_naming_a_person_still_leaves_one_audit_row_like_any_other_call(self):
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		self.be()
+		before = len(self.audit_rows("list_available_housing"))
+		mobile_api.list_available_housing(employee=WORKER_EMPLOYEE)
+		self.assertEqual(len(self.audit_rows("list_available_housing")), before + 1)
+
+	# ── it composes with the branch filter ──────────────────────────────────
+	def test_it_comes_back_alongside_a_branch_filtered_list(self):
+		"""The two the wizard uses together: the camp's cabins, and the one this
+		person had last year."""
+		STORE.seed("Branch", [{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"}])
+		self.configure(enabled=1, public_url="https://umbrel.tail4a2b.ts.net", **ON, allow_update_parcel=1)
+		self.tool_data("update_parcel", {"parcel": "Mill Creek", "branch": "Mill Creek Camp"})
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+
+		self.be()
+		answer = mobile_api.list_available_housing(branch="Mill Creek Camp", employee=WORKER_EMPLOYEE)
+		self.assertTrue(answer["branch_filter_applied"])
+		self.assertEqual(answer["previous_assignment"]["unit"], self.second)
+		self.assertIn(self.second, {row["name"] for row in answer["units"]})

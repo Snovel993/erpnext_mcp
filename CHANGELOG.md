@@ -74,6 +74,26 @@ and the mapping the housing list filters on cannot come apart. A camp spanning
 two parcels returns both — `parcels` is the real answer and the scalar `parcel`
 is set only when there is exactly one.
 
+**A returning worker's cabin is offered back to them.** Passing `employee`
+returns `previous_assignment` — the unit they last left, both dates, and whether
+it can actually be had tonight — so the wizard shows "Last year: MC-Cabin-07" at
+the top of the list and a returning picker is one tap instead of a scroll through
+forty cabins nobody remembers the numbers of. Availability is computed for the
+unit itself rather than looked up in the list beside it, because that list drops
+full and condemned units by default and a cabin missing from it is precisely the
+case this field exists to answer for.
+
+**That one argument carries the HR role gate, and nothing else on the endpoint
+does.** `list_available_housing` counts occupants and never names them, which is
+why a Field Worker may call it; "where did this named person sleep last season"
+is the personnel fact that split keeps off the endpoint. So `require_hr_role`
+runs when and only when `employee` is passed — otherwise this would be a way to
+walk the housing register one employee docname at a time from a picker's phone.
+Somebody with an **open** assignment is reported as `currently_housed` rather
+than offered their own bed back, and an open row wins over any finished one:
+offering last year's cabin to a person who already has one tonight is an offer to
+double-book them.
+
 **The three ways a branch filter can fail are three different answers, and none
 is a silent empty list**, because an empty camp reads on a phone as "no room": a
 branch naming no Branch record is *refused*; a real branch with no ground tagged

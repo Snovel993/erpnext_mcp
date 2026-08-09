@@ -100,6 +100,7 @@ EMPLOYEE = "Employee"
 FARM_SHIFT = "Farm Shift"
 ML_MODEL = "ML Model"
 HOUSING_UNIT = "Housing Unit"
+HOUSING_ASSIGNMENT = "Housing Assignment"
 
 #: The four HR masters the wizard's Assignment step offers as dropdowns, mapped
 #: to the field on each that carries a human label. `Branch` has no second
@@ -451,6 +452,141 @@ def _model_docname(model) -> str:
 	if not value or frappe.db.exists(ML_MODEL, value):
 		return value
 	return str(frappe.db.get_value(ML_MODEL, {"source_uuid": value}, "name") or value)
+
+
+def _previous_assignment(employee: str, allowed: list) -> dict | None:
+	"""Where this person slept last season, and whether that cabin is free now.
+
+	v0.54.0, for the wizard's "Last year: MC-Cabin-07" row. A returning picker
+	who had the same cabin for three seasons is one tap instead of a scroll
+	through forty units nobody remembers the numbers of, and the foreman does not
+	have to ask somebody where they slept last August.
+
+	ENDED ASSIGNMENTS ONLY, MOST RECENT FIRST. A returning worker is by definition
+	somebody whose last stay finished. An open assignment means they are housed
+	right now, which is a different screen and a different sentence — offering
+	"last year: Cabin 7" to somebody who is currently IN Cabin 7 is an offer to
+	double-book them — so it is reported as `currently_housed` and no preference
+	is returned.
+
+	AVAILABILITY IS COMPUTED FOR THE UNIT ITSELF rather than read off the list
+	this is returned beside. That list is filtered — by branch, and by the default
+	that drops full and condemned units — so a cabin missing from it is precisely
+	the case this has to answer for, and looking it up there would report every
+	full cabin as available.
+
+	A UNIT OR AN ASSIGNMENT BELONGING TO AN ENTITY THE CALLER CANNOT REACH IS NOT
+	REPORTED AT ALL. `guard.scoped` cannot do it — a Housing Unit calls its
+	company `owning_entity` — so the check is here, and it is the same rule
+	`assign_housing` applies by hand for the same reason.
+	"""
+	if not compat.doctype_exists(HOUSING_ASSIGNMENT):
+		return None
+
+	# AN OPEN ASSIGNMENT IS CHECKED FIRST, AND IT WINS OVER ANY ENDED ONE. Not
+	# merely a fallback for somebody with no history: a worker who had Cabin 7
+	# last season and is in Cabin 3 tonight has both, and answering with Cabin 7
+	# would offer a one-tap re-assignment for somebody who already has a bed. What
+	# they need is "they are already housed", which is true regardless of how many
+	# finished seasons sit behind it.
+	housed = frappe.db.get_all(
+		HOUSING_ASSIGNMENT,
+		filters={"employee": employee, "end_date": ("is", "not set")},
+		fields=["name", "unit", "assigned_date"],
+		order_by="assigned_date desc",
+		limit_page_length=1,
+	)
+	if housed:
+		current = dict(housed[0])
+		if not _unit_is_reachable(str(current.get("unit") or ""), allowed):
+			return None
+		return {
+			"assignment": current.get("name"),
+			"unit": current.get("unit"),
+			"unit_name": _unit_label(str(current.get("unit") or "")),
+			"check_in_date": str(current.get("assigned_date") or "") or None,
+			"check_out_date": None,
+			"currently_housed": True,
+			"available": False,
+			"unavailable_reason": (
+				"This is where they are housed now, not where they were. Ending that "
+				"assignment is end_housing_assignment; nothing here re-assigns anybody."
+			),
+		}
+
+	rows = frappe.db.get_all(
+		HOUSING_ASSIGNMENT,
+		filters={"employee": employee, "end_date": ("is", "set")},
+		fields=["name", "unit", "assigned_date", "end_date", "housing_deduction_from_wages"],
+		order_by="end_date desc, assigned_date desc",
+		limit_page_length=1,
+	)
+	if not rows:
+		# A first-season hire. Not an error and not a warning — just nothing to
+		# put at the top of the list.
+		return None
+
+	row = dict(rows[0])
+	unit = str(row.get("unit") or "")
+	if not _unit_is_reachable(unit, allowed):
+		return None
+
+	capacity, occupants, condition = _unit_occupancy(unit)
+	condemned = condition == "Uninhabitable"
+	full = bool(capacity) and occupants >= capacity
+	reason = None
+	if condemned:
+		reason = "Marked Uninhabitable since they left. It has to be repaired and inspected first."
+	elif full:
+		reason = f"All {capacity} bed(s) are taken."
+
+	return {
+		"assignment": row.get("name"),
+		"unit": unit,
+		"unit_name": _unit_label(unit),
+		"check_in_date": str(row.get("assigned_date") or "") or None,
+		"check_out_date": str(row.get("end_date") or "") or None,
+		"currently_housed": False,
+		"capacity": capacity or None,
+		"current_occupants": occupants,
+		"open_beds": max(0, capacity - occupants) if capacity else None,
+		"available": not (condemned or full),
+		"unavailable_reason": reason,
+		"housing_deduction_from_wages": row.get("housing_deduction_from_wages") or "Unknown",
+	}
+
+
+def _unit_is_reachable(unit: str, allowed: list) -> bool:
+	"""Does this Housing Unit belong to an entity this caller may see?
+
+	A blank owning entity is reachable, matching `guard.scoped`'s rule: a record
+	with no company is a data problem rather than another entity's secret, and
+	hiding it makes it invisible instead of fixed.
+	"""
+	if not unit or not frappe.db.exists(HOUSING_UNIT, unit):
+		return False
+	owner = str(frappe.db.get_value(HOUSING_UNIT, unit, "owning_entity") or "")
+	return not owner or owner in set(allowed or [])
+
+
+def _unit_label(unit: str) -> str | None:
+	"""What is painted on the door, rather than the docname with the parcel key on it."""
+	if not unit:
+		return None
+	return str(frappe.db.get_value(HOUSING_UNIT, unit, "unit_name") or "") or unit
+
+
+def _unit_occupancy(unit: str) -> tuple:
+	"""`(capacity, occupants_today, condition)` for one unit.
+
+	Occupancy is counted through `housing.occupancy_for`, the same overlap rule
+	`assign_housing` refuses on, so "available" here and "accepted" there cannot
+	come to different answers about the same cabin on the same day.
+	"""
+	row = frappe.db.get_value(HOUSING_UNIT, unit, ["capacity", "condition"], as_dict=True) or {}
+	today = frappe.utils.today()
+	occupants = housing_tools.occupancy_for(unit, today, today)
+	return int(row.get("capacity") or 0), len(occupants), str(row.get("condition") or "")
 
 
 # ── 1. get_current_user_context ─────────────────────────────────────────────
@@ -2688,7 +2824,9 @@ def list_onboarding_reference_data(user: str, company=None) -> dict:
 # ── 44. list_available_housing ──────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("list_available_housing", limit=guard.READ_LIMIT)
-def list_available_housing(user: str, company=None, parcel=None, branch=None, include_full=None) -> dict:
+def list_available_housing(
+	user: str, company=None, parcel=None, branch=None, include_full=None, employee=None
+) -> dict:
 	"""Which cabins have a bed free tonight, and how full each one already is.
 
 	v0.54.0. The wizard's Housing step, and the read `assign_housing` exists to be
@@ -2702,6 +2840,35 @@ def list_available_housing(user: str, company=None, parcel=None, branch=None, in
 	a dropdown; the names are read in the Desk, or through
 	`get_employee_housing_history` on the MCP console. That split is the reason
 	this read carries no HR role gate where `search_employees` does.
+
+	`employee` IS THE ONE ARGUMENT THAT CROSSES THAT LINE, AND IT CARRIES THE GATE
+	WITH IT. Passing it returns `previous_assignment` — where this person slept
+	last season, so the wizard can offer "Last year: MC-Cabin-07" at the top of
+	the list and a returning picker is one tap instead of a scroll through forty
+	cabins nobody remembers the numbers of.
+
+	That is exactly the fact the paragraph above keeps off this endpoint: a named
+	person, a named cabin, and the dates between them. So `personnel.require_hr_role()`
+	runs WHEN AND ONLY WHEN `employee` is passed. Without it, this method would be
+	an unauthenticated-by-role way to walk the housing register one employee
+	docname at a time — the same register `search_employees` guards and
+	`assign_housing` guards, reachable by anybody holding a picker's phone. The
+	vacancy read stays open to a Field Worker because it still names nobody; the
+	onboarding phone that uses this is enrolled as a Farm Manager already, which is
+	stated in this module's header and is what makes the gate free rather than
+	restrictive.
+
+	IT READS ONLY *ENDED* ASSIGNMENTS, most recent first. A returning worker is by
+	definition somebody whose last stay finished; an open assignment means they are
+	housed RIGHT NOW, and offering "last year: Cabin 7" to somebody currently in
+	Cabin 7 is an offer to double-book them. `currently_housed` says so instead, so
+	the wizard can show that rather than a stale preference.
+
+	`previous_assignment.available` IS COMPUTED FOR THE UNIT ITSELF, not read off
+	the list above. The list is filtered — by branch, and by the default that drops
+	full and condemned units — so a cabin that is missing from it is exactly the
+	case this field has to answer for, and looking the answer up in a list that
+	dropped it would report every full cabin as available.
 
 	NON-RESIDENTIAL UNITS ARE NOT IN THE ANSWER AT ALL. A shower block and a shop
 	are Housing Units with a capacity of zero, `create_housing_assignment` refuses
@@ -2750,6 +2917,16 @@ def list_available_housing(user: str, company=None, parcel=None, branch=None, in
 		HOUSING_UNIT,
 		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
 	)
+
+	# The gate rides with the argument. See the docstring: everything else this
+	# method returns is a building and a bed count, and this one thing is a named
+	# person's housing history.
+	previous = None
+	if str(employee or "").strip():
+		personnel.require_hr_role()
+		previous = _previous_assignment(
+			guard.require_scoped_doc(EMPLOYEE, employee, "employee", allowed), allowed
+		)
 
 	branch_wanted = str(branch or "").strip()
 	branch_parcels: list = []
@@ -2846,6 +3023,7 @@ def list_available_housing(user: str, company=None, parcel=None, branch=None, in
 		"count": len(units),
 		"assignable_count": sum(1 for unit in units if unit["assignable"]),
 		"open_beds": sum(unit["open_beds"] or 0 for unit in units),
+		"previous_assignment": previous,
 		"company": wanted or None,
 		"parcel": str(parcel or "").strip() or None,
 		"branch": branch_wanted or None,
