@@ -7050,6 +7050,38 @@ TOOLS = {
 		available=_needs_doctype("Compliance Alert"),
 		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"dismiss_compliance_alert": _tool(
+		calendar.dismiss_compliance_alert,
+		"MUTATING (default OFF). Dismiss one alert THAT SAYS IT MAY BE DISMISSED, with "
+		"a MANDATORY reason. Refuses every alert whose `can_dismiss` is not set, and "
+		"that default is false.\n\n"
+		"THE GATE IS THE DIFFERENCE FROM `dismiss_alert`, which is the same verb with "
+		"no gate on it. That one is for somebody at a desk with the source record open "
+		"in the next tab. This one is for a caller who is NOT there — the Farm Ops app "
+		"calls it from the compliance tab, and a model reading a calendar is in the "
+		"same position — and for those, whether an obligation may be closed without "
+		"being met is a question that was answered in advance or not at all.\n\n"
+		"WHY ALMOST NOTHING IS DISMISSIBLE. An overdue housing inspection is not a "
+		"notification: waving it off leaves a cabin uninspected and the calendar quiet "
+		"about it. Alerts that genuinely are stale — one raised against a lease "
+		"terminated in May, a duplicate of a filing already made elsewhere — are "
+		"marked one at a time, by hand, on the Compliance Alert itself.\n\n"
+		"DISMISSING AN ALERT CHANGES NOTHING UNDERNEATH IT, and the reason recorded "
+		"here is the entire audit trail for an obligation nobody discharged.",
+		{
+			"alert": _field(_STRING, "The Compliance Alert docname. get_compliance_calendar lists them."),
+			"reason": _field(
+				_STRING,
+				"Why this does not need doing. Must be a real explanation, not a word — it is the "
+				"only part of the record nobody can reconstruct.",
+			),
+		},
+		required=("alert", "reason"),
+		mutating=True,
+		title="Dismiss a dismissible compliance alert",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	"dismiss_alert_bulk": _tool(
 		calendar.dismiss_alert_bulk,
 		"MUTATING (default OFF). Dismiss every alert matching a filter, with one "

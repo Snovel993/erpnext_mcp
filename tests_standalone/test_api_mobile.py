@@ -251,6 +251,14 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# `/api/method/upload_file`, which this app's auth hook does not look at,
 		# and every one of them was lost against a 200 and a login page.
 		"attach_onboarding_document",
+		# v0.57.0 — the compliance tab stops being a noticeboard.
+		# `MobileAPI.swift` names both of these already: `dismissComplianceAlert`
+		# is the gated close, and `submitFormSignature` is the pad's own call,
+		# which is `collect_signature`'s write under the argument names
+		# `API_CONTRACT.md` §14.2 posts. The app has never named
+		# `collect_signature`, which is why that one stays below.
+		"dismiss_compliance_alert",
+		"submit_form_signature",
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 

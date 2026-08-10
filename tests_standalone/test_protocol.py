@@ -774,10 +774,17 @@ class Catalogue(SeededTestCase):
 		there should not be — a pass is a derived artefact rebuilt
 		byte-identically from the register on demand, so "read the pass" and
 		"build the pass" are the same call.
+
+		v0.57.0 ADDED ONE WRITE — `dismiss_compliance_alert`, which is
+		`dismiss_alert`'s verb with a gate in front of it. It reads the alert's
+		own `can_dismiss` and refuses everything else, which is what makes the
+		verb safe to publish to a handset and to a model: whether an obligation
+		may be closed without being met is a judgement somebody records in
+		advance, per alert, rather than one the caller makes on the spot.
 		"""
-		self.assertEqual(len(registry.TOOLS), 394)
+		self.assertEqual(len(registry.TOOLS), 395)
 		self.assertEqual(len(registry.READ_TOOLS), 179)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 215)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 216)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

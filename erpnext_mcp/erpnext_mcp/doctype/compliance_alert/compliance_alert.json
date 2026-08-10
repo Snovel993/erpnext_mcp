@@ -26,6 +26,7 @@
   "last_refreshed",
   "snoozed_until",
   "dismissal_section",
+  "can_dismiss",
   "dismissed",
   "auto_dismissed",
   "dismissal_col",
@@ -168,6 +169,14 @@
   },
   {
    "default": "0",
+   "description": "Whether THIS alert may be waved off from a handset without the work behind it being done. Defaults false, and that default is the design: an overdue housing inspection is not a notification, and dismissing one from a phone leaves a cabin uninspected and the calendar quiet about it. Some alerts genuinely are stale — one raised against a lease terminated in May, a duplicate of a filing already made elsewhere — and only somebody with the whole picture knows which, which is why this is ticked by hand here rather than derived by the sweep. The sweep never writes this column: it neither grants the permission nor takes it away, exactly as it leaves a snooze alone. `dismiss_compliance_alert` refuses an alert this is not set on; `dismiss_alert`, which is the operator's own tool at their own desk, does not consult it.",
+   "fieldname": "can_dismiss",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "May Be Dismissed From The Field"
+  },
+  {
+   "default": "0",
    "description": "Taken off the calendar. A dismissed alert is not deleted — the record that somebody looked at this and decided it did not need doing is itself compliance evidence, and it is what an auditor asks for when the same finding turns up twice.",
    "fieldname": "dismissed",
    "fieldtype": "Check",
@@ -208,7 +217,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-03 18:00:00.000000",
+ "modified": "2026-08-10 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Compliance Alert",

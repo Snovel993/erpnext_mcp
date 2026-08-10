@@ -72,6 +72,7 @@ _ALERT_FIELDS = (
 	"first_seen",
 	"last_refreshed",
 	"snoozed_until",
+	"can_dismiss",
 	"dismissed",
 	"auto_dismissed",
 	"dismissed_by",
@@ -187,7 +188,32 @@ def _describe(row: dict, today: str, regimes: list | None = None) -> dict:
 		"dismissed_on": str(row.get("dismissed_on") or "") or None,
 		"dismissed_reason": row.get("dismissed_reason") or None,
 		"framework": rule.framework if rule else None,
+		# ── v0.57.0, both additive and both optional ────────────────────────
+		# `can_dismiss` DEFAULTS FALSE on a site that has not migrated the column
+		# yet, which is the same answer the column's own default gives — so an
+		# alert read through an older schema is one nobody may wave off, which is
+		# the safe direction for a permission to fail.
+		"can_dismiss": bool(frappe.utils.cint(row.get("can_dismiss"))),
+		"signature_request": _signature_request(row),
 	}
+
+
+def _signature_request(row: dict) -> dict | None:
+	"""The blank signature box this alert is about, addressed. Never raises.
+
+	`API_CONTRACT.md` §8.1: an alert carrying one is a row a phone can tap
+	through to a signature pad instead of a noticeboard entry somebody has to go
+	and find the Farm Task for. Nearly every alert answers None — an overdue
+	housing inspection is not a missing signature — and a failure to work one out
+	is the same answer as not having one, because a calendar that would not draw
+	is worse than a row that cannot be tapped.
+	"""
+	try:
+		from . import signatures
+
+		return signatures.request_for_alert(row)
+	except Exception:  # pragma: no cover - a site whose form doctypes are absent
+		return None
 
 
 def _comment(name: str, text: str) -> bool:
@@ -626,10 +652,8 @@ def snooze_alert(args: dict) -> ToolResult:
 
 
 # ── dismiss_alert ───────────────────────────────────────────────────────────
-def dismiss_alert(args: dict) -> ToolResult:
-	"""Take one alert off the calendar, with a mandatory reason."""
-	_require()
-	row = _alert_row(as_str(args, "alert", required=True))
+def _dismissal_reason(args: dict) -> str:
+	"""The mandatory reason, or the refusal that says why it is mandatory."""
 	reason = as_str(args, "reason", required=True)
 	if len(reason) < MIN_REASON:
 		raise ToolError(
@@ -638,8 +662,10 @@ def dismiss_alert(args: dict) -> ToolResult:
 			"from the source record, but the judgement cannot be rebuilt from anything. It is "
 			"also the answer when the same finding turns up next year. Nothing was changed."
 		)
-	today = frappe.utils.today()
+	return reason
 
+
+def _refuse_if_dismissed(row: dict) -> None:
 	if frappe.utils.cint(row.get("dismissed")):
 		how = (
 			"by the sweep, because its source condition resolved"
@@ -648,13 +674,35 @@ def dismiss_alert(args: dict) -> ToolResult:
 		)
 		raise ToolError(f"{row['name']} was already dismissed {how}. Nothing was changed.")
 
-	doc = frappe.get_doc(ALERT, row["name"])
+
+def _record_dismissal(name: str, reason: str, today: str):
+	"""Write the judgement onto the alert. ONE PLACE, because it is the evidence.
+
+	Both dismissal routes land here — the operator's at their desk and the gated
+	one a handset reaches — so who dismissed, when, and why are recorded the same
+	way whichever door was used. An auditor asking "who decided this did not need
+	doing" gets one answer with one shape, and a second copy of this write is a
+	second shape for the same fact to be recorded in.
+	"""
+	doc = frappe.get_doc(ALERT, name)
 	doc.dismissed = 1
 	doc.auto_dismissed = 0
 	doc.dismissed_by = str(frappe.session.user)
 	doc.dismissed_on = today
 	doc.dismissed_reason = reason
 	doc.save(ignore_permissions=True)
+	return doc
+
+
+def dismiss_alert(args: dict) -> ToolResult:
+	"""Take one alert off the calendar, with a mandatory reason."""
+	_require()
+	row = _alert_row(as_str(args, "alert", required=True))
+	reason = _dismissal_reason(args)
+	today = frappe.utils.today()
+
+	_refuse_if_dismissed(row)
+	doc = _record_dismissal(row["name"], reason, today)
 
 	return ToolResult(
 		data={
@@ -671,6 +719,76 @@ def dismiss_alert(args: dict) -> ToolResult:
 				"The underlying condition has NOT changed. Dismissing an alert about an expired "
 				"certificate does not renew the certificate, and the source record still says "
 				"what it said."
+			),
+		},
+		summary=f"dismissed {row['name']} — {reason}",
+		docstatus_delta="0 → 0 (updated)",
+	)
+
+
+# ── dismiss_compliance_alert ────────────────────────────────────────────────
+def dismiss_compliance_alert(args: dict) -> ToolResult:
+	"""Dismiss one alert THE ALERT ITSELF SAYS MAY BE DISMISSED. v0.57.0.
+
+	`API_CONTRACT.md` §8.2, and the whole of what it adds over `dismiss_alert` is
+	the gate: this refuses an alert whose `can_dismiss` is not set, and that
+	default is false.
+
+	WHY THERE ARE TWO ROUTES TO ONE VERB. `dismiss_alert` is somebody at a desk
+	with the source record open in the next tab; the judgement and the context
+	are in the same place. This one is for the callers who are NOT there — a
+	handset in an orchard, a model reading a calendar — and for those the
+	question "may this be waved off" was answered before they arrived or it was
+	not answered at all. An overdue housing inspection is not a notification:
+	dismissing one from a phone leaves a cabin uninspected and the calendar quiet
+	about it, which is exactly why the mobile surface shipped with no dismiss at
+	all. Some alerts genuinely are stale — one raised against a lease terminated
+	in May, a duplicate of a filing already made elsewhere — and somebody with
+	the whole picture says so per alert, in advance, by ticking the box.
+
+	THE GATE IS CHECKED HERE AND NOT ONLY ON THE PHONE. The app hides its Dismiss
+	button on `can_dismiss=false` and its own contract says that is UI courtesy
+	rather than the boundary; a refusal that only exists in a client is not one.
+
+	THE REASON IS THE ENTIRE AUDIT TRAIL for an obligation nobody discharged, so
+	it is required, it has to be a sentence, and it is written to the alert by
+	the same code the desk-side route uses.
+	"""
+	_require()
+	row = _alert_row(as_str(args, "alert", required=True))
+	reason = _dismissal_reason(args)
+	today = frappe.utils.today()
+
+	_refuse_if_dismissed(row)
+	if not frappe.utils.cint(row.get("can_dismiss")):
+		raise ToolError(
+			f"{row['name']} is not marked as dismissible, so it cannot be waved off from here. "
+			"That default is deliberate: an alert is a statement that something is not compliant, "
+			"and closing one without the work being done leaves the condition true and the "
+			"calendar quiet about it. Whoever can see the whole picture marks the individual "
+			"alerts that genuinely are stale — a finding against a terminated lease, a duplicate "
+			"of a filing already made — by ticking 'May Be Dismissed From The Field' on the "
+			"Compliance Alert. At a desk, with the source record to hand, dismiss_alert is the "
+			"route that does not ask. Nothing was changed."
+		)
+
+	doc = _record_dismissal(row["name"], reason, today)
+	return ToolResult(
+		data={
+			**_describe(dict(doc.as_dict()), today),
+			"changed": True,
+			"note": (
+				"The alert is off the calendar and is NOT deleted — the record that somebody "
+				"looked at this and decided it did not need doing is itself compliance evidence. "
+				"It was dismissible because somebody marked this alert dismissible, and that "
+				"marking plus the reason recorded here is the whole account of how an unmet "
+				"obligation came to be closed."
+			),
+			"warning": (
+				"The underlying condition has NOT changed and the source record still says what "
+				"it said. If the sweep can still see the condition tomorrow night, it stays true "
+				"— a dismissal a person made is never reopened, which is why it is recorded "
+				"rather than merely obeyed."
 			),
 		},
 		summary=f"dismissed {row['name']} — {reason}",

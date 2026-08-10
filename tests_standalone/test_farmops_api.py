@@ -218,6 +218,15 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# v0.55.0. Where the signature pad posts what a finger drew, for the
 		# box a missing-signature alert found empty.
 		"/mobile/collect_signature",
+		# v0.57.0. The compliance calendar becomes a place work can be finished:
+		# a row may be closed where the alert itself says it may be, and the pad
+		# has the route and the argument spellings `API_CONTRACT.md` §14.2 posts.
+		# `collect_signature` above is the same write under v0.55.0's names and
+		# keeps its route, because `bind` reduces a body to the keys a signature
+		# declares and a handset already in the field must not have to change to
+		# get an answer.
+		"/mobile/dismiss_compliance_alert",
+		"/mobile/submit_form_signature",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

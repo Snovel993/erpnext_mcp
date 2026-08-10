@@ -103,9 +103,22 @@ def task(row: dict, assignment: dict | None = None) -> dict:
 		"started_at": live.get("started_at"),
 	}
 
-	explanation = alert_explanation(row.get("source_alert"))
+	source = alert_row(row.get("source_alert"))
+	explanation = str(source.get("alert_message") or "").strip()
 	if explanation:
 		out["source_alert_explanation"] = explanation
+	# v0.57.0, and additive: a signature task now carries the ADDRESS of the box
+	# it is asking for, per `API_CONTRACT.md` §14.1. The task NAME is a sentence
+	# — "Collect I-9 Section 2 signature for Juan Lopez" — and a sentence is not
+	# something a handset can post a signature against; the docname is not in it,
+	# and deriving one from the employee's name is how ink lands on the wrong
+	# person's form. It comes off the alert the sweep raised the task from, which
+	# is the same source the compliance calendar reads, so the pad opened from
+	# the Available tab and the pad opened from the calendar are addressed
+	# identically. A task with no alert behind it is ordinary work and gets none.
+	request = signature_request(source)
+	if request:
+		out["signature_request"] = request
 
 	latitude, longitude = coordinates(row.get("location_doctype"), row.get("location"))
 	if latitude is not None and longitude is not None:
@@ -149,6 +162,25 @@ def coordinates(location_doctype, location) -> tuple:
 	return latitude, longitude
 
 
+#: What a task needs to know about the alert behind it: the sentence the rule
+#: wrote, and enough of the alert's identity to work out whether it is asking for
+#: a signature. ONE READ RATHER THAN TWO — a task list is one of these per row.
+_ALERT_FIELDS = ("name", "alert_type", "alert_message", "source_doctype", "source_docname", "due_date")
+
+
+def alert_row(alert) -> dict:
+	"""The Compliance Alert behind a task, or `{}`. Never raises."""
+	name = str(alert or "").strip()
+	if not name or not compat.doctype_exists(ALERT):
+		return {}
+	try:
+		return dict(
+			frappe.db.get_value(ALERT, name, compat.existing_fields(ALERT, _ALERT_FIELDS), as_dict=True) or {}
+		)
+	except Exception:  # pragma: no cover
+		return {}
+
+
 def alert_explanation(alert) -> str:
 	"""Why this task exists, in the words the rule that raised it used.
 
@@ -157,20 +189,57 @@ def alert_explanation(alert) -> str:
 	most work is just work, and "this task exists because somebody made it" is
 	not an explanation worth a card.
 	"""
-	name = str(alert or "").strip()
-	if not name or not compat.doctype_exists(ALERT):
-		return ""
+	return str(alert_row(alert).get("alert_message") or "").strip()
+
+
+def signature_request(row: dict) -> dict | None:
+	"""The §14.1 address an alert row is asking for, or None. Never raises.
+
+	Delegated to `tools/signatures.py` rather than composed here, because that
+	module holds the closed table of boxes this app will write a signature into
+	— and a request the calendar composed independently could address a column
+	the write path refuses, which is a pad that collects ink into nothing.
+	"""
+	if not row:
+		return None
 	try:
-		return str(frappe.db.get_value(ALERT, name, "alert_message") or "").strip()
-	except Exception:  # pragma: no cover
-		return ""
+		from ..tools import signatures
+
+		return signatures.request_for_alert(row)
+	except Exception:  # pragma: no cover - a site whose form doctypes are absent
+		return None
 
 
 # ── the compliance calendar ─────────────────────────────────────────────────
 def alert(row: dict) -> dict:
-	"""One calendar row in the shape `ComplianceAlertSummary` decodes."""
+	"""One calendar row in the shape `ComplianceAlertSummary` decodes.
+
+	v0.57.0 ADDS THREE KEYS AND CHANGES NONE, per `API_CONTRACT.md` §8.1. An
+	alert sent exactly as v0.55.0 sent it still lists, still sorts and still
+	opens its detail — every one of these is optional on the phone, and an alert
+	carrying none of them is the noticeboard row it always was.
+
+	  * `signature_request` — the blank box this alert is about, addressed. The
+	    row becomes a tap that opens a signature pad instead of a sentence
+	    somebody has to go and find the Farm Task for. Composed by
+	    `tools/signatures.py` off the table the WRITE path gates on, so a pad can
+	    only ever be opened at a column this app would accept ink into.
+	  * `subject_doctype` / `subject_docname` — the record the alert concerns,
+	    which the alert has carried since it was raised. Displayed rather than
+	    navigated: the app has no screen for an arbitrary doctype and does not
+	    pretend to.
+	  * `can_dismiss` — whether THIS alert may be closed without the work behind
+	    it being done. False unless somebody said otherwise, which is why the
+	    handset's Dismiss button is absent by default.
+
+	`signature_request` IS NESTED RATHER THAN SPREAD FLAT. The app reads both
+	spellings and the nested one is the contract's own; flattening would put
+	`signature_field` at the top level of a row that also carries a `name`, which
+	is one key collision away from a pad addressed at the alert instead of at the
+	form.
+	"""
 	row = dict(row or {})
-	return {
+	out = {
 		"name": row.get("name"),
 		"title": row.get("title") or row.get("alert_type") or row.get("name"),
 		"explanation": row.get("message") or row.get("alert_message"),
@@ -182,7 +251,14 @@ def alert(row: dict) -> dict:
 		"linked_task": linked_task(row.get("name")),
 		"overdue": row.get("overdue"),
 		"days_until_due": row.get("days_until_due"),
+		"subject_doctype": row.get("source_doctype"),
+		"subject_docname": row.get("source_docname"),
+		"can_dismiss": bool(row.get("can_dismiss")),
 	}
+	request = row.get("signature_request")
+	if request:
+		out["signature_request"] = request
+	return out
 
 
 def alerts(rows: list) -> list:

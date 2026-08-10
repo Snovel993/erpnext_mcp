@@ -246,6 +246,7 @@
   "allow_refresh_compliance_alerts",
   "allow_snooze_alert",
   "allow_dismiss_alert",
+  "allow_dismiss_compliance_alert",
   "allow_dismiss_alert_bulk",
   "training_section",
   "allow_list_trainings",
@@ -2103,6 +2104,13 @@
    "fieldname": "allow_dismiss_alert",
    "fieldtype": "Check",
    "label": "Dismiss Alert"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. The same dismissal, gated on the alert's own 'May Be Dismissed From The Field' box \u2014 which defaults off, so this refuses almost everything until somebody marks an individual alert stale. It is what the Farm Ops app calls; the ungated Dismiss Alert above is the desk-side route.",
+   "fieldname": "allow_dismiss_compliance_alert",
+   "fieldtype": "Check",
+   "label": "Dismiss a Dismissible Compliance Alert"
   },
   {
    "default": "0",

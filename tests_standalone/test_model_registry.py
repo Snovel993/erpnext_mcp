@@ -291,10 +291,13 @@ class ToolRegistration(unittest.TestCase):
 		# `collect_form_signature` — the call that files the capture a
 		# missing-signature alert raised a task to go and collect. v0.56.0 adds
 		# `generate_employee_id_card`, which puts the badge in the Attachments
-		# sidebar of the Employee form somebody already has open.
-		self.assertEqual(len(self.registry.TOOLS), 394)
+		# sidebar of the Employee form somebody already has open. v0.57.0 adds
+		# one more write, `dismiss_compliance_alert` — the same dismissal
+		# `dismiss_alert` makes, gated on the alert's own say-so, for the callers
+		# who are not sitting in front of the record.
+		self.assertEqual(len(self.registry.TOOLS), 395)
 		self.assertEqual(len(self.registry.READ_TOOLS), 179)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 215)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 216)
 
 
 if __name__ == "__main__":

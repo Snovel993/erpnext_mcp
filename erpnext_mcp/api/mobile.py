@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The forty-eight methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The fifty-one methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -87,6 +87,7 @@ import frappe
 from .. import bucket_bridge, compat
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
+from ..tools import calendar as compliance_calendar
 from ..tools import employee as personnel
 from ..tools import housing as housing_tools
 from ..tools import ml_model as ml_model_tools
@@ -94,6 +95,7 @@ from ..tools import mobile as mobile_tools
 from ..tools import wallet as wallet_tools
 from . import guard, shape
 
+ALERT = "Compliance Alert"
 FARM_TASK = "Farm Task"
 FARM_TASK_ASSIGNMENT = "Farm Task Assignment"
 EMPLOYEE = "Employee"
@@ -945,6 +947,59 @@ def list_compliance_alerts(user: str, company=None) -> dict:
 		"company": wanted or None,
 		"critical": len([row for row in rows if row.get("severity") == "Critical"]),
 		"overdue": len([row for row in rows if row.get("overdue")]),
+	}
+
+
+# ── 11a. dismiss_compliance_alert ───────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("dismiss_compliance_alert", limit=guard.WRITE_LIMIT, mutating=True)
+def dismiss_compliance_alert(user: str, alert=None, reason=None) -> dict:
+	"""Close one alert the SERVER marked closable, with a reason. v0.57.0.
+
+	`API_CONTRACT.md` §8.2, and the gate is the whole of it: this refuses any
+	alert whose `can_dismiss` is not set, which is every alert until somebody
+	says otherwise about that one.
+
+	THE APP'S CHECK IS UI COURTESY AND THIS IS THE BOUNDARY, which the app's own
+	contract asks for in as many words. The Dismiss button appears only where
+	`list_compliance_alerts` sent `can_dismiss: true`; the refusal below is what
+	happens when something posts anyway.
+
+	WHY A PHONE MAY NOT SIMPLY DISMISS. An overdue housing inspection is not a
+	notification. Waving one off from a handset leaves a cabin uninspected and
+	the compliance calendar quiet about it, which is why the mobile surface
+	shipped with no dismiss at all — and why the alerts that genuinely are stale
+	are marked one at a time, by somebody who can see the whole picture, rather
+	than by whoever is holding the phone.
+
+	THE REASON IS NOT DECORATION. It is the entire audit trail for an obligation
+	nobody discharged. Empty is refused here as well as on the handset, exactly
+	as `reject_task`'s is, and `tools/calendar.py` refuses a word where a
+	sentence belongs.
+
+	NOTHING ABOUT THE UNDERLYING RECORD CHANGES. The certificate is still
+	expired, the cabin still uninspected. What is recorded is that somebody with
+	a phone in an orchard decided it did not need doing, and who they were.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(ALERT, alert, "alert", allowed)
+	if not str(reason or "").strip():
+		frappe.throw(
+			"A reason is required to dismiss a compliance alert. It is the only part of this "
+			"record nobody can reconstruct: the alert itself the nightly sweep can rebuild from "
+			"the source record, but why somebody decided an obligation did not need meeting "
+			"exists nowhere else.",
+			frappe.ValidationError,
+		)
+
+	result = compliance_calendar.dismiss_compliance_alert({"alert": name, "reason": str(reason).strip()})
+	data = result.data
+	return {
+		"alert": data.get("name"),
+		"dismissed": bool(data.get("dismissed")),
+		"dismissed_by": data.get("dismissed_by"),
+		"dismissed_on": data.get("dismissed_on"),
+		"reason": data.get("dismissed_reason"),
 	}
 
 
@@ -3264,3 +3319,194 @@ def collect_signature(
 		"task_note": (data.get("task") or {}).get("note"),
 		"pdf_regenerated": bool((data.get("pdf") or {}).get("regenerated")),
 	}
+
+
+# ── 47. submit_form_signature ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("submit_form_signature", mutating=True, limit=guard.UPLOAD_LIMIT)
+def submit_form_signature(
+	user: str,
+	doctype=None,
+	docname=None,
+	signature_field=None,
+	signature_image=None,
+	signer_role=None,
+	printed_name=None,
+	employee=None,
+	task=None,
+	task_assignment=None,
+	row=None,
+) -> dict:
+	"""The signature pad's own call, in the shape `API_CONTRACT.md` §14.2 posts.
+
+	THE SAME WRITE AS `collect_signature`, WITH THE APP'S OWN ARGUMENT NAMES AND
+	THE APP'S OWN ANSWER. v0.55.0 published this work as `collect_signature`,
+	which takes `field` and `signature_base64`; the client was written against
+	§14.2, which sends `signature_field` and `signature_image` — and since
+	`farmops_api/routes.bind` reduces a body to the keys the signature declares,
+	a pad posting the contract's spelling at the old method lost the field name
+	and the image on the way in and was told the signature was missing. Both
+	methods stay: an older handset keeps the route it knows, and neither
+	signature grows a second spelling of an argument.
+
+	WHAT IS NEW BESIDES THE NAMES IS THE ANSWER, and it is what makes the
+	compliance calendar a place work can be finished rather than read:
+
+	  * `form_status` — what the form says now, so the screen can report "the
+	    form now reads Complete" instead of "done";
+	  * `dismissed_alert` — the alert this signature ANSWERED. Not a claim that
+	    anything was dismissed: nothing here dismisses an alert, the sweep does
+	    that by looking at the record again and finding the box filled. What the
+	    phone needs is the name of the row it should take off the tab it was
+	    tapped from, and only the server knows which row that is;
+	  * `already_signed` — see below. It is the difference between a retry and a
+	    second signature.
+
+	IT IS IDEMPOTENT, WHICH §14.4 ASKS FOR BY NAME. A submission whose answer
+	never made it back over a marginal link gets retried, and a worker who has
+	already signed being shown an error is a worker who signs again — so a box
+	that already carries an attestation answers success with
+	`already_signed: true` and NOTHING IS OVERWRITTEN. Replacing an attestation
+	somebody made under penalty of perjury is a deliberate act with an
+	`overwrite` flag on it, and that flag is not reachable from here.
+
+	`task` TRAVELS AND CLOSES THE WORK IN THE SAME TRANSACTION. The alert the
+	phone tapped carries the Farm Task the sweep raised, and routing around the
+	task list must not route around closing the task. `task_assignment` is
+	accepted for the reason §6's is — one task can carry several assignments and
+	closing it without naming the unit of work leaves the wrong one open — and is
+	forwarded to the same completion path, which still refuses a completion filed
+	by somebody who was not holding the work. That refusal is REPORTED rather
+	than fatal: the signature is the compliance artefact and the task is
+	bookkeeping about it.
+
+	`signed_on`, `image_format`, `gps_lat` AND `gps_lon` ARE DROPPED, and by the
+	documented mechanism rather than by accident — `routes.bind` keeps only the
+	keys this signature declares, exactly as it drops `pdf_source`. The
+	timestamp is the interesting one: §14.2 stamps it when the pad opened, and
+	the column beside the image is the 8 CFR § 274a.2(h) record of when the
+	attestation was made. A handset that could set it could backdate it, so the
+	server stamps its own and answers with what it wrote — every key here is
+	optional to the client, which reads the server's word for the record.
+
+	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, as on `collect_signature`: this
+	writes the document the employer is inspected on. Every other refusal is the
+	tool's — the closed list of signable boxes, the authorized-signer roster on
+	the two employer boxes, the destroyed I-9 — and is not copied here.
+	"""
+	guard.require_scope(user)
+	personnel.require_hr_role()
+
+	if not str(doctype or "").strip():
+		frappe.throw(
+			"doctype is required — the form the signature goes on, e.g. 'I-9 Form'. The alert or "
+			"task you opened the pad from carries it in signature_request.doctype.",
+			frappe.ValidationError,
+		)
+	if not str(docname or "").strip():
+		frappe.throw(
+			"docname is required — the record being signed. It is signature_request.docname on "
+			"the alert or task the pad was opened from.",
+			frappe.ValidationError,
+		)
+	if not str(signature_image or "").strip():
+		frappe.throw(
+			"signature_image is required: the capture as bare base64, no data: preamble.",
+			frappe.ValidationError,
+		)
+
+	inner = {"doctype": doctype, "name": docname, "signature_base64": signature_image}
+	for key, value in (("field", signature_field), ("row", row), ("task", task)):
+		if value not in (None, ""):
+			inner[key] = value
+
+	try:
+		data = signatures.collect_form_signature(inner).data
+	except signatures.AlreadySignedError:
+		return _already_signed(doctype, docname, signature_field, task)
+
+	closed = data.get("task") or {}
+	return {
+		"doctype": data.get("doctype"),
+		"docname": data.get("name"),
+		# `field` RATHER THAN `signature_field` ON THE WAY BACK, because that is
+		# what §14.3 answers with. The request and the response spell it
+		# differently in the contract and both spellings are the app's.
+		"field": data.get("field"),
+		"form_status": _form_status(data.get("doctype"), data.get("name")),
+		"file_url": data.get("signature"),
+		"task": closed.get("task"),
+		"task_state": _task_state(closed.get("task")),
+		"task_completed": bool(closed.get("completed")),
+		"task_note": closed.get("note"),
+		"signed_on": data.get("signed_at"),
+		"already_signed": False,
+		"dismissed_alert": _alert_answered(data.get("doctype"), data.get("field"), data.get("name")),
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+	}
+
+
+def _already_signed(doctype, docname, field, task) -> dict:
+	"""The §14.3 answer for a box that was already signed. A SUCCESS, not a miss.
+
+	Answers with what is on the record rather than with what this call would have
+	written, because nothing was written. The task is reported in whatever state
+	it is actually in and is NOT closed from here: if the first attempt landed it
+	closed the task then, and if somebody signed this box in the Desk instead
+	then the task is theirs to close from the account holding it.
+	"""
+	resolved = str(doctype or "").strip()
+	name = str(docname or "").strip()
+	return {
+		"doctype": resolved,
+		"docname": name,
+		"field": str(field or "").strip() or None,
+		"form_status": _form_status(resolved, name),
+		"task": str(task or "").strip() or None,
+		"task_state": _task_state(task),
+		"task_completed": None,
+		"already_signed": True,
+		"dismissed_alert": _alert_answered(resolved, field, name),
+		"note": (
+			"This box already carried a signature and nothing was changed. An attestation is "
+			"replaced deliberately or not at all."
+		),
+	}
+
+
+def _form_status(doctype, docname) -> str | None:
+	"""What the form says about itself now. None where the doctype has no status."""
+	name = str(docname or "").strip()
+	resolved = str(doctype or "").strip()
+	if not (name and resolved) or not compat.has_field(resolved, "status"):
+		return None
+	try:
+		return str(frappe.db.get_value(resolved, name, "status") or "") or None
+	except Exception:  # pragma: no cover - a record deleted between write and read
+		return None
+
+
+def _task_state(task) -> str | None:
+	name = str(task or "").strip()
+	if not name or not compat.doctype_exists(FARM_TASK):
+		return None
+	try:
+		return str(frappe.db.get_value(FARM_TASK, name, "state") or "") or None
+	except Exception:  # pragma: no cover
+		return None
+
+
+def _alert_answered(doctype, field, docname) -> str | None:
+	"""The alert a filled box makes untrue, by key. Never raises — see the tool."""
+	box = signatures.BOXES_BY_KEY.get(f"{str(doctype or '').strip()}.{str(field or '').strip()}")
+	if box is None:
+		# The field was resolved by the tool from a doctype with one box, or this
+		# is the already-signed path where the client may have named none.
+		candidates = [
+			entry for entry in signatures.SIGNATURE_BOXES if entry.doctype == str(doctype or "").strip()
+		]
+		if len(candidates) != 1:
+			return None
+		box = candidates[0]
+	return signatures.alert_answered_by(box, str(docname or "").strip()) or None

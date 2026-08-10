@@ -83,6 +83,28 @@ the 1096 transmittal that accompanies it. A caller naming one gets that
 sentence back rather than a list of field names to hunt through — see
 `UNSIGNED_REASONS`, which exists so the refusal ends the question instead of
 starting a search for a column that is not on the page.
+
+────────────────────────────────────────────────────────────────────────────
+v0.57.0: THE BOX ALSO SAYS WHAT THE SIGNER IS BEING ASKED TO SWEAR TO
+────────────────────────────────────────────────────────────────────────────
+
+Every entry now carries the wording as well as the address — the form's name,
+the section's name, and the attestation itself in the government's own words —
+and `request_for_alert` turns one Compliance Alert into the object
+`API_CONTRACT.md` §14.1 describes, which is what lets a phone open a signature
+pad straight off the compliance calendar.
+
+THE WORDING BELONGS HERE FOR THE SAME REASON THE FIELD NAMES DO. A handset
+must not paraphrase 8 CFR § 274a.2's attestation, and it must not compose one
+for a form it has never heard of; the app's own contract says in as many words
+that the person signing and the auditor reading the file should be looking at
+the same sentence. So the sentence lives beside the column it is printed above,
+in the one table that is already a reviewed claim about what each box is.
+
+AND IT IS THE SAME TABLE THE WRITE PATH GATES ON, which is the property worth
+protecting. An alert can only offer a signature route to a box
+`collect_form_signature` would actually accept ink into — a pad addressed at a
+column this app refuses to write is a pad that collects a signature twice.
 """
 
 from __future__ import annotations
@@ -97,6 +119,7 @@ from ..errors import ToolError
 from ..result import ToolResult
 from . import files, i9, signers, taxforms, w4
 
+ALERT = "Compliance Alert"
 I9_FORM = "I-9 Form"
 W4_FORM = "W-4 Form"
 TAX_FORM = "Tax Form"
@@ -118,6 +141,25 @@ SIGNATURE_EXTENSIONS = (".png", ".jpg", ".jpeg")
 #: read by eye. The docname and the field are in it because one form can carry
 #: four of these and "which box is this" should not need a database.
 FILE_STEM = "signature"
+
+
+class AlreadySignedError(ToolError):
+	"""The box this call was addressed at already carries somebody's attestation.
+
+	A `ToolError` SUBCLASS RATHER THAN A NEW KIND OF FAILURE, so every caller
+	that already catches `ToolError` — the MCP dispatcher, the old
+	`collect_signature` wrapper — behaves exactly as it did and reads the same
+	sentence. What the type adds is one caller's ability to tell this refusal
+	apart from the other eleven without matching on prose.
+
+	THAT CALLER IS `submit_form_signature`, and the reason is a phone.
+	`API_CONTRACT.md` §14.4 asks for this route to be idempotent or to say a
+	specific sentence, because a submission whose answer never made it back over
+	a bad link is retried — and a worker who has already signed being shown an
+	error is a worker who signs again. The wrapper answers `already_signed: true`
+	on this exception and success on nothing else; a class is what makes that a
+	decision rather than a `"already carries" in str(exc)`.
+	"""
 
 
 @dataclass(frozen=True)
@@ -153,6 +195,28 @@ class SignatureBox:
 	#: task that asked for it.
 	alert_types: tuple = dataclass_field(default_factory=tuple)
 
+	# ── v0.57.0: what the person at the pad is shown before they draw ───────
+	#: Who is attesting, in `API_CONTRACT.md` §14.1's vocabulary. The app has
+	#: captions for `employee`, `employer`, `preparer` and `witness` and keeps
+	#: anything else VERBATIM, shown humanised — so a role outside those four is
+	#: a wording choice here rather than a client release.
+	signer_role: str = ""
+	#: The caption to print over the ruled line, where this app's four captions
+	#: would word it wrongly. Wins over anything the phone would compose.
+	signer_label: str = ""
+	#: The form as a person names it. Falls back to the doctype on the phone.
+	form_label: str = ""
+	#: A column on the record naming which form this is — `Tax Form.form_type` is
+	#: a 941, an OR-WR, an OQ or a WA-ESD, and the signer is entitled to be told
+	#: which of the four they are signing. Composed into `form_label` when set.
+	form_label_field: str = ""
+	#: Which part of the form. Falls back to the humanised fieldname.
+	section_label: str = ""
+	#: THE SENTENCE BEING SWORN TO, IN THE GOVERNMENT'S OWN WORDS. Never
+	#: paraphrased on the phone and never composed there: absent, the app omits
+	#: the block entirely rather than inventing what a form attests.
+	attestation: str = ""
+
 	@property
 	def key(self) -> str:
 		return f"{self.doctype}.{self.field}"
@@ -169,6 +233,16 @@ SIGNATURE_BOXES = (
 		signed_at_field="section_1_signed_at",
 		signed_ip_field="section_1_signed_ip",
 		alert_types=("i9_section_1_unsigned",),
+		signer_role="employee",
+		form_label="Form I-9, Employment Eligibility Verification",
+		section_label="Section 1. Employee Information and Attestation",
+		attestation=(
+			"I am aware that federal law provides for imprisonment and/or fines for false "
+			"statements, or the use of false documents, in connection with the completion of this "
+			"form. I attest, under penalty of perjury, that this information, including my "
+			"selection of the box attesting to my citizenship or immigration status, is true and "
+			"correct."
+		),
 	),
 	SignatureBox(
 		doctype=I9_FORM,
@@ -180,6 +254,15 @@ SIGNATURE_BOXES = (
 		name_field="verifier_name",
 		title_field="verifier_title",
 		alert_types=("i9_section_2_unsigned",),
+		signer_role="employer",
+		form_label="Form I-9, Employment Eligibility Verification",
+		section_label="Section 2. Employer Review and Verification",
+		attestation=(
+			"I attest, under penalty of perjury, that (1) I have examined the document(s) presented "
+			"by the above-named employee, (2) the above-listed document(s) appear to be genuine and "
+			"to relate to the employee named, and (3) to the best of my knowledge, the employee is "
+			"authorized to work in the United States."
+		),
 	),
 	SignatureBox(
 		doctype=I9_FORM,
@@ -192,6 +275,14 @@ SIGNATURE_BOXES = (
 		name_field="verifier_name",
 		title_field="verifier_title",
 		alert_types=("i9_supplement_b_unsigned",),
+		signer_role="employer",
+		form_label="Form I-9, Employment Eligibility Verification",
+		section_label="Supplement B. Reverification and Rehire",
+		attestation=(
+			"I attest, under penalty of perjury, that to the best of my knowledge, this employee is "
+			"authorized to work in the United States, and if the employee presented document(s), "
+			"the document(s) I have examined appear to be genuine and to relate to the individual."
+		),
 	),
 	SignatureBox(
 		doctype=W4_FORM,
@@ -200,6 +291,13 @@ SIGNATURE_BOXES = (
 		signed_at_field="signed_at",
 		signed_ip_field="signed_ip",
 		alert_types=("w4_signature_missing",),
+		signer_role="employee",
+		form_label="Form W-4, Employee's Withholding Certificate",
+		section_label="Step 5. Sign Here",
+		attestation=(
+			"Under penalties of perjury, I declare that this certificate, to the best of my "
+			"knowledge and belief, is true, correct, and complete."
+		),
 	),
 	# v0.56.0. THE EMPLOYER'S OWN RETURNS, and one box covers four form types
 	# rather than four boxes covering one each: a 941, an OR-WR, an OQ and a
@@ -226,10 +324,36 @@ SIGNATURE_BOXES = (
 		name_field="signer_name",
 		title_field="signer_title",
 		alert_types=("tax_form_signature_missing",),
+		# `officer` IS NOT ONE OF THE FOUR ROLES THE APP HAS A CAPTION FOR, and
+		# naming it anyway is the point rather than an oversight. A 941 is signed
+		# by an officer of the employer, not by "the employer or authorized
+		# representative" the I-9's caption names — and §14.1a says an
+		# unrecognised role is kept verbatim, shown humanised, and posted back
+		# unchanged. `signer_label` is what the line actually reads, and it wins
+		# over anything a phone would compose for a word it does not know.
+		signer_role="officer",
+		signer_label="Signature of officer or authorized agent",
+		form_label="Employer tax return",
+		form_label_field="form_type",
+		section_label="Penalties of perjury declaration",
+		attestation=(
+			"Under penalties of perjury, I declare that I have examined this return, including "
+			"accompanying schedules and statements, and to the best of my knowledge and belief, it "
+			"is true, correct, and complete."
+		),
 	),
 )
 
 BOXES_BY_KEY = {box.key: box for box in SIGNATURE_BOXES}
+
+#: alert_type → the box that alert is about. THE SAME `alert_types` THE TASK
+#: LOOKUP USES, read the other way round: `_task_for` asks "which task belongs to
+#: this box", and the compliance calendar asks "which box is this alert about".
+#: One mapping rather than two means an alert can never offer a signature route
+#: to a column this module would refuse to write.
+BOXES_BY_ALERT_TYPE = {
+	alert_type: box for box in SIGNATURE_BOXES for alert_type in box.alert_types
+}
 
 #: Spellings a caller will reasonably send for each doctype. A phone composing
 #: this call from a Farm Task's `subject_doctype` sends the exact docname; a
@@ -427,7 +551,7 @@ def _child_row(box: SignatureBox, doc, args: dict) -> object:
 		)
 	unsigned = [row for row in rows if not str(row.get(box.field) or "").strip()]
 	if not unsigned:
-		raise ToolError(
+		raise AlreadySignedError(
 			f"every reverification entry on {doc.name} already carries a signature. Name the "
 			f"row explicitly with `row` and pass overwrite=true to replace one filed in error. "
 			f"Nothing was changed."
@@ -588,7 +712,7 @@ def collect_form_signature(args: dict) -> ToolResult:
 	overwrite = as_bool(args, "overwrite", False)
 	existing = str(target.get(box.field) or "").strip()
 	if existing and not overwrite:
-		raise ToolError(
+		raise AlreadySignedError(
 			f"{box.label} on {name} already carries a signature at {existing}. That is an "
 			f"attestation somebody made under penalty of perjury. Pass overwrite=true only to "
 			f"replace one filed in error; the File that was there stays attached to the record "
@@ -888,9 +1012,139 @@ def _redraw(box: SignatureBox, form: str) -> dict:
 	}
 
 
+# ── v0.57.0: what an alert is asking for, addressed ─────────────────────────
+def request_for_alert(row: dict) -> dict | None:
+	"""The `API_CONTRACT.md` §14.1 signature request one alert names, or None.
+
+	THE COMPLIANCE CALENDAR WAS A NOTICEBOARD AND THIS IS WHAT MAKES A ROW A TAP.
+	"I-9 Section 1 was completed but carries no employee signature — Critical" is
+	a sentence a foreman can read and not act on: the pad that fixes it lives
+	behind another tab, findable only by knowing which Farm Task the sweep raised
+	and that it was a signature task at all. An alert that carries the ADDRESS —
+	which doctype, which record, which column — opens the pad itself.
+
+	DERIVED AT READ TIME RATHER THAN STORED ON THE ALERT, and there are three
+	reasons, in ascending order of how much they matter:
+
+	  * an alert raised by v0.55.0 and still open gets its address the moment the
+	    site upgrades, with no patch and no sweep. Nothing about a row on this
+	    calendar changes;
+	  * the address is already a fact about the rule and the record, and a copy
+	    on the alert is a second one to keep in step. `alert_key` is built from
+	    exactly the pair this reads back;
+	  * it comes off `SIGNATURE_BOXES`, which is the table the WRITE path gates
+	    on. A pad can only be opened at a column `collect_form_signature` would
+	    accept ink into — the alternative is a request addressed at a box this
+	    module refuses, which collects a signature into nothing and asks for it
+	    again wherever the form really lives.
+
+	RETURNS None FOR EVERY OTHER ALERT, which is nearly all of them. An overdue
+	housing inspection is not a missing signature and must not grow a pad.
+	"""
+	box = BOXES_BY_ALERT_TYPE.get(str(row.get("alert_type") or "").strip())
+	if box is None:
+		return None
+	docname = str(row.get("source_docname") or "").strip()
+	source_doctype = str(row.get("source_doctype") or "").strip()
+	# THE SOURCE HAS TO BE THE FORM. A rule retargeted at a different doctype
+	# without its box being updated would otherwise address a pad at a record of
+	# the wrong kind — and the app treats an address as opaque, so nothing
+	# downstream would catch it.
+	if not docname or (source_doctype and source_doctype != box.doctype):
+		return None
+
+	request = {
+		"doctype": box.doctype,
+		"docname": docname,
+		"signature_field": box.field,
+		"signer_role": box.signer_role or None,
+		"signer_label": box.signer_label or None,
+		"form_label": box.form_label or None,
+		"section_label": box.section_label or None,
+		"attestation": box.attestation or None,
+		"due_date": str(row.get("due_date") or "") or None,
+	}
+	request.update(_subject_of(box, docname))
+	return {key: value for key, value in request.items() if value is not None}
+
+
+def _subject_of(box: SignatureBox, docname: str) -> dict:
+	"""Who the form is for and whose name belongs under the ruled line.
+
+	NEVER RAISES AND NEVER GUESSES. A record the calendar can see and this
+	account cannot read, a doctype without an `employee` column — a Tax Form is
+	the employer's own return and has none — and a form deleted between the sweep
+	and the read all produce the same answer, which is a request with an address
+	and no biography. The app falls back to the doctype and drops the line.
+
+	`printed_name` FOLLOWS THE ROLE RATHER THAN THE FORM. On Section 1 the name
+	under the line is the employee's, because they are the one attesting. On
+	Section 2 it is the VERIFIER's, and the employee's name there would be a
+	claim about who examined the documents — so it comes off the record's own
+	verifier column and is simply absent until somebody is named.
+	"""
+	fields = compat.existing_fields(
+		box.doctype,
+		[name for name in ("employee", "employee_name", box.name_field, box.form_label_field) if name],
+	)
+	if not fields:
+		return {}
+	try:
+		row = frappe.db.get_value(box.doctype, docname, fields, as_dict=True) or {}
+	except Exception:  # pragma: no cover - a record this account cannot read
+		return {}
+
+	out = {
+		"employee": str(row.get("employee") or "") or None,
+		"employee_name": str(row.get("employee_name") or "") or None,
+	}
+	if box.signer_role == "employee":
+		out["printed_name"] = out["employee_name"]
+	elif box.name_field:
+		out["printed_name"] = str(row.get(box.name_field) or "") or None
+	if box.form_label_field and row.get(box.form_label_field):
+		out["form_label"] = f"Form {row[box.form_label_field]}"
+	return {key: value for key, value in out.items() if value is not None}
+
+
+def alert_answered_by(box: SignatureBox, form: str) -> str:
+	"""The open Compliance Alert this signature has just made untrue, or "".
+
+	NOT A CLAIM THAT AN ALERT WAS DISMISSED, and the distinction is the same one
+	`api/shape.completion` makes at length: nothing here dismisses an alert. The
+	sweep does that, by looking at the record again and finding the box filled,
+	which is the only honest way for an alert to go away. What this names is the
+	row the work ANSWERED — which is what a phone means when it takes the item
+	off the compliance tab it was tapped from.
+
+	FOUND BY KEY RATHER THAN BY SEARCH. An alert's docname is
+	`alert_key(rule, doctype, docname)` and carries nothing that changes daily,
+	so the alert a signature answers is computable rather than queryable. Never
+	raises: a site mid-migrate has no alert table and a signature that landed is
+	still a signature that landed.
+	"""
+	if not compat.doctype_exists(ALERT):
+		return ""
+	from .. import alerts as alert_engine
+
+	for alert_type in box.alert_types:
+		key = alert_engine.alert_key(alert_type, box.doctype, form)
+		try:
+			row = frappe.db.get_value(ALERT, key, ["name", "dismissed"], as_dict=True)
+		except Exception:  # pragma: no cover - a site mid-migrate
+			return ""
+		if row and not frappe.utils.cint(row.get("dismissed")):
+			return str(row["name"])
+	return ""
+
+
 __all__ = [
+	"BOXES_BY_ALERT_TYPE",
 	"SIGNATURE_BOXES",
 	"SIGNATURE_MAX_BYTES",
+	"AlreadySignedError",
 	"SignatureBox",
+	"alert_answered_by",
 	"collect_form_signature",
+	"request_for_alert",
 ]

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 394 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 395 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -9730,3 +9730,58 @@ with no switch is one an operator cannot turn off.
 Read the switch, the audit row, the rollback-on-failure and the never-raise
 contract come from `registry.dispatch`; a handler gets all four for free and
 cannot opt out.
+
+---
+
+## v0.57.0 — Closing a compliance row from the field
+
+### `dismiss_compliance_alert`
+
+**MUTATING (default OFF).** The same dismissal `dismiss_alert` makes, gated on
+the alert's own say-so.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `alert` | yes | The Compliance Alert docname. `get_compliance_calendar` lists them |
+| `reason` | yes | Why this does not need doing. A sentence, not a word |
+
+**The gate is the whole difference.** This refuses any alert whose `can_dismiss`
+is not set, and `can_dismiss` defaults false on every alert the sweep raises.
+`dismiss_alert` — unchanged, ungated — is the route for somebody at a desk with
+the source record open in the next tab. This one is for the callers who are not
+there: the Farm Ops app calls it from the compliance tab, and a model reading a
+calendar is in the same position.
+
+**Why almost nothing is dismissible.** An overdue housing inspection is not a
+notification. Waving it off leaves a cabin uninspected and the calendar quiet
+about it, which is why the mobile surface shipped with no dismiss at all. The
+alerts that genuinely are stale — one raised against a lease terminated in May, a
+duplicate of a filing already made elsewhere — are marked one at a time, on the
+Compliance Alert's **May Be Dismissed From The Field** box, by somebody who can
+see the whole picture. **The nightly sweep never writes that column**: it neither
+grants the permission nor takes it away, exactly as it leaves a snooze alone.
+
+The reason lands on `dismissed_reason` with `dismissed_by` and `dismissed_on`
+beside it, through the same code the desk-side route uses. It is the entire audit
+trail for an obligation nobody discharged, and dismissing the alert changes
+nothing underneath it.
+
+### What an alert now carries
+
+`get_compliance_calendar`, `list_compliance_calendar_for_me` and the mobile
+`list_compliance_alerts` gained two optional keys on every alert, and neither
+changes anything that was already there:
+
+| Key | Meaning |
+|---|---|
+| `can_dismiss` | Whether this alert may be closed without the work being done. False unless somebody said otherwise |
+| `signature_request` | `{doctype, docname, signature_field, …}` for the four missing-signature rules — the blank box the alert is about, addressed |
+
+`signature_request` is **derived at read time** from `tools/signatures.py`'s
+closed table of signature boxes, which is the table the write path gates on. So a
+pad can only ever be opened at a column `collect_form_signature` would accept ink
+into, an alert raised before this release gets its address with no patch and no
+sweep, and there is no second copy of the address to fall out of step with the
+rule. Farm Tasks raised from those alerts carry the same object, off the same
+alert, so the pad opened from the task list and the pad opened from the calendar
+are addressed identically.

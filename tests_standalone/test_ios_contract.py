@@ -61,7 +61,7 @@ from typing import ClassVar
 
 import frappe
 
-from erpnext_mcp import i9_pdf, w4_pdf
+from erpnext_mcp import compliance_rules, i9_pdf, w4_pdf
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import mobile as mobile_api
 from erpnext_mcp.tools import badges as badges_tool
@@ -75,6 +75,13 @@ from .test_api_mobile import TheSurfaceIsClosed as _MobileSurface
 #: `ISO8601DateFormatter` in `LenientDecoding.swift:70-85`. A date the app cannot
 #: parse decodes to nil, which puts "—" where a claim time should be.
 _DATE_FORMATS = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S")
+
+#: The smallest thing that is genuinely a PNG. `signatures._sniff` reads the
+#: first eight bytes and refuses anything else, and nothing here asks a renderer
+#: to open the result — so a real image would be bytes spent proving something
+#: no test in this file asserts. Same constant, same reasoning, as
+#: `test_missing_signatures.A_CAPTURE`.
+A_PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"signature").decode()
 
 
 class ContractError(AssertionError):
@@ -326,6 +333,34 @@ class UserContextModel(Codable):
 	NESTED = (("companies", AccessibleCompanyModel, True, 60),)
 
 
+class SignatureRequestModel(Codable):
+	"""`SignatureRequest.swift` — the address a pad is opened at.
+
+	EVERY FIELD IS LENIENT AND THE FIRST THREE STILL DECIDE EVERYTHING. Nothing
+	here throws; what a miss costs is `isActionable`, and an unactionable request
+	means the row falls through to the task or to its own detail rather than
+	opening a pad addressed at nothing. That failure is silent on the phone,
+	which is exactly why it is asserted here: an alert that quietly stopped being
+	tappable looks like an alert nobody bothered to resolve.
+	"""
+
+	SWIFT = "SignatureRequest.swift"
+	LENIENT = (
+		("doctype", str, 181),
+		("docname", str, 182),
+		("signature_field", str, 183),
+		("signer_role", str, 186),
+		("signer_label", str, 187),
+		("employee", str, 188),
+		("employee_name", str, 189),
+		("form_label", str, 190),
+		("section_label", str, 191),
+		("attestation", str, 192),
+		("printed_name", str, 193),
+	)
+	DATES = (("due_date", 194),)
+
+
 class ComplianceAlertSummaryModel(Codable):
 	SWIFT = "ComplianceAlertSummary.swift"
 	STRICT = (("name", str, 31),)
@@ -335,9 +370,43 @@ class ComplianceAlertSummaryModel(Codable):
 		("company", str, 36),
 		("regulation", str, 37),
 		("linked_task", str, 38),
+		# v0.57.0 — §8.1. Displayed rather than navigated: this app has no screen
+		# for an arbitrary doctype and does not pretend to have one.
+		("subject_doctype", str, 89),
+		("subject_docname", str, 90),
+		# `?? false` on the Swift side, so an absent key is a v1 calendar row with
+		# no Dismiss button — which is the safe direction for a permission to
+		# fail, and the reason a site that never sends it loses nothing.
+		("can_dismiss", bool, 91),
 	)
 	DATES = (("due_date", 34),)
 	ENUMS = (("urgency", {"Low", "Normal", "High", "Critical"}, 35),)
+	NESTED = (("signature_request", SignatureRequestModel, False, 86),)
+
+
+class SignatureSubmissionModel(Codable):
+	"""`SignatureAPI.SubmissionResult` — what comes back from the pad.
+
+	EVERY KEY IS OPTIONAL TO THE CLIENT and a sparse `{}` still reads as "signed,
+	task closed", because that is the route's contract. What the app does with
+	these is report: the form's new status, whether the task closed, and which
+	calendar row to take away.
+	"""
+
+	SWIFT = "SignatureAPI.swift"
+	LENIENT = (
+		("doctype", str, 72),
+		("docname", str, 73),
+		("field", str, 74),
+		("form_status", str, 75),
+		("file_url", str, 76),
+		("task", str, 77),
+		("task_state", str, 78),
+		("task_completed", bool, 79),
+		("already_signed", bool, 81),
+		("dismissed_alert", str, 82),
+	)
+	DATES = (("signed_on", 80),)
 
 
 class CompletionResultModel(Codable):
@@ -1460,6 +1529,39 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			],
 		)
 
+	def an_unsigned_i9(self, name="I9-2026-CONTRACT"):
+		"""A submitted I-9 whose Section 1 attestation box is empty.
+
+		The state `i9_section_1_unsigned` fires on, which is a form filled in
+		perfectly and signed by nobody — not a late form. Seeded rather than
+		walked through the wizard because what is under test is the route from
+		the ALERT to the pad, and `submit_i9_section_1` would fill the box.
+
+		THE RULES ARE SEEDED HERE because the four missing-signature rules are
+		RECORD-ONLY — authored in the declarative vocabulary with no `Rule`
+		object in `alerts/rules.py` to fall back to — so a site that has not run
+		the seeder has no `i9_section_1_unsigned` for the sweep to run at all.
+		"""
+		compliance_rules.seed_compliance_rules()
+		self.the_compliance_columns()
+		STORE.seed(
+			"I-9 Form",
+			[
+				{
+					"name": name,
+					"employee": self.NEW_HIRE,
+					"employee_name": "Ana Ruiz",
+					"company": MAIN,
+					"status": "Section 1 Complete",
+					"hire_date": "2026-07-01",
+					"legal_first_name": "Ana",
+					"legal_last_name": "Ruiz",
+					"citizenship_status": "US Citizen",
+				}
+			],
+		)
+		return name
+
 	def a_documented_returning_picker(self, i9_status="Pending", w4_status="Missing"):
 		"""Somebody who worked last season: an I-9 verified, a W-4 filed, a badge.
 
@@ -2405,6 +2507,162 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertIsNone(row["company_logo_url"])
 		self.assertTrue(row["badge_id"])
 
+	# ── v0.57.0: the compliance tab becomes somewhere work is finished ──────
+	def a_dismissible_alert(self) -> str:
+		"""One alert on the calendar, marked closable from the field.
+
+		THE SWEEP IS AN OPERATOR'S CALL AND THE TICK IS SOMEBODY ELSE'S. Both are
+		done as Administrator here for the same reason `test_09` runs the sweep
+		that way: neither is a thing a phone does, and a fixture that let the
+		worker do them would be testing a site nobody runs.
+		"""
+		frappe.local.session.user = "Administrator"
+		self.tool_data("refresh_compliance_alerts", {"company": MAIN})
+		names = [row["name"] for row in STORE.rows("Compliance Alert")]
+		self.assertTrue(names, "the sweep raised nothing for this fixture to dismiss")
+		frappe.db.set_value("Compliance Alert", names[0], "can_dismiss", 1)
+		self.be()
+		return names[0]
+
+	def test_46_dismiss_compliance_alert(self):
+		"""§8.2 — the row a phone may close, and the reason that is the record.
+
+		THE DEFAULT IS THE DESIGN AND IT IS ASSERTED FIRST. Every alert the sweep
+		raises arrives closable by nobody; the button appears only where somebody
+		with the whole picture said this particular finding is stale. A handset
+		that could wave off an overdue housing inspection would leave a cabin
+		uninspected and the calendar quiet about it, which is why v1 shipped with
+		no dismiss at all.
+		"""
+		alert = self.a_dismissible_alert()
+
+		listed = self.wire("list_compliance_alerts")
+		by_name = {row["name"]: row for row in listed["alerts"]}
+		for index, row in enumerate(listed["alerts"]):
+			ComplianceAlertSummaryModel.decode(row, "list_compliance_alerts", f".alerts[{index}]")
+		self.assertIs(by_name[alert]["can_dismiss"], True)
+		self.assertTrue(
+			[row for row in listed["alerts"] if row["can_dismiss"] is False],
+			"every other alert should still be closable by nobody",
+		)
+
+		row = self.wire("dismiss_compliance_alert", alert=alert, reason="Raised against a lease we ended in May.")
+		VoidResponseModel.decode(row, "dismiss_compliance_alert")
+		self.assertIs(row["dismissed"], True)
+		self.assertEqual(row["reason"], "Raised against a lease we ended in May.")
+		# The whole audit trail: who, when, why — on the alert, not in a log line
+		# somebody has to correlate.
+		stored = frappe.db.get_value(
+			"Compliance Alert", alert, ["dismissed", "auto_dismissed", "dismissed_by", "dismissed_reason"], as_dict=True
+		)
+		self.assertEqual(int(stored["dismissed"] or 0), 1)
+		self.assertEqual(int(stored["auto_dismissed"] or 0), 0)
+		self.assertEqual(stored["dismissed_by"], WORKER)
+		self.assertEqual(stored["dismissed_reason"], "Raised against a lease we ended in May.")
+		# And it is off the calendar the phone reads.
+		self.assertNotIn(alert, {row["name"] for row in self.wire("list_compliance_alerts")["alerts"]})
+
+	def test_46_an_alert_nobody_marked_dismissible_is_refused(self):
+		"""The gate is here and not only on the handset. The app hides the button
+		on `can_dismiss: false` and its own contract calls that UI courtesy; a
+		refusal that exists only in a client is not one."""
+		frappe.local.session.user = "Administrator"
+		self.tool_data("refresh_compliance_alerts", {"company": MAIN})
+		self.be()
+		alert = self.wire("list_compliance_alerts")["alerts"][0]
+		self.assertIs(alert["can_dismiss"], False)
+
+		with self.assertRaises(Exception) as caught:
+			self.wire("dismiss_compliance_alert", alert=alert["name"], reason="Not worth doing this week.")
+		self.assertIn("not marked as dismissible", str(caught.exception))
+		self.assertEqual(int(frappe.db.get_value("Compliance Alert", alert["name"], "dismissed") or 0), 0)
+
+	def test_46_an_empty_reason_is_refused_before_anything_is_written(self):
+		alert = self.a_dismissible_alert()
+		with self.assertRaises(Exception) as caught:
+			self.wire("dismiss_compliance_alert", alert=alert, reason="   ")
+		self.assertIn("reason is required", str(caught.exception))
+		self.assertEqual(int(frappe.db.get_value("Compliance Alert", alert, "dismissed") or 0), 0)
+
+	def test_47_submit_form_signature(self):
+		"""§14.2/§14.3 — the pad's own call, addressed off the alert.
+
+		THE ROUTE NAME AND THE ARGUMENT NAMES ARE THE POINT. v0.55.0 published
+		this write as `collect_signature`, which declares `field` and
+		`signature_base64`; the app posts `signature_field` and
+		`signature_image`, and `routes.bind` drops what a signature does not
+		name — so the contract's own body reached the old method with neither the
+		field nor the picture in it.
+		"""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		frappe.local.session.user = "Administrator"
+		self.tool_data("refresh_compliance_alerts", {"company": MAIN})
+		self.be()
+
+		alert = next(
+			row
+			for row in self.wire("list_compliance_alerts")["alerts"]
+			if row.get("signature_request")
+		)
+		ComplianceAlertSummaryModel.decode(alert, "list_compliance_alerts")
+		request = alert["signature_request"]
+		# The three addressing keys are what make the row a tap rather than a
+		# sentence. `isActionable` is false without all three.
+		self.assertEqual(request["doctype"], "I-9 Form")
+		self.assertEqual(request["docname"], "I9-2026-CONTRACT")
+		self.assertEqual(request["signature_field"], "section_1_signature")
+
+		row = self.wire(
+			"submit_form_signature",
+			doctype=request["doctype"],
+			docname=request["docname"],
+			signature_field=request["signature_field"],
+			signature_image=A_PNG,
+			signer_role=request.get("signer_role"),
+			printed_name=request.get("printed_name"),
+			task=alert.get("linked_task"),
+		)
+		SignatureSubmissionModel.decode(row, "submit_form_signature")
+
+		self.assertEqual(row["field"], "section_1_signature")
+		self.assertTrue(row["file_url"])
+		self.assertIs(row["already_signed"], False)
+		# The alert the phone tapped is named back, so the row it opened comes off
+		# the tab it was opened from.
+		self.assertEqual(row["dismissed_alert"], alert["name"])
+		self.assertTrue(
+			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature")
+		)
+
+	def test_47_a_retry_whose_answer_was_lost_reports_success(self):
+		"""§14.4. A worker shown an error for a signature that landed is a worker
+		who signs again, and nothing is overwritten to say so."""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		first = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+		)
+		second = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+		)
+		SignatureSubmissionModel.decode(second, "submit_form_signature")
+		self.assertIs(second["already_signed"], True)
+		# The ink on the record is the FIRST one. An attestation is replaced
+		# deliberately or not at all.
+		self.assertEqual(
+			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature"),
+			first["file_url"],
+		)
+
 	def test_45_the_photo_and_the_badge_meet_on_the_card(self):
 		"""The two halves of this release, in the order the wizard walks them:
 		the headshot is filed, and the badge issued after it carries the URL the
@@ -2584,6 +2842,11 @@ class TheContractIsComplete(ContractTestCase):
 		# printed elsewhere and could not produce one.
 		"set_employee_photo": "test_44",
 		"generate_employee_badge_qr": "test_45",
+		# v0.57.0 — the compliance tab stops being a noticeboard. One row may be
+		# closed where the alert says it may be, and one may be signed off
+		# without going via the task list first.
+		"dismiss_compliance_alert": "test_46",
+		"submit_form_signature": "test_47",
 	}
 
 	def _published(self, module):

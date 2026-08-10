@@ -103,6 +103,12 @@ ROUTES = (
 	Route("/mobile", mobile_api.reject_task),
 	Route("/mobile", mobile_api.report_field_task),
 	Route("/mobile", mobile_api.list_compliance_alerts),
+	# v0.57.0. The compliance tab stops being a noticeboard. `API_CONTRACT.md`
+	# §8.2 — a row may now be closed from a handset, but only where the alert
+	# itself says so, which is a box somebody ticks per alert and which defaults
+	# off. The gate lives in the wrapper rather than in the app, because a
+	# refusal that only exists in a client is not one.
+	Route("/mobile", mobile_api.dismiss_compliance_alert),
 	Route("/mobile", mobile_api.scan_asset),
 	Route("/mobile", mobile_api.get_asset_detail),
 	Route("/mobile", mobile_api.log_asset_state_change),
@@ -229,6 +235,15 @@ ROUTES = (
 	# different doors — and it is routed here for the same reason everything
 	# above it is: the funnel publishes `/farmops/api/…` and nothing else.
 	Route("/mobile", mobile_api.collect_signature),
+	# v0.57.0. The same write under the name and the argument spellings
+	# `API_CONTRACT.md` §14.2 posts, and the reason both exist is this table's
+	# own argument filter: the app sends `signature_field` and `signature_image`,
+	# `collect_signature` declares `field` and `signature_base64`, and `bind`
+	# drops what a signature does not name — so the contract's body arrived at
+	# the v0.55.0 method with no field name and no picture in it. The older
+	# spelling keeps its route; handsets already in the field are not asked to
+	# change to get an answer.
+	Route("/mobile", mobile_api.submit_form_signature),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

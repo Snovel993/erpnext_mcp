@@ -3,6 +3,57 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.57.0 — 2026-08-10
+
+**The compliance calendar stops being a noticeboard.** *"I-9 Section 1 was
+completed but carries no employee signature — Critical"* is a sentence a foreman
+can read and not act on: the pad that fixes it lives behind another tab,
+findable only by knowing which Farm Task the sweep raised and that it was a
+signature task at all. A missing-signature alert now carries the **address** of
+the box it is about — `{doctype, docname, signature_field}` plus the form's name,
+the section's name and the attestation in the government's own words — so a row
+on the calendar opens the signature pad itself. Farm Tasks raised from those
+alerts carry the same object off the same alert, so the pad opened from the task
+list and the pad opened from the calendar are addressed identically.
+
+**It is derived at read time from the table the write path gates on**, which is
+`tools/signatures.SIGNATURE_BOXES`. A pad can therefore only ever be opened at a
+column `collect_form_signature` would accept ink into; an alert raised before
+this release gets its address with no patch and no sweep; and there is no second
+copy of the address to fall out of step with the rule.
+
+**`dismiss_compliance_alert` — one alert may now be closed from a handset, and
+only where the alert says so.** Compliance Alert grows `can_dismiss`, which
+defaults **false** and which the nightly sweep never writes: it neither grants
+the permission nor takes it away, exactly as it leaves a snooze alone. An
+overdue housing inspection is not a notification — waving it off leaves a cabin
+uninspected and the calendar quiet about it — so the alerts that genuinely are
+stale are marked one at a time, by somebody who can see the whole picture, on
+the alert's own **May Be Dismissed From The Field** box. `dismiss_alert` is
+unchanged and still ungated: the operator at the desk with the source record
+open in the next tab is not the caller this gate is about. The reason is
+required, has to be a sentence, and lands beside `dismissed_by` and
+`dismissed_on` through the same code both routes use.
+
+**`submit_form_signature` — the route the signature pad was already posting to.**
+v0.55.0 published this write as `collect_signature`, which declares `field` and
+`signature_base64`; `API_CONTRACT.md` §14.2 sends `signature_field` and
+`signature_image`, and `farmops_api/routes.bind` reduces a body to the keys a
+signature declares — so the contract's own body reached the v0.55.0 method with
+neither the field name nor the picture in it. Both methods now exist and neither
+grows a second spelling of an argument. The new one answers §14.3: `form_status`,
+`task_state`, and `dismissed_alert` naming the alert the signature answered — not
+a claim that anything was dismissed, since the sweep does that by looking at the
+record again, but the row the phone should take off the tab it was tapped from.
+**It is idempotent**: a box that already carries an attestation answers success
+with `already_signed: true` and nothing is overwritten, because a worker shown an
+error for a signature that landed is a worker who signs again.
+
+**Every addition is optional and additive.** An alert sent exactly as v0.55.0
+sent it still lists, still sorts and still opens its detail; `can_dismiss` reads
+false on a site whose column has not migrated yet, which is the safe direction
+for a permission to fail.
+
 ## 0.56.1 — 2026-08-10
 
 **The badge sheet came out of Save-as-PDF blank.** The cards were on screen and

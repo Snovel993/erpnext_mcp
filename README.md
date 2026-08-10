@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **394 tools** — 179 read-only, 215 mutating.
+- **395 tools** — 179 read-only, 216 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -301,7 +301,7 @@ claude mcp add --transport http erpnext \
 
 ---
 
-## The 394 tools
+## The 395 tools
 
 Full arguments, return shapes and worked examples:
 **[docs/tool-catalog.md](docs/tool-catalog.md)**.
@@ -1266,6 +1266,7 @@ rather than dropped.
 | `refresh_compliance_alerts` | Runs the whole rule set now instead of waiting for tonight. Creates, refreshes, reopens and auto-dismisses. | Touch any operational record — every rule is a read. Or duplicate an alert: the docname carries the rule and the source and nothing that changes daily. |
 | `snooze_alert` | Hides one alert until a date. Not a dismissal: the condition is still true and it comes back on its own. | Take a date that is not in the future — an expired snooze is not a snooze. |
 | `dismiss_alert` | Takes one alert off the calendar, with a **mandatory reason** — the only part of the record nobody can reconstruct, and the answer when the same finding turns up next year. | Delete the alert, or change anything underneath it. Dismissing one about an expired certificate does not renew the certificate. |
+| `dismiss_compliance_alert` | The same dismissal, gated on the alert's own **May Be Dismissed From The Field** box — which defaults off. It is what the Farm Ops app calls, and what a model reading a calendar should call: whether an obligation may be closed without being met is a judgement somebody records in advance, per alert. | Close anything nobody marked dismissible, or take a word where a sentence belongs. |
 | `dismiss_alert_bulk` | Dismisses every alert matching a filter, one reason for all of them. | Write on the first call — **dry run defaults TRUE**, because the whole calendar is one filter away. Or run with no filter at all. |
 | `generate_audit_packet` | Assembles one audit type's evidence for one period into a PDF and files it as a Governance Document. Pulls from the operational records, not from a copy. | Produce a packet for a period that has not finished, or one whose corrective actions are still open — refused, with every open action named, because a warning on a printed document is not read by the person holding it. |
 | `repair_drifted_je_attributions` | Brings drifted GL Entry rows back into step with their vouchers, in a batch, from `find_drifted_je_attributions`' own output. | Move a balance. `party` is an attribution column, so the trial balance after two hundred repairs is arithmetically identical. Nor abort on the first failure: each item is a different voucher. |
