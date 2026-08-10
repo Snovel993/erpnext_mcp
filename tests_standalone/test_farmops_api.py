@@ -215,6 +215,9 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/list_onboarding_reference_data",
 		"/mobile/list_available_housing",
 		"/mobile/assign_housing",
+		# v0.55.0. Where the signature pad posts what a finger drew, for the
+		# box a missing-signature alert found empty.
+		"/mobile/collect_signature",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

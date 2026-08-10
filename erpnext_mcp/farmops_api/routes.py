@@ -221,6 +221,14 @@ ROUTES = (
 	Route("/mobile", mobile_api.list_onboarding_reference_data),
 	Route("/mobile", mobile_api.list_available_housing),
 	Route("/mobile", mobile_api.assign_housing),
+	# v0.55.0. The other end of the missing-signature rules. A Farm Task raised
+	# by `i9_section_2_unsigned` carries the form that needs signing, the app
+	# opens a signature pad over it, and this is where the pad posts. It is the
+	# one call on this surface that takes IMAGE BYTES in the body rather than a
+	# `file_token` — see `tools/signatures.py` for why a capture and a scan take
+	# different doors — and it is routed here for the same reason everything
+	# above it is: the funnel publishes `/farmops/api/…` and nothing else.
+	Route("/mobile", mobile_api.collect_signature),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

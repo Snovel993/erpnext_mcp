@@ -1240,7 +1240,10 @@ class TheUpgradeFromV0220(PrimitiveTestCase):
 		# Twenty-one since v0.39.0 (financial_kpi_threshold_breach) and
 		# twenty-two since v0.42.0 (budget_variance_breach) — both seeded
 		# fresh rather than migrated, and both equally untouched by this patch.
-		self.assertEqual(len(compliance_rules.rule_rows()), 22)
+		# Twenty-six since v0.55.0, on the same reading: the four
+		# missing-signature rules postdate the v0.22.0 the patch migrates FROM,
+		# so there is nothing of theirs for it to have migrated.
+		self.assertEqual(len(compliance_rules.rule_rows()), 26)
 
 	def test_an_operator_edited_threshold_survives_the_migration(self):
 		"""The question the patch exists to answer well. A site that contracted its

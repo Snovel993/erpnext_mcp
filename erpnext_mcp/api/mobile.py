@@ -86,7 +86,7 @@ import frappe
 
 from .. import bucket_bridge, compat
 from ..errors import ToolError
-from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signers, w4
+from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
 from ..tools import employee as personnel
 from ..tools import housing as housing_tools
 from ..tools import ml_model as ml_model_tools
@@ -3156,4 +3156,111 @@ def assign_housing(
 		"deposit_paid": data.get("deposit_paid"),
 		"warnings": data.get("warnings") or [],
 		"section_119_note": data.get("section_119_note"),
+	}
+
+
+# ── 46. collect_signature ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("collect_signature", mutating=True, limit=guard.UPLOAD_LIMIT)
+def collect_signature(
+	user: str,
+	doctype=None,
+	docname=None,
+	field=None,
+	signature_base64=None,
+	file_token=None,
+	row=None,
+	task=None,
+	overwrite=None,
+) -> dict:
+	"""Attach a signature capture to the I-9 or W-4 box a task said was missing.
+
+	THE CALL THE HIRING BOARD'S SIGNATURE TASKS EXIST FOR. A Farm Task raised by
+	`i9_section_2_unsigned` carries `subject_doctype` and `subject_docname` —
+	which form needs signing — and the app opens a signature pad over them. This
+	is what the pad calls when the finger lifts.
+
+	IT TAKES BYTES, WHICH `upload_signed_i9` DOES NOT, and the two are answering
+	different questions rather than disagreeing. That one files a PHOTOGRAPH OF A
+	SIGNED PAGE: megabytes, taken on a camera, and it goes up through
+	`stage_file_chunk` / `finalize_staged_file` because a link that drops halfway
+	through eight megabytes has to be resumable. This one carries what a finger
+	drew on the glass: a few kilobytes of monochrome PNG, complete in one
+	gesture, and chunking it would be three round trips to move less data than
+	the JSON around it — three more places for a signature to be lost while the
+	person who drew it walks back to the block. `tools/signatures.py` holds the
+	512 KB ceiling that keeps the two apart, and something over it is told which
+	door to use. `file_token` is still accepted for a caller that has one.
+
+	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, exactly as `upload_signed_i9`
+	requires it and for the same reason: this writes the document the employer is
+	inspected on. A worker may READ their own I-9 through `get_i9_form` because
+	reading it harms nobody; an account that could put a signature on its own
+	Section 2 could attest that somebody examined documents when nobody did.
+
+	EVERY OTHER REFUSAL IS THE TOOL'S and is not copied here — the closed list of
+	signable boxes, the authorized-signer roster on the two EMPLOYER boxes, the
+	refusal to overwrite an attestation, the destroyed I-9. A second copy of
+	those would be a second set of federal-form rules to keep in step.
+
+	`worker_id` IS NOT AN ARGUMENT. Which task gets closed is worked out from the
+	form and the alert type, and closing it goes through `complete_farm_task`,
+	which refuses a completion from an account that is not holding the task. An
+	account that could name somebody else here would be closing another person's
+	task in their name.
+	"""
+	guard.require_scope(user)
+	personnel.require_hr_role()
+
+	if not str(doctype or "").strip():
+		frappe.throw(
+			"doctype is required — 'I-9 Form' or 'W-4 Form'. The task you opened this from "
+			"carries it in subject_doctype.",
+			frappe.ValidationError,
+		)
+	if not str(docname or "").strip():
+		frappe.throw(
+			"docname is required — the form being signed. The task carries it in "
+			"subject_docname.",
+			frappe.ValidationError,
+		)
+	if not (str(signature_base64 or "").strip() or str(file_token or "").strip()):
+		frappe.throw(
+			"the signature image is required: signature_base64 for a capture taken on the "
+			"pad, or file_token for one already uploaded.",
+			frappe.ValidationError,
+		)
+
+	inner = {"doctype": doctype, "name": docname}
+	for key, value in (
+		("field", field),
+		("signature_base64", signature_base64),
+		("file_token", file_token),
+		("row", row),
+		("task", task),
+		("overwrite", overwrite),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	data = signatures.collect_form_signature(inner).data
+	return {
+		"doctype": data.get("doctype"),
+		"name": data.get("name"),
+		"field": data.get("field"),
+		"label": data.get("label"),
+		"row": data.get("row"),
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+		"signature": data.get("signature"),
+		"signed_at": data.get("signed_at"),
+		"replaced": data.get("replaced"),
+		# BOTH REPORTED, NEITHER FATAL. The app shows a completed signature and,
+		# where the task did not close, why — usually because somebody else is
+		# holding it, which is a thing the person at the pad needs to be told
+		# rather than a failure of what they just did.
+		"task": (data.get("task") or {}).get("task"),
+		"task_completed": bool((data.get("task") or {}).get("completed")),
+		"task_note": (data.get("task") or {}).get("note"),
+		"pdf_regenerated": bool((data.get("pdf") or {}).get("regenerated")),
 	}

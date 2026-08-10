@@ -2864,6 +2864,211 @@ shape(
 )
 
 
+# ── 23. i9_supplement_b_unsigned ────────────────────────────────────────────
+#
+# THE THIRD OF THE MISSING-SIGNATURE RULES, AND THE ONLY ONE THAT IS NOT
+# DECLARATIVE. `i9_section_1_unsigned` and `i9_section_2_unsigned` are records
+# and nothing else — see `compliance_rules.declarative_seed_specs` — because
+# each asks one question of one column on one row, which is exactly what the
+# declarative engine is for. This one cannot be, and the reason is worth stating
+# because it is the test for whether a future rule belongs here or there.
+#
+# SUPPLEMENT B LIVES IN A CHILD TABLE. An I-9 Form carries a `reverifications`
+# table, one row per reverification or rehire, and each row has its own employer
+# attestation — `section_3_signature`. The question "does this form have an
+# unsigned reverification" is therefore a question about a SET of rows, and the
+# answer has to fold that set down: which of them are unsigned, how many, and
+# which is the most recent. That is the same aggregation `audit_action_overdue`
+# does over corrective actions, and the same reason it is built in.
+#
+# THE NEAREST DECLARATIVE PRIMITIVE IS `latest_child_field_threshold`, AND IT
+# DOES NOT REACH. It folds a child table to its newest row and then compares a
+# NUMBER on it — `passes_threshold` takes two floats and answers False on
+# anything else, deliberately, so a thermometer column somebody filled in as
+# "warm" cannot raise a heat alert. "This Attach field is empty" is not a
+# number, and widening that primitive to take presence operators would put a
+# non-numeric comparison inside the one function written to refuse them.
+#
+# ONE ALERT PER FORM, NOT PER ROW. A worker reverified twice, neither signed, is
+# one conversation with one authorized signer holding one form — and two rows on
+# the calendar would read as two people to chase. The message names the count
+# and the most recent date so the person who picks it up knows what they are
+# walking into.
+#: The child doctype Supplement B rows are, and the table on I-9 Form they hang
+#: off. Named rather than inlined because the scanner reads both and the seeded
+#: rule's `requires_doctypes` has to agree with what the scanner will look for.
+REVERIFICATION_DOCTYPE = "I-9 Reverification"
+REVERIFICATION_TABLE = "reverifications"
+
+#: I-9 statuses this rule will not raise on. A destroyed form is past its
+#: retention period; sending somebody to sign it would be asking them to attest
+#: to documents that no longer exist.
+REVERIFICATION_SKIP_STATUSES = ("Destroyed",)
+
+
+def _scan_unsigned_reverifications(context: dict) -> list:
+	"""I-9 forms whose Supplement B rows carry no employer attestation.
+
+	READS THE CHILD TABLE DIRECTLY rather than loading each parent document. A
+	site with four hundred I-9s would be four hundred `get_doc` calls to find the
+	handful with a reverification at all; one query over `I-9 Reverification`
+	grouped in Python is one query. `audit_action_overdue` loads the parent
+	because it needs a controller method (`open_actions`); there is no such
+	method here and no reason to pay for one.
+
+	A FORM WITH NO REVERIFICATION RAISES NOTHING, which is not the same as
+	raising nothing because it is clean. Most I-9s never need a Supplement B —
+	the employee is a citizen, or their authorization has not expired — and a
+	rule that treated "no rows" as "unsigned rows" would raise on the whole
+	register.
+	"""
+	if not compat.doctype_exists(REVERIFICATION_DOCTYPE):
+		return []
+	severity = _severity_of(context, "severity_expired", SEVERITY_CRITICAL)
+
+	# The parents first, so the company scope, the Destroyed exclusion and any
+	# operator scope filters are applied ONCE — and so a reverification row
+	# orphaned by a deleted form is skipped rather than raising an alert whose
+	# source_docname points at nothing.
+	#
+	# THE STATUS EXCLUSION IS DONE IN PYTHON, not in the filter, for the reason
+	# `compliance_rules.row_matches` gives at length: `status != 'Destroyed'` in
+	# SQL drops every row whose status column was never written, and a form
+	# imported without one is not a destroyed form. Reading it here keeps the
+	# unset ones in, which is the direction that fails safe.
+	forms = {
+		row["name"]: row
+		for row in _rows(
+			"I-9 Form",
+			_company_filter({}, context.get("company") or ""),
+			("name", "employee", "employee_name", "company", "status"),
+		)
+		if str(row.get("status") or "") not in REVERIFICATION_SKIP_STATUSES
+	}
+	if not forms:
+		return []
+
+	# NOT THROUGH `_rows`, and the exception is `parent`. That helper selects
+	# only the columns `compat.existing_fields` finds on the doctype's own field
+	# list, and `parent` / `parentfield` are not on ANY child doctype's field
+	# list — they are columns every child table has by construction. Filtering
+	# them out would hand back rows with no idea which form they belong to.
+	unsigned: dict = {}
+	children = (
+		frappe.db.get_all(
+			REVERIFICATION_DOCTYPE,
+			filters={"parent": ("in", sorted(forms)), "parentfield": REVERIFICATION_TABLE},
+			fields=[
+				"name",
+				"parent",
+				"reverification_date",
+				"reason",
+				"section_3_signature",
+				"verifier_name",
+			],
+			limit=2000,
+		)
+		or []
+	)
+	for child in (dict(row) for row in children):
+		if str(child.get("section_3_signature") or "").strip():
+			continue
+		unsigned.setdefault(str(child["parent"]), []).append(child)
+
+	out = []
+	for parent, rows in unsigned.items():
+		form = forms[parent]
+		if not _scoped(context, form):
+			continue
+		# Newest first, and an undated row sorts LAST rather than first: a
+		# reverification nobody dated is a worse record than one dated last March,
+		# but it is not evidence that the most recent reverification was undated,
+		# and the message quotes the date it leads with.
+		rows.sort(key=lambda entry: str(entry.get("reverification_date") or ""), reverse=True)
+		newest = rows[0]
+		when = str(newest.get("reverification_date") or "").strip()
+		person = str(form.get("employee_name") or form.get("employee") or parent)
+		count = (
+			"1 reverification entry has"
+			if len(rows) == 1
+			else f"{len(rows)} reverification entries have"
+		)
+		out.append(
+			Observation(
+				source_doctype="I-9 Form",
+				source_docname=parent,
+				message=(
+					f"{count} no employer signature on {person}'s I-9 ({parent}) — most recently "
+					f"{when or 'an undated entry'}"
+					+ (f", reason: {newest.get('reason')}" if newest.get("reason") else "")
+					+ ". Supplement B carries its own attestation under penalty of perjury, "
+					"separate from Section 2, and an unsigned one leaves the continued "
+					"employment unverified. Collect the signature with collect_form_signature."
+				),
+				severity=severity,
+				company=str(form.get("company") or ""),
+				category="Workforce",
+			)
+		)
+	return out
+
+
+register(
+	Rule(
+		key="i9_supplement_b_unsigned",
+		title="An I-9 reverification (Supplement B) carries no employer signature",
+		category="Workforce",
+		requires=("I-9 Form", "I-9 Reverification"),
+		framework="8 CFR § 274a.2(b)(1)(vii) — reverification attestation, Form I-9 Supplement B",
+		purpose=(
+			"A reverification is the employer saying, again and under penalty of perjury, "
+			"that this person may still lawfully work here. Unsigned, the operation has "
+			"recorded the document it examined and produced no attestation that anybody "
+			"examined it — which on an inspection is the same finding as never having "
+			"reverified at all, on a worker who is still on the crew."
+		),
+		kairotic_gate=(
+			"Fires on a BOX in a CHILD TABLE. Any Supplement B row on a non-Destroyed I-9 "
+			"whose section_3_signature is empty raises this, whatever its date — a "
+			"reverification does not become signed by ageing. ONE alert per form rather than "
+			"per row: two unsigned entries on one worker are one conversation with one "
+			"signer. A form with no reverification rows raises nothing, which is most of the "
+			"register and is why 'no rows' is never read as 'unsigned rows'. Auto-dismisses "
+			"the moment every entry on the form carries a signature."
+		),
+		regimes=("Internal",),
+		scan=_scan_unsigned_reverifications,
+	)
+)
+
+# BUILT-IN, AND THE `date_field` IS EMPTY ON PURPOSE. There is no one date on
+# the parent this rule counts from — the dates it cares about are on the child
+# rows, and it quotes the newest of them in its own message. An empty
+# `date_field` with both thresholds at -1 is this app's existing way of saying
+# "every matching row raises, at `severity_expired`", which is what `i9_expired`
+# says and for the same reason: the condition is a state, not a countdown.
+shape(
+	"i9_supplement_b_unsigned",
+	target_doctype="I-9 Form",
+	builtin_scanner="i9_supplement_b_unsigned",
+	requires_doctypes="I-9 Form, I-9 Reverification",
+	date_field="",
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_expired=SEVERITY_CRITICAL,
+	due_date_mode="None",
+	category="Workforce",
+	retention_years=3,
+	extra_parameters={
+		"producer_task_what": "Collect I-9 Supplement B signature",
+		"producer_task_subject_field": "employee_name",
+		"producer_assignee_resolver": "i9_authorized_signer",
+		"signature_doctype": "I-9 Form",
+		"signature_field": "reverifications.section_3_signature",
+	},
+)
+
+
 # ── the scanner registry ────────────────────────────────────────────────────
 #
 # EVERY SHIPPED RULE'S SCAN IS AVAILABLE AS A NAMED SCANNER, not only the seven

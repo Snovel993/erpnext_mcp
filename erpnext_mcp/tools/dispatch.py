@@ -1565,6 +1565,141 @@ def _assignment_evidence(assignment: str) -> list:
 
 
 # ── 11. generate_tasks_from_compliance_alerts ───────────────────────────────
+#: v0.55.0. The named routings a recipe may ask for, as constants rather than
+#: string literals in two files. A rule record spells the same names in
+#: `extra_parameters.producer_assignee_resolver`, and a typo there is refused by
+#: `_assignee_from_resolver` with the list — not silently routed to nobody.
+RESOLVER_SUPERVISOR = "employee_supervisor"
+RESOLVER_SIGNER = "i9_authorized_signer"
+
+
+def _employee_of_source(row: dict) -> str:
+	"""The Employee an alert's source record is about, or "".
+
+	Every doctype the resolvers below run against — I-9 Form, W-4 Form — carries
+	a Link column called `employee`, because both are records ABOUT one person.
+	Read by name rather than configured on the rule: a doctype where the column
+	is called something else is a doctype these resolvers do not serve, and
+	saying so by answering "" is better than a configurable field that lets
+	somebody point a signature rule at a Purchase Order.
+	"""
+	return str(row.get("employee") or "").strip()
+
+
+def _resolve_employee_supervisor(row: dict, notes: list) -> str:
+	"""Whoever the subject employee reports to. For the signatures THEY have to give.
+
+	SECTION 1 AND THE W-4 ARE SIGNED BY THE EMPLOYEE, so the work is not signing
+	— it is FINDING somebody who is out on a crew somewhere and putting a phone
+	in front of them. Nobody at a desk can do that; the person who can is whoever
+	already knows which block that crew is on this morning, which is what
+	`reports_to` records.
+
+	ANSWERS "" RATHER THAN GUESSING, in all four of the ways this can fail: no
+	employee on the record, no Employee doctype on the site, no `reports_to`
+	column, or a `reports_to` nobody filled in. Each leaves the task on its skill
+	pool and says which one it was on the report — a task assigned to a name
+	nobody holds is off the pool AND on nobody's list.
+	"""
+	employee = _employee_of_source(row)
+	if not employee:
+		return ""
+	if not compat.doctype_exists(EMPLOYEE) or not compat.has_field(EMPLOYEE, "reports_to"):
+		notes.append(
+			"this site's Employee register has no reports_to column, so there is no supervisor "
+			"to route the signature to. The task routes by skill."
+		)
+		return ""
+	supervisor = str(frappe.db.get_value(EMPLOYEE, employee, "reports_to") or "").strip()
+	if not supervisor:
+		notes.append(
+			f"{employee} has no reports_to on their Employee record, so this app does not know "
+			"who would go and find them. The task routes by skill."
+		)
+	return supervisor
+
+
+def _resolve_authorized_signer(row: dict, notes: list) -> str:
+	"""An authorized signer who can be sent to sign the employer's half.
+
+	THE ROSTER IS THE ANSWER TO A LEGAL QUESTION, NOT A CONVENIENCE. `tools/
+	signers.py` holds who this employer has authorised to complete Section 2 of
+	an I-9 and the employer block of a W-4, and only those accounts may. Routing
+	this task to anybody else would be raising work that its holder is not
+	permitted to complete — the sign call would refuse them, having already put
+	the task on their list.
+
+	WHOEVER ALREADY VERIFIED THE DOCUMENTS COMES FIRST. An I-9 missing its
+	Section 2 signature usually names its `verifier_name` — somebody examined the
+	documents and the signature is what did not get captured — and sending the
+	task to that person asks them to finish what they started rather than asking
+	a colleague to attest to an examination they were not present for. §274a.2
+	makes that distinction, not this app: the attestation is that *the signer*
+	examined the documents.
+
+	AN EMPTY ROSTER MEANS UNRESTRICTED, which is every site that has not run
+	`add_authorized_signer`, and there it answers "" — the task falls to the
+	`hr_admin` pool, which is what those sites got for their whole life before
+	this release. A roster with nobody mappable to an Employee does the same and
+	says so.
+	"""
+	from . import signers
+
+	try:
+		roster = [dict(entry) for entry in signers._rows()]
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		notes.append(f"the authorized-signer roster could not be read ({exc}); the task routes by skill.")
+		return ""
+	live = [
+		entry
+		for entry in roster
+		if compat.checked(entry.get("active")) and compat.checked(entry.get("can_sign_i9"))
+	]
+	if not live:
+		notes.append(
+			"no active signer on this site is authorised to sign an I-9 — an empty roster means "
+			"unrestricted, so the task routes to the hr_admin pool rather than to a name. "
+			"add_authorized_signer is what turns this into a named routing."
+		)
+		return ""
+
+	verifier = str(row.get("verifier_name") or "").strip().casefold()
+	ordered = sorted(
+		live, key=lambda entry: str(entry.get("full_name") or "").strip().casefold() != verifier
+	)
+	for entry in ordered:
+		employee = _employee_for_user(str(entry.get("user") or ""))
+		if employee:
+			return employee
+	notes.append(
+		"every active I-9 signer on the roster is a User with no Employee record, and a Farm "
+		"Task is held by an Employee. Link their accounts with the user_id column on Employee, "
+		"or the task stays on the hr_admin pool."
+	)
+	return ""
+
+
+def _employee_for_user(user: str) -> str:
+	"""The Employee docname behind one User account, or "". Never raises."""
+	user = str(user or "").strip()
+	if not (user and compat.doctype_exists(EMPLOYEE) and compat.has_field(EMPLOYEE, "user_id")):
+		return ""
+	try:
+		return str(frappe.db.get_value(EMPLOYEE, {"user_id": user}, "name") or "").strip()
+	except Exception:  # pragma: no cover - a site mid-migrate
+		return ""
+
+
+#: Resolver name → the function. A CLOSED REGISTRY, for the reason
+#: `alerts/rules.SCANNERS` is one: "work out who to send this to" is one sentence
+#: away from "run this against the database", and a rule record naming something
+#: that is not in here routes to the pool with a sentence saying so rather than
+#: to nobody, quietly.
+ASSIGNEE_RESOLVERS = {
+	RESOLVER_SUPERVISOR: _resolve_employee_supervisor,
+	RESOLVER_SIGNER: _resolve_authorized_signer,
+}
+
 #: What each alert type becomes when it stops being a warning and starts being
 #: work. Every entry is a judgement about the SHAPE of the job, and the two that
 #: matter most are `dispatch` and `evidence`:
@@ -1712,6 +1847,53 @@ ALERT_TASK_MAP = {
 		"what": (
 			"Read the record and sign the §112.161(b) supervisor review with sign_training_supervisor_review"
 		),
+	},
+	# ── v0.55.0: the first recipe that names a person without naming a column ──
+	#
+	# Every entry above either routes to a POOL by skill or, on the rules that
+	# carry `producer_assigned_to_expression`, to whoever a column on the tripped
+	# row happens to hold — `row.foreman`, and the foreman is on the shift.
+	# Neither reaches an unsigned reverification. The person who has to sign it
+	# is not on the I-9; they are on the authorized-signer roster, which is a
+	# different doctype an expression cannot walk to.
+	#
+	# So this names a RESOLVER — see `ASSIGNEE_RESOLVERS` — which is a reviewed,
+	# shipped function taking the alert's source row and answering with an
+	# Employee docname or nothing. It is the same trade `builtin_scanner` makes
+	# on the rule side: the SHAPE of the lookup is code because it walks doctypes
+	# an expression cannot reach.
+	#
+	# `subject` IS WHAT MAKES THE TASK READ LIKE AN ERRAND rather than a docname.
+	# "Collect I-9 Supplement B signature for Juan Lopez" is a sentence a foreman
+	# can act on; "… — I9-2026-0043" is a lookup they have to do first.
+	#
+	# ITS THREE SIBLINGS ARE NOT IN THIS TABLE, and their absence is the design
+	# rather than an omission. `i9_section_1_unsigned`, `i9_section_2_unsigned`
+	# and `w4_signature_missing` are RECORD-ONLY rules — authored in the
+	# declarative vocabulary, with no `Rule` object in `alerts/rules.py` to fall
+	# back to — so their producer recipe lives on the record too, in
+	# `producer_farm_task_type`, `evidence_contract` and `extra_parameters`, and
+	# is read by the third path in `_recipe_for`. Copying it up here would put
+	# the definition of an editable rule in a table nobody can edit, and this
+	# table would silently win. This one has a scanner and a `shape(...)`, so it
+	# migrates the way every built-in does: through here.
+	"i9_supplement_b_unsigned": {
+		# COMPLIANCE-AUDIT RATHER THAN HIRING, and it is the one of the four that
+		# differs. Sections 1 and 2 are onboarding: they happen once, in the first
+		# three days, and belong on the hiring board with the rest of that
+		# afternoon's paperwork. A Supplement B is a REVERIFICATION — it happens
+		# to somebody who has worked here for a season or five, when a document
+		# expires or they are rehired — and filing it under Hiring would put a
+		# returning tractor driver on a new-hire board.
+		"task_type": "Compliance-Audit",
+		"creates_record": "",
+		"skill": "hr_admin",
+		"dispatch": "Dispatched",
+		"minutes": 20,
+		"evidence": {"signature": True},
+		"what": "Collect I-9 Supplement B signature",
+		"assignee_resolver": RESOLVER_SIGNER,
+		"subject": "employee_name",
 	},
 }
 
@@ -1888,6 +2070,7 @@ def _recipe_for(alert_type: str, producers: dict | None = None) -> dict | None:
 
 	extra = compliance_rules._quietly(compliance_rules.as_object, row.get("extra_parameters_json"), {})
 	expression = str(row.get("producer_assigned_to_expression") or "").strip()
+	resolver = str(extra.get("producer_assignee_resolver") or "").strip()
 	return {
 		"task_type": task_type,
 		"creates_record": "",
@@ -1897,15 +2080,115 @@ def _recipe_for(alert_type: str, producers: dict | None = None) -> dict | None:
 		# same mode a licence renewal and an I-9 re-verification take — and a
 		# fourth dispatch_mode meaning the same thing would be a second vocabulary
 		# for one idea, on the enum the iOS build switches on.
-		"dispatch": DISPATCH_DISPATCHED if expression else "Self-pick",
+		#
+		# v0.55.0 ADDED THE SECOND WAY TO HAVE A NAME. A resolver names a person
+		# the tripped row does not mention — the employee's supervisor, an
+		# authorized signer — and a rule using one is as much a "send somebody"
+		# rule as one carrying an expression. `_pool_dispatch` catches the case
+		# where the lookup then finds nobody.
+		"dispatch": DISPATCH_DISPATCHED if (expression or resolver) else "Self-pick",
 		"minutes": int(extra.get("producer_task_minutes") or 0),
 		"evidence": dict(evidence),
 		"what": str(extra.get("producer_task_what") or "").strip() or str(row.get("title") or alert_type),
 		"assigned_to_expression": expression,
+		# v0.55.0. The two the record can state that the expression vocabulary
+		# cannot: WHO by named lookup rather than by column, and what to CALL the
+		# task's subject. Both are read here so a rule an operator authors gets the
+		# same routing and the same readable title as the four this app ships.
+		"assignee_resolver": resolver,
+		"subject": str(extra.get("producer_task_subject_field") or "").strip(),
 	}
 
 
-def _assignee_from_expression(recipe: dict, row: dict, notes: list) -> str:
+def _task_title(recipe: dict, subject: str, source: dict) -> str:
+	"""What the task is called on the board. v0.55.0 added the middle case.
+
+	THREE SHAPES, AND THE ORDER IS A JUDGEMENT ABOUT WHO READS IT:
+
+	  "Collect I-9 Section 2 signature for Juan Lopez"   a recipe naming `subject`
+	  "Walk the cabin ... — MC-Cabin-01"                 every recipe before this
+	  "Renew the certificate before it lapses"           an alert with no subject
+
+	A DOCNAME IS THE RIGHT SUBJECT FOR A PLACE AND THE WRONG ONE FOR A PERSON.
+	`MC-Cabin-01` IS what a foreman calls that cabin. `I9-2026-0043` is what
+	nobody calls Juan Lopez — it is a lookup somebody has to do before the task
+	means anything, and a task nobody can read at a glance is a task that sits.
+	So a recipe may name ONE column on the source record to be called by instead,
+	and falls back to the docname where that column is empty. It never falls back
+	to nothing: a title with no subject at all would collapse fifty tasks into
+	fifty identical rows on one board.
+	"""
+	what = str(recipe.get("what") or "")
+	label = str((source or {}).get(str(recipe.get("subject") or "")) or "").strip()
+	if label:
+		return f"{what} for {label}"
+	return f"{what} — {subject}" if subject else what
+
+
+def _source_row(row: dict) -> dict:
+	"""The record one alert points at, as a plain dict, or {}. Never raises.
+
+	READ ONCE PER ALERT AND PASSED DOWN. Three things now want the source record
+	— the assignee expression, the assignee resolver and the subject label on the
+	task's own name — and a sweep of five hundred alerts fetching the same
+	document three times is two hundred and fifty thousand reads nobody asked for.
+	"""
+	doctype = str(row.get("source_doctype") or "")
+	docname = str(row.get("source_docname") or "")
+	if not (doctype and docname):
+		return {}
+	try:
+		return dict(frappe.get_doc(doctype, docname).as_dict())
+	except Exception:
+		return {}
+
+
+def _assignee_for(recipe: dict, row: dict, source: dict, notes: list) -> str:
+	"""Who this task goes to by name, or "" for the pool. v0.55.0.
+
+	TWO WAYS TO NAME A PERSON, AND THE RESOLVER IS TRIED FIRST because it is the
+	more specific claim. An expression reads a COLUMN ON THE ROW THAT TRIPPED —
+	`row.foreman`, the person who was standing there — and a resolver walks to
+	another doctype for somebody the tripped row does not mention at all. A
+	recipe carrying both is a recipe whose author changed their mind; the named
+	lookup wins, and the expression is still there to fall back to.
+	"""
+	name = str(recipe.get("assignee_resolver") or "").strip()
+	if name:
+		resolver = ASSIGNEE_RESOLVERS.get(name)
+		if resolver is None:
+			notes.append(
+				f"the recipe names an assignee resolver {name!r}, which is not one this app "
+				f"ships: {', '.join(sorted(ASSIGNEE_RESOLVERS))}. The task routes by skill."
+			)
+		elif not source:
+			notes.append(
+				f"{row.get('source_doctype')} {row.get('source_docname')} could not be read, so "
+				f"the {name!r} routing was not resolved. The task routes by skill."
+			)
+		else:
+			try:
+				employee = str(resolver(source, notes) or "").strip()
+			except Exception as exc:  # pragma: no cover - a site mid-migrate
+				notes.append(f"the {name!r} routing did not run ({exc}); the task routes by skill.")
+				employee = ""
+			if employee and _is_employee(employee, notes):
+				return employee
+	return _assignee_from_expression(recipe, row, source, notes)
+
+
+def _is_employee(employee: str, notes: list) -> bool:
+	"""Whether a resolved name is somebody payroll has heard of."""
+	if compat.doctype_exists(EMPLOYEE) and not frappe.db.exists(EMPLOYEE, employee):
+		notes.append(
+			f"the routing produced {employee!r}, which is not an Employee on this site. "
+			"The task routes by skill rather than to a name nobody holds."
+		)
+		return False
+	return True
+
+
+def _assignee_from_expression(recipe: dict, row: dict, source: dict, notes: list) -> str:
 	"""The Employee a rule's `producer_assigned_to_expression` names, or "".
 
 	NEVER RAISES AND NEVER GUESSES. An expression that will not run, or that names
@@ -1920,9 +2203,7 @@ def _assignee_from_expression(recipe: dict, row: dict, notes: list) -> str:
 	docname = str(row.get("source_docname") or "")
 	if not (doctype and docname):
 		return ""
-	try:
-		source = dict(frappe.get_doc(doctype, docname).as_dict())
-	except Exception:
+	if not source:
 		notes.append(f"{doctype} {docname} could not be read, so the assignee expression was not evaluated.")
 		return ""
 	try:
@@ -1941,11 +2222,7 @@ def _assignee_from_expression(recipe: dict, row: dict, notes: list) -> str:
 			"column it reads is empty on that record — so the task routes by skill."
 		)
 		return ""
-	if compat.doctype_exists("Employee") and not frappe.db.exists("Employee", employee):
-		notes.append(
-			f"the assignee expression produced {employee!r}, which is not an Employee on this site. "
-			"The task routes by skill rather than to a name nobody holds."
-		)
+	if not _is_employee(employee, notes):
 		return ""
 	return employee
 
@@ -2337,12 +2614,13 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 	# the task would land on. A dry run that could not answer "who gets this" would
 	# be a dry run of the half of the decision nobody is worried about.
 	routing_notes: list = []
-	assignee = _assignee_from_expression(recipe, row, routing_notes)
+	source = _source_row(row)
+	assignee = _assignee_for(recipe, row, source, routing_notes)
 	entry = {
 		"alert": row["name"],
 		"alert_type": row["alert_type"],
 		"severity": row.get("severity"),
-		"task_name": f"{recipe['what']} — {subject}" if subject else recipe["what"],
+		"task_name": _task_title(recipe, subject, source),
 		"task_type": recipe["task_type"],
 		"urgency": SEVERITY_URGENCY.get(str(row.get("severity") or ""), "Normal"),
 		"dispatch_mode": recipe["dispatch"] if assignee else _pool_dispatch(recipe),
@@ -2355,6 +2633,12 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 		"creates_record": recipe["creates_record"] or None,
 		"location_doctype": str(row.get("source_doctype") or "") or None,
 		"location": subject or None,
+		# v0.55.0. THE RECORD THIS TASK IS ABOUT, which for most alerts is the same
+		# pair as `location` above and for a signature task is the whole point:
+		# `location` is only written where the source is somewhere a worker can be
+		# SENT (see `_DISPATCHABLE_LOCATIONS`), and an I-9 is not a place.
+		"subject_doctype": str(row.get("source_doctype") or "") or None,
+		"subject_docname": subject or None,
 		"evidence_required": dict(recipe["evidence"]),
 		"task": None,
 	}
@@ -2411,6 +2695,14 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 	if subject and str(row.get("source_doctype") or "") in _DISPATCHABLE_LOCATIONS:
 		doc.location_doctype = row["source_doctype"]
 		doc.location = subject
+	# v0.55.0. The record itself, whatever kind of record it is, and it is written
+	# for EVERY alert rather than only for the signature rules — "what is this
+	# task about" is a question every board has always had and answered by making
+	# somebody open the alert. Guarded on the column existing so a site that has
+	# the app and has not yet migrated the doctype raises tasks as it always did.
+	if subject and compat.has_field(FARM_TASK, "subject_doctype"):
+		doc.subject_doctype = row["source_doctype"]
+		doc.subject_docname = subject
 	if recipe["creates_record"] and compat.doctype_exists(recipe["creates_record"]):
 		spec = inspections.SPECS.get(recipe["creates_record"])
 		doc.creates_record = recipe["creates_record"]
@@ -2450,7 +2742,13 @@ def _pool_dispatch(recipe: dict) -> str:
 	unreachable, which is the worst of the three ways for dispatch to fail.
 	"""
 	mode = str(recipe.get("dispatch") or "Either")
-	if mode == DISPATCH_DISPATCHED and recipe.get("assigned_to_expression"):
+	# EITHER WAY OF NAMING A PERSON COUNTS. `Dispatched` with nobody on it is
+	# only wrong where the recipe MEANT to name somebody and could not — a
+	# recipe that never tried is a foreman's to assign, which is what Dispatched
+	# has meant since v0.18.0.
+	if mode == DISPATCH_DISPATCHED and (
+		recipe.get("assigned_to_expression") or recipe.get("assignee_resolver")
+	):
 		return "Self-pick" if recipe.get("skill") else "Either"
 	return mode
 

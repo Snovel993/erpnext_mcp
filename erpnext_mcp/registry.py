@@ -91,6 +91,7 @@ from .tools import (
 	rules,
 	sessions,
 	shifts,
+	signatures,
 	signers,
 	state_tax,
 	tasktemplates,
@@ -9483,6 +9484,86 @@ TOOLS = {
 		title="File the signed I-9",
 		available=_needs_doctype("I-9 Form"),
 		requires="the I-9 Form doctype (run bench migrate after installing v0.47.1)",
+	),
+	# ── v0.55.0: collecting the signature an alert said was missing ───────
+	"collect_form_signature": _tool(
+		signatures.collect_form_signature,
+		"MUTATING (default OFF). Attach one signature capture to the box on an "
+		"I-9 or a W-4 that was missing it, close the Farm Task that asked for it, "
+		"and bring the rendered PDF back into step.\n\n"
+		"THE OTHER END OF THE MISSING-SIGNATURE RULES. i9_section_1_unsigned, "
+		"i9_section_2_unsigned, i9_supplement_b_unsigned and w4_signature_missing "
+		"find the empty boxes; generate_tasks_from_compliance_alerts puts each on "
+		"the phone of whoever can fix it — the employee's supervisor for the two "
+		"the WORKER signs, an authorized signer for the two the EMPLOYER signs — "
+		"and this is what that phone calls when the signature has been drawn.\n\n"
+		"FOUR BOXES, AND THE LIST IS CLOSED: I-9 Form.section_1_signature, "
+		"I-9 Form.section_2_signature, I-9 Form.section_3_signature (Supplement B, "
+		"a child row), W-4 Form.signature. A field outside them is refused — an "
+		"endpoint that wrote an image into any column somebody named would be an "
+		"arbitrary write with an Attach-shaped hat on. Omit `field` where the "
+		"doctype has only one box and it is inferred.\n\n"
+		"IT TAKES BASE64, WHICH attach_signed_i9 REFUSES TO, and the difference is "
+		"what is being sent: that one files a SCAN OF A PAGE, which is megabytes "
+		"and goes up in chunks; this one takes what a finger drew on a glass "
+		"rectangle, which is kilobytes and arrives in one gesture. The 512 KB "
+		"ceiling is what separates the two, and something over it is told to use "
+		"the other door. file_token is accepted too.\n\n"
+		"REFUSED BEFORE ANYTHING IS STORED: a caller who may not WRITE the form; a "
+		"caller not on the authorized-signer roster, for the two employer boxes "
+		"only; a box that is already signed, unless overwrite; a destroyed I-9. "
+		"NOT refused: a task that could not be closed (complete_farm_task will not "
+		"take a completion from somebody who was not holding it) or a PDF that "
+		"could not be redrawn — both are reported and neither undoes the "
+		"signature, because the capture is the compliance artefact and the rest is "
+		"bookkeeping about it.\n\n"
+		"Stored PRIVATE, always. Logged to I-9 Audit Log as Signature Collected.",
+		{
+			"doctype": _field(
+				_STRING,
+				"The form the signature goes on: 'I-9 Form' or 'W-4 Form'. A Farm Task "
+				"raised from one of these alerts carries it in subject_doctype.",
+			),
+			"name": _field(_STRING, "The form's docname, e.g. I9-2026-0001 or W4-2026-0007."),
+			"form": _field(_STRING, "Alias for name."),
+			"employee": _field(
+				_STRING, "Whose form, instead of the docname — resolved the same way get_i9_form does."
+			),
+			"field": _field(
+				_STRING,
+				"Which box: section_1_signature, section_2_signature, section_3_signature or "
+				"signature. Optional where the doctype has only one.",
+			),
+			"signature_base64": _field(
+				_STRING,
+				"The capture's bytes, base64, PNG or JPEG, up to 512 KB. A leading data: "
+				"prefix is stripped rather than refused. The format is read off the first "
+				"bytes, not off a filename.",
+			),
+			"file_token": _field(
+				_STRING, "A File already on the site, as finalize_staged_file returns it. Not with signature_base64."
+			),
+			"row": _field(
+				_STRING,
+				"For section_3_signature only: which reverification row, as its docname or its "
+				"1-based position. Defaults to the newest UNSIGNED row, which is the one the "
+				"alert was about.",
+			),
+			"task": _field(
+				_STRING,
+				"The Farm Task to close. Omit and it is found from the form and the alert type — "
+				"both, so an I-9 missing two signatures does not close the wrong one.",
+			),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Replace a signature filed in error. The File that was there stays attached to "
+				"the record.",
+			),
+		},
+		mutating=True,
+		title="Collect a missing signature",
+		available=_needs_doctype("I-9 Form", "W-4 Form"),
+		requires="the I-9 Form or W-4 Form doctype (run bench migrate after installing v0.55.0)",
 	),
 	# ── v0.48.0: who may sign a federal employment form ───────────────────
 	"list_authorized_signers": _tool(

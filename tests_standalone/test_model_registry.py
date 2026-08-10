@@ -287,10 +287,12 @@ class ToolRegistration(unittest.TestCase):
 		# and `get_model_file_chunk` (read) — the file-serving pair that lets
 		# ERPNext hand an iOS app the model binary itself instead of the model
 		# only ever pointing at where Volume Vision keeps it. v0.53.0 adds one
-		# more write, `generate_employee_badge_pass`.
-		self.assertEqual(len(self.registry.TOOLS), 392)
+		# more write, `generate_employee_badge_pass`, and v0.55.0 a second,
+		# `collect_form_signature` — the call that files the capture a
+		# missing-signature alert raised a task to go and collect.
+		self.assertEqual(len(self.registry.TOOLS), 393)
 		self.assertEqual(len(self.registry.READ_TOOLS), 179)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 213)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 214)
 
 
 if __name__ == "__main__":

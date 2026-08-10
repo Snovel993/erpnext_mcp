@@ -1037,6 +1037,12 @@ APP_DOCTYPES = {
 	"I-9 Audit Log": "i_9_audit_log",
 	"I-9 Settings": "i_9_settings",
 	"I-9 Document Type": "i_9_document_type",
+	# v0.55.0. The Supplement B child table. Registered because
+	# `i9_supplement_b_unsigned` reads it as a doctype in its own right —
+	# `frappe.db.get_all("I-9 Reverification", ...)` rather than through its
+	# parent — which is what lets one query answer "which forms have an unsigned
+	# reverification" for a whole register.
+	"I-9 Reverification": "i_9_reverification",
 	# v0.28.0. W-4 / Federal Withholding Engine.
 	"W-4 Form": "w_4_form",
 	"Federal Tax Table": "federal_tax_table",
@@ -1541,6 +1547,13 @@ CHILD_TABLES = {
 	# the rows as bare dicts would let `update_authorized_signer` appear to work
 	# against a row that never made it into the store.
 	("I-9 Settings", "authorized_signers"): "Authorized Signer",
+	# v0.55.0. Supplement B, read as a doctype in its own right by the
+	# `i9_supplement_b_unsigned` scanner — one query with a `parent` filter
+	# answers "which forms have an unsigned reverification" for a whole
+	# register, rather than loading every I-9 to find the handful with a
+	# Section 3 at all. Without this the scanner sees an empty table and the
+	# rule goes quiet, which is the failure that looks like compliance.
+	("I-9 Form", "reverifications"): "I-9 Reverification",
 }
 
 #: Child tables `frappe.get_doc` rehydrates into Documents rather than leaving as

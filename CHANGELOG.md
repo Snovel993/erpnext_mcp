@@ -3,6 +3,72 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.55.0 — 2026-08-09
+
+**The boxes nobody signed, and the loop that closes them.** A form can be filled
+in perfectly, filed on time, and attest to nothing. Every I-9 and W-4 rule this
+app shipped before today watches a CLOCK — verification is overdue, work
+authorization expires, retention has run out — and none of them notices the
+signature box that stayed empty. An unsigned Section 1 is the commonest I-9
+finding an ICE inspection writes up, and it is a substantive violation rather
+than a technical one: without the employee's own attestation the form asserts
+nothing about their work authorization.
+
+**Four new compliance rules, watching a box rather than a date.**
+`i9_section_1_unsigned` and `i9_section_2_unsigned` fire on an I-9 past Draft
+whose employee or employer signature column is empty — the second gated on
+`verification_date` rather than status, because a form still awaiting
+verification has an empty Section 2 and nothing to have signed, which is
+`i9_verification_overdue`'s question and not this one's.
+`w4_signature_missing` fires on any Active W-4 with no employee signature, and
+**expect it to fire broadly on the first sweep after upgrade**: `submit_w4` has
+never captured one, so every W-4 this app has written is, to the IRS, invalid.
+`i9_supplement_b_unsigned` is the fifth permanent built-in scanner — Supplement B
+lives in a CHILD TABLE, so the question folds a set of rows to a count and a
+newest date, which is an aggregation rather than a filter, and it raises **one
+alert per form** because two unsigned entries on one worker are one conversation.
+
+**A missing-signature alert becomes a task held by somebody who can actually
+fix it.** Sections 1 and the W-4 are signed by the WORKER, so the errand is
+finding them — and those tasks go to whoever the employee `reports_to`. Sections
+2 and Supplement B are the EMPLOYER attesting, so those go to an authorized
+signer off the `tools/signers.py` roster, preferring whoever already examined the
+documents. That is a routing an assignee EXPRESSION cannot express: it walks to a
+doctype the tripped row does not mention, so `ALERT_TASK_MAP` and a rule's
+`extra_parameters` gained `producer_assignee_resolver`, a closed registry of
+reviewed lookups, beside the existing sandboxed expression.
+
+**Farm Task gained `subject_doctype` / `subject_docname`.** The record a task is
+ABOUT, which is not `location` — a location is somewhere a worker can be sent and
+is what the pool listing filters on, and an I-9 is not a place. Written for
+every generated task, not only the signature ones. Tasks raised by these rules
+are titled *"Collect I-9 Section 2 signature for Juan Lopez"* rather than
+*"… — I9-2026-0043"*, because a docname is the right subject for a cabin and the
+wrong one for a person.
+
+**`collect_form_signature` is the other end of the loop.** It attaches a capture
+to one of four boxes — the list is closed, because an endpoint that wrote an
+image into any column somebody named would be an arbitrary write — closes the
+Farm Task that asked for it, and regenerates the form's PDF so the printable copy
+and the record do not disagree about the one fact somebody would print it to
+prove. Published on the mobile surface as `collect_signature`.
+
+**It takes base64, which `attach_signed_i9` refuses to,** and the two are
+answering different questions. That one files a SCAN OF A PAGE: megabytes, taken
+on a camera, chunked because a link that drops halfway through eight megabytes
+has to be resumable. This one carries what a finger drew on glass — a few
+kilobytes of monochrome PNG, complete in one gesture — where chunking would be
+three round trips to move less data than the JSON around it, and three more
+places to lose a signature while the person who drew it walks back to the block.
+A 512 KB ceiling separates the two and something over it is told which door to
+use. The format is read off the first bytes, never off a filename.
+
+**Each step may fail without undoing the one before it.** The signature is the
+compliance artefact; the task and the PDF are bookkeeping about it. A task that
+could not be closed — `complete_farm_task` will not take a completion from an
+account that was not holding it — and a PDF that could not be redrawn are both
+reported, and neither rolls back the capture.
+
 ## 0.54.0 — 2026-08-09
 
 **The hiring wizard can say where somebody works and where they sleep.** The

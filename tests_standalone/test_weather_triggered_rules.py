@@ -935,12 +935,15 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		self.assertEqual(live[0]["default_severity"], "Critical")
 		self.assertEqual(int(live[0]["version"]), 2)
 
-	def test_the_split_is_eighteen_declarative_four_builtin_and_no_custom_python(self):
+	def test_the_split_is_twentyone_declarative_five_builtin_and_no_custom_python(self):
 		self.seed_rules()
 		shapes: dict = {}
 		for row in compliance_rules.rule_rows():
 			shapes.setdefault(compliance_rules.shape_of(row), []).append(row["rule_id"])
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 18)
+		# Twenty-one since v0.55.0: the three record-only missing-signature rules
+		# each ask one question of one signature column on one row, which is the
+		# declarative vocabulary working as intended rather than being stretched.
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 21)
 		# Three since v0.39.0: `financial_kpi_threshold_breach` joined the two
 		# permanent built-ins, and it is permanent for a reason neither of those
 		# has — its thresholds are not on its own row, they are on each
@@ -948,5 +951,8 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		# `budget_variance_breach` is permanent for the same class of reason —
 		# its thresholds are on each Budget Line Item and Budget KPI Target,
 		# and the comparison is against every child row on a budget at once.
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 4)
+		# Five since v0.55.0: `i9_supplement_b_unsigned` folds an I-9's
+		# reverification CHILD TABLE to a count and a newest date, and the one
+		# primitive that folds a child table compares numbers by design.
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 5)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])

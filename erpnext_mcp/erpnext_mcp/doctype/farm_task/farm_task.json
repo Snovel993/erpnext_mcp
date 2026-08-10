@@ -29,6 +29,8 @@
   "source_workorder",
   "inspection_session",
   "template",
+  "subject_doctype",
+  "subject_docname",
   "asset_section",
   "asset",
   "field_report_section",
@@ -215,6 +217,22 @@
    "search_index": 1
   },
   {
+   "description": "The record this task is ABOUT, where it is about one — the I-9 Form whose Section 2 needs signing, the W-4 waiting on a signature. v0.55.0. NOT `location`: a location is somewhere a worker can be SENT and is what the pool listing filters on, and an I-9 is not a place. This is the document whoever completes the task has to open, and it is what collect_form_signature reads to find the task a signature answers.",
+   "fieldname": "subject_doctype",
+   "fieldtype": "Link",
+   "label": "About DocType",
+   "options": "DocType",
+   "search_index": 1
+  },
+  {
+   "description": "The docname of the record above. A Dynamic Link, so the Desk clicks straight through to the form that needs the signature and a phone can open it without a second lookup.",
+   "fieldname": "subject_docname",
+   "fieldtype": "Dynamic Link",
+   "label": "About Record",
+   "options": "subject_doctype",
+   "search_index": 1
+  },
+  {
    "fieldname": "asset_section",
    "fieldtype": "Section Break",
    "label": "Asset"
@@ -328,7 +346,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-07-31 18:00:00.000000",
+ "modified": "2026-08-09 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Farm Task",

@@ -257,10 +257,16 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 
 		v0.42.0 added `budget_variance_breach`, the second finance rule, on the
 		same argument.
+
+		v0.55.0 added four MISSING-SIGNATURE rules — three record-only
+		(`i9_section_1_unsigned`, `i9_section_2_unsigned`, `w4_signature_missing`)
+		and one built-in (`i9_supplement_b_unsigned`, which folds a child table).
+		They are the first rules here that watch a BOX rather than a clock: a
+		form can be filed on time, in full, and attest to nothing.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 22)
-		self.assertEqual(len(compliance_rules.rule_rows()), 22)
+		self.assertEqual(len(report["created"]), 26)
+		self.assertEqual(len(compliance_rules.rule_rows()), 26)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
@@ -277,6 +283,9 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 
 		v0.27.0 added three I-9 declarative rules.
 		v0.28.0 added two W-4 declarative rules.
+		v0.55.0 added three more — two I-9 and one W-4 — each of which asks one
+		question of one signature column on one row, which is exactly what the
+		declarative vocabulary is for. Its fourth sibling is built in, below.
 		"""
 		self.seed_rules()
 		shapes = {}
@@ -295,10 +304,13 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 				"housing_inspection_overdue",
 				"i9_expired",
 				"i9_retention_destruction_eligible",
+				"i9_section_1_unsigned",
+				"i9_section_2_unsigned",
 				"i9_verification_overdue",
 				"policy_review_overdue",
 				"shift_heat_threshold_crossed",
 				"training_expiring",
+				"w4_signature_missing",
 				"w4_tax_year_outdated",
 				"water_test_contamination",
 				"water_test_stale",
@@ -347,6 +359,15 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 				# four nullable bounds whose meaning depends on which are set.
 				# That is arithmetic, not a filter.
 				"financial_kpi_threshold_breach",
+				# v0.55.0, and the fifth permanent built-in. Supplement B lives
+				# in a CHILD TABLE — one reverification per row, each with its
+				# own attestation — so "does this form have an unsigned
+				# reverification" folds a set of rows down to a count and a
+				# newest date, which is the same aggregation the first built-in
+				# does. The nearest declarative primitive,
+				# `latest_child_field_threshold`, compares NUMBERS by design and
+				# an empty Attach field is not one.
+				"i9_supplement_b_unsigned",
 				"supervisor_review_lapsed",
 			],
 		)
@@ -946,12 +967,12 @@ class TheApprovalGate(RuleEngineTestCase):
 
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
-	def test_seeding_twice_writes_twenty_two_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 22)
+	def test_seeding_twice_writes_twenty_six_rules_once(self):
+		self.assertEqual(len(self.seed_rules()["created"]), 26)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 22)
-		self.assertEqual(len(compliance_rules.rule_rows()), 22)
+		self.assertEqual(len(again["present"]), 26)
+		self.assertEqual(len(compliance_rules.rule_rows()), 26)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -999,7 +1020,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 22)
+		self.assertEqual(data["rule_count"], 26)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)

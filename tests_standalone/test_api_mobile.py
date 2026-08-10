@@ -278,7 +278,14 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: because a mirror of a Codable that does not exist would invent the
 	#: contract instead of copying it. They move up to `MOBILE` in the release
 	#: that lands the Swift side.
+	#: v0.55.0 adds `collect_signature` on the same footing. The server side is
+	#: complete — the alert finds the empty box, the task routes it, and this
+	#: method files the capture — and the handset side is a signature pad opened
+	#: over a task's `subject_docname`, which `MobileAPI.swift` does not name
+	#: yet. Listed here rather than in `MOBILE` so this file keeps claiming only
+	#: what the Swift actually calls.
 	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
+		"collect_signature",
 		"get_active_model",
 		"get_model_file_chunk",
 		"get_employee_badge_pass",

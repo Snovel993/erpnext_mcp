@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 392 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 393 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -9497,6 +9497,65 @@ status. Scans only: `.pdf`, `.jpg`, `.jpeg`, `.png`, `.heic`, `.heif`, `.tiff`,
 
 **A second signed copy is refused** unless `overwrite` is passed. It is the one
 write on this doctype that could not be undone from the record itself.
+
+### `collect_form_signature`
+
+**MUTATING (default OFF).** Attaches one signature capture to the box on an I-9
+or a W-4 that a missing-signature alert found empty, closes the Farm Task that
+asked for it, and brings the rendered PDF back into step.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `doctype` | yes | `I-9 Form` or `W-4 Form`. A signature task carries it in `subject_doctype` |
+| `name` / `form` / `employee` | yes | Which form, by docname or by person |
+| `field` | | Which box. Optional where the doctype has only one |
+| `signature_base64` | yes* | The capture's bytes, PNG or JPEG, up to 512 KB. A `data:` prefix is stripped |
+| `file_token` | yes* | A File already on the site, for a capture uploaded in chunks |
+| `row` | | Supplement B only: which reverification row. Defaults to the newest unsigned one |
+| `task` | | The Farm Task to close. Found from the form and the alert type when omitted |
+| `overwrite` | | Replace a signature filed in error |
+
+\* one of the two.
+
+**The other end of the missing-signature rules.** `i9_section_1_unsigned`,
+`i9_section_2_unsigned`, `i9_supplement_b_unsigned` and `w4_signature_missing`
+find the empty boxes; `generate_tasks_from_compliance_alerts` puts each on the
+phone of whoever can fix it — the employee's supervisor for the two the *worker*
+signs, an authorized signer for the two the *employer* signs — and this is what
+that phone calls when the signature has been drawn.
+
+**Four boxes, and the list is closed:** `I-9 Form.section_1_signature`,
+`I-9 Form.section_2_signature`, `I-9 Form.section_3_signature` (Supplement B, a
+child row) and `W-4 Form.signature`. A field outside them is refused with the
+list — an endpoint that wrote an image into any column somebody named would be an
+arbitrary write with an Attach-shaped hat on.
+
+**It takes base64, which `attach_signed_i9` refuses to**, and the difference is
+what is being sent. That one files a *scan of a page*: megabytes, taken on a
+camera, chunked because a link that drops halfway through eight megabytes has to
+be resumable. This one carries what a finger drew on glass: a few kilobytes of
+monochrome PNG, complete in one gesture, where chunking would be three round
+trips to move less data than the JSON around it. The **512 KB** ceiling is what
+separates the two, and something over it is told which door to use. The format is
+read off the first bytes, never off a filename.
+
+**Refused before anything is stored:** a caller who may not `write` the form; a
+caller not on the authorized-signer roster, *for the two employer boxes only*
+(Section 1 and the W-4 are signed by the worker, who is on nobody's roster and
+must not need to be); a box that already carries a signature, unless `overwrite`;
+a destroyed I-9.
+
+**Not refused, and reported instead:** a task that could not be closed — this
+delegates to `complete_farm_task`, which will not take a completion from an
+account that was not holding the task — and a PDF that could not be redrawn.
+Neither undoes the signature. The capture is the compliance artefact; the task
+and the PDF are bookkeeping about it, and a phone that stored a signature and
+then lost the renderer has done the part §274a asks for.
+
+The PDF step is **regeneration only**: a form that has never been rendered gets
+nothing, because producing a federal form nobody asked for is not this call's
+decision to make. Stored private, always. Logged to **I-9 Audit Log** as
+`Signature Collected`.
 
 ## Authorized signers (v0.48.0)
 

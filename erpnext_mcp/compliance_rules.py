@@ -1789,6 +1789,245 @@ def declarative_seed_specs() -> list:
 			"authored_by": AUTHOR_SYSTEM,
 			"enabled": 1,
 		},
+		# ── v0.55.0: the boxes with nobody's name in them ───────────────────
+		#
+		# THREE RULES ABOUT ONE FACT, AND THE FACT IS NOT "THE FORM IS
+		# INCOMPLETE". Every other I-9 and W-4 rule in this file watches a CLOCK:
+		# verification is overdue, authorization expires, retention has run out.
+		# These three watch a BOX. A form can be filled in perfectly, filed on
+		# time, and carry no signature at all — and an I-9 whose attestation
+		# nobody signed is not a late I-9, it is a form that attests to nothing.
+		# 8 CFR 274a.2(b)(1)(i)(A) and (ii)(B) ask for a signature under penalty
+		# of perjury from two different people, and neither of them is the
+		# software.
+		#
+		# WHY EACH IS A SEPARATE RULE RATHER THAN ONE `i9_unsigned` WITH THREE
+		# BRANCHES. The two boxes are signed by two different people at two
+		# different moments, and the whole point of these rules is the task each
+		# raises: Section 1 goes to whoever supervises the new hire, because the
+		# person who has to be found is the EMPLOYEE; Section 2 goes to an
+		# authorized signer, because the person who has to be found is the
+		# EMPLOYER's representative. One rule covering both would raise one task
+		# for two errands and land it on one of the two wrong people.
+		#
+		# STATE, NOT CLOCK, on all three. `date_field_role` is `State` and both
+		# thresholds are -1, so nothing bands and nothing counts down. The
+		# deadline these forms live under is already watched by
+		# `i9_verification_overdue`; a missing signature does not become more
+		# missing on the fourth day, and stacking a second countdown on the same
+		# record would put two rows on the calendar for one afternoon's errand.
+		{
+			"rule_id": "i9_section_1_unsigned",
+			"title": "I-9 Section 1 was completed but carries no employee signature",
+			"category": "Workforce",
+			"target_doctype": "I-9 Form",
+			"requires_doctypes": "I-9 Form",
+			# READ FOR THE MESSAGE. The role below is what says so, and the pair of
+			# -1 thresholds is the belt to its braces: hire_date is the day the
+			# signature was due, and printing it is the whole of its job here.
+			"date_field": "hire_date",
+			"date_field_role": DATE_ROLE_STATE,
+			"default_severity": "Critical",
+			"due_date_mode": DUE_NONE,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"scope_filters": [
+				# EVERY STATUS PAST DRAFT, stated as an exclusion rather than a
+				# list. A Draft has not been submitted, so there is nothing to have
+				# signed; a Destroyed form is past its retention period and is not
+				# work anybody should be sent to do. Naming the five in between
+				# would be a list to keep in step with the doctype's Select, and
+				# the day somebody adds a sixth status this rule would go quiet on
+				# it without saying so.
+				{"field": "status", "op": "nin", "value": ["Draft", "Destroyed"]},
+				{"field": "section_1_signature", "op": "isnull"},
+			],
+			"message_template": (
+				"Section 1 of {{ row.employee_name }}'s I-9 ({{ row.name }}) has no employee "
+				"signature. The employee attests to their own citizenship or immigration status "
+				"under penalty of perjury, and that attestation was due on their first day of "
+				"work ({{ row.hire_date }}). Collect the signature with collect_form_signature."
+			),
+			"regimes": [],
+			"regulation_citations": (
+				"8 CFR § 274a.2(b)(1)(i)(A) — employee attestation, signed no later than the "
+				"first day of employment"
+			),
+			"retention_years": 3,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": "Hiring",
+			"producer_skill_required": "hr_admin",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {
+				"producer_task_what": "Collect I-9 Section 1 signature",
+				"producer_task_minutes": 15,
+				"producer_task_subject_field": "employee_name",
+				"producer_assignee_resolver": "employee_supervisor",
+				"signature_doctype": "I-9 Form",
+				"signature_field": "section_1_signature",
+			},
+			"evidence_contract": {"signature": True},
+			"purpose": (
+				"An unsigned Section 1 is the single commonest I-9 finding an ICE inspection "
+				"writes up, and it is a substantive violation rather than a technical one: "
+				"without the employee's own signature the form asserts nothing about their "
+				"work authorization. It is also the cheapest to fix while the person is still "
+				"on the property, which is what makes it worth raising as work rather than "
+				"noting in a report."
+			),
+			"kairotic_gate_description": (
+				"Fires on a BOX, not a date. An I-9 past Draft whose section_1_signature is "
+				"empty raises this the moment the sweep sees it, whatever the hire date says — "
+				"the deadline is already watched by i9_verification_overdue and a second "
+				"countdown on the same record would be two rows for one errand. Silences by "
+				"itself the moment a signature is attached, and does not fire on a Draft "
+				"(nothing has been submitted to sign) or on a Destroyed form (past retention)."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
+		{
+			"rule_id": "i9_section_2_unsigned",
+			"title": "I-9 Section 2 was verified but carries no employer signature",
+			"category": "Workforce",
+			"target_doctype": "I-9 Form",
+			"requires_doctypes": "I-9 Form",
+			"date_field": "verification_date",
+			"date_field_role": DATE_ROLE_STATE,
+			"default_severity": "Critical",
+			"due_date_mode": DUE_NONE,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"scope_filters": [
+				# THE GATE IS `verification_date`, NOT `status`, and the difference
+				# is what the rule is about. A form still awaiting verification has
+				# an empty Section 2 and nothing to have signed — raising on it
+				# would be raising `i9_verification_overdue` a second time under a
+				# different name. A form carrying a verification DATE is one where
+				# somebody looked at the documents; this rule asks whether they
+				# then put their name to what they saw.
+				{"field": "verification_date", "op": "isnotnull"},
+				{"field": "section_2_signature", "op": "isnull"},
+				{"field": "status", "op": "ne", "value": "Destroyed"},
+			],
+			"message_template": (
+				"Section 2 of {{ row.employee_name }}'s I-9 ({{ row.name }}) records a "
+				"verification on {{ row.verification_date }} by {{ row.verifier_name }} and "
+				"carries no employer signature. The examiner attests under penalty of perjury "
+				"that they examined the documents; an unsigned attestation is not one. Collect "
+				"the signature with collect_form_signature."
+			),
+			"regimes": [],
+			"regulation_citations": (
+				"8 CFR § 274a.2(b)(1)(ii)(B) — employer or authorized representative attestation"
+			),
+			"retention_years": 3,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": "Hiring",
+			"producer_skill_required": "hr_admin",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {
+				"producer_task_what": "Collect I-9 Section 2 signature",
+				"producer_task_minutes": 15,
+				"producer_task_subject_field": "employee_name",
+				# NOT the supervisor. Section 2 is signed by whoever examined the
+				# documents on the employer's behalf, and `tools/signers.py` holds
+				# the roster of who that is allowed to be.
+				"producer_assignee_resolver": "i9_authorized_signer",
+				"signature_doctype": "I-9 Form",
+				"signature_field": "section_2_signature",
+			},
+			"evidence_contract": {"signature": True},
+			"purpose": (
+				"Section 2 is the employer's own attestation — that a named person examined "
+				"the documents this form lists and found them to relate to this employee. "
+				"Unsigned, the operation has recorded that it checked and has produced no "
+				"evidence that anybody did, which is the finding an auditor writes up against "
+				"the EMPLOYER rather than against the worker."
+			),
+			"kairotic_gate_description": (
+				"Fires when a verification_date is on the record and section_2_signature is "
+				"empty — somebody examined the documents and nobody signed for it. A form with "
+				"no verification date raises nothing here, because Section 2 has not been "
+				"filled in at all and that is i9_verification_overdue's question. Silences the "
+				"moment a signature is attached."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
+		{
+			"rule_id": "w4_signature_missing",
+			"title": "An active W-4 carries no employee signature",
+			"category": "Workforce",
+			"target_doctype": "W-4 Form",
+			"requires_doctypes": "W-4 Form",
+			"date_field": "effective_date",
+			"date_field_role": DATE_ROLE_STATE,
+			# WARNING, WHERE THE TWO I-9 RULES ARE CRITICAL, and the gap is the
+			# consequence rather than the tidiness of the file. An unsigned I-9 is
+			# a §274a violation with a per-form civil penalty attached. An unsigned
+			# W-4 means the employer must withhold as Single with no adjustments
+			# until it is signed — a real obligation, correctable, and nobody is
+			# fined for the day it took to notice.
+			"default_severity": "Warning",
+			"due_date_mode": DUE_NONE,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"scope_filters": [
+				{"field": "status", "op": "eq", "value": "Active"},
+				{"field": "signature", "op": "isnull"},
+			],
+			"message_template": (
+				"{{ row.employee_name }}'s active W-4 ({{ row.name }}, tax year "
+				"{{ row.tax_year }}) has no employee signature. Form W-4 is signed under "
+				"penalties of perjury, and until it is the employer must withhold at the "
+				"default rate rather than at the elections on this form. Collect the "
+				"signature with collect_form_signature."
+			),
+			"regimes": [],
+			"regulation_citations": (
+				"26 CFR § 31.3402(f)(5)-1 — a withholding certificate must be signed under "
+				"penalties of perjury; IRS Publication 15 — treat an unsigned W-4 as invalid"
+			),
+			"retention_years": 4,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": "Hiring",
+			"producer_skill_required": "hr_admin",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {
+				"producer_task_what": "Collect W-4 signature",
+				"producer_task_minutes": 10,
+				"producer_task_subject_field": "employee_name",
+				"producer_assignee_resolver": "employee_supervisor",
+				"signature_doctype": "W-4 Form",
+				"signature_field": "signature",
+			},
+			"evidence_contract": {"signature": True},
+			"purpose": (
+				"An unsigned W-4 is invalid, and an invalid W-4 does not merely sit in a "
+				"folder — it changes the withholding the employer is required to apply. "
+				"Publication 15 tells the employer to withhold as if the employee were Single "
+				"with no adjustments, which for a married picker claiming three dependents is "
+				"the difference between a correct cheque and a complaint."
+			),
+			"kairotic_gate_description": (
+				"Fires for any Active W-4 whose signature box is empty. Superseded and Draft "
+				"W-4s raise nothing: a superseded form is not the one withholding is computed "
+				"from, and a draft has not been filed. Silences the moment a signature is "
+				"attached with collect_form_signature. EXPECT IT TO FIRE BROADLY ON THE FIRST "
+				"SWEEP AFTER UPGRADE, and that is the finding rather than a fault in the rule: "
+				"submit_w4 has never captured the employee's signature, so every W-4 this app "
+				"has ever written is unsigned and every one of them is, to the IRS, invalid."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
 	]
 
 
