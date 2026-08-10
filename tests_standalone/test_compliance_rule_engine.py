@@ -263,10 +263,16 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		and one built-in (`i9_supplement_b_unsigned`, which folds a child table).
 		They are the first rules here that watch a BOX rather than a clock: a
 		form can be filed on time, in full, and attest to nothing.
+
+		v0.56.0 added a fifth, `tax_form_signature_missing`, for the employer's
+		OWN returns — and its scope is the interesting part: 941, OR-WR, OQ and
+		WA-ESD carry a penalties-of-perjury declaration and W-2 and 1099-NEC have
+		no signature line at all, so the rule names four form types rather than
+		firing on every Tax Form on the site.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 26)
-		self.assertEqual(len(compliance_rules.rule_rows()), 26)
+		self.assertEqual(len(report["created"]), 27)
+		self.assertEqual(len(compliance_rules.rule_rows()), 27)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
@@ -309,6 +315,7 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 				"i9_verification_overdue",
 				"policy_review_overdue",
 				"shift_heat_threshold_crossed",
+				"tax_form_signature_missing",
 				"training_expiring",
 				"w4_signature_missing",
 				"w4_tax_year_outdated",
@@ -967,12 +974,12 @@ class TheApprovalGate(RuleEngineTestCase):
 
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
-	def test_seeding_twice_writes_twenty_six_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 26)
+	def test_seeding_twice_writes_twenty_seven_rules_once(self):
+		self.assertEqual(len(self.seed_rules()["created"]), 27)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 26)
-		self.assertEqual(len(compliance_rules.rule_rows()), 26)
+		self.assertEqual(len(again["present"]), 27)
+		self.assertEqual(len(compliance_rules.rule_rows()), 27)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -1020,7 +1027,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 26)
+		self.assertEqual(data["rule_count"], 27)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)

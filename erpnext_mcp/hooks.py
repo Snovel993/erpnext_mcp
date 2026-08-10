@@ -317,7 +317,12 @@ scheduler_events = {
 	],
 }
 
-#: ONE Jinja method: the amount-in-words the check Print Format renders.
+#: TWO Jinja methods, and the count is in this comment because it should have to
+#: be changed on purpose. Every entry here is resolved when Frappe BUILDS THE
+#: JINJA ENVIRONMENT, which is the most expensive place in this file to be wrong
+#: — see the paragraph below about what that cost in v0.14.0.
+#:
+#: The first: the amount-in-words the check Print Format renders.
 #:
 #: `create_check_print_format` writes a Print Format that has to say an amount
 #: the way a US check says one — "One Thousand Two Hundred Thirty-Four and
@@ -353,7 +358,26 @@ scheduler_events = {
 #: `is defined` and falls back to `frappe.utils.money_in_words` regardless: a
 #: check with no amount in words is not a check, and a valid check with wordier
 #: text beats a blank line.
-jinja = {"methods": ["erpnext_mcp.render.checks.erpnext_mcp_amount_in_words"]}
+#:
+#: THE SECOND ARRIVED IN v0.56.0 with the employee badge card, and it is here
+#: rather than in the template for a reason the check method does not share. A
+#: badge card prints four records' worth of facts — the badge, the Employee, that
+#: Employee's photograph and the Company's mark — none of which the badge row
+#: carries, and two of which are FILES that have to be inlined as `data:` URIs
+#: because wkhtmltopdf hangs on an external image it cannot fetch. That is not
+#: something a Jinja template should be doing four framework calls at a time.
+#: `erpnext_mcp_badge_card` answers it once and returns a dict.
+#:
+#: It obeys both rules the first one taught: a bare dotted path, and a `__name__`
+#: this app has namespaced. `render/badge_card.py` imports nothing of this app's
+#: own at module level for the same reason this comment is so long — resolving
+#: this path must not be able to fail.
+jinja = {
+	"methods": [
+		"erpnext_mcp.render.checks.erpnext_mcp_amount_in_words",
+		"erpnext_mcp.render.badge_card.erpnext_mcp_badge_card",
+	]
+}
 
 #: ENTITY SCOPING FOR THE TWO DOCTYPES FRAPPE'S OWN MECHANISM CANNOT REACH.
 #: v0.17.1. See `permissions.py`, which argues it at length.

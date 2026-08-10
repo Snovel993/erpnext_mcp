@@ -3,6 +3,70 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.56.0 — 2026-08-09
+
+**The badge, where somebody is already looking.** Badges were being issued and
+then being unfindable. `generate_employee_badge_qr` answered with base64 in a
+JSON payload — exactly right for a handset drawing a card on a screen, and
+nothing at all to an HR manager who has opened an Employee form looking for a
+card to print. The badge existed, the register knew it, and the two ways to see
+it were an MCP call and a Bucket Log Badge Map docname nobody memorises.
+
+**Issuing a badge now attaches it to the Employee record.** The QR lands in the
+Attachments sidebar, private, one file per badge however many times it is
+reprinted — the filename carries the badge ID, so a reprint replaces its own
+copy and a reissue leaves the retired card's QR alone as the evidence of what
+that card was. A failed attachment never loses the badge: the register row is
+written first and the outcome is reported rather than raised.
+
+**`generate_employee_id_card` is the new tool**, and it draws the card in the
+print format's own layout rather than a second opinion about one — the same
+markup and the same millimetres, so the card off the tool and the card off the
+Desk Print button line up with the same pre-printed lanyard slot. The PDF is
+**best-effort**: a card needs a photograph and a QR, so it is the one document
+this app cannot draw with its own dependency-free writer, and on a bench with no
+wkhtmltopdf the badge is still issued, the QR is still attached, the card still
+comes back as HTML and the note says what is missing.
+
+**Two buttons in the Desk, and both are records rather than hooks.** An **ID
+Card** button on the Employee form and **Print Badge Sheet** in the Employee
+list's Actions menu. `hooks.py` promises that installing this app cannot change
+how a form the operator already had behaves, and `test_hooks.TheFormScripts`
+holds every `doctype_js` entry to a doctype this app created — Employee is
+ERPNext's. So both are Client Script rows: visible in the Desk, switchable off,
+never re-created once declined, and removed by `before_uninstall` so neither is
+left calling a method that has gone.
+
+**A CR-80 print format for the badge itself**, front and back, with every image
+inlined as a `data:` URI — wkhtmltopdf fetches external URLs synchronously and
+hangs on one it cannot authenticate to, which is why `i9_print_format` bans
+`<img>` outright. The ban was a proxy for the fetch, not the tag, so a card that
+references no external resource keeps the same promise a different way.
+
+**The fifth missing-signature rule covers the employer's own returns.**
+`tax_form_signature_missing` fires on a Tax Form of type 941, OR-WR, OQ or
+WA-ESD that has reached Generated, Filed or Amended with an empty signature
+column. Tax Form had no signature columns at all before this release; it has five
+now, and the rule is what makes them mean something.
+
+**W-2 and 1099-NEC raise nothing and never will.** Neither form has a signature
+line: the recipient copies are statements, and the penalties-of-perjury
+declaration for a batch is made once, on the Form W-3 or Form 1096 transmittal
+that accompanies it. A rule that raised on every W-2 would raise on every
+employee every January for a box that is not on the page. Naming one at
+`collect_form_signature` is refused with that sentence rather than with a list of
+field names, because "Form W-2 has no signature line" ends the question and "not
+a signature box" starts a search for a column that does not exist.
+
+**The signature endpoint is now generic across form types.** `FORM_HANDLERS`
+replaced two `if doctype == I9_FORM` branches with one table of resolve-and-
+render pairs, so the fifth box was a row rather than a third branch. The tax
+return box is the only one of the five with no roster gate: an I-9 and a W-4 are
+signed by people `tools/signers.py` records, and a 941 is signed by an officer of
+the employer this app keeps no register of — so it is gated by `write` permission
+on the record and says so on the entry rather than leaving it to be inferred from
+a blank.
+
 ## 0.55.0 — 2026-08-09
 
 **The boxes nobody signed, and the loop that closes them.** A form can be filled

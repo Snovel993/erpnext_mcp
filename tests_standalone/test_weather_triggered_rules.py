@@ -935,7 +935,7 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		self.assertEqual(live[0]["default_severity"], "Critical")
 		self.assertEqual(int(live[0]["version"]), 2)
 
-	def test_the_split_is_twentyone_declarative_five_builtin_and_no_custom_python(self):
+	def test_the_split_is_twentytwo_declarative_five_builtin_and_no_custom_python(self):
 		self.seed_rules()
 		shapes: dict = {}
 		for row in compliance_rules.rule_rows():
@@ -943,7 +943,9 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		# Twenty-one since v0.55.0: the three record-only missing-signature rules
 		# each ask one question of one signature column on one row, which is the
 		# declarative vocabulary working as intended rather than being stretched.
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 21)
+		# Twenty-two since v0.56.0: `tax_form_signature_missing` is one more
+		# question about one more signature column, on a fourth doctype.
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 22)
 		# Three since v0.39.0: `financial_kpi_threshold_breach` joined the two
 		# permanent built-ins, and it is permanent for a reason neither of those
 		# has — its thresholds are not on its own row, they are on each

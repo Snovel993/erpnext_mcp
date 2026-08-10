@@ -1242,8 +1242,9 @@ class TheUpgradeFromV0220(PrimitiveTestCase):
 		# fresh rather than migrated, and both equally untouched by this patch.
 		# Twenty-six since v0.55.0, on the same reading: the four
 		# missing-signature rules postdate the v0.22.0 the patch migrates FROM,
-		# so there is nothing of theirs for it to have migrated.
-		self.assertEqual(len(compliance_rules.rule_rows()), 26)
+		# so there is nothing of theirs for it to have migrated. Twenty-seven
+		# since v0.56.0 added the fifth, on the employer's own tax returns.
+		self.assertEqual(len(compliance_rules.rule_rows()), 27)
 
 	def test_an_operator_edited_threshold_survives_the_migration(self):
 		"""The question the patch exists to answer well. A site that contracted its

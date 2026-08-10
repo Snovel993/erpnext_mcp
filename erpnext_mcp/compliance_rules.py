@@ -2028,6 +2028,118 @@ def declarative_seed_specs() -> list:
 			"authored_by": AUTHOR_SYSTEM,
 			"enabled": 1,
 		},
+		# ── v0.56.0: the employer's own returns ────────────────────────────
+		#
+		# THE FOURTH SIGNATURE RULE, AND THE ONE WHOSE SCOPE IS THE INTERESTING
+		# PART. A Tax Form on this site can be any of six things, and only four
+		# of them are signed:
+		#
+		#   941      Part 5, "Under penalties of perjury, I declare…"  SIGNED
+		#   OR-WR    Oregon annual withholding reconciliation          SIGNED
+		#   OQ       Oregon quarterly combined report                  SIGNED
+		#   WA-ESD   Washington quarterly wage detail                  SIGNED
+		#   W-2      no signature line anywhere on the form            NOT SIGNED
+		#   1099-NEC no signature line anywhere on the form            NOT SIGNED
+		#
+		# THE TWO EXCLUSIONS ARE NOT AN OVERSIGHT AND THEY ARE NOT THIS APP
+		# BEING CAUTIOUS. Form W-2 has no signature box: the employee copies are
+		# statements rather than declarations, and the penalties-of-perjury
+		# declaration for a whole W-2 batch is made ONCE, on the Form W-3
+		# transmittal that goes to the SSA with them. Form 1099-NEC is the same
+		# shape with Form 1096 as its transmittal. A rule that raised on every
+		# W-2 would raise on every employee, every January, for a box that does
+		# not exist on the page — which is the fastest way to teach an operation
+		# that this calendar is noise.
+		#
+		# NEITHER W-3 NOR 1096 IS A `form_type` ON THIS DOCTYPE YET. When one is
+		# added, it belongs in the list below and nowhere else: that is the whole
+		# of what this rule would need to cover it.
+		{
+			"rule_id": "tax_form_signature_missing",
+			"title": "An employer tax return is generated or filed and carries no signature",
+			"category": "Filings",
+			"target_doctype": "Tax Form",
+			"requires_doctypes": "Tax Form",
+			"requires_fields": "signature",
+			"date_field": "period_end",
+			"date_field_role": DATE_ROLE_STATE,
+			"default_severity": "Warning",
+			"due_date_mode": DUE_NONE,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"scope_filters": [
+				{"field": "form_type", "op": "in", "value": ["941", "OR-WR", "OQ", "WA-ESD"]},
+				# A DRAFT HAS NOTHING TO SIGN. The figures are still moving, and a
+				# declaration signed over numbers that then changed is worse than
+				# an unsigned draft — it is an attestation to a return nobody
+				# filed. Generated, Filed and Amended are the three states where
+				# the numbers are settled.
+				{"field": "status", "op": "in", "value": ["Generated", "Filed", "Amended"]},
+				{"field": "signature", "op": "isnull"},
+			],
+			"message_template": (
+				"{{ row.form_type }} for {{ row.company }} covering {{ row.period_start }} to "
+				"{{ row.period_end }} ({{ row.name }}) is {{ row.status }} and carries no "
+				"signature. This return is made under penalty of perjury by an officer or "
+				"authorised agent of the employer; an unsigned one is not a complete return "
+				"even where the agency accepted the transmission. Sign it with "
+				"collect_form_signature."
+			),
+			"regimes": [],
+			"regulation_citations": (
+				"26 USC § 6065 — returns must contain a written declaration made under "
+				"penalties of perjury; IRS Form 941 Part 5; ORS 316.202; RCW 50.12.070"
+			),
+			"retention_years": 4,
+			"audit_packet_types": [],
+			"producer_task_template": None,
+			"producer_farm_task_type": "Compliance-Audit",
+			# POOLED, NOT ROUTED TO A NAME, and it is the one signature rule of
+			# the five that is. The other four know who signs: an employee signs
+			# their own I-9 and W-4, and `tools/signers.py` records who may sign
+			# the employer's half of those two. A 941 is signed by an OFFICER of
+			# the employer, and this app has no register of officers — the
+			# Authorized Signer roster carries `can_sign_i9` and `can_sign_w4`
+			# and says nothing about tax returns. Inventing a routing off the
+			# wrong flag would send a return to somebody whose authorisation
+			# covers a different form; the honest answer is the compliance_admin
+			# pool, where somebody who knows who signs picks it up.
+			"producer_skill_required": "compliance_admin",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {
+				"producer_task_what": "Sign the employer tax return before it is filed",
+				"producer_task_minutes": 20,
+				# NO `producer_task_subject_field`. The other four rules are about
+				# a person and name them in the title; a 941 is about a COMPANY
+				# and a quarter, and there is no one column that says so — the
+				# alert message names the form, the entity and the period, and it
+				# becomes the task's notes.
+				"signature_doctype": "Tax Form",
+				"signature_field": "signature",
+			},
+			"evidence_contract": {"signature": True},
+			"purpose": (
+				"26 USC § 6065 makes the declaration part of the return rather than a "
+				"formality attached to it: a return without one has not been made, whatever "
+				"the transmission receipt says. The exposure is not the penalty on the "
+				"signature — it is that an unsigned return leaves the filing itself open, and "
+				"the operation finds out from a notice rather than from its own records."
+			),
+			"kairotic_gate_description": (
+				"Fires on a BOX, for the four return types that have one. A Tax Form of type "
+				"941, OR-WR, OQ or WA-ESD that has reached Generated, Filed or Amended with an "
+				"empty signature column raises this. W-2 and 1099-NEC raise NOTHING and never "
+				"will: neither form has a signature line — the declaration for a batch of them "
+				"is made once on the W-3 or 1096 transmittal — so a rule that raised on them "
+				"would raise on every employee every January for a box that is not on the "
+				"page. A Draft raises nothing either: its figures are still moving, and a "
+				"declaration signed over numbers that then changed is worse than no signature. "
+				"Silences the moment a signature is attached."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
 	]
 
 

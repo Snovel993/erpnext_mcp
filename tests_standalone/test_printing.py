@@ -505,6 +505,12 @@ class TheTemplateItself(unittest.TestCase):
 		from erpnext_mcp import hooks
 
 		target = "erpnext_mcp.render.checks.erpnext_mcp_amount_in_words"
-		self.assertEqual(hooks.jinja["methods"], [target])
+		# MEMBERSHIP, NOT EQUALITY, since v0.56.0 put the badge card's resolver
+		# beside this one. What this test is for is the check-printing half —
+		# that the template and the hook agree on a name — and an assertion that
+		# the list holds exactly one entry would fail every time an unrelated
+		# format registered its own, which is a broken test rather than a caught
+		# regression. `test_hooks.py` owns the shape of the whole list.
+		self.assertIn(target, hooks.jinja["methods"])
 		self.assertNotIn(":", target)
 		self.assertFalse(hasattr(hooks, "jenv"))

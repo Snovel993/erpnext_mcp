@@ -381,10 +381,49 @@ class TheJinjaMethod(unittest.TestCase):
 		self.assertIn("erpnext_mcp_amount_in_words is defined", printing.CHECK_TEMPLATE)
 		self.assertIn("frappe.utils.money_in_words", printing.CHECK_TEMPLATE)
 
-	def test_only_one_jinja_method_is_declared(self):
-		"""Every entry here is evaluated on the first page render of every request
-		cycle. This app has one thing to contribute and should keep it that way."""
-		self.assertEqual(len(hooks.jinja["methods"]), 1)
+	def test_the_badge_method_resolves_and_answers_with_a_dict(self):
+		"""v0.56.0's second method, resolved through the hook string rather than
+		imported by name — so a hook pointing at the wrong function fails here even
+		though the right function exists.
+
+		Called with a badge nothing knows about, because the contract that matters
+		is that it NEVER RAISES: it is resolved while Frappe builds the Jinja
+		environment, which it also does to render the error page."""
+		card = resolve(hooks.jinja["methods"][1])("no-such-badge")
+		self.assertIsInstance(card, dict)
+		self.assertFalse(card["ok"])
+		self.assertEqual(card["badge_id"], "no-such-badge")
+
+	def test_the_badge_global_name_comes_from_the_function_and_is_namespaced(self):
+		resolved = resolve(hooks.jinja["methods"][1])
+		self.assertEqual(resolved.__name__, "erpnext_mcp_badge_card")
+		self.assertTrue(resolved.__name__.startswith("erpnext_mcp_"))
+
+	def test_the_badge_template_calls_the_name_the_hook_actually_registers(self):
+		"""The two halves have to agree, and nothing else makes them."""
+		from erpnext_mcp import badge_print_format
+
+		registered = resolve(hooks.jinja["methods"][1]).__name__
+		self.assertEqual(registered, badge_print_format.JINJA_GLOBAL)
+		self.assertIn(registered, badge_print_format.BADGE_TEMPLATE)
+
+	def test_the_badge_template_still_prints_a_card_if_the_hook_is_absent(self):
+		"""Belt to the brace, the same one the check template wears. A Print button
+		that renders a traceback is worse than one that renders a plainer card."""
+		from erpnext_mcp import badge_print_format
+
+		self.assertIn("erpnext_mcp_badge_card is defined", badge_print_format.BADGE_TEMPLATE)
+
+	def test_these_two_jinja_methods_and_nothing_else(self):
+		"""Every entry here is evaluated when Frappe BUILDS THE JINJA ENVIRONMENT,
+		which is the most expensive place in `hooks.py` to be wrong — v0.14.0 took
+		every page on the site down, error page included, from this one key. The
+		count is asserted so a third arrives on purpose and with an argument.
+
+		It was `assertEqual(..., 1)` until v0.56.0, when the badge card needed to
+		resolve four records into one dict and the alternative was a Print Format
+		making four framework calls in presentation code."""
+		self.assertEqual(len(hooks.jinja["methods"]), 2)
 		self.assertEqual(set(hooks.jinja), {"methods"})
 
 

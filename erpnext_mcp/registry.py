@@ -9489,20 +9489,26 @@ TOOLS = {
 	"collect_form_signature": _tool(
 		signatures.collect_form_signature,
 		"MUTATING (default OFF). Attach one signature capture to the box on an "
-		"I-9 or a W-4 that was missing it, close the Farm Task that asked for it, "
-		"and bring the rendered PDF back into step.\n\n"
+		"I-9, a W-4 or an employer tax return that was missing it, close the Farm "
+		"Task that asked for it, and bring the rendered PDF back into step.\n\n"
 		"THE OTHER END OF THE MISSING-SIGNATURE RULES. i9_section_1_unsigned, "
 		"i9_section_2_unsigned, i9_supplement_b_unsigned and w4_signature_missing "
 		"find the empty boxes; generate_tasks_from_compliance_alerts puts each on "
 		"the phone of whoever can fix it — the employee's supervisor for the two "
 		"the WORKER signs, an authorized signer for the two the EMPLOYER signs — "
 		"and this is what that phone calls when the signature has been drawn.\n\n"
-		"FOUR BOXES, AND THE LIST IS CLOSED: I-9 Form.section_1_signature, "
+		"FIVE BOXES, AND THE LIST IS CLOSED: I-9 Form.section_1_signature, "
 		"I-9 Form.section_2_signature, I-9 Form.section_3_signature (Supplement B, "
-		"a child row), W-4 Form.signature. A field outside them is refused — an "
-		"endpoint that wrote an image into any column somebody named would be an "
-		"arbitrary write with an Attach-shaped hat on. Omit `field` where the "
-		"doctype has only one box and it is inferred.\n\n"
+		"a child row), W-4 Form.signature, Tax Form.signature. A field outside "
+		"them is refused — an endpoint that wrote an image into any column "
+		"somebody named would be an arbitrary write with an Attach-shaped hat on. "
+		"Omit `field` where the doctype has only one box and it is inferred.\n\n"
+		"W-2 AND 1099-NEC HAVE NO SIGNATURE LINE and naming one is refused with "
+		"that sentence rather than with a list of field names. The recipient "
+		"copies are statements; the penalties-of-perjury declaration for a batch "
+		"is made once, on the W-3 or 1096 transmittal. The employer returns that "
+		"ARE signed are 941, OR-WR, OQ and WA-ESD, and all four are Tax Form "
+		"records sharing one signature column.\n\n"
 		"IT TAKES BASE64, WHICH attach_signed_i9 REFUSES TO, and the difference is "
 		"what is being sent: that one files a SCAN OF A PAGE, which is megabytes "
 		"and goes up in chunks; this one takes what a finger drew on a glass "
@@ -9521,10 +9527,13 @@ TOOLS = {
 		{
 			"doctype": _field(
 				_STRING,
-				"The form the signature goes on: 'I-9 Form' or 'W-4 Form'. A Farm Task "
-				"raised from one of these alerts carries it in subject_doctype.",
+				"The form the signature goes on: 'I-9 Form', 'W-4 Form' or 'Tax Form'. A "
+				"Farm Task raised from one of these alerts carries it in subject_doctype, and "
+				"a form type ('941', 'OR-WR', 'OQ', 'WA-ESD') resolves to Tax Form.",
 			),
-			"name": _field(_STRING, "The form's docname, e.g. I9-2026-0001 or W4-2026-0007."),
+			"name": _field(
+				_STRING, "The form's docname, e.g. I9-2026-0001, W4-2026-0007 or TAXFRM-2026-0003."
+			),
 			"form": _field(_STRING, "Alias for name."),
 			"employee": _field(
 				_STRING, "Whose form, instead of the docname — resolved the same way get_i9_form does."
@@ -9532,7 +9541,8 @@ TOOLS = {
 			"field": _field(
 				_STRING,
 				"Which box: section_1_signature, section_2_signature, section_3_signature or "
-				"signature. Optional where the doctype has only one.",
+				"signature. Optional where the doctype has only one, which W-4 Form and Tax "
+				"Form both do.",
 			),
 			"signature_base64": _field(
 				_STRING,
@@ -9562,8 +9572,11 @@ TOOLS = {
 		},
 		mutating=True,
 		title="Collect a missing signature",
-		available=_needs_doctype("I-9 Form", "W-4 Form"),
-		requires="the I-9 Form or W-4 Form doctype (run bench migrate after installing v0.55.0)",
+		available=_needs_doctype("I-9 Form", "W-4 Form", "Tax Form"),
+		requires=(
+			"the I-9 Form, W-4 Form or Tax Form doctype (run bench migrate after installing "
+			"v0.56.0)"
+		),
 	),
 	# ── v0.48.0: who may sign a federal employment form ───────────────────
 	"list_authorized_signers": _tool(
@@ -12958,6 +12971,56 @@ TOOLS = {
 		mutating=True,
 		idempotent=True,
 		title="Generate a badge sheet",
+		available=_badge_qr_ready,
+		requires=_BADGE_QR_REQUIRES,
+	),
+	# ── v0.56.0: the badge where an HR manager is already looking ─────────
+	"generate_employee_id_card": _tool(
+		badges.generate_employee_id_card,
+		"MUTATING (default OFF). Draw one employee's ID card and ATTACH IT TO "
+		"THEIR EMPLOYEE RECORD, so it is in the Attachments sidebar of the form "
+		"somebody already has open rather than in a JSON payload.\n\n"
+		"THE PROBLEM IT SOLVES IS FINDABILITY, NOT PRINTING. Badges were being "
+		"issued and then being unfindable: generate_employee_badge_qr answers "
+		"with base64, which is exactly right for a handset drawing a card on a "
+		"screen and is nothing at all to somebody in the Desk. This call issues "
+		"a badge if there is none, reuses the live one if there is — the same "
+		"contract, because it delegates rather than reimplementing the mint — and "
+		"leaves two files on the Employee: the QR as a PNG and the card as a "
+		"PDF.\n\n"
+		"THE LAYOUT IS THE PRINT FORMAT'S, not a second opinion about a card. "
+		"The same millimetres and the same markup as the 'Employee Badge Card' "
+		"format the Desk Print button renders, so both routes produce the same "
+		"card and a pre-printed lanyard slot lines up either way.\n\n"
+		"THE PDF IS BEST-EFFORT AND THE CALL STILL SUCCEEDS WITHOUT IT. A card "
+		"needs a photograph and a QR, so it is the one document this app cannot "
+		"draw with its own dependency-free writer — it asks Frappe for "
+		"wkhtmltopdf, which some bench images have and some do not. Without it "
+		"the badge is still issued, the QR is still attached, `card_html` still "
+		"comes back, and `card_attachment.note` says what is missing. Both "
+		"attachments are reported separately because they fail for different "
+		"reasons.",
+		{
+			"employee": _field(_STRING, "Employee docname, employee_name, or employee_number."),
+			"company": _field(_STRING, "Only needed on a multi-company site."),
+			"regenerate": _field(
+				_BOOLEAN,
+				"Mint a NEW badge ID and retire the current one — the lost-card path. Omit to "
+				"reprint the badge they already hold, which is the common request.",
+			),
+			"attach": _field(
+				_BOOLEAN,
+				"Write the card PDF to the Employee record. Default TRUE, which is the whole "
+				"point of the tool; false returns the card and writes nothing. The QR is "
+				"attached either way.",
+			),
+			"error_correction": _field(_STRING, "L, M, Q or H. Defaults to H for a badge."),
+			"notes": _field(_STRING, "Kept on the register row if a badge is minted."),
+		},
+		required=("employee",),
+		mutating=True,
+		idempotent=True,
+		title="Generate an employee ID card",
 		available=_badge_qr_ready,
 		requires=_BADGE_QR_REQUIRES,
 	),

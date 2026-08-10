@@ -469,6 +469,7 @@
   "allow_link_entries_to_shift",
   "allow_generate_employee_badge_qr",
   "allow_generate_employee_badge_sheet",
+  "allow_generate_employee_id_card",
   "allow_generate_employee_badge_pass",
   "mobile_write_section",
   "allow_create_mobile_user",
@@ -3566,6 +3567,13 @@
    "fieldname": "allow_generate_employee_badge_sheet",
    "fieldtype": "Check",
    "label": "Generate Employee Badge Sheet"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Draw one employee's ID card and attach it to their Employee record, so the badge sits in the Attachments sidebar of the form somebody already has open. Issues a badge if there is none and reuses the live one if there is. The card PDF needs wkhtmltopdf; without it the badge is still issued, the QR is still attached, and the result says what is missing.",
+   "fieldname": "allow_generate_employee_id_card",
+   "fieldtype": "Check",
+   "label": "Generate Employee ID Card"
   },
   {
    "default": "0",

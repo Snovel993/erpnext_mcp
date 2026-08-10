@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 393 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 394 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -9353,6 +9353,45 @@ each carrying name, photograph (or initials), designation, badge ID and QR.
 Issues to anybody with no badge and reuses the live one where there is one.
 **One employee's failure does not lose the sheet**: a name that resolves to
 nobody is reported in `errors` and every other card is still printed.
+
+**In the Desk**, this is the Employee list's Actions menu → *Print Badge Sheet*,
+over whichever rows are ticked. That button is a **Client Script row**, not a
+hook: an operator can see it, untick `enabled`, or delete it, and the app will
+not put it back.
+
+### `generate_employee_id_card`
+
+```json
+{"employee": "HR-EMP-00007"}
+```
+
+**MUTATING (default OFF).** One employee's card, **attached to their own
+Employee record** so it is in the Attachments sidebar of the form somebody
+already has open.
+
+**The problem it solves is findability, not printing.** Badges were being issued
+and then being unfindable: `generate_employee_badge_qr` answers with base64,
+which is exactly right for a handset drawing a card on a screen and is nothing
+at all in the Desk. This issues a badge if there is none, **reuses the live one
+if there is** — it delegates to `generate_employee_badge_qr` rather than
+reimplementing the mint, so a reprint still cannot consume an identifier — and
+leaves two files on the Employee: the QR as a PNG, the card as a PDF.
+
+**The layout is the print format's**, not a second opinion about a card: the same
+markup and the same millimetres as *Employee Badge Card*, so the card off this
+call and the card off the Desk Print button are the same card.
+
+**The PDF is best-effort and the call still succeeds without it.** A card needs a
+photograph and a QR, so it is the one document this app cannot draw with its own
+dependency-free writer — it asks Frappe for wkhtmltopdf, which some bench images
+have and some do not. Without it the badge is still issued, the QR is still
+attached, `card_html` still comes back, and `card_attachment.note` says what is
+missing. The two attachments are reported separately because they fail for
+different reasons.
+
+**In the Desk**, this is the **ID Card** button on the Employee form, under the
+*Badge* group. It shows the card in a dialog, links to whichever files landed,
+and prints from the browser on a bench with no PDF renderer.
 
 ### `resolve_badge`
 

@@ -28,6 +28,13 @@
   "col_break_generation",
   "generated_by",
   "generated_date",
+  "signature_section",
+  "signer_name",
+  "signer_title",
+  "col_break_signature",
+  "signature",
+  "signed_at",
+  "signed_ip",
   "filing_section",
   "filed_date",
   "confirmation_number",
@@ -186,6 +193,47 @@
    "read_only": 1
   },
   {
+   "description": "WHICH RETURNS THIS BLOCK APPLIES TO. Forms 941, OR-WR, OQ and WA-ESD carry a penalties-of-perjury declaration signed by an officer or authorised agent of the employer. Forms W-2 and 1099-NEC DO NOT: the recipient copies carry no signature line at all, and the declaration for a W-2 batch is made once on the Form W-3 transmittal that accompanies it. Leaving this block empty on a W-2 is therefore correct and raises nothing.",
+   "fieldname": "signature_section",
+   "fieldtype": "Section Break",
+   "label": "Signature"
+  },
+  {
+   "description": "The printed name of the person who signed the declaration. A separate fact from the account that made the call \u2014 one authorised person filing on behalf of another is a real thing in an office, and the MCP Action Log records which account, whoever's name went in the box.",
+   "fieldname": "signer_name",
+   "fieldtype": "Data",
+   "label": "Signer Name"
+  },
+  {
+   "description": "Their title. The declaration is made by an officer of the employer or an authorised agent, and which of the two it was is the question an agency asks second.",
+   "fieldname": "signer_title",
+   "fieldtype": "Data",
+   "label": "Signer Title"
+  },
+  {
+   "fieldname": "col_break_signature",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The signature capture. Filed with collect_form_signature, stored private, and surfaced by the tax_form_signature_missing compliance rule while it is empty on a return that is Generated or later.",
+   "fieldname": "signature",
+   "fieldtype": "Attach",
+   "label": "Signature"
+  },
+  {
+   "description": "When the declaration was signed. A signature image on its own is not an electronic signature \u2014 the record is the image, the moment and the address it came from, which is why all three columns are here.",
+   "fieldname": "signed_at",
+   "fieldtype": "Datetime",
+   "label": "Signed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "signed_ip",
+   "fieldtype": "Data",
+   "label": "Signed IP",
+   "read_only": 1
+  },
+  {
    "fieldname": "filing_section",
    "fieldtype": "Section Break",
    "label": "Filed"
@@ -222,7 +270,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-05 17:00:00.000000",
+ "modified": "2026-08-09 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Tax Form",

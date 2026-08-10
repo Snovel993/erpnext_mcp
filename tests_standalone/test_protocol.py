@@ -775,9 +775,9 @@ class Catalogue(SeededTestCase):
 		byte-identically from the register on demand, so "read the pass" and
 		"build the pass" are the same call.
 		"""
-		self.assertEqual(len(registry.TOOLS), 393)
+		self.assertEqual(len(registry.TOOLS), 394)
 		self.assertEqual(len(registry.READ_TOOLS), 179)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 214)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 215)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

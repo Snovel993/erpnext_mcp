@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Collecting the signature a compliance alert said was missing. v0.55.0.
 
-THE OTHER END OF `i9_section_1_unsigned` AND ITS THREE SIBLINGS. Those rules
+THE OTHER END OF `i9_section_1_unsigned` AND ITS FOUR SIBLINGS. Those rules
 find the boxes nobody signed; `generate_tasks_from_compliance_alerts` turns each
 into a Farm Task held by the person who can fix it; and this is what that person
 calls when they have got the signature. Without it the loop stops one step short
@@ -63,10 +63,26 @@ arbitrary fieldname on an arbitrary doctype is an arbitrary write with an
 Attach-shaped hat on.
 
 Each entry also carries what has to be TRUE beside the image: the timestamp
-column, the IP column, and — for the two employer-side boxes — that the caller
-is on the authorized-signer roster. A signature image on its own is not an
+column, the IP column, and — for the two boxes the authorized-signer roster
+governs — that the caller is on it. A signature image on its own is not an
 electronic signature; 8 CFR 274a.2(h) asks for the record of who made it and
 when, and this is where that record gets written.
+
+────────────────────────────────────────────────────────────────────────────
+v0.56.0: THE EMPLOYER'S OWN RETURNS, AND THE TWO FORMS THAT ARE NOT SIGNED
+────────────────────────────────────────────────────────────────────────────
+
+A fifth box covers Tax Form, which is a 941, an OR-WR, an OQ or a WA-ESD —
+four returns, one signature column, and which return a record is lives in
+`form_type` rather than in a fifth, sixth and seventh entry here.
+
+W-2 AND 1099-NEC ARE NOT SIGNED AND ARE NOT BOXES. Neither form has a
+signature line: the recipient copies are statements, and the
+penalties-of-perjury declaration for a whole batch is made once, on the W-3 or
+the 1096 transmittal that accompanies it. A caller naming one gets that
+sentence back rather than a list of field names to hunt through — see
+`UNSIGNED_REASONS`, which exists so the refusal ends the question instead of
+starting a search for a column that is not on the page.
 """
 
 from __future__ import annotations
@@ -79,10 +95,11 @@ from .. import compat
 from ..args import as_bool, as_str
 from ..errors import ToolError
 from ..result import ToolResult
-from . import files, i9, signers, w4
+from . import files, i9, signers, taxforms, w4
 
 I9_FORM = "I-9 Form"
 W4_FORM = "W-4 Form"
+TAX_FORM = "Tax Form"
 FARM_TASK = "Farm Task"
 
 #: The most a signature capture may be, in bytes. See the module docstring: it
@@ -107,11 +124,13 @@ FILE_STEM = "signature"
 class SignatureBox:
 	"""One box that can be signed, and everything true about signing it.
 
-	`form_type` is empty on the two EMPLOYEE boxes and set on the two employer
-	boxes, and that single field is the whole roster gate: Section 1 and the W-4
-	are signed by the worker themselves, who is on nobody's roster and should not
-	need to be, while Section 2 and Supplement B are the employer attesting and
-	`tools/signers.py` holds who may do that.
+	`form_type` IS THE ROSTER GATE AND IT IS EMPTY ON THREE OF THE FIVE. Section 1
+	and the W-4 are signed by the worker themselves, who is on nobody's roster and
+	should not need to be. Section 2 and Supplement B are the employer attesting,
+	and `tools/signers.py` holds who may do that. The employer's tax returns are
+	signed by an OFFICER, and this app has no register of officers — so that box
+	is gated by `write` permission on the record and nothing else, which is said
+	out loud on the entry itself rather than left to be inferred from a blank.
 	"""
 
 	doctype: str
@@ -139,8 +158,8 @@ class SignatureBox:
 		return f"{self.doctype}.{self.field}"
 
 
-#: THE CLOSED REGISTRY. Four boxes, one per missing-signature rule, and adding a
-#: fifth is a code change on purpose: every entry is a claim about which column
+#: THE CLOSED REGISTRY. Five boxes, one per missing-signature rule, and adding a
+#: sixth is a code change on purpose: every entry is a claim about which column
 #: on which doctype is a signature and who is allowed to put one there.
 SIGNATURE_BOXES = (
 	SignatureBox(
@@ -182,6 +201,32 @@ SIGNATURE_BOXES = (
 		signed_ip_field="signed_ip",
 		alert_types=("w4_signature_missing",),
 	),
+	# v0.56.0. THE EMPLOYER'S OWN RETURNS, and one box covers four form types
+	# rather than four boxes covering one each: a 941, an OR-WR, an OQ and a
+	# WA-ESD are one column on one doctype, and which of them a given record is
+	# lives in `form_type`. The COMPLIANCE RULE is where that distinction
+	# belongs — `tax_form_signature_missing` scopes to the four that have a
+	# signature line and leaves W-2 and 1099-NEC alone, because neither of those
+	# forms has one.
+	#
+	# `form_type` IS EMPTY HERE, so no roster gate, and it is the one place this
+	# table says something the I-9 boxes do not. `tools/signers.py` records who
+	# may sign an I-9 and who may sign a W-4; it says nothing about who may sign
+	# a tax return, because that is an officer of the employer and this app has
+	# no register of officers. Gating on `can_sign_i9` would refuse the
+	# bookkeeper who actually signs the 941 and admit somebody whose
+	# authorisation covers a different form entirely — a wrong answer either
+	# way. The gate that does apply is `write` permission on the Tax Form.
+	SignatureBox(
+		doctype=TAX_FORM,
+		field="signature",
+		label="Employer tax return (penalties-of-perjury declaration)",
+		signed_at_field="signed_at",
+		signed_ip_field="signed_ip",
+		name_field="signer_name",
+		title_field="signer_title",
+		alert_types=("tax_form_signature_missing",),
+	),
 )
 
 BOXES_BY_KEY = {box.key: box for box in SIGNATURE_BOXES}
@@ -201,21 +246,112 @@ DOCTYPE_ALIASES = {
 	"w-4": W4_FORM,
 	"w4": W4_FORM,
 	"form w-4": W4_FORM,
+	# v0.56.0. A Tax Form is a 941, an OR-WR, an OQ or a WA-ESD, and a caller
+	# holding one in their hand will say which — so each form TYPE resolves to
+	# the doctype that holds it. `w-2` and `1099-nec` are deliberately absent:
+	# neither form has a signature box, `tax_form_signature_missing` does not
+	# raise on them, and resolving them here would take a caller all the way to
+	# "not a signature box this app will write to" instead of the shorter, truer
+	# answer that the form they are holding has no signature line on it.
+	"tax form": TAX_FORM,
+	"941": TAX_FORM,
+	"form 941": TAX_FORM,
+	"or-wr": TAX_FORM,
+	"orwr": TAX_FORM,
+	"oq": TAX_FORM,
+	"wa-esd": TAX_FORM,
+	"waesd": TAX_FORM,
+}
+
+#: Forms a caller may reasonably NAME and this app will never sign, with the
+#: sentence that says why. Answering "that form has no signature line" is a
+#: different and more useful refusal than "that is not a box I write to" — the
+#: first one settles the question, and the second sends somebody looking for a
+#: field name that does not exist.
+UNSIGNED_FORMS = {
+	"w-2": "W-2",
+	"w2": "W-2",
+	"form w-2": "W-2",
+	"1099-nec": "1099-NEC",
+	"1099nec": "1099-NEC",
+	"1099": "1099-NEC",
+}
+
+UNSIGNED_REASONS = {
+	"W-2": (
+		"Form W-2 has no signature line anywhere on it. The employee copies are statements "
+		"rather than declarations, and the penalties-of-perjury declaration for a whole batch "
+		"is made once, on the Form W-3 transmittal that goes to the SSA with them."
+	),
+	"1099-NEC": (
+		"Form 1099-NEC has no signature line, for the same reason Form W-2 has none: the "
+		"declaration for a batch is made once, on the Form 1096 transmittal."
+	),
+}
+
+
+#: doctype → how to turn a caller's argument into a docname, and how to redraw
+#: the page afterwards. v0.56.0 replaced two `if doctype == I9_FORM` branches
+#: with this, and the reason is that there were about to be three of them: the
+#: shape "resolve, then render" is the same for every form and only the two
+#: functions differ, so a table states it once and adding a fourth form is a row.
+#:
+#: EVERY ENTRY NAMES ITS MODULE'S OWN RESOLVER rather than reimplementing one.
+#: `i9._resolve_form`, `w4._resolve_w4` and `taxforms._resolve_form` each already
+#: take the aliases their own tools take and each already says the right thing
+#: when nothing resolves; a fourth reading of "which W-4" written here would be a
+#: fourth place for it to mean something slightly different.
+FORM_HANDLERS = {
+	I9_FORM: {
+		"resolve": lambda args: i9._resolve_form(args),
+		"render": lambda name: i9.render_i9_pdf({"i9_form": name, "overwrite": True}),
+		"pdf_field": "generated_pdf",
+		"renderer": "render_i9_pdf",
+	},
+	W4_FORM: {
+		"resolve": lambda args: w4._resolve_w4(args),
+		"render": lambda name: w4.render_w4_pdf({"w4_form": name, "overwrite": True}),
+		"pdf_field": "generated_pdf",
+		"renderer": "render_w4_pdf",
+	},
+	TAX_FORM: {
+		"resolve": lambda args: taxforms._resolve_form(args),
+		"render": lambda name: taxforms.render_tax_form_pdf({"name": name, "overwrite": True}),
+		"pdf_field": "generated_pdf",
+		"renderer": "render_tax_form_pdf",
+	},
 }
 
 
 # ── resolving what is being signed ──────────────────────────────────────────
 def _box(args: dict) -> SignatureBox:
-	"""Which of the four boxes this call is about, or the refusal naming all four."""
+	"""Which signature box this call is about, or the refusal naming every one.
+
+	TWO REFUSALS RATHER THAN ONE, and the second is the useful one. A caller
+	naming a form that HAS no signature line — a W-2, a 1099-NEC — is not making
+	a typo that a list of field names will fix; they are asking this app to sign
+	something that is not signed. `UNSIGNED_REASONS` answers that question
+	instead, because "Form W-2 has no signature line" ends the conversation and
+	"not a signature box this app will write to" starts a search for a field name
+	that does not exist.
+	"""
 	doctype = str(args.get("doctype") or args.get("form_doctype") or "").strip()
+	unsigned = UNSIGNED_FORMS.get(doctype.casefold())
+	if unsigned:
+		raise ToolError(
+			f"{UNSIGNED_REASONS[unsigned]} There is nothing on a {unsigned} for this call to "
+			f"attach a signature to, and tax_form_signature_missing does not raise on one. "
+			f"The employer returns that ARE signed are 941, OR-WR, OQ and WA-ESD. "
+			f"Nothing was changed."
+		)
 	resolved = DOCTYPE_ALIASES.get(doctype.casefold(), doctype)
 	fieldname = as_str(args, "field") or as_str(args, "signature_field")
 
 	if not resolved:
 		raise ToolError(
-			"doctype is required — the form the signature goes on, 'I-9 Form' or 'W-4 Form'. "
-			"A Farm Task raised from a missing-signature alert carries it in subject_doctype. "
-			"Nothing was changed."
+			"doctype is required — the form the signature goes on: 'I-9 Form', 'W-4 Form' or "
+			"'Tax Form'. A Farm Task raised from a missing-signature alert carries it in "
+			"subject_doctype. Nothing was changed."
 		)
 	if not fieldname:
 		# The commonest case has ONE answer, so answering it beats refusing: a
@@ -254,11 +390,8 @@ def _form_name(box: SignatureBox, args: dict) -> str:
 	inner = dict(args)
 	if given:
 		inner["name"] = given
-	# DELEGATED, NOT REIMPLEMENTED. `i9._resolve_form` and `w4._resolve_w4`
-	# already take a docname OR an employee and already say the right thing when
-	# neither resolves; a third copy of that reading here would be a third place
-	# for "which W-4" to mean something slightly different.
-	return i9._resolve_form(inner) if box.doctype == I9_FORM else w4._resolve_w4(inner)
+	# DELEGATED, NOT REIMPLEMENTED — see `FORM_HANDLERS`.
+	return str(FORM_HANDLERS[box.doctype]["resolve"](inner))
 
 
 def _child_row(box: SignatureBox, doc, args: dict) -> object:
@@ -404,13 +537,16 @@ def collect_form_signature(args: dict) -> ToolResult:
 
 	WHAT IT REFUSES, AND WHY EACH REFUSAL IS BEFORE THE WRITE:
 
-	  * a field that is not one of the four signature boxes — an endpoint that
-	    wrote an image into any column somebody named is an arbitrary write;
+	  * a field that is not one of the five signature boxes, and a FORM that has
+	    no signature line at all — an endpoint that wrote an image into any
+	    column somebody named is an arbitrary write, and one that accepted a
+	    signature for a W-2 would be inventing a box the IRS does not print;
 	  * a caller who cannot WRITE the form, checked through Frappe's own
 	    permission system rather than through a role list this app invented;
-	  * a caller not on the authorized-signer roster, for the two EMPLOYER
-	    boxes only — Section 1 and the W-4 are signed by the worker, who is on
-	    nobody's roster and must not need to be;
+	  * a caller not on the authorized-signer roster, for the two boxes it
+	    governs — Section 1 and the W-4 are signed by the worker, who is on
+	    nobody's roster and must not need to be, and the employer's tax returns
+	    are signed by an officer this app keeps no register of;
 	  * a box that already carries a signature, unless `overwrite` — replacing
 	    an attestation silently is the one write here that could not be noticed
 	    afterwards;
@@ -593,7 +729,7 @@ def _require_signer(box: SignatureBox) -> dict:
 	"""The roster row authorising this account, `{}` where the box is not gated.
 
 	THE EMPLOYEE BOXES ARE NOT GATED, and that is the point of `form_type` being
-	empty on two of the four. Section 1 and the W-4 are signed by the worker
+	empty on three of the five. Section 1 and the W-4 are signed by the worker
 	themselves under their own penalty of perjury; requiring the account holding
 	the phone to be an authorized signer would mean the only people who could
 	collect a worker's signature are the people authorised to sign FOR the
@@ -719,8 +855,9 @@ def _redraw(box: SignatureBox, form: str) -> dict:
 	and a site missing either has a working signature and no PDF — which is a
 	smaller problem than a signature this call refused to store.
 	"""
+	handler = FORM_HANDLERS[box.doctype]
 	try:
-		existing = str(frappe.db.get_value(box.doctype, form, "generated_pdf") or "").strip()
+		existing = str(frappe.db.get_value(box.doctype, form, handler["pdf_field"]) or "").strip()
 	except Exception:  # pragma: no cover - a site whose column is not migrated
 		existing = ""
 	if not existing:
@@ -728,14 +865,11 @@ def _redraw(box: SignatureBox, form: str) -> dict:
 			"regenerated": False,
 			"note": (
 				"no PDF had been rendered for this form, so there was nothing to bring up to "
-				"date. render_i9_pdf / render_w4_pdf draws one, with the signature stamped in."
+				f"date. {handler['renderer']} draws one, with the signature stamped in."
 			),
 		}
 	try:
-		if box.doctype == I9_FORM:
-			result = i9.render_i9_pdf({"i9_form": form, "overwrite": True})
-		else:
-			result = w4.render_w4_pdf({"w4_form": form, "overwrite": True})
+		result = handler["render"](form)
 	except Exception as exc:
 		return {
 			"regenerated": False,

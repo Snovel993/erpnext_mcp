@@ -59,7 +59,7 @@ from ..args import as_bool, as_str, resolve_company
 from ..errors import ToolError
 from ..render import qr
 from ..result import ToolResult
-from . import bucket_log
+from . import artifacts, bucket_log
 from . import employee as employee_tool
 
 BADGE_DOCTYPE = bucket_log.BADGE_DOCTYPE
@@ -464,6 +464,102 @@ def _card(row: dict, badge_id: str, company: str, rendered: dict) -> dict:
 	}
 
 
+# ── the Employee record's own copy ───────────────────────────────────────
+#
+# v0.56.0, AND IT IS A BUG FIX WEARING A FEATURE'S CLOTHES. Every call below
+# returned the card as base64 in a JSON payload and wrote NOTHING to the
+# Employee record. That is exactly right for the handset — it draws the card on
+# a screen — and it meant that on the Desk, where an HR manager opens somebody's
+# Employee form to find their badge, there was nothing there. The badge existed,
+# the register knew it, and the only ways to see it were an MCP call and a
+# Bucket Log Badge Map docname nobody memorises.
+#
+# So the QR is also written where somebody would look for it: the Attachments
+# sidebar of the Employee record it belongs to.
+#
+# PRIVATE, LIKE EVERY OTHER FILE THIS APP WRITES. A badge QR encodes the badge
+# ID and nothing else — no name, no date of birth — so it is the least sensitive
+# file in the app; it is private anyway, because "which of our files are safe to
+# serve to anybody who guesses the URL" is not a question worth having two
+# answers to.
+#
+# ONE FILE PER BADGE, REPLACED IN PLACE. The filename carries the badge ID, so
+# reprinting the same badge overwrites its own attachment rather than leaving a
+# sidebar with four identical QRs in it, and reissuing after a lost card leaves
+# the old badge's file alone — it is the evidence of what that card was.
+
+#: What the QR attachment is called on the Employee record. The badge ID is in
+#: the name so a sidebar with two of them says which is which, and so the
+#: replace-in-place check below can find its own previous copy without a field
+#: on Employee to remember it by.
+QR_FILE_TEMPLATE = "badge-{badge_id}-qr.png"
+
+#: And the card. Same reasoning, and the suffix is what tells them apart at a
+#: glance in a list that sorts alphabetically.
+CARD_FILE_TEMPLATE = "badge-{badge_id}-card.pdf"
+
+
+def _attached_file(employee: str, file_name: str) -> str:
+	"""The docname of a File with this name already on this Employee, or "".
+
+	MATCHED ON THE NAME, which is what makes reprinting idempotent without a
+	column on Employee to remember the last one by. Frappe uniquifies a
+	filename it has seen before rather than replacing it, so without this a
+	foreman reprinting a washed card four times leaves four identical PNGs in
+	the sidebar and the newest one is not obviously the newest.
+	"""
+	if not compat.doctype_exists("File"):  # pragma: no cover - not a real Frappe
+		return ""
+	try:
+		rows = frappe.db.get_all(
+			"File",
+			filters={
+				"attached_to_doctype": EMPLOYEE,
+				"attached_to_name": employee,
+				"file_name": file_name,
+			},
+			fields=["name"],
+			limit=1,
+		)
+	except Exception:  # pragma: no cover - a site mid-migrate
+		return ""
+	return str(rows[0]["name"]) if rows else ""
+
+
+def _attach_to_employee(employee: str, file_name: str, content: bytes) -> dict:
+	"""Put one file in the Employee's Attachments sidebar. NEVER RAISES.
+
+	A BADGE THAT PRINTED AND DID NOT ATTACH IS STILL A BADGE. This runs after
+	the register has been written and the QR drawn, and the thing the caller
+	asked for — issue a badge, give me the symbol — has already succeeded by the
+	time it is reached. Failing the whole call because the File doctype refused
+	an attachment would take a working badge away from somebody because a
+	sidebar entry did not appear, so the outcome is REPORTED instead: `attached`
+	is False and `note` says why.
+	"""
+	report = {"attached": False, "file_url": None, "file_docname": None, "replaced": None, "note": ""}
+	try:
+		existing = _attached_file(employee, file_name)
+		if existing:
+			# Deleted rather than left beside its replacement. This is the SAME
+			# badge's symbol regenerated, not a second badge — see the section
+			# comment. A reissue mints a new badge ID and therefore a new
+			# filename, and that one is left alone.
+			frappe.delete_doc("File", existing, ignore_permissions=True, force=True)
+			report["replaced"] = existing
+		attachment = artifacts.attach_bytes(EMPLOYEE, employee, file_name, content)
+		report["attached"] = True
+		report["file_url"] = attachment.get("file_url")
+		report["file_docname"] = attachment.get("name")
+	except Exception as exc:
+		report["note"] = (
+			f"the badge was issued and the file was not attached to {employee} "
+			f"({type(exc).__name__}: {exc}). The QR is in this result either way, and calling "
+			f"again will retry the attachment."
+		)
+	return report
+
+
 # ── 1. generate_employee_badge_qr ────────────────────────────────────────
 
 
@@ -510,11 +606,22 @@ def generate_employee_badge_qr(args: dict) -> ToolResult:
 	rendered = _render(badge_id, as_str(args, "error_correction") or BADGE_ERROR_CORRECTION)
 	recorded = _record_badge(row, company, badge_id, args)
 
+	# v0.56.0. AFTER the register is written, and deliberately last: the badge is
+	# issued by this point and the attachment is a convenience on top of it. See
+	# `_attach_to_employee` — it never raises.
+	attach = as_bool(args, "attach", True)
+	attachment = (
+		_attach_to_employee(row["name"], QR_FILE_TEMPLATE.format(badge_id=badge_id), rendered["png"])
+		if attach
+		else {"attached": False, "note": "attach=false — nothing was written to the Employee record."}
+	)
+
 	data = {
 		"actor": actor,
 		**_card(row, badge_id, company, rendered),
 		"created": created,
 		"reused": not created,
+		"attachment": attachment,
 		"retired_badges": recorded["retired"],
 		"previous_employee": recorded["previous_employee"],
 		"backfilled_entries": recorded["backfilled_entries"],
@@ -532,6 +639,8 @@ def generate_employee_badge_qr(args: dict) -> ToolResult:
 	summary = f"badge {badge_id} {verb} for {row.get('employee_name') or row['name']}"
 	if recorded["retired"]:
 		summary += f", retired {', '.join(recorded['retired'])}"
+	if attachment.get("attached"):
+		summary += " and attached to their Employee record"
 	return ToolResult(
 		data=data,
 		summary=summary,
@@ -635,7 +744,133 @@ def generate_employee_badge_sheet(args: dict) -> ToolResult:
 	)
 
 
-# ── 3. resolve_badge ─────────────────────────────────────────────────────
+# ── 3. generate_employee_id_card ─────────────────────────────────────────
+
+
+def generate_employee_id_card(args: dict) -> ToolResult:
+	"""MUTATING (default OFF). One employee's ID card, as a PDF on their own record.
+
+	TIM'S ACTUAL PROBLEM, AND IT IS NOT THAT BADGES WERE HARD TO MAKE. Badges
+	were being made and then being unfindable: `generate_employee_badge_qr`
+	answered with base64 in a JSON payload, which is exactly what a handset wants
+	and is nothing at all to somebody who has opened an Employee form in the Desk
+	looking for a card to print. This attaches the card where they are already
+	looking.
+
+	IT ISSUES A BADGE IF THERE IS NONE, and reuses the live one where there is —
+	the same contract `generate_employee_badge_qr` keeps, because it delegates to
+	it rather than reimplementing the mint. Printing a card must not be a second
+	way to consume an identifier.
+
+	THE LAYOUT IS NOT THIS APP'S SECOND OPINION ABOUT A CARD. `badge_sheet` draws
+	it, in the same millimetres and the same classes as the Print Format the Desk
+	Print button uses, so the card that comes off this call and the card that
+	comes off that button are the same card. A layout written here would be a
+	third one, and three layouts is two too many for a thing that has to line up
+	with a pre-printed lanyard slot.
+
+	────────────────────────────────────────────────────────────────────────
+	THE PDF IS BEST-EFFORT, AND THE REASON IS A POLICY THIS APP ALREADY HAS
+	────────────────────────────────────────────────────────────────────────
+
+	`render/__init__.py` states it: this app has no runtime dependency beyond
+	Frappe itself, and `frappe.utils.pdf.get_pdf` shells out to a **wkhtmltopdf
+	binary that is present in some images and absent in others**. Every other
+	document this app writes is drawn by `render/pdf.py` in the standard library
+	for exactly that reason — but `render/pdf.py` has no images and no colour,
+	and a badge with no photograph and no QR is not a badge.
+
+	So this is the one document that asks for the binary, and it asks POLITELY:
+	where wkhtmltopdf is present the PDF is rendered and attached, and where it
+	is not, the call still issues the badge, still attaches the QR, still returns
+	the card's HTML, and says in one sentence that the PDF needs a binary this
+	bench has not got. A bench without it keeps the Desk's own Print button,
+	which renders the same layout through the same missing binary — so nothing
+	this call could do would make a PDF appear there either.
+	"""
+	_require()
+	inner = dict(args)
+	# `attach` governs the CARD on this call; the QR underneath it is attached
+	# either way, because the QR is what a scanner needs and it costs nothing.
+	inner.pop("attach", None)
+	badge = generate_employee_badge_qr(inner)
+	card = dict(badge.data)
+	employee = str(card.get("employee") or "")
+	badge_id = str(card.get("badge_id") or "")
+
+	from ..badge_sheet import sheet_html
+
+	html = sheet_html([card], title=f"ID Card — {card.get('employee_name') or employee}")
+
+	attach = as_bool(args, "attach", True)
+	rendered = _card_pdf(html)
+	attachment = {"attached": False, "note": rendered["note"]}
+	if attach and rendered["pdf"]:
+		attachment = _attach_to_employee(
+			employee, CARD_FILE_TEMPLATE.format(badge_id=badge_id), rendered["pdf"]
+		)
+	elif not attach:
+		attachment = {"attached": False, "note": "attach=false — nothing was written to the record."}
+
+	data = {
+		"employee": employee,
+		"employee_name": card.get("employee_name"),
+		"badge_id": badge_id,
+		"created": card.get("created"),
+		"reused": card.get("reused"),
+		# BOTH ATTACHMENTS REPORTED SEPARATELY. They fail independently and for
+		# different reasons — the QR needs an encoder, the card needs a PDF
+		# binary — and "the badge did not attach" would be an unanswerable
+		# sentence if it covered two files.
+		"qr_attachment": card.get("attachment"),
+		"card_attachment": attachment,
+		"card_html": html,
+		"pdf_bytes": len(rendered["pdf"]) if rendered["pdf"] else 0,
+		"print_format": "Employee Badge Card",
+	}
+	summary = f"ID card for {card.get('employee_name') or employee} ({badge_id})"
+	summary += (
+		" rendered and attached to their Employee record"
+		if attachment.get("attached")
+		else " — the card was built and not attached as a PDF"
+	)
+	return ToolResult(data=data, summary=summary)
+
+
+def _card_pdf(html: str) -> dict:
+	"""`{"pdf": bytes|None, "note": str}` — the card as a PDF where this bench can.
+
+	NEVER RAISES AND NEVER IMPORTS AT MODULE LEVEL. `frappe.utils.pdf` pulls in
+	pdfkit, which pulls in a subprocess call to a binary; on a bench without it
+	the import itself is the failure, and an ImportError at the top of this file
+	would take every badge tool down with it rather than one PDF.
+	"""
+	try:
+		from frappe.utils.pdf import get_pdf
+	except Exception as exc:  # pragma: no cover - depends on the bench image
+		return {
+			"pdf": None,
+			"note": (
+				f"this bench has no PDF renderer ({type(exc).__name__}), so the card was built "
+				f"as HTML and not attached. `card_html` in this result is the same layout the "
+				f"Desk's 'Employee Badge Card' print format uses; printing it from the browser "
+				f"produces the same card. Installing wkhtmltopdf is what makes this attach."
+			),
+		}
+	try:
+		pdf = get_pdf(html)
+	except Exception as exc:
+		return {
+			"pdf": None,
+			"note": (
+				f"the PDF renderer failed ({type(exc).__name__}: {exc}), so the card was built "
+				f"as HTML and not attached. The badge itself was issued and its QR is attached."
+			),
+		}
+	return {"pdf": pdf, "note": ""} if pdf else {"pdf": None, "note": "the PDF renderer produced nothing."}
+
+
+# ── 4. resolve_badge ─────────────────────────────────────────────────────
 
 
 def resolve_badge(args: dict) -> ToolResult:

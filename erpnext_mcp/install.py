@@ -102,6 +102,9 @@ the settings form, and there is no code path that makes it for them.
 import frappe
 
 from . import (
+	badge_form_action,
+	badge_list_action,
+	badge_print_format,
 	compliance_fields,
 	dashboard,
 	i9_documents,
@@ -136,6 +139,9 @@ def after_install() -> None:
 	_kpi_definitions()
 	_farm_task_templates()
 	_badge_logo_field()
+	_badge_print_format()
+	_badge_list_action()
+	_badge_form_action()
 	frappe.db.commit()
 
 
@@ -160,6 +166,9 @@ def after_migrate() -> None:
 	_kpi_definitions()
 	_farm_task_templates()
 	_badge_logo_field()
+	_badge_print_format()
+	_badge_list_action()
+	_badge_form_action()
 
 
 def _i9_settings() -> None:
@@ -325,6 +334,78 @@ def _badge_logo_field() -> None:
 		badges.install_badge_logo_field()
 	except Exception as exc:  # pragma: no cover - reported rather than fatal
 		print(f"erpnext_mcp: Company.badge_logo was not added — {type(exc).__name__}: {exc}")
+
+
+def _badge_print_format() -> None:
+	"""Give the Desk's Print button a badge that looks like a badge.
+
+	v0.56.0. Without it the button renders Frappe's standard format — Badge ID,
+	Company, Employee, Active, Notes on a sheet of Letter, which is every fact on
+	the record and nothing anybody can clip to a lanyard. IT ONLY EVER CREATES
+	WHAT IS NOT THERE, by name, so an operator who nudged the layout for their own
+	card printer keeps it through every future migrate. That matters more here
+	than anywhere else this app seeds a format: laying out a CR-80 card is a
+	fractional-millimetre argument with one specific piece of hardware.
+	"""
+	report = badge_print_format.seed_badge_print_format()
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded the {report['name']!r} Print Format for Bucket Log Badge Map — "
+			f"the Desk's Print button now lays a badge out at CR-80 (85.6 x 54mm), front and "
+			f"back, for a card printer. It is a CUSTOM format, so anything you change about it "
+			f"survives the next migrate."
+		)
+	elif report.get("reason") not in ("already present", ""):
+		print(f"erpnext_mcp: the badge Print Format was not seeded — {report['reason']}")
+
+
+def _badge_form_action() -> None:
+	"""Put an "ID Card" button on the Employee form itself.
+
+	v0.56.0, and it is the half of this feature the complaint was about. The list
+	action prints a sheet for a ticked crew; this is for the far commoner moment
+	— one Employee form open, and the question "where is this person's badge".
+	Before it, the answer was an MCP call or a Bucket Log Badge Map docname
+	nobody memorises.
+
+	A RECORD RATHER THAN A HOOK, for the same reason the list action is one: the
+	Employee form belongs to ERPNext, `test_hooks.TheFormScripts` holds every
+	`doctype_js` entry to a doctype this app created, and a customisation an
+	operator cannot see or switch off is not one this app installs.
+	`badge_form_action.py` argues it.
+	"""
+	report = badge_form_action.seed_badge_form_action()
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded the {report['name']!r} Client Script — an Employee form now has "
+			f"an ID Card button that issues or reprints their badge, shows the card, and leaves "
+			f"the QR and the card PDF in the record's own Attachments. It is a row in the Desk: "
+			f"untick `enabled` or delete it and this app will not put it back."
+		)
+	elif report.get("reason") not in ("already present", ""):
+		print(f"erpnext_mcp: the Employee ID Card button was not seeded — {report['reason']}")
+
+
+def _badge_list_action() -> None:
+	"""Put "Print Badge Sheet" in the Employee list's Actions menu.
+
+	v0.56.0, AND IT IS A RECORD RATHER THAN A HOOK. The Employee list belongs to
+	ERPNext, and `hooks.py` promises this app does not change how a form the
+	operator already had behaves. A Client Script row is the same route
+	`compliance_fields` and `Company.badge_logo` take onto other people's
+	doctypes: visible in the Desk, switchable off, deleted by
+	`before_uninstall`, and never re-created once declined.
+	`badge_list_action.py` argues the whole thing.
+	"""
+	report = badge_list_action.seed_badge_list_action()
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded the {report['name']!r} Client Script — the Employee list's "
+			f"Actions menu can now print a sheet of badge cards for the selected crew. It is a "
+			f"row in the Desk: untick `enabled` or delete it and this app will not put it back."
+		)
+	elif report.get("reason") not in ("already present", ""):
+		print(f"erpnext_mcp: the Employee badge-sheet button was not seeded — {report['reason']}")
 
 
 def _command_center() -> None:
@@ -869,6 +950,9 @@ def before_uninstall() -> None:
 	uninstalling for compliance reasons is exactly the person who wanted to keep
 	this, so it is spelled out rather than discovered afterwards.
 	"""
+	_remove_badge_list_action()
+	_remove_badge_form_action()
+
 	losses = []
 	for doctype, what in _PRECIOUS_DOCTYPES:
 		try:
@@ -909,6 +993,51 @@ def before_uninstall() -> None:
 			"names, EPA registration numbers, REIs, PHIs, I-9 statuses and traceability "
 			"links do not. Export the affected doctypes BEFORE uninstalling, not after:\n"
 			f"{chr(10).join(sorted({f'  bench --site <site> backup --only-doctype {doctype!r}' for doctype, _f in grafted}))}\n"
+		)
+
+
+def _remove_badge_list_action() -> None:
+	"""Take this app's button off the Employee list before the app goes.
+
+	v0.56.0. THIS IS THE ONE PIECE OF CLEANUP `before_uninstall` DOES rather than
+	warns about, and the asymmetry is the point. Everything else in this function
+	reports what an uninstall will destroy, because those are the operator's
+	records and destroying them is their decision. A Client Script this app wrote
+	onto ERPNext's Employee list is not the operator's record and not a decision:
+	left behind, it is a button calling a method that no longer exists — a form
+	that behaves differently with no way to find out why, which is the exact
+	outcome `hooks.py` promises against.
+
+	It only removes a row still carrying this app's marker, so a script somebody
+	has adopted and rewritten stays. Never raises: an uninstall that died here
+	would leave the app half-removed.
+	"""
+	report = badge_list_action.remove_badge_list_action()
+	if report.get("removed"):
+		print(f"erpnext_mcp: removed the {report['name']!r} Client Script from the Employee list.")
+	elif report.get("reason") not in ("not present", ""):
+		print(
+			"\nerpnext_mcp: could not remove this app's Client Script from the Employee list — "
+			f"{report['reason']}.\nDelete it by hand in the Desk under Client Script, or its "
+			'"Print Badge Sheet" button will stay on the list calling a method that has gone.\n'
+		)
+
+
+def _remove_badge_form_action() -> None:
+	"""Take this app's ID Card button off the Employee form before the app goes.
+
+	The same cleanup `_remove_badge_list_action` does and for the same reason: a
+	button left behind calls a method that no longer exists, which is a form
+	behaving differently with no way to find out why.
+	"""
+	report = badge_form_action.remove_badge_form_action()
+	if report.get("removed"):
+		print(f"erpnext_mcp: removed the {report['name']!r} Client Script from the Employee form.")
+	elif report.get("reason") not in ("not present", ""):
+		print(
+			"\nerpnext_mcp: could not remove this app's Client Script from the Employee form — "
+			f"{report['reason']}.\nDelete it by hand in the Desk under Client Script, or its "
+			'"ID Card" button will stay on the form calling a method that has gone.\n'
 		)
 
 
