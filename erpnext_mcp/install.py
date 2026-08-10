@@ -373,6 +373,12 @@ def _badge_form_action() -> None:
 	`doctype_js` entry to a doctype this app created, and a customisation an
 	operator cannot see or switch off is not one this app installs.
 	`badge_form_action.py` argues it.
+
+	FROM v0.56.1 IT CAN ALSO BE UPDATED, and the three sentences below are the
+	three states: written, brought up to date, or left alone because somebody has
+	edited it. That last one PRINTS — an operator whose edit is silently kept and
+	silently stale has been told nothing, and the fix they are missing here is a
+	card that comes out of Save-as-PDF blank.
 	"""
 	report = badge_form_action.seed_badge_form_action()
 	if report.get("created"):
@@ -381,6 +387,19 @@ def _badge_form_action() -> None:
 			f"an ID Card button that issues or reprints their badge, shows the card, and leaves "
 			f"the QR and the card PDF in the record's own Attachments. It is a row in the Desk: "
 			f"untick `enabled` or delete it and this app will not put it back."
+		)
+	elif report.get("updated"):
+		print(
+			f"erpnext_mcp: {report['reason']} — the {report['name']!r} Client Script was this "
+			f"app's own unedited copy, so it has been brought up to date. The card now reaches "
+			f"the print tab as a blob URL instead of being written into it, which is what makes "
+			f"Save-as-PDF produce a card rather than a blank page."
+		)
+	elif report.get("reason", "").startswith("left alone"):
+		print(
+			f"erpnext_mcp: the {report['name']!r} Client Script has been edited on this site, so "
+			f"it was left exactly as it is — {report['reason']}. Delete the row and run "
+			f"`bench migrate` to take this app's current copy, or paste the fix in by hand."
 		)
 	elif report.get("reason") not in ("already present", ""):
 		print(f"erpnext_mcp: the Employee ID Card button was not seeded — {report['reason']}")
@@ -395,7 +414,9 @@ def _badge_list_action() -> None:
 	`compliance_fields` and `Company.badge_logo` take onto other people's
 	doctypes: visible in the Desk, switchable off, deleted by
 	`before_uninstall`, and never re-created once declined.
-	`badge_list_action.py` argues the whole thing.
+	`badge_list_action.py` argues the whole thing — including why, from v0.56.1,
+	this app's OWN unedited copy of the script is updated in place while one an
+	operator has edited is left alone and said out loud.
 	"""
 	report = badge_list_action.seed_badge_list_action()
 	if report.get("created"):
@@ -403,6 +424,19 @@ def _badge_list_action() -> None:
 			f"erpnext_mcp: seeded the {report['name']!r} Client Script — the Employee list's "
 			f"Actions menu can now print a sheet of badge cards for the selected crew. It is a "
 			f"row in the Desk: untick `enabled` or delete it and this app will not put it back."
+		)
+	elif report.get("updated"):
+		print(
+			f"erpnext_mcp: {report['reason']} — the {report['name']!r} Client Script was this "
+			f"app's own unedited copy, so it has been brought up to date. The sheet now reaches "
+			f"the print tab as a blob URL instead of being written into it, which is what makes "
+			f"Save-as-PDF produce the cards rather than a blank page."
+		)
+	elif report.get("reason", "").startswith("left alone"):
+		print(
+			f"erpnext_mcp: the {report['name']!r} Client Script has been edited on this site, so "
+			f"it was left exactly as it is — {report['reason']}. Delete the row and run "
+			f"`bench migrate` to take this app's current copy, or paste the fix in by hand."
 		)
 	elif report.get("reason") not in ("already present", ""):
 		print(f"erpnext_mcp: the Employee badge-sheet button was not seeded — {report['reason']}")

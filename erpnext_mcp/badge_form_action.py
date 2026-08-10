@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-""""ID Card" on the Employee form, as a record and not as a hook. v0.56.0.
+""""ID Card" on the Employee form, as a record and not as a hook. v0.56.1.
 
 `badge_list_action.py` puts "Print Badge Sheet" on the Employee LIST, for thirty
 people at once. This is the other half and the one the complaint was actually
@@ -23,6 +23,13 @@ So this is a Client Script row, exactly as the list button is, and it keeps the
 same three properties: an operator can SEE it in the Desk, can turn it off or
 delete it and this module will not put it back, and it goes when the app goes
 because `before_uninstall` names it.
+
+IT IS ALSO UPGRADEABLE IN PLACE FROM v0.56.1, on the three-state rule
+`badge_list_action` argues at length: absent is written, a copy that still
+fingerprints as one this app shipped is updated, and a copy an operator has
+edited is left exactly where it is and reported as stale. v0.56.0 could only
+create, which meant the blank-PDF bug below could not be fixed on any site that
+had already migrated.
 
 ────────────────────────────────────────────────────────────────────────────
 WHAT THE BUTTON DOES, AND THE ONE THING IT DELIBERATELY DOES NOT
@@ -48,6 +55,8 @@ explains itself reads as a form that is not ready yet.
 
 from __future__ import annotations
 
+import hashlib
+
 import frappe
 
 CLIENT_SCRIPT = "Client Script"
@@ -63,111 +72,189 @@ SCRIPT_NAME = "Employee — ID Card"
 #: could not find what it wrote last time would write it again at every migrate.
 SCRIPT_MARKER = "erpnext_mcp:badge-card-button"
 
+#: WHICH REVISION OF THE TEXT THIS APP SHIPS. The marker above is identity and
+#: never changes; this changes with the script. `badge_list_action` argues both.
+SCRIPT_REVISION = "r2"
+
+#: Marker and revision on one line — what the seeder matches to answer "is this
+#: site already on the current text".
+SCRIPT_STAMP = f"{SCRIPT_MARKER}@{SCRIPT_REVISION}"
+
+#: Every earlier text this app shipped, fingerprinted by `_fingerprint`. How the
+#: seeder tells its own copy from one an operator has edited.
+PRIOR_REVISIONS = {
+	"691791ffeb586793c4fd694ce15dd7726bcf4ec8ec5407eca117745118dd18c5": (
+		"r1 — v0.56.0, which wrote the card into the tab with document.write"
+	),
+}
+
 #: The method the button calls, spelled once so a test can hold the script and
 #: the whitelisted function to the same dotted path.
 CARD_METHOD = "erpnext_mcp.api.badges.employee_badge_card"
 
-SCRIPT_SOURCE = """// %(marker)s
-// Added by erpnext_mcp (v0.56.0). Untick `enabled` above, or delete this row,
+SCRIPT_SOURCE = """// %(stamp)s
+// Added by erpnext_mcp (v0.56.1). Untick `enabled` above, or delete this row,
 // to remove the button — the app will not put it back.
 //
 // It adds an "ID Card" button to the Employee form. The card it shows is drawn
 // by the server, in the same markup as the "Employee Badge Card" print format,
 // so this file never lays a card out itself.
 
-frappe.ui.form.on("%(doctype)s", {
-	refresh: function (frm) {
-		frm.add_custom_button(
-			__("ID Card"),
-			function () {
-				if (frm.is_new()) {
-					// Present and explaining itself, rather than absent. See the
-					// module docstring: a button that comes and goes reads as a
-					// broken install.
-					frappe.msgprint(__("Save this employee before issuing a badge."));
-					return;
-				}
+(function () {
+	// THE CARD IS HANDED TO THE TAB AS A BLOB URL AND NOT WRITTEN INTO IT.
+	// v0.56.1, and the same fix `badge_list_action` carries for the sheet.
+	// `tab.document.write()` fills in a document whose URL is still
+	// `about:blank`, and a browser's print path renders a page by going back to
+	// its URL — which for `about:blank` is nothing. The card looked right on
+	// screen and came out of Save-as-PDF EMPTY. A blob: URL is a real resource
+	// the print preview can read a second time and get the card back from.
+	//
+	// THE <base> IS WHAT KEEPS THE PHOTOGRAPH ON IT. The card carries
+	// `/files/…` and `/private/files/…` image URLs, which a browser resolves
+	// against the document's own URL, and nothing resolves against a blob: one.
+	// The site's own origin is written in before the document leaves.
+	function show_printable(tab, html) {
+		var url;
+		try {
+			var doc = new DOMParser().parseFromString(html, "text/html");
+			var base = doc.createElement("base");
+			base.setAttribute("href", window.location.origin + "/");
+			doc.head.insertBefore(base, doc.head.firstChild);
+			url = URL.createObjectURL(
+				new Blob(["<!doctype html>\\n" + doc.documentElement.outerHTML], {
+					type: "text/html;charset=utf-8",
+				})
+			);
+		} catch (error) {
+			// A browser with no DOMParser, Blob or createObjectURL still gets
+			// the card on screen the old way — which is where every browser was
+			// before this release.
+			tab.document.open();
+			tab.document.write(html);
+			tab.document.close();
+			return;
+		}
 
-				frappe.call({
-					method: "%(method)s",
-					args: { employee: frm.doc.name },
-					freeze: true,
-					freeze_message: __("Drawing the badge..."),
-				}).then(function (response) {
-					const card = (response || {}).message;
-					if (!card || !card.html) {
+		tab.location.href = url;
+
+		// REVOKED WHEN THE TAB CLOSES AND NOT ON A TIMER: the print preview
+		// reads the URL a second time, and one revoked while the card is still
+		// open would print the blank page this exists to stop.
+		var watch = setInterval(function () {
+			if (!tab || tab.closed) {
+				clearInterval(watch);
+				URL.revokeObjectURL(url);
+			}
+		}, 5000);
+	}
+
+	frappe.ui.form.on("%(doctype)s", {
+		refresh: function (frm) {
+			frm.add_custom_button(
+				__("ID Card"),
+				function () {
+					if (frm.is_new()) {
+						// Present and explaining itself, rather than absent. See
+						// the module docstring: a button that comes and goes
+						// reads as a broken install.
+						frappe.msgprint(__("Save this employee before issuing a badge."));
 						return;
 					}
 
-					const links = [];
-					if (card.card_url) {
-						links.push(
-							'<a href="' + frappe.utils.escape_html(card.card_url) +
-								'" target="_blank">' + __("Open the PDF") + "</a>"
-						);
-					}
-					if (card.qr_url) {
-						links.push(
-							'<a href="' + frappe.utils.escape_html(card.qr_url) +
-								'" target="_blank">' + __("Open the QR") + "</a>"
-						);
-					}
+					frappe.call({
+						method: "%(method)s",
+						args: { employee: frm.doc.name },
+						freeze: true,
+						freeze_message: __("Drawing the badge..."),
+					}).then(function (response) {
+						const card = (response || {}).message;
+						if (!card || !card.html) {
+							return;
+						}
 
-					const dialog = new frappe.ui.Dialog({
-						title: __("Badge {0}", [card.badge_id]),
-						size: "large",
-						fields: [
-							{
-								fieldtype: "HTML",
-								fieldname: "card",
-								options:
-									'<div style="display:flex;justify-content:center;padding:12px 0">' +
-									card.html +
-									"</div>" +
-									(links.length
-										? '<div style="text-align:center;padding-bottom:8px">' +
-										  links.join(" &nbsp;·&nbsp; ") +
-										  "</div>"
-										: "") +
-									(card.note
-										? '<div class="text-muted small" style="text-align:center">' +
-										  frappe.utils.escape_html(card.note) +
-										  "</div>"
-										: ""),
+						const links = [];
+						if (card.card_url) {
+							links.push(
+								'<a href="' + frappe.utils.escape_html(card.card_url) +
+									'" target="_blank">' + __("Open the PDF") + "</a>"
+							);
+						}
+						if (card.qr_url) {
+							links.push(
+								'<a href="' + frappe.utils.escape_html(card.qr_url) +
+									'" target="_blank">' + __("Open the QR") + "</a>"
+							);
+						}
+
+						const dialog = new frappe.ui.Dialog({
+							title: __("Badge {0}", [card.badge_id]),
+							size: "large",
+							fields: [
+								{
+									fieldtype: "HTML",
+									fieldname: "card",
+									options:
+										'<div style="display:flex;justify-content:center;padding:12px 0">' +
+										card.html +
+										"</div>" +
+										(links.length
+											? '<div style="text-align:center;padding-bottom:8px">' +
+											  links.join(" &nbsp;·&nbsp; ") +
+											  "</div>"
+											: "") +
+										(card.note
+											? '<div class="text-muted small" style="text-align:center">' +
+											  frappe.utils.escape_html(card.note) +
+											  "</div>"
+											: ""),
+								},
+							],
+							// PRINT FROM THE DIALOG, so a bench with no PDF
+							// renderer still gets paper. The browser's own print
+							// dialog draws the same HTML the PDF would have
+							// carried — see `show_printable` for how it gets
+							// there and why it is not written into the tab.
+							primary_action_label: __("Print"),
+							primary_action: function () {
+								const tab = window.open("", "_blank");
+								if (!tab) {
+									frappe.msgprint(__("Allow pop-ups for this site to print the card."));
+									return;
+								}
+								show_printable(tab, card.html);
 							},
-						],
-						// PRINT FROM THE DIALOG, so a bench with no PDF renderer
-						// still gets paper. The browser's own print dialog draws
-						// the same HTML the PDF would have carried.
-						primary_action_label: __("Print"),
-						primary_action: function () {
-							const tab = window.open("", "_blank");
-							if (!tab) {
-								frappe.msgprint(__("Allow pop-ups for this site to print the card."));
-								return;
-							}
-							tab.document.open();
-							tab.document.write(card.html);
-							tab.document.close();
-						},
-					});
-					dialog.show();
+						});
+						dialog.show();
 
-					// The sidebar only refetches its attachments on a reload, and
-					// the whole point of this feature is that the file is THERE
-					// afterwards. Without this the operator prints a card, looks
-					// at the sidebar, and sees what was there before they pressed
-					// the button.
-					if (card.attached || card.qr_url) {
-						frm.reload_doc();
-					}
-				});
-			},
-			__("Badge")
-		);
-	},
-});
-""" % {"marker": SCRIPT_MARKER, "doctype": EMPLOYEE, "method": CARD_METHOD}
+						// The sidebar only refetches its attachments on a reload,
+						// and the whole point of this feature is that the file is
+						// THERE afterwards. Without this the operator prints a
+						// card, looks at the sidebar, and sees what was there
+						// before they pressed the button.
+						if (card.attached || card.qr_url) {
+							frm.reload_doc();
+						}
+					});
+				},
+				__("Badge")
+			);
+		},
+	});
+})();
+""" % {"stamp": SCRIPT_STAMP, "doctype": EMPLOYEE, "method": CARD_METHOD}
+
+
+def _fingerprint(text: str) -> str:
+	"""A hash of a script with line endings and trailing whitespace normalised.
+
+	The same function `badge_list_action._fingerprint` is, and spelled out here
+	rather than imported for the reason the two modules are separate at all:
+	these are two independent rows on somebody else's doctype, and neither
+	should stop working because the other was refactored.
+	"""
+	body = str(text or "").replace("\r\n", "\n").strip()
+	lines = [line.rstrip() for line in body.split("\n")]
+	return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 def _existing() -> str:
@@ -194,19 +281,25 @@ def _existing() -> str:
 
 
 def seed_badge_form_action() -> dict:
-	"""Create the Employee form button if this site has not got it. Never raises.
+	"""Create the Employee form button, or bring this app's own copy up to date.
 
-	IT ONLY EVER CREATES WHAT IS NOT THERE. An operator who deleted it has
-	declined it and gets to keep declining it; one who edited it keeps the edit.
-	The same contract `seed_i9_print_format` and `seed_badge_list_action` keep,
-	and it matters here for the same reason it matters there — this is a button
-	on somebody else's form, and a customisation that reappears at every
-	`bench migrate` is one nobody can decline.
+	THE THREE STATES ARE ARGUED IN `badge_list_action`'s MODULE DOCSTRING and
+	this keeps them exactly: absent is written, a copy still fingerprinting as
+	one this app shipped is updated, and a copy an operator has edited is left
+	alone and reported. An operator who deleted the row is none of the three —
+	the seeder never sees it, and they keep declining it.
 
-	Returns `{"created": bool, "name": str, "reason": str}` so `install.py` can
-	say one true sentence either way.
+	Never raises. Returns `{"created": bool, "updated": bool, "name": str,
+	"revision": str, "reason": str}` so `install.py` can say one true sentence
+	whichever of the four happened.
 	"""
-	report = {"created": False, "name": SCRIPT_NAME, "reason": ""}
+	report = {
+		"created": False,
+		"updated": False,
+		"name": SCRIPT_NAME,
+		"revision": SCRIPT_REVISION,
+		"reason": "",
+	}
 	try:
 		if not frappe.db.exists("DocType", CLIENT_SCRIPT):  # pragma: no cover - not a real Frappe
 			report["reason"] = "this site has no Client Script doctype"
@@ -218,7 +311,30 @@ def seed_badge_form_action() -> dict:
 		found = _existing()
 		if found:
 			report["name"] = found
-			report["reason"] = "already present"
+			stored = str(frappe.db.get_value(CLIENT_SCRIPT, found, "script") or "")
+			if SCRIPT_STAMP in stored:
+				report["reason"] = "already present"
+				return report
+
+			shipped = PRIOR_REVISIONS.get(_fingerprint(stored))
+			if not shipped:
+				# SOMEBODY HAS BEEN IN IT. Their edit stands, and the caller is
+				# told plainly rather than left thinking the fix went out.
+				report["reason"] = (
+					"left alone — this site's copy has been edited, so it is not this app's "
+					f"to rewrite. It is missing revision {SCRIPT_REVISION}"
+				)
+				return report
+
+			# This app's own text, unchanged since it wrote it. Saved through the
+			# document rather than `db.set_value` so Client Script's `on_update`
+			# runs and the Desk stops serving the cached old one.
+			doc = frappe.get_doc(CLIENT_SCRIPT, found)
+			doc.script = SCRIPT_SOURCE
+			doc.flags.ignore_permissions = True
+			doc.save(ignore_permissions=True)
+			report["updated"] = True
+			report["reason"] = f"updated from {shipped.split(' —')[0]} to {SCRIPT_REVISION}"
 			return report
 
 		doc = frappe.get_doc(
@@ -274,9 +390,12 @@ def remove_badge_form_action() -> dict:
 
 __all__ = (
 	"CARD_METHOD",
+	"PRIOR_REVISIONS",
 	"SCRIPT_MARKER",
 	"SCRIPT_NAME",
+	"SCRIPT_REVISION",
 	"SCRIPT_SOURCE",
+	"SCRIPT_STAMP",
 	"remove_badge_form_action",
 	"seed_badge_form_action",
 )

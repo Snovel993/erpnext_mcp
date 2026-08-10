@@ -7,7 +7,7 @@ this app does not lay the card out. The Desk is the consumer with nowhere to sen
 the JSON: an HR manager who ticks thirty pickers wants thirty cards, not an array
 of thirty base64 PNGs.
 
-FIVE CLAIMS.
+SEVEN CLAIMS.
 
 1. `TheGeometry` — eight cards fit a sheet of Letter at CR-80 with a cut
    allowance, and the arithmetic is checked against `PAGE` rather than asserted
@@ -22,6 +22,13 @@ FIVE CLAIMS.
 5. `TheListAction` — the Employee list button is a RECORD and not a hook, it is
    only ever created when absent, it does not overwrite ERPNext's own list
    settings, and `before_uninstall` takes it away again.
+6. `ThePrintableTab` — v0.56.1. The sheet reaches the tab as a blob: URL rather
+   than being written into `about:blank`, which is what makes Save-as-PDF
+   produce cards instead of an empty page, and it carries a `<base>` so the
+   photographs survive the move.
+7. `TheRevisionUpgrade` — v0.56.1. A seeder that only ever creates cannot ship a
+   fix. This app's own unedited copy is updated in place; a copy an operator has
+   edited is left exactly as it is and reported.
 """
 
 import inspect
@@ -32,6 +39,7 @@ import frappe
 from erpnext_mcp import badge_list_action, badge_sheet
 from erpnext_mcp.badge_print_format import CARD_HEIGHT_MM, CARD_WIDTH_MM
 
+from .badge_scripts_r1 import LIST_SCRIPT_R1
 from .fixtures import MAIN, MAIN_ABBR, SeededTestCase, install_hrms
 from .harness import STORE
 
@@ -386,3 +394,139 @@ class TheListAction(SeededTestCase):
 		for hook in (install.after_install, install.after_migrate):
 			with self.subTest(hook=hook.__name__):
 				self.assertIn("_badge_list_action()", inspect.getsource(hook))
+
+
+# ── 6 ─────────────────────────────────────────────────────────────────────────
+class ThePrintableTab(unittest.TestCase):
+	"""v0.56.1. THE SHEET CAME OUT OF SAVE-AS-PDF BLANK.
+
+	`tab.document.write()` fills in a document whose URL is still `about:blank`,
+	and a browser's print path renders a page by going back to its URL — which
+	for `about:blank` is nothing at all. The cards were on screen and the PDF was
+	empty. The document is handed over as a blob: URL instead, which is a real
+	resource the print preview can read a second time.
+	"""
+
+	def test_the_sheet_reaches_the_tab_as_a_url_and_not_as_a_write(self):
+		source = badge_list_action.SCRIPT_SOURCE
+		self.assertIn("URL.createObjectURL", source)
+		self.assertIn("tab.location.href = url", source)
+		# The only surviving `document.write` is the fallback for a browser with
+		# no Blob at all — it must not be what the response goes through.
+		self.assertNotIn("tab.document.write(payload.html)", source)
+		self.assertIn("show_printable(tab, payload.html)", source)
+
+	def test_it_writes_a_base_so_the_photographs_still_resolve(self):
+		"""A card carries `/files/…` and `/private/files/…` image URLs, and
+		NOTHING resolves against a blob: URL. Without the base every photo and
+		company logo on the sheet comes out broken."""
+		source = badge_list_action.SCRIPT_SOURCE
+		self.assertIn('doc.createElement("base")', source)
+		self.assertIn('base.setAttribute("href", window.location.origin + "/")', source)
+		self.assertIn("doc.head.insertBefore(base", source)
+
+	def test_a_browser_without_blob_still_gets_the_sheet_on_screen(self):
+		"""The fallback is the old path, which is where every browser was before
+		this release: the sheet renders, only its PDF is worse off."""
+		source = badge_list_action.SCRIPT_SOURCE
+		self.assertIn("catch (error) {", source)
+		self.assertIn("tab.document.write(html)", source)
+
+	def test_the_url_is_revoked_when_the_tab_goes_and_not_on_a_timer(self):
+		"""THE PRINT PREVIEW READS THE URL A SECOND TIME. A URL revoked while the
+		sheet is still open would print the blank page this whole change exists
+		to stop."""
+		source = badge_list_action.SCRIPT_SOURCE
+		self.assertIn("tab.closed", source)
+		self.assertIn("URL.revokeObjectURL(url)", source)
+		self.assertIn("clearInterval(watch)", source)
+
+	def test_the_helper_declares_no_global(self):
+		self.assertIn("function show_printable(tab, html) {", badge_list_action.SCRIPT_SOURCE)
+		self.assertIn("(function () {", badge_list_action.SCRIPT_SOURCE)
+
+
+# ── 7 ─────────────────────────────────────────────────────────────────────────
+class TheRevisionUpgrade(SeededTestCase):
+	"""v0.56.1. A SEEDER THAT ONLY EVER CREATES CANNOT SHIP A FIX.
+
+	v0.56.0 wrote the row when it was absent and did nothing when it was
+	present, so every site that had already migrated was stuck with the sheet
+	that printed blank. Three states now: absent is written, this app's own
+	unedited copy is updated, and a copy somebody has edited is left alone.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		install_hrms()
+		STORE.rows("Client Script").clear()
+
+	def _seed_at(self, script: str) -> str:
+		badge_list_action.seed_badge_list_action()
+		name = badge_list_action._existing()
+		frappe.db.set_value("Client Script", name, "script", script)
+		return name
+
+	def test_the_text_v0_56_0_shipped_is_recognised_as_this_apps_own(self):
+		"""THE ONE CHECK THAT CANNOT PASS WHILE THE UPGRADE IS BROKEN ON A REAL
+		BENCH. The fingerprint is of a text this module does not keep a copy of;
+		if it is wrong, every existing site is told its copy has been edited and
+		quietly keeps the bug."""
+		self.assertIn(
+			badge_list_action._fingerprint(LIST_SCRIPT_R1), badge_list_action.PRIOR_REVISIONS
+		)
+
+	def test_a_site_still_on_the_previous_revision_is_brought_up_to_date(self):
+		name = self._seed_at(LIST_SCRIPT_R1)
+		report = badge_list_action.seed_badge_list_action()
+
+		self.assertTrue(report["updated"])
+		self.assertFalse(report["created"])
+		self.assertIn("r1", report["reason"])
+		self.assertIn(badge_list_action.SCRIPT_REVISION, report["reason"])
+		self.assertEqual(
+			frappe.db.get_value("Client Script", name, "script"), badge_list_action.SCRIPT_SOURCE
+		)
+		self.assertEqual(len(STORE.rows("Client Script")), 1)
+
+	def test_a_migrate_after_the_upgrade_changes_nothing_again(self):
+		self._seed_at(LIST_SCRIPT_R1)
+		badge_list_action.seed_badge_list_action()
+		report = badge_list_action.seed_badge_list_action()
+		self.assertFalse(report["updated"])
+		self.assertEqual(report["reason"], "already present")
+
+	def test_an_edited_copy_is_left_alone_and_said_out_loud(self):
+		"""An operator whose edit is silently kept and silently stale has been
+		told nothing, and what they are missing here is a blank PDF."""
+		edited = LIST_SCRIPT_R1 + "\n// mine\n"
+		name = self._seed_at(edited)
+		report = badge_list_action.seed_badge_list_action()
+
+		self.assertFalse(report["updated"])
+		self.assertTrue(report["reason"].startswith("left alone"))
+		self.assertIn(badge_list_action.SCRIPT_REVISION, report["reason"])
+		self.assertEqual(frappe.db.get_value("Client Script", name, "script"), edited)
+
+	def test_whitespace_a_database_changed_is_not_an_operators_edit(self):
+		"""The question is "has a person been in this". A field that came back
+		with CRLF, or without its final newline, has not been edited by
+		anybody."""
+		mangled = LIST_SCRIPT_R1.replace("\n", "\r\n").rstrip() + "   "
+		self._seed_at(mangled)
+		report = badge_list_action.seed_badge_list_action()
+		self.assertTrue(report["updated"])
+
+	def test_the_stamp_carries_the_marker_the_row_is_found_by(self):
+		"""`_existing` matches the marker and the seeder matches the stamp. One
+		line has to satisfy both or a migrate writes a second row."""
+		self.assertIn(badge_list_action.SCRIPT_MARKER, badge_list_action.SCRIPT_STAMP)
+		self.assertIn(badge_list_action.SCRIPT_STAMP, badge_list_action.SCRIPT_SOURCE)
+
+	def test_install_says_which_of_the_three_happened(self):
+		from erpnext_mcp import install
+
+		source = inspect.getsource(install._badge_list_action)
+		self.assertIn('report.get("created")', source)
+		self.assertIn('report.get("updated")', source)
+		self.assertIn("left alone", source)

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The badge where somebody is already looking: the Employee record. v0.56.0.
+"""The badge where somebody is already looking: the Employee record. v0.56.1.
 
 `test_badges.py` proves a badge is minted, recorded and drawn. `test_badge_sheet`
 and `test_badge_print_format` prove it can be laid out on paper. None of them
@@ -8,7 +8,7 @@ badges at all: badges were being issued and then being unfindable, because every
 call returned base64 in a JSON payload and wrote nothing to the record an HR
 manager actually opens.
 
-FOUR CLAIMS.
+SIX CLAIMS.
 
 1. `TheQRLandsOnTheEmployee` — issuing a badge puts the QR in the Employee's own
    Attachments, privately, once per badge however many times it is reprinted.
@@ -25,6 +25,14 @@ FOUR CLAIMS.
 4. `TheClientScripts` — the two buttons are Client Script ROWS and not
    `doctype_js` hooks, they are created only when absent, and each names a
    method that actually exists.
+
+5. `ThePrintedCard` — v0.56.1. The card reaches the print tab as a blob: URL
+   rather than being written into `about:blank`, which is what makes
+   Save-as-PDF produce a card instead of an empty page.
+
+6. `TheRevisionUpgrade` — v0.56.1. A seeder that only ever creates cannot ship
+   a fix, so this app's own unedited copy is updated in place while one an
+   operator has edited is left exactly as it is and reported.
 """
 
 import unittest.mock
@@ -35,6 +43,7 @@ from erpnext_mcp import badge_form_action, badge_list_action
 from erpnext_mcp.api import badges as badge_api
 from erpnext_mcp.tools import badges
 
+from .badge_scripts_r1 import FORM_SCRIPT_R1
 from .fixtures import MAIN, MAIN_ABBR, SeededTestCase, install_hrms
 from .harness import STORE
 
@@ -342,3 +351,121 @@ class TheClientScripts(EmployeeBadgeTestCase):
 		self.assertEqual(badge_form_action.FORM_VIEW, "Form")
 		self.assertEqual(badge_list_action.LIST_VIEW, "List")
 		self.assertNotEqual(badge_form_action.SCRIPT_MARKER, badge_list_action.SCRIPT_MARKER)
+
+
+# ── 5. the card has to survive Save-as-PDF ───────────────────────────────
+class ThePrintedCard(EmployeeBadgeTestCase):
+	"""v0.56.1. THE CARD CAME OUT OF SAVE-AS-PDF BLANK.
+
+	`tab.document.write()` fills in a document whose URL is still `about:blank`,
+	and a browser's print path renders a page by going back to its URL — which
+	for `about:blank` is nothing. The card was on screen and the PDF was empty.
+	`badge_sheet`'s sheet had the same bug and carries the same fix.
+	"""
+
+	def test_the_card_reaches_the_tab_as_a_url_and_not_as_a_write(self):
+		source = badge_form_action.SCRIPT_SOURCE
+		self.assertIn("URL.createObjectURL", source)
+		self.assertIn("tab.location.href = url", source)
+		self.assertNotIn("tab.document.write(card.html)", source)
+		self.assertIn("show_printable(tab, card.html)", source)
+
+	def test_it_writes_a_base_so_the_photograph_still_resolves(self):
+		"""The card carries `/files/…` and `/private/files/…` image URLs, and
+		nothing resolves against a blob: URL."""
+		source = badge_form_action.SCRIPT_SOURCE
+		self.assertIn('doc.createElement("base")', source)
+		self.assertIn('base.setAttribute("href", window.location.origin + "/")', source)
+
+	def test_the_url_outlives_the_print_preview(self):
+		"""The preview reads the URL a second time. Revoking on a timer would
+		reintroduce the blank page; this waits for the tab to close."""
+		source = badge_form_action.SCRIPT_SOURCE
+		self.assertIn("tab.closed", source)
+		self.assertIn("URL.revokeObjectURL(url)", source)
+
+	def test_the_helper_declares_no_global(self):
+		"""A Client Script is evaluated on somebody else's form. A bare function
+		declaration at the top of one is a name on `window`."""
+		source = badge_form_action.SCRIPT_SOURCE
+		self.assertIn("(function () {", source)
+		self.assertIn("})();", source.strip())
+		self.assertLess(source.index("(function () {"), source.index("frappe.ui.form.on"))
+
+	def test_the_card_is_still_drawn_by_the_server(self):
+		"""The one thing this script deliberately does not do. Three layouts is a
+		photograph that sits 2mm differently depending on which button somebody
+		pressed — so the blob carries the server's HTML through untouched, and
+		the only thing added to it is the `<base>`."""
+		source = badge_form_action.SCRIPT_SOURCE
+		self.assertIn("doc.documentElement.outerHTML", source)
+		self.assertNotIn('class="badge-card"', source)
+		self.assertNotIn("mm;", source)
+
+
+# ── 6. a seeder that only creates cannot ship a fix ──────────────────────
+class TheRevisionUpgrade(EmployeeBadgeTestCase):
+	"""v0.56.1. Three states: absent is written, this app's own unedited copy is
+	updated, and a copy an operator has edited is left alone and reported."""
+
+	def setUp(self):
+		super().setUp()
+		STORE.rows("Client Script").clear()
+
+	def _seed_at(self, script: str) -> str:
+		badge_form_action.seed_badge_form_action()
+		name = badge_form_action._existing()
+		frappe.db.set_value("Client Script", name, "script", script)
+		return name
+
+	def test_the_text_v0_56_0_shipped_is_recognised_as_this_apps_own(self):
+		"""THE ONE CHECK THAT CANNOT PASS WHILE THE UPGRADE IS BROKEN ON A REAL
+		BENCH: the fingerprint is of a text this module keeps no copy of."""
+		self.assertIn(
+			badge_form_action._fingerprint(FORM_SCRIPT_R1), badge_form_action.PRIOR_REVISIONS
+		)
+
+	def test_a_site_still_on_the_previous_revision_is_brought_up_to_date(self):
+		name = self._seed_at(FORM_SCRIPT_R1)
+		report = badge_form_action.seed_badge_form_action()
+
+		self.assertTrue(report["updated"])
+		self.assertFalse(report["created"])
+		self.assertEqual(
+			frappe.db.get_value("Client Script", name, "script"), badge_form_action.SCRIPT_SOURCE
+		)
+		self.assertEqual(len([r for r in STORE.rows("Client Script") if r.get("view") == "Form"]), 1)
+
+	def test_an_edited_copy_is_left_alone_and_said_out_loud(self):
+		edited = FORM_SCRIPT_R1 + "\n// mine\n"
+		name = self._seed_at(edited)
+		report = badge_form_action.seed_badge_form_action()
+
+		self.assertFalse(report["updated"])
+		self.assertTrue(report["reason"].startswith("left alone"))
+		self.assertIn(badge_form_action.SCRIPT_REVISION, report["reason"])
+		self.assertEqual(frappe.db.get_value("Client Script", name, "script"), edited)
+
+	def test_a_migrate_after_the_upgrade_changes_nothing_again(self):
+		self._seed_at(FORM_SCRIPT_R1)
+		badge_form_action.seed_badge_form_action()
+		report = badge_form_action.seed_badge_form_action()
+		self.assertFalse(report["updated"])
+		self.assertEqual(report["reason"], "already present")
+
+	def test_the_two_scripts_are_versioned_apart(self):
+		"""They are two rows on two views and they will not always move
+		together. A shared stamp would let one seeder call the other's row
+		current."""
+		self.assertNotEqual(badge_form_action.SCRIPT_STAMP, badge_list_action.SCRIPT_STAMP)
+		self.assertIn(badge_form_action.SCRIPT_MARKER, badge_form_action.SCRIPT_STAMP)
+
+	def test_install_says_which_of_the_three_happened(self):
+		import inspect
+
+		from erpnext_mcp import install
+
+		source = inspect.getsource(install._badge_form_action)
+		self.assertIn('report.get("created")', source)
+		self.assertIn('report.get("updated")', source)
+		self.assertIn("left alone", source)

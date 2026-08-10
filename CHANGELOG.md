@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.56.1 — 2026-08-10
+
+**The badge sheet came out of Save-as-PDF blank.** The cards were on screen and
+the PDF was an empty page. Both buttons handed their printable document to a new
+tab with `document.write()`, which fills in a document whose URL is still
+`about:blank` — and a browser's print path renders a page by going back to its
+URL, where there is nothing. The sheet and the ID card now reach the tab as a
+**blob: URL**, a real resource the print preview can read a second time.
+
+**The photographs survive the move because the document carries a `<base>`.** A
+card's photo and company logo are `/files/…` and `/private/files/…` URLs, which a
+browser resolves against the document's own URL, and *nothing* resolves against a
+blob: one. The site's own origin is written into the document before it leaves,
+so a private photo still fetches with the operator's own session. The blob URL is
+released when the tab closes rather than on a timer: the print preview reads it
+again, and a URL revoked mid-preview would print the same blank page.
+
+**The seeders can now ship a fix.** v0.56.0's Client Script seeders created the
+row when it was absent and did nothing when it was present, which meant no site
+that had already migrated could ever receive a correction. They now recognise
+three states: absent is written, **this app's own unedited copy is updated in
+place**, and a copy an operator has edited is left exactly as it is — and said
+out loud at `bench migrate`, with the revision they are missing, rather than
+silently kept and silently stale. Ownership is decided by fingerprinting the
+stored text against every revision this app has shipped, so a single character of
+somebody's own still makes the script theirs. Deleting the row still declines the
+button for good.
+
 ## 0.56.0 — 2026-08-09
 
 **The badge, where somebody is already looking.** Badges were being issued and
