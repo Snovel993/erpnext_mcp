@@ -55,6 +55,8 @@ EIGHT CLAIMS.
 """
 
 import json
+import re
+import subprocess
 from pathlib import Path
 from typing import ClassVar
 
@@ -260,39 +262,138 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 			with self.subTest(path=route.path):
 				self.assertTrue(getattr(route.handler, "farm_ops_method", None))
 
-	def test_every_route_has_a_line_in_the_funnel_mount_script(self):
+	#: `--set-path=<path> <target>` off one line of the mount script's --dry-run.
+	MOUNT_LINE = re.compile(r"--set-path=(\S+)\s+(\S+)\s*$")
+
+	def mounts(self):
+		"""Every (path, target) `scripts/mount_farmops_funnel.sh` would publish.
+
+		Run rather than read. The script builds each target from its mount path
+		so the two cannot drift, and a test that re-parsed the source would be
+		asserting against the lists rather than against what the operator's shell
+		is actually handed. `--dry-run` prints the commands and executes nothing,
+		so this touches no docker and no tailnet.
+		"""
+		script = Path(__file__).resolve().parent.parent / "scripts" / "mount_farmops_funnel.sh"
+		completed = subprocess.run(
+			["sh", str(script), "--dry-run"],
+			capture_output=True,
+			text=True,
+			timeout=30,
+			check=False,
+		)
+		self.assertEqual(completed.returncode, 0, completed.stderr)
+		found = {}
+		for line in completed.stdout.splitlines():
+			if " funnel " not in line or "--set-path" not in line or line.rstrip().endswith(" off"):
+				continue
+			match = self.MOUNT_LINE.search(line)
+			self.assertIsNotNone(match, f"unparsed mount line: {line!r}")
+			found[match.group(1)] = match.group(2)
+		self.assertTrue(found, "the mount script emitted no mounts at all")
+		return found
+
+	def test_no_mount_forwards_to_a_bare_origin(self):
+		"""THE ASSERTION THAT WOULD HAVE CAUGHT v0.58.0's SILENT 404 ON EVERY ROUTE.
+
+		`--set-path` STRIPS THE PATH IT MATCHED before it forwards. The obvious
+		mount — `--set-path=/farmops/api/health http://127.0.0.1:5250` — reads as
+		"publish that path" and does not do that: what reached gunicorn was `/`,
+		for all fifty-six of them, and what came back was `farmops_api`'s own
+		refusal for a path outside its prefix:
+
+		    {"error": "/ is not a Farm Ops API path."}
+
+		The phone showed that as its generic miss, exactly as it had shown
+		v0.57.1's proxy 404, and `tailscale serve status` listed fifty-six mounts
+		that all looked right. THE TARGET IS WHERE THE BUG LIVES, so the target
+		is what this reads: every mount must forward to its own path, so that the
+		strip and the target's path cancel out.
+		"""
+		for path, target in sorted(self.mounts().items()):
+			with self.subTest(path=path):
+				self.assertTrue(
+					target.endswith(path),
+					f"--set-path={path} forwards to {target}, which does not carry {path}. "
+					f"Tailscale strips the matched path, so this mount delivers the request "
+					f"to the origin's root and the service answers 404 to everything.",
+				)
+				# And the path exactly once: an origin that already carried it
+				# would double it into `/farmops/farmops/api/...`.
+				self.assertEqual(target.count(path), 1, target)
+
+	def test_every_route_is_covered_by_a_mount(self):
 		"""THE ASSERTION THAT WOULD HAVE CAUGHT THREE RELEASES OF SILENT 404s.
 
-		`tailscale funnel --set-path` is an EXACT mount point, so the funnel
-		publishes one path per line and a route added to `routes.py` is not
-		published by having been added. v0.54.0, v0.55.0 and v0.57.0 each added
-		routes and none of them was mounted: six methods — the housing pair, the
-		onboarding dropdowns, both signature routes and the alert dismissal —
-		answered Tailscale's own plain-text 404 to every phone on the farm while
-		every test in this file passed, because these tests call the service and
-		a handset calls the funnel.
+		v0.54.0, v0.55.0 and v0.57.0 each added routes to `routes.py` and none of
+		them was mounted, because the funnel was fifty-six exact mount points and
+		a route is not published by having been added. Six methods — the housing
+		pair, the onboarding dropdowns, both signature routes and the alert
+		dismissal — answered Tailscale's own plain-text 404 to every phone on the
+		farm while every test in this file passed, because these tests call the
+		service and a handset calls the funnel. Nothing about it was visible from
+		the server: the request never arrived, so there was no log line, no audit
+		row and no traceback.
 
-		Nothing about that is visible from the server. The request never arrives,
-		so there is no log line, no audit row and no traceback; what the worker
-		gets is a 404 body the app cannot parse into a sentence, so it shows its
-		generic miss — "That task no longer exists". A signature pad reporting a
-		vanished task is the failure this assertion exists to make loud.
-
-		BOTH DIRECTIONS, for the reason the two above it are: a line with no
-		route publishes a path to the public internet that resolves to nothing,
-		which is the smaller failure and still one nobody would notice.
+		v0.58.1 mounts `/farmops` as ONE PREFIX, which is what makes a route
+		published by having been added. This asserts the property that buys —
+		every route, and the health path, under a mount — rather than the list
+		that used to stand in for it. It still fails loudly if somebody narrows
+		the prefix back to something that leaves a route uncovered.
 		"""
-		script = (Path(__file__).resolve().parent.parent / "scripts" / "mount_farmops_funnel.sh").read_text()
-		listed = set()
-		for block, prefix in (("MOBILE", "/mobile"), ("FILES", "/files")):
-			body = script.split(f'{block}="\n', 1)[1].split('"\n', 1)[0]
-			listed |= {f"{prefix}/{line.strip()}" for line in body.splitlines() if line.strip()}
-		self.assertEqual(
-			listed,
-			{route.path for route in ROUTES},
-			"scripts/mount_farmops_funnel.sh and routes.py disagree about what a phone can "
-			"reach. A route missing from the script is a 404 in somebody's hand.",
+		mounts = self.mounts()
+		covered = {path for path in mounts if path == PREFIX or PREFIX.startswith(f"{path}/")}
+		self.assertTrue(
+			covered,
+			f"nothing in the mount script covers {PREFIX} — every route a phone calls is a "
+			f"404 in somebody's hand. Mounts: {sorted(mounts)}",
 		)
+		for route in ROUTES:
+			with self.subTest(path=route.path):
+				full = f"{PREFIX}{route.path}"
+				self.assertTrue(
+					any(full == mount or full.startswith(f"{mount}/") for mount in covered),
+					f"{full} is not under any mount in scripts/mount_farmops_funnel.sh",
+				)
+		self.assertTrue(
+			any(farmops_app.HEALTH_PATH.startswith(f"{mount}/") for mount in covered),
+			f"{farmops_app.HEALTH_PATH} is not mounted, and it is what makes a failed check "
+			f"diagnostic rather than binary",
+		)
+
+	def test_the_other_two_ports_are_mounted_one_exact_path_at_a_time(self):
+		"""A PREFIX MOUNT ON EITHER OF THEM PUBLISHES SOMETHING NOBODY MEANT TO.
+
+		The `/farmops` prefix is safe because the service behind it 404s anything
+		that is not in `ROUTES` and every route in `ROUTES` runs `guard.endpoint`
+		— the mount is not the boundary, the route table is. Neither other port
+		has that property:
+
+		  * `/api/method` on 5300 is Frappe's whitelisted-method router. A prefix
+		    there publishes every `@frappe.whitelist()` on the site, in every
+		    installed app, to the public internet.
+		  * `/bankbridge` on 5202 fronts an admin UI that is unauthenticated by
+		    design, plus four unauthenticated Plaid write endpoints. Bank Bridge's
+		    SECURITY.md says publish the OAuth callback and nothing else.
+
+		So this asserts the shape rather than the contents: anything mounted off
+		those two ports is a leaf path, never a prefix somebody could grow into.
+		"""
+		for path in self.mounts():
+			if path == PREFIX or PREFIX.startswith(f"{path}/"):
+				continue
+			with self.subTest(path=path):
+				self.assertNotIn(
+					path,
+					("/", "/api", "/api/method", "/bankbridge", "/bankbridge/plaid"),
+					f"{path} is a prefix mount over a surface whose boundary is not a route "
+					f"table. See this test's docstring for what it publishes.",
+				)
+				self.assertTrue(
+					path.startswith("/api/method/erpnext_mcp.") or path.startswith("/bankbridge/"),
+					f"{path} is neither a farmops route nor one of the two exact paths this "
+					f"script is allowed to publish",
+				)
 
 	def test_no_admin_tool_is_reachable_at_any_path(self):
 		"""The one that matters. Two hundred MCP tools; none of them is here."""
