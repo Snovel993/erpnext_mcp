@@ -58,6 +58,7 @@ import itertools
 
 import frappe
 
+from .. import breaks as breaks_mod
 from .. import compat, geo, shifts
 from ..args import as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
@@ -1147,3 +1148,390 @@ def _track_gaps(points: list) -> list:
 				}
 			)
 	return out
+
+# ── 9. log_shift_break ────────────────────────────────────────────────────
+
+BREAK_KINDS = {
+	"Paid Rest": {"event_type": "Rest Period", "paid": True},
+	"Unpaid Meal": {"event_type": "Meal Period", "paid": False},
+	"Cool-Down": {"event_type": "Cool-Down", "paid": True},
+}
+
+VALID_APPLIES_TO = ("Crew", "Individual")
+
+
+def log_shift_break(args: dict) -> ToolResult:
+	"""Start a break on a shift — rest, meal or cool-down.
+
+	A thin, opinionated wrapper over `log_shift_event`. Validates the break-
+	specific fields together: an Individual break must name an employee, a Crew
+	break must not, and the break_kind must be one of the three payroll-meaningful
+	values.
+	"""
+	_require()
+	actor = employee_tool.require_hr_role()
+	row = _resolve_shift(args)
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	break_kind = as_str(args, "break_kind", required=True).strip()
+	if break_kind not in BREAK_KINDS:
+		raise ToolError(
+			f"break_kind must be one of {', '.join(BREAK_KINDS)}. Got {break_kind!r}."
+		)
+
+	applies_to = (as_str(args, "applies_to") or "Crew").strip()
+	if applies_to not in VALID_APPLIES_TO:
+		raise ToolError(f"applies_to must be Crew or Individual. Got {applies_to!r}.")
+
+	employee = None
+	if applies_to == "Individual":
+		employee = employee_tool.resolve_employee(as_str(args, "employee", required=True))
+	elif as_str(args, "employee"):
+		raise ToolError(
+			"employee is set but applies_to is Crew. A crew break covers everybody on the "
+			"shift — remove employee or set applies_to to Individual."
+		)
+
+	when = _when(args, "started_at")
+	duration = as_float(args, "duration_minutes")
+	event_type = BREAK_KINDS[break_kind]["event_type"]
+
+	doc = frappe.get_doc(DOCTYPE, row["name"])
+	doc.append(
+		"compliance_events",
+		{
+			"event_type": event_type,
+			"event_datetime": when,
+			"logged_by": row.get("foreman"),
+			"description": as_str(args, "description") or None,
+			"break_kind": break_kind,
+			"duration_minutes": duration,
+			"duration_source": "Scheduled",
+			"applies_to": applies_to,
+			"employee": employee,
+		},
+	)
+	doc.flags.ignore_permissions = True
+	doc.save(ignore_permissions=True)
+
+	described = shifts.describe(dict(doc.as_dict()), with_children=True)
+	crew_on_shift = described.get("still_on_shift") or described.get("crew_size") or 0
+	covers = crew_on_shift if applies_to == "Crew" else 1
+
+	break_tally = {}
+	for ev in described.get("compliance_events") or []:
+		bk = ev.get("break_kind")
+		if bk:
+			break_tally[bk] = break_tally.get(bk, 0) + 1
+
+	return ToolResult(
+		data={
+			**described,
+			"actor": actor,
+			"logged": {
+				"break_kind": break_kind,
+				"started_at": when,
+				"duration_minutes": duration,
+				"applies_to": applies_to,
+				"covers_workers": covers,
+			},
+			"breaks_today": break_tally,
+		},
+		summary=f"logged {break_kind} on {row['name']} at {when} ({applies_to})",
+		docstatus_delta="0 → 0 (amended)",
+	)
+
+
+# ── 10. end_shift_break ──────────────────────────────────────────────────
+
+def end_shift_break(args: dict) -> ToolResult:
+	"""End a running break — write the observed duration.
+
+	Writes `ended_at` and the true `duration_minutes`, and flips
+	`duration_source` to Observed.
+	"""
+	_require()
+	actor = employee_tool.require_hr_role()
+	row = _resolve_shift(args)
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	event_name = as_str(args, "event", required=True).strip()
+	ended_at = _when(args, "ended_at")
+
+	doc = frappe.get_doc(DOCTYPE, row["name"])
+	target = None
+	for entry in doc.compliance_events or []:
+		if str(entry.name) == event_name:
+			target = entry
+			break
+	if target is None:
+		raise ToolError(
+			f"No compliance event {event_name!r} on {row['name']}. "
+			"log_shift_break or log_shift_event creates one first."
+		)
+	if not target.get("break_kind"):
+		raise ToolError(
+			f"Event {event_name} is a {target.get('event_type')}, not a break event. "
+			"Only break events (with a break_kind) can be ended."
+		)
+
+	start_str = str(target.get("event_datetime") or "")
+	if ended_at < start_str:
+		raise ToolError(
+			f"ended_at ({ended_at}) is before the break started ({start_str}). "
+			"A break cannot end before it began."
+		)
+
+	target.ended_at = ended_at
+	observed_minutes = shifts.hours_between(start_str, ended_at)
+	if observed_minutes is not None:
+		target.duration_minutes = round(observed_minutes * 60, 1)
+	target.duration_source = "Observed"
+
+	doc.flags.ignore_permissions = True
+	doc.save(ignore_permissions=True)
+
+	described = shifts.describe(dict(doc.as_dict()), with_children=True)
+
+	break_tally = {}
+	for ev in described.get("compliance_events") or []:
+		bk = ev.get("break_kind")
+		if bk:
+			break_tally[bk] = break_tally.get(bk, 0) + 1
+
+	return ToolResult(
+		data={
+			**described,
+			"actor": actor,
+			"ended": {
+				"event": event_name,
+				"break_kind": target.get("break_kind"),
+				"started_at": start_str,
+				"ended_at": ended_at,
+				"duration_minutes": target.duration_minutes,
+				"duration_source": "Observed",
+			},
+			"breaks_today": break_tally,
+		},
+		summary=f"ended {target.get('break_kind')} on {row['name']} at {ended_at}",
+		docstatus_delta="0 → 0 (amended)",
+	)
+
+
+# ── 11. get_break_policy ─────────────────────────────────────────────────
+
+BREAK_POLICY_DOCTYPE = "Labor Break Policy"
+
+
+def get_break_policy(args: dict) -> ToolResult:
+	"""The break schedule the handset counts its break coach from."""
+	compat.require_doctype(
+		BREAK_POLICY_DOCTYPE,
+		"The Labor Break Policy DocType ships with erpnext_mcp v0.58.0 — run `bench migrate`.",
+	)
+	actor = employee_tool.require_hr_role()
+	company = resolve_company(args, actor)
+	work_state = as_str(args, "work_state") or ""
+
+	filters = {"enabled": 1}
+	if work_state:
+		filters["work_state"] = work_state
+
+	policies = frappe.db.get_all(
+		BREAK_POLICY_DOCTYPE,
+		filters=filters,
+		fields=["name"],
+		order_by="effective_from desc",
+		limit_page_length=1,
+	)
+	if not policies:
+		return ToolResult(
+			data={"policy": None, "note": "No enabled break policy found for this state."},
+			summary="no break policy found",
+		)
+
+	doc = frappe.get_doc(BREAK_POLICY_DOCTYPE, policies[0]["name"])
+	policy_dict = _describe_break_policy(dict(doc.as_dict()))
+
+	return ToolResult(
+		data=policy_dict,
+		summary=f"break policy {doc.name} for {doc.work_state}",
+	)
+
+
+def _describe_break_policy(row: dict) -> dict:
+	approved_by = row.get("human_approved_by") or None
+	return {
+		"policy": row.get("name") or row.get("policy_id"),
+		"work_state": row.get("work_state"),
+		"effective_from": str(row.get("effective_from") or "") or None,
+		"effective_to": str(row.get("effective_to") or "") or None,
+		"approved": bool(approved_by),
+		"approved_by": approved_by,
+		"regulation_citations": row.get("regulation_citations") or None,
+		"rest_schedule": [
+			{
+				"hours_from": r.get("hours_from"),
+				"hours_to": r.get("hours_to"),
+				"periods_owed": r.get("periods_owed"),
+				"minutes_each": r.get("minutes_each"),
+				"paid": bool(r.get("paid")),
+			}
+			for r in (row.get("rest_schedule") or [])
+		],
+		"meal_schedule": [
+			{
+				"hours_from": r.get("hours_from"),
+				"hours_to": r.get("hours_to"),
+				"periods_owed": r.get("periods_owed"),
+				"minutes_each": r.get("minutes_each"),
+				"paid": bool(r.get("paid")),
+			}
+			for r in (row.get("meal_schedule") or [])
+		],
+		"heat_schedule": [
+			{
+				"heat_index_from": r.get("heat_index_from"),
+				"heat_index_to": r.get("heat_index_to"),
+				"minutes_each": r.get("minutes_each"),
+				"every_hours": r.get("every_hours"),
+				"concurrent_with_rest": bool(r.get("concurrent_with_rest")),
+			}
+			for r in (row.get("heat_schedule") or [])
+		],
+		"max_hours_without_rest": row.get("max_hours_without_rest") or None,
+		"notes": row.get("notes") or None,
+	}
+
+
+# ── 12. get_shift_production ─────────────────────────────────────────────
+
+BUCKET_LOG = "Bucket Log Entry"
+
+
+def get_shift_production(args: dict) -> ToolResult:
+	"""Per-worker bucket counts for a shift, sorted by count desc."""
+	_require()
+	actor = employee_tool.require_hr_role()
+	row = _resolve_shift(args)
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	production = _compute_shift_production(row)
+
+	return ToolResult(
+		data=production,
+		summary=f"{row['name']}: {production['total_accepted']} buckets, {len(production['workers'])} workers",
+	)
+
+
+def _compute_shift_production(row: dict) -> dict:
+	"""Build the production board for a shift."""
+	shift_name = row["name"]
+	crew = shifts.crew_of(shift_name)
+
+	workers_by_emp = {}
+	for member in crew:
+		emp = member.get("employee")
+		if not emp:
+			continue
+		workers_by_emp[emp] = {
+			"employee": emp,
+			"employee_name": member.get("employee_name") or emp,
+			"badge_id": None,
+			"joined_at": str(member.get("joined_at") or "") or None,
+			"left_at": str(member.get("left_at") or "") or None,
+			"buckets_accepted": 0,
+			"buckets_rejected": 0,
+			"hours_present": shifts.hours_between(
+				str(member.get("joined_at") or row.get("start_datetime") or ""),
+				str(member.get("left_at") or row.get("end_datetime") or frappe.utils.now()),
+			),
+		}
+
+	# Read badge mappings
+	if compat.doctype_exists("Bucket Log Badge Map"):
+		for bm in frappe.db.get_all(
+			"Bucket Log Badge Map",
+			filters={"employee": ("in", list(workers_by_emp.keys()))},
+			fields=["employee", "badge_id"],
+		):
+			if bm["employee"] in workers_by_emp:
+				workers_by_emp[bm["employee"]]["badge_id"] = bm.get("badge_id")
+
+	# Read bucket counts
+	total_accepted = 0
+	total_rejected = 0
+	unattributed = 0
+	if compat.doctype_exists(BUCKET_LOG):
+		picker_field = compat.first_field(BUCKET_LOG, "picker_id", "employee", "picker", "worker")
+		if picker_field:
+			status_field = compat.first_field(BUCKET_LOG, "status", "verdict")
+			fields = ["name", picker_field]
+			if status_field:
+				fields.append(status_field)
+
+			shift_filter = compat.first_field(BUCKET_LOG, "shift", "farm_shift")
+			if shift_filter:
+				entries = frappe.db.get_all(
+					BUCKET_LOG,
+					filters={shift_filter: shift_name},
+					fields=fields,
+					limit_page_length=0,
+				)
+				for entry in entries:
+					picker = entry.get(picker_field)
+					status = str(entry.get(status_field) or "Accepted") if status_field else "Accepted"
+					if picker and picker in workers_by_emp:
+						if status in ("Accepted", "Linked"):
+							workers_by_emp[picker]["buckets_accepted"] += 1
+							total_accepted += 1
+						else:
+							workers_by_emp[picker]["buckets_rejected"] += 1
+							total_rejected += 1
+					elif picker:
+						total_accepted += 1
+						unattributed += 1
+					else:
+						total_accepted += 1
+						unattributed += 1
+
+	# Break reconciliation
+	events = shifts.events_of(shift_name)
+	policy_name = row.get("break_policy")
+	policy_dict = {}
+	if policy_name and compat.doctype_exists(BREAK_POLICY_DOCTYPE):
+		try:
+			pdoc = frappe.get_doc(BREAK_POLICY_DOCTYPE, policy_name)
+			policy_dict = _describe_break_policy(dict(pdoc.as_dict()))
+		except Exception:
+			pass
+
+	break_events = [dict(ev) for ev in events if ev.get("break_kind")]
+	for emp, w in workers_by_emp.items():
+		seg = {
+			"employee": emp,
+			"joined_at": w["joined_at"] or str(row.get("start_datetime") or ""),
+			"left_at": w["left_at"] or str(row.get("end_datetime") or ""),
+		}
+		if policy_dict:
+			wb = breaks_mod.worker_breaks(seg, break_events, policy_dict)
+			w["rest_periods_owed"] = wb["rest_owed"]
+			w["rest_periods_taken"] = wb["rest_taken"]
+			w["meal_periods_owed"] = wb["meal_owed"]
+			w["meal_periods_taken"] = wb["meal_taken"]
+			w["paid_break_minutes"] = round(wb["paid_break_hours"] * 60, 0)
+			w["unpaid_break_minutes"] = round(wb["unpaid_break_hours"] * 60, 0)
+
+	workers = sorted(workers_by_emp.values(), key=lambda w: w["buckets_accepted"], reverse=True)
+	still_on = len([m for m in crew if not m.get("left_at")])
+
+	return {
+		"shift": shift_name,
+		"as_of": frappe.utils.now(),
+		"crew_size": len(crew),
+		"still_on_shift": still_on,
+		"total_accepted": total_accepted,
+		"total_rejected": total_rejected,
+		"workers": workers,
+		"unattributed_entries": unattributed,
+	}

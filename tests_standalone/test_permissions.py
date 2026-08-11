@@ -227,6 +227,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"I-9 Audit Log",
 				"I-9 Document Type",
 				"Inspection Template",
+				"Labor Break Policy",
 				"MCP Action Log",
 				"Staged File Chunk",
 				"Staged File Upload Session",

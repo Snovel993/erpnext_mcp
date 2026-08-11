@@ -1,0 +1,191 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:policy_id",
+ "creation": "2026-08-10 12:00:00.000000",
+ "description": "The break schedule for one state in one effective period. A data record, not code, for the same reason every other compliance threshold is: regulations do not move on a release cadence, and a number that lives in Python is a number that needs a deploy to change. Oregon renumbered heat illness from -1130 to -1131 mid-stream; Washington's ag heat rule became permanent in 2023 and was amended in 2024.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "policy_id",
+  "work_state",
+  "col1",
+  "effective_from",
+  "effective_to",
+  "col2",
+  "enabled",
+  "regulation_section",
+  "regulation_citations",
+  "approval_section",
+  "human_approved_by",
+  "approval_col",
+  "human_approved_on",
+  "rest_section",
+  "rest_schedule",
+  "meal_section",
+  "meal_schedule",
+  "heat_section",
+  "heat_schedule",
+  "config_section",
+  "max_hours_without_rest",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "policy_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Policy ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "work_state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Work State",
+   "options": "OR\nWA",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "effective_from",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective From",
+   "reqd": 1
+  },
+  {
+   "description": "Blank means current — the policy is in effect until replaced.",
+   "fieldname": "effective_to",
+   "fieldtype": "Date",
+   "label": "Effective To"
+  },
+  {
+   "fieldname": "col2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "regulation_section",
+   "fieldtype": "Section Break",
+   "label": "Regulation"
+  },
+  {
+   "description": "The statutes and administrative rules this schedule is read from. Kept as text rather than a link because the citation is the evidence, and an evidence record that points at nothing is worse than one that quotes the number.",
+   "fieldname": "regulation_citations",
+   "fieldtype": "Small Text",
+   "label": "Regulation Citations"
+  },
+  {
+   "fieldname": "approval_section",
+   "fieldtype": "Section Break",
+   "label": "Approval"
+  },
+  {
+   "description": "The person who read each citation against the rule and approved it. Blank until somebody does — a policy with no approver is returned to the handset with approved: false, and the break coach shows a caveat.",
+   "fieldname": "human_approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User"
+  },
+  {
+   "fieldname": "approval_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "human_approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On"
+  },
+  {
+   "fieldname": "rest_section",
+   "fieldtype": "Section Break",
+   "label": "Rest Schedule"
+  },
+  {
+   "fieldname": "rest_schedule",
+   "fieldtype": "Table",
+   "label": "Rest Schedule",
+   "options": "Labor Break Schedule Row"
+  },
+  {
+   "fieldname": "meal_section",
+   "fieldtype": "Section Break",
+   "label": "Meal Schedule"
+  },
+  {
+   "fieldname": "meal_schedule",
+   "fieldtype": "Table",
+   "label": "Meal Schedule",
+   "options": "Labor Break Schedule Row"
+  },
+  {
+   "fieldname": "heat_section",
+   "fieldtype": "Section Break",
+   "label": "Heat Schedule"
+  },
+  {
+   "fieldname": "heat_schedule",
+   "fieldtype": "Table",
+   "label": "Heat Schedule",
+   "options": "Labor Heat Break Row"
+  },
+  {
+   "fieldname": "config_section",
+   "fieldtype": "Section Break",
+   "label": "Configuration"
+  },
+  {
+   "description": "Washington: no worker may work more than 3 hours without a rest period. Oregon: no hard ceiling. Null rather than a large sentinel, so a client that ignores it produces no countdown rather than a wrong one.",
+   "fieldname": "max_hours_without_rest",
+   "fieldtype": "Float",
+   "label": "Max Hours Without Rest",
+   "precision": "1"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-10 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Labor Break Policy",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

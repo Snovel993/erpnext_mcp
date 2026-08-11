@@ -33,6 +33,7 @@ import json
 import frappe
 from frappe.utils import today
 
+from .. import breaks as breaks_mod
 from .. import bucket_bridge, compat, payroll_integration
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
@@ -1038,6 +1039,7 @@ def _load_period_shifts(
 	# `existing_fields` anyway: a bench running this code against a database it
 	# has not migrated yet should lose the override, not the payroll run.
 	shift_pay_fields = compat.existing_fields(FARM_SHIFT, ("pay_type", "pay_rate"))
+	break_policy_fields = compat.existing_fields(FARM_SHIFT, ("break_policy",))
 
 	rows = frappe.db.get_all(
 		FARM_SHIFT,
@@ -1053,6 +1055,7 @@ def _load_period_shifts(
 			"shift_type",
 			"location",
 			*shift_pay_fields,
+			*break_policy_fields,
 		],
 		order_by="start_datetime asc",
 		limit_page_length=SHIFT_CAP,
@@ -1153,6 +1156,12 @@ def _load_period_shifts(
 			entry["pay_rate"] = _num(row.get("pay_rate"))
 		shifts.append(entry)
 
+	# v0.58.0. Read compliance events with a break_kind, read the shift's
+	# break_policy, and compute per-crew-row break hours. This is the wiring
+	# that makes break_hours reach payroll_calc — the four lines the design doc
+	# says close §0 finding 1.
+	_attach_break_hours(shifts, kept, names)
+
 	provenance["sources"].append(FARM_SHIFT)
 	provenance["shift_count"] = len(shifts)
 
@@ -1173,6 +1182,84 @@ def _load_period_shifts(
 	provenance["piece_row_count"] = len(piece_rows)
 
 	return shifts, provenance
+
+
+COMPLIANCE_EVENT = "Farm Shift Compliance Event"
+BREAK_POLICY = "Labor Break Policy"
+
+
+def _attach_break_hours(shifts_list: list, kept: list, names: list) -> None:
+	"""Read break events and policies, compute per-crew-row break_hours.
+
+	Writes `break_hours` and `unpaid_break_hours` onto each crew dict in place.
+	Only runs when the compliance event doctype has a break_kind field.
+	"""
+	if not names or not compat.doctype_exists(COMPLIANCE_EVENT):
+		return
+	if not compat.first_field(COMPLIANCE_EVENT, "break_kind"):
+		return
+
+	break_fields = ["parent", "event_type", "event_datetime", "break_kind",
+		"ended_at", "duration_minutes", "duration_source", "applies_to", "employee"]
+	existing = compat.existing_fields(COMPLIANCE_EVENT, tuple(break_fields))
+	if "break_kind" not in existing:
+		return
+
+	events_by_shift: dict[str, list[dict]] = {}
+	for ev in frappe.db.get_all(
+		COMPLIANCE_EVENT,
+		filters={"parent": ("in", names), "break_kind": ("is", "set")},
+		fields=list(existing),
+		limit_page_length=0,
+	):
+		events_by_shift.setdefault(ev["parent"], []).append(dict(ev))
+
+	if not events_by_shift:
+		return
+
+	policy_cache: dict[str, dict] = {}
+	shift_policy: dict[str, str] = {}
+	for row in kept:
+		bp = row.get("break_policy")
+		if bp:
+			shift_policy[row["name"]] = bp
+
+	for entry in shifts_list:
+		shift_name = entry["name"]
+		break_events = events_by_shift.get(shift_name)
+		if not break_events:
+			continue
+
+		policy_name = shift_policy.get(shift_name, "")
+		policy_dict: dict = {}
+		if policy_name:
+			if policy_name not in policy_cache:
+				if compat.doctype_exists(BREAK_POLICY):
+					try:
+						pdoc = frappe.get_doc(BREAK_POLICY, policy_name)
+						policy_cache[policy_name] = dict(pdoc.as_dict())
+					except Exception:
+						policy_cache[policy_name] = {}
+				else:
+					policy_cache[policy_name] = {}
+			policy_dict = policy_cache[policy_name]
+
+		if not policy_dict:
+			continue
+
+		for member in entry.get("crew") or []:
+			if member.get("break_hours") not in (None, "", 0, 0.0):
+				continue
+			seg = {
+				"employee": member.get("employee"),
+				"joined_at": member.get("joined_at") or entry.get("start_datetime"),
+				"left_at": member.get("left_at") or entry.get("end_datetime"),
+			}
+			wb = breaks_mod.worker_breaks(seg, break_events, policy_dict)
+			if wb["paid_break_hours"] > 0:
+				member["break_hours"] = wb["paid_break_hours"]
+			if wb["unpaid_break_hours"] > 0:
+				member["unpaid_break_hours"] = wb["unpaid_break_hours"]
 
 
 def _load_piece_rows(

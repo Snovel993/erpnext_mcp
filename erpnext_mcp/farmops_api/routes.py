@@ -244,6 +244,17 @@ ROUTES = (
 	# spelling keeps its route; handsets already in the field are not asked to
 	# change to get an answer.
 	Route("/mobile", mobile_api.submit_form_signature),
+	# v0.58.0. The break methods: log a break, end it, and read the policy that
+	# says what is owed. `get_break_policy` is the read the handset's break coach
+	# computes its countdown from — the schedule itself, fetched at shift start.
+	Route("/mobile", mobile_api.log_shift_break),
+	Route("/mobile", mobile_api.end_shift_break),
+	Route("/mobile", mobile_api.get_break_policy),
+	# v0.59.0. The foreman's day: clock somebody out, see production, read the
+	# shift. `clock_out_worker` is the mobile name for `remove_worker_from_shift`.
+	Route("/mobile", mobile_api.clock_out_worker),
+	Route("/mobile", mobile_api.get_shift_production),
+	Route("/mobile", mobile_api.get_shift),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

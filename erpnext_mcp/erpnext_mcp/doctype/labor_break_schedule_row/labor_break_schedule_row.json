@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-10 12:00:00.000000",
+ "description": "One band of a break schedule: how many rest or meal periods are owed when the shift falls in the hours_from–hours_to range. A policy carries one child table of these for rest and another for meals, so the two schedules can differ without a union type.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "hours_from",
+  "hours_to",
+  "col1",
+  "periods_owed",
+  "minutes_each",
+  "col2",
+  "paid"
+ ],
+ "fields": [
+  {
+   "fieldname": "hours_from",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "From (hours)",
+   "precision": "2",
+   "reqd": 1
+  },
+  {
+   "fieldname": "hours_to",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "To (hours)",
+   "precision": "2",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "periods_owed",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Periods Owed",
+   "reqd": 1
+  },
+  {
+   "fieldname": "minutes_each",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Minutes Each",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "paid",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Paid"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-10 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Labor Break Schedule Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

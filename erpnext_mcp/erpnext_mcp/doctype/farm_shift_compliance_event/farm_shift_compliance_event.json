@@ -13,6 +13,16 @@
   "event_col",
   "weather_snapshot_temp_f",
   "weather_snapshot_heat_index_f",
+  "break_section",
+  "break_kind",
+  "ended_at",
+  "break_col",
+  "duration_minutes",
+  "duration_source",
+  "break_scope_section",
+  "applies_to",
+  "break_scope_col",
+  "employee",
   "detail_section",
   "description",
   "producer_section",
@@ -29,7 +39,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Event",
-   "options": "Water Break\nShade Break\nRest Cycle\nSupervisor Observation\nHeat Illness Signs Check\nCool-Down\nThreshold Crossed\nAcclimatization Reminder\nOther",
+   "options": "Water Break\nShade Break\nRest Cycle\nSupervisor Observation\nHeat Illness Signs Check\nCool-Down\nThreshold Crossed\nAcclimatization Reminder\nRest Period\nMeal Period\nOther",
    "reqd": 1
   },
   {
@@ -66,6 +76,72 @@
    "fieldtype": "Float",
    "label": "Heat Index at Event (°F)",
    "precision": "1"
+  },
+  {
+   "fieldname": "break_section",
+   "fieldtype": "Section Break",
+   "label": "Break",
+   "depends_on": "eval:in_list(['Rest Period','Meal Period','Cool-Down'], doc.event_type)"
+  },
+  {
+   "description": "The payroll classification. Blank on every non-break event, which is every event that existed before v0.58.0. Paid Rest stays inside total_hours and is paid at the average piece rate; Unpaid Meal comes off the span; Cool-Down is paid rest for payroll and a distinct compliance record.",
+   "fieldname": "break_kind",
+   "fieldtype": "Select",
+   "label": "Break Kind",
+   "options": "\nPaid Rest\nUnpaid Meal\nCool-Down"
+  },
+  {
+   "description": "When the break ended. Rest taken, not offered — a break with a start and an end is a claim about what happened; a break with only a scheduled duration is a claim about what was intended.",
+   "fieldname": "ended_at",
+   "fieldtype": "Datetime",
+   "label": "Ended At"
+  },
+  {
+   "fieldname": "break_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What payroll sums. Set from the policy's scheduled figure at log time; overwritten with the observed figure when ended_at is recorded.",
+   "fieldname": "duration_minutes",
+   "fieldtype": "Float",
+   "label": "Duration (min)",
+   "precision": "1"
+  },
+  {
+   "default": "Scheduled",
+   "description": "Scheduled means the duration is the policy's figure. Observed means somebody tapped End and the true elapsed time replaced it. Visibly weaker evidence when Scheduled — a payroll that rests on a schedule rather than a measurement.",
+   "fieldname": "duration_source",
+   "fieldtype": "Select",
+   "label": "Duration Source",
+   "options": "Scheduled\nObserved"
+  },
+  {
+   "fieldname": "break_scope_section",
+   "fieldtype": "Section Break",
+   "label": "Break Scope",
+   "depends_on": "eval:in_list(['Rest Period','Meal Period','Cool-Down'], doc.event_type)"
+  },
+  {
+   "default": "Crew",
+   "description": "A crew break covers everybody on the shift at the time. An individual break covers one worker — the picker who takes their meal late because they were finishing a row.",
+   "fieldname": "applies_to",
+   "fieldtype": "Select",
+   "label": "Applies To",
+   "options": "Crew\nIndividual"
+  },
+  {
+   "fieldname": "break_scope_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Required when applies_to is Individual; ignored for Crew breaks. The specific worker this break covers.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "label": "Employee",
+   "options": "Employee",
+   "depends_on": "eval:doc.applies_to=='Individual'"
   },
   {
    "fieldname": "detail_section",
@@ -110,7 +186,7 @@
  "index_web_pages_for_search": 0,
  "istable": 1,
  "links": [],
- "modified": "2026-08-03 20:00:00.000000",
+ "modified": "2026-08-10 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Farm Shift Compliance Event",

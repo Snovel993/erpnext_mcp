@@ -228,6 +228,14 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# get an answer.
 		"/mobile/dismiss_compliance_alert",
 		"/mobile/submit_form_signature",
+		# v0.58.0. The break methods: log, end, and the policy the coach counts from.
+		"/mobile/log_shift_break",
+		"/mobile/end_shift_break",
+		"/mobile/get_break_policy",
+		# v0.59.0. The foreman's day: clock somebody out, production, shift detail.
+		"/mobile/clock_out_worker",
+		"/mobile/get_shift_production",
+		"/mobile/get_shift",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

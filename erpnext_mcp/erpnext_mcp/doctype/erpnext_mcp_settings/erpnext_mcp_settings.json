@@ -352,6 +352,10 @@
   "allow_remove_worker_from_shift",
   "allow_log_shift_event",
   "allow_end_shift",
+  "allow_log_shift_break",
+  "allow_end_shift_break",
+  "allow_get_break_policy",
+  "allow_get_shift_production",
   "allow_log_shift_location",
   "allow_create_heat_exposure_event",
   "weather_section",
@@ -2804,6 +2808,34 @@
   },
   {
    "default": "0",
+   "description": "MUTATING. Start a break on a shift — rest, meal or cool-down. A thin wrapper over log_shift_event that validates the break-specific fields together. A Crew break covers everybody on the shift; an Individual break must name the employee.",
+   "fieldname": "allow_log_shift_break",
+   "fieldtype": "Check",
+   "label": "Log Shift Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. End a running break — write the observed duration. Writes ended_at and the true duration_minutes, and flips duration_source to Observed.",
+   "fieldname": "allow_end_shift_break",
+   "fieldtype": "Check",
+   "label": "End Shift Break"
+  },
+  {
+   "default": "1",
+   "description": "READ. The break schedule for a state — the rest, meal and heat cool-down obligations the handset's break coach counts from. Returns the policy with its schedule rows. ON by default because reading a policy cannot create one.",
+   "fieldname": "allow_get_break_policy",
+   "fieldtype": "Check",
+   "label": "Get Break Policy"
+  },
+  {
+   "default": "1",
+   "description": "READ. Per-worker bucket counts for a shift, sorted by count descending. The production board: each worker's accepted and rejected bucket counts, hours present, and break reconciliation. ON by default because reading production cannot change it.",
+   "fieldname": "allow_get_shift_production",
+   "fieldtype": "Check",
+   "label": "Get Shift Production"
+  },
+  {
+   "default": "0",
    "description": "MUTATING. Appends one GPS fix to a shift's track \u2014 what the iOS app posts periodically while a shift is running. IT APPENDS AND NEVER EDITS: a breadcrumb somebody can correct is not a record of where the phone was. This is the one tool on the shift surface a worker's phone drives rather than the foreman, and it does not contradict the sole-actor rule \u2014 that rule is about who is ANSWERABLE, and a breadcrumb attests to nothing. OFF by default: a location track is a record of where people were, and turning it on is a decision an operator should take on purpose.",
    "fieldname": "allow_log_shift_location",
    "fieldtype": "Check",
@@ -4014,7 +4046,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-09 12:00:00.000000",
+ "modified": "2026-08-10 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ERPNext MCP Settings",

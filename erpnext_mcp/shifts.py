@@ -91,6 +91,7 @@ from __future__ import annotations
 
 import frappe
 
+from . import breaks as breaks_mod
 from . import compat
 
 DOCTYPE = "Farm Shift"
@@ -429,7 +430,7 @@ def describe_crew_row(row: dict, shift_end: str = "") -> dict:
 def describe_event_row(row: dict) -> dict:
 	producer = str(row.get("producer_record_doctype") or "").strip()
 	name = str(row.get("producer_record_name") or "").strip()
-	return {
+	out = {
 		"event_type": row.get("event_type"),
 		"event_datetime": str(row.get("event_datetime") or "") or None,
 		"logged_by": row.get("logged_by") or None,
@@ -441,6 +442,15 @@ def describe_event_row(row: dict) -> dict:
 		"heat_index_f": row.get("weather_snapshot_heat_index_f"),
 		"evidence_attached": bool(row.get("evidence_file")),
 	}
+	break_kind = row.get("break_kind") or ""
+	if break_kind:
+		out["break_kind"] = break_kind
+		out["ended_at"] = str(row.get("ended_at") or "") or None
+		out["duration_minutes"] = row.get("duration_minutes")
+		out["duration_source"] = row.get("duration_source") or "Scheduled"
+		out["applies_to"] = row.get("applies_to") or "Crew"
+		out["employee"] = row.get("employee") or None
+	return out
 
 
 def describe(row: dict, with_children: bool = False) -> dict:
@@ -477,7 +487,51 @@ def describe(row: dict, with_children: bool = False) -> dict:
 	out["compliance_event_count"] = len(events)
 	out["weather_timeline"] = readings
 	out["weather_reading_count"] = len(readings)
+	out["break_summary"] = _break_summary(row, crew, events)
 	return out
+
+
+def _break_summary(shift_row: dict, crew: list, events: list) -> dict | None:
+	"""Break reconciliation for the shift, if a break policy is linked."""
+	policy_name = shift_row.get("break_policy")
+	if not policy_name:
+		return None
+	try:
+		pdoc = frappe.get_doc("Labor Break Policy", policy_name)
+	except Exception:
+		return None
+	policy = pdoc.as_dict()
+	break_events = [e for e in events if e.get("break_kind")]
+	shift_dict = {
+		"start_datetime": shift_row.get("start_datetime"),
+		"end_datetime": shift_row.get("end_datetime"),
+	}
+	recon = breaks_mod.crew_reconciliation(shift_dict, crew, break_events, policy)
+	rest_logged = sum(1 for e in break_events if e.get("break_kind") == "Paid Rest")
+	meal_logged = sum(1 for e in break_events if e.get("break_kind") == "Unpaid Meal")
+	cool_down_logged = sum(1 for e in break_events if e.get("break_kind") == "Cool-Down")
+	scheduled_not_observed = [
+		{
+			"name": e.get("name"),
+			"break_kind": e.get("break_kind"),
+			"event_datetime": str(e.get("event_datetime") or ""),
+			"duration_minutes": e.get("duration_minutes"),
+		}
+		for e in break_events
+		if (e.get("duration_source") or "Scheduled") == "Scheduled" and not e.get("ended_at")
+	]
+	return {
+		"policy": policy_name,
+		"work_state": policy.get("work_state"),
+		"approved": bool(policy.get("human_approved_by")),
+		"crew_totals": {
+			"rest_logged": rest_logged,
+			"meal_logged": meal_logged,
+			"cool_down_logged": cool_down_logged,
+		},
+		"workers_short": recon.get("workers_short", []),
+		"breaks_scheduled_not_observed": scheduled_not_observed,
+	}
 
 
 def describe_heat_event(row: dict, with_plan: bool = True) -> dict:

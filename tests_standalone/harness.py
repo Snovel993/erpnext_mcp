@@ -1087,6 +1087,10 @@ APP_DOCTYPES = {
 	"Bucket Log Entry": "bucket_log_entry",
 	"Bucket Log Session": "bucket_log_session",
 	"Bucket Log Badge Map": "bucket_log_badge_map",
+	# v0.58.0. The break policy and its two child schedules.
+	"Labor Break Policy": "labor_break_policy",
+	"Labor Break Schedule Row": "labor_break_schedule_row",
+	"Labor Heat Break Row": "labor_heat_break_row",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

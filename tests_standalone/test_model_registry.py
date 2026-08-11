@@ -295,9 +295,9 @@ class ToolRegistration(unittest.TestCase):
 		# one more write, `dismiss_compliance_alert` — the same dismissal
 		# `dismiss_alert` makes, gated on the alert's own say-so, for the callers
 		# who are not sitting in front of the record.
-		self.assertEqual(len(self.registry.TOOLS), 395)
-		self.assertEqual(len(self.registry.READ_TOOLS), 179)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 216)
+		self.assertEqual(len(self.registry.TOOLS), 399)
+		self.assertEqual(len(self.registry.READ_TOOLS), 181)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 218)
 
 
 if __name__ == "__main__":

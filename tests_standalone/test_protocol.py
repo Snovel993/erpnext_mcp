@@ -782,9 +782,9 @@ class Catalogue(SeededTestCase):
 		may be closed without being met is a judgement somebody records in
 		advance, per alert, rather than one the caller makes on the spot.
 		"""
-		self.assertEqual(len(registry.TOOLS), 395)
-		self.assertEqual(len(registry.READ_TOOLS), 179)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 216)
+		self.assertEqual(len(registry.TOOLS), 399)
+		self.assertEqual(len(registry.READ_TOOLS), 181)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 218)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

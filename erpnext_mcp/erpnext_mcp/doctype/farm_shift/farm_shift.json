@@ -17,6 +17,7 @@
   "company",
   "location",
   "work_state",
+  "break_policy",
   "pay_type",
   "pay_rate",
   "farm_location_gps",
@@ -117,6 +118,13 @@
    "label": "Work State",
    "options": "\nOR\nWA",
    "search_index": 1
+  },
+  {
+   "description": "Which break schedule this shift was judged against, snapshotted at start. A policy amended in September must not retroactively make a July shift non-compliant.",
+   "fieldname": "break_policy",
+   "fieldtype": "Link",
+   "label": "Break Policy",
+   "options": "Labor Break Policy"
   },
   {
    "description": "Leave blank for the ordinary day, where this work is paid the way the worker's salary structure says. Fill it in on the day that was different — a picker moved onto irrigation is Hourly, whatever their structure says — and set Pay Rate, or the structure's Hourly Rate covers it.",
@@ -251,7 +259,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-03 20:00:00.000000",
+ "modified": "2026-08-10 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Farm Shift",

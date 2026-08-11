@@ -563,6 +563,33 @@ class BreaksAreTwoKinds(IntegrationTestCase):
 		self.assertEqual(slip["gross_detail"]["break_pay"], 20.0)
 		self.assertEqual(slip["gross_pay"], 320.0)
 
+	def test_ana_worked_example_break_pay_is_5_56(self):
+		"""§6.2: Ana, 62 buckets at $1.50, 0.50h paid rest, 0.50h unpaid meal.
+		Joined 05:58 left 15:20 = 9.37h span − 0.50h unpaid meal = 8.87h on clock.
+		piece_hours = 8.87 − 0.50 = 8.37h. avg = 93/8.37 = $11.11/h.
+		break_pay = $11.11 × 0.50 = $5.56."""
+		agg = self.aggregate(
+			[
+				shift(
+					"S1",
+					"2025-06-02",
+					start="05:58:00",
+					end="15:20:00",
+					break_hours=0.5,
+					unpaid_break_hours=0.5,
+					crew=[member(WORKER, piece_units=62)],
+				),
+			]
+		)[WORKER]
+		slip = calculate_full_payroll(
+			{"employee": WORKER},
+			pi.engine_shift_rows(agg),
+			{"pay_type": "Piece Rate", "base_rate": 1.50, "name": "FSS-1"},
+			{"pay_frequency": "Biweekly", "w4_data": {}, "fica_config": {}},
+		)
+		self.assertEqual(slip["gross_detail"]["piece_earnings"], 93.0)
+		self.assertEqual(slip["gross_detail"]["break_pay"], 5.56)
+
 
 # ── Claim 4: piece units reach the payroll ────────────────────────────
 

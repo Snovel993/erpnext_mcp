@@ -300,6 +300,12 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_onboarding_reference_data",
 		"list_available_housing",
 		"assign_housing",
+		"log_shift_break",
+		"end_shift_break",
+		"get_break_policy",
+		"clock_out_worker",
+		"get_shift_production",
+		"get_shift",
 	}
 
 	def _whitelisted(self, module):

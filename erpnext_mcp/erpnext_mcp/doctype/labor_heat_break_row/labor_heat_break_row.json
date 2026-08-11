@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-10 12:00:00.000000",
+ "description": "One band of a heat-break schedule: at this heat-index range, how many minutes of cool-down every how many hours. concurrent_with_rest says whether a cool-down that coincides with a scheduled rest period counts as both — OAR 437-004-1131 says it does, and double-counting would inflate break_hours.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "heat_index_from",
+  "heat_index_to",
+  "col1",
+  "minutes_each",
+  "every_hours",
+  "col2",
+  "concurrent_with_rest"
+ ],
+ "fields": [
+  {
+   "fieldname": "heat_index_from",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Heat Index From (°F)",
+   "precision": "1",
+   "reqd": 1
+  },
+  {
+   "fieldname": "heat_index_to",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Heat Index To (°F)",
+   "precision": "1",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "minutes_each",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Minutes Each",
+   "reqd": 1
+  },
+  {
+   "fieldname": "every_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Every (hours)",
+   "precision": "1",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "concurrent_with_rest",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Concurrent with Rest"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-10 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Labor Heat Break Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

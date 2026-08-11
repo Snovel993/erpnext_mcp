@@ -115,6 +115,12 @@ list_available_housing
 assign_housing
 collect_signature
 submit_form_signature
+log_shift_break
+end_shift_break
+get_break_policy
+clock_out_worker
+get_shift_production
+get_shift
 "
 
 # ── /farmops/api/files/… ────────────────────────────────────────────────────

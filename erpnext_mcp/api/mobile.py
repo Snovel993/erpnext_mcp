@@ -3639,3 +3639,148 @@ def _alert_answered(doctype, field, docname) -> str | None:
 			return None
 		box = candidates[0]
 	return signatures.alert_answered_by(box, str(docname or "").strip()) or None
+
+
+# ── 39. log_shift_break ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("log_shift_break", mutating=True, limit=guard.WRITE_LIMIT)
+def log_shift_break(
+	user: str,
+	shift=None,
+	break_kind=None,
+	started_at=None,
+	duration_minutes=None,
+	applies_to=None,
+	employee=None,
+	description=None,
+) -> dict:
+	"""Start a break on a shift — rest, meal or cool-down.
+
+	`break_kind` IS NOT `event_type` AND THE TWO ARE NOT THE SAME FIELD.
+	`break_kind` is the payroll classification (Paid Rest, Unpaid Meal, Cool-Down);
+	`event_type` is derived from it and is never taken from the body. A phone that
+	could set event_type directly could write a Rest Period with no break_kind,
+	which would log on the compliance timeline and reach nothing in payroll —
+	exactly the gap this method exists to close.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	inner = {"shift": name, "break_kind": break_kind}
+	for key, value in (
+		("started_at", started_at),
+		("duration_minutes", duration_minutes),
+		("applies_to", applies_to),
+		("description", description),
+	):
+		if value is not None:
+			inner[key] = value
+	if employee is not None:
+		inner["employee"] = _employee_argument(employee, allowed)
+
+	result = shifts.log_shift_break(inner)
+	return result.data
+
+
+# ── 40. end_shift_break ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("end_shift_break", mutating=True, limit=guard.WRITE_LIMIT)
+def end_shift_break(user: str, shift=None, event=None, ended_at=None) -> dict:
+	"""End a running break — write the observed duration.
+
+	`event` is the name of the compliance event row, returned by
+	`log_shift_break` in its response. The phone keeps it from the log call and
+	passes it back here — same pattern as a task assignment docname.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	inner = {"shift": name, "event": event}
+	if ended_at is not None:
+		inner["ended_at"] = ended_at
+
+	result = shifts.end_shift_break(inner)
+	return result.data
+
+
+# ── 41. get_break_policy ──────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_break_policy", limit=guard.READ_LIMIT)
+def get_break_policy(user: str, company=None, work_state=None) -> dict:
+	"""The break schedule the handset counts its break coach from.
+
+	A policy with no approver is returned with approved: false and IS STILL
+	RETURNED. Withholding the schedule until somebody signs it would mean no
+	break coach at all in the first season, which is worse than a coach whose
+	provenance is visible.
+	"""
+	inner = {}
+	if company is not None:
+		inner["company"] = company
+	if work_state is not None:
+		inner["work_state"] = work_state
+
+	result = shifts.get_break_policy(inner)
+	return result.data
+
+
+# ── 42. clock_out_worker ──────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("clock_out_worker", mutating=True, limit=guard.WRITE_LIMIT)
+def clock_out_worker(user: str, shift=None, employee=None, left_at=None, notes=None) -> dict:
+	"""End one worker's time on a shift that continues without them.
+
+	Named `clock_out_worker` on this surface rather than `remove_worker_from_shift`,
+	because the phone's verb is the operational one and the tool's verb is the
+	storage one.
+
+	THE EMPLOYEE GUARD IS THE SAME ONE `add_worker_to_shift` USES. An account that
+	can name somebody else's employee — somebody from another entity entirely — is
+	not scoped to anything, and scoping to the caller's own entities is the
+	minimum that makes it safe.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+	person = _employee_argument(employee, allowed)
+
+	inner = {"shift": name, "employee": person}
+	if left_at is not None:
+		inner["left_at"] = left_at
+	if notes is not None:
+		inner["notes"] = notes
+
+	result = shifts.remove_worker_from_shift(inner)
+	return result.data
+
+
+# ── 43. get_shift_production ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_shift_production", limit=guard.READ_LIMIT)
+def get_shift_production(user: str, shift=None) -> dict:
+	"""Per-worker bucket counts for a shift, sorted by count desc.
+
+	The production board. Polled on every successful bucket sync rather than on a
+	timer, so a board that refreshes when something changed is both cheaper and
+	fresher than one on a clock.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	result = shifts.get_shift_production({"shift": name})
+	return result.data
+
+
+# ── 44. get_shift ─────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_shift", limit=guard.READ_LIMIT)
+def get_shift(user: str, shift=None) -> dict:
+	"""The shift with its crew, events, weather and break summary.
+
+	This is the read the close screen renders and what the audit packet reads.
+	Existing as an MCP tool since v0.19.3, and now reachable from a phone.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	result = shifts.get_shift({"shift": name})
+	return result.data

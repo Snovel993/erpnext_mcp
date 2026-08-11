@@ -11229,6 +11229,101 @@ TOOLS = {
 		available=_needs_doctype("Farm Shift"),
 		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"log_shift_break": _tool(
+		shifts.log_shift_break,
+		"MUTATING (default OFF). Start a break on a shift — rest, meal or cool-down.\n\n"
+		"A thin, opinionated wrapper over `log_shift_event` that validates the "
+		"break-specific fields together. An Individual break must name an employee; "
+		"a Crew break must not; and `break_kind` must be Paid Rest, Unpaid Meal or "
+		"Cool-Down.\n\n"
+		"Returns the shift with children, plus a break tally and how many workers "
+		"the break covers (the crew on shift at the time, for a Crew break).",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname."),
+			"name": _field(_STRING, "Alias for shift."),
+			"break_kind": _field(
+				_STRING,
+				"Paid Rest, Unpaid Meal or Cool-Down. The payroll classification — NOT "
+				"the event_type, which is derived.",
+			),
+			"started_at": _field(
+				_STRING,
+				"When the break started, YYYY-MM-DD HH:MM:SS. Defaults to now.",
+			),
+			"duration_minutes": _field(
+				_NUMBER,
+				"Scheduled duration in minutes. From the policy — 10 for rest, 30 for meal.",
+			),
+			"applies_to": _field(
+				_STRING,
+				"Crew (default) or Individual. A crew break covers everybody on the shift.",
+			),
+			"employee": _field(
+				_STRING,
+				"Required when applies_to is Individual. The specific worker.",
+			),
+			"description": _field(_STRING, "What happened, in the foreman's words."),
+		},
+		required=("break_kind",),
+		mutating=True,
+		title="Log a shift break",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"end_shift_break": _tool(
+		shifts.end_shift_break,
+		"MUTATING (default OFF). End a running break — write the observed duration.\n\n"
+		"Writes `ended_at` and the true `duration_minutes`, and flips "
+		"`duration_source` to Observed. A break that was started but never ended "
+		"keeps its Scheduled duration — honest, usable for payroll, and visibly "
+		"weaker evidence than Observed.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname."),
+			"name": _field(_STRING, "Alias for shift."),
+			"event": _field(
+				_STRING,
+				"The compliance event row name — returned by log_shift_break.",
+			),
+			"ended_at": _field(
+				_STRING,
+				"When the break ended, YYYY-MM-DD HH:MM:SS. Defaults to now.",
+			),
+		},
+		required=("event",),
+		mutating=True,
+		title="End a shift break",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_break_policy": _tool(
+		shifts.get_break_policy,
+		"The break schedule for a state — the rest, meal and heat cool-down "
+		"obligations the handset's break coach counts from.\n\n"
+		"Returns the policy with its schedule rows. A policy with no approver is "
+		"returned with `approved: false` and IS STILL RETURNED — withholding the "
+		"schedule until somebody signs it would mean no break coach at all in the "
+		"first season.",
+		{
+			"company": _field(_STRING, "Optional company filter."),
+			"work_state": _field(_STRING, "OR or WA. Returns the most recent enabled policy for this state."),
+		},
+		title="Get the break policy",
+		available=_needs_doctype("Labor Break Policy"),
+		requires="the Labor Break Policy DocType, which ships with erpnext_mcp v0.58.0",
+	),
+	"get_shift_production": _tool(
+		shifts.get_shift_production,
+		"Per-worker bucket counts for a shift, sorted by count descending.\n\n"
+		"The production board. Returns each worker's accepted and rejected bucket "
+		"counts, hours present, and break reconciliation (owed vs taken).",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname."),
+			"name": _field(_STRING, "Alias for shift."),
+		},
+		title="Get shift production",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	"log_shift_location": _tool(
 		shifts.log_shift_location,
 		"MUTATING (default OFF). Append one GPS fix to a shift's track. This is what "
