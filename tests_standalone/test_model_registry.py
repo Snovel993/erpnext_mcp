@@ -24,12 +24,21 @@ THREE CLAIMS, ONE CLASS EACH, PLUS THE REGISTRATION ITSELF.
    found to be Active — no existing Active model, an unrelated one, and the
    candidate's own record are all "not a conflict"; the true collision names
    what it would supersede.
-4. `ToolRegistration` — the nine tools exist in `registry.TOOLS`, split four
-   read / five write the way the release describes, and the registry's total
+4. `ReadingABundle` — v0.59.0. `looks_like_bundle` decides on the bytes and not
+   the file name, `read_bundle` opens a real zip built in the test and reports
+   what is in it, `validate_bundle_manifest` finds exactly the reasons a
+   manifest cannot be the source of `class_names`, and
+   `reconcile_bundle_manifest` lets the bundle win over the record's own labels
+   while refusing to settle the three things that are the record's identity.
+5. `ToolRegistration` — the ten tools exist in `registry.TOOLS`, split four
+   read / six write the way the release describes, and the registry's total
    counts reflect them.
 """
 
+import io
+import json
 import unittest
+import zipfile
 
 from erpnext_mcp import model_registry as engine
 
@@ -240,8 +249,178 @@ class CheckingConflicts(unittest.TestCase):
 		self.assertTrue(result["conflict"])
 
 
+def bundle_bytes(manifest=None, entries=None, manifest_name="manifest.json", model_name="model.mlmodel"):
+	"""A real zip, built here, in the shape Volume Vision's exporter produces.
+
+	Built rather than fixtured because the thing under test is the reading of a
+	zip: a fixture file would prove the parser can read one particular archive
+	somebody committed, and this proves it can read what the format says.
+	"""
+	buffer = io.BytesIO()
+	with zipfile.ZipFile(buffer, "w") as archive:
+		if manifest is not None:
+			archive.writestr(
+				manifest_name, manifest if isinstance(manifest, str) else json.dumps(manifest)
+			)
+		if model_name:
+			archive.writestr(model_name, b"\x00\x01coreml-weights\x02\x03")
+		for name, payload in (entries or {}).items():
+			archive.writestr(name, payload)
+	return buffer.getvalue()
+
+
+MANIFEST = {
+	"uuid": "4b6f6e1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
+	"name": "Cherry Fill Detection",
+	"version": "3.2",
+	"class_names": ["background", "cherry", "bucket", "lip"],
+	"class_roles": {"cherry": "fill", "bucket": "container"},
+	"piecework_activity": "bucket_fill_detection",
+	"model_kind": "Segmentation",
+	"metrics": {"mAP50": 0.91, "precision": 0.88},
+	"preprocessing": {"input_size": [640, 640], "normalization": "0-1", "color_space": "RGB"},
+	"training_completed_at": "2026-08-01 14:22:00",
+}
+
+
+class ReadingABundle(unittest.TestCase):
+	"""v0.59.0 — the zip, its manifest, and who wins when they disagree."""
+
+	def test_the_magic_number_decides_and_not_the_file_name(self):
+		self.assertTrue(engine.looks_like_bundle(bundle_bytes(MANIFEST)))
+		self.assertFalse(engine.looks_like_bundle(b"\x00\x01coreml-weights\x02\x03"))
+		self.assertFalse(engine.looks_like_bundle(b""))
+		self.assertFalse(engine.looks_like_bundle(None))
+
+	def test_a_bundle_reports_its_manifest_its_model_and_its_entries(self):
+		read = engine.read_bundle(bundle_bytes(MANIFEST))
+		self.assertTrue(read["is_bundle"])
+		self.assertEqual(read["errors"], [])
+		self.assertEqual(read["manifest"]["class_names"], MANIFEST["class_names"])
+		self.assertEqual(read["manifest_entry"], "manifest.json")
+		self.assertEqual(read["model_entry"], "model.mlmodel")
+		self.assertEqual(read["model_format"], engine.MODEL_FORMAT_COREML)
+		self.assertIn("model.mlmodel", read["entries"])
+
+	def test_a_bundle_zipped_as_a_folder_is_still_read(self):
+		"""`zip -r bundle.zip cherry_fill_v1/` is what a hand-built bundle looks like."""
+		read = engine.read_bundle(
+			bundle_bytes(MANIFEST, manifest_name="cherry_v1/manifest.json", model_name="cherry_v1/model.mlmodel")
+		)
+		self.assertEqual(read["errors"], [])
+		self.assertEqual(read["manifest_entry"], "cherry_v1/manifest.json")
+		self.assertEqual(read["model_entry"], "cherry_v1/model.mlmodel")
+
+	def test_a_raw_model_is_not_a_bundle_and_is_not_an_error(self):
+		read = engine.read_bundle(b"\x00\x01coreml-weights\x02\x03")
+		self.assertFalse(read["is_bundle"])
+		self.assertEqual(read["errors"], [])
+		self.assertEqual(read["manifest"], {})
+
+	def test_a_truncated_zip_is_an_error_rather_than_an_empty_manifest(self):
+		read = engine.read_bundle(bundle_bytes(MANIFEST)[:40])
+		self.assertTrue(read["is_bundle"])
+		self.assertTrue(any("truncated" in e for e in read["errors"]))
+
+	def test_a_zip_with_no_manifest_is_refused(self):
+		read = engine.read_bundle(bundle_bytes(manifest=None))
+		self.assertTrue(any("manifest.json" in e for e in read["errors"]))
+
+	def test_a_manifest_that_is_not_json_is_an_error(self):
+		read = engine.read_bundle(bundle_bytes(manifest="{not json"))
+		self.assertTrue(any("not valid UTF-8 JSON" in e for e in read["errors"]))
+
+	def test_class_names_is_the_one_required_key(self):
+		self.assertEqual(engine.validate_bundle_manifest(MANIFEST), [])
+		self.assertTrue(any("no class_names" in e for e in engine.validate_bundle_manifest({"uuid": "x"})))
+		self.assertTrue(
+			any("not an ordered array" in e for e in engine.validate_bundle_manifest({"class_names": {}}))
+		)
+		self.assertTrue(any("is empty" in e for e in engine.validate_bundle_manifest({"class_names": []})))
+		self.assertTrue(
+			any(
+				"not label strings" in e
+				for e in engine.validate_bundle_manifest({"class_names": ["cherry", 7, ""]})
+			)
+		)
+
+	def test_metrics_that_are_not_an_object_are_reported(self):
+		errors = engine.validate_bundle_manifest({"class_names": ["a"], "metrics": [1, 2]})
+		self.assertTrue(any("metrics" in e for e in errors))
+
+	def test_the_bundle_wins_over_the_records_own_class_names_and_says_so(self):
+		record = model(class_names=json.dumps(["cherry", "bucket"]), source_uuid=MANIFEST["uuid"])
+		result = engine.reconcile_bundle_manifest(record, MANIFEST, "cherry.bundle.zip")
+		self.assertEqual(result["updates"]["class_names"], MANIFEST["class_names"])
+		self.assertEqual(result["conflicts"], [])
+		self.assertTrue(any("class_names on this record were" in w for w in result["warnings"]))
+
+	def test_a_record_with_no_labels_gets_them_without_a_warning(self):
+		result = engine.reconcile_bundle_manifest(model(), MANIFEST, "cherry.bundle.zip")
+		self.assertEqual(result["updates"]["class_names"], MANIFEST["class_names"])
+		self.assertEqual(result["warnings"], [])
+
+	def test_the_manifest_is_stored_whole_and_the_provenance_sentence_names_the_uuid(self):
+		result = engine.reconcile_bundle_manifest(model(), MANIFEST, "cherry.bundle.zip")
+		self.assertEqual(result["updates"]["bundle_manifest"], MANIFEST)
+		note = result["updates"]["manifest_source"]
+		self.assertTrue(note.startswith(engine.MANIFEST_SOURCE_BUNDLE))
+		self.assertIn(MANIFEST["uuid"], note)
+		self.assertIn("cherry.bundle.zip", note)
+
+	def test_a_bundle_for_a_different_trained_model_is_a_conflict_not_a_warning(self):
+		record = model(source_uuid="11111111-2222-3333-4444-555555555555")
+		result = engine.reconcile_bundle_manifest(record, MANIFEST)
+		self.assertTrue(result["conflicts"])
+		self.assertIn(MANIFEST["uuid"], result["conflicts"][0])
+		self.assertNotIn("source_uuid", result["updates"])
+
+	def test_a_record_with_no_uuid_adopts_the_manifests(self):
+		result = engine.reconcile_bundle_manifest(model(), MANIFEST)
+		self.assertEqual(result["updates"]["source_uuid"], MANIFEST["uuid"])
+
+	def test_a_malformed_manifest_uuid_is_not_adopted(self):
+		result = engine.reconcile_bundle_manifest(model(), dict(MANIFEST, uuid="not-a-uuid"))
+		self.assertNotIn("source_uuid", result["updates"])
+		self.assertTrue(any("well-formed UUID" in w for w in result["warnings"]))
+
+	def test_version_and_activity_are_warned_about_and_never_rewritten(self):
+		record = model(version="1", piecework_activity="harvest_quality")
+		result = engine.reconcile_bundle_manifest(record, MANIFEST)
+		self.assertNotIn("version", result["updates"])
+		self.assertNotIn("piecework_activity", result["updates"])
+		self.assertTrue(any("training version" in w for w in result["warnings"]))
+		self.assertTrue(any("piecework_activity is left alone" in w for w in result["warnings"]))
+
+	def test_a_training_date_already_on_the_record_is_left_alone(self):
+		record = model(training_completed_at="2026-07-30 08:00:00")
+		result = engine.reconcile_bundle_manifest(record, MANIFEST)
+		self.assertNotIn("training_completed_at", result["updates"])
+		self.assertEqual(
+			engine.reconcile_bundle_manifest(model(), MANIFEST)["updates"]["training_completed_at"],
+			MANIFEST["training_completed_at"],
+		)
+
+	def test_an_unrecognised_model_kind_is_reported_rather_than_applied(self):
+		result = engine.reconcile_bundle_manifest(model(), dict(MANIFEST, model_kind="Sorcery"))
+		self.assertNotIn("model_kind", result["updates"])
+		self.assertTrue(any("Sorcery" in w for w in result["warnings"]))
+
+	def test_the_manifest_reaches_an_ios_client_without_unpacking_the_zip(self):
+		record = model(bundle_manifest=json.dumps(MANIFEST), manifest_source=engine.MANIFEST_SOURCE_BUNDLE)
+		manifest = engine.build_model_manifest(record)["metadata"]["bundle"]
+		self.assertTrue(manifest["is_bundle"])
+		self.assertEqual(manifest["preprocessing"], MANIFEST["preprocessing"])
+		self.assertEqual(manifest["class_roles"], MANIFEST["class_roles"])
+
+	def test_a_legacy_record_says_where_its_labels_came_from_too(self):
+		manifest = engine.build_model_manifest(model())["metadata"]["bundle"]
+		self.assertFalse(manifest["is_bundle"])
+		self.assertEqual(manifest["manifest_source"], engine.MANIFEST_SOURCE_RECORD)
+
+
 class ToolRegistration(unittest.TestCase):
-	"""Nine tools, four reads and five writes, wired into the catalogue."""
+	"""Ten tools, four reads and six writes, wired into the catalogue."""
 
 	READ_TOOLS = ("get_model", "list_models", "get_active_model", "get_model_file_chunk")
 	MUTATING_TOOLS = (
@@ -250,6 +429,7 @@ class ToolRegistration(unittest.TestCase):
 		"activate_model",
 		"deprecate_model",
 		"attach_model_file",
+		"pull_model_from_vv",
 	)
 
 	def setUp(self):
@@ -282,7 +462,7 @@ class ToolRegistration(unittest.TestCase):
 			with self.subTest(tool=name):
 				self.assertNotIn(name, self.registry.DEFAULT_ON_MUTATING_TOOLS)
 
-	def test_the_registry_totals_include_the_nine(self):
+	def test_the_registry_totals_include_the_ten(self):
 		# 389/178/211 as of v0.51.1, plus v0.52.0's `attach_model_file` (write)
 		# and `get_model_file_chunk` (read) — the file-serving pair that lets
 		# ERPNext hand an iOS app the model binary itself instead of the model
@@ -294,10 +474,13 @@ class ToolRegistration(unittest.TestCase):
 		# sidebar of the Employee form somebody already has open. v0.57.0 adds
 		# one more write, `dismiss_compliance_alert` — the same dismissal
 		# `dismiss_alert` makes, gated on the alert's own say-so, for the callers
-		# who are not sitting in front of the record.
-		self.assertEqual(len(self.registry.TOOLS), 399)
+		# who are not sitting in front of the record. v0.59.0 adds
+		# `pull_model_from_vv` — the one call that replaces the curl-and-bench-
+		# console procedure for getting a trained model out of Volume Vision,
+		# and the only tool in this app that fetches a file from another server.
+		self.assertEqual(len(self.registry.TOOLS), 400)
 		self.assertEqual(len(self.registry.READ_TOOLS), 181)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 218)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 219)
 
 
 if __name__ == "__main__":

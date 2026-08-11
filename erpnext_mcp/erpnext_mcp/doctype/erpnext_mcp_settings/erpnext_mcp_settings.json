@@ -461,6 +461,7 @@
   "allow_activate_model",
   "allow_deprecate_model",
   "allow_attach_model_file",
+  "allow_pull_model_from_vv",
   "bucket_log_read_section",
   "allow_list_bucket_entries",
   "allow_get_bucket_session",
@@ -3520,6 +3521,13 @@
    "fieldname": "allow_attach_model_file",
    "fieldtype": "Check",
    "label": "Attach Model File"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Fetches a trained model straight from Volume Vision and attaches it — the bundle endpoint (/training/models/<uuid>/bundle) first, the original raw /download as a reported fallback. Makes an OUTBOUND request from this site's network to the host in the record's source_server; http/https only, no credentials in the URL, no redirects followed.",
+   "fieldname": "allow_pull_model_from_vv",
+   "fieldtype": "Check",
+   "label": "Pull Model From Volume Vision"
   },
   {
    "fieldname": "bucket_log_read_section",

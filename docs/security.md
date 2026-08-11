@@ -290,6 +290,38 @@ to have a pointless conversation with an operator who could not help anyway.
 A predicate that raises is treated as unavailable. An availability check that
 errored is not evidence the tool would have worked.
 
+### The tools that make an outbound request
+
+Almost everything here reads and writes the local site. A few tools open a
+connection *out* from the site's own network, which is the shape of every
+server-side request forgery there has ever been, so each states its own rule:
+
+- **`validate_public_endpoint`** probes this site from outside. It will only
+  reach the operator's configured `public_url` or a host under `.ts.net`, over
+  HTTPS, on the default port, and it refuses to send the bearer token anywhere
+  but the configured URL. See `tools/funnel.py`.
+- **`check_regulation_feed`** / **`check_all_regulation_feeds`** fetch the
+  regulation page named on a Regulation Feed record and hash it. They detect
+  change and never act on what they read.
+- **`pull_model_from_vv`** (v0.59.0) fetches a trained model from Volume Vision.
+  Its target is an operator's own training box on their own LAN —
+  `http://umbrel.local:5101` — so a public-suffix allowlist would be exactly
+  wrong and a hardcoded host would make this a script for one site. What is
+  enforced instead, in `services/volume_vision.py`: **http/https only**, **no
+  credentials in the URL** (a `user:pass@host` target is refused, not
+  forwarded), **no redirects followed** (a 3xx is reported with its `Location`
+  and nothing is fetched — following one is how an allowed host becomes an
+  unallowed one between the check and the request), and a **512 MB ceiling**
+  checked against `Content-Length` before the body is read and against the body
+  after, so a server that lies about the first cannot exhaust the worker on the
+  second. The URL comes from the ML Model record's own `source_server` unless a
+  caller passes one, and the switch — `allow_pull_model_from_vv` — is off by
+  default like every other mutating tool.
+
+The fetched bytes are then held to their own contract: a zip is read as a model
+bundle and refused if it does not open, carries no `manifest.json`, or names a
+different `source_uuid` than the record it is being attached to.
+
 ---
 
 ## The audit log

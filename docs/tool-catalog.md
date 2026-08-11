@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 399 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 400 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -9168,6 +9168,17 @@ up in pieces) or `file_content` (base64 in the call itself, for something
 small) is required. Re-attaching **replaces** `model_file`; the previous File
 is left on the site rather than deleted.
 
+**v0.59.0: a zip is read as a bundle.** The first four bytes decide — `PK`
+magic, not the file name, because the name is whatever a browser called the
+download. A bundle's `manifest.json` supplies `class_names` (in
+model-output-index order), `metrics` and the rest, `manifest_source` on the
+record records that they came from training, and the whole zip is what gets
+stored. Anything that is not a zip attaches exactly as it did in v0.52.0 and
+reports that its labels are unverified. A zip that will not open, or one with
+no `manifest.json`, is **refused** with nothing written. `force: true` is
+needed to attach a bundle whose manifest names a different `source_uuid` than
+the record's.
+
 ### `get_model_file_chunk`
 
 ```json
@@ -9180,6 +9191,66 @@ Read-only. One base64 slice of the attached binary — the same shape
 off the answer. Refuses **by name** when `attach_model_file` has not run yet,
 rather than reaching for `source_server` on the caller's behalf — there is no
 proxy back to Volume Vision here, deliberately.
+
+Serves whatever is attached: `total_bytes` and `total_chunks` are computed from
+the stored bytes on every call, so a bundle simply has more pieces than the raw
+model it contains. `is_bundle` says which shape arrived, read from the bytes
+rather than from the record, so a client can branch on unzip-vs-compile from
+the first chunk.
+
+---
+
+## v0.59.0 — Model Bundles from Volume Vision
+
+One tool. A **bundle** is one zip carrying `model.mlmodel` beside a
+`manifest.json` Volume Vision writes at export time from the training config —
+`class_names` in model-output-index order, plus `metrics`, `class_roles` and
+the `preprocessing` block (input size, normalization) an iOS app needs at
+inference. It exists because three lists could previously disagree about what
+output index 2 means — the labels typed onto the ML Model record, the labels
+Volume Vision held, and the labels a phone cached months ago — and when they
+did, nothing failed. Inference went on returning confident numbers against the
+wrong names.
+
+`get_active_model`'s manifest gains `metadata.bundle` —
+`is_bundle`, `manifest_source`, `class_roles`, `preprocessing`,
+`training_version` — so a client reads the preprocessing parameters without
+unpacking anything.
+
+### `pull_model_from_vv`
+
+```json
+{"model": "MLM-2026-0001"}
+```
+
+**MUTATING (default OFF).** The whole manual procedure — curl on a laptop,
+base64, `bench console` — as one call, with the provenance check nobody was
+doing by hand.
+
+Asks `GET <source_server>/training/models/<uuid>/bundle` **first**. Falls back
+to `GET <source_server>/training/models/<uuid>/download` — the endpoint LiDAR
+Capture and BucketLog have always used, unchanged — only when the bundle
+endpoint answers 404/405/501, which is what a Volume Vision without the bundle
+export deployed answers. **The fallback is reported**, in `warnings` and in the
+summary, because a raw file has no manifest and leaves `class_names`
+unverified; `allow_raw_fallback: false` refuses instead of taking it.
+
+`source_server` and `source_uuid` default to the ML Model record's own — host
+**and port** are read from the record, never assumed — and either can be passed
+to override. A record can also be found by its `source_uuid` alone, which is
+how a caller holding only Volume Vision's identifier finds the ERPNext record
+for it.
+
+**Refuses a bundle whose manifest names a different `source_uuid`** than the
+record's: that is the wrong file for this record, and attaching it would make
+every iOS cache keyed on that uuid wrong. `force: true` overrides, and says so
+in the warnings.
+
+This is the only tool in this app that fetches a file from another server. It
+enforces http/https only, no credentials in the URL, no redirects followed, and
+a 512 MB ceiling checked against `Content-Length` before the body is read and
+against the body after — see `erpnext_mcp/services/volume_vision.py` on why the
+allowlist posture is different from `validate_public_endpoint`'s.
 
 ---
 

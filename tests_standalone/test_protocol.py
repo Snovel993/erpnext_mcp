@@ -781,10 +781,19 @@ class Catalogue(SeededTestCase):
 		verb safe to publish to a handset and to a model: whether an obligation
 		may be closed without being met is a judgement somebody records in
 		advance, per alert, rather than one the caller makes on the spot.
+
+		v0.59.0 ADDED ONE WRITE — `pull_model_from_vv`, and it is the only tool
+		in this app that fetches a file from another server. It asks Volume
+		Vision's NEW `/training/models/<uuid>/bundle` for the zip that carries
+		`manifest.json` beside the weights, falls back to the original
+		`/download` when that endpoint is not deployed yet and says so, and
+		attaches what it got. There is no read counterpart: `get_model` already
+		returns everything the pull wrote, and `get_model_file_chunk` already
+		serves the bytes.
 		"""
-		self.assertEqual(len(registry.TOOLS), 399)
+		self.assertEqual(len(registry.TOOLS), 400)
 		self.assertEqual(len(registry.READ_TOOLS), 181)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 218)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 219)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

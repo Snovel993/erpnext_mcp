@@ -21,12 +21,48 @@ translation table.
 (uuid/name/class_names/metadata) rather than inventing a second one, because an
 iOS client that already parses one manifest shape from Volume Vision's sync
 endpoint should not need a second parser for ERPNext's.
+
+────────────────────────────────────────────────────────────────────────────
+v0.59.0: THE BUNDLE, AND WHY `class_names` HAS EXACTLY ONE SOURCE
+────────────────────────────────────────────────────────────────────────────
+
+Three lists could disagree about what output index 2 of a segmentation model
+means: the labels typed into this record at registration, the labels Volume
+Vision holds on its `TrainedModel`, and the labels an iOS app cached beside a
+compiled model months ago. Nothing forced them to agree, and when they did not
+the failure was silent — inference kept returning confident numbers against the
+wrong names.
+
+A **model bundle** is the fix: one zip carrying `model.mlmodel` and a
+`manifest.json` written by Volume Vision at export time, in model-output-index
+order, from the same training config the weights were produced under. The
+functions below are the reading of it — `looks_like_bundle` (the PK magic in the
+first four bytes, which is what tells a bundle from a raw `.mlmodel` without
+trusting a file extension anybody can rename), `read_bundle`,
+`validate_bundle_manifest` and `reconcile_bundle_manifest`.
+
+**The bundle wins.** `reconcile_bundle_manifest` reports what it is about to
+overwrite rather than merging: a manifest that came out of training is a
+statement about the weights in the same zip, and a list typed into this record
+is a statement about somebody's memory of them. What it does NOT overwrite is
+the three fields that are this record's own identity and not training's to
+assign — `version`, `piecework_activity`, and a `source_uuid` that is already
+set and disagrees. A disagreeing `source_uuid` means the wrong bundle is being
+attached to this record, which is a mistake to refuse rather than a value to
+reconcile; `tools/ml_model.py` turns that into the refusal.
+
+Nothing here reads a file or a database. `read_bundle` takes the bytes and
+returns a dict, so the same function serves an operator's upload and a pull
+straight off Volume Vision without either path getting its own parser.
 """
 
 from __future__ import annotations
 
+import io
 import json
+import posixpath
 import re
+import zipfile
 
 STATUS_DRAFT = "Draft"
 STATUS_ACTIVE = "Active"
@@ -46,6 +82,36 @@ MODEL_FORMAT_TENSORFLOW = "TensorFlow"
 MODEL_FORMAT_OTHER = "Other"
 MODEL_FORMATS = (MODEL_FORMAT_COREML, MODEL_FORMAT_ONNX, MODEL_FORMAT_TENSORFLOW, MODEL_FORMAT_OTHER)
 DEFAULT_MODEL_FORMAT = MODEL_FORMAT_COREML
+
+#: The file inside a bundle that carries the class names. Volume Vision writes
+#: it at export time; every other name in the zip is payload.
+BUNDLE_MANIFEST_NAME = "manifest.json"
+
+#: The first four bytes of a zip. `PK\x03\x04` is a local file header (every
+#: bundle with anything in it), `PK\x05\x06` an empty archive, `PK\x07\x08` a
+#: spanned one. Checked instead of the file extension because the extension is
+#: whatever the operator's browser called the download, and a `.mlmodel` that is
+#: really a zip fails on the phone, hours later, as a CoreML compile error.
+BUNDLE_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+
+#: Extensions a bundle's model payload may have, most specific first. Used only
+#: to name which entry is the model and to infer `model_format` when the
+#: manifest does not state one.
+_MODEL_SUFFIXES = (
+    (".mlpackage", MODEL_FORMAT_COREML),
+    (".mlmodelc", MODEL_FORMAT_COREML),
+    (".mlmodel", MODEL_FORMAT_COREML),
+    (".onnx", MODEL_FORMAT_ONNX),
+    (".tflite", MODEL_FORMAT_TENSORFLOW),
+    (".pb", MODEL_FORMAT_TENSORFLOW),
+)
+
+#: What `manifest_source` says when the labels came out of a bundle, and when
+#: they did not. The record itself carries the sentence, so somebody reading the
+#: ML Model form in a year can see where its `class_names` came from without
+#: reconstructing which release attached the file.
+MANIFEST_SOURCE_BUNDLE = "class_names source: bundle manifest from VV training"
+MANIFEST_SOURCE_RECORD = "class_names source: entered on this site — no bundle manifest"
 
 #: `version` is compared and sorted as a string everywhere in this app (the
 #: same way ERPNext compares one), so the only thing worth policing is that it
@@ -95,6 +161,301 @@ def metrics_of(model_doc: dict) -> dict:
     """`metrics` read as a dict, or `{}` if absent or unparseable."""
     parsed, _error = _parse_json_value((model_doc or {}).get("metrics"), dict)
     return parsed if parsed is not None else {}
+
+
+def bundle_manifest_of(model_doc: dict) -> dict:
+    """The stored `bundle_manifest` read as a dict, or `{}`.
+
+    Lenient like `class_names_of` and for the same reason: this is a read path.
+    A record whose `bundle_manifest` is empty is a record whose binary is a raw
+    model rather than a bundle — not an error, just the older shape.
+    """
+    parsed, _error = _parse_json_value((model_doc or {}).get("bundle_manifest"), dict)
+    return parsed if parsed is not None else {}
+
+
+# ── reading a model bundle ───────────────────────────────────────────────
+
+
+def looks_like_bundle(content: bytes) -> bool:
+    """Whether `content` starts with a zip's magic number.
+
+    Four bytes, no extension, no MIME type. See `BUNDLE_MAGICS`.
+    """
+    if not isinstance(content, (bytes, bytearray, memoryview)):
+        return False
+    head = bytes(content[:4])
+    return any(head.startswith(magic) for magic in BUNDLE_MAGICS)
+
+
+def _manifest_entry(names: list) -> str:
+    """The name of the manifest inside the zip, allowing for one wrapping folder.
+
+    A zip built by `zip -r bundle.zip cherry_fill_v1/` puts everything under a
+    directory, which is what `zip` does by default and what an operator who
+    zipped a folder by hand will produce. Refusing that would be refusing the
+    likeliest hand-built bundle over a detail Volume Vision's own exporter
+    happens not to have.
+    """
+    for name in names:
+        if posixpath.basename(name) == BUNDLE_MANIFEST_NAME and name.count("/") <= 1:
+            return name
+    return ""
+
+
+def _model_entry(names: list) -> tuple:
+    """`(entry_name, model_format)` for the model payload in the zip, or `("", "")`."""
+    for suffix, model_format in _MODEL_SUFFIXES:
+        for name in names:
+            lowered = name.lower().rstrip("/")
+            if lowered.endswith(suffix):
+                return name, model_format
+    return "", ""
+
+
+def read_bundle(content: bytes) -> dict:
+    """Open `content` as a model bundle and report what is in it.
+
+    Returns `is_bundle` (the magic number said zip), `entries` (every name in
+    the archive), `manifest_entry`/`manifest` (the parsed `manifest.json`),
+    `model_entry`/`model_format` (the payload the phone will compile), and
+    `errors` — every reason this is not a usable bundle, as sentences.
+
+    A zip with no `manifest.json` is an ERROR rather than a bundle with an empty
+    manifest: the whole point of the format is that the labels travel with the
+    weights, and a zip that carries only weights is a raw model in a wrapper
+    that would be stored as if its provenance had been checked.
+    """
+    result = {
+        "is_bundle": looks_like_bundle(content),
+        "entries": [],
+        "manifest_entry": "",
+        "manifest": {},
+        "model_entry": "",
+        "model_format": "",
+        "errors": [],
+    }
+    if not result["is_bundle"]:
+        return result
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(bytes(content)))
+    except (zipfile.BadZipFile, OSError, ValueError) as exc:
+        result["errors"].append(
+            f"the file begins like a zip but does not open as one ({type(exc).__name__}: {exc}) — "
+            "it is likely a truncated download"
+        )
+        return result
+
+    with archive:
+        result["entries"] = list(archive.namelist())
+        manifest_entry = _manifest_entry(result["entries"])
+        if not manifest_entry:
+            result["errors"].append(
+                f"the zip has no {BUNDLE_MANIFEST_NAME} — a bundle carries the class names beside "
+                "the weights, and a zip without one has no provenance to read"
+            )
+            return result
+        result["manifest_entry"] = manifest_entry
+        try:
+            raw = archive.read(manifest_entry)
+        except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
+            result["errors"].append(f"{manifest_entry} could not be read ({type(exc).__name__}: {exc})")
+            return result
+
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        result["errors"].append(f"{manifest_entry} is not valid UTF-8 JSON ({exc})")
+        return result
+    if not isinstance(manifest, dict):
+        result["errors"].append(f"{manifest_entry} is a JSON {type(manifest).__name__}, not an object")
+        return result
+
+    result["manifest"] = manifest
+    result["model_entry"], result["model_format"] = _model_entry(result["entries"])
+    result["errors"].extend(validate_bundle_manifest(manifest))
+    return result
+
+
+def validate_bundle_manifest(manifest: dict) -> list:
+    """Every reason this manifest cannot be trusted as the source of `class_names`.
+
+    Empty list means usable. Only `class_names` is REQUIRED — the rest of the
+    manifest is metadata this app is glad to have and can do without, but a
+    bundle whose labels are missing, empty, or not an ordered list of strings
+    cannot answer the one question the format exists to answer.
+    """
+    manifest = manifest or {}
+    errors = []
+
+    if "class_names" not in manifest:
+        errors.append(
+            f"{BUNDLE_MANIFEST_NAME} has no class_names — that list, in model-output-index order, "
+            "is the reason the bundle format exists"
+        )
+        return errors
+
+    class_names = manifest.get("class_names")
+    if not isinstance(class_names, list):
+        errors.append(
+            f"{BUNDLE_MANIFEST_NAME}'s class_names is a {type(class_names).__name__}, not an ordered array"
+        )
+        return errors
+    if not class_names:
+        errors.append(f"{BUNDLE_MANIFEST_NAME}'s class_names is empty")
+        return errors
+
+    bad = [repr(value) for value in class_names if not isinstance(value, str) or not value.strip()]
+    if bad:
+        errors.append(
+            f"{BUNDLE_MANIFEST_NAME}'s class_names has {len(bad)} entry/entries that are not label "
+            f"strings: {', '.join(bad[:5])}"
+        )
+
+    metrics = manifest.get("metrics")
+    if metrics is not None and not isinstance(metrics, dict):
+        errors.append(f"{BUNDLE_MANIFEST_NAME}'s metrics is a {type(metrics).__name__}, not an object")
+
+    return errors
+
+
+def manifest_source_note(manifest: dict, file_name: str = "") -> str:
+    """The sentence `manifest_source` carries when a bundle supplied the labels."""
+    manifest = manifest or {}
+    detail = []
+    uuid = _clean(manifest.get("uuid"))
+    if uuid:
+        detail.append(f"uuid {uuid}")
+    version = _clean(manifest.get("version"))
+    if version:
+        detail.append(f"training version {version}")
+    completed = _clean(manifest.get("training_completed_at"))
+    if completed:
+        detail.append(f"trained {completed}")
+    if file_name:
+        detail.append(f"{BUNDLE_MANIFEST_NAME} in {file_name}")
+    return MANIFEST_SOURCE_BUNDLE + (f" ({', '.join(detail)})" if detail else "")
+
+
+def reconcile_bundle_manifest(model_doc: dict, manifest: dict, file_name: str = "") -> dict:
+    """What attaching this bundle changes on this record, and what it refuses to.
+
+    Returns `updates` (field → new value, ready to set), `warnings` (every place
+    the bundle disagreed with what was already there and won), and `conflicts`
+    (the disagreements that are NOT the bundle's to settle — see the module
+    docstring). A caller with a non-empty `conflicts` has the wrong bundle for
+    this record and should stop; `warnings` are for the audit trail and are not
+    a reason to refuse anything.
+
+    `file_size_bytes` is deliberately not set here: this function sees a
+    manifest, not the zip, and the size that matters is the stored file's.
+    """
+    model_doc = model_doc or {}
+    manifest = manifest or {}
+    updates: dict = {}
+    warnings: list = []
+    conflicts: list = []
+
+    class_names = manifest.get("class_names")
+    if isinstance(class_names, list) and class_names:
+        existing = class_names_of(model_doc)
+        updates["class_names"] = list(class_names)
+        if existing and existing != list(class_names):
+            warnings.append(
+                f"class_names on this record were {json.dumps(existing)} and the bundle's manifest "
+                f"says {json.dumps(list(class_names))}. The bundle wins — it was written at export "
+                "time from the config the weights were trained under, and the record's list was "
+                "typed by hand. The old list is in this call's `previous` block."
+            )
+
+    metrics = manifest.get("metrics")
+    if isinstance(metrics, dict) and metrics:
+        existing_metrics = metrics_of(model_doc)
+        updates["metrics"] = dict(metrics)
+        if existing_metrics and existing_metrics != dict(metrics):
+            warnings.append("metrics on this record differed from the bundle's; the bundle's replaced them.")
+
+    model_kind = _clean(manifest.get("model_kind"))
+    if model_kind:
+        if model_kind not in MODEL_KINDS:
+            warnings.append(
+                f"the manifest's model_kind {model_kind!r} is not one of {', '.join(MODEL_KINDS)} "
+                "and was not applied."
+            )
+        else:
+            existing_kind = _clean(model_doc.get("model_kind"))
+            if existing_kind != model_kind:
+                updates["model_kind"] = model_kind
+                if existing_kind:
+                    warnings.append(
+                        f"model_kind was {existing_kind!r} and the bundle says {model_kind!r}; the "
+                        "bundle wins."
+                    )
+
+    model_format = _clean(manifest.get("model_format")) or _clean(manifest.get("format"))
+    if model_format and model_format in MODEL_FORMATS:
+        existing_format = _clean(model_doc.get("model_format"))
+        if existing_format != model_format:
+            updates["model_format"] = model_format
+            if existing_format:
+                warnings.append(
+                    f"model_format was {existing_format!r} and the bundle says {model_format!r}; the "
+                    "bundle wins."
+                )
+
+    for field, key in (("taxonomy_schema", "taxonomy_schema"), ("taxonomy_version", "taxonomy_version")):
+        value = _clean(manifest.get(key))
+        if value and not _clean(model_doc.get(field)):
+            updates[field] = value
+
+    # FILLED WHEN EMPTY, NEVER OVERWRITTEN. A datetime already on the record was
+    # written by somebody who registered this model; the manifest's is the same
+    # fact in whatever format the exporter used, and rewriting one well-formed
+    # timestamp with another spelling of itself churns the record for nothing.
+    completed = _clean(manifest.get("training_completed_at"))
+    if completed and not _clean(model_doc.get("training_completed_at")):
+        updates["training_completed_at"] = completed
+
+    manifest_uuid = _clean(manifest.get("uuid"))
+    record_uuid = _clean(model_doc.get("source_uuid"))
+    if manifest_uuid and not record_uuid:
+        if _UUID_PATTERN.match(manifest_uuid):
+            updates["source_uuid"] = manifest_uuid
+        else:
+            warnings.append(
+                f"the manifest's uuid {manifest_uuid!r} is not a well-formed UUID and was not "
+                "adopted as source_uuid."
+            )
+    elif manifest_uuid and record_uuid and manifest_uuid != record_uuid:
+        conflicts.append(
+            f"this record's source_uuid is {record_uuid} and the bundle's manifest says "
+            f"{manifest_uuid}. That is a different trained model, not a newer file for this one — "
+            "attaching it would make every downstream cache keyed on the uuid wrong."
+        )
+
+    manifest_version = _clean(manifest.get("version"))
+    record_version = _clean(model_doc.get("version"))
+    if manifest_version and record_version and manifest_version != record_version:
+        warnings.append(
+            f"the bundle's training version is {manifest_version!r} and this record is version "
+            f"{record_version!r}. version is left alone — it is half of the (company, model_name, "
+            "version) key this record is unique on, and update_model is where it changes."
+        )
+
+    manifest_activity = _clean(manifest.get("piecework_activity"))
+    record_activity = _clean(model_doc.get("piecework_activity"))
+    if manifest_activity and record_activity and manifest_activity != record_activity:
+        warnings.append(
+            f"the bundle says it was trained for {manifest_activity!r} and this record is deployed "
+            f"for {record_activity!r}. piecework_activity is left alone — it is the identity "
+            "get_active_model is queried by, not a value training assigns."
+        )
+
+    updates["bundle_manifest"] = dict(manifest)
+    updates["manifest_source"] = manifest_source_note(manifest, file_name)
+
+    return {"updates": updates, "warnings": warnings, "conflicts": conflicts}
 
 
 # ── validating a registration ────────────────────────────────────────────
@@ -169,8 +530,16 @@ def build_model_manifest(model_doc: dict) -> dict:
     back to the ERPNext docname for a model registered without one — an iOS
     cache keyed on `uuid` still gets a stable key either way, it is just not
     one Volume Vision itself would recognise.
+
+    v0.59.0 adds `metadata.bundle`. An iOS app that has read this manifest knows
+    BEFORE it starts pulling chunks whether the bytes are a zip it must unpack or
+    a raw model it can compile directly, and it gets the manifest's own
+    `preprocessing` and `class_roles` blocks — the two things that have no field
+    of their own on this record — without unpacking anything. `is_bundle` false
+    is the legacy shape and is not an error.
     """
     model_doc = model_doc or {}
+    bundle = bundle_manifest_of(model_doc)
     return {
         "uuid": _clean(model_doc.get("source_uuid")) or _clean(model_doc.get("name")),
         "name": model_doc.get("model_name"),
@@ -190,6 +559,14 @@ def build_model_manifest(model_doc: dict) -> dict:
             # discovering "not attached yet" on the first read call — and,
             # deliberately, before it would ever fall back to source_server.
             "downloadable": bool(_clean(model_doc.get("model_file"))),
+            "bundle": {
+                "is_bundle": bool(bundle),
+                "manifest_source": _clean(model_doc.get("manifest_source"))
+                or (MANIFEST_SOURCE_BUNDLE if bundle else MANIFEST_SOURCE_RECORD),
+                "class_roles": bundle.get("class_roles"),
+                "preprocessing": bundle.get("preprocessing"),
+                "training_version": bundle.get("version"),
+            },
             "deployment_targets": model_doc.get("deployment_targets"),
             "status": model_doc.get("status"),
             "deployed_at": model_doc.get("deployed_at"),

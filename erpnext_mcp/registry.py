@@ -12895,10 +12895,75 @@ TOOLS = {
 			"file_token": _field(_STRING, "A File docname already on this site — see commit_staged_file."),
 			"file_content": _field(_STRING, "The model's bytes, base64. Small files only — see the ceiling."),
 			"file_name": _field(_STRING, "Required alongside file_content. Ignored with file_token."),
+			"force": _field(
+				_BOOLEAN,
+				"Attach a bundle whose manifest names a DIFFERENT source_uuid than this record's. "
+				"Default false, which refuses it — see the description.",
+			),
 		},
 		required=("model",),
 		mutating=True,
 		title="Attach a model file",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.59.0: the bundle pulled straight from Volume Vision ────────────
+	"pull_model_from_vv": _tool(
+		ml_model.pull_model_from_vv,
+		"MUTATING (default OFF). Fetch a trained model straight from Volume "
+		"Vision and attach it to this ML Model record — the whole manual "
+		"procedure (curl on a laptop, base64, bench console) as one call.\n\n"
+		"ASKS FOR THE BUNDLE FIRST. /training/models/<uuid>/bundle is the zip "
+		"carrying model.mlmodel beside a manifest.json written at export time; "
+		"its class_names, in model-output-index order, become this record's, "
+		"and manifest_source records that they came from training rather than "
+		"from somebody typing them. /training/models/<uuid>/download — the "
+		"endpoint every existing consumer has always used — is the FALLBACK, "
+		"taken only when the bundle endpoint answers 404/405/501, which is what "
+		"a Volume Vision without the bundle export deployed answers. The "
+		"fallback is reported in `warnings` and in the summary, because a raw "
+		"file has no manifest and leaves class_names unverified.\n\n"
+		"WHERE IT FETCHES FROM: source_server on the record unless one is "
+		"passed here — host AND port are read from it, never assumed. "
+		"source_uuid likewise defaults to the record's, and a record can be "
+		"resolved by its source_uuid alone.\n\n"
+		"REFUSES A BUNDLE WHOSE MANIFEST NAMES A DIFFERENT source_uuid than "
+		"the record's — that is the wrong file for this record, and attaching "
+		"it would make every iOS cache keyed on the uuid wrong. force=true "
+		"overrides.",
+		{
+			"model": _field(
+				_STRING,
+				"The ML Model record to pull into, by docname, model_name or source_uuid. Required "
+				"unless source_uuid is passed.",
+			),
+			"source_uuid": _field(
+				_STRING,
+				"Volume Vision's TrainedModel.uuid. Defaults to the record's; also resolves the "
+				"record when `model` is not passed.",
+			),
+			"source_server": _field(
+				_STRING,
+				"The Volume Vision origin to fetch from, e.g. 'http://umbrel.local:5101'. Defaults "
+				"to the record's source_server. http/https only; no credentials, no redirects.",
+			),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"prefer_bundle": _field(
+				_BOOLEAN, "Ask /bundle first. Default true; false goes straight to the raw /download."
+			),
+			"allow_raw_fallback": _field(
+				_BOOLEAN,
+				"Fall back to /download when /bundle is not there. Default true; false refuses "
+				"rather than attaching a file with no manifest.",
+			),
+			"timeout_seconds": _field(_INTEGER, "How long to wait for Volume Vision. Default 120."),
+			"force": _field(
+				_BOOLEAN, "Attach a bundle whose manifest names a different source_uuid. Default false."
+			),
+		},
+		mutating=True,
+		title="Pull a model from Volume Vision",
 		available=_needs_doctype("ML Model"),
 		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

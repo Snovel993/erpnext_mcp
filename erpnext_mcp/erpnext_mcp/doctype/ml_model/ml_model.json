@@ -24,6 +24,8 @@
   "model_format",
   "storage_section",
   "model_file",
+  "manifest_source",
+  "bundle_manifest",
   "taxonomy_section",
   "taxonomy_schema",
   "taxonomy_version",
@@ -156,6 +158,20 @@
    "read_only": 1
   },
   {
+   "description": "Where this record's class_names came from. A model attached as a bundle (a zip carrying model.mlmodel beside a manifest.json written by Volume Vision at export time) says 'class_names source: bundle manifest from VV training' and names the uuid it came from; anything else says the labels were entered on this site. Set by attach_model_file and pull_model_from_vv; there is nothing to type here.",
+   "fieldname": "manifest_source",
+   "fieldtype": "Small Text",
+   "label": "Manifest Source",
+   "read_only": 1
+  },
+  {
+   "description": "The bundle's manifest.json, verbatim, when the attached file is a bundle — empty when it is a raw model. It is stored whole because it carries two things this doctype has no column for and an iOS app needs at inference time: preprocessing (input_size, normalization, color space) and class_roles. get_active_model hands both back under manifest.metadata.bundle so a phone reads them without unpacking the zip. Set programmatically; there is nothing to type here.",
+   "fieldname": "bundle_manifest",
+   "fieldtype": "JSON",
+   "label": "Bundle Manifest",
+   "read_only": 1
+  },
+  {
    "fieldname": "taxonomy_section",
    "fieldtype": "Section Break",
    "label": "Taxonomy"
@@ -230,7 +246,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-08 09:00:00.000000",
+ "modified": "2026-08-11 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "ML Model",

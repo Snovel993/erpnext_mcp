@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""ML Model Registry — v0.43.0, plus v0.52.0's file serving. Nine tools, and
-only five of them write.
+"""ML Model Registry — v0.43.0, plus v0.52.0's file serving and v0.59.0's
+bundles. Ten tools, and only six of them write.
 
 WHAT THIS APP TRACKS, AND WHAT IT DOES NOT. Volume Vision (Flask/SQLAlchemy)
 trains models and holds the weights; this app never sees a weight and never
@@ -64,6 +64,44 @@ the first time anybody asked would still make a phone's first request depend on
 Volume Vision being reachable, which is the exact dependency this release
 removes; an operator running `attach_model_file` once, deliberately, after a
 training run is the one dependency it replaces it with.
+
+────────────────────────────────────────────────────────────────────────────
+v0.59.0: THE BUNDLE, AND THE PULL THAT FETCHES ONE
+────────────────────────────────────────────────────────────────────────────
+
+v0.52.0 got the binary out of Volume Vision's hands and into ERPNext's, and left
+one thing behind: the LABELS. `class_names` was typed onto the record at
+registration, the weights were exported separately, and nothing checked that
+output index 2 of the model and entry 2 of the list were the same thing. When
+they were not, nothing failed — inference went on returning confident numbers
+against the wrong names, which is worse than an error and much harder to notice.
+
+A **model bundle** is one zip carrying `model.mlmodel` and a `manifest.json`
+Volume Vision writes at export time, in model-output-index order, from the same
+training config the weights came out of. Two tools change for it:
+
+  * `attach_model_file` SNIFFS THE BYTES. Four bytes of PK magic — not the file
+    extension, which is whatever a browser called the download — decide whether
+    what arrived is a bundle or a raw model. A bundle's manifest is read, its
+    `class_names` become the record's, and `manifest_source` says on the record
+    itself where they came from. A raw file behaves exactly as it did in
+    v0.52.0, and says so.
+
+  * `pull_model_from_vv` IS THE WHOLE MANUAL PROCEDURE AS ONE CALL. It fetches
+    the bundle from Volume Vision's new `/training/models/<uuid>/bundle`, falls
+    back to the original `/download` when that server has not been upgraded yet
+    (reporting the fallback rather than hiding it), attaches what it got, and
+    reconciles the manifest exactly as an operator's own upload would be. The
+    HTTP half — and the reasoning about making an outbound request from inside
+    the site's network — lives in `services/volume_vision.py`.
+
+THE BUNDLE WINS AND SAYS SO. When a bundle's `class_names` disagree with the
+record's, the record's are replaced and the previous list is returned in the
+result's `previous` block with a warning naming both. The one disagreement that
+is NOT reconciled is `source_uuid`: a bundle for a different trained model is the
+wrong file for this record, and attaching it would make every iOS cache keyed on
+that uuid wrong. That is refused by name, with `force=true` for the operator who
+means it. See `model_registry.reconcile_bundle_manifest`.
 """
 
 from __future__ import annotations
@@ -75,9 +113,10 @@ import os
 import frappe
 
 from .. import compat, model_registry
-from ..args import as_int, as_limit, as_str, resolve_company
+from ..args import as_bool, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
+from ..services import volume_vision
 from . import files as files_tools
 from . import kpi as kpi_tools
 
@@ -218,6 +257,9 @@ def _describe(doc) -> dict:
 		"taxonomy_schema": doc.get("taxonomy_schema") or None,
 		"taxonomy_version": doc.get("taxonomy_version") or None,
 		"model_file": doc.get("model_file") or None,
+		"manifest_source": doc.get("manifest_source") or None,
+		"bundle_manifest": model_registry.bundle_manifest_of(doc.as_dict()) or None,
+		"is_bundle": bool(model_registry.bundle_manifest_of(doc.as_dict())),
 		"class_names": model_registry.class_names_of(doc.as_dict()),
 		"metrics": model_registry.metrics_of(doc.as_dict()),
 		"file_size_bytes": doc.get("file_size_bytes") or None,
@@ -567,12 +609,23 @@ def get_active_model(args: dict) -> ToolResult:
 # ── 8. attach_model_file ─────────────────────────────────────────────────
 
 
-def _attach_file_token(doc, file_token: str):
+def _staged_file(file_token: str):
+	"""The File `file_token` names, read but NOT yet re-parented.
+
+	Separated from the attach so the bytes can be inspected — is this a bundle,
+	and does its manifest belong to this record? — before anything is written.
+	A refusal that has already moved the File would be a refusal that says
+	"nothing was changed" and is lying.
+	"""
 	if not frappe.db.exists("File", file_token):
 		raise ToolError(f"no File named {file_token!r}. Nothing was changed.")
 	file_doc = frappe.get_doc("File", file_token)
 	if file_doc.get("is_folder"):
 		raise ToolError(f"File {file_token!r} is a folder, not a model binary. Nothing was changed.")
+	return file_doc
+
+
+def _attach_file_token(doc, file_doc):
 	file_doc.attached_to_doctype = DOCTYPE
 	file_doc.attached_to_name = doc.name
 	file_doc.attached_to_field = "model_file"
@@ -581,10 +634,7 @@ def _attach_file_token(doc, file_token: str):
 	return file_doc
 
 
-def _attach_file_content(doc, file_content: str, file_name: str):
-	if not file_name:
-		raise ToolError("file_name is required alongside file_content. Nothing was changed.")
-	content = files_tools.decode_base64_content(file_content, tail="Nothing was changed.")
+def _attach_bytes(doc, content: bytes, file_name: str):
 	file_doc = frappe.get_doc(
 		{
 			"doctype": "File",
@@ -599,6 +649,81 @@ def _attach_file_content(doc, file_content: str, file_name: str):
 	file_doc.flags.ignore_permissions = True
 	file_doc.insert(ignore_permissions=True)
 	return file_doc
+
+
+# ── the bundle half, shared by attach_model_file and pull_model_from_vv ───
+
+
+def _read_bundle(content: bytes, file_name: str) -> dict:
+	"""`model_registry.read_bundle`, with a zip that will not open turned into a refusal.
+
+	A file whose first four bytes are PK and whose contents are not a readable
+	bundle is a truncated or corrupt download, and storing it would mean an iOS
+	app discovering that hours later on a handset in an orchard. The raw path is
+	untouched: bytes that are not a zip are not a bundle and never come here.
+	"""
+	bundle = model_registry.read_bundle(content)
+	if not bundle["is_bundle"]:
+		return bundle
+	if bundle["errors"]:
+		raise ToolError(
+			f"{file_name} is a zip, so it was read as a model bundle, and it is not a usable one: "
+			+ "; ".join(bundle["errors"])
+			+ ". A raw .mlmodel attaches unchanged; it is only a zip that is held to the bundle "
+			"contract. Nothing was changed."
+		)
+	return bundle
+
+
+def _apply_bundle(doc, bundle: dict, file_name: str, force: bool) -> dict:
+	"""Reconcile a bundle's manifest onto `doc` in memory. Returns the audit block.
+
+	Nothing is saved here — the caller saves once, after the File is attached,
+	so a conflict refuses before either the record or the attachment moves.
+	"""
+	reconciled = model_registry.reconcile_bundle_manifest(doc.as_dict(), bundle["manifest"], file_name)
+	if reconciled["conflicts"] and not force:
+		raise ToolError(
+			"; ".join(reconciled["conflicts"])
+			+ ". Attach this bundle to the record that actually names that model, or pass force=true "
+			"if this record is being repointed deliberately. Nothing was changed."
+		)
+	if reconciled["conflicts"]:
+		reconciled["warnings"].append(
+			"force=true: " + "; ".join(reconciled["conflicts"]) + " — applied anyway, and source_uuid "
+			"was left as it was. Any iOS cache keyed on the old uuid is now stale."
+		)
+
+	for field, value in reconciled["updates"].items():
+		if field in ("class_names", "metrics", "bundle_manifest"):
+			setattr(doc, field, json.dumps(value, default=str))
+		else:
+			setattr(doc, field, value)
+	return reconciled
+
+
+def _apply_raw(doc, file_name: str) -> list:
+	"""What a NON-bundle attachment records about its own provenance.
+
+	The record keeps whatever `class_names` it already had — there is nothing in
+	a raw `.mlmodel` to check them against — and `manifest_source` says so, so
+	the difference between "these labels came out of training" and "somebody
+	typed these" is visible on the form rather than inferred from which release
+	the file was attached in.
+	"""
+	doc.manifest_source = model_registry.MANIFEST_SOURCE_RECORD
+	doc.bundle_manifest = None
+	if not model_registry.class_names_of(doc.as_dict()):
+		return [
+			f"{file_name} is a raw model file, not a bundle, and this record has no class_names — "
+			"so nothing on this site knows what the model's output indices mean. Pull a bundle with "
+			"pull_model_from_vv, or set them with update_model(class_names=[...])."
+		]
+	return [
+		f"{file_name} is a raw model file, not a bundle. class_names on this record are unchanged "
+		"and unverified against the weights — nothing in a raw .mlmodel says what its output "
+		"indices mean. pull_model_from_vv gets the bundle when Volume Vision serves one."
+	]
 
 
 def attach_model_file(args: dict) -> ToolResult:
@@ -620,10 +745,17 @@ def attach_model_file(args: dict) -> ToolResult:
 	takes with a badge `regenerate` supersedes — so a rollback to a previous
 	version is `activate_model` on an older record plus a fresh attach, not a
 	recovery from a bin.
+
+	v0.59.0: A ZIP IS READ AS A BUNDLE, ANYTHING ELSE IS THE OLD BEHAVIOUR. The
+	first four bytes decide, not the file name. A bundle's `manifest.json`
+	supplies `class_names`, `metrics` and the rest, and the record says so in
+	`manifest_source`; a raw model attaches exactly as it did before, and says
+	that its labels are unverified. See the module docstring.
 	"""
 	_require()
 	actor = kpi_tools.require_kpi_role()
 	doc = _resolve(_reference(args), company=as_str(args, "company"), version=as_str(args, "version"))
+	before = _describe(doc)
 
 	file_token = as_str(args, "file_token")
 	file_content = as_str(args, "file_content")
@@ -639,21 +771,67 @@ def attach_model_file(args: dict) -> ToolResult:
 			"otherwise. Nothing was changed."
 		)
 
+	# READ AND JUDGE BEFORE WRITING ANYTHING. Both paths produce the bytes first
+	# so a bundle that belongs to another trained model is refused with the File
+	# still where it was and the record untouched.
 	if file_token:
-		file_doc = _attach_file_token(doc, file_token)
+		staged = _staged_file(file_token)
+		content = staged.get_content()
+		file_name = staged.get("file_name") or file_token
 	else:
-		file_doc = _attach_file_content(doc, file_content, as_str(args, "file_name"))
+		staged = None
+		file_name = as_str(args, "file_name")
+		if not file_name:
+			raise ToolError("file_name is required alongside file_content. Nothing was changed.")
+		content = files_tools.decode_base64_content(file_content, tail="Nothing was changed.")
+
+	if isinstance(content, str):  # a File stored as text still has to be sniffed as bytes
+		content = content.encode("utf-8", "surrogateescape")
+
+	bundle = _read_bundle(content, file_name)
+	force = as_bool(args, "force", False)
+	if bundle["is_bundle"]:
+		reconciled = _apply_bundle(doc, bundle, file_name, force)
+	else:
+		reconciled = {"updates": {}, "warnings": _apply_raw(doc, file_name), "conflicts": []}
+
+	file_doc = _attach_file_token(doc, staged) if staged else _attach_bytes(doc, content, file_name)
 
 	doc.model_file = file_doc.file_url
-	doc.file_size_bytes = int(file_doc.get("file_size") or 0)
+	doc.file_size_bytes = int(file_doc.get("file_size") or 0) or len(content)
 	doc.flags.ignore_permissions = True
 	doc.save(ignore_permissions=True)
 
 	described = _describe(doc)
+	data = {
+		"actor": actor,
+		"model": described,
+		"file": file_doc.name,
+		"file_size_bytes": doc.file_size_bytes,
+		"is_bundle": bundle["is_bundle"],
+		"bundle": {
+			"entries": bundle["entries"],
+			"manifest_entry": bundle["manifest_entry"],
+			"model_entry": bundle["model_entry"],
+			"manifest": bundle["manifest"],
+		}
+		if bundle["is_bundle"]
+		else None,
+		"manifest_source": described["manifest_source"],
+		"warnings": reconciled["warnings"],
+		"previous": {"class_names": before["class_names"], "metrics": before["metrics"]},
+	}
+	shape = "bundle" if bundle["is_bundle"] else "raw model file"
+	summary = f"attached {file_doc.get('file_name')} ({doc.file_size_bytes} bytes, {shape}) to {doc.name}"
+	if bundle["is_bundle"]:
+		summary += f"; class_names from its manifest ({len(described['class_names'])} label(s))"
+	if reconciled["warnings"]:
+		summary += f"; {len(reconciled['warnings'])} warning(s)"
 	return ToolResult(
-		data={"actor": actor, "model": described, "file": file_doc.name, "file_size_bytes": doc.file_size_bytes},
-		summary=f"attached {file_doc.get('file_name')} ({doc.file_size_bytes} bytes) to {doc.name}",
-		docstatus_delta=f"model_file set on {doc.name}",
+		data=data,
+		summary=summary,
+		docstatus_delta=f"model_file set on {doc.name}"
+		+ ("; class_names/metrics taken from the bundle manifest" if bundle["is_bundle"] else ""),
 	)
 
 
@@ -676,6 +854,13 @@ def get_model_file_chunk(args: dict) -> ToolResult:
 	`source_server` on the caller's behalf — see the module docstring on why
 	there is no proxy here. `attach_model_file` is the fix, and the refusal
 	says so.
+
+	v0.59.0: SERVES WHATEVER IS ATTACHED, AND SAYS WHICH IT IS. A bundle is
+	larger than the raw model it contains, so `total_chunks` is larger too — it
+	is computed from the stored bytes on every call and is right for either
+	shape. `is_bundle` is read from the bytes themselves rather than from the
+	record, so a client can branch on unzip-vs-compile from the first chunk it
+	receives even if it never read the manifest.
 	"""
 	_require()
 	doc = _resolve(_reference(args), company=as_str(args, "company"), version=as_str(args, "version"))
@@ -705,6 +890,8 @@ def get_model_file_chunk(args: dict) -> ToolResult:
 		)
 	file_doc = frappe.get_doc("File", file_name)
 	content = file_doc.get_content()
+	if isinstance(content, str):
+		content = content.encode("utf-8", "surrogateescape")
 	total_bytes = len(content)
 	total_chunks = max(1, -(-total_bytes // chunk_bytes))
 	if chunk_index >= total_chunks:
@@ -715,6 +902,7 @@ def get_model_file_chunk(args: dict) -> ToolResult:
 
 	start = chunk_index * chunk_bytes
 	piece = content[start : start + chunk_bytes]
+	is_bundle = model_registry.looks_like_bundle(content)
 	return ToolResult(
 		data={
 			"model": doc.name,
@@ -725,6 +913,153 @@ def get_model_file_chunk(args: dict) -> ToolResult:
 			"total_bytes": total_bytes,
 			"chunk_base64": base64.b64encode(piece).decode("ascii"),
 			"is_last": chunk_index == total_chunks - 1,
+			"is_bundle": is_bundle,
+			"manifest_source": doc.get("manifest_source")
+			or (
+				model_registry.MANIFEST_SOURCE_BUNDLE
+				if is_bundle
+				else model_registry.MANIFEST_SOURCE_RECORD
+			),
 		},
-		summary=f"{doc.name} chunk {chunk_index + 1}/{total_chunks} ({len(piece)} bytes)",
+		summary=f"{doc.name} chunk {chunk_index + 1}/{total_chunks} ({len(piece)} bytes"
+		+ (", bundle" if is_bundle else ", raw model")
+		+ ")",
+	)
+
+
+# ── 10. pull_model_from_vv ───────────────────────────────────────────────
+
+
+def pull_model_from_vv(args: dict) -> ToolResult:
+	"""MUTATING (default OFF). Fetch a trained model straight from Volume Vision
+	and attach it to this ML Model record — the whole manual procedure (curl on a
+	laptop, base64, `bench console`) as one call, with the provenance check nobody
+	was doing by hand.
+
+	WHAT IT ASKS FOR, IN ORDER. `/training/models/<uuid>/bundle` first — the zip
+	carrying `model.mlmodel` beside a `manifest.json` written at export time —
+	and `/training/models/<uuid>/download`, the endpoint every existing consumer
+	has always used, only as a fallback when the first answers 404/405/501. A
+	Volume Vision that has not had the bundle export deployed yet answers exactly
+	that, so the fallback is the "Phase 1 is not live on the training box"
+	path. IT IS REPORTED, NOT HIDDEN: a raw file has no manifest, so the
+	record's `class_names` remain whatever somebody typed, `manifest_source` says
+	so, and the warning is in the result and the summary.
+
+	WHERE IT FETCHES FROM. `source_server` on the record, unless `source_server`
+	is passed here — the port is read, never assumed, because a Volume Vision on
+	an operator's Umbrel is on whatever port they put it on. `source_uuid`
+	likewise defaults to the record's. A record can also be resolved BY its
+	source_uuid alone, which is how a caller holding only Volume Vision's
+	identifier finds the ERPNext record for it.
+
+	IT REFUSES A BUNDLE THAT NAMES A DIFFERENT TRAINED MODEL. See
+	`_apply_bundle`. Everything else the manifest disagrees with, the manifest
+	wins and the warning says what was replaced.
+	"""
+	_require()
+	actor = kpi_tools.require_kpi_role()
+
+	reference = as_str(args, "model") or as_str(args, "name") or as_str(args, "model_name")
+	source_uuid = as_str(args, "source_uuid")
+	if not reference and not source_uuid:
+		raise ToolError(
+			"one of model (a docname or model_name) or source_uuid is required — there is nothing "
+			"to pull into otherwise. register_model is what creates the record first. Nothing was "
+			"changed."
+		)
+	doc = _resolve(reference or source_uuid, company=as_str(args, "company"), version=as_str(args, "version"))
+	before = _describe(doc)
+
+	uuid = source_uuid or str(doc.get("source_uuid") or "").strip()
+	if not uuid:
+		raise ToolError(
+			f"{doc.name} has no source_uuid and none was passed. That is Volume Vision's own "
+			"TrainedModel.uuid and the only thing that names a model there — pass source_uuid, or "
+			"set it with update_model. Nothing was changed."
+		)
+	base_url = as_str(args, "source_server") or as_str(args, "vv_url") or (doc.get("source_server") or "")
+
+	fetched = volume_vision.fetch_model(
+		base_url,
+		uuid,
+		prefer_bundle=as_bool(args, "prefer_bundle", True),
+		allow_raw_fallback=as_bool(args, "allow_raw_fallback", True),
+		timeout=as_int(args, "timeout_seconds") or volume_vision.DEFAULT_TIMEOUT_SECONDS,
+	)
+	content = fetched["content"]
+	file_name = fetched["file_name"]
+
+	bundle = _read_bundle(content, file_name)
+	force = as_bool(args, "force", False)
+	warnings = list(fetched["warnings"])
+	if bundle["is_bundle"]:
+		reconciled = _apply_bundle(doc, bundle, file_name, force)
+		warnings.extend(reconciled["warnings"])
+	else:
+		warnings.extend(_apply_raw(doc, file_name))
+		if fetched["endpoint"] == "bundle":
+			warnings.append(
+				f"{fetched['url']} answered 200 with something that is not a zip. The endpoint "
+				"exists but did not serve a bundle — it was stored as a raw model."
+			)
+
+	# RECORDED BEFORE THE SAVE, NOT AFTER. The two arguments that steered this
+	# fetch are the two facts a later reader needs to repeat it, and a pull that
+	# worked from an argument the record does not hold is a pull nobody can
+	# reproduce from the record.
+	if source_uuid and not (doc.get("source_uuid") or ""):
+		doc.source_uuid = source_uuid
+	if base_url and not (doc.get("source_server") or ""):
+		doc.source_server = base_url
+
+	file_doc = _attach_bytes(doc, content, file_name)
+	doc.model_file = file_doc.file_url
+	doc.file_size_bytes = int(file_doc.get("file_size") or 0) or len(content)
+	doc.flags.ignore_permissions = True
+	doc.save(ignore_permissions=True)
+
+	described = _describe(doc)
+	data = {
+		"actor": actor,
+		"model": described,
+		"file": file_doc.name,
+		"file_size_bytes": doc.file_size_bytes,
+		"source": {
+			"url": fetched["url"],
+			"endpoint": fetched["endpoint"],
+			"fell_back": fetched["fell_back"],
+			"source_uuid": uuid,
+			"server_version": fetched.get("server_version"),
+			"server_class_names": fetched.get("server_class_names"),
+		},
+		"is_bundle": bundle["is_bundle"],
+		"bundle": {
+			"entries": bundle["entries"],
+			"manifest_entry": bundle["manifest_entry"],
+			"model_entry": bundle["model_entry"],
+			"manifest": bundle["manifest"],
+		}
+		if bundle["is_bundle"]
+		else None,
+		"manifest_source": described["manifest_source"],
+		"warnings": warnings,
+		"previous": {"class_names": before["class_names"], "metrics": before["metrics"]},
+	}
+	shape = "bundle" if bundle["is_bundle"] else "raw model file"
+	summary = (
+		f"pulled {file_name} ({doc.file_size_bytes} bytes, {shape}) from {fetched['url']} onto "
+		f"{doc.name}"
+	)
+	if bundle["is_bundle"]:
+		summary += f"; class_names from its manifest ({len(described['class_names'])} label(s))"
+	if fetched["fell_back"]:
+		summary += "; FELL BACK to the raw /download endpoint — no manifest"
+	if warnings:
+		summary += f"; {len(warnings)} warning(s)"
+	return ToolResult(
+		data=data,
+		summary=summary,
+		docstatus_delta=f"model_file set on {doc.name} from {fetched['url']}"
+		+ ("; class_names/metrics taken from the bundle manifest" if bundle["is_bundle"] else ""),
 	)

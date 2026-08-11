@@ -3,6 +3,88 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.59.0 — 2026-08-11
+
+**A model's labels and a model's weights have never travelled together, and
+nothing noticed when they disagreed.** `class_names` was typed onto an ML Model
+record at registration; the weights were exported from Volume Vision separately;
+a phone cached its own copy of the list months ago. Three lists, no check, and
+the failure is silent — output index 2 keeps meaning `bucket` on the record and
+`lip` in the model, and inference goes on returning confident numbers against
+the wrong names. That is worse than an error, because nothing in a log says it
+happened.
+
+**A model bundle is one zip carrying `model.mlmodel` beside a `manifest.json`,
+and `manifest.json.class_names` is now the only list anything reads.** Volume
+Vision writes it at export time, in model-output-index order, from the same
+training config the weights came out of. This release is ERPNext's half —
+Phase 2 of the model bundle pipeline; the export itself is Phase 1 on the
+training server and the iOS bundle loader is Phase 3.
+
+**`pull_model_from_vv` is the whole manual procedure as one call.** Getting a
+trained model onto a phone took a laptop, `curl`, a base64 encode and a
+`bench console`, every step forgettable and the one that mattered — do these
+labels match these weights? — done by nobody. The new tool asks Volume Vision's
+new `/training/models/<uuid>/bundle` for the zip, attaches it, and reconciles
+the manifest onto the record. `source_server` and `source_uuid` come from the ML
+Model record unless passed; **host and port are read from the record, never
+assumed**, because a Volume Vision on an operator's Umbrel is on whatever port
+they put it on.
+
+**The bundle endpoint is asked first and the original one is the fallback.**
+`/training/models/<uuid>/download` is unchanged and stays forever — LiDAR
+Capture and BucketLog pull raw files through it and are untouched by any of
+this. When `/bundle` answers 404/405/501, which is exactly what a Volume Vision
+without the Phase 1 export deployed answers, the pull falls back to `/download`
+and **says so** in `warnings` and in the summary: a raw file has no manifest, so
+`class_names` stay whatever somebody typed and the record's new
+`manifest_source` field records that. `allow_raw_fallback=false` refuses rather
+than taking it.
+
+**`attach_model_file` reads the bytes, not the file name.** Four bytes of `PK`
+magic decide whether an upload is a bundle or a raw model — the name is whatever
+a browser called the download, and a `.mlmodel` that is really a zip fails hours
+later as a CoreML compile error on a handset in an orchard. A bundle's manifest
+supplies `class_names`, `metrics`, `model_kind` and the rest; a raw file behaves
+exactly as it did in v0.52.0. A zip that will not open, or one with no
+`manifest.json`, is refused with nothing written.
+
+**The bundle wins, and says what it overwrote.** When a manifest's `class_names`
+disagree with the record's, the record's are replaced, the previous list comes
+back in the result's `previous` block, and the warning names both. Three things
+the bundle does NOT get to settle: `version` and `piecework_activity` are this
+record's identity rather than training's to assign, and a manifest naming a
+different `source_uuid` than the record's is **refused** — that is a different
+trained model, and attaching it would make every iOS cache keyed on the uuid
+wrong. `force=true` is there for the operator who means it.
+
+**Two new fields on ML Model, and no new table.** `manifest_source` carries the
+sentence — *"class_names source: bundle manifest from VV training (uuid …)"* —
+so somebody reading the form in a year can see where the labels came from.
+`bundle_manifest` keeps the manifest whole, because it carries the two things
+this doctype has no column for and an iOS app needs at inference:
+`preprocessing` (input size, normalization, colour space) and `class_roles`.
+Both reach a phone through `get_active_model`'s manifest under
+`metadata.bundle`, so nothing has to unpack a zip to read them.
+
+`get_model_file_chunk` serves whatever is attached and computes `total_bytes`
+and `total_chunks` from the stored bytes on every call, so a bundle simply has
+more pieces than the raw model it contains; its answer now carries `is_bundle`,
+read from the bytes rather than the record, so a client can branch on
+unzip-vs-compile from the first chunk it receives.
+
+**This is the only tool in this app that fetches a file from another server**,
+which is the shape of every server-side request forgery there has ever been.
+`services/volume_vision.py` states the position: http/https only, no credentials
+in the URL, no redirects followed, and a 512 MB ceiling checked against
+`Content-Length` before the body is read and against the body after. The
+allowlist posture is deliberately different from `validate_public_endpoint`'s —
+the target here is an operator's own training box on their own LAN, so a list of
+public suffixes would be exactly wrong and a hardcoded host would be a script
+for one site.
+
+Tool surface **400** (181 read, 219 write). Full standalone suite green.
+
 ## 0.57.1 — 2026-08-10
 
 **Six routes have never been reachable from a phone, and the server could not
