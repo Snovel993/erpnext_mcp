@@ -55,6 +55,7 @@ EIGHT CLAIMS.
 """
 
 import json
+from pathlib import Path
 from typing import ClassVar
 
 import frappe
@@ -250,6 +251,40 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		for route in ROUTES:
 			with self.subTest(path=route.path):
 				self.assertTrue(getattr(route.handler, "farm_ops_method", None))
+
+	def test_every_route_has_a_line_in_the_funnel_mount_script(self):
+		"""THE ASSERTION THAT WOULD HAVE CAUGHT THREE RELEASES OF SILENT 404s.
+
+		`tailscale funnel --set-path` is an EXACT mount point, so the funnel
+		publishes one path per line and a route added to `routes.py` is not
+		published by having been added. v0.54.0, v0.55.0 and v0.57.0 each added
+		routes and none of them was mounted: six methods — the housing pair, the
+		onboarding dropdowns, both signature routes and the alert dismissal —
+		answered Tailscale's own plain-text 404 to every phone on the farm while
+		every test in this file passed, because these tests call the service and
+		a handset calls the funnel.
+
+		Nothing about that is visible from the server. The request never arrives,
+		so there is no log line, no audit row and no traceback; what the worker
+		gets is a 404 body the app cannot parse into a sentence, so it shows its
+		generic miss — "That task no longer exists". A signature pad reporting a
+		vanished task is the failure this assertion exists to make loud.
+
+		BOTH DIRECTIONS, for the reason the two above it are: a line with no
+		route publishes a path to the public internet that resolves to nothing,
+		which is the smaller failure and still one nobody would notice.
+		"""
+		script = (Path(__file__).resolve().parent.parent / "scripts" / "mount_farmops_funnel.sh").read_text()
+		listed = set()
+		for block, prefix in (("MOBILE", "/mobile"), ("FILES", "/files")):
+			body = script.split(f'{block}="\n', 1)[1].split('"\n', 1)[0]
+			listed |= {f"{prefix}/{line.strip()}" for line in body.splitlines() if line.strip()}
+		self.assertEqual(
+			listed,
+			{route.path for route in ROUTES},
+			"scripts/mount_farmops_funnel.sh and routes.py disagree about what a phone can "
+			"reach. A route missing from the script is a 404 in somebody's hand.",
+		)
 
 	def test_no_admin_tool_is_reachable_at_any_path(self):
 		"""The one that matters. Two hundred MCP tools; none of them is here."""

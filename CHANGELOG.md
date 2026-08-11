@@ -3,6 +3,43 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.57.1 — 2026-08-10
+
+**Six routes have never been reachable from a phone, and the server could not
+see it.** The funnel mounts paths one at a time with
+`tailscale funnel --set-path`, so a route added to `farmops_api/routes.py` is
+not published by having been added — and nothing published the ones added in
+v0.54.0, v0.55.0 or v0.57.0. A probe of all 53 from outside: 47 answer, and the
+six that do not are `list_onboarding_reference_data`, `list_available_housing`,
+`assign_housing`, `collect_signature`, `dismiss_compliance_alert` and
+`submit_form_signature`. The request stops at the proxy, so there is no log
+line, no audit row and no traceback; what the worker sees is Tailscale's own
+plain-text 404, which the app cannot parse into a sentence, so it shows its
+generic miss — *"That task no longer exists — someone may have taken it."* — for
+a signature that was working perfectly on the other side.
+`scripts/mount_farmops_funnel.sh` mounts the lot and is asserted against the
+route table in both directions by the test suite;
+`validate_public_endpoint(probe_routes=true)` asks the same question from
+outside. **Fixing this needs an operator on the Umbrel, not an upgrade.**
+
+**The rendered I-9 and W-4 have never carried the signature, since v0.51.0.**
+`render_i9_pdf` built its record from `_i9_fields()`, which does not list
+`section_1_signature` or `section_2_signature` — so `_signature_captures` looked
+for keys that were never in the dict and returned `{}` every time, and the page
+came out unstamped and unflattened. `render_w4_pdf` had the same bug against
+`signature`. Both now read their capture columns at the render. The stamping
+tests pointed at the pure renderer and passed throughout; the new regression
+tests go through the tools, from a capture on the record, with a real PNG.
+
+**`submit_form_signature` returns the signed page.** A new `pdf` object carries
+the completed form as base64 beside `file_url`, because a private File is a
+login page to a handset that authenticates to the sidecar — the same reason
+`get_employee_badge_pass` sends its bytes. It renders one where none existed,
+reports rather than fails when it cannot (`pdf.available: false`), and a retry
+reads the existing page instead of drawing a second. `include_pdf=false` turns
+it off. iOS shows it behind a "See the signed form" button. See
+[`RELEASES/v0.57.1.md`](RELEASES/v0.57.1.md).
+
 ## 0.57.0 — 2026-08-10
 
 **The compliance calendar stops being a noticeboard.** *"I-9 Section 1 was

@@ -82,11 +82,14 @@ keep in step.
 
 from __future__ import annotations
 
+import base64
+
 import frappe
 
 from .. import bucket_bridge, compat
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
+from ..tools import files as file_tools
 from ..tools import calendar as compliance_calendar
 from ..tools import employee as personnel
 from ..tools import housing as housing_tools
@@ -3336,6 +3339,7 @@ def submit_form_signature(
 	task=None,
 	task_assignment=None,
 	row=None,
+	include_pdf=None,
 ) -> dict:
 	"""The signature pad's own call, in the shape `API_CONTRACT.md` §14.2 posts.
 
@@ -3389,6 +3393,28 @@ def submit_form_signature(
 	server stamps its own and answers with what it wrote — every key here is
 	optional to the client, which reads the server's word for the record.
 
+	`include_pdf` HANDS BACK THE PAGE THAT WAS JUST SIGNED, AND DEFAULTS ON.
+	v0.57.1. The signed form is the artefact the whole flow exists to produce and
+	the person who drew the signature could not see it: `file_url` names a
+	private File, and this app authenticates to THIS door with `X-FarmOps-Token`
+	rather than to Frappe, so a private URL is a login page to it — the same
+	reason `get_employee_badge_pass` puts its `.pkpass` in the answer. So the
+	PDF travels as base64 beside the URL, and `render_i9_pdf` stamps the capture
+	into the page content and flattens it, which means what comes back is the
+	page WITH the signature on it rather than the blank-box copy.
+
+	IT RENDERS ONE WHERE NONE EXISTED, which `collect_form_signature` will not do
+	on its own — see `_redraw`, which argues at length that drawing a federal
+	form nobody asked for is this app deciding something that is not its to
+	decide. A caller passing this HAS asked, by name, in the same call. Turning
+	it off is supported for a client that only wants the write.
+
+	NOT FATAL, EVER. The renderers need `pypdf` and the blank federal form on
+	disk; a site missing either gets `pdf.available: false` with the reason in
+	`pdf.note` and a signature that is on the record regardless. A page is worth
+	less than the attestation it depicts, and a call that threw away the second
+	to avoid reporting the loss of the first would have the trade backwards.
+
 	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, as on `collect_signature`: this
 	writes the document the employer is inspected on. Every other refusal is the
 	tool's — the closed list of signable boxes, the authorized-signer roster on
@@ -3415,7 +3441,13 @@ def submit_form_signature(
 			frappe.ValidationError,
 		)
 
-	inner = {"doctype": doctype, "name": docname, "signature_base64": signature_image}
+	wants_pdf = _as_flag(include_pdf, default=True)
+	inner = {
+		"doctype": doctype,
+		"name": docname,
+		"signature_base64": signature_image,
+		"render_pdf": wants_pdf,
+	}
 	for key, value in (("field", signature_field), ("row", row), ("task", task)):
 		if value not in (None, ""):
 			inner[key] = value
@@ -3423,7 +3455,7 @@ def submit_form_signature(
 	try:
 		data = signatures.collect_form_signature(inner).data
 	except signatures.AlreadySignedError:
-		return _already_signed(doctype, docname, signature_field, task)
+		return _already_signed(doctype, docname, signature_field, task, wants_pdf)
 
 	closed = data.get("task") or {}
 	return {
@@ -3444,10 +3476,76 @@ def submit_form_signature(
 		"dismissed_alert": _alert_answered(data.get("doctype"), data.get("field"), data.get("name")),
 		"employee": data.get("employee"),
 		"employee_name": data.get("employee_name"),
+		# See the docstring. The page carries the capture stamped in, and the
+		# bytes travel because a private File is a login page to this caller.
+		"pdf": _signed_pdf(data.get("pdf") or {}) if wants_pdf else None,
 	}
 
 
-def _already_signed(doctype, docname, field, task) -> dict:
+def _signed_pdf(redrawn: dict) -> dict:
+	"""The rendered page as something a handset can open, or why it has none.
+
+	ALWAYS A DICT AND NEVER A RAISE. `_redraw` has already swallowed whatever the
+	renderer did and reported it in `note`; this reads the File it named and can
+	fail on its own — a File row written in a transaction that has not committed,
+	a site whose private files directory moved. Both end the same way: the
+	signature is on the record, and the phone is told there is no page rather
+	than shown a failure for a write that succeeded.
+
+	`available` IS THE KEY TO BRANCH ON, not the presence of `base64`. A page
+	that rendered and could not be read back is a different problem from a site
+	with no `pypdf`, and both are `available: false` with the reason in `note`.
+	"""
+	out = {
+		"available": False,
+		"regenerated": bool(redrawn.get("regenerated")),
+		"file_url": redrawn.get("file_url"),
+		"file_name": redrawn.get("file_name"),
+		"content_type": "application/pdf",
+		"base64": None,
+		"bytes": None,
+		"replaced": redrawn.get("replaced"),
+		"note": redrawn.get("note"),
+	}
+	url = str(redrawn.get("file_url") or "").strip()
+	if not url:
+		return out
+	out["file_name"] = out["file_name"] or url.rsplit("/", 1)[-1] or None
+	try:
+		docname = str(frappe.db.get_value("File", {"file_url": url}, "name") or "")
+		content = file_tools.read_file_bytes(docname) if docname else b""
+	except Exception as exc:  # pragma: no cover - see the docstring
+		out["note"] = f"the page was rendered at {url} and could not be read back ({exc})."
+		return out
+	if not content:
+		out["note"] = f"the page at {url} read back empty."
+		return out
+	out.update(
+		{
+			"available": True,
+			"base64": base64.b64encode(content).decode("ascii"),
+			"bytes": len(content),
+		}
+	)
+	return out
+
+
+def _as_flag(value, default: bool) -> bool:
+	"""One optional boolean off a JSON body, tolerating the four ways it arrives.
+
+	A phone sends `true`; a form post sends `"true"`; an older client sends `1`;
+	and an absent key means the default rather than false. `args.as_bool` reads
+	from a dict and these are already bound parameters, so the same tolerance is
+	spelled out here rather than round-tripped through one.
+	"""
+	if value is None or value == "":
+		return default
+	if isinstance(value, bool):
+		return value
+	return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _already_signed(doctype, docname, field, task, wants_pdf: bool = False) -> dict:
 	"""The §14.3 answer for a box that was already signed. A SUCCESS, not a miss.
 
 	Answers with what is on the record rather than with what this call would have
@@ -3455,6 +3553,14 @@ def _already_signed(doctype, docname, field, task) -> dict:
 	it is actually in and is NOT closed from here: if the first attempt landed it
 	closed the task then, and if somebody signed this box in the Desk instead
 	then the task is theirs to close from the account holding it.
+
+	THE PDF IS READ AND NOT DRAWN, for exactly that reason. A retry whose first
+	attempt landed wants the same page back — the worker is standing there and
+	the point of the answer is to show them what they signed — but rendering one
+	here would make the idempotent path write, which is the one thing this
+	branch exists not to do. So it hands back whatever page is already on the
+	record, and a form nobody has rendered reports no page rather than growing
+	one on a retry.
 	"""
 	resolved = str(doctype or "").strip()
 	name = str(docname or "").strip()
@@ -3468,11 +3574,34 @@ def _already_signed(doctype, docname, field, task) -> dict:
 		"task_completed": None,
 		"already_signed": True,
 		"dismissed_alert": _alert_answered(resolved, field, name),
+		"pdf": _existing_pdf(resolved, name) if wants_pdf else None,
 		"note": (
 			"This box already carried a signature and nothing was changed. An attestation is "
 			"replaced deliberately or not at all."
 		),
 	}
+
+
+def _existing_pdf(doctype, docname) -> dict:
+	"""The page already on the record, read back. Never renders and never raises."""
+	handler = signatures.FORM_HANDLERS.get(str(doctype or "").strip()) or {}
+	field = handler.get("pdf_field")
+	if not (field and docname):
+		return _signed_pdf({})
+	try:
+		url = str(frappe.db.get_value(doctype, docname, field) or "").strip()
+	except Exception:  # pragma: no cover - a site whose column is not migrated
+		url = ""
+	if not url:
+		return _signed_pdf(
+			{
+				"note": (
+					f"no page has been rendered for this form. {handler.get('renderer')} draws "
+					f"one, with the signature stamped in."
+				)
+			}
+		)
+	return _signed_pdf({"regenerated": False, "file_url": url})
 
 
 def _form_status(doctype, docname) -> str | None:

@@ -794,7 +794,7 @@ def collect_form_signature(args: dict) -> ToolResult:
 
 	# ── 3. the task, and ── 4. the PDF ──────────────────────────────────
 	result["task"] = _close_the_task(box, name, handle.name, args)
-	result["pdf"] = _redraw(box, name)
+	result["pdf"] = _redraw(box, name, ensure=as_bool(args, "render_pdf", False))
 
 	return ToolResult(
 		data=result,
@@ -956,7 +956,7 @@ def _task_for(box: SignatureBox, form: str) -> str:
 	return ""
 
 
-def _redraw(box: SignatureBox, form: str) -> dict:
+def _redraw(box: SignatureBox, form: str, ensure: bool = False) -> dict:
 	"""Regenerate the form's PDF so the retained page carries the new signature.
 
 	THE WHOLE REASON THIS STEP IS HERE. `render_i9_pdf` stamps captured
@@ -966,14 +966,22 @@ def _redraw(box: SignatureBox, form: str) -> dict:
 	stale would mean the record and its printable copy disagree about the one
 	fact somebody would print it to prove.
 
-	REGENERATION, AND ONLY REGENERATION. A form that has never been rendered gets
-	nothing: `render_i9_pdf` is one call away, it is the caller's decision when to
-	make it, and producing a federal form nobody asked for — on a phone, in an
-	orchard, as a side effect of collecting a signature — is this app deciding
-	something that is not its to decide. What it will not leave behind is a
-	rendered page that has gone stale, which is why `overwrite` is passed: the
-	File that was there stays attached to the record either way, so the printed
-	copy somebody already had signed is not lost.
+	REGENERATION, AND ONLY REGENERATION, UNLESS THE CALLER ASKED. A form that has
+	never been rendered gets nothing by default: `render_i9_pdf` is one call
+	away, it is the caller's decision when to make it, and producing a federal
+	form nobody asked for — on a phone, in an orchard, as a side effect of
+	collecting a signature — is this app deciding something that is not its to
+	decide. What it will not leave behind is a rendered page that has gone stale,
+	which is why `overwrite` is passed: the File that was there stays attached to
+	the record either way, so the printed copy somebody already had signed is not
+	lost.
+
+	`ensure=True` IS THAT DECISION BEING MADE, NOT ROUTED AROUND. v0.57.1 added
+	it for the signature pad, which asks for the page back so the person who just
+	signed can see what they signed. That is a caller asking by name, in the same
+	call, for a specific reason — which is exactly the condition the paragraph
+	above says is missing when the render happens as a side effect. Nothing
+	changes for a caller that does not pass it.
 
 	NEVER RAISES. The renderers need `pypdf` and the blank federal form on disk,
 	and a site missing either has a working signature and no PDF — which is a
@@ -984,7 +992,7 @@ def _redraw(box: SignatureBox, form: str) -> dict:
 		existing = str(frappe.db.get_value(box.doctype, form, handler["pdf_field"]) or "").strip()
 	except Exception:  # pragma: no cover - a site whose column is not migrated
 		existing = ""
-	if not existing:
+	if not existing and not ensure:
 		return {
 			"regenerated": False,
 			"note": (
@@ -998,9 +1006,15 @@ def _redraw(box: SignatureBox, form: str) -> dict:
 		return {
 			"regenerated": False,
 			"note": (
-				f"the signature is on the record and the PDF was not redrawn ({exc}). The "
-				f"rendered page at {existing} is now out of date with the record it was drawn "
-				f"from; nothing about the signature depends on it."
+				f"the signature is on the record and the PDF was {'not drawn' if not existing else 'not redrawn'} "
+				f"({exc}). "
+				+ (
+					f"The rendered page at {existing} is now out of date with the record it was "
+					f"drawn from; "
+					if existing
+					else "There is no rendered page; "
+				)
+				+ "nothing about the signature depends on it."
 			),
 		}
 	data = getattr(result, "data", None) or {}
@@ -1008,7 +1022,7 @@ def _redraw(box: SignatureBox, form: str) -> dict:
 		"regenerated": True,
 		"file_url": data.get("file_url"),
 		"file_name": data.get("file_name"),
-		"replaced": existing,
+		"replaced": existing or None,
 	}
 
 

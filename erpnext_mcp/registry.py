@@ -8519,7 +8519,14 @@ TOOLS = {
 		"The reachable targets are the configured public_url and hosts under "
 		"`.ts.net`, over HTTPS, base URL only, redirects not followed. This makes "
 		"an outbound request from inside the site's network, which is the shape of "
-		"every server-side request forgery there has ever been.",
+		"every server-side request forgery there has ever been.\n\n"
+		"`probe_routes=true` ALSO ASKS WHETHER EVERY ROUTE A PHONE CALLS IS "
+		"PUBLISHED. The funnel mounts one exact path per method, so a route added "
+		"to the app is not reachable until somebody mounts it — and when nobody "
+		"does, the request stops at the proxy, which means no log line, no audit "
+		"row and no traceback on this side. Three releases shipped that way; the "
+		"first report was a foreman holding a signed screen being told the task no "
+		"longer existed.",
 		{
 			"url": _field(
 				_STRING,
@@ -8530,6 +8537,12 @@ TOOLS = {
 				_BOOLEAN,
 				"Send this site's own X-MCP-Token, proving the whole round trip. Only allowed "
 				"against the configured public_url. Default false.",
+			),
+			"probe_routes": _field(
+				_BOOLEAN,
+				"Also POST an empty body, unauthenticated, to every farmops_api route and report "
+				"which ones the funnel is not carrying. A 401 in JSON is the pass. Default false "
+				"— it is ~53 requests and belongs in an upgrade check, not in every probe.",
 			),
 			"timeout_seconds": _field(_INTEGER, "1–30. Default 8."),
 		},

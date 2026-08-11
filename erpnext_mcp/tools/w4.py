@@ -577,6 +577,14 @@ def render_w4_pdf(args: dict) -> ToolResult:
     record["first_date_of_employment"] = frappe.db.get_value(
         EMPLOYEE, employee, "date_of_joining"
     )
+    # Read here rather than added to `_w4_fields`, for the reason
+    # `render_i9_pdf` gives at the same line: that list is what `get_w4`
+    # answers with, and the URL of somebody's ink is not something a reader of
+    # the record needs. `_signature_capture` below looks for exactly this key
+    # and, until v0.57.1, was handed a dict that never carried it — so the
+    # rendered W-4 had an empty signature line on every site, on a form whose
+    # employee signature is the only thing that makes it a valid election.
+    record["signature"] = frappe.db.get_value(W4_FORM, name, "signature")
 
     person = _employee_for(employee)
     employer = _employer_for(str(row.get("company") or ""))

@@ -55,16 +55,21 @@ from the release that shipped it and asserts the mirror refuses it.
 """
 
 import base64
+import io
 import json
+import struct
 import unittest
+import zlib
 from typing import ClassVar
 
 import frappe
+from pypdf import PdfReader
 
 from erpnext_mcp import compliance_rules, i9_pdf, w4_pdf
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import mobile as mobile_api
 from erpnext_mcp.tools import badges as badges_tool
+from erpnext_mcp.tools import i9 as i9_tools
 
 from .fixtures import MAIN, MAIN_ABBR, install_hrms
 from .harness import STORE, set_roles
@@ -82,6 +87,36 @@ _DATE_FORMATS = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m
 #: no test in this file asserts. Same constant, same reasoning, as
 #: `test_missing_signatures.A_CAPTURE`.
 A_PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"signature").decode()
+
+
+def _a_real_png(size: int = 64) -> bytes:
+	"""A PNG a renderer can actually open, for the one test that needs one.
+
+	`A_PNG` above is eight magic bytes and is right for every test that only
+	asks whether the signature was STORED. It is exactly wrong for the test that
+	asks whether the signature reached the PAGE: `i9.render_i9_pdf` swallows a
+	capture it cannot read — deliberately, because losing one image should not
+	stop an employer printing the form — so a fixture that merely looks like a
+	PNG takes the same silent path as the bug, and the test passes while the
+	page comes back blank.
+	"""
+	def chunk(kind: bytes, payload: bytes) -> bytes:
+		body = kind + payload
+		return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body))
+
+	scanlines = b"".join(
+		bytes([0]) + bytes([0 if ((x // 8 + y // 8) % 2 == 0) else 255 for x in range(size)])
+		for y in range(size)
+	)
+	return (
+		b"\x89PNG\r\n\x1a\n"
+		+ chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 0, 0, 0, 0))
+		+ chunk(b"IDAT", zlib.compress(scanlines))
+		+ chunk(b"IEND", b"")
+	)
+
+
+A_REAL_PNG = _a_real_png()
 
 
 class ContractError(AssertionError):
@@ -384,13 +419,41 @@ class ComplianceAlertSummaryModel(Codable):
 	NESTED = (("signature_request", SignatureRequestModel, False, 86),)
 
 
+class SignedPDFModel(Codable):
+	"""`SignatureAPI.SignedPDF` — the completed form, as a page the phone opens.
+
+	THE BYTES ARE IN THE ANSWER BECAUSE `file_url` IS UNREACHABLE HERE. It names
+	a private File on the site and this app authenticates to the sidecar with
+	`X-FarmOps-Token` rather than to Frappe, so the URL is a login page to the
+	handset — the same reason `get_employee_badge_pass` sends its `.pkpass`
+	down. §14.3 has said `file_url` is "recorded, not displayed" since it was
+	written; this is what makes the page displayable.
+
+	`available` IS WHAT THE SCREEN BRANCHES ON and it is false for three
+	different reasons — no `pypdf`, no rendered page, a page that read back
+	empty — each with its sentence in `note`. NONE of them says anything about
+	whether the signature landed, which is settled by the call returning.
+	"""
+
+	SWIFT = "SignatureAPI.swift"
+	LENIENT = (
+		("available", bool, 46),
+		("regenerated", bool, 49),
+		("file_url", str, 50),
+		("file_name", str, 51),
+		("bytes", int, 52),
+		("note", str, 54),
+		("base64", str, 58),
+	)
+
+
 class SignatureSubmissionModel(Codable):
 	"""`SignatureAPI.SubmissionResult` — what comes back from the pad.
 
 	EVERY KEY IS OPTIONAL TO THE CLIENT and a sparse `{}` still reads as "signed,
 	task closed", because that is the route's contract. What the app does with
-	these is report: the form's new status, whether the task closed, and which
-	calendar row to take away.
+	these is report: the form's new status, whether the task closed, which
+	calendar row to take away, and — since v0.57.1 — the page that was signed.
 	"""
 
 	SWIFT = "SignatureAPI.swift"
@@ -407,6 +470,7 @@ class SignatureSubmissionModel(Codable):
 		("dismissed_alert", str, 82),
 	)
 	DATES = (("signed_on", 80),)
+	NESTED = ((("pdf"), SignedPDFModel, False, 83),)
 
 
 class CompletionResultModel(Codable):
@@ -2633,6 +2697,203 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertEqual(row["dismissed_alert"], alert["name"])
 		self.assertTrue(
 			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature")
+		)
+
+	def test_47_the_signed_page_comes_back_in_the_answer(self):
+		"""v0.57.1. The artefact the whole flow exists to produce, in the hands of
+		the person who just signed it.
+
+		`file_url` NAMES A FILE THIS CALLER CANNOT FETCH. It is a private File on
+		the site and the app authenticates to the sidecar with `X-FarmOps-Token`
+		rather than to Frappe — §14.3 has said "recorded, not displayed" about it
+		since it was written. So the page travels as base64, the way
+		`get_employee_badge_pass` sends a `.pkpass`, and `render_i9_pdf` stamps
+		the capture into the page content, which is what makes it the SIGNED form
+		rather than a blank-box copy of the same record.
+		"""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		row = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+		)
+		SignatureSubmissionModel.decode(row, "submit_form_signature")
+
+		pdf = row["pdf"]
+		self.assertIs(pdf["available"], True)
+		self.assertIs(pdf["regenerated"], True)
+		self.assertEqual(pdf["content_type"], "application/pdf")
+		self.assertTrue(pdf["file_url"])
+		# A real PDF, not a note about one. The magic bytes are the assertion
+		# that matters: a base64 string that decodes to anything else would pass
+		# every other check here and put an empty viewer in front of a foreman.
+		self.assertTrue(base64.b64decode(pdf["base64"]).startswith(b"%PDF"))
+		self.assertEqual(pdf["bytes"], len(base64.b64decode(pdf["base64"])))
+		# And it is filed against the record, not only handed down the wire.
+		self.assertEqual(
+			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "generated_pdf"), pdf["file_url"]
+		)
+
+	def test_47_the_page_that_comes_back_carries_the_ink(self):
+		"""THE PAGE IS ONLY WORTH SENDING IF THE SIGNATURE IS ON IT, and from
+		v0.51.0 to v0.57.0 it was not — on any site, for any form.
+
+		`i9_pdf.py` says at length that the capture is stamped into the page
+		content and the result flattened, so the retained copy cannot be edited
+		back into an unsigned one. It was true of `fill_i9_pdf`, which is where
+		the stamping tests point, and false of everything that CALLED it:
+		`render_i9_pdf` built its record from `_i9_fields()`, which does not
+		carry `section_1_signature` or `section_2_signature` — those are the URLs
+		of the ink, and a reader of the record has no use for them — so
+		`_signature_captures` looked for two keys that were never in the dict and
+		returned `{}` every time. No captures meant no stamping AND no
+		flattening, which is why the field count below is the assertion: an
+		unflattened page is the tell, and it is visible without decoding an
+		image.
+
+		A REAL PNG rather than the eight magic bytes the tests above use. The
+		renderer decodes this one, and a fixture that only looks like a PNG would
+		pass through the same silent skip this test exists to catch.
+		"""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		row = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=base64.b64encode(A_REAL_PNG).decode(),
+		)
+		page = base64.b64decode(row["pdf"]["base64"])
+		reader = PdfReader(io.BytesIO(page))
+		self.assertEqual(
+			len(reader.get_fields() or {}),
+			0,
+			"the page came back unflattened, which means no capture reached the renderer — "
+			"the signature is on the record and invisible on the copy of it a worker is shown.",
+		)
+		# And the electronic-signature record beside the image, which is what
+		# makes it an attestation under 8 CFR 274a.2(h) rather than a picture.
+		# Matched without the trailing word, because the renderer wraps the
+		# sentence into the Additional Information box and the line break lands
+		# in a different place for a different name.
+		text = "\n".join((sheet.extract_text() or "") for sheet in reader.pages)
+		self.assertIn("signature image affixed", text)
+		self.assertIn("Electronically signed pursuant to 8 CFR 274a.2", text)
+
+	def test_47_a_client_that_does_not_want_the_page_is_not_sent_one(self):
+		"""`include_pdf=false` for a caller that only wants the write. Drawing a
+		federal form is not free and a client that will not show it should not
+		make the phone wait for it."""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		row = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+			include_pdf=False,
+		)
+		SignatureSubmissionModel.decode(row, "submit_form_signature")
+		self.assertIsNone(row["pdf"])
+		# The signature is on the record regardless — the page was the only
+		# thing turned off.
+		self.assertTrue(
+			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature")
+		)
+		self.assertFalse(
+			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "generated_pdf") or ""
+		)
+
+	def test_47_a_page_that_cannot_be_drawn_is_reported_and_is_not_fatal(self):
+		"""NEVER FATAL. A site without `pypdf` or the blank federal form has a
+		working signature and no page, and the phone is told which — a call that
+		threw away the attestation to avoid reporting the loss of a picture of it
+		would have the trade backwards."""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+
+		def no_renderer(_args):
+			raise RuntimeError("pypdf is not installed on this site")
+
+		original = i9_tools.render_i9_pdf
+		i9_tools.render_i9_pdf = no_renderer
+		self.addCleanup(setattr, i9_tools, "render_i9_pdf", original)
+
+		row = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+		)
+		SignatureSubmissionModel.decode(row, "submit_form_signature")
+		self.assertIs(row["pdf"]["available"], False)
+		self.assertIsNone(row["pdf"]["base64"])
+		self.assertIn("pypdf", row["pdf"]["note"])
+		# THE SIGNATURE LANDED. That is the whole point of the assertion above.
+		self.assertIs(row["already_signed"], False)
+		self.assertTrue(row["file_url"])
+		self.assertTrue(
+			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature")
+		)
+
+	def test_47_a_retry_gets_the_page_back_without_drawing_a_second_one(self):
+		"""§14.4's idempotent path stays a READ. The worker is standing there and
+		wants the same page; rendering one here would make the branch that exists
+		not to write, write."""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		first = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+		)
+		second = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+		)
+		SignatureSubmissionModel.decode(second, "submit_form_signature")
+		self.assertIs(second["already_signed"], True)
+		self.assertIs(second["pdf"]["available"], True)
+		self.assertIs(second["pdf"]["regenerated"], False)
+		# The same page, not a fresh one drawn on a retry.
+		self.assertEqual(second["pdf"]["file_url"], first["pdf"]["file_url"])
+
+	def test_47_a_retry_on_a_form_nobody_rendered_does_not_grow_a_page(self):
+		"""The other half of the rule above. `include_pdf` asks for a page and
+		the already-signed branch answers with what is there — which on a form
+		signed in the Desk is nothing."""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+			include_pdf=False,
+		)
+		second = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+		)
+		self.assertIs(second["already_signed"], True)
+		self.assertIs(second["pdf"]["available"], False)
+		self.assertFalse(
+			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "generated_pdf") or ""
 		)
 
 	def test_47_a_retry_whose_answer_was_lost_reports_success(self):

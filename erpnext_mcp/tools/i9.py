@@ -1443,6 +1443,22 @@ def render_i9_pdf(args: dict) -> ToolResult:
 
     record = {key: value for key, value in row.items()}
     record["name"] = name
+    # THE TWO CAPTURE COLUMNS ARE READ HERE AND NOT VIA `_i9_fields`, and the
+    # bug this line fixes is the reason it is worth a comment. That list is
+    # documented as "the fields returned by get_i9_form" and it does not carry
+    # `section_1_signature` or `section_2_signature` — they are the URLs of the
+    # ink itself, which a reader of the record has no use for. But this function
+    # built its `record` out of exactly that list, so `_signature_captures`
+    # below was looking for two keys that were never in the dict and returning
+    # `{}` every single time. v0.51.0 says at length that the retained page
+    # carries the signature the person actually made; from v0.51.0 to v0.57.0 it
+    # never did, on any site, and nothing caught it because the stamping is
+    # tested against `i9_pdf.fill_i9_pdf` directly, with `signatures=` passed in
+    # by the test. Widening `_i9_fields` would have fixed it by also putting two
+    # private file URLs into every `get_i9_form` answer, which is a different
+    # decision made by accident.
+    for column in ("section_1_signature", "section_2_signature"):
+        record[column] = frappe.db.get_value(I9_FORM, name, column)
     reverifications = _reverification_history(name)
     employer = _employer_block(str(row.get("company") or ""))
     ssn = _full_ssn(name, args)

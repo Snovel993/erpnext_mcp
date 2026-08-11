@@ -652,6 +652,47 @@ class RenderTool(I9TestCase):
 		data = self.render()
 		self.assertIn("Employers Only: first date of employment", data["incomplete"])
 
+	@unittest.skipUnless(pdf_signing.available(), "needs Pillow, reportlab and pypdf")
+	def test_a_captured_signature_on_the_record_reaches_the_rendered_page(self):
+		"""THE INTEGRATION THE STAMPING TESTS BELOW DO NOT COVER, and the gap
+		they left was a real one from v0.51.0 to v0.57.0.
+
+		`TheSignatureIsStampedIntoStep5` calls `w4_pdf.fill_w4_pdf` and hands it
+		`signature=` directly, so it proves the stamping and says nothing about
+		whether anything ever passes one in. `render_w4_pdf` did not:
+		`_signature_capture` reads `record["signature"]`, the record was built
+		from `_w4_fields()`, and that list does not carry the column — so every
+		W-4 this app rendered came out with an empty Step 5 line, on a form whose
+		own instructions say it is not valid unless it is signed.
+
+		THE FIELD COUNT IS THE ASSERTION because it needs no image decoding: a
+		page with a capture on it is flattened, and one without is not.
+		"""
+		from erpnext_mcp.tools import files as file_tools
+
+		handle = file_tools.insert_attachment(
+			"w4-signature.png",
+			a_capture(),
+			is_private=True,
+			doctype="W-4 Form",
+			name="W4-2026-0001",
+			attached_to_field="signature",
+		)
+		frappe.db.set_value("W-4 Form", "W4-2026-0001", "signature", handle.get("file_url"))
+
+		from pypdf import PdfReader
+
+		data = self.render()
+		page = file_tools.read_file_bytes(
+			str(frappe.db.get_value("File", {"file_url": data["file_url"]}, "name"))
+		)
+		reader = PdfReader(io.BytesIO(page))
+		self.assertIsNone(
+			reader.get_fields(),
+			"the rendered W-4 came back unflattened, which means the capture on the record "
+			"never reached the renderer — an unsigned page for a signed election.",
+		)
+
 	def test_a_second_render_is_refused_unless_overwrite_is_passed(self):
 		self.render()
 		message = self.tool_error("render_w4_pdf", {"w4_form": "W4-2026-0001"})

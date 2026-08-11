@@ -154,6 +154,15 @@ def validate_public_endpoint(args: dict) -> ToolResult:
 	data["tls"] = _tls_report(parsed.hostname, parsed.port or 443, timeout)
 	data["http"] = _http_report(data["endpoint"], authenticate, timeout)
 	data.update(_verdict(data))
+
+	if as_bool(args, "probe_routes", False):
+		data["routes"] = _route_report(url, timeout)
+		if data["routes"]["unpublished"]:
+			data["summary"] = (
+				f"{data['summary']} — and {len(data['routes']['unpublished'])} of "
+				f"{data['routes']['checked']} phone routes are NOT published"
+			)
+
 	return ToolResult(data=data, summary=data["summary"])
 
 
@@ -197,6 +206,117 @@ def _target_url(args: dict) -> str:
 		"inside the site's network, so the set of things it may reach is a short allowlist and "
 		"not an argument. Nothing was sent."
 	)
+
+
+# ── is every route a phone calls actually PUBLISHED? ────────────────────────
+def _route_report(url: str, timeout: int) -> dict:
+	"""Probe every `farmops_api` route from outside and say which ones answer.
+
+	v0.57.1. THE CHECK THAT WAS MISSING, and the reason it is missing is that
+	the two halves of "can a phone reach this" live in different places and only
+	one of them is in this repository. `routes.py` is the route table and the
+	test suite asserts it exhaustively; the funnel is a list of
+	`tailscale funnel --set-path` mounts on the Umbrel, one line per method, and
+	a route added to the table is NOT published by having been added.
+
+	Three releases proved what that costs. v0.54.0, v0.55.0 and v0.57.0 each
+	added routes, none was mounted, and six methods — the housing pair, the
+	onboarding dropdowns, `collect_signature` and `submit_form_signature` —
+	answered Tailscale's own plain-text `404 page not found` to every handset on
+	the farm. NOTHING ON THE SERVER COULD SEE IT: the request stops at the
+	proxy, so there is no access log line, no audit row and no traceback. The
+	first report was a foreman with a signature on the glass being told the task
+	had been taken by somebody else.
+
+	SO IT IS ASKED FROM OUTSIDE, unauthenticated, exactly as the MCP probe above
+	is. A 401 is the RIGHT answer and the one this looks for: it proves the path
+	reached gunicorn and the credential gate refused an anonymous caller.
+	Anything else — a plain-text 404 from the proxy, an HTML login page from
+	nginx, a timeout — means the path is not carrying, and the method behind it
+	is unreachable no matter how correct it is.
+
+	NOTHING IS SENT BUT AN EMPTY BODY. Every route is POST-only and each one
+	refuses an unauthenticated caller before reading an argument, so `{}` is
+	enough to learn whether the path carries and cannot cause a write. The
+	mutating routes are probed on the same footing for that reason.
+	"""
+	from ..farmops_api import PREFIX, ROUTES
+
+	base = url.rstrip("/")
+	published, unpublished = [], []
+	for route in ROUTES:
+		outcome = _probe_route(f"{base}{PREFIX}{route.path}", timeout)
+		(published if outcome["published"] else unpublished).append(outcome)
+
+	report = {
+		"checked": len(ROUTES),
+		"published": [row["path"] for row in published],
+		"unpublished": unpublished,
+	}
+	if unpublished:
+		report["diagnosis"] = (
+			f"{len(unpublished)} of {len(ROUTES)} routes did not reach the service. A phone "
+			f"calling one of them gets a 404 body the app cannot read, so it shows its generic "
+			f"miss — 'That task no longer exists' — for a method that is working perfectly on "
+			f"the other side of the proxy. Mount them: run scripts/mount_farmops_funnel.sh on "
+			f"the Umbrel host, then run this again."
+		)
+	else:
+		report["diagnosis"] = "every route a phone calls reaches the service."
+	return report
+
+
+def _probe_route(endpoint: str, timeout: int) -> dict:
+	"""One route, from outside. `published` is true only for the service's own 401.
+
+	THE SERVER HEADER IS THE TELL AND THE STATUS IS NOT. Tailscale answers an
+	unmounted path with 404 and so does `farmops_api` for a path that is mounted
+	and not in the route table — the same code, two completely different
+	problems. gunicorn names itself and the proxy does not, and the body settles
+	it either way: this service answers JSON on every single exit, including
+	both of its 404s.
+	"""
+	row = {"path": endpoint.split("/farmops/api", 1)[-1]}
+	request = urllib.request.Request(
+		endpoint,
+		data=b"{}",
+		headers={"Content-Type": "application/json", "Accept": "application/json"},
+		method="POST",
+	)
+	try:
+		opener = urllib.request.build_opener(_NoRedirect)
+		with opener.open(request, timeout=timeout) as response:
+			status, headers, payload = response.status, response.headers, response.read(4096)
+	except urllib.error.HTTPError as exc:
+		status, headers = exc.code, exc.headers
+		try:
+			payload = exc.read(4096)
+		except Exception:  # pragma: no cover
+			payload = b""
+	except Exception as exc:
+		row.update({"published": False, "error": f"{type(exc).__name__}: {exc}"})
+		return row
+
+	content_type = (headers.get("Content-Type") if headers else "") or ""
+	row.update(
+		{
+			"status": status,
+			"content_type": content_type or None,
+			"server": (headers.get("Server") if headers else None),
+		}
+	)
+	# 401 AND JSON. A 200 here would mean the credential gate is not running,
+	# which is a finding of its own and is not "published" in any sense worth
+	# reporting as healthy.
+	row["published"] = status == 401 and "json" in content_type.lower()
+	if not row["published"]:
+		row["body"] = payload[:200].decode("utf-8", "replace")
+		row["note"] = (
+			"not mounted on the funnel — this is the proxy answering, not the service"
+			if "json" not in content_type.lower()
+			else f"reached something that answered {status} rather than the service's 401"
+		)
+	return row
 
 
 def _tls_report(host: str, port: int, timeout: int) -> dict:
