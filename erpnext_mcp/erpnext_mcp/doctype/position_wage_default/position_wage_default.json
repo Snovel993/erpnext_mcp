@@ -1,0 +1,145 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-12 09:00:00.000000",
+ "description": "What an hour of one job title is worth at one company, from one date. The rate a NEW Farm Salary Structure starts from: create_salary_structure looks the employee's Designation up here when the caller names no hourly rate, so a Picker hired in March is on the same rate as a Picker hired in June without anybody retyping it. It is a DEFAULT and nothing else — once written onto a structure the number is that worker's, and editing the row here does not reach back and change what an existing structure pays.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "designation",
+  "col_break_1",
+  "hourly_rate",
+  "is_active",
+  "dates_section",
+  "effective_from",
+  "effective_to",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "PWD-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "PWD-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The job title this rate is the default for. A Link to the site's own Designation register rather than a typed string, because it is matched against Employee.designation and two spellings of 'Irrigator' would be two rates nobody could reconcile.",
+   "fieldname": "designation",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Designation",
+   "options": "Designation",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "What an hour of this job pays.",
+   "fieldname": "hourly_rate",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Hourly Rate",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "The kill switch. An inactive row is never read as a default, whatever its dates say.",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "dates_section",
+   "fieldtype": "Section Break",
+   "label": "Effective Period"
+  },
+  {
+   "fieldname": "effective_from",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective From",
+   "reqd": 1
+  },
+  {
+   "description": "Leave blank for the rate in force now. Where two rows both cover a date, the later effective_from wins.",
+   "fieldname": "effective_to",
+   "fieldtype": "Date",
+   "label": "Effective To"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-12 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Position Wage Default",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR User"
+  }
+ ],
+ "search_fields": "company,designation,hourly_rate",
+ "sort_field": "effective_from",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "designation",
+ "track_changes": 1
+}

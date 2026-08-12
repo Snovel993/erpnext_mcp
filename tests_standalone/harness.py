@@ -1104,6 +1104,11 @@ APP_DOCTYPES = {
 	# v0.60.0. One row per signature event: who was proved to be at the pad, on
 	# what device, where, and against what hash of the record they were shown.
 	"Signing Evidence": "signing_evidence",
+	# v0.61.0. What the OPERATION pays, as opposed to what one person earns:
+	# a rate per unit per (company, activity), read on every payroll run, and a
+	# default hourly rate per (company, designation), read once at hire.
+	"Piecework Rate": "piecework_rate",
+	"Position Wage Default": "position_wage_default",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

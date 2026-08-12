@@ -545,10 +545,15 @@ class ToolRegistration(unittest.TestCase):
 		# v0.60.0 adds two READS and no write: `list_signing_evidence` and
 		# `get_signing_evidence`, over the register of who signed what and how
 		# anybody knows it was them. Nothing writes that register but the
-		# signature path itself.
-		self.assertEqual(len(self.registry.TOOLS), 402)
-		self.assertEqual(len(self.registry.READ_TOOLS), 183)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 219)
+		# signature path itself. v0.61.0 adds eight — four reads and four writes
+		# — over the two company-wide wage tables: what the OPERATION pays for a
+		# bucket and for an hour of a job title, as opposed to what one named
+		# person earns. `Piecework Rate.activity` is the same vocabulary this
+		# register keys a model by, which is what lets one rate table and one
+		# deployed model talk about the same piece of work.
+		self.assertEqual(len(self.registry.TOOLS), 410)
+		self.assertEqual(len(self.registry.READ_TOOLS), 187)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 223)
 
 
 if __name__ == "__main__":

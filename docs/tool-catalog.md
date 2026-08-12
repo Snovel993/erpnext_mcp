@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 402 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 410 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 183 read tools are **on** by default and can be switched off individually. A
+All 187 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -9918,3 +9918,122 @@ sweep, and there is no second copy of the address to fall out of step with the
 rule. Farm Tasks raised from those alerts carry the same object, off the same
 alert, so the pad opened from the task list and the pad opened from the calendar
 are addressed identically.
+
+---
+
+## v0.61.0 — What the operation pays, as opposed to what one person earns
+
+Until this release a piece rate was a number on one worker's **Farm Salary
+Structure**. $1.25 a bucket was typed once per picker, a season's raise was a
+hundred edits nobody could audit, and the question "what does this farm pay for a
+bucket" had no record to answer it from. Two registers replace that, and **what
+each one is for is different, which is the whole design**:
+
+| | Read | When | Effect of editing it |
+|---|---|---|---|
+| **Piecework Rate** | `(company, activity)` → rate per unit | on **every payroll run**, for every worker whose structure names no rate | the next run pays the new rate |
+| **Position Wage Default** | `(company, designation)` → hourly rate | **once**, when a salary structure is created | nothing that already exists |
+
+**The asymmetry is deliberate.** A piece rate is a property of the *work* — a
+bucket is a bucket, and the operation pays what the operation pays — so a table
+that governs it live is what makes a mid-season raise one row. An hourly wage is a
+property of the *employment*: it is what a person was hired at, it is what a wage
+claim asks about, and a table that could silently restate somebody's agreed rate
+for a period already worked would be a table that rewrites history. So the hourly
+default is **copied onto** the structure and the piece rate is **inherited by** it.
+
+### The lookup order, which is the only thing payroll asks
+
+```
+1. the employee's Farm Salary Structure base_rate, where it is > 0
+2. the active Piecework Rate for that employee's company and activity
+3. neither — and that is an error, reported by name
+```
+
+**Step 1 wins because it is the more specific record.** A rate on one person's
+structure is a rate somebody negotiated with that person, and a company table
+cannot know about it. `> 0` rather than "is set" is what makes the fallback
+reachable at all: `base_rate` is a required Currency field, so a structure created
+without one holds `0.0`, not `None`.
+
+**Step 3 is an error and not a zero,** and that is the failure this release
+exists to make loud. A piece-rate worker paid at a rate of nothing earns nothing
+at the rate, and what they are then paid is the **minimum wage makeup** — a real,
+correct number. The slip balances, the run reports no failure, and the only
+symptom is a makeup figure that looks like a rate set too low rather than a rate
+never set at all.
+
+**What a batch run does with that refusal is not to abort.** A picker with no rate
+is reported into `employees_missing_piece_rates` and everybody else is paid — the
+posture `run_payroll_for_period` has taken towards a missing salary structure
+since v0.35.0. A single-employee `preview_payroll` has nobody else to hold up, so
+there the refusal is the answer.
+
+### Which activity, when the hours do not say
+
+Neither Bucket Log Entry nor Farm Task Assignment records *what kind* of piecework
+a count is. So the activity comes from the salary structure, which gained an
+optional **`piecework_activity`** field — the worker's half of the
+`(company, activity)` pair, in the same vocabulary `ML Model` already uses.
+
+Where a structure names none, **one unambiguous company rate is used and several
+are refused.** That is an observation rather than a guess: a company with one
+piecework rate in force has already answered the question, and a company with
+three has not. The refusal lists the candidates, because *"set piecework_activity
+to one of: bucket_segmentation, thinning"* is an instruction somebody can act on.
+
+Activities are compared case-folded, with spaces and hyphens read as underscores,
+so `Bucket Segmentation` typed into the Desk and `bucket_segmentation` posted by
+the iPad are the same activity.
+
+### Raising a rate is a new row, not an edit
+
+`select_effective` gives the row with the **latest `effective_from` that covers the
+date**, so adding a row from 1 June and leaving the old one open-ended pays June
+onwards at the new rate — and leaves the old row paying the periods it already
+paid. That is what the dates are for, and it is why `update_piecework_rate` warns
+on every edit that moves the rate on a row already in force.
+
+**There is no delete on either table.** `is_active=false` takes a row out of every
+future lookup and leaves it readable, because a rate that paid a period is the
+record of what that period paid. At most one *active* row per
+`(company, activity, effective_from)` — two rows starting the same day are two
+answers to one question, and a rate that depended on which was created first is a
+rate nobody can predict.
+
+### Permissions
+
+Farm Manager gets **read and write, not create**; Compliance Officer **read only**.
+No name appears on either row — this is the *price list*, not somebody's pay — which
+is what makes it safe in front of a role that cannot read Farm Salary Structure and
+still cannot. Adding a row is how a raise happens, so the person who runs the
+operation may correct the table and the person who sets what the operation pays
+(System Manager, HR Manager) is who adds to it. The officer who checks whether a
+rate cleared the minimum wage floor is not the account that set it.
+
+| Tool | Default | What it does |
+|---|---|---|
+| `list_piecework_rates` | **on** | Every rate matching the filters, plus `in_force` — the one row per (company, activity) a run dated `on_date` would read |
+| `get_piecework_rate` | **on** | One rate in full, whether it is the live row, and which row covers `on_date` instead if not |
+| `list_position_wage_defaults` | **on** | Every default, plus the one row per (company, designation) a structure created on `on_date` would be seeded from |
+| `get_position_wage_default` | **on** | One default in full, and whether it is the row a new hire in that job starts on |
+| `create_piecework_rate` | off | Sets what a unit pays from a date. Also how a raise is made; names what it superseded |
+| `update_piecework_rate` | off | Corrects a rate typed wrong, or retires it. `company` and `activity` are locked |
+| `create_position_wage_default` | off | Sets the default hourly rate for a job title from a date |
+| `update_position_wage_default` | off | Edits or retires a default. Structures already seeded from it are unchanged |
+
+### What changed in payroll
+
+`create_salary_structure` takes `piecework_activity`, seeds `hourly_rate` from the
+position wage default when the caller names none, and **accepts `base_rate` 0 on a
+Piece Rate structure** — where it now checks, at creation, that the inheritance will
+actually resolve. A structure that would fail on payday fails in front of the person
+creating it instead.
+
+`get_salary_structure` reports `effective_rate` and `rate_source`, because a read
+that showed the zero and stopped would be a read that says a picker earns nothing.
+`list_salary_structures` flags `inheriting_company_piecework_rate` rather than
+resolving every row. `preview_payroll` carries `piece_rate_source` and the rate's
+docname, and the period runs carry two lists that are opposite facts:
+`piece_rates_from_company` (the fallback working) and
+`employees_missing_piece_rates` (the fallback finding nothing).

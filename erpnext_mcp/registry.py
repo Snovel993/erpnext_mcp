@@ -103,6 +103,7 @@ from .tools import (
 	uploads,
 	visits,
 	w4,
+	wagedefaults,
 	wallet,
 	weather,
 	workflow,
@@ -10636,6 +10637,228 @@ TOOLS = {
 		title="Post payroll to GL",
 		available=_needs_doctype("Farm Payroll Account Mapping"),
 		requires="the Farm Payroll Account Mapping doctype (run bench migrate after installing v0.40.0)",
+	),
+	# ── v0.61.0: the two company-wide wage tables ───────────────────────────
+	"list_piecework_rates": _tool(
+		wagedefaults.list_piecework_rates,
+		"What the operation pays for one unit of one piecework activity, and which "
+		"of those rates is actually in force. Read-only.\n\n"
+		"THE REGISTER IS MOSTLY HISTORY AND THAT IS THE POINT, so the result has two "
+		"lists: `rates` is every row matching the filters, and `in_force` is the ONE "
+		"row per (company, activity) a payroll run dated `on_date` would read — the "
+		"latest effective_from that covers the date. A raise is a new row rather than "
+		"an edit, so five rows for one activity is the normal state of a table that "
+		"can still explain what May paid.\n\n"
+		"Payroll reads these rows only for workers whose Farm Salary Structure has "
+		"base_rate 0: a rate negotiated with one person is the more specific record "
+		"and wins.",
+		{
+			"company": _COMPANY,
+			"activity": _field(
+				_STRING,
+				"One activity, e.g. 'bucket_segmentation'. Matched case-insensitively, with "
+				"spaces and hyphens read as underscores.",
+			),
+			"is_active": _field(_BOOLEAN, "Only active rows, or only retired ones. Omit for both."),
+			"on_date": _field(
+				_STRING,
+				"The date `in_force` is computed for, YYYY-MM-DD. Defaults to today. Use a pay "
+				"period's END to see what that period was paid at.",
+			),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("Piecework Rate"),
+		requires="the Piecework Rate doctype (run bench migrate after installing v0.61.0)",
+		title="List piecework rates",
+	),
+	"get_piecework_rate": _tool(
+		wagedefaults.get_piecework_rate,
+		"One piecework rate in full, and whether it is the row payroll would actually "
+		"read. Read-only.\n\n"
+		"`in_force` answers the only question worth asking of a dated rate table; where "
+		"it is false, `in_force_instead` names the row that covers `on_date` instead. A "
+		"superseded row is kept rather than deleted because it explains the periods it "
+		"did pay.",
+		{
+			"name": _field(_STRING, "Piecework Rate docname, e.g. 'PWR-2026-0001'."),
+			"piecework_rate": _field(_STRING, "Alias for name."),
+			"on_date": _field(
+				_STRING, "The date to test the row against, YYYY-MM-DD. Defaults to today."
+			),
+		},
+		required=("name",),
+		available=_needs_doctype("Piecework Rate"),
+		requires="the Piecework Rate doctype (run bench migrate after installing v0.61.0)",
+		title="Get piecework rate",
+	),
+	"list_position_wage_defaults": _tool(
+		wagedefaults.list_position_wage_defaults,
+		"The default hourly rate for each job title at each company, and which of "
+		"those rows a new hire would start on. Read-only.\n\n"
+		"A DEFAULT AND NOTHING MORE. `create_salary_structure` reads the row in force "
+		"ONCE, when it creates a structure, and copies the number onto it; from then on "
+		"it is that worker's rate and editing the default does not reach back through "
+		"it. `in_force` is what a structure created on `on_date` would be seeded from — "
+		"it says nothing about what any existing structure pays.",
+		{
+			"company": _COMPANY,
+			"designation": _field(_STRING, "One job title, e.g. 'Picker'. Exact Designation docname."),
+			"is_active": _field(_BOOLEAN, "Only active rows, or only retired ones. Omit for both."),
+			"on_date": _field(
+				_STRING, "The date `in_force` is computed for, YYYY-MM-DD. Defaults to today."
+			),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("Position Wage Default"),
+		requires="the Position Wage Default doctype (run bench migrate after installing v0.61.0)",
+		title="List position wage defaults",
+	),
+	"get_position_wage_default": _tool(
+		wagedefaults.get_position_wage_default,
+		"One position wage default in full, and whether it is the row a new hire in "
+		"that job would start on. Read-only.\n\n"
+		"Where `in_force` is false, `in_force_instead` names the row that covers "
+		"`on_date`. Neither row changes what an existing salary structure pays: the "
+		"default is read once, at creation.",
+		{
+			"name": _field(_STRING, "Position Wage Default docname, e.g. 'PWD-2026-0001'."),
+			"position_wage_default": _field(_STRING, "Alias for name."),
+			"on_date": _field(
+				_STRING, "The date to test the row against, YYYY-MM-DD. Defaults to today."
+			),
+		},
+		required=("name",),
+		available=_needs_doctype("Position Wage Default"),
+		requires="the Position Wage Default doctype (run bench migrate after installing v0.61.0)",
+		title="Get position wage default",
+	),
+	"create_piecework_rate": _tool(
+		wagedefaults.create_piecework_rate,
+		"MUTATING (default OFF). Set what one unit of one piecework activity pays at "
+		"one company, from one date.\n\n"
+		"THIS IS ALSO HOW A RAISE IS MADE. Adding a row with a later effective_from "
+		"supersedes the open-ended one from that date onwards and leaves it paying the "
+		"periods it already paid — which is why editing the live row is the wrong tool "
+		"for a new season's rate. The result names what was superseded.\n\n"
+		"Every worker whose Farm Salary Structure has base_rate 0 and this activity is "
+		"paid from this row on the next run. A structure that names its own rate is "
+		"unaffected: a negotiated rate is the more specific record.\n\n"
+		"Refused: no company, no activity, a negative rate, no effective_from, an "
+		"effective_to before it, or a second ACTIVE row starting the same day for the "
+		"same activity — two answers to one question is not a raise.",
+		{
+			"company": _COMPANY,
+			"activity": _field(
+				_STRING,
+				"REQUIRED. Which piecework this rate pays for — the same vocabulary ML Model "
+				"uses, e.g. 'bucket_segmentation'. Stored as typed and matched case-insensitively.",
+			),
+			"rate_per_unit": _field(_NUMBER, "REQUIRED. What one bucket, bin or tree pays."),
+			"effective_from": _field(
+				_STRING, "First day this rate pays, YYYY-MM-DD. Defaults to today."
+			),
+			"effective_to": _field(
+				_STRING, "Last day it pays, YYYY-MM-DD. Omit for the rate in force from now on."
+			),
+			"description": _field(_STRING, "What this rate is for — 'Cherry picking, 2026 season'."),
+			"is_active": _field(_BOOLEAN, "Default true. False creates a row payroll will not read."),
+		},
+		required=("activity", "rate_per_unit"),
+		mutating=True,
+		title="Create piecework rate",
+		available=_needs_doctype("Piecework Rate"),
+		requires="the Piecework Rate doctype (run bench migrate after installing v0.61.0)",
+	),
+	"update_piecework_rate": _tool(
+		wagedefaults.update_piecework_rate,
+		"MUTATING (default OFF). Correct a piecework rate, or take it out of service "
+		"by clearing is_active.\n\n"
+		"THIS IS FOR A RATE THAT WAS TYPED WRONG, not for a new season's rate. Moving "
+		"rate_per_unit on a row that has already been in force changes what a re-run "
+		"over that period computes, and the result says so on every such edit — use "
+		"create_piecework_rate with a later effective_from for a raise.\n\n"
+		"company and activity cannot be changed: they are the pair payroll resolves a "
+		"rate by, and moving one would restate which workers a period was paid under. "
+		"THERE IS NO DELETE. is_active=false takes a row out of every future lookup and "
+		"leaves it readable, because a rate that paid a period is the record of what "
+		"that period paid.",
+		{
+			"name": _field(_STRING, "Piecework Rate docname."),
+			"piecework_rate": _field(_STRING, "Alias for name."),
+			"rate_per_unit": _field(_NUMBER, "New rate per unit."),
+			"effective_from": _field(_STRING, "New first day, YYYY-MM-DD."),
+			"effective_to": _field(
+				_STRING, "New last day, YYYY-MM-DD. Empty string reopens the row indefinitely."
+			),
+			"description": _field(_STRING, "New description."),
+			"is_active": _field(_BOOLEAN, "False retires the row without deleting it."),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Update piecework rate",
+		available=_needs_doctype("Piecework Rate"),
+		requires="the Piecework Rate doctype (run bench migrate after installing v0.61.0)",
+	),
+	"create_position_wage_default": _tool(
+		wagedefaults.create_position_wage_default,
+		"MUTATING (default OFF). Set the default hourly rate for one job title at one "
+		"company, from one date, so a Picker hired in June starts on the Picker rate "
+		"without anybody retyping it.\n\n"
+		"IT SEEDS AND DOES NOT GOVERN. create_salary_structure reads the row in force "
+		"once and copies the number onto the new structure; structures that already "
+		"exist are untouched, and editing this row later changes nothing any of them "
+		"pays. That asymmetry with Piecework Rate is deliberate — an hourly wage is "
+		"what a person was hired at, and a table that could restate it retroactively "
+		"would rewrite what a wage claim asks about.\n\n"
+		"designation is a Designation docname, so it can be matched against "
+		"Employee.designation; a title the site does not have is refused by name rather "
+		"than created.",
+		{
+			"company": _COMPANY,
+			"designation": _field(
+				_STRING, "REQUIRED. The job title this rate is the default for, e.g. 'Picker'."
+			),
+			"hourly_rate": _field(_NUMBER, "REQUIRED. What an hour of this job pays."),
+			"effective_from": _field(
+				_STRING, "First day this default applies, YYYY-MM-DD. Defaults to today."
+			),
+			"effective_to": _field(_STRING, "Last day it applies, YYYY-MM-DD. Omit for open-ended."),
+			"notes": _field(_STRING, "Why this rate, in the words somebody setting it would use."),
+			"is_active": _field(_BOOLEAN, "Default true. False creates a row nothing reads."),
+		},
+		required=("designation", "hourly_rate"),
+		mutating=True,
+		title="Create position wage default",
+		available=_needs_doctype("Position Wage Default"),
+		requires="the Position Wage Default doctype (run bench migrate after installing v0.61.0)",
+	),
+	"update_position_wage_default": _tool(
+		wagedefaults.update_position_wage_default,
+		"MUTATING (default OFF). Edit a position wage default, or take it out of "
+		"service by clearing is_active.\n\n"
+		"SALARY STRUCTURES ALREADY SEEDED FROM IT ARE UNCHANGED, whatever is edited "
+		"here — the default is read once, at creation. New structures created from now "
+		"on start on the edited number.\n\n"
+		"company and designation cannot be changed: they are the pair a new structure "
+		"is seeded by. There is no delete tool.",
+		{
+			"name": _field(_STRING, "Position Wage Default docname."),
+			"position_wage_default": _field(_STRING, "Alias for name."),
+			"hourly_rate": _field(_NUMBER, "New hourly rate."),
+			"effective_from": _field(_STRING, "New first day, YYYY-MM-DD."),
+			"effective_to": _field(
+				_STRING, "New last day, YYYY-MM-DD. Empty string reopens the row indefinitely."
+			),
+			"notes": _field(_STRING, "New notes."),
+			"is_active": _field(_BOOLEAN, "False retires the row without deleting it."),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Update position wage default",
+		available=_needs_doctype("Position Wage Default"),
+		requires="the Position Wage Default doctype (run bench migrate after installing v0.61.0)",
 	),
 	# ── v0.31.0: Expense Receipt Capture ────────────────────────────────────
 	"list_expense_receipts": _tool(

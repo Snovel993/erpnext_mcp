@@ -327,7 +327,7 @@ PROPERTY = ("Lease",)
 #: the User Permission `create_mobile_user` writes says whose. A Farm Manager
 #: scoped to one entity gets no reach into another's personnel file out of it.
 HIRING_FORMS = ("I-9 Form",)
-#: v0.60.0. THE TWO COMPANY-WIDE RATE TABLES, AND THEY ARE A GROUP OF THEIR OWN
+#: v0.61.0. THE TWO COMPANY-WIDE RATE TABLES, AND THEY ARE A GROUP OF THEIR OWN
 #: BECAUSE OF WHAT READING THEM MEANS.
 #:
 #: A Piecework Rate and a Position Wage Default are not somebody's pay — they are
@@ -490,10 +490,13 @@ ROLE_SPECS = (
 			# READ, deliberately. See the module docstring: the person who decides
 			# a walk is required and the person who decides who walks it must not
 			# be the same account.
-			*_grant(READ, DISPATCH, CAMP, GROUND, PAPER, SHIFTS, SIGNING_EVIDENCE),
+			*_grant(READ, DISPATCH, CAMP, GROUND, PAPER, SHIFTS, SIGNING_EVIDENCE, WAGE_TABLES),
 		),
 		cannot=(
 			"dispatch anybody — Farm Task is read-only for this role, on purpose",
+			"set or correct a wage rate — the two company-wide tables are read-only here, "
+			"because the officer who checks whether a rate cleared the minimum wage floor "
+			"must not be the account that set it",
 			"alter a signature evidence row — the register is read-only to every role in "
 			"this app, because a chain of custody that can be edited is not one",
 			"form a crew shift or sign one off — the shift register is read-only here, "
@@ -529,6 +532,13 @@ ROLE_SPECS = (
 			# FULL: the form is raised by the hiring path and destroyed by the
 			# retention schedule, neither of which is a manager's call.
 			*_grant(READ_WRITE, HIRING_FORMS),
+			# v0.61.0. The PRICE LIST, which is what a manager is actually asked
+			# about in a packing shed at six in the morning — no name appears on
+			# either row, which is what makes it safe to hand to a role that
+			# cannot read Farm Salary Structure and still cannot. READ_WRITE, not
+			# FULL: adding a row is how a raise happens, and one insert changes
+			# what the whole company's next payroll pays. See WAGE_TABLES.
+			*_grant(READ_WRITE, WAGE_TABLES),
 			*_grant(READ, PAPER, SIGNING_EVIDENCE),
 		),
 		cannot=(
@@ -539,6 +549,9 @@ ROLE_SPECS = (
 			"raise or destroy an I-9 — Section 2 is theirs to complete and sign, but the "
 			"form begins with the worker's Section 1 and its life is the retention "
 			"schedule's, not a manager's",
+			"ADD a piecework rate or a position wage default — they may correct what is "
+			"in the tables, but adding a row is how a raise happens, and one insert "
+			"changes what the whole company's next payroll pays",
 		),
 	),
 	RoleSpec(

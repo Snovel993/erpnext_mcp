@@ -3,6 +3,76 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.61.0 — 2026-08-12
+
+**Collect once, use everywhere.** Until this release a piece rate was a number on
+one worker's Farm Salary Structure. $1.25 a bucket was typed once per picker, a
+season's raise was a hundred edits nobody could audit, and *what does this farm
+pay for a bucket* had no record to answer it from.
+
+**Two registers replace that, and they are read at opposite moments.** A
+**Piecework Rate** — `(company, activity)` → rate per unit, from a date — is read
+on **every payroll run**, for every worker whose structure names no rate of its
+own; raise the row and the next run pays the new rate. A **Position Wage
+Default** — `(company, designation)` → hourly rate, from a date — is read
+**once**, when a salary structure is created, and never reaches back through it.
+
+**That asymmetry is deliberate.** A piece rate is a property of the WORK: a bucket
+is a bucket, and the operation pays what the operation pays. An hourly wage is a
+property of the EMPLOYMENT — it is what a person was hired at, it is what a wage
+claim asks about, and a table that could silently restate somebody's agreed rate
+for a period already worked would be a table that rewrites history. So the hourly
+default is copied ONTO the structure and the piece rate is inherited BY it.
+
+**The lookup order is the only thing payroll asks:** the structure's own
+`base_rate` where it is greater than zero, then the active company rate for that
+employee's company and activity, then **refuse**. The structure wins because it is
+the more specific record — a company table cannot know about a rate somebody
+negotiated with one person.
+
+**A missing rate is an error and not a zero,** and that is the failure this
+release exists to make loud. A piece-rate worker paid at a rate of nothing earns
+nothing at the rate, and what they are then paid is the minimum wage makeup — a
+real, correct number. The slip balances, the run reports no failure, and the only
+symptom is a makeup figure that looks like a rate set too low rather than a rate
+that was never set at all. A batch run does not abort over it: the worker lands in
+`employees_missing_piece_rates` and everybody else is paid, the posture
+`run_payroll_for_period` has taken towards a missing salary structure since
+v0.35.0. A single-employee preview has nobody else to hold up, so there it raises.
+
+**Which activity, when the hours do not say.** No bucket row records what KIND of
+piecework it is, so the activity comes from `Farm Salary Structure.piecework_activity`
+— new, optional, and the same vocabulary `ML Model` uses. Where a structure names
+none, one unambiguous company rate is used and several are refused *by name*: a
+company with one rate in force has already answered the question and a company
+with three has not. Matched case-folded, with spaces and hyphens read as
+underscores, so the Desk and the iPad spell the same activity.
+
+**Raising a rate is a new row, not an edit.** The latest `effective_from` covering
+a date wins, so adding a row from 1 June leaves the old one paying the periods it
+already paid. **There is no delete on either table** — `is_active=false` takes a
+row out of every future lookup and leaves it readable. Two ACTIVE rows starting
+the same day for the same activity are refused: that is two answers to one
+question, not a raise.
+
+**Eight tools, four reads and four writes**, plus `piecework_activity` on
+`create_salary_structure`, `effective_rate`/`rate_source` on `get_salary_structure`,
+`inheriting_company_piecework_rate` on `list_salary_structures`, and two opposite
+lists on every period run — `piece_rates_from_company` (the fallback working) and
+`employees_missing_piece_rates` (the fallback finding nothing). A Piece Rate
+structure created with `base_rate` 0 is checked at creation that the inheritance
+resolves, so a structure that would fail on payday fails in front of the person
+creating it.
+
+**Farm Manager reads and writes both tables; Compliance Officer reads them.**
+Neither may CREATE: no name appears on either row — this is the price list, not
+somebody's pay — but adding a row is how a raise happens, and one insert changes
+what the whole company's next payroll pays.
+
+Run `bench --site <site> migrate`. Nothing changes for a site that creates no
+rows: every existing structure names its own rate, and the fallback is simply
+never reached.
+
 ## 0.60.0 — 2026-08-12
 
 **An auditor's second question.** The first is *was it signed*, and this app has

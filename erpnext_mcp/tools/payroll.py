@@ -34,7 +34,7 @@ import frappe
 from frappe.utils import today
 
 from .. import breaks as breaks_mod
-from .. import bucket_bridge, compat, payroll_integration
+from .. import bucket_bridge, compat, payroll_integration, wage_defaults
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..payroll_calc import (
@@ -43,6 +43,7 @@ from ..payroll_calc import (
 from ..result import ToolResult
 from ..state_withholding import SUPPORTED_STATES
 from ..withholding import FILING_STATUS_MAP, PERIODS_PER_YEAR
+from . import wagedefaults
 
 SALARY_STRUCTURE = "Farm Salary Structure"
 PAYROLL_ENTRY = "Farm Payroll Entry"
@@ -96,6 +97,79 @@ def _num(value, default: float = 0.0) -> float:
 		return default
 
 
+def _structure_activity_fields() -> list:
+	"""`piecework_activity` where the site has migrated to v0.61.0, else nothing.
+
+	The same posture every optional column in this module gets: a site that has
+	not run `bench migrate` yet reads exactly as it did before, and the
+	company-wide fallback is simply unreachable there rather than an exception on
+	payday.
+	"""
+	return compat.existing_fields(SALARY_STRUCTURE, ("piecework_activity",))
+
+
+def _resolve_piece_rates(structures: dict, company: str, on_date: str) -> tuple[dict, list]:
+	"""Fill `base_rate` from the company Piecework Rate table where a structure names none.
+
+	THE LOOKUP ORDER LIVES IN `wage_defaults.resolve_piece_rate` and this is only
+	its database half — the structures that need an answer, the company's rate
+	rows, and the per-employee catch. See that module's docstring for why the
+	structure's own rate wins and why a miss is an error rather than a zero.
+
+	`on_date` is the pay period's END, so a period straddling a rate change is
+	paid at the rate in force when it closed.
+
+	Mutates the structure dicts in place and returns
+	`(resolved_by_employee, could_not_resolve)`. A miss is RETURNED rather than
+	raised because the caller decides what to do with it: a single-employee
+	preview has nobody else to hold up and re-raises, a company run reports it
+	and pays everybody else — the posture `run_payroll_for_period` has taken
+	towards a missing salary structure since v0.35.0.
+	"""
+	needing = [
+		structure
+		for structure in (structures or {}).values()
+		if str(structure.get("pay_type") or "") == "Piece Rate" and _num(structure.get("base_rate")) <= 0
+	]
+	if not needing:
+		return {}, []
+
+	rates = wagedefaults.rates_for_company(company)
+	resolved: dict = {}
+	missing: list = []
+	for structure in needing:
+		candidate = dict(structure)
+		candidate.setdefault("company", company)
+		try:
+			answer = wage_defaults.resolve_piece_rate(candidate, rates, on_date)
+		except ToolError as exc:
+			missing.append(
+				{
+					"employee": structure.get("employee"),
+					"employee_name": structure.get("employee_name") or structure.get("employee"),
+					"salary_structure": structure.get("name"),
+					"piecework_activity": (
+						wage_defaults.normalize_activity(structure.get("piecework_activity")) or None
+					),
+					"reason": str(exc),
+				}
+			)
+			continue
+		structure["base_rate"] = answer["rate"]
+		structure["piece_rate_source"] = answer["source"]
+		structure["piecework_rate"] = answer["piecework_rate"]
+		structure["piecework_activity"] = answer["activity"] or structure.get("piecework_activity")
+		if answer["source"] == wage_defaults.SOURCE_COMPANY:
+			resolved[str(structure.get("employee") or "")] = {
+				"employee": structure.get("employee"),
+				"employee_name": structure.get("employee_name") or structure.get("employee"),
+				"activity": answer["activity"],
+				"rate": answer["rate"],
+				"piecework_rate": answer["piecework_rate"],
+			}
+	return resolved, missing
+
+
 def _resolve_employee(args: dict) -> str:
 	emp = as_str(args, "employee") or as_str(args, "name") or as_str(args, "employee_name")
 	if not emp:
@@ -137,6 +211,7 @@ def get_salary_structure(args: dict) -> ToolResult:
 		"pay_type",
 		"base_rate",
 		*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
+		*_structure_activity_fields(),
 		"effective_from",
 		"effective_to",
 		"is_active",
@@ -144,9 +219,50 @@ def get_salary_structure(args: dict) -> ToolResult:
 	]
 	row = frappe.db.get_value(SALARY_STRUCTURE, name, fields, as_dict=True)
 	data = {k: (str(v) if v is not None else None) for k, v in row.items()}
+
+	# WHAT THIS WORKER IS ACTUALLY PAID, which since v0.61.0 is not always the
+	# number in the column. A piece-rate structure with base_rate 0 inherits the
+	# company rate, and a read of the structure that showed the zero and stopped
+	# would be a read that says a picker earns nothing.
+	structure = dict(row)
+	structure.setdefault("employee", employee)
+	effective_rate = _num(row.get("base_rate"))
+	rate_source = wage_defaults.SOURCE_STRUCTURE
+	if str(row.get("pay_type") or "") == "Piece Rate" and effective_rate <= 0:
+		resolved, unresolved = _resolve_piece_rates(
+			{employee: structure}, row.get("company") or "", today()
+		)
+		if unresolved:
+			data["effective_rate"] = None
+			data["rate_source"] = None
+			data["rate_note"] = unresolved[0]["reason"]
+			return ToolResult(
+				data=data,
+				summary=(
+					f"Salary structure for {employee}: {row.get('pay_type')} with NO RATE — "
+					"none on the structure and none in the company table"
+				),
+			)
+		effective_rate = _num(structure.get("base_rate"))
+		rate_source = wage_defaults.SOURCE_COMPANY
+		data["piecework_rate"] = structure.get("piecework_rate")
+		data["rate_note"] = (
+			f"base_rate is 0 on the structure, so payroll reads the company-wide Piecework "
+			f"Rate {structure.get('piecework_rate')} for "
+			f"{structure.get('piecework_activity') or 'this activity'}. Raise it there and "
+			"this worker follows it."
+		)
+		if resolved:
+			data["piecework_activity"] = structure.get("piecework_activity")
+	data["effective_rate"] = effective_rate
+	data["rate_source"] = rate_source
+
 	return ToolResult(
 		data=data,
-		summary=f"Salary structure for {employee}: {row.get('pay_type')} at {row.get('base_rate')}",
+		summary=(
+			f"Salary structure for {employee}: {row.get('pay_type')} at {effective_rate}"
+			+ (" (from the company piecework rate)" if rate_source == wage_defaults.SOURCE_COMPANY else "")
+		),
 	)
 
 
@@ -180,6 +296,7 @@ def list_salary_structures(args: dict) -> ToolResult:
 			"pay_type",
 			"base_rate",
 			*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
+			*_structure_activity_fields(),
 			"effective_from",
 			"effective_to",
 			"is_active",
@@ -187,7 +304,28 @@ def list_salary_structures(args: dict) -> ToolResult:
 		limit_page_length=limit,
 		order_by="modified desc",
 	)
-	data = {"structures": [dict(r) for r in rows], "count": len(rows)}
+	structures = [dict(r) for r in rows]
+	# A piece-rate structure with base_rate 0 is not a worker on nothing — it is a
+	# worker on the company rate. Flagged rather than resolved, because resolving
+	# every row would mean one rate-table read per company per list call and the
+	# answer is one `get_salary_structure` away.
+	inheriting = [
+		row["name"]
+		for row in structures
+		if str(row.get("pay_type") or "") == "Piece Rate" and _num(row.get("base_rate")) <= 0
+	]
+	data = {
+		"structures": structures,
+		"count": len(rows),
+		"inheriting_company_piecework_rate": inheriting,
+	}
+	if inheriting:
+		data["note"] = (
+			f"{len(inheriting)} structure(s) have base_rate 0 and pay type Piece Rate, which "
+			"means they take the company-wide Piecework Rate for their activity rather than a "
+			"rate of their own. get_salary_structure resolves what one of them actually pays; "
+			"list_piecework_rates has the table."
+		)
 	return ToolResult(data=data, summary=f"{len(rows)} salary structure(s)")
 
 
@@ -222,13 +360,25 @@ def preview_payroll(args: dict) -> ToolResult:
 		ss_name,
 		[
 			"name",
+			"company",
 			"pay_type",
 			"base_rate",
 			"employee_name",
 			*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
+			*_structure_activity_fields(),
 		],
 		as_dict=True,
 	)
+
+	# The company-wide fallback, for a piece-rate structure that names no rate of
+	# its own. `_resolve_piece_rates` RETURNS a miss rather than raising it, so a
+	# whole-company run can report and carry on — here there is nobody else to
+	# carry on for, so the miss is the answer and it is raised.
+	structure = {"employee": employee, **dict(ss)}
+	rate_company = company or ss.get("company") or ""
+	_resolved, unresolved = _resolve_piece_rates({employee: structure}, rate_company, str(pay_period_end))
+	if unresolved:
+		raise ToolError(unresolved[0]["reason"])
 
 	# Load shifts
 	shifts = _load_shifts(employee, pay_period_start, pay_period_end, company)
@@ -245,12 +395,26 @@ def preview_payroll(args: dict) -> ToolResult:
 		shifts,
 		{
 			"pay_type": ss.pay_type,
-			"base_rate": float(ss.base_rate or 0),
+			"base_rate": _num(structure.get("base_rate")),
 			"hourly_rate": ss.get("hourly_rate"),
 			"name": ss_name,
 		},
 		tax_config,
 	)
+
+	# Where the piece rate came from, on the preview that used it. "Why is this
+	# picker on $1.30" should be answerable off the preview rather than by opening
+	# two registers and comparing them.
+	if structure.get("piece_rate_source") == wage_defaults.SOURCE_COMPANY:
+		result = dict(result)
+		result["piece_rate_source"] = wage_defaults.SOURCE_COMPANY
+		result["piecework_rate"] = structure.get("piecework_rate")
+		result["piecework_activity"] = structure.get("piecework_activity") or None
+		result["piece_rate_note"] = (
+			f"{employee_name}'s salary structure names no base_rate, so the rate came from "
+			f"{structure.get('piecework_rate')} — the company-wide Piecework Rate for "
+			f"{structure.get('piecework_activity') or 'this activity'} in force on {pay_period_end}."
+		)
 
 	return ToolResult(
 		data=result,
@@ -374,15 +538,73 @@ def list_payroll_entries(args: dict) -> ToolResult:
 
 
 def create_salary_structure(args: dict) -> ToolResult:
-	"""Create a salary structure for an employee."""
+	"""Create a salary structure for an employee.
+
+	v0.61.0. TWO RATES CAN NOW COME FROM A COMPANY TABLE INSTEAD OF THE CALLER,
+	and the two arrive by different routes because they are different kinds of
+	fact:
+
+	  * The HOURLY rate is COPIED ONTO THE STRUCTURE at creation, from the
+	    Position Wage Default for this employee's Designation. From then on it is
+	    this worker's number and editing the default does not reach back through
+	    it — an hourly wage is what somebody was hired at.
+	  * The PIECE rate is NOT copied. A piece-rate structure created with
+	    `base_rate` 0 inherits from the company's Piecework Rate table on every
+	    payroll run, which is what makes a mid-season raise one edit instead of a
+	    hundred. What is checked HERE is only that the inheritance will resolve:
+	    a structure that would fail on payday should fail now, in front of the
+	    person creating it, rather than in a run three weeks later.
+	"""
 	employee = _resolve_employee(args)
 	company = resolve_company(as_str(args, "company"), required=True)
 	pay_type = as_str(args, "pay_type", required=True)
 	if pay_type not in ("Piece Rate", "Hourly", "Salary"):
 		raise ToolError("pay_type must be Piece Rate, Hourly, or Salary.")
-	base_rate = _as_float(args, "base_rate", required=True)
-	if base_rate <= 0:
-		raise ToolError("base_rate must be positive.")
+	piecework_activity = as_str(args, "piecework_activity")
+	if piecework_activity and pay_type != "Piece Rate":
+		raise ToolError(
+			f"piecework_activity is only meaningful on a Piece Rate structure, and this one is "
+			f"{pay_type}. It names which company piecework rate pays this worker. Nothing was created."
+		)
+
+	designation = frappe.db.get_value(EMPLOYEE, employee, "designation") or ""
+	effective_from = as_date(args, "effective_from") or today()
+	seeded: dict = {}
+
+	base_rate = _as_float(args, "base_rate", 0.0)
+	if base_rate < 0:
+		raise ToolError("base_rate cannot be negative.")
+	if base_rate == 0 and pay_type == "Hourly":
+		# An Hourly structure's base_rate IS the hourly rate, so the Position Wage
+		# Default seeds it directly.
+		default_row = wagedefaults.default_hourly_rate(company, designation, effective_from)
+		if default_row:
+			base_rate = float(default_row.get("hourly_rate") or 0)
+			seeded["base_rate"] = {
+				"from": "position_wage_default",
+				"position_wage_default": default_row.get("name"),
+				"designation": designation,
+				"effective_on": effective_from,
+			}
+	if base_rate <= 0 and pay_type != "Piece Rate":
+		raise ToolError(
+			"base_rate must be positive"
+			+ (
+				f", and {company} has no active Position Wage Default for "
+				f"{designation!r} to take it from"
+				if pay_type == "Hourly" and designation
+				else ""
+			)
+			+ (
+				". This employee has no designation, so there is no position wage default to "
+				"look up either"
+				if pay_type == "Hourly" and not designation
+				else ""
+			)
+			+ ". Zero is only meaningful on a Piece Rate structure, where it means 'inherit the "
+			"company-wide Piecework Rate'. Nothing was created."
+		)
+
 	# What an hour of non-piece work pays this worker. Optional, and only ever read
 	# for a shift whose own pay type says Hourly — a picker moved onto irrigation
 	# for the afternoon. Zero is allowed and means "not set": those hours then earn
@@ -391,24 +613,52 @@ def create_salary_structure(args: dict) -> ToolResult:
 	hourly_rate = _as_float(args, "hourly_rate", 0.0)
 	if hourly_rate < 0:
 		raise ToolError("hourly_rate cannot be negative.")
-	effective_from = as_date(args, "effective_from") or today()
+	if hourly_rate == 0 and pay_type != "Hourly":
+		default_row = wagedefaults.default_hourly_rate(company, designation, effective_from)
+		if default_row:
+			hourly_rate = float(default_row.get("hourly_rate") or 0)
+			seeded["hourly_rate"] = {
+				"from": "position_wage_default",
+				"position_wage_default": default_row.get("name"),
+				"designation": designation,
+				"effective_on": effective_from,
+			}
+
 	effective_to = as_date(args, "effective_to")
 	notes = as_str(args, "notes")
 
-	doc = frappe.get_doc(
-		{
-			"doctype": SALARY_STRUCTURE,
+	# A Piece Rate structure with no rate of its own has to be able to find one,
+	# and it is better to say so now than on payday. `resolve_piece_rate` raises
+	# the sentence that names the company and the activity.
+	inherited = None
+	if pay_type == "Piece Rate" and base_rate == 0:
+		candidate = {
 			"employee": employee,
+			"employee_name": frappe.db.get_value(EMPLOYEE, employee, "employee_name") or employee,
 			"company": company,
-			"pay_type": pay_type,
-			"base_rate": base_rate,
-			"hourly_rate": hourly_rate or 0,
-			"effective_from": effective_from,
-			"effective_to": effective_to or None,
-			"is_active": 1,
-			"notes": notes or None,
+			"base_rate": 0,
+			"piecework_activity": piecework_activity,
 		}
-	)
+		inherited = wage_defaults.resolve_piece_rate(
+			candidate, wagedefaults.rates_for_company(company), effective_from
+		)
+
+	values = {
+		"doctype": SALARY_STRUCTURE,
+		"employee": employee,
+		"company": company,
+		"pay_type": pay_type,
+		"base_rate": base_rate,
+		"hourly_rate": hourly_rate or 0,
+		"effective_from": effective_from,
+		"effective_to": effective_to or None,
+		"is_active": 1,
+		"notes": notes or None,
+	}
+	if _structure_activity_fields():
+		values["piecework_activity"] = piecework_activity or None
+
+	doc = frappe.get_doc(values)
 	doc.flags.ignore_permissions = True
 	doc.insert()
 
@@ -418,12 +668,45 @@ def create_salary_structure(args: dict) -> ToolResult:
 			"name": doc.name,
 			"employee": employee,
 			"employee_name": emp_name,
+			"designation": designation or None,
 			"pay_type": pay_type,
 			"base_rate": base_rate,
 			"hourly_rate": hourly_rate,
+			"piecework_activity": wage_defaults.normalize_activity(piecework_activity) or None,
 			"effective_from": str(effective_from),
+			"seeded_from_defaults": seeded or None,
+			"inherits_piecework_rate": (
+				{
+					"piecework_rate": inherited["piecework_rate"],
+					"activity": inherited["activity"],
+					"rate_per_unit": inherited["rate"],
+				}
+				if inherited
+				else None
+			),
+			"note": (
+				(
+					f"base_rate is 0, so every payroll run reads the company-wide Piecework Rate "
+					f"for {inherited['activity']} — today that is {inherited['piecework_rate']} at "
+					f"{inherited['rate']} per unit. Raise the rate there and this worker follows "
+					"it; put a number on this structure instead and the structure wins. "
+					if inherited
+					else ""
+				)
+				+ (
+					f"The hourly rate was taken from the {designation} position wage default "
+					f"({(seeded.get('hourly_rate') or seeded.get('base_rate') or {}).get('position_wage_default')}). "
+					"It is a copy: editing that default later will not change what this worker is "
+					"paid. "
+					if seeded
+					else ""
+				)
+			).strip()
+			or None,
 		},
-		summary=f"Salary structure created for {emp_name}: {pay_type} at {base_rate}",
+		summary=f"Salary structure created for {emp_name}: {pay_type} at {base_rate}"
+		+ (f" (inherited from {inherited['piecework_rate']})" if inherited else "")
+		+ (" (hourly rate from the position wage default)" if seeded else ""),
 	)
 
 
@@ -475,10 +758,23 @@ def calculate_payroll(args: dict) -> ToolResult:
 	structures = frappe.db.get_all(
 		SALARY_STRUCTURE,
 		filters={"company": company, "is_active": 1},
-		fields=["name", "employee", "employee_name", "pay_type", "base_rate"],
+		fields=[
+			"name",
+			"employee",
+			"employee_name",
+			"pay_type",
+			"base_rate",
+			*_structure_activity_fields(),
+		],
 	)
 	if not structures:
 		raise ToolError(f"no active salary structures for company {company}.")
+
+	# The company-wide piece rate, for every structure that names none. Reported
+	# rather than raised, for the reason `run_payroll_for_period` gives at length:
+	# one worker's missing rate does not hold up everybody else's pay.
+	by_employee = {str(row.get("employee") or ""): row for row in structures}
+	_from_company, missing_rates = _resolve_piece_rates(by_employee, company, str(pay_period_end))
 
 	# Create the payroll entry
 	entry = frappe.get_doc(
@@ -573,9 +869,16 @@ def calculate_payroll(args: dict) -> ToolResult:
 			"total_gross": entry.total_gross,
 			"total_deductions": entry.total_deductions,
 			"total_net": entry.total_net,
+			"employees_missing_piece_rates": missing_rates,
 		},
 		summary=f"Payroll entry {entry.name}: {len(structures)} employee(s), "
-		f"gross ${entry.total_gross}, net ${entry.total_net}",
+		f"gross ${entry.total_gross}, net ${entry.total_net}"
+		+ (
+			f" — {len(missing_rates)} piece-rate worker(s) with no rate on their structure "
+			"and none in the company table"
+			if missing_rates
+			else ""
+		),
 	)
 
 
@@ -716,6 +1019,12 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 	employees = [_resolve_employee({"employee": only})] if only else None
 
 	structures = _load_structures(company, employees)
+	# Before the shifts, because a piece-rate structure with no rate of its own is
+	# not payable until the company table has answered — and the answer has to be
+	# on the structure before `run_integrated_payroll` reads it. Dated to the
+	# period END so a period straddling a rate change pays what was in force when
+	# it closed.
+	company_rates, missing_rates = _resolve_piece_rates(structures, company, str(end))
 	shifts, provenance = _load_period_shifts(company, start, end, employees=employees)
 
 	# Everybody a slip could be owed to: whoever worked, plus whoever has a
@@ -766,6 +1075,16 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 		"overtime_threshold": threshold,
 		"workweek_anchor": str(anchor) if anchor else str(start),
 		"employees_missing_structures": missing,
+		# v0.61.0. Two lists rather than one number, because they are opposite
+		# facts. `piece_rates_from_company` is the fallback WORKING — these
+		# workers were paid the company rate because their own structure named
+		# none, which is the whole point of the table. `employees_missing_piece_rates`
+		# is the fallback finding nothing, and it is the loud version of a failure
+		# that used to be silent: a picker rated at zero still gets paid, by the
+		# minimum wage makeup, and the slip balances. Nobody reading the totals
+		# would know a rate was never set.
+		"piece_rates_from_company": [company_rates[key] for key in sorted(company_rates)],
+		"employees_missing_piece_rates": missing_rates,
 		"sources": provenance,
 	}
 	return context, slips, payroll_integration.summarize_payroll_run(slips)
@@ -855,6 +1174,12 @@ def preview_payroll_for_period(args: dict) -> ToolResult:
 				else ""
 			)
 			+ (
+				f" — {len(context['employees_missing_piece_rates'])} piece-rate worker(s) with no rate "
+				"on their structure and none in the company table"
+				if context["employees_missing_piece_rates"]
+				else ""
+			)
+			+ (
 				f" — {len(totals['below_minimum_wage'])} below minimum wage"
 				if totals["below_minimum_wage"]
 				else ""
@@ -936,6 +1261,12 @@ def run_payroll_for_period(args: dict) -> ToolResult:
 			f"{totals['employee_count']} employee(s), {totals['total_hours']}h "
 			f"({totals['total_overtime_hours']}h OT), gross ${totals['total_gross']}, "
 			f"net ${totals['total_net']}"
+			+ (
+				f" — {len(context['employees_missing_piece_rates'])} piece-rate worker(s) with no rate "
+				"on their structure and none in the company table"
+				if context["employees_missing_piece_rates"]
+				else ""
+			)
 			+ (
 				f" — {len(totals['below_minimum_wage'])} below minimum wage"
 				if totals["below_minimum_wage"]
@@ -1604,6 +1935,7 @@ def _load_structures(company: str, employees: list[str] | None = None) -> dict:
 			"pay_type",
 			"base_rate",
 			*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
+			*_structure_activity_fields(),
 			"effective_from",
 		],
 		order_by="effective_from asc",
@@ -1621,6 +1953,11 @@ def _load_structures(company: str, employees: list[str] | None = None) -> dict:
 			"employee_name": row.get("employee_name") or "",
 			"pay_type": row.get("pay_type") or "Hourly",
 			"base_rate": _num(row.get("base_rate")),
+			# Which piecework this worker's rate is for — the other half of the
+			# (company, activity) pair the company-wide table is keyed by, and
+			# read only where `base_rate` is 0. Blank is normal and is not a
+			# problem on a site with one piecework rate in force.
+			"piecework_activity": row.get("piecework_activity") or "",
 			# What non-piece hours are worth to a piece-rate worker. None rather
 			# than zero where the site has not set one: the engine treats None as
 			# "no rate on file" and pays those hours up to the minimum wage, and it

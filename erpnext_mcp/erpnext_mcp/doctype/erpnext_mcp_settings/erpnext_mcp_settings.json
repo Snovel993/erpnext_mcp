@@ -328,6 +328,16 @@
   "payroll_gl_write_col",
   "allow_configure_payroll_accounts",
   "allow_post_payroll_to_gl",
+  "wage_tables_section",
+  "allow_list_piecework_rates",
+  "allow_get_piecework_rate",
+  "allow_list_position_wage_defaults",
+  "allow_get_position_wage_default",
+  "wage_tables_col",
+  "allow_create_piecework_rate",
+  "allow_update_piecework_rate",
+  "allow_create_position_wage_default",
+  "allow_update_position_wage_default",
   "tax_form_section",
   "allow_list_tax_forms",
   "allow_get_tax_form",
@@ -2651,6 +2661,71 @@
    "fieldname": "allow_post_payroll_to_gl",
    "fieldtype": "Check",
    "label": "Post Payroll To GL"
+  },
+  {
+   "fieldname": "wage_tables_section",
+   "fieldtype": "Section Break",
+   "label": "Company-Wide Wage Tables"
+  },
+  {
+   "default": "1",
+   "description": "READ. What the operation pays for one unit of one piecework activity, and which of those rows is in force. `in_force` is the ONE row per (company, activity) a payroll run dated `on_date` would read; everything else is history, and it is kept because a period already paid must still be explicable.",
+   "fieldname": "allow_list_piecework_rates",
+   "fieldtype": "Check",
+   "label": "List Piecework Rates"
+  },
+  {
+   "default": "1",
+   "description": "READ. One piecework rate in full, and whether it is the row payroll would actually read on a given date — where it is not, the row that covers that date instead is named.",
+   "fieldname": "allow_get_piecework_rate",
+   "fieldtype": "Check",
+   "label": "Get Piecework Rate"
+  },
+  {
+   "default": "1",
+   "description": "READ. The default hourly rate for each job title at each company, and which row a salary structure created on a given date would be seeded from. It says nothing about what any EXISTING structure pays: the default is read once, at creation.",
+   "fieldname": "allow_list_position_wage_defaults",
+   "fieldtype": "Check",
+   "label": "List Position Wage Defaults"
+  },
+  {
+   "default": "1",
+   "description": "READ. One position wage default in full, and whether it is the row a new hire in that job would start on.",
+   "fieldname": "allow_get_position_wage_default",
+   "fieldtype": "Check",
+   "label": "Get Position Wage Default"
+  },
+  {
+   "fieldname": "wage_tables_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Sets what one unit of one piecework activity pays at one company, from one date. THIS IS ALSO HOW A RAISE IS MADE — a row with a later effective_from supersedes the open-ended one from that date on and leaves it paying the periods it already paid. Every worker whose salary structure has base_rate 0 and that activity is paid from it on the next run; a structure naming its own rate is unaffected.",
+   "fieldname": "allow_create_piecework_rate",
+   "fieldtype": "Check",
+   "label": "Create Piecework Rate"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Corrects a piecework rate that was typed wrong, or retires it with is_active=false. Moving the rate on a row already in force changes what a re-run over that period computes, and the result says so. company and activity cannot be changed, and there is no delete: a rate that paid a period is the record of what that period paid.",
+   "fieldname": "allow_update_piecework_rate",
+   "fieldtype": "Check",
+   "label": "Update Piecework Rate"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Sets the default hourly rate for one job title at one company, from one date. IT SEEDS AND DOES NOT GOVERN: create_salary_structure copies the number onto a new structure once, and structures that already exist are untouched by anything written here.",
+   "fieldname": "allow_create_position_wage_default",
+   "fieldtype": "Check",
+   "label": "Create Position Wage Default"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Edits a position wage default or retires it with is_active=false. Salary structures already seeded from it are unchanged, whatever is edited here — an hourly wage is what a person was hired at, and a table that could restate it retroactively would rewrite what a wage claim asks about.",
+   "fieldname": "allow_update_position_wage_default",
+   "fieldtype": "Check",
+   "label": "Update Position Wage Default"
   },
   {
    "fieldname": "tax_form_section",

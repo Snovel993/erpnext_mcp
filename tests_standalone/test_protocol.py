@@ -798,10 +798,30 @@ class Catalogue(SeededTestCase):
 		nothing else, the doctype is append-only, and a tool that could add one
 		would be a tool that could manufacture an identity check that never
 		happened. `collect_form_signature` grew the arguments instead.
+
+		v0.61.0 ADDED EIGHT — four reads and four writes — over the two
+		company-wide wage tables: what the OPERATION pays for a bucket and for an
+		hour of a job title, as opposed to what one named person earns. Four each
+		and NO DELETE on either: a rate that paid a period is the record of what
+		that period paid, so `update_*` can clear `is_active` and nothing can
+		remove the row — the posture `remove_authorized_signer` takes for the same
+		reason.
+
+		THE TWO TABLES ARE READ AT OPPOSITE MOMENTS and that asymmetry is the
+		design rather than an inconsistency. A Piecework Rate is read on EVERY
+		payroll run, for every worker whose structure names no rate, which is what
+		makes a mid-season raise one row instead of a hundred edits. A Position
+		Wage Default is read ONCE, when a salary structure is created, and never
+		reaches back through it: a piece rate is a property of the work, and an
+		hourly wage is what a person was hired at.
+
+		`wage_defaults.py` is pure — the lookup order takes rows and returns
+		answers, so it is testable without a bench — and `tools/wagedefaults.py`
+		is the only place that reads or writes either doctype.
 		"""
-		self.assertEqual(len(registry.TOOLS), 402)
-		self.assertEqual(len(registry.READ_TOOLS), 183)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 219)
+		self.assertEqual(len(registry.TOOLS), 410)
+		self.assertEqual(len(registry.READ_TOOLS), 187)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 223)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
