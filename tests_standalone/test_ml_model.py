@@ -380,6 +380,29 @@ class AttachingABundle(MLModelToolTestCase):
 		self.assertEqual(result["model"]["source_uuid"], UUID)
 		self.assertTrue(any("force=true" in w for w in result["warnings"]))
 
+	def test_an_iso_8601_training_date_is_converted_rather_than_failing_the_save(self):
+		"""THE v0.59.0 FIELD BUG. Volume Vision writes `2026-07-08T02:38:43Z`,
+		which is what every JSON producer writes and what no MariaDB DATETIME
+		accepts: the save came back `OperationalError (1292, "Incorrect datetime
+		value")` with the model already downloaded and nothing to show for it.
+		The standalone double now refuses the same string the server refuses, so
+		this test fails at the attach if the conversion is ever removed."""
+		result = self.attach(bundle_bytes(dict(MANIFEST, training_completed_at="2026-07-08T02:38:43Z")))
+		self.assertEqual(result["model"]["training_completed_at"], "2026-07-08 02:38:43")
+		self.assertEqual(
+			frappe.db.get_value(DOCTYPE, self.model, "training_completed_at"), "2026-07-08 02:38:43"
+		)
+
+	def test_a_training_date_with_an_offset_is_stored_as_the_same_instant_in_utc(self):
+		result = self.attach(bundle_bytes(dict(MANIFEST, training_completed_at="2026-07-08T04:38:43+02:00")))
+		self.assertEqual(result["model"]["training_completed_at"], "2026-07-08 02:38:43")
+
+	def test_an_unreadable_training_date_warns_and_the_rest_of_the_bundle_still_lands(self):
+		result = self.attach(bundle_bytes(dict(MANIFEST, training_completed_at="whenever")))
+		self.assertIsNone(result["model"]["training_completed_at"])
+		self.assertEqual(result["model"]["class_names"], MANIFEST["class_names"])
+		self.assertTrue(any("not a timestamp" in w for w in result["warnings"]))
+
 	def test_the_manifests_preprocessing_reaches_an_ios_client_through_get_active_model(self):
 		self.attach(bundle_bytes())
 		self.tool_data("activate_model", {"model": self.model})

@@ -401,6 +401,70 @@ class ReadingABundle(unittest.TestCase):
 			MANIFEST["training_completed_at"],
 		)
 
+	def test_an_iso_training_date_is_converted_before_it_reaches_a_datetime_column(self):
+		"""The bug: MariaDB answers `2026-07-08T02:38:43Z` with
+		`OperationalError (1292, "Incorrect datetime value")`, which failed the
+		whole pull after the model had already come down the wire."""
+		result = engine.reconcile_bundle_manifest(
+			model(), dict(MANIFEST, training_completed_at="2026-07-08T02:38:43Z")
+		)
+		self.assertEqual(result["updates"]["training_completed_at"], "2026-07-08 02:38:43")
+		self.assertEqual(result["warnings"], [])
+
+	def test_an_unreadable_training_date_warns_instead_of_failing_the_attach(self):
+		result = engine.reconcile_bundle_manifest(
+			model(), dict(MANIFEST, training_completed_at="last Tuesday")
+		)
+		self.assertNotIn("training_completed_at", result["updates"])
+		self.assertTrue(any("not a timestamp" in w for w in result["warnings"]))
+		# Everything else still applied — one unreadable field is not a refusal.
+		self.assertEqual(result["updates"]["class_names"], MANIFEST["class_names"])
+
+
+class ConvertingATimestamp(unittest.TestCase):
+	"""v0.59.0 — `as_mariadb_datetime`, the ISO 8601 a Datetime column refuses."""
+
+	def test_the_shape_volume_vision_writes(self):
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08T02:38:43Z"), "2026-07-08 02:38:43")
+
+	def test_an_offset_is_applied_and_not_discarded(self):
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08T04:38:43+02:00"), "2026-07-08 02:38:43")
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-07T19:38:43-07:00"), "2026-07-08 02:38:43")
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08T04:38:43+0200"), "2026-07-08 02:38:43")
+
+	def test_an_offset_that_crosses_a_day_boundary_moves_the_date(self):
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08T00:30:00+02:00"), "2026-07-07 22:30:00")
+
+	def test_fractional_seconds_are_dropped_rather_than_refused(self):
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08T02:38:43.512394Z"), "2026-07-08 02:38:43")
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08T02:38:43.5"), "2026-07-08 02:38:43")
+
+	def test_a_value_already_in_the_column_s_own_format_is_unchanged(self):
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08 02:38:43"), "2026-07-08 02:38:43")
+
+	def test_a_missing_time_or_seconds_is_filled_with_zeroes(self):
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08"), "2026-07-08 00:00:00")
+		self.assertEqual(engine.as_mariadb_datetime("2026-07-08T02:38"), "2026-07-08 02:38:00")
+
+	def test_a_datetime_object_survives_the_round_trip(self):
+		import datetime as dt
+
+		self.assertEqual(
+			engine.as_mariadb_datetime(dt.datetime(2026, 7, 8, 2, 38, 43, 9999)), "2026-07-08 02:38:43"
+		)
+		self.assertEqual(
+			engine.as_mariadb_datetime(
+				dt.datetime(2026, 7, 8, 4, 38, 43, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+			),
+			"2026-07-08 02:38:43",
+		)
+		self.assertEqual(engine.as_mariadb_datetime(dt.date(2026, 7, 8)), "2026-07-08 00:00:00")
+
+	def test_anything_unreadable_is_an_empty_string_and_never_a_raise(self):
+		for value in ("", None, "last Tuesday", "2026-13-01", "2026-02-30", "08/07/2026", 7, {}):
+			with self.subTest(value=value):
+				self.assertEqual(engine.as_mariadb_datetime(value), "")
+
 	def test_an_unrecognised_model_kind_is_reported_rather_than_applied(self):
 		result = engine.reconcile_bundle_manifest(model(), dict(MANIFEST, model_kind="Sorcery"))
 		self.assertNotIn("model_kind", result["updates"])

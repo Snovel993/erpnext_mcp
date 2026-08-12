@@ -37,6 +37,7 @@ import datetime
 import hmac
 import json
 import os
+import re
 import secrets
 import shutil
 import sys
@@ -58,6 +59,15 @@ SITE_ROOT = tempfile.mkdtemp(prefix="erpnext-mcp-site-")
 
 #: Subdirectories of the site folder the app is allowed to write into.
 SITE_FILE_DIRS = (("private", "files"), ("public", "files"))
+
+#: What a MariaDB DATETIME or DATE column accepts as a string. The `T`
+#: separator is tolerated because the server tolerates it; a trailing `Z` or a
+#: `+02:00` offset is not, because the column has nowhere to put a zone — see
+#: `Document._validate_datetimes`.
+_MARIADB_DATETIME = re.compile(
+	r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})"
+	r"(?:[ T](?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?(?:\.\d+)?)?$"
+)
 
 
 def get_site_path(*parts) -> str:
@@ -1647,6 +1657,7 @@ class Document(FrappeDict):
 		self._run("before_save")
 		self._validate_links()
 		self._validate_selects()
+		self._validate_datetimes()
 		self._name_children()
 		STORE.put(self)
 		self._run("after_insert")
@@ -1664,6 +1675,7 @@ class Document(FrappeDict):
 		self._run("before_save")
 		self._validate_links()
 		self._validate_selects()
+		self._validate_datetimes()
 		self._name_children()
 		STORE.put(self)
 		self._run("on_update")
@@ -1783,6 +1795,73 @@ class Document(FrappeDict):
 				continue
 			for row in self.get(fieldname) or []:
 				self._validate_selects_on(child_doctype, row)
+
+	def _validate_datetimes(self):
+		"""Refuse a Datetime or Date value MariaDB would refuse, as the column does.
+
+		THIS IS THE v0.59.0 GAP, AND IT IS THE SAME SHAPE AS v0.16.1's. The double
+		stored whatever string it was handed into a `Datetime` field, so
+		`pull_model_from_vv` could write Volume Vision's own
+		`2026-07-08T02:38:43Z` into `ML Model.training_completed_at`, pass the
+		whole standalone suite, and then fail on Tim's site with
+		`OperationalError (1292, "Incorrect datetime value")` — after the model
+		had already come down the wire. Every JSON producer on earth writes ISO
+		8601 and no MariaDB DATETIME accepts one, so this is a boundary the app
+		crosses often and could not previously test.
+
+		THE RULE IS MariaDB'S, NOT `datetime.fromisoformat`'s. A `T` between the
+		date and the time is tolerated (the server takes it); a zone designator —
+		a trailing `Z`, or a `+02:00` — is NOT, because a DATETIME column has
+		nowhere to put one, and that refusal is the entire bug. A Date column
+		accepts a datetime string, which the server truncates.
+
+		Reimplemented here rather than imported from `model_registry.as_mariadb_datetime`,
+		for the reason `account_autoname` is reimplemented above: two independent
+		copies of a rule that must match the server is how a test notices one of
+		them drifting. A double that called the app's own converter would agree
+		with the app and prove nothing.
+		"""
+		if self.flags.get("ignore_validate"):
+			return
+		self._validate_datetimes_on(self.doctype, self)
+		for (parent, fieldname), child_doctype in CHILD_TABLES.items():
+			if parent != self.doctype:
+				continue
+			for row in self.get(fieldname) or []:
+				self._validate_datetimes_on(child_doctype, row)
+
+	def _validate_datetimes_on(self, doctype: str, doc):
+		meta = META.get(doctype)
+		if meta is None:
+			return
+		for field in meta.fields:
+			fieldtype = field.get("fieldtype")
+			if fieldtype not in ("Datetime", "Date"):
+				continue
+			value = doc.get(field["fieldname"])
+			if value in (None, "") or isinstance(value, (datetime.datetime, datetime.date)):
+				continue
+			match = _MARIADB_DATETIME.match(str(value).strip())
+			calendar_error = None
+			if match:
+				try:
+					datetime.datetime(
+						int(match["year"]),
+						int(match["month"]),
+						int(match["day"]),
+						int(match["hour"] or 0),
+						int(match["minute"] or 0),
+						int(match["second"] or 0),
+					)
+				except ValueError as exc:
+					calendar_error = str(exc)
+			if not match or calendar_error:
+				raise ValidationError(
+					f"Incorrect datetime value: {str(value)!r} for column "
+					f"{doctype}.{field['fieldname']} — MariaDB takes 'YYYY-MM-DD HH:MM:SS' and "
+					f"nothing else. An ISO 8601 string with a trailing 'Z' or a '+02:00' offset is "
+					f"the usual source of this; convert it before the save."
+				)
 
 	def _validate_selects_on(self, doctype: str, doc):
 		meta = META.get(doctype)

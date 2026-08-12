@@ -9246,6 +9246,12 @@ record's: that is the wrong file for this record, and attaching it would make
 every iOS cache keyed on that uuid wrong. `force: true` overrides, and says so
 in the warnings.
 
+The manifest's `training_completed_at` is ISO 8601 (`2026-07-08T02:38:43Z`) and
+the column it lands in is a MariaDB `DATETIME`, which refuses one. It is
+converted before the write, with any offset applied so the column holds UTC for
+every bundle; an unreadable timestamp leaves the field unset with a warning
+rather than failing an attach that has otherwise succeeded.
+
 This is the only tool in this app that fetches a file from another server. It
 enforces http/https only, no credentials in the URL, no redirects followed, and
 a 512 MB ceiling checked against `Content-Length` before the body is read and

@@ -3,6 +3,39 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.59.1 — 2026-08-11
+
+**`pull_model_from_vv` failed at the save, after the model had already come down
+the wire.** Volume Vision writes `training_completed_at` into its manifest the
+way every JSON producer on earth writes a timestamp — ISO 8601,
+`2026-07-08T02:38:43Z` — and a Frappe `Datetime` column is a MariaDB `DATETIME`,
+which answers that string with `OperationalError (1292, "Incorrect datetime
+value")`. The `T` and the `Z` are the whole problem; the instant was always
+fine. `model_registry.as_mariadb_datetime` converts before the write, and
+`reconcile_bundle_manifest` calls it.
+
+**An offset is applied, not discarded.** `2026-07-08T04:38:43+02:00` is stored
+as `2026-07-08 02:38:43`, so the column holds one zone for every bundle rather
+than whichever zone the training box happened to be in. A `DATETIME` has nowhere
+to put a zone, and the alternative — keeping the wall clock and dropping the
+offset — files two timestamps two hours apart as the same moment. A value with
+no offset is taken as written, because there is nothing else it could mean.
+Fractional seconds are dropped, a date with no time becomes midnight, and
+anything unreadable leaves the field unset with a warning rather than failing an
+attach that has otherwise succeeded.
+
+**The standalone double now refuses what MariaDB refuses.** This bug passed 6718
+local tests because the in-memory `frappe` stored whatever string it was handed
+into a `Datetime` field. `Document._validate_datetimes` closes that the same way
+v0.16.1's `_validate_selects` closed the Kanban-column class: the `T` separator
+is tolerated (the server tolerates it), a zone designator is not, and the error
+names the column and the likely cause. **The rest of the suite passes it
+unchanged** — every other datetime this app writes was already in the column's
+own format — so the check costs nothing and makes the class of bug catchable
+rather than the instance. It is deliberately a second implementation of the
+rule rather than a call into `as_mariadb_datetime`: a double that used the app's
+own converter would agree with the app and prove nothing.
+
 ## 0.59.0 — 2026-08-11
 
 **A model's labels and a model's weights have never travelled together, and
