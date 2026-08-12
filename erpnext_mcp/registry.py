@@ -8799,7 +8799,7 @@ TOOLS = {
 	"update_employee": _tool(
 		employee.update_employee,
 		"MUTATING (default OFF). Change the identity, assignment and compliance-status "
-		"fields on an Employee that already exists — the same nineteen "
+		"fields on an Employee that already exists — the same twenty-two "
 		"create_employee writes, and nothing else. `jurisdiction` is here for the "
 		"reason it is defaulted there: wage law follows where the work is PERFORMED, "
 		"and a crew that crossed the river onto a Washington block is paid under a "
@@ -8811,7 +8811,7 @@ TOOLS = {
 		"PAYROLL, TAX AND BANKING FIELDS ARE REFUSED BY NAME — salary structure, "
 		"income tax slab, bank account, CTC. Those need the HR module's own form, "
 		"where its approvals and retention rules run. A field that is real on this "
-		"site but outside the nineteen gets a different refusal from a field that "
+		"site but outside the twenty-two gets a different refusal from a field that "
 		"does not exist at all, because they are different mistakes.\n\n"
 		"IT REPORTS WHAT ACTUALLY CHANGED, field by field, with the previous value — "
 		"a value that was already what you asked for lands in `unchanged` rather "

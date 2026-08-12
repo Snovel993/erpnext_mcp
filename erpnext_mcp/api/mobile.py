@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The fifty-one methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The sixty-four methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -1208,7 +1208,7 @@ def create_employee(
 
 	IT DELEGATES RATHER THAN INSERTING. `frappe.get_doc({...}).insert()` here would
 	be four lines and would step around every rule `tools/employee.py` has held
-	since v0.18.1: the nineteen-field allowlist that refuses `ctc` and
+	since v0.18.1: the twenty-two-field allowlist that refuses `ctc` and
 	`salary_structure` by name, the second-record check that keeps one person off
 	the dispatch board twice, the mandatory fields read off THIS site's meta rather
 	than assumed, and `require_hr_role`. Those rules stay where they are for the
@@ -2848,7 +2848,17 @@ def list_onboarding_reference_data(user: str, company=None) -> dict:
 	run the kill switch, the role gate, the enrolment gate and the rate limit,
 	which is the whole of what this needs; `search_employees`, which really does
 	read the register, carries the HR role gate and this deliberately does not.
+
+	v0.62.0 MOVED THE BODY INTO `_onboarding_reference_data` AND CHANGED NOTHING
+	HERE. `list_org_reference_data` is the same read under the name the handset
+	calls; it takes the same one argument, and the only reason both exist is that
+	a phone already in an orchard must not have to be reinstalled to get an answer.
 	"""
+	return _onboarding_reference_data(user, company)
+
+
+def _onboarding_reference_data(user: str, company) -> dict:
+	"""The four dropdowns. See `list_onboarding_reference_data` for every rule."""
 	allowed = guard.require_scope(user)
 	wanted = guard.require_company(user, company, allowed)
 	entities = [wanted] if wanted else allowed
@@ -3004,7 +3014,25 @@ def list_available_housing(
 	`parcel` IS STILL ACCEPTED and is narrower than `branch`. Passing both filters
 	to the intersection, which is what somebody asking for one parcel of a
 	two-parcel camp means.
+
+	v0.62.0 MOVED THE BODY INTO `_available_housing` AND CHANGED NOTHING HERE.
+	`list_housing_units` is the same read under the name the handset calls and the
+	one argument it spells differently; every paragraph above is a rule about what
+	a phone may see of a camp, and two copies of them would be two answers to the
+	same question a season from now.
 	"""
+	return _available_housing(
+		user,
+		company=company,
+		parcel=parcel,
+		branch=branch,
+		include_full=include_full,
+		employee=employee,
+	)
+
+
+def _available_housing(user: str, company, parcel, branch, include_full, employee) -> dict:
+	"""The camp read both wrappers make. See `list_available_housing` for every rule."""
 	allowed = guard.require_scope(user)
 	wanted = guard.require_company(user, company, allowed)
 	compat.require_doctype(
@@ -3096,14 +3124,28 @@ def list_available_housing(
 				"unit_name": unit.get("unit_name"),
 				"unit_type": unit.get("unit_type"),
 				"parcel": unit.get("parcel"),
+				"parcel_name": unit.get("parcel_name") or unit.get("parcel"),
 				"company": unit.get("owning_entity"),
 				"capacity": capacity or None,
 				"current_occupants": occupants,
+				# v0.62.0. The same count under the key `HousingUnit` decodes.
+				# Two spellings of one number rather than a rename, because a
+				# handset already in the field reads the first.
+				"occupied": occupants,
 				"open_beds": open_beds,
 				"status": "Uninhabitable" if condemned else ("Full" if full else "Available"),
 				"condition": unit.get("condition"),
 				"assignable": not (condemned or full),
 				"unassignable_reason": reason,
+				"blocked_reason": reason,
+				# ALWAYS TRUE, AND STATED RATHER THAN OMITTED. The loop above
+				# drops every non-residential unit before it gets here — see the
+				# docstring on why a dropdown must not offer a shower block — so
+				# every row that survives is somewhere a person sleeps. The
+				# handset's own fallback guesses this from `unit_type` when the
+				# server is silent, and a guess about a customised type would
+				# grey out a real cabin.
+				"is_residential": True,
 				"max_occupants_per_or_law": unit.get("max_occupants_per_or_law"),
 				"capacity_over_lawful_occupancy": unit.get("capacity_over_lawful_occupancy"),
 				"inspection_overdue": unit.get("inspection_overdue"),
@@ -3112,11 +3154,17 @@ def list_available_housing(
 		)
 
 	units = guard.scoped(units, allowed)
+	open_beds = sum(unit["open_beds"] or 0 for unit in units)
 	return {
 		"units": units,
 		"count": len(units),
 		"assignable_count": sum(1 for unit in units if unit["assignable"]),
-		"open_beds": sum(unit["open_beds"] or 0 for unit in units),
+		"open_beds": open_beds,
+		# v0.62.0. `HousingUnitList` reads `total_open_beds` first and `open_beds`
+		# second, and the number is the same one — the step's header says "6 beds
+		# open across 4 cabins" and computing that from the rows it was shown
+		# would be wrong by exactly the filter that was applied.
+		"total_open_beds": open_beds,
 		"previous_assignment": previous,
 		"company": wanted or None,
 		"parcel": str(parcel or "").strip() or None,
@@ -3176,6 +3224,63 @@ def assign_housing(
 	assignment without the flag — and AT capacity the check above has already
 	refused. Letting a phone send the flag itself would hand it the one argument
 	that turns the capacity refusal off.
+
+	v0.62.0 MOVED THE BODY INTO `_house_one_person` AND CHANGED NOTHING HERE.
+	`create_housing_assignment` is the same write under the name and the argument
+	spellings the handset actually posts, and the two must not come to hold two
+	copies of the capacity rule. This wrapper still passes the flag as true on the
+	caller's behalf and still declares no argument for it; that one is the choice
+	that differs between them, so it is the one parameter the shared function
+	takes.
+	"""
+	return _house_one_person(
+		user,
+		employee=employee,
+		unit=housing_unit,
+		assigned_date=check_in_date,
+		end_date=end_date,
+		company=None,
+		deposit_paid=deposit_paid,
+		housing_deduction_from_wages=housing_deduction_from_wages,
+		notes=notes,
+		allow_multi_occupancy=True,
+		unit_label="housing_unit",
+		date_label="check_in_date",
+	)
+
+
+def _house_one_person(
+	user: str,
+	employee,
+	unit,
+	assigned_date,
+	end_date,
+	company,
+	deposit_paid,
+	housing_deduction_from_wages,
+	notes,
+	allow_multi_occupancy: bool,
+	unit_label: str,
+	date_label: str,
+) -> dict:
+	"""The housing write both wrappers make, with the one difference as an argument.
+
+	v0.62.0. `assign_housing` (v0.54.0) and `create_housing_assignment` are the
+	same act under two names — see this module's header on why the older spelling
+	keeps its route — and every rule below is one an operator can defend in a wage
+	claim or a Section 119 audit. Two copies of it would be two sets of camp rules
+	to keep in step, which is the mistake the dispatch wrappers refuse to make with
+	the concurrent-claim limit.
+
+	`unit_label` AND `date_label` NAME THE ARGUMENT THE CALLER ACTUALLY SENT, so a
+	refusal quotes the spelling that is on the handset's screen rather than the
+	other wrapper's. A phone told "check_in_date is required" by a method it called
+	with `assigned_date` is a phone whose operator cannot act on the sentence.
+
+	THE CAPACITY CEILING IS NOT `allow_multi_occupancy`'s TO LIFT, whichever
+	wrapper is calling. The flag says "this unit really is shared"; the count says
+	how many beds are in it, and no flag on a phone adds one. See `assign_housing`
+	on why the tool warns where this refuses.
 	"""
 	allowed = guard.require_scope(user)
 	personnel.require_hr_role()
@@ -3184,12 +3289,13 @@ def assign_housing(
 		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
 	)
 
+	wanted = guard.require_company(user, company, allowed)
 	person = guard.require_scoped_doc(EMPLOYEE, employee, "employee", allowed)
-	unit = guard.require_docname(HOUSING_UNIT, housing_unit, "housing_unit")
-	start = str(check_in_date or "").strip()
+	unit = guard.require_docname(HOUSING_UNIT, unit, unit_label)
+	start = str(assigned_date or "").strip()
 	if not start:
 		frappe.throw(
-			"check_in_date is required — an assignment with no start date is not a record.",
+			f"{date_label} is required — an assignment with no start date is not a record.",
 			frappe.ValidationError,
 		)
 	finish = str(end_date or "").strip()
@@ -3199,10 +3305,20 @@ def assign_housing(
 	# not one, so the check is made here rather than skipped — a cabin belonging
 	# to an entity this caller cannot reach is not found, the same refusal as a
 	# docname that does not exist.
-	unit_row = frappe.db.get_value(HOUSING_UNIT, unit, ["owning_entity", "capacity"], as_dict=True) or {}
+	unit_row = (
+		frappe.db.get_value(HOUSING_UNIT, unit, ["owning_entity", "capacity", "unit_name"], as_dict=True) or {}
+	)
 	owner = str(unit_row.get("owning_entity") or "")
 	if owner and owner not in set(allowed):
-		frappe.throw(f"housing_unit {unit} was not found.", frappe.DoesNotExistError)
+		frappe.throw(f"{unit_label} {unit} was not found.", frappe.DoesNotExistError)
+	# A `company` argument NARROWS, and a cabin outside it reads as not found for
+	# the same reason one outside the caller's entities does. `require_company`
+	# above has already refused a company this account cannot reach at all, so
+	# what is left here is a real entity of theirs that this unit does not belong
+	# to — which is a mis-tapped camp on the previous screen, not a permission
+	# failure, and either way not somewhere this person is being put.
+	if wanted and owner and owner != wanted:
+		frappe.throw(f"{unit_label} {unit} was not found.", frappe.DoesNotExistError)
 
 	capacity = int(unit_row.get("capacity") or 0)
 	occupied = housing_tools.occupancy_for(unit, start, finish or None)
@@ -3218,10 +3334,7 @@ def assign_housing(
 		"unit": unit,
 		"employee": person,
 		"assigned_date": start,
-		# Under capacity by the check above, so a shared cabin is the ordinary
-		# case rather than the exception this flag was written for. See the
-		# docstring: the phone cannot send it, and this is not it being forwarded.
-		"allow_multi_occupancy": True,
+		"allow_multi_occupancy": bool(allow_multi_occupancy),
 	}
 	for key, value in (
 		("end_date", finish),
@@ -3233,19 +3346,32 @@ def assign_housing(
 			inner[key] = value
 
 	data = housing_tools.create_housing_assignment(inner).data
+	occupants_after = int(data.get("occupants_after") or 0)
 	return {
 		"assignment": data.get("name"),
+		# v0.62.0. THE SAME DOCNAME UNDER THE KEY THE HANDSET READS. `assignment`
+		# is what v0.54.0 called it and what anything already in the field is
+		# parsing; `HousingAssignmentResult` decodes `name`, which is also what
+		# every other write on this surface hands its docname back under. Both,
+		# rather than a rename that would go quiet on a phone in an orchard.
+		"name": data.get("name"),
 		"employee": data.get("employee"),
 		"employee_name": data.get("employee_name"),
 		"unit": data.get("unit"),
+		"unit_name": data.get("unit_name") or unit_row.get("unit_name") or data.get("unit"),
 		"parcel": data.get("parcel"),
 		"company": owner or None,
 		"check_in_date": data.get("assigned_date"),
+		# The handset's spelling of the same date, for the same reason `name` is
+		# above: `OnboardingHousing.apiParams` sends `assigned_date` and
+		# `HousingAssignmentResult` reads it back.
+		"assigned_date": data.get("assigned_date"),
 		"end_date": data.get("end_date"),
 		"status": data.get("status"),
 		"unit_capacity": data.get("unit_capacity"),
-		"current_occupants": data.get("occupants_after"),
-		"open_beds": max(0, capacity - int(data.get("occupants_after") or 0)) if capacity else None,
+		"current_occupants": occupants_after,
+		"occupied": occupants_after,
+		"open_beds": max(0, capacity - occupants_after) if capacity else None,
 		"housing_deduction_from_wages": data.get("housing_deduction_from_wages"),
 		"deposit_paid": data.get("deposit_paid"),
 		"warnings": data.get("warnings") or [],
@@ -3872,3 +3998,614 @@ def get_shift(user: str, shift=None) -> dict:
 
 	result = shifts.get_shift({"shift": name})
 	return result.data
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# v0.62.0 — THE SEVEN THE APP CALLS AND THIS SURFACE DID NOT ANSWER
+# ════════════════════════════════════════════════════════════════════════════
+#
+# `MobileAPI.swift` was audited against v0.61.0 on 2026-08-12 and named seven
+# paths that 404. Three of them are methods that exist under another spelling and
+# four are methods that do not exist here at all. This block is both halves.
+#
+# THE THREE ALIASES ARE ALIASES AND NOT RENAMES, and that is the whole design of
+# them. A rename would fix the handset in the next TestFlight build and break
+# every phone already in an orchard on the release it shipped in — this surface's
+# contract with a device in the field is that a method it can reach today it can
+# still reach tomorrow, which is why `collect_signature` kept its route when
+# `submit_form_signature` arrived at v0.57.0 with the argument spellings
+# `API_CONTRACT.md` actually posts. Same act, two doors, ONE implementation
+# behind them: each of the three delegates to a private function the older
+# wrapper now also calls, so the camp rules, the capacity ceiling and the entity
+# scoping cannot come to differ between the two names.
+#
+# AN ALIAS IS NOT A BARE FORWARD, BECAUSE `routes.bind` REDUCES A BODY TO THE
+# KEYS A SIGNATURE DECLARES. Two of the three needed a parameter change to be
+# correct rather than merely reachable, and this is what the iOS audit's own note
+# is about: a rename alone would have turned a loud 404 into a quiet wrong
+# answer. `list_housing_units` declares `assignable_only` where the older name
+# declares `include_full`, and a dropped filter would have listed cabins nobody
+# can be put in. `create_housing_assignment` declares `unit`, `assigned_date`,
+# `company` and `allow_multi_occupancy` where the older name declares
+# `housing_unit`, `check_in_date` and neither of the last two — so a rename would
+# have arrived with no unit, no date, and the barracks flag silently gone.
+#
+# THE BARRACKS FLAG IS FORWARDED HERE AND IS STILL NOT AN OVERRIDE. See
+# `_house_one_person`: the capacity ceiling refuses before the flag is read, on
+# both doors. What the flag decides is the case UNDER capacity — a bunk room that
+# really is shared, said out loud, versus a foreman tapping the same cabin twice —
+# and that is a question only the person standing there can answer.
+
+
+# ── 45. list_org_reference_data ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_org_reference_data", limit=guard.READ_LIMIT)
+def list_org_reference_data(user: str, company=None) -> dict:
+	"""`list_onboarding_reference_data` under the name the handset calls it.
+
+	v0.62.0. The four dropdowns on the wizard's Assignment step, and the one of
+	the three aliases that needed no argument change at all: both spellings take
+	`company` and nothing else. Every rule — the scoping, the absent masters, the
+	branch-to-parcel mapping — is in `list_onboarding_reference_data`'s docstring
+	and in the function both of them call.
+	"""
+	return _onboarding_reference_data(user, company)
+
+
+# ── 46. list_housing_units ──────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_housing_units", limit=guard.READ_LIMIT)
+def list_housing_units(
+	user: str, company=None, parcel=None, branch=None, assignable_only=None, employee=None
+) -> dict:
+	"""`list_available_housing` under the handset's name and its filter's spelling.
+
+	v0.62.0. Every rule is `list_available_housing`'s and both names run the same
+	function; what differs is one argument, and it differs in BOTH its name and
+	its sense.
+
+	`assignable_only` IS THE NEGATIVE OF `include_full`, AND THE DEFAULT FLIPS
+	WITH IT. `HousingAPI.listUnits` sends the flag only when a caller asks for the
+	open beds alone, so the ordinary call from the wizard asks for the WHOLE camp —
+	the full cabins and the condemned one included, marked and greyed out, because
+	a foreman who cannot find the cabin they expected needs to be told it is full
+	rather than shown a shorter list. The older name defaults the other way, which
+	is right for the question IT was written for ("where can somebody sleep") and
+	is not the question this one is asked.
+
+	A dropped filter is exactly the failure the iOS audit refused to risk with a
+	bare rename: `routes.bind` keeps only the keys a signature declares, so
+	`assignable_only` sent at a method that names `include_full` is not an error —
+	it is a filter that vanishes, and the list comes back full of cabins nobody can
+	be put in. Declaring it here is what makes that impossible.
+
+	NON-RESIDENTIAL UNITS ARE STILL ABSENT ENTIRELY, under either name. A shower
+	block is not a bed with a problem; it is not a bed. See `list_available_housing`.
+	"""
+	# Off → the whole camp. See the docstring: the handset sends this flag only to
+	# NARROW, so its absence is the wide answer and `include_full` is its inverse.
+	only_assignable = str(assignable_only or "").strip().lower() in ("1", "true", "yes")
+	return _available_housing(
+		user,
+		company=company,
+		parcel=parcel,
+		branch=branch,
+		include_full=not only_assignable,
+		employee=employee,
+	)
+
+
+# ── 47. create_housing_assignment ───────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_housing_assignment", mutating=True, limit=guard.WRITE_LIMIT)
+def create_housing_assignment(
+	user: str,
+	employee=None,
+	unit=None,
+	assigned_date=None,
+	end_date=None,
+	company=None,
+	deposit_paid=None,
+	housing_deduction_from_wages=None,
+	notes=None,
+	allow_multi_occupancy=None,
+) -> dict:
+	"""`assign_housing` under the name and the four argument spellings the app posts.
+
+	v0.62.0. The write is `_house_one_person`'s and so is every refusal in it: the
+	HR role gate, the entity scoping on both the person and the cabin, the capacity
+	ceiling this surface enforces where the tool only warns, and the tool's own
+	rules about a shower block, a condemned unit and an end date before a start.
+
+	FOUR ARGUMENTS DIFFER FROM `assign_housing` AND EACH ONE MATTERS:
+
+	  * `unit` and `assigned_date` are what `OnboardingHousing.apiParams` sends.
+	    The older wrapper declares `housing_unit` and `check_in_date`, and
+	    `routes.bind` keeps only the keys a signature names — so this method under
+	    the older signature would have received a body with no unit and no date in
+	    it and refused every hire for want of a start date it was sent.
+	  * `company` NARROWS THE CABIN, and the wizard sends it because it has just
+	    hired somebody into that entity. A unit belonging to another of the
+	    caller's entities reads as not found rather than as refused, which is the
+	    rule every other docname on this surface follows.
+	  * `allow_multi_occupancy` IS THE BARRACKS CASE AND IT IS OFF BY DEFAULT,
+	    which is the opposite of what `assign_housing` does and is deliberate on
+	    both sides. That method cannot receive the flag, so it passes true on the
+	    caller's behalf; a bunk room and a double-tap look identical on the wire,
+	    and the older wrapper resolved the ambiguity in favour of the bunk room.
+	    The handset can answer the question properly — the foreman is standing
+	    there — so here the default refuses the second body, NAMING who is already
+	    in the cabin, and the flag is the deliberate second tap.
+
+	THE FLAG DOES NOT LIFT THE CAPACITY CEILING and there is no argument that
+	does. `_house_one_person` counts the beds before it writes and refuses a unit
+	that is already at capacity whatever the body said, because nothing on a phone
+	adds a bunk to a cabin and a bed that does not exist becomes somebody sleeping
+	in a truck.
+	"""
+	return _house_one_person(
+		user,
+		employee=employee,
+		unit=unit,
+		assigned_date=assigned_date,
+		end_date=end_date,
+		company=company,
+		deposit_paid=deposit_paid,
+		housing_deduction_from_wages=housing_deduction_from_wages,
+		notes=notes,
+		allow_multi_occupancy=str(allow_multi_occupancy or "").strip().lower() in ("1", "true", "yes"),
+		unit_label="unit",
+		date_label="assigned_date",
+	)
+
+
+#: What `set_employee_org_fields` writes, in the order the wizard's Assignment
+#: step reads them. Every one is on `tools/employee.WRITABLE`, which is what
+#: makes this wrapper a subset rather than a second allowlist.
+ORG_FIELDS = ("branch", "department", "designation", "employment_type", "date_of_joining")
+
+#: What `set_employee_contact_fields` writes: the handset's spelling on the left,
+#: this site's Employee column on the right.
+#:
+#: THE MAP EXISTS BECAUSE FRAPPE HR'S COLUMN NAMES ARE NOT WHAT ANYBODY CALLS
+#: THESE FIELDS. `person_to_be_contacted` is labelled "Emergency Contact Name" on
+#: the form itself, and a phone should not have to know the docname of a column
+#: to file a phone number against it. `company` is not here and is not writable
+#: through this method — which entity employs somebody is the Assignment step's
+#: fact and `set_employee_org_fields`'s to change.
+CONTACT_FIELDS = {
+	"cell_phone": "cell_number",
+	"personal_email": "personal_email",
+	"current_address": "current_address",
+	"emergency_contact_name": "person_to_be_contacted",
+	"emergency_phone": "emergency_phone_number",
+}
+
+
+# ── 48. set_employee_org_fields ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("set_employee_org_fields", mutating=True, limit=guard.WRITE_LIMIT)
+def set_employee_org_fields(
+	user: str,
+	employee=None,
+	company=None,
+	branch=None,
+	department=None,
+	designation=None,
+	employment_type=None,
+	date_of_joining=None,
+) -> dict:
+	"""Where one person is filed: branch, department, job title, class, start date.
+
+	v0.62.0, AND THE STEP IT COMPLETES HAS HAD NOWHERE TO WRITE SINCE v0.54.0.
+	`list_onboarding_reference_data` has served the four dropdowns for six
+	releases and this surface published no method that could put the chosen values
+	on the record — so the Assignment step read beautifully off the site, asked a
+	foreman four questions, and dropped all four answers. A returning worker's
+	record is never created at all, which is why this cannot be folded into
+	`create_employee`: on the common path in tree fruit there is nothing to create.
+
+	IT IS A SUBSET OF `update_employee` AND NOT A SECOND WRITER. Every field it
+	takes is on `tools/employee.WRITABLE`, the tool runs its own HR role gate and
+	its own company scoping, and the Link validation against THIS site's Branch,
+	Department, Designation and Employment Type records is the tool's — which is
+	the same delegation `create_employee` makes and for the same reason: a second
+	copy of the personnel rules is a second set to keep in step.
+
+	AN UNSENT FIELD IS LEFT ALONE AND AN EMPTY ONE IS NOT AN ANSWER. The step is
+	shown to returning workers whose department was set in the office last season,
+	and a call that wrote "" for every untouched picker would clear four columns
+	somebody filled in deliberately. So a blank is dropped here rather than passed
+	as a clear — a caller that genuinely means "remove this person's department"
+	is asking for something a hiring wizard does not do, and does it in the Desk.
+
+	WHAT CAME BACK IS WHAT STUCK. `skipped` names any field this site's Employee
+	doctype does not carry — `branch` on a bench without Frappe HR's Branch master
+	is the real case — because a step that assumed its own optimism would show a
+	green tick over a department nobody has. It is `update_employee`'s
+	`fields_not_on_this_site` under the name `AppliedOrgFields` decodes.
+
+	THE HR ROLE IS THE TOOL'S GATE AND IT IS NOT COPIED HERE. See this module's
+	header: only Farm Manager holds both a Farm Ops grant and an HR role, which is
+	the enrolment an operator running the hiring wizard already needs.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+	# Validated but NOT forwarded. `company` scopes the caller — an account naming
+	# an entity it cannot reach is refused here rather than at the tool — and
+	# re-pointing an Employee at a different company is a transfer, not an
+	# assignment step, so this method does not do it. `update_employee` will, from
+	# the console, where somebody can mean it.
+	guard.require_company(user, company, allowed)
+
+	sent = {
+		"branch": branch,
+		"department": department,
+		"designation": designation,
+		"employment_type": employment_type,
+		"date_of_joining": date_of_joining,
+	}
+	inner = {"name": person}
+	for key in ORG_FIELDS:
+		value = str(sent.get(key) or "").strip()
+		if value:
+			inner[key] = value
+
+	if len(inner) == 1:
+		frappe.throw(
+			"Nothing was sent to write. Pass at least one of: " + ", ".join(ORG_FIELDS) + ".",
+			frappe.ValidationError,
+		)
+
+	data = personnel.update_employee(inner).data
+	# Read back off the record rather than echoed off the request. See the
+	# docstring: what the step reports has to be what the row says, and a Link
+	# this site cannot resolve leaves its column unset while the call succeeds.
+	current = (
+		frappe.db.get_value(
+			EMPLOYEE, person, compat.existing_fields(EMPLOYEE, list(ORG_FIELDS)), as_dict=True
+		)
+		or {}
+	)
+	return {
+		"employee": person,
+		"employee_name": data.get("employee_name"),
+		"company": data.get("company"),
+		"branch": current.get("branch"),
+		"department": current.get("department"),
+		"designation": current.get("designation"),
+		"employment_type": current.get("employment_type"),
+		"date_of_joining": str(current.get("date_of_joining") or "") or None,
+		"changed": data.get("changed") or [],
+		"unchanged": data.get("unchanged") or [],
+		"skipped": data.get("fields_not_on_this_site") or [],
+	}
+
+
+# ── 49. set_employee_contact_fields ─────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("set_employee_contact_fields", mutating=True, limit=guard.WRITE_LIMIT)
+def set_employee_contact_fields(
+	user: str,
+	employee=None,
+	cell_phone=None,
+	personal_email=None,
+	current_address=None,
+	emergency_contact_name=None,
+	emergency_phone=None,
+) -> dict:
+	"""How to reach one person, and who to ring if something happens to them.
+
+	v0.62.0. A SEPARATE METHOD FROM `set_employee_org_fields` BECAUSE IT IS A
+	DIFFERENT FACT, which is the handset's own argument and the right one: that
+	one says where somebody is filed and this says how to reach them. A phone
+	number is exactly the field somebody will want to correct on its own, from a
+	screen that has nothing to do with which ranch a picker reports to.
+
+	THE ARGUMENT NAMES ARE THE HANDSET'S AND THE COLUMNS ARE FRAPPE HR'S, mapped
+	by `CONTACT_FIELDS`. `emergency_contact_name` is `person_to_be_contacted` on
+	the doctype and `emergency_phone` is `emergency_phone_number`; the labels on
+	the form are the words this method takes, because a phone should not have to
+	know the docname of a column to file a number in it.
+
+	THE LAST THREE ARE NEW TO `tools/employee.WRITABLE` AT v0.62.0 and that is a
+	decision rather than a convenience — see that module's docstring, where the
+	list is closed on purpose. An emergency contact is the same KIND of fact as
+	the cell number beside it: how somebody is reached, and by whom, on the day it
+	matters. An operation that cannot answer the second question at four in the
+	afternoon in August has a real problem, and the answer is collected on the day
+	somebody is hired or it is not collected at all. None of the three is payroll,
+	tax or banking, which is the boundary that list actually defends.
+
+	AN UNSENT FIELD IS LEFT ALONE AND AN EMPTY ONE IS NOT AN ANSWER — the same
+	rule as the org write, and here it is load-bearing: the step opens on what is
+	already filed for a returning worker, and a call that sent "" for an untouched
+	box would erase the only way anybody had to reach them.
+
+	IT IS A SUBSET OF `update_employee`, so the HR role gate, the company scoping
+	and the schema check are all the tool's. `skipped` reports a column this site's
+	Employee does not carry rather than failing the hire over it.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+
+	sent = {
+		"cell_phone": cell_phone,
+		"personal_email": personal_email,
+		"current_address": current_address,
+		"emergency_contact_name": emergency_contact_name,
+		"emergency_phone": emergency_phone,
+	}
+	inner = {"name": person}
+	for spoken, column in CONTACT_FIELDS.items():
+		value = str(sent.get(spoken) or "").strip()
+		if value:
+			inner[column] = value
+
+	if len(inner) == 1:
+		frappe.throw(
+			"Nothing was sent to write. Pass at least one of: " + ", ".join(CONTACT_FIELDS) + ".",
+			frappe.ValidationError,
+		)
+
+	data = personnel.update_employee(inner).data
+	current = (
+		frappe.db.get_value(
+			EMPLOYEE, person, compat.existing_fields(EMPLOYEE, list(CONTACT_FIELDS.values())), as_dict=True
+		)
+		or {}
+	)
+	absent = set(data.get("fields_not_on_this_site") or [])
+	return {
+		"employee": person,
+		"employee_name": data.get("employee_name"),
+		# Reported under the names that were SENT, not the columns they landed in.
+		# A caller told that `person_to_be_contacted` was skipped has to work out
+		# that it asked for `emergency_contact_name`, and the map that answers that
+		# is on this side of the wire.
+		**{spoken: current.get(column) for spoken, column in CONTACT_FIELDS.items()},
+		"changed": data.get("changed") or [],
+		"unchanged": data.get("unchanged") or [],
+		"skipped": sorted(
+			spoken for spoken, column in CONTACT_FIELDS.items() if column in absent
+		),
+	}
+
+
+#: The parent doctypes whose attachments a phone may read, and whether reading
+#: one is a personnel act.
+#:
+#: A CLOSED LIST, FOR THE REASON `attach_onboarding_document` NAMES ONE PARENT IN
+#: CODE. `files.list_attachments` takes any doctype on the site, which is right on
+#: an MCP console and is not right here: a field worker who could name the parent
+#: could walk the File table one docname at a time — a lease, a bank statement, a
+#: governance document — through a method whose whole job is to hand back what is
+#: filed against it. The tool's own Frappe permission check would refuse most of
+#: that; this refuses the question.
+#:
+#: THE FLAG IS WHETHER THE HR ROLE RIDES WITH IT. An Employee's folder and an
+#: I-9's are the photographs of somebody's identity documents, which is the
+#: personnel read `search_employees` and `assign_housing` both gate; a Farm Task's
+#: evidence and a Housing Inspection's photographs are field work, and the six
+#: gates `guard.endpoint` has already run are the whole of what those need.
+ATTACHMENT_PARENTS = {
+	EMPLOYEE: True,
+	"I-9 Form": True,
+	"Farm Task": False,
+	"Farm Task Assignment": False,
+	HOUSING_UNIT: False,
+	"Housing Inspection": False,
+	"Compliance Alert": False,
+	"Farm Shift": False,
+}
+
+
+def _attachment_parent(doctype, docname, allowed: list) -> tuple:
+	"""One parent document, proved readable by this caller. Returns (doctype, name).
+
+	THREE GATES, IN THIS ORDER. The doctype has to be one on `ATTACHMENT_PARENTS`;
+	a personnel parent brings the HR role with it; and the docname has to name a
+	record inside the caller's own entities, which reads as not found when it does
+	not — the same refusal `require_scoped_doc` gives everywhere else, so a caller
+	cannot map the site's docnames by watching which error comes back.
+	"""
+	wanted = str(doctype or EMPLOYEE).strip() or EMPLOYEE
+	if wanted not in ATTACHMENT_PARENTS:
+		frappe.throw(
+			f"{wanted} is not a record this surface reads attachments from. The ones it does "
+			"are: " + ", ".join(sorted(ATTACHMENT_PARENTS)) + ". Nothing was read.",
+			frappe.PermissionError,
+		)
+	if ATTACHMENT_PARENTS[wanted]:
+		personnel.require_hr_role()
+	compat.require_doctype(
+		wanted,
+		"It is not installed on this site, so nothing is filed against it.",
+	)
+	if wanted == HOUSING_UNIT:
+		# A Housing Unit calls its company `owning_entity`, so `require_scoped_doc`
+		# finds no `company` column and would let one through unscoped. The same
+		# hand-made check `_house_one_person` makes, for the same reason.
+		name = guard.require_docname(wanted, docname, "docname")
+		owner = str(frappe.db.get_value(wanted, name, "owning_entity") or "")
+		if owner and owner not in set(allowed):
+			frappe.throw(f"docname {name} was not found.", frappe.DoesNotExistError)
+		return wanted, name
+	return wanted, guard.require_scoped_doc(wanted, docname, "docname", allowed)
+
+
+# ── 50. list_attachments ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_attachments", limit=guard.READ_LIMIT)
+def list_attachments(user: str, doctype=None, docname=None) -> dict:
+	"""What is filed against one record. The missing half of every upload here.
+
+	v0.62.0, AND THE GAP IS SIX RELEASES OLD. This surface has published a way to
+	FILE a document against an Employee since v0.48.3 and no way to ask what was
+	already there — so a badge issued on a hire day was never visible from a
+	handset again, the wizard could not show a returning picker the licence
+	photograph it took last season, and "is there work authorization on file for
+	this person" was a question only answerable in the Desk.
+
+	IT DELEGATES TO `files.list_attachments`, which is the tool that has existed
+	since v0.1 and which checks Frappe's own `read` permission on the parent —
+	the one family of tools in this app that does, and `tools/files.py` argues why
+	at length. That check runs on the WORKER, not on the MCP System User: on this
+	transport `frappe.session.user` is the person holding the phone for the whole
+	call, which is what makes the tool's promise about `is_private` mean something
+	here.
+
+	THE PARENT DOCTYPE IS A CLOSED LIST AND A PERSONNEL PARENT CARRIES THE HR
+	ROLE. See `ATTACHMENT_PARENTS`. The tool takes any doctype on the site, which
+	is right on a console and would be a way to walk the File table from an
+	orchard; this names the records the app actually files against, and gates the
+	two that are somebody's identity documents.
+
+	`docname` IS THE HANDSET'S SPELLING and `name` is the tool's. Both are
+	accepted, because `AttachmentAPI.list` sends the first and the MCP tool
+	documents the second, and a method that took only one of them would be a 400
+	for whichever caller guessed wrong.
+
+	`document_kind` IS NOT IN THE ANSWER AND CANNOT BE. `attach_onboarding_document`
+	records it on the audit row rather than on the File — it is a label on the act,
+	not a column on the object — so reporting one here would mean inventing it.
+	The client treats it as optional and shows the filename instead, which is the
+	honest fallback.
+	"""
+	allowed = guard.require_scope(user)
+	parent, name = _attachment_parent(doctype, docname, allowed)
+
+	data = file_tools.list_attachments({"doctype": parent, "name": name}).data
+	rows = []
+	for row in data.get("attachments") or []:
+		rows.append(
+			{
+				"name": row.get("name"),
+				"file_name": row.get("file_name"),
+				"file_url": row.get("file_url"),
+				"file_size": row.get("file_size"),
+				"size_human": row.get("size_human"),
+				"is_private": bool(row.get("is_private")),
+				# `content_type` is what `EmployeeAttachment` decodes and
+				# `mime_type` is what the tool calls it. The same string twice
+				# rather than a rename in either direction.
+				"content_type": row.get("mime_type"),
+				"mime_type": row.get("mime_type"),
+				"creation": str(row.get("creation") or "") or None,
+				"uploaded_by": row.get("uploaded_by"),
+				"attached_to_field": row.get("attached_to_field"),
+				# Whether `get_attachment_content` can hand this one back in one
+				# piece. A 40 MB scan is listed and is not openable on a phone,
+				# and saying so in the list is what stops the viewer trying.
+				"retrievable": bool(row.get("retrievable")),
+			}
+		)
+	return {
+		"doctype": parent,
+		"docname": name,
+		# The tool's spelling of the same value, so a caller written against the
+		# MCP tool's answer reads the same document.
+		"name": name,
+		"attachments": rows,
+		"count": len(rows),
+		"total_size": data.get("total_size"),
+		"total_size_human": data.get("total_size_human"),
+	}
+
+
+# ── 51. get_attachment_content ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_attachment_content", limit=guard.UPLOAD_LIMIT)
+def get_attachment_content(user: str, file=None, name=None, max_bytes=None) -> dict:
+	"""One attachment's bytes, base64. Without it the list above cannot be opened.
+
+	v0.62.0. NOT SUGAR OVER `file_url`, WHICH THIS APP CANNOT USE — and that is
+	the whole reason this method exists rather than the client following the URL
+	the list hands it. Every file this app writes is PRIVATE by design (an I-9
+	document photograph must not be world-readable), the handset authenticates to
+	the sidecar with `X-FarmOps-Token` rather than to Frappe, and a
+	`/private/files/…` link answers that with a login page. It is the same failure
+	`attach_onboarding_document` was built for, read backwards.
+
+	THE FILE IS AUTHORIZED TWICE AND THE SECOND CHECK IS THE ONE THAT MATTERS.
+	`files.get_attachment_content` asks the File's own parent for `read` and then
+	the File doctype's own controller — Frappe's permissions, on the worker. This
+	wrapper then re-runs `_attachment_parent` on the parent it is actually attached
+	to, because a File docname is a global handle: without that, a caller could
+	name the File id of a document hanging off another entity's Employee, or off a
+	Journal Entry, and the tool alone would decide it on Frappe roles that a Farm
+	Manager scoped to one company legitimately holds.
+
+	AN UNATTACHED FILE IS REFUSED HERE, where the tool allows its owner to read
+	one. There is no parent to scope it by and nothing on this surface produces
+	one — `finalize_staged_file` commits evidence unattached on purpose, and
+	`attach_onboarding_document` is the call that gives it a home. A file with no
+	home is not this door's to open.
+
+	`file` IS THE HANDSET'S SPELLING and `name` is the tool's; both are accepted,
+	the same tolerance `list_attachments` has. Note it is the File DOCNAME, not the
+	filename — `list_attachments` is where it comes from.
+
+	IT IS RATE-LIMITED AS AN UPLOAD, not as a read. A viewer opening a folder of
+	six photographs is six calls of a megabyte each, which is the shape
+	`UPLOAD_LIMIT` was sized for; `READ_LIMIT` is for a list refreshing.
+	"""
+	allowed = guard.require_scope(user)
+	docname = str(file or name or "").strip()
+	if not docname:
+		frappe.throw(
+			"file is required — it is the File docname, which list_attachments gives. "
+			"Nothing was read.",
+			frappe.ValidationError,
+		)
+	docname = guard.require_docname("File", docname, "file")
+
+	row = (
+		frappe.db.get_value(
+			"File", docname, ["attached_to_doctype", "attached_to_name", "is_folder"], as_dict=True
+		)
+		or {}
+	)
+	if row.get("is_folder"):
+		frappe.throw(f"file {docname} is a folder, not a document.", frappe.ValidationError)
+	parent_doctype = str(row.get("attached_to_doctype") or "")
+	parent_name = str(row.get("attached_to_name") or "")
+	if not parent_doctype or not parent_name:
+		# See the docstring. Not "not found" — this one is a real refusal about a
+		# real file, and a caller holding a token from `finalize_staged_file` needs
+		# to be told to file it rather than to go looking for a different docname.
+		frappe.throw(
+			f"file {docname} is attached to no document, so there is nothing to check it "
+			"against. File it against a record first — attach_onboarding_document does that "
+			"for an Employee. Nothing was read.",
+			frappe.PermissionError,
+		)
+	# The gate the tool cannot run: a File docname is global, and whose record it
+	# hangs off is this surface's question rather than Frappe's.
+	_attachment_parent(parent_doctype, parent_name, allowed)
+
+	inner = {"name": docname}
+	if max_bytes not in (None, ""):
+		inner["max_bytes"] = max_bytes
+
+	data = file_tools.get_attachment_content(inner).data
+	return {
+		"name": data.get("name"),
+		"file": data.get("name"),
+		"file_name": data.get("file_name"),
+		"file_url": data.get("file_url"),
+		"is_private": data.get("is_private"),
+		"attached_to_doctype": data.get("attached_to_doctype"),
+		"attached_to_name": data.get("attached_to_name"),
+		"file_size": data.get("file_size"),
+		"size_human": data.get("size_human"),
+		# THREE SPELLINGS OF TWO FACTS, and none of them is a rename. The client
+		# reads `content_type` and `content`; the MCP tool answers `mime_type` and
+		# `content_base64`; `encoding` says which of the two the bytes are in, so
+		# nothing has to infer it from the key it happened to read.
+		"content_type": data.get("mime_type"),
+		"mime_type": data.get("mime_type"),
+		"encoding": data.get("encoding"),
+		"content": data.get("content_base64"),
+		"content_base64": data.get("content_base64"),
+	}

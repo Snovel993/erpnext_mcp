@@ -3,6 +3,76 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.62.0 — 2026-08-12
+
+**Seven routes the iOS app already calls and this server answered 404.**
+`MobileAPI.swift` was audited against v0.61.0 on 2026-08-12. Three of the seven
+exist here under a different name; four did not exist at all. Every one of them
+is a path a shipped handset posts to today, on a screen a foreman is standing in
+front of.
+
+**The three name mismatches are published as ALIASES, not renames.** A rename
+fixes the next TestFlight build and breaks every phone already in an orchard —
+the same promise `collect_signature` kept in v0.57.0. Each alias delegates to a
+private function the older wrapper now also calls, so the camp rules, the
+capacity ceiling and the entity scoping cannot come to differ between the two
+names.
+
+**An alias is not a bare forward, because `routes.bind` reduces a body to the
+keys a signature declares.** Two of the three needed a parameter change to be
+correct rather than merely reachable:
+
+- `list_housing_units` declares `assignable_only` where `list_available_housing`
+  declares `include_full`. Sent at a signature that does not name it, the flag
+  does not error — it vanishes, and the camp list comes back full of cabins
+  nobody can be put in. The sense inverts with the name, so the default flips:
+  the ordinary call now asks for the whole camp, full and condemned units marked
+  and greyed out with the reason printed.
+- `create_housing_assignment` declares `unit`, `assigned_date`, `company` and
+  `allow_multi_occupancy` where `assign_housing` declares `housing_unit`,
+  `check_in_date` and neither of the last two. Under the old signature the body
+  the app posts arrives with no cabin and no date in it.
+
+**`allow_multi_occupancy` is forwarded and is still not an override.** The
+capacity ceiling is checked before the write on both doors and no argument lifts
+it. What the flag decides is the case UNDER capacity: a bunk room that really is
+shared, said out loud, versus a foreman tapping the same cabin twice. The older
+wrapper cannot receive it and passes true on the caller's behalf; the new one
+defaults to refusing the second body, naming who is already in the cabin.
+
+**`set_employee_org_fields` and `set_employee_contact_fields`** are the two
+writes the hiring wizard has never had. Thin subsets of `update_employee`, so the
+HR role gate, the company scoping and the Link validation are the tool's. An
+unsent field is left alone and an empty one is not an answer — both steps are
+shown to returning workers, and a call that wrote `""` for an untouched box would
+clear a column somebody set in the office last season.
+
+**`employee.WRITABLE` grows from nineteen to twenty-two** — `current_address`,
+`person_to_be_contacted`, `emergency_phone_number`. The contact method names five
+fields and the allowlist carried two. An emergency contact is the same kind of
+fact as the cell number beside it: how somebody is reached, and by whom, on the
+day it matters. None of the three is payroll, tax or banking.
+
+**`list_attachments` and `get_attachment_content`** have existed as MCP tools
+since v0.1 and were never routed, so six routes could FILE documents against an
+Employee and none could ask what was already there. They carry three gates the
+tools cannot run themselves: a closed list of parent doctypes, the HR role on the
+personnel ones, and — for the content read — a re-check of the parent the File is
+actually attached to, because a File docname is a global handle. An unattached
+file is refused outright. The bytes travel rather than a `file_url`, because
+every file this app writes is private and the handset authenticates to the
+sidecar rather than to Frappe.
+
+**`HR User` joins Farm Manager's companion roles.** `tools/files.py` consults
+Frappe's own permissions, deliberately, so a Farm Manager holding only this app's
+roles could file a licence photograph and not read the folder back. Named as a
+companion role rather than granted here: a Custom DocPerm on `Employee` would
+make Frappe ignore every standard permission that doctype has, for every role on
+the site. Re-run `create_mobile_user(..., update_existing=true)` for a manager who
+needs it.
+
+See [`RELEASES/v0.62.0.md`](RELEASES/v0.62.0.md).
+
 ## 0.61.0 — 2026-08-12
 
 **Collect once, use everywhere.** Until this release a piece rate was a number on

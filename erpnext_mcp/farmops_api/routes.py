@@ -255,6 +255,38 @@ ROUTES = (
 	Route("/mobile", mobile_api.clock_out_worker),
 	Route("/mobile", mobile_api.get_shift_production),
 	Route("/mobile", mobile_api.get_shift),
+	# v0.62.0. THE SEVEN `MobileAPI.swift` NAMES AND THIS TABLE DID NOT CARRY.
+	# Audited against v0.61.0 on 2026-08-12; see the block comment in
+	# `api/mobile.py` that opens this set for the argument each one settles.
+	#
+	# THE FIRST THREE ARE THE SAME ACT AS THE ROUTE ABOVE THEM UNDER THE NAME AND
+	# THE ARGUMENT SPELLINGS THE APP ACTUALLY POSTS, which is exactly why they are
+	# routes of their own rather than renames of `list_onboarding_reference_data`,
+	# `list_available_housing` and `assign_housing`. This table's own argument
+	# filter is the reason a rename would not have been enough: `bind` keeps only
+	# the keys a signature names, so `assignable_only` at a method declaring
+	# `include_full` is a filter that vanishes and `unit`/`assigned_date` at one
+	# declaring `housing_unit`/`check_in_date` is an assignment with no cabin and
+	# no date in it. The older spellings keep their routes — a handset already in
+	# an orchard is not asked to change to get an answer, which is the same
+	# promise `collect_signature` kept when `submit_form_signature` arrived.
+	Route("/mobile", mobile_api.list_org_reference_data),
+	Route("/mobile", mobile_api.list_housing_units),
+	Route("/mobile", mobile_api.create_housing_assignment),
+	# The two writes the hiring wizard's Assignment and Contact steps have never
+	# had. `list_onboarding_reference_data` has served the four dropdowns since
+	# v0.54.0 with nowhere to put the answers, and the contact step collects a
+	# number and an email a returning picker is reached on in October.
+	Route("/mobile", mobile_api.set_employee_org_fields),
+	Route("/mobile", mobile_api.set_employee_contact_fields),
+	# Reading the folder back. Six routes above file documents against an Employee
+	# and until now none could ask what was already there — so a badge issued on a
+	# hire day was invisible from a handset ever after, and every private file this
+	# app writes was unreachable from the device that collected it (the funnel
+	# strips the credential a `/private/files/…` link would want, and answers with
+	# a login page).
+	Route("/mobile", mobile_api.list_attachments),
+	Route("/mobile", mobile_api.get_attachment_content),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

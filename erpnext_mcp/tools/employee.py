@@ -34,7 +34,7 @@ and the QR; it is the tool to reach for when the person is new. These are the
 tools for when they are not.
 
 ────────────────────────────────────────────────────────────────────────────
-IT WRITES NINETEEN FIELDS AND REFUSES EVERYTHING ELSE BY NAME
+IT WRITES TWENTY-TWO FIELDS AND REFUSES EVERYTHING ELSE BY NAME
 ────────────────────────────────────────────────────────────────────────────
 
 `WRITABLE` is a closed list. Not a filter over the doctype, not "everything
@@ -52,6 +52,12 @@ asked for that this list did not carry — so every hire made through the wizard
 recorded which COMPANY employs somebody and nothing about which camp they report
 to, and a dispatcher looking for the Mill Creek crew had to read it off the
 housing assignment or ask.
+
+Nineteen until v0.62.0, when the current address and the two halves of the
+emergency contact joined them for the same reason one release later. The mobile
+surface's `set_employee_contact_fields` names five contact fields and this list
+carried two of them, so a phone number and an email could be filed on a hire day
+and the person to ring if that picker went down on a block could not.
 
 Everything NOT on it is refused, and the payroll, tax and banking fields are
 refused with their OWN message, because those are the ones somebody will actually
@@ -206,7 +212,7 @@ SELECT_FIELDS = ("status", "i9_status", "w4_status")
 #: has to have an answer for them — see the module docstring.
 COMPLIANCE_FIELDS = ("i9_status", "w4_status", "jurisdiction")
 
-#: The nineteen. Ordered as somebody filling in a form would read them, because
+#: The twenty-two. Ordered as somebody filling in a form would read them, because
 #: this tuple is what the refusal messages list.
 WRITABLE = (
 	"employee_name",
@@ -240,6 +246,29 @@ WRITABLE = (
 	"user_id",
 	"personal_email",
 	"cell_number",
+	# v0.62.0. THE THREE COLUMNS "HOW TO REACH THEM" WAS MISSING, and they join
+	# the list under the same rule as `branch` did: a field the hiring wizard's
+	# own step declares and this list cannot write is a field collected on a
+	# tailgate and dropped on arrival. `set_employee_contact_fields` on the mobile
+	# surface names all five contact fields — a cell number, a personal email, a
+	# current address and the two halves of an emergency contact — and only the
+	# first two had anywhere to land.
+	#
+	# THEY ARE FRAPPE HR'S OWN SPELLINGS, not the app's. `person_to_be_contacted`
+	# is labelled "Emergency Contact Name" on the form and `emergency_phone_number`
+	# is "Emergency Phone"; the mobile wrapper takes the labels the handset speaks
+	# and maps them here, because the docname of a column is not a thing a phone
+	# should have to know.
+	#
+	# NONE OF THE THREE IS PAYROLL, TAX OR BANKING — see `SENSITIVE_FIELDS`. They
+	# are the same kind of fact as the two above them: how somebody is reached,
+	# and who is called if something happens to them on a block. An operation that
+	# cannot answer the second question at four in the afternoon in August has a
+	# real problem, and the answer is collected on the day somebody is hired or it
+	# is not collected at all.
+	"current_address",
+	"person_to_be_contacted",
+	"emergency_phone_number",
 	*COMPLIANCE_FIELDS,
 )
 
@@ -524,8 +553,12 @@ def _reject_unknown(args: dict, allowed: tuple, reserved: tuple = ()) -> None:
 			)
 		raise ToolError(
 			f"{key!r} is a real Employee field on this site but is not one this tool writes. "
-			f"The nineteen it does are: {', '.join(WRITABLE)}. Anything else belongs in the "
-			"Desk, where the HR module's own validation runs. Nothing was changed."
+			# COUNTED RATHER THAN SPELLED OUT. It was "the nineteen" in the
+			# sentence and in the docstring until v0.62.0 added three, and a
+			# refusal that names a number the tuple no longer has is a refusal
+			# that teaches the reader something false about the allowlist.
+			f"The {len(WRITABLE)} it does are: {', '.join(WRITABLE)}. Anything else belongs in "
+			"the Desk, where the HR module's own validation runs. Nothing was changed."
 		)
 
 
@@ -684,6 +717,12 @@ def create_employee(args: dict) -> ToolResult:
 		"branch",
 		"personal_email",
 		"cell_number",
+		# v0.62.0. On `WRITABLE` and therefore here, for the reason the comment
+		# above `branch` gives: a field on the first tuple and not on this one is
+		# a field the tool accepts without complaint and silently drops.
+		"current_address",
+		"person_to_be_contacted",
+		"emergency_phone_number",
 		*COMPLIANCE_FIELDS,
 	)
 	for key in optional:
@@ -1032,8 +1071,8 @@ def update_employee(args: dict) -> ToolResult:
 		"fields_not_on_this_site": absent,
 		"linkage": linkage,
 		"note": (
-			"Only the nineteen identity, assignment and compliance-status fields are writable "
-			"here. Payroll, tax "
+			f"Only the {len(WRITABLE)} identity, assignment, contact and compliance-status "
+			"fields are writable here. Payroll, tax "
 			"and banking fields are refused by name and belong in the Desk, where the HR "
 			"module's own validation runs."
 		),

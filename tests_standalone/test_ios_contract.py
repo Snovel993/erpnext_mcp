@@ -1007,6 +1007,243 @@ class ContractTestCase(MobileAPITestCase):
 		return staged, finalized
 
 
+# ── v0.62.0: the seven the handset named and this surface answered with a 404 ─
+class OrgOptionModel(Codable):
+	"""`OrgOption` — one Department, Designation or Employment Type row.
+
+	`name` IS THE DOCNAME AND IT IS THE ONLY THING THAT TRAVELS BACK. All four
+	masters are Link fields on Employee, so what `set_employee_org_fields` writes
+	is a docname and not a label; Frappe spells the two differently often enough
+	to matter (a Department docnamed `Orchard - OML` is labelled `Orchard`), and
+	writing the label is a link-validation failure rather than a department.
+
+	LENIENT THROUGHOUT, and the consequence is stated in the Swift: a row whose
+	`name` decodes empty is FILTERED OUT of the picker rather than throwing. So a
+	server that omitted the key would not crash the step — it would quietly offer
+	a shorter list, which is the silent miss this file exists to catch.
+	"""
+
+	SWIFT = "OrgReferenceData.swift"
+	LENIENT = (
+		("name", str, 24),
+		("label", str, 28),
+	)
+
+
+class BranchOptionModel(Codable):
+	"""`BranchOption` — a Branch, and the ground it holds.
+
+	`parcel` IS THE JOIN THE HOUSING STEP CANNOT BE REACHED WITHOUT. An Employee
+	carries a Branch and a Housing Unit stands on a Parcel; `Parcel.branch` is the
+	only column between them, and without it a wizard that has just asked which
+	camp somebody works at cannot then show that camp's cabins.
+
+	IT IS LENIENT AND NULL IS A REAL ANSWER. The server sends null for a branch
+	that maps to NO parcels and for one that maps to SEVERAL — see
+	`list_onboarding_reference_data` on why a scalar that picked the first of two
+	would send half a camp's beds missing — and the client's documented fallback
+	for null is to ask the server, which is what passing `branch` to
+	`list_housing_units` does.
+	"""
+
+	SWIFT = "OrgReferenceData.swift"
+	LENIENT = (
+		("name", str, 76),
+		("label", str, 77),
+		("parcel", str, 80),
+		("parcel_name", str, 83),
+	)
+
+
+class OrgReferenceDataModel(Codable):
+	"""`OrgReferenceData` — the four dropdowns on the Assignment step, in one read.
+
+	NO STRICT FIELD ANYWHERE, and that is the design rather than a weakness. A
+	master this site does not have comes back as an empty list and the step drops
+	that picker; a master that threw would mean a bench without Frappe HR's Branch
+	doctype could not hire anybody at all. `isFromServer` is the flag that
+	separates "this farm has no departments" from "the call failed", and the
+	client sets it itself — it is not on the wire, which is why it is not here.
+	"""
+
+	SWIFT = "OrgReferenceData.swift"
+	NESTED = (
+		("branches", BranchOptionModel, True, 128),
+		("departments", OrgOptionModel, True, 129),
+		("designations", OrgOptionModel, True, 130),
+		("employment_types", OrgOptionModel, True, 131),
+	)
+
+
+class AppliedOrgFieldsModel(Codable):
+	"""`AppliedOrgFields` — what actually stuck, read back off the record.
+
+	THE ECHO IS THE POINT AND IT IS WHY THIS METHOD ANSWERS AT ALL. All four are
+	Link fields, and a site missing one of the doctypes — or an account without
+	write permission on it — leaves that column unset while the call as a whole
+	succeeds. A step that assumed its own state was filed would show a green tick
+	over a department nobody has.
+
+	`skipped` IS A LIST AND ITS ABSENCE READS AS "EVERYTHING LANDED", which is
+	the older-server case the Swift's `decodeIfPresent` is written for. It is
+	`update_employee`'s `fields_not_on_this_site` under the name the client uses.
+	"""
+
+	SWIFT = "OrgReferenceData.swift"
+	NULLABLE = (
+		("employee", str, 320),
+		("branch", str, 321),
+		("department", str, 322),
+		("designation", str, 323),
+		("employment_type", str, 324),
+	)
+	LENIENT = (("skipped", list, 328),)
+
+
+class HousingUnitModel(Codable):
+	"""`HousingUnit` — one cabin, with the beds in it and the reason if there are none.
+
+	LENIENT THROUGHOUT, and the Swift says why in its own words: one unreadable
+	cabin must not empty the camp list on a phone in a yard. What that costs is
+	that every miss here is SILENT, which is exactly why the keys are checked.
+
+	`capacity` AND `occupied` ARE NON-OPTIONAL Ints ON THE SWIFT SIDE AND STILL
+	LENIENT ON THE WIRE — `lenientInt(...) ?? 0`. So the server's `null` for an
+	unmeasured cabin arrives as 0, which is what `open_beds: null` already means
+	and is not "every bed taken".
+
+	`occupied` IS READ FIRST AND `current_occupants` SECOND, which is why both are
+	on the wire. `assignable` DEFAULTS TO TRUE when the server is silent — a
+	client greying out every unit because a field was missing is a camp list
+	nobody can use — so `blocked_reason` beside it is what makes a refusal legible
+	BEFORE the tap rather than after it.
+	"""
+
+	SWIFT = "HousingModels.swift"
+	LENIENT = (
+		("name", str, 24),
+		("unit_name", str, 28),
+		("unit_type", str, 32),
+		("parcel", str, 34),
+		("parcel_name", str, 35),
+		("capacity", int, 38),
+		("occupied", int, 41),
+		("current_occupants", int, 41),
+		("open_beds", int, 45),
+		("condition", str, 48),
+		("max_occupants_per_or_law", int, 54),
+		("is_residential", bool, 57),
+		("assignable", bool, 60),
+		("blocked_reason", str, 63),
+	)
+
+
+class HousingUnitListModel(Codable):
+	"""`HousingUnitList` — the camp, and the totals the step's header prints.
+
+	`total_open_beds` IS THE WHOLE CAMP AND NOT THE ROWS RETURNED. The header
+	says "6 beds open across 4 cabins", and computing that from a filtered or
+	truncated list would be a lie the size of the filter.
+
+	`units` PRESENT AND EMPTY IS A REAL ANSWER — a ranch with no camp — and the
+	Swift checks for the KEY rather than for content precisely so that it does
+	not fall through to its bare-array tolerance and throw over a correct
+	response.
+	"""
+
+	SWIFT = "HousingModels.swift"
+	LENIENT = (
+		("total_open_beds", int, 209),
+		("parcel", str, 213),
+		("parcel_name", str, 214),
+	)
+	NESTED = (("units", HousingUnitModel, True, 206),)
+
+
+class HousingAssignmentResultModel(Codable):
+	"""`HousingAssignmentResult` — the row that was written, and the beds left.
+
+	`name` IS THE ONE FIELD THE CLIENT READS WITHOUT A FALLBACK, and it is the
+	Housing Assignment docname. The Swift decodes it leniently into `""`, so an
+	answer missing it is not a crash — it is an assignment the step cannot name,
+	on a record that exists, which is the harder failure to notice. The key is
+	checked here for that reason.
+
+	THE OCCUPANCY COMES BACK SO THE LIST IS NOT RE-FETCHED. A foreman housing a
+	crew of six assigns six times off one screen, and a re-read between each is
+	six round trips in a place with one bar of signal.
+	"""
+
+	SWIFT = "HousingModels.swift"
+	LENIENT = (
+		("name", str, 294),
+		("unit", str, 295),
+		("unit_name", str, 296),
+		("employee", str, 297),
+		("assigned_date", str, 298),
+		("occupied", int, 301),
+		("open_beds", int, 302),
+	)
+
+
+class EmployeeAttachmentModel(Codable):
+	"""`EmployeeAttachment` — one file in the folder.
+
+	`name` IS THE ONLY STRICT FIELD ON THE WHOLE ROW, and it is strict in the
+	Swift too: `try c.decode(String.self, forKey: .name)`. It is the File DOCNAME
+	and it is what `get_attachment_content` is asked for, so a row without one is
+	a row that cannot be opened — the v0.18.2 class of failure, where the list
+	renders and the tap throws.
+
+	`file_name` FALLS BACK TO THE DOCNAME, which is the client's rule and not a
+	licence to omit it: a File row with no filename is still a file somebody can
+	open, and the docname is the only other handle on it.
+
+	`content_type` IS THE CLIENT'S SPELLING OF `mime_type`. Both are sent; this
+	mirror checks the one the Swift actually reads.
+
+	`document_kind` IS ABSENT ON PURPOSE AND IS NOT CHECKED HERE.
+	`attach_onboarding_document` records the label on the AUDIT ROW rather than
+	on the File — it is a label on the act, not a column on the object — so
+	reporting one would mean inventing it. The client treats it as optional and
+	shows the filename instead.
+	"""
+
+	SWIFT = "EmployeeAttachment.swift"
+	STRICT = (("name", str, 16),)
+	LENIENT = (
+		("file_name", str, 19),
+		("file_url", str, 24),
+		("file_size", int, 26),
+		("is_private", bool, 27),
+		("content_type", str, 28),
+	)
+	DATES = (("creation", 29),)
+
+
+class AttachmentContentModel(Codable):
+	"""`AttachmentContent` — the bytes, base64, in one answer.
+
+	`content` IS THE CONTRACT AND `data` IS ACCEPTED, per the client's own
+	decoder; this surface sends `content` and `content_base64`, because the MCP
+	tool has called it the second since v0.1 and neither name is being taken away
+	from anybody.
+
+	THE BYTES TRAVEL RATHER THAN A URL, which is the whole reason the method
+	exists: every file this app writes is private, the handset authenticates to
+	the sidecar rather than to Frappe, and a `/private/files/…` link answers that
+	with a login page. A payload with no `content` in it is a viewer with nothing
+	to draw.
+	"""
+
+	SWIFT = "AttachmentAPI.swift"
+	LENIENT = (
+		("file_name", str, 71),
+		("content_type", str, 72),
+		("content", str, 73),
+	)
+
+
 # ── 1. the twelve methods, each decoded by its mirror ─────────────────────────
 class EveryMobileMethodDecodes(ContractTestCase):
 	"""The suite proper. One test per method the app calls."""
@@ -3113,6 +3350,381 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertEqual(row["photo_url"], photo["photo_url"])
 
 
+	# ── v0.62.0: the seven the handset called and this surface 404'd on ─────
+	#
+	# EVERY ONE OF THESE IS A ROUTE THE APP ALREADY NAMES. `MobileAPI.swift` was
+	# audited against v0.61.0 on 2026-08-12 and its own comments record what each
+	# 404 cost: an Assignment step that read four dropdowns off the site and could
+	# not write the answers, a Housing step with no server to talk to under the
+	# name it used, a contact step collecting a number that went nowhere, and a
+	# folder of private files that could be filled and never opened.
+	#
+	# THREE OF THE SEVEN REACH THE SAME FUNCTIONS AS METHODS ALREADY TESTED
+	# ABOVE, under the name and the argument spellings the app posts. What these
+	# tests are FOR is not the shared body — it has its own tests — but the two
+	# things a bare rename would have got wrong: that the arguments the handset
+	# sends are declared (`routes.bind` drops what a signature does not name), and
+	# that the answer decodes into the Codable the app actually uses.
+
+	def test_48_list_org_reference_data(self):
+		"""§13.1 under the name the app calls it. `list_onboarding_reference_data`
+		has served this since v0.54.0 and `OnboardingAPI.orgReferenceData` posts
+		to a path that did not exist, so the four pickers came back
+		`.unavailable` on every hire and the step showed a sentence about setting
+		them in the office."""
+		self.the_hr_furniture()
+		body = self.wire("list_org_reference_data", company=MAIN)
+		OrgReferenceDataModel.decode(body, "list_org_reference_data")
+
+		self.assertIn("branches", body)
+		self.assertIn("employment_types", body)
+		# The same answer as the older name, key for key. Both call one function,
+		# and this is what says so rather than assuming it.
+		self.assertEqual(body, self.wire("list_onboarding_reference_data", company=MAIN))
+
+	def test_48_a_branch_carries_the_ground_it_holds(self):
+		"""The join the Housing step cannot be reached without: an Employee has a
+		Branch, a cabin stands on a Parcel, and `Parcel.branch` is the only column
+		between them."""
+		self.the_hr_furniture()
+		STORE.seed("Branch", [{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"}])
+		# The docname, not the label. A Parcel is docnamed with the owning
+		# entity's abbreviation on it, and reading it off the row rather than
+		# spelling it here is the same rule `OrgOption` states about Links.
+		parcel = frappe.db.get_value("Housing Unit", self.unit, "parcel")
+		frappe.db.set_value("Parcel", parcel, "branch", "Mill Creek Camp")
+
+		body = self.wire("list_org_reference_data")
+		OrgReferenceDataModel.decode(body, "list_org_reference_data")
+		row = next(entry for entry in body["branches"] if entry["name"] == "Mill Creek Camp")
+		self.assertEqual(row["parcels"], [parcel])
+		# One parcel, so the scalar convenience is filled. Null is the answer for
+		# none AND for several — see the mirror.
+		self.assertEqual(row["parcel"], parcel)
+
+	def test_49_list_housing_units(self):
+		"""§13.3 under the app's name, and with the app's spelling of its filter.
+
+		`HousingAPI.listUnits` sends `assignable_only`; `list_available_housing`
+		declares `include_full`. A rename alone would have turned the 404 into a
+		filter `routes.bind` drops on the floor — the harder bug to notice,
+		because the list comes back looking fine and full of cabins nobody can be
+		put in.
+		"""
+		self.the_hr_furniture()
+		body = self.wire("list_housing_units", company=MAIN)
+		HousingUnitListModel.decode(body, "list_housing_units")
+
+		unit = next(row for row in body["units"] if row["name"] == self.unit)
+		self.assertEqual(unit["capacity"], 4)
+		self.assertEqual(unit["occupied"], 0)
+		self.assertIs(unit["assignable"], True)
+		self.assertIs(unit["is_residential"], True)
+		self.assertIsNone(unit["blocked_reason"])
+		self.assertEqual(body["total_open_beds"], body["open_beds"])
+
+	def test_49_assignable_only_is_the_negative_of_include_full(self):
+		"""And the DEFAULT flips with it. The handset sends the flag only to
+		narrow, so the ordinary call asks for the whole camp — the full cabins
+		greyed out with the reason printed, because a foreman who cannot find the
+		cabin they expected needs to be told it is full rather than shown a
+		shorter list."""
+		self.the_hr_furniture()
+		frappe.db.set_value("Housing Unit", self.unit, "condition", "Uninhabitable")
+
+		wide = self.wire("list_housing_units", company=MAIN)
+		HousingUnitListModel.decode(wide, "list_housing_units")
+		condemned = next(row for row in wide["units"] if row["name"] == self.unit)
+		self.assertIs(condemned["assignable"], False)
+		self.assertIn("Uninhabitable", condemned["blocked_reason"])
+
+		narrow = self.wire("list_housing_units", company=MAIN, assignable_only=True)
+		HousingUnitListModel.decode(narrow, "list_housing_units")
+		self.assertNotIn(self.unit, [row["name"] for row in narrow["units"]])
+		# Which is the older method's DEFAULT, and the point of declaring the
+		# argument at all: the same camp, two answers, one flag.
+		self.assertEqual(
+			[row["name"] for row in narrow["units"]],
+			[row["name"] for row in self.wire("list_available_housing", company=MAIN)["units"]],
+		)
+
+	def test_50_create_housing_assignment(self):
+		"""§13.4 under the name and the four argument spellings the app posts.
+
+		`OnboardingHousing.apiParams` sends `unit` and `assigned_date`;
+		`assign_housing` declares `housing_unit` and `check_in_date`. A rename
+		alone would have delivered a body with no cabin and no date in it, and
+		refused every hire for want of a start date it had been sent.
+		"""
+		self.the_hr_furniture()
+		row = self.wire(
+			"create_housing_assignment",
+			employee=self.NEW_HIRE,
+			unit=self.unit,
+			company=MAIN,
+			assigned_date=frappe.utils.today(),
+			housing_deduction_from_wages="No",
+			notes="Key #14 handed over",
+		)
+		HousingAssignmentResultModel.decode(row, "create_housing_assignment")
+
+		self.assertTrue(row["name"])
+		self.assertEqual(row["unit"], self.unit)
+		self.assertEqual(row["employee"], self.NEW_HIRE)
+		self.assertEqual(row["assigned_date"], frappe.utils.today())
+		self.assertEqual(row["occupied"], 1)
+		self.assertEqual(row["open_beds"], 3)
+		# `assignment` is v0.54.0's key for the same docname and is still sent.
+		self.assertEqual(row["assignment"], row["name"])
+
+	def test_50_the_second_body_needs_the_barracks_flag_said_out_loud(self):
+		"""A bunk room and a double-tap look identical on the wire, and the app
+		resolves that where it can be resolved: the foreman is standing there.
+		Off by default, so the typo is refused NAMING who is already in the
+		cabin, and the flag is the deliberate second tap."""
+		self.the_hr_furniture()
+		first = self.wire(
+			"create_housing_assignment",
+			employee=self.NEW_HIRE,
+			unit=self.unit,
+			assigned_date=frappe.utils.today(),
+		)
+		HousingAssignmentResultModel.decode(first, "create_housing_assignment")
+
+		with self.assertRaises(Exception) as caught:
+			self.wire(
+				"create_housing_assignment",
+				employee=self.SECOND_HAND,
+				unit=self.unit,
+				assigned_date=frappe.utils.today(),
+			)
+		# The refusal NAMES who is already in there, which is what makes it
+		# actionable at a tailgate rather than a mystery.
+		self.assertIn("allow_multi_occupancy", str(caught.exception))
+		# By NAME, not by docname — the foreman reads this at a tailgate and
+		# "HA-2026-07-00001" tells them nothing about who is in the cabin.
+		self.assertIn("Rosa Delgado", str(caught.exception))
+
+	def test_50_the_flag_lets_the_second_body_in_under_capacity(self):
+		"""The other half of the same rule: a bunk room legitimately holds six,
+		and the flag is how a foreman says this one really is shared."""
+		self.the_hr_furniture()
+		self.wire(
+			"create_housing_assignment",
+			employee=self.NEW_HIRE,
+			unit=self.unit,
+			assigned_date=frappe.utils.today(),
+		)
+		shared = self.wire(
+			"create_housing_assignment",
+			employee=self.SECOND_HAND,
+			unit=self.unit,
+			assigned_date=frappe.utils.today(),
+			allow_multi_occupancy=True,
+		)
+		HousingAssignmentResultModel.decode(shared, "create_housing_assignment")
+		self.assertEqual(shared["occupied"], 2)
+		self.assertEqual(shared["open_beds"], 2)
+
+	def test_50_the_flag_does_not_lift_the_capacity_ceiling(self):
+		"""THE ONE PROPERTY THAT MUST NOT DRIFT. Nothing on a phone adds a bunk to
+		a cabin, and a bed that does not exist becomes somebody sleeping in a
+		truck. The tool WARNS about an over-full unit and writes the row, which is
+		right on a console where an operator can weigh it; this surface refuses,
+		with or without the flag."""
+		self.the_hr_furniture()
+		frappe.db.set_value("Housing Unit", self.unit, "capacity", 1)
+		self.wire(
+			"create_housing_assignment",
+			employee=self.NEW_HIRE,
+			unit=self.unit,
+			assigned_date=frappe.utils.today(),
+		)
+
+		with self.assertRaises(Exception) as caught:
+			self.wire(
+				"create_housing_assignment",
+				employee=self.SECOND_HAND,
+				unit=self.unit,
+				assigned_date=frappe.utils.today(),
+				allow_multi_occupancy=True,
+			)
+		self.assertIn("already has 1 assigned", str(caught.exception))
+		self.assertIn("Nothing was created", str(caught.exception))
+
+	def test_51_set_employee_org_fields(self):
+		"""§13.2 — the write the Assignment step has never had.
+
+		`list_onboarding_reference_data` has served the four dropdowns since
+		v0.54.0 and this surface published nothing that could put the chosen
+		values on the record. So the step read beautifully off the site, asked a
+		foreman four questions, and dropped all four answers.
+		"""
+		self.the_hr_furniture()
+		STORE.seed("Branch", [{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"}])
+		STORE.seed("Department", [{"name": "Orchard", "department_name": "Orchard", "company": MAIN}])
+		STORE.seed("Designation", [{"name": "Picker", "designation_name": "Picker"}])
+		STORE.seed(
+			"Employment Type", [{"name": "Seasonal Worker", "employee_type_name": "Seasonal Worker"}]
+		)
+
+		row = self.wire(
+			"set_employee_org_fields",
+			employee=self.NEW_HIRE,
+			company=MAIN,
+			branch="Mill Creek Camp",
+			department="Orchard",
+			designation="Picker",
+			employment_type="Seasonal Worker",
+		)
+		AppliedOrgFieldsModel.decode(row, "set_employee_org_fields")
+
+		self.assertEqual(row["employee"], self.NEW_HIRE)
+		self.assertEqual(row["branch"], "Mill Creek Camp")
+		self.assertEqual(row["designation"], "Picker")
+		self.assertEqual(row["skipped"], [])
+		# READ BACK OFF THE RECORD, not echoed off the request — which is the
+		# whole reason this method answers with anything at all.
+		self.assertEqual(
+			frappe.db.get_value("Employee", self.NEW_HIRE, "designation"), "Picker"
+		)
+
+	def test_51_an_unsent_field_is_left_alone(self):
+		"""The step is shown to returning workers whose department was set in the
+		office last season, and a call that wrote "" for every untouched picker
+		would clear four columns somebody filled in deliberately."""
+		self.the_hr_furniture()
+		STORE.seed("Designation", [{"name": "Picker", "designation_name": "Picker"}])
+		STORE.seed("Department", [{"name": "Orchard", "department_name": "Orchard", "company": MAIN}])
+		frappe.db.set_value("Employee", self.NEW_HIRE, "department", "Orchard")
+
+		row = self.wire("set_employee_org_fields", employee=self.NEW_HIRE, designation="Picker")
+		AppliedOrgFieldsModel.decode(row, "set_employee_org_fields")
+		self.assertEqual(row["department"], "Orchard")
+		self.assertEqual(frappe.db.get_value("Employee", self.NEW_HIRE, "department"), "Orchard")
+
+	def test_52_set_employee_contact_fields(self):
+		"""§16 — how to reach somebody, and who to ring if something happens.
+
+		THE ARGUMENT NAMES ARE THE HANDSET'S AND THE COLUMNS ARE FRAPPE HR'S.
+		`emergency_contact_name` is `person_to_be_contacted` on the doctype and
+		`emergency_phone` is `emergency_phone_number`; a phone should not have to
+		know the docname of a column to file a number in it.
+		"""
+		self.the_hr_furniture()
+		row = self.wire(
+			"set_employee_contact_fields",
+			employee=self.NEW_HIRE,
+			cell_phone="5415550143",
+			personal_email="rosa@example.test",
+			current_address="144 Orchard Lane, The Dalles OR",
+			emergency_contact_name="Marisol Delgado",
+			emergency_phone="5415550188",
+		)
+
+		self.assertEqual(row["cell_phone"], "5415550143")
+		self.assertEqual(row["emergency_contact_name"], "Marisol Delgado")
+		self.assertEqual(row["skipped"], [])
+		self.assertEqual(
+			frappe.db.get_value("Employee", self.NEW_HIRE, "cell_number"), "5415550143"
+		)
+		self.assertEqual(
+			frappe.db.get_value("Employee", self.NEW_HIRE, "person_to_be_contacted"),
+			"Marisol Delgado",
+		)
+
+	def test_52_the_two_the_shipped_app_sends_are_enough_on_their_own(self):
+		"""`OnboardingContact.apiParams` sends exactly `cell_phone` and
+		`personal_email`, and only when they were answered. A method that
+		required the other three would refuse the call the app actually makes."""
+		self.the_hr_furniture()
+		row = self.wire(
+			"set_employee_contact_fields",
+			employee=self.NEW_HIRE,
+			cell_phone="5415550143",
+			personal_email="rosa@example.test",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Employee", self.NEW_HIRE, "personal_email"), "rosa@example.test"
+		)
+		# An untouched box is not an answer — the returning worker's number stays.
+		self.assertIsNone(row["current_address"])
+
+	def test_53_list_attachments(self):
+		"""§15.1 — the missing half of every upload on this surface.
+
+		Six routes here file documents against an Employee and none could ask
+		what was already there, so a badge issued on a hire day was never visible
+		from a handset again and "is there work authorization on file" was a Desk
+		question.
+		"""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="licence", name="licence.jpg")
+		self.wire(
+			"attach_onboarding_document",
+			employee=self.NEW_HIRE,
+			file_token=finalized["file_token"],
+			document_kind="i9_list_b_document",
+		)
+
+		body = self.wire("list_attachments", doctype="Employee", docname=self.NEW_HIRE)
+		self.assertEqual(body["count"], 1)
+		row = body["attachments"][0]
+		EmployeeAttachmentModel.decode(row, "list_attachments", ".attachments[0]")
+		self.assertEqual(row["file_name"], "licence.jpg")
+		self.assertIs(row["is_private"], True)
+		self.assertIs(row["retrievable"], True)
+
+	def test_53_a_doctype_this_surface_does_not_read_is_refused(self):
+		"""A CLOSED LIST, for the reason `attach_onboarding_document` names one
+		parent in code. The tool takes any doctype on the site, which is right on
+		a console and would be a way to walk the File table one docname at a time
+		from an orchard."""
+		self.the_hr_furniture()
+		with self.assertRaises(frappe.PermissionError) as caught:
+			self.wire("list_attachments", doctype="Journal Entry", docname="JE-0001")
+		self.assertIn("not a record this surface reads attachments from", str(caught.exception))
+
+	def test_54_get_attachment_content(self):
+		"""§15.2 — the bytes, because the URL beside them cannot be fetched.
+
+		Every file this app writes is private by design, the handset
+		authenticates to the sidecar rather than to Frappe, and a
+		`/private/files/…` link answers that with a login page. Without this the
+		list above is a list of things that cannot be opened.
+		"""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="licence", name="licence.jpg")
+		self.wire(
+			"attach_onboarding_document",
+			employee=self.NEW_HIRE,
+			file_token=finalized["file_token"],
+			document_kind="i9_list_b_document",
+		)
+		listed = self.wire("list_attachments", doctype="Employee", docname=self.NEW_HIRE)
+
+		row = self.wire("get_attachment_content", file=listed["attachments"][0]["name"])
+		AttachmentContentModel.decode(row, "get_attachment_content")
+
+		self.assertEqual(row["file_name"], "licence.jpg")
+		self.assertEqual(base64.b64decode(row["content"]), b"licence-bytes")
+		# The MCP tool's spelling of the same bytes, so a caller written against
+		# the console's answer reads the same file.
+		self.assertEqual(row["content"], row["content_base64"])
+
+	def test_54_a_file_attached_to_nothing_is_refused(self):
+		"""`finalize_staged_file` commits evidence UNATTACHED on purpose, and
+		`attach_onboarding_document` is the call that gives it a home. There is
+		no parent to scope an unattached file by, and a file with no home is not
+		this door's to open."""
+		self.the_hr_furniture()
+		_staged, finalized = self.upload(kind="loose", name="loose.jpg")
+
+		with self.assertRaises(frappe.PermissionError) as caught:
+			self.wire("get_attachment_content", file=finalized["file_token"])
+		self.assertIn("attached to no document", str(caught.exception))
+
+
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
 	"""A transcription that accepts the broken payload proves nothing at all.
@@ -3282,6 +3894,19 @@ class TheContractIsComplete(ContractTestCase):
 		# without going via the task list first.
 		"dismiss_compliance_alert": "test_46",
 		"submit_form_signature": "test_47",
+		# v0.62.0 — the seven `MobileAPI.swift` names and this surface answered
+		# with a 404. The first three reach the same functions as
+		# `list_onboarding_reference_data`, `list_available_housing` and
+		# `assign_housing`; they have mirrors of their own because a shared body
+		# is not a shared SIGNATURE, and `routes.bind` reduces a request to the
+		# keys a signature declares.
+		"list_org_reference_data": "test_48",
+		"list_housing_units": "test_49",
+		"create_housing_assignment": "test_50",
+		"set_employee_org_fields": "test_51",
+		"set_employee_contact_fields": "test_52",
+		"list_attachments": "test_53",
+		"get_attachment_content": "test_54",
 	}
 
 	def _published(self, module):

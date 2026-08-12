@@ -513,7 +513,36 @@ ROLE_SPECS = (
 			"zones, housing and leases for their assigned companies."
 		),
 		summary="You run the operation: the work, the compliance behind it, and the ground it happens on.",
-		companion_roles=("Employee",),
+		# v0.62.0. `HR User` JOINS `Employee`, AND IT IS NAMED HERE RATHER THAN
+		# GRANTED BELOW BECAUSE RULE 1 IS NOT NEGOTIABLE — see the module
+		# docstring. Both roles belong to Frappe HR, which owns the `Employee`
+		# doctype, and a Custom DocPerm written on Employee by this app would make
+		# Frappe ignore EVERY standard permission that doctype has, for every role
+		# on the site, silently, during `bench migrate`.
+		#
+		# WHAT MADE IT NECESSARY: the seven routes v0.62.0 published to close the
+		# handset's 404s include two Employee writes and the attachment reads for
+		# an Employee's folder. This app's own gate on those is
+		# `employee.HR_ROLES`, which lists Farm Manager and passes — but
+		# `tools/files.py` is the one family of tools in this app that consults
+		# FRAPPE's permissions, deliberately, because `is_private` is a promise
+		# the framework makes about who may see a passport scan. That check asks
+		# whether the account may read the Employee, and a Farm Manager holding
+		# only this app's roles and the site's own `Employee` role may read its
+		# OWN record and no one else's. So the manager running a hire could file
+		# a licence photograph and could not read the folder back.
+		#
+		# `HR User` IS THE NARROWER OF FRAPPE HR'S TWO and is the role a real HR
+		# clerk holds; `HR Manager` additionally administers the module's own
+		# masters and setup. `employee.HR_ROLES` has accepted both since v0.18.1,
+		# which is the same judgement made one layer up.
+		#
+		# NOTHING IS ASSIGNED SILENTLY AND NOTHING BREAKS WITHOUT IT.
+		# `create_mobile_user` assigns a companion role only where the site
+		# actually has it and REPORTS the ones it does not, so a bench without
+		# hrms enrols a Farm Manager exactly as it did before and says why the
+		# folder reads will refuse.
+		companion_roles=("Employee", "HR User"),
 		permissions=(
 			*_grant(
 				FULL,

@@ -238,6 +238,19 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/clock_out_worker",
 		"/mobile/get_shift_production",
 		"/mobile/get_shift",
+		# v0.62.0. The seven the handset names and this table did not carry. The
+		# first three reach the same functions as `list_onboarding_reference_data`,
+		# `list_available_housing` and `assign_housing` above; they are separate
+		# paths because `bind` reduces a body to the keys a signature declares, so
+		# the argument spellings the app posts have to exist in a signature or
+		# they are dropped on the floor. The last four had no method at all.
+		"/mobile/list_org_reference_data",
+		"/mobile/list_housing_units",
+		"/mobile/create_housing_assignment",
+		"/mobile/set_employee_org_fields",
+		"/mobile/set_employee_contact_fields",
+		"/mobile/list_attachments",
+		"/mobile/get_attachment_content",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

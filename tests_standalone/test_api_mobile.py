@@ -259,6 +259,18 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# `collect_signature`, which is why that one stays below.
 		"dismiss_compliance_alert",
 		"submit_form_signature",
+		# v0.62.0 — the seven `MobileAPI.swift` names and this surface answered
+		# with a 404. Three are the methods below under the name and the argument
+		# spellings the app actually posts; four had no method here at all. Every
+		# one of the seven is named by a constant in `MobileAPI.swift` today,
+		# which is what puts them in THIS set rather than in the pending one.
+		"list_org_reference_data",
+		"list_housing_units",
+		"create_housing_assignment",
+		"set_employee_org_fields",
+		"set_employee_contact_fields",
+		"list_attachments",
+		"get_attachment_content",
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 

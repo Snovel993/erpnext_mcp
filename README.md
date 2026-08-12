@@ -2186,10 +2186,11 @@ Everything above describes one endpoint,
 `/api/method/erpnext_mcp.mcp.handle`, which is what an AI client calls. **The
 Farm Ops iOS app does not use it, and since v0.18.0 it does not use Frappe's
 request handler at all.** It calls a closed list of routes on a separate process
-— eleven at v0.18.0, forty-one as of v0.48.3, and `routes.py` is the list:
+— eleven at v0.18.0, forty-one as of v0.48.3, sixty-six as of v0.62.0, and
+`routes.py` is the list:
 
 ```
-POST /farmops/api/mobile/<one of thirty-nine>
+POST /farmops/api/mobile/<one of sixty-four>
 POST /farmops/api/files/<one of two>
 X-FarmOps-Token: <api_key>:<api_secret>
 ```

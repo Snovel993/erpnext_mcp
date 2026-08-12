@@ -1149,6 +1149,17 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 		with it, because `submit_i9_section_1` fills that box from
 		`Employee.middle_name` when the caller sends none.
 
+		The last three are v0.62.0's, and they close the same shape of gap one
+		release later: `set_employee_contact_fields` on the mobile surface names
+		five contact fields and this list carried two of them, so a hire could
+		record a phone number and an email and could not record who to ring if
+		that picker went down on a block. `person_to_be_contacted` and
+		`emergency_phone_number` are Frappe HR's own spellings of "Emergency
+		Contact Name" and "Emergency Phone"; the mobile wrapper takes the labels
+		and maps them, because the docname of a column is not a thing a handset
+		should have to know. None of the three is payroll, tax or banking, which
+		is the boundary this list actually defends.
+
 		`branch` is the nineteenth, added in v0.54.0. It is Frappe HR's own
 		operating-unit dimension and the last field the hiring wizard's Assignment
 		step asked for that this list did not carry — so a crew hired for a
@@ -1175,6 +1186,9 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 				"user_id",
 				"personal_email",
 				"cell_number",
+				"current_address",
+				"person_to_be_contacted",
+				"emergency_phone_number",
 				"i9_status",
 				"w4_status",
 				"jurisdiction",
@@ -1215,6 +1229,9 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 			"status": "Active",
 			"personal_email": "ana@example.test",
 			"cell_number": "5415550143",
+			"current_address": "144 Orchard Lane, The Dalles OR",
+			"person_to_be_contacted": "Marisol Ramos",
+			"emergency_phone_number": "5415550188",
 			"i9_status": "Verified",
 			"w4_status": "On-File",
 			"jurisdiction": "WA",

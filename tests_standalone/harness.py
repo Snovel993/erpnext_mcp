@@ -650,6 +650,15 @@ ERPNEXT_SCHEMA = {
 		"image",
 		"personal_email",
 		"cell_number",
+		# v0.62.0 joined these three to `employee.WRITABLE` so the mobile
+		# surface's `set_employee_contact_fields` had somewhere to put the two
+		# halves of an emergency contact. All three are standard on ERPNext's
+		# Employee; absent from this double they would be dropped silently by
+		# `compat.has_field` and the suite would call that a pass — which is the
+		# same trap `middle_name` and `image` are commented for above.
+		"current_address",
+		"person_to_be_contacted",
+		"emergency_phone_number",
 		"department",
 		"designation",
 		"status",
