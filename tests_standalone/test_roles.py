@@ -177,6 +177,32 @@ class TheCustomDocPermTrap(RolesTestCase):
 		]
 		self.assertEqual(len(copies), 1)
 
+	def test_a_standard_row_for_a_role_this_site_lacks_does_not_abort_the_mirror(self):
+		"""v0.59.3. I-9 Form ships a DocPerm for `HR Manager`, which comes from
+		`hrms` and is absent on a bench that never installed it — this suite's
+		site is one of those, deliberately.
+
+		`Custom DocPerm.role` is a Link, so copying that row raises. A mirror that
+		raises HALFWAY is worse than no mirror at all: the rows already written are
+		enough to make Frappe discard every standard DocPerm the doctype had, so
+		System Manager would lose the I-9 register during a migration. The
+		unresolvable row is skipped instead — it grants nobody anything, because
+		nobody can hold a role the site does not have.
+		"""
+		self.assertFalse(frappe.db.exists("Role", "HR Manager"), "fixture precondition")
+		standard = {
+			str(row["role"])
+			for row in frappe.db.get_all("DocPerm", filters={"parent": "I-9 Form"}, fields=["role"])
+		}
+		self.assertIn("HR Manager", standard, "fixture precondition")
+
+		report = self.install()
+		self.assertEqual([], [row for row in report["failed"] if "I-9 Form" in str(row.get("name"))])
+		after = custom_perms("I-9 Form")
+		self.assertIn("System Manager", after)
+		self.assertIn("Farm Manager", after)
+		self.assertNotIn("HR Manager", after)
+
 	def test_a_doctype_an_operator_already_customised_is_not_mirrored_again(self):
 		"""Then the mirror has already happened, in the Desk, by Frappe itself."""
 		frappe.get_doc(
@@ -352,6 +378,38 @@ class WhatEachRoleMay(RolesTestCase):
 			with self.subTest(doctype=doctype):
 				self.assertTrue(self.may("Farm Manager", doctype, "write"))
 		self.assertFalse(self.may("Farm Manager", "Governance Document", "write"))
+
+	def test_a_farm_manager_may_write_the_i9_because_section_2_is_theirs(self):
+		"""v0.59.3. THE EMPLOYER'S HALF OF THE FORM NEEDS AN EMPLOYER WHO CAN WRITE IT.
+
+		8 CFR § 274a.2(b)(1)(ii) puts Section 2 on the employer or its authorised
+		representative, and `signatures._require_write` gates every signature on
+		Frappe's `write` — so a role that supervises hiring and held only `read`
+		was refused at the pad with a sentence about a column.
+
+		Asserted in both directions, because a grant asserted one way proves
+		nothing about its edges: read and write yes, create and delete no. The
+		form begins with the worker's Section 1 and ends on the retention
+		schedule, and neither of those is a manager's decision.
+		"""
+		self.assertTrue(self.may("Farm Manager", "I-9 Form", "read"))
+		self.assertTrue(self.may("Farm Manager", "I-9 Form", "write"))
+		self.assertFalse(self.may("Farm Manager", "I-9 Form", "create"))
+		self.assertFalse(self.may("Farm Manager", "I-9 Form", "delete"))
+
+	def test_the_i9_grant_reaches_nobody_it_was_not_written_for(self):
+		"""The other five roles are where they were. A permission added for one
+		role that quietly appears on another is the shape of this file's worst
+		failure — and `HR Manager` keeping its standard row is the mirror doing
+		its job, since the first Custom DocPerm on a doctype discards every
+		standard permission it had."""
+		for role in ("Field Worker", "Foreman", "Compliance Officer", "Family Member", "Advisor"):
+			with self.subTest(role=role):
+				self.assertFalse(self.may(role, "I-9 Form"))
+		# And System Manager, which the doctype ships with, is still there —
+		# without the mirror the Farm Manager row would have taken it off.
+		self.assertTrue(self.may("System Manager", "I-9 Form", "write"))
+		self.assertTrue(self.may("System Manager", "I-9 Form", "delete"))
 
 
 class TheSplit(RolesTestCase):

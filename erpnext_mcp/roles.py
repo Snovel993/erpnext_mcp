@@ -279,6 +279,54 @@ HOLDING = ("Cap Table Entry", "Member Event", "Note Payable", "Asset Cost Profil
 PAPER = ("Governance Document", "Related Party")
 PEOPLE = ("Family",)
 PROPERTY = ("Lease",)
+#: v0.59.3. THE FEDERAL HIRING FORM, AND IT IS A GROUP OF ONE ON PURPOSE.
+#:
+#: Form I-9 IS SIGNED TWICE BY TWO DIFFERENT PEOPLE. The worker attests in
+#: Section 1; within three business days of the first day of work the EMPLOYER
+#: attests in Section 2 that it examined the documents that worker presented.
+#: 8 CFR § 274a.2(b)(1)(ii) puts that second attestation on the employer or its
+#: authorised representative, and on an operation this size that is the person
+#: standing in the packing shed with the phone — the Farm Manager. A role that
+#: supervises hiring and cannot WRITE the form cannot do the half of the form
+#: that is legally its own.
+#:
+#: THE GAP SHOWED UP AS A SENTENCE ABOUT A COLUMN RATHER THAN A MISSING BUTTON,
+#: which is worth recording because the design that produced it is the right
+#: one: `tools/signatures._require_write` gates every signature on Frappe's own
+#: `has_permission(..., "write", doc=...)` instead of on a role list of its own,
+#: so a Farm Manager signing Section 2 from the iOS app was refused with "this
+#: account may not write I-9 Form … so it may not put a signature on it". The
+#: check was correct and the permission table was incomplete.
+#:
+#: READ AND WRITE. NOT `create`, AND NOT `delete`.
+#:
+#:   * An I-9 BEGINS with the worker's Section 1 — the hiring path raises it as
+#:     the MCP system user — and a manager who could raise one could raise one
+#:     for somebody who was never hired, which is the shape a fabricated
+#:     verification takes.
+#:   * DESTROYING ONE IS THE RETENTION SCHEDULE'S DECISION AND NOBODY ELSE'S.
+#:     § 274a.2(b)(2) keeps the form three years from hire or one year from
+#:     separation, whichever is later, and an I-9 that disappears before then is
+#:     precisely the failure the register exists to prevent. `delete` stays with
+#:     System Manager, where the doctype's own standard permissions put it.
+#:
+#: THE AUTHORIZED-SIGNER ROSTER IS STILL THE SECOND GATE AND THIS DOES NOT TOUCH
+#: IT. Write permission decides whether an account may edit the record;
+#: `tools/signers.py` decides whose name may appear as the employer's authorised
+#: representative, and Section 2 and Supplement B are both gated on it *after*
+#: this check passes. Two different questions, two different registers, and
+#: collapsing them would mean the list of people who may attest for the employer
+#: was maintained by whoever last edited a role.
+#:
+#: WHOSE I-9 REMAINS FRAPPE'S QUESTION, NOT THIS FILE'S — see the module
+#: docstring on the split, and `permissions.py` on the clause doing the work.
+#: `I-9 Form.company` is a REQUIRED Link to Company, so a Farm Manager's Company
+#: User Permission scopes every list, every read and — because the signature
+#: check is made WITH the document — every signature to the entities that
+#: manager actually manages. This grant says what kind of work the role does;
+#: the User Permission `create_mobile_user` writes says whose. A Farm Manager
+#: scoped to one entity gets no reach into another's personnel file out of it.
+HIRING_FORMS = ("I-9 Form",)
 
 
 def _grant(perm: dict, *groups) -> tuple:
@@ -403,6 +451,11 @@ ROLE_SPECS = (
 				RULE_DEFINITIONS,
 			),
 			*_grant(READ_WRITE, CALENDAR),
+			# v0.59.3. Section 2 is the employer's half of the I-9 and this is the
+			# role that stands in front of the worker to do it. READ_WRITE, not
+			# FULL: the form is raised by the hiring path and destroyed by the
+			# retention schedule, neither of which is a manager's call.
+			*_grant(READ_WRITE, HIRING_FORMS),
 			*_grant(READ, PAPER),
 		),
 		cannot=(
@@ -410,6 +463,9 @@ ROLE_SPECS = (
 			"holding company's equity",
 			"edit the governance archive (read only)",
 			"touch notes payable or asset cost profiles",
+			"raise or destroy an I-9 — Section 2 is theirs to complete and sign, but the "
+			"form begins with the worker's Section 1 and its life is the retention "
+			"schedule's, not a manager's",
 		),
 	),
 	RoleSpec(
@@ -611,6 +667,18 @@ def _mirror_standard_perms(doctype: str, report: dict) -> None:
 	Runs once per doctype — the existence check is on the doctype, not on the
 	role — and does nothing at all on a doctype an operator has already
 	customised through the Desk, because then the mirror has already happened.
+
+	A STANDARD ROW NAMING A ROLE THIS SITE DOES NOT HAVE IS SKIPPED, AND THAT IS
+	NOT A HOLE IN THE MIRROR. v0.59.3, found by granting Farm Manager the I-9:
+	that doctype ships a DocPerm for `HR Manager`, which comes from `hrms` and is
+	absent on a bench that never installed it. `Custom DocPerm.role` is a Link, so
+	copying the row there raises `LinkValidationError` — and a mirror that raises
+	HALF WAY THROUGH is the exact failure this function exists to prevent, because
+	the rows it managed to write are enough to make Frappe discard every standard
+	DocPerm the doctype had. Skipping the unresolvable row takes nothing away from
+	anybody: a permission held by a role no site has is held by no user, and the
+	rows for roles that DO exist are mirrored intact. The alternative — abort, and
+	report the grant as failed — leaves the doctype in the state the abort caused.
 	"""
 	if frappe.db.exists(CUSTOM_DOCPERM, {"parent": doctype}):
 		return
@@ -620,7 +688,12 @@ def _mirror_standard_perms(doctype: str, report: dict) -> None:
 	# silently drops it from the mirror, which is how a mirrored permission
 	# quietly becomes a weaker one.
 	rows = frappe.db.get_all(DOCPERM, filters={"parent": doctype}, fields="*", order_by="idx asc") or []
+	mirrored = 0
 	for row in rows:
+		if not _role_installed(str(dict(row).get("role") or "")):
+			# See the docstring: a permission for a role this site does not have
+			# grants nobody anything, and copying it would abort the mirror.
+			continue
 		payload = {
 			key: value
 			for key, value in dict(row).items()
@@ -641,7 +714,8 @@ def _mirror_standard_perms(doctype: str, report: dict) -> None:
 		doc = frappe.get_doc(payload)
 		doc.flags.ignore_permissions = True
 		doc.insert(ignore_if_duplicate=True)
-	if rows and doctype not in report["mirrored_doctypes"]:
+		mirrored += 1
+	if mirrored and doctype not in report["mirrored_doctypes"]:
 		report["mirrored_doctypes"].append(doctype)
 
 

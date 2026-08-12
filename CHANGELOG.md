@@ -3,6 +3,51 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.59.3 — 2026-08-12
+
+**A Farm Manager could not sign the half of the I-9 that is legally theirs.**
+Section 2 is the employer attesting that it examined the documents the worker
+presented — 8 CFR § 274a.2(b)(1)(ii) puts it on the employer or its authorised
+representative, within three business days — and on this operation that is the
+person in the packing shed with the phone. `signatures._require_write` gates
+every signature on Frappe's own `write` check rather than on a role list of its
+own, which is the right design and is exactly why the gap surfaced as a sentence
+about a column: *"this account may not write I-9 Form I9-2026-0001, so it may
+not put a signature on it."* The check was correct and `roles.py` was
+incomplete. Farm Manager now holds **read and write** on I-9 Form.
+
+**Not `create`, and not `delete`.** An I-9 begins with the worker's Section 1,
+raised on the hiring path — a manager who could raise one could raise one for
+somebody who was never hired. Destroying one is the retention schedule's
+decision and nobody else's: § 274a.2(b)(2) keeps the form three years from hire
+or one year from separation, whichever is later. Both stay with System Manager,
+where the doctype's own permissions put them. The authorized-signer roster is
+untouched and is still the second gate: `write` decides whether an account may
+edit the record, `tools/signers.py` decides whose name may appear as the
+employer's representative, and Section 2 asks both.
+
+**Which I-9, not just which role.** `I-9 Form.company` is a required Link, so a
+manager's Company User Permission already scopes every list, read and — because
+the check is made *with* the document — every signature. What did not hold was
+the fallback: `_require_write` answers a permission-cache failure with a
+doctype-level check, which knows nothing about whose record it is. Harmless
+while no mobile role held `write` on any federal form; now the difference
+between "may this role sign an I-9" and "may this manager sign THIS one".
+`_require_entity` asks the second question against the `company` column, and a
+form belonging to an entity the account is not scoped to is refused by name. An
+account with no User Permission stays unrestricted — Frappe's rule, kept so an
+operator's own login works; the strict reading lives on the mobile door, where
+`guard.require_scope` refuses a phone with no entities outright.
+
+**The mirror no longer aborts on a role the site does not have.** I-9 Form ships
+a DocPerm for `HR Manager`, which comes from `hrms`; `Custom DocPerm.role` is a
+Link, so on a bench without it the mirror raised `LinkValidationError` partway
+through — and a half-written mirror is the precise failure `_mirror_standard_perms`
+exists to prevent, because the rows it did write are enough to make Frappe
+discard every standard DocPerm the doctype had. System Manager would have lost
+the I-9 register during a migration. Unresolvable rows are skipped instead: a
+permission held by a role no site has is held by no user.
+
 ## 0.59.2 — 2026-08-11
 
 **Not one bucket entry has ever synced from a handset, and it is v0.59.1's bug

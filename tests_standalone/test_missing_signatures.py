@@ -33,7 +33,7 @@ import frappe
 from erpnext_mcp import alerts, compliance_rules
 from erpnext_mcp.tools import signatures
 
-from .fixtures import APPROVER, MAIN, V12TestCase, install_hrms
+from .fixtures import APPROVER, MAIN, OTHER, V12TestCase, install_hrms
 from .harness import STORE
 
 TODAY = "2026-07-24"
@@ -582,6 +582,71 @@ class TheRefusals(SignatureTestCase):
 			 "signature_base64": A_CAPTURE},
 		)
 		self.assertTrue(frappe.db.get_value("I-9 Form", name, "section_1_signature"))
+
+	def scope_caller_to(self, company: str) -> None:
+		"""One User Permission row on Company for the acting account.
+
+		The same row `create_mobile_user` writes, and the same one an operator
+		writes in the Desk — `apply_to_all_doctypes` is what makes it reach a
+		doctype nobody thought about when the row was created, which on this site
+		includes the federal hiring forms.
+		"""
+		frappe.get_doc(
+			{
+				"doctype": "User Permission",
+				"user": frappe.session.user,
+				"allow": "Company",
+				"for_value": company,
+				"apply_to_all_doctypes": 1,
+			}
+		).insert(ignore_permissions=True)
+
+	def test_a_form_belonging_to_another_entity_is_refused(self):
+		"""v0.59.3. WHICH I-9, NOT JUST WHICH ROLE.
+
+		A Farm Manager now holds `write` on I-9 Form, which is what lets them
+		complete Section 2 at all. What decides WHOSE Section 2 is the User
+		Permission on Company — and it has to hold on the signature path, because
+		the form the alert points at is named by the caller. A manager scoped to
+		one entity signing another entity's I-9 would be attesting for an employer
+		they do not work for.
+		"""
+		mine = self.an_i9(name="I9-2026-MINE", company=MAIN)
+		theirs = self.an_i9(name="I9-2026-THEIRS", company=OTHER)
+		self.scope_caller_to(MAIN)
+
+		error = self.tool_error(
+			"collect_form_signature",
+			{"doctype": "I-9 Form", "name": theirs, "field": "section_1_signature",
+			 "signature_base64": A_CAPTURE},
+		)
+		self.assertIn(OTHER, error)
+		self.assertIn("not scoped to", error)
+		self.assertFalse(frappe.db.get_value("I-9 Form", theirs, "section_1_signature"))
+
+		# And the entity they DO manage is untouched by the refusal.
+		self.tool_data(
+			"collect_form_signature",
+			{"doctype": "I-9 Form", "name": mine, "field": "section_1_signature",
+			 "signature_base64": A_CAPTURE},
+		)
+		self.assertTrue(frappe.db.get_value("I-9 Form", mine, "section_1_signature"))
+
+	def test_an_account_with_no_user_permission_is_unrestricted(self):
+		"""FRAPPE'S RULE, KEPT ON PURPOSE. An operator's own login and the MCP
+		System User hold no Company User Permission, and every Desk surface on the
+		site treats that as "every company". The strict reading lives on the
+		mobile door, where `guard.require_scope` refuses a phone with no entities
+		outright — that one faces the open internet and can afford to fail
+		closed."""
+		self.assertEqual([], [row for row in STORE.rows("User Permission") if row.get("allow") == "Company"])
+		theirs = self.an_i9(name="I9-2026-THEIRS", company=OTHER)
+		self.tool_data(
+			"collect_form_signature",
+			{"doctype": "I-9 Form", "name": theirs, "field": "section_1_signature",
+			 "signature_base64": A_CAPTURE},
+		)
+		self.assertTrue(frappe.db.get_value("I-9 Form", theirs, "section_1_signature"))
 
 	def test_the_tool_ships_off(self):
 		self.configure(enabled=1, allow_collect_form_signature=0)

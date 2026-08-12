@@ -113,7 +113,7 @@ from dataclasses import dataclass, field as dataclass_field
 
 import frappe
 
-from .. import compat
+from .. import compat, roles
 from ..args import as_bool, as_str
 from ..errors import ToolError
 from ..result import ToolResult
@@ -667,6 +667,10 @@ def collect_form_signature(args: dict) -> ToolResult:
 	    signature for a W-2 would be inventing a box the IRS does not print;
 	  * a caller who cannot WRITE the form, checked through Frappe's own
 	    permission system rather than through a role list this app invented;
+	  * a caller whose User Permissions do not name the ENTITY the form belongs
+	    to — the same answer Frappe's check gives, asked again against the
+	    `company` column so that a permission-cache failure cannot widen it into
+	    "any I-9 on the site". See `_require_entity`;
 	  * a caller not on the authorized-signer roster, for the two boxes it
 	    governs — Section 1 and the W-4 are signed by the worker, who is on
 	    nobody's roster and must not need to be, and the employer's tax returns
@@ -846,6 +850,53 @@ def _require_write(box: SignatureBox, name: str) -> None:
 			f"this account may not write {box.doctype} {name}, so it may not put a signature on "
 			f"it. A signature changes what the form asserts about a person, which is why the "
 			f"check is `write` and not `read`. Nothing was changed."
+		)
+	_require_entity(box, name)
+
+
+def _require_entity(box: SignatureBox, name: str) -> None:
+	"""Refuse a form belonging to an entity this account is not scoped to.
+
+	v0.59.3. FRAPPE ALREADY ANSWERS THIS AND THIS ASKS AGAIN ANYWAY, which needs
+	the argument spelled out because the function above exists to say the
+	opposite. `has_permission(..., doc=name)` applies the caller's Company User
+	Permissions to every Link on the record, so a Farm Manager scoped to one
+	entity is already refused another's I-9 on the line before. What is asked
+	again here is the ONE question whose fallback drops it: the `except` branch
+	above answers a permission-cache failure with a DOCTYPE-level check, and a
+	doctype-level check knows nothing about which company the record belongs to.
+	Before the six roles held `write` on any federal form that branch was
+	harmless — it fell through to a refusal either way. Now that a Farm Manager
+	holds `write` on I-9 Form it is the difference between "may this role sign
+	an I-9" and "may this manager sign THIS I-9", and those are not the same
+	question.
+
+	SO THE ENTITY IS CHECKED AGAINST THE COLUMN, not against a permission cache
+	that may be the thing that just failed. `Company` is a required Link on all
+	three signable forms, which is what makes one line of SQL a complete answer.
+
+	AN ACCOUNT WITH NO USER PERMISSION IS UNRESTRICTED, deliberately, and it is
+	the same disagreement `permissions.py` documents at length: that is Frappe's
+	rule, it is what makes an operator's own login and the MCP System User work,
+	and departing from it here would refuse every correctly-configured operator
+	on a tool they have always been able to call. The strict reading lives on the
+	mobile door — `api/guard.require_scope` refuses a phone with no entities
+	outright, and `create_mobile_user` will not make such an account — so the
+	surface facing the open internet is the one that fails closed.
+	"""
+	try:
+		allowed = roles.companies_for(_current_user())
+		if not allowed:
+			return
+		company = str(frappe.db.get_value(box.doctype, name, "company") or "")
+	except Exception:  # pragma: no cover - a site whose User Permission table we cannot read
+		return
+	if company and company not in allowed:
+		raise ToolError(
+			f"{box.doctype} {name} belongs to {company}, which this account is not scoped to. "
+			f"A signature is an attestation about one employer's record, and the entities an "
+			f"account may attest for are the ones its User Permissions name — an operator "
+			f"changes that with create_mobile_user(update_existing=true). Nothing was changed."
 		)
 
 
