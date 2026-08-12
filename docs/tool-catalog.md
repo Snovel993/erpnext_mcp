@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 400 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 402 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 181 read tools are **on** by default and can be switched off individually. A
+All 183 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -9672,6 +9672,62 @@ The PDF step is **regeneration only**: a form that has never been rendered gets
 nothing, because producing a federal form nobody asked for is not this call's
 decision to make. Stored private, always. Logged to **I-9 Audit Log** as
 `Signature Collected`.
+
+## Signature evidence (v0.60.0)
+
+A signature image proves that somebody drew a shape on a piece of glass. The
+question an auditor asks second is **how do you know it was him**, and until
+v0.60.0 the honest answer was that a phone said so.
+
+**Signing Evidence** is one row per signature event, across every form that
+carries one: who signed, in what capacity, which badge was scanned to prove they
+were standing there, on what device, at what coordinates, from what address, and
+against a **hash of the record as it stood when they were shown it**. It is
+written by `collect_form_signature` and by nothing else — the doctype is
+append-only, its controller refuses every write after the insert, `in_create`
+keeps the Desk's New button off it, and **there is no tool that creates one**.
+That absence is the design: a tool that could add a row would be a tool that
+could manufacture an identity check that never happened.
+
+**The capacity comes off the box, not off the caller.** Section 1 of a Form I-9
+is a worker attesting under their own penalty of perjury and Section 2 is the
+employer attesting that it examined that worker's documents. A caller may state a
+`signature_role` and it is *checked* against the signature box; it is never
+believed over it.
+
+**A badge that resolves to the wrong person is refused**, before the image is
+stored, on the boxes the worker signs in their own name. Verification that fails
+open is not verification. No badge at all is not an error — an operator signing a
+941 at a desk has no card to scan — and the row says `Unverified` rather than
+claiming a check that did not happen.
+
+**The hash is taken before the signature is written**, which is the only moment
+that answers "what did they see". It covers **the columns that held something
+when the record was presented**, and not the signature columns, the rendered PDF
+or the workflow status — all of which this app writes as a consequence of
+somebody signing. So information *added* later does not trip it (the employer
+completing Section 2 in August on a form the worker signed in July), and
+information *changed* or *erased* does. An integrity check that fired on every
+correctly-handled form would be one nobody reads.
+
+That rule cannot be re-derived after the fact — by the time anybody checks, some
+of those columns hold something — so the row stores the field list beside the
+hash. It doubles as the answer to a question an auditor would otherwise take on
+trust: **which parts of this form does this signature vouch for.**
+`get_signing_evidence` recomputes over exactly those fields on every read.
+
+**A replaced signature appends.** `overwrite=true` writes a new evidence row
+naming the old one in `supersedes`; the old row is never edited and never
+deleted. A chain of custody that can be revised is not one.
+
+**Permissions.** Farm Manager and Compliance Officer read it; System Manager and
+HR Manager hold it fully. **No role in this app gets write access** — including
+the two that read it, because the register's whole value is that nobody edits it.
+
+| Tool | Default | What it does |
+|---|---|---|
+| `list_signing_evidence` | **on** | Signature events by document, signer, badge, capacity, company or date range. Reports `unverified_count` separately — the rows that cannot answer "how do you know it was him". |
+| `get_signing_evidence` | **on** | One event in full, with the document hash re-checked against the record as it stands now, and `superseded_by` where the attestation was later replaced. |
 
 ## Authorized signers (v0.48.0)
 

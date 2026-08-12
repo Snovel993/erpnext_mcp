@@ -230,6 +230,56 @@ def get_authorized_signer(user: str, form_type: str = "I-9") -> dict:
 	}
 
 
+def authorized_signer_for_company(user: str, form_type: str, company: str = "") -> dict:
+	"""`get_authorized_signer`, plus the entity whose record is being signed.
+
+	v0.60.0. "MAY THIS ACCOUNT SIGN" WAS ONLY EVER HALF A QUESTION and the two
+	halves lived in two places that did not know about each other. The roster
+	answers WHICH FORM — Section 2 of an I-9, the employer block of a W-4 — and
+	says nothing about which employer's copy of it; the entity is a User
+	Permission on Company, checked separately by `signatures._require_entity`. A
+	signer who was on the roster and scoped to a different farm was refused with
+	"this account may not write I-9 Form …", which is a true sentence that sends
+	an operator to the permission manager when the roster is where they need to
+	look, or the other way round. Asking both here means one refusal that names
+	the actual gap.
+
+	THE ROSTER HAS NO COMPANY COLUMN AND THIS DOES NOT ADD ONE. Who this employer
+	has authorised to examine documents is a question about the employer, and on
+	a multi-entity family operation the same three people sign for all of it — a
+	per-company roster would be three copies of one list, and the copy somebody
+	forgot to update would be a signature refused in the packing shed. So the
+	entity half is answered where the app already answers it, by the account's own
+	Company User Permissions.
+
+	AN ACCOUNT WITH NO USER PERMISSION IS UNRESTRICTED, the same disagreement
+	`permissions.py` documents at length and for the same reason: that is Frappe's
+	rule, it is what makes an operator's own login and the MCP System User work,
+	and a stricter reading here would refuse every correctly-configured operator
+	on a call they have always been able to make. The fail-closed reading lives on
+	the mobile door, which is the surface facing the open internet.
+	"""
+	signer = get_authorized_signer(user, form_type)
+	wanted = str(company or "").strip()
+	if not wanted:
+		return signer
+	try:
+		from .. import roles
+
+		allowed = roles.companies_for(str(user or ""))
+	except Exception:  # pragma: no cover - a site whose User Permission table we cannot read
+		return signer
+	if allowed and wanted not in allowed:
+		raise ToolError(
+			f"{user or 'this account'} may sign a Form {normalise_form_type(form_type)} and not "
+			f"one belonging to {wanted}, which its User Permissions do not name. The employer's "
+			f"attestation is made on behalf of ONE employer, and the entities an account may "
+			f"attest for are the ones it is scoped to — an operator changes that with "
+			f"create_mobile_user(update_existing=true). Nothing was changed."
+		)
+	return signer
+
+
 def resolve_signature(args: dict, form_type: str, name_key: str, title_key: str,
                       required: bool = True) -> dict:
 	"""The name and title that go on the form, and where each of them came from.

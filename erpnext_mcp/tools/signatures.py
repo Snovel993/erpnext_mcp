@@ -105,6 +105,40 @@ AND IT IS THE SAME TABLE THE WRITE PATH GATES ON, which is the property worth
 protecting. An alert can only offer a signature route to a box
 `collect_form_signature` would actually accept ink into — a pad addressed at a
 column this app refuses to write is a pad that collects a signature twice.
+
+────────────────────────────────────────────────────────────────────────────
+v0.60.0: THE SIGNATURE WAS NEVER THE HARD HALF. PROVING WHO MADE IT IS.
+────────────────────────────────────────────────────────────────────────────
+
+Everything above answers "what was signed, and when". It has never answered the
+question an auditor asks second — HOW DO YOU KNOW IT WAS HIM — and the honest
+reply until this release was that the app knew because a phone said so.
+
+So one call now does six things, and the sixth is `Signing Evidence`: one row
+per signature event carrying the badge that was scanned, how identity was
+established, the device, the coordinates, the address, and a hash of the record
+AS IT WAS PRESENTED. `tools/signing_evidence.py` argues the shape of that
+register; three things belong on this side of the wire:
+
+**THE HASH IS TAKEN BEFORE THE WRITE.** "What did they see" is a fact about the
+document at presentation. A fingerprint computed afterwards includes the
+signature and proves only that this app had just written one.
+
+**THE CAPACITY COMES OFF THE BOX, NOT OFF THE CALLER.** Section 1 and Section 2
+of one form are a worker's attestation and an employer's, and a client that
+could label them would be choosing which legal act it had just performed. A
+caller may state a role and it is CHECKED against the box; it is never believed
+over it.
+
+**IDENTITY VERIFICATION IS REFUSED, NOT RECORDED, WHEN IT FAILS.** A badge that
+resolves to somebody other than the person the form is about stops the call
+before the image is stored. Verification that fails open is not verification —
+and a `verification_method` column that could be set without a check having
+happened would be worse than no column, because it would look like proof.
+
+The row itself is best-effort and reported, for the reason the task and the PDF
+are: the signature is the irreplaceable artefact and the person who drew it has
+gone back to work. What is NOT best-effort is any of the checking above.
 """
 
 from __future__ import annotations
@@ -114,10 +148,10 @@ from dataclasses import dataclass, field as dataclass_field
 import frappe
 
 from .. import compat, roles
-from ..args import as_bool, as_str
+from ..args import as_bool, as_float, as_str
 from ..errors import ToolError
 from ..result import ToolResult
-from . import files, i9, signers, taxforms, w4
+from . import badges, files, i9, signers, signing_evidence, taxforms, w4
 
 ALERT = "Compliance Alert"
 I9_FORM = "I-9 Form"
@@ -345,6 +379,54 @@ SIGNATURE_BOXES = (
 )
 
 BOXES_BY_KEY = {box.key: box for box in SIGNATURE_BOXES}
+
+#: Columns dropped from the document fingerprint on TOP OF the signature columns
+#: the boxes above already name. Both are things this app writes as a
+#: CONSEQUENCE of somebody signing, and a hash that moved when they did would be
+#: an integrity check that fired on its own side effects.
+#:
+#:   * `generated_pdf` is redrawn by `_redraw` in the same call as the signature;
+#:   * `status` on a Form I-9 advances from "Section 1 Complete" to "Complete"
+#:     the moment Section 2 is verified.
+#:
+#: WHAT IS DELIBERATELY *NOT* HERE is everything substantive: the legal name, the
+#: date of birth, the citizenship attestation, the document titles, numbers and
+#: expiry dates, the addresses, the withholding figures. Alter any of those after
+#: an attestation was made and `verify_fingerprint` says so — which is the whole
+#: point of keeping the noise out. An integrity check that reports a mismatch on
+#: every correctly-handled form is one nobody reads.
+#:
+#: THE OTHER HALF OF THE NOISE IS HANDLED IN `document_fingerprint`, which hashes
+#: only the columns that HELD SOMETHING when the record was presented — so the
+#: employer filling in Section 2 in August does not make the worker's July
+#: attestation read as tampered. That rule belongs beside the hash rather than in
+#: this table because it is about emptiness rather than about which columns are
+#: signatures.
+HASH_ALSO_EXCLUDES = ("generated_pdf", "status")
+
+
+def hash_exclusions(doctype: str) -> tuple:
+	"""Every column the document fingerprint is taken without, for one doctype.
+
+	COMPUTED FROM `SIGNATURE_BOXES` RATHER THAN LISTED, so a sixth box cannot be
+	added without its three columns leaving the hash — and a signature that
+	silently invalidated every earlier fingerprint on the same form is exactly the
+	failure a second hand-maintained list would produce.
+
+	EVERY box on the doctype contributes, not just the one being signed. A Form
+	I-9 is signed three times over several months; scoping the exclusion to the
+	box in hand would mean the employer's Section 2 signature made the worker's
+	own Section 1 fingerprint stop matching, which is a false alarm about the one
+	record that must not raise them.
+	"""
+	columns = set(HASH_ALSO_EXCLUDES)
+	for box in SIGNATURE_BOXES:
+		if doctype and box.doctype != doctype:
+			continue
+		for name in (box.field, box.signed_at_field, box.signed_ip_field):
+			if name:
+				columns.add(name)
+	return tuple(sorted(columns))
 
 #: alert_type → the box that alert is about. THE SAME `alert_types` THE TASK
 #: LOOKUP USES, read the other way round: `_task_for` asks "which task belongs to
@@ -678,12 +760,16 @@ def collect_form_signature(args: dict) -> ToolResult:
 	  * a box that already carries a signature, unless `overwrite` — replacing
 	    an attestation silently is the one write here that could not be noticed
 	    afterwards;
-	  * a destroyed I-9, which is a record whose documents no longer exist.
+	  * a destroyed I-9, which is a record whose documents no longer exist;
+	  * v0.60.0, a BADGE THAT RESOLVES TO SOMEBODY ELSE on a box the worker signs
+	    in their own name, and a caller CLAIMING A CAPACITY the box contradicts.
+	    Both are identity failures rather than permission ones, and an identity
+	    check that fails open is not one — see `_identity` and `_evidence_role`.
 
-	AND WHAT IT DOES NOT REFUSE: a task it could not close, and a PDF it could
-	not redraw. Both are reported, neither undoes the signature. See the module
-	docstring — the capture is the compliance artefact and the rest is
-	bookkeeping about it.
+	AND WHAT IT DOES NOT REFUSE: a task it could not close, a PDF it could not
+	redraw, and an evidence row it could not write. All three are reported, none
+	of them undoes the signature. See the module docstring — the capture is the
+	compliance artefact and the rest is bookkeeping about it.
 	"""
 	box = _box(args)
 	compat.require_doctype(
@@ -705,7 +791,21 @@ def collect_form_signature(args: dict) -> ToolResult:
 	# before anything is decoded means a caller who may not sign is refused
 	# having had nothing of theirs stored.
 	_require_write(box, name)
-	signer = _require_signer(box)
+	company = str(doc.get("company") or "")
+	signer = _require_signer(box, company)
+
+	# THE CAPACITY AND THE IDENTITY, BEFORE ANY OF THE FOUR WRITES. A badge naming
+	# the wrong person and a role the box contradicts are both refusals, and both
+	# have to land while there is still nothing of this caller's on the site.
+	role = _evidence_role(box, args)
+	identity = _identity(box, doc, role, args)
+
+	# THE FINGERPRINT, TAKEN NOW. `doc` has not been touched yet, so this is the
+	# record as the signer was shown it — which is the only moment at which the
+	# question "what did they see" has an answer. See `hash_exclusions`.
+	fingerprint = signing_evidence.document_fingerprint(
+		doc, exclude=hash_exclusions(box.doctype)
+	)
 
 	target = doc
 	child = None
@@ -796,7 +896,22 @@ def collect_form_signature(args: dict) -> ToolResult:
 		"signer_roster_enforced": bool(signer.get("configured")),
 	}
 
-	# ── 3. the task, and ── 4. the PDF ──────────────────────────────────
+	# ── 3. the evidence ─────────────────────────────────────────────────
+	result["evidence"] = _record_evidence(
+		box=box,
+		doc=doc,
+		target=target,
+		role=role,
+		identity=identity,
+		signer=signer,
+		fingerprint=fingerprint,
+		company=company,
+		stored=stored,
+		replaced=bool(existing),
+		args=args,
+	)
+
+	# ── 4. the task, and ── 5. the PDF ──────────────────────────────────
 	result["task"] = _close_the_task(box, name, handle.name, args)
 	result["pdf"] = _redraw(box, name, ensure=as_bool(args, "render_pdf", False))
 
@@ -805,6 +920,76 @@ def collect_form_signature(args: dict) -> ToolResult:
 		summary=f"{box.label} signed on {name}"
 		+ (f" for {doc.get('employee_name')}" if doc.get("employee_name") else "")
 		+ (f", task {result['task']['task']} completed" if (result["task"] or {}).get("completed") else ""),
+	)
+
+
+def _record_evidence(
+	*,
+	box: SignatureBox,
+	doc,
+	target,
+	role: str,
+	identity: dict,
+	signer: dict,
+	fingerprint: dict,
+	company: str,
+	stored: str,
+	replaced: bool,
+	args: dict,
+) -> dict:
+	"""Write the Signing Evidence row for the signature that has just landed.
+
+	AFTER THE FORM, NOT BEFORE IT, and the ordering is the module docstring's
+	rather than a convenience. An evidence row written first would describe a
+	signature that might not exist; written here it describes one that does. The
+	step never raises — `signing_evidence.record` swallows and reports — for the
+	reason the task and the PDF never do.
+
+	`signed_at` COMES OFF THE FORM RATHER THAN OFF THE CLOCK. The column was
+	stamped a few lines above and the evidence row must say the same moment as
+	the record it is evidence about; reading `now()` a second time would put two
+	timestamps a millisecond apart on one signature, which is the kind of
+	discrepancy an auditor is trained to ask about and nobody can explain.
+
+	`supersedes` IS ONLY LOOKED UP WHEN SOMETHING WAS REPLACED, because that is
+	the only time the answer means anything. A first signature on a box that a
+	previous evidence row happens to mention would otherwise claim to supersede a
+	record it has nothing to do with.
+	"""
+	who = identity.get("employee") or (
+		str(doc.get("employee") or "") if role == "Employee" else ""
+	)
+	who_name = identity.get("employee_name") or (
+		str(doc.get("employee_name") or "") if who and who == str(doc.get("employee") or "") else ""
+	)
+	context = _context(args)
+	return signing_evidence.record(
+		document_type=box.doctype,
+		document_name=doc.name,
+		signature_role=role,
+		signature_field=box.field,
+		signed_at=str(target.get(box.signed_at_field) or frappe.utils.now()),
+		company=company,
+		signer=who,
+		signer_name=who_name or signer.get("full_name") or "",
+		# THE HUMAN, NOT THE EFFECTIVE USER. `mcp.handle` switches to the MCP
+		# System User a line after it authenticates, so `frappe.session.user`
+		# would name the same account for all forty callers — see
+		# `signers._current_user`, which reads back the identity captured before
+		# that switch. On an evidence row that distinction is the whole column.
+		signer_user=signers._current_user(),
+		signer_badge=identity.get("badge") or "",
+		verification_method=identity.get("method") or "",
+		signature_image=stored,
+		document_hash=fingerprint["hash"],
+		hashed_fields=",".join(fingerprint["fields"]),
+		device_id=context["device_id"],
+		ip_address=context["ip_address"],
+		gps_latitude=context["latitude"],
+		gps_longitude=context["longitude"],
+		supersedes=(
+			signing_evidence.supersede_target(box.doctype, doc.name, box.field) if replaced else ""
+		),
 	)
 
 
@@ -900,7 +1085,7 @@ def _require_entity(box: SignatureBox, name: str) -> None:
 		)
 
 
-def _require_signer(box: SignatureBox) -> dict:
+def _require_signer(box: SignatureBox, company: str = "") -> dict:
 	"""The roster row authorising this account, `{}` where the box is not gated.
 
 	THE EMPLOYEE BOXES ARE NOT GATED, and that is the point of `form_type` being
@@ -909,10 +1094,148 @@ def _require_signer(box: SignatureBox) -> dict:
 	the phone to be an authorized signer would mean the only people who could
 	collect a worker's signature are the people authorised to sign FOR the
 	employer, which is precisely the conflation §274a keeps apart.
+
+	v0.60.0 PASSES THE COMPANY THROUGH, and the reason is that "authorized to
+	sign" was only ever half a question. The roster answers WHICH FORM somebody
+	may sign; the entity whose record they are signing is a separate fact that
+	lives in Frappe's User Permissions, and until this release the two were
+	checked in two places that did not know about each other — so a refusal could
+	say "you are not authorized for I-9" when the truth was "not for this
+	employer's I-9", which sends an operator to the wrong register.
 	"""
 	if not box.form_type:
 		return {}
-	return signers.get_authorized_signer(_current_user(), box.form_type)
+	return signers.authorized_signer_for_company(_current_user(), box.form_type, company)
+
+
+# ── v0.60.0: the capacity, and who is standing at the pad ───────────────────
+def _evidence_role(box: SignatureBox, args: dict) -> str:
+	"""The capacity this signature is made in. THE BOX DECIDES.
+
+	A caller may state a role and it is CHECKED; it is never believed over the
+	table. Section 1 of a Form I-9 is a worker attesting under their own penalty
+	of perjury and Section 2 is the employer attesting that it examined that
+	worker's documents — two different legal acts on one piece of paper, and a
+	client that could label them would be choosing which of the two it had just
+	performed. The refusal names both, because a phone sending the wrong one is
+	almost always a phone that opened the wrong pad.
+	"""
+	from_box = signing_evidence.ROLES_BY_BOX.get(box.signer_role or "", "")
+	asked = signing_evidence.normalise_signature_role(
+		as_str(args, "signature_role") or as_str(args, "signer_role")
+	)
+	if asked and from_box and asked != from_box:
+		raise ToolError(
+			f"{box.label} is signed in the capacity of {from_box}, and this call says "
+			f"{asked}. The capacity is a property of the box rather than of the caller — "
+			f"an employer's attestation filed as an employee's, or the reverse, is a false "
+			f"statement about who examined what. Open the pad for the box you mean. "
+			f"Nothing was changed."
+		)
+	return from_box or asked
+
+
+def _identity(box: SignatureBox, doc, role: str, args: dict) -> dict:
+	"""Who was proved to be at the pad, or the refusal that stops the call.
+
+	THE STEP THAT MAKES A SIGNATURE WORTH SOMETHING, and it is the one this app
+	did not have. A drawn shape plus a timestamp proves that somebody was holding
+	a phone; a badge scanned at the moment of signing, resolved on the server
+	against this employer's own register, proves WHICH somebody.
+
+	THE BADGE IS RESOLVED THROUGH `resolve_badge`, NOT READ OFF THE TABLE HERE.
+	That tool already refuses an unknown card, a retired one, one belonging to
+	another entity and one whose holder has left — four sentences an operator can
+	act on, and four ways an identity check can be quietly wrong if it is written
+	a second time.
+
+	A BADGE THAT RESOLVES TO THE WRONG PERSON IS FATAL, and only on the boxes
+	where the signer is supposed to be the form's own employee. Section 1 and the
+	W-4 are the worker signing for themselves, so a badge naming somebody else is
+	either the wrong worker at the pad or the wrong form open — both of which end
+	the call. Section 2 is the EMPLOYER's representative, whose badge is
+	legitimately not the employee's; there the scan identifies the verifier and is
+	checked against the roster instead, which `_require_signer` has already done.
+
+	NO BADGE IS NOT AN ERROR. An operator signing a 941 at a desk has no card to
+	scan, and refusing them would be this app inventing a requirement no form
+	makes. The row says `Unverified` and an auditor is told which kind of packet
+	they are holding.
+	"""
+	badge_id = as_str(args, "signer_badge") or as_str(args, "badge_id") or as_str(args, "badge")
+	method = signing_evidence.normalise_verification_method(as_str(args, "verification_method"))
+	subject = str(doc.get("employee") or "")
+	out = {"badge": "", "method": method, "employee": "", "employee_name": ""}
+
+	if not badge_id:
+		if method == "Badge QR":
+			raise ToolError(
+				"verification_method says a badge was scanned and no signer_badge came with it. "
+				"An identity check the server cannot repeat is not one it may record — the column "
+				"would look like proof and hold nothing. Send the badge, or omit the method. "
+				"Nothing was changed."
+			)
+		# `Photo` and `Employee ID` are attested by the client and are recorded as
+		# such. They are weaker than a badge and they are not nothing; what would
+		# be nothing is a method with no subject at all, so the person the form is
+		# about stands in where the box is one they sign themselves.
+		if method and role == "Employee" and subject:
+			out["employee"] = subject
+			out["employee_name"] = str(doc.get("employee_name") or "")
+		return out
+
+	resolved = badges.resolve_badge(
+		{"badge_id": badge_id, "company": str(doc.get("company") or "")}
+	).data
+	holder = str(resolved.get("employee") or "")
+	if role == "Employee" and subject and holder != subject:
+		raise ToolError(
+			f"badge {badge_id!r} belongs to {holder} ({resolved.get('employee_name')}), and "
+			f"{box.label} on {doc.name} is signed by {subject} "
+			f"({doc.get('employee_name') or 'the employee named on it'}) in their own name. "
+			f"Either the wrong person is at the pad or the wrong form is open, and a signature "
+			f"filed across that gap would attest under one person's penalty of perjury to another "
+			f"person's document. Nothing was changed."
+		)
+	out.update(
+		{
+			"badge": str(resolved.get("badge_id") or badge_id),
+			"method": method or "Badge QR",
+			"employee": holder,
+			"employee_name": str(resolved.get("employee_name") or ""),
+		}
+	)
+	return out
+
+
+def _context(args: dict) -> dict:
+	"""Where and on what the signature was drawn, as the client reports it.
+
+	CORROBORATION, NOT AUTHENTICATION, and the distinction is why none of these
+	is checked against anything. A device UUID and a pair of coordinates are what
+	the handset says about itself; the server cannot verify either, and treating
+	an unverifiable claim as a verified one is how a record comes to assert more
+	than it knows. What they are worth is the ordinary thing corroboration is
+	worth — a signature drawn on a known device at the packing shed, and one drawn
+	somewhere else, are different facts to have written down.
+
+	COORDINATES ARE ALL-OR-NOTHING. A latitude with no longitude is a point on a
+	line rather than a place, and half a fix recorded as if it were a whole one is
+	worse than none.
+	"""
+	latitude = args.get("gps_latitude", args.get("gps_lat"))
+	longitude = args.get("gps_longitude", args.get("gps_lon"))
+	fix = {"latitude": None, "longitude": None}
+	if latitude not in (None, "") and longitude not in (None, ""):
+		fix = {
+			"latitude": as_float(latitude, "gps_latitude"),
+			"longitude": as_float(longitude, "gps_longitude"),
+		}
+	return {
+		"device_id": as_str(args, "device_id") or as_str(args, "device"),
+		"ip_address": _remote_addr(),
+		**fix,
+	}
 
 
 def _current_user() -> str:
@@ -1205,11 +1528,13 @@ def alert_answered_by(box: SignatureBox, form: str) -> str:
 
 __all__ = [
 	"BOXES_BY_ALERT_TYPE",
+	"BOXES_BY_KEY",
 	"SIGNATURE_BOXES",
 	"SIGNATURE_MAX_BYTES",
 	"AlreadySignedError",
 	"SignatureBox",
 	"alert_answered_by",
 	"collect_form_signature",
+	"hash_exclusions",
 	"request_for_alert",
 ]

@@ -542,8 +542,12 @@ class ToolRegistration(unittest.TestCase):
 		# `pull_model_from_vv` — the one call that replaces the curl-and-bench-
 		# console procedure for getting a trained model out of Volume Vision,
 		# and the only tool in this app that fetches a file from another server.
-		self.assertEqual(len(self.registry.TOOLS), 400)
-		self.assertEqual(len(self.registry.READ_TOOLS), 181)
+		# v0.60.0 adds two READS and no write: `list_signing_evidence` and
+		# `get_signing_evidence`, over the register of who signed what and how
+		# anybody knows it was them. Nothing writes that register but the
+		# signature path itself.
+		self.assertEqual(len(self.registry.TOOLS), 402)
+		self.assertEqual(len(self.registry.READ_TOOLS), 183)
 		self.assertEqual(len(self.registry.MUTATING_TOOLS), 219)
 
 

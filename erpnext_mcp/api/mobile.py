@@ -3376,6 +3376,11 @@ def submit_form_signature(
 	task_assignment=None,
 	row=None,
 	include_pdf=None,
+	signer_badge=None,
+	verification_method=None,
+	device_id=None,
+	gps_lat=None,
+	gps_lon=None,
 ) -> dict:
 	"""The signature pad's own call, in the shape `API_CONTRACT.md` §14.2 posts.
 
@@ -3420,14 +3425,26 @@ def submit_form_signature(
 	than fatal: the signature is the compliance artefact and the task is
 	bookkeeping about it.
 
-	`signed_on`, `image_format`, `gps_lat` AND `gps_lon` ARE DROPPED, and by the
-	documented mechanism rather than by accident — `routes.bind` keeps only the
-	keys this signature declares, exactly as it drops `pdf_source`. The
-	timestamp is the interesting one: §14.2 stamps it when the pad opened, and
-	the column beside the image is the 8 CFR § 274a.2(h) record of when the
-	attestation was made. A handset that could set it could backdate it, so the
-	server stamps its own and answers with what it wrote — every key here is
-	optional to the client, which reads the server's word for the record.
+	`signed_on` AND `image_format` ARE DROPPED, and by the documented mechanism
+	rather than by accident — `routes.bind` keeps only the keys this signature
+	declares, exactly as it drops `pdf_source`. The timestamp is the interesting
+	one: §14.2 stamps it when the pad opened, and the column beside the image is
+	the 8 CFR § 274a.2(h) record of when the attestation was made. A handset that
+	could set it could backdate it, so the server stamps its own and answers with
+	what it wrote — every key here is optional to the client, which reads the
+	server's word for the record.
+
+	`gps_lat` AND `gps_lon` USED TO BE DROPPED WITH THEM, AND ARE NOT ANY MORE.
+	v0.60.0 — the reason they were dropped was never that a location is worth
+	nothing; it was that the server had nowhere to put one, so a signature
+	declaring them would have been a signature accepting data it discarded. The
+	Signing Evidence register is that somewhere, and `signer_badge`,
+	`verification_method` and `device_id` arrive with them: the badge is the
+	IDENTITY step, resolved on the server against this employer's own register and
+	REFUSED where it names somebody other than the worker whose form is open. The
+	rest is corroboration and is recorded as such — a device UUID and a pair of
+	coordinates are what the handset says about itself, and this app does not
+	treat an unverifiable claim as a verified one.
 
 	`include_pdf` HANDS BACK THE PAGE THAT WAS JUST SIGNED, AND DEFAULTS ON.
 	v0.57.1. The signed form is the artefact the whole flow exists to produce and
@@ -3484,7 +3501,21 @@ def submit_form_signature(
 		"signature_base64": signature_image,
 		"render_pdf": wants_pdf,
 	}
-	for key, value in (("field", signature_field), ("row", row), ("task", task)):
+	for key, value in (
+		("field", signature_field),
+		("row", row),
+		("task", task),
+		# v0.60.0. The evidence half. `signer_role` travels too and is CHECKED
+		# rather than believed — `signatures._evidence_role` refuses a capacity the
+		# box contradicts, so a pad that opened Section 1 and posted "employer"
+		# gets a refusal instead of a mislabelled attestation.
+		("signer_role", signer_role),
+		("signer_badge", signer_badge),
+		("verification_method", verification_method),
+		("device_id", device_id),
+		("gps_latitude", gps_lat),
+		("gps_longitude", gps_lon),
+	):
 		if value not in (None, ""):
 			inner[key] = value
 
@@ -3512,6 +3543,16 @@ def submit_form_signature(
 		"dismissed_alert": _alert_answered(data.get("doctype"), data.get("field"), data.get("name")),
 		"employee": data.get("employee"),
 		"employee_name": data.get("employee_name"),
+		# v0.60.0. The evidence row this signature produced, and — where it could
+		# not be written, or was written without an identity check — the sentence
+		# saying so. REPORTED RATHER THAN SILENT for the reason `task_note` is:
+		# the person at the pad has done everything asked of them either way, and
+		# an operation that is quietly collecting the weaker kind of evidence
+		# should be able to find that out from the answer rather than from an
+		# auditor.
+		"evidence": (data.get("evidence") or {}).get("evidence"),
+		"evidence_status": (data.get("evidence") or {}).get("status"),
+		"evidence_note": (data.get("evidence") or {}).get("note") or None,
 		# See the docstring. The page carries the capture stamped in, and the
 		# bytes travel because a private File is a login page to this caller.
 		"pdf": _signed_pdf(data.get("pdf") or {}) if wants_pdf else None,
@@ -3611,6 +3652,17 @@ def _already_signed(doctype, docname, field, task, wants_pdf: bool = False) -> d
 		"already_signed": True,
 		"dismissed_alert": _alert_answered(resolved, field, name),
 		"pdf": _existing_pdf(resolved, name) if wants_pdf else None,
+		# NO EVIDENCE ROW, AND THE KEYS ARE HERE SAYING SO. This branch exists not
+		# to write, and an evidence row for a signature that was not collected
+		# would be the register asserting an identity check on a call that made
+		# none — on the retry path, where it would happen most. The row belonging
+		# to the attempt that DID land is already in the register.
+		"evidence": None,
+		"evidence_status": None,
+		"evidence_note": (
+			"nothing was signed on this call, so no evidence row was written. The one for the "
+			"attempt that landed is in the Signing Evidence register against this document."
+		),
 		"note": (
 			"This box already carried a signature and nothing was changed. An attestation is "
 			"replaced deliberately or not at all."

@@ -93,6 +93,7 @@ from .tools import (
 	shifts,
 	signatures,
 	signers,
+	signing_evidence,
 	state_tax,
 	tasktemplates,
 	tax,
@@ -9622,6 +9623,76 @@ TOOLS = {
 			"the I-9 Form, W-4 Form or Tax Form doctype (run bench migrate after installing "
 			"v0.56.0)"
 		),
+	),
+	# ── v0.60.0: the evidence packet behind each signature ────────────────
+	"list_signing_evidence": _tool(
+		signing_evidence.list_signing_evidence,
+		"Signature events, with the identity check behind each one. Read-only.\n\n"
+		"ONE ROW PER SIGNATURE, across every form that carries one — who signed, in "
+		"what capacity, which badge was scanned to prove they were there, on what "
+		"device, at what coordinates, from what address, and against a hash of the "
+		"record as it stood when they were shown it. This is what answers an "
+		"auditor's second question: not 'was it signed' but 'how do you know it was "
+		"him'.\n\n"
+		"status is Recorded where identity was verified AND the document was hashed, "
+		"and Unverified where either is missing. `unverified_count` is reported "
+		"separately on purpose — a register that only gave its total would hide the "
+		"rows that cannot answer the question it exists for.\n\n"
+		"Filter by document, by signer, by badge, by company, by capacity or by date "
+		"range; both dates are inclusive of the whole day.",
+		{
+			"document_type": _field(
+				_STRING,
+				"The doctype that was signed — 'I-9 Form', 'W-4 Form', 'Tax Form'. Takes the "
+				"same aliases the signature tools take ('i9', 'w-4', '941').",
+			),
+			"document_name": _field(_STRING, "One specific signed record, e.g. 'I9-2026-0001'."),
+			"signer": _field(_STRING, "Employee docname or employee_name of the person who signed."),
+			"employee": _field(_STRING, "Alias for signer."),
+			"signer_badge": _field(_STRING, "The badge ID that was scanned at the pad."),
+			"signature_role": _field(
+				_STRING,
+				"The capacity signed in: Employee, Employer Representative, Preparer or "
+				"Translator, Witness, Officer, Inspector.",
+			),
+			"verification_method": _field(
+				_STRING, "How identity was established: Badge QR, Employee ID or Photo."
+			),
+			"status": _field(_STRING, "Recorded or Unverified."),
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Earliest signing date, YYYY-MM-DD. Inclusive."),
+			"to_date": _field(_STRING, "Latest signing date, YYYY-MM-DD. Inclusive of the whole day."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("Signing Evidence"),
+		requires="the Signing Evidence doctype (run bench migrate after installing v0.60.0)",
+		title="List signing evidence",
+	),
+	"get_signing_evidence": _tool(
+		signing_evidence.get_signing_evidence,
+		"One signature event in full, with the document hash RE-CHECKED against the "
+		"record as it stands now. Read-only.\n\n"
+		"`tamper_check.matches` is the answer worth reading: true means nothing this "
+		"signature vouched for has changed since it was made; false means something "
+		"has; null means the row was recorded without a hash, or the document can no "
+		"longer be read. `tamper_check.covers` names the columns it vouches for.\n\n"
+		"THE HASH COVERS THE COLUMNS THAT HELD SOMETHING WHEN THE SIGNER WAS SHOWN "
+		"THE RECORD, and not the signature columns, the rendered PDF or the workflow "
+		"status. So information ADDED later — the employer completing Section 2 in "
+		"August on a form the worker signed in July — does not trip it, and "
+		"information CHANGED or ERASED does. An integrity check that fired on every "
+		"correctly-handled form would be one nobody reads.\n\n"
+		"Also reports `superseded_by` where this attestation was later replaced. The "
+		"replaced row is never edited and never deleted: a chain of custody that can "
+		"be revised is not one.",
+		{
+			"name": _field(_STRING, "Signing Evidence docname. list_signing_evidence finds them."),
+			"evidence": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		available=_needs_doctype("Signing Evidence"),
+		requires="the Signing Evidence doctype (run bench migrate after installing v0.60.0)",
+		title="Get signing evidence",
 	),
 	# ── v0.48.0: who may sign a federal employment form ───────────────────
 	"list_authorized_signers": _tool(

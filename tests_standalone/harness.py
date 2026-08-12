@@ -1101,6 +1101,9 @@ APP_DOCTYPES = {
 	"Labor Break Policy": "labor_break_policy",
 	"Labor Break Schedule Row": "labor_break_schedule_row",
 	"Labor Heat Break Row": "labor_heat_break_row",
+	# v0.60.0. One row per signature event: who was proved to be at the pad, on
+	# what device, where, and against what hash of the record they were shown.
+	"Signing Evidence": "signing_evidence",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

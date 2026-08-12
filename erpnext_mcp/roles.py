@@ -327,6 +327,77 @@ PROPERTY = ("Lease",)
 #: the User Permission `create_mobile_user` writes says whose. A Farm Manager
 #: scoped to one entity gets no reach into another's personnel file out of it.
 HIRING_FORMS = ("I-9 Form",)
+#: v0.60.0. THE TWO COMPANY-WIDE RATE TABLES, AND THEY ARE A GROUP OF THEIR OWN
+#: BECAUSE OF WHAT READING THEM MEANS.
+#:
+#: A Piecework Rate and a Position Wage Default are not somebody's pay — they are
+#: what the OPERATION pays for a bucket and for an hour of a job title. No name
+#: appears on either row. That is what makes them safe to put in front of a Farm
+#: Manager, who cannot read `Farm Salary Structure` and still cannot: the
+#: register of what each individual earns belongs to the HR module that owns
+#: `Employee`, and this release does not go round it. What a manager gets is the
+#: PRICE LIST, which is the thing they are actually asked about in a packing shed
+#: at six in the morning.
+#:
+#: READ AND WRITE FOR THE FARM MANAGER. NOT `create`.
+#:
+#: The distinction looks pedantic until you notice what `create` would mean here.
+#: `select_effective` gives the row with the latest `effective_from` that covers a
+#: date, so ADDING A ROW IS HOW A RAISE HAPPENS — one insert changes what the
+#: whole company's next payroll pays, for everybody on that activity, with no
+#: second party to it. Editing an existing row is bounded by contrast: the rate
+#: was already set by somebody who could set rates, and a manager fixing a typo
+#: in it is fixing this season's number, not opening next season's. So the person
+#: who runs the operation may correct the table and the person who sets what the
+#: operation pays — System Manager or HR Manager, through the doctype's own
+#: standard permissions — is who adds to it.
+#:
+#: READ ONLY FOR THE COMPLIANCE OFFICER, and it is a read they need rather than a
+#: courtesy. The piece rate is the input to the minimum wage makeup on every slip,
+#: and "was the rate high enough that these hours cleared the floor" is a
+#: compliance question — ORS 653.025 and RCW 49.46.020 — that cannot be answered
+#: from the slip alone. They may not touch either table, which is the same
+#: separation this file keeps everywhere: the officer who checks whether a rate
+#: was lawful must not be the account that set it.
+WAGE_TABLES = ("Piecework Rate", "Position Wage Default")
+#: v0.60.0. THE RECORD OF WHO SIGNED WHAT, AND HOW ANYBODY KNOWS.
+#:
+#: A group of one, and READ-ONLY TO EVERY ROLE IN THIS FILE — including the two
+#: that hold it. That is not caution about a new doctype; it is the doctype's
+#: entire point. A Signing Evidence row is append-only, `in_create` keeps the
+#: Desk's New button off it, and its controller refuses every write after the
+#: insert, so the only thing that makes one is the signature path itself. A role
+#: granted `write` here could not use it — but the grant would say, in the one
+#: register whose value is that it cannot be edited, that somebody is expected to
+#: edit it.
+#:
+#: WHY THESE TWO AND NOT THE OTHER FOUR:
+#:
+#:   * A COMPLIANCE OFFICER is the person the auditor actually talks to. This is
+#:     the register that answers "how do you know it was him", and a compliance
+#:     role that keeps the certificate register and cannot open the signature
+#:     evidence for the forms in it is a role that has to ask somebody else for
+#:     the second half of every answer.
+#:   * A FARM MANAGER signs Section 2 themselves — see `HIRING_FORMS` — and
+#:     reading back what was recorded about their own attestation is the same
+#:     access they already have to the form it is about.
+#:
+#:   * A FOREMAN does not get it, and the reason is the separation this file
+#:     keeps everywhere else: a foreman runs the board, and the evidence trail
+#:     over signatures collected on that board is checked by somebody who is not
+#:     running it.
+#:   * A FIELD WORKER does not get it. The register carries badge IDs, device
+#:     identifiers and coordinates for every signature on the operation, which is
+#:     a movement record for the whole crew — it is the Housing Assignment
+#:     argument in `permissions.py` pointed at a different table.
+#:   * FAMILY MEMBER AND ADVISOR do not get it. Whose I-9 was signed where is the
+#:     operating company's personnel file, not the holding company's business.
+#:
+#: `Signing Evidence.company` is a REQUIRED Link to Company, so whose evidence a
+#: reader may see is Frappe's question and not this file's — the same split the
+#: module docstring opens with, and the reason this app writes no query condition
+#: of its own for it.
+SIGNING_EVIDENCE = ("Signing Evidence",)
 
 
 def _grant(perm: dict, *groups) -> tuple:
@@ -419,10 +490,12 @@ ROLE_SPECS = (
 			# READ, deliberately. See the module docstring: the person who decides
 			# a walk is required and the person who decides who walks it must not
 			# be the same account.
-			*_grant(READ, DISPATCH, CAMP, GROUND, PAPER, SHIFTS),
+			*_grant(READ, DISPATCH, CAMP, GROUND, PAPER, SHIFTS, SIGNING_EVIDENCE),
 		),
 		cannot=(
 			"dispatch anybody — Farm Task is read-only for this role, on purpose",
+			"alter a signature evidence row — the register is read-only to every role in "
+			"this app, because a chain of custody that can be edited is not one",
 			"form a crew shift or sign one off — the shift register is read-only here, "
 			"because OAR 437-004-1131 puts the obligations on the supervisor who was "
 			"standing on the block",
@@ -456,7 +529,7 @@ ROLE_SPECS = (
 			# FULL: the form is raised by the hiring path and destroyed by the
 			# retention schedule, neither of which is a manager's call.
 			*_grant(READ_WRITE, HIRING_FORMS),
-			*_grant(READ, PAPER),
+			*_grant(READ, PAPER, SIGNING_EVIDENCE),
 		),
 		cannot=(
 			"see the cap table or member events — the operating side does not read the "

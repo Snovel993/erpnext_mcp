@@ -790,9 +790,17 @@ class Catalogue(SeededTestCase):
 		attaches what it got. There is no read counterpart: `get_model` already
 		returns everything the pull wrote, and `get_model_file_chunk` already
 		serves the bytes.
+
+		v0.60.0 ADDED TWO READS AND NO WRITE — `list_signing_evidence` and
+		`get_signing_evidence`, over the register of who signed what and how
+		anybody knows. THE ABSENCE OF A WRITE IS THE POINT rather than an
+		omission: a Signing Evidence row is created by the signature path and by
+		nothing else, the doctype is append-only, and a tool that could add one
+		would be a tool that could manufacture an identity check that never
+		happened. `collect_form_signature` grew the arguments instead.
 		"""
-		self.assertEqual(len(registry.TOOLS), 400)
-		self.assertEqual(len(registry.READ_TOOLS), 181)
+		self.assertEqual(len(registry.TOOLS), 402)
+		self.assertEqual(len(registry.READ_TOOLS), 183)
 		self.assertEqual(len(registry.MUTATING_TOOLS), 219)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):

@@ -1,0 +1,283 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-12 09:00:00.000000",
+ "description": "One signature event, and everything that was true around it. A signature image on its own proves almost nothing: an evidence packet is WHO signed (identity verified at the pad, not asserted afterwards), WHAT they were shown (a hash of the record as it stood when it was presented), WHERE and ON WHAT (device, coordinates, address) and WHEN. Append-only — rows are immutable after insertion, and nothing on this site creates one from the Desk. A signature that is replaced does not edit the row it replaced; the new row names it in `supersedes`, because an evidence chain that can be revised is not evidence.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "signer",
+  "signer_name",
+  "signer_user",
+  "signer_badge",
+  "verification_method",
+  "identity_col",
+  "signed_at",
+  "status",
+  "company",
+  "document_section",
+  "document_type",
+  "document_name",
+  "signature_role",
+  "document_col",
+  "signature_field",
+  "supersedes",
+  "signature_section",
+  "signature_image",
+  "document_hash",
+  "hashed_fields",
+  "context_section",
+  "device_id",
+  "ip_address",
+  "context_col",
+  "gps_latitude",
+  "gps_longitude"
+ ],
+ "fields": [
+  {
+   "description": "The person whose signature this is. EMPTY IS A REAL ANSWER rather than a gap: an employer representative attesting on Section 2 is an account on the authorized-signer roster and need not be on the payroll, so `signer_user` is the fact that always exists and this is the one that usually does.",
+   "fieldname": "signer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Signer",
+   "options": "Employee",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The signer's name as the record carried it at the moment of signing. Stored rather than fetched, because an Employee renamed in 2029 must not silently restate who signed in 2026.",
+   "fieldname": "signer_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Signer Name",
+   "read_only": 1
+  },
+  {
+   "description": "The account that made the call. WHO SIGNS IS NOT WHO CALLS — one authorized person filing on behalf of another is a real thing in a packing shed, and the two facts are kept apart here for the same reason the authorized-signer roster keeps `user` and `full_name` apart.",
+   "fieldname": "signer_user",
+   "fieldtype": "Link",
+   "label": "Signed By (Account)",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "description": "The badge ID scanned to prove this person was at the pad. This is the identity step: a badge that resolved to somebody other than the person the form is about is refused before anything is written, so a badge recorded here is one that matched.",
+   "fieldname": "signer_badge",
+   "fieldtype": "Data",
+   "label": "Signer Badge",
+   "read_only": 1
+  },
+  {
+   "description": "How identity was established at the pad. EMPTY MEANS NOTHING WAS DONE, which is why it is a blank option rather than a default — a record that quietly claimed a scan that never happened would be worse than one that admits there was none. `status` says the same thing in one word, for a list view to filter on.",
+   "fieldname": "verification_method",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Verification Method",
+   "options": "\nBadge QR\nEmployee ID\nPhoto",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "When the attestation was made, stamped by the server. NOT a time the client sent: a handset that could set this could backdate an attestation, and 8 CFR § 274a.2(h) asks for the moment the signature was made rather than the moment an app says it was.",
+   "fieldname": "signed_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Signed At",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Recorded",
+   "description": "Whether the chain is complete. `Recorded` means identity was verified AND the document was hashed as presented. `Unverified` means one of those two is missing — the signature still happened and the row still stands, and an auditor is told which of the two kinds of evidence they are holding rather than left to work it out from two empty columns.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Recorded\nUnverified",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "The employer whose record was signed. A required Link to Company, which is what lets a Farm Manager's Company User Permission scope this register the same way it scopes every other one — no query condition of this app's own.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "document_section",
+   "fieldtype": "Section Break",
+   "label": "Document"
+  },
+  {
+   "description": "The doctype that was signed — 'I-9 Form', 'W-4 Form', 'Tax Form'.",
+   "fieldname": "document_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Document Type",
+   "options": "DocType",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The specific record that was signed. A Dynamic Link, so the Desk opens the signed form from the evidence row in one click — which is the first thing anybody holding this record wants to do.",
+   "fieldname": "document_name",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Document",
+   "options": "document_type",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The capacity this person signed in. It is derived from the box that was signed rather than from anything a client sent: 'Employee' and 'Employer Representative' are different legal acts on the same form, and a caller that could choose between them could relabel an employer's attestation as a worker's.",
+   "fieldname": "signature_role",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Signature Role",
+   "options": "Employee\nEmployer Representative\nPreparer or Translator\nWitness\nOfficer\nInspector",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "document_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Which box on the form carries this signature. A Form I-9 has three, two of which are signed in the same capacity by the same kind of person — without this column two evidence rows for one form would be indistinguishable, which is exactly the question an inspection asks.",
+   "fieldname": "signature_field",
+   "fieldtype": "Data",
+   "label": "Signature Field",
+   "read_only": 1
+  },
+  {
+   "description": "The evidence row this signature replaced, where one was replaced. THE OLD ROW IS NOT EDITED and is not deleted: replacing an attestation somebody made under penalty of perjury is a deliberate act, and the record of the one that was there is the only thing that can show it happened.",
+   "fieldname": "supersedes",
+   "fieldtype": "Link",
+   "label": "Supersedes",
+   "options": "Signing Evidence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "signature_section",
+   "fieldtype": "Section Break",
+   "label": "Signature"
+  },
+  {
+   "description": "The drawn signature as it was captured, stored private and attached to the form as well. The same File the form's own signature column points at — one image, two records naming it, so neither can drift from the other.",
+   "fieldname": "signature_image",
+   "fieldtype": "Attach",
+   "label": "Signature Image",
+   "read_only": 1
+  },
+  {
+   "description": "SHA-256 of the record's content as it stood when the signer was shown it, taken BEFORE the signature was written. This is what answers 'what did they actually see' — recompute it against the form today and a document altered after signing no longer matches.",
+   "fieldname": "document_hash",
+   "fieldtype": "Data",
+   "label": "Document Hash",
+   "length": 71,
+   "read_only": 1
+  },
+  {
+   "description": "The columns the hash was taken over — the ones that held something when the signer was shown the record. Stored because it cannot be re-derived later: by then some of the empty columns hold something, and recomputing over the new set would report a form nobody altered as tampered. It also answers, without anyone having to take it on trust, WHICH PARTS of this form this signature vouches for.",
+   "fieldname": "hashed_fields",
+   "fieldtype": "Small Text",
+   "label": "Hashed Fields",
+   "read_only": 1
+  },
+  {
+   "fieldname": "context_section",
+   "fieldtype": "Section Break",
+   "label": "Context"
+  },
+  {
+   "description": "The device the signature was drawn on, as the client identifies itself. Opaque to this app on purpose: it is corroboration, not authentication, and a value the server cannot verify must not be treated as one it can.",
+   "fieldname": "device_id",
+   "fieldtype": "Data",
+   "label": "Device ID",
+   "read_only": 1
+  },
+  {
+   "description": "The address the signature arrived from, which is the 8 CFR § 274a.2(h) record for a remote signing. Empty for a call made without a request behind it.",
+   "fieldname": "ip_address",
+   "fieldtype": "Data",
+   "label": "IP Address",
+   "read_only": 1
+  },
+  {
+   "fieldname": "context_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "gps_latitude",
+   "fieldtype": "Float",
+   "label": "GPS Latitude",
+   "precision": "7",
+   "read_only": 1
+  },
+  {
+   "fieldname": "gps_longitude",
+   "fieldtype": "Float",
+   "label": "GPS Longitude",
+   "precision": "7",
+   "read_only": 1
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-12 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Signing Evidence",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "document_name,signature_role,signer_name",
+ "sort_field": "signed_at",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "document_name",
+ "track_changes": 0
+}

@@ -274,6 +274,10 @@
   "allow_render_i9_pdf",
   "allow_attach_signed_i9",
   "allow_collect_form_signature",
+  "evidence_section",
+  "allow_list_signing_evidence",
+  "evidence_col",
+  "allow_get_signing_evidence",
   "signers_section",
   "allow_list_authorized_signers",
   "allow_add_authorized_signer",
@@ -2297,6 +2301,29 @@
    "fieldname": "allow_collect_form_signature",
    "fieldtype": "Check",
    "label": "Collect Form Signature"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Signature Evidence"
+  },
+  {
+   "default": "1",
+   "description": "READ. Signature events with the identity check behind each one — who signed, in what capacity, which badge was scanned, on what device, where, and against what hash of the record they were shown. Filter by document, signer, badge, capacity, company or date range. `unverified_count` reports how many of them were captured without an identity check or without a document hash.",
+   "fieldname": "allow_list_signing_evidence",
+   "fieldtype": "Check",
+   "label": "List Signing Evidence"
+  },
+  {
+   "fieldname": "evidence_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "READ. One signature event in full, with the document hash RE-CHECKED against the record as it stands now — `tamper_check.matches` is false where something the signer attested to has been altered since. Also reports whether this attestation was later superseded.",
+   "fieldname": "allow_get_signing_evidence",
+   "fieldtype": "Check",
+   "label": "Get Signing Evidence"
   },
   {
    "fieldname": "signers_section",

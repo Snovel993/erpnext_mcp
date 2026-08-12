@@ -3,6 +3,79 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.60.0 — 2026-08-12
+
+**An auditor's second question.** The first is *was it signed*, and this app has
+answered it since v0.55.0 — the image, the moment and the address, which is what
+8 CFR § 274a.2(h) asks for. The second is **how do you know it was him**, and
+until now the honest answer was that a phone said so.
+
+**`Signing Evidence` — one row per signature event**, across every form that
+carries one: who signed and in what capacity, which badge was scanned to prove
+they were standing there, which account made the call, the device, the
+coordinates, the address, and a hash of the record as it stood when they were
+shown it. Not six columns on the I-9: one form carries three signatures by two
+people in two capacities, and per-form columns would be that set again on every
+form that grows a signature line.
+
+**Append-only, and there is no tool that creates one.** The controller refuses
+every write after the insert, `in_create` takes away the Desk's New button, and
+the signature path is the only thing that writes a row — a tool that could add
+one would be a tool that could manufacture an identity check that never happened.
+A replaced signature appends a row naming the old one in `supersedes`; the old
+row keeps saying what it said.
+
+**Identity is refused, not recorded, when it fails.** A badge that resolves to
+somebody other than the worker whose form is open stops the call before the image
+is stored — either the wrong person is at the pad or the wrong form is, and a
+signature filed across that gap would attest under one person's penalty of
+perjury to another person's document. `verification_method: "Badge QR"` with no
+badge attached is refused rather than recorded: the column would look like proof
+and hold nothing. No badge at all is not an error — the row says `Unverified`,
+and the register reports how many of those it holds.
+
+**The capacity comes off the box, not off the caller.** Section 1 is a worker
+attesting and Section 2 is the employer attesting it examined that worker's
+documents. A stated `signature_role` is checked against the box, never believed
+over it.
+
+**The authorized-signer check now asks the whole question.** The roster answers
+which form; the entity is a Company User Permission checked elsewhere, so a
+signer scoped to a different farm used to be refused with a sentence about
+`write` permission — true, and it sends an operator to the wrong register.
+`signers.authorized_signer_for_company` asks both and names the actual gap. The
+roster does not grow a company column: on a multi-entity family operation the
+same people sign for all of it, and three copies of one list means the copy
+somebody forgot to update is a signature refused in the packing shed.
+
+**The document hash is taken before the signature is written**, and covers the
+columns that HELD SOMETHING when the record was presented — not the signature
+columns, the rendered PDF or the workflow status. So the employer completing
+Section 2 in August does not make the worker's July attestation read as tampered,
+while anything changed or erased does. The field list is stored beside the hash,
+because the rule cannot be re-derived once the empty columns are full — and it
+doubles as the answer to *which parts of this form does this signature vouch
+for*.
+
+**`submit_form_signature` declares five more arguments** — `signer_badge`,
+`verification_method`, `device_id`, `gps_lat`, `gps_lon`. The last two are in
+§14.2 and have been dropped by `routes.bind` since v0.57.0, because the server
+had nowhere to put a location; it has one now. `signed_on` is still dropped — a
+handset that could set the attestation's timestamp could backdate it. The answer
+carries `evidence`, `evidence_status` and `evidence_note`, reported rather than
+silent. The idempotent retry writes no row and says so.
+
+**Two reads and no writes**: `list_signing_evidence` (by document, signer, badge,
+capacity, company or date range, with `unverified_count` reported separately) and
+`get_signing_evidence` (one event in full, hash re-checked on every read, plus
+`superseded_by`). Farm Manager and Compliance Officer read the register; System
+Manager and HR Manager hold it fully; **no role in this app gets write access**,
+including the two that read it.
+
+Run `bench --site <site> migrate`. Nothing changes for a site that sends no new
+arguments — signatures are collected as before and each writes an `Unverified`
+row, which is a true statement about one captured without an identity check.
+
 ## 0.59.3 — 2026-08-12
 
 **A Farm Manager could not sign the half of the I-9 that is legally theirs.**

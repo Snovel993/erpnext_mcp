@@ -3016,6 +3016,88 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			first["file_url"],
 		)
 
+	def test_47_the_evidence_the_pad_sends_reaches_the_register(self):
+		"""v0.60.0. §14.2's `gps_lat`/`gps_lon` were DROPPED by `routes.bind`
+		because the signature did not declare them, and the reason it did not was
+		that the server had nowhere to put a location. It has one now, and the
+		badge, the device and the fix travel with it — a signature event that says
+		who was proved to be at the pad, on what, and where."""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		STORE.seed(
+			"Bucket Log Badge Map",
+			[
+				{
+					"doctype": "Bucket Log Badge Map",
+					"name": "ETC-0007",
+					"badge_id": "ETC-0007",
+					"employee": self.NEW_HIRE,
+					"company": MAIN,
+					"active": 1,
+				}
+			],
+		)
+		row = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname="I9-2026-CONTRACT",
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+			signer_role="employee",
+			signer_badge="ETC-0007",
+			device_id="9E1C4A70-0B2F-4C1E-9A55-1D7E0F3B2C48",
+			gps_lat=45.5231,
+			gps_lon=-122.6765,
+			include_pdf=False,
+		)
+		SignatureSubmissionModel.decode(row, "submit_form_signature")
+		self.assertEqual(row["evidence_status"], "Recorded")
+		evidence = frappe.db.get_value(
+			"Signing Evidence",
+			row["evidence"],
+			["signer", "signer_badge", "verification_method", "device_id", "gps_latitude"],
+			as_dict=True,
+		)
+		self.assertEqual(evidence["signer"], self.NEW_HIRE)
+		self.assertEqual(evidence["signer_badge"], "ETC-0007")
+		self.assertEqual(evidence["verification_method"], "Badge QR")
+		self.assertTrue(evidence["device_id"])
+		self.assertAlmostEqual(float(evidence["gps_latitude"]), 45.5231, places=4)
+
+	def test_47_a_badge_naming_somebody_else_stops_the_pad(self):
+		"""The identity step, on the door the phone actually posts to. Either the
+		wrong person is at the pad or the wrong form is open, and nothing is
+		written either way."""
+		self.the_hr_furniture()
+		self.an_unsigned_i9()
+		STORE.seed(
+			"Bucket Log Badge Map",
+			[
+				{
+					"doctype": "Bucket Log Badge Map",
+					"name": "ETC-0008",
+					"badge_id": "ETC-0008",
+					"employee": self.SECOND_HAND,
+					"company": MAIN,
+					"active": 1,
+				}
+			],
+		)
+		with self.assertRaises(Exception) as caught:
+			self.wire(
+				"submit_form_signature",
+				doctype="I-9 Form",
+				docname="I9-2026-CONTRACT",
+				signature_field="section_1_signature",
+				signature_image=A_PNG,
+				signer_badge="ETC-0008",
+			)
+		self.assertIn("Nothing was changed", str(caught.exception))
+		self.assertFalse(
+			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature") or ""
+		)
+		self.assertEqual(STORE.rows("Signing Evidence"), [])
+
 	def test_45_the_photo_and_the_badge_meet_on_the_card(self):
 		"""The two halves of this release, in the order the wizard walks them:
 		the headshot is filed, and the badge issued after it carries the URL the
