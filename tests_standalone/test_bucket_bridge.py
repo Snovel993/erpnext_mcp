@@ -483,6 +483,43 @@ class SyncingEntries(BucketLogToolTestCase):
 		self.assertEqual(result["invalid_count"], 1)
 		self.assertEqual(result["invalid"][0]["entry_uuid"], bad["entry_uuid"])
 
+	def test_an_entry_the_column_refuses_is_skipped_without_failing_the_batch(self):
+		"""v0.59.2 — THE GAP BETWEEN "THIS APP APPROVES IT" AND "THE COLUMN TAKES IT".
+
+		The test above covers an entry `validate_bucket_entry` refuses, which is
+		reported and skipped and always has been. This one covers the other kind:
+		an entry every check in this app PASSES and the database then refuses at
+		the write. Until v0.59.2 the `doc.insert()` handler named
+		`UniqueValidationError` and nothing else, so that entry left the loop and
+		came back as a 500 with no per-entry detail — and a batch endpoint whose
+		client retries on failure turns that into a queue that never drains.
+
+		THE PAYLOAD IS THE ONE THAT ACTUALLY DID IT. An ISO 8601 timestamp with a
+		trailing `Z` is what an iPhone's `ISO8601DateFormatter` writes, `_parse_dt`
+		reads it happily so `validate_bucket_entry` returns no errors, and a
+		MariaDB DATETIME will not take it. `api/mobile._bucket_entries` now converts before the tool ever
+		sees it, which is what fixes the handset; this test is the tool's own
+		door, which an MCP client or a Desk import can still arrive at with the
+		same string. It must degrade to one reported entry, not a lost batch.
+		"""
+		first = _entry(entry_uuid="a1111111-1111-1111-1111-111111111111")
+		iso = _entry(
+			entry_uuid="b2222222-2222-2222-2222-222222222222",
+			timestamp="2026-06-01T08:30:00Z",
+		)
+		last = _entry(entry_uuid="c3333333-3333-3333-3333-333333333333")
+
+		# The premise: this app has no complaint about the middle one.
+		self.assertEqual(engine.validate_bucket_entry(iso), [])
+
+		result = self.tool_data("sync_bucket_entries", {"entries": [first, iso, last]})
+		self.assertEqual(result["created_count"], 2)
+		self.assertEqual(result["invalid_count"], 1)
+		self.assertEqual(result["invalid"][0]["entry_uuid"], iso["entry_uuid"])
+		self.assertIn("datetime", " ".join(result["invalid"][0]["errors"]).lower())
+		filed = sorted(row["entry_uuid"] for row in STORE.rows(ENTRY_DOCTYPE))
+		self.assertEqual(filed, [first["entry_uuid"], last["entry_uuid"]])
+
 	def test_worker_badge_resolves_to_employee_via_the_badge_map(self):
 		self.tool_data("link_badge_to_employee", {"badge_id": BADGE, "employee": EMP, "company": MAIN})
 		result = self.tool_data("sync_bucket_entries", {"entries": [_entry()]})

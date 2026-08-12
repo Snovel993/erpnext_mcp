@@ -1361,6 +1361,98 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		# The badge resolved through the map rather than through the body.
 		self.assertTrue(all(entry["employee"] == self.NEW_HIRE for entry in STORE.rows("Bucket Log Entry")))
 
+	def test_23_the_timestamp_the_handset_actually_sends(self):
+		"""v0.59.2 — ISO 8601 WITH A TRAILING Z, WHICH IS THE ONLY THING A PHONE SENDS.
+
+		THE TEST ABOVE IS WHY THIS BUG SHIPPED. `test_23` feeds
+		`f"{today()} 07:12:00"` — a Frappe Datetime string, the shape a Desk
+		import has — and no handset has ever produced one.
+		`BadgeAPI.payload` stamps every capture with an `ISO8601DateFormatter`
+		set to `.withInternetDateTime` in UTC (`BadgeAPI.timestamps`), so the
+		wire carries `2026-08-11T07:12:00Z`, and a MariaDB DATETIME will not take
+		the `T` or the `Z`. Both entries in the batch above passed, the endpoint
+		was published, and not one bucket entry ever reached the register from a
+		device — 31 sat queued on one iPad.
+
+		The payload below is `BadgeAPI.payload` transcribed field for field,
+		`capture_mode` and `auto_verdict` included, because a fixture that sent
+		only the fields the server reads would not have caught this one either.
+		"""
+		self.the_hr_furniture()
+		self.wire("link_badge_to_employee", badge_id="QR-0042", employee=self.NEW_HIRE, company=MAIN)
+		row = self.wire(
+			"sync_bucket_entries",
+			company=MAIN,
+			entries=[
+				{
+					"id": "1E4A0C7A-0001",
+					"session_id": "SESSION-A",
+					"badge_id": "QR-0042",
+					"timestamp": "2026-08-11T07:12:00Z",
+					"accepted": True,
+					"coverage_percent": 94.5,
+					"device_id": "iPad-7",
+					"auto_verdict": "full",
+					"capture_mode": "ML Verified",
+				},
+				{
+					"id": "1E4A0C7A-0002",
+					"session_id": "SESSION-A",
+					"badge_id": "QR-0042",
+					"timestamp": "2026-08-11T07:19:31Z",
+					"accepted": False,
+					"coverage_percent": 41.0,
+					"device_id": "iPad-7",
+					"auto_verdict": "not_full",
+					"capture_mode": "ML Verified",
+				},
+			],
+		)
+		UndecodedResponseModel.decode(row, "sync_bucket_entries")
+		self.assertEqual(row["invalid_count"], 0, row["invalid"])
+		self.assertEqual(row["created_count"], 2)
+
+		# THE INSTANT SURVIVES, IN THE SHAPE THE COLUMN TAKES. Not the sync
+		# time, not midnight, not the string it arrived as.
+		filed = sorted(entry["timestamp"] for entry in STORE.rows("Bucket Log Entry"))
+		self.assertEqual(filed, ["2026-08-11 07:12:00", "2026-08-11 07:19:31"])
+
+		# And the session the two belong to was aggregated off those timestamps,
+		# which is the read a foreman actually opens.
+		session = STORE.rows("Bucket Log Session")[0]
+		self.assertEqual(session["started_at"], "2026-08-11 07:12:00")
+		self.assertEqual(session["ended_at"], "2026-08-11 07:19:31")
+		self.assertEqual(session["total_accepted"], 1)
+		self.assertEqual(session["total_rejected"], 1)
+
+	def test_23_an_offset_is_applied_rather_than_dropped(self):
+		"""A handset whose formatter is not on UTC still files the right instant.
+
+		`BadgeAPI.timestamps` pins UTC, so `+00:00` is what production sends —
+		but `ISO8601DateFormatter` is one line from emitting a local offset, and
+		the rule that a `+02:00` capture is stored two hours earlier rather than
+		at its wall clock is `datetimes.as_mariadb_datetime`'s, checked here at
+		the boundary that now depends on it.
+		"""
+		self.the_hr_furniture()
+		self.wire("link_badge_to_employee", badge_id="QR-0042", employee=self.NEW_HIRE, company=MAIN)
+		row = self.wire(
+			"sync_bucket_entries",
+			company=MAIN,
+			entries=[
+				{
+					"id": "1E4A0C7A-0003",
+					"session_id": "SESSION-B",
+					"badge_id": "QR-0042",
+					"timestamp": "2026-08-11T09:12:00+02:00",
+					"accepted": True,
+					"device_id": "iPad-7",
+				}
+			],
+		)
+		self.assertEqual(row["invalid_count"], 0, row["invalid"])
+		self.assertEqual(STORE.rows("Bucket Log Entry")[0]["timestamp"], "2026-08-11 07:12:00")
+
 	def test_24_start_shift(self):
 		"""`foreman` IS NOT IN THE SIGNATURE — it comes off the authenticated caller."""
 		self.the_hr_furniture()

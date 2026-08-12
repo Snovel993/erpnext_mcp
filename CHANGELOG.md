@@ -3,6 +3,54 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.59.2 — 2026-08-11
+
+**Not one bucket entry has ever synced from a handset, and it is v0.59.1's bug
+at the other boundary.** `BadgeAPI.payload` stamps every capture with an
+`ISO8601DateFormatter` set to `.withInternetDateTime` in UTC, so the wire
+carries `2026-08-11T07:12:00Z`; Bucket Log Entry's `timestamp` is a Frappe
+`Datetime`, which is a MariaDB `DATETIME`, which answers that string with
+`OperationalError (1292, "Incorrect datetime value")`. The same `T` and the same
+`Z` that failed the model pull, on the path that carries piece-rate.
+`api/mobile._bucket_entries` converts before the tool sees it.
+
+**The failure was invisible from both ends, which is why it lasted.**
+`bucket_bridge.validate_bucket_entry` READ the string quite happily — `_parse_dt`
+splits the `T` and drops the `Z` — so every entry passed every check this app
+makes and then died at the insert. The standalone suite agreed, because
+`test_ios_contract`'s bucket case fed `f"{today()} 07:12:00"`, a Frappe Datetime
+string in the shape a Desk import has and no handset has ever produced. The
+suite now drives the format the phone actually sends, offset case included.
+
+**`as_mariadb_datetime` moved to `erpnext_mcp/datetimes.py`.** It was written in
+`model_registry.py` because the failing case was a trained model's
+`training_completed_at`, but the rule was never a fact about ML models — it is a
+fact about every boundary where something that speaks JSON writes a timestamp
+into a `Datetime` column, and this app has two. `model_registry` re-exports the
+name, so its own callers are unchanged. A value that will not convert is passed
+through unchanged rather than blanked, so the refusal names the value instead of
+reporting a field the phone did send as missing.
+
+**One capture the column refuses no longer costs the batch.** The `doc.insert()`
+handler in `sync_bucket_entries` named `UniqueValidationError` and nothing else,
+so any other refusal at the write left the loop and came back as a 500 with no
+per-entry detail — and a device that retries a failed batch resends the poison
+entry with the good ones behind it, forever, which is the second half of why an
+iPad had 31 captures queued. Other failures now land in `invalid[]`, the channel
+this endpoint already promises and `BucketSyncResult` already decodes, behind a
+savepoint so skipping one entry does not take the transaction with it. The
+duplicate-race branch is unchanged in behaviour and is now matched by class name
+rather than through `frappe.exceptions`, which the standalone double does not
+implement — meaning that branch had never once been exercised locally.
+
+**`capture_mode` and `auto_verdict` are still dropped, now knowingly.** The app
+sends both on every row so the farm can answer "how many of this season's
+buckets did a model look at"; Bucket Log Entry has no column for either. Neither
+is an input to pay, so nothing is owed a picker while they are unstored. The
+discard is documented in `_bucket_entries` rather than fixed here — two new
+fields is a doctype change with a patch behind it, and not something to bundle
+with a datetime fix.
+
 ## 0.59.1 — 2026-08-11
 
 **`pull_model_from_vv` failed at the save, after the model had already come down

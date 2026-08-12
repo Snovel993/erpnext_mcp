@@ -29,6 +29,15 @@ one malformed row should keep the other forty-nine, the same posture
 because the alternative is a device retrying the whole batch forever against
 the one row it cannot fix by resending.
 
+v0.59.2 EXTENDS THAT TO THE WRITE ITSELF, which is where the promise was
+leaking. Only `UniqueValidationError` was caught at `doc.insert()`, so an entry
+this app's own checks approved and the DATABASE refused — an ISO 8601 timestamp
+a `DATETIME` column will not take was the case that surfaced it — left the loop
+and came back as a 500 with no per-entry detail, and the device retrying the
+whole batch forever is exactly what happened. Every other insert failure now
+lands in `invalid[]` alongside the validation ones, behind a savepoint so
+skipping one capture does not take the transaction with it.
+
 ────────────────────────────────────────────────────────────────────────────
 WHO MAY WRITE
 ────────────────────────────────────────────────────────────────────────────
@@ -288,6 +297,60 @@ def _sync_session(session_uuid: str) -> None:
 	doc.save(ignore_permissions=True)
 
 
+#: Class names a unique-index collision arrives as. MATCHED BY NAME, not by
+#: `except frappe.exceptions.UniqueValidationError`, because the batch loop below
+#: has to catch the whole family of insert failures in ONE clause in order to
+#: keep going, and `isinstance` against a class this Frappe may not define is a
+#: second failure inside the handler. `DuplicateEntryError` is what older Frappe
+#: raised for the same collision, and both are worth recognising on a site this
+#: app does not pin a Frappe version for.
+_DUPLICATE_ERROR_NAMES = ("UniqueValidationError", "DuplicateEntryError")
+
+
+def _is_duplicate(exc: BaseException) -> bool:
+	"""Whether `exc` is a unique-index collision, whatever this Frappe calls it.
+
+	The class hierarchy is walked rather than the exception's own type only, so a
+	subclass a future Frappe introduces is still read as the duplicate it is.
+	"""
+	return any(cls.__name__ in _DUPLICATE_ERROR_NAMES for cls in type(exc).__mro__)
+
+
+#: Reused for every entry in a batch rather than made unique per entry. MariaDB
+#: replaces a savepoint of the same name, and there is never more than one of
+#: these outstanding — each is set immediately before one insert and released or
+#: rolled back to before the next.
+_ENTRY_SAVEPOINT = "erpnext_mcp_bucket_entry"
+
+
+def _savepoint():
+	"""A named savepoint before one entry's insert, where this Frappe has them.
+
+	SKIPPING AN ENTRY IS ONLY A SKIP IF THE TRANSACTION SURVIVES IT. `invalid`
+	promises the caller that the other entries in the batch were filed, and a
+	failed insert can leave the transaction in a state where every subsequent
+	one fails too — which would turn one refused capture into a batch that
+	reports thirty successes and commits none. Same tool and same reason as
+	`dashboard._savepoint`; returns None where the database layer has no
+	savepoints, which is the in-memory double and is harmless there because
+	nothing it raises is a transaction a driver has poisoned.
+	"""
+	try:
+		frappe.db.savepoint(_ENTRY_SAVEPOINT)
+		return _ENTRY_SAVEPOINT
+	except Exception:
+		return None
+
+
+def _rollback_to(savepoint) -> None:
+	if not savepoint:
+		return
+	try:
+		frappe.db.rollback(save_point=savepoint)
+	except Exception:
+		pass
+
+
 # ── 1. sync_bucket_entries ───────────────────────────────────────────────
 
 
@@ -299,7 +362,8 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 
 	DEDUPLICATES BY entry_uuid — resyncing a batch the site already has is a
 	no-op, not a duplicate record. An entry that fails validation is reported
-	and skipped rather than failing the call; see the module docstring.
+	and skipped rather than failing the call, and so (v0.59.2) is one the
+	database itself refuses at the write; see the module docstring.
 
 	`badge_policy` (v0.50.0) DECIDES WHAT AN UNRESOLVABLE BADGE MEANS.
 	`lenient`, the default, is the v0.44.0 behaviour: the capture is filed with
@@ -422,16 +486,41 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 		doc.h3_cell = str(entry.get("h3_cell") or "").strip() or None
 		doc.device_id = str(entry.get("device_id") or "").strip() or None
 		doc.flags.ignore_permissions = True
+		savepoint = _savepoint()
 		try:
 			doc.insert(ignore_permissions=True)
-		except frappe.exceptions.UniqueValidationError:
-			# The `existing` set above is a snapshot from before this loop ran —
-			# it cannot see a row a CONCURRENT retry of this same batch inserted
-			# a moment ago. That race is real: a phone that timed out waiting for
-			# a response and resent the batch is the ordinary case, not an
-			# exotic one. Losing that race is not a failure to report, it is the
-			# duplicate this function already promises to skip.
-			duplicates.append(entry_uuid)
+		except Exception as exc:
+			_rollback_to(savepoint)
+			if _is_duplicate(exc):
+				# The `existing` set above is a snapshot from before this loop ran —
+				# it cannot see a row a CONCURRENT retry of this same batch inserted
+				# a moment ago. That race is real: a phone that timed out waiting for
+				# a response and resent the batch is the ordinary case, not an
+				# exotic one. Losing that race is not a failure to report, it is the
+				# duplicate this function already promises to skip.
+				duplicates.append(entry_uuid)
+				continue
+			# ONE ENTRY THE COLUMN REFUSES MUST NOT COST THE OTHER THIRTY. Until
+			# v0.59.2 this clause named `UniqueValidationError` and nothing else,
+			# so anything the insert raised for any other reason left the loop and
+			# came back as a 500 with no per-entry detail — and the queue on the
+			# handset, which retries a batch that failed, resent the same poison
+			# entry with the same thirty good ones behind it, forever. That is
+			# exactly how the ISO-8601 timestamp bug presented: a payload every
+			# check in this app approved, refused by MariaDB at the write.
+			#
+			# `invalid` is the channel this function already promises for "we
+			# could not file this one, here is why", and `BucketSyncResult`
+			# already decodes it and shows it on the capture screen. The message
+			# carries the exception's class as well as its text because a
+			# DataError and a TimestampError read very differently to whoever gets
+			# handed the screenshot.
+			invalid.append(
+				{
+					"entry_uuid": entry_uuid or None,
+					"errors": [f"could not be filed: {type(exc).__name__}: {exc}"],
+				}
+			)
 			continue
 
 		created.append(_describe_entry(doc))

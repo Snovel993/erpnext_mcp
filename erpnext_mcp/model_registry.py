@@ -58,12 +58,22 @@ straight off Volume Vision without either path getting its own parser.
 
 from __future__ import annotations
 
-import datetime
 import io
 import json
 import posixpath
 import re
 import zipfile
+
+# `as_mariadb_datetime` LIVES IN `datetimes.py` NOW AND IS RE-EXPORTED HERE.
+# v0.59.1 wrote it in this module because the failing case was Volume Vision's
+# `training_completed_at`; v0.59.2 found the same rule wanted at a second
+# boundary — an iPhone's `ISO8601DateFormatter` stamping a bucket capture — and
+# `api/mobile.py` importing the ML model registry to convert a timestamp would
+# have claimed a dependency that is not one. The name stays reachable here
+# because `reconcile_bundle_manifest` below and `tools/ml_model.py` already
+# call it, and because `MARIADB_DATETIME_FORMAT` is this module's own answer to
+# "what shape does a Datetime column want".
+from .datetimes import MARIADB_DATETIME_FORMAT, as_mariadb_datetime  # noqa: F401
 
 STATUS_DRAFT = "Draft"
 STATUS_ACTIVE = "Active"
@@ -123,22 +133,6 @@ MANIFEST_SOURCE_RECORD = "class_names source: entered on this site — no bundle
 _VERSION_PATTERN = re.compile(r"^\d+(\.\d+){0,3}$")
 _UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
-#: An ISO 8601 timestamp as Volume Vision's exporter writes one, and as a
-#: `Datetime` column will not take one: `2026-07-08T02:38:43Z`. Date and time
-#: are matched separately from the offset so the offset can be applied rather
-#: than discarded. Written out rather than left to `datetime.fromisoformat`
-#: because that function did not accept a trailing `Z` before Python 3.11 and
-#: this app supports 3.10, which is exactly the input that produced the bug.
-_ISO_DATETIME_PATTERN = re.compile(
-    r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})"
-    r"(?:[T ](?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?(?:\.\d+)?)?"
-    r"\s*(?P<offset>[Zz]|[+-]\d{2}:?\d{2})?$"
-)
-
-#: What MariaDB's DATETIME takes, and what every Frappe `Datetime` column is
-#: written in.
-MARIADB_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-
 
 def _clean(value) -> str:
     return str(value or "").strip()
@@ -178,70 +172,6 @@ def metrics_of(model_doc: dict) -> dict:
     """`metrics` read as a dict, or `{}` if absent or unparseable."""
     parsed, _error = _parse_json_value((model_doc or {}).get("metrics"), dict)
     return parsed if parsed is not None else {}
-
-
-def as_mariadb_datetime(value) -> str:
-    """`value` as `YYYY-MM-DD HH:MM:SS`, or `""` when it is not a timestamp.
-
-    THIS IS WHY IT EXISTS. Volume Vision writes `training_completed_at` into a
-    manifest the way every JSON producer does — ISO 8601, `2026-07-08T02:38:43Z`
-    — and MariaDB answers a `Datetime` column set to that string with
-    `OperationalError (1292, "Incorrect datetime value")`, which surfaces as a
-    failed pull with the model already downloaded and nothing to show for it.
-    The `T` and the zone designator are the whole problem; the instant is fine.
-
-    AN OFFSET IS APPLIED, NOT DISCARDED. `2026-07-08T04:38:43+02:00` becomes
-    `2026-07-08 02:38:43`, so the column holds one zone (UTC) for every bundle
-    rather than whichever zone the training box happened to be in. A `Datetime`
-    column has nowhere to put a zone, and the alternative — keeping the wall
-    clock and dropping the offset — stores two timestamps three hours apart as
-    if they were the same moment. A value with NO offset is taken as written,
-    because there is nothing else it could mean.
-
-    RETURNS `""` RATHER THAN RAISING for anything unreadable. This module is
-    pure and its caller is a reconcile that has already downloaded a model;
-    `reconcile_bundle_manifest` turns the empty string into a warning and leaves
-    the field alone, which is a bundle attached with one field unset rather than
-    a pull that fails after the transfer.
-    """
-    if isinstance(value, datetime.datetime):
-        value = value.replace(microsecond=0)
-        return (
-            value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
-            if value.tzinfo
-            else value
-        ).strftime(MARIADB_DATETIME_FORMAT)
-    if isinstance(value, datetime.date):
-        return datetime.datetime(value.year, value.month, value.day).strftime(MARIADB_DATETIME_FORMAT)
-
-    text = _clean(value)
-    if not text:
-        return ""
-    match = _ISO_DATETIME_PATTERN.match(text)
-    if not match:
-        return ""
-
-    parts = match.groupdict()
-    try:
-        stamp = datetime.datetime(
-            int(parts["year"]),
-            int(parts["month"]),
-            int(parts["day"]),
-            int(parts["hour"] or 0),
-            int(parts["minute"] or 0),
-            int(parts["second"] or 0),
-        )
-    except ValueError:
-        # A well-shaped string naming a day that does not exist — 2026-02-30,
-        # or hour 25. The pattern cannot catch those and the calendar can.
-        return ""
-
-    offset = parts["offset"] or ""
-    if offset and offset not in ("Z", "z"):
-        sign = -1 if offset[0] == "-" else 1
-        digits = offset[1:].replace(":", "")
-        stamp -= sign * datetime.timedelta(hours=int(digits[:2]), minutes=int(digits[2:4]))
-    return stamp.strftime(MARIADB_DATETIME_FORMAT)
 
 
 def bundle_manifest_of(model_doc: dict) -> dict:

@@ -86,7 +86,7 @@ import base64
 
 import frappe
 
-from .. import bucket_bridge, compat
+from .. import bucket_bridge, compat, datetimes
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
 from ..tools import files as file_tools
@@ -305,6 +305,38 @@ def _bucket_entries(raw, company: str) -> list:
 	picker directly would be able to move somebody else's piece-rate onto its own
 	badge without ever touching the map an operator reads.
 
+	THE TIMESTAMP IS CONVERTED, NOT PASSED THROUGH — v0.59.2, AND IT IS WHY NOT
+	ONE BUCKET ENTRY HAD EVER SYNCED FROM A HANDSET. `BadgeAPI.payload` stamps
+	every capture with an `ISO8601DateFormatter` set to `.withInternetDateTime`
+	in UTC, so the wire carries `2026-08-11T07:12:00Z`. Bucket Log Entry's
+	`timestamp` is a Frappe `Datetime`, which is a MariaDB DATETIME, which
+	answers that string with `OperationalError (1292, "Incorrect datetime
+	value")`. The failure was invisible from both ends: `validate_bucket_entry`
+	APPROVED the string (`bucket_bridge._parse_dt` splits the `T` and drops the
+	`Z` quite happily), so the entry got past every check this app makes and
+	then died at the insert, and the whole batch came back a 500 — the same
+	shape as v0.59.1's model pull, at the other boundary where something that
+	speaks JSON writes a timestamp into a Datetime column.
+
+	A value that will not convert is handed back UNCHANGED rather than blanked.
+	`as_mariadb_datetime` answers `""` for anything unreadable, and a blank
+	timestamp reaches the validator as "timestamp is required", which tells the
+	phone the field was missing when in fact it was unreadable. Passing the
+	original through gets the entry the message that names the value.
+
+	`capture_mode` AND `auto_verdict` ARE SENT AND ARE DROPPED HERE, KNOWINGLY.
+	`BadgeAPI.payload` writes both on every row so the farm can answer "how many
+	of this season's buckets did a model actually look at" — `auto_verdict` is
+	`BucketEntry.AutoVerdict` (full/not_full/manual_override/timeout/
+	manual_tally) and `capture_mode` is the "Badge Only" / "ML Verified" split
+	derived from it. Bucket Log Entry has no column for either, so they are not
+	read: forwarding a key the doctype has no field for would be dropped by
+	Frappe anyway, one layer further in and without this note. Neither is an
+	input to pay — the verdict is the only field that decides that — so nothing
+	is owed a picker while they are unstored. Adding the two fields is a
+	doctype change with a patch behind it, deliberately not bundled with a
+	datetime fix.
+
 	The rest is a rename. `FarmOpsKit/Capture/BucketEntry.swift` encodes `id`,
 	`session_id`, `badge_id` and `accepted`; the doctype's columns are
 	`entry_uuid`, `session_uuid`, `worker_badge` and `verdict`. Both spellings are
@@ -333,12 +365,16 @@ def _bucket_entries(raw, company: str) -> list:
 		verdict = str(entry.get("verdict") or "").strip()
 		if not verdict and entry.get("accepted") is not None:
 			verdict = "Accepted" if entry.get("accepted") in (True, 1, "1", "true", "True") else "Rejected"
+		# ISO 8601 in, MariaDB DATETIME out. See the docstring: the raw value is
+		# kept when it will not convert, so the refusal names the value rather
+		# than reporting a field the phone did send as missing.
+		timestamp = entry.get("timestamp")
 		row = {
 			"company": company,
 			"entry_uuid": str(entry.get("entry_uuid") or entry.get("id") or "").strip(),
 			"session_uuid": str(entry.get("session_uuid") or entry.get("session_id") or "").strip(),
 			"worker_badge": str(entry.get("worker_badge") or entry.get("badge_id") or "").strip(),
-			"timestamp": entry.get("timestamp"),
+			"timestamp": datetimes.as_mariadb_datetime(timestamp) or timestamp,
 			"verdict": verdict,
 		}
 		for key in ("coverage_percent", "gps_lat", "gps_lon"):
