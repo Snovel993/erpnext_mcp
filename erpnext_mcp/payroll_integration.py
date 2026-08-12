@@ -894,6 +894,7 @@ def build_payroll_inputs(
 	fica_config: dict,
 	federal_tax_tables=None,
 	state_tax_tables: dict | None = None,
+	min_wage_rates: dict | None = None,
 	pay_frequency: str = "Biweekly",
 	ytd_by_employee: dict | None = None,
 ) -> list[dict]:
@@ -962,6 +963,11 @@ def build_payroll_inputs(
 					"ytd_ss_withheld": _as_float(ytd.get("ytd_ss_withheld")),
 					"state_configs": dict(state_configs or {}),
 					"state_tax_tables": dict(state_tax_tables or {}),
+					# v0.63.0. The wage floor for this run, off the site's own
+					# State Tax Configurations. None means the engine falls back
+					# to `payroll_calc.MINIMUM_WAGE_RATES`, which is what every
+					# caller got before a table existed to configure.
+					"min_wage_rates": dict(min_wage_rates or {}) or None,
 				},
 				"aggregate": aggregate,
 				"min_wage_regions": structure.get("min_wage_regions") or {},
@@ -1023,6 +1029,7 @@ def run_integrated_payroll(
 	company: str = "",
 	federal_tax_tables=None,
 	state_tax_tables: dict | None = None,
+	min_wage_rates: dict | None = None,
 	pay_frequency: str = "Biweekly",
 	ytd_by_employee: dict | None = None,
 	overtime_threshold: float = OVERTIME_THRESHOLD_HOURS,
@@ -1069,6 +1076,7 @@ def run_integrated_payroll(
 		fica_config,
 		federal_tax_tables=federal_tax_tables,
 		state_tax_tables=state_tax_tables,
+		min_wage_rates=min_wage_rates,
 		pay_frequency=pay_frequency,
 		ytd_by_employee=ytd_by_employee,
 	)
@@ -1092,6 +1100,14 @@ def run_integrated_payroll(
 			aggregate.get("hours_by_state") or {},
 			wages_by_state,
 			item.get("min_wage_regions"),
+			# v0.63.0. THE SAME TABLE THE ENGINE PAID FROM. Without this the
+			# independent check would test against the SHIPPED rates while the
+			# engine paid the site's configured ones — so a farm that raised its
+			# own floor would see every topped-up slip flagged as below the
+			# minimum, and a farm whose configured rate was lower would see
+			# nothing flagged that should be. A cross-check reading a different
+			# table from the thing it checks is not a cross-check.
+			min_wage_rates=(item.get("tax_config") or {}).get("min_wage_rates"),
 			overtime_hours_by_state=aggregate.get("overtime_hours_by_state") or {},
 		)
 		# What the floor added, on the slip and per state, so a report can show it

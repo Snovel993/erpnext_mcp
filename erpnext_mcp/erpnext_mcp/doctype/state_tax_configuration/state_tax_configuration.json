@@ -39,7 +39,13 @@
   "wa_li_section",
   "wa_li_rate_employee",
   "wa_li_col",
-  "wa_li_rate_employer"
+  "wa_li_rate_employer",
+  "min_wage_section",
+  "minimum_wage",
+  "minimum_wage_effective_from",
+  "min_wage_col",
+  "minimum_wage_non_urban",
+  "minimum_wage_portland_metro"
  ],
  "fields": [
   {
@@ -264,6 +270,43 @@
    "fieldtype": "Percent",
    "label": "L&I Employer Rate",
    "description": "Varies by risk class. Employer-entered."
+  },
+  {
+   "description": "The wage floor these hours are owed. It lives HERE rather than in a settings page of its own because a minimum wage is a fact about a state in a year, which is exactly what this record already is — one row per company, state and tax year. Leave every field below at zero and the shipped table applies (Oregon $14.70 standard / $13.70 non-urban / $15.95 Portland metro, Washington $16.66); set one and it wins for this company, this state and this year. That is what makes a July rate change a row somebody edits instead of a release.",
+   "fieldname": "min_wage_section",
+   "fieldtype": "Section Break",
+   "label": "Minimum Wage"
+  },
+  {
+   "default": "0",
+   "description": "The standard hourly floor for this state. Zero means 'not set here' and the shipped table applies — NOT 'this state has no minimum wage', which is a thing no state in this app is. The floor is PAID and not merely reported: gross pay is the greater of what the work earned and what the hours were owed, and the difference appears on the slip as `minimum_wage_makeup`.",
+   "fieldname": "minimum_wage",
+   "fieldtype": "Currency",
+   "label": "Minimum Wage (Standard)"
+  },
+  {
+   "description": "When this rate took effect, for the record. NOT read by the payroll engine, which selects the configuration by TAX YEAR — a rate change mid-year needs the row for that year updated, and this column is what tells the next person reading it which change they are looking at.",
+   "fieldname": "minimum_wage_effective_from",
+   "fieldtype": "Date",
+   "label": "Minimum Wage Effective From"
+  },
+  {
+   "fieldname": "min_wage_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "OREGON ONLY. ORS 653.025 sets three rates by geography, and this is the non-urban counties one. Leave it at zero in any other state — a worker's region is named on their salary structure, and a region a state does not define falls back to the standard rate rather than to nothing.",
+   "fieldname": "minimum_wage_non_urban",
+   "fieldtype": "Currency",
+   "label": "Minimum Wage (Non-Urban)"
+  },
+  {
+   "default": "0",
+   "description": "OREGON ONLY. The Portland metro rate under ORS 653.025 — the highest of the three, and the one that applies to work inside the urban growth boundary. Same rule as above: zero means not set, and a state with no such region ignores it.",
+   "fieldname": "minimum_wage_portland_metro",
+   "fieldtype": "Currency",
+   "label": "Minimum Wage (Portland Metro)"
   }
  ],
  "index_web_pages_for_search": 0,

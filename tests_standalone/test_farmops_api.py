@@ -251,6 +251,14 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/set_employee_contact_fields",
 		"/mobile/list_attachments",
 		"/mobile/get_attachment_content",
+		# v0.63.0. The two ends of the signing flow. `get_document_preview` is the
+		# route `API_CONTRACT.md` §17.5 asked for by name — the presentation step
+		# had no way to render the page, because both renderers answer with a
+		# private `file_url` and this door cannot follow one. `seal_signed_document`
+		# is step 5 of the same chain, published for the forms the automatic seal
+		# on `submit_form_signature` cannot reach.
+		"/mobile/get_document_preview",
+		"/mobile/seal_signed_document",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

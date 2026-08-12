@@ -92,6 +92,7 @@ from .tools import (
 	sessions,
 	shifts,
 	signatures,
+	signed_documents,
 	signers,
 	signing_evidence,
 	state_tax,
@@ -9695,6 +9696,85 @@ TOOLS = {
 		requires="the Signing Evidence doctype (run bench migrate after installing v0.60.0)",
 		title="Get signing evidence",
 	),
+	# ── v0.63.0: the document either side of the signature ────────────────
+	"get_document_preview": _tool(
+		signed_documents.get_document_preview,
+		"The rendered federal form as BYTES, so the person about to sign it can be "
+		"shown it first. Read-only in every sense that matters: no signature is "
+		"taken, no signature column is written, the evidence register is not "
+		"touched.\n\n"
+		"STEP 1 OF THE SIGNING EVIDENCE CHAIN — the signer saw the document. The iOS "
+		"app could not take it: both renderers answer with a PRIVATE file_url, the "
+		"handset authenticates to the FarmOps sidecar rather than to Frappe, and a "
+		"private URL is a login page to it. So the page travels as base64 in the "
+		"answer, under `content`, `content_base64` and `base64` — three spellings of "
+		"one string, so a client written against any of them reads it.\n\n"
+		"IT WILL DRAW THE PAGE ONCE where the record has none, which on a fresh I-9 "
+		"is every time. It will NOT silently replace one that exists: `stale` says "
+		"whether the record has changed since the page was drawn, and `refresh=true` "
+		"is how a caller asks for a redraw. Showing a stale page to a signer means "
+		"hashing something other than what they read.\n\n"
+		"`signature_boxes` lists what can be signed on this form, whether each box "
+		"already carries a signature, and the VERBATIM attestation for each — the "
+		"government's own sentence, never a paraphrase.",
+		{
+			"document_type": _field(
+				_STRING,
+				"The form: 'I-9 Form', 'W-4 Form' or 'Tax Form'. Takes the same aliases the "
+				"signature tools take ('i9', 'w-4', '941').",
+			),
+			"document_name": _field(
+				_STRING, "The record to preview, e.g. 'I9-2026-0001'. Or name the employee instead."
+			),
+			"employee": _field(
+				_STRING, "Find the form by the person it belongs to, where the docname is not to hand."
+			),
+			"refresh": _field(
+				_BOOLEAN,
+				"Redraw the page from the record before returning it. Default false — the page "
+				"already on the record is handed back, with `stale` saying whether it is current.",
+			),
+		},
+		required=("document_type",),
+		title="Preview a federal form",
+	),
+	"seal_signed_document": _tool(
+		signed_documents.seal_signed_document,
+		"MUTATING. Produce the tamper-evident copy of a form that has ALREADY been "
+		"signed, and file its hash on the evidence register. It writes a new File on "
+		"the document and three columns on every Signing Evidence row for it; it "
+		"collects no signature and alters none.\n\n"
+		"STEP 5 OF THE CHAIN. The form is redrawn — which stamps every captured "
+		"signature into the page CONTENT at the government's own signature "
+		"rectangles and flattens the AcroForm away, so there is no annotation to "
+		"delete and no field to clear — and a verification page is appended naming, "
+		"for each signature: the signer, the badge scanned, how identity was "
+		"established, the moment, the device, the coordinates and the fingerprint of "
+		"the record as it stood when it was presented. A SHA-256 of the finished file "
+		"goes onto the evidence rows, because it cannot be printed on the file it is "
+		"taken over.\n\n"
+		"AN UNSIGNED FORM IS REFUSED. A verification page on a form nobody signed is "
+		"an official-looking appendix that vouches for nothing, and somebody would "
+		"file it. A signed form with NO evidence row — every signature collected "
+		"before v0.60.0 — is sealed anyway, with the page saying in as many words "
+		"that the identity, device and location were never captured.\n\n"
+		"It does not repoint `generated_pdf`: that is the working page somebody "
+		"prints, this is the retained artefact, and no sealed copy is ever deleted. "
+		"submit_form_signature takes this step automatically, so the ordinary flow "
+		"never calls this — it is for a form signed before v0.63.0, or one whose "
+		"second signature arrived through the Desk.",
+		{
+			"document_type": _field(
+				_STRING, "The form: 'I-9 Form', 'W-4 Form' or 'Tax Form'. Same aliases as above."
+			),
+			"document_name": _field(_STRING, "The signed record to seal, e.g. 'I9-2026-0001'."),
+			"employee": _field(_STRING, "Find the form by the person it belongs to."),
+		},
+		required=("document_type",),
+		mutating=True,
+		idempotent=False,
+		title="Seal a signed document",
+	),
 	# ── v0.48.0: who may sign a federal employment form ───────────────────
 	"list_authorized_signers": _tool(
 		signers.list_authorized_signers,
@@ -10158,6 +10238,23 @@ TOOLS = {
 			"wa_cares_exempt_employees": _field(_STRING, "Comma-separated employee IDs who opted out."),
 			"wa_li_rate_employee": _field(_NUMBER, "L&I employee rate, varies by risk class."),
 			"wa_li_rate_employer": _field(_NUMBER, "L&I employer rate, varies by risk class."),
+			"minimum_wage": _field(
+				_NUMBER,
+				"The standard hourly wage floor for this state. Leave unset and the shipped "
+				"table applies (OR $14.70, WA $16.66); set it and it wins for this company, "
+				"state and tax year — which is what makes a rate change a row rather than a "
+				"release. Zero means 'not set here', never 'the floor is zero'.",
+			),
+			"minimum_wage_non_urban": _field(
+				_NUMBER,
+				"OREGON ONLY. The non-urban counties rate under ORS 653.025. A worker is on it "
+				"when their salary structure's min_wage_region says Non-Urban.",
+			),
+			"minimum_wage_portland_metro": _field(
+				_NUMBER,
+				"OREGON ONLY. The Portland metro rate under ORS 653.025 — the highest of the "
+				"three, for work inside the urban growth boundary.",
+			),
 		},
 		required=("state", "tax_year"),
 		mutating=True,
@@ -10188,6 +10285,23 @@ TOOLS = {
 			"wa_cares_exempt_employees": _field(_STRING, "Updated exempt employees list."),
 			"wa_li_rate_employee": _field(_NUMBER, "New L&I employee rate."),
 			"wa_li_rate_employer": _field(_NUMBER, "New L&I employer rate."),
+			"minimum_wage": _field(
+				_NUMBER,
+				"The standard hourly wage floor for this state. Leave unset and the shipped "
+				"table applies (OR $14.70, WA $16.66); set it and it wins for this company, "
+				"state and tax year — which is what makes a rate change a row rather than a "
+				"release. Zero means 'not set here', never 'the floor is zero'.",
+			),
+			"minimum_wage_non_urban": _field(
+				_NUMBER,
+				"OREGON ONLY. The non-urban counties rate under ORS 653.025. A worker is on it "
+				"when their salary structure's min_wage_region says Non-Urban.",
+			),
+			"minimum_wage_portland_metro": _field(
+				_NUMBER,
+				"OREGON ONLY. The Portland metro rate under ORS 653.025 — the highest of the "
+				"three, for work inside the urban growth boundary.",
+			),
 		},
 		required=("state", "tax_year"),
 		mutating=True,
@@ -10251,7 +10365,23 @@ TOOLS = {
 		"Dry-run payroll calculation for a single employee over a date range. "
 		"Shows gross pay, all deductions (federal, state, FICA), and net pay "
 		"WITHOUT creating any records. Uses the employee's active salary "
-		"structure, W-4, and shifts in the period. Read-only.",
+		"structure, W-4, and shifts in the period. Read-only.\n\n"
+		"`minimum_wage` IS THE BLOCK TO READ ON A PIECE-RATE WORKER. The floor is "
+		"PAID rather than reported: gross is the greater of what the buckets earned "
+		"and what the hours were owed, per state and with the overtime premium "
+		"carried, and `minimum_wage.makeup` is the difference. A slip with makeup on "
+		"it was paid lawfully — the makeup is the number that says the RATE is set "
+		"below what the hours are worth, and it recurs every period until somebody "
+		"changes it. `compliant` and `makeup` are deliberately two different facts; "
+		"conflating them would either report every underpriced bucket as a violation "
+		"or hide it entirely.\n\n"
+		"`minimum_wage.rates` is the floor table this preview used and "
+		"`configured_states` names the states that took it from their own State Tax "
+		"Configuration rather than from the shipped default — which is the answer to "
+		"'the floor is not what I set it to'. `region` is the worker's own, off "
+		"their salary structure. A Salary structure is NOT topped up and says so: "
+		"whether a salaried employee is exempt is a fact about their job this app "
+		"does not hold.",
 		{
 			"employee": _field(_STRING, "Employee docname or employee_name."),
 			"employee_name": _field(_STRING, "Alias for employee."),
@@ -10309,6 +10439,14 @@ TOOLS = {
 				"tractor time — read only for a shift whose own pay_type says Hourly. "
 				"Leave unset for a worker who only ever does one kind of work.",
 			),
+			"min_wage_region": _field(
+				_STRING,
+				"Standard, Non-Urban or Portland Metro. Which of a state's geographic minimum "
+				"wage rates these hours are owed — Oregon sets three under ORS 653.025, "
+				"Washington sets one, so every Washington worker is Standard and so is most of "
+				"Oregon. Defaults to Standard. A region the worker's state does not define falls "
+				"back to that state's standard rate.",
+			),
 			"effective_from": _field(_STRING, "Start date as YYYY-MM-DD. Defaults to today."),
 			"effective_to": _field(_STRING, "End date as YYYY-MM-DD. Leave blank for open-ended."),
 			"notes": _field(_STRING, "Optional notes."),
@@ -10340,7 +10478,20 @@ TOOLS = {
 		"MUTATING (default OFF). Generate a full payroll entry for a pay "
 		"period. Creates a Farm Payroll Entry in Calculated status with one "
 		"slip per active employee who has a salary structure. Each slip "
-		"includes gross pay, federal and state withholding, FICA, and net pay.",
+		"includes gross pay, federal and state withholding, FICA, and net pay.\n\n"
+		"THE ENTRY IS A DRAFT AND `minimum_wage` IS WHAT TO READ BEFORE SUBMITTING "
+		"IT. The wage floor is PAID, not merely compared against: gross is the "
+		"greater of what the work earned and what the hours were owed, per state, "
+		"with the overtime premium carried. `minimum_wage.topped_up` names the "
+		"workers whose pay had to be raised to reach it and `total_makeup` is what "
+		"that cost — a piece rate that needs makeup every period is set below what "
+		"the hours are worth, and the employer carries the difference on every one "
+		"of them. `minimum_wage.below_floor` should be empty; a row in it on a "
+		"piece-rate or hourly slip usually means a shift carries no work_state, so "
+		"no legislature and no floor applies to it.\n\n"
+		"The rates come from each State Tax Configuration's own minimum wage "
+		"columns where they are set, and from the shipped table otherwise — so a "
+		"rate change is a row somebody edits rather than a release.",
 		{
 			"company": _COMPANY,
 			"pay_period_start": _field(_STRING, "Start date as YYYY-MM-DD."),

@@ -198,6 +198,13 @@ DETAIL_FIELDS = (
 	"ip_address",
 	"gps_latitude",
 	"gps_longitude",
+	# v0.63.0. The tamper-evident copy this attestation appears in, and the hash
+	# of its finished bytes. Read through `existing_fields` like everything else
+	# here, so a site that has not migrated past v0.60.0 reports the row without
+	# them rather than failing the query.
+	"sealed_pdf",
+	"sealed_pdf_hash",
+	"sealed_at",
 )
 
 
@@ -706,6 +713,12 @@ def get_signing_evidence(args: dict) -> ToolResult:
 	data["tamper_check"] = verify_fingerprint(data)
 	data["superseded_by"] = _superseded_by(name)
 	data["identity_verified"] = bool(str(row.get("verification_method") or "").strip())
+	# v0.63.0. Whether step 5 has happened for this attestation. Reported as its
+	# own boolean rather than left to be inferred from a URL, because "there is a
+	# sealed copy" and "the document still hashes to what was signed" are the two
+	# halves of tamper-evidence and a reader should not have to know that an empty
+	# Attach field means the first one is missing.
+	data["sealed"] = bool(str(row.get("sealed_pdf") or "").strip())
 	data["gps"] = (
 		{"latitude": row.get("gps_latitude"), "longitude": row.get("gps_longitude")}
 		if row.get("gps_latitude") or row.get("gps_longitude")

@@ -818,10 +818,16 @@ class Catalogue(SeededTestCase):
 		`wage_defaults.py` is pure — the lookup order takes rows and returns
 		answers, so it is testable without a bench — and `tools/wagedefaults.py`
 		is the only place that reads or writes either doctype.
+
+		v0.63.0 adds the two ends of the signing flow: `get_document_preview`,
+		which hands the page a signer has to be SHOWN back as bytes because the
+		handset authenticates to the sidecar and cannot follow a private
+		`file_url`, and `seal_signed_document`, which appends the verification
+		page and hashes the finished file. One read, one write.
 		"""
-		self.assertEqual(len(registry.TOOLS), 410)
-		self.assertEqual(len(registry.READ_TOOLS), 187)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 223)
+		self.assertEqual(len(registry.TOOLS), 412)
+		self.assertEqual(len(registry.READ_TOOLS), 188)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 224)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

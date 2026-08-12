@@ -287,6 +287,22 @@ ROUTES = (
 	# a login page).
 	Route("/mobile", mobile_api.list_attachments),
 	Route("/mobile", mobile_api.get_attachment_content),
+	# v0.63.0. THE TWO ENDS OF THE SIGNING FLOW THE SERVER NEVER SERVED.
+	#
+	# `get_document_preview` is step 1 of the evidence chain — the signer saw the
+	# form — and `API_CONTRACT.md` §17.5 is the whole argument for it: both
+	# renderers answer with a private `file_url`, this door authenticates with
+	# `X-FarmOps-Token` rather than to Frappe, so the app could show the COMPLETED
+	# page after signing and not the blank one before. §17.5 called that a
+	# server-side gap and said the fix is one route. The bytes travel in the
+	# answer, exactly as the signed page and the `.pkpass` do.
+	#
+	# `seal_signed_document` is step 5, published so a handset can take it for the
+	# two cases `submit_form_signature` cannot — a form signed before v0.63.0, and
+	# one whose second signature came through the Desk. The ordinary flow never
+	# calls it: the signature route seals what it just signed.
+	Route("/mobile", mobile_api.get_document_preview),
+	Route("/mobile", mobile_api.seal_signed_document),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

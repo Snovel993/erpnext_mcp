@@ -304,8 +304,19 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: over a task's `subject_docname`, which `MobileAPI.swift` does not name
 	#: yet. Listed here rather than in `MOBILE` so this file keeps claiming only
 	#: what the Swift actually calls.
+	#: v0.63.0 adds `get_document_preview` and `seal_signed_document` on the same
+	#: footing, and the first of the two is unusual in that the CONTRACT asked for
+	#: it before the client could call it: `API_CONTRACT.md` §17.5 names the
+	#: presentation step as a server-side gap and says "the fix is one route".
+	#: This is that route, and `MobileAPI.swift` does not name it yet — the
+	#: handset side is a viewer on the `.reviewing` step, which is separate,
+	#: tracked work. `seal_signed_document` may never need naming at all: the
+	#: ordinary flow gets its seal from `submit_form_signature`, and this method
+	#: exists for a form signed before v0.63.0 or one signed in the Desk.
 	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
 		"collect_signature",
+		"get_document_preview",
+		"seal_signed_document",
 		"get_active_model",
 		"get_model_file_chunk",
 		"get_employee_badge_pass",

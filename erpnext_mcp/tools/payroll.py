@@ -38,7 +38,10 @@ from .. import bucket_bridge, compat, payroll_integration, wage_defaults
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..payroll_calc import (
+	MIN_WAGE_REGION_KEYS,
 	calculate_full_payroll,
+	normalise_min_wage_region,
+	state_min_wage_rates,
 )
 from ..result import ToolResult
 from ..state_withholding import SUPPORTED_STATES
@@ -106,6 +109,48 @@ def _structure_activity_fields() -> list:
 	payday.
 	"""
 	return compat.existing_fields(SALARY_STRUCTURE, ("piecework_activity",))
+
+
+#: The region key → the Select option as the doctype spells it. The inverse of
+#: `payroll_calc.MIN_WAGE_REGION_KEYS`, kept here rather than there because the
+#: label is a fact about the doctype and the key is a fact about the rate table.
+_REGION_LABELS = {
+	"standard": "Standard",
+	"non_urban": "Non-Urban",
+	"portland_metro": "Portland Metro",
+}
+
+
+def _structure_region_fields() -> list:
+	"""`min_wage_region` where the site has migrated to v0.63.0, else nothing.
+
+	The same posture `_structure_activity_fields` takes, and the same reason: a
+	site that has not run `bench migrate` reads exactly as it did before, and every
+	worker on it is owed the standard rate — which is what `normalise_min_wage_region`
+	returns for a value that is not there.
+	"""
+	return compat.existing_fields(SALARY_STRUCTURE, ("min_wage_region",))
+
+
+def _min_wage_regions(structure: dict, rates: dict) -> dict:
+	"""`{"OR": "portland_metro", "WA": "portland_metro"}` for one salary structure.
+
+	THE SAME REGION AGAINST EVERY STATE, WHICH LOOKS WRONG AND IS NOT. The engine
+	asks `min_wage_regions.get(state, "standard")` per state and then
+	`applicable_minimum_wage` looks that region up in THAT STATE's own rates,
+	falling back to its standard where the key is absent. Washington defines one
+	rate, so a Portland-metro worker who spent a week over the river is owed
+	Washington's standard $16.66 — which is exactly what naming the region against
+	both states produces, with no per-state table on the structure and no branch
+	here that would have to know which states have regions.
+
+	A structure with no region — every one on a site that has not migrated — gets
+	`standard` everywhere, which is the pre-v0.63.0 behaviour unchanged.
+	"""
+	region = normalise_min_wage_region(structure.get("min_wage_region"))
+	if region == "standard":
+		return {}
+	return {state: region for state in (rates or {})}
 
 
 def _resolve_piece_rates(structures: dict, company: str, on_date: str) -> tuple[dict, list]:
@@ -366,6 +411,7 @@ def preview_payroll(args: dict) -> ToolResult:
 			"employee_name",
 			*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
 			*_structure_activity_fields(),
+			*_structure_region_fields(),
 		],
 		as_dict=True,
 	)
@@ -398,9 +444,16 @@ def preview_payroll(args: dict) -> ToolResult:
 			"base_rate": _num(structure.get("base_rate")),
 			"hourly_rate": ss.get("hourly_rate"),
 			"name": ss_name,
+			# v0.63.0. WHICH of the state's floors this worker's hours are owed.
+			# Declared by the engine since v0.49.0 and supplied by nobody, so
+			# Oregon's Portland metro rate — the highest of the three, and the one
+			# an orchard inside the urban growth boundary is on — was unreachable
+			# from any tool in this app.
+			"min_wage_regions": _min_wage_regions(structure, tax_config.get("min_wage_rates")),
 		},
 		tax_config,
 	)
+	result = _with_minimum_wage_view(result, tax_config, structure)
 
 	# Where the piece rate came from, on the preview that used it. "Why is this
 	# picker on $1.30" should be answerable off the preview rather than by opening
@@ -416,11 +469,101 @@ def preview_payroll(args: dict) -> ToolResult:
 			f"{structure.get('piecework_activity') or 'this activity'} in force on {pay_period_end}."
 		)
 
+	makeup = _num(result.get("minimum_wage_makeup"))
 	return ToolResult(
 		data=result,
 		summary=f"Payroll preview for {employee_name}: gross ${result['gross_pay']}, "
-		f"net ${result['net_pay']}, {len(shifts)} shift(s)",
+		f"net ${result['net_pay']}, {len(shifts)} shift(s)"
+		# ON THE SUMMARY LINE, NOT ONLY IN THE DATA. A makeup is the number that
+		# says a piece rate is set below the lawful floor, and the whole reason a
+		# preview exists is to be READ before anybody posts. It has been in the
+		# answer since v0.49.0 and in a nested key nobody opens.
+		+ (
+			f" — ${makeup:,.2f} of that is minimum wage makeup, so this rate did not "
+			f"clear the floor on its own"
+			if makeup > 0.005
+			else ""
+		),
 	)
+
+
+def _with_minimum_wage_view(slip: dict, tax_config: dict, structure: dict) -> dict:
+	"""One slip plus the `minimum_wage` block a person reads before posting.
+
+	WHY A BLOCK RATHER THAN MORE TOP-LEVEL KEYS. The engine already answers
+	`minimum_wage_makeup`, `minimum_wage_by_state`, `minimum_wage_check` and
+	`effective_hourly_rate`, and all four have been in every preview since
+	v0.49.0. What none of them says is WHERE THE FLOOR CAME FROM — which is the
+	question somebody asks the moment they disagree with the number, and until
+	v0.63.0 it had one answer on every site because the table was compiled in.
+	Now it is a row somebody can edit, so the preview has to say which row.
+
+	`compliant` IS THE VERDICT AND IT IS TRUE ON A TOPPED-UP SLIP, which is not a
+	contradiction: the higher-of rule PAYS the floor, so a slip that needed makeup
+	is compliant BECAUSE the makeup is on it. `makeup` is the number that says the
+	RATE is too low. A reader who wants "is this lawful" reads the first; a reader
+	who wants "is our piece rate right" reads the second, and conflating them would
+	either report every underpriced bucket as a violation or hide it entirely.
+	"""
+	out = dict(slip)
+	rates = tax_config.get("min_wage_rates") or {}
+	region = normalise_min_wage_region(structure.get("min_wage_region"))
+	makeup = _num(out.get("minimum_wage_makeup"))
+	configured = sorted(
+		state
+		for state, config in (tax_config.get("state_configs") or {}).items()
+		if isinstance(config, dict) and _num(config.get("minimum_wage")) > 0
+	)
+	out["minimum_wage"] = {
+		"region": region,
+		"rates": rates,
+		# Which states took their floor off a State Tax Configuration rather than
+		# off the shipped table. Named rather than counted, because "the floor is
+		# not what I set it to" is answered by knowing whether the row was read at
+		# all.
+		"configured_states": configured,
+		"applies": str(out.get("pay_type") or "") != "Salary",
+		"compliant": bool(out.get("minimum_wage_check")),
+		"makeup": makeup,
+		"floor": _num(out.get("minimum_wage_floor")),
+		"earned_gross": _num(out.get("earned_gross")),
+		"effective_hourly_rate": _num(out.get("effective_hourly_rate")),
+		"by_state": out.get("minimum_wage_by_state") or {},
+		"note": _minimum_wage_note(out, makeup, region),
+	}
+	return out
+
+
+def _minimum_wage_note(slip: dict, makeup: float, region: str) -> str:
+	"""The sentence under the figures, or "" where there is nothing to say.
+
+	THREE CASES AND THEY ARE DIFFERENT FACTS. A salaried slip is not tested at
+	all and must say so rather than reporting a silent pass; a topped-up slip is
+	lawful AND has a rate problem; everything else needs no sentence, and a note
+	on a compliant hourly slip would be noise on every line of every run.
+	"""
+	if str(slip.get("pay_type") or "") == "Salary":
+		return (
+			"Salary structures are not topped up here. Whether a salaried employee is exempt "
+			"from the minimum wage — executive, administrative, professional, or one of the "
+			"agricultural exemptions — is a fact about their job that this app does not hold, "
+			"and raising an exempt supervisor's pay because a sixty-hour harvest week divided "
+			"their salary below the floor would be inventing an obligation. Any shortfall is "
+			"reported in minimum_wage_detail_flat for somebody who knows the answer to decide."
+		)
+	if makeup > 0.005:
+		hours = _num(slip.get("total_hours"))
+		earned = _num(slip.get("earned_gross"))
+		rate = round(earned / hours, 2) if hours > 0 else 0.0
+		return (
+			f"The work earned ${earned:,.2f} over {hours:,.2f} hour(s) — ${rate:,.2f} an hour — "
+			f"and the hours are owed ${_num(slip.get('minimum_wage_floor')):,.2f} at the "
+			f"{region.replace('_', ' ')} floor, so ${makeup:,.2f} of makeup is ON this slip and "
+			f"the worker is paid lawfully. THE RATE IS THE PROBLEM, not the pay: a piece rate "
+			f"that needs makeup every period is a rate set below what the hours are worth, and "
+			f"the employer carries the difference on every one of them."
+		)
+	return ""
 
 
 def get_payroll_entry(args: dict) -> ToolResult:
@@ -627,6 +770,20 @@ def create_salary_structure(args: dict) -> ToolResult:
 	effective_to = as_date(args, "effective_to")
 	notes = as_str(args, "notes")
 
+	# v0.63.0. Which of a state's geographic minimum wage rates these hours are
+	# owed. REFUSED rather than defaulted when it is not one of the three, because
+	# unlike the payroll path — where an unreadable value on an existing row must
+	# not hold up a whole company's pay — this is somebody typing it, once, in
+	# front of the answer. `Standard` is the default and covers every Washington
+	# worker and most Oregon ones.
+	region = as_str(args, "min_wage_region") or as_str(args, "region")
+	if region and region.strip().casefold() not in MIN_WAGE_REGION_KEYS:
+		raise ToolError(
+			f"min_wage_region must be Standard, Non-Urban or Portland Metro, got {region!r}. "
+			f"Oregon sets three rates by geography under ORS 653.025; Washington sets one, so "
+			f"every Washington worker is Standard. Nothing was created."
+		)
+
 	# A Piece Rate structure with no rate of its own has to be able to find one,
 	# and it is better to say so now than on payday. `resolve_piece_rate` raises
 	# the sentence that names the company and the activity.
@@ -657,6 +814,8 @@ def create_salary_structure(args: dict) -> ToolResult:
 	}
 	if _structure_activity_fields():
 		values["piecework_activity"] = piecework_activity or None
+	if _structure_region_fields():
+		values["min_wage_region"] = _REGION_LABELS[normalise_min_wage_region(region)]
 
 	doc = frappe.get_doc(values)
 	doc.flags.ignore_permissions = True
@@ -672,6 +831,7 @@ def create_salary_structure(args: dict) -> ToolResult:
 			"pay_type": pay_type,
 			"base_rate": base_rate,
 			"hourly_rate": hourly_rate,
+			"min_wage_region": _REGION_LABELS[normalise_min_wage_region(region)],
 			"piecework_activity": wage_defaults.normalize_activity(piecework_activity) or None,
 			"effective_from": str(effective_from),
 			"seeded_from_defaults": seeded or None,
@@ -765,6 +925,7 @@ def calculate_payroll(args: dict) -> ToolResult:
 			"pay_type",
 			"base_rate",
 			*_structure_activity_fields(),
+			*_structure_region_fields(),
 		],
 	)
 	if not structures:
@@ -791,6 +952,10 @@ def calculate_payroll(args: dict) -> ToolResult:
 	total_gross = 0.0
 	total_deductions = 0.0
 	total_net = 0.0
+	# v0.63.0. The minimum wage picture for the whole run, gathered as it is
+	# calculated. See `_minimum_wage_summary` for why it is on the RESULT of this
+	# tool rather than only inside the entry it writes.
+	minimum_wage_rows: list[dict] = []
 
 	for ss in structures:
 		employee = ss.employee
@@ -800,9 +965,15 @@ def calculate_payroll(args: dict) -> ToolResult:
 		slip = calculate_full_payroll(
 			{"employee": employee, "employee_name": ss.employee_name},
 			shifts,
-			{"pay_type": ss.pay_type, "base_rate": float(ss.base_rate or 0), "name": ss.name},
+			{
+				"pay_type": ss.pay_type,
+				"base_rate": float(ss.base_rate or 0),
+				"name": ss.name,
+				"min_wage_regions": _min_wage_regions(ss, tax_config.get("min_wage_rates")),
+			},
 			tax_config,
 		)
+		minimum_wage_rows.append(_minimum_wage_row(ss, slip))
 
 		state_detail = json.dumps(slip.get("state_taxes_detail", {}), default=str)
 
@@ -828,6 +999,14 @@ def calculate_payroll(args: dict) -> ToolResult:
 				"total_deductions": slip["total_deductions"],
 				"net_pay": slip["net_pay"],
 				"minimum_wage_check": 1 if slip["minimum_wage_check"] else 0,
+				# v0.63.0. THE TWO COLUMNS THE SLIP DOCTYPE HAS CARRIED SINCE v0.49.0
+				# AND THIS TOOL NEVER WROTE. `_slip_row` — the period path — has
+				# filled both from the start; this path stored the topped-up gross
+				# and nothing saying it had been topped up, so a stored row could not
+				# answer "how much of this was makeup" and the audit trail for a
+				# below-floor piece rate stopped at the preview.
+				"earned_gross": slip.get("earned_gross") or 0,
+				"minimum_wage_makeup": slip.get("minimum_wage_makeup") or 0,
 				"effective_hourly_rate": slip["effective_hourly_rate"],
 				"social_security_employer": slip.get("social_security_employer") or 0,
 				"medicare_employer": slip.get("medicare_employer") or 0,
@@ -858,6 +1037,7 @@ def calculate_payroll(args: dict) -> ToolResult:
 	for ss in structures:
 		_mark_bucket_entries_paid(ss.employee, pay_period_start, pay_period_end, company)
 
+	minimum_wage = _minimum_wage_summary(minimum_wage_rows)
 	return ToolResult(
 		data={
 			"name": entry.name,
@@ -870,9 +1050,26 @@ def calculate_payroll(args: dict) -> ToolResult:
 			"total_deductions": entry.total_deductions,
 			"total_net": entry.total_net,
 			"employees_missing_piece_rates": missing_rates,
+			# v0.63.0. THE ENTRY IS A DRAFT AND THIS IS WHAT SOMEBODY READS BEFORE
+			# SUBMITTING IT. Every figure here was computed on the way through and
+			# stored on the slips; what was missing was a place to see it without
+			# opening forty child rows, on the one call that produces the document
+			# a person is about to approve.
+			"minimum_wage": minimum_wage,
 		},
 		summary=f"Payroll entry {entry.name}: {len(structures)} employee(s), "
 		f"gross ${entry.total_gross}, net ${entry.total_net}"
+		+ (
+			f" — ${minimum_wage['total_makeup']:,.2f} of minimum wage makeup across "
+			f"{len(minimum_wage['topped_up'])} worker(s)"
+			if minimum_wage["total_makeup"] > 0.005
+			else ""
+		)
+		+ (
+			f" — {len(minimum_wage['below_floor'])} slip(s) BELOW THE FLOOR"
+			if minimum_wage["below_floor"]
+			else ""
+		)
 		+ (
 			f" — {len(missing_rates)} piece-rate worker(s) with no rate on their structure "
 			"and none in the company table"
@@ -880,6 +1077,78 @@ def calculate_payroll(args: dict) -> ToolResult:
 			else ""
 		),
 	)
+
+
+def _minimum_wage_row(structure, slip: dict) -> dict:
+	"""One worker's minimum wage picture, for the run summary above."""
+	return {
+		"employee": slip.get("employee"),
+		"employee_name": slip.get("employee_name"),
+		"salary_structure": structure.get("name"),
+		"pay_type": slip.get("pay_type"),
+		"region": normalise_min_wage_region(structure.get("min_wage_region")),
+		"total_hours": _num(slip.get("total_hours")),
+		"earned_gross": _num(slip.get("earned_gross")),
+		"minimum_wage_floor": _num(slip.get("minimum_wage_floor")),
+		"minimum_wage_makeup": _num(slip.get("minimum_wage_makeup")),
+		"effective_hourly_rate": _num(slip.get("effective_hourly_rate")),
+		"meets_minimum_wage": bool(slip.get("minimum_wage_check")),
+		"by_state": slip.get("minimum_wage_by_state") or {},
+	}
+
+
+def _minimum_wage_summary(rows: list) -> dict:
+	"""The run's wage-floor picture, as three lists that mean three things.
+
+	`topped_up` IS NOT A VIOLATION LIST and `below_floor` is. The higher-of rule
+	pays the floor, so a worker who needed makeup was paid lawfully and the makeup
+	is the number that says THE RATE is set too low — a real problem, on the
+	employer's own cost rather than on the worker's cheque, and one that recurs
+	every period until somebody changes the rate. `below_floor` is the slip that
+	came out short ANYWAY, which after v0.49.0 should be empty for every piece-rate
+	and hourly worker and is where a salaried shortfall surfaces.
+
+	`salaried_shortfall` is that third case named rather than folded into the
+	second. Whether a salaried employee is exempt from the minimum wage is a fact
+	about their job this app does not hold, so their pay is not raised and the gap
+	is reported for somebody who knows the answer.
+	"""
+	topped_up = [row for row in rows if row["minimum_wage_makeup"] > 0.005]
+	below = [row for row in rows if not row["meets_minimum_wage"] and row["pay_type"] != "Salary"]
+	salaried = [
+		row for row in rows if row["pay_type"] == "Salary" and not row["meets_minimum_wage"]
+	]
+	total = round(sum(row["minimum_wage_makeup"] for row in rows), 2)
+	note = ""
+	if topped_up:
+		note = (
+			f"{len(topped_up)} worker(s) were topped up to the minimum wage, ${total:,.2f} in "
+			f"total. THEY WERE PAID LAWFULLY — the floor is paid, not merely compared against — "
+			f"and the makeup is the figure that says their rate is set below what their hours "
+			f"are worth. It recurs every period until the rate changes."
+		)
+	if below:
+		note += (
+			(" " if note else "")
+			+ f"{len(below)} slip(s) are BELOW THE FLOOR after the makeup, which should not "
+			f"happen on a piece-rate or hourly structure: check that every shift carries a "
+			f"work_state, because a shift with none has no legislature behind it and no floor "
+			f"is applied."
+		)
+	if salaried:
+		note += (
+			(" " if note else "")
+			+ f"{len(salaried)} salaried slip(s) divide below the floor and were NOT topped up. "
+			f"Whether a salaried employee is exempt is a fact about their job this app does not "
+			f"hold; somebody who knows decides."
+		)
+	return {
+		"total_makeup": total,
+		"topped_up": topped_up,
+		"below_floor": below,
+		"salaried_shortfall": salaried,
+		"note": note,
+	}
 
 
 def submit_payroll(args: dict) -> ToolResult:
@@ -1027,6 +1296,18 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 	company_rates, missing_rates = _resolve_piece_rates(structures, company, str(end))
 	shifts, provenance = _load_period_shifts(company, start, end, employees=employees)
 
+	# v0.63.0. THE WAGE FLOOR, READ OFF THE SITE AND NAMED PER WORKER. Two things
+	# the engine has declared since v0.49.0 and nothing ever supplied: the rate
+	# table (so an Oregon rate change is a row somebody edits, not a release) and
+	# which of a state's geographic rates each structure is on (so the Portland
+	# metro floor is reachable at all). Both are resolved here, once, and handed
+	# down — a per-employee lookup inside the loop would read the same three
+	# configurations forty times for one answer.
+	state_configs = _load_state_configs(company)
+	min_wage_rates = state_min_wage_rates(state_configs)
+	for structure in structures.values():
+		structure["min_wage_regions"] = _min_wage_regions(structure, min_wage_rates)
+
 	# Everybody a slip could be owed to: whoever worked, plus whoever has a
 	# structure. The union rather than either half, because a worker with no
 	# structure has to be reported and a salaried employee with no shift has to
@@ -1038,13 +1319,14 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 		shifts,
 		structures,
 		_load_w4_map(known),
-		_load_state_configs(company),
+		state_configs,
 		_load_fica_config(),
 		start,
 		end,
 		company=company,
 		federal_tax_tables=_load_federal_tables(pay_frequency),
 		state_tax_tables=_load_state_tax_tables(),
+		min_wage_rates=min_wage_rates,
 		pay_frequency=pay_frequency,
 		ytd_by_employee=_load_ytd(company, start, known),
 		overtime_threshold=threshold,
@@ -1085,6 +1367,17 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 		# would know a rate was never set.
 		"piece_rates_from_company": [company_rates[key] for key in sorted(company_rates)],
 		"employees_missing_piece_rates": missing_rates,
+		# v0.63.0. Where the floor these slips were tested against came from.
+		# Named rather than assumed, because until this release there was only one
+		# possible answer and now there are two — the shipped table, or a State Tax
+		# Configuration somebody edited — and "the floor is not what I set it to"
+		# is answered by knowing which.
+		"minimum_wage_rates": min_wage_rates,
+		"minimum_wage_states_configured": sorted(
+			state
+			for state, config in (state_configs or {}).items()
+			if isinstance(config, dict) and _num(config.get("minimum_wage")) > 0
+		),
 		"sources": provenance,
 	}
 	return context, slips, payroll_integration.summarize_payroll_run(slips)
@@ -1936,6 +2229,7 @@ def _load_structures(company: str, employees: list[str] | None = None) -> dict:
 			"base_rate",
 			*compat.existing_fields(SALARY_STRUCTURE, ("hourly_rate",)),
 			*_structure_activity_fields(),
+			*_structure_region_fields(),
 			"effective_from",
 		],
 		order_by="effective_from asc",
@@ -1964,6 +2258,11 @@ def _load_structures(company: str, employees: list[str] | None = None) -> dict:
 			# should not be able to confuse that with a rate deliberately set to
 			# nothing.
 			"hourly_rate": row.get("hourly_rate"),
+			# v0.63.0. Which of a state's geographic floors this worker's hours are
+			# owed. Carried as the raw Select value rather than normalised here,
+			# because `_period_run` is where the rate table exists to name states
+			# against — see `_min_wage_regions`.
+			"min_wage_region": row.get("min_wage_region"),
 		}
 	return structures
 
@@ -2101,6 +2400,14 @@ def _build_tax_config(employee: str, pay_frequency: str, company: str | None = N
 		"ytd_ss_withheld": 0.0,
 		"state_configs": state_configs,
 		"state_tax_tables": state_tax_tables,
+		# v0.63.0. THE FLOOR, READ OFF THE SITE. `calculate_full_payroll` has taken
+		# `min_wage_rates` since v0.49.0 and nothing ever supplied one, so every
+		# run on every install used the table compiled into `payroll_calc` — which
+		# meant an Oregon rate change was a release rather than a row. Built from
+		# the SAME state configurations the withholding engines are handed, so what
+		# a state charges and what it says an hour is worth cannot come from two
+		# different rows.
+		"min_wage_rates": state_min_wage_rates(state_configs),
 	}
 
 

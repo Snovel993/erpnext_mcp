@@ -382,7 +382,30 @@ def _config_fields() -> list[str]:
         "wa_pfml_wage_base",
         "wa_cares_rate", "wa_cares_employee_only", "wa_cares_exempt_employees",
         "wa_li_rate_employee", "wa_li_rate_employer",
+        *MIN_WAGE_FIELDS,
     ]
+
+
+#: v0.63.0. THE WAGE FLOOR, WRITABLE ON EVERY STATE RATHER THAN ON ONE.
+#:
+#: Every other field in this module is state-specific by construction — a PFML
+#: rate is a Washington fact and a transit tax is an Oregon one — and
+#: `_config_rate_fields` branches accordingly. The minimum wage is not: every
+#: state has one, so these three are appended to BOTH branches rather than
+#: sorted into either.
+#:
+#: The two regional rates are Oregon's alone (ORS 653.025 sets three by
+#: geography; RCW 49.46.020 sets one) and are still offered on a Washington row,
+#: for the reason `state_min_wage_rates` ignores a zero: a column nobody fills in
+#: costs nothing, and a branch that REFUSED them would have to be revisited the
+#: day a third state with regional rates is added. What protects a Washington row
+#: from a stray value is the lookup, which asks that state's own table for the
+#: region and falls back to its standard rate when it is not there.
+MIN_WAGE_FIELDS = (
+    "minimum_wage",
+    "minimum_wage_non_urban",
+    "minimum_wage_portland_metro",
+)
 
 
 def _config_rate_fields(state: str) -> list[str]:
@@ -392,6 +415,7 @@ def _config_rate_fields(state: str) -> list[str]:
             "or_paid_leave_rate", "or_paid_leave_employee_share",
             "or_paid_leave_employer_share", "or_paid_leave_small_employer",
             "or_workers_comp_rate",
+            *MIN_WAGE_FIELDS,
         ]
     elif state == "WA":
         return [
@@ -399,6 +423,7 @@ def _config_rate_fields(state: str) -> list[str]:
             "wa_pfml_wage_base",
             "wa_cares_rate", "wa_cares_exempt_employees",
             "wa_li_rate_employee", "wa_li_rate_employer",
+            *MIN_WAGE_FIELDS,
         ]
     return []
 

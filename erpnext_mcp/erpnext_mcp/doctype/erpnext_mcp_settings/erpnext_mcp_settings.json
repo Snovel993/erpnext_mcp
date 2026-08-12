@@ -278,6 +278,10 @@
   "allow_list_signing_evidence",
   "evidence_col",
   "allow_get_signing_evidence",
+  "signed_documents_section",
+  "allow_get_document_preview",
+  "signed_documents_col",
+  "allow_seal_signed_document",
   "signers_section",
   "allow_list_authorized_signers",
   "allow_add_authorized_signer",
@@ -2334,6 +2338,29 @@
    "fieldname": "allow_get_signing_evidence",
    "fieldtype": "Check",
    "label": "Get Signing Evidence"
+  },
+  {
+   "fieldname": "signed_documents_section",
+   "fieldtype": "Section Break",
+   "label": "Signed Documents (preview and seal)"
+  },
+  {
+   "default": "1",
+   "description": "READ. The rendered federal form as BYTES, so the person about to sign it can be shown it first — step 1 of the signing evidence chain, and the step the iOS app could not take because both renderers answer with a private file_url the handset cannot follow. It takes no signature, writes no signature column and does not touch the evidence register; it will DRAW the page once where the record has none, which on a fresh I-9 is every time.",
+   "fieldname": "allow_get_document_preview",
+   "fieldtype": "Check",
+   "label": "Get Document Preview"
+  },
+  {
+   "fieldname": "signed_documents_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Seal a form that has ALREADY been signed: redraw it with every capture stamped into the page content and the AcroForm flattened away, append a verification page naming the signer, the identity check, the moment, the device, the coordinates and the document fingerprint, then hash the finished file and record that hash on every Signing Evidence row for it. An unsigned form is refused — an appendix that vouches for nothing is worse than no appendix. submit_form_signature takes this step automatically, so this tool is for a form signed before v0.63.0 or one whose second signature came through the Desk.",
+   "fieldname": "allow_seal_signed_document",
+   "fieldtype": "Check",
+   "label": "Seal Signed Document"
   },
   {
    "fieldname": "signers_section",

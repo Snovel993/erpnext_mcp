@@ -64,10 +64,97 @@ from __future__ import annotations
 from .state_withholding import calculate_state_withholding
 from .withholding import calculate_federal_withholding
 
+#: THE SHIPPED FLOOR, AND THE FALLBACK RATHER THAN THE ANSWER. v0.63.0: a State
+#: Tax Configuration may now carry its own three rates per company, state and tax
+#: year, and `state_min_wage_rates` merges those over this table — so a rate
+#: change is a row somebody edits in the Desk instead of a release. This stays as
+#: the default because a site that has configured nothing must still pay a lawful
+#: floor: a table that started empty would make the higher-of rule a no-op on
+#: every install until an operator noticed, and "the minimum wage was zero" is
+#: the one wrong answer in this module that nobody would see on a slip.
 MINIMUM_WAGE_RATES = {
 	"OR": {"standard": 14.70, "non_urban": 13.70, "portland_metro": 15.95},
 	"WA": {"standard": 16.66},
 }
+
+#: `min_wage_region` on a Farm Salary Structure → the key in the table above.
+#: The Select is written the way a person reads it and the table is keyed the way
+#: a dict is; one mapping rather than two spellings kept in step by hand.
+MIN_WAGE_REGION_KEYS = {
+	"standard": "standard",
+	"non-urban": "non_urban",
+	"non urban": "non_urban",
+	"non_urban": "non_urban",
+	"nonurban": "non_urban",
+	"portland metro": "portland_metro",
+	"portland-metro": "portland_metro",
+	"portland_metro": "portland_metro",
+	"portland": "portland_metro",
+	"metro": "portland_metro",
+}
+
+#: The column on a State Tax Configuration that carries each region's rate.
+MIN_WAGE_COLUMNS = {
+	"standard": "minimum_wage",
+	"non_urban": "minimum_wage_non_urban",
+	"portland_metro": "minimum_wage_portland_metro",
+}
+
+
+def normalise_min_wage_region(value) -> str:
+	"""`"Portland Metro"` → `"portland_metro"`. Unknown or empty → `"standard"`.
+
+	FALLS BACK RATHER THAN RAISING, because the caller is a payroll run and the
+	value came off a Select on somebody's salary structure. A region this app does
+	not recognise is a data problem worth one wrong-but-lawful floor — the standard
+	rate, which is the one every worker in the state is owed at minimum — and not
+	worth refusing to pay a whole company over.
+	"""
+	raw = str(value or "").strip().casefold()
+	if not raw:
+		return "standard"
+	return MIN_WAGE_REGION_KEYS.get(raw, "standard")
+
+
+def state_min_wage_rates(state_configs: dict, shipped: dict | None = None) -> dict:
+	"""The floor table for a run: the shipped rates with this site's own over them.
+
+	Args:
+		state_configs: State code → State Tax Configuration as a dict, which is
+			what `_load_state_configs` already builds for the withholding
+			engines. Read here rather than fetched again, so the row that says
+			what SUTA costs and the row that says what an hour is worth cannot
+			come from two different configurations of the same state.
+		shipped: The defaults to merge over. `MINIMUM_WAGE_RATES` unless a test
+			passes its own.
+
+	Returns:
+		A new dict in `MINIMUM_WAGE_RATES`' shape. The input is not modified.
+
+	ZERO MEANS "NOT SET HERE", NOT "THE FLOOR IS ZERO". Currency fields default to
+	0 on every row of every doctype, so treating a zero as an override would let a
+	site that filled in nothing but its SUTA rate silently drop the wage floor to
+	nothing for its whole payroll — and the makeup that catches an underpaid piece
+	rate would compute against it and find nothing wrong. A rate has to be a
+	positive number to win.
+
+	A STATE WITH A CONFIGURATION AND NO RATES KEEPS THE SHIPPED ONES, which is what
+	every site upgrading to v0.63.0 is: the columns are new and empty everywhere,
+	and the release must not change what a single slip pays until somebody types a
+	number into one.
+	"""
+	rates = {state: dict(regions) for state, regions in (shipped or MINIMUM_WAGE_RATES).items()}
+	for state, config in (state_configs or {}).items():
+		if not isinstance(config, dict):
+			continue
+		for region, column in MIN_WAGE_COLUMNS.items():
+			try:
+				value = float(config.get(column) or 0.0)
+			except (TypeError, ValueError):
+				continue
+			if value > 0:
+				rates.setdefault(state, {})[region] = value
+	return rates
 
 #: What an overtime hour is worth in total: one and a half times the regular rate.
 OT_MULTIPLIER = 1.5

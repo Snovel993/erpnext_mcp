@@ -33,7 +33,12 @@
   "ip_address",
   "context_col",
   "gps_latitude",
-  "gps_longitude"
+  "gps_longitude",
+  "seal_section",
+  "sealed_pdf",
+  "sealed_at",
+  "seal_col",
+  "sealed_pdf_hash"
  ],
  "fields": [
   {
@@ -236,6 +241,38 @@
    "fieldtype": "Float",
    "label": "GPS Longitude",
    "precision": "7",
+   "read_only": 1
+  },
+  {
+   "description": "The tamper-evident copy. Everything above this line is fixed at the moment of signing and may never move; these three describe an artefact produced AFTERWARDS and legitimately change — a Section 1 attestation sealed alone in July appears in a two-signature sealed copy once the employer signs in August, and a row frozen at the first file would point an auditor at a copy missing half the signatures on the form it describes. No sealed copy is ever deleted: each is a new File on the document and the chain of them is itself a record.",
+   "fieldname": "seal_section",
+   "fieldtype": "Section Break",
+   "label": "Sealed Copy"
+  },
+  {
+   "description": "The sealed PDF this attestation currently appears in: the form with every captured signature stamped into the page content, the AcroForm flattened away, and a verification page appended naming the signer, the identity check, the moment, the device, the coordinates and the document fingerprint. Attached to the signed document as well — one file, two records naming it.",
+   "fieldname": "sealed_pdf",
+   "fieldtype": "Attach",
+   "label": "Sealed PDF",
+   "read_only": 1
+  },
+  {
+   "description": "When the sealed copy above was produced. Not when the signature was made — `signed_at` is that, and the two are deliberately different columns because a form signed in July and sealed in August is the ordinary case rather than an anomaly.",
+   "fieldname": "sealed_at",
+   "fieldtype": "Datetime",
+   "label": "Sealed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "seal_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "SHA-256 of the sealed PDF's finished bytes. It cannot be printed on the file it is taken over — printing it would change them — so it lives here, and it is the check that catches an edit to ANY page of that file including the verification page itself. `document_hash` above answers a different question: whether the RECORD still says what the signer was shown.",
+   "fieldname": "sealed_pdf_hash",
+   "fieldtype": "Data",
+   "label": "Sealed PDF Hash",
+   "length": 71,
    "read_only": 1
   }
  ],

@@ -3,6 +3,139 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.63.0 — 2026-08-12
+
+**The two ends of a signature, and the wage floor somebody can actually set.**
+Three pieces of work: the page a signer has to be shown before they sign, the
+tamper-evident copy produced after they do, and a minimum wage that is a row in
+the Desk rather than a constant in a module.
+
+### The presentation step — `get_document_preview`
+
+`API_CONTRACT.md` §17.5 named this a server-side gap and said the fix is one
+route. Step 1 of the signing evidence chain is that the signer SAW the form, and
+the app could not show it to them: `render_i9_pdf` and `render_w4_pdf` answer
+with a **private** `file_url`, the handset authenticates to the FarmOps sidecar
+with `X-FarmOps-Token` rather than to Frappe, and a private URL is a login page
+to it. So the app could show the *completed* form after signing — those bytes
+travel in `submit_form_signature`'s answer — and not the blank one before.
+
+The page now travels as base64 under `content`, `content_base64` and `base64`.
+Three spellings of one string, because a client written against the contract,
+against this app's file tools or against the signature answer should all read
+the same page.
+
+**It draws once and does not silently redraw.** A form with no page gets one —
+which on a fresh I-9 is every time, and without it the route would answer "no
+page" on the exact case the pad opens for. A form that has one is handed back as
+it stands, with `stale` saying whether the record has changed since it was drawn
+and `refresh=true` available for a caller who needs certainty. Re-rendering on
+every screen open would repoint `generated_pdf` a dozen times a hire day, and
+that field is the copy somebody printed and had signed.
+
+`signature_boxes` comes back with it: what can be signed, which boxes already
+carry a signature, and the **verbatim** attestation for each. A pad that
+discovers Section 1 is taken by submitting to it is a pad that discovers it with
+the worker standing there.
+
+### The tamper-evident copy — `seal_signed_document`
+
+Flattening a form has made it tamper-**resistant** since v0.51.0: no annotation
+to delete, no field to clear. That says nothing about **detection** — an edited
+page looks exactly like an unedited one. Two things fix that, and the release
+adds both:
+
+- **A verification page**, appended, naming for every signature on the form the
+  signer, the badge scanned, how identity was established, the moment, the
+  device, the coordinates and the fingerprint of the record as it was presented.
+  Drawn from the Signing Evidence rows rather than from a second copy of the
+  same facts.
+- **A SHA-256 of the finished file**, recorded on those rows. It cannot be
+  printed on the file it is taken over — printing it would change the bytes — so
+  the page carries the *document* fingerprint and the register carries the
+  *file* hash. Two hashes, two questions: "is this the form they saw" and "is
+  this the file we produced".
+
+`submit_form_signature` takes the step automatically and reports it under
+`seal`, following `include_pdf`. **Never fatally**: a bench without reportlab
+gets `sealed: false` with the reason and a signature that is on the federal
+record regardless, which is the ordering rule the whole signature path keeps.
+
+**An unsigned form is refused.** A verification page on a form nobody signed is
+an official-looking appendix that vouches for nothing, and somebody would file
+it. A signed form with **no** evidence row — every signature collected before
+v0.60.0 — is sealed anyway, with the page saying in as many words that the
+identity, device and location were never captured and cannot be reconstructed.
+
+**Signing Evidence grows three columns** — `sealed_pdf`, `sealed_pdf_hash`,
+`sealed_at` — and they are the only thing on an append-only row that moves. They
+name an artefact produced *afterwards* rather than a fact about the signing, and
+they legitimately change: a Section 1 attestation sealed alone in July appears in
+a two-signature sealed copy once the employer signs in August. Written with
+`db.set_value`, so the controller's refusal stays absolute for every path that
+could revise what the row says about the signature. No sealed copy is deleted.
+
+### The wage floor, configurable
+
+`calculate_full_payroll` has declared `min_wage_rates` since v0.49.0 and
+**nothing ever supplied one**, so every run on every install used the table
+compiled into `payroll_calc` and an Oregon rate change was a release. It has
+declared `min_wage_regions` for just as long and nothing supplied one either, so
+Oregon's Portland metro rate — the highest of the three, and the one an orchard
+inside the urban growth boundary is on — was unreachable from any tool here.
+
+**State Tax Configuration** grows `minimum_wage`, `minimum_wage_non_urban` and
+`minimum_wage_portland_metro`, per company, state and tax year. A **zero means
+"not set here"**, never "the floor is zero": currency fields default to 0 on
+every row, and treating one as an override would let a site that filled in
+nothing but its SUTA rate drop the floor to nothing for its whole payroll. A
+site that configures nothing pays exactly what it paid before this release.
+
+**Farm Salary Structure** grows `min_wage_region` — Standard, Non-Urban or
+Portland Metro. It is on the structure rather than on the shift because it is a
+fact about where somebody *works*, and a crew moving between blocks inside one
+region must not have its floor move with it. A region a state does not define
+falls back to that state's standard rate, so a Portland-metro worker who spent a
+week over the river is owed Washington's $16.66.
+
+**The independent cross-check now reads the same table the engine paid from.**
+Without that, a farm that raised its own floor would see every topped-up slip
+flagged as below the minimum.
+
+### The floor, made visible before anybody posts
+
+`preview_payroll` carries a `minimum_wage` block — the region, the rate table it
+used, which states took their floor off their own configuration, the makeup and
+the sentence explaining it — and names the makeup on its summary line. It has
+been in the answer since v0.49.0, in a nested key nobody opens.
+
+`compliant` and `makeup` are deliberately two different facts. The floor is
+PAID, so a slip that needed makeup was paid lawfully; the makeup is the number
+that says the **rate** is set below what the hours are worth, and it recurs every
+period until somebody changes it. Conflating them would either report every
+underpriced bucket as a violation or hide it entirely.
+
+`calculate_payroll` now writes `earned_gross` and `minimum_wage_makeup` onto the
+slips it stores — two columns the doctype has carried since v0.49.0 that this
+path never filled, so a stored row could not answer "how much of this was
+makeup" — and reports the run's floor picture on the draft somebody is about to
+submit: who was topped up, what it cost, and separately anything still below the
+floor, which on a piece-rate or hourly slip usually means a shift carries no
+`work_state` and so no legislature and no floor.
+
+### Permissions
+
+`W-4 Form` is granted read and write to **Farm Manager**, which is the v0.59.3
+finding restated for the other federal form. `signatures._require_write` gates
+every signature on Frappe's own `has_permission`, so the W-4's signature box,
+`seal_signed_document` and `get_document_preview` were all closed to the role
+that runs onboarding. It is **not a widening**: `w4.submit_w4` inserts with
+`ignore_permissions` behind `require_hr_role()`, and `HR_ROLES` names Farm
+Manager — the role has been creating and editing W-4 records on every site since
+the wizard shipped, with no DocPerm saying so. `Tax Form` is deliberately not
+granted: a 941 is signed by an officer of the employer, and this app keeps no
+register of officers.
+
 ## 0.62.0 — 2026-08-12
 
 **Seven routes the iOS app already calls and this server answered 404.**

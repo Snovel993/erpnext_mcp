@@ -20,6 +20,19 @@ own Deleted Document records each deletion.
 `in_create` ON THE DOCTYPE IS THE OTHER HALF. It removes the Desk's New button,
 so the only way a row exists is the signature path that writes it — which is
 what makes the register's completeness mean something.
+
+THE THREE SEAL COLUMNS ARE THE ONE EXCEPTION AND THEY DO NOT COME THROUGH HERE.
+v0.63.0 added `sealed_pdf`, `sealed_pdf_hash` and `sealed_at`, which name the
+tamper-evident copy this attestation appears in. They are written by
+`tools/signed_documents._record_seal` with `frappe.db.set_value(...,
+update_modified=False)` — the same door `render_i9_pdf` uses for
+`generated_pdf_on` — and NOT through `save()`, so the refusal below stays
+absolute for every path a person or a tool could take to revise what this row
+says about the signature. The distinction is not a loophole: every other column
+is a fact about the moment of signing and is fixed at it, and those three are a
+pointer at an artefact produced afterwards that legitimately moves when the form
+gains a second signature and is sealed again. See that function, which argues it
+at length.
 """
 
 import frappe

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 410 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 412 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 187 read tools are **on** by default and can be switched off individually. A
+All 188 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -9728,6 +9728,68 @@ the two that read it, because the register's whole value is that nobody edits it
 |---|---|---|
 | `list_signing_evidence` | **on** | Signature events by document, signer, badge, capacity, company or date range. Reports `unverified_count` separately — the rows that cannot answer "how do you know it was him". |
 | `get_signing_evidence` | **on** | One event in full, with the document hash re-checked against the record as it stands now, and `superseded_by` where the attestation was later replaced. |
+
+## The document either side of a signature (v0.63.0)
+
+The register above records steps 1 to 4 of the evidence chain and takes step 5's
+hash of the *record*. Two of those steps had no artefact behind them, and both are
+about the PDF rather than the row.
+
+**Step 1 — the signer saw the form.** `API_CONTRACT.md` §17.5 records why the iOS
+app could not show it to them: `render_i9_pdf` and `render_w4_pdf` answer with a
+**private** `file_url`, the handset authenticates to the FarmOps sidecar with
+`X-FarmOps-Token` rather than to Frappe, and a private URL is a login page to it.
+So the app could show the *completed* form after signing — those bytes travel in
+`submit_form_signature`'s answer — and not the blank one before. §17.5 called that
+a server-side gap and said the fix is one route.
+
+`get_document_preview` is that route. The page travels as base64 under `content`,
+`content_base64` and `base64` — three spellings of one string, so a client written
+against the contract, against this app's file tools or against the signature
+answer all read the same page. It takes no signature and writes no signature
+column. It **will draw the page once** where the record has none, which on a fresh
+I-9 is every time; it will **not** silently replace one that exists, because
+that field is the copy somebody printed and had signed. `stale` says whether the
+record has changed since the page was drawn, and `refresh=true` asks for a
+redraw. Showing a stale page to a signer means hashing something other than what
+they read.
+
+**Step 5 — the artefact is tamper-evident.** Flattening a form makes it tamper
+*resistant*: there is no annotation to delete and no field to clear, so altering it
+takes a real PDF editor. That says nothing about **detection** — an edited page
+looks exactly like an unedited one. `seal_signed_document` adds the two things
+that make an alteration noticeable:
+
+- a **verification page**, appended, stating for every signature on the form who
+  signed, the badge scanned, how identity was established, the moment, the device,
+  the coordinates and the fingerprint of the record as it was presented;
+- a **SHA-256 of the finished file**, recorded on every Signing Evidence row for
+  the document. It cannot be printed on the file it is taken over — printing it
+  would change the bytes — so the page carries the *document* fingerprint and the
+  register carries the *file* hash. Two hashes, two questions: "is this the form
+  they saw" and "is this the file we produced".
+
+**An unsigned form is refused.** A verification page on a form nobody signed is an
+official-looking appendix that vouches for nothing, and somebody would file it. A
+signed form with **no** evidence row — every signature collected before v0.60.0 —
+is sealed anyway, with the page saying in as many words that the identity, device
+and location were never captured and cannot be reconstructed.
+
+The sealed copy does **not** repoint `generated_pdf`: that is the working page
+somebody prints, this is the retained artefact, and collapsing the two would mean
+the next signature's redraw threw the seal away. No sealed copy is ever deleted,
+so the chain of them is itself a record.
+
+`submit_form_signature` takes the seal automatically and reports it under `seal`,
+never fatally — a bench without reportlab gets `sealed: false` with the reason and
+a signature that is on the federal record regardless. This tool is for the two
+cases that step cannot cover: a form signed before v0.63.0, and one whose second
+signature arrived through the Desk.
+
+| Tool | Default | What it does |
+|---|---|---|
+| `get_document_preview` | **on** | The rendered form as bytes, so the person about to sign it can be shown it. Lists the form's signature boxes, which already carry one, and each box's verbatim attestation. |
+| `seal_signed_document` | off | Append the verification page to a signed form, hash the finished file, and record that hash on every Signing Evidence row for it. |
 
 ## Authorized signers (v0.48.0)
 

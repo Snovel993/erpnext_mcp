@@ -16,6 +16,7 @@
   "base_rate",
   "piecework_activity",
   "hourly_rate",
+  "min_wage_region",
   "is_active",
   "dates_section",
   "effective_from",
@@ -96,6 +97,14 @@
    "fieldname": "hourly_rate",
    "fieldtype": "Currency",
    "label": "Hourly Rate (Non-Piece Work)"
+  },
+  {
+   "default": "Standard",
+   "description": "Which of a state's geographic minimum wage rates this worker's hours are owed. Oregon sets three under ORS 653.025 \u2014 standard, non-urban counties, and the Portland metro urban growth boundary \u2014 and Washington sets one, so this is Standard for every Washington worker and for most Oregon ones. IT IS ON THE STRUCTURE RATHER THAN ON THE SHIFT because it is a fact about where somebody WORKS rather than about one day of it, and a crew that moves between blocks inside one region must not have its floor move with it. A region the worker's state does not define falls back to that state's standard rate rather than to nothing.",
+   "fieldname": "min_wage_region",
+   "fieldtype": "Select",
+   "label": "Minimum Wage Region",
+   "options": "Standard\nNon-Urban\nPortland Metro"
   },
   {
    "default": "1",

@@ -89,6 +89,7 @@ import frappe
 from .. import bucket_bridge, compat, datetimes
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
+from ..tools import signed_documents
 from ..tools import files as file_tools
 from ..tools import calendar as compliance_calendar
 from ..tools import employee as personnel
@@ -3588,11 +3589,23 @@ def submit_form_signature(
 	decide. A caller passing this HAS asked, by name, in the same call. Turning
 	it off is supported for a client that only wants the write.
 
+	IT SEALS THE PAGE IT HANDS BACK, WHICH IS v0.63.0 AND STEP 5 OF THE CHAIN.
+	Everything above collects the four things that happen in the field; the fifth
+	is the server's, and until this release nothing took it. `seal` in the answer
+	names the tamper-evident copy: the form with the captures stamped into the
+	page content and the AcroForm flattened away, a verification page appended
+	stating who signed, how they were identified, when, on what device, at what
+	coordinates and what the record fingerprinted to, and a SHA-256 of the
+	finished file filed back onto every Signing Evidence row it describes. It
+	FOLLOWS `include_pdf`, because a caller that turned the page off wanted only
+	the write, and sealing produces a page.
+
 	NOT FATAL, EVER. The renderers need `pypdf` and the blank federal form on
 	disk; a site missing either gets `pdf.available: false` with the reason in
-	`pdf.note` and a signature that is on the record regardless. A page is worth
-	less than the attestation it depicts, and a call that threw away the second
-	to avoid reporting the loss of the first would have the trade backwards.
+	`pdf.note`, `seal.sealed: false` with the reason in `seal.note`, and a
+	signature that is on the record regardless. A page is worth less than the
+	attestation it depicts, and a call that threw away the second to avoid
+	reporting the loss of the first would have the trade backwards.
 
 	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, as on `collect_signature`: this
 	writes the document the employer is inspected on. Every other refusal is the
@@ -3621,6 +3634,7 @@ def submit_form_signature(
 		)
 
 	wants_pdf = _as_flag(include_pdf, default=True)
+	wants_seal = wants_pdf
 	inner = {
 		"doctype": doctype,
 		"name": docname,
@@ -3682,6 +3696,60 @@ def submit_form_signature(
 		# See the docstring. The page carries the capture stamped in, and the
 		# bytes travel because a private File is a login page to this caller.
 		"pdf": _signed_pdf(data.get("pdf") or {}) if wants_pdf else None,
+		# v0.63.0. Step 5, taken automatically and reported honestly. See `_seal`.
+		"seal": _seal(data.get("doctype"), data.get("name"), wants_seal),
+	}
+
+
+def _seal(doctype, docname, wanted: bool) -> dict:
+	"""Seal the form the signature just landed on. NEVER RAISES, ALWAYS A DICT.
+
+	THE LAST STEP IN THE ORDERING `tools/signatures.py` OPENS WITH, and it inherits
+	that ordering's rule rather than getting its own: store the image, write it
+	onto the form, record the evidence, close the task, redraw the PDF, seal it —
+	and each step may fail without undoing the one before it, because THE
+	SIGNATURE IS THE IRREPLACEABLE ARTEFACT and the person who drew it has gone
+	back to work. A signature refused to keep the seal chain tidy would throw away
+	the only thing that cannot be recovered.
+
+	SO EVERY FAILURE IS REPORTED AND NONE IS FATAL. `sealed: false` with the reason
+	in `note` is what a bench missing reportlab gets, and what a form whose page
+	could not be redrawn gets, and the signature is on the federal record in both
+	cases. An operator who finds `sealed: false` in an answer has been told, which
+	is the difference between best-effort and silent — the same promise
+	`evidence_status` makes one key above it.
+
+	IT FOLLOWS `include_pdf`, which is the honest coupling rather than a shortcut:
+	a caller that turned the page off is a caller that only wanted the write, and
+	sealing produces a page. Turning it back on for them would be this method
+	deciding it knows better.
+	"""
+	if not wanted:
+		return {"sealed": False, "note": "include_pdf was off, so no sealed copy was produced."}
+	if not (str(doctype or "").strip() and str(docname or "").strip()):
+		return {"sealed": False, "note": "the signature's own document could not be identified."}
+	try:
+		data = signed_documents.seal_signed_document(
+			{"document_type": doctype, "document_name": docname}
+		).data
+	except Exception as exc:
+		return {
+			"sealed": False,
+			"note": (
+				f"the signature is on the record and no sealed copy was produced ({exc}). The "
+				f"attestation, its moment and its evidence row are unaffected; seal_signed_document "
+				f"produces one later without collecting anything again."
+			),
+		}
+	return {
+		"sealed": bool(data.get("sealed")),
+		"file_url": data.get("file_url"),
+		"file_name": data.get("file_name"),
+		"bytes": data.get("bytes"),
+		"sealed_pdf_hash": data.get("sealed_pdf_hash"),
+		"signatures_on_page": data.get("signatures_on_page"),
+		"evidence_updated": data.get("evidence_updated") or [],
+		"note": data.get("note") or None,
 	}
 
 
@@ -3778,6 +3846,20 @@ def _already_signed(doctype, docname, field, task, wants_pdf: bool = False) -> d
 		"already_signed": True,
 		"dismissed_alert": _alert_answered(resolved, field, name),
 		"pdf": _existing_pdf(resolved, name) if wants_pdf else None,
+		# NO SEAL EITHER, AND FOR THE SAME REASON AS THE EVIDENCE ROW BELOW. This
+		# branch exists not to write, and sealing writes — a new File on the
+		# personnel record and a stamp on every evidence row for the form. On the
+		# retry path, where this branch happens most, that would mean a marginal
+		# link produced a fresh sealed copy per attempt. The one the attempt that
+		# LANDED produced is already attached and already named on the rows.
+		"seal": {
+			"sealed": False,
+			"note": (
+				"nothing was signed on this call, so nothing was sealed. The sealed copy for the "
+				"attempt that landed is attached to this document and named on its Signing "
+				"Evidence rows."
+			),
+		},
 		# NO EVIDENCE ROW, AND THE KEYS ARE HERE SAYING SO. This branch exists not
 		# to write, and an evidence row for a signature that was not collected
 		# would be the register asserting an identity check on a call that made
@@ -4608,4 +4690,237 @@ def get_attachment_content(user: str, file=None, name=None, max_bytes=None) -> d
 		"encoding": data.get("encoding"),
 		"content": data.get("content_base64"),
 		"content_base64": data.get("content_base64"),
+	}
+
+
+# ── 52. get_document_preview ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("get_document_preview", mutating=True, limit=guard.UPLOAD_LIMIT)
+def get_document_preview(user: str, document_type=None, document_name=None, docname=None,
+                         employee=None, refresh=None) -> dict:
+	"""The unsigned page, as bytes, for the step that has to come before the pad.
+
+	v0.63.0, AND `API_CONTRACT.md` §17.5 IS THE WHOLE ARGUMENT FOR IT. Step 1 of
+	the signing evidence chain is that the signer SAW the form. The app has been
+	unable to show it to them: `generate_i9_pdf` and `generate_w4_pdf` answer with
+	a private `file_url`, this door authenticates with `X-FarmOps-Token` rather
+	than to Frappe, and a `/private/files/…` link is a login page to it. So the
+	presentation screen could print the section, the box and the verbatim
+	attestation off `request_for_alert` and could not render the page any of it
+	was about. §17.5 called that a server-side gap and said the fix is one route.
+	This is the route.
+
+	THE BYTES TRAVEL IN THE ANSWER, which is the same answer `submit_form_signature`
+	gives on the way out and `get_employee_badge_pass` gives for a `.pkpass`, and
+	for the identical reason. `content`, `content_base64` and `base64` are three
+	spellings of one string — the contract's, the file tools' and the signature
+	answer's — so a client written against any of the three reads the page.
+
+	IT IS READ-ONLY IN THE SENSE THAT MATTERS AND `mutating=True` ANYWAY. No
+	signature is taken, no signature column is written and the Signing Evidence
+	register is not touched. What it can write is the rendered page itself, once,
+	where the record has none — which on a fresh I-9 is every time, and without it
+	this route would answer "no page" on the exact case the pad opens for. See
+	`signed_documents.get_document_preview`, which argues why a caller asking for
+	a preview by name is the same decision `_redraw`'s `ensure` flag is.
+
+	`stale` IS THE KEY THE PRESENTATION STEP BRANCHES ON. True means the record
+	has changed since the page was drawn, so the page is not what the record says
+	now — and the fingerprint taken at signing covers the RECORD. Showing a stale
+	page to a signer means hashing something other than what they read. `refresh`
+	redraws; it is not the default, because a preview that re-rendered on every
+	screen open would repoint `generated_pdf` a dozen times a hire day and that
+	field is the copy somebody printed.
+
+	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, as on every other method that
+	touches these three forms. `get_i9_form` lets a worker read their OWN I-9
+	because reading it harms nobody; this is addressed at a form by docname rather
+	than at a person, so there is no "their own" to make an exception for — and the
+	account holding the pad is the foreman's, not the signer's.
+
+	Every refusal is the tool's: a form with no signature line, a doctype this app
+	does not render, a destroyed I-9, and Frappe's own `read` permission on the
+	record. None of it is restated here.
+	"""
+	allowed = guard.require_scope(user)
+	personnel.require_hr_role()
+
+	wanted = str(document_type or "").strip()
+	if not wanted:
+		frappe.throw(
+			"document_type is required — the form to preview: 'I-9 Form', 'W-4 Form' or "
+			"'Tax Form'. The alert or task the pad was opened from carries it in "
+			"signature_request.doctype. Nothing was read.",
+			frappe.ValidationError,
+		)
+
+	inner = {"document_type": wanted}
+	for key, value in (
+		("document_name", document_name or docname),
+		("employee", employee),
+		("refresh", refresh),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+	if not (inner.get("document_name") or inner.get("employee")):
+		frappe.throw(
+			"document_name is required — the record to preview. The alert or task carries it "
+			"in signature_request.docname; employee= finds the form by the person it belongs "
+			"to instead. Nothing was read.",
+			frappe.ValidationError,
+		)
+
+	# THE ENTITY GATE, AFTER THE RESOLUTION AND BEFORE THE READ. The tool takes an
+	# employee or a docname and resolves either to a form; which ENTITY that form
+	# belongs to is this surface's question rather than Frappe's, and asking it
+	# against the resolved docname is what stops `employee=` being a way to reach
+	# a record in a company this caller's User Permissions do not name. It reads
+	# as not found, the same refusal `require_scoped_doc` gives everywhere.
+	#
+	# BEFORE, NOT AFTER, EVEN THOUGH THIS IS A READ. The preview draws the page
+	# where the record has none, so a gate that ran on the way out would refuse
+	# the bytes having already rendered and attached a File to a form in a company
+	# this caller may not reach. The refusal has to land with nothing of theirs on
+	# the record, which is the same order `seal_signed_document` keeps below.
+	resolved_doctype, resolved_name = signed_documents.resolve_document(inner)
+	guard.require_scoped_doc(resolved_doctype, resolved_name, "document_name", allowed)
+
+	inner["document_type"] = resolved_doctype
+	inner["document_name"] = resolved_name
+	inner.pop("employee", None)
+	data = signed_documents.get_document_preview(inner).data
+
+	return {
+		"document_type": data.get("document_type"),
+		"document_name": data.get("document_name"),
+		"docname": data.get("document_name"),
+		"employee": data.get("employee"),
+		"status": data.get("status"),
+		"available": bool(data.get("available")),
+		"rendered": bool(data.get("rendered")),
+		"stale": bool(data.get("stale")),
+		"modified": data.get("modified"),
+		"file_url": data.get("file_url"),
+		"file_name": data.get("file_name"),
+		"content_type": data.get("content_type"),
+		"encoding": data.get("encoding"),
+		"content": data.get("content"),
+		"content_base64": data.get("content_base64"),
+		"base64": data.get("base64"),
+		"bytes": data.get("bytes"),
+		# What can be signed on this form and what already has been. The pad needs
+		# both before it asks anybody to draw anything — see `_boxes_for` — and the
+		# attestation on each is the government's own sentence, which §17.5 says
+		# the presentation step shows verbatim rather than summarising.
+		"signature_boxes": data.get("signature_boxes") or [],
+		"note": data.get("note") or None,
+	}
+
+
+# ── 53. seal_signed_document ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("seal_signed_document", mutating=True, limit=guard.UPLOAD_LIMIT)
+def seal_signed_document(user: str, document_type=None, document_name=None, docname=None,
+                         employee=None, include_pdf=None) -> dict:
+	"""Produce the tamper-evident copy of a form that has already been signed.
+
+	v0.63.0. STEP 5 OF THE CHAIN, published here so a handset can take it — and
+	`submit_form_signature` already takes it automatically, so the ordinary flow
+	never needs this call. What it is for is the two cases the automatic step
+	cannot cover: a form signed before v0.63.0, and a form whose second signature
+	arrived through the Desk rather than through the pad.
+
+	IT COLLECTS NOTHING AND SIGNS NOTHING. Every signature it seals is already on
+	the record; this redraws the form — which stamps those captures into the page
+	content and flattens the AcroForm away — appends the verification page built
+	from the Signing Evidence rows, hashes the finished file, and files that hash
+	back on the rows. An unsigned form is REFUSED rather than sealed, because a
+	verification page on a form nobody signed is an official-looking appendix that
+	vouches for nothing.
+
+	`include_pdf` HANDS THE SEALED BYTES BACK AND DEFAULTS ON, for the reason
+	`submit_form_signature`'s does: the file is private, this door cannot follow a
+	private URL, and a route that produced an artefact the caller cannot open
+	would have produced it for nobody.
+
+	THE HR ROLE IS REQUIRED WITH NO EXCEPTION and Frappe's own `write` permission
+	on the form is checked by the tool. Sealing attaches a document to somebody's
+	personnel record and stamps the evidence register that describes it; an
+	account that may not write the form may not do either.
+	"""
+	allowed = guard.require_scope(user)
+	personnel.require_hr_role()
+
+	wanted = str(document_type or "").strip()
+	if not wanted:
+		frappe.throw(
+			"document_type is required — the form to seal: 'I-9 Form', 'W-4 Form' or "
+			"'Tax Form'. Nothing was changed.",
+			frappe.ValidationError,
+		)
+	inner = {"document_type": wanted}
+	for key, value in (("document_name", document_name or docname), ("employee", employee)):
+		if value not in (None, ""):
+			inner[key] = value
+	if not (inner.get("document_name") or inner.get("employee")):
+		frappe.throw(
+			"document_name is required — the record to seal. employee= finds the form by the "
+			"person it belongs to instead. Nothing was changed.",
+			frappe.ValidationError,
+		)
+
+	# SCOPED BEFORE THE WRITE, unlike the preview, which scopes after. This one
+	# attaches a file and stamps evidence rows, so a caller who may not reach the
+	# entity must be refused with nothing of theirs having landed on it.
+	resolved_doctype, resolved_name = signed_documents.resolve_document(inner)
+	guard.require_scoped_doc(resolved_doctype, resolved_name, "document_name", allowed)
+
+	data = signed_documents.seal_signed_document(
+		{"document_type": resolved_doctype, "document_name": resolved_name}
+	).data
+
+	out = {
+		"document_type": data.get("document_type"),
+		"document_name": data.get("document_name"),
+		"docname": data.get("document_name"),
+		"sealed": bool(data.get("sealed")),
+		"file_url": data.get("file_url"),
+		"file_name": data.get("file_name"),
+		"content_type": "application/pdf",
+		"bytes": data.get("bytes"),
+		"sealed_pdf_hash": data.get("sealed_pdf_hash"),
+		"signatures_on_page": data.get("signatures_on_page"),
+		"evidence": data.get("evidence") or [],
+		"evidence_updated": data.get("evidence_updated") or [],
+		"note": data.get("note") or None,
+	}
+	if _as_flag(include_pdf, default=True):
+		out.update(_sealed_bytes(data.get("file_url")))
+	return out
+
+
+def _sealed_bytes(url) -> dict:
+	"""The sealed copy read back as base64, or the keys saying it could not be.
+
+	NEVER RAISES, for the reason `_signed_pdf` never does: the seal is on the
+	document and the register points at it whatever happens here, and a failure to
+	read a file back is not a failure of the write that produced it.
+	"""
+	out = {"encoding": None, "content": None, "content_base64": None, "base64": None}
+	target = str(url or "").strip()
+	if not target:
+		return out
+	try:
+		docname = str(frappe.db.get_value("File", {"file_url": target}, "name") or "")
+		content = file_tools.read_file_bytes(docname) if docname else b""
+	except Exception:  # pragma: no cover - see the docstring
+		return out
+	if not content:
+		return out
+	encoded = base64.b64encode(content).decode("ascii")
+	return {
+		"encoding": "base64",
+		"content": encoded,
+		"content_base64": encoded,
+		"base64": encoded,
 	}

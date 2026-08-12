@@ -550,10 +550,15 @@ class ToolRegistration(unittest.TestCase):
 		# bucket and for an hour of a job title, as opposed to what one named
 		# person earns. `Piecework Rate.activity` is the same vocabulary this
 		# register keys a model by, which is what lets one rate table and one
-		# deployed model talk about the same piece of work.
-		self.assertEqual(len(self.registry.TOOLS), 410)
-		self.assertEqual(len(self.registry.READ_TOOLS), 187)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 223)
+		# deployed model talk about the same piece of work. v0.63.0 adds two over
+		# the document either side of a signature: `get_document_preview` (read)
+		# is step 1 of the evidence chain — the page the signer is shown, as bytes,
+		# because the handset cannot follow a private file_url — and
+		# `seal_signed_document` (write) is step 5, the verification page and the
+		# hash of the finished file.
+		self.assertEqual(len(self.registry.TOOLS), 412)
+		self.assertEqual(len(self.registry.READ_TOOLS), 188)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 224)
 
 
 if __name__ == "__main__":

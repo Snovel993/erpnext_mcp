@@ -327,6 +327,40 @@ PROPERTY = ("Lease",)
 #: the User Permission `create_mobile_user` writes says whose. A Farm Manager
 #: scoped to one entity gets no reach into another's personnel file out of it.
 HIRING_FORMS = ("I-9 Form",)
+#: v0.63.0. THE OTHER FEDERAL FORM THE HIRING WIZARD COLLECTS, AND THE SAME
+#: FINDING v0.59.3 MADE ABOUT THE FIRST ONE.
+#:
+#: `HIRING_FORMS` above records how the I-9 gap surfaced: `signatures._require_write`
+#: gates every signature on Frappe's own `has_permission(..., "write", doc=...)`
+#: rather than on a role list of its own, so a Farm Manager signing Section 2 from
+#: the app was refused with "this account may not write I-9 Form" — the check was
+#: correct and the permission table was incomplete. Form W-4 is in exactly that
+#: state today and the same three calls are closed by it: the signature box in
+#: Step 5, `seal_signed_document`, and `get_document_preview`, which is the read a
+#: pad has to make BEFORE anybody signs anything.
+#:
+#: THE GRANT IS NOT A WIDENING, WHICH IS THE PART WORTH CHECKING. `w4.submit_w4`
+#: inserts with `flags.ignore_permissions = True` behind `employee.require_hr_role()`,
+#: and `HR_ROLES` names Farm Manager — so this role has been creating and editing
+#: W-4 records through this app since the wizard shipped, on every site, with no
+#: DocPerm saying so. What the table said and what the role did were already out of
+#: step; this puts them back in step rather than granting something new.
+#:
+#: READ AND WRITE. NOT `create`, AND NOT `delete`, for the reasons `HIRING_FORMS`
+#: gives: a withholding certificate begins with the worker's own elections, and a
+#: W-4 that disappears is a withholding basis nobody can reconstruct at year end.
+#:
+#: THE SIGNER IS THE WORKER, NOT THE MANAGER, and nothing here changes that. The
+#: W-4's box carries no `form_type`, so the authorized-signer roster does not gate
+#: it — and `signatures._identity` refuses a badge that resolves to somebody other
+#: than the form's own employee on precisely this box. Write permission decides
+#: whose account may hold the pad; the identity check decides whose hand may sign.
+#:
+#: `Tax Form` IS DELIBERATELY NOT HERE. A 941 or an OR-WR is signed by an OFFICER
+#: of the employer under penalties of perjury, this app keeps no register of
+#: officers, and a Farm Manager is not one by virtue of running the orchard. That
+#: box stays gated by whatever write permission the site's own rules give.
+WITHHOLDING_FORMS = ("W-4 Form",)
 #: v0.61.0. THE TWO COMPANY-WIDE RATE TABLES, AND THEY ARE A GROUP OF THEIR OWN
 #: BECAUSE OF WHAT READING THEM MEANS.
 #:
@@ -560,7 +594,7 @@ ROLE_SPECS = (
 			# role that stands in front of the worker to do it. READ_WRITE, not
 			# FULL: the form is raised by the hiring path and destroyed by the
 			# retention schedule, neither of which is a manager's call.
-			*_grant(READ_WRITE, HIRING_FORMS),
+			*_grant(READ_WRITE, HIRING_FORMS, WITHHOLDING_FORMS),
 			# v0.61.0. The PRICE LIST, which is what a manager is actually asked
 			# about in a packing shed at six in the morning — no name appears on
 			# either row, which is what makes it safe to hand to a role that
