@@ -15,6 +15,7 @@
   "company",
   "task_name",
   "farm_location_gps",
+  "farm_shift",
   "dispatched_by_foreman",
   "timing_section",
   "claimed_at",
@@ -99,6 +100,13 @@
    "fieldname": "farm_location_gps",
    "fieldtype": "Data",
    "label": "Farm Location (GPS)"
+  },
+  {
+   "fieldname": "farm_shift",
+   "fieldtype": "Link",
+   "label": "Farm Shift",
+   "options": "Farm Shift",
+   "description": "The shift this work was actually done on, and the anchor that puts the completion's evidence onto a compliance record spanning the whole exposure period. A task completion carries a point in time; the shift carries the timeline the point sits inside, and OR-OSHA asks about the second. Written at claim, start or completion — whichever first knows which shift the worker was on."
   },
   {
    "default": "0",

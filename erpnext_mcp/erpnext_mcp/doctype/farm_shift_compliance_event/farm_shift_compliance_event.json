@@ -39,7 +39,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Event",
-   "options": "Water Break\nShade Break\nRest Cycle\nSupervisor Observation\nHeat Illness Signs Check\nCool-Down\nThreshold Crossed\nAcclimatization Reminder\nRest Period\nMeal Period\nOther",
+   "options": "Water Break\nShade Break\nRest Cycle\nSupervisor Observation\nHeat Illness Signs Check\nCool-Down\nThreshold Crossed\nAcclimatization Reminder\nRest Period\nMeal Period\nTask Completed\nOther",
    "reqd": 1
   },
   {

@@ -22,6 +22,7 @@
   "dispatch_mode",
   "assigned_to",
   "assigned_to_name",
+  "farm_shift",
   "dispatch_col",
   "estimated_duration_minutes",
   "source_section",
@@ -169,6 +170,13 @@
    "fieldname": "assigned_to_name",
    "fieldtype": "Data",
    "label": "Assigned To (Name)"
+  },
+  {
+   "fieldname": "farm_shift",
+   "fieldtype": "Link",
+   "label": "Farm Shift",
+   "options": "Farm Shift",
+   "description": "The shift this work belongs to. NOT a duplicate of the assignment's own shift link: this one says which shift the job was RAISED FOR, and the assignment's says which shift it was actually DONE ON. A spray task dispatched for the morning shift and finished on the afternoon's is two different facts, and a re-entry-interval question needs both."
   },
   {
    "fieldname": "dispatch_col",

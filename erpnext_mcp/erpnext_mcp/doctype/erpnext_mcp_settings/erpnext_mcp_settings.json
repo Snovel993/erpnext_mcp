@@ -374,6 +374,7 @@
   "allow_end_shift_break",
   "allow_get_break_policy",
   "allow_get_shift_production",
+  "allow_get_shift_crew_timeline",
   "allow_log_shift_location",
   "allow_create_heat_exposure_event",
   "weather_section",
@@ -565,7 +566,7 @@
   },
   {
    "default": "0",
-   "description": "Master switch. While this is off the MCP endpoint answers 404 for everyone, whatever else is configured here. This is the fastest way to cut off an AI client: untick, save, done \u2014 no restart, no token change.",
+   "description": "Master switch. While this is off the MCP endpoint answers 404 for everyone, whatever else is configured here. This is the fastest way to cut off an AI client: untick, save, done — no restart, no token change.",
    "fieldname": "enabled",
    "fieldtype": "Check",
    "label": "Enabled"
@@ -597,7 +598,7 @@
    "fieldname": "endpoint_info",
    "fieldtype": "HTML",
    "label": "Endpoint",
-   "options": "<div class='form-message blue'><p><b>Endpoint</b><br><code>POST https://&lt;your-site&gt;/api/method/erpnext_mcp.mcp.handle</code></p><p><b>Header</b><br><code>X-MCP-Token: &lt;token&gt;</code></p><p>JSON-RPC 2.0 (MCP Streamable HTTP). POST only \u2014 this server sends no unsolicited messages, so there is no stream to open.</p><p>Every call, allowed or refused, is recorded in <a href='/app/mcp-action-log'>MCP Action Log</a>.</p></div>"
+   "options": "<div class='form-message blue'><p><b>Endpoint</b><br><code>POST https://&lt;your-site&gt;/api/method/erpnext_mcp.mcp.handle</code></p><p><b>Header</b><br><code>X-MCP-Token: &lt;token&gt;</code></p><p>JSON-RPC 2.0 (MCP Streamable HTTP). POST only — this server sends no unsolicited messages, so there is no stream to open.</p><p>Every call, allowed or refused, is recorded in <a href='/app/mcp-action-log'>MCP Action Log</a>.</p></div>"
   },
   {
    "depends_on": "eval:doc.enabled",
@@ -618,34 +619,34 @@
   },
   {
    "default": "127.0.0.1/32,::1/128,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12",
-   "description": "Comma- or newline-separated CIDR blocks allowed to reach the endpoint, checked after the token. Defaults to loopback plus private LAN ranges. An empty list denies everyone \u2014 a blank field is far more often a mistake than an intent to publish an accounting API. Add 0.0.0.0/0 only if you genuinely mean the whole internet.",
+   "description": "Comma- or newline-separated CIDR blocks allowed to reach the endpoint, checked after the token. Defaults to loopback plus private LAN ranges. An empty list denies everyone — a blank field is far more often a mistake than an intent to publish an accounting API. Add 0.0.0.0/0 only if you genuinely mean the whole internet.",
    "fieldname": "allowed_cidrs",
    "fieldtype": "Small Text",
    "label": "Allowed CIDRs"
   },
   {
-   "description": "Base URL a client should use, if it differs from the one this site sees. Leave empty and the connection panel uses frappe.utils.get_url(). Set it for a site behind a Tailscale Funnel, a tunnel or a reverse proxy on another hostname \u2014 there is no way for the server to guess its own public name. Example: https://erp.tail1234.ts.net",
+   "description": "Base URL a client should use, if it differs from the one this site sees. Leave empty and the connection panel uses frappe.utils.get_url(). Set it for a site behind a Tailscale Funnel, a tunnel or a reverse proxy on another hostname — there is no way for the server to guess its own public name. Example: https://erp.tail1234.ts.net",
    "fieldname": "public_url",
    "fieldtype": "Data",
    "label": "Public URL"
   },
   {
    "default": "1",
-   "description": "On: the Farm Ops mobile app can reach /api/method/erpnext_mcp.api.mobile.* and .../erpnext_mcp.api.files.* with a per-user API token. Off: every one of those eleven methods answers 503 immediately, for every phone, without reading or writing anything \u2014 the one-flip shutdown for the mobile surface. This is SEPARATE from the master switch above, which governs the MCP endpoint the AI uses: stopping the AI and stopping the phones are different decisions. It can also be forced off without the Desk by setting \"farm_ops_mobile_enabled\": 0 in site_config.json; either source saying off means off.",
+   "description": "On: the Farm Ops mobile app can reach /api/method/erpnext_mcp.api.mobile.* and .../erpnext_mcp.api.files.* with a per-user API token. Off: every one of those eleven methods answers 503 immediately, for every phone, without reading or writing anything — the one-flip shutdown for the mobile surface. This is SEPARATE from the master switch above, which governs the MCP endpoint the AI uses: stopping the AI and stopping the phones are different decisions. It can also be forced off without the Desk by setting \"farm_ops_mobile_enabled\": 0 in site_config.json; either source saying off means off.",
    "fieldname": "farm_ops_mobile_enabled",
    "fieldtype": "Check",
    "label": "Farm Ops Mobile API Enabled"
   },
   {
    "default": "30",
-   "description": "Days a Farm Ops credential may go unused before a nightly sweep revokes its token. This is what limits the damage from a phone lost in an orchard and never reported: an unreported device stops working by itself. The ACCOUNT is never disabled and the roles and entity access are untouched \u2014 only the token goes, and the worker gets a new QR. Tick \"Exempt From Idle Sweep\" on a Mobile Access Grant that is legitimately quiet for months. Set this to 0 to switch the sweep off entirely.",
+   "description": "Days a Farm Ops credential may go unused before a nightly sweep revokes its token. This is what limits the damage from a phone lost in an orchard and never reported: an unreported device stops working by itself. The ACCOUNT is never disabled and the roles and entity access are untouched — only the token goes, and the worker gets a new QR. Tick \"Exempt From Idle Sweep\" on a Mobile Access Grant that is legitimately quiet for months. Set this to 0 to switch the sweep off entirely.",
    "fieldname": "mobile_grant_idle_days",
    "fieldtype": "Int",
    "label": "Revoke Idle Mobile Credentials After (Days)",
    "non_negative": 1
   },
   {
-   "description": "Where the weekly Journal Entry attribution drift report goes when it finds something. Comma-separated; leave empty and it goes to every enabled System Manager on the site. The watch is READ-ONLY \u2014 it reports drift and never repairs it, because rewriting GL rows on submitted accounting documents on a timer is not something this app does. If no outgoing email account is configured the report lands in the Error Log instead, so a finding is never lost to an SMTP setting.",
+   "description": "Where the weekly Journal Entry attribution drift report goes when it finds something. Comma-separated; leave empty and it goes to every enabled System Manager on the site. The watch is READ-ONLY — it reports drift and never repairs it, because rewriting GL rows on submitted accounting documents on a timer is not something this app does. If no outgoing email account is configured the report lands in the Error Log instead, so a finding is never lost to an SMTP setting.",
    "fieldname": "drift_report_email",
    "fieldtype": "Data",
    "label": "Drift Report Recipients",
@@ -665,7 +666,7 @@
   },
   {
    "depends_on": "eval:doc.require_user_context",
-   "description": "The user tools run as, and that mutations are attributed to. Create a dedicated one (for example mcp@yourcompany.example) with only the roles the tools you enabled actually need \u2014 Accounts User is normally enough for the ledger tools; reports, attachments and workflow actions need whatever their own DocTypes require. Falls back to Administrator if left empty.",
+   "description": "The user tools run as, and that mutations are attributed to. Create a dedicated one (for example mcp@yourcompany.example) with only the roles the tools you enabled actually need — Accounts User is normally enough for the ledger tools; reports, attachments and workflow actions need whatever their own DocTypes require. Falls back to Administrator if left empty.",
    "fieldname": "mcp_system_user",
    "fieldtype": "Link",
    "label": "MCP System User",
@@ -774,7 +775,7 @@
    "label": "List Cost Centers"
   },
   {
-   "description": "<b>Every one of these is off on a fresh install and stays off until you tick it.</b> Each call is recorded in MCP Action Log with its arguments and its docstatus change. Enable the narrowest set that does the job: create_journal_entry alone gives an AI a scratchpad in the ledger, because a draft affects no balance until submit_journal_entry \u2014 a separate switch \u2014 posts it. <br><br>Two more write tools live in the sections below: <b>Advance Workflow</b> (Workflow) and <b>Create Todo</b> (Comments &amp; Tasks). The banner at the top of this form always lists every write tool that is currently live, wherever its switch is.",
+   "description": "<b>Every one of these is off on a fresh install and stays off until you tick it.</b> Each call is recorded in MCP Action Log with its arguments and its docstatus change. Enable the narrowest set that does the job: create_journal_entry alone gives an AI a scratchpad in the ledger, because a draft affects no balance until submit_journal_entry — a separate switch — posts it. <br><br>Two more write tools live in the sections below: <b>Advance Workflow</b> (Workflow) and <b>Create Todo</b> (Comments &amp; Tasks). The banner at the top of this form always lists every write tool that is currently live, wherever its switch is.",
    "fieldname": "mutating_tools_section",
    "fieldtype": "Section Break",
    "label": "Accounting Write Tools"
@@ -802,7 +803,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Set or change party_type and party on ONE line of a Journal Entry, including a submitted one, in both the voucher and its GL Entry rows. Moves no balance \u2014 account, debit, credit and date are not arguments. Requires a reason, which is written to the entry's comment thread.",
+   "description": "WRITE. Set or change party_type and party on ONE line of a Journal Entry, including a submitted one, in both the voucher and its GL Entry rows. Moves no balance — account, debit, credit and date are not arguments. Requires a reason, which is written to the entry's comment thread.",
    "fieldname": "allow_update_journal_entry_party",
    "fieldtype": "Check",
    "label": "Update Journal Entry Party"
@@ -828,7 +829,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Create the Bank Account record a bank feed writes into, and the Bank institution behind it. Refuses a GL account that is not an Asset (a bank account) or a Liability (a credit card), and an Asset account whose account_type is not Bank or Cash \u2014 ERPNext's own reconciliation filters on that flag.",
+   "description": "WRITE. Create the Bank Account record a bank feed writes into, and the Bank institution behind it. Refuses a GL account that is not an Asset (a bank account) or a Liability (a credit card), and an Asset account whose account_type is not Bank or Cash — ERPNext's own reconciliation filters on that flag.",
    "fieldname": "allow_create_bank_account",
    "fieldtype": "Check",
    "label": "Create Bank Account"
@@ -842,7 +843,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Book a whole opening balance sheet as one journal entry \u2014 every line explicit, the balancing difference going to an offset account you name. Posts the entry too when asked, which also requires <b>Submit Journal Entry</b> above.",
+   "description": "WRITE. Book a whole opening balance sheet as one journal entry — every line explicit, the balancing difference going to an offset account you name. Posts the entry too when asked, which also requires <b>Submit Journal Entry</b> above.",
    "fieldname": "allow_post_opening_balance_journal_entry",
    "fieldtype": "Check",
    "label": "Post Opening Balance Journal Entry"
@@ -856,7 +857,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Delete a DRAFT journal entry outright, recording what it was and why in the audit log. Refuses submitted entries (cancel those instead) and cancelled ones \u2014 a cancelled entry and its reversing rows are the audit trail.",
+   "description": "WRITE. Delete a DRAFT journal entry outright, recording what it was and why in the audit log. Refuses submitted entries (cancel those instead) and cancelled ones — a cancelled entry and its reversing rows are the audit trail.",
    "fieldname": "allow_delete_draft_journal_entry",
    "fieldtype": "Check",
    "label": "Delete Draft Journal Entry"
@@ -909,7 +910,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE, AND IRREVERSIBLE \u2014 the only tool here with no undo, no draft and no cancelled state. Hard-deletes an account with no GL entries, no journal entry lines, no children, no company default and no bank account pointing at it. Prefer Disable Account for anything with history; this exists to free an account NUMBER, which disabling does not.",
+   "description": "WRITE, AND IRREVERSIBLE — the only tool here with no undo, no draft and no cancelled state. Hard-deletes an account with no GL entries, no journal entry lines, no children, no company default and no bank account pointing at it. Prefer Disable Account for anything with history; this exists to free an account NUMBER, which disabling does not.",
    "fieldname": "allow_delete_account",
    "fieldtype": "Check",
    "label": "Delete Account"
@@ -922,7 +923,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Create a Fiscal Year so ERPNext will accept postings dated inside it \u2014 the prerequisite for booking anything historical. Refuses a name already in use and a date range overlapping another year for the same company.",
+   "description": "WRITE. Create a Fiscal Year so ERPNext will accept postings dated inside it — the prerequisite for booking anything historical. Refuses a name already in use and a date range overlapping another year for the same company.",
    "fieldname": "allow_create_fiscal_year",
    "fieldtype": "Check",
    "label": "Create Fiscal Year"
@@ -940,7 +941,7 @@
    "label": "Update Fiscal Year"
   },
   {
-   "description": "How a posting is classified once it reaches an account: which segment of the business it belongs to (cost centers), what other axes it is filed under (accounting dimensions), and which accounts a document reaches for when nothing says (company defaults).<br><br>The read-only tree, <b>List Cost Centers</b>, is in the Accounting Read Tools section above. <b>Create Accounting Dimension</b> is the only switch in this app that can add a DocType to your site \u2014 and only when a call asks for it explicitly.",
+   "description": "How a posting is classified once it reaches an account: which segment of the business it belongs to (cost centers), what other axes it is filed under (accounting dimensions), and which accounts a document reaches for when nothing says (company defaults).<br><br>The read-only tree, <b>List Cost Centers</b>, is in the Accounting Read Tools section above. <b>Create Accounting Dimension</b> is the only switch in this app that can add a DocType to your site — and only when a call asks for it explicitly.",
    "fieldname": "dimension_tools_section",
    "fieldtype": "Section Break",
    "label": "Cost Centers & Dimensions"
@@ -954,7 +955,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Rename, renumber or disable/enable one cost center. Moves the docname with the fields. Cannot reparent \u2014 this app ships no tool that can.",
+   "description": "WRITE. Rename, renumber or disable/enable one cost center. Moves the docname with the fields. Cannot reparent — this app ships no tool that can.",
    "fieldname": "allow_update_cost_center",
    "fieldtype": "Check",
    "label": "Update Cost Center"
@@ -966,14 +967,14 @@
   },
   {
    "default": "0",
-   "description": "WRITE, AND A SCHEMA CHANGE. Creates an Accounting Dimension and adds a Link custom field to the documents that carry it \u2014 and, when the call asks for it, generates the custom DocType whose records become the dimension's values. Those fields are permanent until somebody removes them in the Desk. The narrowest switch in this section to leave off.",
+   "description": "WRITE, AND A SCHEMA CHANGE. Creates an Accounting Dimension and adds a Link custom field to the documents that carry it — and, when the call asks for it, generates the custom DocType whose records become the dimension's values. Those fields are permanent until somebody removes them in the Desk. The narrowest switch in this section to leave off.",
    "fieldname": "allow_create_accounting_dimension",
    "fieldtype": "Check",
    "label": "Create Accounting Dimension"
   },
   {
    "default": "0",
-   "description": "WRITE. Add one value to an existing accounting dimension \u2014 one record in the DocType that dimension points at. Touches no ledger and creates no fields.",
+   "description": "WRITE. Add one value to an existing accounting dimension — one record in the DocType that dimension points at. Touches no ledger and creates no fields.",
    "fieldname": "allow_create_dimension_value",
    "fieldtype": "Check",
    "label": "Create Dimension Value"
@@ -987,13 +988,13 @@
   },
   {
    "default": "0",
-   "description": "WRITE. The same fields, but FOUND rather than given \u2014 by account number for a numbered chart, then by account type, then by root type, with every candidate passing the same type checks. The setup call to make after Create Company. Never fills a field with something merely plausible: what it cannot resolve it reports. Idempotent.",
+   "description": "WRITE. The same fields, but FOUND rather than given — by account number for a numbered chart, then by account type, then by root type, with every candidate passing the same type checks. The setup call to make after Create Company. Never fills a field with something merely plausible: what it cannot resolve it reports. Idempotent.",
    "fieldname": "allow_bulk_wire_default_accounts",
    "fieldtype": "Check",
    "label": "Wire Company Default Accounts"
   },
   {
-   "description": "Reading a site's approval structure, and \u2014 behind its own switch \u2014 acting on it. Workflow actions run through Frappe's own apply_workflow, so they respect the acting user's roles and the transition's conditions.",
+   "description": "Reading a site's approval structure, and — behind its own switch — acting on it. Workflow actions run through Frappe's own apply_workflow, so they respect the acting user's roles and the transition's conditions.",
    "fieldname": "workflow_tools_section",
    "fieldtype": "Section Break",
    "label": "Workflow"
@@ -1039,7 +1040,7 @@
    "label": "Advance Workflow"
   },
   {
-   "description": "A site's saved reports are usually the most trustworthy answer to an accounting question, because somebody who knew the schema already wrote them. run_report enforces the acting user's permission on the report's DocType, so it can reach figures the raw read tools cannot \u2014 and is bounded by the roles you gave the MCP System User.",
+   "description": "A site's saved reports are usually the most trustworthy answer to an accounting question, because somebody who knew the schema already wrote them. run_report enforces the acting user's permission on the report's DocType, so it can reach figures the raw read tools cannot — and is bounded by the roles you gave the MCP System User.",
    "fieldname": "report_tools_section",
    "fieldtype": "Section Break",
    "label": "Reports"
@@ -1084,7 +1085,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Attach a file to ANY document \u2014 a statement onto the Journal Entry that books it, a receipt onto a Bank Transaction, a contract onto an Asset. Creates one File and changes nothing else. Needs write permission on the parent document, refuses a cancelled parent unless told otherwise, and refuses a filename the document already has.",
+   "description": "WRITE. Attach a file to ANY document — a statement onto the Journal Entry that books it, a receipt onto a Bank Transaction, a contract onto an Asset. Creates one File and changes nothing else. Needs write permission on the parent document, refuses a cancelled parent unless told otherwise, and refuses a filename the document already has.",
    "fieldname": "allow_attach_file_to_document",
    "fieldtype": "Check",
    "label": "Attach File To Document"
@@ -1097,13 +1098,13 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Create or update the Print Format that cuts a printed check out of a Payment Entry, laid out for US laser check stock (three 3.5-inch panels: check, stub, stub). Creates no payment and posts nothing \u2014 it decides where the fields land on paper. MICR is preprinted on the stock and is never rendered here. Custom format, so bench migrate never overwrites it.",
+   "description": "WRITE. Create or update the Print Format that cuts a printed check out of a Payment Entry, laid out for US laser check stock (three 3.5-inch panels: check, stub, stub). Creates no payment and posts nothing — it decides where the fields land on paper. MICR is preprinted on the stock and is never rendered here. Custom format, so bench migrate never overwrites it.",
    "fieldname": "allow_create_check_print_format",
    "fieldtype": "Check",
    "label": "Create Check Print Format"
   },
   {
-   "description": "Files too big to fit in one tool call, moved onto the site a piece at a time. Pieces are rows in a table, so an upload survives a bench restart; a session idle for 24 hours is swept automatically. Staging alone creates no File \u2014 Commit Staged File is the switch that decides whether anything lands.",
+   "description": "Files too big to fit in one tool call, moved onto the site a piece at a time. Pieces are rows in a table, so an upload survives a bench restart; a session idle for 24 hours is swept automatically. Staging alone creates no File — Commit Staged File is the switch that decides whether anything lands.",
    "fieldname": "upload_tools_section",
    "fieldtype": "Section Break",
    "label": "Streaming Uploads"
@@ -1117,7 +1118,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Stage one piece of a file. Creates no File on its own \u2014 the pieces sit in a staging table until Commit Staged File assembles them, and are discarded if it never does. Enabling this without Commit Staged File gives an AI somewhere to put bytes and no way to land them.",
+   "description": "WRITE. Stage one piece of a file. Creates no File on its own — the pieces sit in a staging table until Commit Staged File assembles them, and are discarded if it never does. Enabling this without Commit Staged File gives an AI somewhere to put bytes and no way to land them.",
    "fieldname": "allow_stage_file_chunk",
    "fieldtype": "Check",
    "label": "Stage File Chunk"
@@ -1128,7 +1129,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Assemble a staged upload into a File \u2014 attached to a document, or filed as a new Governance Document. Verifies the caller's own SHA-256 and size against the assembled bytes and refuses on mismatch. This is the switch that decides whether a chunked upload can land anything at all.",
+   "description": "WRITE. Assemble a staged upload into a File — attached to a document, or filed as a new Governance Document. Verifies the caller's own SHA-256 and size against the assembled bytes and refuses on mismatch. This is the switch that decides whether a chunked upload can land anything at all.",
    "fieldname": "allow_commit_staged_file",
    "fieldtype": "Check",
    "label": "Commit Staged File"
@@ -1168,7 +1169,7 @@
    "label": "Create Todo"
   },
   {
-   "description": "Only usable where the Frappe HR (hrms) app is installed \u2014 on a site without it these tools are not advertised at all, whatever these switches say. Employee, attendance and leave data is personal information; enable deliberately.",
+   "description": "Only usable where the Frappe HR (hrms) app is installed — on a site without it these tools are not advertised at all, whatever these switches say. Employee, attendance and leave data is personal information; enable deliberately.",
    "fieldname": "hr_tools_section",
    "fieldtype": "Section Break",
    "label": "HR"
@@ -1182,7 +1183,7 @@
   },
   {
    "default": "1",
-   "description": "READ. One Employee record with the onboarding state a returning worker arrives with \u2014 identity and assignment, the compliance columns, and the live I-9, W-4 and badge records those columns are reconciled against. Nothing in this app writes i9_status or w4_status after the hire, so a completed form fills a column still at its hire-time default; Expired and Requires-Update are never written over.",
+   "description": "READ. One Employee record with the onboarding state a returning worker arrives with — identity and assignment, the compliance columns, and the live I-9, W-4 and badge records those columns are reconciled against. Nothing in this app writes i9_status or w4_status after the hire, so a completed form fills a column still at its hire-time default; Expired and Requires-Update are never written over.",
    "fieldname": "allow_get_employee",
    "fieldtype": "Check",
    "label": "Get Employee"
@@ -1249,7 +1250,7 @@
    "label": "List Client Scripts"
   },
   {
-   "description": "Structured artefacts for somebody who has to sign something off \u2014 each carries its own provenance and its own anomaly flags, and an ERROR flag means the numbers do not internally agree. All read-only: nothing is stored, emailed or filed.<br><br>The first two switches are the MCP tools; the rest are the individual packet types, each gated separately so you can expose a reconciliation packet without exposing a payroll one.",
+   "description": "Structured artefacts for somebody who has to sign something off — each carries its own provenance and its own anomaly flags, and an ERROR flag means the numbers do not internally agree. All read-only: nothing is stored, emailed or filed.<br><br>The first two switches are the MCP tools; the rest are the individual packet types, each gated separately so you can expose a reconciliation packet without exposing a payroll one.",
    "fieldname": "packet_tools_section",
    "fieldtype": "Section Break",
    "label": "Compliance Packets"
@@ -1288,7 +1289,7 @@
    "label": "Fiscal Year Audit Packet"
   },
   {
-   "description": "The member register and its event trail. The cap table is the only place on this site that maps an anonymous member id to a legal name \u2014 gate it accordingly.",
+   "description": "The member register and its event trail. The cap table is the only place on this site that maps an anonymous member id to a legal name — gate it accordingly.",
    "fieldname": "governance_tools_section",
    "fieldtype": "Section Break",
    "label": "Cap Table and Member Events"
@@ -1316,7 +1317,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Retire a member: withdrawal date, retired flag, and a Withdrawal event in the trail. Moves no money \u2014 a final distribution is a separate Record Member Event call.",
+   "description": "WRITE. Retire a member: withdrawal date, retired flag, and a Withdrawal event in the trail. Moves no money — a final distribution is a separate Record Member Event call.",
    "fieldname": "allow_close_cap_table_entry",
    "fieldtype": "Check",
    "label": "Close Cap Table Entry"
@@ -1335,14 +1336,14 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Record one member event and, where it books money, the DRAFT journal entry for it \u2014 tagged with the member dimension on every line. Enabling this grants creating that draft; it does not grant posting it.",
+   "description": "WRITE. Record one member event and, where it books money, the DRAFT journal entry for it — tagged with the member dimension on every line. Enabling this grants creating that draft; it does not grant posting it.",
    "fieldname": "allow_record_member_event",
    "fieldtype": "Check",
    "label": "Record Member Event"
   },
   {
    "default": "0",
-   "description": "WRITE. Post the draft journal entry a member event is waiting on. Also requires Submit Journal Entry to be on \u2014 that switch is where moving a balance is decided, whatever route reaches it.",
+   "description": "WRITE. Post the draft journal entry a member event is waiting on. Also requires Submit Journal Entry to be on — that switch is where moving a balance is decided, whatever route reaches it.",
    "fieldname": "allow_submit_member_event",
    "fieldtype": "Check",
    "label": "Submit Member Event"
@@ -1381,7 +1382,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Convert an entry's .docx attachment to PDF, attach the PDF beside it, and repoint the entry at it \u2014 because a .docx is an editing format that renders differently everywhere and some applications will not open at all. The .docx is KEPT. Needs LibreOffice headless in the container and refuses cleanly without it; overwriting an existing PDF is a separate, non-default flag.",
+   "description": "WRITE. Convert an entry's .docx attachment to PDF, attach the PDF beside it, and repoint the entry at it — because a .docx is an editing format that renders differently everywhere and some applications will not open at all. The .docx is KEPT. Needs LibreOffice headless in the container and refuses cleanly without it; overwriting an existing PDF is a separate, non-default flag.",
    "fieldname": "allow_regenerate_governance_document_pdf",
    "fieldtype": "Check",
    "label": "Regenerate Governance Document PDF"
@@ -1466,7 +1467,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Close a note as Paid Off, Refinanced or Written Off, recording the disposition in its own history. Writes no journal entry \u2014 relieving a written-off balance is a posting with tax consequences that somebody should make on purpose.",
+   "description": "WRITE. Close a note as Paid Off, Refinanced or Written Off, recording the disposition in its own history. Writes no journal entry — relieving a written-off balance is a posting with tax consequences that somebody should make on purpose.",
    "fieldname": "allow_close_note_payable",
    "fieldtype": "Check",
    "label": "Close Note Payable"
@@ -1500,7 +1501,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Change a registered parcel. Cannot re-key it, cannot move it between entities, and cannot set the asset link \u2014 that is its own tool.",
+   "description": "WRITE. Change a registered parcel. Cannot re-key it, cannot move it between entities, and cannot set the asset link — that is its own tool.",
    "fieldname": "allow_update_parcel",
    "fieldtype": "Check",
    "label": "Update Parcel"
@@ -1519,7 +1520,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Move a Parcel to another Company as a conveyance: the parcel record, its attachments, and every lease, block, irrigation zone, housing unit and housing assignment pointing at it. Writes no Journal Entry \u2014 recording a conveyance and booking its consequences are separate acts. Refuses over an active lease.",
+   "description": "WRITE. Move a Parcel to another Company as a conveyance: the parcel record, its attachments, and every lease, block, irrigation zone, housing unit and housing assignment pointing at it. Writes no Journal Entry — recording a conveyance and booking its consequences are separate acts. Refuses over an active lease.",
    "fieldname": "allow_convey_parcel",
    "fieldtype": "Check",
    "label": "Convey Parcel"
@@ -1540,7 +1541,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Record a lease in either direction, with the executed document attached. Books nothing \u2014 recording the agreement and booking its consequences are separate acts.",
+   "description": "WRITE. Record a lease in either direction, with the executed document attached. Books nothing — recording the agreement and booking its consequences are separate acts.",
    "fieldname": "allow_create_lease",
    "fieldtype": "Check",
    "label": "Create Lease"
@@ -1579,7 +1580,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Register a relationship. Stores the last four digits of a taxpayer id and refuses nine \u2014 the full number belongs on the signed W-9, not on this site.",
+   "description": "WRITE. Register a relationship. Stores the last four digits of a taxpayer id and refuses nine — the full number belongs on the signed W-9, not on this site.",
    "fieldname": "allow_create_related_party",
    "fieldtype": "Check",
    "label": "Create Related Party"
@@ -1592,14 +1593,14 @@
    "label": "Update Related Party"
   },
   {
-   "description": "Tools that build a document \u2014 a PDF report, a tax workbook \u2014 and file it in the governance archive with the file attached. They create a Governance Document and Files; they post nothing to the ledger.",
+   "description": "Tools that build a document — a PDF report, a tax workbook — and file it in the governance archive with the file attached. They create a Governance Document and Files; they post nothing to the ledger.",
    "fieldname": "document_tools_section",
    "fieldtype": "Section Break",
    "label": "Generated Documents"
   },
   {
    "default": "0",
-   "description": "WRITE. Build the quarter's investment report as a PDF and file it as a Prior Statement. Refuses a quarter that is not genuinely closed \u2014 the statement filed, every investment entry submitted, every bank transaction reconciled \u2014 and names everything missing in one reply.",
+   "description": "WRITE. Build the quarter's investment report as a PDF and file it as a Prior Statement. Refuses a quarter that is not genuinely closed — the statement filed, every investment entry submitted, every bank transaction reconciled — and names everything missing in one reply.",
    "fieldname": "allow_generate_quarterly_investment_report",
    "fieldtype": "Check",
    "label": "Generate Quarterly Investment Report"
@@ -1642,7 +1643,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Change a company's country, tax id or notes \u2014 and its currency only while nothing is posted. Refuses the abbreviation, the name, and the fiscal year start month, each with the reason.",
+   "description": "WRITE. Change a company's country, tax id or notes — and its currency only while nothing is posted. Refuses the abbreviation, the name, and the fiscal year start month, each with the reason.",
    "fieldname": "allow_update_company",
    "fieldtype": "Check",
    "label": "Update Company"
@@ -1708,7 +1709,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Change a registered block. Cannot re-key it, cannot move it to another parcel, and cannot set the cost center \u2014 that is its own tool.",
+   "description": "WRITE. Change a registered block. Cannot re-key it, cannot move it to another parcel, and cannot set the cost center — that is its own tool.",
    "fieldname": "allow_update_field",
    "fieldtype": "Check",
    "label": "Update Field"
@@ -1736,7 +1737,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Change a registered zone. Cannot re-key it, cannot move it to another block, and cannot set the area in acres \u2014 that is computed.",
+   "description": "WRITE. Change a registered zone. Cannot re-key it, cannot move it to another block, and cannot set the area in acres — that is computed.",
    "fieldname": "allow_update_irrigation_zone",
    "fieldtype": "Check",
    "label": "Update Irrigation Zone"
@@ -1847,14 +1848,14 @@
   },
   {
    "default": "0",
-   "description": "WRITE. The same for an irrigation zone, and reports whether it sits inside the block it waters \u2014 reported rather than enforced, because a shared line really does cross boundaries.",
+   "description": "WRITE. The same for an irrigation zone, and reports whether it sits inside the block it waters — reported rather than enforced, because a shared line really does cross boundaries.",
    "fieldname": "allow_set_zone_boundary",
    "fieldtype": "Check",
    "label": "Set Zone Boundary"
   },
   {
    "default": "0",
-   "description": "WRITE. The same for a parcel \u2014 the OUTER shape, the one the deed and the tax bill both describe \u2014 and reports which of the blocks, zones and cabins registered on it fall outside it. Reported rather than enforced: a planting that predates a deed split really does straddle the line. This closes the gap set_field_boundary apologised for on every call from v0.12.0 to v0.31.0, when a parcel had no boundary to check a block against.",
+   "description": "WRITE. The same for a parcel — the OUTER shape, the one the deed and the tax bill both describe — and reports which of the blocks, zones and cabins registered on it fall outside it. Reported rather than enforced: a planting that predates a deed split really does straddle the line. This closes the gap set_field_boundary apologised for on every call from v0.12.0 to v0.31.0, when a parcel had no boundary to check a block against.",
    "fieldname": "allow_set_parcel_boundary",
    "fieldtype": "Check",
    "label": "Set Parcel Boundary"
@@ -1899,7 +1900,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Change relationship, related party, active flag or notes. Cannot rename \u2014 the name is the docname every posting points at.",
+   "description": "WRITE. Change relationship, related party, active flag or notes. Cannot rename — the name is the docname every posting points at.",
    "fieldname": "allow_update_family_member",
    "fieldtype": "Check",
    "label": "Update Family Member"
@@ -1911,14 +1912,14 @@
   },
   {
    "default": "1",
-   "description": "READ. What compliance requires of an operational record on this site, field by field \u2014 which framework wants each one, why, and what breaks in the day-to-day WORK if it is missing.",
+   "description": "READ. What compliance requires of an operational record on this site, field by field — which framework wants each one, why, and what breaks in the day-to-day WORK if it is missing.",
    "fieldname": "allow_get_compliance_field_map",
    "fieldtype": "Check",
    "label": "Compliance Field Map"
   },
   {
    "default": "1",
-   "description": "WRITE, and the ONE switch in this app that defaults ON. Adds the compliance columns \u2014 applicator, EPA reg number, REI, PHI, weather, I-9 status, W-4 status, wage-law jurisdiction, traceability links \u2014 to Spray Log, Employee and the BucketLog bridge, as Custom Fields, on every migrate. This is the one place erpnext_mcp extends a DocType it did not create, and it is deliberate: compliance woven into the operational record is defensible under audit and a shadow log beside it is not. Turn it OFF and no field is ever added. See docs/compliance_fields.md.",
+   "description": "WRITE, and the ONE switch in this app that defaults ON. Adds the compliance columns — applicator, EPA reg number, REI, PHI, weather, I-9 status, W-4 status, wage-law jurisdiction, traceability links — to Spray Log, Employee and the BucketLog bridge, as Custom Fields, on every migrate. This is the one place erpnext_mcp extends a DocType it did not create, and it is deliberate: compliance woven into the operational record is defensible under audit and a shadow log beside it is not. Turn it OFF and no field is ever added. See docs/compliance_fields.md.",
    "fieldname": "allow_install_compliance_fields",
    "fieldtype": "Check",
    "label": "Install Compliance Fields"
@@ -1926,7 +1927,7 @@
   {
    "fieldname": "evidence_read_section",
    "fieldtype": "Section Break",
-   "label": "Compliance Evidence \u2014 Read"
+   "label": "Compliance Evidence — Read"
   },
   {
    "default": "1",
@@ -1963,7 +1964,7 @@
   },
   {
    "default": "1",
-   "description": "READ. What was filed, to whom, when, and what came back \u2014 with the ones still awaiting a response called out.",
+   "description": "READ. What was filed, to whom, when, and what came back — with the ones still awaiting a response called out.",
    "fieldname": "allow_list_regulatory_filings",
    "fieldtype": "Check",
    "label": "List Regulatory Filings"
@@ -1992,7 +1993,7 @@
   {
    "fieldname": "evidence_write_section",
    "fieldtype": "Section Break",
-   "label": "Compliance Evidence \u2014 Write"
+   "label": "Compliance Evidence — Write"
   },
   {
    "default": "0",
@@ -2024,7 +2025,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Change a certificate's dates, holder, issuing body, renewal window or status. Moving the expiration forward is refused here \u2014 that is a renewal.",
+   "description": "WRITE. Change a certificate's dates, holder, issuing body, renewal window or status. Moving the expiration forward is refused here — that is a renewal.",
    "fieldname": "allow_update_certification",
    "fieldtype": "Check",
    "label": "Update Certification"
@@ -2071,7 +2072,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Declare an audit finished. REFUSES while any corrective action is still open \u2014 a closure date over an open finding is the most misleading thing this app could record.",
+   "description": "WRITE. Declare an audit finished. REFUSES while any corrective action is still open — a closure date over an open finding is the most misleading thing this app could record.",
    "fieldname": "allow_close_audit_event",
    "fieldtype": "Check",
    "label": "Close Audit Event"
@@ -2083,7 +2084,7 @@
   },
   {
    "default": "1",
-   "description": "READ. What is due and what is late, worst first, grouped by category \u2014 read live from the alerts the nightly sweep maintains.",
+   "description": "READ. What is due and what is late, worst first, grouped by category — read live from the alerts the nightly sweep maintains.",
    "fieldname": "allow_get_compliance_calendar",
    "fieldtype": "Check",
    "label": "Compliance Calendar"
@@ -2116,7 +2117,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Hide one alert until a date. Not a dismissal \u2014 the condition is still true and it comes back on its own.",
+   "description": "WRITE. Hide one alert until a date. Not a dismissal — the condition is still true and it comes back on its own.",
    "fieldname": "allow_snooze_alert",
    "fieldtype": "Check",
    "label": "Snooze Alert"
@@ -2130,14 +2131,14 @@
   },
   {
    "default": "0",
-   "description": "WRITE. The same dismissal, gated on the alert's own 'May Be Dismissed From The Field' box \u2014 which defaults off, so this refuses almost everything until somebody marks an individual alert stale. It is what the Farm Ops app calls; the ungated Dismiss Alert above is the desk-side route.",
+   "description": "WRITE. The same dismissal, gated on the alert's own 'May Be Dismissed From The Field' box — which defaults off, so this refuses almost everything until somebody marks an individual alert stale. It is what the Farm Ops app calls; the ungated Dismiss Alert above is the desk-side route.",
    "fieldname": "allow_dismiss_compliance_alert",
    "fieldtype": "Check",
    "label": "Dismiss a Dismissible Compliance Alert"
   },
   {
    "default": "0",
-   "description": "WRITE. Dismiss every alert matching a filter, with one reason for all of them. REQUIRES a dry run first \u2014 the whole calendar is one filter away.",
+   "description": "WRITE. Dismiss every alert matching a filter, with one reason for all of them. REQUIRES a dry run first — the whole calendar is one filter away.",
    "fieldname": "allow_dismiss_alert_bulk",
    "fieldtype": "Check",
    "label": "Dismiss Alerts in Bulk"
@@ -2149,14 +2150,14 @@
   },
   {
    "default": "1",
-   "description": "READ. The training register: who was taught what, when, under which regimes, and what has lapsed. Filters by regime the way an audit packet is assembled \u2014 'every NOP record for the last five years', 'every WPS record for 2026' \u2014 and reports the FSMA \u00a7112.161 elements each record is missing, including the \u00a7112.161(b) supervisor review that a GAP-only operation most often lacks.",
+   "description": "READ. The training register: who was taught what, when, under which regimes, and what has lapsed. Filters by regime the way an audit packet is assembled — 'every NOP record for the last five years', 'every WPS record for 2026' — and reports the FSMA §112.161 elements each record is missing, including the §112.161(b) supervisor review that a GAP-only operation most often lacks.",
    "fieldname": "allow_list_trainings",
    "fieldtype": "Check",
    "label": "List Trainings"
   },
   {
    "default": "1",
-   "description": "READ. One training record in full, with that person's whole training history and the retention period the tags demand \u2014 five years where any tag is NOP (7 CFR 205.103(b)(4)), three for OR-OSHA, two for FSMA and WPS. The longest tag governs, with the citation beside the number.",
+   "description": "READ. One training record in full, with that person's whole training history and the retention period the tags demand — five years where any tag is NOP (7 CFR 205.103(b)(4)), three for OR-OSHA, two for FSMA and WPS. The longest tag governs, with the citation beside the number.",
    "fieldname": "allow_get_training",
    "fieldtype": "Check",
    "label": "Get Training"
@@ -2168,20 +2169,20 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Files one training event tagged with every audit it answers \u2014 one afternoon can satisfy WPS, Oregon's heat rule, FSMA Subpart C and USDA GAP at once, so the record carries a tag list and appears in every packet it earned. Requires the topics actually covered, because a regime tag without them is a claim an inspector will disallow. Writes the \u00a7112.161 fields at the time: trainee signature, farm name, and a date-and-time activity stamp.",
+   "description": "MUTATING. Files one training event tagged with every audit it answers — one afternoon can satisfy WPS, Oregon's heat rule, FSMA Subpart C and USDA GAP at once, so the record carries a tag list and appears in every packet it earned. Requires the topics actually covered, because a regime tag without them is a claim an inspector will disallow. Writes the §112.161 fields at the time: trainee signature, farm name, and a date-and-time activity stamp.",
    "fieldname": "allow_record_training",
    "fieldtype": "Check",
    "label": "Record Training"
   },
   {
    "default": "0",
-   "description": "MUTATING. Records the FSMA \u00a7112.161(b) supervisor review on a training record \u2014 reviewed, dated and signed by a supervisor within a reasonable time after the record was made. This is the requirement USDA GAP does not ask for and FDA cites even where the training itself was fine. A separate act from recording the training, which is why it is a separate switch. Refuses a self-review, a supervisor from another entity, and a review dated before the training.",
+   "description": "MUTATING. Records the FSMA §112.161(b) supervisor review on a training record — reviewed, dated and signed by a supervisor within a reasonable time after the record was made. This is the requirement USDA GAP does not ask for and FDA cites even where the training itself was fine. A separate act from recording the training, which is why it is a separate switch. Refuses a self-review, a supervisor from another entity, and a review dated before the training.",
    "fieldname": "allow_sign_training_supervisor_review",
    "fieldtype": "Check",
    "label": "Sign Training Supervisor Review"
   },
   {
-   "description": "Structured Form I-9 workflow \u2014 employment eligibility verification with Section 1/2 status tracking, retention dates, audit logging, and USCIS document type lookup. Only usable where the I-9 doctypes exist (run bench migrate after installing v0.27.0).",
+   "description": "Structured Form I-9 workflow — employment eligibility verification with Section 1/2 status tracking, retention dates, audit logging, and USCIS document type lookup. Only usable where the I-9 doctypes exist (run bench migrate after installing v0.27.0).",
    "fieldname": "i9_section",
    "fieldtype": "Section Break",
    "label": "I-9 Compliance"
@@ -2209,7 +2210,7 @@
   },
   {
    "default": "1",
-   "description": "I-9s awaiting employer verification \u2014 Section 1 done, Section 2 not yet.",
+   "description": "I-9s awaiting employer verification — Section 1 done, Section 2 not yet.",
    "fieldname": "allow_list_pending_i9_verifications",
    "fieldtype": "Check",
    "label": "List Pending I-9 Verifications"
@@ -2601,7 +2602,7 @@
   },
   {
    "default": "1",
-   "description": "READ. One employee's hours in a date range as payroll reads them \u2014 their own span on each shift rather than the crew's, overtime resolved week by week at the 40-hour agricultural threshold, hours split by work state, and piece units from whichever source this site records them in. No money, and nothing written.",
+   "description": "READ. One employee's hours in a date range as payroll reads them — their own span on each shift rather than the crew's, overtime resolved week by week at the 40-hour agricultural threshold, hours split by work state, and piece units from whichever source this site records them in. No money, and nothing written.",
    "fieldname": "allow_get_employee_timesheet_summary",
    "fieldtype": "Check",
    "label": "Employee Timesheet Summary"
@@ -2863,7 +2864,7 @@
   },
   {
    "default": "1",
-   "description": "READ. The shift register: who was where, with which crew, for how long, and what is still open. `status` is computed from whether a shift has an end time rather than read off a stored column, because an OPEN shift is what the weather sweep walks. Reports every shift closed WITHOUT a supervisor signature \u2014 end_shift cannot produce one, so anything on that list was closed in the Desk, and FSMA \u00a7112.161(b) asks for a review dated and signed.",
+   "description": "READ. The shift register: who was where, with which crew, for how long, and what is still open. `status` is computed from whether a shift has an end time rather than read off a stored column, because an OPEN shift is what the weather sweep walks. Reports every shift closed WITHOUT a supervisor signature — end_shift cannot produce one, so anything on that list was closed in the Desk, and FSMA §112.161(b) asks for a review dated and signed.",
    "fieldname": "allow_list_shifts",
    "fieldtype": "Check",
    "label": "List Shifts"
@@ -2877,21 +2878,21 @@
   },
   {
    "default": "1",
-   "description": "READ. Where the crew went during one shift, in the order the fixes were TAKEN rather than the order they arrived \u2014 a phone out of signal posts an hour of breadcrumbs the moment the bars come back, and a track sorted by insertion draws the crew teleporting. Reports every silence longer than ten minutes as a gap and interpolates nothing: an invented position on a record read in a wage dispute is the worst thing this app could put on a map. ON by default, because reading a track cannot create one.",
+   "description": "READ. Where the crew went during one shift, in the order the fixes were TAKEN rather than the order they arrived — a phone out of signal posts an hour of breadcrumbs the moment the bars come back, and a track sorted by insertion draws the crew teleporting. Reports every silence longer than ten minutes as a gap and interpolates nothing: an invented position on a record read in a wage dispute is the worst thing this app could put on a map. ON by default, because reading a track cannot create one.",
    "fieldname": "allow_get_shift_track",
    "fieldtype": "Check",
    "label": "Get Shift Track"
   },
   {
    "default": "1",
-   "description": "READ. Every documented hot shift and what each one claims about OAR 437-004-1131 \u2014 water, shade, rest cycle, observation, training. Reports the shifts where heat illness signs were observed, which is what an investigation reads first, and the ones that do not confirm current heat training, which is a citation on the first hot morning.",
+   "description": "READ. Every documented hot shift and what each one claims about OAR 437-004-1131 — water, shade, rest cycle, observation, training. Reports the shifts where heat illness signs were observed, which is what an investigation reads first, and the ones that do not confirm current heat training, which is a citation on the first hot morning.",
    "fieldname": "allow_list_heat_exposure_events",
    "fieldtype": "Check",
    "label": "List Heat Exposure Events"
   },
   {
    "default": "1",
-   "description": "READ. One heat record in full with the shift behind it, and the obligations the record does NOT claim were met, in the rule's own terms. Says so when the shift's event timeline is empty \u2014 the checkboxes are the assertion and the logged water breaks are the evidence for it.",
+   "description": "READ. One heat record in full with the shift behind it, and the obligations the record does NOT claim were met, in the rule's own terms. Says so when the shift's event timeline is empty — the checkboxes are the assertion and the logged water breaks are the evidence for it.",
    "fieldname": "allow_get_heat_exposure_event",
    "fieldtype": "Check",
    "label": "Get Heat Exposure Event"
@@ -2903,35 +2904,35 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Forms a crew at a place and starts the exposure period every compliance question about it is asked against. THE FOREMAN FORMS THE CREW \u2014 there is no worker clock-in, because OAR 437-004-1131 puts the water, shade and observation obligations on a named responsible person and a crew of thirty each clocking themselves in is a shift with nobody responsible for the record. Per-worker attendance survives inside the crew envelope as joined_at and left_at on each row.",
+   "description": "MUTATING. Forms a crew at a place and starts the exposure period every compliance question about it is asked against. THE FOREMAN FORMS THE CREW — there is no worker clock-in, because OAR 437-004-1131 puts the water, shade and observation obligations on a named responsible person and a crew of thirty each clocking themselves in is a shift with nobody responsible for the record. Per-worker attendance survives inside the crew envelope as joined_at and left_at on each row.",
    "fieldname": "allow_start_shift",
    "fieldtype": "Check",
    "label": "Start Shift"
   },
   {
    "default": "0",
-   "description": "MUTATING. Rosters a late arrival or a transfer onto a shift already running. joined_at defaults to NOW rather than to the shift's start, which is the opposite of start_shift's default and right for the same reason \u2014 their Attendance record spans from when they actually arrived. Refuses a second row for somebody already on the crew, which would become two payroll days for one person.",
+   "description": "MUTATING. Rosters a late arrival or a transfer onto a shift already running. joined_at defaults to NOW rather than to the shift's start, which is the opposite of start_shift's default and right for the same reason — their Attendance record spans from when they actually arrived. Refuses a second row for somebody already on the crew, which would become two payroll days for one person.",
    "fieldname": "allow_add_worker_to_shift",
    "fieldtype": "Check",
    "label": "Add Worker to Shift"
   },
   {
    "default": "0",
-   "description": "MUTATING. Ends one worker's time on a shift that continues without them. It SETS left_at and does not delete the row \u2014 the row is the only record that this person was on this shift at all, which is what a wage claim turns on and what says who was exposed before they were sent home.",
+   "description": "MUTATING. Ends one worker's time on a shift that continues without them. It SETS left_at and does not delete the row — the row is the only record that this person was on this shift at all, which is what a wage claim turns on and what says who was exposed before they were sent home.",
    "fieldname": "allow_remove_worker_from_shift",
    "fieldtype": "Check",
    "label": "Remove Worker from Shift"
   },
   {
    "default": "0",
-   "description": "MUTATING. Records one thing the foreman did about the conditions, at the moment it happened \u2014 water break, shade break, rest cycle, supervisor observation, cool-down. THE TIMELINE IS THE EVIDENCE: Oregon's heat rule does not ask whether water was available in principle, it asks what happened during the shift, and a timeline written from memory in the evening is what an investigator discounts.",
+   "description": "MUTATING. Records one thing the foreman did about the conditions, at the moment it happened — water break, shade break, rest cycle, supervisor observation, cool-down. THE TIMELINE IS THE EVIDENCE: Oregon's heat rule does not ask whether water was available in principle, it asks what happened during the shift, and a timeline written from memory in the evening is what an investigator discounts.",
    "fieldname": "allow_log_shift_event",
    "fieldtype": "Check",
    "label": "Log Shift Event"
   },
   {
    "default": "0",
-   "description": "MUTATING. Closes a shift with the supervisor's signature and writes one Attendance record per crew member, each spanning that person's OWN joined_at to their own left_at. The signature is required: an unsigned close is an update statement setting a timestamp, and \u00a7112.161(b) asks for a review dated AND signed. The Attendance bridge never blocks the close \u2014 a site without Frappe HR or an archived employee is reported, not refused.",
+   "description": "MUTATING. Closes a shift with the supervisor's signature and writes one Attendance record per crew member, each spanning that person's OWN joined_at to their own left_at. The signature is required: an unsigned close is an update statement setting a timestamp, and §112.161(b) asks for a review dated AND signed. The Attendance bridge never blocks the close — a site without Frappe HR or an archived employee is reported, not refused.",
    "fieldname": "allow_end_shift",
    "fieldtype": "Check",
    "label": "End Shift"
@@ -2965,15 +2966,22 @@
    "label": "Get Shift Production"
   },
   {
+   "default": "1",
+   "description": "READ. Every crew member's OWN envelope on one shift: their span, the weather they personally stood in, the water/shade/rest events inside it, and what their own hours entitle them to. The shift is one record and the crew is not one person — a picker who joined at 09:40 was absent for the hour it was hottest, and a heat record scoped to the crew says otherwise. ON by default because reading an envelope cannot change it.",
+   "fieldname": "allow_get_shift_crew_timeline",
+   "fieldtype": "Check",
+   "label": "Get Shift Crew Timeline"
+  },
+  {
    "default": "0",
-   "description": "MUTATING. Appends one GPS fix to a shift's track \u2014 what the iOS app posts periodically while a shift is running. IT APPENDS AND NEVER EDITS: a breadcrumb somebody can correct is not a record of where the phone was. This is the one tool on the shift surface a worker's phone drives rather than the foreman, and it does not contradict the sole-actor rule \u2014 that rule is about who is ANSWERABLE, and a breadcrumb attests to nothing. OFF by default: a location track is a record of where people were, and turning it on is a decision an operator should take on purpose.",
+   "description": "MUTATING. Appends one GPS fix to a shift's track — what the iOS app posts periodically while a shift is running. IT APPENDS AND NEVER EDITS: a breadcrumb somebody can correct is not a record of where the phone was. This is the one tool on the shift surface a worker's phone drives rather than the foreman, and it does not contradict the sole-actor rule — that rule is about who is ANSWERABLE, and a breadcrumb attests to nothing. OFF by default: a location track is a record of where people were, and turning it on is a decision an operator should take on purpose.",
    "fieldname": "allow_log_shift_location",
    "fieldtype": "Check",
    "label": "Log Shift Location"
   },
   {
    "default": "0",
-   "description": "MUTATING. Documents OAR 437-004-1131 for one shift, signed and submitted \u2014 the answer to 'prove the July 15 crew complied'. At most one per shift, because two records about one exposure period will disagree. Checks the training claim against the register AS OF THE DAY OF THE SHIFT and refuses a verified claim the register contradicts; refuses signs observed with no response and no explanation. Everything else is recorded with the gap stated.",
+   "description": "MUTATING. Documents OAR 437-004-1131 for one shift, signed and submitted — the answer to 'prove the July 15 crew complied'. At most one per shift, because two records about one exposure period will disagree. Checks the training claim against the register AS OF THE DAY OF THE SHIFT and refuses a verified claim the register contradicts; refuses signs observed with no response and no explanation. Everything else is recorded with the gap stated.",
    "fieldname": "allow_create_heat_exposure_event",
    "fieldtype": "Check",
    "label": "Create Heat Exposure Event"
@@ -2985,21 +2993,21 @@
   },
   {
    "default": "1",
-   "description": "READ. One shift's conditions across its exposure period, with the extremes and the instant it first reached threshold \u2014 the answer to 'how hot was it when the break was called' without reading the whole shift. Says where each reading came from, and calls out a timeline that mixes live fifteen-minute readings with an hourly archive reconstruction, because the two are not equally strong evidence.",
+   "description": "READ. One shift's conditions across its exposure period, with the extremes and the instant it first reached threshold — the answer to 'how hot was it when the break was called' without reading the whole shift. Says where each reading came from, and calls out a timeline that mixes live fifteen-minute readings with an hourly archive reconstruction, because the two are not equally strong evidence.",
    "fieldname": "allow_get_weather_timeline",
    "fieldtype": "Check",
    "label": "Get Weather Timeline"
   },
   {
    "default": "1",
-   "description": "READ. Closed shifts carrying fewer than one weather reading per hour of their own length \u2014 the worklist for the backfill. Shifts with no farm_location_gps are listed separately, because no amount of backfilling documents one and the fix is a different action.",
+   "description": "READ. Closed shifts carrying fewer than one weather reading per hour of their own length — the worklist for the backfill. Shifts with no farm_location_gps are listed separately, because no amount of backfilling documents one and the fix is a different action.",
    "fieldname": "allow_list_shifts_missing_weather",
    "fieldtype": "Check",
    "label": "List Shifts Missing Weather"
   },
   {
    "default": "1",
-   "description": "READ. What this site fetches, how often, the three thresholds a reading is read against and the per-company overrides \u2014 because 'the threshold is 80' is false on a site where one entity set 75. There is deliberately NO write counterpart: those are outbound URLs and the numbers that decide whether a hot afternoon gets logged at all, and an operator edits them in the Desk.",
+   "description": "READ. What this site fetches, how often, the three thresholds a reading is read against and the per-company overrides — because 'the threshold is 80' is false on a site where one entity set 75. There is deliberately NO write counterpart: those are outbound URLs and the numbers that decide whether a hot afternoon gets logged at all, and an operator edits them in the Desk.",
    "fieldname": "allow_get_weather_settings",
    "fieldtype": "Check",
    "label": "Get Weather Settings"
@@ -3011,14 +3019,14 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Appends one Open-Meteo reading to an OPEN shift immediately, bypassing the cache \u2014 for the foreman who wants the conditions on the record now rather than in eleven minutes. Logs a Threshold Crossed compliance event where the reading crosses, ONCE PER SHIFT rather than once per reading. It never creates a Heat Exposure Event: which crew was exposed and whether the rest cycle was taken are judgements by the person who was there.",
+   "description": "MUTATING. Appends one Open-Meteo reading to an OPEN shift immediately, bypassing the cache — for the foreman who wants the conditions on the record now rather than in eleven minutes. Logs a Threshold Crossed compliance event where the reading crosses, ONCE PER SHIFT rather than once per reading. It never creates a Heat Exposure Event: which crew was exposed and whether the rest cycle was taken are judgements by the person who was there.",
    "fieldname": "allow_fetch_weather_now",
    "fieldtype": "Check",
    "label": "Fetch Weather Now"
   },
   {
    "default": "0",
-   "description": "MUTATING. Reconstructs a CLOSED shift's timeline from Open-Meteo's historical archive, at the archive's own hourly granularity, so a shift that ran before the service was switched on can still be documented. Idempotent \u2014 every reading is matched against the minute already present, and a reading is never edited. It writes no compliance events: a Threshold Crossed row dated last July on a signed shift would be an observation nobody made.",
+   "description": "MUTATING. Reconstructs a CLOSED shift's timeline from Open-Meteo's historical archive, at the archive's own hourly granularity, so a shift that ran before the service was switched on can still be documented. Idempotent — every reading is matched against the minute already present, and a reading is never edited. It writes no compliance events: a Threshold Crossed row dated last July on a signed shift would be an observation nobody made.",
    "fieldname": "allow_backfill_weather_for_shift",
    "fieldtype": "Check",
    "label": "Backfill Weather for a Shift"
@@ -3030,7 +3038,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Assemble every piece of evidence for one audit type over one period into a PDF, and file it as a Governance Document. REFUSES an incomplete period \u2014 a packet produced while corrective actions are still open would be contradicted by the auditor's first question.",
+   "description": "WRITE. Assemble every piece of evidence for one audit type over one period into a PDF, and file it as a Governance Document. REFUSES an incomplete period — a packet produced while corrective actions are still open would be contradicted by the auditor's first question.",
    "fieldname": "allow_generate_audit_packet",
    "fieldtype": "Check",
    "label": "Generate Audit Packet"
@@ -3049,7 +3057,7 @@
   },
   {
    "default": "1",
-   "description": "READ, DIAGNOSTIC. Every submitted Journal Entry whose voucher and general ledger disagree about who a line belongs to \u2014 the damage class v0.13.0's broken update_journal_entry_party left behind. Writes nothing.",
+   "description": "READ, DIAGNOSTIC. Every submitted Journal Entry whose voucher and general ledger disagree about who a line belongs to — the damage class v0.13.0's broken update_journal_entry_party left behind. Writes nothing.",
    "fieldname": "allow_find_drifted_je_attributions",
    "fieldtype": "Check",
    "label": "Find Drifted JE Attributions"
@@ -3068,7 +3076,7 @@
   },
   {
    "default": "1",
-   "description": "READ. The pool: every task a worker could pick up right now, with their concurrent-claim count. Self-pick and Either only \u2014 dispatched work is not in the pool by design.",
+   "description": "READ. The pool: every task a worker could pick up right now, with their concurrent-claim count. Self-pick and Either only — dispatched work is not in the pool by design.",
    "fieldname": "allow_list_available_tasks",
    "fieldtype": "Check",
    "label": "List Available Tasks"
@@ -3089,7 +3097,7 @@
   },
   {
    "default": "1",
-   "description": "READ. One task in full \u2014 its evidence contract, every assignment and rejection, the record its completion produced, and whether the alert it came from has since auto-dismissed.",
+   "description": "READ. One task in full — its evidence contract, every assignment and rejection, the record its completion produced, and whether the alert it came from has since auto-dismissed.",
    "fieldname": "allow_get_farm_task",
    "fieldtype": "Check",
    "label": "Get Farm Task"
@@ -3129,7 +3137,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. A worker takes a task from the pool. Capped at three concurrent claims per worker \u2014 a hoarding limit, not a productivity one. Refuses Dispatched work.",
+   "description": "WRITE. A worker takes a task from the pool. Capped at three concurrent claims per worker — a hoarding limit, not a productivity one. Refuses Dispatched work.",
    "fieldname": "allow_claim_farm_task",
    "fieldtype": "Check",
    "label": "Claim Farm Task"
@@ -3162,7 +3170,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. THE BRIDGE. Turns every open Compliance Alert into a dispatchable Farm Task carrying the evidence its completion has to produce. Idempotent \u2014 a second run finds the tasks the first raised and skips them.",
+   "description": "WRITE. THE BRIDGE. Turns every open Compliance Alert into a dispatchable Farm Task carrying the evidence its completion has to produce. Idempotent — a second run finds the tasks the first raised and skips them.",
    "fieldname": "allow_generate_tasks_from_compliance_alerts",
    "fieldtype": "Check",
    "label": "Generate Tasks from Compliance Alerts"
@@ -3174,7 +3182,7 @@
   },
   {
    "default": "1",
-   "description": "READ. Every shape of recurring job this operation has defined \u2014 its skill, duration, evidence contract and checklist size. The map of what the operation knows how to ask for.",
+   "description": "READ. Every shape of recurring job this operation has defined — its skill, duration, evidence contract and checklist size. The map of what the operation knows how to ask for.",
    "fieldname": "allow_list_farm_task_templates",
    "fieldtype": "Check",
    "label": "List Farm Task Templates"
@@ -3193,14 +3201,14 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Define the shape of one recurring job as a record \u2014 type, skill, duration, dispatch mode, evidence contract, produced record, instructions and checklist. The next task raised from it has that shape, with no app release.",
+   "description": "WRITE. Define the shape of one recurring job as a record — type, skill, duration, dispatch mode, evidence contract, produced record, instructions and checklist. The next task raised from it has that shape, with no app release.",
    "fieldname": "allow_create_farm_task_template",
    "fieldtype": "Check",
    "label": "Create Farm Task Template"
   },
   {
    "default": "0",
-   "description": "WRITE. Edit a template in place. It changes what FUTURE tasks look like and reaches nothing already raised \u2014 a task snapshots its template at creation.",
+   "description": "WRITE. Edit a template in place. It changes what FUTURE tasks look like and reaches nothing already raised — a task snapshots its template at creation.",
    "fieldname": "allow_update_farm_task_template",
    "fieldtype": "Check",
    "label": "Update Farm Task Template"
@@ -3267,7 +3275,7 @@
   {
    "fieldname": "records_write_section",
    "fieldtype": "Section Break",
-   "label": "Compliance Records \u2014 Write"
+   "label": "Compliance Records — Write"
   },
   {
    "default": "0",
@@ -3319,7 +3327,7 @@
   {
    "fieldname": "mobile_read_section",
    "fieldtype": "Section Break",
-   "label": "Mobile Accounts and Entity Scoping \u2014 Read"
+   "label": "Mobile Accounts and Entity Scoping — Read"
   },
   {
    "default": "1",
@@ -3341,14 +3349,14 @@
   },
   {
    "default": "1",
-   "description": "Reach this site from outside over HTTPS and report the TLS certificate, the status and a verdict. Probes unauthenticated by default \u2014 a 401 is the best result. It will only reach the configured public_url or a host under .ts.net, because it makes an outbound request from inside your network.",
+   "description": "Reach this site from outside over HTTPS and report the TLS certificate, the status and a verdict. Probes unauthenticated by default — a 401 is the best result. It will only reach the configured public_url or a host under .ts.net, because it makes an outbound request from inside your network.",
    "fieldname": "allow_validate_public_endpoint",
    "fieldtype": "Check",
    "label": "Validate Public Endpoint"
   },
   {
    "default": "1",
-   "description": "What this machine thinks it is serving: Funnel ports, URLs, the node's tailnet DNS name. Read-only, and nothing in this app can turn Funnel on or off \u2014 changing what is reachable from the whole internet is an operator decision.",
+   "description": "What this machine thinks it is serving: Funnel ports, URLs, the node's tailnet DNS name. Read-only, and nothing in this app can turn Funnel on or off — changing what is reachable from the whole internet is an operator decision.",
    "fieldname": "allow_get_tailscale_funnel_config",
    "fieldtype": "Check",
    "label": "Tailscale Funnel Config"
@@ -3356,7 +3364,7 @@
   {
    "fieldname": "fieldwork_read_section",
    "fieldtype": "Section Break",
-   "label": "Farm Ops Mobile \u2014 Read"
+   "label": "Farm Ops Mobile — Read"
   },
   {
    "default": "1",
@@ -3385,7 +3393,7 @@
   },
   {
    "default": "1",
-   "description": "The compliance calendar narrowed to the entities the caller may see \u2014 one call per entity, merged, Critical first. An account with no Company User Permission is refused rather than shown the whole site.",
+   "description": "The compliance calendar narrowed to the entities the caller may see — one call per entity, merged, Critical first. An account with no Company User Permission is refused rather than shown the whole site.",
    "fieldname": "allow_list_compliance_calendar_for_me",
    "fieldtype": "Check",
    "label": "My Compliance Calendar"
@@ -3397,21 +3405,21 @@
   },
   {
    "default": "1",
-   "description": "READ. (Normalized operating cash flow \u2212 maintenance capex) \u00f7 productive acres, for one company over one period, WITH EVERY INGREDIENT ITEMIZED. The components are not extras: a normalized figure nobody can inspect is indistinguishable from an arranged one, and every buyer and lender who reads this number tests it one add-back at a time. Raw OCF is computed from GL Entry by the direct method so it traces back to rows; maintenance capex is actual spend and never a percentage of revenue; the denominator is what was PRODUCTIVE, time-weighted, not what is owned.",
+   "description": "READ. (Normalized operating cash flow − maintenance capex) ÷ productive acres, for one company over one period, WITH EVERY INGREDIENT ITEMIZED. The components are not extras: a normalized figure nobody can inspect is indistinguishable from an arranged one, and every buyer and lender who reads this number tests it one add-back at a time. Raw OCF is computed from GL Entry by the direct method so it traces back to rows; maintenance capex is actual spend and never a percentage of revenue; the denominator is what was PRODUCTIVE, time-weighted, not what is owned.",
    "fieldname": "allow_get_sustainable_cf_per_acre",
    "fieldtype": "Check",
    "label": "Get Sustainable CF Per Acre"
   },
   {
    "default": "1",
-   "description": "READ. The normalization register \u2014 every adjustment proposed, approved, refused or superseded, with its justification and who signed it. Only Approved rows move the KPI, and the tool says which those are; the others are kept because a rejection with a reason teaches the next proposal.",
+   "description": "READ. The normalization register — every adjustment proposed, approved, refused or superseded, with its justification and who signed it. Only Approved rows move the KPI, and the tool says which those are; the others are kept because a rejection with a reason teaches the next proposal.",
    "fieldname": "allow_list_normalization_adjustments",
    "fieldtype": "Check",
    "label": "List Normalization Adjustments"
   },
   {
    "default": "1",
-   "description": "READ. Any registered financial report over a window, TRAILING TWELVE MONTHS BY DEFAULT, with the period just finished beside it and up to five years of prior windows under both. Agricultural revenue is aggressively seasonal \u2014 Q3 is harvest and Q1 is pruning \u2014 so two single periods set against each other say the operation collapsed in January and recovered in September, every year, on every farm. A rolling twelve months holds the whole cycle exactly once however it is read. The registry ships with sustainable_cf_per_acre, ocf and revenue.",
+   "description": "READ. Any registered financial report over a window, TRAILING TWELVE MONTHS BY DEFAULT, with the period just finished beside it and up to five years of prior windows under both. Agricultural revenue is aggressively seasonal — Q3 is harvest and Q1 is pruning — so two single periods set against each other say the operation collapsed in January and recovered in September, every year, on every farm. A rolling twelve months holds the whole cycle exactly once however it is read. The registry ships with sustainable_cf_per_acre, ocf and revenue.",
    "fieldname": "allow_get_windowed_report",
    "fieldtype": "Check",
    "label": "Get Windowed Report"
@@ -3425,7 +3433,7 @@
   },
   {
    "default": "1",
-   "description": "READ. The KPI register: what this site computes, how, over what window, and what it alerts on. v0.39.0 made a KPI a RECORD rather than a Python function, so every field on one \u2014 the window, the step, the lookback, the four thresholds, the dashboard order and the switch \u2014 is editable with no code release. What is NOT editable is the engine: formula_type has exactly two values, both deterministic, and nothing on the record holds Python.",
+   "description": "READ. The KPI register: what this site computes, how, over what window, and what it alerts on. v0.39.0 made a KPI a RECORD rather than a Python function, so every field on one — the window, the step, the lookback, the four thresholds, the dashboard order and the switch — is editable with no code release. What is NOT editable is the engine: formula_type has exactly two values, both deterministic, and nothing on the record holds Python.",
    "fieldname": "allow_list_financial_kpi_definitions",
    "fieldtype": "Check",
    "label": "List Financial KPI Definitions"
@@ -3439,14 +3447,14 @@
   },
   {
    "default": "1",
-   "description": "READ. One defined KPI over its own window, with the period just finished, the prior-window history and the threshold verdict beside it. It goes through the same window standard get_windowed_report does, so a KPI somebody typed into a form this morning behaves identically at the fiscal year boundary and on a partial ledger. A null value is an ANSWER \u2014 a division nobody could perform \u2014 and never a zero. It warms the Financial KPI History cache and writes nothing else.",
+   "description": "READ. One defined KPI over its own window, with the period just finished, the prior-window history and the threshold verdict beside it. It goes through the same window standard get_windowed_report does, so a KPI somebody typed into a form this morning behaves identically at the fiscal year boundary and on a partial ledger. A null value is an ANSWER — a division nobody could perform — and never a zero. It warms the Financial KPI History cache and writes nothing else.",
    "fieldname": "allow_compute_kpi",
    "fieldtype": "Check",
    "label": "Compute KPI"
   },
   {
    "default": "1",
-   "description": "READ. The whole financial dashboard in one call: every enabled KPI for one company, in order, each with its value, its history and its threshold verdict. One broken definition does not empty the dashboard \u2014 it becomes a null value with a warning on that row. Read `breached` first and `unwatched_note` second: a KPI with no thresholds can never appear in `breached` however bad it gets.",
+   "description": "READ. The whole financial dashboard in one call: every enabled KPI for one company, in order, each with its value, its history and its threshold verdict. One broken definition does not empty the dashboard — it becomes a null value with a warning on that row. Read `breached` first and `unwatched_note` second: a KPI with no thresholds can never appear in `breached` however bad it gets.",
    "fieldname": "allow_compute_all_kpis",
    "fieldtype": "Check",
    "label": "Compute All KPIs"
@@ -3458,28 +3466,28 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Proposes one add-back to or subtraction from operating cash flow. CREATES A DRAFT, ALWAYS \u2014 a draft does not count towards Sustainable CF/Acre and nothing in this tool can make it count. That split is deliberate: finding a non-recurring item in a ledger nobody reads line by line is worth a great deal, and deciding that it will not recur is a judgement somebody has to defend across a table.",
+   "description": "MUTATING. Proposes one add-back to or subtraction from operating cash flow. CREATES A DRAFT, ALWAYS — a draft does not count towards Sustainable CF/Acre and nothing in this tool can make it count. That split is deliberate: finding a non-recurring item in a ledger nobody reads line by line is worth a great deal, and deciding that it will not recur is a judgement somebody has to defend across a table.",
    "fieldname": "allow_create_normalization_adjustment",
    "fieldtype": "Check",
    "label": "Create Normalization Adjustment"
   },
   {
    "default": "0",
-   "description": "MUTATING. THE HUMAN HALF. Sets an adjustment to Approved with the approver's signature attached and an approval timestamp written rather than taken as input. There is no unsigned path through it \u2014 the whole argument for the record is that a normalization is a judgement with somebody's name against it. Refused where another approved adjustment already covers the same company, period and category.",
+   "description": "MUTATING. THE HUMAN HALF. Sets an adjustment to Approved with the approver's signature attached and an approval timestamp written rather than taken as input. There is no unsigned path through it — the whole argument for the record is that a normalization is a judgement with somebody's name against it. Refused where another approved adjustment already covers the same company, period and category.",
    "fieldname": "allow_approve_normalization_adjustment",
    "fieldtype": "Check",
    "label": "Approve Normalization Adjustment"
   },
   {
    "default": "0",
-   "description": "MUTATING. Refuses a proposed normalization on the record, with the reason attached. The rejection is kept rather than deleted, for the same reason a rejected insurance claim is kept. An already-approved adjustment cannot be rejected \u2014 it has been counted, and rewriting a decision is not the same as recording one.",
+   "description": "MUTATING. Refuses a proposed normalization on the record, with the reason attached. The rejection is kept rather than deleted, for the same reason a rejected insurance claim is kept. An already-approved adjustment cannot be rejected — it has been counted, and rewriting a decision is not the same as recording one.",
    "fieldname": "allow_reject_normalization_adjustment",
    "fieldtype": "Check",
    "label": "Reject Normalization Adjustment"
   },
   {
    "default": "0",
-   "description": "MUTATING. Classifies Assets with no capex_type in bulk, dry-run by default. The heuristic is one sentence \u2014 everything bought before the operation started tracking is generally maintenance, because it is the existing productive plant carrying on \u2014 and it never overwrites a classification somebody made, so a second run finds nothing to do. A starting position rather than an answer, and it says so.",
+   "description": "MUTATING. Classifies Assets with no capex_type in bulk, dry-run by default. The heuristic is one sentence — everything bought before the operation started tracking is generally maintenance, because it is the existing productive plant carrying on — and it never overwrites a classification somebody made, so a second run finds nothing to do. A starting position rather than an answer, and it says so.",
    "fieldname": "allow_backfill_asset_capex_type",
    "fieldtype": "Check",
    "label": "Backfill Asset Capex Type"
@@ -3493,14 +3501,14 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Define one financial KPI as a record \u2014 what it is called, how it is computed, over what window, and what values are worth an alert. Two formula types and no third: Built-in delegates to a computer that ships with this app, and Expression evaluates arithmetic in a sandbox that parses to an AST and refuses every node that is not arithmetic. NOTHING ON THE RECORD HOLDS PYTHON, which is the deliberate difference from create_compliance_rule.",
+   "description": "MUTATING. Define one financial KPI as a record — what it is called, how it is computed, over what window, and what values are worth an alert. Two formula types and no third: Built-in delegates to a computer that ships with this app, and Expression evaluates arithmetic in a sandbox that parses to an AST and refuses every node that is not arithmetic. NOTHING ON THE RECORD HOLDS PYTHON, which is the deliberate difference from create_compliance_rule.",
    "fieldname": "allow_create_financial_kpi_definition",
    "fieldtype": "Check",
    "label": "Create Financial KPI Definition"
   },
   {
    "default": "0",
-   "description": "MUTATING. Edit one KPI definition in place \u2014 thresholds, window, order, description, the switch. It edits rather than superseding, unlike update_compliance_rule, because a rule is a definition behind an EVENT and a KPI is a definition behind a LINE. Changing the arithmetic is reported as a decision with the cached row count in front of the caller; kpi_id cannot be changed at all, because it is the cache key on every history row.",
+   "description": "MUTATING. Edit one KPI definition in place — thresholds, window, order, description, the switch. It edits rather than superseding, unlike update_compliance_rule, because a rule is a definition behind an EVENT and a KPI is a definition behind a LINE. Changing the arithmetic is reported as a decision with the cached row count in front of the caller; kpi_id cannot be changed at all, because it is the cache key on every history row.",
    "fieldname": "allow_update_financial_kpi_definition",
    "fieldtype": "Check",
    "label": "Update Financial KPI Definition"
@@ -3514,7 +3522,7 @@
   },
   {
    "default": "1",
-   "description": "Whether the overnight Financial KPI History sweep runs. ON by default, because it is what makes a windowed report answer in a second rather than a minute \u2014 a five-year Monthly history is sixty full computations over twelve months of GL each, and the point of doing them at two in the morning is that nobody is waiting. Turn it off on a very large book or a shared bench: reports still answer, they answer from a cold cache, and they say in their warnings how much history they had to leave out. It does not affect recompute_kpi_history, which is somebody asking on purpose.",
+   "description": "Whether the overnight Financial KPI History sweep runs. ON by default, because it is what makes a windowed report answer in a second rather than a minute — a five-year Monthly history is sixty full computations over twelve months of GL each, and the point of doing them at two in the morning is that nobody is waiting. Turn it off on a very large book or a shared bench: reports still answer, they answer from a cold cache, and they say in their warnings how much history they had to leave out. It does not affect recompute_kpi_history, which is somebody asking on purpose.",
    "fieldname": "enable_kpi_history_sweep",
    "fieldtype": "Check",
    "label": "Enable KPI History Overnight Sweep"
@@ -3522,11 +3530,11 @@
   {
    "fieldname": "budget_read_section",
    "fieldtype": "Section Break",
-   "label": "Budget + Variance Alerts \u2014 Read"
+   "label": "Budget + Variance Alerts — Read"
   },
   {
    "default": "1",
-   "description": "READ. One budget in full \u2014 every line item, every KPI target, and the breach state read from whatever was computed at its last refresh. `last_refreshed` is the field to check first: empty means every actual and variance figure is a placeholder rather than a figure.",
+   "description": "READ. One budget in full — every line item, every KPI target, and the breach state read from whatever was computed at its last refresh. `last_refreshed` is the field to check first: empty means every actual and variance figure is a placeholder rather than a figure.",
    "fieldname": "allow_get_budget",
    "fieldtype": "Check",
    "label": "Get Budget"
@@ -3540,7 +3548,7 @@
   },
   {
    "default": "1",
-   "description": "READ. The full variance breakdown for one budget \u2014 every line item and every KPI target, and which of them breach their own threshold, worst first. Reads whatever refresh_budget last computed and never touches the ledger.",
+   "description": "READ. The full variance breakdown for one budget — every line item and every KPI target, and which of them breach their own threshold, worst first. Reads whatever refresh_budget last computed and never touches the ledger.",
    "fieldname": "allow_get_budget_variance_report",
    "fieldtype": "Check",
    "label": "Get Budget Variance Report"
@@ -3548,32 +3556,32 @@
   {
    "fieldname": "budget_write_section",
    "fieldtype": "Section Break",
-   "label": "Budget + Variance Alerts \u2014 Write"
+   "label": "Budget + Variance Alerts — Write"
   },
   {
    "default": "0",
-   "description": "MUTATING. Defines one budget: which general ledger accounts and which Financial KPI Definitions it tracks, and what it planned for each, for one company and one fiscal year. Every actual and variance column starts at zero \u2014 refresh_budget is what fills them in.",
+   "description": "MUTATING. Defines one budget: which general ledger accounts and which Financial KPI Definitions it tracks, and what it planned for each, for one company and one fiscal year. Every actual and variance column starts at zero — refresh_budget is what fills them in.",
    "fieldname": "allow_create_budget",
    "fieldtype": "Check",
    "label": "Create Budget"
   },
   {
    "default": "0",
-   "description": "MUTATING. Edits one budget in place. line_items and kpi_targets, if passed, REPLACE the whole table \u2014 including every figure already computed on it \u2014 which refresh_budget then rebuilds.",
+   "description": "MUTATING. Edits one budget in place. line_items and kpi_targets, if passed, REPLACE the whole table — including every figure already computed on it — which refresh_budget then rebuilds.",
    "fieldname": "allow_update_budget",
    "fieldtype": "Check",
    "label": "Update Budget"
   },
   {
    "default": "0",
-   "description": "MUTATING. Recomputes one budget's actual and variance columns from the general ledger (year-to-date GL movement within the fiscal year) and the KPI framework's own cache, and saves them onto the budget. Does not itself write a Compliance Alert \u2014 the budget_variance_breach rule reads these same stored fields the way financial_kpi_threshold_breach reads the KPI cache, and the hourly sweep is what reaches the calendar. The overnight sweep calls this for every Active budget automatically.",
+   "description": "MUTATING. Recomputes one budget's actual and variance columns from the general ledger (year-to-date GL movement within the fiscal year) and the KPI framework's own cache, and saves them onto the budget. Does not itself write a Compliance Alert — the budget_variance_breach rule reads these same stored fields the way financial_kpi_threshold_breach reads the KPI cache, and the hourly sweep is what reaches the calendar. The overnight sweep calls this for every Active budget automatically.",
    "fieldname": "allow_refresh_budget",
    "fieldtype": "Check",
    "label": "Refresh Budget"
   },
   {
    "default": "0",
-   "description": "MUTATING. Sets status=Closed. Nothing is deleted \u2014 a closed budget keeps every figure it last computed and simply stops being refreshed overnight or scanned for variance alerts.",
+   "description": "MUTATING. Sets status=Closed. Nothing is deleted — a closed budget keeps every figure it last computed and simply stops being refreshed overnight or scanned for variance alerts.",
    "fieldname": "allow_close_budget",
    "fieldtype": "Check",
    "label": "Close Budget"
@@ -3661,7 +3669,7 @@
   {
    "fieldname": "bucket_log_read_section",
    "fieldtype": "Section Break",
-   "label": "BucketLog \u2192 Piecework Bridge \u2014 Read"
+   "label": "BucketLog → Piecework Bridge — Read"
   },
   {
    "default": "1",
@@ -3708,7 +3716,7 @@
   {
    "fieldname": "bucket_log_write_section",
    "fieldtype": "Section Break",
-   "label": "BucketLog \u2192 Piecework Bridge \u2014 Write"
+   "label": "BucketLog → Piecework Bridge — Write"
   },
   {
    "default": "0",
@@ -3762,7 +3770,7 @@
   {
    "fieldname": "mobile_write_section",
    "fieldtype": "Section Break",
-   "label": "Mobile Accounts and Auth \u2014 Write"
+   "label": "Mobile Accounts and Auth — Write"
   },
   {
    "default": "0",
@@ -3773,35 +3781,35 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Creates one Employee record \u2014 the register every Farm Ops mobile method scopes work by. Writes seventeen identity, assignment and compliance-status fields and refuses everything else by name; payroll, tax and banking fields get their own refusal, because each has a form, an approval and a retention rule this app knows nothing about. The three statuses erpnext_mcp itself installs as mandatory — i9_status, w4_status, jurisdiction — start at Pending, Missing and the hiring entity's own state rather than blocking the hire, and every default is named in the result. Every Link and Select is checked against this site's own schema, and a second record for a name this company already has is refused with the existing docname.",
+   "description": "MUTATING. Creates one Employee record — the register every Farm Ops mobile method scopes work by. Writes seventeen identity, assignment and compliance-status fields and refuses everything else by name; payroll, tax and banking fields get their own refusal, because each has a form, an approval and a retention rule this app knows nothing about. The three statuses erpnext_mcp itself installs as mandatory — i9_status, w4_status, jurisdiction — start at Pending, Missing and the hiring entity's own state rather than blocking the hire, and every default is named in the result. Every Link and Select is checked against this site's own schema, and a second record for a name this company already has is refused with the existing docname.",
    "fieldname": "allow_create_employee",
    "fieldtype": "Check",
    "label": "Create Employee"
   },
   {
    "default": "0",
-   "description": "MUTATING. Changes the same seventeen identity, assignment and compliance-status fields on an Employee that already exists, and reports field by field what actually changed with the previous value. Payroll, tax and banking fields are refused by name. Re-pointing an existing login needs replace_user=true \u2014 it moves that person's whole task history with it.",
+   "description": "MUTATING. Changes the same seventeen identity, assignment and compliance-status fields on an Employee that already exists, and reports field by field what actually changed with the previous value. Payroll, tax and banking fields are refused by name. Re-pointing an existing login needs replace_user=true — it moves that person's whole task history with it.",
    "fieldname": "allow_update_employee",
    "fieldtype": "Check",
    "label": "Update Employee"
   },
   {
    "default": "0",
-   "description": "MUTATING. Sets Employee.user_id \u2014 the single field that turns a working mobile credential into a working task board. Reports whether the phone will now actually work, not merely whether the field was written: farm_ops_ready is true only when the account holds a Farm Ops role, its Mobile Access Grant is Active and the Employee is Active, and says which of the three is missing when it is not. One person, one login: refused when the User already belongs to another Employee.",
+   "description": "MUTATING. Sets Employee.user_id — the single field that turns a working mobile credential into a working task board. Reports whether the phone will now actually work, not merely whether the field was written: farm_ops_ready is true only when the account holds a Farm Ops role, its Mobile Access Grant is Active and the Employee is Active, and says which of the three is missing when it is not. One person, one login: refused when the User already belongs to another Employee.",
    "fieldname": "allow_link_employee_to_user",
    "fieldtype": "Check",
    "label": "Link Employee To User"
   },
   {
    "default": "0",
-   "description": "MUTATING. One call for a new hire, in the only order that works: the Employee record, their I-9 / W-4 / photo ID filed as PRIVATE attachments ON THAT EMPLOYEE RECORD, a scoped login with a credential, THE LINK BETWEEN THE TWO, optionally the login QR, and optionally safety-training and camp-orientation tasks. The paperwork never goes to the governance archive \u2014 that register holds the documents describing the business, and an auditor, an advisor and a family member browse it. Idempotent: a second run reuses the Employee, the account and the link rather than duplicating any of them.",
+   "description": "MUTATING. One call for a new hire, in the only order that works: the Employee record, their I-9 / W-4 / photo ID filed as PRIVATE attachments ON THAT EMPLOYEE RECORD, a scoped login with a credential, THE LINK BETWEEN THE TWO, optionally the login QR, and optionally safety-training and camp-orientation tasks. The paperwork never goes to the governance archive — that register holds the documents describing the business, and an auditor, an advisor and a family member browse it. Idempotent: a second run reuses the Employee, the account and the link rather than duplicating any of them.",
    "fieldname": "allow_onboard_employee",
    "fieldtype": "Check",
    "label": "Onboard Employee"
   },
   {
    "default": "0",
-   "description": "MUTATING. Disables a login, destroys its API credential and records WHY. The reason is required \u2014 'left at the end of harvest' and 'dismissed for cause' are different answers to the same auditor question and the grant is the only place either survives.",
+   "description": "MUTATING. Disables a login, destroys its API credential and records WHY. The reason is required — 'left at the end of harvest' and 'dismissed for cause' are different answers to the same auditor question and the grant is the only place either survives.",
    "fieldname": "allow_revoke_mobile_user",
    "fieldtype": "Check",
    "label": "Revoke Mobile User"
@@ -3812,7 +3820,7 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Mints a fresh Frappe API key/secret for one user and RETURNS THE SECRET \u2014 the only time it appears in a result. Issuing a new one stops the previous one working. The expiry_days argument sets a REVIEW DATE, not an expiry: Frappe API secrets do not expire on their own and this app installs no job that revokes one.",
+   "description": "MUTATING. Mints a fresh Frappe API key/secret for one user and RETURNS THE SECRET — the only time it appears in a result. Issuing a new one stops the previous one working. The expiry_days argument sets a REVIEW DATE, not an expiry: Frappe API secrets do not expire on their own and this app installs no job that revokes one.",
    "fieldname": "allow_generate_api_token",
    "fieldtype": "Check",
    "label": "Generate API Token"
@@ -3834,11 +3842,11 @@
   {
    "fieldname": "fieldwork_write_section",
    "fieldtype": "Section Break",
-   "label": "Farm Ops Mobile \u2014 Write"
+   "label": "Farm Ops Mobile — Write"
   },
   {
    "default": "0",
-   "description": "MUTATING. claim_farm_task with the worker resolved from the authenticated request. Adds no rule and weakens none \u2014 the concurrent-claim limit and the refusal to self-pick Dispatched work still come from the same code.",
+   "description": "MUTATING. claim_farm_task with the worker resolved from the authenticated request. Adds no rule and weakens none — the concurrent-claim limit and the refusal to self-pick Dispatched work still come from the same code.",
    "fieldname": "allow_claim_task_via_mobile",
    "fieldtype": "Check",
    "label": "Claim Task (Mobile)"
@@ -3868,7 +3876,7 @@
   },
   {
    "default": "1",
-   "description": "READ. Completed task assignments grouped into the trips their handsets recorded \u2014 five cabins closed on one walk to the north block is ONE visit and five completions. The grouping is the app's `visit_id` rather than a guess from how close the timestamps are, because no threshold gets both an unhurried walk and two fast jobs at opposite ends of a property right. A completion with no visit_id is in no visit and is counted separately; everything filed before v0.20.1 is in that group.",
+   "description": "READ. Completed task assignments grouped into the trips their handsets recorded — five cabins closed on one walk to the north block is ONE visit and five completions. The grouping is the app's `visit_id` rather than a guess from how close the timestamps are, because no threshold gets both an unhurried walk and two fast jobs at opposite ends of a property right. A completion with no visit_id is in no visit and is counted separately; everything filed before v0.20.1 is in that group.",
    "fieldname": "allow_list_visits",
    "fieldtype": "Check",
    "label": "List Visits"
@@ -3880,7 +3888,7 @@
   },
   {
    "default": "1",
-   "description": "READ. Every Inspection Template on this site \u2014 the shapes of multi-section visit a worker can be sent on \u2014 with what each produces, which regimes it answers and which version is live. Superseded and deactivated templates are listed too, because the sessions worked from them are still readable.",
+   "description": "READ. Every Inspection Template on this site — the shapes of multi-section visit a worker can be sent on — with what each produces, which regimes it answers and which version is live. Superseded and deactivated templates are listed too, because the sessions worked from them are still readable.",
    "fieldname": "allow_list_inspection_templates",
    "fieldtype": "Check",
    "label": "List Inspection Templates"
@@ -3894,7 +3902,7 @@
   },
   {
    "default": "1",
-   "description": "READ. Every templated visit \u2014 who went, where, from which template and which pinned version, and which compliance records the trip produced. The chain of custody an auditor follows backwards from a Housing Inspection to the afternoon that produced it.",
+   "description": "READ. Every templated visit — who went, where, from which template and which pinned version, and which compliance records the trip produced. The chain of custody an auditor follows backwards from a Housing Inspection to the afternoon that produced it.",
    "fieldname": "allow_list_inspection_sessions",
    "fieldtype": "Check",
    "label": "List Inspection Sessions"
@@ -3913,49 +3921,49 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Authors a new Inspection Template, live immediately \u2014 it reaches the handset on the next fetch and the rule engine can match it on the next sweep, with no app release. Templates are DATA: adding one is adding a record. Refuses a template with no sections, two sections sharing a name, a second live template with a name one already holds, and any evidence-contract key outside the vocabulary.",
+   "description": "MUTATING. Authors a new Inspection Template, live immediately — it reaches the handset on the next fetch and the rule engine can match it on the next sweep, with no app release. Templates are DATA: adding one is adding a record. Refuses a template with no sections, two sections sharing a name, a second live template with a name one already holds, and any evidence-contract key outside the vocabulary.",
    "fieldname": "allow_create_inspection_template",
    "fieldtype": "Check",
    "label": "Create Inspection Template"
   },
   {
    "default": "0",
-   "description": "MUTATING. Changes a template by SUPERSEDING it \u2014 a new row at version+1, the old one deactivated and pointing at it. The old row is never edited, which is why a session worked in April is still readable in November and why a session started against v1 while v2 is being authored is unaffected.",
+   "description": "MUTATING. Changes a template by SUPERSEDING it — a new row at version+1, the old one deactivated and pointing at it. The old row is never edited, which is why a session worked in April is still readable in November and why a session started against v1 while v2 is being authored is unaffected.",
    "fieldname": "allow_update_inspection_template",
    "fieldtype": "Check",
    "label": "Supersede Inspection Template"
   },
   {
    "default": "0",
-   "description": "MUTATING. Stops new sessions starting from a template, and records why. It destroys nothing \u2014 every session already worked from it stays readable and every compliance record they produced stays in the register and in the audit packet. There is deliberately no delete.",
+   "description": "MUTATING. Stops new sessions starting from a template, and records why. It destroys nothing — every session already worked from it stays readable and every compliance record they produced stays in the register and in the audit packet. There is deliberately no delete.",
    "fieldname": "allow_deactivate_inspection_template",
    "fieldtype": "Check",
    "label": "Deactivate Inspection Template"
   },
   {
    "default": "0",
-   "description": "MUTATING. Opens one visit against one template at one place and pins the template version it will be read against. Writes NO compliance record and moves no register \u2014 a started session has dismissed nothing.",
+   "description": "MUTATING. Opens one visit against one template at one place and pins the template version it will be read against. Writes NO compliance record and moves no register — a started session has dismissed nothing.",
    "fieldname": "allow_start_inspection_session",
    "fieldtype": "Check",
    "label": "Start Inspection Session"
   },
   {
    "default": "0",
-   "description": "MUTATING, AND THE ONE WITH TEETH. Files every section of a visit and writes the compliance records the sections promise \u2014 separately, at their own cadences, with the visit's shared evidence attached to each. Refuses a missing required section, a section the pinned template version does not have, and any section short of its evidence contract; nothing is written if any of those refuses, because half a visit is a set of records that look complete and are not.",
+   "description": "MUTATING, AND THE ONE WITH TEETH. Files every section of a visit and writes the compliance records the sections promise — separately, at their own cadences, with the visit's shared evidence attached to each. Refuses a missing required section, a section the pinned template version does not have, and any section short of its evidence contract; nothing is written if any of those refuses, because half a visit is a set of records that look complete and are not.",
    "fieldname": "allow_submit_inspection_session",
    "fieldtype": "Check",
    "label": "Submit Inspection Session"
   },
   {
    "default": "0",
-   "description": "MUTATING. An AI client that has read a regulation drafts an Inspection Template through this tool \u2014 its sections, their evidence contracts, the records they produce. The draft lands INACTIVE and marked `AI-proposed` with the source it was read from, so no handset fetches it until somebody approves it. No model is called here: the proposer IS the client, and this tool is the validator and the gate.",
+   "description": "MUTATING. An AI client that has read a regulation drafts an Inspection Template through this tool — its sections, their evidence contracts, the records they produce. The draft lands INACTIVE and marked `AI-proposed` with the source it was read from, so no handset fetches it until somebody approves it. No model is called here: the proposer IS the client, and this tool is the validator and the gate.",
    "fieldname": "allow_propose_inspection_template_from_regulation",
    "fieldtype": "Check",
    "label": "Propose Template From Regulation"
   },
   {
    "default": "0",
-   "description": "MUTATING, AND IT IS THE GATE FOR TEMPLATES. An inactive template \u2014 one a model proposed, or one somebody withdrew \u2014 is turned on here and nowhere else, with the approver and the date written onto the record. Where a live template already holds the name at a lower version it is deactivated and pointed at this one: superseded, never edited, so the sessions already worked from it stay readable.",
+   "description": "MUTATING, AND IT IS THE GATE FOR TEMPLATES. An inactive template — one a model proposed, or one somebody withdrew — is turned on here and nowhere else, with the approver and the date written onto the record. Where a live template already holds the name at a lower version it is deactivated and pointed at this one: superseded, never edited, so the sessions already worked from it stay readable.",
    "fieldname": "allow_approve_inspection_template",
    "fieldtype": "Check",
    "label": "Approve Inspection Template"
@@ -3963,11 +3971,11 @@
   {
    "fieldname": "compliance_rule_section",
    "fieldtype": "Section Break",
-   "label": "Compliance rules (v0.22.0 \u2014 the rule definitions themselves)"
+   "label": "Compliance rules (v0.22.0 — the rule definitions themselves)"
   },
   {
    "default": "1",
-   "description": "READ. One compliance rule in full: the condition it evaluates, its thresholds and scope filters, the regulation it cites, the kairotic gate saying what makes it ripe, and who approved it and when. Accepts a rule_id, which resolves to whichever version is live, or a docname, which is one exact version \u2014 including a superseded one, so the definition an older alert was raised under stays readable.",
+   "description": "READ. One compliance rule in full: the condition it evaluates, its thresholds and scope filters, the regulation it cites, the kairotic gate saying what makes it ripe, and who approved it and when. Accepts a rule_id, which resolves to whichever version is live, or a docname, which is one exact version — including a superseded one, so the definition an older alert was raised under stays readable.",
    "fieldname": "allow_get_compliance_rule",
    "fieldtype": "Check",
    "label": "Get Compliance Rule"
@@ -3986,35 +3994,35 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Authors a new compliance rule \u2014 a condition the nightly sweep evaluates against this site's records \u2014 with no code release. It arrives as a DRAFT and fires nothing until it is approved. Runtime stays deterministic: a rule is a declarative expression over record state, and there is no model in the trigger path. Refuses a duplicate rule_id, a target DocType this site has not got, a rule with no kairotic gate, a malformed scope filter, and any custom_python the sandbox would not run.",
+   "description": "MUTATING. Authors a new compliance rule — a condition the nightly sweep evaluates against this site's records — with no code release. It arrives as a DRAFT and fires nothing until it is approved. Runtime stays deterministic: a rule is a declarative expression over record state, and there is no model in the trigger path. Refuses a duplicate rule_id, a target DocType this site has not got, a rule with no kairotic gate, a malformed scope filter, and any custom_python the sandbox would not run.",
    "fieldname": "allow_create_compliance_rule",
    "fieldtype": "Check",
    "label": "Create Compliance Rule"
   },
   {
    "default": "0",
-   "description": "MUTATING, AND IT IS THE GATE. A rule cannot be enabled any other way \u2014 the DocType refuses `enabled` without an approver and a date \u2014 so there is no path by which a rule, least of all one a model proposed, starts firing without a person having put their name to it. An auditor asking who decided the site should watch for this reads the answer off the rule itself.",
+   "description": "MUTATING, AND IT IS THE GATE. A rule cannot be enabled any other way — the DocType refuses `enabled` without an approver and a date — so there is no path by which a rule, least of all one a model proposed, starts firing without a person having put their name to it. An auditor asking who decided the site should watch for this reads the answer off the rule itself.",
    "fieldname": "allow_approve_compliance_rule",
    "fieldtype": "Check",
    "label": "Approve Compliance Rule"
   },
   {
    "default": "0",
-   "description": "MUTATING. Changes a rule by SUPERSEDING it \u2014 a new row at version+1, the old one disabled and pointing at it. The old row is never edited, which is why an alert from April is still explicable in November and why a sweep that started against v1 finishes against v1. The result carries a field-by-field before \u2192 after, so the audit log records what the rule said before and not merely what was asked for.",
+   "description": "MUTATING. Changes a rule by SUPERSEDING it — a new row at version+1, the old one disabled and pointing at it. The old row is never edited, which is why an alert from April is still explicable in November and why a sweep that started against v1 finishes against v1. The result carries a field-by-field before → after, so the audit log records what the rule said before and not merely what was asked for.",
    "fieldname": "allow_update_compliance_rule",
    "fieldtype": "Check",
    "label": "Supersede Compliance Rule"
   },
   {
    "default": "0",
-   "description": "MUTATING. Stops a rule firing, and records why. It DISMISSES NOTHING \u2014 every alert it already raised stays on the calendar exactly as it was, because switching a rule off is not evidence that anybody did the work. There is deliberately no delete: the rule stays on the site, disabled, with the reason on the record.",
+   "description": "MUTATING. Stops a rule firing, and records why. It DISMISSES NOTHING — every alert it already raised stays on the calendar exactly as it was, because switching a rule off is not evidence that anybody did the work. There is deliberately no delete: the rule stays on the site, disabled, with the reason on the record.",
    "fieldname": "allow_deactivate_compliance_rule",
    "fieldtype": "Check",
    "label": "Deactivate Compliance Rule"
   },
   {
    "default": "0",
-   "description": "MUTATING. An AI client that has read a regulation drafts a Compliance Rule through this tool \u2014 target doctype, thresholds, scope, citation, kairotic gate. The draft lands DISABLED and marked `AI-proposed` with the source it was read from, and it fires nothing until a person approves it. A draft for a rule_id that is already live is written at version+1 and touches nothing; a draft carrying `custom_python` is flagged, and the approval refuses it until the approver acknowledges the code by name.",
+   "description": "MUTATING. An AI client that has read a regulation drafts a Compliance Rule through this tool — target doctype, thresholds, scope, citation, kairotic gate. The draft lands DISABLED and marked `AI-proposed` with the source it was read from, and it fires nothing until a person approves it. A draft for a rule_id that is already live is written at version+1 and touches nothing; a draft carrying `custom_python` is flagged, and the approval refuses it until the approver acknowledges the code by name.",
    "fieldname": "allow_propose_compliance_rule",
    "fieldtype": "Check",
    "label": "Propose Compliance Rule"
@@ -4026,14 +4034,14 @@
   },
   {
    "default": "1",
-   "description": "READ. The regulation register: every source this site watches, with the regime it serves, how often it is checked, when it was last looked at and when it last moved. `status` is a report rather than a setting \u2014 Error is what the last check said, and Paused is the only state that keeps a feed out of the sweep.",
+   "description": "READ. The regulation register: every source this site watches, with the regime it serves, how often it is checked, when it was last looked at and when it last moved. `status` is a report rather than a setting — Error is what the last check said, and Paused is the only state that keeps a feed out of the sweep.",
    "fieldname": "allow_list_regulation_feeds",
    "fieldtype": "Check",
    "label": "List Regulation Feeds"
   },
   {
    "default": "1",
-   "description": "READ. One source in full, including its append-only change log \u2014 every change, error and recovery it has seen, one timestamped entry each. A CHANGED entry names the rules derived from this source; it does not mean any of them was touched.",
+   "description": "READ. One source in full, including its append-only change log — every change, error and recovery it has seen, one timestamped entry each. A CHANGED entry names the rules derived from this source; it does not mean any of them was touched.",
    "fieldname": "allow_get_regulation_feed",
    "fieldtype": "Check",
    "label": "Get Regulation Feed"
@@ -4052,14 +4060,14 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Registers a regulatory source \u2014 a URL, the regime it serves, what it covers, how often to look, and the compliance rules that were written from it. It writes a pointer and fetches nothing until a check runs. Refuses a URL that is not http(s), a feed name already on the site, a regime the vocabulary does not hold, and a rule link that resolves to nothing.",
+   "description": "MUTATING. Registers a regulatory source — a URL, the regime it serves, what it covers, how often to look, and the compliance rules that were written from it. It writes a pointer and fetches nothing until a check runs. Refuses a URL that is not http(s), a feed name already on the site, a regime the vocabulary does not hold, and a rule link that resolves to nothing.",
    "fieldname": "allow_create_regulation_feed",
    "fieldtype": "Check",
    "label": "Create Regulation Feed"
   },
   {
    "default": "0",
-   "description": "MUTATING. Edits a source, and pauses one \u2014 which is the kill switch, and keeps the whole change log. It CANNOT write the detector's own memory: the stored hash, the last-checked and last-changed timestamps and the change log are refused as arguments, because a hash somebody typed is a change that will never be reported.",
+   "description": "MUTATING. Edits a source, and pauses one — which is the kill switch, and keeps the whole change log. It CANNOT write the detector's own memory: the stored hash, the last-checked and last-changed timestamps and the change log are refused as arguments, because a hash somebody typed is a change that will never be reported.",
    "fieldname": "allow_update_regulation_feed",
    "fieldtype": "Check",
    "label": "Update Regulation Feed"
@@ -4073,7 +4081,7 @@
   },
   {
    "default": "0",
-   "description": "MUTATING, AND IT MAKES SEVERAL OUTBOUND REQUESTS. The sweep on demand: every source that is not paused and is older than its own check frequency, through the same code path the daily scheduler takes. One source's failure is one source's failure. It detects only \u2014 no compliance rule is read, modified, disabled or superseded by it.",
+   "description": "MUTATING, AND IT MAKES SEVERAL OUTBOUND REQUESTS. The sweep on demand: every source that is not paused and is older than its own check frequency, through the same code path the daily scheduler takes. One source's failure is one source's failure. It detects only — no compliance rule is read, modified, disabled or superseded by it.",
    "fieldname": "allow_check_all_regulation_feeds",
    "fieldtype": "Check",
    "label": "Check All Regulation Feeds"
@@ -4125,7 +4133,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Record a scan event on an asset \u2014 updates last_scan_at, last_scan_by, and optionally the GPS position.",
+   "description": "WRITE. Record a scan event on an asset — updates last_scan_at, last_scan_by, and optionally the GPS position.",
    "fieldname": "allow_scan_asset",
    "fieldtype": "Check",
    "label": "Scan Asset"
@@ -4139,7 +4147,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Update an asset's fields. Cannot rename \u2014 the docname IS the tag ID.",
+   "description": "WRITE. Update an asset's fields. Cannot rename — the docname IS the tag ID.",
    "fieldname": "allow_update_registered_asset",
    "fieldtype": "Check",
    "label": "Update Registered Asset"
@@ -4153,7 +4161,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Bulk registration for initial rollout \u2014 up to 500 assets in one call.",
+   "description": "WRITE. Bulk registration for initial rollout — up to 500 assets in one call.",
    "fieldname": "allow_bulk_create_assets",
    "fieldtype": "Check",
    "label": "Bulk Create Assets"
@@ -4167,7 +4175,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Log a state-change action on an asset \u2014 validates the transition, updates current_state, creates an immutable audit log entry.",
+   "description": "WRITE. Log a state-change action on an asset — validates the transition, updates current_state, creates an immutable audit log entry.",
    "fieldname": "allow_log_asset_state_change",
    "fieldtype": "Check",
    "label": "Log Asset State Change"

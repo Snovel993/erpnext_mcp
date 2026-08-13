@@ -392,8 +392,27 @@ class TheLoopCloses(DispatchTestCase):
 		self.assertEqual(
 			self.tool_data("get_housing_unit", {"unit": unit})["last_habitability_inspection"], TODAY
 		)
+
+		# v0.64.0. THE COMPLETION ITSELF NOW ASKS THE RULE TO LOOK AGAIN, so the
+		# dismissal lands here rather than on the next scheduled pass. The
+		# mechanism did not change — the rule re-scanned and found its condition
+		# untrue — only the moment did, which is why the assertion moved from the
+		# second sweep's report onto the completion's own.
+		asked = done["compliance_evaluation"]["rules_asked"]
+		# The rule that RAISED the task, and the rules that READ the register it
+		# wrote to. `housing_corrective_action_open` is the second kind and it
+		# belongs here: this completion filed a Housing Inspection, which is
+		# exactly the doctype that rule scans, so its answer may have moved too.
+		# Nobody linked it to the task — the RECORD is the link.
+		self.assertIn("housing_inspection_overdue", asked)
+		self.assertIn("housing_corrective_action_open", asked)
+		self.assertTrue(done["compliance_evaluation"]["auto_dismissed"])
+
+		# And the scheduled sweep is now a no-op against this rule, because there
+		# is nothing left for it to notice. A second dismissal of an already
+		# dismissed alert would be the calendar double-counting its own work.
 		second = self.tool_data("refresh_compliance_alerts", {"today": TODAY})
-		self.assertTrue(
+		self.assertFalse(
 			[
 				entry
 				for entry in second["alerts"]
@@ -403,7 +422,18 @@ class TheLoopCloses(DispatchTestCase):
 		)
 		self.assertIn("auto-dismissed", self.tool_data("get_farm_task", {"task": task})["loop_closed"])
 
-	def test_nothing_in_the_completion_touched_an_alert_directly(self):
+	def test_nothing_in_the_completion_dismissed_an_alert_by_hand(self):
+		"""The alert goes at completion now. THE SWEEP still decides, not the tool.
+
+		v0.64.0 moved WHEN the calendar notices and deliberately did not move WHO
+		decides. The distinction is the whole posture: a completion that set
+		`dismissed` itself would be the app asserting a condition had resolved
+		because somebody filed paperwork about it, which is the failure the
+		auto-dismissal flag exists to make visible. So the alert IS dismissed
+		here — and it carries `auto_dismissed`, with no dismissing user and no
+		reason, which is exactly the shape `_auto_dismiss` writes and exactly the
+		shape a hand dismissal cannot have.
+		"""
 		self.a_camp()
 		self.tool_data("refresh_compliance_alerts", {"today": TODAY})
 		generated = self.tool_data(
@@ -414,8 +444,25 @@ class TheLoopCloses(DispatchTestCase):
 		self.tool_data("claim_farm_task", {"task": task, "worker_id": "EMP-001"})
 		done = self.complete(task)
 		self.assertIn("only honest way", done["dismissal_note"])
+
 		alert = STORE.get_raw("Compliance Alert", generated["created"][0]["alert"])
-		self.assertFalse(int(alert["dismissed"]))
+		self.assertTrue(int(alert["dismissed"]))
+		self.assertTrue(int(alert["auto_dismissed"]))
+		# The two columns a hand dismissal fills and an automatic one must not.
+		self.assertFalse(alert.get("dismissed_by"))
+		self.assertFalse(alert.get("dismissed_reason"))
+
+	def test_a_completion_that_answers_no_rule_evaluates_nothing(self):
+		"""No source alert and no produced record is nothing for a rule to re-read.
+
+		The narrowing has to be able to come back EMPTY, or it is not a narrowing.
+		A hand-raised task that files no record cannot have changed any rule's
+		answer, and running the whole rule set on the off-chance would be this app
+		doing a site's compliance sweep every time somebody ticked off a job.
+		"""
+		task = self.claimed()
+		done = self.complete(task)
+		self.assertIsNone(done["compliance_evaluation"])
 
 	def test_a_finding_lands_the_task_in_awaiting_review(self):
 		"""The work is done AND something needs a person. Both are true."""

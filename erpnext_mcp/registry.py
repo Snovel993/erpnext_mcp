@@ -7377,6 +7377,12 @@ TOOLS = {
 			"urgency": _field(_STRING, "Only this urgency."),
 			"assigned_to": _field(_STRING, "Only tasks with this Employee id on them."),
 			"skill_required": _field(_STRING, "Only tasks needing this skill."),
+			"farm_shift": _field(
+				_STRING,
+				"Only work anchored to this shift — 'what is still open on the crew that is out "
+				"there right now'. Without it the board reports `by_shift` and "
+				"`not_anchored_to_a_shift` across everything it returned.",
+			),
 			"limit": _LIMIT,
 		},
 		title="Dispatch board",
@@ -7452,6 +7458,12 @@ TOOLS = {
 			"assigned_to": _field(_STRING, "Dispatch it to this Employee id straight away."),
 			"assigned_to_name": _field(_STRING, "Their name, where no HR app can resolve it."),
 			"draft": _field(_BOOLEAN, "Hold it in Draft rather than publishing to the pool. Default false."),
+			"farm_shift": _field(
+				_STRING,
+				"The Farm Shift this work belongs to. Anchors the completion's evidence onto a "
+				"compliance record spanning the whole exposure period rather than a point in "
+				"time. Refused if the shift is at another company.",
+			),
 			"notes": _field(_STRING, "Instructions: where the key is, which breaker, who to ask."),
 		},
 		required=("task_name", "task_type", "evidence_required"),
@@ -7564,6 +7576,11 @@ TOOLS = {
 			"assigned_to_name": _field(_STRING, "Their name, where no HR app can resolve it."),
 			"reassign": _field(_BOOLEAN, "Take it off whoever holds it. Requires `reason`."),
 			"reason": _field(_STRING, "Why it is being taken off them. Written onto their assignment."),
+			"farm_shift": _field(
+				_STRING,
+				"The Farm Shift this dispatch belongs to. Written onto the task and the new "
+				"assignment; omitting it leaves whatever the task already carried alone.",
+			),
 		},
 		required=("task", "assigned_to"),
 		mutating=True,
@@ -7606,6 +7623,13 @@ TOOLS = {
 			"task": _field(_STRING, "The Farm Task docname — its live assignment is used."),
 			"worker_id": _field(_STRING, "Checked against who holds it, if given."),
 			"started_at": _field(_STRING, "Override the clock-in time. Defaults to now."),
+			"farm_shift": _field(
+				_STRING,
+				"The Farm Shift the work is being done on. INFERRED WHEN OMITTED from the one "
+				"open shift this worker is rostered on — and only when there is exactly one, "
+				"because two would mean guessing which crew's compliance record the evidence "
+				"lands on.",
+			),
 		},
 		mutating=True,
 		title="Start a farm task",
@@ -7617,10 +7641,24 @@ TOOLS = {
 		"MUTATING (default OFF). Finish one task: check the evidence against the "
 		"contract, file it, and WRITE THE COMPLIANCE RECORD the task promised — the "
 		"actual Housing Inspection, Detector Test or Water Test, with the "
-		"photographs on it. That record moves the register forward, and the alert "
-		"that asked for the work auto-dismisses on the next sweep because its "
-		"condition is no longer true. Nothing here touches an alert directly, and "
-		"nothing needs to.\n\n"
+		"photographs on it. That record moves the register forward, and the rules "
+		"that read it are then asked to look again — so the alert that sent "
+		"somebody usually clears in the same call, because its condition is no "
+		"longer true. NOTHING HERE DISMISSES AN ALERT DIRECTLY and nothing needs "
+		"to: `compliance_evaluation` reports what the narrowed sweep decided, and "
+		"a completion against a condition that is still true leaves its alert "
+		"standing. Doing the work and fixing the problem are two different "
+		"facts.\n\n"
+		"`farm_shift` ANCHORS THE WORK TO A SHIFT, and it is what makes the "
+		"evidence reach a compliance record spanning an exposure period rather "
+		"than sitting on the assignment alone. Settable here, at creation, at "
+		"dispatch and at clock-in — and inferred at clock-in where the worker is "
+		"rostered on exactly one open shift, because nobody types a shift docname "
+		"into a phone. Where there is one, this call appends a Task Completed "
+		"event to that shift's own timeline carrying the signature and the "
+		"weather AS IT STOOD AT OR BEFORE the work finishing, beside the water "
+		"breaks and observations for the same afternoon. `shift_evidence` says "
+		"what happened, and is null where the work was anchored to no shift.\n\n"
 		"REFUSES A SUBMISSION THAT DOES NOT MEET THE EVIDENCE CONTRACT, naming each "
 		"requirement that is short. This is the refusal the whole doctype exists "
 		"for. Note the findings_text rule: PASS AN EMPTY STRING to record that "
@@ -7668,6 +7706,13 @@ TOOLS = {
 				"Extra fields for the compliance record — a laboratory's results, a detector's "
 				"pass/fail, the irrigation zone a sample came from. Merged over the task's own "
 				"`creates_record_data`.",
+			),
+			"farm_shift": _field(
+				_STRING,
+				"The Farm Shift the work was done on, and the last chance to say so. Where "
+				"there is one, this call appends a Task Completed event to that shift's "
+				"timeline carrying the signature and the weather as it stood at or before the "
+				"work finishing. Omitting it leaves whatever the clock-in established.",
 			),
 			"visit_id": _field(
 				_STRING,
@@ -11766,6 +11811,52 @@ TOOLS = {
 			"name": _field(_STRING, "Alias for shift."),
 		},
 		title="Get shift production",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_shift_crew_timeline": _tool(
+		shifts.get_shift_crew_timeline,
+		"Every crew member's OWN envelope on one shift — their span, the weather "
+		"they stood in, the care they were given, and what they are owed. "
+		"Read-only.\n\n"
+		"THE SHIFT IS ONE RECORD AND THE CREW IS NOT ONE PERSON. `get_shift` "
+		"answers what happened on the shift and `get_weather_timeline` answers how "
+		"hot it got; neither answers the question a wage claim and a heat citation "
+		"both turn on, which is what happened TO ANA — who joined at 09:40, left at "
+		"13:00, and was therefore present for two of the shift's five water breaks "
+		"and absent for the hour it was hottest.\n\n"
+		"EVERY FIGURE IS COMPUTED AGAINST THAT WORKER'S OWN SPAN, never the "
+		"shift's. `peak_temp_f` is the conditions THEY stood in. "
+		"`first_crossing_in_span` is when OAR 437-004-1131's obligations "
+		"started running FOR THEM, and `present_at_shift_first_crossing` says "
+		"whether they were even there when the shift crossed. `care_events_in_span` "
+		"counts the water, shade, rest and observation events inside their envelope "
+		"plus the Individual-scoped ones naming them — a crew break at 08:00 is not "
+		"care given to somebody who arrived at 09:40, and counting it would flatter "
+		"the operation in exactly the place an investigator checks.\n\n"
+		"NOTHING IS INTERPOLATED. `minutes_bracketed_by_crossings` is a BRACKET "
+		"from the first at-or-above reading in their span to the last, not a sum of "
+		"exposure: the readings are samples and the temperature between two of them "
+		"is a thing nobody measured. `sample_gap_minutes` reports the real cadence, "
+		"so a loosely-bracketed afternoon reconstructed hourly from the archive "
+		"cannot be read as a live quarter-hour one.\n\n"
+		"`breaks` IS PER PERSON AND NULL WITHOUT A POLICY. Entitlement is a "
+		"function of hours worked, so the four-hour picker and the ten-hour foreman "
+		"are owed different numbers across the same afternoon — "
+		"`short_of_their_break_entitlement` is the worklist.\n\n"
+		"`pay_type` and `pay_rate` fall back from the crew row to the shift, with "
+		"`pay_basis_from` saying which answered. Scoped to the companies the "
+		"calling account may actually reach.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname, e.g. SHIFT-2026-0001."),
+			"name": _field(_STRING, "Alias for shift."),
+			"employee": _field(
+				_STRING,
+				"One crew member's envelope instead of the whole crew. Refuses somebody who was "
+				"never rostered — a person not on the crew has no envelope on this shift.",
+			),
+		},
+		title="Get a shift's per-worker crew timeline",
 		available=_needs_doctype("Farm Shift"),
 		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

@@ -3,6 +3,64 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.64.0 — 2026-08-12
+
+**What happened to Ana, and which shift the work was done on.** The shift has
+anchored compliance since v0.19.3 and collected its own weather since v0.19.4,
+and could still not answer a question about one person on it or say which shift
+a task was done on. Both gaps had the same shape: the data was already stored
+and nothing read it.
+
+- **`get_shift_crew_timeline`** — every crew member's own envelope. Their span,
+  the weather **they** stood in, the water/shade/rest events inside it, and what
+  their own hours entitle them to. A picker who joined at 09:40 was absent for
+  the hour it was hottest and for three of the five water breaks; a heat record
+  scoped to the crew says otherwise, and that record is read in an
+  investigation. `present_at_shift_first_crossing` is the field that says so.
+- **Nothing is interpolated.** `minutes_bracketed_by_crossings` is a bracket
+  between two samples, not a sum of exposure, and `sample_gap_minutes` reports
+  the real cadence so a loosely-bracketed archive reconstruction cannot be read
+  as a live quarter-hour timeline. `breaks` is null without a policy, not zero.
+- **`Farm Task` and `Farm Task Assignment` gain `farm_shift`**, and they are not
+  the same field: the task's says which shift the work was **raised for**, the
+  assignment's which it was **done on**. Settable at creation, dispatch,
+  clock-in and completion; **inferred** at clock-in from the one open shift the
+  worker is rostered on, and only when there is exactly one — two would mean
+  guessing which crew's compliance record the evidence lands on. A shift at
+  another company is refused by name.
+- **A completion's evidence reaches the shift's own timeline.** One
+  `Task Completed` event — its own type, not `Other` — carrying the timestamp,
+  the worker, the signature file and the weather **as it stood at or before** the
+  work finishing. It points at the assignment rather than copying its
+  photographs. One event per assignment; a replay writes nothing.
+- **`get_shift` reports `farm_tasks`** (the work still open on the crew) and
+  `list_dispatch_board` takes `farm_shift`, reporting `by_shift` and
+  `not_anchored_to_a_shift`.
+- **The calendar looks again at the moment the world changed.**
+  `refresh_compliance_alerts` grew an `alert_types` allowlist with the same
+  raised-nothing-**dismissed-nothing** promise its `regime` filter has, and
+  `complete_farm_task` calls it for the rule that raised the task plus every
+  rule reading the register the completion wrote to — nobody links the task to
+  the rule, the **record** is the link. It is the sweep called sooner, not a
+  shortcut around it: the rule's own condition still decides, and a completion
+  against a condition that is still true leaves its alert standing.
+
+### Fixed
+
+- **`log_shift_break` failed on every call since v0.58.0.** It passed the whole
+  request dict to `as_float` where the value belonged, so `float({...})` raised
+  and the refusal quoted the caller's entire payload back as the offending
+  "number". The tool was unreachable.
+- **`shifts.EVENT_FIELDS` never fetched the six break columns**, which was not a
+  missing key but silent wrong arithmetic in three places: `describe_event_row`'s
+  break branch was unreachable, an **Individual** break counted as taken by the
+  whole crew because `applies_to` was absent and defaulted to Crew, and
+  `duration_minutes` was absent and read as zero — so paid and unpaid break
+  minutes were **zero on every shift**, including in `get_shift_production`.
+
+Catalogue: **413 tools, 189 read**. Migration is `bench migrate`; nothing is
+backfilled and nothing needs to be.
+
 ## 0.63.1 — 2026-08-12
 
 **The same argument drop, pointed the other way.** v0.62.0 published three

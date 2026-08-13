@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 412 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 413 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 188 read tools are **on** by default and can be switched off individually. A
+All 189 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -6537,6 +6537,48 @@ thing this app could put on a map.
 Empty is the ordinary answer for a shift worked before the phones were logging,
 and it is **not** a gap in the compliance record — the shift's own location, crew
 spans and event timeline are unaffected.
+
+## 210c. `get_shift_crew_timeline`
+
+**Read-only**, default ON (`allow_get_shift_crew_timeline`). v0.64.0.
+
+**Arguments:** `shift` (or `name`), `employee` (one person's envelope instead of
+the whole crew).
+
+**Returns** `crew` — one envelope per rostered person, each with `joined_at`,
+`left_at`, `present_until`, `hours_present`, `pay_type`/`pay_rate` (with
+`pay_basis_from` saying whether the crew row or the shift answered), an
+`exposure` block, `events` inside their span and a `breaks` block — plus the
+shift's `thresholds`, `shift_first_crossing`, `sample_gap_minutes`,
+`exposed_to_the_heat_threshold`, `arrived_after_the_first_crossing` and
+`short_of_their_break_entitlement`.
+
+**The shift is one record and the crew is not one person.** `get_shift` answers
+what happened on the shift and `get_weather_timeline` answers how hot it got.
+Neither answers the question a wage claim and a heat citation both turn on, which
+is what happened *to Ana* — who joined at 09:40, left at 13:00, and was therefore
+present for two of the shift's five water breaks and absent for the hour it was
+hottest.
+
+**Every figure is computed against that worker's own span, never the shift's.**
+`peak_temp_f` is the conditions *they* stood in. `first_crossing_in_span` is when
+OAR 437-004-1131's obligations started running *for them*, and
+`present_at_shift_first_crossing` says whether they were even there when the
+shift crossed. `care_events_in_span` counts the water, shade, rest and
+observation events inside their envelope plus the Individual-scoped ones naming
+them — a crew break at 08:00 is not care given to somebody who arrived at 09:40,
+and counting it would flatter the operation in exactly the place an investigator
+checks.
+
+**Nothing is interpolated.** `minutes_bracketed_by_crossings` is a *bracket* from
+the first at-or-above reading in their span to the last, not a sum of exposure:
+the readings are samples and the temperature between two of them is a thing
+nobody measured. `sample_gap_minutes` reports the real cadence, so an afternoon
+reconstructed hourly from the archive cannot be read as a live quarter-hour one.
+
+**`breaks` is per person and null without a policy.** Entitlement is a function
+of hours worked, so the four-hour picker and the ten-hour foreman are owed
+different numbers across the same afternoon.
 
 ## 211. `list_heat_exposure_events`
 

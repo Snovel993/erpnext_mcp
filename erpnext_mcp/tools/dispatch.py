@@ -131,6 +131,7 @@ _TASK_FIELDS = (
 	"asset",
 	"template",
 	"checklist_status",
+	"farm_shift",
 	"creation",
 	"modified",
 	"owner",
@@ -158,9 +159,23 @@ _ASSIGNMENT_FIELDS = (
 	"produced_record",
 	"visit_id",
 	"completion_signature",
+	"farm_shift",
 	"creation",
 	"owner",
 )
+
+#: v0.64.0. The Farm Shift doctype, named here rather than imported from
+#: `shifts.py` at module scope because dispatch must keep loading on a site that
+#: has not migrated the shift tables — every read of it below goes through
+#: `compat.doctype_exists` first, and a task surface that refused to import
+#: because the shift surface was absent would take out the dispatch board too.
+FARM_SHIFT = "Farm Shift"
+
+#: The event a completion writes onto the shift it was done on. Its own type
+#: rather than `Other`, because a timeline where every dispatched job reads
+#: "Other" is a timeline nobody can scan — and scanning it is the entire reason
+#: an inspector opens a shift record.
+TASK_COMPLETED_EVENT = "Task Completed"
 
 
 # ── shared ──────────────────────────────────────────────────────────────────
@@ -188,6 +203,412 @@ def task_row(task: str) -> dict:
 		frappe.db.get_value(FARM_TASK, task, compat.existing_fields(FARM_TASK, _TASK_FIELDS), as_dict=True)
 		or {}
 	)
+
+
+def _shift_argument(args: dict, company: str = "", key: str = "farm_shift") -> str:
+	"""A Farm Shift docname off the arguments, checked, or "" where none was given.
+
+	v0.64.0. REFUSES A SHIFT THAT DOES NOT EXIST AND A SHIFT AT ANOTHER COMPANY,
+	and does neither silently. The link is what puts a completion's evidence onto
+	a record spanning the whole exposure period, so a typo here does not produce a
+	task with a slightly wrong field — it produces a task whose evidence lands on
+	nobody's shift, or worse, on a crew that was never there.
+
+	A CLOSED SHIFT IS ACCEPTED AND REPORTED RATHER THAN REFUSED. Work is written
+	up after the fact constantly — the phone that could not reach the site until
+	the evening is the same caller `log_shift_location` keeps — and refusing to
+	record which shift a job was done on because the foreman has already signed
+	the close would throw away the link precisely when it is hardest to
+	reconstruct.
+	"""
+	name = as_str(args, key) or as_str(args, "shift")
+	if not name:
+		return ""
+	if not compat.doctype_exists(FARM_SHIFT):
+		raise ToolError(
+			f"this site has no {FARM_SHIFT} DocType, so {name!r} cannot be linked. It ships with "
+			"erpnext_mcp — run `bench --site <site> migrate`. Nothing was changed."
+		)
+	if not frappe.db.exists(FARM_SHIFT, name):
+		raise ToolError(
+			f"no {FARM_SHIFT} called {name!r} on this site. list_shifts has the register; a docname "
+			"looks like SHIFT-2026-0001. Nothing was changed."
+		)
+	if company:
+		theirs = str(frappe.db.get_value(FARM_SHIFT, name, "company") or "")
+		if theirs and theirs != company:
+			raise ToolError(
+				f"{name} is a shift at {theirs} and this task is at {company}. A completion filed "
+				"against another entity's shift puts one company's evidence on another company's "
+				"compliance record, which is the one direction an auditor cannot unpick. Nothing "
+				"was changed."
+			)
+	return name
+
+
+def _open_shift_for(worker: str, company: str = "") -> str:
+	"""The ONE open shift this worker is rostered on right now, or "".
+
+	v0.64.0. AMBIGUITY RETURNS NOTHING. Two open shifts naming the same person is
+	a roster somebody needs to fix, and picking the newer of them would put a
+	completion's evidence on a crew that was somewhere else — which is a false
+	entry on a compliance record rather than a missing one, and the two are not
+	equally bad. Nobody is rostered on two crews at once in practice; when the
+	data says otherwise, the data is what has to be believed.
+
+	NEVER RAISES. This is a convenience on a clock-in, and a phone that could not
+	be told which shift it is on should still be able to start the job.
+	"""
+	if not worker or not compat.doctype_exists(FARM_SHIFT):
+		return ""
+	try:
+		filters = {"employee": worker, "left_at": ("is", "not set"), "parenttype": FARM_SHIFT}
+		rows = frappe.db.get_all(
+			"Farm Shift Crew Member", filters=filters, fields=["parent"], limit=50
+		)
+		names = sorted({str(entry.get("parent") or "") for entry in rows or [] if entry.get("parent")})
+		if not names:
+			return ""
+		shift_filters = {"name": ("in", names), "end_datetime": ("is", "not set")}
+		if company:
+			shift_filters["company"] = company
+		open_now = frappe.db.get_all(FARM_SHIFT, filters=shift_filters, fields=["name"], limit=5)
+		found = sorted({str(entry["name"]) for entry in open_now or []})
+		return found[0] if len(found) == 1 else ""
+	except Exception:
+		return ""
+
+
+def _rules_this_completion_answers(task: dict, produced_doctype: str) -> list:
+	"""The alert types worth re-running now that this work is filed.
+
+	v0.64.0. TWO SOURCES, BOTH NARROW ON PURPOSE.
+
+	The first is the rule that RAISED this task. If a compliance alert sent
+	somebody to walk a cabin, the rule behind that alert is by definition the one
+	whose condition the walk was meant to change, and it is the alert the worker
+	is watching.
+
+	The second is every rule whose target doctype is the record this completion
+	PRODUCED. A spray task that files a pesticide application record, a detector
+	round that files an inspection, a water task that files a test — the rule that
+	asks "when was the last one" reads exactly that register, and it is the rule
+	an EPA or FSMA question turns on. This is the half that makes a task
+	compliance-native rather than merely compliance-adjacent: nobody had to link
+	the task to the rule, because the RECORD is the link.
+
+	IT RETURNS NAMES AND EVALUATES NOTHING. Deciding what is relevant and
+	deciding what is true are separate jobs, and the second belongs to the rule.
+	"""
+	wanted = []
+	alert = str(task.get("source_alert") or "")
+	if alert and compat.doctype_exists(ALERT):
+		try:
+			alert_type = str(frappe.db.get_value(ALERT, alert, "alert_type") or "")
+			if alert_type:
+				wanted.append(alert_type)
+		except Exception:
+			pass
+	if produced_doctype:
+		try:
+			from ..alerts import base as alerts_base
+
+			rules, _notes = alerts_base.resolve_rules()
+			for key, rule in (rules or {}).items():
+				# `requires` is the doctypes a rule cannot run without, which is
+				# where a declarative rule's target_doctype lands. A rule that
+				# cannot be run without the register this completion just wrote to
+				# is a rule whose answer may have just changed.
+				if produced_doctype in tuple(rule.requires or ()):
+					wanted.append(key)
+		except Exception:
+			pass
+	return sorted(set(wanted))
+
+
+def _evaluate_compliance_after(task: dict, produced_doctype: str, company: str) -> dict | None:
+	"""Re-run the rules this completion could have changed. Never raises.
+
+	THIS IS THE SWEEP, CALLED SOONER — not a shortcut around it. Nothing here
+	dismisses an alert because a task was completed; it re-runs the rule and lets
+	the rule's own condition decide, exactly as the nightly run would. A task
+	completed against a condition that is still true leaves its alert standing,
+	which is the outcome that matters most: doing the work and fixing the problem
+	are two different facts and both have to be reportable.
+
+	NEVER RAISES AND NEVER FAILS THE COMPLETION. The work is filed and the
+	evidence is on the record before this runs. A rule that throws, a site
+	mid-migrate, a register this app cannot read — none of them is a reason to
+	turn a worker's filed completion into an error on their phone.
+	"""
+	names = _rules_this_completion_answers(task, produced_doctype)
+	if not names:
+		return None
+	try:
+		from ..alerts import base as alerts_base
+
+		report = alerts_base.refresh_compliance_alerts(company=company or "", alert_types=names)
+	except Exception as exc:
+		return {
+			"rules_asked": names,
+			"evaluated": False,
+			"why_not": (
+				f"the narrowed sweep did not run: {type(exc).__name__}: {exc}. The completion, its "
+				"evidence and its produced record are unaffected, and the scheduled sweep will "
+				"reach these rules on its next pass."
+			),
+		}
+	dismissed = [
+		entry["name"]
+		for entry in report.get("alerts") or []
+		if entry.get("outcome") == "auto_dismissed"
+	]
+	out = {
+		"rules_asked": names,
+		"evaluated": True,
+		"auto_dismissed": dismissed,
+		"created": report.get("created", 0),
+		"refreshed": report.get("refreshed", 0),
+		"reopened": report.get("reopened", 0),
+		"note": (
+			"These are the rules whose answer this completion could have changed — the one that "
+			"raised the task, and any that read the register it wrote to. THE SWEEP DECIDED, not "
+			"the completion: an alert here went away because its rule looked again and found its "
+			"condition no longer true, which is the only honest way one goes away."
+		),
+	}
+	if not dismissed:
+		out["standing_note"] = (
+			"No alert dismissed. That is a normal and often correct outcome: the work is done and "
+			"the condition that raised the alert may still be true — a cabin walked and found "
+			"faulty is a completed task and an open problem, and both facts survive this call."
+		)
+	return out
+
+
+def _shift_carries_event(shift: str, assignment: str) -> bool:
+	"""Does this shift's timeline already carry an event produced by `assignment`?
+
+	Read-only, and never raises: it answers a reporting question on a replay
+	path whose entire promise is that it writes nothing.
+	"""
+	if not shift or not assignment or not compat.doctype_exists(FARM_SHIFT):
+		return False
+	try:
+		from .. import shifts as shifts_mod
+
+		return any(
+			str(entry.get("producer_record_name") or "") == assignment
+			for entry in shifts_mod.events_of(shift)
+		)
+	except Exception:
+		return False
+
+
+def _weather_at(shift: str, when: str) -> dict:
+	"""The shift's last weather reading AT OR BEFORE `when`. Never the next one.
+
+	v0.64.0. AT OR BEFORE, and the asymmetry is the whole of it. A completion at
+	11:52 sits between the 11:45 and 12:00 readings, and the honest snapshot is
+	the one that had already been taken when the work finished — reaching forward
+	to 12:00 would stamp a record with a measurement that did not exist yet, which
+	is the kind of detail that turns a good-faith record into a disputed one.
+
+	Empty where the shift has no timeline, which is not the same as zero and is
+	why the caller writes nothing rather than writing nulls.
+	"""
+	if not when:
+		return {}
+	try:
+		from .. import shifts as shifts_mod
+
+		before = [
+			entry
+			for entry in shifts_mod.weather_of(shift)
+			if str(entry.get("reading_datetime") or "") and str(entry["reading_datetime"]) <= when
+		]
+	except Exception:
+		return {}
+	return dict(before[-1]) if before else {}
+
+
+def _flow_evidence_into_shift(assignment_doc, task: dict, evidence: list, clean_pass) -> dict | None:
+	"""Append this completion to its shift's compliance timeline. Never raises.
+
+	v0.64.0. THIS IS THE JOIN THE WHOLE TASK↔SHIFT LINK EXISTS FOR. A task
+	completion carries a point in time: this cabin, this worker, these two
+	photographs, 11:52. A shift carries the period an exposure regime asks about.
+	Until this function ran, the two records could both be perfect and still leave
+	nobody able to answer "what was done during the July 15 shift" without
+	reconciling two registers by hand — which is the reconciliation that does not
+	happen on the afternoon an inspector asks for it.
+
+	WHAT IS COPIED AND WHAT IS DELIBERATELY NOT. The event carries the timestamp,
+	the worker who filed it, a sentence naming the work and its outcome, the
+	signature file, and the weather AS IT STOOD AT OR BEFORE the completion. It
+	does NOT copy the photographs onto the shift: the evidence lives on the
+	assignment, the event names the assignment in `producer_record_name`, and a
+	second copy of a photograph is a second thing that can drift from the first.
+	The event is a POINTER WITH ENOUGH ON IT TO BE READ WITHOUT FOLLOWING.
+
+	`logged_by` IS WRITTEN HERE AND IS LEFT EMPTY BY THE WEATHER SWEEP, and the
+	difference is not an inconsistency. Somebody DID this work and signed for it;
+	naming them is the record being true. Nobody observed a temperature — the
+	sweep did — and naming the foreman against a reading they did not take would
+	put their identity behind an observation they never made.
+
+	IT NEVER RAISES AND IT NEVER FAILS THE COMPLETION. The completion is already
+	saved and its evidence is already filed when this runs. A shift deleted out
+	from under a task, a site mid-migrate, a foreman who closed the shift a second
+	ago — none of those is a reason to throw away a worker's filed evidence, so
+	every failure comes back as a sentence the caller reports.
+	"""
+	shift = str(assignment_doc.get("farm_shift") or "")
+	if not shift:
+		return None
+	if not compat.doctype_exists(FARM_SHIFT) or not frappe.db.exists(FARM_SHIFT, shift):
+		return {
+			"farm_shift": shift,
+			"event_logged": False,
+			"why_not": (
+				f"{shift} is no longer on this site, so there is no compliance timeline to append "
+				"to. The completion, its evidence and its produced record are unaffected — they "
+				"are on the assignment, which is where they have always been."
+			),
+		}
+
+	when = str(assignment_doc.get("completed_at") or "") or frappe.utils.now()
+
+	# ONE EVENT PER ASSIGNMENT. `complete_farm_task` already refuses a second
+	# completion and absorbs an idempotent replay before reaching here, but a
+	# shift is edited in the Desk too — and two identical entries on a timeline
+	# is the failure `already_crossed` exists to prevent one doctype over.
+	try:
+		from .. import shifts as shifts_mod
+
+		for entry in shifts_mod.events_of(shift):
+			if str(entry.get("producer_record_name") or "") == assignment_doc.name:
+				return {
+					"farm_shift": shift,
+					"event_logged": False,
+					"why_not": (
+						f"{shift} already carries an event produced by {assignment_doc.name}. One "
+						"completion is one entry on a timeline; a second would be the same work "
+						"appearing to have been done twice."
+					),
+				}
+	except Exception:
+		pass
+
+	reading = _weather_at(shift, when)
+	outcome = (
+		"no issues found"
+		if clean_pass is True
+		else (
+			f"findings recorded: {str(assignment_doc.get('findings_text') or '').strip()[:200]}"
+			if str(assignment_doc.get("findings_text") or "").strip()
+			else "completed"
+		)
+	)
+	description = (
+		f"{task.get('task_type') or 'Task'} '{task.get('task_name') or assignment_doc.task}' "
+		f"({assignment_doc.task}) completed by "
+		f"{assignment_doc.get('assigned_to_name') or assignment_doc.get('assigned_to')} — {outcome}. "
+		f"{len(evidence)} evidence file(s) and the completion signature are on "
+		f"{assignment_doc.name}, which is the record of what was produced; this entry is where it "
+		"sits on the shift's own timeline."
+	)
+	if task.get("produced_record") or assignment_doc.get("produced_record"):
+		description += (
+			f" Produced {task.get('creates_record') or 'record'} "
+			f"{assignment_doc.get('produced_record') or task.get('produced_record')}."
+		)
+
+	row = {
+		"event_type": TASK_COMPLETED_EVENT,
+		"event_datetime": when,
+		"description": description,
+		"producer_record_doctype": FARM_TASK_ASSIGNMENT,
+		"producer_record_name": assignment_doc.name,
+	}
+	# The signature is the attested part of the completion, so it is the file
+	# worth carrying onto a record somebody else will read. Written only when
+	# there is one — a blank Attach is not evidence of anything.
+	if assignment_doc.get("signature_file"):
+		row["evidence_file"] = assignment_doc.signature_file
+	# `logged_by` is a Link to Employee. A worker id that is not an Employee on
+	# this site (a badge-only site, an archived hire) leaves the column empty
+	# rather than refusing — the name is already in the description.
+	worker = str(assignment_doc.get("assigned_to") or "")
+	if worker and hr_installed() and frappe.db.exists(EMPLOYEE, worker):
+		row["logged_by"] = worker
+	if reading.get("temp_f") is not None:
+		row["weather_snapshot_temp_f"] = reading.get("temp_f")
+	if reading.get("heat_index_f") is not None:
+		row["weather_snapshot_heat_index_f"] = reading.get("heat_index_f")
+
+	try:
+		shift_doc = frappe.get_doc(FARM_SHIFT, shift)
+		shift_doc.append("compliance_events", row)
+		shift_doc.flags.ignore_permissions = True
+		shift_doc.save(ignore_permissions=True)
+	except Exception as exc:
+		return {
+			"farm_shift": shift,
+			"event_logged": False,
+			"why_not": (
+				f"could not append to {shift}'s timeline: {type(exc).__name__}: {exc}. The "
+				"completion, its evidence and its produced record are unaffected — a shift that "
+				"will not take an entry is not a reason to throw away work somebody has signed for."
+			),
+		}
+
+	out = {
+		"farm_shift": shift,
+		"event_logged": True,
+		"event_type": TASK_COMPLETED_EVENT,
+		"event_datetime": when,
+		"weather_snapshot_temp_f": row.get("weather_snapshot_temp_f"),
+		"weather_snapshot_heat_index_f": row.get("weather_snapshot_heat_index_f"),
+		"evidence_file_carried": bool(row.get("evidence_file")),
+		"note": (
+			f"This completion is now on {shift}'s compliance timeline, beside the water breaks, "
+			"the observations and the weather readings for the same afternoon. That is what makes "
+			"'what was done during this shift' one read instead of a reconciliation between two "
+			"registers — and the reconciliation is what does not happen on the day somebody asks."
+		),
+	}
+	if not reading:
+		out["weather_note"] = (
+			f"No weather reading had been taken on {shift} at or before {when}, so the event "
+			"carries no snapshot. Null rather than zero: nobody measured, which is not a "
+			"temperature."
+		)
+	return out
+
+
+def _shift_note(shift: str) -> str:
+	"""The sentence a closed or cancelled shift earns on a task that names it."""
+	if not shift or not compat.doctype_exists(FARM_SHIFT):
+		return ""
+	row = dict(
+		frappe.db.get_value(FARM_SHIFT, shift, ["status", "end_datetime", "cancelled"], as_dict=True) or {}
+	)
+	if compat.checked(row.get("cancelled")):
+		return (
+			f"{shift} is CANCELLED. The link is kept because it is still the true answer to which "
+			"shift this work was raised for, but a cancelled shift's compliance record is not "
+			"evidence of anything and nothing will flow onto it."
+		)
+	if row.get("end_datetime"):
+		return (
+			f"{shift} is already closed (ended {row['end_datetime']}). The link is kept and a "
+			"completion will still append its event to the shift's timeline — an event logged "
+			"after the close is a late entry rather than a false one, and the timestamps say "
+			"which. What it cannot do is change a supervisor's signature that has already been "
+			"given."
+		)
+	return ""
 
 
 def _describe_task(row: dict) -> dict:
@@ -237,6 +658,10 @@ def _describe_task(row: dict) -> dict:
 		out["reported_at"] = str(row["reported_at"])
 	if row.get("report_photo"):
 		out["report_photo"] = row["report_photo"]
+	# v0.64.0. Reported only when there is one, so the payload of a task raised
+	# before shifts existed is exactly the shape it has always been.
+	if row.get("farm_shift"):
+		out["farm_shift"] = row["farm_shift"]
 	return out
 
 
@@ -284,6 +709,12 @@ def _describe_assignment(row: dict) -> dict:
 		# any tool happens to describe: it is a fact about one submission, not a
 		# property of the assignment worth repeating on a dispatch board.
 		"visit_id": row.get("visit_id") or None,
+		# v0.64.0. WHICH SHIFT THE WORK WAS ACTUALLY DONE ON, which is not always
+		# the shift the task was raised for. Always present rather than
+		# conditional — a client that has to test for the key before reading it
+		# has two paths where it needs one, and this one decides whether a
+		# completion's evidence reached a compliance record at all.
+		"farm_shift": row.get("farm_shift") or None,
 	}
 
 
@@ -432,6 +863,7 @@ def create_farm_task(args: dict) -> ToolResult:
 
 	worker = _worker(args, "assigned_to", required=False)
 	draft = as_bool(args, "draft", False)
+	farm_shift = _shift_argument(args, company or "")
 
 	doc = frappe.new_doc(FARM_TASK)
 	doc.task_name = as_str(args, "task_name", required=True)
@@ -453,6 +885,7 @@ def create_farm_task(args: dict) -> ToolResult:
 	)
 	doc.notes = as_str(args, "notes")
 	doc.evidence_required = json.dumps(_evidence_argument(args))
+	doc.farm_shift = farm_shift or None
 	doc.state = DRAFT if draft else AVAILABLE
 	if worker:
 		doc.assigned_to = worker
@@ -483,6 +916,9 @@ def create_farm_task(args: dict) -> ToolResult:
 			"Dispatch mode is Dispatched and nobody is assigned, so this task will sit in Available "
 			"and no worker can claim it. Somebody has to be sent with assign_farm_task."
 		)
+	shift_note = _shift_note(farm_shift)
+	if shift_note:
+		warnings.append(shift_note)
 
 	data = {**described, "assignment": assignment}
 	if warnings:
@@ -519,7 +955,9 @@ def _evidence_argument(args: dict) -> dict:
 	return parse_evidence_required(raw)
 
 
-def _open_assignment(task_doc, worker: str, worker_name: str, dispatched: bool) -> dict:
+def _open_assignment(
+	task_doc, worker: str, worker_name: str, dispatched: bool, farm_shift: str = ""
+) -> dict:
 	assignment = frappe.new_doc(FARM_TASK_ASSIGNMENT)
 	assignment.task = task_doc.name
 	assignment.task_name = task_doc.task_name
@@ -529,6 +967,14 @@ def _open_assignment(task_doc, worker: str, worker_name: str, dispatched: bool) 
 	assignment.state = CLAIMED
 	assignment.dispatched_by_foreman = 1 if dispatched else 0
 	assignment.claimed_at = frappe.utils.now()
+	# v0.64.0. THE ASSIGNMENT'S SHIFT DEFAULTS FROM THE TASK'S AND IS NOT THE SAME
+	# FIELD. The task's says which shift the work was RAISED for; this one says
+	# which it was DONE on, and they diverge the moment a job dispatched for the
+	# morning gets finished after lunch. The default is right far more often than
+	# it is wrong, and every later call that knows better overwrites it.
+	assignment.farm_shift = (
+		farm_shift or (task_doc.get("farm_shift") if hasattr(task_doc, "get") else None) or None
+	)
 	assignment.insert(ignore_permissions=True)
 	return _describe_assignment(dict(assignment.as_dict()))
 
@@ -579,12 +1025,19 @@ def assign_farm_task(args: dict) -> ToolResult:
 		reassigned.save(ignore_permissions=True)
 		reassigned_from = current.get("assigned_to_name") or current.get("assigned_to")
 
+	farm_shift = _shift_argument(args, str(row.get("company") or ""))
+
 	task_doc = frappe.get_doc(FARM_TASK, row["name"])
 	task_doc.assigned_to = worker
 	task_doc.assigned_to_name = worker_name
 	task_doc.state = CLAIMED
+	# WRITTEN ONLY WHEN GIVEN. A dispatch that names no shift leaves whatever the
+	# task already carried alone; blanking it would turn a link somebody set at
+	# creation into a missing one every time the work changed hands.
+	if farm_shift:
+		task_doc.farm_shift = farm_shift
 	task_doc.save(ignore_permissions=True)
-	assignment = _open_assignment(task_doc, worker, worker_name, dispatched=True)
+	assignment = _open_assignment(task_doc, worker, worker_name, dispatched=True, farm_shift=farm_shift)
 
 	data = {
 		**_describe_task(dict(task_doc.as_dict())),
@@ -692,22 +1145,45 @@ def start_farm_task(args: dict) -> ToolResult:
 			f"{assignment['name']} is {assignment.get('state')}, not {CLAIMED}. Nothing was changed."
 		)
 
+	task = task_row(assignment["task"])
+	farm_shift = _shift_argument(args, str(task.get("company") or ""))
+
 	doc = frappe.get_doc(FARM_TASK_ASSIGNMENT, assignment["name"])
 	doc.state = IN_PROGRESS
 	doc.started_at = as_str(args, "started_at") or frappe.utils.now()
+	if farm_shift:
+		doc.farm_shift = farm_shift
+	elif not doc.farm_shift:
+		# v0.64.0. THE CLOCK-IN IS THE LAST CHEAP MOMENT TO LEARN WHICH SHIFT THIS
+		# IS. Nobody types a shift docname into a phone, and a completion that
+		# reaches the shift's compliance record only when somebody remembered to
+		# pass an argument is a compliance record with holes in it on exactly the
+		# busy days it matters. Inferred ONLY from an open shift this worker is
+		# actually rostered on at this moment, and only when there is exactly one
+		# — two open shifts naming the same person is an ambiguity, and guessing
+		# would put the evidence on the wrong crew's record, which is worse than
+		# leaving it unlinked and saying so.
+		doc.farm_shift = _open_shift_for(doc.assigned_to, str(task.get("company") or "")) or None
 	doc.save(ignore_permissions=True)
 	_set_task_state(assignment["task"], IN_PROGRESS)
 
-	task = task_row(assignment["task"])
 	return ToolResult(
 		data={
 			"assignment": _describe_assignment(dict(doc.as_dict())),
-			"task": _describe_task(task),
+			"task": _describe_task(task_row(assignment["task"])),
 			"evidence_you_will_need": _contract_sentence(evidence_contract(task.get("evidence_required"))),
 			"note": (
 				"This is the clock-in for THIS TASK, not for the shift. A worker on the clock all "
 				"morning did this particular cabin between ten and half past, and that is what an "
 				"hour charged to a job has to mean."
+			),
+			"shift_note": (
+				f"This work is anchored to shift {doc.farm_shift}, so its completion evidence will "
+				"land on that shift's compliance timeline beside the weather it was done in."
+				if doc.farm_shift
+				else "This work is anchored to NO SHIFT, so its completion evidence will sit on the "
+				"assignment alone and nothing will reach a compliance record spanning an exposure "
+				"period. Pass farm_shift here or at completion if the worker was on one."
 			),
 		},
 		summary=f"{doc.assigned_to_name} started {assignment['task']} at {doc.started_at}",
@@ -813,6 +1289,16 @@ def complete_farm_task(args: dict) -> ToolResult:
 	location_gps = as_str(args, "farm_location_gps")
 	if location_gps:
 		doc.farm_location_gps = location_gps
+	# v0.64.0. THE LAST CHANCE TO SAY WHICH SHIFT THIS WAS DONE ON, and the one
+	# a client that only ever calls `complete_farm_task` has. Written only when
+	# given, on the same argument `farm_location_gps` is and for the same reason:
+	# blanking a link the clock-in already established would silently detach a
+	# completion from the compliance record it belongs on.
+	completion_shift = _shift_argument(args, str(task.get("company") or ""))
+	if completion_shift:
+		doc.farm_shift = completion_shift
+	elif not doc.farm_shift:
+		doc.farm_shift = _open_shift_for(worker, str(task.get("company") or "")) or None
 	doc.signature_file = signature or doc.signature_file
 	doc.actual_duration_minutes = as_int(args, "actual_duration_minutes") or _elapsed(
 		doc.started_at, doc.completed_at
@@ -866,6 +1352,20 @@ def complete_farm_task(args: dict) -> ToolResult:
 		doc.produced_record = produced
 	doc.save(ignore_permissions=True)
 
+	# v0.64.0. THE EVIDENCE FLOWS ONTO THE SHIFT AFTER THE ASSIGNMENT IS SAVED
+	# AND NEVER BEFORE. The assignment is the record of what was produced; the
+	# shift event is a pointer to it. Writing the pointer first would leave a
+	# timeline entry naming a completion that a later failure meant never existed.
+	shift_flow = _flow_evidence_into_shift(doc, task, evidence, clean_pass)
+
+	# v0.64.0. AND THEN ASK THE CALENDAR TO LOOK AGAIN. Same reason, same moment:
+	# the world has changed and the record says so, and a worker who files two
+	# photographs and a signature and watches the alert that sent them there sit
+	# unchanged until two in the morning learns that the calendar is decoration.
+	compliance_eval = _evaluate_compliance_after(
+		task, str(task.get("creates_record") or "").strip(), str(task.get("company") or "")
+	)
+
 	final_state = AWAITING_REVIEW if record_state == records.CORRECTIVE_ACTION_REQUIRED else COMPLETED
 	task_fields = {"produced_record": produced or ""}
 	# The ticks are written back ONLY where there is a checklist, so a task
@@ -891,9 +1391,26 @@ def complete_farm_task(args: dict) -> ToolResult:
 		"x_idempotent": False,
 		"completion_signature": doc.completion_signature,
 		"visit_id": doc.visit_id or None,
+		# ALWAYS PRESENT, null where this work was not anchored to a shift. A
+		# client reading its absence as "it worked" would report a compliance
+		# record that was never written, which is the failure this whole join
+		# exists to prevent.
+		"shift_evidence": shift_flow,
+		# ALWAYS PRESENT, null where this completion could not have changed any
+		# rule's answer — a hand-raised task from no alert that produces no
+		# record is exactly that, and saying so is different from silence.
+		"compliance_evaluation": compliance_eval,
 	}
 	if record_note:
 		data["record_note"] = record_note
+	if shift_flow is None:
+		data["shift_note"] = (
+			"This completion is anchored to NO SHIFT, so nothing reached a compliance record "
+			"spanning an exposure period — the evidence is on the assignment alone. Pass "
+			"farm_shift to create_farm_task, assign_farm_task, start_farm_task or this call when "
+			"the work belongs to a shift. A shift is inferred at clock-in when the worker is "
+			"rostered on exactly one open one."
+		)
 	if final_state == AWAITING_REVIEW:
 		data["review_note"] = (
 			"This went to Awaiting-Review because the record it produced found something. The WORK "
@@ -904,10 +1421,13 @@ def complete_farm_task(args: dict) -> ToolResult:
 		)
 	else:
 		data["dismissal_note"] = (
-			"Nothing here touched a Compliance Alert. The record this completion wrote moved the "
-			"register forward, and the alert that asked for the work auto-dismisses on the next "
-			"sweep because its condition is no longer true. That is the only honest way for an "
-			"alert to go away — changing the world and letting the sweep notice."
+			"Nothing here dismissed a Compliance Alert BY HAND, and nothing can. The record this "
+			"completion wrote moved the register forward; the rules that read that register were "
+			"then asked to look again, and any alert that went away did so because its own "
+			"condition is no longer true. That is the only honest way for an alert to go away — "
+			"changing the world and letting the sweep notice — and `compliance_evaluation` is "
+			"what the sweep said. Rules outside that narrowing are untouched and reach the "
+			"scheduled pass as they always did."
 		)
 	return ToolResult(
 		data=data,
@@ -981,6 +1501,26 @@ def _replayed(assignment: dict, task: dict, worker: str, args: dict):
 		"x_idempotent": True,
 		"completion_signature": stored,
 		"visit_id": row.get("visit_id") or None,
+		# v0.64.0. PRESENT AND READ BACK, NEVER RE-WRITTEN. `_flow_evidence_into_
+		# shift` is not called here for the same reason nothing else in this
+		# function writes: a replay is the same completion arriving twice, and
+		# appending its event to the shift a second time would put one afternoon's
+		# work on the timeline as two. The key is reported so a client's two code
+		# paths stay one — it reads what IS on the record, which is what the first
+		# call already put there.
+		"shift_evidence": (
+			{
+				"farm_shift": row.get("farm_shift"),
+				"event_logged": _shift_carries_event(str(row.get("farm_shift") or ""), assignment["name"]),
+				"replayed": True,
+			}
+			if row.get("farm_shift")
+			else None
+		),
+		# Null, and deliberately. A replay changed nothing, so no rule's answer
+		# can have changed either — re-running the sweep here would be this app
+		# doing work because a phone lost an acknowledgement.
+		"compliance_evaluation": None,
 		"idempotent_note": (
 			f"This completion was already filed, at {row.get('completed_at')}, and nothing was "
 			"changed by this call. The submission matches the one on record — same worker, same "
@@ -1452,6 +1992,13 @@ def list_dispatch_board(args: dict) -> ToolResult:
 		value = as_str(args, key)
 		if value:
 			filters[key] = value
+	# v0.64.0. THE BOARD, NARROWED TO ONE SHIFT. "What is still open on the crew
+	# that is out there right now" is the question a foreman actually asks at
+	# two in the afternoon, and answering it by reading the whole board and
+	# filtering by eye is how the one Critical job gets missed.
+	board_shift = _shift_argument(args, company or "")
+	if board_shift:
+		filters["farm_shift"] = board_shift
 
 	rows = frappe.db.get_all(
 		FARM_TASK,
@@ -1469,26 +2016,51 @@ def list_dispatch_board(args: dict) -> ToolResult:
 	unassigned = [task["name"] for task in tasks if task["state"] == AVAILABLE]
 	critical = [task["name"] for task in tasks if task["urgency"] == "Critical" and task["open"]]
 
+	# v0.64.0. WHICH SHIFTS THIS BOARD'S WORK BELONGS TO, and how much of it
+	# belongs to none. The second number is the one worth reading: an unanchored
+	# task's completion evidence reaches no compliance record spanning an
+	# exposure period, so a board that is mostly unanchored is a dispatch surface
+	# that is not feeding the shift record it was built to feed.
+	by_shift = {}
+	for task in tasks:
+		shift = task.get("farm_shift")
+		if shift:
+			by_shift.setdefault(shift, []).append(task["name"])
+	unanchored = [task["name"] for task in tasks if not task.get("farm_shift")]
+
+	data = {
+		"company": company,
+		"farm_shift": board_shift or None,
+		"count": len(tasks),
+		"limit": limit,
+		"truncated": len(tasks) >= limit,
+		"by_state": {state: len(entries) for state, entries in columns.items()},
+		"columns": {state: entries for state, entries in columns.items() if entries},
+		"in_the_pool": unassigned,
+		"open_critical": critical,
+		"by_shift": by_shift,
+		"not_anchored_to_a_shift": unanchored,
+		"generated_from_alerts": len(from_alerts),
+		"kanban_route": "/app/farm-task/view/kanban/Farm Task Dispatch",
+		"note": (
+			f"{len(from_alerts)} of {len(tasks)} task(s) on this board came from a compliance "
+			"alert. That fraction is the honest measure of whether the calendar is driving "
+			"work or being read and ignored."
+		),
+	}
+	if unanchored and tasks:
+		data["shift_note"] = (
+			f"{len(unanchored)} of {len(tasks)} task(s) here name no shift. Their completions file "
+			"evidence against the assignment and reach no record spanning an exposure period — "
+			"which is correct for desk work and a gap for anything done by a crew in a field. "
+			"farm_shift can be set at creation, dispatch, clock-in or completion, and clock-in "
+			"infers it where the worker is rostered on exactly one open shift."
+		)
 	return ToolResult(
-		data={
-			"company": company,
-			"count": len(tasks),
-			"limit": limit,
-			"truncated": len(tasks) >= limit,
-			"by_state": {state: len(entries) for state, entries in columns.items()},
-			"columns": {state: entries for state, entries in columns.items() if entries},
-			"in_the_pool": unassigned,
-			"open_critical": critical,
-			"generated_from_alerts": len(from_alerts),
-			"kanban_route": "/app/farm-task/view/kanban/Farm Task Dispatch",
-			"note": (
-				f"{len(from_alerts)} of {len(tasks)} task(s) on this board came from a compliance "
-				"alert. That fraction is the honest measure of whether the calendar is driving "
-				"work or being read and ignored."
-			),
-		},
+		data=data,
 		summary=(
 			f"{len(tasks)} task(s) on the board: {len(unassigned)} in the pool, {len(critical)} open Critical"
+			+ (f", across {len(by_shift)} shift(s)" if by_shift else "")
 		),
 	)
 

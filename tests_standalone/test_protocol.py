@@ -825,8 +825,8 @@ class Catalogue(SeededTestCase):
 		`file_url`, and `seal_signed_document`, which appends the verification
 		page and hashes the finished file. One read, one write.
 		"""
-		self.assertEqual(len(registry.TOOLS), 412)
-		self.assertEqual(len(registry.READ_TOOLS), 188)
+		self.assertEqual(len(registry.TOOLS), 413)
+		self.assertEqual(len(registry.READ_TOOLS), 189)
 		self.assertEqual(len(registry.MUTATING_TOOLS), 224)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):

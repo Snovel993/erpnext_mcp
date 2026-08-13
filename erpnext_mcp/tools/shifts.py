@@ -873,6 +873,11 @@ def get_shift(args: dict) -> ToolResult:
 			if compat.doctype_exists(shifts.LOCATION_DOCTYPE)
 			else 0
 		),
+		# v0.64.0. THE OTHER HALF OF THE TASK↔SHIFT JOIN. The shift's own
+		# `compliance_events` already carry a Task Completed entry per finished
+		# job; this is the work that is still OPEN on the crew that is out there,
+		# which no event can be because it has not happened yet.
+		"farm_tasks": _tasks_on_shift(row["name"]),
 	}
 	if not described["weather_timeline"]:
 		data["weather_note"] = (
@@ -907,6 +912,57 @@ def get_shift(args: dict) -> ToolResult:
 			f"{described['compliance_event_count']} event(s) logged"
 		),
 	)
+
+
+#: The Farm Task doctype, named here rather than imported so that the shift
+#: surface keeps loading on a site without the dispatch tables. Every read goes
+#: through `compat.doctype_exists` first.
+FARM_TASK = "Farm Task"
+
+
+def _tasks_on_shift(shift: str) -> dict:
+	"""The tasks anchored to one shift, split by whether they are still open.
+
+	v0.64.0. A COUNT AND A SHORT LIST, NOT THE BOARD. `get_shift` is already the
+	longest read on this surface and a harvest shift can carry dozens of jobs;
+	`list_dispatch_board(farm_shift=…)` is the tool that draws them in full. What
+	belongs here is the answer to "is there work still open on this crew", which
+	is one number and the names behind it.
+
+	NEVER RAISES. A shift record is read in a wage claim and an inspection, and
+	a dispatch table that is missing or mid-migrate is not a reason to refuse it.
+	"""
+	out = {"total": 0, "open": [], "completed": 0}
+	if not compat.doctype_exists(FARM_TASK):
+		return out
+	try:
+		rows = frappe.db.get_all(
+			FARM_TASK,
+			filters={"farm_shift": shift},
+			fields=compat.existing_fields(
+				FARM_TASK, ("name", "task_name", "task_type", "state", "urgency", "assigned_to_name")
+			),
+			order_by="modified desc",
+			limit=200,
+		)
+	except Exception:
+		return out
+	terminal = ("Completed", "Cancelled", "Rejected")
+	out["total"] = len(rows or [])
+	out["completed"] = len([entry for entry in rows or [] if str(entry.get("state") or "") == "Completed"])
+	out["open"] = [
+		{
+			"name": entry.get("name"),
+			"task_name": entry.get("task_name"),
+			"task_type": entry.get("task_type"),
+			"state": entry.get("state"),
+			"urgency": entry.get("urgency"),
+			"assigned_to_name": entry.get("assigned_to_name") or None,
+		}
+		for entry in rows or []
+		if str(entry.get("state") or "") not in terminal
+	]
+	return out
 
 
 # ── 8. log_shift_location ───────────────────────────────────────────────────
@@ -1193,7 +1249,12 @@ def log_shift_break(args: dict) -> ToolResult:
 		)
 
 	when = _when(args, "started_at")
-	duration = as_float(args, "duration_minutes")
+	# v0.64.0. `as_float` takes the VALUE first and the label second — every other
+	# one of its hundred-odd call sites does — and this one passed the whole args
+	# dict as the value. `float({...})` raises, so this line failed EVERY call to
+	# this tool since v0.58.0, and the refusal it produced quoted the entire
+	# request payload back as the offending "number".
+	duration = as_float(args.get("duration_minutes"), "duration_minutes")
 	event_type = BREAK_KINDS[break_kind]["event_type"]
 
 	doc = frappe.get_doc(DOCTYPE, row["name"])
@@ -1535,3 +1596,358 @@ def _compute_shift_production(row: dict) -> dict:
 		"workers": workers,
 		"unattributed_entries": unattributed,
 	}
+
+
+# ── 13. get_shift_crew_timeline ──────────────────────────────────────────
+
+#: The event types that are evidence somebody was LOOKED AFTER rather than
+#: merely present. Counted per worker inside their own envelope, because
+#: "the crew took three water breaks" is not an answer about the person who
+#: arrived after two of them.
+CARE_EVENTS = (
+	"Water Break",
+	"Shade Break",
+	"Rest Cycle",
+	"Cool-Down",
+	"Supervisor Observation",
+	"Heat Illness Signs Check",
+	"Rest Period",
+	"Meal Period",
+)
+
+
+def get_shift_crew_timeline(args: dict) -> ToolResult:
+	"""Every crew member's own envelope: their span, their weather, their events.
+
+	v0.64.0. THE SHIFT IS ONE RECORD AND THE CREW IS NOT ONE PERSON, and this is
+	the tool that stops the first fact from erasing the second. `get_shift`
+	answers "what happened on this shift"; `get_weather_timeline` answers "how hot
+	did it get". Neither answers the question a wage claim and a heat citation
+	both turn on, which is what happened TO ANA — who joined at 09:40, left at
+	13:00, and was therefore present for two of the shift's five water breaks and
+	absent for the hour it was hottest.
+
+	EVERY NUMBER HERE IS COMPUTED AGAINST THE WORKER'S OWN SPAN, never the
+	shift's. That is the entire point:
+
+	  * `readings_in_span` and `peak` are the conditions THEY stood in. The
+	    foreman's 96 °F at three in the afternoon is not evidence about a picker
+	    who went home at one.
+	  * `first_crossing_in_span` is when OAR 437-004-1131's obligations started
+	    running FOR THEM. A worker who arrived after the crossing has a later
+	    clock than the shift's, and `present_at_shift_first_crossing` says which.
+	  * `care_events_in_span` counts only the water, shade, rest and observation
+	    events that fell inside their envelope, plus the Individual-scoped ones
+	    that name them. A crew-scoped break at 08:00 is not care given to somebody
+	    who arrived at 09:40, and counting it would be the record flattering the
+	    operation in exactly the place an investigator checks.
+
+	NOTHING IS INTERPOLATED, and `minutes_bracketed_by_crossings` is named the
+	way it is for that reason. It is the elapsed time from the first at-or-above
+	reading in the worker's span to the last one — a BRACKET, not a sum of
+	exposure — because the readings are samples every fifteen minutes and the
+	temperature between two of them is a thing nobody measured. `sample_gap_
+	minutes` reports the actual cadence so a reader can see how coarse the
+	bracket is; a timeline reconstructed hourly from the archive brackets the
+	same afternoon far more loosely than a live one, and the two must not read
+	alike.
+
+	IT IS READ-ONLY AND IT WRITES NOTHING BACK. `present_until` is computed from
+	an empty `left_at` for the same reason `describe_crew_row` computes it:
+	writing it would destroy the difference between "left at 13:00" and "stayed
+	to the end" the moment the shift's end time changed.
+	"""
+	_require()
+	actor = employee_tool.require_hr_role()
+	row = _resolve_shift(args)
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	from ..services import weather as weather_service
+
+	shift_name = row["name"]
+	shift_end = str(row.get("end_datetime") or "") or None
+	shift_start = str(row.get("start_datetime") or "") or None
+	crew = shifts.crew_of(shift_name)
+	events = shifts.events_of(shift_name)
+	readings = shifts.weather_of(shift_name)
+	limits = weather_service.thresholds_for(str(row.get("company") or ""))
+
+	only = as_str(args, "employee")
+	if only:
+		crew = [entry for entry in crew if str(entry.get("employee") or "") == only]
+		if not crew:
+			raise ToolError(
+				f"{only} is not on {shift_name}'s crew. A person who was not rostered has no "
+				"envelope on this shift — get_shift has the crew list. Nothing was changed."
+			)
+
+	# The shift's OWN first crossing, computed once. Every worker is then asked
+	# whether they were standing there when it happened, which is a different
+	# question from whether it happened at all.
+	shift_crossings = [
+		str(entry.get("reading_datetime") or "")
+		for entry in readings
+		if weather_service._heat_crossing(entry, limits)
+	]
+	shift_first_crossing = shift_crossings[0] if shift_crossings else None
+
+	policy = _break_policy_dict(row)
+	break_events = [dict(entry) for entry in events if entry.get("break_kind")]
+
+	workers = [
+		_crew_envelope(
+			member,
+			shift_row=row,
+			shift_end=shift_end,
+			readings=readings,
+			events=events,
+			break_events=break_events,
+			policy=policy,
+			limits=limits,
+			shift_first_crossing=shift_first_crossing,
+		)
+		for member in crew
+	]
+
+	exposed = [entry["employee"] for entry in workers if entry["exposure"]["first_crossing_in_span"]]
+	arrived_after = [
+		entry["employee"]
+		for entry in workers
+		if shift_first_crossing and not entry["exposure"]["present_at_shift_first_crossing"]
+	]
+	short = [
+		entry["employee"]
+		for entry in workers
+		if entry["breaks"] and entry["breaks"].get("short")
+	]
+
+	data = {
+		"shift": shift_name,
+		"company": row.get("company"),
+		"shift_type": row.get("shift_type") or None,
+		"location": row.get("location") or None,
+		"start_datetime": shift_start,
+		"end_datetime": shift_end,
+		"open": shifts.is_open(row),
+		"foreman": row.get("foreman"),
+		"foreman_name": row.get("foreman_name"),
+		"crew_size": len(crew),
+		"still_on_shift": len([entry for entry in crew if not entry.get("left_at")]),
+		"thresholds": limits,
+		"shift_first_crossing": shift_first_crossing,
+		"weather_reading_count": len(readings),
+		"sample_gap_minutes": _sample_gap_minutes(readings),
+		"crew": workers,
+		"exposed_to_the_heat_threshold": exposed,
+		"arrived_after_the_first_crossing": arrived_after,
+		"short_of_their_break_entitlement": short,
+		"break_policy": row.get("break_policy") or None,
+	}
+
+	if not readings:
+		data["weather_note"] = (
+			"THIS SHIFT HAS NO WEATHER TIMELINE, so every exposure figure below is null rather "
+			"than zero — nobody measured, which is not the same as nothing happened. An open "
+			"shift with farm_location_gps collects readings on the quarter-hour sweep; a closed "
+			"one is reconstructed by backfill_weather_for_shift; a shift with no coordinates "
+			"never collects anything and never will."
+		)
+	elif shift_first_crossing and arrived_after:
+		data["exposure_note"] = (
+			f"{len(arrived_after)} of {len(workers)} crew member(s) were not on this shift when it "
+			f"first crossed the heat threshold at {shift_first_crossing}. {shifts.CITATION}'s "
+			"obligations run from the crossing FOR THE PEOPLE WHO WERE EXPOSED TO IT, so their "
+			"clock is their own joined_at and not the shift's — and a heat record that documents "
+			"one exposure period for a crew that turned over across the afternoon is documenting "
+			"a day that did not happen to most of them."
+		)
+	if short:
+		data["break_note"] = (
+			f"{len(short)} crew member(s) took fewer rest or meal periods than their own hours on "
+			"this shift entitle them to. Computed per person against their own span, which is the "
+			"only way it can be right: entitlement is a function of hours worked, and a worker who "
+			"put in four hours is owed a different number from the foreman who put in ten."
+		)
+	if not crew:
+		data["crew_note"] = (
+			"NO CREW ROWS. A shift with no crew is a record that nobody was at work, which is "
+			"almost always a shift formed but never rostered — add_worker_to_shift is what fills "
+			"it, and remove_worker_from_shift sets left_at rather than deleting the row, so an "
+			"empty crew here is never somebody who has been taken off."
+		)
+
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{shift_name}: {len(crew)} crew envelope(s)"
+			+ (f", {len(exposed)} exposed at or above threshold" if readings else "")
+			+ (f", {len(short)} short of break entitlement" if short else "")
+		),
+	)
+
+
+def _break_policy_dict(row: dict) -> dict:
+	"""The shift's break policy as a plain dict, or `{}` where there is none."""
+	policy_name = row.get("break_policy")
+	if not policy_name or not compat.doctype_exists(BREAK_POLICY_DOCTYPE):
+		return {}
+	try:
+		return _describe_break_policy(dict(frappe.get_doc(BREAK_POLICY_DOCTYPE, policy_name).as_dict()))
+	except Exception:
+		# A policy that has been deleted out from under a shift is a gap in the
+		# entitlement figures and not a reason to refuse the whole read — the
+		# spans, the weather and the events are all still true without it.
+		return {}
+
+
+def _sample_gap_minutes(readings: list):
+	"""The MEDIAN gap between readings, which is how coarse the bracket below is.
+
+	Median rather than mean because a shift that was backfilled for its morning
+	and fetched live for its afternoon has one enormous gap at the join, and a
+	mean would report a cadence that describes neither half.
+	"""
+	stamps = [str(entry.get("reading_datetime") or "") for entry in readings]
+	stamps = sorted(stamp for stamp in stamps if stamp)
+	if len(stamps) < 2:
+		return None
+	gaps = []
+	for earlier, later in zip(stamps, stamps[1:]):
+		try:
+			gaps.append(float(frappe.utils.time_diff_in_seconds(later, earlier)) / 60.0)
+		except Exception:
+			continue
+	if not gaps:
+		return None
+	gaps.sort()
+	middle = len(gaps) // 2
+	value = gaps[middle] if len(gaps) % 2 else (gaps[middle - 1] + gaps[middle]) / 2.0
+	return round(value, 1)
+
+
+def _within(stamp: str, start: str, end: str) -> bool:
+	"""Is `stamp` inside `[start, end]`? An unknown bound does not exclude.
+
+	A missing `joined_at` means nobody wrote down when they arrived, and treating
+	that as "arrived at the end of time" would empty their envelope and report a
+	worker who was looked after all day as one who was never there at all.
+	"""
+	if not stamp:
+		return False
+	if start and stamp < start:
+		return False
+	if end and stamp > end:
+		return False
+	return True
+
+
+def _crew_envelope(
+	member: dict,
+	shift_row: dict,
+	shift_end: str,
+	readings: list,
+	events: list,
+	break_events: list,
+	policy: dict,
+	limits: dict,
+	shift_first_crossing,
+) -> dict:
+	"""One crew member's own span, and everything true inside it."""
+	from ..services import weather as weather_service
+
+	employee = str(member.get("employee") or "")
+	described = shifts.describe_crew_row(member, shift_end or "")
+	joined = described["joined_at"] or str(shift_row.get("start_datetime") or "")
+	until = described["present_until"] or str(shift_row.get("end_datetime") or "") or frappe.utils.now()
+
+	mine = [
+		entry
+		for entry in readings
+		if _within(str(entry.get("reading_datetime") or ""), joined, until)
+	]
+	crossings = [
+		str(entry.get("reading_datetime") or "")
+		for entry in mine
+		if weather_service._heat_crossing(entry, limits)
+	]
+
+	def peak(fieldname):
+		values = []
+		for entry in mine:
+			value = entry.get(fieldname)
+			if value in (None, ""):
+				continue
+			try:
+				values.append(float(value))
+			except (TypeError, ValueError):
+				continue
+		return max(values) if values else None
+
+	bracket = None
+	if len(crossings) >= 2:
+		bracket = shifts.hours_between(crossings[0], crossings[-1])
+		bracket = round(bracket * 60.0, 1) if bracket is not None else None
+	elif len(crossings) == 1:
+		# ONE READING IS A MOMENT AND NOT A DURATION. Zero is the honest answer:
+		# the crew was above the threshold when somebody measured, and how long
+		# either side of that is a thing nobody recorded.
+		bracket = 0.0
+
+	mine_events = []
+	for entry in events:
+		when = str(entry.get("event_datetime") or "")
+		scope = str(entry.get("applies_to") or "Crew")
+		named = str(entry.get("employee") or "")
+		if scope == "Individual":
+			if named != employee:
+				continue
+		elif not _within(when, joined, until):
+			continue
+		mine_events.append(shifts.describe_event_row(entry))
+
+	care = [entry for entry in mine_events if entry["event_type"] in CARE_EVENTS]
+
+	out = {
+		**described,
+		"employee": employee,
+		"hours_present": shifts.hours_between(joined, until),
+		"span": {"from": joined or None, "to": until or None},
+		"pay_type": member.get("pay_type") or shift_row.get("pay_type") or None,
+		"pay_rate": member.get("pay_rate") if member.get("pay_rate") not in (None, "") else shift_row.get("pay_rate"),
+		"pay_basis_from": "crew row" if member.get("pay_type") else ("shift" if shift_row.get("pay_type") else None),
+		"exposure": {
+			"readings_in_span": len(mine),
+			"peak_temp_f": peak("temp_f"),
+			"peak_heat_index_f": peak("heat_index_f"),
+			"peak_wind_speed_mph": peak("wind_speed_mph"),
+			"readings_at_or_above_the_heat_threshold": len(crossings),
+			"first_crossing_in_span": crossings[0] if crossings else None,
+			"last_crossing_in_span": crossings[-1] if crossings else None,
+			"minutes_bracketed_by_crossings": bracket,
+			"present_at_shift_first_crossing": (
+				_within(shift_first_crossing, joined, until) if shift_first_crossing else None
+			),
+		},
+		"events_in_span": len(mine_events),
+		"care_events_in_span": len(care),
+		"events": mine_events,
+	}
+
+	if policy:
+		wb = breaks_mod.worker_breaks(
+			{"employee": employee, "joined_at": joined, "left_at": until},
+			break_events,
+			policy,
+		)
+		out["breaks"] = {
+			"rest_owed": wb["rest_owed"],
+			"rest_taken": wb["rest_taken"],
+			"meal_owed": wb["meal_owed"],
+			"meal_taken": wb["meal_taken"],
+			"paid_break_minutes": round(wb["paid_break_hours"] * 60.0, 1),
+			"unpaid_break_minutes": round(wb["unpaid_break_hours"] * 60.0, 1),
+			"short": bool(wb["rest_taken"] < wb["rest_owed"] or wb["meal_taken"] < wb["meal_owed"]),
+		}
+	else:
+		out["breaks"] = None
+	return out

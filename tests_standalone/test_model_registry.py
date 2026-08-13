@@ -556,8 +556,8 @@ class ToolRegistration(unittest.TestCase):
 		# because the handset cannot follow a private file_url — and
 		# `seal_signed_document` (write) is step 5, the verification page and the
 		# hash of the finished file.
-		self.assertEqual(len(self.registry.TOOLS), 412)
-		self.assertEqual(len(self.registry.READ_TOOLS), 188)
+		self.assertEqual(len(self.registry.TOOLS), 413)
+		self.assertEqual(len(self.registry.READ_TOOLS), 189)
 		self.assertEqual(len(self.registry.MUTATING_TOOLS), 224)
 
 

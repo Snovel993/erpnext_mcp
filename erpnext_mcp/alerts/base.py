@@ -344,7 +344,7 @@ def days_since(today: str, target) -> int | None:
 
 # ── the sweep ───────────────────────────────────────────────────────────────
 def refresh_compliance_alerts(
-	company: str = "", today: str = "", dry_run: bool = False, regime: str = ""
+	company: str = "", today: str = "", dry_run: bool = False, regime: str = "", alert_types=None
 ) -> dict:
 	"""Run every available rule and reconcile the Compliance Alert table to it.
 
@@ -379,9 +379,33 @@ def refresh_compliance_alerts(
 	training — run whenever their UNION contains the regime, and then tag each
 	alert from the record. A WPS sweep therefore rescans every certificate and
 	keeps the applicator licences.
+
+	`alert_types` (v0.64.0) NARROWS TO NAMED RULES, and it is the tightest of the
+	three narrowings for the same reason the other two are safe: a rule it skips
+	RAISES NOTHING AND DISMISSES NOTHING. It exists because `complete_farm_task`
+	now asks the calendar to look again at the moment the world changed, rather
+	than leaving the alert that asked for the work standing until the next
+	scheduled sweep. A worker who has just walked a cabin, filed two photographs
+	and a signature, and watched the alert that sent them there sit there
+	unchanged learns that the calendar is decoration.
+
+	IT IS STILL THE SWEEP AND NOT A SHORTCUT. Nothing here dismisses an alert
+	because a task was completed; it re-runs the rule that raised it and lets the
+	rule's own condition decide, exactly as the nightly run would. That is the
+	only honest way an alert goes away — change the world, and let the sweep
+	notice — and calling it sooner does not make it a different mechanism. A task
+	completed against a condition that is still true leaves the alert exactly
+	where it was, which is the outcome that matters most: the work being done and
+	the problem being fixed are two different facts.
+
+	An `alert_types` naming nothing this site has is not an error. It reports the
+	names as skipped and changes nothing, because a rule that has been renamed or
+	disabled since a task was raised is a normal state of a live site and not a
+	reason to fail a completion that has already been filed.
 	"""
 	today = today or frappe.utils.today()
 	wanted = regimes_vocabulary.canon(regime) if regime else ""
+	named = {str(key).strip() for key in (alert_types or []) if str(key).strip()}
 	# ONE RESOLUTION PER SWEEP, and everything below reads this dict. Resolving
 	# per rule would mean a rule superseded halfway through a sweep changed
 	# definition mid-run, which is exactly the race versioning-by-copy exists to
@@ -392,6 +416,11 @@ def refresh_compliance_alerts(
 		"today": today,
 		"company": company or None,
 		"regime": wanted or None,
+		"alert_types": sorted(named) or None,
+		# A name this site does not have is REPORTED rather than raised. A rule
+		# renamed or disabled since a task was raised is an ordinary state of a
+		# live site, and it must not be able to fail a completion already filed.
+		"alert_types_not_on_this_site": sorted(named - set(rule_names)) or None,
 		"dry_run": bool(dry_run),
 		"created": 0,
 		"refreshed": 0,
@@ -420,6 +449,20 @@ def refresh_compliance_alerts(
 
 	for key in rule_names:
 		rule = rules[key]
+		if named and key not in named:
+			report["rules_skipped"].append(
+				{
+					"alert_type": key,
+					"title": rule.title,
+					"reason": (
+						"the sweep was narrowed to "
+						f"{', '.join(sorted(named))} and this rule is not among them. It raised "
+						"nothing AND DISMISSED NOTHING — a narrowed sweep that cleared the rules it "
+						"did not run would empty most of the calendar and look like progress."
+					),
+				}
+			)
+			continue
 		if wanted and wanted not in regimes_vocabulary.parse(rule.regimes):
 			report["rules_skipped"].append(
 				{

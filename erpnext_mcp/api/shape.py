@@ -356,12 +356,27 @@ def completion(data: dict) -> dict:
 	of "Done", and the app's contract asks for it by name for exactly that reason.
 
 	`dismissed_alert` IS NOT A CLAIM THAT AN ALERT WAS DISMISSED. Nothing in this
-	app dismisses an alert directly; the record moves the register forward and the
-	next sweep notices the condition is no longer true — `complete_farm_task`
-	argues that this is the only honest way for an alert to go away. What this
-	field names is the alert the work ANSWERED, which is what the phone means when
-	it says "cleared", and it is only populated when the completion actually
-	produced the record that answers it.
+	app dismisses an alert directly. The record moves the register forward and a
+	SWEEP notices the condition is no longer true — `complete_farm_task` argues
+	that this is the only honest way for an alert to go away. What this field
+	names is the alert the work ANSWERED, which is what the phone means when it
+	says "cleared", and it is only populated when the completion actually produced
+	the record that answers it.
+
+	v0.64.0 MOVED WHEN THAT SWEEP RUNS AND NOT WHAT THIS FIELD MEANS. The
+	completion now re-runs the rule that raised the task, and the rules that read
+	the register it wrote to, at the moment it files — so the alert usually is
+	gone by the time the phone reads this. It is still the rule that decided, and
+	this field still names what the work answered rather than what was cleared;
+	a completion against a condition that is still true leaves the alert standing
+	and this field populated, which is correct and is the case the distinction
+	exists for.
+
+	THE SERVER'S RESULT CARRIES MORE THAN THIS. `shift_evidence` and
+	`compliance_evaluation` are on `complete_farm_task`'s own payload and are
+	deliberately not projected here: this is a strict projection, the handset's
+	`CompletionResult` decodes exactly these keys, and a field the app cannot yet
+	render belongs on the MCP surface until the app asks for it.
 	"""
 	data = dict(data or {})
 	task_row = dict(data.get("task") or {})

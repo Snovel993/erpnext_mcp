@@ -98,13 +98,24 @@ March.
 
 v0.17.1 MOVED THE SWEEP FROM NIGHTLY TO HOURLY, and the reason is the phones.
 The sweep is also what makes an alert GO AWAY: `complete_farm_task` writes a
-compliance record, the register moves forward, and the next sweep notices the
-condition has stopped being true. That is the only honest way for an alert to
-clear — nothing here dismisses one directly. Nightly meant a worker who walked a
-cabin at eight in the morning saw the alert asking them to walk it for the rest
-of the day, on the phone, having just done the work. Eleven rules over a farm's
+compliance record, the register moves forward, and a sweep notices the condition
+has stopped being true. That is the only honest way for an alert to clear —
+nothing dismisses one directly. Nightly meant a worker who walked a cabin at
+eight in the morning saw the alert asking them to walk it for the rest of the
+day, on the phone, having just done the work. Eleven rules over a farm's
 registers is a cheap pass, and running it hourly costs about a second a day of
 somebody's worker in exchange for a calendar that tells the truth by lunchtime.
+
+v0.64.0 FINISHED THAT ARGUMENT RATHER THAN REVISITING IT. The hourly cadence
+closed the gap from a day to an hour; a completion now asks the rules it could
+have changed to look again IN THE SAME CALL, which closes it to nothing — the
+worker who walked the cabin at eight sees the alert gone at eight. The mechanism
+is untouched: it is this same reconciliation, narrowed by `alert_types` to the
+rule that raised the task and the rules that read the register the completion
+wrote to, and a rule outside that narrowing raises nothing and DISMISSES NOTHING.
+The hourly job below is still what keeps the whole picture true, because most of
+what makes an alert stale is not a task completion at all — a certificate lapsing
+at midnight is nobody's tap on a phone.
 
 THE SWEEP IS SAFE TO RUN AT ANY CADENCE because it is a full reconciliation
 rather than an increment: every run rebuilds the whole picture and every alert is

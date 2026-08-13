@@ -199,8 +199,41 @@ FIELDS = (
 	"supervisor_review_on",
 )
 
-CREW_FIELDS = ("name", "employee", "employee_name", "role", "joined_at", "left_at", "notes", "idx")
+#: v0.64.0 added `pay_type` and `pay_rate`, which have been on the doctype since
+#: the crew table shipped and were read nowhere. `get_shift_crew_timeline` is
+#: what needed them: a worker's envelope decides what they are OWED as well as
+#: what they were EXPOSED to, and a piece-rate picker who joined at ten and an
+#: hourly foreman who was there from six are paid on different bases across the
+#: same afternoon. Fetched through `compat.existing_fields`, so a site whose
+#: migration has not reached the columns loses the two keys rather than the read.
+CREW_FIELDS = (
+	"name",
+	"employee",
+	"employee_name",
+	"role",
+	"joined_at",
+	"left_at",
+	"pay_type",
+	"pay_rate",
+	"notes",
+	"idx",
+)
 
+#: v0.64.0 added the six break columns, which have been on the doctype since
+#: v0.58.0 and were never FETCHED. Everything downstream reads these rows through
+#: `events_of`, so their absence was not a missing key on a payload — it was
+#: silent wrong arithmetic in three places at once:
+#:
+#:   * `describe_event_row`'s break branch is gated on `break_kind` and could
+#:     never be entered, so no break event ever reported its kind or duration;
+#:   * `breaks.worker_breaks` skips an Individual break that names somebody else
+#:     — with `applies_to` absent it defaults to Crew, so ONE person's cool-down
+#:     counted as a break taken by the whole crew;
+#:   * the same function totals `duration_minutes`, which was absent and read as
+#:     zero, so paid and unpaid break minutes were zero on every shift.
+#:
+#: Fetched through `compat.existing_fields`, so a site whose migration predates
+#: the break columns loses the keys rather than the read.
 EVENT_FIELDS = (
 	"name",
 	"event_type",
@@ -212,6 +245,12 @@ EVENT_FIELDS = (
 	"weather_snapshot_temp_f",
 	"weather_snapshot_heat_index_f",
 	"evidence_file",
+	"break_kind",
+	"ended_at",
+	"duration_minutes",
+	"duration_source",
+	"applies_to",
+	"employee",
 	"idx",
 )
 
