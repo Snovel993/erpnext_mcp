@@ -559,9 +559,11 @@ class ToolRegistration(unittest.TestCase):
 		# one scanned string resolved against the badge, asset, housing and block
 		# registers in that order — and it counts as a write for one branch's
 		# sake: the asset one is `scan_asset`, which stamps `last_scan_at`.
-		self.assertEqual(len(self.registry.TOOLS), 414)
-		self.assertEqual(len(self.registry.READ_TOOLS), 189)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 225)
+		# v0.66.0 adds nineteen master-data tools — ten reads, nine writes — over
+		# Item, Item Group, Supplier, Customer, Warehouse and Item Price.
+		self.assertEqual(len(self.registry.TOOLS), 433)
+		self.assertEqual(len(self.registry.READ_TOOLS), 199)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 234)
 
 
 if __name__ == "__main__":

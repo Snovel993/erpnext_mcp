@@ -932,9 +932,123 @@ ERPNEXT_SCHEMA = {
 		"is_stock_item",
 		"asset_category",
 		"disabled",
+		# v0.66.0. `tools/masters.py` reads and writes these. NOTE what is NOT
+		# here: a flat `default_warehouse` and flat `re_order_level`/`re_order_qty`.
+		# ERPNext moved both into child tables in v12, and this fixture is a site
+		# that made that move — which is what makes the child-table branch of
+		# `_set_default_warehouse` and `_set_reorder` the one the suite exercises,
+		# and the flat fallback a branch a v11 site would take instead.
+		"description",
+		"brand",
+		"is_purchase_item",
+		"is_sales_item",
+		"has_batch_no",
+		"has_serial_no",
+		"valuation_rate",
+		"standard_rate",
+		"item_defaults",
+		"reorder_levels",
 	],
-	"Item Group": ["name", "is_group"],
+	"Item Default": [
+		"name",
+		"parent",
+		"parenttype",
+		"parentfield",
+		"idx",
+		"company",
+		"default_warehouse",
+		"default_price_list",
+		"buying_cost_center",
+		"selling_cost_center",
+		"expense_account",
+		"income_account",
+	],
+	"Item Reorder": [
+		"name",
+		"parent",
+		"parenttype",
+		"parentfield",
+		"idx",
+		"warehouse",
+		"warehouse_group",
+		"warehouse_reorder_level",
+		"warehouse_reorder_qty",
+		"material_request_type",
+	],
+	"Item Group": ["name", "item_group_name", "parent_item_group", "is_group"],
 	"UOM": ["name", "enabled"],
+	# v0.66.0. The masters `tools/masters.py` creates and reads. `Customer` and
+	# `Supplier` carry no `company` column here, deliberately and faithfully:
+	# stock ERPNext puts none on either, and the tools' promise is that a company
+	# argument on a site-wide doctype is REPORTED as not applied rather than
+	# quietly dropped. A fixture that invented the column would make that
+	# reporting untestable.
+	"Customer": [
+		"name",
+		"customer_name",
+		"customer_group",
+		"customer_type",
+		"territory",
+		"disabled",
+		"tax_id",
+		"tax_category",
+		"default_currency",
+		"default_price_list",
+		"payment_terms",
+		"credit_limit",
+		"accounts",
+	],
+	"Supplier Group": ["name", "parent_supplier_group", "is_group"],
+	"Customer Group": ["name", "parent_customer_group", "is_group"],
+	"Territory": ["name", "parent_territory", "is_group"],
+	"Warehouse": [
+		"name",
+		"warehouse_name",
+		"company",
+		"parent_warehouse",
+		"is_group",
+		"disabled",
+		"warehouse_type",
+		"account",
+		"city",
+		"phone_no",
+		"address_line_1",
+	],
+	"Warehouse Type": ["name"],
+	"Price List": [
+		"name",
+		"price_list_name",
+		"currency",
+		"enabled",
+		"buying",
+		"selling",
+		"price_not_uom_dependent",
+	],
+	"Item Price": [
+		"name",
+		"item_code",
+		"item_name",
+		"price_list",
+		"price_list_rate",
+		"currency",
+		"uom",
+		"valid_from",
+		"valid_upto",
+		"customer",
+		"supplier",
+		"batch_no",
+		"buying",
+		"selling",
+	],
+	# The per-company control-account override both party doctypes carry.
+	#
+	# NO "Address" AND NO "Dynamic Link", deliberately. This double is a site
+	# that never installed ERPNext's address module — a real configuration, and
+	# the one `newhire`'s jurisdiction fallback exists for — so both stay absent
+	# and the tests that need them register them per test, as test_employee does.
+	# Putting them here would also have quietly changed how `Dynamic Link` is
+	# queried, since it is a flat table that tests seed directly.
+	"Party Account": ["name", "parent", "parenttype", "parentfield", "idx", "company", "account"],
 	# No "Location", deliberately: ERPNext's Asset requires one on some versions
 	# and not others, and this fixture is a site without it — which is what makes
 	# `create_asset`'s "set it only where the field exists" branch a real case.
@@ -949,6 +1063,12 @@ ERPNEXT_AUTONAME = {
 	"Bank": "field:bank_name",
 	"Fiscal Year": "field:year",
 	"Supplier": "field:supplier_name",
+	# v0.66.0. Each of these IS its own name on a stock install, and every one of
+	# them is a docname a caller stores: `create_item_group` refuses a name that
+	# is taken, and it can only do that if the name is the key here too.
+	"Item Group": "field:item_group_name",
+	"Customer": "field:customer_name",
+	"Price List": "field:price_list_name",
 	# A Party Type IS its name, which is what makes `frappe.db.exists("Party
 	# Type", "Family")` the check every caller writes.
 	"Party Type": "field:party_type",
@@ -1225,6 +1345,32 @@ ERPNEXT_FIELD_LINKS = {
 	("Employee", "employment_type"): ("Link", "Employment Type"),
 	("Employee", "gender"): ("Link", "Gender"),
 	("Employee", "user_id"): ("Link", "User"),
+	# ── v0.66.0: the master-data links and the two party Selects ────────────
+	# Every one of these is a link `tools/masters.py` writes. Modelling them is
+	# what makes its refusals real rather than decorative: a tool that checks a
+	# warehouse exists before appending an Item Default row is indistinguishable
+	# from one that does not, on a double where the bad row inserts anyway.
+	("Item", "item_group"): ("Link", "Item Group"),
+	("Item", "stock_uom"): ("Link", "UOM"),
+	("Item Group", "parent_item_group"): ("Link", "Item Group"),
+	("Item Default", "company"): ("Link", "Company"),
+	("Item Default", "default_warehouse"): ("Link", "Warehouse"),
+	("Item Reorder", "warehouse"): ("Link", "Warehouse"),
+	("Warehouse", "company"): ("Link", "Company"),
+	("Warehouse", "parent_warehouse"): ("Link", "Warehouse"),
+	("Warehouse", "warehouse_type"): ("Link", "Warehouse Type"),
+	("Supplier", "supplier_group"): ("Link", "Supplier Group"),
+	("Customer", "customer_group"): ("Link", "Customer Group"),
+	("Customer", "territory"): ("Link", "Territory"),
+	("Item Price", "item_code"): ("Link", "Item"),
+	("Item Price", "price_list"): ("Link", "Price List"),
+	("Item Price", "customer"): ("Link", "Customer"),
+	("Item Price", "supplier"): ("Link", "Supplier"),
+	# `masters._party_type` reads these options off the site's own meta rather
+	# than comparing against a hardcoded pair, so a fixture with no options at
+	# all would let any string through and prove nothing.
+	("Supplier", "supplier_type"): ("Select", "\nCompany\nIndividual"),
+	("Customer", "customer_type"): ("Select", "\nCompany\nIndividual"),
 	("Party Type", "party_type"): ("Link", "DocType"),
 	("GL Entry", "party_type"): ("Link", "DocType"),
 	("GL Entry", "party"): ("Dynamic Link", "party_type"),
@@ -1506,6 +1652,10 @@ CHILD_TABLES = {
 	("Workflow", "states"): "Workflow Document State",
 	("Workflow", "transitions"): "Workflow Transition",
 	("Asset Category", "accounts"): "Asset Category Account",
+	("Item", "item_defaults"): "Item Default",
+	("Item", "reorder_levels"): "Item Reorder",
+	("Supplier", "accounts"): "Party Account",
+	("Customer", "accounts"): "Party Account",
 	("Asset Cost Profile", "cost_center_allocation"): "Asset Cost Center Allocation",
 	("Asset Cost Profile", "depreciation_postings"): "Asset Depreciation Posting",
 	("Note Payable", "payment_events"): "Note Payable Event",
@@ -2171,6 +2321,23 @@ class BankAccountDocument(Document):
 		self.name = " - ".join(part for part in parts if part)
 
 
+class WarehouseDocument(Document):
+	"""Warehouse, which names itself `"<warehouse_name> - <company abbr>"`.
+
+	Reproduced from ERPNext's `Warehouse.autoname` for the reason
+	`AccountDocument` and `BankAccountDocument` are reproduced: `create_warehouse`
+	PREDICTS that docname before it writes anything, so it can refuse a collision
+	with a sentence instead of a framework error — and a double that named
+	warehouses `WH-00001` would make the prediction, the collision check and the
+	docname the response hands back all fictions at once.
+	"""
+
+	def autoname(self):
+		abbr = frappe.db.get_value("Company", self.get("company"), "abbr") or ""
+		name = str(self.get("warehouse_name") or "").strip()
+		self.name = f"{name} - {abbr}" if abbr else name
+
+
 class DocTypeDocument(Document):
 	"""Inserting a DocType makes it exist, which is the whole point of the test.
 
@@ -2381,6 +2548,7 @@ STUB_CONTROLLERS = {
 	"Account": AccountDocument,
 	"Bank Account": BankAccountDocument,
 	"Cost Center": CostCenterDocument,
+	"Warehouse": WarehouseDocument,
 	"DocType": DocTypeDocument,
 	"Custom Field": CustomFieldDocument,
 	"Journal Entry": JournalEntryDocument,
@@ -2995,6 +3163,12 @@ CHILD_TABLE_SOURCES = {
 	# itself as never reverified, which is exactly the answer that gets a lawfully
 	# reverified worker walked through a second I-9.
 	"I-9 Reverification": (("I-9 Form", "reverifications"),),
+	# v0.66.0. `masters._items_with_defaults_for` queries this child doctype
+	# directly with a `company` filter, because the question — "which items has
+	# this company set a default for" — is asked before any Item is loaded.
+	# Without this entry the company filter on `list_items` would match nothing
+	# and the tool would report an empty catalogue as an answer.
+	"Item Default": (("Item", "item_defaults"),),
 }
 
 

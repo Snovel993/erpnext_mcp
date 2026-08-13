@@ -73,6 +73,7 @@ from .tools import (
 	investment_report,
 	kpi,
 	kpidefs,
+	masters,
 	meta,
 	ml_model,
 	mobile,
@@ -2657,6 +2658,438 @@ TOOLS = {
 			"limit": _LIMIT,
 		},
 		title="List purchase orders",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	# ── master data ─────────────────────────────────────────────────────────
+	# v0.66.0. The records every other document points at. Read the module
+	# docstring in tools/masters.py before touching these: `company` means three
+	# different things across them, and each tool reports which one it applied.
+	"list_item_groups": _tool(
+		masters.list_item_groups,
+		"The Item Group tree, flat — every node with its parent_item_group and "
+		"is_group flag, plus the roots listed separately. This is the tool to "
+		"call before create_item, because an Item needs a group that exists. "
+		"Read-only.",
+		{
+			"parent_item_group": _field(_STRING, "Only the children of this group."),
+			"is_group": _field(_BOOLEAN, "true for branches only, false for leaves only."),
+			"limit": _LIMIT,
+		},
+		title="List item groups",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"create_item_group": _tool(
+		masters.create_item_group,
+		"MUTATING (default OFF). Create one Item Group under an existing group "
+		"node, defaulting to 'All Item Groups'. Refuses a parent that is a leaf, "
+		"and refuses a name already taken — ERPNext names an Item Group after "
+		"itself, so the name IS the docname. An Item Group has no docstatus and "
+		"therefore no draft state.",
+		{
+			"item_group_name": _field(_STRING, "The group's name, which becomes its docname."),
+			"parent_item_group": _field(
+				_STRING,
+				"The group node to file it under. Defaults to 'All Item Groups' where "
+				"the site has it; refused with the site's own group nodes listed where "
+				"it does not.",
+			),
+			"is_group": _field(
+				_BOOLEAN,
+				"true to create a branch that holds other groups, false (the default) "
+				"for a leaf that holds items.",
+			),
+		},
+		required=("item_group_name",),
+		mutating=True,
+		title="Create item group",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_items": _tool(
+		masters.list_items,
+		"Items by group, stock flag, disabled flag and a name search — with "
+		"item_code, item_name, item_group, stock_uom, is_stock_item and disabled, "
+		"plus a count per group. NOTE on `company`: an ERPNext Item is not "
+		"company-scoped, so the filter is applied as 'has an Item Default row for "
+		"this company' and HIDES items usable by every company. The response says "
+		"so in company_scope. Read-only.",
+		{
+			"item_group": _field(_STRING, "Item Group docname. Refused if it does not exist."),
+			"is_stock_item": _field(_BOOLEAN, "true for stocked items, false for services and fees."),
+			"disabled": _field(_BOOLEAN, "true for disabled items only, false for live ones only."),
+			"company": _COMPANY,
+			"search": _field(_STRING, "Substring of item_name, case-insensitive."),
+			"limit": _LIMIT,
+		},
+		title="List items",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_item": _tool(
+		masters.get_item,
+		"One Item in full: description, group, stock UOM, the flags, every "
+		"per-company default row (default warehouse, price list, cost centers and "
+		"accounts) and every reorder rule with the warehouse it belongs to. "
+		"Accepts an item_code or an item_name. Read-only.",
+		{
+			"item_code": _field(_STRING, "The Item docname. An item_name is also accepted."),
+			"name": _field(_STRING, "Alias for item_code."),
+			"item": _field(_STRING, "Alias for item_code."),
+		},
+		required=("item_code",),
+		title="Get item",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"create_item": _tool(
+		masters.create_item,
+		"MUTATING (default OFF). Create one Item. NOT A DRAFT: an ERPNext Item "
+		"has no docstatus, so it is live the moment it is created — pass disabled "
+		"to keep it out of transactions instead. The stock_uom is checked against "
+		"this site's UOM list and refused with the units it actually has, and the "
+		"item_group must already exist (create_item_group makes one).",
+		{
+			"item_code": _field(_STRING, "The code, which becomes the docname. Must be unique."),
+			"item_name": _field(_STRING, "Display name. Defaults to the item_code."),
+			"item_group": _field(
+				_STRING,
+				"An existing Item Group. Defaults to 'All Item Groups'. A LEAF group is "
+				"the normal choice — unlike parent_item_group on create_item_group, this "
+				"is not required to be a branch.",
+			),
+			"stock_uom": _field(_STRING, "Stock unit of measure. Defaults to 'Nos'."),
+			"is_stock_item": _field(_BOOLEAN, "Defaults to true. false for a service or a fee."),
+			"description": _field(_STRING, "Long description."),
+			"disabled": _field(_BOOLEAN, "Create it disabled. Defaults to false."),
+			"default_warehouse": _field(
+				_STRING,
+				"Default Warehouse. Stored on the item_defaults row for the company on "
+				"v12+, or on the flat field where the site still has one; the response "
+				"says which.",
+			),
+			"company": _field(
+				_STRING,
+				"Which company the default_warehouse row belongs to. Inferred from the "
+				"warehouse itself when omitted.",
+			),
+		},
+		required=("item_code",),
+		mutating=True,
+		title="Create item",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"update_item": _tool(
+		masters.update_item,
+		"MUTATING (default OFF). Change one Item's description, name, group, "
+		"disabled flag, default warehouse or reorder rule in place. Never renames "
+		"it — the item_code IS the docname. A reorder level needs a warehouse "
+		"(ERPNext keys the Item Reorder row by one): reorder_warehouse, or the "
+		"item's own default, or a refusal saying so. Returns a `changed` map of "
+		"before/after for every field it actually moved.",
+		{
+			"item_code": _field(_STRING, "The Item docname. An item_name is also accepted."),
+			"name": _field(_STRING, "Alias for item_code."),
+			"item": _field(_STRING, "Alias for item_code."),
+			"description": _field(_STRING, "New description. Pass an empty string to clear it."),
+			"item_name": _field(_STRING, "New display name."),
+			"item_group": _field(_STRING, "Move it to this existing Item Group."),
+			"disabled": _field(_BOOLEAN, "true to take it out of transactions, false to restore it."),
+			"default_warehouse": _field(_STRING, "Set the default Warehouse."),
+			"reorder_level": _field(_NUMBER, "Reorder when stock falls below this."),
+			"reorder_qty": _field(_NUMBER, "How much to order when it does."),
+			"reorder_warehouse": _field(
+				_STRING,
+				"Which warehouse the reorder rule is for. Defaults to the item's own "
+				"default warehouse; required when it has none.",
+			),
+			"company": _field(_STRING, "Which company a default_warehouse row belongs to."),
+		},
+		required=("item_code",),
+		mutating=True,
+		title="Update item",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_suppliers": _tool(
+		masters.list_suppliers,
+		"Suppliers by group, disabled flag and a name search, with their type, "
+		"country and tax identifiers. NOTE on `company`: an ERPNext Supplier is "
+		"SITE-WIDE and has no company column, so the argument is validated and "
+		"reported back as not applied rather than silently dropped. Read-only.",
+		{
+			"supplier_group": _field(_STRING, "Supplier Group docname. Refused if unknown."),
+			"disabled": _field(_BOOLEAN, "true for disabled suppliers only."),
+			"company": _COMPANY,
+			"search": _field(_STRING, "Substring of supplier_name, case-insensitive."),
+			"limit": _LIMIT,
+		},
+		title="List suppliers",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_supplier": _tool(
+		masters.get_supplier,
+		"One Supplier in full: group, type, country, tax identifiers, its "
+		"per-company payable-account overrides and the Addresses linked to it. "
+		"Accepts a docname or a supplier_name. Read-only.",
+		{
+			"name": _field(_STRING, "The Supplier docname, or its supplier_name."),
+			"supplier": _field(_STRING, "Alias for name."),
+			"supplier_name": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		title="Get supplier",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"create_supplier": _tool(
+		masters.create_supplier,
+		"MUTATING (default OFF). Create one Supplier. The supplier_group must "
+		"exist and defaults to 'All Supplier Groups'; supplier_type is matched "
+		"case-insensitively against this site's own Select options (Company or "
+		"Individual on a stock install) and refused with the list. A Supplier has "
+		"no docstatus and therefore no draft state, and no company column — a "
+		"company passed here is validated and reported as not stored.",
+		{
+			"supplier_name": _field(_STRING, "The name, which becomes the docname."),
+			"supplier_group": _field(_STRING, "An existing Supplier Group. Defaults to 'All Supplier Groups'."),
+			"supplier_type": _field(_STRING, "Company or Individual."),
+			"company": _COMPANY,
+			"country": _field(_STRING, "Country docname."),
+			"tax_id": _field(_STRING, "Tax identifier — the EIN or SSN a 1099 is filed against."),
+			"tax_category": _field(_STRING, "Tax Category docname."),
+			"tax_withholding_category": _field(_STRING, "Tax Withholding Category docname."),
+			"is_transporter": _field(_BOOLEAN, "Mark it a transporter."),
+		},
+		required=("supplier_name",),
+		mutating=True,
+		title="Create supplier",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"update_supplier": _tool(
+		masters.update_supplier,
+		"MUTATING (default OFF). Change one Supplier's group, type, disabled "
+		"flag, country or tax identifiers in place. Never renames it. Returns a "
+		"`changed` map of before/after, and refuses when nothing sent differs "
+		"from what is stored.",
+		{
+			"name": _field(_STRING, "The Supplier docname, or its supplier_name."),
+			"supplier": _field(_STRING, "Alias for name."),
+			"supplier_name": _field(_STRING, "Alias for name."),
+			"supplier_group": _field(_STRING, "Move it to this Supplier Group."),
+			"supplier_type": _field(_STRING, "Company or Individual."),
+			"disabled": _field(_BOOLEAN, "true to disable, false to restore."),
+			"country": _field(_STRING, "Country docname."),
+			"tax_id": _field(_STRING, "Tax identifier."),
+			"tax_category": _field(_STRING, "Tax Category docname."),
+			"tax_withholding_category": _field(_STRING, "Tax Withholding Category docname."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Update supplier",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_customers": _tool(
+		masters.list_customers,
+		"Customers by group, territory, disabled flag and a name search, with "
+		"their type, tax identifiers and default price list. NOTE on `company`: "
+		"an ERPNext Customer is SITE-WIDE and has no company column, so the "
+		"argument is validated and reported back as not applied. Read-only.",
+		{
+			"customer_group": _field(_STRING, "Customer Group docname. Refused if unknown."),
+			"territory": _field(_STRING, "Territory docname. Refused if unknown."),
+			"disabled": _field(_BOOLEAN, "true for disabled customers only."),
+			"company": _COMPANY,
+			"search": _field(_STRING, "Substring of customer_name, case-insensitive."),
+			"limit": _LIMIT,
+		},
+		title="List customers",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_customer": _tool(
+		masters.get_customer,
+		"One Customer in full: group, territory, type, tax identifiers, credit "
+		"limit, its per-company receivable-account overrides and the Addresses "
+		"linked to it. Accepts a docname or a customer_name. Read-only.",
+		{
+			"name": _field(_STRING, "The Customer docname, or its customer_name."),
+			"customer": _field(_STRING, "Alias for name."),
+			"customer_name": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		title="Get customer",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"create_customer": _tool(
+		masters.create_customer,
+		"MUTATING (default OFF). Create one Customer. The customer_group and "
+		"territory must exist and default to 'All Customer Groups' and 'All "
+		"Territories'; customer_type is matched against this site's own Select "
+		"options (Company or Individual on a stock install). A Customer has no "
+		"docstatus and therefore no draft state, and no company column — a "
+		"company passed here is validated and reported as not stored.",
+		{
+			"customer_name": _field(_STRING, "The name, which becomes the docname."),
+			"customer_group": _field(_STRING, "An existing Customer Group. Defaults to 'All Customer Groups'."),
+			"customer_type": _field(_STRING, "Company or Individual."),
+			"territory": _field(_STRING, "An existing Territory. Defaults to 'All Territories'."),
+			"company": _COMPANY,
+			"tax_id": _field(_STRING, "Tax identifier."),
+			"tax_category": _field(_STRING, "Tax Category docname."),
+			"default_currency": _field(_STRING, "Currency this customer is billed in."),
+			"default_price_list": _field(_STRING, "Selling Price List to default their rates from."),
+		},
+		required=("customer_name",),
+		mutating=True,
+		title="Create customer",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"update_customer": _tool(
+		masters.update_customer,
+		"MUTATING (default OFF). Change one Customer's group, territory, type, "
+		"disabled flag, tax identifiers or default price list in place. Never "
+		"renames it. Returns a `changed` map of before/after, and refuses when "
+		"nothing sent differs from what is stored.",
+		{
+			"name": _field(_STRING, "The Customer docname, or its customer_name."),
+			"customer": _field(_STRING, "Alias for name."),
+			"customer_name": _field(_STRING, "Alias for name."),
+			"customer_group": _field(_STRING, "Move it to this Customer Group."),
+			"customer_type": _field(_STRING, "Company or Individual."),
+			"territory": _field(_STRING, "Move it to this Territory."),
+			"disabled": _field(_BOOLEAN, "true to disable, false to restore."),
+			"tax_id": _field(_STRING, "Tax identifier."),
+			"tax_category": _field(_STRING, "Tax Category docname."),
+			"default_currency": _field(_STRING, "Currency this customer is billed in."),
+			"default_price_list": _field(_STRING, "Selling Price List to default their rates from."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Update customer",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_warehouses": _tool(
+		masters.list_warehouses,
+		"Warehouses by company, group flag, disabled flag and parent — flat, each "
+		"row naming its parent_warehouse, with the roots listed separately. "
+		"Unlike Items and parties, a Warehouse REALLY IS company-scoped, so the "
+		"company filter here is exact. Read-only.",
+		{
+			"company": _COMPANY,
+			"is_group": _field(_BOOLEAN, "true for branches only, false for stock-holding leaves."),
+			"disabled": _field(_BOOLEAN, "true for disabled warehouses only."),
+			"parent_warehouse": _field(_STRING, "Only the children of this warehouse."),
+			"limit": _LIMIT,
+		},
+		title="List warehouses",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"create_warehouse": _tool(
+		masters.create_warehouse,
+		"MUTATING (default OFF). Create one Warehouse in a company's tree. "
+		"ERPNext names it '<warehouse_name> - <company abbr>', and that docname "
+		"is predicted BEFORE anything is written so a collision comes back as a "
+		"sentence rather than a framework error. The parent defaults to the "
+		"company's own root group; a parent that is a leaf, or belongs to another "
+		"company, is refused. A Warehouse has no docstatus and therefore no draft "
+		"state.",
+		{
+			"warehouse_name": _field(_STRING, "The name. The docname adds ' - <company abbr>'."),
+			"company": _COMPANY,
+			"parent_warehouse": _field(
+				_STRING,
+				"The group warehouse to file it under. Defaults to the company's root "
+				"group ('All Warehouses - <abbr>' on a stock install).",
+			),
+			"warehouse_type": _field(_STRING, "Warehouse Type docname, where the site has the field."),
+			"is_group": _field(
+				_BOOLEAN,
+				"true to create a branch that holds other warehouses and no stock. "
+				"Defaults to false.",
+			),
+			"city": _field(_STRING, "City, for the warehouse address block."),
+		},
+		required=("warehouse_name",),
+		mutating=True,
+		title="Create warehouse",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_price_lists": _tool(
+		masters.list_price_lists,
+		"Price Lists on this site with their currency and their buying / selling "
+		"/ enabled flags. A Price List holds no rates itself — the rates are Item "
+		"Price rows pointing at it, which get_item_price reads. Read-only.",
+		{
+			"enabled": _field(_BOOLEAN, "true for enabled lists only."),
+			"buying": _field(_BOOLEAN, "true for buying lists only."),
+			"selling": _field(_BOOLEAN, "true for selling lists only."),
+			"limit": _LIMIT,
+		},
+		title="List price lists",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_item_price": _tool(
+		masters.get_item_price,
+		"Every Item Price for one item, optionally narrowed to one price list, "
+		"UOM, customer or supplier. Pass `as_of` and the response adds "
+		"`applicable` — the subset whose valid_from/valid_upto window covers that "
+		"date, with an open end treated as still in force. `price_list_rate` is "
+		"filled ONLY when exactly one row applies; more than one and the choice "
+		"belongs to ERPNext's pricing rules, not to this tool. Read-only.",
+		{
+			"item_code": _field(_STRING, "The Item docname. An item_name is also accepted."),
+			"name": _field(_STRING, "Alias for item_code."),
+			"item": _field(_STRING, "Alias for item_code."),
+			"price_list": _field(_STRING, "Restrict to one Price List. Refused if unknown."),
+			"uom": _field(_STRING, "Restrict to one unit of measure."),
+			"customer": _field(_STRING, "Restrict to a customer-specific price."),
+			"supplier": _field(_STRING, "Restrict to a supplier-specific price."),
+			"as_of": _field(_STRING, "Date as YYYY-MM-DD to test each row's validity window against."),
+			"limit": _LIMIT,
+		},
+		required=("item_code",),
+		title="Get item price",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"set_item_price": _tool(
+		masters.set_item_price,
+		"MUTATING (default OFF). Create or update one Item Price. The row is "
+		"matched on the WHOLE key — item, price list, UOM, customer, supplier and "
+		"valid_from — which is what ERPNext's own duplicate check uses; matching "
+		"on less would overwrite a customer's negotiated rate with the list rate. "
+		"When the key matches more than one existing row this refuses and names "
+		"them rather than picking. The response says whether it created or "
+		"updated, and carries the previous rate when it updated.",
+		{
+			"item_code": _field(_STRING, "The Item docname. An item_name is also accepted."),
+			"name": _field(_STRING, "Alias for item_code."),
+			"item": _field(_STRING, "Alias for item_code."),
+			"price_list": _field(_STRING, "The Price List this rate belongs to."),
+			"rate": _field(_NUMBER, "The rate, in the price list's currency. Cannot be negative."),
+			"price_list_rate": _field(_NUMBER, "Alias for rate."),
+			"uom": _field(_STRING, "Unit this rate is per. Omit for the item's stock UOM."),
+			"customer": _field(_STRING, "Make it one customer's price. Mutually exclusive with supplier."),
+			"supplier": _field(_STRING, "Make it one supplier's price. Mutually exclusive with customer."),
+			"currency": _field(_STRING, "Defaults to the price list's own currency."),
+			"valid_from": _field(_STRING, "Start of the validity window, YYYY-MM-DD."),
+			"valid_upto": _field(_STRING, "End of the validity window, YYYY-MM-DD."),
+		},
+		required=("item_code", "price_list", "rate"),
+		mutating=True,
+		title="Set item price",
 		available=_app_installed("erpnext"),
 		requires="the ERPNext app",
 	),

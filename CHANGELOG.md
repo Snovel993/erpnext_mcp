@@ -3,6 +3,70 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.66.0 — 2026-08-13
+
+**The nouns everything else is written in.** This app could read an order book
+and age a receivable and could not name the chemical on the order, the supplier
+who sold it or the shed it is locked in. Nineteen tools — ten reads, nine writes
+— over `Item`, `Item Group`, `Supplier`, `Customer`, `Warehouse`, `Price List`
+and `Item Price`. All nineteen wrap stock ERPNext doctypes, so all nineteen go
+unavailable by name on a Frappe-only bench.
+
+- **`list_items` / `get_item` / `create_item` / `update_item`.** `get_item`
+  returns the per-company default rows and the reorder rules with the warehouse
+  each belongs to, not just the header. `update_item` never renames — the
+  `item_code` IS the docname — and returns a `changed` map of before/after for
+  every field it actually moved.
+- **`list_item_groups` / `create_item_group`**, with a parent that must be a
+  group node and a name that must be free, both refused before anything is
+  written.
+- **`list_suppliers` / `get_supplier` / `create_supplier` / `update_supplier`,
+  and the same four for Customer.** One implementation with the nouns swapped,
+  for the reason `list_sales_orders` and `list_purchase_orders` are one: a fix to
+  the company reporting or the truncation must not be able to land on one side
+  only.
+- **`list_warehouses` / `create_warehouse`.** ERPNext names a Warehouse
+  `"<name> - <company abbr>"`, and the docname is PREDICTED before anything is
+  written, so a collision is a sentence naming the docname rather than a
+  framework error. Same mechanism as `create_account`.
+- **`list_price_lists` / `get_item_price` / `set_item_price`.**
+
+**`company` means three different things across these doctypes, and every tool
+reports which one it applied.** A Warehouse really is company-scoped. An Item is
+not — ERPNext moved per-company defaults into the `item_defaults` child table in
+v12, so filtering Items by company means "has a default row for this company" and
+HIDES every item usable by all of them; `list_items` says so in `company_scope`
+rather than letting the shorter list speak for itself. A Supplier and a Customer
+are neither: stock ERPNext puts no company column on either, so the argument is
+validated — a company that does not exist is still a mistake worth hearing about
+— and reported back as not applied. Never silently dropped.
+
+**Nothing here is a draft, and the tools say so rather than implying otherwise.**
+None of these doctypes is submittable: an Item is live the moment it is inserted.
+Every create returns `"submittable": false`, because "creates as draft" is what a
+reader expects from a create tool in this app — everywhere else it means a
+docstatus 0 document — and here there is no such state to promise. `disabled` is
+the nearest thing, and `create_item` will set it.
+
+**A reorder level belongs to a warehouse.** ERPNext keys the `Item Reorder` row
+by one, so "reorder at 50" with no shed named cannot be stored. `update_item`
+takes `reorder_warehouse`, falls back to the item's own default, and refuses with
+that sentence when there is neither — rather than writing the rule against
+whichever warehouse sorted first.
+
+**`set_item_price` matches on the whole key** — item, price list, UOM, customer,
+supplier and `valid_from`, which is what ERPNext's own duplicate check uses.
+Matching on the item and the list alone would overwrite a customer's negotiated
+rate with the list rate. A key matching more than one existing row is refused
+with the rows named: that site has duplicates ERPNext would have refused, and
+picking one silently is how a negotiated rate disappears.
+
+**Three switches that shipped without a place on the form now have one.**
+`allow_get_available_actions`, `allow_list_asset_state_history` and
+`allow_log_asset_state_change` were in the DocType's `fields` and missing from
+its `field_order`, so the form never rendered them — a control an operator could
+not reach is not a control.
+
 ## 0.65.0 — 2026-08-13
 
 **One scan, whatever was on the tag.** Farm Ops had four scanners and every one

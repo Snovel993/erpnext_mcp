@@ -832,10 +832,20 @@ class Catalogue(SeededTestCase):
 		holds it. It counts as MUTATING because one of those four branches is
 		`scan_asset`, which stamps `last_scan_at` — the other three are reads,
 		and `scan_recorded` in the answer says which happened.
+
+		v0.66.0 adds NINETEEN — ten reads and nine writes — over the master data
+		every other document points at: Item, Item Group, Supplier, Customer,
+		Warehouse and Item Price. The largest single jump in the catalogue, and
+		the least novel: they wrap stock ERPNext doctypes, and the work is in the
+		refusals rather than in the reads. The one thing to know before adding to
+		them is that `company` means a DIFFERENT THING on each of the three party
+		shapes — a Warehouse is company-scoped, an Item only through its default
+		row, a Supplier and a Customer not at all — and each tool reports which of
+		the three it applied rather than letting a shorter list speak for itself.
 		"""
-		self.assertEqual(len(registry.TOOLS), 414)
-		self.assertEqual(len(registry.READ_TOOLS), 189)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 225)
+		self.assertEqual(len(registry.TOOLS), 433)
+		self.assertEqual(len(registry.READ_TOOLS), 199)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 234)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

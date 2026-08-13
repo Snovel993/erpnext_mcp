@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 414 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 433 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 189 read tools are **on** by default and can be switched off individually. A
+All 199 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -10263,3 +10263,244 @@ a bin trailer is forty pure reads in a minute, and `WRITE_LIMIT` would refuse th
 crew rather than the abuse. The company comes from the caller's own scope — a
 `company` in the body may narrow it and can never widen it — and every task and
 alert leaving the route is checked against that scope on the way out.
+
+---
+
+# Master data (v0.66.0)
+
+*Nineteen tools — ten reads and nine writes — over the records every other
+ERPNext document points at: `Item`, `Item Group`, `Supplier`, `Customer`,
+`Warehouse`, `Price List` and `Item Price`.*
+
+Until this release the app could read an order book and age a receivable but
+could not name the chemical, the supplier who sold it or the shed it is locked
+in — so every workflow ending in a document ended instead at "open the Desk and
+create the master first".
+
+**Read the next three paragraphs before calling anything here. `company` means a
+different thing on each of these doctypes, and every tool reports which of the
+three it applied.**
+
+**A Warehouse really is company-scoped.** `Warehouse.company` is a column, the
+docname carries the company's abbreviation (`Chemical Shed - CFL`), and
+`list_warehouses(company=…)` is an exact filter.
+
+**An Item is not.** ERPNext moved per-company defaults out of `Item` and into the
+`item_defaults` child table in v12. An Item with **no default row at all** is
+usable by every company on the site — so `list_items(company=…)` means "the items
+this company has set a default for" and **hides the rest**. The response says so
+in `company_scope`; a caller reading the count as "this company's catalogue" is
+wrong, and the shorter list will not tell them.
+
+**A Supplier and a Customer are neither.** Stock ERPNext puts no company column
+on either. The argument is accepted (a model will send it), **validated** — a
+company that does not exist is still a mistake worth hearing about — and reported
+back as not applied in `company_scope`. It is never silently dropped.
+
+**Nothing here is submittable, so nothing here is a draft.** None of these
+doctypes has a docstatus: an Item is live the moment it is inserted, and there is
+no "submit it later" step to hold it back. Every create tool returns
+`"submittable": false` and says so. The nearest thing to a draft is `disabled`,
+which is a real field on Item, Supplier, Customer and Warehouse and which
+`create_item` will set on request.
+
+**A reorder level needs a warehouse, and that is ERPNext's rule.** A reorder rule
+lives on an `Item Reorder` row keyed by the warehouse it applies to; "reorder at
+50" with no shed named is not a thing the doctype can store. `update_item` takes
+`reorder_warehouse`, falls back to the item's own default warehouse, and refuses
+with that sentence when there is neither — rather than writing the rule against
+whichever warehouse sorted first.
+
+**A price is not a field on an Item.** Prices are `Item Price` rows: one per item
+per price list per UOM, optionally narrowed to one customer or supplier and to a
+date window. `set_item_price` matches on the **whole** key before deciding
+whether to create or update, because matching on the item and the list alone
+would overwrite a customer's negotiated rate with the list rate.
+
+## `list_item_groups`
+
+The Item Group tree, flat. Each row names its `parent_item_group`; `roots` lists
+the nodes with no parent separately. Call it before `create_item`.
+
+Arguments: `parent_item_group`, `is_group`, `limit`.
+
+```json
+{"item_groups": [{"name": "All Item Groups", "item_group_name": "All Item Groups",
+                  "parent_item_group": null, "is_group": true},
+                 {"name": "Farm Chemicals", "item_group_name": "Farm Chemicals",
+                  "parent_item_group": "All Item Groups", "is_group": false}],
+ "count": 2, "roots": ["All Item Groups"]}
+```
+
+`is_group` comes back as a real boolean. A Check field read with a bare `bool()`
+reports `"0"` as true, which would make every leaf look like a branch — and a
+branch is exactly what `create_item_group` demands as a parent.
+
+## `create_item_group` — MUTATING, default off
+
+Arguments: `item_group_name` (required), `parent_item_group` (default `All Item
+Groups`), `is_group`.
+
+Refused, each with `Nothing was created`: a name already taken (ERPNext names an
+Item Group after itself, so the name **is** the docname), a parent that does not
+exist (the site's own group nodes are listed), and a parent that is a **leaf**.
+
+## `list_items`
+
+Arguments: `item_group`, `is_stock_item`, `disabled`, `company`, `search`
+(substring of `item_name`), `limit`.
+
+Returns `item_code`, `item_name`, `item_group`, `stock_uom`, `is_stock_item` and
+`disabled` per row, plus `by_item_group` counts and the usual `truncated` flag.
+See the `company` paragraph above for what a company filter does and does not
+include.
+
+## `get_item`
+
+One Item in full. On top of the list fields: `description`, the flags, and the
+two child tables that matter —
+
+```json
+{"item_code": "SURROUND-WP", "item_name": "Surround WP", "stock_uom": "Lb",
+ "item_defaults": [{"company": "Constancy Farms LLC",
+                    "default_warehouse": "Chemical Shed - CFL",
+                    "default_price_list": null, "buying_cost_center": null,
+                    "selling_cost_center": null, "expense_account": null,
+                    "income_account": null}],
+ "reorder_levels": [{"warehouse": "Chemical Shed - CFL", "reorder_level": 50.0,
+                     "reorder_qty": 200.0, "material_request_type": "Purchase"}],
+ "default_warehouse": "Chemical Shed - CFL",
+ "default_warehouse_note": "this site keeps default warehouses in the item_defaults child table…"}
+```
+
+`default_warehouse` at the top level is a convenience, filled **only** when there
+is exactly one default row, with a note saying where the real answer lives. On a
+pre-v12 site with a flat `default_warehouse` field, that field is reported
+directly and the note is absent.
+
+## `create_item` — MUTATING, default off
+
+Arguments: `item_code` (required), `item_name` (defaults to the code),
+`item_group` (defaults to `All Item Groups`), `stock_uom` (defaults to `Nos`),
+`is_stock_item` (defaults to true), `description`, `disabled`,
+`default_warehouse`, `company`.
+
+The `stock_uom` is checked against this site's own UOM list and refused with the
+units it actually has — ERPNext ships around a hundred and a farm uses six, and
+`Lbs` where the site says `Lb` should get the list rather than a link error from
+inside the insert. A `default_warehouse` lands on the `item_defaults` row for the
+company, which is **inferred from the warehouse itself** when `company` is
+omitted; a warehouse belonging to another company is refused.
+
+## `update_item` — MUTATING, default off
+
+Changes `description`, `item_name`, `item_group`, `disabled`,
+`default_warehouse`, `reorder_level` / `reorder_qty` / `reorder_warehouse`.
+**Never renames** — the `item_code` is the docname.
+
+```json
+{"name": "SURROUND-WP",
+ "changed": {"description": ["Kaolin clay particle film", "Kaolin clay, OMRI listed"]},
+ "reorder": {"stored_on": "Item Reorder row", "warehouse": "Chemical Shed - CFL",
+             "created": true, "reorder_level": 50.0, "reorder_qty": 200.0}}
+```
+
+A second reorder write against the same warehouse updates that row rather than
+adding a second one. A value that already matches what is stored is reported as
+an empty `changed` map rather than saved.
+
+## `list_suppliers` / `list_customers`
+
+One implementation with the nouns swapped, for the reason `list_sales_orders` and
+`list_purchase_orders` are one implementation: a fix to the company reporting or
+the truncation must not be able to land on one side only.
+
+Arguments: `supplier_group` / `customer_group`, `territory` (customers),
+`disabled`, `company`, `search`, `limit`. An unknown group or territory is
+refused **with the site's own list**, rather than answering with zero rows.
+
+## `get_supplier` / `get_customer`
+
+Accepts a docname or the display name. On top of the stored fields:
+
+- `company_accounts` — the per-company payable/receivable **overrides**. Empty is
+  the normal case and means the party posts to each company's own control
+  account.
+- `addresses` — found the way ERPNext links them, through the `Dynamic Link` row
+  on the **Address**, not through a field on the party. A site without ERPNext's
+  address module gets `[]` rather than an error.
+
+## `create_supplier` / `create_customer` — MUTATING, default off
+
+`supplier_name` / `customer_name` required. Groups default to `All Supplier
+Groups` / `All Customer Groups`, and a Customer's territory to `All Territories`
+— each used only where the site actually has that record, and otherwise refused
+with what the site does have.
+
+`supplier_type` / `customer_type` are matched **case-insensitively against this
+site's own Select options** and stored in the doctype's casing, so `company`
+becomes `Company` and `Partnership` is refused with the real choices listed. The
+options are read off the site's meta rather than hardcoded, so a customised
+Select answers with its own values.
+
+## `update_supplier` / `update_customer` — MUTATING, default off
+
+Group, type, territory, `disabled` and the tax identifiers, in place, never
+renaming. Returns `changed` as before/after pairs, and refuses when nothing sent
+differs from what is stored — an update that changes nothing and reports success
+is how a caller concludes a value was written when it was not.
+
+## `list_warehouses`
+
+Arguments: `company`, `is_group`, `disabled`, `parent_warehouse`, `limit`. Flat,
+each row naming its parent, with `roots` listed separately. This is the one place
+in this section where the obvious reading of `company` is the right one.
+
+## `create_warehouse` — MUTATING, default off
+
+Arguments: `warehouse_name` (required), `company`, `parent_warehouse`,
+`warehouse_type`, `is_group`, `city`.
+
+ERPNext names a Warehouse `"<warehouse_name> - <company abbr>"`, and **that
+docname is predicted before anything is written**, so a collision comes back as a
+sentence naming the docname rather than as a framework error. The same mechanism
+is why two companies can each have a `Stores`. The parent defaults to the
+company's own root group (`All Warehouses - <abbr>` on a stock install); a parent
+that is a leaf, or belongs to another company, is refused.
+
+## `list_price_lists`
+
+`enabled`, `buying`, `selling`, `limit`. A Price List holds no rates itself.
+
+## `get_item_price`
+
+Every `Item Price` for one item, optionally narrowed by `price_list`, `uom`,
+`customer` or `supplier`.
+
+Pass `as_of` and the response adds `applicable` — the subset whose
+`valid_from`/`valid_upto` window covers that date, **with an open end treated as
+still in force**, which is what most rows on a real site look like. The full
+`prices` list survives the filter: "what was it in March" and "what prices exist"
+are both questions somebody asks.
+
+`price_list_rate` is filled **only** when exactly one row applies. Two rows and
+no date is not a price, and choosing between them is ERPNext's pricing rules to
+do, not this tool's.
+
+## `set_item_price` — MUTATING, default off
+
+Arguments: `item_code`, `price_list`, `rate` (all required), `uom`, `customer`,
+`supplier`, `currency` (defaults to the price list's own), `valid_from`,
+`valid_upto`.
+
+```json
+{"name": "IP-0002", "created": false, "item_code": "SURROUND-WP",
+ "price_list": "Standard Buying", "price_list_rate": 2.65, "previous_rate": 2.40,
+ "currency": "USD", "uom": "Lb", "valid_from": "2026-07-01"}
+```
+
+Refused: a negative rate, a `customer` **and** a `supplier` together (an Item
+Price is one or the other), an inverted validity window, and — the one worth
+knowing — a key that matches **more than one** existing row. That means the site
+has duplicates ERPNext's own check would have refused, and picking one of them
+silently is how a rate somebody negotiated disappears.

@@ -79,6 +79,7 @@
   "allow_list_pending_approvals",
   "list_available_actions_col",
   "allow_list_available_actions",
+  "allow_get_available_actions",
   "allow_advance_workflow",
   "report_tools_section",
   "allow_list_reports",
@@ -109,6 +110,27 @@
   "allow_list_sales_orders",
   "allow_get_outstanding_invoices",
   "allow_list_purchase_orders",
+  "master_data_tools_section",
+  "allow_list_item_groups",
+  "allow_create_item_group",
+  "allow_list_items",
+  "allow_get_item",
+  "allow_create_item",
+  "allow_update_item",
+  "master_data_tools_col",
+  "allow_list_suppliers",
+  "allow_get_supplier",
+  "allow_create_supplier",
+  "allow_update_supplier",
+  "allow_list_customers",
+  "allow_get_customer",
+  "allow_create_customer",
+  "allow_update_customer",
+  "allow_list_warehouses",
+  "allow_create_warehouse",
+  "allow_list_price_lists",
+  "allow_get_item_price",
+  "allow_set_item_price",
   "meta_tools_section",
   "allow_list_custom_fields",
   "allow_list_client_scripts",
@@ -549,6 +571,7 @@
   "allow_list_assets",
   "allow_get_asset_detail",
   "allow_get_asset_history",
+  "allow_list_asset_state_history",
   "allow_generate_asset_qr",
   "allow_generate_asset_qr_sheet",
   "asset_tag_col",
@@ -556,6 +579,7 @@
   "allow_register_asset",
   "allow_update_registered_asset",
   "allow_retire_asset",
+  "allow_log_asset_state_change",
   "allow_bulk_create_assets",
   "allow_universal_scan"
  ],
@@ -1229,6 +1253,149 @@
    "fieldname": "allow_list_purchase_orders",
    "fieldtype": "Check",
    "label": "List Purchase Orders"
+  },
+  {
+   "description": "Items, Item Groups, Suppliers, Customers, Warehouses and prices — the records every other ERPNext document points at. None of these doctypes is submittable, so nothing here creates a draft: a master is live the moment it is created, and <b>disabled</b> is the nearest thing to holding one back.<br><br>The word <b>company</b> means three different things across these tools, and each one reports which it applied: a Warehouse really is company-scoped, an Item is scoped only through its per-company default row, and a Supplier or Customer is site-wide and has no company column at all.",
+   "fieldname": "master_data_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Master Data"
+  },
+  {
+   "default": "1",
+   "description": "The Item Group tree, flat, with each node's parent.",
+   "fieldname": "allow_list_item_groups",
+   "fieldtype": "Check",
+   "label": "List Item Groups"
+  },
+  {
+   "default": "0",
+   "description": "Create one Item Group under an existing group node.",
+   "fieldname": "allow_create_item_group",
+   "fieldtype": "Check",
+   "label": "Create Item Group"
+  },
+  {
+   "default": "1",
+   "description": "Items by group, stock flag and disabled flag. A company filter here means 'has a default row for this company'.",
+   "fieldname": "allow_list_items",
+   "fieldtype": "Check",
+   "label": "List Items"
+  },
+  {
+   "default": "1",
+   "description": "One Item in full, with its per-company defaults and reorder rules.",
+   "fieldname": "allow_get_item",
+   "fieldtype": "Check",
+   "label": "Get Item"
+  },
+  {
+   "default": "0",
+   "description": "Create one Item. Live on creation — an Item has no draft state.",
+   "fieldname": "allow_create_item",
+   "fieldtype": "Check",
+   "label": "Create Item"
+  },
+  {
+   "default": "0",
+   "description": "Change an Item's description, group, disabled flag, default warehouse or reorder rule. Never renames it.",
+   "fieldname": "allow_update_item",
+   "fieldtype": "Check",
+   "label": "Update Item"
+  },
+  {
+   "fieldname": "master_data_tools_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Suppliers by group and disabled flag. Site-wide: a company filter is reported as not applied.",
+   "fieldname": "allow_list_suppliers",
+   "fieldtype": "Check",
+   "label": "List Suppliers"
+  },
+  {
+   "default": "1",
+   "description": "One Supplier in full, with per-company payable-account overrides and linked addresses.",
+   "fieldname": "allow_get_supplier",
+   "fieldtype": "Check",
+   "label": "Get Supplier"
+  },
+  {
+   "default": "0",
+   "description": "Create one Supplier in an existing Supplier Group.",
+   "fieldname": "allow_create_supplier",
+   "fieldtype": "Check",
+   "label": "Create Supplier"
+  },
+  {
+   "default": "0",
+   "description": "Change a Supplier's group, type, disabled flag or tax identifiers. Never renames it.",
+   "fieldname": "allow_update_supplier",
+   "fieldtype": "Check",
+   "label": "Update Supplier"
+  },
+  {
+   "default": "1",
+   "description": "Customers by group, territory and disabled flag. Site-wide: a company filter is reported as not applied.",
+   "fieldname": "allow_list_customers",
+   "fieldtype": "Check",
+   "label": "List Customers"
+  },
+  {
+   "default": "1",
+   "description": "One Customer in full, with per-company receivable-account overrides and linked addresses.",
+   "fieldname": "allow_get_customer",
+   "fieldtype": "Check",
+   "label": "Get Customer"
+  },
+  {
+   "default": "0",
+   "description": "Create one Customer in an existing Customer Group and Territory.",
+   "fieldname": "allow_create_customer",
+   "fieldtype": "Check",
+   "label": "Create Customer"
+  },
+  {
+   "default": "0",
+   "description": "Change a Customer's group, territory, type, disabled flag or tax identifiers. Never renames it.",
+   "fieldname": "allow_update_customer",
+   "fieldtype": "Check",
+   "label": "Update Customer"
+  },
+  {
+   "default": "1",
+   "description": "Warehouses by company, group flag and disabled flag. Genuinely company-scoped.",
+   "fieldname": "allow_list_warehouses",
+   "fieldtype": "Check",
+   "label": "List Warehouses"
+  },
+  {
+   "default": "0",
+   "description": "Create one Warehouse in a company's tree. The docname is predicted before anything is written.",
+   "fieldname": "allow_create_warehouse",
+   "fieldtype": "Check",
+   "label": "Create Warehouse"
+  },
+  {
+   "default": "1",
+   "description": "Price Lists with their currency and buying/selling flags.",
+   "fieldname": "allow_list_price_lists",
+   "fieldtype": "Check",
+   "label": "List Price Lists"
+  },
+  {
+   "default": "1",
+   "description": "Item Price rows for one item, with an optional as-of date test.",
+   "fieldname": "allow_get_item_price",
+   "fieldtype": "Check",
+   "label": "Get Item Price"
+  },
+  {
+   "default": "0",
+   "description": "Create or update one Item Price, matched on the whole key. Refuses when the key matches more than one row.",
+   "fieldname": "allow_set_item_price",
+   "fieldtype": "Check",
+   "label": "Set Item Price"
   },
   {
    "description": "Site customisation, for a developer debugging their own instance. Client Script bodies are truncated to 500 characters.",

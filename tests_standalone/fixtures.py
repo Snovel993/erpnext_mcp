@@ -1700,3 +1700,229 @@ class V12TestCase(V11TestCase):
 	def setUp(self):
 		super().setUp()
 		seed_v12()
+
+
+# ── v0.66.0 fixtures: the master data every document points at ──────────────
+#: An Item Group tree with a real branch and two leaves, because
+#: `create_item_group` refuses a leaf as a parent and a fixture with only a root
+#: could not tell that refusal from the tool doing nothing.
+ITEM_GROUP_ROOT = "All Item Groups"
+CONSUMABLES = "Consumables"
+CHEMICALS = "Farm Chemicals"
+
+#: Two warehouses in MAIN and one in OTHER. The third is what makes "a parent
+#: warehouse belonging to another company is refused" a real case rather than an
+#: unreachable branch.
+MAIN_WAREHOUSE_ROOT = f"All Warehouses - {MAIN_ABBR}"
+STORES = f"Stores - {MAIN_ABBR}"
+OTHER_WAREHOUSE_ROOT = f"All Warehouses - {OTHER_ABBR}"
+
+#: An item stocked in MAIN, an item scoped to nobody, and a disabled one.
+SPRAY = "SURROUND-WP"
+TWINE = "TWINE-BALE"
+RETIRED_ITEM = "OLD-OIL"
+
+STANDARD_SELLING = "Standard Selling"
+STANDARD_BUYING = "Standard Buying"
+
+MASTER_CUSTOMER = "Southgate Markets"
+MASTER_SUPPLIER = "Example Supplies Inc"
+RETIRED_SUPPLIER = "Closed Chemical Co"
+
+
+def seed_masters() -> None:
+	"""Item, party, warehouse and price masters. Additive to `seed_site`."""
+	_master_trees()
+	_master_warehouses()
+	_master_items()
+	_master_parties()
+	_master_prices()
+
+
+def _master_trees() -> None:
+	STORE.seed(
+		"Item Group",
+		[
+			{"name": ITEM_GROUP_ROOT, "item_group_name": ITEM_GROUP_ROOT, "is_group": 1},
+			{
+				"name": CONSUMABLES,
+				"item_group_name": CONSUMABLES,
+				"parent_item_group": ITEM_GROUP_ROOT,
+				"is_group": 0,
+			},
+		],
+	)
+	STORE.seed("UOM", [{"name": "Nos", "enabled": 1}, {"name": "Lb", "enabled": 1}])
+	STORE.seed("Supplier Group", [{"name": "All Supplier Groups", "is_group": 1}, {"name": "Services"}])
+	STORE.seed("Customer Group", [{"name": "All Customer Groups", "is_group": 1}, {"name": "Packers"}])
+	STORE.seed("Territory", [{"name": "All Territories", "is_group": 1}, {"name": "Washington"}])
+	STORE.seed("Warehouse Type", [{"name": "Transit"}])
+
+
+def _master_warehouses() -> None:
+	STORE.seed(
+		"Warehouse",
+		[
+			{"name": MAIN_WAREHOUSE_ROOT, "warehouse_name": "All Warehouses", "company": MAIN, "is_group": 1},
+			{
+				"name": STORES,
+				"warehouse_name": "Stores",
+				"company": MAIN,
+				"parent_warehouse": MAIN_WAREHOUSE_ROOT,
+				"is_group": 0,
+			},
+			{
+				"name": OTHER_WAREHOUSE_ROOT,
+				"warehouse_name": "All Warehouses",
+				"company": OTHER,
+				"is_group": 1,
+			},
+		],
+	)
+
+
+def _master_items() -> None:
+	"""Three items, and only one of them scoped to a company.
+
+	`TWINE` has no `item_defaults` row at all, which is the normal state of an
+	item on a real site and the one that disappears from a company-filtered
+	listing — the behaviour `list_items` reports in `company_scope` rather than
+	letting the shorter list speak for itself.
+	"""
+	STORE.seed(
+		"Item",
+		[
+			{
+				"name": SPRAY,
+				"item_code": SPRAY,
+				"item_name": "Surround WP",
+				"item_group": CONSUMABLES,
+				"stock_uom": "Lb",
+				"is_stock_item": 1,
+				"disabled": 0,
+				"description": "Kaolin clay particle film",
+				"item_defaults": [{"company": MAIN, "default_warehouse": STORES}],
+				"reorder_levels": [],
+			},
+			{
+				"name": TWINE,
+				"item_code": TWINE,
+				"item_name": "Baling Twine",
+				"item_group": CONSUMABLES,
+				"stock_uom": "Nos",
+				"is_stock_item": 1,
+				"disabled": 0,
+				"item_defaults": [],
+				"reorder_levels": [],
+			},
+			{
+				"name": RETIRED_ITEM,
+				"item_code": RETIRED_ITEM,
+				"item_name": "Bulk Oil (retired)",
+				"item_group": CONSUMABLES,
+				"stock_uom": "Nos",
+				"is_stock_item": 1,
+				"disabled": 1,
+				"item_defaults": [],
+				"reorder_levels": [],
+			},
+		],
+	)
+
+
+def _master_parties() -> None:
+	STORE.seed(
+		"Supplier",
+		[
+			{
+				"name": MASTER_SUPPLIER,
+				"supplier_name": MASTER_SUPPLIER,
+				"supplier_group": "Services",
+				"supplier_type": "Company",
+				"disabled": 0,
+				"accounts": [{"company": MAIN, "account": f"2100 - Accounts Payable - {MAIN_ABBR}"}],
+			},
+			# Disabled, so "disabled=false shows only the live ones" is a filter
+			# with something to exclude rather than a no-op that passes anyway.
+			{
+				"name": RETIRED_SUPPLIER,
+				"supplier_name": RETIRED_SUPPLIER,
+				"supplier_group": "Services",
+				"supplier_type": "Individual",
+				"disabled": 1,
+				"accounts": [],
+			},
+		],
+	)
+	STORE.seed(
+		"Customer",
+		[
+			{
+				"name": MASTER_CUSTOMER,
+				"customer_name": MASTER_CUSTOMER,
+				"customer_group": "Packers",
+				"customer_type": "Company",
+				"territory": "Washington",
+				"disabled": 0,
+				"accounts": [],
+			}
+		],
+	)
+
+
+def _master_prices() -> None:
+	STORE.seed(
+		"Price List",
+		[
+			{
+				"name": STANDARD_SELLING,
+				"price_list_name": STANDARD_SELLING,
+				"currency": "USD",
+				"enabled": 1,
+				"selling": 1,
+				"buying": 0,
+			},
+			{
+				"name": STANDARD_BUYING,
+				"price_list_name": STANDARD_BUYING,
+				"currency": "USD",
+				"enabled": 1,
+				"selling": 0,
+				"buying": 1,
+			},
+		],
+	)
+	STORE.seed(
+		"Item Price",
+		[
+			{
+				"name": "IP-0001",
+				"item_code": SPRAY,
+				"item_name": "Surround WP",
+				"price_list": STANDARD_BUYING,
+				"price_list_rate": 2.15,
+				"currency": "USD",
+				"uom": "Lb",
+				"valid_from": "2026-01-01",
+				"valid_upto": "2026-06-30",
+			},
+			{
+				"name": "IP-0002",
+				"item_code": SPRAY,
+				"item_name": "Surround WP",
+				"price_list": STANDARD_BUYING,
+				"price_list_rate": 2.40,
+				"currency": "USD",
+				"uom": "Lb",
+				"valid_from": "2026-07-01",
+			},
+		],
+	)
+
+
+class MastersTestCase(SeededTestCase):
+	"""The fixture site plus the item, party, warehouse and price masters."""
+
+	def setUp(self):
+		super().setUp()
+		seed_masters()
