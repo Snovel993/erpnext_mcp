@@ -46,6 +46,7 @@ SEVEN CLAIMS.
 
 import base64
 import hashlib
+import inspect
 import json
 from typing import ClassVar
 from unittest import mock
@@ -319,8 +320,21 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: are about to scan, which `MobileAPI.swift` does not name yet. Listed here
 	#: rather than in `MOBILE` so this file keeps claiming only what the Swift
 	#: actually calls.
+	#: v0.67.0 adds the four receipt-capture methods on the same footing. This is
+	#: Sprint 2's SERVER side: the two new registers exist, the classifier that
+	#: decides which one a photograph belongs in exists, and the capture screen
+	#: that would call them is the iOS half of the same sprint. Listed here
+	#: rather than in `MOBILE` so this file keeps claiming only what
+	#: `MobileAPI.swift` actually names — and note that `create_expense_receipt`
+	#: is among them even though the app has photographed receipts since v0.31.0:
+	#: it reached `submit_expense_receipt` through the MCP surface, and this is
+	#: the first time the flow has a route of its own.
 	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
 		"universal_scan",
+		"classify_receipt",
+		"create_expense_receipt",
+		"create_scale_ticket",
+		"list_scale_tickets",
 		"collect_signature",
 		"get_document_preview",
 		"seal_signed_document",
@@ -2213,3 +2227,159 @@ class TheScannerScreenHasOneCall(MobileAPITestCase):
 		self.assertNotIn("s3cr3t-nobody-should-see", str(caught.exception))
 		row = self.audit_rows("universal_scan")[-1]
 		self.assertNotIn("s3cr3t-nobody-should-see", json.dumps(row))
+
+
+# ── receipt capture (v0.67.0) ───────────────────────────────────────────────
+class ReceiptCaptureFromAPhone(MobileAPITestCase):
+	"""The four routes Sprint 2 publishes, and the three arguments they refuse.
+
+	The interesting assertions here are not that the endpoints work — the tools
+	are tested in `test_receipts.py` and `test_expenses.py`. They are that this
+	transport does not hand a phone anything the tool would otherwise accept:
+	`submitted_by` comes from the authenticated account, the company comes from
+	the caller's scope, and there is no way to submit a scale ticket at all.
+	"""
+
+	PACKER = "Blue Ridge Packing"
+
+	def setUp(self):
+		super().setUp()
+		STORE.seed(
+			"Customer",
+			[{"name": self.PACKER, "customer_name": self.PACKER, "customer_group": "Packers"}],
+		)
+		self.be()
+
+	def ticket(self, **overrides):
+		payload = {
+			"ticket_number": "44718",
+			"date": "2026-09-14",
+			"customer": self.PACKER,
+			"gross_weight": 18400,
+			"tare_weight": 6200,
+			"weight_uom": "Lb",
+		}
+		payload.update(overrides)
+		return mobile_api.create_scale_ticket(**payload)
+
+	# ── classify_receipt ────────────────────────────────────────────────────
+	def test_the_classifier_answers_and_shows_its_working(self):
+		data = mobile_api.classify_receipt(text="SCALE TICKET 44718 GROSS WT 18400 TARE WT 6200")
+		self.assertEqual(data["receipt_type"], "scale_ticket")
+		self.assertIn("scale ticket", data["matched_signals"])
+
+	def test_the_classifier_still_needs_an_enrolled_credential(self):
+		self.be("Guest")
+		with self.assertRaises(frappe.PermissionError):
+			mobile_api.classify_receipt(text="anything")
+
+	# ── create_scale_ticket ─────────────────────────────────────────────────
+	def test_a_ticket_captured_from_a_phone_arrives_as_a_draft(self):
+		data = self.ticket()
+		self.assertEqual(data["status"], "Draft")
+		self.assertEqual(data["docstatus"], 0)
+		self.assertEqual(data["net_weight"], 12200.0)
+
+	def test_the_company_comes_from_the_callers_scope_when_none_is_sent(self):
+		self.assertEqual(self.ticket()["company"], MAIN)
+
+	def test_a_company_this_account_cannot_reach_is_refused_not_quietly_swapped(self):
+		with self.assertRaises(frappe.PermissionError):
+			self.ticket(company=OTHER)
+
+	def test_there_is_no_way_to_submit_a_ticket_from_a_phone(self):
+		"""Submitting freezes a third party's weight record. The tool exists for
+		somebody who can see the settlement it will be checked against."""
+		self.assertFalse(hasattr(mobile_api, "submit_scale_ticket"))
+
+	def test_a_phone_cannot_assert_a_net_weight(self):
+		"""Not by being refused — by the argument not existing. `bind` keeps only
+		the keys a signature declares, so a body carrying one is dropped."""
+		self.assertNotIn("net_weight", inspect.signature(mobile_api.create_scale_ticket).parameters)
+
+	# ── list_scale_tickets ──────────────────────────────────────────────────
+	def test_the_back_button_list_shows_what_this_crew_just_filed(self):
+		self.ticket()
+		self.ticket(ticket_number="44719")
+		data = mobile_api.list_scale_tickets()
+		self.assertEqual(data["count"], 2)
+		self.assertEqual(data["total_net_weight"], 24400.0)
+
+	def test_the_list_is_scoped_to_the_callers_entities(self):
+		"""A ticket filed by MAIN's crew is not another entity's to read, and the
+		filter runs twice — once in the tool, once on the way out."""
+		self.ticket()
+		self.enrol(email=OUTSIDER, name="Ben Ortiz", entities=[OTHER])
+		self.be(OUTSIDER)
+		self.assertEqual(mobile_api.list_scale_tickets()["count"], 0)
+
+	def test_the_per_unit_count_survives_the_trip_to_the_phone(self):
+		self.ticket()
+		self.ticket(ticket_number="44719", weight_uom="Bin", gross_weight=40, tare_weight=0)
+		self.assertEqual(mobile_api.list_scale_tickets()["by_weight_uom"], {"Lb": 1, "Bin": 1})
+
+	# ── create_expense_receipt ──────────────────────────────────────────────
+	def receipt(self, **overrides):
+		payload = {
+			"merchant": "Valley Co-op Fuel",
+			"amount": 184.62,
+			"receipt_date": "2026-06-14",
+			"category": "Fuel",
+		}
+		payload.update(overrides)
+		return mobile_api.create_expense_receipt(**payload)
+
+	def test_a_receipt_captured_from_a_phone_is_filed_against_the_caller(self):
+		self.assertEqual(self.receipt()["submitted_by"], WORKER_EMPLOYEE)
+
+	def test_a_phone_cannot_file_an_expense_against_somebody_else(self):
+		"""A reimbursement claim with the wrong person's signature on it."""
+		for argument in ("submitted_by", "employee"):
+			with self.subTest(argument=argument):
+				self.assertNotIn(argument, inspect.signature(mobile_api.create_expense_receipt).parameters)
+
+	def test_an_offline_queue_can_post_a_draft(self):
+		self.assertEqual(self.receipt(status="Draft")["status"], "Draft")
+
+	def test_a_phone_cannot_post_an_already_approved_receipt(self):
+		"""Refused by the tool's own `CREATABLE_STATUSES`, not by this signature —
+		which is the right place for it, because the MCP surface needs the same
+		refusal, and `guard` turns it into the ValidationError a phone reads."""
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.receipt(status="Approved")
+		self.assertIn("Approval and rejection are separate tools", str(caught.exception))
+
+	def test_approval_is_not_reachable_from_a_phone_at_all(self):
+		for method in ("approve_expense_receipt", "reject_expense_receipt"):
+			with self.subTest(method=method):
+				self.assertFalse(hasattr(mobile_api, method))
+
+	def test_the_supplier_and_item_links_are_forwarded(self):
+		STORE.seed(
+			"Supplier",
+			[{"name": "Valley Co-operative", "supplier_name": "Valley Co-operative"}],
+		)
+		STORE.seed("Item", [{"name": "HOSE-050", "item_name": "Hydraulic hose 1/2in"}])
+		data = self.receipt(
+			supplier="Valley Co-operative",
+			items=[{"description": "HYD HOSE 1/2", "item": "HOSE-050", "quantity": 1, "unit_price": 31.25}],
+		)
+		self.assertEqual(data["supplier"], "Valley Co-operative")
+		self.assertEqual(data["items"][0]["item"], "HOSE-050")
+
+	def test_a_json_encoded_items_array_is_accepted(self):
+		"""`URLSession` posting JSON and a multipart retry do not agree about
+		nested arrays, and the intent is unambiguous either way."""
+		data = self.receipt(items=json.dumps([{"description": "Nozzle", "quantity": 2, "unit_price": 4.5}]))
+		self.assertEqual(data["items"][0]["line_total"], 9.0)
+
+	def test_a_malformed_items_body_is_refused_rather_than_500ing(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.receipt(items="not json at all")
+
+	def test_settlements_are_not_reachable_from_a_phone(self):
+		"""A settlement is a multi-page document that arrives at an office, not a
+		thing anybody photographs at a tailgate."""
+		for method in ("create_settlement_statement", "submit_settlement_statement"):
+			with self.subTest(method=method):
+				self.assertFalse(hasattr(mobile_api, method))

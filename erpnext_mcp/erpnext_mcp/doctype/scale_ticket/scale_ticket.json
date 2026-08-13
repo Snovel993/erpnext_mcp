@@ -1,0 +1,285 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-13 09:00:00.000000",
+ "description": "One load of fruit, weighed onto somebody else's scale. The packer keeps the original; this is the grower's copy, and it is the only weight the grower controls. Gross minus tare is net, computed here rather than taken, because the arithmetic on a thermal slip is the first thing a settlement disagreement is about. A ticket is Draft while the phone still has it, Submitted once it is filed, and Matched once a Settlement Statement claims it — which is the whole point of keeping tickets: a settlement that pays for less fruit than was delivered can only be seen by somebody holding both halves.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "ticket_number",
+  "date",
+  "customer",
+  "company",
+  "header_col",
+  "variety",
+  "grade",
+  "status",
+  "settlement",
+  "weight_section",
+  "gross_weight",
+  "tare_weight",
+  "weight_col",
+  "net_weight",
+  "weight_uom",
+  "origin_section",
+  "field",
+  "block",
+  "origin_col",
+  "truck_id",
+  "driver",
+  "destination",
+  "image_section",
+  "ticket_image",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The number printed on the packer's own ticket. Not this record's docname — the two are different registers, and a settlement dispute is argued in the packer's numbering.",
+   "fieldname": "ticket_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Ticket Number",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The day the load crossed the scale.",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The packer or shipper the fruit was delivered to, as a Customer.",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "header_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Free text on purpose. A packer writes what a packer writes, and forcing it onto an Item list at capture time is how a ticket goes unrecorded.",
+   "fieldname": "variety",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Variety",
+   "search_index": 1
+  },
+  {
+   "fieldname": "grade",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Grade"
+  },
+  {
+   "default": "Draft",
+   "description": "Computed, never typed. Draft is a ticket still on the phone; Submitted is one that has been filed; Matched is one a Settlement Statement has claimed; Cancelled is a submitted ticket withdrawn.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nSubmitted\nMatched\nCancelled",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Settlement Statement that paid for this load, once one does. Set by matching, not by hand.",
+   "fieldname": "settlement",
+   "fieldtype": "Link",
+   "label": "Settlement",
+   "options": "Settlement Statement",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "weight_section",
+   "fieldtype": "Section Break",
+   "label": "Weights"
+  },
+  {
+   "default": "0",
+   "description": "Truck and fruit together, as the scale read it.",
+   "fieldname": "gross_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Gross Weight",
+   "precision": "3"
+  },
+  {
+   "default": "0",
+   "description": "The empty truck, and the bins if the packer tares them.",
+   "fieldname": "tare_weight",
+   "fieldtype": "Float",
+   "label": "Tare Weight",
+   "precision": "3"
+  },
+  {
+   "fieldname": "weight_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Gross minus tare. COMPUTED, never taken as input — a net weight somebody typed is a number with no arithmetic behind it, and this is the figure a settlement is checked against.",
+   "fieldname": "net_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Net Weight",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "default": "Kg",
+   "description": "The unit all three weights are in. One unit per ticket: a gross in pounds and a tare in kilos is a net of nothing.",
+   "fieldname": "weight_uom",
+   "fieldtype": "Select",
+   "label": "Weight UOM",
+   "options": "Kg\nLb\nTon\nBin\nBox",
+   "reqd": 1
+  },
+  {
+   "fieldname": "origin_section",
+   "fieldtype": "Section Break",
+   "label": "Where It Came From, Where It Went"
+  },
+  {
+   "description": "The Field the load was picked from, where the operation tracks fields.",
+   "fieldname": "field",
+   "fieldtype": "Link",
+   "label": "Field",
+   "options": "Field",
+   "search_index": 1
+  },
+  {
+   "description": "The block within the field, as the crew calls it.",
+   "fieldname": "block",
+   "fieldtype": "Data",
+   "label": "Block"
+  },
+  {
+   "fieldname": "origin_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "truck_id",
+   "fieldtype": "Data",
+   "label": "Truck ID"
+  },
+  {
+   "fieldname": "driver",
+   "fieldtype": "Data",
+   "label": "Driver"
+  },
+  {
+   "description": "The packing house, cold storage or yard the load was taken to.",
+   "fieldname": "destination",
+   "fieldtype": "Data",
+   "label": "Destination"
+  },
+  {
+   "fieldname": "image_section",
+   "fieldtype": "Section Break",
+   "label": "The Ticket"
+  },
+  {
+   "description": "The photograph of the paper ticket. Keep it: a thermal slip in a truck door pocket is unreadable by the time a settlement arrives, and this is the only thing that outlives a disagreement about what the scale said.",
+   "fieldname": "ticket_image",
+   "fieldtype": "Attach Image",
+   "label": "Ticket Image"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-08-13 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Scale Ticket",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Farm Manager",
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Foreman",
+   "write": 1
+  }
+ ],
+ "search_fields": "ticket_number,customer,variety,status",
+ "sort_field": "date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "ticket_number",
+ "track_changes": 1
+}

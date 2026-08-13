@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 433 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 442 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 199 read tools are **on** by default and can be switched off individually. A
+All 204 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7946,6 +7946,7 @@ looked at.
 | `employee` | | Who submitted it — docname or employee name (`submitted_by` is an alias) |
 | `category` | | `Fuel`, `Equipment Parts`, `Supplies`, `Hardware`, `Feed`, `Seed`, `Fertilizer`, `Other` |
 | `farm_task` | | Only the receipts booked against one task |
+| `supplier` | | Only the receipts **linked** to one Supplier (v0.67.0) |
 | `from_date` / `to_date` | | Receipt date range, `YYYY-MM-DD` |
 | `limit` | | Default 100, hard maximum 500 |
 
@@ -7975,12 +7976,13 @@ cannot create an already-approved receipt.
 | `submitted_by` | yes | Employee who photographed it — docname or name (`employee` is an alias) |
 | `company` | | Required on a multi-company site |
 | `category` | | Defaults to `Other` |
+| `supplier` | | The Supplier this receipt is from, where the merchant is one you keep a record for (v0.67.0) |
 | `farm_task` | | The job the expense was incurred for |
 | `status` | | `Draft` or `Submitted`. Defaults to `Submitted` |
 | `receipt_image` | | File URL of the photograph |
 | `ocr_raw_text` | | Everything the scanner read, kept for audit |
 | `ocr_confidence` | | A **fraction from 0 to 1**, not a percentage |
-| `items` | | `[{description, quantity, unit_price, line_total}, …]` |
+| `items` | | `[{description, item, quantity, unit_price, line_total}, …]` |
 | `notes` | | Anything the person capturing it wants to add |
 
 `ocr_confidence` is range-checked rather than rescaled. A scanner reporting `87`
@@ -7992,6 +7994,21 @@ A line item with a `quantity` and a `unit_price` but no `line_total` gets the
 product; one that carries its own total keeps it. OCR reads a bold receipt total
 far more reliably than a column of line arithmetic, and a receipt that charges
 four at $3 and totals $11.50 after a discount is telling the truth.
+
+**v0.67.0: `supplier` and `items[].item`.** Both optional, both **additive**.
+`merchant` and `description` keep saying exactly what the paper said; the links
+sit beside them. That is the point — a slip printed `VALLEY CO-OP #14` and a
+Supplier called `Valley Co-operative` are the same vendor, and replacing the
+first with the second loses the evidence in the act of improving the data.
+Keeping both is what lets a bookkeeper total a year of fuel per vendor **and**
+still show an auditor the string the machine read.
+
+Neither is ever inferred. No fuzzy match from merchant to Supplier, no lookup
+from an OCR'd line to an Item — `HYD HOSE 1/2` matches four items in a real
+catalogue, and a guess would put a fabricated consumption figure somewhere a
+person later reads as a measurement. On a bench with no ERPNext, both are
+**refused by name** rather than written as dangling links, and the receipt
+captures fine without them.
 
 ### `approve_expense_receipt`
 
@@ -10504,3 +10521,271 @@ Price is one or the other), an inverted validity window, and — the one worth
 knowing — a key that matches **more than one** existing row. That means the site
 has duplicates ERPNext's own check would have refused, and picking one of them
 silently is how a rate somebody negotiated disappears.
+
+---
+
+# v0.67.0 — Receipt capture: scale tickets and settlements
+
+Nine tools over the two documents that stand between a load of fruit leaving the
+orchard and the money arriving for it. Five reads, four writes, and one of the
+reads touches no doctype at all.
+
+## The idea: the receipt is the financial atom
+
+A foreman photographs a piece of paper. Which piece of paper it is decides which
+register it lands in, and that decision is the only branch in an otherwise
+identical flow — photograph, extract, file, review:
+
+| The paper | Lands in | Tool |
+|---|---|---|
+| a fuel or parts slip | Expense Receipt | `submit_expense_receipt` (v0.31.0) |
+| a scale ticket | **Scale Ticket** | `create_scale_ticket` |
+| a packout settlement | **Settlement Statement** | `create_settlement_statement` |
+| a vendor invoice | Purchase Invoice | *not yet implemented* |
+
+`classify_receipt` is that branch, published as a tool.
+
+## Why a Scale Ticket is not a Delivery Note
+
+ERPNext has a Delivery Note and it is the wrong shape. A Delivery Note is the
+*seller's* document about goods leaving on the seller's terms: priced, against a
+Sales Order, in Items and UOMs the seller controls. A scale ticket is a third
+party's weight record — the packer owns the scale, the packer prints the slip,
+the variety is whatever the packer's clerk wrote, and **there is no price on it
+at all**. The price arrives months later, on a settlement.
+
+Forcing it onto a Delivery Note would mean inventing an Item per variety per
+grade before a foreman could photograph a slip at a tailgate. A capture that
+requires master data to exist first is a capture that does not happen.
+
+## The two registers are independent, and that is the whole audit
+
+A Settlement Statement's `gross_delivered_weight` is what the **packer** says
+arrived. The sum of the Scale Tickets matched to it is what the **grower's** own
+copies say arrived. Nothing here reconciles them, overwrites one with the other,
+or refuses a settlement whose figure disagrees.
+
+`get_settlement_statement` reports both and names the difference in
+`delivery_reconciliation`, because the difference *is* the answer. It is the
+entire reason a grower keeps ticket stubs, and a tool that quietly agreed them
+would delete the only audit either document has.
+
+## Both registers are submittable, and create is always a draft
+
+`create_scale_ticket` and `create_settlement_statement` leave the document at
+docstatus 0. Submitting a scale ticket makes a third party's weight record
+immutable, and an operator who wants a phone able to *capture* tickets does not
+necessarily want the same phone able to *freeze* them. One switch cannot express
+that; two can.
+
+`status` on both is **computed from `docstatus`**, never typed:
+
+| Scale Ticket | | Settlement Statement | |
+|---|---|---|---|
+| `Draft` | docstatus 0 | `Draft` | docstatus 0 |
+| `Submitted` | docstatus 1, no settlement | `Submitted` | docstatus 1, no JE |
+| `Matched` | docstatus 1, settlement set | `Posted` | docstatus 1, JE set |
+| `Cancelled` | docstatus 2 | `Cancelled` | docstatus 2 |
+
+**Nothing in v0.67.0 sets `posted_journal_entry`.** The tool that books
+settlement proceeds to the ledger is a later sprint; the column and the state
+exist now so that sprint does not have to migrate every statement captured
+before it.
+
+## `list_scale_tickets`
+
+**READ (default ON).** Filters: `customer`, `company`, `status`, `variety`,
+`field`, `settlement`, `unmatched`, `from_date`/`to_date`, `limit`.
+
+`unmatched: true` is the question the register exists to answer — which
+delivered loads no settlement has claimed yet.
+
+```json
+{"scale_tickets": [{"name": "ST-ETC-0004", "ticket_number": "44718",
+                    "date": "2026-09-14", "customer": "Blue Ridge Packing",
+                    "variety": "Honeycrisp", "gross_weight": 18400.0,
+                    "tare_weight": 6200.0, "net_weight": 12200.0,
+                    "weight_uom": "Lb", "status": "Submitted",
+                    "settlement": null}],
+ "count": 1, "total_net_weight": 12200.0,
+ "by_status": {"Submitted": 1}, "by_weight_uom": {"Lb": 1}}
+```
+
+`total_net_weight` sums the rows returned, and `by_weight_uom` is beside it
+because **kilos and bins do not add**. A single total spanning both units is a
+fiction, and the count is how a reader knows whether they are looking at one.
+
+## `get_scale_ticket`
+
+**READ (default ON).** One ticket in full, plus `weight_check` — the subtraction
+restated so a reader can see the sum rather than being asked to trust it:
+
+```json
+{"weight_check": {"gross_weight": 18400.0, "tare_weight": 6200.0,
+                  "net_weight": 12200.0, "weight_uom": "Lb",
+                  "computed_as": "18400.0 - 6200.0 = 12200.0"}}
+```
+
+`settlement_detail` is present when a settlement has claimed the load.
+
+## `create_scale_ticket` — MUTATING, default off
+
+Required: `ticket_number`, `date`, `customer`. Also takes `company`, `variety`,
+`grade`, `gross_weight`, `tare_weight`, `weight_uom`, `field`, `block`,
+`truck_id`, `driver`, `destination`, `ticket_image`, `notes`.
+
+**`net_weight` is not an argument.** It is gross minus tare, computed by the
+controller and read-only in the Desk. A net weight somebody typed is the number
+a settlement dispute turns on with no arithmetic behind it. Where the slip's own
+printed net disagrees with the subtraction, **that disagreement is the finding**
+— it goes in `notes` beside the photograph, not silently into the field the
+grower will later argue from.
+
+A `tare_weight` above the `gross_weight` is refused: it is two numbers off
+different tickets, or a gross in pounds against a tare in kilos, and a negative
+net propagating into a settlement check would make the check say the packer
+overpaid.
+
+`ticket_number` is the **packer's** number and is not unique on this site. Two
+packers will both have a ticket 4471 sooner or later, and a uniqueness
+constraint would refuse the second grower's real ticket. The docname carries the
+company abbreviation instead — `ST-OML-0001` — because the question asked of a
+scale ticket is "whose fruit", not "which season".
+
+## `submit_scale_ticket` — MUTATING, default off
+
+Takes `name` (aliases `scale_ticket`, `ticket`). Refuses an already-submitted or
+cancelled ticket by name. A ticket with **no weight at all** is refused at this
+moment rather than at capture — a draft is a record in progress, and a foreman
+at a tailgate may have the truck before they have read the scale.
+
+## `list_settlement_statements`
+
+**READ (default ON).** Filters: `customer`, `company`, `status`,
+`from_date`/`to_date`, `limit`. Returns each statement's packout and cull
+percentages, deductions and net proceeds, plus site totals for the rows matched.
+
+## `get_settlement_statement`
+
+**READ (default ON).** Lines, deductions, computed percentages, the money, the
+Scale Tickets it claims — and `delivery_reconciliation`, which is the part to
+read first:
+
+```json
+{"delivery_reconciliation": {"packer_gross_delivered_weight": 48000.0,
+                             "matched_ticket_net_weight": 49850.0,
+                             "weight_uom": "Lb", "variance": -1850.0,
+                             "matched_ticket_count": 4,
+                             "tickets_in_other_units_excluded": 0}}
+```
+
+A negative variance means the tickets say more fruit was delivered than the
+packer paid for. Neither figure is derived from the other and neither is
+corrected. Tickets in a different weight unit are **counted and excluded**
+rather than converted — there is no bins-to-kilos conversion this app knows, and
+a fabricated one would put a fabricated variance on the answer.
+
+## `create_settlement_statement` — MUTATING, default off
+
+Required: `statement_number`, `date`, `customer`. Also takes `company`,
+`period_start`, `period_end`, `gross_delivered_weight`, `packed_weight`,
+`cull_weight`, `weight_uom`, `line_items`, `deductions`, `statement_image`,
+`notes`.
+
+```json
+{"line_items": [{"variety": "Honeycrisp", "grade": "XF",
+                 "packed_weight": 31200, "price_per_unit": 0.62,
+                 "price_uom": "Lb", "gross_amount": 19344.0}],
+ "deductions": [{"deduction_type": "Packing", "description": "Pack charge", "amount": 6240.0},
+                {"deduction_type": "Cold Storage", "description": "Sep–Nov", "amount": 1120.0}]}
+```
+
+**Five numbers are computed and cannot be passed:** `packout_pct`, `cull_pct`,
+`total_gross_revenue`, `total_deductions`, `net_proceeds`. The two percentages
+are how one packer is compared with another, and a percentage nobody recomputed
+is a percentage nobody checked.
+
+A line's `gross_amount` is filled from `packed_weight × price_per_unit` where the
+statement left it blank, and left alone where the statement gave one — a packer
+who applied a promotion to a line is telling the truth and the multiplication is
+not. `price_uom` is a separate field because a packer quotes per box and weighs
+in pounds often enough that assuming they agree would misprice a line by a
+factor of forty.
+
+**Nothing is reconciled.** The lines are never checked against `packed_weight`
+(fruit still in storage and fruit repacked into a later pool live in the gap),
+and `cull_weight` is never derived from delivered minus packed (juice and shrink
+live in that one). Deriving either would manufacture a number growers
+renegotiate contracts over.
+
+A **negative deduction is refused**. A deduction is already a subtraction, so a
+negative one would add to the proceeds; if the packer credited something back,
+that is a line item.
+
+## `submit_settlement_statement` — MUTATING, default off
+
+Takes `name` (aliases `settlement_statement`, `settlement`, `statement`).
+Refuses an already-submitted or cancelled statement. **It posts nothing to the
+ledger.**
+
+## `classify_receipt`
+
+**READ (default ON), and it touches no doctype at all.** Takes `merchant`,
+`description`, `text` (alias `ocr_raw_text`) and `amount`; returns which of
+`expense`, `scale_ticket`, `settlement` or `bill` the document is.
+
+```json
+{"receipt_type": "scale_ticket", "confidence": 0.71,
+ "default_applied": false,
+ "matched_signals": ["scale ticket", "gross wt", "tare wt", "net wt", "bins"],
+ "scores": {"scale_ticket": 10, "settlement": 1, "bill": 0, "expense": 0},
+ "alternatives": [{"receipt_type": "settlement", "score": 1,
+                   "matched_signals": ["packed"]}],
+ "suggested_tool": "Scale Ticket (create_scale_ticket)"}
+```
+
+**Rules, not a model, and the reason is accountability rather than cost.** The
+classifier runs while somebody is standing in front of the thing they
+photographed, and it is *allowed* to be wrong — the app shows its answer as a
+pre-selected tab a person can change. What it is not allowed to be is
+unarguable. "Why did it file my ticket as an expense" has to have an answer, and
+`matched_signals` is that answer; a keyword table is auditable by reading it.
+
+**Confidence is the winner's share of all matched evidence, scaled down when
+there was little evidence to share** (full weight at a score of 4), and capped at
+**0.95** — a keyword rule is never certain, and 1.0 is an instruction to the
+client to stop asking.
+
+**Nothing matching returns `expense` with confidence 0 and
+`default_applied: true`** — a fallback, stated as one, rather than a guess
+wearing a number. Expense is where an unrecognised slip does least harm, because
+it is the register a person reviews anyway.
+
+**Ties break toward the more specific document** — `settlement`, then
+`scale_ticket`, then `bill`, then `expense`. A settlement quotes weights and so
+always picks up scale-ticket words; a scale ticket almost never says "packout".
+`expense` is last because it is also the fallback, and a fallback that could win
+a tie would swallow the two registers this release exists to fill.
+
+**`amount` is echoed back and never used to classify.** A $9,000 fuel bill and a
+$9,000 settlement are the same number, and a rule on it would be a rule on farm
+size.
+
+`bill` currently has no register to land in, and `suggested_tool` says so rather
+than pointing at something that does not exist.
+
+## The four mobile routes
+
+`POST /farmops/api/mobile/` — `classify_receipt`, `create_expense_receipt`,
+`create_scale_ticket`, `list_scale_tickets`.
+
+`submit_scale_ticket`, `create_settlement_statement` and
+`submit_settlement_statement` have **no route**, each for its own reason:
+submitting freezes a third party's weight record, and a settlement is a
+multi-page document that arrives at an office rather than a thing anybody
+photographs at a tailgate. A method with no route 404s, which is the design of
+that table.
+
+On `create_expense_receipt` and `create_scale_ticket` the **company comes from
+the caller's scope** and `submitted_by` from the authenticated account — an
+account that can name somebody else in a request body is not scoped to anything.

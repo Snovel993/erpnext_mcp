@@ -83,6 +83,7 @@ keep in step.
 from __future__ import annotations
 
 import base64
+import json
 
 import frappe
 
@@ -93,9 +94,11 @@ from ..tools import signed_documents
 from ..tools import files as file_tools
 from ..tools import calendar as compliance_calendar
 from ..tools import employee as personnel
+from ..tools import expenses as expense_tools
 from ..tools import housing as housing_tools
 from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
+from ..tools import receipts as receipt_tools
 from ..tools import universal_scan as universal_scan_tool
 from ..tools import wallet as wallet_tools
 from . import guard, shape
@@ -142,6 +145,11 @@ BUCKET_BATCH_CAP = bucket_log.BATCH_CAP
 #: name out of, and a longer answer is a bigger payload nobody reads to the end.
 #: A search that hits the cap is a search that needs another letter typed into it.
 EMPLOYEE_SEARCH_LIMIT = 20
+
+#: Most scale tickets the capture screen's back-button list hands back. It is a
+#: "what did I just file" list rather than a register view — twenty covers a
+#: morning at a bin trailer, and anything longer is a question for the Desk.
+MOBILE_TICKET_LIMIT = 20
 
 #: What `search_employees` reports about each match, in the order
 #: `ExistingEmployee` (`Models/OnboardingModels.swift:273`) declares them.
@@ -5205,3 +5213,274 @@ def universal_scan(user: str, content=None, scan=None, raw=None, code=None, comp
 	data["overdue_task_count"] = len(data["overdue_tasks"])
 	data["due_compliance_count"] = len(data["due_compliance"])
 	return data
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# v0.67.0 — RECEIPT CAPTURE
+#
+# Four methods, one screen. The app's capture flow is: photograph → on-device
+# OCR → `classify_receipt` → the create call for whichever register came back.
+# That is the whole of "the receipt is the financial atom" as a phone sees it,
+# and the branch is the only part of it that is not identical across the four
+# kinds of paper a foreman photographs.
+#
+# WHAT IS DELIBERATELY *NOT* PUBLISHED HERE, and each for its own reason:
+#
+#   `submit_scale_ticket` — submitting freezes a third party's weight record.
+#     A phone captures; a person at a desk who can see the settlement it will be
+#     checked against decides when it stops being editable. The MCP tool exists
+#     for that person and carries its own switch.
+#   `create_settlement_statement` / `submit_settlement_statement` — a settlement
+#     is a multi-page document that arrives by post or email at an office. It is
+#     not a thing anybody photographs at a tailgate, and a create call with two
+#     child tables in its body is not a capture, it is data entry.
+#   `approve_expense_receipt` / `reject_expense_receipt` — approval is not a
+#     field action, and it never was: v0.31.0 put those behind separate switches
+#     for the same reason this transport leaves them off entirely.
+#
+# `classify_receipt` IS PUBLISHED THOUGH IT TOUCHES NOTHING. It reads no
+# doctype, writes nothing, and could in principle ship as a table inside the
+# app. It is here because the table would then exist twice — once in
+# `tools/receipts.py` and once in Swift — and the two copies would drift apart
+# the first time somebody added a keyword on one side. The classification a
+# phone shows and the classification the catalogue makes are the same function
+# call, or they are two answers to one question.
+# ════════════════════════════════════════════════════════════════════════════
+
+
+# ── 55. classify_receipt ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("classify_receipt", limit=guard.READ_LIMIT)
+def classify_receipt(user: str, merchant=None, description=None, text=None, amount=None) -> dict:
+	"""Which register a photographed document belongs in. v0.67.0.
+
+	Metered as a READ and declared as one, because it is: no doctype is touched
+	on any branch. The rate limit is `READ_LIMIT` rather than `WRITE_LIMIT`
+	because of what the screen does with it — a foreman working through a
+	glovebox of slips at the end of a week is thirty classifications in a
+	minute, none of which writes anything, and ten would refuse the person
+	rather than the abuse.
+
+	THE ANSWER IS A SUGGESTION AND THE APP IS TOLD SO. `confidence` is never 1.0
+	and `matched_signals` comes back with every answer, so the capture screen can
+	pre-select a tab AND show why. A classifier whose reasoning is invisible is a
+	classifier nobody corrects, and every correction a person makes here is
+	training data for the keyword table in a way a hidden score never is.
+	"""
+	guard.require_scope(user)
+
+	inner = {}
+	for key, value in (
+		("merchant", merchant),
+		("description", description),
+		("text", text),
+		("amount", amount),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return receipt_tools.classify_receipt(inner).data
+
+
+# ── 56. create_expense_receipt ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_expense_receipt", mutating=True, limit=guard.WRITE_LIMIT)
+def create_expense_receipt(
+	user: str,
+	merchant=None,
+	amount=None,
+	receipt_date=None,
+	category=None,
+	company=None,
+	supplier=None,
+	farm_task=None,
+	status=None,
+	receipt_image=None,
+	ocr_raw_text=None,
+	ocr_confidence=None,
+	items=None,
+	notes=None,
+) -> dict:
+	"""The fuel slip at the pump, with v0.67.0's Supplier and Item links.
+
+	`submitted_by` IS THE AUTHENTICATED CALLER AND IS NOT AN ARGUMENT. The tool
+	takes one, and a phone that could name somebody else in a request body could
+	file an expense against another worker's name — which is a reimbursement
+	claim with the wrong person's signature on it. Same rule as
+	`list_dispatched_tasks`' `worker_id`, and the same reason.
+
+	`status` IS forwarded, unlike `create_employee`'s. The tool's own
+	`CREATABLE_STATUSES` admits Draft and Submitted and nothing else, so the
+	worst a phone can do with it is post something it has not finished — which
+	is exactly what an offline queue draining on a truck's hotspot needs to do.
+	Approved and Rejected are refused by the tool, not by this signature.
+
+	`supplier` and `items[].item` ARE FORWARDED AND NEVER INFERRED. A picker in
+	the app puts a Supplier against a merchant when the person capturing
+	recognises one; nothing here fuzzy-matches `VALLEY CO-OP #14` onto a
+	Supplier record, because a wrong link is worse than no link and is
+	indistinguishable from a right one afterwards.
+	"""
+	allowed = guard.require_scope(user)
+
+	inner = {
+		"merchant": merchant,
+		"amount": amount,
+		"receipt_date": receipt_date,
+		"company": _company(user, company, allowed),
+		"submitted_by": _employee(user),
+	}
+	for key, value in (
+		("category", category),
+		("supplier", supplier),
+		("farm_task", farm_task),
+		("status", status),
+		("receipt_image", receipt_image),
+		("ocr_raw_text", ocr_raw_text),
+		("ocr_confidence", ocr_confidence),
+		("notes", notes),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+	if items:
+		inner["items"] = _receipt_items(items)
+
+	return expense_tools.submit_expense_receipt(inner).data
+
+
+def _receipt_items(raw) -> list:
+	"""The app's line-item list, checked into the shape the tool takes.
+
+	A JSON string is accepted as well as a list because this transport hands the
+	body through untouched and `URLSession` posting `application/json` and a
+	`multipart` retry do not agree about nested arrays. The tool refuses anything
+	that is not a list of objects, so a malformed body is still refused — this
+	only spares the phone a 500 where the intent was unambiguous.
+	"""
+	if isinstance(raw, str):
+		try:
+			raw = json.loads(raw)
+		except ValueError:
+			frappe.throw("items must be a JSON array of line objects.", frappe.ValidationError)
+	if not isinstance(raw, list):
+		frappe.throw("items must be a list of line objects.", frappe.ValidationError)
+	return raw
+
+
+# ── 57. create_scale_ticket ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_scale_ticket", mutating=True, limit=guard.WRITE_LIMIT)
+def create_scale_ticket(
+	user: str,
+	ticket_number=None,
+	date=None,
+	customer=None,
+	company=None,
+	variety=None,
+	grade=None,
+	gross_weight=None,
+	tare_weight=None,
+	weight_uom=None,
+	field=None,
+	block=None,
+	truck_id=None,
+	driver=None,
+	destination=None,
+	ticket_image=None,
+	notes=None,
+) -> dict:
+	"""The thermal slip at the tailgate, captured as a draft. v0.67.0.
+
+	IT ARRIVES AS A DRAFT AND THERE IS NO `submit` ARGUMENT. Submitting makes a
+	third party's weight record immutable, and the person who should decide that
+	is the one who can see the settlement it will be checked against — not the
+	foreman standing at a truck with a photograph. `submit_scale_ticket` exists
+	in the catalogue for that person, behind its own switch, and is deliberately
+	not published at this door.
+
+	NET WEIGHT IS NOT AN ARGUMENT EITHER, here or in the tool. It is gross minus
+	tare, computed by the controller. A phone that could post a net would be a
+	phone that could post a net disagreeing with the two numbers beside it, and
+	the disagreement is the single most valuable thing on the record: where the
+	slip's own printed net differs from the subtraction, that goes in `notes`
+	beside the photograph, where a person will read it.
+	"""
+	allowed = guard.require_scope(user)
+
+	inner = {
+		"ticket_number": ticket_number,
+		"date": date,
+		"customer": customer,
+		"company": _company(user, company, allowed),
+	}
+	for key, value in (
+		("variety", variety),
+		("grade", grade),
+		("gross_weight", gross_weight),
+		("tare_weight", tare_weight),
+		("weight_uom", weight_uom),
+		("field", field),
+		("block", block),
+		("truck_id", truck_id),
+		("driver", driver),
+		("destination", destination),
+		("ticket_image", ticket_image),
+		("notes", notes),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return receipt_tools.create_scale_ticket(inner).data
+
+
+# ── 58. list_scale_tickets ──────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_scale_tickets", limit=guard.READ_LIMIT)
+def list_scale_tickets(
+	user: str,
+	company=None,
+	customer=None,
+	status=None,
+	unmatched=None,
+	from_date=None,
+	to_date=None,
+	limit=None,
+) -> dict:
+	"""What this crew has already delivered, so the same load is not filed twice.
+
+	The capture screen's back-button list. A foreman who has just photographed a
+	ticket wants to see the last few they filed, and a duplicate ticket number
+	against the same packer is the mistake this list prevents — the register does
+	not refuse one, because two packers really do both have a ticket 4471.
+
+	SCOPED TWICE, like every other list here. The tool filters by company; the
+	rows are checked against the caller's entities again on the way out, because
+	a row that escapes the filter through a code path nobody thought about is
+	the failure this surface exists to prevent.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed)
+
+	inner = {"limit": limit or MOBILE_TICKET_LIMIT}
+	for key, value in (
+		("company", wanted),
+		("customer", customer),
+		("status", status),
+		("from_date", from_date),
+		("to_date", to_date),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+	if str(unmatched or "").lower() in ("1", "true", "yes"):
+		inner["unmatched"] = True
+
+	data = receipt_tools.list_scale_tickets(inner).data
+	rows = guard.scoped(data.get("scale_tickets") or [], allowed)
+	return {
+		"scale_tickets": rows,
+		"count": len(rows),
+		"company": wanted or None,
+		"total_net_weight": round(sum(float(row.get("net_weight") or 0) for row in rows), 3),
+		"by_weight_uom": data.get("by_weight_uom") or {},
+		"by_status": data.get("by_status") or {},
+	}

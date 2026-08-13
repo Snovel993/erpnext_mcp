@@ -380,6 +380,17 @@
   "allow_submit_expense_receipt",
   "allow_approve_expense_receipt",
   "allow_reject_expense_receipt",
+  "receipts_section",
+  "allow_list_scale_tickets",
+  "allow_get_scale_ticket",
+  "allow_list_settlement_statements",
+  "allow_get_settlement_statement",
+  "allow_classify_receipt",
+  "receipts_col",
+  "allow_create_scale_ticket",
+  "allow_submit_scale_ticket",
+  "allow_create_settlement_statement",
+  "allow_submit_settlement_statement",
   "shift_section",
   "allow_list_shifts",
   "allow_get_shift",
@@ -3024,6 +3035,78 @@
    "fieldname": "allow_reject_expense_receipt",
    "fieldtype": "Check",
    "label": "Reject Expense Receipt"
+  },
+  {
+   "fieldname": "receipts_section",
+   "fieldtype": "Section Break",
+   "label": "Receipts & Scale Tickets"
+  },
+  {
+   "default": "1",
+   "description": "READ. Scale tickets by customer, company, status, variety, field and delivery date. `unmatched: true` answers the question the register exists for — which delivered loads no settlement has claimed yet. Reports a per-unit count beside the summed weight, because kilos and bins do not add.",
+   "fieldname": "allow_list_scale_tickets",
+   "fieldtype": "Check",
+   "label": "List Scale Tickets"
+  },
+  {
+   "default": "1",
+   "description": "READ. One scale ticket in full — the three weights with the subtraction shown, the origin and destination, the photograph of the slip, and the settlement that claimed it.",
+   "fieldname": "allow_get_scale_ticket",
+   "fieldtype": "Check",
+   "label": "Get Scale Ticket"
+  },
+  {
+   "default": "1",
+   "description": "READ. Packer settlement statements by customer, company, status and date, with each one's packout percentage, deductions and net proceeds.",
+   "fieldname": "allow_list_settlement_statements",
+   "fieldtype": "Check",
+   "label": "List Settlement Statements"
+  },
+  {
+   "default": "1",
+   "description": "READ. One settlement in full — priced lines, deductions, computed percentages, and the reconciliation between the packer's delivered weight and the grower's own matched scale tickets. The variance is reported, never corrected.",
+   "fieldname": "allow_get_settlement_statement",
+   "fieldtype": "Check",
+   "label": "Get Settlement Statement"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which register a photographed document belongs in — expense, scale ticket, settlement or bill — from a keyword table that ships in the source, with the matched keywords returned so the answer can be argued with. Touches no doctype at all.",
+   "fieldname": "allow_classify_receipt",
+   "fieldtype": "Check",
+   "label": "Classify Receipt"
+  },
+  {
+   "fieldname": "receipts_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Capture one scale ticket as a DRAFT. Net weight is computed from gross minus tare and cannot be passed; a tare above the gross is refused rather than producing a negative net.",
+   "fieldname": "allow_create_scale_ticket",
+   "fieldtype": "Check",
+   "label": "Create Scale Ticket"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a draft scale ticket, which makes it immutable. Separate from capture on purpose: freezing a third party's weight record is not the same permission as writing one down.",
+   "fieldname": "allow_submit_scale_ticket",
+   "fieldtype": "Check",
+   "label": "Submit Scale Ticket"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Capture one packer settlement statement as a DRAFT, with its priced lines and its deductions. Every percentage and every total is computed here rather than accepted from the statement.",
+   "fieldname": "allow_create_settlement_statement",
+   "fieldtype": "Check",
+   "label": "Create Settlement Statement"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a draft settlement statement, which makes it immutable. It posts nothing to the ledger — the tool that books settlement proceeds is a later release.",
+   "fieldname": "allow_submit_settlement_statement",
+   "fieldtype": "Check",
+   "label": "Submit Settlement Statement"
   },
   {
    "fieldname": "shift_section",

@@ -264,6 +264,17 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# unfamiliar sticker had to be told what it was looking at before it
 		# could ask. This resolves the string first and answers second.
 		"/mobile/universal_scan",
+		# v0.67.0. Receipt capture, four routes: the branch, and the three
+		# registers a phone may write into. `submit_scale_ticket`,
+		# `create_settlement_statement` and `submit_settlement_statement` are
+		# tools with NO route here on purpose — the first freezes a third party's
+		# weight record and the other two are an office document, not a
+		# photograph — and the assertion below in the other direction is what
+		# keeps that a decision rather than an omission.
+		"/mobile/classify_receipt",
+		"/mobile/create_expense_receipt",
+		"/mobile/create_scale_ticket",
+		"/mobile/list_scale_tickets",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

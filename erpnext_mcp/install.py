@@ -905,6 +905,22 @@ _PRECIOUS_DOCTYPES = (
 		"exists nowhere else once the paper slip is in a truck door pocket",
 	),
 	(
+		"Scale Ticket",
+		"the delivery register — every load of fruit weighed onto somebody else's scale, "
+		"with the photograph of the thermal slip it was read off. THE GROWER'S ONLY COPY: "
+		"the packer keeps the original, the paper fades in a truck door pocket inside a "
+		"season, and without these the packer's settlement statement is unauditable — "
+		"there is nothing left to check it against",
+	),
+	(
+		"Settlement Statement",
+		"the packout register — what each packer said arrived, what packed out, what was "
+		"culled, what it sold for and what was deducted before the cheque. The priced "
+		"lines and the deduction rows exist nowhere else once the statement is filed, and "
+		"they are what answers 'what did cold storage cost me last season' and 'which "
+		"packer actually returns more per bin'",
+	),
+	(
 		"Shift Location Log",
 		"the crew tracks — every GPS fix the phones posted during a shift, with the time "
 		"each one was taken. It is the only record of where anybody actually went, which "

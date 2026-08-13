@@ -1,0 +1,320 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-13 09:00:00.000000",
+ "description": "The packer's account of what happened to a period's fruit: how much was delivered, how much packed out, how much was culled, what the packed fruit sold for, and what was taken off the top before the cheque was written. Packout and cull percentages are computed from the weights rather than read off the statement, because those two numbers are how one packer is compared with another and a percentage nobody recomputed is a percentage nobody checked. The Scale Tickets this settlement covers point AT it — the link lives on the ticket, so a delivered load that no settlement claims is a query rather than a reconciliation.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "statement_number",
+  "date",
+  "customer",
+  "company",
+  "header_col",
+  "period_start",
+  "period_end",
+  "status",
+  "posted_journal_entry",
+  "weight_section",
+  "gross_delivered_weight",
+  "packed_weight",
+  "cull_weight",
+  "weight_col",
+  "weight_uom",
+  "packout_pct",
+  "cull_pct",
+  "lines_section",
+  "line_items",
+  "deductions_section",
+  "deductions",
+  "totals_section",
+  "total_gross_revenue",
+  "total_deductions",
+  "totals_col",
+  "net_proceeds",
+  "image_section",
+  "statement_image",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The number the packer put on the statement. Their register, not this one.",
+   "fieldname": "statement_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Statement Number",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The date on the statement itself, which is not the period it covers.",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The packer or shipper who issued it, as a Customer — the same party the Scale Tickets name.",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "header_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "First day of the delivery period this settles.",
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "label": "Period Start",
+   "search_index": 1
+  },
+  {
+   "description": "Last day of the delivery period this settles.",
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "label": "Period End",
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "description": "Computed, never typed. Draft is unfiled; Submitted is filed and unposted; Posted is filed with a Journal Entry behind it; Cancelled is a filed statement withdrawn.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nSubmitted\nPosted\nCancelled",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Journal Entry that booked these proceeds, once one exists. Nothing in v0.67.0 writes it — the posting tool is a later sprint, and this is the column it will set.",
+   "fieldname": "posted_journal_entry",
+   "fieldtype": "Link",
+   "label": "Posted Journal Entry",
+   "options": "Journal Entry",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "weight_section",
+   "fieldtype": "Section Break",
+   "label": "Packout"
+  },
+  {
+   "default": "0",
+   "description": "What the packer says arrived over the period. The figure to check against the Scale Tickets, which is the only reason to keep tickets at all.",
+   "fieldname": "gross_delivered_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Gross Delivered Weight",
+   "precision": "3"
+  },
+  {
+   "default": "0",
+   "description": "What came out the other end as packed fruit.",
+   "fieldname": "packed_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Packed Weight",
+   "precision": "3"
+  },
+  {
+   "default": "0",
+   "description": "What was culled. Not necessarily gross minus packed — juice, shrink and fruit still in storage all live in the gap, so the difference is reported rather than assumed.",
+   "fieldname": "cull_weight",
+   "fieldtype": "Float",
+   "label": "Cull Weight",
+   "precision": "3"
+  },
+  {
+   "fieldname": "weight_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Kg",
+   "description": "The unit all three weights are in, and the one the Scale Tickets have to be in to be compared.",
+   "fieldname": "weight_uom",
+   "fieldtype": "Select",
+   "label": "Weight UOM",
+   "options": "Kg\nLb\nTon\nBin\nBox",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Packed over delivered, as a percentage. COMPUTED — this is the number one packer is judged against another with.",
+   "fieldname": "packout_pct",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Packout %",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Culled over delivered, as a percentage. COMPUTED.",
+   "fieldname": "cull_pct",
+   "fieldtype": "Percent",
+   "label": "Cull %",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Lines"
+  },
+  {
+   "description": "One row per variety and grade the statement priced.",
+   "fieldname": "line_items",
+   "fieldtype": "Table",
+   "label": "Line Items",
+   "options": "Settlement Line Item"
+  },
+  {
+   "fieldname": "deductions_section",
+   "fieldtype": "Section Break",
+   "label": "Deductions"
+  },
+  {
+   "description": "Everything taken off the top before the cheque. Rows, not one netted figure.",
+   "fieldname": "deductions",
+   "fieldtype": "Table",
+   "label": "Deductions",
+   "options": "Settlement Deduction"
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break",
+   "label": "Money"
+  },
+  {
+   "default": "0",
+   "description": "The sum of the line items' gross amounts. COMPUTED.",
+   "fieldname": "total_gross_revenue",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Gross Revenue",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "The sum of the deduction rows. COMPUTED.",
+   "fieldname": "total_deductions",
+   "fieldtype": "Currency",
+   "label": "Total Deductions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "totals_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Gross revenue less deductions — what the cheque should say. COMPUTED, and the one number on this record worth reconciling against the bank.",
+   "fieldname": "net_proceeds",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Net Proceeds",
+   "read_only": 1
+  },
+  {
+   "fieldname": "image_section",
+   "fieldtype": "Section Break",
+   "label": "The Statement"
+  },
+  {
+   "description": "The statement as it arrived. A settlement re-keyed from paper and then thrown away is a settlement nobody can dispute.",
+   "fieldname": "statement_image",
+   "fieldtype": "Attach",
+   "label": "Statement File"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-08-13 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Settlement Statement",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Farm Manager",
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "statement_number,customer,status",
+ "sort_field": "date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "statement_number",
+ "track_changes": 1
+}

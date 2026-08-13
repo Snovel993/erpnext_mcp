@@ -15,6 +15,7 @@
   "col_break_header",
   "company",
   "submitted_by",
+  "supplier",
   "farm_task",
   "status",
   "image_section",
@@ -100,6 +101,15 @@
    "label": "Submitted By",
    "options": "Employee",
    "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Supplier this receipt is from, where the merchant is one this operation has a record for. OPTIONAL and separate from `merchant`, which stays exactly as the paper reads it: a slip printed 'VALLEY CO-OP #14' and a Supplier called 'Valley Co-operative' are the same vendor, and overwriting one with the other loses the evidence. Linking is what lets a year of fuel be totalled per vendor and what a 1099 pre-fill reads.",
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Supplier",
+   "options": "Supplier",
    "search_index": 1
   },
   {

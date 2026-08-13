@@ -7,17 +7,27 @@
  "engine": "InnoDB",
  "field_order": [
   "description",
+  "item",
   "quantity",
   "unit_price",
   "line_total"
  ],
  "fields": [
   {
-   "columns": 5,
+   "columns": 3,
    "fieldname": "description",
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Description"
+  },
+  {
+   "columns": 2,
+   "description": "The Item this line bought, where somebody recognised it. OPTIONAL, and never inferred from the description — an OCR'd line reading 'HYD HOSE 1/2' matches four items and picking one would put a fabricated consumption figure into whatever reads this later.",
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item",
+   "options": "Item"
   },
   {
    "columns": 2,

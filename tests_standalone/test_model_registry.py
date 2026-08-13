@@ -561,9 +561,13 @@ class ToolRegistration(unittest.TestCase):
 		# sake: the asset one is `scan_asset`, which stamps `last_scan_at`.
 		# v0.66.0 adds nineteen master-data tools — ten reads, nine writes — over
 		# Item, Item Group, Supplier, Customer, Warehouse and Item Price.
-		self.assertEqual(len(self.registry.TOOLS), 433)
-		self.assertEqual(len(self.registry.READ_TOOLS), 199)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 234)
+		# v0.67.0 adds nine receipt-capture tools — five reads, four writes — over
+		# the two new registers, Scale Ticket and Settlement Statement, plus
+		# `classify_receipt`, which is the only read here that touches no doctype
+		# at all: it decides which of the four registers a photograph belongs in.
+		self.assertEqual(len(self.registry.TOOLS), 442)
+		self.assertEqual(len(self.registry.READ_TOOLS), 204)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 238)
 
 
 if __name__ == "__main__":

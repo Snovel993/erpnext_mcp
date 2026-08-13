@@ -842,10 +842,26 @@ class Catalogue(SeededTestCase):
 		shapes — a Warehouse is company-scoped, an Item only through its default
 		row, a Supplier and a Customer not at all — and each tool reports which of
 		the three it applied rather than letting a shorter list speak for itself.
+
+		v0.67.0 adds NINE — five reads and four writes — and they are the first
+		tools here over registers this app invented rather than wrapped: Scale
+		Ticket and Settlement Statement. The pair is one idea. A scale ticket is
+		what the GROWER's copy says was delivered; a settlement is what the PACKER
+		says was delivered, packed and paid for. Nothing in the nine reconciles
+		them — `get_settlement_statement` reports both figures and names the
+		variance, because the variance is the answer and a tool that agreed them
+		would delete the only audit either document has.
+
+		`classify_receipt` is the odd one and the one to read the source of: it
+		touches NO doctype, holds no state, and decides from a keyword table which
+		of the four registers a photograph belongs in. It is the branch in "the
+		receipt is the financial atom" — one capture flow, four destinations — and
+		it returns the keywords that produced its answer, because a classifier
+		nobody can argue with is a classifier nobody will correct.
 		"""
-		self.assertEqual(len(registry.TOOLS), 433)
-		self.assertEqual(len(registry.READ_TOOLS), 199)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 234)
+		self.assertEqual(len(registry.TOOLS), 442)
+		self.assertEqual(len(registry.READ_TOOLS), 204)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 238)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

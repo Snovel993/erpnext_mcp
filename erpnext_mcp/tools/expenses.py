@@ -28,6 +28,31 @@ but because "rejected" with no sentence beside it is the state that generates th
 next three messages asking why — and by the time anybody asks, the person who
 refused it has forgotten. It is stored on the record, not in a comment, so
 `get_expense_receipt` returns it to the phone that submitted the thing.
+
+────────────────────────────────────────────────────────────────────────────
+v0.67.0: THE SUPPLIER AND ITEM LINKS, AND WHY THEY SIT BESIDE THE TEXT
+────────────────────────────────────────────────────────────────────────────
+
+Sprint 1 gave this app the ability to create a Supplier and an Item; this
+release lets a receipt point at them. `supplier` on the header and `item` on
+each line are both OPTIONAL and both ADDITIVE — `merchant` and `description`
+keep saying exactly what the paper said.
+
+That is the whole design. A slip printed `VALLEY CO-OP #14` and a Supplier
+record called `Valley Co-operative` are the same vendor, and a capture that
+replaced the first with the second would lose the evidence in the act of
+improving the data. Keeping both is what lets a bookkeeper total a year of fuel
+per vendor AND still show an auditor the string the machine read.
+
+NEITHER IS EVER INFERRED. No fuzzy match from merchant to Supplier, no lookup
+from an OCR'd line to an Item. `HYD HOSE 1/2` matches four items in a real
+catalogue, and a guess would put a fabricated consumption figure somewhere a
+person would later read as a measurement. A link gets set when a human — or a
+client with a picker in front of a human — says so, or it stays empty.
+
+Both are refused by name on a bench without ERPNext rather than written as
+dangling links, because a Link column pointing at a doctype the site does not
+have is a record that cannot be opened in the Desk.
 """
 
 from __future__ import annotations
@@ -43,6 +68,8 @@ EXPENSE_RECEIPT = "Expense Receipt"
 EXPENSE_RECEIPT_ITEM = "Expense Receipt Item"
 EMPLOYEE = "Employee"
 FARM_TASK = "Farm Task"
+SUPPLIER = "Supplier"
+ITEM = "Item"
 
 DRAFT = "Draft"
 SUBMITTED = "Submitted"
@@ -87,6 +114,7 @@ _LIST_FIELDS = (
 	"status",
 	"company",
 	"submitted_by",
+	"supplier",
 	"farm_task",
 	"ocr_confidence",
 	"receipt_image",
@@ -152,12 +180,32 @@ def _items_out(doc) -> list[dict]:
 		items.append(
 			{
 				"description": get("description"),
+				"item": get("item"),
 				"quantity": float(get("quantity") or 0),
 				"unit_price": float(get("unit_price") or 0),
 				"line_total": float(get("line_total") or 0),
 			}
 		)
 	return items
+
+
+def _linked(doctype: str, value: str, label: str) -> str:
+	"""An optional Link argument, proved to exist, or a refusal naming the reason.
+
+	A bench without ERPNext has no Supplier and no Item at all, and the refusal
+	says THAT rather than "no Supplier called 'X'" — which would read as a typo
+	and send somebody looking for a record that could never be there.
+	"""
+	if not value:
+		return ""
+	if not frappe.db.exists("DocType", doctype):
+		raise ToolError(
+			f"this site has no {doctype} doctype, so {label} cannot be set. {doctype} "
+			f"ships with the ERPNext app; the receipt captures fine without it."
+		)
+	if not frappe.db.exists(doctype, value):
+		raise ToolError(f"no {doctype} called {value!r} on this site.")
+	return str(value)
 
 
 def _read_items(args: dict) -> list[dict]:
@@ -189,6 +237,7 @@ def _read_items(args: dict) -> list[dict]:
 		rows.append(
 			{
 				"description": as_str(item, "description") or None,
+				"item": _linked(ITEM, as_str(item, "item"), f"items[{index}].item") or None,
 				"quantity": quantity,
 				"unit_price": unit_price,
 				"line_total": line_total,
@@ -241,6 +290,10 @@ def list_expense_receipts(args: dict) -> ToolResult:
 	farm_task = as_str(args, "farm_task")
 	if farm_task:
 		filters["farm_task"] = farm_task
+
+	supplier = as_str(args, "supplier")
+	if supplier:
+		filters["supplier"] = _linked(SUPPLIER, supplier, "supplier")
 
 	from_date = as_date(args, "from_date")
 	to_date = as_date(args, "to_date")
@@ -326,6 +379,8 @@ def submit_expense_receipt(args: dict) -> ToolResult:
 	if farm_task and not frappe.db.exists(FARM_TASK, farm_task):
 		raise ToolError(f"no Farm Task called {farm_task!r} on this site.")
 
+	supplier = _linked(SUPPLIER, as_str(args, "supplier"), "supplier")
+
 	doc = frappe.get_doc(
 		{
 			"doctype": EXPENSE_RECEIPT,
@@ -335,6 +390,7 @@ def submit_expense_receipt(args: dict) -> ToolResult:
 			"category": category,
 			"company": company,
 			"submitted_by": submitted_by,
+			"supplier": supplier or None,
 			"farm_task": farm_task or None,
 			"status": status,
 			"receipt_image": as_str(args, "receipt_image") or None,
@@ -359,6 +415,7 @@ def submit_expense_receipt(args: dict) -> ToolResult:
 			"status": status,
 			"company": company,
 			"submitted_by": submitted_by,
+			"supplier": supplier or None,
 			"farm_task": farm_task or None,
 			"ocr_confidence": doc.get("ocr_confidence"),
 			"receipt_image": doc.get("receipt_image"),

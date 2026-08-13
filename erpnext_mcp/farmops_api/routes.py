@@ -319,6 +319,21 @@ ROUTES = (
 	# `resolve_badge` get the same refusals, and an asset scanned here gets the
 	# same `last_scan_at` stamp `scan_asset` leaves.
 	Route("/mobile", mobile_api.universal_scan),
+	# v0.67.0. Receipt capture: one screen, four kinds of paper, and the branch
+	# between them published as a route of its own. `classify_receipt` reads no
+	# doctype and could have shipped as a keyword table inside the app — it is
+	# here so that the table exists once rather than once per platform, because
+	# two copies of a classifier are two answers to one question.
+	#
+	# Three of the nine receipt tools are deliberately absent. `submit_scale_ticket`
+	# freezes a third party's weight record, and `create_settlement_statement`
+	# and `submit_settlement_statement` are a multi-page document that arrives at
+	# an office rather than a thing anybody photographs at a tailgate. A method
+	# with no route 404s, which is the whole design of this table.
+	Route("/mobile", mobile_api.classify_receipt),
+	Route("/mobile", mobile_api.create_expense_receipt),
+	Route("/mobile", mobile_api.create_scale_ticket),
+	Route("/mobile", mobile_api.list_scale_tickets),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

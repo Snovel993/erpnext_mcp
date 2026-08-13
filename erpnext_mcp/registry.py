@@ -88,6 +88,7 @@ from .tools import (
 	printing,
 	read,
 	realestate,
+	receipts,
 	reports,
 	rules,
 	sessions,
@@ -213,6 +214,31 @@ _GEO_REQUIRES = (
 	"which this app declares as dependencies — install them into the bench's environment "
 	"with `./env/bin/pip install 'shapely>=2.0' 'h3>=4.0.0'` and restart"
 )
+
+
+#: v0.67.0. What the two receipt registers need beyond `bench migrate`: BOTH
+#: doctypes link to Customer, which ships with ERPNext and exists nowhere else.
+#: `_needs_doctype` is deliberately an ANY, so it cannot express "and" — hence a
+#: predicate of its own rather than a second reading of that one.
+_RECEIPT_REQUIRES = (
+	"the Scale Ticket and Settlement Statement doctypes (run `bench migrate` after "
+	"installing v0.67.0) and the ERPNext app, which is where Customer — the packer "
+	"every ticket and every settlement names — comes from"
+)
+
+
+def _receipts_ready(*doctypes: str):
+	"""Predicate: this site has the doctype AND has ERPNext for the Customer link."""
+	needs_doctype = _needs_doctype(*doctypes)
+	erpnext_installed = _app_installed("erpnext")
+
+	def predicate() -> bool:
+		try:
+			return bool(needs_doctype() and erpnext_installed())
+		except Exception:
+			return False
+
+	return predicate
 
 
 def _geo_ready(*doctypes: str):
@@ -11531,6 +11557,12 @@ TOOLS = {
 				"Feed, Seed, Fertilizer, or Other.",
 			),
 			"farm_task": _field(_STRING, "Filter to the receipts booked against one Farm Task."),
+			"supplier": _field(
+				_STRING,
+				"Filter to the receipts linked to one Supplier. Only finds receipts "
+				"somebody LINKED — the merchant text is not searched, because a "
+				"vendor total built out of string matches is not a vendor total.",
+			),
 			"from_date": _field(_STRING, "Earliest receipt_date as YYYY-MM-DD."),
 			"to_date": _field(_STRING, "Latest receipt_date as YYYY-MM-DD."),
 			"limit": _LIMIT,
@@ -11575,6 +11607,14 @@ TOOLS = {
 			"company": _COMPANY,
 			"submitted_by": _field(_STRING, "The Employee who photographed it — docname or employee_name."),
 			"employee": _field(_STRING, "Alias for submitted_by."),
+			"supplier": _field(
+				_STRING,
+				"v0.67.0. The Supplier this receipt is from, where the merchant is "
+				"one this operation has a record for. OPTIONAL and ADDITIVE — "
+				"`merchant` still says exactly what the paper said, and the link is "
+				"never inferred from it. It is what lets a year of fuel be totalled "
+				"per vendor. Refused by name on a bench with no ERPNext.",
+			),
 			"farm_task": _field(_STRING, "Optional Farm Task this expense was incurred for."),
 			"status": _field(_STRING, "Draft or Submitted. Defaults to Submitted."),
 			"receipt_image": _field(_STRING, "File URL of the photograph, as returned by an upload tool."),
@@ -11592,6 +11632,7 @@ TOOLS = {
 						"type": "object",
 						"properties": {
 							"description": _STRING,
+							"item": _STRING,
 							"quantity": _NUMBER,
 							"unit_price": _NUMBER,
 							"line_total": _NUMBER,
@@ -11601,7 +11642,11 @@ TOOLS = {
 				"Line items the scanner could read. `line_total` is filled from "
 				"quantity times unit_price where it is missing, and left alone "
 				"where the receipt gave one. The lines are never reconciled "
-				"against the total — tax, tips and deposits live between them.",
+				"against the total — tax, tips and deposits live between them. "
+				"v0.67.0: `item` optionally links a line to an Item, and is NEVER "
+				"inferred from the description — an OCR'd 'HYD HOSE 1/2' matches "
+				"four items and a guess would become a fabricated consumption "
+				"figure somewhere downstream.",
 			),
 			"notes": _field(_STRING, "Anything the person capturing it wants to add."),
 		},
@@ -11653,6 +11698,281 @@ TOOLS = {
 		title="Reject expense receipt",
 		available=_needs_doctype("Expense Receipt"),
 		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+	),
+	# ── v0.67.0: scale tickets, settlements, and which one a photo is ───────
+	"list_scale_tickets": _tool(
+		receipts.list_scale_tickets,
+		"Scale tickets — loads of fruit weighed onto a packer's scale — by "
+		"customer, company, status, variety, field and delivery date range. "
+		"`unmatched: true` is the question this register exists to answer: which "
+		"delivered loads no Settlement Statement has claimed yet. Returns the "
+		"summed net weight and a `by_weight_uom` count beside it, because kilos "
+		"and bins do not add and a single total across both would be a fiction. "
+		"Read-only.",
+		{
+			"customer": _field(_STRING, "The packer — a Customer docname or customer_name."),
+			"company": _COMPANY,
+			"status": _field(_STRING, "Draft, Submitted, Matched or Cancelled."),
+			"variety": _field(_STRING, "Exact variety as written on the tickets."),
+			"field": _field(_STRING, "Only the tickets picked from one Field."),
+			"settlement": _field(_STRING, "Only the tickets one Settlement Statement claims."),
+			"unmatched": _field(
+				_BOOLEAN,
+				"true for delivered loads no settlement has claimed — the unpaid list.",
+			),
+			"from_date": _field(_STRING, "Earliest delivery date as YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest delivery date as YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List scale tickets",
+		available=_receipts_ready("Scale Ticket"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"get_scale_ticket": _tool(
+		receipts.get_scale_ticket,
+		"One scale ticket in full: the three weights with the SUBTRACTION SHOWN in "
+		"`weight_check`, where it came from, where it went, the photograph of the "
+		"paper slip, and the Settlement Statement that claimed it if one has. "
+		"Read-only.",
+		{
+			"name": _field(_STRING, "The Scale Ticket docname."),
+			"scale_ticket": _field(_STRING, "Alias for name."),
+			"ticket": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		title="Get scale ticket",
+		available=_receipts_ready("Scale Ticket"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"create_scale_ticket": _tool(
+		receipts.create_scale_ticket,
+		"MUTATING (default OFF). Capture one scale ticket AS A DRAFT. `net_weight` "
+		"is computed as gross minus tare and cannot be passed — a net weight "
+		"somebody typed is the number a settlement dispute turns on with no "
+		"arithmetic behind it. A tare above the gross is refused rather than "
+		"producing a negative net. All three weights share one `weight_uom`. "
+		"Submitting is a separate tool with its own switch, because freezing a "
+		"third party's weight record is not the same permission as capturing one.",
+		{
+			"ticket_number": _field(
+				_STRING,
+				"The number printed on the PACKER's ticket. Not unique on this site "
+				"and not made so — two packers will both have a ticket 4471.",
+			),
+			"date": _field(_STRING, "The day the load crossed the scale, YYYY-MM-DD."),
+			"customer": _field(_STRING, "The packer — a Customer docname or customer_name."),
+			"company": _COMPANY,
+			"variety": _field(_STRING, "Free text, as the packer's clerk wrote it."),
+			"grade": _field(_STRING, "Free text."),
+			"gross_weight": _field(_NUMBER, "Truck and fruit together, as the scale read it."),
+			"tare_weight": _field(_NUMBER, "The empty truck, and the bins if the packer tares them."),
+			"weight_uom": _field(_STRING, "Kg, Lb, Ton, Bin or Box. Defaults to Kg."),
+			"field": _field(_STRING, "The Field the load was picked from, where one is tracked."),
+			"block": _field(_STRING, "The block within the field, as the crew calls it."),
+			"truck_id": _field(_STRING, "Truck identifier."),
+			"driver": _field(_STRING, "Driver's name."),
+			"destination": _field(_STRING, "Packing house, cold store or yard the load went to."),
+			"ticket_image": _field(_STRING, "File URL of the photographed slip."),
+			"notes": _field(
+				_STRING,
+				"Anything the person capturing it wants to add — including where the "
+				"slip's own printed net disagrees with gross minus tare, which is a "
+				"finding and belongs here rather than silently in the weight field.",
+			),
+		},
+		required=("ticket_number", "date", "customer"),
+		mutating=True,
+		title="Create scale ticket",
+		available=_receipts_ready("Scale Ticket"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"submit_scale_ticket": _tool(
+		receipts.submit_scale_ticket,
+		"MUTATING (default OFF). Submit a draft scale ticket, which makes it "
+		"immutable — the property a third party's weight record needs. A ticket "
+		"with no weight on it is refused at this moment rather than at capture, "
+		"because a foreman at a tailgate may have the truck before they have read "
+		"the scale. Already-submitted and cancelled tickets are refused by name.",
+		{
+			"name": _field(_STRING, "The Scale Ticket docname."),
+			"scale_ticket": _field(_STRING, "Alias for name."),
+			"ticket": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Submit scale ticket",
+		available=_receipts_ready("Scale Ticket"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"list_settlement_statements": _tool(
+		receipts.list_settlement_statements,
+		"Packer settlement statements by customer, company, status and statement "
+		"date, with each one's packout and cull percentages, total deductions and "
+		"net proceeds. Read-only.",
+		{
+			"customer": _field(_STRING, "The packer — a Customer docname or customer_name."),
+			"company": _COMPANY,
+			"status": _field(_STRING, "Draft, Submitted, Posted or Cancelled."),
+			"from_date": _field(_STRING, "Earliest statement date as YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest statement date as YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List settlement statements",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"get_settlement_statement": _tool(
+		receipts.get_settlement_statement,
+		"One settlement in full: every priced line, every deduction, the computed "
+		"packout and cull percentages, the money, and the Scale Tickets it "
+		"claims.\n\n"
+		"READ `delivery_reconciliation` FIRST. It puts the packer's own delivered "
+		"weight beside the sum of the grower's matched tickets and names the "
+		"variance. Neither figure is derived from the other and neither is "
+		"corrected — a settlement that pays for less fruit than was delivered is "
+		"the single thing this pair of registers exists to make visible, and a "
+		"tool that quietly agreed them would delete it. Tickets in a different "
+		"weight unit are counted and EXCLUDED rather than converted. Read-only.",
+		{
+			"name": _field(_STRING, "The Settlement Statement docname."),
+			"settlement_statement": _field(_STRING, "Alias for name."),
+			"settlement": _field(_STRING, "Alias for name."),
+			"statement": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		title="Get settlement statement",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"create_settlement_statement": _tool(
+		receipts.create_settlement_statement,
+		"MUTATING (default OFF). Capture one packer settlement AS A DRAFT, with "
+		"its priced lines and its deductions. `packout_pct`, `cull_pct`, "
+		"`total_gross_revenue`, `total_deductions` and `net_proceeds` are all "
+		"COMPUTED and cannot be passed: the percentages are how one packer is "
+		"compared with another, and a percentage nobody recomputed is a percentage "
+		"nobody checked. A line's `gross_amount` is filled from packed weight "
+		"times price where it is missing and left alone where the statement gave "
+		"one. The lines are never reconciled against `packed_weight` and the cull "
+		"is never derived from delivered minus packed — storage, shrink and juice "
+		"live in both gaps.",
+		{
+			"statement_number": _field(_STRING, "The number the packer put on the statement."),
+			"date": _field(_STRING, "The date on the statement itself, YYYY-MM-DD."),
+			"customer": _field(_STRING, "The packer — a Customer docname or customer_name."),
+			"company": _COMPANY,
+			"period_start": _field(_STRING, "First day of the delivery period settled."),
+			"period_end": _field(_STRING, "Last day of the delivery period settled."),
+			"gross_delivered_weight": _field(
+				_NUMBER,
+				"What the PACKER says arrived. Never overwritten with the ticket "
+				"total — the difference between the two is the whole audit.",
+			),
+			"packed_weight": _field(_NUMBER, "What came out the other end as packed fruit."),
+			"cull_weight": _field(_NUMBER, "What was culled. Not assumed from the difference."),
+			"weight_uom": _field(_STRING, "Kg, Lb, Ton, Bin or Box. Defaults to Kg."),
+			"line_items": _field(
+				{
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"variety": _STRING,
+							"grade": _STRING,
+							"packed_weight": _NUMBER,
+							"price_per_unit": _NUMBER,
+							"price_uom": _STRING,
+							"gross_amount": _NUMBER,
+						},
+					},
+				},
+				"One row per variety and grade the statement priced. `price_uom` is "
+				"not assumed to equal the weight unit — a packer quotes per box and "
+				"weighs in pounds often enough that assuming it would misprice a line.",
+			),
+			"deductions": _field(
+				{
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"deduction_type": _STRING,
+							"description": _STRING,
+							"amount": _NUMBER,
+						},
+					},
+				},
+				"Packing, Cold Storage, Marketing, Commission or Other, each with a "
+				"POSITIVE amount — the sign is carried by what the field means. Kept "
+				"as rows rather than one netted figure, because 'what did storage "
+				"cost me' is the question a grower asks a year later.",
+			),
+			"scale_tickets": _field(
+				_STRING_ARRAY,
+				"Docnames of the Scale Tickets this settlement pays for. Each is "
+				"stamped `Matched` and drops off the `unmatched: true` list. All "
+				"four checks run BEFORE anything is written, so nothing is created "
+				"with half its tickets claimed: a ticket still in DRAFT is refused "
+				"(its weights can still change), one already matched to another "
+				"settlement is refused (two statements paying for one load is the "
+				"overpayment this register exists to surface), and so is one from "
+				"another company or another packer.",
+			),
+			"statement_image": _field(_STRING, "File URL of the statement as it arrived."),
+			"notes": _field(_STRING, "Anything worth recording beside it."),
+		},
+		required=("statement_number", "date", "customer"),
+		mutating=True,
+		title="Create settlement statement",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"submit_settlement_statement": _tool(
+		receipts.submit_settlement_statement,
+		"MUTATING (default OFF). Submit a draft settlement statement, which makes "
+		"it immutable. Already-submitted and cancelled statements are refused by "
+		"name. Submitting does NOT post anything to the ledger — the tool that "
+		"books settlement proceeds is a later sprint, and `status` only reads "
+		"Posted once it exists.",
+		{
+			"name": _field(_STRING, "The Settlement Statement docname."),
+			"settlement_statement": _field(_STRING, "Alias for name."),
+			"settlement": _field(_STRING, "Alias for name."),
+			"statement": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Submit settlement statement",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"classify_receipt": _tool(
+		receipts.classify_receipt,
+		"Which register a photographed document belongs in — `expense`, "
+		"`scale_ticket`, `settlement` or `bill` — with a confidence and, more "
+		"usefully, the keywords that produced the answer.\n\n"
+		"RULE-BASED AND DETERMINISTIC. It reads merchant, description and raw OCR "
+		"text against a keyword table that ships in the source, so 'why did it "
+		"file my ticket as an expense' always has an answer: it is in "
+		"`matched_signals`. Nothing matching at all returns `expense` with "
+		"confidence 0 and `default_applied: true` — a fallback, stated as one, "
+		"rather than a guess wearing a number. It never returns a confidence of "
+		"1.0, because a keyword rule is never certain. `bill` currently has no "
+		"register to land in and says so in `suggested_tool`. Read-only, and it "
+		"touches no doctype at all.",
+		{
+			"merchant": _field(_STRING, "The vendor or packer as it reads on the paper."),
+			"description": _field(_STRING, "Anything the capturing client already knows."),
+			"text": _field(_STRING, "The raw OCR output. The most useful single argument."),
+			"ocr_raw_text": _field(_STRING, "Alias for text."),
+			"amount": _field(
+				_NUMBER,
+				"Echoed back for the client's convenience. It is NOT used to "
+				"classify — a $9,000 fuel bill and a $9,000 settlement are the same "
+				"number, and a rule on it would be a rule on farm size.",
+			),
+		},
+		title="Classify receipt",
 	),
 	# ── v0.19.0: the training register ──────────────────────────────────────
 	"record_training": _tool(

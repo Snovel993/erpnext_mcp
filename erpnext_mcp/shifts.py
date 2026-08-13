@@ -138,8 +138,8 @@ CITATION = "OAR 437-004-1131"
 
 
 # ── naming ──────────────────────────────────────────────────────────────────
-def next_in_series(doctype: str, prefix: str, year: str, width: int = 4) -> str:
-	"""`PREFIX-YYYY-0001`, counted from what is already on the site.
+def next_in_series(doctype: str, prefix: str, segment: str, width: int = 4) -> str:
+	"""`PREFIX-SEGMENT-0001`, counted from what is already on the site.
 
 	EXPANDED HERE RATHER THAN BY FRAPPE'S `naming_series` HOOK. Both doctypes
 	declare their series as a field so the Desk shows it and an operator can read
@@ -148,11 +148,20 @@ def next_in_series(doctype: str, prefix: str, year: str, width: int = 4) -> str:
 	standalone suite, and a test asserting `SHIFT-2026-0001` is asserting the
 	thing that ships.
 
-	The year is the record's own year, not this year. A shift that ran on 31
-	December and was closed on 1 January belongs to the year it started, and a
-	series keyed off `today()` would file it under the wrong one for ever.
+	`segment` IS A YEAR ON EVERY DATED REGISTER and a company abbreviation on
+	Scale Ticket and Settlement Statement — the counting is the same either way,
+	because what it counts is whatever already sits between the prefix and the
+	sequence. It was called `year` until v0.67.0, when the two receipt registers
+	arrived wanting `ST-OML-0001`; the parameter was renamed rather than the
+	function copied, because a second copy of "read every existing name and take
+	the highest" is a second place for the off-by-one to live.
+
+	Where the segment IS a year it is the record's own year, not this year. A
+	shift that ran on 31 December and was closed on 1 January belongs to the year
+	it started, and a series keyed off `today()` would file it under the wrong one
+	for ever.
 	"""
-	head = f"{prefix}-{year}-"
+	head = f"{prefix}-{segment}-"
 	existing = frappe.db.get_all(doctype, filters={"name": ("like", f"{head}%")}, pluck="name", limit=100000)
 	highest = 0
 	for name in existing or []:

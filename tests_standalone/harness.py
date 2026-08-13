@@ -1238,6 +1238,12 @@ APP_DOCTYPES = {
 	# default hourly rate per (company, designation), read once at hire.
 	"Piecework Rate": "piecework_rate",
 	"Position Wage Default": "position_wage_default",
+	# v0.67.0. The two receipt registers and the settlement's two child tables:
+	# what a packer weighed in, and what the packer later said it was worth.
+	"Scale Ticket": "scale_ticket",
+	"Settlement Statement": "settlement_statement",
+	"Settlement Line Item": "settlement_line_item",
+	"Settlement Deduction": "settlement_deduction",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -1703,6 +1709,12 @@ CHILD_TABLES = {
 	# `get_expense_receipt` returning the same four keys on a freshly built
 	# document and on one re-read from the store a test rather than a hope.
 	("Expense Receipt", "items"): "Expense Receipt Item",
+	# v0.67.0. Both are read back off the document in hand rather than through a
+	# `parent` filter, but they are modelled here anyway: `_name_children` is what
+	# gives a child row an `idx`, and a settlement whose lines had none would sum
+	# correctly and print in the wrong order.
+	("Settlement Statement", "line_items"): "Settlement Line Item",
+	("Settlement Statement", "deductions"): "Settlement Deduction",
 	# v0.34.0. The tax form generators read a pay period's slips back off the
 	# entry with `frappe.get_doc`, so the double has to store them as child rows
 	# of the doctype they belong to or a W-2 built from a seeded payroll entry

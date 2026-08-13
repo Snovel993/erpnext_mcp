@@ -315,13 +315,36 @@ def _tree_parent(doctype: str, parent_field: str, given: str, fallback: str, lab
 	return parent
 
 
-def _group_or_refuse(doctype: str, given: str, fallback: str, label: str) -> str:
-	"""A Supplier/Customer Group or Territory: the one given, or the site's root.
+def _group_or_refuse(
+	doctype: str, given: str, fallback: str, label: str, *, prefer_leaf: bool = False
+) -> str:
+	"""A Supplier/Customer Group or Territory: the one given, or a site default.
 
 	Unlike `_tree_parent` this accepts a leaf — a party belongs to a leaf group,
 	not to a branch — and it is a required link on both party doctypes, which is
 	why a site with no usable default gets the list rather than an insert that
 	fails ERPNext's own mandatory pass.
+
+	`prefer_leaf` IS THE v0.67.0 FIX, and it is worth the paragraph. This
+	defaulted a Customer to `All Customer Groups` and a Supplier to `All Supplier
+	Groups`, both of which are the ROOT of their tree and therefore group nodes.
+	ERPNext puts a link filter of `is_group = 0` on both fields, so every
+	`create_customer` call that did not name a group was refused by the framework
+	— on a stock site, that is every call the tool was designed to make easy.
+
+	The failure was invisible to this app's own suite because a group node is a
+	perfectly valid docname and the standalone double does not reproduce
+	ERPNext's link filters. It was visible immediately on a bench.
+
+	So where `prefer_leaf` is set and the stock root is a group, the default
+	becomes the site's FIRST NON-GROUP node in alphabetical order — `Commercial`
+	on a stock ERPNext install. Alphabetical rather than "first created" because
+	a default that depends on insertion order is a default that differs between
+	two sites nobody can tell apart.
+
+	It is NOT set for Territory: a Territory group is accepted on a Customer, and
+	stock ERPNext's own Selling Settings default IS `All Territories`. Changing
+	that would be fixing a bug nobody has.
 	"""
 	value = (given or "").strip()
 	if value:
@@ -332,15 +355,42 @@ def _group_or_refuse(doctype: str, given: str, fallback: str, label: str) -> str
 				f"{', '.join(sorted(options)) or '<none>'}. Nothing was created."
 			)
 		return value
-	if _exists(doctype, fallback):
+
+	if prefer_leaf:
+		leaf = _first_leaf(doctype)
+		if leaf:
+			return leaf
+	if _exists(doctype, fallback) and not (prefer_leaf and _is_group(doctype, fallback)):
 		return fallback
+
 	options = frappe.db.get_all(doctype, pluck="name", limit=25)
 	if len(options) == 1:
 		return options[0]
+	if prefer_leaf:
+		raise ToolError(
+			f"{label} is required and this site has no non-group {doctype} to default to — "
+			f"ERPNext refuses a party filed under a group node. Create one, or pass {label} "
+			f"explicitly. Known: {', '.join(sorted(options)) or '<none>'}. Nothing was created."
+		)
 	raise ToolError(
 		f"{label} is required and this site has no {doctype} called {fallback!r} to default to. "
 		f"Known: {', '.join(sorted(options)) or '<none>'}. Nothing was created."
 	)
+
+
+def _is_group(doctype: str, name: str) -> bool:
+	"""Is this tree node a branch? A doctype with no `is_group` has no branches."""
+	if not compat.has_field(doctype, "is_group"):
+		return False
+	return _checked(frappe.db.get_value(doctype, name, "is_group"))
+
+
+def _first_leaf(doctype: str) -> str:
+	"""The alphabetically first non-group node, or `""` where there is none."""
+	if not compat.has_field(doctype, "is_group"):
+		return ""
+	rows = frappe.db.get_all(doctype, filters={"is_group": 0}, pluck="name", limit=500)
+	return sorted(str(row) for row in rows or [])[0] if rows else ""
 
 
 def _child_rows(doc, fieldname: str) -> list:
@@ -1104,7 +1154,11 @@ def create_supplier(args: dict) -> ToolResult:
 	_require(SUPPLIER)
 	name = as_str(args, "supplier_name", required=True)
 	group = _group_or_refuse(
-		"Supplier Group", as_str(args, "supplier_group"), ALL_SUPPLIER_GROUPS, "supplier_group"
+		"Supplier Group",
+		as_str(args, "supplier_group"),
+		ALL_SUPPLIER_GROUPS,
+		"supplier_group",
+		prefer_leaf=True,
 	)
 	supplier_type = _party_type(SUPPLIER, "supplier_type", as_str(args, "supplier_type"))
 	company, company_note = _party_company(SUPPLIER, as_str(args, "company"))
@@ -1144,7 +1198,11 @@ def create_customer(args: dict) -> ToolResult:
 	_require(CUSTOMER)
 	name = as_str(args, "customer_name", required=True)
 	group = _group_or_refuse(
-		"Customer Group", as_str(args, "customer_group"), ALL_CUSTOMER_GROUPS, "customer_group"
+		"Customer Group",
+		as_str(args, "customer_group"),
+		ALL_CUSTOMER_GROUPS,
+		"customer_group",
+		prefer_leaf=True,
 	)
 	territory = _group_or_refuse("Territory", as_str(args, "territory"), ALL_TERRITORIES, "territory")
 	customer_type = _party_type(CUSTOMER, "customer_type", as_str(args, "customer_type"))

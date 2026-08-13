@@ -475,9 +475,16 @@ class CreateSupplier(MastersTestCase):
 		self.configure(enabled=1, **WRITES_ON)
 
 	def test_creates_a_supplier_in_the_default_group(self):
+		"""v0.67.0: the default is the first NON-GROUP group, not the tree root.
+
+		`All Supplier Groups` is a branch, and ERPNext puts an `is_group = 0` link
+		filter on `Supplier.supplier_group` — so the old default was refused by
+		the framework on every call that did not name a group, which is every call
+		the tool exists to make easy.
+		"""
 		data = self.tool_data("create_supplier", {"supplier_name": "Wilbur-Ellis"})
 		self.assertEqual(data["name"], "Wilbur-Ellis")
-		self.assertEqual(data["supplier_group"], "All Supplier Groups")
+		self.assertEqual(data["supplier_group"], "Services")
 		self.assertIsNotNone(STORE.get_raw("Supplier", "Wilbur-Ellis"))
 
 	def test_the_supplier_type_is_matched_case_insensitively(self):
@@ -568,11 +575,54 @@ class Customers(MastersTestCase):
 		self.assertEqual(data["territory"], "Washington")
 		self.assertIsNotNone(STORE.get_raw("Customer", "Stemilt Growers"))
 
-	def test_the_group_and_territory_default_to_the_roots(self):
+	def test_the_group_defaults_to_a_leaf_and_the_territory_to_the_root(self):
+		"""v0.67.0, and the asymmetry is the point.
+
+		A Customer Group default of `All Customer Groups` was refused on a bench:
+		it is the root of the tree, ERPNext filters `Customer.customer_group` to
+		`is_group = 0`, and every `create_customer` call that did not name a group
+		— the whole convenience of the tool — failed. So the group now defaults to
+		the site's alphabetically first non-group node.
+
+		The TERRITORY still defaults to `All Territories`, which is also a group
+		node, because ERPNext accepts a group territory on a Customer and its own
+		Selling Settings default is exactly that. Changing it would be fixing a
+		bug nobody has.
+		"""
 		self.configure(enabled=1, **WRITES_ON)
 		data = self.tool_data("create_customer", {"customer_name": "Stemilt Growers"})
-		self.assertEqual(data["customer_group"], "All Customer Groups")
+		self.assertEqual(data["customer_group"], "Packers")
 		self.assertEqual(data["territory"], "All Territories")
+
+	def test_a_named_group_still_wins_over_the_leaf_default(self):
+		"""The default only applies when nothing was asked for. A caller who
+		names a group — even a group NODE — gets what they named."""
+		self.configure(enabled=1, **WRITES_ON)
+		STORE.seed("Customer Group", [{"name": "Wholesale"}])
+		data = self.tool_data(
+			"create_customer", {"customer_name": "Stemilt Growers", "customer_group": "Wholesale"}
+		)
+		self.assertEqual(data["customer_group"], "Wholesale")
+
+	def test_the_leaf_default_is_alphabetical_and_not_insertion_order(self):
+		"""A default that depended on insertion order would differ between two
+		sites nobody could tell apart."""
+		self.configure(enabled=1, **WRITES_ON)
+		STORE.seed("Customer Group", [{"name": "Wholesale"}, {"name": "Commercial"}])
+		data = self.tool_data("create_customer", {"customer_name": "Stemilt Growers"})
+		self.assertEqual(data["customer_group"], "Commercial")
+
+	def test_a_site_with_only_group_nodes_is_refused_with_the_reason(self):
+		"""Not "no Customer Group called X" — that reads as a typo and sends
+		somebody looking for a record that could never have been there."""
+		self.configure(enabled=1, **WRITES_ON)
+		STORE.tables["Customer Group"] = {
+			"All Customer Groups": {"name": "All Customer Groups", "is_group": 1},
+			"Trade": {"name": "Trade", "is_group": 1},
+		}
+		message = self.tool_error("create_customer", {"customer_name": "Stemilt Growers"})
+		self.assertIn("no non-group Customer Group", message)
+		self.assertIn("Nothing was created", message)
 
 	def test_a_duplicate_customer_is_refused(self):
 		self.configure(enabled=1, **WRITES_ON)

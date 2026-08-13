@@ -1,0 +1,55 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-13 09:00:00.000000",
+ "description": "One charge the packer took off the top before paying. Packing, cold storage, marketing, commission — the four that show up on nearly every settlement — plus Other for the ones that do not. Kept as rows rather than as one netted-off number because the question a grower asks a year later is not 'what did I get' but 'what did storage cost me', and a single net figure cannot answer it.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "deduction_type",
+  "description",
+  "amount"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "default": "Other",
+   "fieldname": "deduction_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Deduction Type",
+   "options": "Packing\nCold Storage\nMarketing\nCommission\nOther",
+   "reqd": 1
+  },
+  {
+   "columns": 6,
+   "description": "What the statement called it, in the packer's own words.",
+   "fieldname": "description",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Description"
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "description": "A positive number. This is an amount deducted, so its sign is carried by what the field means rather than by the number in it — a negative here would add to the proceeds.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-13 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Settlement Deduction",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

@@ -828,10 +828,17 @@ class TheDoctypeItself(ExpenseTestCase):
 		the tool and refused by the database."""
 		self.assertEqual(tuple(self.by_name["category"]["options"].split("\n")), expenses.CATEGORIES)
 
-	def test_the_item_table_is_a_child_table_with_the_four_named_columns(self):
+	def test_the_item_table_is_a_child_table_with_the_five_named_columns(self):
+		"""`item` joined the four in v0.67.0. It is a Link and it is OPTIONAL:
+		the description still says what the slip said, and nothing infers one
+		from the other."""
 		self.assertEqual(int(self.item.get("istable") or 0), 1)
 		fields = {field["fieldname"] for field in self.item["fields"]}
-		self.assertEqual(fields, {"description", "quantity", "unit_price", "line_total"})
+		self.assertEqual(fields, {"description", "item", "quantity", "unit_price", "line_total"})
+		item_field = next(f for f in self.item["fields"] if f["fieldname"] == "item")
+		self.assertEqual(item_field["fieldtype"], "Link")
+		self.assertEqual(item_field["options"], "Item")
+		self.assertFalse(item_field.get("reqd"))
 
 	def test_the_receipt_points_at_the_item_table(self):
 		self.assertEqual(self.by_name["items"]["fieldtype"], "Table")
@@ -865,3 +872,114 @@ class TheDoctypeItself(ExpenseTestCase):
 		name = self.capture()["name"]
 		result = self.tool("get_expense_receipt", {"name": name})
 		json.loads(result["content"][0]["text"])
+
+
+# ── Claim 11: the Supplier and Item links (v0.67.0) ───────────────────────
+
+
+class VendorAndItemLinks(ExpenseTestCase):
+	"""Sprint 1 gave this app the ability to create a Supplier and an Item.
+	Sprint 2 lets a receipt point at them — ADDITIVELY, and never by inference.
+
+	The design is one sentence, and it is what every test below is checking: the
+	link sits BESIDE the text, not instead of it. A slip printed
+	`VALLEY CO-OP #14` and a Supplier record called `Valley Co-operative` are the
+	same vendor, and a capture that replaced the first with the second would lose
+	the evidence in the act of improving the data.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		STORE.seed(
+			"Supplier",
+			[
+				{
+					"name": "Valley Co-operative",
+					"supplier_name": "Valley Co-operative",
+					"supplier_group": "Services",
+				}
+			],
+		)
+		STORE.seed(
+			"Item", [{"name": "HOSE-050", "item_name": "Hydraulic hose 1/2in", "item_group": "Consumables"}]
+		)
+
+	def test_a_receipt_can_name_the_supplier_behind_the_merchant(self):
+		data = self.capture(supplier="Valley Co-operative")
+		self.assertEqual(data["supplier"], "Valley Co-operative")
+
+	def test_the_merchant_text_is_untouched_by_the_link(self):
+		"""THE POINT OF THE WHOLE FEATURE. The paper still says what it said."""
+		data = self.capture(merchant="VALLEY CO-OP #14", supplier="Valley Co-operative")
+		self.assertEqual(data["merchant"], "VALLEY CO-OP #14")
+		self.assertEqual(data["supplier"], "Valley Co-operative")
+
+	def test_a_receipt_without_a_supplier_is_still_a_receipt(self):
+		self.assertIsNone(self.capture()["supplier"])
+
+	def test_nothing_infers_a_supplier_from_the_merchant_string(self):
+		"""A wrong link is worse than no link and is indistinguishable from a
+		right one afterwards."""
+		self.assertIsNone(self.capture(merchant="Valley Co-operative")["supplier"])
+
+	def test_a_supplier_that_does_not_exist_is_refused(self):
+		self.assertIn(
+			"no Supplier called",
+			self.tool_error("submit_expense_receipt", {**FUEL_RECEIPT, "supplier": "Nobody Ltd"}),
+		)
+
+	def test_the_register_can_be_filtered_to_one_vendor(self):
+		self.capture(supplier="Valley Co-operative")
+		self.capture(merchant="Cascade Ag Parts")
+		data = self.tool_data("list_expense_receipts", {"supplier": "Valley Co-operative"})
+		self.assertEqual(data["count"], 1)
+		self.assertEqual(data["receipts"][0]["supplier"], "Valley Co-operative")
+
+	def test_a_line_can_name_the_item_it_bought(self):
+		data = self.capture(
+			items=[{"description": "HYD HOSE 1/2", "item": "HOSE-050", "quantity": 2, "unit_price": 31.25}]
+		)
+		self.assertEqual(data["items"][0]["item"], "HOSE-050")
+		self.assertEqual(data["items"][0]["description"], "HYD HOSE 1/2")
+
+	def test_an_item_that_does_not_exist_is_refused_naming_the_line(self):
+		message = self.tool_error(
+			"submit_expense_receipt",
+			{**FUEL_RECEIPT, "items": [{"description": "HYD HOSE 1/2", "item": "NOPE-001"}]},
+		)
+		self.assertIn("no Item called 'NOPE-001'", message)
+
+	def test_a_line_with_no_item_is_still_a_line(self):
+		"""`HYD HOSE 1/2` matches four items in a real catalogue, and a guess
+		would put a fabricated consumption figure somewhere downstream."""
+		data = self.capture(items=[{"description": "HYD HOSE 1/2", "quantity": 2, "unit_price": 31.25}])
+		self.assertIsNone(data["items"][0]["item"])
+		self.assertEqual(data["items"][0]["line_total"], 62.50)
+
+	def test_the_links_survive_a_read(self):
+		name = self.capture(
+			supplier="Valley Co-operative",
+			items=[{"description": "HYD HOSE 1/2", "item": "HOSE-050", "quantity": 1, "unit_price": 31.25}],
+		)["name"]
+		data = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(data["supplier"], "Valley Co-operative")
+		self.assertEqual(data["items"][0]["item"], "HOSE-050")
+
+	def test_a_bench_with_no_erpnext_refuses_by_the_real_reason(self):
+		"""Not "no Supplier called X" — that reads as a typo and sends somebody
+		looking for a record that could never have been there."""
+		from .harness import INSTALLED_DOCTYPES
+
+		INSTALLED_DOCTYPES.discard("Supplier")
+		message = self.tool_error(
+			"submit_expense_receipt", {**FUEL_RECEIPT, "supplier": "Valley Co-operative"}
+		)
+		self.assertIn("has no Supplier doctype", message)
+		self.assertIn("captures fine without it", message)
+
+	def test_the_supplier_field_is_optional_on_the_doctype_too(self):
+		receipt = _load_app_doctype("expense_receipt")
+		by_name = {field["fieldname"]: field for field in receipt["fields"]}
+		self.assertEqual(by_name["supplier"]["fieldtype"], "Link")
+		self.assertEqual(by_name["supplier"]["options"], "Supplier")
+		self.assertFalse(by_name["supplier"].get("reqd"))

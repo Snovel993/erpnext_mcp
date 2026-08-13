@@ -3,6 +3,114 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.67.0 — 2026-08-13
+
+**Receipt capture: the two documents between a load of fruit and the money for
+it.** Sprint 2 of the gap-closure plan. Nine tools — five reads, four writes —
+over two new registers, `Scale Ticket` and `Settlement Statement`, plus the
+classifier that decides which register a photograph belongs in. Four mobile
+routes, and the Supplier and Item links the expense receipt has wanted since
+Sprint 1 created the records to point at.
+
+**The design principle is that the receipt is the financial atom.** A foreman
+photographs a piece of paper; which piece of paper it is decides which register
+it lands in, and that is the only branch in an otherwise identical flow — a fuel
+slip becomes an Expense Receipt, a scale ticket a Scale Ticket, a packout report
+a Settlement Statement, a vendor invoice a Purchase Invoice (a later sprint).
+`classify_receipt` is that branch, published as a tool.
+
+- **`list_scale_tickets` / `get_scale_ticket` / `create_scale_ticket` /
+  `submit_scale_ticket`.** A scale ticket is a THIRD PARTY'S weight record: the
+  packer owns the scale, prints the slip and keeps the original, and there is no
+  price on it at all. `net_weight` is computed as gross minus tare and cannot be
+  passed — the number a settlement dispute turns on is not one a caller asserts —
+  and a tare above the gross is refused rather than producing a negative net.
+  `get_scale_ticket` returns `weight_check` with the subtraction spelled out, so
+  the arithmetic is shown rather than trusted. Docnames carry the company
+  abbreviation (`ST-OML-0001`), because the question asked of a ticket is whose
+  fruit rather than which season; the packer's own `ticket_number` is a separate
+  field and is deliberately NOT unique, since two packers will both have a
+  ticket 4471 sooner or later.
+- **`list_settlement_statements` / `get_settlement_statement` /
+  `create_settlement_statement` / `submit_settlement_statement`,** with
+  `Settlement Line Item` and `Settlement Deduction` as child tables. Five numbers
+  are computed and cannot be passed: `packout_pct`, `cull_pct`,
+  `total_gross_revenue`, `total_deductions` and `net_proceeds`. The two
+  percentages are how one packer is compared with another, and a percentage
+  nobody recomputed is a percentage nobody checked. Deductions are kept as ROWS
+  rather than one netted figure, because "what did cold storage cost me" is the
+  question a grower asks a year later and a net number cannot answer it.
+- **The two registers are never reconciled, and that is the feature.**
+  `gross_delivered_weight` is what the PACKER says arrived; the sum of the
+  matched Scale Tickets is what the GROWER'S own copies say. Nothing agrees them.
+  `get_settlement_statement` reports both in `delivery_reconciliation` and names
+  the variance — a settlement paying for less fruit than was delivered is the
+  single thing this pair of documents exists to make visible, and a tool that
+  quietly corrected one figure would delete the only audit either document has.
+  Tickets in a different weight unit are counted and EXCLUDED rather than
+  converted; there is no bins-to-kilos conversion this app knows, and a
+  fabricated one would put a fabricated variance on the answer.
+- **Matching is checked entirely before anything is written.** Passing
+  `scale_tickets` to `create_settlement_statement` claims them. A ticket still in
+  DRAFT is refused (its weights can still change after the settlement is checked
+  against them), one already matched to another settlement is refused (two
+  statements paying for one load is the overpayment this register exists to
+  surface, and re-pointing the ticket would hide it), and so is one from another
+  company or another packer. Cancelling a settlement releases its tickets back
+  onto the unpaid list.
+- **`classify_receipt` is rules, not a model, and the reason is accountability.**
+  It reads merchant, description and raw OCR text against a keyword table that
+  ships in the source and returns `matched_signals` with every answer, so "why
+  did it file my ticket as an expense" always has an answer. Confidence is the
+  winner's share of matched evidence, scaled down when there was little evidence,
+  and capped at 0.95 — a keyword rule is never certain. Nothing matching returns
+  `expense` with confidence 0 and `default_applied: true`: a fallback, stated as
+  one, rather than a guess wearing a number. `amount` is echoed and never used to
+  classify, because a $9,000 fuel bill and a $9,000 settlement are the same
+  number and a rule on it would be a rule on farm size.
+- **Both registers are submittable and both creates leave a draft.** Submitting
+  freezes a third party's weight record, which is not the same permission as
+  writing one down — so it is a separate tool with a separate switch. `status` on
+  both is computed from `docstatus` and never typed. `Posted` exists on a
+  settlement and NOTHING in this release reaches it; the tool that books proceeds
+  to the ledger is a later sprint, and the column is here so that sprint does not
+  have to migrate every statement captured before it.
+- **Expense receipts gain `supplier` and `items[].item`.** Both optional, both
+  ADDITIVE — `merchant` and `description` keep saying exactly what the paper
+  said. A slip printed `VALLEY CO-OP #14` and a Supplier called `Valley
+  Co-operative` are the same vendor, and replacing the first with the second
+  loses the evidence in the act of improving the data. Neither link is ever
+  inferred: `HYD HOSE 1/2` matches four items in a real catalogue, and a guess
+  would become a fabricated consumption figure downstream. `list_expense_receipts`
+  gains a `supplier` filter, which finds only receipts somebody LINKED — the
+  merchant text is not searched, because a vendor total built out of string
+  matches is not a vendor total.
+- **Four mobile routes:** `classify_receipt`, `create_expense_receipt`,
+  `create_scale_ticket` and `list_scale_tickets`. `submit_scale_ticket`,
+  `create_settlement_statement` and `submit_settlement_statement` have NO route,
+  each for its own reason — the first freezes a third party's record, the other
+  two are a multi-page document that arrives at an office rather than a thing
+  anybody photographs at a tailgate. On both create routes the company comes from
+  the caller's scope and `submitted_by` from the authenticated account: an
+  account that can name somebody else in a request body is not scoped to
+  anything.
+
+### Fixed
+
+- **`create_customer` and `create_supplier` defaulted to a group node, and
+  ERPNext refused every such call.** `All Customer Groups` and `All Supplier
+  Groups` are the ROOTS of their trees, and ERPNext puts an `is_group = 0` link
+  filter on both party fields — so on a stock site every `create_customer` that
+  did not name a group failed at the framework, which is every call the tool
+  exists to make easy. The default is now the site's alphabetically first
+  NON-GROUP node (`Commercial` on a stock install); alphabetical rather than
+  first-created, because a default that depends on insertion order differs
+  between two sites nobody can tell apart. A site with only group nodes is
+  refused with that reason rather than with "no Customer Group called X", which
+  reads as a typo. `territory` is deliberately unchanged — ERPNext accepts a
+  group Territory on a Customer, and its own Selling Settings default is exactly
+  that.
+
 ## 0.66.0 — 2026-08-13
 
 **The nouns everything else is written in.** This app could read an order book
