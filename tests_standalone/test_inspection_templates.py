@@ -888,6 +888,67 @@ class TheRuleEngine(SessionTestCase):
 			self.a_camp(f"MC-Cabin-{index:02d}")
 		return self.tool_data("refresh_compliance_alerts", {"today": TODAY})
 
+	def test_submitting_the_session_clears_both_alerts_it_answered(self):
+		"""v0.64.1. The other door that writes compliance registers.
+
+		A session is the multi-section version of one afternoon: one walk round a
+		cabin filing a Housing Inspection and a Detector Test at their own
+		cadences. v0.64.0 gave the narrowed sweep to `complete_farm_task` and to
+		nothing else — so the same work, done through a session rather than
+		through two tasks, left both alerts standing until the hourly pass. One
+		farm, one afternoon, two answers depending on which screen it was filed
+		from.
+		"""
+		self.a_camp_with_alerts(units=1)
+		open_alerts = {
+			str(row["alert_type"]): str(row["name"])
+			for row in STORE.rows("Compliance Alert")
+			if not int(row.get("dismissed") or 0)
+		}
+		self.assertEqual(
+			sorted(open_alerts), ["housing_detector_test_stale", "housing_inspection_overdue"]
+		)
+
+		session = self.a_session(unit="MC-Cabin-01 - MC")["name"]
+		submitted = self.tool_data(
+			"submit_inspection_session",
+			{"name": session, "section_submissions": self.a_full_submission()},
+		)
+		self.assertEqual(len(submitted["produced"]), 2)
+
+		evaluation = submitted["compliance_evaluation"]
+		self.assertEqual(
+			evaluation["rules_asked"], ["housing_detector_test_stale", "housing_inspection_overdue"]
+		)
+		self.assertEqual(sorted(evaluation["auto_dismissed"]), sorted(open_alerts.values()))
+		for name in open_alerts.values():
+			self.assertTrue(int(STORE.get_raw("Compliance Alert", name)["auto_dismissed"]))
+
+	def test_a_session_at_one_cabin_leaves_the_next_cabins_alerts_alone(self):
+		"""The sweep is narrowed by RULE and decided per RECORD. A walk at Cabin 1
+		re-runs the habitability rule, which then looks at every unit and finds
+		Cabin 2 still uninspected — so the row that should go, goes, and the row
+		that should stay, stays."""
+		self.a_camp_with_alerts(units=2)
+		open_alerts = {
+			str(row["source_docname"]): str(row["name"])
+			for row in STORE.rows("Compliance Alert")
+			if row["alert_type"] == "housing_inspection_overdue"
+		}
+		self.assertEqual(len(open_alerts), 2)
+
+		session = self.a_session(unit="MC-Cabin-01 - MC")["name"]
+		submitted = self.tool_data(
+			"submit_inspection_session",
+			{"name": session, "section_submissions": self.a_full_submission()},
+		)
+
+		walked = open_alerts["MC-Cabin-01 - MC"]
+		untouched = open_alerts["MC-Cabin-02 - MC"]
+		self.assertIn(walked, submitted["compliance_evaluation"]["auto_dismissed"])
+		self.assertNotIn(untouched, submitted["compliance_evaluation"]["auto_dismissed"])
+		self.assertFalse(int(STORE.get_raw("Compliance Alert", untouched)["dismissed"]))
+
 	def test_two_alerts_at_one_place_become_one_task_carrying_a_session(self):
 		self.seed_the_shipped_templates()
 		self.a_camp_with_alerts(units=1)

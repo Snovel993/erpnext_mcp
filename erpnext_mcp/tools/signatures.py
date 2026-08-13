@@ -866,6 +866,14 @@ def collect_form_signature(args: dict) -> ToolResult:
 	doc.flags.ignore_permissions = True
 	doc.save()
 
+	# v0.64.2. AND THE FORM COMPLETES ITSELF WHEN THE LAST BOX IS FILLED.
+	# `submit_i9_section_2` no longer marks a form Complete with a blank
+	# attestation on it — it files the documents and rests at Awaiting
+	# Verification — so something has to notice when the outstanding signature
+	# arrives, and the signature landing IS that moment. It moves ONE edge and
+	# never raises; see `i9.advance_if_signed`.
+	advanced = i9.advance_if_signed(name) if box.doctype == I9_FORM else ""
+
 	if box.doctype == I9_FORM:
 		i9._log_action(
 			name,
@@ -894,6 +902,26 @@ def collect_form_signature(args: dict) -> ToolResult:
 		"signed_at": str(target.get(box.signed_at_field) or ""),
 		"replaced": existing or None,
 		"signer_roster_enforced": bool(signer.get("configured")),
+		# v0.64.2. The status this signature moved the form to, or null where it
+		# moved nothing — which is every signature except the one that fills the
+		# last outstanding attestation on a form whose Section 2 is already filed.
+		"form_status_advanced_to": advanced or None,
+		# ── THE ALERT THIS ANSWERED, READ BEFORE ANYTHING SWEEPS ────────────
+		#
+		# v0.64.1, and the ordering is the entire point. `alert_answered_by`
+		# finds the OPEN alert this signature makes untrue, and two steps below
+		# this line now make it stop being open — `_close_the_task` completes the
+		# Farm Task, whose completion re-runs the rule, and
+		# `_evaluate_compliance_after` re-runs it directly. Read afterwards, the
+		# lookup finds a dismissed row and answers "" — so the app's compliance
+		# tab would be told nothing was answered on precisely the calls where the
+		# work landed and the alert cleared, which is backwards.
+		#
+		# It is still NOT a claim that an alert was dismissed; see
+		# `alert_answered_by`. It names the row this signature answered, at the
+		# moment it answered it, and whether the sweep then agreed is
+		# `compliance_evaluation`'s business to report.
+		"answered_alert": alert_answered_by(box, name) or None,
 	}
 
 	# ── 3. the evidence ─────────────────────────────────────────────────
@@ -914,6 +942,7 @@ def collect_form_signature(args: dict) -> ToolResult:
 	# ── 4. the task, and ── 5. the PDF ──────────────────────────────────
 	result["task"] = _close_the_task(box, name, handle.name, args)
 	result["pdf"] = _redraw(box, name, ensure=as_bool(args, "render_pdf", False))
+	result["compliance_evaluation"] = _evaluate_compliance_after(box, company)
 
 	return ToolResult(
 		data=result,
@@ -1297,6 +1326,83 @@ def _close_the_task(box: SignatureBox, form: str, file_docname: str, args: dict)
 			),
 		}
 	return {"task": task, "completed": True}
+
+
+def _evaluate_compliance_after(box: SignatureBox, company: str) -> dict | None:
+	"""Re-run the rules this signature could have made untrue. NEVER RAISES.
+
+	v0.64.1, and it closes the second half of the hole v0.64.0 opened the first
+	half of. `complete_farm_task` re-runs the rules a completion could have
+	changed at the moment it files, so the alert is gone by the time the phone
+	reads the answer. A SIGNATURE reached that only sideways: `_close_the_task`
+	completes the Farm Task the sweep raised, and the completion sweeps. Where
+	there is no such task — nobody has run `generate_tasks_from_compliance_alerts`,
+	or the task was closed by hand, or the form was signed from the compliance tab
+	rather than from the board — nothing swept, and the row the worker had just
+	tapped came straight back on the next load and sat there for up to an hour.
+
+	THE NARROWING IS THE BOX'S OWN `alert_types`. It is the same tuple
+	`_task_for` matches a task on and `alert_answered_by` computes a docname
+	from — the rules that fire on THIS blank box, stated once — so a sixth
+	signature box added to `SIGNATURE_BOXES` gets this for nothing and cannot be
+	narrowed wrongly.
+
+	IT IS THE SWEEP, CALLED SOONER. Nothing here dismisses an alert because a
+	signature landed; the rule re-runs and reads the column, which now has a URL
+	in it. A box filled on a form whose OTHER box is still blank leaves that
+	other alert standing, which is correct and is why the rule decides rather
+	than this function.
+
+	RUNNING TWICE IS HARMLESS AND IS THE COMMON CASE. Where a task did close, its
+	completion has already swept the same rule; the sweep is idempotent by
+	construction — `alert_key` carries nothing that changes — so the second pass
+	finds the row the first one wrote and refreshes it.
+
+	NEVER RAISES AND NEVER UNDOES THE SIGNATURE, which is the ordering the module
+	docstring sets out: the capture is the irreplaceable artefact and every step
+	after it is bookkeeping about it. A rule that throws, a site mid-migrate, an
+	alert table that is not there yet — none of them is a reason to refuse ink
+	that is already on a federal form.
+	"""
+	names = sorted({str(key).strip() for key in (box.alert_types or ()) if str(key).strip()})
+	if not names or not compat.doctype_exists(ALERT):
+		return None
+	try:
+		from ..alerts import base as alerts_base
+
+		report = alerts_base.refresh_compliance_alerts(company=company or "", alert_types=names)
+	except Exception as exc:
+		return {
+			"rules_asked": names,
+			"evaluated": False,
+			"why_not": (
+				f"the narrowed sweep did not run: {type(exc).__name__}: {exc}. The signature, its "
+				"evidence row and the form it is on are unaffected, and the scheduled sweep will "
+				"reach these rules on its next pass."
+			),
+		}
+	dismissed = [
+		entry["name"] for entry in report.get("alerts") or [] if entry.get("outcome") == "auto_dismissed"
+	]
+	out = {
+		"rules_asked": names,
+		"evaluated": True,
+		"auto_dismissed": dismissed,
+		"created": report.get("created", 0),
+		"refreshed": report.get("refreshed", 0),
+		"reopened": report.get("reopened", 0),
+		"note": (
+			"These are the rules that fire on this signature box. THE SWEEP DECIDED, not the "
+			"signature: an alert here went away because its rule looked again and found the box "
+			"filled, which is the only honest way one goes away."
+		),
+	}
+	if not dismissed:
+		out["standing_note"] = (
+			"No alert dismissed. That is a normal outcome: a form with two blank boxes has two "
+			"alerts, and filling one leaves the other standing until somebody signs it."
+		)
+	return out
 
 
 def _task_for(box: SignatureBox, form: str) -> str:

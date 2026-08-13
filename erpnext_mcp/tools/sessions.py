@@ -832,10 +832,14 @@ def submit_inspection_session(args: dict) -> ToolResult:
 
 	described = _describe_session(dict(doc.as_dict()), full=True)
 	skipped = [name for name, entry in submitted.items() if entry.get("skipped")]
+	compliance_eval = _evaluate_compliance_after(produced, str(doc.get("company") or ""))
 	data = {
 		**described,
 		"produced": produced,
 		"skipped_sections": skipped,
+		# v0.64.1. ALWAYS PRESENT, null where nothing this session produced could
+		# have changed a rule's answer. See `_evaluate_compliance_after`.
+		"compliance_evaluation": compliance_eval,
 		"note": (
 			f"{len(produced)} compliance record(s) were created — separately, at their own "
 			"cadences, exactly as they would have been from three separate visits. That is the "
@@ -866,6 +870,81 @@ def submit_inspection_session(args: dict) -> ToolResult:
 		),
 		docstatus_delta="0 → 0 (updated)",
 	)
+
+
+def _evaluate_compliance_after(produced: list, company: str) -> dict | None:
+	"""Re-run the rules the records this session wrote could have made untrue.
+
+	v0.64.1, and it is `complete_farm_task`'s v0.64.0 behaviour reaching the OTHER
+	door that writes compliance registers. A session is the multi-section version
+	of the same afternoon: one walk round a cabin that files a Housing Inspection
+	and a Detector Test at their own cadences. Both of those registers are exactly
+	what `housing_inspection_overdue` and `housing_detector_test_stale` are
+	discharged through, and until now a worker who did the whole round through a
+	session watched both alerts sit there until the hourly sweep — while the same
+	work done as two Farm Tasks cleared them on the spot. One farm, one afternoon,
+	two different answers depending on which screen it was filed from.
+
+	NARROWED BY WHAT WAS ACTUALLY PRODUCED, through the same backwards read of
+	`ALERT_TASK_MAP` the task path uses — so the two doors cannot come to disagree
+	about which rule a Housing Inspection answers.
+
+	IT IS THE SWEEP, CALLED SOONER. A session whose record found something routes
+	that record to Corrective Action Required and raises its own Critical alert;
+	the rules re-run here read the register and decide for themselves, so the walk
+	that found a fault clears the "nobody has walked this" alert and leaves the
+	new finding standing. Both facts are true and both survive.
+
+	NEVER RAISES. Every record is written and every section is filed by the time
+	this runs.
+	"""
+	from .dispatch import _rules_reading_register
+
+	names = sorted(
+		{
+			alert_type
+			for entry in produced or []
+			for alert_type in _rules_reading_register(str((entry or {}).get("doctype") or ""))
+		}
+	)
+	if not names:
+		return None
+	try:
+		from ..alerts import base as alerts_base
+
+		report = alerts_base.refresh_compliance_alerts(company=company or "", alert_types=names)
+	except Exception as exc:
+		return {
+			"rules_asked": names,
+			"evaluated": False,
+			"why_not": (
+				f"the narrowed sweep did not run: {type(exc).__name__}: {exc}. Every record this "
+				"session produced is written and its evidence is filed, and the scheduled sweep "
+				"will reach these rules on its next pass."
+			),
+		}
+	dismissed = [
+		entry["name"] for entry in report.get("alerts") or [] if entry.get("outcome") == "auto_dismissed"
+	]
+	out = {
+		"rules_asked": names,
+		"evaluated": True,
+		"auto_dismissed": dismissed,
+		"created": report.get("created", 0),
+		"refreshed": report.get("refreshed", 0),
+		"reopened": report.get("reopened", 0),
+		"note": (
+			"These are the rules whose register this session wrote to. THE SWEEP DECIDED, not the "
+			"submission: an alert here went away because its rule looked again and found its "
+			"condition no longer true."
+		),
+	}
+	if not dismissed:
+		out["standing_note"] = (
+			"No alert dismissed. That is a normal and often correct outcome — the work is done and "
+			"the condition that raised the alert may still be true."
+		)
+	return out
 
 
 def _submitted_sections(args: dict, template_sections: dict) -> dict:

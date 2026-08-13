@@ -3817,6 +3817,13 @@ def submit_form_signature(
 		# differently in the contract and both spellings are the app's.
 		"field": data.get("field"),
 		"form_status": _form_status(data.get("doctype"), data.get("name")),
+		# v0.64.2. Null on every signature except the one that fills the last
+		# outstanding attestation on a form whose Section 2 is already filed —
+		# which is the moment the wizard's last step is waiting for. `form_status`
+		# above says what the form reads NOW; this says whether THIS signature is
+		# what moved it, and a screen that wants to announce "the I-9 is complete"
+		# needs the second question rather than the first.
+		"form_status_advanced_to": data.get("form_status_advanced_to"),
 		"file_url": data.get("signature"),
 		"task": closed.get("task"),
 		"task_state": _task_state(closed.get("task")),
@@ -3824,7 +3831,14 @@ def submit_form_signature(
 		"task_note": closed.get("note"),
 		"signed_on": data.get("signed_at"),
 		"already_signed": False,
-		"dismissed_alert": _alert_answered(data.get("doctype"), data.get("field"), data.get("name")),
+		# v0.64.1. THE TOOL'S OWN READING WINS, and it has to. `collect_form_
+		# signature` now re-runs the rules this box fires — so by the time this
+		# projection runs, the alert has usually been dismissed and a fresh
+		# lookup would answer with nothing on exactly the calls that worked. The
+		# tool captured it before it swept; `_alert_answered` stays as the
+		# fallback for the already-signed branch below, which sweeps nothing.
+		"dismissed_alert": data.get("answered_alert")
+		or _alert_answered(data.get("doctype"), data.get("field"), data.get("name")),
 		"employee": data.get("employee"),
 		"employee_name": data.get("employee_name"),
 		# v0.60.0. The evidence row this signature produced, and — where it could
@@ -3893,6 +3907,12 @@ def _seal(doctype, docname, wanted: bool) -> dict:
 		"sealed_pdf_hash": data.get("sealed_pdf_hash"),
 		"signatures_on_page": data.get("signatures_on_page"),
 		"evidence_updated": data.get("evidence_updated") or [],
+		# v0.64.1. Whether the sealed copy also reached the worker's personnel
+		# folder. PROJECTED RATHER THAN DROPPED because it is the answer to the
+		# question the gap was found by asking — "where is the completed I-9" —
+		# and a handset that filed one has just put it somewhere an inspection
+		# looks. `filed: false` carries the reason, exactly as `sealed` does.
+		"employee_copy": data.get("employee_copy") or {"filed": False},
 		"note": data.get("note") or None,
 	}
 

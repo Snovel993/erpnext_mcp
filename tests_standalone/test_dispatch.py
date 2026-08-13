@@ -464,6 +464,71 @@ class TheLoopCloses(DispatchTestCase):
 		done = self.complete(task)
 		self.assertIsNone(done["compliance_evaluation"])
 
+	def test_a_hand_raised_walk_clears_the_alert_nobody_linked_it_to(self):
+		"""v0.64.1. THE RECORD IS THE LINK — and it was not, for the three rules
+		that matter most.
+
+		The task here comes from NO alert: a foreman raised a habitability walk
+		himself, which is the ordinary case on a site where nobody has run
+		`generate_tasks_from_compliance_alerts` (a manual tool, default off). So
+		the `source_alert` half of the narrowing has nothing to say, and the
+		produced-record half is the whole of it.
+
+		It used to find nothing. `housing_inspection_overdue` scans HOUSING UNIT
+		and the completion produced a HOUSING INSPECTION, and the test was
+		`produced_doctype in rule.requires` — so the only rule that matched was
+		`housing_corrective_action_open`, which reads the new record to raise a
+		NEW problem. The walk re-ran the rule that opens findings against it and
+		never the rule whose alert asked for the walk, and the alert sat on the
+		worker's phone until the hourly sweep.
+
+		The register moves by write-back — recording an inspection advances the
+		unit's `last_habitability_inspection` — so what a rule answers to is not
+		readable off `requires`. `ALERT_TASK_MAP` already states it, and this is
+		that table read backwards.
+		"""
+		unit = self.a_camp()
+		raised = self.tool_data("refresh_compliance_alerts", {"today": TODAY})
+		alerts = [
+			entry["name"]
+			for entry in raised["alerts"]
+			if entry["alert_type"] == "housing_inspection_overdue"
+		]
+		self.assertEqual(len(alerts), 1)
+
+		task = self.claimed(
+			creates_record="Housing Inspection",
+			location_doctype="Housing Unit",
+			location=unit,
+		)
+		self.assertFalse(STORE.get_raw("Farm Task", task).get("source_alert"))
+		done = self.complete(task)
+
+		evaluation = done["compliance_evaluation"]
+		self.assertIn("housing_inspection_overdue", evaluation["rules_asked"])
+		self.assertEqual(evaluation["auto_dismissed"], alerts)
+		self.assertTrue(int(STORE.get_raw("Compliance Alert", alerts[0])["auto_dismissed"]))
+
+	def test_the_register_a_rule_reads_is_not_the_doctype_it_scans(self):
+		"""The mapping under the fix, stated as the thing it is: a produced record
+		names the rules that record discharges, and for all three of the field-work
+		rules that is a DIFFERENT doctype from the one the rule scans."""
+		from erpnext_mcp.tools.dispatch import _rules_reading_register
+
+		self.assertEqual(_rules_reading_register("Housing Inspection"), ["housing_inspection_overdue"])
+		self.assertEqual(_rules_reading_register("Detector Test"), ["housing_detector_test_stale"])
+		# TWO rules are discharged through a Water Test, and both belong: the one
+		# that says the block has not been sampled lately, and the one that says
+		# the last sample failed and wants a clean one. A produced record answers
+		# every rule whose work produces it, not the first.
+		self.assertEqual(
+			_rules_reading_register("Water Test"),
+			["water_test_contamination", "water_test_stale"],
+		)
+		# A doctype no recipe produces names nothing, rather than everything.
+		self.assertEqual(_rules_reading_register("Journal Entry"), [])
+		self.assertEqual(_rules_reading_register(""), [])
+
 	def test_a_finding_lands_the_task_in_awaiting_review(self):
 		"""The work is done AND something needs a person. Both are true."""
 		unit = self.a_camp()

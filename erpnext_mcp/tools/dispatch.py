@@ -297,6 +297,42 @@ def _rules_this_completion_answers(task: dict, produced_doctype: str) -> list:
 	compliance-native rather than merely compliance-adjacent: nobody had to link
 	the task to the rule, because the RECORD is the link.
 
+	────────────────────────────────────────────────────────────────────────
+	v0.64.1: `requires` IS NOT THE REGISTER, AND ON THE THREE RULES THAT
+	MATTER MOST IT IS NOT EVEN CLOSE
+	────────────────────────────────────────────────────────────────────────
+
+	The second half above was written as "`produced_doctype` in `rule.requires`"
+	and that misses exactly the rules a completion is trying to answer. A
+	built-in scanner declares `requires` as the doctype it SCANS, not the
+	register it reads through:
+
+	    housing_inspection_overdue   scans Housing Unit, produced Housing Inspection
+	    housing_detector_test_stale  scans Housing Unit, produced Detector Test
+	    water_test_stale             scans Field,        produced Water Test
+
+	None of the three matched. What DID match were the rules that read the
+	produced register to raise a NEW problem — `housing_corrective_action_open`,
+	`water_test_contamination` — so a habitability walk re-ran the rule that
+	opens a finding against it and never the rule whose alert sent somebody to
+	walk the cabin. The alert stood until the hourly sweep, on the phone, in
+	front of the worker who had just done the work: precisely the failure the
+	narrowed sweep was added to end.
+
+	Those rules go through the register by WRITE-BACK — recording an inspection
+	moves `Housing Unit.last_habitability_inspection`, which is what makes the
+	condition false (`records.py` argues why that write-back is in the
+	controller). So the register a rule answers to is not derivable from
+	`requires`, and `ALERT_TASK_MAP` is where this app already states it: each
+	recipe names the record the alert's own work produces. Read backwards, it is
+	the map from a produced record to the alerts that record answers — and it is
+	the same table the task was built from, so the two cannot drift.
+
+	BOTH TESTS ARE KEPT, because they are true of different rules.
+	`water_test_contamination` genuinely requires Water Test and is genuinely
+	worth re-running when one is filed; it just is not the rule the task was
+	raised by.
+
 	IT RETURNS NAMES AND EVALUATES NOTHING. Deciding what is relevant and
 	deciding what is true are separate jobs, and the second belongs to the rule.
 	"""
@@ -310,6 +346,7 @@ def _rules_this_completion_answers(task: dict, produced_doctype: str) -> list:
 		except Exception:
 			pass
 	if produced_doctype:
+		wanted.extend(_rules_reading_register(produced_doctype))
 		try:
 			from ..alerts import base as alerts_base
 
@@ -324,6 +361,32 @@ def _rules_this_completion_answers(task: dict, produced_doctype: str) -> list:
 		except Exception:
 			pass
 	return sorted(set(wanted))
+
+
+def _rules_reading_register(produced_doctype: str) -> list:
+	"""The alert types whose own work produces `produced_doctype`. Never raises.
+
+	`ALERT_TASK_MAP` READ BACKWARDS, and that is the whole of it. The table says
+	what each alert becomes when it stops being a warning and starts being work,
+	and `creates_record` on each recipe is the register that alert's condition is
+	discharged through. A completion that just wrote to that register is a
+	completion whose answer those rules may have changed — whether or not this
+	particular task was ever raised from an alert, which is the case the
+	`source_alert` half cannot reach.
+
+	NAMES ONLY, AND UNFILTERED BY WHAT THIS SITE HAS. `refresh_compliance_alerts`
+	already reports an `alert_types` entry it does not recognise as skipped rather
+	than failing on it — a rule renamed or disabled since is an ordinary state of
+	a live site and must not be able to fail a completion already filed.
+	"""
+	wanted = str(produced_doctype or "").strip()
+	if not wanted:
+		return []
+	return sorted(
+		alert_type
+		for alert_type, recipe in ALERT_TASK_MAP.items()
+		if str((recipe or {}).get("creates_record") or "").strip() == wanted
+	)
 
 
 def _evaluate_compliance_after(task: dict, produced_doctype: str, company: str) -> dict | None:

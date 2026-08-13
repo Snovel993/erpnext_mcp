@@ -3,6 +3,69 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.64.2 — 2026-08-12
+
+**Complete means signed.** An I-9 could reach its terminal status with both
+attestation boxes empty, and carry a signing timestamp for each of them anyway.
+
+- **`submit_i9_section_2` marks a form `Complete` only where both attestations
+  are on it.** 8 CFR § 274a.2(b)(1) asks for the signatures, not for full boxes,
+  and the missing-signature rules were the only thing saying otherwise — a
+  detective control behind a status whose whole value is being readable without
+  running a sweep first. The examined documents are still filed; the form rests
+  at `Awaiting Verification`, which the tool already accepts as input, and
+  `unsigned` names what is outstanding.
+- **A signature that never happened no longer gets a timestamp.**
+  `section_1_signed_at` / `section_2_signed_at` and their IP columns were stamped
+  unconditionally, so a blank box carried an 8 CFR § 274a.2(h) "date signed" for
+  an attestation nobody made. They are now written only where a signature is, and
+  a moment the pad already captured is never overwritten by a later data submit.
+- **The signature completes the form.** `collect_form_signature` advances an I-9
+  from `Awaiting Verification` to `Complete` when the last outstanding
+  attestation lands — one edge, never any other, never raising. Reported as
+  `form_status_advanced_to`.
+- **Two distinct signers on one device was already supported and is now
+  asserted.** The employee's Section 1 (identified by their own badge, not
+  roster-gated) and the phone owner's Section 2 (roster-gated, badge legitimately
+  not the employee's) collected through one authenticated mobile session, two
+  evidence rows with distinct legal capacities, both blocks on the sealed page.
+
+## 0.64.1 — 2026-08-12
+
+**The row that would not go, and the form nobody could find.** Two things a farm
+found by using them: a compliance item that stayed on the phone after the work
+was done, and a completed I-9 that was invisible from the Employee it belongs to.
+
+- **`ALERT_TASK_MAP` read backwards is what a produced record answers.** v0.64.0
+  re-ran "every rule whose `requires` contains the produced doctype", and that
+  missed the three rules it most needed to reach: `housing_inspection_overdue`
+  and `housing_detector_test_stale` scan **Housing Unit**, `water_test_stale`
+  scans **Field**, and the completions produce a Housing Inspection, a Detector
+  Test and a Water Test. Those registers reach the rule by **write-back**, so
+  what a rule answers to is not readable off `requires`. Only the rules that
+  raise a *new* problem matched, so a habitability walk re-ran the rule that
+  opens findings against it and never the rule that asked for the walk.
+- **A signature now re-runs its own box's rules.** `collect_form_signature`
+  reached the sweep only through `_close_the_task` — so it cleared the row on a
+  site where somebody had run `generate_tasks_from_compliance_alerts`, a manual
+  tool that is **off by default**, and nowhere else. Narrowed by the box's own
+  `alert_types`.
+- **`submit_inspection_session` re-runs the rules its records discharge.** The
+  same afternoon's work filed as a session rather than as two tasks left both
+  alerts standing until the hourly pass.
+- **`dismissed_alert` is read before the sweep, not after.** It names the open
+  alert a signature makes untrue — and the three fixes above make it stop being
+  open in the same call, so a fresh lookup answered nothing on exactly the calls
+  that worked. The tool captures it at the moment it answers it.
+- **The sealed PDF is cross-filed on the Employee.** `seal_signed_document`
+  attached the tamper-evident artefact to the **form**, so a completed I-9 could
+  only be found by somebody who already knew the I-9 Form docname — not by
+  anybody opening the worker's record and asking to see their paperwork. It is a
+  second `File` row at the **same** `file_url`: two links to one artefact, never
+  two copies of the bytes. A re-seal does not duplicate the link, a form naming
+  no employee says so rather than being guessed at, and a cross-link that fails
+  cannot undo the seal. Reported as `employee_copy`.
+
 ## 0.64.0 — 2026-08-12
 
 **What happened to Ana, and which shift the work was done on.** The shift has

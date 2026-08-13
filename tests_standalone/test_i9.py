@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Structured I-9 workflow — the 15 tools, the audit trail, the SSN rule.
 
-ELEVEN CLAIMS.
+TWELVE CLAIMS, the last of them v0.64.2's.
 
 1. `ReadTools` — every read tool returns the right data in the right shape.
 2. `CreateAndFill` — the happy path: create, Section 1, Section 2.
@@ -25,6 +25,11 @@ v0.47.0, and each of the four is a federal requirement the app did not meet:
 11. `Section3Reverification` — `reverify_i9` appends without overwriting
     Section 2, moves the work-authorization expiry forward, refuses a document
     that had already expired, and closes an outstanding receipt.
+
+12. `CompleteMeansSigned` — v0.64.2. A form reaches `Complete` only when it
+    carries both attestations; the documents are filed regardless and it rests
+    at `Awaiting Verification` until the outstanding one is signed. And a
+    signature that never happened gets no timestamp and no IP.
 """
 import json
 from datetime import date, timedelta
@@ -35,6 +40,13 @@ from erpnext_mcp.tools import i9, newhire
 
 from .fixtures import MAIN, V12TestCase, install_hrms
 from .harness import STORE, add_field
+
+#: What the two attestations look like on a form that carries them. The tools
+#: take a file URL and store it; nothing here reads the bytes, and a test that
+#: needs a REAL capture goes through `collect_form_signature` in
+#: `test_missing_signatures.py`.
+SECTION_1_INK = "/private/files/i9-section-1-signature.png"
+SECTION_2_INK = "/private/files/i9-section-2-signature.png"
 
 I9_TOOLS_ON = {
     f"allow_{name}": 1
@@ -142,6 +154,13 @@ class I9TestCase(V12TestCase):
             "legal_first_name": "Ada",
             "legal_last_name": "Orchard",
             "citizenship_status": "US Citizen",
+            # v0.64.2. THE FIXTURES SIGN, because a Form I-9 is complete when it
+            # carries the attestations rather than when its boxes are full, and a
+            # helper that built the unsigned form would make every test
+            # downstream of it assert against a record no inspection would
+            # accept. The tests that are ABOUT the unsigned form pass
+            # `section_1_signature=""` / `section_2_signature=""` and say so.
+            "section_1_signature": SECTION_1_INK,
         }
         payload.update(overrides)
         return self.tool_data("submit_i9_section_1", payload)
@@ -155,6 +174,7 @@ class I9TestCase(V12TestCase):
             "list_a_doc_number": "123456789",
             "verifier_name": "Tim Polehn",
             "verification_date": str(date.today()),
+            "section_2_signature": SECTION_2_INK,
         }
         payload.update(overrides)
         return self.tool_data("submit_i9_section_2", payload)
@@ -662,6 +682,131 @@ class FullSSNIsOptInOnly(I9TestCase):
         self.tool_data("update_i9_settings", {"store_full_ssn": False})
         self._submit_section_2()
         self.assertIsNone(self._stored_full())
+
+
+# ── 10 ────────────────────────────────────────────────────────────────────────
+class CompleteMeansSigned(I9TestCase):
+    """v0.64.2. A Form I-9 is complete when it carries the attestations.
+
+    `submit_i9_section_2` used to write `status = "Complete"` unconditionally, so
+    a form reached its terminal status with both signature boxes empty and the
+    only thing saying otherwise was a compliance sweep raising two Criticals
+    afterwards. That is a detective control, and the whole value of a status
+    called Complete is that somebody can read it without running a sweep first.
+
+    THE DOCUMENTS ARE STILL FILED. Refusing the call would throw away the
+    examination somebody performed — which documents, by whom, inside the
+    three-business-day window. The form rests at `Awaiting Verification`, which
+    this tool already accepts as input, and the outstanding signature advances it.
+
+    THE DETECTIVE CONTROL IS KEPT AND IS NOT RE-ASSERTED HERE. A form parked at
+    Awaiting Verification because nobody signed it is exactly what
+    `i9_section_1_unsigned` and `i9_section_2_unsigned` chase; that they fire on
+    an unsigned form is `test_missing_signatures.py`'s claim, and that signing
+    dismisses them is `test_alert_resolution.py`'s. This release adds a gate in
+    front of them rather than replacing them.
+    """
+
+    def test_a_form_with_no_attestations_does_not_reach_complete(self):
+        self._create_draft()
+        self._submit_section_1(section_1_signature="")
+        data = self._submit_section_2(section_2_signature="")
+
+        self.assertEqual(data["status"], "Awaiting Verification")
+        self.assertEqual(
+            data["unsigned"],
+            ["Section 1 (the employee's attestation)", "Section 2 (the employer's attestation)"],
+        )
+        self.assertIn("8 CFR", data["unsigned_note"])
+
+    def test_the_documents_are_filed_anyway(self):
+        """The examination is real work and is not thrown away by the refusal to
+        call the form complete."""
+        self._create_draft()
+        self._submit_section_1(section_1_signature="")
+        self._submit_section_2(section_2_signature="")
+
+        form = next(iter(STORE.rows("I-9 Form")))
+        self.assertEqual(form["list_a_doc_title"], "U.S. Passport")
+        self.assertEqual(form["list_a_doc_number"], "123456789")
+        self.assertEqual(form["verifier_name"], "Tim Polehn")
+        self.assertTrue(form["verification_date"])
+
+    def test_one_attestation_is_not_both(self):
+        self._create_draft()
+        self._submit_section_1()
+        data = self._submit_section_2(section_2_signature="")
+        self.assertEqual(data["unsigned"], ["Section 2 (the employer's attestation)"])
+        self.assertEqual(data["status"], "Awaiting Verification")
+
+    def test_both_attestations_complete_it_in_the_one_call(self):
+        self._create_draft()
+        self._submit_section_1()
+        data = self._submit_section_2()
+        self.assertEqual(data["status"], "Complete")
+        self.assertEqual(data["unsigned"], [])
+        self.assertNotIn("unsigned_note", data)
+
+    def test_a_signature_that_never_happened_gets_no_timestamp(self):
+        """The defect this release is really about. Both columns used to be
+        stamped unconditionally — so a blank signature box carried an
+        8 CFR 274a.2(h) 'date signed' and a signing IP for an attestation nobody
+        made. A record asserting more than it knows is worse than a blank one."""
+        self._create_draft()
+        self._submit_section_1(section_1_signature="")
+        self._submit_section_2(section_2_signature="")
+
+        form = next(iter(STORE.rows("I-9 Form")))
+        for field in ("section_1_signature", "section_2_signature"):
+            self.assertFalse(form.get(field))
+        for field in ("section_1_signed_at", "section_2_signed_at"):
+            self.assertFalse(form.get(field), f"{field} was stamped for a signature nobody made")
+        for field in ("section_1_signed_ip", "section_2_signed_ip"):
+            self.assertFalse(form.get(field))
+
+    def test_a_signature_that_did_happen_is_stamped(self):
+        """The other direction, so the fix cannot be 'stop stamping'."""
+        self._create_draft()
+        self._submit_section_1()
+        self._submit_section_2()
+
+        form = next(iter(STORE.rows("I-9 Form")))
+        self.assertTrue(form["section_1_signed_at"])
+        self.assertTrue(form["section_2_signed_at"])
+
+    def test_signing_the_outstanding_box_advances_the_form(self):
+        """The other half of the gate, and without it the gate would be a trap.
+        The pad is where the signature arrives on a handset, not the submit
+        call, so the signature landing has to be what completes the form."""
+        self._create_draft()
+        self._submit_section_1()
+        self._submit_section_2(section_2_signature="")
+        form = next(iter(STORE.rows("I-9 Form")))
+        self.assertEqual(form["status"], "Awaiting Verification")
+
+        frappe.db.set_value("I-9 Form", form["name"], "section_2_signature", SECTION_2_INK)
+        self.assertEqual(i9.advance_if_signed(str(form["name"])), "Complete")
+        self.assertEqual(
+            frappe.db.get_value("I-9 Form", form["name"], "status"), "Complete"
+        )
+
+    def test_it_moves_one_edge_and_no_other(self):
+        """A status machine a signature pad could drive in any direction would
+        not be one. It will not advance a form whose Section 2 was never filed,
+        and will not reopen or re-close anything else."""
+        self._create_draft()
+        self._submit_section_1()
+        form = next(iter(STORE.rows("I-9 Form")))
+        name = str(form["name"])
+        # Section 1 Complete: signed, but Section 2 was never filed.
+        self.assertEqual(i9.advance_if_signed(name), "")
+        self.assertEqual(frappe.db.get_value("I-9 Form", name, "status"), "Section 1 Complete")
+
+        # A form somebody set to Expired is not quietly completed either.
+        self._submit_section_2()
+        frappe.db.set_value("I-9 Form", name, "status", "Expired")
+        self.assertEqual(i9.advance_if_signed(name), "")
+        self.assertEqual(frappe.db.get_value("I-9 Form", name, "status"), "Expired")
 
 
 # ── 10 ────────────────────────────────────────────────────────────────────────

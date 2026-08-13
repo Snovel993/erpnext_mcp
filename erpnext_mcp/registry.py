@@ -9319,7 +9319,21 @@ TOOLS = {
 		"configured the roster is not enforced at all and verifier_name is required, "
 		"which is the pre-v0.48.0 behaviour and what every site has on upgrade. "
 		"list_authorized_signers says which case a site is in.\n\n"
-		"Moves the I-9 to 'Complete'. Logged to I-9 Audit Log.",
+		"v0.64.2: COMPLETE MEANS SIGNED. This moves the form to 'Complete' only where "
+		"BOTH attestations are on it — Section 1 is the employee's under their own "
+		"penalty of perjury and Section 2 is the employer's, and 8 CFR 274a.2(b)(1) "
+		"asks for the signatures rather than for full boxes. With either missing the "
+		"documents are still filed and the form rests at 'Awaiting Verification', "
+		"which this tool accepts as input; `unsigned` names what is outstanding. "
+		"Collect it with collect_form_signature (or submit_form_signature from a "
+		"handset) and the form advances to Complete on its own. A receipt does NOT "
+		"hold a form open — only a missing attestation does, and the two reasons are "
+		"reported separately.\n\n"
+		"THE SIGNING MOMENT IS WRITTEN ONLY WHERE A SIGNATURE IS. Passing "
+		"section_2_signature stamps section_2_signed_at and the caller's IP; omitting "
+		"it leaves both empty rather than recording when an attestation nobody made "
+		"was made, and never overwrites a moment the pad already captured.\n\n"
+		"Logged to I-9 Audit Log.",
 		{
 			"employee": _field(_STRING, "Employee docname or employee_name."),
 			"employee_name": _field(_STRING, "Alias for employee."),
@@ -9807,7 +9821,15 @@ TOOLS = {
 		"prints, this is the retained artefact, and no sealed copy is ever deleted. "
 		"submit_form_signature takes this step automatically, so the ordinary flow "
 		"never calls this — it is for a form signed before v0.63.0, or one whose "
-		"second signature arrived through the Desk.",
+		"second signature arrived through the Desk.\n\n"
+		"v0.64.1: THE SEALED COPY IS ALSO FILED ON THE EMPLOYEE the form is about, "
+		"because a completed I-9 findable only from an I-9 Form docname is invisible "
+		"to anybody who opens the worker's record and asks to see their paperwork. It "
+		"is a SECOND LINK AT THE SAME file_url, not a second copy of the bytes — a "
+		"tamper-evident artefact must not exist twice under one hash. `employee_copy` "
+		"reports it; a form that names no employee, such as an employer tax return, "
+		"says so rather than being guessed at, and a cross-link that fails cannot "
+		"undo the seal.",
 		{
 			"document_type": _field(
 				_STRING, "The form: 'I-9 Form', 'W-4 Form' or 'Tax Form'. Same aliases as above."

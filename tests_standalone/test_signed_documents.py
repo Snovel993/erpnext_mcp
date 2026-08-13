@@ -5,7 +5,7 @@
 record which survives a challenge, and two of them had no artefact behind them
 until this release. Both are about the PDF rather than the register row.
 
-SIX CLAIMS.
+SEVEN CLAIMS, the last of them v0.64.1's.
 
 1. `ThePreviewIsBytes` — `get_document_preview` hands the page back as base64
    under all three spellings a client might read, because the handset
@@ -33,6 +33,12 @@ SIX CLAIMS.
 
 6. `TheSealFollowsTheSignature` — `submit_form_signature` takes step 5
    automatically, reports it, and is not made fatal by it.
+
+7. `TheSealedCopyReachesThePersonnelFolder` — v0.64.1. The sealed artefact is
+   cross-filed on the Employee the form is about, as a second link to one file
+   rather than a second copy of the bytes. A completed I-9 that could only be
+   found from an I-9 Form docname was invisible to the person who opens an
+   Employee and asks to see the worker's paperwork.
 """
 
 import base64
@@ -327,6 +333,118 @@ class TheSealIsAppended(SignedDocumentTestCase):
 			"never captured",
 			self.read_pdf(sealed["file_url"]).pages[-1].extract_text().replace("\n", " "),
 		)
+
+
+# ── Claim 7 ─────────────────────────────────────────────────────────────────
+class TheSealedCopyReachesThePersonnelFolder(SignedDocumentTestCase):
+	"""v0.64.1. A completed I-9 that only an I-9 Form docname could find.
+
+	The seal was attached to the FORM, which is correct and was the whole of it.
+	Nobody asked to see an I-9 Form: they ask to see a worker's paperwork, open
+	the Employee, and found nothing — the sealed, hashed, tamper-evident artefact
+	was one join away from the place an inspection looks. Filing it in both is
+	what a cross-reference is for.
+	"""
+
+	def folder(self, employee: str) -> list:
+		return frappe.db.get_all(
+			"File",
+			filters={"attached_to_doctype": "Employee", "attached_to_name": employee},
+			fields=["name", "file_url", "file_name"],
+		)
+
+	def test_the_sealed_copy_is_filed_on_the_employee_too(self):
+		name = self.signed_i9()
+		employee = str(frappe.db.get_value("I-9 Form", name, "employee"))
+		self.assertFalse(self.folder(employee), "the folder should be empty before the seal")
+
+		sealed = self.seal(document_name=name)
+		filed = sealed["employee_copy"]
+		self.assertTrue(filed["filed"])
+		self.assertEqual(filed["employee"], employee)
+		self.assertFalse(filed["already_linked"])
+		self.assertEqual([row["file_url"] for row in self.folder(employee)], [sealed["file_url"]])
+
+	def test_it_is_a_second_link_and_not_a_second_copy_of_the_bytes(self):
+		"""Two links to one artefact is a cross-reference. Two COPIES would be two
+		documents that can drift apart, and the one thing a tamper-evident file
+		must not do is exist twice under one hash."""
+		name = self.signed_i9()
+		employee = str(frappe.db.get_value("I-9 Form", name, "employee"))
+		sealed = self.seal(document_name=name)
+
+		rows = frappe.db.get_all("File", filters={"file_url": sealed["file_url"]}, fields=["name"])
+		self.assertEqual(len(rows), 2, "one File on the form, one on the Employee, one URL")
+		self.assertEqual(self.folder(employee)[0]["file_url"], sealed["file_url"])
+		# And the bytes behind that URL are the sealed artefact itself, read
+		# through the Employee's own link rather than the form's — same file,
+		# same hash, which is what makes it evidence in both places.
+		filed = self.folder(employee)[0]
+		docname = str(frappe.db.get_value("File", {"file_url": filed["file_url"]}, "name"))
+		self.assertEqual(
+			pdf_seal.sha256_of(file_tools.read_file_bytes(docname)), sealed["sealed_pdf_hash"]
+		)
+
+	def test_a_reseal_does_not_file_a_duplicate(self):
+		"""`seal_signed_document` is documented as re-runnable — an operator
+		re-seals a form that has gained a second signature. A personnel folder
+		that grew a link per re-seal would be a changelog of one document."""
+		name = self.signed_i9()
+		employee = str(frappe.db.get_value("I-9 Form", name, "employee"))
+		first = self.seal(document_name=name)
+		again = self.seal(document_name=name)
+
+		self.assertEqual(again["file_url"], first["file_url"])
+		self.assertTrue(again["employee_copy"]["filed"])
+		self.assertTrue(again["employee_copy"]["already_linked"])
+		self.assertEqual(len(self.folder(employee)), 1)
+
+	def test_a_second_signature_files_the_new_sealed_copy_beside_the_first(self):
+		"""A re-seal after new ink is a DIFFERENT artefact with a different hash,
+		and both are retained — the same promise the form's own attachments make.
+		Nothing is deleted, here or there."""
+		name = self.signed_i9()
+		employee = str(frappe.db.get_value("I-9 Form", name, "employee"))
+		first = self.seal(document_name=name)
+		self.sign(doctype="I-9 Form", name=name, field="section_2_signature")
+		second = self.seal(document_name=name)
+
+		self.assertNotEqual(first["sealed_pdf_hash"], second["sealed_pdf_hash"])
+		self.assertEqual(
+			sorted(row["file_url"] for row in self.folder(employee)),
+			sorted({first["file_url"], second["file_url"]}),
+		)
+
+	def test_a_form_that_names_nobody_is_told_so_rather_than_guessed_at(self):
+		"""An employer return is signed by an officer and belongs in no personnel
+		folder. `filed: false` with the reason is the honest answer; inventing a
+		link would put a 941 in somebody's file."""
+		name = self.signed_i9()
+		frappe.db.set_value("I-9 Form", name, "employee", "")
+		sealed = self.seal(document_name=name)
+
+		self.assertTrue(sealed["sealed"])
+		self.assertFalse(sealed["employee_copy"]["filed"])
+		self.assertIn("names no employee", sealed["employee_copy"]["reason"])
+
+	def test_the_cross_link_cannot_undo_the_seal(self):
+		"""The ordering `tools/signatures.py` opens with, inherited: the sealed
+		artefact is written and hashed before this runs, and a cross-reference
+		that could fail the call would trade the irreplaceable thing for the
+		convenient one."""
+		from unittest import mock
+
+		name = self.signed_i9()
+		with mock.patch.object(
+			file_tools, "insert_attachment", side_effect=RuntimeError("no room on the disk")
+		):
+			sealed = self.seal(document_name=name)
+
+		self.assertTrue(sealed["sealed"])
+		self.assertTrue(sealed["sealed_pdf_hash"])
+		self.assertFalse(sealed["employee_copy"]["filed"])
+		self.assertIn("no room on the disk", sealed["employee_copy"]["reason"])
+		self.assertIn("attach_file_to_document", sealed["employee_copy"]["reason"])
 
 
 # ── Claim 5 ─────────────────────────────────────────────────────────────────

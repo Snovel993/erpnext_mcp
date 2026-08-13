@@ -9,7 +9,7 @@ puts the ADDRESS on the alert — which doctype, which record, which column — 
 opens the one door out of a row that is not "do the work": a dismissal, for the
 alerts somebody has said in advance are stale.
 
-FOUR CLAIMS.
+FIVE CLAIMS, the last of them v0.64.1's.
 
 1. `TheAlertCarriesItsSignatureBox` — a missing-signature alert names the form,
    the record and the column, plus the words the person at the pad is shown. The
@@ -29,6 +29,12 @@ FOUR CLAIMS.
    `collect_form_signature` accepts, the signature lands on the form, and the
    next sweep dismisses the alert with nobody having touched it. That last step
    is what makes this a loop rather than three features.
+
+5. `TheRowGoesWhenTheInkLands` — v0.64.1, and it is claim 4 with the wait taken
+   out. The signature re-runs its own box's rules where it lands, so the row
+   goes at the moment the pad closes rather than at the top of the hour — on a
+   site where nobody generated a Farm Task for the alert, which is the default
+   and was the branch nothing swept.
 """
 
 import base64
@@ -427,6 +433,114 @@ class TheLoopCloses(ResolutionTestCase):
 
 		box = signatures.BOXES_BY_ALERT_TYPE["i9_section_1_unsigned"]
 		self.assertEqual(signatures.alert_answered_by(box, name), "")
+
+
+# ── 5 ───────────────────────────────────────────────────────────────────────
+class TheRowGoesWhenTheInkLands(ResolutionTestCase):
+	"""v0.64.1. The compliance tab clears at the moment the pad closes.
+
+	v0.64.0 gave `complete_farm_task` a narrowed sweep so an alert stops standing
+	until the top of the hour in front of the worker who just answered it. A
+	SIGNATURE reached that only sideways — `_close_the_task` completes the Farm
+	Task the sweep raised, and the completion sweeps — so it worked exactly where
+	somebody had run `generate_tasks_from_compliance_alerts`, a manual tool that
+	is off by default. Everywhere else the pad closed, the row came straight back
+	on the next load, and the calendar read as decoration.
+	"""
+
+	def test_a_signature_with_no_task_behind_it_still_clears_the_row(self):
+		"""The case the task path could not reach. Nobody generated a task, so
+		there is no completion to sweep on this worker's behalf — and the alert
+		has to go anyway, because the box it is about now has ink in it."""
+		self.a_roster()
+		name = self.an_i9()
+		self.sweep()
+		alert = self.row_for("i9_section_1_unsigned")["name"]
+		self.assertFalse(
+			frappe.db.get_all("Farm Task", filters={"source_alert": alert}, pluck="name"),
+			"this test is about the branch with no task; generating one would test the other one",
+		)
+
+		result = self.tool_data(
+			"collect_form_signature",
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
+		)
+
+		evaluation = result["compliance_evaluation"]
+		self.assertEqual(evaluation["rules_asked"], ["i9_section_1_unsigned"])
+		self.assertEqual(evaluation["auto_dismissed"], [alert])
+		# NOBODY DISMISSED IT. The rule looked again and found the column filled,
+		# which is the only honest way an alert goes away.
+		row = STORE.get_raw(ALERT, alert)
+		self.assertTrue(int(row["auto_dismissed"]))
+		self.assertFalse(row.get("dismissed_by"))
+		self.assertFalse(row.get("dismissed_reason"))
+
+	def test_the_answered_alert_is_still_named_after_the_sweep_took_it(self):
+		"""The collision the fix creates, and why the read moved.
+
+		`alert_answered_by` finds the OPEN alert a signature makes untrue, and the
+		sweep two steps later makes it stop being open. Read afterwards it answers
+		nothing — so the phone would be told no row was answered on exactly the
+		calls where the work landed. The tool captures it before it sweeps, and
+		`submit_form_signature` reports what the tool captured.
+		"""
+		self.a_roster()
+		name = self.an_i9()
+		self.sweep()
+		alert = self.row_for("i9_section_1_unsigned")["name"]
+
+		result = self.tool_data(
+			"collect_form_signature",
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
+		)
+		self.assertEqual(result["answered_alert"], alert)
+		# And the fresh lookup now answers nothing, which is what makes the
+		# captured value load-bearing rather than a convenience.
+		box = signatures.BOXES_BY_ALERT_TYPE["i9_section_1_unsigned"]
+		self.assertEqual(signatures.alert_answered_by(box, name), "")
+
+	def test_signing_one_form_leaves_every_other_worker_alone(self):
+		"""The sweep is narrowed by RULE and decided per RECORD, so one worker's
+		signature cannot empty the row belonging to somebody who has not signed.
+		A narrowed sweep that cleared what it did not look at would empty a
+		calendar and read as progress — which is the failure the `alert_types`
+		allowlist was given the same promise as the `regime` filter to prevent."""
+		self.a_roster()
+		mine = self.an_i9()
+		theirs = self.an_i9(
+			name="I9-2026-0002",
+			employee="HR-EMP-00003",
+			employee_name="Ana Ramirez",
+			legal_first_name="Ana",
+			legal_last_name="Ramirez",
+		)
+		self.sweep()
+		unsigned = signatures.alert_answered_by(
+			signatures.BOXES_BY_ALERT_TYPE["i9_section_1_unsigned"], theirs
+		)
+		self.assertTrue(unsigned, "the second worker's I-9 should have raised its own alert")
+
+		self.tool_data(
+			"collect_form_signature",
+			{
+				"doctype": "I-9 Form",
+				"name": mine,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
+		)
+		self.assertFalse(int(STORE.get_raw(ALERT, unsigned)["dismissed"]))
 
 
 # ── the seeder is what puts these four rules on a site ──────────────────────

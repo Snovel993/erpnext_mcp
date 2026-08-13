@@ -1466,10 +1466,90 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			list_c_authority="SSA",
 		)
 		VoidResponseModel.decode(row, "submit_i9_section_2")
-		self.assertEqual(row["status"], "Complete")
 		filed = next(iter(STORE.rows("I-9 Form")))
 		self.assertEqual(filed["list_b_doc_title"], "Driver's License")
 		self.assertEqual(filed["list_c_doc_authority"], "SSA")
+
+		# v0.64.2. THIS IS THE CONTRACT SAYING WHAT THE APP IS MISSING, and the
+		# assertion is left pointing at it rather than fixed up with a signature
+		# the wizard does not send.
+		#
+		# `OnboardingWizardViewModel` posts the Section 1 and Section 2 DATA and
+		# neither attestation: Section 1's capture is uploaded as a loose PNG on
+		# the Employee, and Section 2's is drawn on the pad, shown as "Captured"
+		# on the Review screen and never sent anywhere at all. So this call — the
+		# app's own call, with the app's own arguments — leaves a Form I-9 with
+		# its documents examined and nobody's name sworn to them.
+		#
+		# Until v0.64.2 that reached `Complete`, and the two Critical alerts that
+		# followed were the only thing saying otherwise. It now rests at
+		# `Awaiting Verification` and says which attestations are outstanding.
+		self.assertEqual(row["status"], "Awaiting Verification")
+		self.assertEqual(
+			row["unsigned"],
+			["Section 1 (the employee's attestation)", "Section 2 (the employer's attestation)"],
+		)
+		self.assertIn("8 CFR", row["unsigned_note"])
+
+	def test_20a_the_form_completes_when_both_attestations_arrive(self):
+		"""The other half of test 20, and what the wizard has to start doing.
+
+		Two calls to `submit_form_signature` on the SAME handset and the same
+		authenticated account — the employee's Section 1, identified by their own
+		badge, and the phone owner's Section 2, authorised by the signer roster.
+		The server has supported both since v0.60.0; nothing in the app makes
+		either call on this path.
+		"""
+		self.the_hr_furniture()
+		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
+		self.wire("submit_i9_section_1", employee=self.NEW_HIRE, citizenship_status="US Citizen")
+		self.wire(
+			"submit_i9_section_2",
+			employee=self.NEW_HIRE,
+			document_path="List A",
+			verifier_name="Ana Ramos",
+			verifier_title="Farm Manager",
+			verification_date=frappe.utils.today(),
+			list_a_doc_type="U.S. Passport",
+			list_a_doc_number="X1234567",
+			list_a_authority="US Dept of State",
+		)
+		form = str(next(iter(STORE.rows("I-9 Form")))["name"])
+
+		first = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname=form,
+			signature_field="section_1_signature",
+			signature_image=A_PNG,
+		)
+		# The employee's attestation alone does not complete the form.
+		self.assertIsNone(first["form_status_advanced_to"])
+		self.assertEqual(first["form_status"], "Awaiting Verification")
+
+		second = self.wire(
+			"submit_form_signature",
+			doctype="I-9 Form",
+			docname=form,
+			signature_field="section_2_signature",
+			signature_image=A_PNG,
+		)
+		# The employer's completes it, and the form says so without anybody
+		# calling submit_i9_section_2 a second time.
+		self.assertEqual(second["form_status_advanced_to"], "Complete")
+		self.assertEqual(second["form_status"], "Complete")
+
+		filed = next(iter(STORE.rows("I-9 Form")))
+		self.assertEqual(filed["status"], "Complete")
+		self.assertTrue(filed["section_1_signature"])
+		self.assertTrue(filed["section_2_signature"])
+		# Two signers, two capacities, on one form and one device.
+		roles = sorted(
+			str(row["signature_role"])
+			for row in STORE.rows("Signing Evidence")
+			if row["document_name"] == form
+		)
+		self.assertEqual(roles, ["Employee", "Employer Representative"])
 
 	def test_21_submit_w4(self):
 		self.the_hr_furniture()
@@ -2230,7 +2310,10 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		UndecodedResponseModel.decode(row, "get_i9_form")
 
 		self.assertEqual(row["employee"], self.NEW_HIRE)
-		self.assertEqual(row["status"], "Complete")
+		# v0.64.2, and incidental to what this test is about: the wizard posts
+		# neither attestation, so the form it builds rests here rather than at
+		# Complete. See test_20 for the argument.
+		self.assertEqual(row["status"], "Awaiting Verification")
 		self.assertEqual(row["list_a_doc_title"], "U.S. Passport")
 		self.assertEqual(row["verifier_name"], "Ana Ramos")
 		self.assertEqual(row["address_city"], "Yakima")
@@ -2464,7 +2547,16 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			verifier_title="Farm Manager",
 			verification_date=frappe.utils.today(),
 		)
-		self.assertEqual(row["status"], "Complete")
+		# THE RECEIPT IS STILL NOT WHAT HOLDS THIS FORM OPEN, which is the claim
+		# this test protects: under 8 CFR 274a.2(b)(1)(vi) the worker may work
+		# while the replacement comes, so `list_a_is_receipt` does not block
+		# completion. What holds it open is the missing attestation, and the two
+		# reasons must not be confused — `unsigned` names the one in force.
+		self.assertEqual(row["status"], "Awaiting Verification")
+		self.assertEqual(
+			row["unsigned"],
+			["Section 1 (the employee's attestation)", "Section 2 (the employer's attestation)"],
+		)
 		filed = next(iter(STORE.rows("I-9 Form")))
 		self.assertTrue(int(filed["list_a_is_receipt"] or 0))
 		self.assertTrue(int(filed["receipt_pending"] or 0))

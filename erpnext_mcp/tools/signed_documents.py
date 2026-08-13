@@ -75,6 +75,14 @@ SEAL_FIELDS = ("sealed_pdf", "sealed_pdf_hash", "sealed_at")
 #: eye and a sealed copy is never mistaken for the working page.
 SEAL_STEM = "sealed"
 
+#: The link column a signed form carries to the person it is about. Only forms
+#: that HAVE one are cross-filed — an employer return is signed by an officer
+#: and belongs to nobody's personnel folder, which is why this is looked up on
+#: the doctype rather than assumed.
+EMPLOYEE_LINK = "employee"
+
+EMPLOYEE = "Employee"
+
 
 # ── resolving which form ────────────────────────────────────────────────────
 def resolve_document(args: dict) -> tuple[str, str]:
@@ -463,6 +471,7 @@ def seal_signed_document(args: dict) -> ToolResult:
 
 	attachment = artifacts.attach_bytes(doctype, name, _seal_file_name(doctype, name, url), sealed)
 	recorded = _record_seal(rows, attachment.get("file_url"), digest)
+	filed = _file_on_employee(doctype, name, attachment)
 
 	data = {
 		"document_type": doctype,
@@ -480,14 +489,134 @@ def seal_signed_document(args: dict) -> ToolResult:
 		"signed_boxes": signed,
 		"evidence": [row.get("name") for row in rows],
 		"evidence_updated": recorded["updated"],
+		# v0.64.1. ALWAYS PRESENT, and `filed` is false where the form names
+		# nobody. A caller that had to test for the key would have two code paths
+		# where it needs one — see `shift_evidence` on `complete_farm_task`.
+		"employee_copy": filed,
 		"note": recorded["note"] or note or "",
 	}
 	summary = (
 		f"{doctype} {name} sealed as {attachment.get('file_name')} ({len(sealed):,} bytes), "
 		f"{len(rows)} signature(s) on the verification page"
 		+ (f", {len(recorded['updated'])} evidence row(s) stamped" if recorded["updated"] else "")
+		+ (f", filed on {filed['employee']}" if filed.get("filed") else "")
 	)
 	return ToolResult(data=data, summary=summary)
+
+
+def _file_on_employee(doctype: str, name: str, attachment) -> dict:
+	"""Cross-file the sealed copy onto the Employee the form is about. NEVER RAISES.
+
+	────────────────────────────────────────────────────────────────────────
+	WHY THE SEALED PDF BELONGS IN TWO PLACES AND THE WORKING PAGE DOES NOT
+	────────────────────────────────────────────────────────────────────────
+
+	v0.64.1, and it is a gap somebody found by looking for a completed I-9 where
+	an inspection would look for it. `seal_signed_document` attached the retained
+	artefact to the FORM, which is correct and was the whole of it: the personnel
+	folder — the Employee record, which is what anybody opens when they are
+	asked "show me this worker's paperwork" — showed nothing. The I-9 was
+	complete, sealed, hashed and findable only by somebody who already knew the
+	I-9 Form docname, which an auditor standing at a desk does not.
+
+	IT IS A SECOND `File` ROW AT THE SAME `file_url`, NOT A SECOND COPY OF THE
+	BYTES. `insert_attachment` writes a row pointing at a URL when it is given no
+	content, which is the same door `attach_file_to_document` uses for a file that
+	already lives on the site. Two links to one artefact is what a cross-reference
+	is; two copies would be two documents that can drift apart, and the one thing
+	a tamper-evident artefact must not do is exist twice with one hash.
+
+	ONLY THE SEAL TRAVELS, NEVER `generated_pdf`. The working page is redrawn
+	every time a signature lands, and a personnel folder accumulating a copy of
+	each intermediate draw would bury the one document that matters under the
+	four that were superseded. The seal is the retained artefact by construction
+	— that is the argument `seal_signed_document` already makes for not
+	repointing `generated_pdf` — so it is the one that gets filed.
+
+	A FORM THAT NAMES NOBODY IS NOT AN ERROR. A Tax Form is an employer return
+	signed by an officer; it has no `employee` column and belongs in no personnel
+	folder. `filed: false` with the reason is the honest answer, and inventing a
+	link would put a 941 in somebody's file.
+
+	NEVER RAISES, for the reason `_record_seal` does not: the sealed artefact is
+	already written and hashed by the time this runs, and a cross-reference that
+	could undo it would trade the irreplaceable thing for the convenient one.
+	"""
+	url = str(attachment.get("file_url") or "").strip()
+	if not url:
+		return {"filed": False, "reason": "the sealed copy has no file_url to point a second link at."}
+	if not compat.has_field(doctype, EMPLOYEE_LINK):
+		return {
+			"filed": False,
+			"reason": (
+				f"{doctype} carries no {EMPLOYEE_LINK} column — it is not a form about one person, "
+				f"so there is no personnel folder for the sealed copy to appear in."
+			),
+		}
+	try:
+		employee = str(frappe.db.get_value(doctype, name, EMPLOYEE_LINK) or "").strip()
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		return {"filed": False, "reason": f"the {EMPLOYEE_LINK} on {name} could not be read ({exc})."}
+	if not employee:
+		return {
+			"filed": False,
+			"reason": f"{doctype} {name} names no employee, so there is no folder to file it in.",
+		}
+	if not compat.doctype_exists(EMPLOYEE):
+		return {"filed": False, "reason": "this site has no Employee DocType."}
+
+	# ALREADY THERE IS A SUCCESS, NOT A SKIP. `seal_signed_document` is documented
+	# as re-runnable — an operator re-seals a form that has gained a second
+	# signature — and a re-seal that filed a duplicate link every time would turn
+	# a personnel folder into a changelog of one document.
+	try:
+		existing = frappe.db.get_all(
+			"File",
+			filters={
+				"file_url": url,
+				"attached_to_doctype": EMPLOYEE,
+				"attached_to_name": employee,
+			},
+			pluck="name",
+			limit=1,
+		)
+	except Exception:  # pragma: no cover - a site mid-migrate
+		existing = []
+	if existing:
+		return {
+			"filed": True,
+			"employee": employee,
+			"file": existing[0],
+			"file_url": url,
+			"already_linked": True,
+		}
+
+	try:
+		linked = files.insert_attachment(
+			str(attachment.get("file_name") or "").strip() or url.rsplit("/", 1)[-1],
+			b"",
+			is_private=True,
+			doctype=EMPLOYEE,
+			name=employee,
+			file_url=url,
+		)
+	except Exception as exc:
+		return {
+			"filed": False,
+			"employee": employee,
+			"reason": (
+				f"the sealed copy is attached to {doctype} {name} and could not be cross-filed on "
+				f"{EMPLOYEE} {employee} ({exc}). attach_file_to_document with this file_url files it "
+				f"without producing anything again."
+			),
+		}
+	return {
+		"filed": True,
+		"employee": employee,
+		"file": linked.name,
+		"file_url": url,
+		"already_linked": False,
+	}
 
 
 def _base_page(doctype: str, name: str, handler: dict) -> str:

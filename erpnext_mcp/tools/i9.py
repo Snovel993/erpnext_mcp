@@ -577,6 +577,86 @@ def create_i9_form(args: dict) -> ToolResult:
     )
 
 
+#: The two attestations a Form I-9 is not complete without, and the label each
+#: one is refused by name under. Section 3 / Supplement B is deliberately absent:
+#: a reverification is an EVENT on a form that was already complete, not a
+#: precondition of it, and folding it in here would make a rehire reopen a
+#: finished record.
+REQUIRED_SIGNATURES = (
+    ("section_1_signature", "Section 1 (the employee's attestation)"),
+    ("section_2_signature", "Section 2 (the employer's attestation)"),
+)
+
+
+def _remote_addr() -> str:
+    """The caller's address, or "" where the request has none.
+
+    A function rather than the expression it replaces, because it was written
+    twice and the two copies were the two places a signing IP was being stamped
+    for a signature that had not been made.
+    """
+    try:
+        request = getattr(getattr(frappe, "local", None), "request", None)
+        return str(getattr(request, "remote_addr", "") or "") if request else ""
+    except Exception:  # pragma: no cover - a context with no request
+        return ""
+
+
+def unsigned_boxes(doc) -> list:
+    """Which of the two required attestations this form is still missing.
+
+    Empty means the form carries both and may be Complete. Returns the LABELS
+    rather than the fieldnames, because every caller uses them in a sentence
+    somebody reads.
+    """
+    return [
+        label
+        for field, label in REQUIRED_SIGNATURES
+        if not str(doc.get(field) or "").strip()
+    ]
+
+
+def advance_if_signed(name: str) -> str:
+    """Move an I-9 from `Awaiting Verification` to `Complete` once it is signed.
+
+    THE OTHER HALF OF THE GATE IN `submit_i9_section_2`, and without it that gate
+    would be a trap. Section 2's documents are filed, the form rests at
+    `Awaiting Verification` because a box was blank, and the signature that fills
+    it arrives at the PAD rather than back through the submit call — which is the
+    ordinary flow on a handset and the whole point of `collect_form_signature`.
+    Something has to notice, and the signature landing is the moment.
+
+    IT ONLY EVER MOVES ONE EDGE. `Awaiting Verification` → `Complete`, and only
+    where Section 2 was genuinely filed (`verification_date` is what says so) and
+    both attestations are now present. It will not advance a Draft, will not
+    touch a form somebody set to Reverification Needed, Expired or Destroyed, and
+    will not reopen a Complete one. A status machine that could be driven from a
+    signature pad in any other direction would be a status machine.
+
+    RETURNS THE NEW STATUS, or "" where nothing moved. NEVER RAISES: the
+    signature is on the record by the time this runs and is the irreplaceable
+    artefact — the same ordering rule every step after a capture obeys.
+    """
+    try:
+        doc = frappe.get_doc(I9_FORM, name)
+        if str(doc.get("status") or "") != "Awaiting Verification":
+            return ""
+        if not doc.get("verification_date") or unsigned_boxes(doc):
+            return ""
+        doc.status = "Complete"
+        doc.flags.ignore_permissions = True
+        doc.save()
+    except Exception:  # pragma: no cover - see the docstring
+        return ""
+    _log_action(
+        name,
+        str(doc.get("employee") or ""),
+        "Completed",
+        {"reason": "the last outstanding attestation was signed", "status": "Complete"},
+    )
+    return "Complete"
+
+
 def _business_days_between(start: date, end: date) -> int:
     """Count business days between two dates (inclusive of both)."""
     if end < start:
@@ -673,15 +753,23 @@ def submit_i9_section_1(args: dict) -> ToolResult:
                 "three and this form answered with none."
             )
 
+    # THE MOMENT AND THE ADDRESS ARE WRITTEN ONLY WHERE A SIGNATURE IS. v0.64.2,
+    # and the old shape stamped both unconditionally: a Section 1 with an empty
+    # signature column carried a `section_1_signed_at` and a `section_1_signed_ip`
+    # anyway. That is the 8 CFR § 274a.2(h) record of when the employee's
+    # attestation was made, filled in for an attestation nobody made — a record
+    # asserting more than it knows, and the direction that matters, because an
+    # inspector reading a timestamp and an IP has been told somebody signed.
+    #
+    # A SIGNATURE ALREADY ON THE RECORD IS NOT RE-STAMPED EITHER. The pad may
+    # have collected it before this call, and `collect_form_signature` wrote the
+    # true moment; overwriting it with `now()` would replace the time the person
+    # drew it with the time somebody typed the rest of the form.
     sig = as_str(args, "section_1_signature")
     if sig:
         doc.section_1_signature = sig
-    doc.section_1_signed_at = frappe.utils.now()
-    doc.section_1_signed_ip = (
-        frappe.local.request.remote_addr
-        if hasattr(frappe, "local") and hasattr(frappe.local, "request") and frappe.local.request
-        else ""
-    )
+        doc.section_1_signed_at = frappe.utils.now()
+        doc.section_1_signed_ip = _remote_addr()
 
     doc.preparer_used = as_bool(args, "preparer_used", False)
     if doc.preparer_used:
@@ -809,17 +897,35 @@ def submit_i9_section_2(args: dict) -> ToolResult:
     doc.verifier_title = signature["title"]
     doc.verification_date = verification_date
 
+    # Same rule as Section 1's, and see the comment there for why.
     sig = as_str(args, "section_2_signature")
     if sig:
         doc.section_2_signature = sig
-    doc.section_2_signed_at = frappe.utils.now()
-    doc.section_2_signed_ip = (
-        frappe.local.request.remote_addr
-        if hasattr(frappe, "local") and hasattr(frappe.local, "request") and frappe.local.request
-        else ""
-    )
+        doc.section_2_signed_at = frappe.utils.now()
+        doc.section_2_signed_ip = _remote_addr()
 
-    doc.status = "Complete"
+    # ── COMPLETE MEANS SIGNED, AND UNTIL v0.64.2 IT DID NOT ─────────────
+    #
+    # This line used to read `doc.status = "Complete"` unconditionally, so an
+    # I-9 reached its terminal status with both signature boxes empty. The
+    # missing-signature rules caught it afterwards and raised two Criticals —
+    # which is a DETECTIVE control, and the whole value of a status called
+    # Complete is that somebody can read it without running a sweep first.
+    #
+    # A form is not complete because its fields are full. Section 1 is the
+    # employee's attestation under penalty of perjury and Section 2 is the
+    # employer's; a Form I-9 carrying neither is a set of answers about
+    # documents, and 8 CFR § 274a.2(b)(1) asks for the attestations.
+    #
+    # THE DOCUMENT DATA IS STILL WRITTEN. Refusing the call outright would throw
+    # away the examination somebody actually performed — which documents were
+    # produced, by whom, on what date, inside the three-business-day window this
+    # function has already checked. So the work is filed and the form rests at
+    # `Awaiting Verification`, which is a status this tool already ACCEPTS as
+    # input: signing the outstanding box advances it (see `advance_if_signed`),
+    # and re-submitting with the signature does too.
+    missing = unsigned_boxes(doc)
+    doc.status = "Awaiting Verification" if missing else "Complete"
     doc.flags.ignore_permissions = True
     doc.save()
 
@@ -856,8 +962,28 @@ def submit_i9_section_2(args: dict) -> ToolResult:
         "verifier_name": doc.verifier_name,
         "verifier_title": doc.verifier_title or None,
         "signer_roster_enforced": bool(signature["configured"]),
+        # v0.64.2. ALWAYS PRESENT, EMPTY WHERE THE FORM IS SIGNED. A caller that
+        # had to test for the key would have two code paths where it needs one,
+        # and the one it exercises least is the one that ships broken.
+        "unsigned": missing,
     }
-    summary = f"Section 2 completed for {employee} by {doc.verifier_name}"
+    if missing:
+        data["unsigned_note"] = (
+            f"The documents are examined and filed, and this form is NOT Complete: it is missing "
+            f"{' and '.join(missing)}. A Form I-9 is complete when it carries the attestations, "
+            f"not when its boxes are full — 8 CFR § 274a.2(b)(1) asks for the signatures, and a "
+            f"status of Complete on an unsigned form is the one thing an inspection reads and "
+            f"believes. Collect the outstanding one with collect_form_signature (or "
+            f"submit_form_signature from a handset) and the form advances to Complete on its own."
+        )
+    summary = (
+        f"Section 2 filed for {employee} by {doc.verifier_name}"
+        + (
+            f"; AWAITING {' and '.join(missing)}"
+            if missing
+            else " — both attestations present, form Complete"
+        )
+    )
     if receipt_lists:
         summary += (
             f" against a List {'/'.join(receipt_lists)} receipt — the document itself is "
@@ -866,7 +992,7 @@ def submit_i9_section_2(args: dict) -> ToolResult:
     return ToolResult(
         data=data,
         summary=summary,
-        docstatus_delta="Section 1 Complete → Complete",
+        docstatus_delta=f"Section 1 Complete → {doc.status}",
     )
 
 
