@@ -3552,6 +3552,134 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertIn("already has 1 assigned", str(caught.exception))
 		self.assertIn("Nothing was created", str(caught.exception))
 
+	def test_49_both_doors_answer_to_both_spellings_of_the_filter(self):
+		"""v0.63.1. The mirror of the bug v0.62.0 fixed, and the reason it needed
+		fixing on both sides: `routes.bind` drops what a signature does not name
+		whichever direction the caller crosses in. Before this, `include_full`
+		sent at `list_housing_units` vanished exactly as `assignable_only` sent at
+		`list_available_housing` did — and both vanish silently, which on this
+		read is a wrong list of beds rather than an error anybody sees."""
+		self.the_hr_furniture()
+		frappe.db.set_value("Housing Unit", self.unit, "condition", "Uninhabitable")
+
+		def names(method, **kwargs):
+			answer = self.wire(method, company=MAIN, **kwargs)
+			HousingUnitListModel.decode(answer, method)
+			return [row["name"] for row in answer["units"]]
+
+		# The narrow question, asked four ways at two doors. Same camp, same answer.
+		narrow = names("list_available_housing")
+		self.assertNotIn(self.unit, narrow)
+		self.assertEqual(names("list_available_housing", assignable_only=True), narrow)
+		self.assertEqual(names("list_housing_units", assignable_only=True), narrow)
+		self.assertEqual(names("list_housing_units", include_full=False), narrow)
+
+		# And the wide one. The condemned cabin is LISTED and marked, which is the
+		# whole point of the handset's default.
+		wide = names("list_housing_units")
+		self.assertIn(self.unit, wide)
+		self.assertEqual(names("list_housing_units", assignable_only=False), wide)
+		self.assertEqual(names("list_available_housing", include_full=True), wide)
+		self.assertEqual(names("list_available_housing", assignable_only=False), wide)
+
+	def test_49_neither_default_moved_when_the_other_spelling_arrived(self):
+		"""The property the aliases exist to protect. A body naming NEITHER
+		spelling is every handset already in an orchard, and the two doors answer
+		it differently on purpose: one is asked "where can somebody sleep", the
+		other "show me the camp"."""
+		self.the_hr_furniture()
+		frappe.db.set_value("Housing Unit", self.unit, "condition", "Uninhabitable")
+
+		self.assertNotIn(
+			self.unit, [row["name"] for row in self.wire("list_available_housing", company=MAIN)["units"]]
+		)
+		self.assertIn(
+			self.unit, [row["name"] for row in self.wire("list_housing_units", company=MAIN)["units"]]
+		)
+
+	def test_49_a_body_that_says_both_to_one_effect_is_refused_by_name(self):
+		"""Not resolved. `include_full=true` beside `assignable_only=true` asked
+		for the whole camp and for the open beds in one breath, and picking a half
+		would answer a question nobody asked with a list somebody acts on."""
+		self.the_hr_furniture()
+		for door in ("list_available_housing", "list_housing_units"):
+			for contradiction in (
+				{"include_full": True, "assignable_only": True},
+				{"include_full": False, "assignable_only": False},
+			):
+				with self.subTest(method=door, body=contradiction), self.assertRaises(Exception) as caught:
+					self.wire(door, company=MAIN, **contradiction)
+				self.assertIn("include_full", str(caught.exception))
+				self.assertIn("assignable_only", str(caught.exception))
+				self.assertIn("Nothing was read", str(caught.exception))
+
+	def test_50_both_doors_answer_to_both_spellings_of_the_cabin_and_the_date(self):
+		"""v0.63.1. `assign_housing` declares `housing_unit`/`check_in_date` and
+		`create_housing_assignment` declares `unit`/`assigned_date`, and until now
+		crossing between them lost both fields to `bind` — a hire refused for want
+		of a start date the body had carried, naming an argument the caller had
+		never heard of."""
+		self.the_hr_furniture()
+		older = self.wire(
+			"assign_housing",
+			employee=self.NEW_HIRE,
+			unit=self.unit,
+			assigned_date=frappe.utils.today(),
+		)
+		HousingAssignmentResultModel.decode(older, "assign_housing")
+		self.assertEqual(older["unit"], self.unit)
+		self.assertEqual(older["assigned_date"], frappe.utils.today())
+
+		newer = self.wire(
+			"create_housing_assignment",
+			employee=self.SECOND_HAND,
+			housing_unit=self.unit,
+			check_in_date=frappe.utils.today(),
+			allow_multi_occupancy=True,
+		)
+		HousingAssignmentResultModel.decode(newer, "create_housing_assignment")
+		self.assertEqual(newer["unit"], self.unit)
+		self.assertEqual(newer["assigned_date"], frappe.utils.today())
+
+	def test_50_the_refusal_quotes_the_spelling_the_body_actually_used(self):
+		"""Which is the whole reason the label travels with the value. A phone
+		told `check_in_date is required` by a method it called with
+		`assigned_date` is a phone whose operator cannot act on the sentence."""
+		self.the_hr_furniture()
+		with self.assertRaises(Exception) as caught:
+			self.wire("assign_housing", employee=self.NEW_HIRE, unit=self.unit)
+		self.assertIn("check_in_date is required", str(caught.exception))
+
+		with self.assertRaises(Exception) as caught:
+			self.wire("assign_housing", employee=self.NEW_HIRE, housing_unit=self.unit)
+		self.assertIn("check_in_date is required", str(caught.exception))
+
+		with self.assertRaises(Exception) as caught:
+			self.wire(
+				"create_housing_assignment",
+				employee=self.NEW_HIRE,
+				housing_unit=self.unit,
+				assigned_date="",
+			)
+		self.assertIn("assigned_date is required", str(caught.exception))
+
+	def test_50_two_spellings_naming_two_cabins_is_refused_rather_than_resolved(self):
+		"""One of them is a cabin somebody is NOT being put in, and nothing in the
+		body says which. Nothing is written either way."""
+		self.the_hr_furniture()
+		with self.assertRaises(Exception) as caught:
+			self.wire(
+				"create_housing_assignment",
+				employee=self.NEW_HIRE,
+				unit=self.unit,
+				housing_unit="MC-Cabin-99",
+				assigned_date=frappe.utils.today(),
+			)
+		self.assertIn("unit", str(caught.exception))
+		self.assertIn("housing_unit", str(caught.exception))
+		self.assertIn("Nothing was written", str(caught.exception))
+		self.assertEqual(frappe.db.count("Housing Assignment"), 0)
+
 	def test_51_set_employee_org_fields(self):
 		"""§13.2 — the write the Assignment step has never had.
 

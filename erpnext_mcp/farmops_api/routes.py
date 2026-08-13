@@ -270,6 +270,13 @@ ROUTES = (
 	# no date in it. The older spellings keep their routes — a handset already in
 	# an orchard is not asked to change to get an answer, which is the same
 	# promise `collect_signature` kept when `submit_form_signature` arrived.
+	#
+	# v0.63.1: BOTH SPELLINGS NOW REACH BOTH DOORS, and this filter is still the
+	# reason. Declaring one spelling per method fixed the crossing the app makes
+	# and left the opposite crossing dropping arguments the same silent way — so
+	# each of these two methods and each of the two above it declares its own
+	# spelling AND the other's, reconciled in one place in `api/mobile.py`, with
+	# each door keeping the default it answers for.
 	Route("/mobile", mobile_api.list_org_reference_data),
 	Route("/mobile", mobile_api.list_housing_units),
 	Route("/mobile", mobile_api.create_housing_assignment),

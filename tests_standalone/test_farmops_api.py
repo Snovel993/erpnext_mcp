@@ -904,6 +904,42 @@ class TheArgumentFilter(FarmOpsAPITestCase):
 				self.assertNotIn(refused, farmops_routes.accepted_arguments(route.handler))
 				self.assertEqual(farmops_routes.bind(route, {refused: "Left"}), {})
 
+	def test_both_housing_doors_accept_both_spellings_of_the_same_argument(self):
+		"""v0.63.1. This filter is why the four aliases exist, and it is also why
+		one spelling each was not enough: a body crossing from either name to the
+		other lost the argument it was carrying, silently. `list_available_housing`
+		and `list_housing_units` answer one question with the filter spelled two
+		opposite ways; `assign_housing` and `create_housing_assignment` name one
+		cabin and one date two ways. Every pair must survive `bind` at BOTH doors —
+		a dropped filter here is a list of cabins nobody can be put in, and a
+		dropped cabin is a hire refused for want of a field the phone sent."""
+		pairs = {
+			"list_available_housing": ("include_full", "assignable_only"),
+			"list_housing_units": ("include_full", "assignable_only"),
+			"assign_housing": ("unit", "housing_unit", "assigned_date", "check_in_date"),
+			"create_housing_assignment": ("unit", "housing_unit", "assigned_date", "check_in_date"),
+		}
+		for method, spellings in pairs.items():
+			route = farmops_routes.BY_PATH[f"/mobile/{method}"]
+			accepted = farmops_routes.accepted_arguments(route.handler)
+			for spelling in spellings:
+				with self.subTest(method=method, argument=spelling):
+					self.assertIn(spelling, accepted)
+					self.assertEqual(farmops_routes.bind(route, {spelling: "kept"})[spelling], "kept")
+
+	def test_the_barracks_flag_still_cannot_be_sent_to_the_older_housing_door(self):
+		"""The one argument v0.63.1 did NOT alias across, and the reason both
+		doors exist. `assign_housing` passes the flag as true on the caller's
+		behalf under capacity and the capacity check refuses at it; declaring it
+		there would hand a phone the argument that changes that answer. `company`
+		stays off it for the same reason it always was — that door narrows by the
+		caller's own entities and nothing else."""
+		route = farmops_routes.BY_PATH["/mobile/assign_housing"]
+		for refused in ("allow_multi_occupancy", "company"):
+			with self.subTest(argument=refused):
+				self.assertNotIn(refused, farmops_routes.accepted_arguments(route.handler))
+				self.assertEqual(farmops_routes.bind(route, {refused: True}), {})
+
 	def test_a_body_naming_another_user_is_answered_as_the_caller(self):
 		"""An account that can name somebody else in a request body is not
 		scoped to anything. Dropped here AND in `guard` — two locks, one door."""

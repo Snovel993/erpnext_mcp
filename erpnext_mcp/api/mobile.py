@@ -2926,11 +2926,124 @@ def _onboarding_reference_data(user: str, company) -> dict:
 	return out
 
 
+# ── the two spellings of one flag, and of one cabin ─────────────────────────
+#
+# v0.63.1. THE v0.62.0 ALIASES WERE REACHABLE UNDER ONE SPELLING EACH, WHICH IS
+# HALF OF WHAT AN ALIAS IS FOR. That release declared `assignable_only` on
+# `list_housing_units` and `unit`/`assigned_date` on `create_housing_assignment`
+# because `routes.bind` reduces a body to the keys a signature names, so the
+# handset's spellings could not otherwise arrive at all. What it left standing is
+# the MIRROR of the bug it fixed: the same silent drop, pointed the other way. A
+# caller reaching the new name with the older body loses the filter and is shown
+# cabins nobody can be put in; a caller reaching the older name with the new body
+# loses the cabin and the date and is refused a hire it named. Both doors now
+# declare both spellings, and the three functions below are the ONE place the
+# pairs are reconciled — an alias whose reconciliation lived in the wrapper would
+# be a second copy of the rule the moment a third spelling arrived.
+#
+# NEITHER DOOR'S DEFAULT MOVED, and that is why `default_full` is an argument
+# rather than a constant. `include_full` and `assignable_only` are not two names
+# for one flag; they are OPPOSITE SENSES WITH OPPOSITE DEFAULTS. The older name
+# answers "where can somebody sleep" and drops the full cabins and the condemned
+# one; the handset's name answers "show me the camp" and keeps them, marked and
+# greyed out. Accepting both spellings changes what a caller MAY send. It does
+# not change what either name answers when the caller sends neither, because
+# every handset already in an orchard is a caller who sends neither.
+#
+# A CONTRADICTION IS REFUSED RATHER THAN RESOLVED. `include_full=true` beside
+# `assignable_only=true` is not a body any client this app knows about produces,
+# and there is no reading of it truer than the other — so it is refused by name,
+# with both keys quoted back, rather than settled in favour of whichever the code
+# happens to read first. A wrong list of beds is the failure this whole block
+# exists to prevent, and silently picking one half of a contradiction is that
+# failure with a different cause.
+def _was_sent(raw) -> bool:
+	"""Whether the body actually carried this key. A literal `false` counts as sent.
+
+	`False` and `0` are ANSWERS, and the difference between "the caller said no"
+	and "the caller said nothing" is the whole of which default applies. So this
+	tests presence and never truth — `str(False)` is `"False"`, which is not the
+	empty string and is therefore something the caller said.
+	"""
+	return str(raw if raw is not None else "").strip() != ""
+
+
+def _said_yes(raw) -> bool:
+	"""What this surface reads as true on the wire. Absence is false, as is anything else."""
+	return str(raw or "").strip().lower() in ("1", "true", "yes")
+
+
+def _camp_breadth(include_full, assignable_only, default_full: bool) -> bool:
+	"""One boolean out of two spellings of one flag: keep the cabins with no bed left.
+
+	See the block above for the whole argument. `default_full` is the answering
+	method's OWN default, applied when the body carried neither spelling.
+	"""
+	full_sent, narrow_sent = _was_sent(include_full), _was_sent(assignable_only)
+	if full_sent and narrow_sent:
+		# They agree only when they DISAGREE in value, because one is the negative
+		# of the other. Both true, or both false, is a body that asked for the
+		# camp and for the open beds in the same breath.
+		if _said_yes(include_full) == _said_yes(assignable_only):
+			frappe.throw(
+				"include_full and assignable_only are one flag in opposite senses and this body "
+				f"says both, to the same effect: include_full={include_full!r} with "
+				f"assignable_only={assignable_only!r}. Send one of them. "
+				"assignable_only=true and include_full=false are the same request — the cabins "
+				"with a bed free tonight; assignable_only=false and include_full=true are the "
+				"other one — the whole camp, the full and condemned units marked and kept. "
+				"Nothing was read.",
+				frappe.ValidationError,
+			)
+		return _said_yes(include_full)
+	if full_sent:
+		return _said_yes(include_full)
+	if narrow_sent:
+		return not _said_yes(assignable_only)
+	return default_full
+
+
+def _one_spelling(primary, alias, primary_label: str, alias_label: str) -> tuple:
+	"""One value out of two spellings of one argument, and the name the caller used.
+
+	THE LABEL TRAVELS WITH THE VALUE because `_house_one_person` quotes it in
+	every refusal it makes, and a phone told `check_in_date is required` by a
+	method it called with `assigned_date` is a phone whose operator cannot act on
+	the sentence. The label returned is the spelling the BODY carried, not the
+	one the door happens to prefer; the door's own spelling is the fallback for a
+	body that carried neither, which is the case that produces "is required".
+
+	TWO DIFFERENT VALUES ARE REFUSED, for the same reason a contradicting flag
+	is: one of them is a cabin somebody is not being put in, and there is nothing
+	in the body saying which.
+	"""
+	primary_value = str(primary or "").strip()
+	alias_value = str(alias or "").strip()
+	if primary_value and alias_value and primary_value != alias_value:
+		frappe.throw(
+			f"{primary_label} and {alias_label} are two spellings of one argument and this body "
+			f"says both, differently: {primary_label}={primary_value} against "
+			f"{alias_label}={alias_value}. Send one of them. Nothing was written.",
+			frappe.ValidationError,
+		)
+	if primary_value:
+		return primary_value, primary_label
+	if alias_value:
+		return alias_value, alias_label
+	return "", primary_label
+
+
 # ── 44. list_available_housing ──────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("list_available_housing", limit=guard.READ_LIMIT)
 def list_available_housing(
-	user: str, company=None, parcel=None, branch=None, include_full=None, employee=None
+	user: str,
+	company=None,
+	parcel=None,
+	branch=None,
+	include_full=None,
+	employee=None,
+	assignable_only=None,
 ) -> dict:
 	"""Which cabins have a bed free tonight, and how full each one already is.
 
@@ -3021,13 +3134,23 @@ def list_available_housing(
 	one argument it spells differently; every paragraph above is a rule about what
 	a phone may see of a camp, and two copies of them would be two answers to the
 	same question a season from now.
+
+	v0.63.1 ACCEPTS `assignable_only` HERE TOO, AND THE DEFAULT ABOVE IS UNMOVED.
+	It is the negative of `include_full` — `assignable_only=true` is this method's
+	default question and `assignable_only=false` is the whole camp — and it is
+	declared because `routes.bind` drops what a signature does not name, so a
+	client that learned the handset's spelling was silently getting the default
+	from this door rather than the filter it sent. Sending BOTH spellings to the
+	same effect is refused by name rather than resolved; see `_camp_breadth`.
 	"""
 	return _available_housing(
 		user,
 		company=company,
 		parcel=parcel,
 		branch=branch,
-		include_full=include_full,
+		# False: this method's question is "where can somebody sleep", so a body
+		# that names neither spelling drops the full cabins and the condemned one.
+		include_full=_camp_breadth(include_full, assignable_only, default_full=False),
 		employee=employee,
 	)
 
@@ -3193,6 +3316,8 @@ def assign_housing(
 	deposit_paid=None,
 	housing_deduction_from_wages=None,
 	notes=None,
+	unit=None,
+	assigned_date=None,
 ) -> dict:
 	"""Put one new hire in one cabin from one date. The wizard's Housing step.
 
@@ -3233,20 +3358,39 @@ def assign_housing(
 	caller's behalf and still declares no argument for it; that one is the choice
 	that differs between them, so it is the one parameter the shared function
 	takes.
+
+	v0.63.1 ACCEPTS `unit` AND `assigned_date` HERE TOO. They are the handset's
+	spellings of the cabin and the date, and until now a body carrying them
+	arrived at this method with both dropped by `routes.bind` and was refused for
+	want of a start date it had been sent — the same failure v0.62.0 fixed in the
+	other direction, and the reason the refusal was hard to read is that it named
+	an argument the caller had never heard of. Either spelling now decides, the
+	refusals quote the one the body actually used, and two spellings carrying
+	DIFFERENT cabins or dates is refused rather than resolved: one of them is a
+	cabin somebody is not being put in and nothing in the body says which.
+
+	WHAT IS STILL NOT ACCEPTED HERE IS `company` AND `allow_multi_occupancy`, and
+	neither is an oversight. This method's promise is that it passes the barracks
+	flag on the caller's behalf under capacity and refuses AT it — see above —
+	and a spelling alias is not the place to hand a phone the one argument that
+	changes that answer. `create_housing_assignment` is the door that declares
+	both, and it is the one the hiring wizard posts to.
 	"""
+	unit_value, unit_label = _one_spelling(housing_unit, unit, "housing_unit", "unit")
+	date_value, date_label = _one_spelling(check_in_date, assigned_date, "check_in_date", "assigned_date")
 	return _house_one_person(
 		user,
 		employee=employee,
-		unit=housing_unit,
-		assigned_date=check_in_date,
+		unit=unit_value,
+		assigned_date=date_value,
 		end_date=end_date,
 		company=None,
 		deposit_paid=deposit_paid,
 		housing_deduction_from_wages=housing_deduction_from_wages,
 		notes=notes,
 		allow_multi_occupancy=True,
-		unit_label="housing_unit",
-		date_label="check_in_date",
+		unit_label=unit_label,
+		date_label=date_label,
 	)
 
 
@@ -4112,6 +4256,19 @@ def get_shift(user: str, shift=None) -> dict:
 # `housing_unit`, `check_in_date` and neither of the last two — so a rename would
 # have arrived with no unit, no date, and the barracks flag silently gone.
 #
+# v0.63.1 DECLARES BOTH SPELLINGS AT BOTH DOORS, because the paragraph above
+# describes a drop that has a mirror image. `bind` reducing a body to one
+# signature's keys costs a caller the filter whichever direction they cross in:
+# `include_full` sent at `list_housing_units` vanished exactly as `assignable_only`
+# sent at `list_available_housing` did, and `housing_unit`/`check_in_date` sent at
+# `create_housing_assignment` vanished exactly as `unit`/`assigned_date` did — so
+# a client written against either name got a wrong list of beds or a refused hire
+# the moment it reached the other. Each door still keeps its OWN default and its
+# own barracks behaviour; what it no longer does is silently ignore the other
+# door's word for the same thing. `_camp_breadth` and `_one_spelling` are where
+# the pairs are reconciled, and a body that says both to contradictory effect is
+# refused there by name rather than settled in the code's favour.
+#
 # THE BARRACKS FLAG IS FORWARDED HERE AND IS STILL NOT AN OVERRIDE. See
 # `_house_one_person`: the capacity ceiling refuses before the flag is read, on
 # both doors. What the flag decides is the case UNDER capacity — a bunk room that
@@ -4138,7 +4295,13 @@ def list_org_reference_data(user: str, company=None) -> dict:
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("list_housing_units", limit=guard.READ_LIMIT)
 def list_housing_units(
-	user: str, company=None, parcel=None, branch=None, assignable_only=None, employee=None
+	user: str,
+	company=None,
+	parcel=None,
+	branch=None,
+	assignable_only=None,
+	employee=None,
+	include_full=None,
 ) -> dict:
 	"""`list_available_housing` under the handset's name and its filter's spelling.
 
@@ -4163,16 +4326,24 @@ def list_housing_units(
 
 	NON-RESIDENTIAL UNITS ARE STILL ABSENT ENTIRELY, under either name. A shower
 	block is not a bed with a problem; it is not a bed. See `list_available_housing`.
+
+	v0.63.1 ACCEPTS `include_full` HERE TOO, AND THE DEFAULT ABOVE IS UNMOVED. The
+	older spelling is declared for the same reason this method declares the newer
+	one: `routes.bind` drops what a signature does not name, so a caller who knew
+	only `include_full` was getting this door's WIDE default whatever it sent —
+	including when it sent `include_full=false` and meant the open beds alone.
+	Both spellings now decide, in their own sense, and a body carrying neither
+	still gets the whole camp. Sending both to the same effect is refused by name
+	rather than resolved; see `_camp_breadth`.
 	"""
-	# Off → the whole camp. See the docstring: the handset sends this flag only to
-	# NARROW, so its absence is the wide answer and `include_full` is its inverse.
-	only_assignable = str(assignable_only or "").strip().lower() in ("1", "true", "yes")
 	return _available_housing(
 		user,
 		company=company,
 		parcel=parcel,
 		branch=branch,
-		include_full=not only_assignable,
+		# True: the handset sends its flag only to NARROW, so a body naming neither
+		# spelling is the wide answer — the whole camp, the full cabins marked.
+		include_full=_camp_breadth(include_full, assignable_only, default_full=True),
 		employee=employee,
 	)
 
@@ -4191,6 +4362,8 @@ def create_housing_assignment(
 	housing_deduction_from_wages=None,
 	notes=None,
 	allow_multi_occupancy=None,
+	housing_unit=None,
+	check_in_date=None,
 ) -> dict:
 	"""`assign_housing` under the name and the four argument spellings the app posts.
 
@@ -4224,20 +4397,32 @@ def create_housing_assignment(
 	that is already at capacity whatever the body said, because nothing on a phone
 	adds a bunk to a cabin and a bed that does not exist becomes somebody sleeping
 	in a truck.
+
+	v0.63.1 ACCEPTS `housing_unit` AND `check_in_date` HERE TOO — the older
+	wrapper's spellings of the same cabin and the same date, declared so that a
+	client written against `assign_housing` reaches this door with its body
+	intact rather than with the two fields `routes.bind` would otherwise drop.
+	Either spelling decides; the refusals quote the one the body actually used;
+	two spellings naming different cabins or dates is refused rather than
+	resolved. Nothing else about this method changes with them — `company` still
+	narrows, and `allow_multi_occupancy` is still off by default, which is the
+	one behaviour that differs between the two doors and the reason both exist.
 	"""
+	unit_value, unit_label = _one_spelling(unit, housing_unit, "unit", "housing_unit")
+	date_value, date_label = _one_spelling(assigned_date, check_in_date, "assigned_date", "check_in_date")
 	return _house_one_person(
 		user,
 		employee=employee,
-		unit=unit,
-		assigned_date=assigned_date,
+		unit=unit_value,
+		assigned_date=date_value,
 		end_date=end_date,
 		company=company,
 		deposit_paid=deposit_paid,
 		housing_deduction_from_wages=housing_deduction_from_wages,
 		notes=notes,
-		allow_multi_occupancy=str(allow_multi_occupancy or "").strip().lower() in ("1", "true", "yes"),
-		unit_label="unit",
-		date_label="assigned_date",
+		allow_multi_occupancy=_said_yes(allow_multi_occupancy),
+		unit_label=unit_label,
+		date_label=date_label,
 	)
 
 

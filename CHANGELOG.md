@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.63.1 — 2026-08-12
+
+**The same argument drop, pointed the other way.** v0.62.0 published three
+aliases because `routes.bind` reduces a request body to the keys the answering
+signature names, so the handset's spellings could not otherwise arrive. It
+declared one spelling per door, which left the identical drop open in the
+opposite direction: `include_full` sent at `list_housing_units` vanished exactly
+as `assignable_only` sent at `list_available_housing` did, and
+`housing_unit`/`check_in_date` sent at `create_housing_assignment` vanished
+exactly as `unit`/`assigned_date` sent at `assign_housing` did. A dropped filter
+is a list of cabins nobody can be put in; a dropped cabin is a hire refused for
+want of a field the phone sent, naming an argument the caller never heard of.
+
+All four methods now declare **both** spellings, reconciled in one place in
+`api/mobile.py`.
+
+- **Neither door's default moved.** `include_full` and `assignable_only` are one
+  flag in opposite senses with opposite defaults — "where can somebody sleep"
+  against "show me the camp" — and a body naming neither spelling still gets the
+  answer its door has always given. Every handset in the field sends neither or
+  exactly one, so nothing already deployed changes answer.
+- **Refusals quote the spelling the body used.** A phone told `check_in_date is
+  required` by a method it called with `assigned_date` is a phone whose operator
+  cannot act on the sentence.
+- **A body saying both to contradictory effect is refused rather than resolved**,
+  with both keys quoted and nothing read or written.
+- `assign_housing` still declares neither `allow_multi_occupancy` nor `company`,
+  on purpose: it passes the barracks flag on the caller's behalf under capacity
+  and refuses at it, and a spelling alias is not the place to hand a phone the
+  argument that changes that answer.
+
 ## 0.63.0 — 2026-08-12
 
 **The two ends of a signature, and the wage floor somebody can actually set.**
