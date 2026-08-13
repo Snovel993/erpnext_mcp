@@ -555,10 +555,13 @@ class ToolRegistration(unittest.TestCase):
 		# is step 1 of the evidence chain — the page the signer is shown, as bytes,
 		# because the handset cannot follow a private file_url — and
 		# `seal_signed_document` (write) is step 5, the verification page and the
-		# hash of the finished file.
-		self.assertEqual(len(self.registry.TOOLS), 413)
+		# hash of the finished file. v0.65.0 adds one write, `universal_scan` —
+		# one scanned string resolved against the badge, asset, housing and block
+		# registers in that order — and it counts as a write for one branch's
+		# sake: the asset one is `scan_asset`, which stamps `last_scan_at`.
+		self.assertEqual(len(self.registry.TOOLS), 414)
 		self.assertEqual(len(self.registry.READ_TOOLS), 189)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 224)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 225)
 
 
 if __name__ == "__main__":

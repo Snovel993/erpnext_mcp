@@ -556,7 +556,8 @@
   "allow_register_asset",
   "allow_update_registered_asset",
   "allow_retire_asset",
-  "allow_bulk_create_assets"
+  "allow_bulk_create_assets",
+  "allow_universal_scan"
  ],
  "fields": [
   {
@@ -4186,6 +4187,13 @@
    "fieldname": "allow_list_asset_state_history",
    "fieldtype": "Check",
    "label": "List Asset State History"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Scan anything: resolves one scanned string against the badge register, Asset Register, Housing Unit and Field, in that order, and answers with the entity, its open work and what may be done next. It writes on the asset branch only — the same last_scan_at stamp Scan Asset leaves.",
+   "fieldname": "allow_universal_scan",
+   "fieldtype": "Check",
+   "label": "Universal Scan"
   }
  ],
  "index_web_pages_for_search": 0,

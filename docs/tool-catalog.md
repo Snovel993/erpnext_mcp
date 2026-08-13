@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 413 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 414 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -10141,3 +10141,125 @@ resolving every row. `preview_payroll` carries `piece_rate_source` and the rate'
 docname, and the period runs carry two lists that are opposite facts:
 `piece_rates_from_company` (the fallback working) and
 `employees_missing_piece_rates` (the fallback finding nothing).
+
+---
+
+## v0.65.0 — one scan, whatever was on the tag
+
+Farm Ops already had four scanners and every one of them required the person
+holding the phone to know what they were about to scan **before** they scanned
+it. In an orchard that is backwards: a worker walks up to a thing with a sticker
+on it, and which register that sticker belongs to is the question, not the
+premise.
+
+### `universal_scan`
+
+**WRITE (default OFF).** Takes the raw string a camera produced and resolves it
+itself, then answers with the thing, the work outstanding on it, and what may be
+done next.
+
+| Argument | | |
+|---|---|---|
+| `content` | **required** | The scan as read. `scan`, `raw` and `code` are accepted spellings |
+| `company` | | Resolve only within this company's registers |
+| `shift` | | Farm Shift docname — badge branch only, adds `on_shift`/`joined_at` |
+| `scanned_by` | | The User who scanned. Recorded on the asset branch only |
+| `gps_lat` / `gps_lon` | | The scanner's fix. Recorded on the asset branch only |
+| `history_limit` | | Timeline entries. Default 10, hard maximum 100 |
+
+**The cascade, first match wins, on the exact docname:**
+
+| # | Register | `entity_type` | Behind it |
+|---|---|---|---|
+| 1 | Bucket Log Badge Map | `employee` | `resolve_badge`, plus the open shift this person is on |
+| 2 | Asset Register | `asset` | `scan_asset` — **the only branch that writes** |
+| 3 | Housing Unit | `housing_unit` | `get_housing_unit` |
+| 4 | Field | `field` | `get_field` |
+| 5 | — | `unknown` | the string as scanned, and which registers were searched |
+
+**The badge is first because a badge is a person.** A string that is somehow in
+both the badge register and the Asset Register resolves to the worker, because
+attributing somebody's piece work to a sprayer is the one confusion here with a
+payroll consequence and the one nobody can unpick afterwards.
+
+**The match is an exact docname.** `asset_row`, `unit_row` and `field_row` all
+fall back to a `LIKE` search on a partial name — right for an operator typing
+half a name into a tool, wrong for a cascade, where it would let a cabin's
+sticker resolve to whichever valve happened to share its prefix.
+
+**A printed tag encodes a URL.** `Asset Register` builds `qr_url` as
+`<public url>/scan/<name>`, so what a camera actually hands over is
+`https://erp.example.com/scan/MC-Valve-05`. That path is unwrapped — and
+percent-decoded — before any register is read. A bare string is passed through
+untouched.
+
+**Refusals pass through rather than falling through.** A retired badge, one
+belonging to somebody who has left, and a record in another company each get the
+sentence the tool that owns them writes. A card that *was* issued is a badge
+whatever its state, and demoting it to "unknown tag" would be the wrong sentence
+in every one of those cases.
+
+**Unknown is an answer, not an error.** A supplier's carton barcode or a
+hand-written label comes back with `entity_type: "unknown"`, the content whole,
+`searched` naming the registers that were actually consulted, and `create_task`
+still offered — the scan that resolves to nothing is the one most worth raising a
+job about, and the task needs the string.
+
+**One scan is refused instead: a credential document.** `generate_mobile_login_qr`
+mints `{"url":…,"api_key":…,"api_secret":…}`, and what a camera reads by accident
+is whichever QR is nearest. That string is refused before any register is read and
+is **not quoted back** — the same decision `resolve_badge` makes at the badge step,
+made here at the door in front of all four registers.
+
+**Response**
+
+```json
+{
+  "content": "https://erp.example.com/scan/MC-Valve-05",
+  "resolved_from": "MC-Valve-05",
+  "entity_type": "asset",
+  "entity": { "name": "MC-Valve-05", "asset_type": "Irrigation Valve", "...": "..." },
+  "entity_name": "MC-Valve-05",
+  "pending_tasks": [], "pending_task_count": 0,
+  "overdue_tasks": [], "overdue_task_count": 0,
+  "due_compliance": [], "due_compliance_count": 0,
+  "recent_history": [],
+  "available_actions": ["create_task", "log_state_change", "report_issue"],
+  "scan_recorded": true
+}
+```
+
+Every key is present on every answer, empty where it does not apply, so one
+client struct decodes all five entity types.
+
+| `entity_type` | `available_actions` |
+|---|---|
+| `employee` | `create_task`, `view_compliance`, `view_i9` |
+| `asset` | `create_task`, `log_state_change`, `report_issue` |
+| `housing_unit` | `create_task`, `start_inspection`, `log_state_change` |
+| `field` | `create_task`, `view_irrigation` |
+| `unknown` | `create_task` |
+
+**`overdue_tasks` is a subset of `pending_tasks`, not a partition of it.** A Farm
+Task carries no due date of its own, so *overdue* here means the Compliance Alert
+the task answers was due before today; a hand-raised task has no date and is
+never overdue. Every task carries `due_date` and `overdue`, so a client rendering
+only `pending_tasks` still shows the late work and nothing has to be re-derived on
+the handset.
+
+**Government IDs are deliberately absent from the cascade.** A licence's PDF417
+and a passport's MRZ are parsed on the handset and routed to the hiring wizard
+there. Those barcodes carry a date of birth, a document number and an address, and
+posting them to a server so it can name what the phone already knows would put an
+identity document into an HTTP body, an audit row's arguments and a log file for
+no answer the phone did not already have.
+
+### The mobile route
+
+`POST /farmops/api/mobile/universal_scan` publishes the same call to a handset.
+It is **metered as a read** (sixty a minute, `resolve_badge`'s limit) and
+**declared as a write**, and both are deliberate: a crew clock scanning a queue at
+a bin trailer is forty pure reads in a minute, and `WRITE_LIMIT` would refuse the
+crew rather than the abuse. The company comes from the caller's own scope — a
+`company` in the body may narrow it and can never widen it — and every task and
+alert leaving the route is checked against that scope on the way out.

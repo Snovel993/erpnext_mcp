@@ -313,7 +313,14 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: tracked work. `seal_signed_document` may never need naming at all: the
 	#: ordinary flow gets its seal from `submit_form_signature`, and this method
 	#: exists for a form signed before v0.63.0 or one signed in the Desk.
+	#: v0.65.0 adds `universal_scan` on the same footing. The server side is the
+	#: whole of it — one string in, whichever register holds it out — and the
+	#: handset side is a scanner screen that stops asking the worker what they
+	#: are about to scan, which `MobileAPI.swift` does not name yet. Listed here
+	#: rather than in `MOBILE` so this file keeps claiming only what the Swift
+	#: actually calls.
 	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
+		"universal_scan",
 		"collect_signature",
 		"get_document_preview",
 		"seal_signed_document",
@@ -2101,3 +2108,108 @@ class TheReturningWorkersCabin(MobileAPITestCase):
 		self.assertTrue(answer["branch_filter_applied"])
 		self.assertEqual(answer["previous_assignment"]["unit"], self.second)
 		self.assertIn(self.second, {row["name"] for row in answer["units"]})
+
+
+# ── 14. universal_scan ──────────────────────────────────────────────────────
+class TheScannerScreenHasOneCall(MobileAPITestCase):
+	"""v0.65.0. The route behind "point the camera at it and see what it is".
+
+	The cascade itself is `test_universal_scan.py`'s subject. What is asserted
+	HERE is only what this transport adds: the gates, the entity scoping, the
+	audit row, and the argument spellings — because this door's own filter keeps
+	only the keys the signature declares, and a scan posted under a name the
+	signature does not carry arrives empty.
+	"""
+
+	VALVE = "MC-Valve-05"
+
+	def setUp(self):
+		super().setUp()
+		self.configure(
+			enabled=1,
+			public_url="https://umbrel.tail4a2b.ts.net",
+			**ON,
+			allow_register_asset=1,
+			allow_universal_scan=1,
+		)
+
+	def a_valve(self, name=VALVE, company=MAIN):
+		return self.tool_data(
+			"register_asset", {"name": name, "asset_type": "Irrigation Valve", "company": company}
+		)["name"]
+
+	def test_a_tag_resolves_and_the_scan_is_recorded_against_the_caller(self):
+		self.a_valve()
+		self.be()
+		answer = mobile_api.universal_scan(content=self.VALVE)
+		self.assertEqual(answer["entity_type"], "asset")
+		self.assertEqual(answer["entity_name"], self.VALVE)
+		self.assertTrue(answer["scan_recorded"])
+		self.assertEqual(frappe.db.get_value("Asset Register", self.VALVE, "last_scan_by"), WORKER)
+
+	def test_a_stranger_comes_back_as_unknown_rather_than_as_an_error(self):
+		self.be()
+		answer = mobile_api.universal_scan(content="0123456789012")
+		self.assertEqual(answer["entity_type"], "unknown")
+		self.assertEqual(answer["available_actions"], ["create_task"])
+		self.assertFalse(answer["scan_recorded"])
+
+	def test_every_spelling_of_the_scan_argument_reaches_the_tool(self):
+		"""`bind` drops what a signature does not name, so a handset posting
+		`code` at a method declaring only `content` would be told the field is
+		required while holding a perfectly good scan."""
+		self.a_valve()
+		for key in ("content", "scan", "raw", "code"):
+			with self.subTest(argument=key):
+				self.be()
+				answer = mobile_api.universal_scan(**{key: self.VALVE})
+				self.assertEqual(answer["entity_name"], self.VALVE)
+
+	def test_an_empty_scan_is_refused_before_anything_is_read(self):
+		self.be()
+		with self.assertRaises(frappe.ValidationError) as caught:
+			mobile_api.universal_scan(content="   ")
+		self.assertIn("content is required", str(caught.exception))
+
+	def test_guest_is_refused_like_every_other_method_here(self):
+		self.be("Guest")
+		with self.assertRaises(frappe.PermissionError):
+			mobile_api.universal_scan(content=self.VALVE)
+
+	def test_a_tag_belonging_to_another_entity_is_not_scanned(self):
+		"""The scoping that matters on a scan: a phone cannot stamp, or read,
+		the register of a farm this account was never given."""
+		self.a_valve(name="SEL-Valve-01", company=OTHER)
+		self.be()
+		with self.assertRaises(frappe.ValidationError) as caught:
+			mobile_api.universal_scan(content="SEL-Valve-01")
+		self.assertIn(OTHER, str(caught.exception))
+		self.assertFalse(frappe.db.get_value("Asset Register", "SEL-Valve-01", "last_scan_at"))
+
+	def test_the_company_argument_may_narrow_and_may_not_widen(self):
+		self.a_valve()
+		self.be()
+		self.assertEqual(mobile_api.universal_scan(content=self.VALVE, company=MAIN)["entity_type"], "asset")
+		with self.assertRaises(frappe.PermissionError):
+			mobile_api.universal_scan(content=self.VALVE, company=OTHER)
+
+	# ── the audit row ───────────────────────────────────────────────────────
+	def test_one_audit_row_lands_for_the_scan(self):
+		self.a_valve()
+		self.be()
+		before = len(self.audit_rows("universal_scan"))
+		mobile_api.universal_scan(content=self.VALVE)
+		self.assertEqual(len(self.audit_rows("universal_scan")), before + 1)
+
+	def test_a_login_payload_scanned_by_mistake_is_refused_and_redacted(self):
+		"""The one scan that must not be echoed — and the audit row is where it
+		would have been kept. `guard.redact_payloads` is what stops that, and this
+		is the test that both halves hold on this route."""
+		payload = '{"url":"https://x","api_key":"k-abc","api_secret":"s3cr3t-nobody-should-see"}'
+		self.be()
+		with self.assertRaises(frappe.ValidationError) as caught:
+			mobile_api.universal_scan(content=payload)
+		self.assertIn("credential document", str(caught.exception))
+		self.assertNotIn("s3cr3t-nobody-should-see", str(caught.exception))
+		row = self.audit_rows("universal_scan")[-1]
+		self.assertNotIn("s3cr3t-nobody-should-see", json.dumps(row))

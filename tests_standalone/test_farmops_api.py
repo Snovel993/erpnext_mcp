@@ -259,6 +259,11 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# on `submit_form_signature` cannot reach.
 		"/mobile/get_document_preview",
 		"/mobile/seal_signed_document",
+		# v0.65.0. The scanner screen's one call. Five routes above answer for
+		# one register each and refuse everything else, so a phone pointed at an
+		# unfamiliar sticker had to be told what it was looking at before it
+		# could ask. This resolves the string first and answers second.
+		"/mobile/universal_scan",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

@@ -101,6 +101,7 @@ from .tools import (
 	taxforms,
 	trade,
 	training,
+	universal_scan,
 	uploads,
 	visits,
 	w4,
@@ -14839,6 +14840,60 @@ TOOLS = {
 		},
 		required=("asset_name",),
 		title="List asset state change history",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.65.0: one scan, whatever it turns out to be ──────────────────────
+	"universal_scan": _tool(
+		universal_scan.universal_scan,
+		"MUTATING (default OFF). SCAN ANYTHING. Takes the raw string a camera "
+		"produced and works out for itself what it names, then answers with "
+		"that thing, the work outstanding on it and what may be done next — so "
+		"a scanner screen no longer has to know what it is about to scan.\n\n"
+		"THE CASCADE, first match wins, on the EXACT docname: the badge "
+		"register (a person), then Asset Register (a tagged valve, sprayer, "
+		"cabin or block — the only branch that WRITES), then Housing Unit, "
+		"then Field. A printed asset tag encodes `<site>/scan/<name>`, and "
+		"that URL is unwrapped to the docname before any register is read.\n\n"
+		"UNKNOWN IS AN ANSWER, NOT A REFUSAL. A supplier's barcode or a "
+		"hand-written label comes back as entity_type 'unknown' with the raw "
+		"content, the registers that were actually searched, and `create_task` "
+		"still offered — the scan that resolves to nothing is the one most "
+		"worth raising a job about.\n\n"
+		"IT IS MUTATING BECAUSE ONE BRANCH WRITES: an asset scan stamps "
+		"last_scan_at, last_scan_by and the GPS fix, because it IS scan_asset. "
+		"A badge, a cabin and a block are reads, and `scan_recorded` says which "
+		"happened.\n\n"
+		"REFUSALS PASS THROUGH RATHER THAN FALLING THROUGH. A retired badge, "
+		"one belonging to somebody who has left, and a record in another "
+		"company each get the sentence the tool that owns them writes, instead "
+		"of being demoted to 'unknown'.\n\n"
+		"`overdue_tasks` is a SUBSET of `pending_tasks`: a Farm Task carries no "
+		"due date of its own, so overdue means the Compliance Alert the task "
+		"answers was due before today. Every task carries `due_date` and "
+		"`overdue` so nothing has to be re-derived by the caller.",
+		{
+			"content": _field(
+				_STRING,
+				"REQUIRED. The string the scanner read, raw. `scan`, `raw` and `code` are "
+				"accepted spellings of the same argument.",
+			),
+			"company": _field(_STRING, "Resolve only within this company's registers."),
+			"shift": _field(
+				_STRING,
+				"Farm Shift docname. Badge branch only — adds on_shift/joined_at to the "
+				"answer, which is what turns an identification into an admission.",
+			),
+			"scanned_by": _field(_STRING, "The User who scanned. Recorded on the asset branch only."),
+			"gps_lat": _field(_NUMBER, "Latitude from the scanner's GPS fix. Asset branch only."),
+			"gps_lon": _field(_NUMBER, "Longitude from the scanner's GPS fix. Asset branch only."),
+			"history_limit": _field(
+				_INTEGER, "Timeline entries returned. Default 10, hard maximum 100."
+			),
+		},
+		required=("content",),
+		mutating=True,
+		title="Scan anything",
 		available=_needs_doctype("Asset Register"),
 		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

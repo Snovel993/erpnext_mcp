@@ -3,6 +3,52 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.65.0 — 2026-08-13
+
+**One scan, whatever was on the tag.** Farm Ops had four scanners and every one
+of them needed the person holding the phone to know what they were about to scan
+before they scanned it. A worker walks up to a thing with a sticker on it; which
+register that sticker belongs to is the question, not the premise.
+
+- **`universal_scan` (WRITE, default off) resolves a scanned string itself.** The
+  cascade is ordered and first match wins, on the **exact docname**: the badge
+  register, then Asset Register, then Housing Unit, then Field. It answers with
+  the entity, its live tasks, its open compliance alerts, a timeline and the
+  actions a client may offer — every key present on every answer, empty where it
+  does not apply, so one client struct decodes all five entity types.
+- **The badge is first because a badge is a person.** A string in both the badge
+  register and the Asset Register resolves to the worker: attributing somebody's
+  piece work to a sprayer is the one confusion here with a payroll consequence.
+- **The match is exact.** `asset_row`, `unit_row` and `field_row` all fall back to
+  a `LIKE` search on a partial name, which is right for an operator typing half a
+  name and wrong for a cascade — it would let a cabin's sticker resolve to
+  whichever valve shared its prefix.
+- **A printed tag is a URL, and it is unwrapped.** `Asset Register` builds
+  `qr_url` as `<public url>/scan/<name>`, so a camera hands over a full URL; the
+  `/scan/<tag>` path is unwrapped and percent-decoded before any register is read.
+- **Refusals pass through rather than falling through.** A retired badge, one
+  belonging to somebody who has left, and a record in another company each keep
+  the sentence the tool that owns them writes. A card that *was* issued is a badge
+  whatever its state.
+- **Unknown is an answer.** A supplier's barcode comes back with the content
+  whole, the registers actually searched, and `create_task` still offered — the
+  scan that resolves to nothing is the one most worth raising a job about.
+- **A credential document is the one scan refused, and is not quoted back.** A
+  mobile login QR read by mistake at a scan step would otherwise take the unknown
+  branch, whose whole promise is that the string comes back whole.
+- **The asset branch is the only one that writes**, and it writes what
+  `scan_asset` writes: `last_scan_at`, `last_scan_by` and the GPS fix. It now
+  refuses another entity's asset **before** the stamp rather than after.
+  `scan_recorded` says which happened.
+- **`overdue_tasks` is a subset of `pending_tasks`.** A Farm Task has no due date
+  of its own, so overdue means the Compliance Alert the task answers was due
+  before today; a hand-raised task is never overdue.
+- **`POST /farmops/api/mobile/universal_scan`** publishes the same call to a
+  handset: metered as a read (sixty a minute — a crew clock at a bin trailer is
+  forty pure reads in a minute) and declared as a write. The company comes from
+  the caller's scope, a `company` in the body may only narrow it, and every task
+  and alert is checked against that scope on the way out.
+
 ## 0.64.2 — 2026-08-12
 
 **Complete means signed.** An I-9 could reach its terminal status with both

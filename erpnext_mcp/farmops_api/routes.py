@@ -310,6 +310,15 @@ ROUTES = (
 	# calls it: the signature route seals what it just signed.
 	Route("/mobile", mobile_api.get_document_preview),
 	Route("/mobile", mobile_api.seal_signed_document),
+	# v0.65.0. The scanner screen's one call. Five routes above it — `scan_asset`,
+	# `get_asset_detail`, `resolve_badge`, `list_housing_units` and the field
+	# reads — each answer for one register and refuse everything else, so a phone
+	# pointed at an unknown QR had to be told what it was looking at before it
+	# could ask. This resolves the string first and answers second, and it is the
+	# same code behind each branch: a badge read here and a badge read at
+	# `resolve_badge` get the same refusals, and an asset scanned here gets the
+	# same `last_scan_at` stamp `scan_asset` leaves.
+	Route("/mobile", mobile_api.universal_scan),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

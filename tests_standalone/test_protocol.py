@@ -824,10 +824,18 @@ class Catalogue(SeededTestCase):
 		handset authenticates to the sidecar and cannot follow a private
 		`file_url`, and `seal_signed_document`, which appends the verification
 		page and hashes the finished file. One read, one write.
+
+		v0.65.0 adds one write, `universal_scan`, and it is the only tool here
+		that does not know what it is about until it has read the string it was
+		given: it resolves a scanned tag against the badge register, the Asset
+		Register, Housing Unit and Field in that order and answers for whichever
+		holds it. It counts as MUTATING because one of those four branches is
+		`scan_asset`, which stamps `last_scan_at` — the other three are reads,
+		and `scan_recorded` in the answer says which happened.
 		"""
-		self.assertEqual(len(registry.TOOLS), 413)
+		self.assertEqual(len(registry.TOOLS), 414)
 		self.assertEqual(len(registry.READ_TOOLS), 189)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 224)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 225)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

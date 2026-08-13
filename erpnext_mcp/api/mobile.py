@@ -96,6 +96,7 @@ from ..tools import employee as personnel
 from ..tools import housing as housing_tools
 from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
+from ..tools import universal_scan as universal_scan_tool
 from ..tools import wallet as wallet_tools
 from . import guard, shape
 
@@ -5129,3 +5130,78 @@ def _sealed_bytes(url) -> dict:
 		"content_base64": encoded,
 		"base64": encoded,
 	}
+
+
+# ── 54. universal_scan ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("universal_scan", mutating=True, limit=guard.READ_LIMIT)
+def universal_scan(user: str, content=None, scan=None, raw=None, code=None, company=None,
+                   shift=None, gps_lat=None, gps_lon=None, history_limit=None) -> dict:
+	"""One camera, four registers, one call. v0.65.0.
+
+	THE SCANNER SCREEN HAD TO KNOW THE ANSWER BEFORE IT COULD ASK THE QUESTION.
+	`resolve_badge`, `scan_asset`, `get_housing_unit` and `get_field` each refuse
+	everything that is not theirs, so a phone pointed at an unknown QR either
+	asked the worker which kind of thing they were about to scan, or called all
+	four and read the refusals. The server knows which register a string is in;
+	this is that knowledge published as a route.
+
+	IT IS METERED AS A READ AND DECLARED AS A WRITE, and both are deliberate.
+	The only write on any branch is the `last_scan_at` stamp `scan_asset` leaves
+	on the asset the worker is standing in front of — so the route table records
+	it as mutating, because it is. The LIMIT is `resolve_badge`'s sixty rather
+	than `scan_asset`'s ten because of what this route is used for: a crew clock
+	scanning a queue at a bin trailer is forty badge reads in a minute, every one
+	of them a pure read, and `WRITE_LIMIT` would refuse the crew rather than the
+	abuse.
+
+	THE COMPANY IS THE CALLER'S, ALWAYS. It is taken from the scope check rather
+	than from the body, so a tag belonging to another entity resolves as though
+	it were not there — the same answer `resolve_badge` gives a card from another
+	site, and the reason a scan cannot be used to enumerate the register next
+	door. `company` in the body is honoured only as a NARROWING of what this
+	account already reaches; `guard.require_company` refuses anything else.
+
+	GPS IS PASSED THROUGH AND LANDS ON ONE BRANCH. An asset scan records where
+	the worker was standing; a badge, a cabin and a block scan record nothing at
+	all, and `scan_recorded` in the answer says which happened rather than
+	leaving a client to infer it from the entity type.
+
+	THE FOUR SPELLINGS OF `content` ARE THE TOOL'S OWN, restated in this
+	signature because this transport's argument filter keeps only the keys a
+	signature declares — a handset posting `code` at a method that names only
+	`content` would arrive with an empty scan and be told the field is required.
+	"""
+	allowed = guard.require_scope(user)
+	scanned = str(content or scan or raw or code or "").strip()
+	if not scanned:
+		frappe.throw(
+			"content is required — the string the scanner read.", frappe.ValidationError
+		)
+
+	inner = {
+		"content": scanned,
+		"company": _company(user, company, allowed),
+		"scanned_by": user,
+	}
+	if shift:
+		inner["shift"] = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+	if gps_lat is not None:
+		inner["gps_lat"] = gps_lat
+	if gps_lon is not None:
+		inner["gps_lon"] = gps_lon
+	if history_limit is not None:
+		inner["history_limit"] = history_limit
+
+	data = universal_scan_tool.universal_scan(inner).data
+	# The belt to the tool's own braces: every list that leaves here is checked
+	# against the caller's entities on the way out, exactly as
+	# `list_compliance_alerts` checks its rows. A task or an alert that escaped
+	# the company filter through a code path nobody thought about is the failure
+	# this surface exists to prevent.
+	for key in ("pending_tasks", "overdue_tasks", "due_compliance"):
+		data[key] = guard.scoped(data.get(key) or [], allowed)
+	data["pending_task_count"] = len(data["pending_tasks"])
+	data["overdue_task_count"] = len(data["overdue_tasks"])
+	data["due_compliance_count"] = len(data["due_compliance"])
+	return data
