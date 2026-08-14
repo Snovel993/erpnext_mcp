@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
-## Unreleased
+## v0.69.0 — Sprint 4: Inventory, Stock & Document Intelligence
 
 **Sprint 4 of the Gap Closure Plan: stock and inventory.** v0.66.0's master
 data could name a shed and a chemical; nothing until now could say how much of
