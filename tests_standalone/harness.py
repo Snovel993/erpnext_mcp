@@ -1456,6 +1456,10 @@ APP_DOCTYPES = {
 	# records, so a value that turns out to be wrong can be traced to the stage
 	# that produced it.
 	"Document Validation": "document_validation",
+	# v0.71.0. What a line on a bank statement is, as a record rather than as
+	# code — see `tools/banking_bridge.py` for why the dictionary a farm uses to
+	# read its own statement cannot live in a release.
+	"Bank Categorization Rule": "bank_categorization_rule",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

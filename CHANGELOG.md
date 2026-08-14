@@ -3,6 +3,113 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.71.0 — 2026-08-14 — Sprint 6: CFL Banking
+
+**Sprint 6 of the Gap Closure Plan, and its capstone: the bridge from the paper
+this app has been collecting since Sprint 2 to the bank's own record of the same
+money.** Sprints 2 to 5 built the claims — a photographed receipt, a supplier's
+bill, a packer settlement, a cheque, a payroll run. None of them is evidence that
+money actually moved. Ten tools — six reads, four writes, in a new
+`tools/banking_bridge.py` — compare the two records and report the gap:
+
+```
+Expense Receipt ↔ Bank Transaction ↔ Bank Categorization Rule → category, account, party
+```
+
+- **Three reconciliation questions, answered separately and never summed.**
+  ALLOCATION (is this settled against a Payment Entry, which ERPNext already
+  answers), EVIDENCE (is there a receipt behind it) and CATEGORISATION (what kind
+  of expense was it) are three states a transaction can be in in any combination.
+  `get_bank_reconciliation_status` reports all three side by side with counts,
+  gross amounts and the tool that closes each gap. A single "84% reconciled"
+  would be wrong in whichever sense the reader meant — and it would hide the case
+  that matters most: a statement that ties out perfectly with a third of its
+  withdrawals having no paper behind them.
+- **`auto_match_receipts` is a READ tool, and that is the sprint's load-bearing
+  decision.** It scores every unmatched receipt against every unmatched
+  withdrawal, ranks the pairs, hands back the exact
+  `match_receipt_to_bank_transaction` call that would commit each one — and
+  writes nothing. A wrong receipt-to-bank link is **invisible afterwards**: both
+  documents exist, both amounts are right, and the only thing wrong is which slip
+  is filed against which withdrawal. So a person accepts each one, and
+  `bank_match_method` records whether a human named both documents or accepted a
+  machine's proposal.
+- **Confidence is amount 0.5, date 0.3, merchant 0.2, capped at 0.95.** The
+  amount carries half because it is the only signal nearly impossible to coincide
+  by accident at farm volumes; the merchant carries least, because a bank memo
+  line is a mangled vendor name at best and a terminal ID at worst. Tuned so an
+  exact amount within a day clears the threshold with an unreadable memo, and an
+  exact amount a week later with no name agreement does not.
+- **The direction is the one signal a person cannot overrule.** An amount two
+  cents out or a date eight days late is a judgement, and a human naming both
+  documents outranks an algorithm — the link is made, the objections come back in
+  `blockers`, and the stored confidence is 0 so the pair surfaces in any later
+  review. Money arriving is not an expense under any judgement, so a receipt
+  against a deposit is refused outright.
+- **Contested proposals are reported, not resolved.** Two slips for $47.83 at the
+  same station on the same day happen on a farm with two trucks, and nothing can
+  say which is which. The higher scorer is proposed and the other is listed under
+  `contested` with the transaction named — dropping it silently would leave a
+  bookkeeper hunting for a charge sitting on the statement in front of them.
+- **`apply_categorization_rules` (MUTATING, default off) IS allowed to write in
+  bulk**, and the difference from matching is inspectability rather than
+  confidence: a rule is deterministic, its output names the rule that produced
+  it, and an operator who disagrees reads the rule, fixes it and runs again.
+  First match by priority wins; a category typed by hand is never overwritten
+  unless asked; `dry_run=true` does the whole run and writes nothing, and what it
+  does NOT categorise is the list of rules the farm still needs.
+- **The rules are DATA, not code** — the same argument the compliance framework
+  makes, applied to the chart of accounts. `Bank Categorization Rule` is an
+  ordinary doctype (pattern, match field, match type, direction, amount band,
+  priority, category, account, party), unique on `(company, rule_name)` and named
+  from a series so two farms on one site can both have a rule called "Fuel —
+  Chevron". A regex that will not compile is refused **on save**, not in the
+  middle of a run over a month of statement.
+- **`seed_farm_categorization_rules` (MUTATING, default off)** puts a starting
+  book on a site — Fuel, Chemicals/Spray, Equipment Parts, Labor Services,
+  Irrigation, Insurance, Utilities, Feed, Supplies, Professional Services, Owner
+  Draw — merchant patterns at priority 10-40, generic words at 100+, every rule
+  `Withdrawal`-only because a refund from Chevron is not a tank of diesel.
+  Idempotent by `(company, rule_name)`; a deleted rule comes back on the next run,
+  which is **stated rather than solved** — disable one that does not fit, because
+  a tombstone register is more machinery than the problem deserves. Accounts are
+  **mapped, never guessed**: `account_map` is vetted before any rule is created,
+  and there is no keyword search of the chart of accounts anywhere in this
+  release.
+- **`get_cash_flow_summary` refuses to produce one number.** A settlement, a
+  sales invoice and a bank deposit can all be the same money arriving three times
+  in three doctypes; summing them would triple a season's revenue and look
+  entirely reasonable. So `cash` (the bank statement — the only money that
+  actually moved, and the only total in the response) is reported apart from the
+  DOCUMENTS, each of which states its own basis. `by_category` is where the two
+  touch and it **deduplicates**: a receipt matched to a withdrawal is one
+  purchase, so the withdrawal is dropped and the receipt kept.
+  `deduplicated_transactions` is the number this whole sprint exists to make
+  right — without it, a farm's fuel total is its receipts plus its fuel
+  withdrawals, roughly double, with nothing visibly wrong.
+- **Nothing here posts to the ledger.** Not one of the ten writes a GL Entry, a
+  Journal Entry, a Payment Entry or an allocation. Matching records EVIDENCE;
+  categorising records what a transaction WAS. Turning either into a posting is
+  `create_journal_entry`, which has its own switch — a tool that could both
+  decide what a statement line means and post it would be a tool that writes a
+  farm's books from a memo field.
+- **Schema.** Expense Receipt gains four columns in this app's own DocType JSON
+  (`bench migrate`): `bank_transaction`, `bank_match_method`,
+  `bank_match_confidence`, `bank_matched_on`. Bank Transaction gains three Custom
+  Fields — `farm_category`, `farm_expense_account`, `categorization_rule` —
+  created at install and again lazily on first use, all three **`allow_on_submit`**
+  because a bank feed's transactions are submitted and a field without the flag
+  cannot be changed on one without cancelling it, which would detach every
+  allocation already made against it. This is the third place this app extends a
+  doctype it does not own; `compliance_fields.py` argues the general case.
+- **This release does not rebuild Bank Bridge**, the separate app that handles
+  Plaid connections and statement parsing. Bank Bridge puts Bank Transactions on
+  the site; these ten are what the farm's own paper has to say about them.
+
+125 new standalone tests (`tests_standalone/test_banking_bridge.py`), twelve
+claims. Suite total 8081, all passing. Catalogue: **513 tools, 244 read, 269
+mutating.** Full notes in `RELEASES/v0.71.0.md`.
+
 ## 0.70.0 — 2026-08-14 — Sprint 5: Sales, Settlements & Receivables
 
 **Sprint 5 of the Gap Closure Plan: the money end of the grower-packer

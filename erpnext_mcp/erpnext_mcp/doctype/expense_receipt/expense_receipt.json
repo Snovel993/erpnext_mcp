@@ -36,6 +36,12 @@
   "routing_section",
   "linked_doctype",
   "linked_document",
+  "bank_section",
+  "bank_transaction",
+  "bank_match_method",
+  "bank_col",
+  "bank_match_confidence",
+  "bank_matched_on",
   "notes_section",
   "notes"
  ],
@@ -247,6 +253,46 @@
    "fieldtype": "Dynamic Link",
    "label": "Linked Document",
    "options": "linked_doctype",
+   "read_only": 1
+  },
+  {
+   "fieldname": "bank_section",
+   "fieldtype": "Section Break",
+   "label": "Bank Reconciliation"
+  },
+  {
+   "description": "The Bank Transaction this receipt is the paper for. Set by match_receipt_to_bank_transaction, never inferred and never written in bulk — a proposed match is reviewed by a person before it becomes this field. Blank means the money for this receipt has not been found on a statement, which is a worklist, not an error.",
+   "fieldname": "bank_transaction",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Bank Transaction",
+   "options": "Bank Transaction",
+   "search_index": 1
+  },
+  {
+   "description": "How the link was made. `Manual` is a person naming both documents; `Proposed` is a match accepted from auto_match_receipts, which scored it but did not commit it. The distinction is what lets an auditor ask how much of a season's reconciliation a machine suggested.",
+   "fieldname": "bank_match_method",
+   "fieldtype": "Select",
+   "label": "Match Method",
+   "options": "\nManual\nProposed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "bank_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "How alike the receipt and the transaction were, 0 to 1 — amount, date proximity and merchant against the bank's memo line. Evidence for the link, not a gate on it: a person who names both documents is right whatever the score says.",
+   "fieldname": "bank_match_confidence",
+   "fieldtype": "Float",
+   "label": "Match Confidence",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "bank_matched_on",
+   "fieldtype": "Date",
+   "label": "Matched On",
    "read_only": 1
   },
   {

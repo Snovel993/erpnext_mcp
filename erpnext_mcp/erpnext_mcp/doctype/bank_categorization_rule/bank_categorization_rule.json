@@ -1,0 +1,261 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-08-14 09:00:00.000000",
+ "description": "One rule that says what a line on a bank statement is: if the description contains CHEVRON, this is Fuel and it books to 5200. Rules are DATA rather than code — a farm that starts buying from a new co-op adds a row, not a release. Nothing here posts anything: a rule fills in the category, the expense account and the party on a Bank Transaction, and a person or a Journal Entry still decides what to do with it. Rules are tried in priority order and the FIRST match wins, so a specific merchant rule belongs at a lower number than the generic word rule that would otherwise swallow it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "rule_name",
+  "company",
+  "category",
+  "header_col",
+  "enabled",
+  "priority",
+  "account",
+  "cost_center",
+  "match_section",
+  "match_field",
+  "match_type",
+  "pattern",
+  "match_col",
+  "direction",
+  "amount_min",
+  "amount_max",
+  "party_section",
+  "party_type",
+  "party",
+  "stats_section",
+  "times_applied",
+  "last_applied",
+  "notes_section",
+  "notes"
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2026-08-14 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Bank Categorization Rule",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Farm Manager"
+  }
+ ],
+ "search_fields": "rule_name,category,pattern",
+ "sort_field": "priority",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "rule_name",
+ "track_changes": 1,
+ "fields": [
+  {
+   "default": "BCR-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "BCR-.#####",
+   "read_only": 1
+  },
+  {
+   "description": "What this rule is called, for a person reading the list. Unique within the company — two rules with the same name are indistinguishable in the report that says which rule categorised a transaction.",
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Rule Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The label a matching transaction is filed under — Fuel, Chemicals/Spray, Irrigation. Free text rather than a Select, deliberately: the categories a farm actually uses are the farm's business, and a fixed list would need a release every time one changed. Where a category matches an Expense Receipt category exactly, the two sides of the reconciliation line up on their own.",
+   "fieldname": "category",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "header_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "A disabled rule is kept and skipped. Deleting a rule loses the record of why a year of transactions were categorised the way they were.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "100",
+   "description": "Lower runs first, and the FIRST match wins. A specific merchant (CHEVRON, priority 10) belongs below the generic word (FUEL, priority 100) that would otherwise swallow it.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Priority"
+  },
+  {
+   "description": "The GL account a matching transaction belongs in. OPTIONAL — a rule with a category and no account still sorts the statement, which is most of the value; it just cannot tell a Journal Entry where to post. Never guessed: a rule created without one comes back saying so.",
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "label": "Expense Account",
+   "options": "Account",
+   "search_index": 1
+  },
+  {
+   "description": "Where the cost is booked below Company, if the operation tracks that.",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "match_section",
+   "fieldtype": "Section Break",
+   "label": "What This Rule Matches"
+  },
+  {
+   "default": "description",
+   "description": "Which field on the Bank Transaction the pattern is tested against. `description` is the memo line a bank feed writes and is what nearly every rule wants.",
+   "fieldname": "match_field",
+   "fieldtype": "Select",
+   "label": "Match Field",
+   "options": "description\nreference_number\nbank_party_name",
+   "reqd": 1
+  },
+  {
+   "default": "contains",
+   "description": "How the pattern is compared. All four are case-insensitive. `regex` is Python's syntax and is validated when the rule is saved, so a rule that would explode at apply time is refused here instead.",
+   "fieldname": "match_type",
+   "fieldtype": "Select",
+   "label": "Match Type",
+   "options": "contains\nstarts_with\nequals\nregex",
+   "reqd": 1
+  },
+  {
+   "description": "The text to look for. Case-insensitive — bank feeds shout, and a rule that only matched CHEVRON would miss Chevron.",
+   "fieldname": "pattern",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Pattern",
+   "reqd": 1
+  },
+  {
+   "fieldname": "match_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Any",
+   "description": "Whether this rule applies to money out, money in, or both. Most expense rules are Withdrawal: a refund from the same merchant is not the same category as a purchase from them, and matching it would file a credit as a cost.",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "label": "Direction",
+   "options": "Any\nDeposit\nWithdrawal",
+   "reqd": 1
+  },
+  {
+   "description": "Smallest absolute amount this rule applies to. Blank means no floor.",
+   "fieldname": "amount_min",
+   "fieldtype": "Currency",
+   "label": "Amount Min"
+  },
+  {
+   "description": "Largest absolute amount this rule applies to. Blank means no ceiling. A fuel-card rule capped at 2000 stops a wire transfer that happens to name the same vendor being filed as a tank of diesel.",
+   "fieldname": "amount_max",
+   "fieldtype": "Currency",
+   "label": "Amount Max"
+  },
+  {
+   "fieldname": "party_section",
+   "fieldtype": "Section Break",
+   "label": "Party"
+  },
+  {
+   "description": "OPTIONAL. When set, a matching transaction that names nobody gets this party — which is what makes a year of fuel totallable per vendor and what a 1099 pre-fill reads. A transaction that already names a party is never overwritten.",
+   "fieldname": "party_type",
+   "fieldtype": "Select",
+   "label": "Party Type",
+   "options": "\nSupplier\nCustomer\nEmployee"
+  },
+  {
+   "fieldname": "party",
+   "fieldtype": "Dynamic Link",
+   "label": "Party",
+   "options": "party_type"
+  },
+  {
+   "fieldname": "stats_section",
+   "fieldtype": "Section Break",
+   "label": "Usage"
+  },
+  {
+   "description": "How many transactions this rule has categorised. A rule at zero after a season is a rule whose pattern never matched anything — which is worth knowing before trusting the ones that did.",
+   "fieldname": "times_applied",
+   "fieldtype": "Int",
+   "label": "Times Applied",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_applied",
+   "fieldtype": "Date",
+   "label": "Last Applied",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ]
+}

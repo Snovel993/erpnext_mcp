@@ -663,7 +663,19 @@
   "allow_list_revalidation_due",
   "document_intel_write_section",
   "allow_validate_document_extraction",
-  "allow_revalidate_document"
+  "allow_revalidate_document",
+  "banking_bridge_read_section",
+  "allow_auto_match_receipts",
+  "allow_get_bank_reconciliation_status",
+  "allow_list_unmatched_receipts",
+  "allow_list_unmatched_bank_transactions",
+  "allow_list_bank_categorization_rules",
+  "allow_get_cash_flow_summary",
+  "banking_bridge_write_section",
+  "allow_match_receipt_to_bank_transaction",
+  "allow_create_bank_categorization_rule",
+  "allow_apply_categorization_rules",
+  "allow_seed_farm_categorization_rules"
  ],
  "fields": [
   {
@@ -4995,6 +5007,88 @@
    "fieldname": "allow_revalidate_document",
    "fieldtype": "Check",
    "label": "Revalidate Document"
+  },
+  {
+   "description": "Sprint 6 of the Gap Closure Plan (v0.71.0): the bank statement, and whether anybody can say what each line was.<br><br>Three questions that get confused and have different answers: is a transaction <b>allocated</b> in the ledger (ERPNext's own reconciliation), is there a <b>receipt</b> behind it, and does anybody know what <b>kind</b> of expense it was. get_bank_reconciliation_status answers all three side by side and never adds them together.<br><br>auto_match_receipts is a READ tool on purpose: it proposes and never commits, because a wrong link between a slip and a withdrawal is invisible afterwards — both documents exist and both amounts are right.",
+   "fieldname": "banking_bridge_read_section",
+   "fieldtype": "Section Break",
+   "label": "CFL Banking — Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. Score every unmatched Expense Receipt against every unmatched bank withdrawal and return ranked proposals with the call that would commit each one. Writes nothing — a wrong receipt-to-bank link is invisible afterwards, so a person accepts each one.",
+   "fieldname": "allow_auto_match_receipts",
+   "fieldtype": "Check",
+   "label": "Auto Match Receipts"
+  },
+  {
+   "default": "1",
+   "description": "READ. Three reconciliation questions for one account and period, answered separately and never added together: is each transaction allocated in the ledger, does each one have a receipt behind it, and does anybody know what kind of expense it was.",
+   "fieldname": "allow_get_bank_reconciliation_status",
+   "fieldtype": "Check",
+   "label": "Get Bank Reconciliation Status"
+  },
+  {
+   "default": "1",
+   "description": "READ. Expense Receipts with no bank transaction against them — the evidence worklist — oldest first, with totals and a category breakdown.",
+   "fieldname": "allow_list_unmatched_receipts",
+   "fieldtype": "Check",
+   "label": "List Unmatched Receipts"
+  },
+  {
+   "default": "1",
+   "description": "READ. Statement lines with nothing behind them, and which kind of nothing: no allocation in the ledger, no receipt on file, or both.",
+   "fieldname": "allow_list_unmatched_bank_transactions",
+   "fieldtype": "Check",
+   "label": "List Unmatched Bank Transactions"
+  },
+  {
+   "default": "1",
+   "description": "READ. The book of categorization rules in the order they are tried, with the ones that have never fired and the ones with no expense account named.",
+   "fieldname": "allow_list_bank_categorization_rules",
+   "fieldtype": "Check",
+   "label": "List Bank Categorization Rules"
+  },
+  {
+   "default": "1",
+   "description": "READ. What came in and what went out, with the bank statement reported apart from the documents and never summed with them, and a category breakdown that deduplicates a receipt against the withdrawal it is matched to.",
+   "fieldname": "allow_get_cash_flow_summary",
+   "fieldtype": "Check",
+   "label": "Get Cash Flow Summary"
+  },
+  {
+   "description": "The write half of Sprint 6. <b>Nothing here posts to the ledger</b> — not one tool writes a GL Entry, a Journal Entry or an allocation. Matching a receipt records EVIDENCE; categorising records what a transaction WAS. Turning either into a posting is create_journal_entry, which has its own switch.<br><br>Categorisation is allowed to write in bulk where matching is not, because a rule is deterministic and its output names the rule that produced it — an operator who disagrees reads the rule, fixes it and runs again.",
+   "fieldname": "banking_bridge_write_section",
+   "fieldtype": "Section Break",
+   "label": "CFL Banking — Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Link one Expense Receipt to the Bank Transaction it is the paper for, or rank the candidates and write nothing. Evidence, not a posting: nothing is booked and no allocation is made.",
+   "fieldname": "allow_match_receipt_to_bank_transaction",
+   "fieldtype": "Check",
+   "label": "Match Receipt To Bank Transaction"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create one rule saying what a statement line is — description contains CHEVRON, category Fuel, account 5200. The expense account is never guessed.",
+   "fieldname": "allow_create_bank_categorization_rule",
+   "fieldtype": "Check",
+   "label": "Create Bank Categorization Rule"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Run the enabled rules against uncategorised Bank Transactions and record the category, the account and which rule decided it. Posts nothing. Never overwrites a category set by hand unless asked.",
+   "fieldname": "allow_apply_categorization_rules",
+   "fieldtype": "Check",
+   "label": "Apply Categorization Rules"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Put a starting book of farm categorization rules on the site — fuel, chemicals, parts, labor, irrigation, insurance, utilities, supplies, professional services, owner draw. Idempotent by (company, rule name): a second run creates nothing and leaves every edit alone. Disable a rule that does not fit rather than deleting it \u2014 a deleted rule is re-created by the next run.",
+   "fieldname": "allow_seed_farm_categorization_rules",
+   "fieldtype": "Check",
+   "label": "Seed Farm Categorization Rules"
   }
  ],
  "index_web_pages_for_search": 0,

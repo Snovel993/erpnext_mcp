@@ -976,10 +976,35 @@ class Catalogue(SeededTestCase):
 		so the Scale Ticket is the delivery evidence, and a second record of one
 		delivery would disagree with the first with nothing to say which is
 		right.
+
+		v0.71.0 adds TEN over CFL Banking — six reads and four writes — Sprint 6
+		and the capstone of the Gap Closure Plan: the bridge from the paper this
+		app has been collecting since Sprint 2 to the bank's own record of the
+		same money. `match_receipt_to_bank_transaction` links one slip to the
+		withdrawal it explains, or ranks the candidates and writes nothing;
+		`auto_match_receipts` is the batch half and is a READ tool on purpose,
+		because a wrong link between a slip and a withdrawal is invisible
+		afterwards — both documents exist and both amounts are right — so a
+		person accepts each one and the record says a machine proposed it.
+		`create_bank_categorization_rule`, `list_bank_categorization_rules`,
+		`apply_categorization_rules` and `seed_farm_categorization_rules` make
+		the dictionary a farm reads its own statement with a RECORD rather than
+		code, and the categorisation is allowed to write in bulk where the
+		matching is not, because a rule is deterministic and names itself in its
+		own output. `get_bank_reconciliation_status` answers the three
+		reconciliation questions — ledger allocation, receipt evidence,
+		categorisation — SEPARATELY and never adds them together;
+		`list_unmatched_receipts` and `list_unmatched_bank_transactions` are the
+		two worklists; `get_cash_flow_summary` reports the bank statement apart
+		from the documents and deduplicates a receipt against the withdrawal it
+		is matched to.
+
+		NOTHING in Sprint 6 posts to the ledger. Not one of the ten writes a GL
+		Entry, a Journal Entry or an allocation.
 		"""
-		self.assertEqual(len(registry.TOOLS), 503)
-		self.assertEqual(len(registry.READ_TOOLS), 238)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 265)
+		self.assertEqual(len(registry.TOOLS), 513)
+		self.assertEqual(len(registry.READ_TOOLS), 244)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 269)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

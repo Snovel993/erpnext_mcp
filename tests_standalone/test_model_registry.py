@@ -785,9 +785,26 @@ class ToolRegistration(unittest.TestCase):
 		# reads that make a season legible. There is deliberately no Delivery
 		# Note tool: the packer owns the scale, so the Scale Ticket is the
 		# delivery evidence.
-		self.assertEqual(len(self.registry.TOOLS), 503)
-		self.assertEqual(len(self.registry.READ_TOOLS), 238)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 265)
+		# v0.71.0 adds TEN over CFL Banking — six reads and four writes —
+		# Sprint 6 of the Gap Closure Plan and its capstone: the bridge from the
+		# receipt/expense/invoice pipeline to the bank's own record of the same
+		# money. `match_receipt_to_bank_transaction` and `auto_match_receipts`
+		# pair a slip with the withdrawal it is the paper for — the batch half
+		# is a READ tool that proposes and never commits, because a wrong link
+		# between a slip and a withdrawal is invisible afterwards.
+		# `create_bank_categorization_rule`, `list_bank_categorization_rules`,
+		# `apply_categorization_rules` and `seed_farm_categorization_rules` make
+		# the dictionary a farm reads its own statement with a RECORD rather
+		# than code. `get_bank_reconciliation_status` answers the ledger, the
+		# evidence and the categorisation questions separately and never sums
+		# them; `list_unmatched_receipts` and
+		# `list_unmatched_bank_transactions` are the two worklists; and
+		# `get_cash_flow_summary` reports the cash apart from the documents and
+		# deduplicates a receipt against the withdrawal it is matched to.
+		# Nothing in Sprint 6 posts to the ledger.
+		self.assertEqual(len(self.registry.TOOLS), 513)
+		self.assertEqual(len(self.registry.READ_TOOLS), 244)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 269)
 
 
 if __name__ == "__main__":

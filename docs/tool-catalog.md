@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 503 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 513 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 238 read tools are **on** by default and can be switched off individually. A
+All 244 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -12231,3 +12231,222 @@ and deliberately not stored — stage the image and pass `scan_file_url`.
 have no route: two are an office's registers rather than anything a phone at a
 shed reads, and the third re-decides a stored status, which is a supervisor's
 call at a desk.
+
+---
+
+## CFL Banking (v0.71.0)
+
+Sprint 6 of the Gap Closure Plan, and its capstone. Sprints 2 to 5 built the
+paper: a photographed receipt, a bill from a supplier, a settlement from the
+packer, a cheque received, a payroll run. Every one of those is a *claim* that
+money moved. These ten are about the **other** record of the same movement — the
+bank's — and about the gap between the two, which is the only place a farm finds
+out that a claim was wrong.
+
+**Three questions, deliberately not one feature.** They get confused constantly
+and they have different answers:
+
+| | Question | Answered by | Fixed by |
+|---|---|---|---|
+| **Allocation** | Is this transaction settled against a Payment Entry or a Journal Entry, so the ledger balance is the statement balance? | ERPNext itself | `reconcile_bank_transaction` (v0.1.0) |
+| **Evidence** | Is there a *receipt* behind this line — the slip from the pump, the invoice from the parts counter? | Sprint 6 | `match_receipt_to_bank_transaction` |
+| **Categorisation** | What *kind* of expense was it? `CHEVRON 0093746 PASCO WA` is not a category. | Sprint 6 | `apply_categorization_rules` |
+
+`get_bank_reconciliation_status` answers all three side by side and **never adds
+them together**. A transaction can be perfectly allocated and have no paper
+behind it — which is exactly what an audit asks about — and one with a receipt
+can be uncategorised and still tie out.
+
+**Matching is proposed, never committed in bulk.** `auto_match_receipts` is a
+**read** tool. It scores every unmatched receipt against every unmatched
+withdrawal, hands back a ranked list with the exact call that would commit each
+one, and writes nothing. That is not timidity about a hard problem: a wrong
+receipt-to-bank link is *invisible* afterwards — both documents exist, both
+amounts are right, and the only thing wrong is which slip is filed against which
+withdrawal. So a person accepts each one, and `bank_match_method` records that a
+machine proposed it.
+
+**Categorisation is different and is allowed to write.** A rule is deterministic
+and inspectable, and its output names the rule that produced it, so an operator
+who disagrees reads the rule, fixes it and runs again. A fuzzy amount-and-date
+match has none of those properties.
+
+**Nothing in this sprint posts to the ledger.** Not one of the ten writes a GL
+Entry, a Journal Entry, a Payment Entry or an allocation. Categorising a
+transaction says what it *was*; turning that into a posting is
+`create_journal_entry`, which has its own switch and its own review.
+
+**The columns this release adds.** Expense Receipt gains four in this app's own
+DocType JSON (`bench migrate`): `bank_transaction`, `bank_match_method`,
+`bank_match_confidence`, `bank_matched_on`. Bank Transaction gains three Custom
+Fields — `farm_category`, `farm_expense_account`, `categorization_rule` — created
+at install and again lazily on first use, all three `allow_on_submit` because a
+bank feed's transactions are submitted and a bookkeeper correcting a category
+must not have to cancel one.
+
+### `match_receipt_to_bank_transaction` — MUTATING, default off
+
+**Arguments:** `expense_receipt` (required), `bank_transaction`, `bank_account`,
+`match_method` (`Manual` | `Proposed`), `replace`, `amount_tolerance`,
+`date_window_days`, `limit`.
+
+Two modes in one tool. **With** a `bank_transaction` it writes the link; **without**
+one it scores every eligible transaction and returns ranked candidates, writing
+nothing. It is one tool rather than two because the second call is the first call
+with one more argument.
+
+Refused by name, all of it before anything is written: a **deposit** (an expense
+receipt is money out, and that one cannot be overruled), a receipt and a
+transaction in **different companies**, a **rejected** receipt, a transaction
+that already has a **different receipt**, and a receipt already matched
+elsewhere unless `replace=true` — in which case the result names what was
+unlinked.
+
+The **score** is not in that list. An amount two cents out or a date eight days
+late is a judgement, and a person naming both documents outranks an algorithm:
+the link is made, the objections come back in `blockers`, and the stored
+confidence is `0.0` so the pair surfaces in any later review.
+
+### `auto_match_receipts`
+
+Read-only. **Arguments:** `company`, `bank_account`, `from_date`, `to_date`,
+`category`, `status`, `min_amount`, `max_amount`, `min_confidence` (default
+`0.70`), `amount_tolerance` (default `0.02`), `date_window_days` (default `7`,
+maximum `60`), `limit`.
+
+Each proposal carries `confidence`, the three `signals` behind it (amount gap,
+days between, merchant against the bank's memo line) and a `commit_with` block —
+the tool name and arguments that would commit it.
+
+**Confidence is amount 0.5, date 0.3, merchant 0.2, capped at 0.95.** The amount
+is half of it because it is the only signal that is nearly impossible to coincide
+by accident at farm transaction volumes; the merchant is worth least because a
+bank memo line is a mangled version of a name at best and a terminal ID at worst.
+Tuned so an exact amount within a day clears the threshold even when the memo is
+unreadable, and an exact amount a week later with no name agreement does not.
+
+**Contested proposals are reported, not resolved.** Two slips for the same amount
+on the same day at the same vendor are a real thing on a farm with two trucks.
+The higher scorer is proposed; the other comes back under `contested` with the
+transaction named, rather than dropped.
+
+### `get_bank_reconciliation_status`
+
+Read-only. **Arguments:** `bank_account`, `company`, `from_date`, `to_date`.
+
+Returns `transactions` (count, deposits, withdrawals, net) plus
+`ledger_allocation`, `receipt_evidence` and `categorization` — each with
+`matched`, `unmatched`, the two gross amounts, `total` and `matched_pct`, and
+each carrying the question it answers and the tool that closes its gap.
+`matched_pct` is `null` rather than `0` when there is nothing in the period.
+
+### `list_unmatched_receipts`
+
+Read-only. **Arguments:** `company`, `from_date`, `to_date`, `category`,
+`status`, `min_amount`, `max_amount`, `limit`.
+
+Oldest first, because the receipt that has been waiting longest is the one whose
+charge is most likely never to have landed at all. Rejected receipts are excluded
+unless a status is named.
+
+### `list_unmatched_bank_transactions`
+
+Read-only. **Arguments:** `bank_account`, `company`, `from_date`, `to_date`,
+`direction`, `min_amount`, `max_amount`, `require` (`any` | `receipt` |
+`allocation` | `both`), `limit`.
+
+Every row carries `unmatched_reasons`: `no allocation in the ledger` is a
+bookkeeping gap, `no receipt on file` is an evidence gap, and a transaction can
+have either, both or neither.
+
+### `create_bank_categorization_rule` — MUTATING, default off
+
+**Arguments:** `rule_name`, `company`, `category`, `pattern` (all required),
+`match_field` (`description` | `reference_number` | `bank_party_name`),
+`match_type` (`contains` | `starts_with` | `equals` | `regex`), `direction`,
+`priority`, `account`, `cost_center`, `party_type`, `party`, `amount_min`,
+`amount_max`, `enabled`, `notes`.
+
+**The account is optional and never guessed.** A rule with a category and no
+account still sorts a statement, which is most of the value; picking a leaf
+expense account by name on the operator's behalf would put a season of spraying
+somewhere nobody chose. When one is given it is checked against the company,
+against being a group and against being disabled — all three before anything is
+written. A `regex` that will not compile is refused on save, so a bad rule fails
+here rather than in the middle of a categorisation run.
+
+**Overlap is reported, not refused.** Rules are *meant* to overlap: `CHEVRON` at
+priority 10 and `FUEL` at 100, first match wins. The result names which existing
+rules also match and which of them would win.
+
+### `list_bank_categorization_rules`
+
+Read-only. **Arguments:** `company`, `enabled`, `category`, `limit`.
+
+In **evaluation order** — priority ascending — because reading the list top to
+bottom is how somebody works out why a transaction got the category it did.
+`never_fired` names the rules that have matched nothing, which usually means an
+earlier rule is swallowing their transactions.
+
+### `apply_categorization_rules` — MUTATING, default off
+
+**Arguments:** `company` (required), `bank_account`, `from_date`, `to_date`,
+`rule`, `dry_run`, `overwrite`, `limit`.
+
+First match by priority wins. Writes `farm_category`, `farm_expense_account` and
+`categorization_rule` with `db.set_value` — a bank feed's transactions are
+submitted, and `save()` on one either refuses or drags the whole document through
+validation it does not need. A rule's `party` is set only on a transaction that
+names nobody.
+
+**A category somebody typed by hand is never overwritten** unless
+`overwrite=true`, in which case the result reports what was there before.
+`dry_run=true` does the whole run and writes nothing — the sensible first call
+after seeding, because what it does *not* categorise is the list of rules the
+farm still needs.
+
+### `get_cash_flow_summary`
+
+Read-only. **Arguments:** `company` (required), `bank_account`, `from_date`,
+`to_date`.
+
+**The one thing it refuses to do is add them up.** A settlement, a sales invoice
+and a bank deposit can all be the same money arriving three times in three
+doctypes at three different moments; a single total would triple a season's
+revenue and look entirely reasonable. So:
+
+- `cash` — the bank statement. Deposits, withdrawals, net. The only section where
+  the money actually moved, and the only total in the response.
+- `inflows` / `outflows` — the **documents**: payments received and made, sales
+  and purchase invoices, settlements, payroll, expense receipts. Each says its
+  doctype, count, amount and **basis**, or why it is absent on this site.
+- `by_category` — outflow by category, **deduplicated**: a receipt matched to a
+  withdrawal is one purchase, so the withdrawal is dropped and the receipt kept
+  (the receipt carries the category somebody chose from the paper; the bank line
+  carries one a pattern guessed from a memo field). `deduplicated_transactions`
+  says how many were dropped.
+
+### `seed_farm_categorization_rules` — MUTATING, default off
+
+**Arguments:** `company` (required), `account_map`, `dry_run`.
+
+Seeds a starting book across Fuel, Chemicals/Spray, Equipment Parts, Labor
+Services, Irrigation, Insurance, Utilities, Feed, Supplies, Professional Services
+and Owner Draw. Specific merchant patterns sit at priority 10–40 and generic
+words at 100+, because the first match wins. **Every seeded rule is
+`Withdrawal`-only** — a refund from Chevron is not a tank of diesel.
+
+Nothing here matches a bare transfer or an ATM withdrawal: `TRANSFER` is an owner
+draw on one farm and a sweep between the operating and payroll accounts on the
+next, and a seed that guessed would file a year of internal movements as equity
+leaving the company.
+
+**Idempotent by (company, rule_name).** A second run creates nothing and leaves
+every edit — pattern, priority, account, `enabled` — alone. A **deleted** rule
+comes back on the next run: disable one that does not fit rather than deleting
+it, which is stated rather than solved because a tombstone register is more
+machinery than the problem deserves.
+
+`account_map` is `{category: account}` and every account in it is vetted
+**before any rule is created**, so a bad one produces nothing rather than half a
+book. Categories left out of it are named in `categories_without_account`.

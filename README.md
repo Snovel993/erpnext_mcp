@@ -14,7 +14,7 @@ Nothing in it is specific to one install. Company names, account numbers, fiscal
 years, report names and the Bank Transaction schema are all discovered from your
 site at call time.
 
-- **395 tools** — 179 read-only, 216 mutating.
+- **513 tools** — 244 read-only, 269 mutating.
 - **Every mutating tool ships OFF, with one named exception.** A fresh install
   cannot change a document until you tick a box. The exception is
   `install_compliance_fields`, which adds columns rather than data and is argued
@@ -92,7 +92,8 @@ you reason about it you end up pasting screenshots.
 An LLM is perfectly capable of reasoning about a general ledger. It cannot see
 one. This closes that gap without handing anything away:
 
-- **It cannot write by default.** All 38 mutating tools are off on install.
+- **It cannot write by default.** All but one of the 269 mutating tools are
+  off on install (the exception is `install_compliance_fields`, argued below).
   Turning one on is a checkbox on a form only System Manager can open.
 - **The dangerous verb gets its own switch.** `create_journal_entry` only ever
   produces a draft — `docstatus=0`, affecting no balance. Posting is

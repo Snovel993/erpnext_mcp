@@ -143,6 +143,7 @@ def after_install() -> None:
 	_badge_list_action()
 	_badge_form_action()
 	_settlement_invoice_link()
+	_bank_categorization_fields()
 	frappe.db.commit()
 
 
@@ -171,6 +172,7 @@ def after_migrate() -> None:
 	_badge_list_action()
 	_badge_form_action()
 	_settlement_invoice_link()
+	_bank_categorization_fields()
 
 
 def _settlement_invoice_link() -> None:
@@ -207,6 +209,42 @@ def _settlement_invoice_link() -> None:
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(
 			f"erpnext_mcp: the Sales Invoice settlement link was not installed — "
+			f"{type(exc).__name__}: {exc}"
+		)
+
+
+def _bank_categorization_fields() -> None:
+	"""Give Bank Transaction the three columns a categorisation writes into.
+
+	v0.71.0, and the third place this app adds a Custom Field to somebody else's
+	doctype — `compliance_fields.py` argues the general case and
+	`_settlement_invoice_link` is the narrow precedent. The argument here is that
+	the alternative is a parallel record with one row per bank transaction, and a
+	shadow record of a thing that already exists drifts from it.
+
+	`tools/banking_bridge.py` creates the same fields lazily on first use, so a
+	bench that upgraded without running the installer still works. Doing it here
+	means the columns exist before anybody needs them, which is what makes them
+	filterable in the Desk.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import banking_bridge
+
+		if not frappe.db.exists("DocType", "Bank Transaction"):
+			return
+		if banking_bridge.ensure_categorization_fields():
+			return
+		print(
+			"erpnext_mcp: Bank Transaction did not take the categorisation Custom Fields. "
+			"apply_categorization_rules will refuse to write until they exist; every read tool "
+			"still works and reports every transaction as uncategorised."
+		)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(
+			f"erpnext_mcp: the Bank Transaction categorisation fields were not installed — "
 			f"{type(exc).__name__}: {exc}"
 		)
 

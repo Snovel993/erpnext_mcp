@@ -47,6 +47,7 @@ from .tools import (
 	auditpacket,
 	badges,
 	banking,
+	banking_bridge,
 	bucket_log,
 	budget,
 	calendar,
@@ -286,6 +287,24 @@ _SALES_REQUIRES = (
 _SETTLEMENT_INVOICE_REQUIRES = (
 	"the Settlement Statement doctype (run `bench migrate` after installing v0.67.0) AND "
 	"the ERPNext app's Accounts module, which is where Sales Invoice comes from"
+)
+
+
+#: v0.71.0. What the receipt-to-statement bridge needs at both ends: the bank's
+#: record of the money and the farm's record of the paper. A site with one and
+#: not the other has nothing to reconcile, which is why these tools are
+#: advertised on `_all_doctypes` rather than on either half.
+_BANK_BRIDGE_REQUIRES = (
+	"the ERPNext app's Bank Transaction doctype, which is the bank's record of the money, "
+	"AND the Expense Receipt doctype, which ships with erpnext_mcp — run `bench migrate`"
+)
+
+#: What the categorisation half needs. The rule register is ours; the
+#: transactions it reads are ERPNext's.
+_CATEGORIZATION_REQUIRES = (
+	"the Bank Categorization Rule doctype, which ships with erpnext_mcp — run `bench migrate` "
+	"after installing v0.71.0 — and, for the tools that read statements, the ERPNext app's "
+	"Bank Transaction"
 )
 
 
@@ -17647,6 +17666,298 @@ TOOLS = {
 		title="List revalidations due",
 		available=_needs_doctype("Document Validation"),
 		requires="the Document Validation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.71.0, Sprint 6: the bank statement and what is behind each line ──
+	"match_receipt_to_bank_transaction": _tool(
+		banking_bridge.match_receipt_to_bank_transaction,
+		"MUTATING (default OFF). Link one Expense Receipt to the Bank "
+		"Transaction it is the paper for — or, called WITHOUT a "
+		"bank_transaction, rank the candidates and write nothing.\n\n"
+		"The link is EVIDENCE, not a posting and not an allocation. Nothing is "
+		"booked, no GL row is written, and ERPNext's own reconciliation is "
+		"untouched — reconcile_bank_transaction is the separate tool that "
+		"settles a transaction against a Payment Entry or a Journal Entry.\n\n"
+		"REFUSED BY NAME, all of it before anything is written: a receipt "
+		"already matched elsewhere (unless replace=true), a transaction that "
+		"already has a different receipt, a deposit (an expense receipt is "
+		"money out), a receipt and a transaction in different companies, and a "
+		"rejected receipt. A link made against the scoring rules is allowed — a "
+		"person naming both documents outranks an algorithm — and comes back "
+		"with the objections listed and a stored confidence of 0.",
+		{
+			"expense_receipt": _field(_STRING, "REQUIRED. The Expense Receipt docname."),
+			"receipt": _field(_STRING, "Alias for expense_receipt."),
+			"name": _field(_STRING, "Alias for expense_receipt."),
+			"bank_transaction": _field(
+				_STRING,
+				"The Bank Transaction to link. OMIT IT to get ranked candidates and write "
+				"nothing — that is the read-shaped call.",
+			),
+			"transaction": _field(_STRING, "Alias for bank_transaction."),
+			"bank_account": _field(_STRING, "Narrow the candidate search to one Bank Account."),
+			"match_method": _field(
+				_STRING,
+				"Manual (a person named both documents) or Proposed (a match auto_match_receipts "
+				"scored and a person accepted). Default Manual.",
+			),
+			"replace": _field(_BOOLEAN, "Re-point a receipt that is already matched. Default false."),
+			"amount_tolerance": _field(
+				_NUMBER, "How far the two amounts may differ and still be one purchase. Default 0.02."
+			),
+			"date_window_days": _field(
+				_NUMBER, "How many days after the receipt the charge may post. Default 7, maximum 60."
+			),
+			"limit": _LIMIT,
+		},
+		required=("expense_receipt",),
+		mutating=True,
+		title="Match receipt to bank transaction",
+		available=_all_doctypes("Bank Transaction", "Expense Receipt"),
+		requires=_BANK_BRIDGE_REQUIRES,
+	),
+	"auto_match_receipts": _tool(
+		banking_bridge.auto_match_receipts,
+		"Score every unmatched Expense Receipt against every unmatched bank "
+		"WITHDRAWAL and return ranked proposals. WRITES NOTHING — it is a read "
+		"tool, deliberately.\n\n"
+		"Each proposal carries the confidence, the three signals behind it "
+		"(amount gap, days between, merchant against the bank's memo line) and "
+		"the exact match_receipt_to_bank_transaction call that would commit it. "
+		"A wrong receipt-to-bank link is invisible afterwards — both documents "
+		"exist and both amounts are right — so a person accepts each one.\n\n"
+		"CONTESTED PROPOSALS ARE REPORTED, NOT RESOLVED. Two slips for the same "
+		"amount on the same day at the same vendor happen on a farm with two "
+		"trucks; the higher scorer is proposed and the other is listed under "
+		"`contested` with the transaction named, rather than dropped. Read-only.",
+		{
+			"company": _field(_STRING, "Scope to one company. Defaults to the site's default."),
+			"bank_account": _field(_STRING, "Scope to one Bank Account."),
+			"from_date": _field(_STRING, "Earliest transaction date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest transaction date, YYYY-MM-DD."),
+			"category": _field(_STRING, "Only receipts in this category."),
+			"status": _field(_STRING, "Only receipts in this status. Rejected ones are excluded by default."),
+			"min_amount": _field(_NUMBER, "Only receipts at or above this amount."),
+			"max_amount": _field(_NUMBER, "Only receipts at or below this amount."),
+			"min_confidence": _field(_NUMBER, "Floor for a proposal, 0 to 1. Default 0.70."),
+			"amount_tolerance": _field(_NUMBER, "Amount gap allowed, in currency. Default 0.02."),
+			"date_window_days": _field(_NUMBER, "Posting window in days. Default 7, maximum 60."),
+			"limit": _LIMIT,
+		},
+		title="Auto-match receipts to bank transactions",
+		available=_all_doctypes("Bank Transaction", "Expense Receipt"),
+		requires=_BANK_BRIDGE_REQUIRES,
+	),
+	"get_bank_reconciliation_status": _tool(
+		banking_bridge.get_bank_reconciliation_status,
+		"Three reconciliation questions for one account and period, answered "
+		"SEPARATELY and never added together: is each transaction allocated in "
+		"the ledger, does each one have a receipt behind it, and does anybody "
+		"know what kind of expense it was.\n\n"
+		"They are independent states, not stages. A statement can tie out "
+		"perfectly while a third of its withdrawals have no paper — which is "
+		"the case an audit asks about — and a categorised transaction can be "
+		"entirely unreconciled. Counts and gross amounts for each, plus the "
+		"category breakdown. Dashboard-ready. Read-only.",
+		{
+			"bank_account": _field(_STRING, "The Bank Account. Omit for every account in the company."),
+			"company": _field(_STRING, "Scope to one company."),
+			"from_date": _field(_STRING, "Start of the period, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "End of the period, YYYY-MM-DD."),
+		},
+		title="Get bank reconciliation status",
+		available=_needs_doctype("Bank Transaction"),
+		requires=_BANK_BRIDGE_REQUIRES,
+	),
+	"list_unmatched_receipts": _tool(
+		banking_bridge.list_unmatched_receipts,
+		"Expense Receipts with no Bank Transaction against them — the evidence "
+		"worklist — oldest first, with the totals and a category breakdown. "
+		"Filterable by company, date range, category, status and amount range. "
+		"Rejected receipts are excluded unless a status is named, because a "
+		"rejected receipt is not evidence of anything. Read-only.",
+		{
+			"company": _field(_STRING, "Scope to one company."),
+			"from_date": _field(_STRING, "Earliest receipt date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest receipt date, YYYY-MM-DD."),
+			"category": _field(_STRING, "Only this category."),
+			"status": _field(_STRING, "Draft, Submitted, Approved or Rejected."),
+			"min_amount": _field(_NUMBER, "At or above this amount."),
+			"max_amount": _field(_NUMBER, "At or below this amount."),
+			"limit": _LIMIT,
+		},
+		title="List unmatched receipts",
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_unmatched_bank_transactions": _tool(
+		banking_bridge.list_unmatched_bank_transactions,
+		"Statement lines with nothing behind them, and WHICH kind of nothing. "
+		"Every row carries `unmatched_reasons`: 'no allocation in the ledger' "
+		"is a bookkeeping gap, 'no receipt on file' is an evidence gap, and a "
+		"transaction can have either, both or neither.\n\n"
+		"`require` narrows it — `receipt` for the audit question, `allocation` "
+		"for the tie-out question, `both` for the lines that are missing "
+		"everything. Filterable by account, company, date range, amount range "
+		"and direction. Read-only.",
+		{
+			"bank_account": _field(_STRING, "Scope to one Bank Account."),
+			"company": _field(_STRING, "Scope to one company."),
+			"from_date": _field(_STRING, "Earliest transaction date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest transaction date, YYYY-MM-DD."),
+			"direction": _field(_STRING, "'Deposit' or 'Withdrawal'."),
+			"min_amount": _field(_NUMBER, "Gross amount at or above this."),
+			"max_amount": _field(_NUMBER, "Gross amount at or below this."),
+			"require": _field(
+				_STRING,
+				"any (default — missing either), receipt, allocation, or both (missing both).",
+			),
+			"limit": _LIMIT,
+		},
+		title="List unmatched bank transactions",
+		available=_needs_doctype("Bank Transaction"),
+		requires=_BANK_BRIDGE_REQUIRES,
+	),
+	"create_bank_categorization_rule": _tool(
+		banking_bridge.create_bank_categorization_rule,
+		"MUTATING (default OFF). Create one rule that says what a statement "
+		"line is: description contains CHEVRON → category Fuel, account 5200. "
+		"Rules are DATA rather than code, so a farm that changes fuel suppliers "
+		"adds a row rather than waiting for a release.\n\n"
+		"THE ACCOUNT IS OPTIONAL AND NEVER GUESSED. A rule with a category and "
+		"no account still sorts a statement, which is most of the value. When "
+		"one is given it is checked against the company, against being a group "
+		"and against being disabled before anything is written.\n\n"
+		"Overlap is REPORTED, not refused: rules are meant to overlap and the "
+		"first match by priority wins, so the result names which existing rules "
+		"also match and which of them would win. Creating a rule categorises "
+		"nothing — apply_categorization_rules runs it.",
+		{
+			"rule_name": _field(_STRING, "REQUIRED. Unique within the company."),
+			"company": _field(_STRING, "REQUIRED. The company whose statements this rule reads."),
+			"category": _field(_STRING, "REQUIRED. Fuel, Chemicals/Spray, Irrigation — free text."),
+			"pattern": _field(_STRING, "REQUIRED. The text to look for. Case-insensitive."),
+			"match_field": _field(_STRING, "description (default), reference_number or bank_party_name."),
+			"match_type": _field(_STRING, "contains (default), starts_with, equals or regex."),
+			"direction": _field(_STRING, "Any (default), Deposit or Withdrawal."),
+			"priority": _field(_INTEGER, "Lower runs first. Default 100."),
+			"account": _field(_STRING, "The expense account. Never guessed; omit if undecided."),
+			"expense_account": _field(_STRING, "Alias for account."),
+			"cost_center": _field(_STRING, "Cost center for matching transactions."),
+			"party_type": _field(_STRING, "Supplier, Customer or Employee."),
+			"party": _field(_STRING, "The party record. Set only on transactions that name nobody."),
+			"amount_min": _field(_NUMBER, "Smallest gross amount this rule applies to."),
+			"amount_max": _field(_NUMBER, "Largest gross amount this rule applies to."),
+			"enabled": _field(_BOOLEAN, "Default true."),
+			"notes": _field(_STRING, "Why this rule exists."),
+		},
+		required=("rule_name", "company", "category", "pattern"),
+		mutating=True,
+		title="Create bank categorization rule",
+		available=_needs_doctype("Bank Categorization Rule"),
+		requires=_CATEGORIZATION_REQUIRES,
+	),
+	"list_bank_categorization_rules": _tool(
+		banking_bridge.list_bank_categorization_rules,
+		"The book of categorization rules IN THE ORDER THEY ARE TRIED — "
+		"priority ascending, first match wins — because reading the list top to "
+		"bottom is how somebody works out why a transaction got the category it "
+		"did. Reports which rules have never fired (usually an earlier rule is "
+		"swallowing their transactions) and which have no expense account. "
+		"Read-only.",
+		{
+			"company": _field(_STRING, "Scope to one company."),
+			"enabled": _field(_BOOLEAN, "Only enabled rules, or only disabled ones."),
+			"category": _field(_STRING, "Only rules filing into this category."),
+			"limit": _LIMIT,
+		},
+		title="List bank categorization rules",
+		available=_needs_doctype("Bank Categorization Rule"),
+		requires=_CATEGORIZATION_REQUIRES,
+	),
+	"apply_categorization_rules": _tool(
+		banking_bridge.apply_categorization_rules,
+		"MUTATING (default OFF). Run the enabled rules against uncategorised "
+		"Bank Transactions and record, on each one, the category, the expense "
+		"account and WHICH RULE decided it.\n\n"
+		"This writes without a per-row review, unlike receipt matching, and the "
+		"reason is that a rule is deterministic and inspectable: its output "
+		"names the rule, so an operator who disagrees reads it, fixes it and "
+		"runs again. NOTHING IS POSTED — no GL Entry, no Journal Entry, no "
+		"allocation. Categorising says what a transaction WAS.\n\n"
+		"A category somebody typed by hand is never overwritten unless "
+		"overwrite=true. `dry_run=true` does the whole run and writes nothing, "
+		"which is the sensible first call after seeding rules — and what it "
+		"does NOT categorise is the list of rules the farm still needs.",
+		{
+			"company": _field(_STRING, "REQUIRED. Rules and transactions are both scoped to it."),
+			"bank_account": _field(_STRING, "Only transactions on this Bank Account."),
+			"from_date": _field(_STRING, "Earliest transaction date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest transaction date, YYYY-MM-DD."),
+			"rule": _field(_STRING, "Run ONE rule, by docname or rule_name, instead of the book."),
+			"dry_run": _field(_BOOLEAN, "Do everything and write nothing. Default false."),
+			"overwrite": _field(_BOOLEAN, "Replace categories already set. Default false."),
+			"limit": _LIMIT,
+		},
+		required=("company",),
+		mutating=True,
+		title="Apply categorization rules",
+		available=_all_doctypes("Bank Transaction", "Bank Categorization Rule"),
+		requires=_CATEGORIZATION_REQUIRES,
+	),
+	"get_cash_flow_summary": _tool(
+		banking_bridge.get_cash_flow_summary,
+		"What came in, what went out, and ON WHICH BASIS each number is true — "
+		"the whole Sprint 1-5 pipeline in one cash picture.\n\n"
+		"THE ONE THING IT REFUSES TO DO IS ADD THEM UP. A settlement, a sales "
+		"invoice and a bank deposit can all be the same money arriving three "
+		"times in three doctypes; a single total would triple a season's "
+		"revenue and look reasonable. So `cash` (the bank statement, the only "
+		"money that actually moved) is reported apart from the DOCUMENTS — "
+		"payments in and out, invoices, settlements, payroll, receipts — each "
+		"with its doctype, count, amount and basis.\n\n"
+		"`by_category` is the one place the two touch, and it DEDUPLICATES: a "
+		"receipt matched to a withdrawal is one purchase, so the withdrawal is "
+		"dropped and the receipt kept. Read-only.",
+		{
+			"company": _field(_STRING, "REQUIRED. Whose cash this is."),
+			"bank_account": _field(_STRING, "Scope the cash section to one Bank Account."),
+			"from_date": _field(_STRING, "Start of the period, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "End of the period, YYYY-MM-DD."),
+		},
+		required=("company",),
+		title="Get cash flow summary",
+	),
+	"seed_farm_categorization_rules": _tool(
+		banking_bridge.seed_farm_categorization_rules,
+		"MUTATING (default OFF). Put a starting book of farm categorization "
+		"rules on the site — fuel, chemicals and spray, equipment and parts, "
+		"labor services, irrigation, insurance, utilities, feed and supplies, "
+		"professional services and owner draw — with the specific merchant "
+		"patterns at priority 10-40 and the generic words at 100+, because the "
+		"first match wins.\n\n"
+		"IDEMPOTENT by (company, rule_name): running it twice creates nothing "
+		"the second time and leaves every edit alone. A DELETED rule comes back "
+		"on the next run — disable one that does not fit this farm instead, "
+		"which every later run respects.\n\n"
+		"ACCOUNTS ARE MAPPED, NEVER GUESSED. Pass account_map to give a "
+		"category its expense account; the rest get rules that sort a statement "
+		"but cannot tell a Journal Entry where to post, and are named in the "
+		"result. Nothing here searches the chart of accounts by keyword.",
+		{
+			"company": _field(_STRING, "REQUIRED. The company to seed."),
+			"account_map": _field(
+				_OBJECT,
+				'{"Fuel": "5200 - Fuel - ABC", …}. Each account is fully vetted BEFORE any rule '
+				"is created, so a bad one produces nothing rather than half a book.",
+			),
+			"dry_run": _field(_BOOLEAN, "List what would be seeded and write nothing."),
+		},
+		required=("company",),
+		mutating=True,
+		idempotent=True,
+		title="Seed farm categorization rules",
+		available=_needs_doctype("Bank Categorization Rule"),
+		requires=_CATEGORIZATION_REQUIRES,
 	),
 }
 
