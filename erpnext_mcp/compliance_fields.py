@@ -620,6 +620,75 @@ _ASSET_FIELDS = (
 )
 
 
+# ── Item — ERPNext ──────────────────────────────────────────────────────────
+#
+# v0.69.0, AND IT IS THE SAME ARGUMENT AS Spray Log WITH THE SUBJECT CHANGED.
+# The REI and the PHI are on the Spray Log because that is where the person doing
+# the spraying is. They are ALSO on the product, because that is where the label
+# says them — and the label is the law. A site keeping them only on the spray
+# record has to have somebody read a jug before every application and type the
+# number in correctly, which is a data-entry step standing between a crew and a
+# block they may not enter.
+#
+# WHAT THESE TWO COLUMNS BUY, CONCRETELY. `complete_farm_task` reads them off the
+# chemicals in the tank mix and stamps the WINDOW onto the task — an expiry to the
+# hour and a harvest date — which is what `rei_active_block_entry` and
+# `phi_harvest_window` raise from. Without them the app can record that a spray
+# happened and cannot say when the block reopens, which is the one question the
+# record exists to answer.
+#
+# NEITHER IS REQUIRED, and that is deliberate in the way `Asset.capex_type` is:
+# most items in an orchard's register are bins, twine and diesel, and a required
+# REI would make every one of them unsaveable until somebody typed a zero into a
+# column that does not apply to a pallet.
+_ITEM_FIELDS = (
+	ComplianceField(
+		fieldname="rei_hours",
+		label="REI (hours)",
+		fieldtype="Int",
+		framework="EPA WPS 40 CFR 170.407 — restricted-entry interval; FIFRA label",
+		why=(
+			"The label's restricted-entry interval for this product, in hours. It is the "
+			"number the re-entry prohibition after every application of it is computed "
+			"from, and it belongs to the product rather than to any one spray."
+		),
+		operational=(
+			"Crew scheduling, from the item register outwards. Recorded here, finishing a "
+			"spray task states the hour the block reopens by itself; recorded nowhere, "
+			"somebody reads a jug in the field and the crew boss guesses."
+		),
+		description=(
+			"Hours workers may not enter a treated area without PPE, off this product's "
+			"label. Leave at zero for anything that is not a restricted-entry product — a "
+			"fertiliser, a foliar nutrient, bin liners. A tank mix takes the LONGEST REI "
+			"of the products in it."
+		),
+	),
+	ComplianceField(
+		fieldname="phi_days",
+		label="PHI (days)",
+		fieldtype="Int",
+		framework="FIFRA label; FDA tolerances 40 CFR 180",
+		why=(
+			"The label's pre-harvest interval for this product, in days. Picking inside it "
+			"is a residue violation on a shipped load, and the interval is a property of "
+			"the product the same way the REI is."
+		),
+		operational=(
+			"Harvest scheduling weeks out. A block sprayed inside its PHI cannot be picked, "
+			"and the pick date is planned against this number long before the sprayer is "
+			"filled — so it has to be knowable from the product, not only from the last "
+			"application record."
+		),
+		description=(
+			"Days after application before the crop may be harvested, off this product's "
+			"label. Leave at zero for anything with no pre-harvest restriction. A tank mix "
+			"takes the LONGEST PHI of the products in it."
+		),
+	),
+)
+
+
 #: Every doctype this installer knows about, in the order it reports them.
 #:
 #: The last two are `verify` targets: Housing Unit and Field are this app's own
@@ -706,6 +775,22 @@ TARGETS = (
 			"present. get_sustainable_cf_per_acre still computes — it reports a "
 			"maintenance capex of zero and says why in its warnings, which is the honest "
 			"answer for a site that records no fixed assets at all."
+		),
+	),
+	Target(
+		doctype="Item",
+		owner_app="erpnext",
+		purpose=(
+			"The restricted-entry and pre-harvest intervals off a product's own label, on the "
+			"product. Every application of a chemical inherits them, which is what lets a "
+			"finished spray task say when the block reopens and when it may be picked without "
+			"anybody reading a jug in the field."
+		),
+		fields=_ITEM_FIELDS,
+		absent_note=(
+			"This site has no Item DocType, which means ERPNext's stock module is not present. "
+			"Spray tasks still complete and still record what was used; no REI or PHI window is "
+			"computed, and the two interval rules raise nothing rather than raising wrongly."
 		),
 	),
 	Target(

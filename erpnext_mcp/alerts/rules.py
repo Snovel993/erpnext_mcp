@@ -3069,6 +3069,203 @@ shape(
 )
 
 
+# ── v0.69.0: an item below the level somebody set for it ────────────────────
+#
+# BUILT-IN, AND THE REASON IS A JOIN RATHER THAN AN AGGREGATION. `audit_action_overdue`
+# is built-in because it folds a child table; this one is built-in because the
+# number and the level live on two different doctypes with no column joining them.
+# The balance is `Bin.actual_qty`, keyed on (item, warehouse). The level is a
+# reorder rule that lives on `Item Reorder` on a modern site and on `Item.re_order_level`
+# on an old one. The declarative engine walks the rows of ONE doctype and asks a
+# question of each; there is no question you can ask of a Bin whose answer is on
+# an Item's child table, and no primitive short of a general join gets there.
+#
+# IT READS THE RULES THROUGH `stock_inventory._reorder_rules` AND THE BALANCES
+# THROUGH `_bin_rows` — the same two functions `list_reorder_alerts` uses, which
+# is the whole reason this rule is thirty lines rather than a hundred. Where a
+# reorder rule lives on a given ERPNext vintage is a decision v0.69.0 already
+# made once; a second copy of it in the alert engine would be the one that goes
+# stale, and it would go stale silently, on the sites running the vintage nobody
+# tests against.
+#
+# THE ROW WITH NO BIN IS THE MOST URGENT ROW, and it is the one a naive scan
+# misses. ERPNext writes a Bin the first time stock moves for an item in a
+# warehouse — so an item that has never arrived has NO row at all, and "no bin"
+# means zero rather than "no opinion". Scanning bins and joining outwards would
+# silently skip exactly the shortages that are total. So this walks the RULES —
+# the operation's own statement of what it intends to keep on hand — and looks
+# the balance up beside each one. Same call `list_reorder_alerts` makes, and the
+# two agree by construction rather than by review.
+#
+# WHAT IT KEYS THE ALERT ON. The ITEM, always, and never the Bin — even though a
+# Bin exists for most of them and would carry the warehouse in its docname. An
+# alert key must not move, and a bin's does: `alerts/base.py` keys on
+# (rule, source_doctype, source_docname), so an item that is short today with no
+# bin and short next week with one would raise a SECOND alert and dismiss the
+# first, losing its `first_seen` and anybody's snooze. The warehouse is in the
+# message, where it is read, rather than in the identity, where it would churn.
+
+
+def _item_row(item_code: str, cache: dict) -> dict:
+	if item_code not in cache:
+		try:
+			cache[item_code] = dict(
+				frappe.db.get_value(
+					"Item", item_code, ["item_name", "stock_uom", "disabled"], as_dict=True
+				)
+				or {}
+			)
+		except Exception:  # pragma: no cover - a site without the stock module
+			cache[item_code] = {}
+	return cache[item_code]
+
+
+def _scan_item_reorder(context: dict) -> list:
+	"""Items whose balance has fallen below the level the operation set for them."""
+	from ..tools import stock_inventory
+
+	company = context.get("company") or ""
+	severity = _severity_of(context, "severity_expired", SEVERITY_INFO)
+	scoped_warehouses = set(stock_inventory._company_warehouses(company)) if company else set()
+
+	items: dict = {}
+	out = []
+	for (item_code, warehouse), rule in sorted(stock_inventory._reorder_rules().items()):
+		# A LEVEL OF ZERO IS NOT A LEVEL. ERPNext writes the row for the reorder
+		# QUANTITY as readily as for the level, so a zero here is "nobody said",
+		# and raising on it would put every item with a reorder row and an empty
+		# shelf on the board — including the ones deliberately kept at nothing.
+		level = float(rule.get("reorder_level") or 0)
+		if level <= 0 or not item_code:
+			continue
+		if company and warehouse and scoped_warehouses and warehouse not in scoped_warehouses:
+			continue
+
+		item = _item_row(item_code, items)
+		# A disabled item is one nobody is allowed to buy or consume, so an alert
+		# to reorder it is noise at best and a cancelled purchase order at worst.
+		# Same exclusion `list_reorder_alerts` makes, for the same reason.
+		if item.get("disabled"):
+			continue
+
+		bin_filters: dict = {"item_code": item_code}
+		if warehouse:
+			bin_filters["warehouse"] = warehouse
+		elif company and scoped_warehouses:
+			bin_filters["warehouse"] = ("in", sorted(scoped_warehouses))
+		bins = stock_inventory._bin_rows(bin_filters)
+		current = round(sum(float(row.get("actual_qty") or 0) for row in bins), 6)
+		if current >= level:
+			continue
+
+		uom = str(item.get("stock_uom") or "")
+		subject = {
+			"name": item_code,
+			"item_code": item_code,
+			"item_name": item.get("item_name"),
+			"warehouse": warehouse,
+			"actual_qty": current,
+			"reorder_level": level,
+			"company": company,
+		}
+		if not _scoped(context, subject):
+			continue
+
+		where = f" in {warehouse}" if warehouse else ""
+		out.append(
+			Observation(
+				source_doctype="Item",
+				source_docname=item_code,
+				message=(
+					f"Stock below reorder level: {_number(current)} / {_number(level)}"
+					f"{(' ' + uom) if uom else ''} — {item_code}{where}. "
+					+ (
+						"There is no bin for it at all, so the balance is zero rather than low. "
+						if not bins
+						else ""
+					)
+					+ "Raise the order now: the interval between ordering and having it on the "
+					"shelf is what the reorder level was set to cover, and the day it is needed "
+					"is not the day to find out it is short."
+				),
+				severity=severity,
+				company=company,
+			)
+		)
+	return out
+
+
+def _number(value: float) -> str:
+	"""A quantity without a trailing `.0` on the whole numbers most of them are."""
+	return str(int(value)) if float(value) == int(value) else str(round(float(value), 3))
+
+
+register(
+	Rule(
+		key="item_below_reorder",
+		title="An item's stock has fallen below its reorder level",
+		category="Inventory",
+		requires=("Item", "Bin"),
+		framework="Internal — inventory continuity behind the spray, irrigation and harvest calendars",
+		purpose=(
+			"A reorder level is the operation's own statement of how much lead time it needs "
+			"for one item. Crossing it is not a shortage yet, which is precisely why it is "
+			"worth an alert: the alert is the lead time. An orchard that finds out it is short "
+			"of a product on the morning of the application has already lost the window, and a "
+			"spray window missed is a pest cycle, not an errand."
+		),
+		kairotic_gate=(
+			"Fires on a BALANCE against a LEVEL, and only where somebody set a level — an item "
+			"with no reorder row raises nothing, for ever, because nobody has said what "
+			"'enough' means for it. An item WITH a level and no bin in that warehouse raises at "
+			"a balance of zero rather than being skipped, since a bin that does not exist is "
+			"the most complete shortage there is. Silences by itself the moment the balance "
+			"comes back up to the level: receiving the order IS the fix, and nothing else has "
+			"to happen for the alert to go."
+		),
+		regimes=("Internal",),
+		scan=_scan_item_reorder,
+	)
+)
+
+# BUILT-IN, `date_field` EMPTY, BOTH THRESHOLDS AT -1 — this app's existing way
+# of saying "every matching row raises, at `severity_expired`". A stock balance
+# has no deadline to be near or past; it is above the level or it is below it.
+#
+# INFO RATHER THAN WARNING, and that is a deliberate down-grade from what the
+# spec asked for. Compliance Alert has three severities and this board is shared
+# with a live restricted-entry interval and an unsigned I-9. A reorder point is
+# real and it is NOT of that kind: nobody is unsafe, nothing is unlawful, and a
+# week of notice is the whole point. Filed at the level that means "know about
+# this", so the levels above it keep meaning what they mean.
+shape(
+	"item_below_reorder",
+	target_doctype="Item",
+	builtin_scanner="item_below_reorder",
+	requires_doctypes="Item, Item Reorder, Bin",
+	date_field="",
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_critical=SEVERITY_WARNING,
+	severity_warning=SEVERITY_INFO,
+	severity_expired=SEVERITY_INFO,
+	default_severity=SEVERITY_INFO,
+	due_date_mode="None",
+	category="Inventory",
+	retention_years=1,
+	# THE ONE RULE OF THE THREE THIS RELEASE ADDS THAT HAS WORK BEHIND IT. An REI
+	# and a PHI are clocks nobody can shorten; a short shelf is somebody going to
+	# buy something, so it gets a task recipe and `rectify_alert` can raise it.
+	producer_farm_task_type="Other",
+	producer_skill_required="",
+	extra_parameters={
+		"producer_task_what": "Reorder this item — the balance is below the level set for it",
+		"producer_task_minutes": 15,
+	},
+	evidence_contract={"findings_text": True},
+)
+
+
 # ── the scanner registry ────────────────────────────────────────────────────
 #
 # EVERY SHIPPED RULE'S SCAN IS AVAILABLE AS A NAMED SCANNER, not only the seven

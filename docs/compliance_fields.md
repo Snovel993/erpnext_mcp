@@ -194,6 +194,37 @@ would demand a classification nobody present can make. The gate is in
 | `growth_portion` | Currency | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | The other half of the split, stored rather than derived. A portion computed as 'the total minus the other one' cannot disagree with the total, which sounds like a virtue and means a transposed figure is silently absorbed instead of refused. | What the expansion actually cost, separable from what keeping the existing ground going cost. It is the number a return-on-new-planting calculation starts from. |
 | `capex_justification` | Small Text | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | Required for Growth and Mixed by `create_asset`: what capacity does this add? Classifying a purchase as growth takes it out of the maintenance figure, which raises sustainable cash flow — the one direction in which a misclassification flatters the operation, and therefore the one that needs a sentence behind it. | The reason the purchase was made, in the words of whoever made it, on the record it was made against. It is what next year's planning reads to find out whether the new capacity did what it was bought to do. |
 
+### `Item` — erpnext
+
+The restricted-entry and pre-harvest intervals off a product's own label, on the product. Every application of a chemical inherits them, which is what lets a finished spray task say when the block reopens and when it may be picked without anybody reading a jug in the field.
+
+**The same argument as `Spray Log`, with the subject changed.** The REI and the
+PHI are on the spray record because that is where the person doing the spraying
+is. They are *also* on the product, because that is where the label says them —
+and the label is the law. A site keeping them only on the spray record needs
+somebody to read a jug before every application and type the number in
+correctly, which is a data-entry step standing between a crew and a block they
+may not enter.
+
+**What the two columns buy, concretely.** `complete_farm_task` reads them off
+the chemicals in the tank mix and stamps the *window* onto the task — an expiry
+to the hour and a harvest date — which is what the `rei_active_block_entry` and
+`phi_harvest_window` compliance rules raise from. Without them the app can
+record that a spray happened and cannot say when the block reopens, which is the
+one question the record exists to answer.
+
+**Neither is `reqd`,** in the way `Asset.capex_type` is not: most items in an
+orchard's register are bins, twine and diesel, and a required REI would make
+every one of them unsaveable until somebody typed a zero into a column that does
+not apply to a pallet. A tank mix takes the **longest** REI and the longest PHI
+of the products in it — a mix is under the strictest thing in it, and a block
+does not become half-enterable at hour twelve.
+
+| Field | Type | Required | Framework | Why the regulator wants it | What breaks in the WORK without it |
+| --- | --- | --- | --- | --- | --- |
+| `rei_hours` | Int | no | EPA WPS 40 CFR 170.407 — restricted-entry interval; FIFRA label | The label's restricted-entry interval for this product, in hours. It is the number the re-entry prohibition after every application of it is computed from, and it belongs to the product rather than to any one spray. | Crew scheduling, from the item register outwards. Recorded here, finishing a spray task states the hour the block reopens by itself; recorded nowhere, somebody reads a jug in the field and the crew boss guesses. |
+| `phi_days` | Int | no | FIFRA label; FDA tolerances 40 CFR 180 | The label's pre-harvest interval for this product, in days. Picking inside it is a residue violation on a shipped load, and the interval is a property of the product the same way the REI is. | Harvest scheduling weeks out. A block sprayed inside its PHI cannot be picked, and the pick date is planned against this number long before the sprayer is filled — so it has to be knowable from the product, not only from the last application record. |
+
 ### `Housing Unit` — erpnext_mcp
 
 FSMA Produce Safety Rule Subpart L worker facilities, and the habitability and detector-test dates Oregon's agricultural labor housing rules turn on. Shipped as declared fields in v0.12.0, verified here.

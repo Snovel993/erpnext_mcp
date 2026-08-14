@@ -6116,11 +6116,34 @@ MUTATING (off). The tool the release exists for.
 | `witness` | Somebody else who was there |
 | `actual_duration_minutes`, `completed_at` | The clock |
 | `record_data` | Extra fields for the compliance record, merged over the task's own template |
+| `materials_used` | v0.69.0. What was consumed: `[{item_code, qty, uom?, warehouse?}]` |
 
 It checks the evidence against the contract, files it, and **writes the
 compliance record the task promised** — the actual Housing Inspection, Detector
 Test or Water Test, with the photographs on it. That record moves the register,
 and the alert that asked for the work auto-dismisses on the next sweep.
+
+**v0.69.0: the work moves the stock.** Each line of `materials_used` is issued
+out of the warehouse as its own submitted `Material Issue`, tagged back to the
+task — and on a **spray** task with nothing passed here, the tank mix already on
+the task is what gets issued, because that is what the applicator was sent to put
+on the block. `materials_consumed` in the result says which list was used, what
+moved, and what did not.
+
+**A movement that cannot be written NEVER fails the completion.** Insufficient
+stock, an item with no warehouse, a site with no Stock module — every one of them
+comes back as a warning on a completion that succeeded. A worker holding a
+signature, two photographs and a finished spray is holding a compliance record,
+and no shed count is worth destroying one. A **malformed** list is the one
+exception and is refused before anything is written.
+
+**A spray stamps its own intervals.** The longest `rei_hours` and the longest
+`phi_days` among the chemicals in the tank become `rei_expires_at` (to the hour)
+and `phi_clears_on` on the task — a mix is under the strictest product in it —
+and the `rei_active_block_entry` and `phi_harvest_window` alerts are raised in
+the same call. Both clear themselves when their own interval closes; neither is
+dismissible by hand. `spray_windows` in the result reports them, and is null
+where nothing sprayed restricts entry or harvest.
 
 **REFUSES a submission short of the contract**, naming each requirement that is
 missing. The `findings_text` case is the subtle one: passing an **empty string**

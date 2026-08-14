@@ -646,6 +646,14 @@ def complete_task_via_mobile(args: dict) -> ToolResult:
 	# not: `list_visits` groups on exact value, so a garbled identifier does not
 	# read as a bad row, it reads as a SECOND VISIT — and the rollup somebody
 	# reports off is wrong rather than obviously incomplete.
+	# v0.69.0. `materials_used` joins the pass-through list and nothing about it
+	# is re-implemented here — the parse, the refusal, the drawdown and the two
+	# interval windows all stay in `complete_farm_task`, for the reason the
+	# docstring above gives about the evidence contract. A spray task whose tank
+	# mix is already on the task needs nothing from the phone at all: the mix is
+	# drawn down from the task itself. This argument is for the OTHER case — the
+	# twine, the filter, the bin liners — and for an applicator correcting what
+	# actually went in the tank.
 	for key in (
 		"signature_file",
 		"completion_narrative",
@@ -655,6 +663,7 @@ def complete_task_via_mobile(args: dict) -> ToolResult:
 		"completed_at",
 		"record_data",
 		"visit_id",
+		"materials_used",
 	):
 		if args.get(key) is not None:
 			inner[key] = args.get(key)

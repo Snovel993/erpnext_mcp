@@ -270,14 +270,20 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		WA-ESD carry a penalties-of-perjury declaration and W-2 and 1099-NEC have
 		no signature line at all, so the rule names four form types rather than
 		firing on every Tax Form on the site.
+
+		v0.69.0 added three that come out of the stock hooks: two spray intervals
+		(`rei_active_block_entry`, `phi_harvest_window`), which are the first
+		rules here whose auto-dismiss is measured in HOURS rather than days, and
+		`item_below_reorder`, which is built in because the balance and the level
+		it is read against live on two different doctypes.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 27)
-		self.assertEqual(len(compliance_rules.rule_rows()), 27)
+		self.assertEqual(len(report["created"]), 30)
+		self.assertEqual(len(compliance_rules.rule_rows()), 30)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
-	def test_the_shapes_are_eighteen_declarative_two_builtin_and_no_custom_python(self):
+	def test_the_shapes_are_twenty_four_declarative_six_builtin_and_no_custom_python(self):
 		"""The split is a claim the release makes, so it is asserted rather than described.
 
 		v0.22.0 shipped 6/7/0 and named the four primitives that would move five of
@@ -314,7 +320,16 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 				"i9_section_1_unsigned",
 				"i9_section_2_unsigned",
 				"i9_verification_overdue",
+				# v0.69.0. Both read a column a spray task's completion stamped —
+				# an expiry to the hour and a harvest date — against
+				# `{{current_datetime}}` and `{{current_date}}`. A rule whose
+				# whole condition is "is this window still open" is exactly what
+				# the declarative vocabulary is for; what was missing was the
+				# datetime template variable, which is one entry in a closed
+				# registry rather than a new shape of rule.
+				"phi_harvest_window",
 				"policy_review_overdue",
+				"rei_active_block_entry",
 				"shift_heat_threshold_crossed",
 				"tax_form_signature_missing",
 				"training_expiring",
@@ -327,7 +342,7 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])
 
-	def test_the_two_that_stay_built_in_are_named_and_argued(self):
+	def test_the_six_that_stay_built_in_are_named_and_argued(self):
 		"""PERMANENT, not a backlog. Both are a different SHAPE of question.
 
 		`audit_action_overdue` walks a child table, keeps the overdue rows, picks
@@ -376,6 +391,15 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 				# `latest_child_field_threshold`, compares NUMBERS by design and
 				# an empty Attach field is not one.
 				"i9_supplement_b_unsigned",
+				# v0.69.0, and the sixth permanent built-in. The balance is
+				# `Bin.actual_qty` and the level is a reorder rule that lives on
+				# `Item Reorder` on a modern site and on `Item.re_order_level` on
+				# an old one — two doctypes with no column joining them, plus a
+				# vintage decision `stock_inventory._reorder_rules` already owns.
+				# The declarative engine walks the rows of ONE doctype; there is
+				# no question you can ask of a Bin whose answer is on an Item's
+				# child table.
+				"item_below_reorder",
 				"supervisor_review_lapsed",
 			],
 		)
@@ -1052,12 +1076,12 @@ class TheApprovalGate(RuleEngineTestCase):
 
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
-	def test_seeding_twice_writes_twenty_seven_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 27)
+	def test_seeding_twice_writes_thirty_rules_once(self):
+		self.assertEqual(len(self.seed_rules()["created"]), 30)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 27)
-		self.assertEqual(len(compliance_rules.rule_rows()), 27)
+		self.assertEqual(len(again["present"]), 30)
+		self.assertEqual(len(compliance_rules.rule_rows()), 30)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -1105,7 +1129,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 27)
+		self.assertEqual(data["rule_count"], 30)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)

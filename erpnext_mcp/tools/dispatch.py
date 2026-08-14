@@ -96,6 +96,11 @@ from .housing import EMPLOYEE, hr_installed
 
 FARM_TASK = "Farm Task"
 FARM_TASK_ASSIGNMENT = "Farm Task Assignment"
+
+#: The one `task_type` whose completion reads a tank mix off the task and stamps
+#: a restricted-entry and a pre-harvest window from it. Named once here because
+#: three places test it and a literal in each is how the fourth gets missed.
+SPRAY_TASK_TYPE = "Spray"
 ALERT = alerts.ALERT_DOCTYPE
 
 BOARD_CAP = 500
@@ -132,6 +137,16 @@ _TASK_FIELDS = (
 	"template",
 	"checklist_status",
 	"farm_shift",
+	# v0.69.0. The tank mix, what issuing it did, and the two windows a spray
+	# leaves behind. Read here rather than fetched per call: `task_row` is what
+	# every describe, every replay and the drawdown itself already reads.
+	"materials_used",
+	"stock_drawdown",
+	"spray_completed_at",
+	"rei_expires_at",
+	"rei_source_item",
+	"phi_clears_on",
+	"phi_source_item",
 	"creation",
 	"modified",
 	"owner",
@@ -449,6 +464,59 @@ def _evaluate_compliance_after(task: dict, produced_doctype: str, company: str) 
 	return out
 
 
+#: The two rules a finished spray can raise on the spot. Named here rather than
+#: derived, for the reason `_rules_this_completion_answers` gives about every
+#: other narrowing in this file: a sweep that guessed which rules a completion
+#: could have changed would either run all of them on every tap or quietly miss
+#: the one the worker is watching.
+SPRAY_WINDOW_RULES = ("rei_active_block_entry", "phi_harvest_window")
+
+
+def _evaluate_spray_windows(windows: dict, company: str) -> dict | None:
+	"""Raise the REI and PHI alerts for a spray that just finished. Never raises.
+
+	SEPARATE FROM `_evaluate_compliance_after` AND DELIBERATELY AFTER IT. That one
+	runs before the task's own state is written, because what it re-asks are rules
+	about the REGISTER a completion wrote to. These two read columns that only
+	exist once `_set_task_state` has stamped them, so they have to come after —
+	and folding them into one call would mean reordering a sweep that a dozen
+	tests and one iOS build already depend on the timing of.
+
+	Returns None where this completion opened no window at all, which is every
+	non-spray task and every spray of nothing restricted. Saying "no window" is
+	different from saying nothing.
+	"""
+	if not (windows.get("rei_expires_at") or windows.get("phi_clears_on")):
+		return None
+	try:
+		from ..alerts import base as alerts_base
+
+		report = alerts_base.refresh_compliance_alerts(
+			company=company or "", alert_types=list(SPRAY_WINDOW_RULES)
+		)
+	except Exception as exc:
+		return {
+			"rules_asked": list(SPRAY_WINDOW_RULES),
+			"evaluated": False,
+			"why_not": (
+				f"the interval rules did not run: {type(exc).__name__}: {exc}. The window is "
+				"STAMPED ON THE TASK either way — the block's expiry is recorded and the "
+				"scheduled sweep will raise the alert on its next pass."
+			),
+		}
+	return {
+		"rules_asked": list(SPRAY_WINDOW_RULES),
+		"evaluated": True,
+		"created": report.get("created", 0),
+		"refreshed": report.get("refreshed", 0),
+		"note": (
+			"The restricted-entry and pre-harvest windows this application opened are now on the "
+			"compliance calendar, scoped to the block. Neither is dismissible by hand and neither "
+			"needs to be: each one silences itself the moment its own interval closes."
+		),
+	}
+
+
 def _shift_carries_event(shift: str, assignment: str) -> bool:
 	"""Does this shift's timeline already carry an event produced by `assignment`?
 
@@ -725,6 +793,19 @@ def _describe_task(row: dict) -> dict:
 	# before shifts existed is exactly the shape it has always been.
 	if row.get("farm_shift"):
 		out["farm_shift"] = row["farm_shift"]
+	# v0.69.0, on the same rule: present only where the task has one, so nothing
+	# about a habitability walk's payload changed. The tank mix is what a phone
+	# shows an applicator BEFORE they fill the sprayer, and the two windows are
+	# what it shows anybody else who opens the block's last spray afterwards.
+	materials = _quiet_materials(row.get("materials_used"))
+	if materials:
+		out["materials_used"] = materials
+	for column in ("spray_completed_at", "rei_expires_at", "phi_clears_on"):
+		if row.get(column):
+			out[column] = str(row[column])
+	for column in ("rei_source_item", "phi_source_item"):
+		if row.get(column):
+			out[column] = row[column]
 	return out
 
 
@@ -947,6 +1028,12 @@ def create_farm_task(args: dict) -> ToolResult:
 		parse_json_object(args.get("creates_record_data"), "creates_record_data")
 	)
 	doc.notes = as_str(args, "notes")
+	# v0.69.0. THE TANK MIX, STATED WHEN THE WORK IS RAISED. Refused here rather
+	# than absorbed: a spray task is dispatched with the mix on it precisely so
+	# the applicator is not deciding at the sprayer, and a malformed list is a
+	# planning error somebody can fix now, before anybody drives anywhere.
+	# `complete_farm_task` draws whatever is on this column down out of stock.
+	doc.materials_used = json.dumps(_materials_argument(args))
 	doc.evidence_required = json.dumps(_evidence_argument(args))
 	doc.farm_shift = farm_shift or None
 	doc.state = DRAFT if draft else AVAILABLE
@@ -1016,6 +1103,93 @@ def _evidence_argument(args: dict) -> dict:
 			"to disbelieve. Nothing was created."
 		)
 	return parse_evidence_required(raw)
+
+
+def _materials_argument(args: dict, key: str = "materials_used") -> list:
+	"""The materials list off the arguments, refused early and by name.
+
+	v0.69.0. REFUSED RATHER THAN WARNED ABOUT, and it is the one place in the
+	stock path where that is true — `stock_bridge` never raises once a completion
+	is under way, because a shed count must not cost somebody their compliance
+	record. This is BEFORE any of that: nothing has been written, the person who
+	typed the list is still there, and a silent drop would mean a chemical went on
+	a block and came off no count with nobody told.
+	"""
+	from .. import stock_bridge
+
+	try:
+		return stock_bridge.parse_materials(args.get(key), key)
+	except stock_bridge.MaterialsError as exc:
+		raise ToolError(f"{exc} Nothing was written.") from None
+
+
+def _draw_down_materials(task: dict, assignment_doc, args: dict) -> tuple[dict, dict]:
+	"""(materials_consumed, spray_windows) for one completion. NEVER RAISES.
+
+	THE TWO SOURCES, AND WHICH ONE WINS. An explicit `materials_used` on the
+	completion is what the worker says they actually used, and it outranks
+	everything — the plan is not the event. Where the completion says nothing and
+	the task is a SPRAY, the task's own tank mix is used instead: that is what the
+	applicator was sent to put on the block, the label rate is what went in the
+	tank, and a spray whose chemicals came off no count is the failure this hook
+	exists to end. For any other task type, silence means nothing was consumed —
+	guessing that a repair used the parts somebody once listed would issue stock
+	on a task whose whole point may have been that the part was not needed.
+
+	NOTHING IN HERE CAN FAIL THE COMPLETION. Every write is inside
+	`stock_bridge`, which catches per line; the two calls around it are wrapped
+	as well, so a site mid-migrate or an Item register this app cannot read costs
+	a warning rather than a filed piece of work.
+	"""
+	from .. import stock_bridge
+
+	consumed = {
+		"source": None,
+		"materials": [],
+		"stock_entries": [],
+		"warnings": [],
+		"requested": 0,
+		"moved": 0,
+	}
+	windows: dict = {}
+	try:
+		explicit, warnings = stock_bridge.materials_from_record(args.get("materials_used"), "materials_used")
+		if explicit:
+			materials, source = explicit, "completion_argument"
+		else:
+			planned, planned_warnings = stock_bridge.materials_from_record(
+				task.get("materials_used"), "the task's materials_used"
+			)
+			spray = str(task.get("task_type") or "") == SPRAY_TASK_TYPE
+			materials = planned if spray else []
+			source = "task_tank_mix" if (spray and planned) else None
+			warnings = warnings + (planned_warnings if spray else [])
+		consumed["source"] = source
+		consumed["materials"] = materials
+		consumed["warnings"] = list(warnings)
+		if not materials:
+			return consumed, windows
+
+		moved = stock_bridge.issue_materials(
+			materials,
+			company=str(task.get("company") or ""),
+			source_doctype=FARM_TASK,
+			source_name=str(assignment_doc.task),
+			posting_datetime=str(assignment_doc.completed_at or ""),
+		)
+		consumed["stock_entries"] = moved["stock_entries"]
+		consumed["warnings"] = consumed["warnings"] + moved["warnings"]
+		consumed["requested"] = moved["requested"]
+		consumed["moved"] = moved["moved"]
+
+		if str(task.get("task_type") or "") == SPRAY_TASK_TYPE:
+			windows = stock_bridge.spray_windows(materials, str(assignment_doc.completed_at or ""))
+	except Exception as exc:  # a completion is never lost to a stock failure
+		consumed["warnings"].append(
+			f"the materials drawdown did not run: {type(exc).__name__}: {exc}. The completion, its "
+			"evidence and its compliance record are unaffected — issue the stock by hand."
+		)
+	return consumed, windows
 
 
 def _open_assignment(
@@ -1283,6 +1457,14 @@ def complete_farm_task(args: dict) -> ToolResult:
 		)
 
 	contract = evidence_contract(task.get("evidence_required"))
+	# v0.69.0. THE MATERIALS ARGUMENT IS CHECKED HERE, WITH THE EVIDENCE, AND
+	# NOT LATER. It is the only stock refusal in the whole completion path (see
+	# `_draw_down_materials` for why every other one is a warning) and it belongs
+	# where every other refusal is: before anything has been written, while the
+	# client that sent the list can still correct it. The value is thrown away —
+	# `_draw_down_materials` re-reads it — because this is a validation and not a
+	# computation, and doing it twice costs nothing next to a partial write.
+	_materials_argument(args)
 	evidence = inspections.normalise_evidence(args.get("evidence_files"), "evidence_files")
 	signature = as_str(args, "signature_file")
 	narrative = as_str(args, "completion_narrative")
@@ -1421,6 +1603,15 @@ def complete_farm_task(args: dict) -> ToolResult:
 	# timeline entry naming a completion that a later failure meant never existed.
 	shift_flow = _flow_evidence_into_shift(doc, task, evidence, clean_pass)
 
+	# v0.69.0. THE STOCK MOVES AFTER THE ASSIGNMENT IS SAVED, for exactly the
+	# reason the shift event does — and with one extra promise on top of it. The
+	# completion is the compliance record; the stock entry is a consequence of it.
+	# Issuing first would leave five litres off a shed count for a completion a
+	# later failure meant never existed, and — the part that matters more — a
+	# drawdown that could not be written must never travel back up this function
+	# as an error. It cannot: see `_draw_down_materials`.
+	materials_consumed, spray_window = _draw_down_materials(task, doc, args)
+
 	# v0.64.0. AND THEN ASK THE CALENDAR TO LOOK AGAIN. Same reason, same moment:
 	# the world has changed and the record says so, and a worker who files two
 	# photographs and a signature and watches the alert that sent them there sit
@@ -1435,7 +1626,45 @@ def complete_farm_task(args: dict) -> ToolResult:
 	# without one never has an empty blob stamped over the default.
 	if checklist_items(checklist_state):
 		task_fields["checklist_status"] = json.dumps(checklist_state)
+	# v0.69.0. WHAT WAS ACTUALLY USED, AND WHAT THE DRAWDOWN DID, ON THE TASK.
+	# `materials_used` is overwritten only when the completion NAMED a list —
+	# where the tank mix came off the task itself, rewriting it with a copy of
+	# itself would be noise, and where nothing was consumed, blanking the plan
+	# would erase what somebody was sent to do.
+	if materials_consumed["source"] == "completion_argument":
+		task_fields["materials_used"] = json.dumps(materials_consumed["materials"])
+	if materials_consumed["source"]:
+		task_fields["stock_drawdown"] = json.dumps(
+			{
+				"source": materials_consumed["source"],
+				"stock_entries": materials_consumed["stock_entries"],
+				"warnings": materials_consumed["warnings"],
+				"requested": materials_consumed["requested"],
+				"moved": materials_consumed["moved"],
+			}
+		)
+	# THE WINDOWS, WRITTEN ONCE AND NEVER RECOMPUTED. `stock_bridge.spray_windows`
+	# has already folded the tank to its strictest product; these five columns are
+	# what `rei_active_block_entry` and `phi_harvest_window` read, and stamping
+	# them here — rather than having the rules join out to the labels every sweep
+	# — is what stops a label correction next March silently reopening a block
+	# that was posted last August.
+	for column in (
+		"spray_completed_at",
+		"rei_expires_at",
+		"rei_source_item",
+		"phi_clears_on",
+		"phi_source_item",
+	):
+		if spray_window.get(column):
+			task_fields[column] = spray_window[column]
 	_set_task_state(assignment["task"], final_state, **task_fields)
+
+	# AND THEN ASK THE TWO INTERVAL RULES, in the same call and for the same
+	# reason the narrowed sweep above exists: the applicator who has just shut
+	# the sprayer is the person who needs to see the block posted, and "it will
+	# appear within the hour" is how a crew learns to look somewhere else.
+	spray_window_eval = _evaluate_spray_windows(spray_window, str(task.get("company") or ""))
 
 	data = {
 		"task": _describe_task(task_row(assignment["task"])),
@@ -1463,9 +1692,26 @@ def complete_farm_task(args: dict) -> ToolResult:
 		# rule's answer — a hand-raised task from no alert that produces no
 		# record is exactly that, and saying so is different from silence.
 		"compliance_evaluation": compliance_eval,
+		# v0.69.0. ALWAYS PRESENT, null where this completion consumed nothing —
+		# same convention as `shift_evidence` above and for the same reason. A
+		# client testing for the key's existence rather than its value has two
+		# paths where it needs one.
+		"materials_consumed": _describe_consumption(materials_consumed),
+		# ALWAYS PRESENT, null where this was not a spray or where nothing in the
+		# tank restricts entry or harvest. A fertiliser opens no window, and
+		# saying so is different from silence.
+		"spray_windows": _describe_windows(spray_window, spray_window_eval),
 	}
 	if record_note:
 		data["record_note"] = record_note
+	if materials_consumed["warnings"]:
+		data["stock_note"] = (
+			"THE COMPLETION SUCCEEDED AND PART OF THE DRAWDOWN DID NOT. Every warning in "
+			"`materials_consumed.warnings` is a movement that was not written — the work, its "
+			"evidence and its compliance record are unaffected, and no stock question can ever "
+			"cost somebody a filed piece of work. Issue what is listed by hand, or fix the count "
+			"and re-issue: what was used is recorded on the task either way."
+		)
 	if shift_flow is None:
 		data["shift_note"] = (
 			"This completion is anchored to NO SHIFT, so nothing reached a compliance record "
@@ -1500,6 +1746,99 @@ def complete_farm_task(args: dict) -> ToolResult:
 		),
 		docstatus_delta=f"{assignment.get('state')} → {final_state}",
 	)
+
+
+def _replayed_consumption(task: dict) -> dict | None:
+	"""What the FIRST completion's drawdown did, read off the task. Never raises."""
+	raw = str(task.get("stock_drawdown") or "").strip()
+	if not raw or raw == "{}":
+		return None
+	try:
+		stored = json.loads(raw)
+	except Exception:  # pragma: no cover - a column somebody hand-edited
+		return None
+	if not isinstance(stored, dict) or not stored.get("source"):
+		return None
+	stored["materials"] = _quiet_materials(task.get("materials_used"))
+	stored["replayed"] = True
+	return stored
+
+
+def _replayed_windows(task: dict) -> dict | None:
+	"""The windows the FIRST completion stamped, read off the task. Never raises."""
+	out = {
+		key: task.get(key)
+		for key in (
+			"spray_completed_at",
+			"rei_expires_at",
+			"rei_source_item",
+			"phi_clears_on",
+			"phi_source_item",
+		)
+		if task.get(key)
+	}
+	if not (out.get("rei_expires_at") or out.get("phi_clears_on")):
+		return None
+	out["replayed"] = True
+	return out
+
+
+def _quiet_materials(raw) -> list:
+	from .. import stock_bridge
+
+	materials, _warnings = stock_bridge.materials_from_record(raw, "materials_used")
+	return materials
+
+
+def _describe_consumption(consumed: dict) -> dict | None:
+	"""The `materials_consumed` block, or None where nothing was consumed.
+
+	A WARNING WITH NO SOURCE IS STILL REPORTED, and that case is real: a task
+	whose stored tank mix will not parse consumed nothing and has something
+	important to say about why. Returning null there would turn "this task's
+	materials column is corrupt and nothing was drawn down" into silence, which
+	is the one shape of answer this whole path is written against.
+	"""
+	if not consumed.get("source") and not consumed.get("warnings"):
+		return None
+	out = {
+		# `completion_argument` or `task_tank_mix` — WHICH LIST WAS USED, said out
+		# loud. The two are different claims about the same spray: one is what the
+		# worker reported using and the other is what they were sent to use, and a
+		# reader reconciling a count later needs to know which they are looking at.
+		"source": consumed["source"],
+		"materials": consumed["materials"],
+		"stock_entries": consumed["stock_entries"],
+		"requested": consumed["requested"],
+		"moved": consumed["moved"],
+		"warnings": consumed["warnings"],
+	}
+	if consumed["requested"] and not consumed["moved"]:
+		out["note"] = (
+			"Nothing moved. What was used is recorded on the task and on this completion; the "
+			"stock ledger does not know about it yet."
+		)
+	return out
+
+
+def _describe_windows(windows: dict, evaluation: dict | None) -> dict | None:
+	"""The `spray_windows` block, or None where this application opened none."""
+	if not windows:
+		return None
+	if not (windows.get("rei_expires_at") or windows.get("phi_clears_on")):
+		# The only other thing `spray_windows` returns is the note about a site
+		# whose Item register cannot answer, and that is worth reporting rather
+		# than flattening to null: "no restriction" and "cannot say" are the two
+		# answers a person must never confuse.
+		return dict(windows) or None
+	out = dict(windows)
+	out["evaluation"] = evaluation
+	out["note"] = (
+		"Both intervals are stamped on the task and neither moves again — a label corrected "
+		"next season does not reopen a block that was posted this one. Each clears itself: the "
+		"REI to the hour, the PHI the day after the date above."
+	)
+	return out
 
 
 def _replayed(assignment: dict, task: dict, worker: str, args: dict):
@@ -1584,6 +1923,14 @@ def _replayed(assignment: dict, task: dict, worker: str, args: dict):
 		# can have changed either — re-running the sweep here would be this app
 		# doing work because a phone lost an acknowledgement.
 		"compliance_evaluation": None,
+		# v0.69.0. READ BACK OFF THE TASK, NEVER RE-ISSUED — the same treatment
+		# `shift_evidence` gets above and for a sharper version of the same
+		# reason: drawing the tank mix down a second time would take a real
+		# quantity off a real shed count because a phone lost an acknowledgement.
+		# The keys are present so a client's two paths stay one; both report what
+		# the FIRST call already did.
+		"materials_consumed": _replayed_consumption(task),
+		"spray_windows": _replayed_windows(task),
 		"idempotent_note": (
 			f"This completion was already filed, at {row.get('completed_at')}, and nothing was "
 			"changed by this call. The submission matches the one on record — same worker, same "

@@ -695,6 +695,26 @@ _COMPANY = _field(
 )
 _LIMIT = _field(_INTEGER, "Maximum rows to return. Default 100, hard maximum 500.")
 
+#: v0.69.0. The consumption list, on the three tools that take one. Declared once
+#: because `create_farm_task`, `complete_farm_task` and `complete_task_via_mobile`
+#: mean the SAME list at three moments — planned, filed, filed from a phone — and
+#: three copies of this paragraph is how one of them ends up describing a
+#: different shape from the other two.
+_MATERIALS_USED_FIELD = _field(
+	{"type": "array", "items": {"type": "object"}},
+	'What this job consumes: [{"item_code": "SPRAY-01", "qty": 5, "uom": "Litre", '
+	'"warehouse": "Chemical Shed - OML"}]. `warehouse` is optional and falls back to the '
+	"item's own default for the company. ON A SPRAY TASK THIS IS THE TANK MIX, and stating "
+	"it at creation is what lets the completion draw it down without the applicator "
+	"retyping it — pass it here too only to correct what actually went in the tank. "
+	"COMPLETING THE TASK ISSUES EACH LINE out of stock as its own Material Issue, tagged "
+	"back to the task, and computes the block's restricted-entry and pre-harvest windows "
+	"from the chemicals in it. A movement that cannot be written NEVER FAILS THE "
+	"COMPLETION — it comes back as a warning on a completion that succeeded, because the "
+	"filed work is a compliance record and a shed count is not. A malformed list IS "
+	"refused, before anything is written.",
+)
+
 
 TOOLS = {
 	# ── read-only ───────────────────────────────────────────────────────────
@@ -8557,6 +8577,7 @@ TOOLS = {
 				"time. Refused if the shift is at another company.",
 			),
 			"notes": _field(_STRING, "Instructions: where the key is, which breaker, who to ask."),
+			"materials_used": _MATERIALS_USED_FIELD,
 		},
 		required=("task_name", "task_type", "evidence_required"),
 		mutating=True,
@@ -8814,6 +8835,7 @@ TOOLS = {
 				"a garbled one reads as a second visit. Omit it to file outside any visit. Not "
 				"part of what makes a resubmission identical.",
 			),
+			"materials_used": _MATERIALS_USED_FIELD,
 		},
 		required=("worker_id",),
 		mutating=True,
@@ -16004,6 +16026,7 @@ TOOLS = {
 				"8-4-4-4-12, either case; anything else is refused. list_visits reports the "
 				"rollup.",
 			),
+			"materials_used": _MATERIALS_USED_FIELD,
 			"user": _field(_STRING, "Only when the request carries no per-user credential."),
 		},
 		mutating=True,

@@ -58,6 +58,62 @@ would for a human in the Desk.
 - **All three mutating tools default off; all six read tools default on**, in a
   new "Stock & Inventory" settings section.
 
+**And the half that makes the count keep itself: work moves stock, and stock
+never blocks work.** A tool an operator has to remember to call is a shed count
+that is wrong by lunchtime on the first busy day. Three integration hooks and
+three compliance rules, so the quantity on the shelf is a consequence of what
+the crew did this morning rather than a second thing somebody types.
+
+- **A spray task's tank mix draws itself down.** `materials_used` —
+  `[{item_code, qty, uom?, warehouse?}]` — is now a field on Farm Task and an
+  argument to `create_farm_task`, `complete_farm_task` and
+  `complete_task_via_mobile`. Completing the task issues each line as its own
+  submitted `Material Issue`, tagged back to the task through the same
+  `source_doctype` / `source_name` linkage `create_stock_entry` uses. On a spray
+  task the tank mix on the task is used when the completion names nothing,
+  because that is what the applicator was sent to put on the block; on every
+  other task type, silence means nothing was consumed.
+- **One entry per line, not one per job**, which is not ERPNext's house style
+  and is deliberate: the failure that actually happens is per item — one
+  chemical short in one warehouse — and a single multi-line entry fails whole.
+  Five chemicals with one short becomes four issued and one warned about.
+- **NOTHING ABOUT STOCK CAN COST SOMEBODY A FILED PIECE OF WORK.** Insufficient
+  stock, an item with no warehouse, a site with no Stock module: every one comes
+  back as a warning on a completion that succeeded, never as a refusal. A worker
+  holding a signature, two photographs and a finished spray is holding a
+  compliance record. A **malformed** list is the one refusal, and it happens
+  before anything is written. A resubmission does not issue the stock twice.
+- **A submitted Purchase Receipt puts what arrived away — unless it already
+  did.** On every site with ERPNext's Stock module, submitting a Purchase
+  Receipt posts its own Stock Ledger Entries; writing a `Material Receipt` on
+  top of that would count every delivery twice, which is a worse inventory than
+  no automation at all. `submit_purchase_receipt` checks the **ledger** rather
+  than a version number and reports `inbound_stock.posted_by` either way.
+- **`rei_active_block_entry` (Critical) and `phi_harvest_window` (Warning).**
+  Completing a spray stamps the longest `rei_hours` and longest `phi_days` in
+  the tank onto the task as `rei_expires_at` (to the hour) and `phi_clears_on` —
+  a mix is under the strictest product in it — and both alerts are raised in the
+  same call the sprayer stopped in. **Each clears itself by its own clock**, the
+  REI to the hour, and neither is dismissible by hand: a button on an REI would
+  imply the worker can end it. The window is stamped once and never recomputed,
+  so a label corrected next March cannot reopen a block posted last August.
+- **`{{current_datetime}}`**, the fourth scope-filter template variable and what
+  made a rule with an hour hand possible. Every threshold in the vocabulary
+  counts days; a four-hour REI on a block sprayed at two expires at six.
+- **`item_below_reorder` (Info).** Built in, because the balance is on `Bin` and
+  the level is on `Item`'s child table with no column joining them — it reads
+  both through the same `_reorder_rules` / `_bin_rows` `list_reorder_alerts`
+  uses, so the alert and the report cannot disagree. An item with a rule and no
+  Bin raises **at zero**. Keyed on the Item and never the Bin, so an alert key
+  cannot move when a bin appears and lose the row's `first_seen`.
+- **`Item.rei_hours` and `Item.phi_days`** join `install_compliance_fields` —
+  the REI and PHI belong to the product, because that is where the label says
+  them, and reading a jug in the field is a data-entry step standing between a
+  crew and a block they may not enter. Neither is required.
+- **`Inventory` and `Spray and Pesticides`** join the compliance-rule category
+  vocabulary; the second was already in the Compliance Alert doctype with no
+  rule using it.
+
 ## 0.68.0 — 2026-08-13
 
 **Sprint 3 of the Gap Closure Plan, part four: the alert that told a worker

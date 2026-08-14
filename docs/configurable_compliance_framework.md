@@ -565,6 +565,38 @@ columns are installed on demand, and a rule that refused every row on a site tha
 had not run `install_compliance_fields` would look exactly like a clean
 operation.
 
+#### Dynamic values: the four template variables
+
+A filter's `value` may be a template instead of a literal, resolved **at sweep
+time** rather than when the rule was saved:
+
+| Template | Resolves to | Added |
+| --- | --- | --- |
+| `{{current_year}}` | the calendar year, as a number | v0.68.0 |
+| `{{current_month}}` | the calendar month, as a number | v0.68.0 |
+| `{{current_date}}` | today, as `YYYY-MM-DD` | v0.68.0 |
+| `{{current_datetime}}` | now, as `YYYY-MM-DD HH:MM:SS` | v0.69.0 |
+
+"Current year" is not a fact a rule authored today can hardcode, because the rule
+is still meant to be true next January — `w4_tax_year_outdated` is the rule that
+was missing this. **Matched whole-string only:** `"{{current_year}}"` resolves
+and `"before {{current_year}}"` is refused at authoring time, because a filter
+value is compared against a column as a number or as exact text, never as a
+blended string. Lists resolve element-wise, for `in` / `nin`. The registry is
+closed, for the same reason `custom_python` runs in an interpreter this app
+wrote: "resolve a template" is one sentence away from "evaluate an expression".
+
+**`{{current_datetime}}` is what gives a rule an hour hand.** Every threshold in
+this vocabulary counts *days*, which is right for a certificate and useless for a
+restricted-entry interval: a four-hour REI on a block sprayed at two in the
+afternoon expires at six, and a rule that could only compare dates would either
+hold the alert until midnight or drop it at breakfast. Against a Datetime column
+it compares as ISO **text**, which sorts correctly to the second — so
+`{"field": "rei_expires_at", "op": "gte", "value": "{{current_datetime}}"}` is
+true exactly while the block is shut. **That comparison is the auto-dismiss:**
+the sweep stops observing the row and `alerts/base.py` dismisses what it stops
+observing. Nothing in the engine had to learn about hours.
+
 ### Message templates
 
 Jinja, rendered by `jinja2.sandbox.SandboxedEnvironment` with **no `frappe` in

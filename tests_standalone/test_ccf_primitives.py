@@ -1244,7 +1244,10 @@ class TheUpgradeFromV0220(PrimitiveTestCase):
 		# missing-signature rules postdate the v0.22.0 the patch migrates FROM,
 		# so there is nothing of theirs for it to have migrated. Twenty-seven
 		# since v0.56.0 added the fifth, on the employer's own tax returns.
-		self.assertEqual(len(compliance_rules.rule_rows()), 27)
+		# Thirty since v0.69.0, on the same reading again: the two spray-interval
+		# rules and the reorder rule were authored long after v0.22.0 and are
+		# seeded fresh, so the patch has nothing of theirs to migrate either.
+		self.assertEqual(len(compliance_rules.rule_rows()), 30)
 
 	def test_an_operator_edited_threshold_survives_the_migration(self):
 		"""The question the patch exists to answer well. A site that contracted its

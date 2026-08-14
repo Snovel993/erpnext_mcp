@@ -935,7 +935,7 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		self.assertEqual(live[0]["default_severity"], "Critical")
 		self.assertEqual(int(live[0]["version"]), 2)
 
-	def test_the_split_is_twentytwo_declarative_five_builtin_and_no_custom_python(self):
+	def test_the_split_is_twentyfour_declarative_six_builtin_and_no_custom_python(self):
 		self.seed_rules()
 		shapes: dict = {}
 		for row in compliance_rules.rule_rows():
@@ -945,7 +945,10 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		# declarative vocabulary working as intended rather than being stretched.
 		# Twenty-two since v0.56.0: `tax_form_signature_missing` is one more
 		# question about one more signature column, on a fourth doctype.
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 22)
+		# Twenty-four since v0.69.0: `rei_active_block_entry` and
+		# `phi_harvest_window` each ask whether one stamped window is still open,
+		# which needed a datetime template variable rather than a new shape.
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_DECLARATIVE]), 24)
 		# Three since v0.39.0: `financial_kpi_threshold_breach` joined the two
 		# permanent built-ins, and it is permanent for a reason neither of those
 		# has — its thresholds are not on its own row, they are on each
@@ -956,5 +959,7 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		# Five since v0.55.0: `i9_supplement_b_unsigned` folds an I-9's
 		# reverification CHILD TABLE to a count and a newest date, and the one
 		# primitive that folds a child table compares numbers by design.
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 5)
+		# Six since v0.69.0: `item_below_reorder` reads a balance on Bin against a
+		# level on Item's child table, which is a join rather than a filter.
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 6)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])

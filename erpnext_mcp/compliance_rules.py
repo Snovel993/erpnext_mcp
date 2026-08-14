@@ -177,8 +177,19 @@ CATEGORIES = (
 	# everything else — see `alerts/rules.py::financial_kpi_threshold_breach`.
 	"Finance",
 	"Housing",
+	# v0.69.0. A chemical below its reorder level — see
+	# `alerts/rules.py::item_below_reorder`. NEW IN THE ALERT DOCTYPE TOO, and
+	# the only category here that was: every other value already existed on
+	# Compliance Alert and this vocabulary was catching up with it. An orchard
+	# out of the product it books a spray window against is an operational
+	# problem with a compliance consequence, and filing it under "Other" would
+	# put it on a board where "Other" means nobody has decided.
+	"Inventory",
 	"Policies",
 	"Records",
+	# v0.69.0, and it was in the Compliance Alert doctype from v0.15.0 with no
+	# rule using it. The REI and PHI window rules are the first two.
+	"Spray and Pesticides",
 	"Water and Sanitation",
 	"Workforce",
 )
@@ -238,10 +249,22 @@ _LIST_OPS = ("in", "nin")
 #: A CLOSED REGISTRY, same reasoning as `THRESHOLD_SOURCES` above: "resolve a
 #: template" is one sentence away from "evaluate an expression", and this app's
 #: rule already has `custom_python` for the case a fixed vocabulary does not reach.
+#: v0.69.0 adds the FOURTH, and it is the one that made a rule with an hour hand
+#: possible. Every threshold in this vocabulary counts days, which is right for a
+#: certificate and useless for a restricted-entry interval: a four-hour REI on a
+#: block sprayed at two in the afternoon expires at six, and a rule that could
+#: only compare dates would either hold the alert until midnight or drop it at
+#: breakfast. `{{current_datetime}}` against a Datetime column compares as ISO
+#: TEXT — which sorts correctly, to the second — so `rei_expires_at gt
+#: {{current_datetime}}` is true exactly while the block is shut and false the
+#: minute it is not. THAT COMPARISON IS THE AUTO-DISMISS: the sweep stops
+#: observing, and `alerts/base.py` dismisses what it stops observing. Nothing
+#: had to learn about hours.
 TEMPLATE_VARIABLES = {
 	"current_year": lambda: frappe.utils.getdate().year,
 	"current_date": lambda: frappe.utils.today(),
 	"current_month": lambda: frappe.utils.getdate().month,
+	"current_datetime": lambda: str(frappe.utils.now()),
 }
 
 _TEMPLATE_RE = re.compile(r"^\{\{\s*(\w+)\s*\}\}$")
@@ -2201,6 +2224,170 @@ def declarative_seed_specs() -> list:
 				"page. A Draft raises nothing either: its figures are still moving, and a "
 				"declaration signed over numbers that then changed is worse than no signature. "
 				"Silences the moment a signature is attached."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
+		# ── v0.69.0: the two intervals a finished spray opens ──────────────
+		#
+		# BOTH READ A COLUMN THE COMPLETION STAMPED, and that is the whole design.
+		# The label facts live on the Item (`rei_hours`, `phi_days`); the WINDOW is
+		# a fact about a block and exists from the moment the sprayer switches off,
+		# so `complete_farm_task` computes it once — longest product in the tank —
+		# and writes `rei_expires_at` and `phi_clears_on` onto the task. These two
+		# rules then do nothing cleverer than ask whether the window is still open.
+		#
+		# WHY THAT IS BETTER THAN A RULE THAT JOINS. A declarative rule walks one
+		# doctype; reaching from a spray to its chemicals to their labels is a join
+		# the vocabulary does not have and should not grow for this — and a rule
+		# that recomputed the interval on every sweep would answer differently the
+		# day somebody corrected a product's label, retroactively reopening or
+		# shutting a block on a date that has already passed. The window is stamped
+		# at the kairotic moment and does not move afterwards, which is what a
+		# posting notice on a gate means.
+		#
+		# THE SEVERITIES ARE THE CONTRACT'S, MAPPED ONTO THIS APP'S THREE. Compliance
+		# Alert has Critical/Warning/Info and nothing between: REI is Critical
+		# (somebody walks into a treated block and it is an injury), PHI is Warning
+		# (a picking plan that has to change, weeks out, and nobody is hurt by it).
+		{
+			"rule_id": "rei_active_block_entry",
+			"title": "A sprayed block is inside its restricted-entry interval",
+			"category": "Spray and Pesticides",
+			"target_doctype": "Farm Task",
+			"requires_doctypes": "Farm Task",
+			# THE EXPIRY, READ FOR THE MESSAGE AND BANDING NOTHING. The role below
+			# is what says so; the filter underneath is what makes it fire.
+			"date_field": "rei_expires_at",
+			"date_field_role": DATE_ROLE_STATE,
+			"default_severity": "Critical",
+			# NO DUE DATE, AND IT IS A TYPE DECISION AS WELL AS A JUDGEMENT.
+			# `Compliance Alert.due_date` is a Date; an REI expires at an HOUR, and
+			# putting "2026-08-14 18:00:00" into a Date column would either be
+			# truncated to a day — which is the whole error this rule exists to
+			# stop — or refused. The hour is in the message, where it is readable.
+			"due_date_mode": DUE_NONE,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"missing_date_behaviour": ON_MISSING_SKIP,
+			"scope_filters": [
+				{"field": "task_type", "op": "eq", "value": "Spray"},
+				# A window is only ever stamped by a completion, so this pair is
+				# belt and braces rather than the mechanism — but a task somebody
+				# re-opened by hand should stop posting a gate.
+				{"field": "state", "op": "in", "value": ["Awaiting-Review", "Completed"]},
+				{"field": "rei_expires_at", "op": "isnotnull"},
+				# THE AUTO-DISMISS, AND IT IS THIS LINE. `{{current_datetime}}`
+				# resolves at SWEEP time; ISO datetimes compare as text in the right
+				# order; so the row matches exactly while the interval is open and
+				# stops matching the sweep after it closes — at which point
+				# `alerts/base.py` dismisses the alert because nothing observed it.
+				# `gte` rather than `gt` so the alert stands THROUGH the expiry
+				# instant rather than a moment before it.
+				{"field": "rei_expires_at", "op": "gte", "value": "{{current_datetime}}"},
+			],
+			"message_template": (
+				"REI active — no worker entry until {{ row.rei_expires_at }} on "
+				"{{ row.location or row.task_name }}"
+				"{% if row.rei_source_item %} ({{ row.rei_source_item }}, "
+				"sprayed {{ row.spray_completed_at }}){% endif %}. Post the block and keep "
+				"everybody out without PPE until the interval closes — 40 CFR 170.407."
+			),
+			"regimes": ["WPS", "OR-OSHA"],
+			"regulation_citations": "EPA WPS 40 CFR 170.407 restricted-entry interval; OAR 437-004-6501",
+			"retention_years": 2,
+			"audit_packet_types": ["EPA", "OSHA"],
+			# NOTHING TO DISPATCH. The fix for an REI is time passing, and a task
+			# asking somebody to go and make four hours elapse is the kind of item
+			# that teaches a crew to stop reading the board. `api/rectify.py`
+			# answers this one with a refusal that says which kind of refusal it is.
+			"producer_task_template": None,
+			"producer_farm_task_type": None,
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {},
+			"evidence_contract": {},
+			"purpose": (
+				"The restricted-entry interval is the one number in a spray record that a person "
+				"can be hurt by. Every other field on the application answers a question later; "
+				"this one answers 'can the crew go in' tomorrow morning, and the crew boss making "
+				"that call is usually not the applicator who read the label."
+			),
+			"kairotic_gate_description": (
+				"Fires on a CLOCK THAT IS STILL RUNNING, not on a date. A completed spray task "
+				"carries the expiry its own tank mix opened — the longest REI of the products in "
+				"it, from the hour the spray actually finished — and this rule raises for exactly "
+				"as long as that instant is in the future. It silences BY ITSELF, to the hour, "
+				"when the interval closes: no work, no dismissal, nobody to remind. A spray of "
+				"nothing restricted raises nothing at all, because no window was stamped."
+			),
+			"authored_by": AUTHOR_SYSTEM,
+			"enabled": 1,
+		},
+		{
+			"rule_id": "phi_harvest_window",
+			"title": "A sprayed block is inside its pre-harvest interval",
+			"category": "Spray and Pesticides",
+			"target_doctype": "Farm Task",
+			"requires_doctypes": "Farm Task",
+			"date_field": "phi_clears_on",
+			"date_field_role": DATE_ROLE_STATE,
+			# WARNING, WHICH IS THIS APP'S "HIGH". A PHI is weeks of notice about a
+			# picking plan; nobody is injured by it and nothing has yet gone wrong.
+			# Raising it at Critical beside a live REI would put the two on one
+			# board at one level, and the level would stop meaning "stop".
+			"default_severity": "Warning",
+			# THE DATE THE BLOCK OPENS, ON THE CALENDAR. `phi_clears_on` is a Date
+			# and a cadence of zero makes the due date the anchor itself — so a
+			# harvest planner reading the compliance calendar sees the pick date
+			# rather than having to read it out of a sentence.
+			"due_date_mode": DUE_FROM_ANCHOR,
+			"threshold_critical_days": -1,
+			"threshold_warning_days": -1,
+			"cadence_days": 0,
+			"missing_date_behaviour": ON_MISSING_SKIP,
+			"scope_filters": [
+				{"field": "task_type", "op": "eq", "value": "Spray"},
+				{"field": "state", "op": "in", "value": ["Awaiting-Review", "Completed"]},
+				{"field": "phi_clears_on", "op": "isnotnull"},
+				# `gte` AND NOT `gt`, and the day between them is a real decision:
+				# the alert stands ON the clearing date and goes away the day after,
+				# so a block is never picked on the strength of an alert that
+				# vanished at midnight. A day of over-caution against a residue
+				# violation on a shipped load is not a close call.
+				{"field": "phi_clears_on", "op": "gte", "value": "{{current_date}}"},
+			],
+			"message_template": (
+				"PHI active — no harvest until {{ row.phi_clears_on }} on "
+				"{{ row.location or row.task_name }}"
+				"{% if row.phi_source_item %} ({{ row.phi_source_item }}, "
+				"sprayed {{ row.spray_completed_at }}){% endif %}. A pick inside the interval is "
+				"a residue violation on a shipped load."
+			),
+			"regimes": ["FSMA", "GAP"],
+			"regulation_citations": "FIFRA label pre-harvest interval; FDA tolerances 40 CFR 180",
+			"retention_years": 2,
+			"audit_packet_types": ["EPA", "FSMA", "GAP"],
+			"producer_task_template": None,
+			"producer_farm_task_type": None,
+			"producer_skill_required": "",
+			"producer_assigned_to_expression": "",
+			"extra_parameters": {},
+			"evidence_contract": {},
+			"purpose": (
+				"The pre-harvest interval is a scheduling fact that becomes a legal one at the "
+				"packing house. A load rejected for residue is traced back to a block and a date, "
+				"and the operation's own answer has to be a record it kept before the pick rather "
+				"than a reconstruction afterwards."
+			),
+			"kairotic_gate_description": (
+				"Fires on a DATE THAT HAS NOT ARRIVED. A completed spray task carries the first "
+				"date its block may be picked — the longest PHI of the products in the tank, from "
+				"the day the spray finished — and this rule raises while that date is today or "
+				"later. It silences by itself the day after: the interval closing IS the fix, and "
+				"there is nothing for anybody to do about it in the meantime except plan around "
+				"it, which is what the alert is for."
 			),
 			"authored_by": AUTHOR_SYSTEM,
 			"enabled": 1,

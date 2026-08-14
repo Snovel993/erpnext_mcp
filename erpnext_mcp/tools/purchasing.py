@@ -592,12 +592,86 @@ def submit_purchase_receipt(args: dict) -> ToolResult:
 		"company": doc.get("company"),
 		"supplier": doc.get("supplier"),
 		"grand_total": doc.get("grand_total"),
+		# v0.69.0. ALWAYS PRESENT. What happened to the stock, including — and
+		# especially — the case where this tool wrote nothing because ERPNext had
+		# already done it.
+		"inbound_stock": _inbound_stock(doc),
 	}
 	return ToolResult(
 		data,
 		f"submitted Purchase Receipt {doc.name} ({doc.get('supplier')}, {doc.get('grand_total')})",
 		docstatus_delta="0 → 1 (submitted)",
 	)
+
+
+def _inbound_stock(doc) -> dict:
+	"""Put what arrived into the warehouse, unless submitting already did. Never raises.
+
+	v0.69.0, AND THE GUARD IS THE INTERESTING HALF. On a site with ERPNext's
+	Stock module, submitting a Purchase Receipt POSTS ITS OWN STOCK LEDGER
+	ENTRIES — that is what submission means for this doctype, and the docstring
+	above has said so since v0.68.0. Writing a Material Receipt on top of it
+	would put every delivery into the warehouse twice, which is a worse inventory
+	than no automation at all and is exactly the kind of error nobody finds until
+	a count.
+
+	So the mirror entry is written only where the receipt did NOT post: a site
+	without the stock ledger, a receipt of non-stock items, an install where
+	Purchase Receipt records what arrived rather than moving it. `stock_bridge.
+	receipt_already_posted` decides, off the LEDGER rather than off a version
+	number, and it answers "already posted" for anything it cannot determine —
+	erring towards writing nothing, because a receipt somebody enters by hand is
+	recoverable and a doubled balance is a physical count.
+
+	EITHER WAY THE ANSWER IS REPORTED. "ERPNext moved it" and "we moved it" are
+	both good outcomes and they are different facts; a caller that could not tell
+	them apart would have to guess which of two shapes of ledger it is reading.
+	"""
+	from .. import stock_bridge
+
+	name = str(doc.name)
+	try:
+		if stock_bridge.receipt_already_posted(name):
+			return {
+				"created": [],
+				"warnings": [],
+				"posted_by": "purchase_receipt",
+				"note": (
+					"Submitting this receipt posted its own Stock Ledger Entries, so the goods are "
+					"already in the warehouse and nothing further was written. A second Material "
+					"Receipt on top of that would count every delivery twice."
+				),
+			}
+		lines = stock_bridge.receipt_lines(doc)
+		moved = stock_bridge.receive_materials(
+			lines,
+			company=str(doc.get("company") or ""),
+			source_doctype=PURCHASE_RECEIPT,
+			source_name=name,
+			posting_datetime=str(doc.get("posting_date") or ""),
+		)
+	except Exception as exc:  # a submitted receipt is never unsubmitted over this
+		return {
+			"created": [],
+			"warnings": [
+				f"the inbound stock movement did not run: {type(exc).__name__}: {exc}. THE RECEIPT "
+				"IS SUBMITTED — this is about the warehouse, not about the document."
+			],
+			"posted_by": "nobody",
+			"note": "Move the received quantities into the warehouse by hand.",
+		}
+	return {
+		"created": moved["stock_entries"],
+		"warnings": moved["warnings"],
+		"posted_by": "erpnext_mcp" if moved["moved"] else "nobody",
+		"note": (
+			f"This site's Purchase Receipt posts no stock ledger entry of its own, so "
+			f"{moved['moved']} of {moved['requested']} line(s) were put away as Material Receipts "
+			f"tagged back to {name}."
+			if moved["requested"]
+			else "This receipt has no stock lines to put away."
+		),
+	}
 
 
 # ── Purchase Invoice ─────────────────────────────────────────────────────────

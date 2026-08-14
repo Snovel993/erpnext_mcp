@@ -48,6 +48,15 @@
   "produced_record",
   "record_col",
   "creates_record_data",
+  "materials_section",
+  "materials_used",
+  "stock_drawdown",
+  "materials_col",
+  "spray_completed_at",
+  "rei_expires_at",
+  "rei_source_item",
+  "phi_clears_on",
+  "phi_source_item",
   "notes_section",
   "notes"
  ],
@@ -339,6 +348,70 @@
    "fieldtype": "Code",
    "label": "Creates Record Data",
    "options": "JSON"
+  },
+  {
+   "fieldname": "materials_section",
+   "fieldtype": "Section Break",
+   "label": "Materials and Intervals"
+  },
+  {
+   "default": "[]",
+   "description": "JSON: what this job consumes, as [{\"item_code\": \"SPRAY-01\", \"qty\": 5, \"uom\": \"Litre\", \"warehouse\": \"Chemical Shed - OML\"}]. v0.69.0. FOR A SPRAY THIS IS THE TANK MIX, stated when the task is raised because that is what the applicator is being sent to put on the block; for everything else it is whatever the completion says was used. Completing the task issues each line out of stock — one Material Issue per line, tagged back to this task — and a spray's REI and PHI windows are computed from the items in it. An issue that fails does NOT fail the completion: the work is the compliance record and the shed count is not.",
+   "fieldname": "materials_used",
+   "fieldtype": "Code",
+   "label": "Materials Used",
+   "options": "JSON"
+  },
+  {
+   "default": "{}",
+   "description": "JSON: what the completion's drawdown actually did — the Stock Entries written, and a warning for every line that could not be issued. Written by complete_farm_task and read by nobody else; it is here so the answer to 'did the chemical come off the count, and if not why not' lives on the task rather than only in the response somebody's phone got.",
+   "fieldname": "stock_drawdown",
+   "fieldtype": "Code",
+   "label": "Stock Drawdown",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "materials_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When the spray this task IS actually finished. The anchor both intervals below are measured from — not the task's creation, not the sweep's clock. Written by the completion.",
+   "fieldname": "spray_completed_at",
+   "fieldtype": "Datetime",
+   "label": "Spray Completed At",
+   "read_only": 1
+  },
+  {
+   "description": "The restricted-entry interval's expiry, to the hour. Nobody enters this block without PPE until it passes (EPA WPS 40 CFR 170.407). Computed at completion from the LONGEST rei_hours in the tank — a mix is under the strictest product in it — and it is what the rei_active_block_entry rule reads. Empty means nothing sprayed here restricted entry.",
+   "fieldname": "rei_expires_at",
+   "fieldtype": "Datetime",
+   "label": "REI Expires At",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Which product in the tank set the REI above, so nobody has to reopen five labels to find out what they are waiting on.",
+   "fieldname": "rei_source_item",
+   "fieldtype": "Data",
+   "label": "REI Source Item",
+   "read_only": 1
+  },
+  {
+   "description": "The first date this block may be harvested (FIFRA label pre-harvest interval; FDA tolerances 40 CFR 180). Computed at completion from the LONGEST phi_days in the tank, for the same reason the REI is. It is what the phi_harvest_window rule reads. Empty means nothing sprayed here restricted harvest.",
+   "fieldname": "phi_clears_on",
+   "fieldtype": "Date",
+   "label": "PHI Clears On",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Which product in the tank set the PHI above.",
+   "fieldname": "phi_source_item",
+   "fieldtype": "Data",
+   "label": "PHI Source Item",
+   "read_only": 1
   },
   {
    "fieldname": "notes_section",

@@ -45,14 +45,17 @@ FOUR SHAPES OF ANSWER, in the order a reader should trust them:
      verb a worker recognises ("Test the detectors") and pointing it at the
      one endpoint that raises the task.
 
-  4. **A refusal that says which kind of refusal it is.** Three alert types are
+  4. **A refusal that says which kind of refusal it is.** Five alert types are
      answered "no, and here is why" rather than left to fall through:
      `i9_retention_destruction_eligible`, whose fix is irreversible and gets
-     reviewed before it is taken, and the two threshold breaches
+     reviewed before it is taken; the two threshold breaches
      (`financial_kpi_threshold_breach`, `budget_variance_breach`), which report
-     a computed number crossing a line rather than a missing record. "A lawyer
-     signs off on this" and "nobody has written this yet" are different facts,
-     and only the second invites somebody to go looking for the button.
+     a computed number crossing a line rather than a missing record; and, from
+     v0.69.0, the two spray intervals (`rei_active_block_entry`,
+     `phi_harvest_window`), whose fix is time passing. "A lawyer signs off on
+     this", "this is a number, not a missing record", "this ends by itself at
+     six o'clock" and "nobody has written this yet" are four different facts,
+     and only the last invites somebody to go looking for the button.
 
 AN ALERT TYPE WITH NEITHER — no explicit recipe here and no task recipe on
 `tools/dispatch.ALERT_TASK_MAP` or its declarative twin — is answered honestly:
@@ -389,6 +392,38 @@ def _shift_heat_threshold_crossed(row: dict) -> dict:
 	return _task_action("log_shift_event", "Document the water, shade and rest cycle")
 
 
+# ── v0.69.0: two clocks nobody can shorten, and one shelf somebody can fill ──
+#
+# THE TWO INTERVAL RULES ARE DELIBERATE REFUSALS, and they are the clearest case
+# in this module for why the honest "no" has its own sentence. An REI is over
+# when it is over. There is no form to fill in, no signature to collect and no
+# task to raise — a task asking somebody to make four hours elapse is exactly
+# the item that teaches a crew to stop reading the board. What a phone SHOULD do
+# with these is show them, which it already does; what it must not do is offer a
+# button, because a button implies the worker can end the interval and the entire
+# value of the alert is that they cannot.
+def _rei_active_block_entry(row: dict) -> dict:
+	return _no_fix(
+		"Nothing ends a restricted-entry interval except the interval running out — there is "
+		"no form here and no task worth raising. This alert clears BY ITSELF, to the hour, at "
+		"the expiry in its message. Until then the block is posted and nobody goes in without "
+		"PPE (40 CFR 170.407)."
+	)
+
+
+def _phi_harvest_window(row: dict) -> dict:
+	return _no_fix(
+		"A pre-harvest interval is not a task, it is a date: this clears by itself the day "
+		"after the one in its message. What it is FOR is the picking plan — move the block "
+		"back, and pick something else first. A pick inside the interval is a residue "
+		"violation on a shipped load, and no action on this screen can shorten it."
+	)
+
+
+def _item_below_reorder(row: dict) -> dict:
+	return _task_action("create_task", "Raise a task to reorder this item")
+
+
 #: THE CLOSED MAP. Every key is an alert_type this release names a rectification
 #: for; adding one is a code change on purpose, same reasoning as
 #: `tools/signatures.SIGNATURE_BOXES` — this table is a claim about which route
@@ -422,6 +457,9 @@ _BUILDERS = {
 	"water_test_stale": _water_test_stale,
 	"water_test_contamination": _water_test_contamination,
 	"shift_heat_threshold_crossed": _shift_heat_threshold_crossed,
+	"rei_active_block_entry": _rei_active_block_entry,
+	"phi_harvest_window": _phi_harvest_window,
+	"item_below_reorder": _item_below_reorder,
 }
 
 
