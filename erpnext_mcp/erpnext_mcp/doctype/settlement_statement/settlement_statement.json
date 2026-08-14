@@ -17,6 +17,7 @@
   "period_end",
   "status",
   "posted_journal_entry",
+  "sales_invoice",
   "weight_section",
   "gross_delivered_weight",
   "packed_weight",
@@ -115,6 +116,16 @@
    "fieldtype": "Link",
    "label": "Posted Journal Entry",
    "options": "Journal Entry",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "description": "The Sales Invoice that recognised these proceeds as revenue, once one exists. Set by create_sales_invoice_from_settlement (v0.70.0), and the reason a second invoice against the same statement is refused. A settlement carries this OR posted_journal_entry, never both — the invoice path and the journal-entry path are alternatives, and running both would book the proceeds twice.",
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Sales Invoice",
+   "options": "Sales Invoice",
    "read_only": 1,
    "search_index": 1
   },

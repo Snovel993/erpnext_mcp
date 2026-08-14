@@ -142,6 +142,7 @@ def after_install() -> None:
 	_badge_print_format()
 	_badge_list_action()
 	_badge_form_action()
+	_settlement_invoice_link()
 	frappe.db.commit()
 
 
@@ -169,6 +170,45 @@ def after_migrate() -> None:
 	_badge_print_format()
 	_badge_list_action()
 	_badge_form_action()
+	_settlement_invoice_link()
+
+
+def _settlement_invoice_link() -> None:
+	"""Give Sales Invoice the column that points back at a Settlement Statement.
+
+	v0.70.0, and the second place in this app that adds a Custom Field to a
+	doctype it does not own — `compliance_fields.py` is the first and argues the
+	general case. The argument here is narrower and easier: the settlement→invoice
+	link has to be readable from BOTH ends or neither end can be trusted. An
+	invoice with no pointer back is an invoice nobody can trace to the statement
+	it billed, and "which settlement is this revenue" is the question an audit
+	asks first.
+
+	The field is created lazily by `tools/sales.py` on first use as well, so a
+	site that never runs this still gets a working link. Doing it here means the
+	column exists before anybody needs it, which is what makes it filterable in
+	the Desk and in `list_sales_invoices`.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import sales
+
+		if not frappe.db.exists("DocType", "Sales Invoice"):
+			return
+		if sales.ensure_settlement_link_field():
+			return
+		print(
+			"erpnext_mcp: Sales Invoice did not take the settlement_statement Custom Field. "
+			"Invoices created from a settlement will still be created; they will not carry a "
+			"link back to it."
+		)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(
+			f"erpnext_mcp: the Sales Invoice settlement link was not installed — "
+			f"{type(exc).__name__}: {exc}"
+		)
 
 
 def _i9_settings() -> None:

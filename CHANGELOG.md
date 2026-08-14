@@ -3,7 +3,104 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
-## v0.69.0 — Sprint 4: Inventory, Stock & Document Intelligence
+## 0.70.0 — 2026-08-14 — Sprint 5: Sales, Settlements & Receivables
+
+**Sprint 5 of the Gap Closure Plan: the money end of the grower-packer
+pipeline.** Sprint 2 built the Scale Ticket that says a load was delivered and
+the Settlement Statement that says what the packer eventually paid for it.
+Neither of them touched the ledger. Twelve tools — six reads, six writes, all in
+a new `tools/sales.py` — carry a settlement through revenue, receivables and the
+cheque:
+
+```
+Scale Ticket(s) → Settlement Statement → Sales Invoice → Payment Entry
+```
+
+- **There is no Delivery Note, and that is the design.** ERPNext's Delivery Note
+  is the *seller's* record of goods leaving on the seller's terms, priced, in
+  Items and UOMs the seller controls. In grower-packer the seller controls none
+  of that — the packer owns the scale, prints the ticket, decides the variety and
+  the grade, and states the price months later. The Scale Ticket **is** the
+  delivery evidence, so nothing here writes a second record of one delivery for
+  the first to disagree with.
+- **`create_sales_invoice`** and **`create_sales_invoice_from_settlement`**
+  (MUTATING, default off) produce a DRAFT invoice — from hand-written lines, or
+  from a SUBMITTED settlement. Each priced settlement line becomes a line against
+  a shared non-stock Item per variety and grade, created once and reused, never
+  one Item per statement. A settlement that is a draft, is cancelled, already has
+  an invoice, or already has a posted Journal Entry is refused **by name**.
+- **The invoice totals to the settlement, not to a recomputation.** A settlement
+  keeps a stated gross amount even where weight × price does not produce it (a
+  pool adjustment is real; the multiplication is not), and ERPNext's Sales
+  Invoice Item has no such tolerance — it computes `amount = qty × rate` on every
+  validate. So a disagreeing line has its **rate** adjusted rather than its
+  amount, and comes back carrying `stated_price_per_unit` beside the rate used
+  and `rate_differs_from_statement: true`. The adjustment is visible rather than
+  absorbed, and `total_check` names the variance against the settlement either
+  way.
+- **Deductions are negative `Actual` charge rows, not a netted revenue line.**
+  Revenue is recognised **gross**, packing and cold storage land in **expense**,
+  and the receivable is the **net**. Netting them into revenue would delete the
+  number a grower most wants a year later — what did storage cost me. The
+  deduction account is **refused rather than guessed** when the company has no
+  default: picking a leaf Expense account by name would put a season of storage
+  charges somewhere nobody chose.
+- **`submit_sales_invoice`** (MUTATING, default off) is what recognises the
+  revenue, and it **reads the GL rows back** from GL Entry rather than computing
+  them — an empty `gl_entries` on a site that has GL Entry means the submit
+  posted nothing, which is worth knowing before trusting the invoice.
+- **`receive_payment`** (MUTATING, default off) records money in as a DRAFT
+  Payment Entry, Receive/Customer only, so a tool that can collect money cannot
+  be talked into spending it. Named invoices, or **oldest first** across
+  everything outstanding when a cheque arrives with no advice. A payment larger
+  than everything outstanding is not refused and not spread onto invoices that
+  do not exist: the remainder is `unallocated_amount`, a real on-account balance.
+- **`post_settlement_to_gl`** (MUTATING, default off) is the ALTERNATIVE — a
+  DRAFT Journal Entry with the same three movements and no subledger, for
+  operations that reconcile settlements against a bank deposit rather than
+  against an invoice. It stamps the settlement `Posted` immediately, and the
+  invoice path refuses a settlement it has touched, because **two revenue
+  postings for one statement is a double count nobody finds until the year end**.
+- **`reconcile_settlement_to_tickets`** (MUTATING, default off) attaches a stub
+  that turned up after the settlement was filed, running the same four checks
+  `create_settlement_statement` runs — draft ticket, already-matched ticket,
+  wrong company, wrong packer — all of them before anything is written. It
+  changes no weight, price or total on the settlement; what it reports is
+  `variance_change`, how far the disagreement with the packer moved.
+- **`get_settlement_shrink`** (read) splits shrink into the cull the packer
+  reported and the **unexplained remainder**, separately. A cull percentage is
+  what a grower renegotiates a contract over; an unexplained percentage is what a
+  grower asks a question about. Per variety and grade it puts the settlement's
+  priced lines beside the grower's matched tickets, and a variety on one side and
+  not the other is reported as such rather than dropped — a packer regrading a
+  load produces exactly that.
+- **`get_packout_summary`** (read) aggregates packout by variety, grade,
+  customer, field or month, and **returns null rather than allocating** what
+  cannot be attributed: a packer states one cull weight per statement, so no part
+  of it belongs to a single variety, and a settlement pooling two fields cannot
+  be split back into them. What is left over is reported under `unattributed`. A
+  pro-rata packout by field is a made-up number that looks exactly like a
+  measured one.
+- **`get_ar_aging`** (read) is the receivables mirror of `get_ap_aging`, grouped
+  by CUSTOMER and cross-checked against GL Entry, with per-customer `drift` where
+  the ledger and the open invoices disagree. It complements
+  `get_outstanding_invoices`, which lists invoices; a collections call and a
+  dashboard want different shapes.
+- **`get_season_summary`** (read) traces the whole pipeline for a date range and
+  names the three gaps: fruit delivered that no settlement claimed, settlements
+  nobody invoiced or posted, invoices nobody collected. `pipeline_health` reads
+  `complete` only when all three are empty.
+- **Two link fields, set together.** Settlement Statement gains `sales_invoice`
+  (this app's own DocType JSON — run `bench migrate`); Sales Invoice gains
+  `settlement_statement` as a **Custom Field**, installed by `after_migrate` and
+  again lazily on first use. This is the second place this app extends a doctype
+  it does not own, after `compliance_fields.py`, and the argument is narrower:
+  the link has to be readable from both ends or neither end can be trusted.
+  Either being absent is **reported** as an unset link, never silently skipped.
+- **All six mutating tools default off; all six read tools default on**, in a new
+  "Sales, Settlements & AR" settings section.
+
+## 0.69.0 — 2026-08-14 — Sprint 4: Inventory, Stock & Document Intelligence
 
 **Sprint 4 of the Gap Closure Plan: stock and inventory.** v0.66.0's master
 data could name a shed and a chemical; nothing until now could say how much of

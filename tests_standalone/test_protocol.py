@@ -38,14 +38,22 @@ class Handshake(SeededTestCase):
 	def test_the_app_version_matches_the_changelog(self):
 		"""v0.2.0 tagged and shipped with `__version__` still reading "0.1.0", so
 		every client's handshake reported the wrong server version. Comparing the
-		two things a release has to keep in step costs one test."""
+		two things a release has to keep in step costs one test.
+
+		THE `v?` IS LOAD-BEARING. v0.69.0 wrote its heading as `## v0.69.0`
+		while every earlier one read `## 0.68.0`, so the pattern skipped it and
+		matched the release before — and this test went on comparing
+		`__version__` against a two-releases-old number instead of failing. A
+		guard that can be switched off by a typo in the document it guards is
+		not a guard, so the prefix is now optional and the newest heading is
+		always the one read."""
 		import pathlib
 		import re
 
 		from erpnext_mcp import __version__
 
 		changelog = pathlib.Path(__file__).resolve().parents[1] / "CHANGELOG.md"
-		latest = re.search(r"^## (\d+\.\d+\.\d+)", changelog.read_text(), re.M)
+		latest = re.search(r"^## v?(\d+\.\d+\.\d+)", changelog.read_text(), re.M)
 		self.assertIsNotNone(latest, "no version heading in CHANGELOG.md")
 		self.assertEqual(
 			__version__,
@@ -943,10 +951,35 @@ class Catalogue(SeededTestCase):
 		the record keeps the OCR text at all; `get_document_validation`,
 		`list_document_validations` and `list_revalidation_due` read the
 		register.
+
+		v0.70.0 adds TWELVE over sales and settlements — six reads and six
+		writes — Sprint 5 of the Gap Closure Plan, and the far end of the
+		pipeline Sprints 2 and 3 opened. `create_sales_invoice` and
+		`create_sales_invoice_from_settlement` turn a submitted packer
+		settlement into a DRAFT invoice: each priced line becomes a line against
+		a shared non-stock Item per variety and grade, each deduction a negative
+		Actual charge row, so revenue is recognised gross and the receivable is
+		the net. `submit_sales_invoice` recognises it and reads the GL rows back
+		rather than computing them; `receive_payment` collects, allocating
+		oldest-first when no advice came with the cheque; `post_settlement_to_gl`
+		is the journal-entry ALTERNATIVE, refused on a settlement already
+		invoiced and refusing one already posted, because two revenue postings
+		for one statement is a double count nobody finds until the year end; and
+		`reconcile_settlement_to_tickets` attaches a stub that turned up after
+		the settlement was filed, reporting how far the variance with the packer
+		moved. `get_settlement_shrink`, `get_packout_summary`, `get_ar_aging`
+		and `get_season_summary` are the reads — and each of them says where its
+		numbers came from and returns null rather than allocating one that
+		cannot be attributed.
+
+		There is deliberately NO Delivery Note tool. The packer owns the scale,
+		so the Scale Ticket is the delivery evidence, and a second record of one
+		delivery would disagree with the first with nothing to say which is
+		right.
 		"""
-		self.assertEqual(len(registry.TOOLS), 491)
-		self.assertEqual(len(registry.READ_TOOLS), 232)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 259)
+		self.assertEqual(len(registry.TOOLS), 503)
+		self.assertEqual(len(registry.READ_TOOLS), 238)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 265)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

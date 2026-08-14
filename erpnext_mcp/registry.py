@@ -94,6 +94,7 @@ from .tools import (
 	receipts,
 	reports,
 	rules,
+	sales,
 	sessions,
 	shifts,
 	signatures,
@@ -266,6 +267,54 @@ def _purchase_invoice_from_receipt_ready():
 	def predicate() -> bool:
 		try:
 			return bool(needs_receipt() and needs_pi() and erpnext_installed())
+		except Exception:
+			return False
+
+	return predicate
+
+
+#: v0.70.0. What the sales pipeline needs: ERPNext, because Sales Invoice,
+#: Payment Entry and Customer all come from it and from nowhere else.
+_SALES_REQUIRES = (
+	"the ERPNext app, which is where Sales Invoice, Payment Entry and Customer come from"
+)
+
+#: What turning a settlement into an invoice needs: BOTH registers. A site with
+#: settlements and no ERPNext has nothing to invoice into; a site with ERPNext
+#: and no settlements has nothing to invoice from. `_needs_doctype` is an
+#: ANY-of, so it cannot express that — hence predicates of their own.
+_SETTLEMENT_INVOICE_REQUIRES = (
+	"the Settlement Statement doctype (run `bench migrate` after installing v0.67.0) AND "
+	"the ERPNext app's Accounts module, which is where Sales Invoice comes from"
+)
+
+
+def _all_doctypes(*doctypes: str):
+	"""Predicate: does this site have EVERY one of `doctypes`?
+
+	The AND to `_needs_doctype`'s OR. A tool that genuinely needs two registers
+	present must not advertise itself on a site with only one, because the
+	failure it would give is a traceback from halfway through the work rather
+	than a sentence naming what is missing.
+	"""
+
+	def predicate() -> bool:
+		try:
+			return all(doctype_exists(doctype) for doctype in doctypes)
+		except Exception:
+			return False
+
+	return predicate
+
+
+def _settlement_invoice_ready():
+	"""Predicate: this site can hold a settlement AND raise an invoice from it."""
+	needs_both = _all_doctypes("Settlement Statement", "Sales Invoice")
+	erpnext_installed = _app_installed("erpnext")
+
+	def predicate() -> bool:
+		try:
+			return bool(needs_both() and erpnext_installed())
 		except Exception:
 			return False
 
@@ -3073,6 +3122,446 @@ TOOLS = {
 		title="AP ageing",
 		available=_app_installed("erpnext"),
 		requires="the ERPNext app",
+	),
+	# ── sales, settlements & AR (v0.70.0) ───────────────────────────────────
+	# Sprint 5 of the Gap Closure Plan. Sprints 2 and 3 built the two ends of the
+	# grower-packer pipeline — the Scale Ticket that says a load was delivered,
+	# and the Settlement Statement that says what the packer paid for it. These
+	# twelve are the middle and the end: settlement → revenue → receivable →
+	# cheque, plus the packout and ageing reads that make a season legible.
+	# `tools/sales.py`'s module docstring argues why there is no Delivery Note
+	# and why the invoice path is the default one out of a settlement.
+	"create_sales_invoice": _tool(
+		sales.create_sales_invoice,
+		"MUTATING (default OFF). Create a DRAFT Sales Invoice — docstatus 0, no "
+		"revenue recognised and no receivable created. Two modes, and passing "
+		"both is refused: `items` writes hand-made lines, `settlement_statement` "
+		"fills the invoice from a SUBMITTED packer settlement.\n\n"
+		"FROM A SETTLEMENT: each priced line becomes a line against a shared "
+		"non-stock Item per variety and grade (created once, reused after that), "
+		"and each deduction becomes a NEGATIVE 'Actual' charge row against "
+		"deduction_account — so revenue is recognised GROSS, packing and storage "
+		"land in expense, and the receivable is the net. A line whose stated "
+		"gross amount does not equal weight × price has its RATE adjusted rather "
+		"than its amount, so the invoice totals to exactly what the packer said "
+		"they owed; the stated price is reported beside it and the line is "
+		"flagged. A settlement that is a draft, is cancelled, already has an "
+		"invoice, or already has a posted Journal Entry is refused by name.\n\n"
+		"Cannot submit — submit_sales_invoice is the separate tool with the "
+		"separate switch.",
+		{
+			"customer": _field(_STRING, "The packer — a Customer docname or customer_name."),
+			"company": _COMPANY,
+			"settlement_statement": _field(
+				_STRING,
+				"A SUBMITTED Settlement Statement to fill the invoice from. Mutually "
+				"exclusive with items.",
+			),
+			"posting_date": _field(_STRING, "YYYY-MM-DD. Defaults to today, or to the settlement's date."),
+			"due_date": _field(
+				_STRING,
+				"YYYY-MM-DD. From a settlement, defaults to thirty days after the posting date.",
+			),
+			"items": {
+				"type": "array",
+				"description": (
+					"Hand-written lines when there is no settlement: each an object with "
+					"item_code, qty and rate, optionally amount, uom, description, "
+					"income_account and cost_center."
+				),
+				"items": {
+					"type": "object",
+					"properties": {
+						"item_code": _STRING,
+						"qty": _NUMBER,
+						"rate": _NUMBER,
+						"amount": _NUMBER,
+						"uom": _STRING,
+						"description": _STRING,
+						"income_account": _STRING,
+						"cost_center": _STRING,
+					},
+				},
+			},
+			"taxes": {
+				"type": "array",
+				"description": (
+					"Charge rows: charge_type is Actual, On Net Total or On Previous Row "
+					"Amount. An Actual row needs a tax_amount, and a NEGATIVE one is how a "
+					"withheld charge is expressed."
+				),
+				"items": {
+					"type": "object",
+					"properties": {
+						"charge_type": _STRING,
+						"account_head": _STRING,
+						"description": _STRING,
+						"rate": _NUMBER,
+						"tax_amount": _NUMBER,
+					},
+				},
+			},
+			"income_account": _field(
+				_STRING,
+				"Revenue account for every line. Defaults to the company's "
+				"default_income_account, or to its only leaf Income account.",
+			),
+			"debit_to": _field(
+				_STRING,
+				"Receivable account. Defaults to the company's default_receivable_account, "
+				"or to its only account typed Receivable.",
+			),
+			"deduction_account": _field(
+				_STRING,
+				"Where a settlement's deductions are posted. REQUIRED when the settlement "
+				"has deductions and the company has no default_expense_account — picking a "
+				"leaf Expense account by name would put a season of storage charges "
+				"somewhere nobody chose.",
+			),
+			"include_deductions": _field(
+				_BOOLEAN,
+				"Default true. False invoices the GROSS amount and leaves the deductions to "
+				"be booked separately — the receivable will not clear until they are.",
+			),
+			"cost_center": _field(_STRING, "Cost center applied to every line."),
+			"notes": _field(_STRING, "Remarks on the invoice."),
+		},
+		mutating=True,
+		title="Create sales invoice",
+		available=_needs_doctype("Sales Invoice"),
+		requires=_SALES_REQUIRES,
+	),
+	"create_sales_invoice_from_settlement": _tool(
+		sales.create_sales_invoice_from_settlement,
+		"MUTATING (default OFF). ONE STEP from a submitted Settlement Statement "
+		"to a DRAFT Sales Invoice, and the ordinary way a grower recognises "
+		"packer revenue. A thin wrapper over create_sales_invoice with the "
+		"settlement pre-filled and the dates defaulted — the settlement's own "
+		"date, and thirty days after it for the due date — so there is exactly "
+		"one implementation of what a settlement line becomes.\n\n"
+		"Sets both link fields: the settlement points at the invoice and the "
+		"invoice points back. That pair is what makes a SECOND posting against "
+		"the same statement refusable, through this path or through "
+		"post_settlement_to_gl. Always a draft.",
+		{
+			"settlement_statement": _field(_STRING, "The Settlement Statement docname."),
+			"settlement": _field(_STRING, "Alias for settlement_statement."),
+			"statement": _field(_STRING, "Alias for settlement_statement."),
+			"posting_date": _field(_STRING, "YYYY-MM-DD. Defaults to the settlement's own date."),
+			"due_date": _field(_STRING, "YYYY-MM-DD. Defaults to thirty days after the posting date."),
+			"income_account": _field(_STRING, "Revenue account. Defaults to the company default."),
+			"debit_to": _field(_STRING, "Receivable account. Defaults to the company default."),
+			"deduction_account": _field(_STRING, "Where the packer's deductions are posted."),
+			"include_deductions": _field(_BOOLEAN, "Default true. See create_sales_invoice."),
+			"cost_center": _field(_STRING, "Cost center for the revenue allocation."),
+			"notes": _field(_STRING, "Remarks. Defaults to naming the statement and its period."),
+		},
+		required=("settlement_statement",),
+		mutating=True,
+		title="Create sales invoice from settlement",
+		available=_settlement_invoice_ready(),
+		requires=_SETTLEMENT_INVOICE_REQUIRES,
+	),
+	"get_sales_invoice": _tool(
+		sales.get_sales_invoice,
+		"One Sales Invoice in full: header, line items, charge rows, every "
+		"Payment Entry allocated against it with how much each one paid, its "
+		"ageing bucket as of a date, and the Settlement Statement it billed if "
+		"there is one. Payments are read from the Payment Entry Reference table "
+		"rather than from GL Entry, because a payment's ledger rows do not say "
+		"which invoice they settled. A DRAFT invoice is not aged at all — "
+		"nothing is owed until it is submitted. Read-only.",
+		{
+			"sales_invoice": _field(_STRING, "The Sales Invoice docname."),
+			"invoice": _field(_STRING, "Alias for sales_invoice."),
+			"name": _field(_STRING, "Alias for sales_invoice."),
+			"as_of": _field(_STRING, "Date to age against, YYYY-MM-DD. Defaults to today."),
+		},
+		required=("sales_invoice",),
+		title="Get sales invoice",
+		available=_needs_doctype("Sales Invoice"),
+		requires=_SALES_REQUIRES,
+	),
+	"list_sales_invoices": _tool(
+		sales.list_sales_invoices,
+		"Sales Invoice headers, newest first, by customer, company, status, "
+		"posting date range, outstanding-only and the Settlement Statement they "
+		"billed. Returns the billed and outstanding totals for the rows "
+		"RETURNED, which is a partial figure when truncated is true. Draft and "
+		"cancelled invoices are included unless a status filter excludes them — "
+		"a draft owes nothing, so it inflates total_grand and not "
+		"total_outstanding. Read-only.",
+		{
+			"customer": _field(_STRING, "Customer docname or customer_name."),
+			"company": _COMPANY,
+			"status": _field(_STRING, "Draft, Unpaid, Paid, Overdue, Return, Cancelled."),
+			"from_date": _field(_STRING, "Earliest posting date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest posting date, YYYY-MM-DD."),
+			"outstanding_only": _field(_BOOLEAN, "Only invoices with money still owed."),
+			"settlement_statement": _field(_STRING, "Only the invoices billing one settlement."),
+			"limit": _LIMIT,
+		},
+		title="List sales invoices",
+		available=_needs_doctype("Sales Invoice"),
+		requires=_SALES_REQUIRES,
+	),
+	"submit_sales_invoice": _tool(
+		sales.submit_sales_invoice,
+		"MUTATING (default OFF). Submit a DRAFT Sales Invoice — docstatus 0 → 1. "
+		"THIS IS THE TOOL THAT RECOGNISES REVENUE: on a real site ERPNext's own "
+		"controller debits the receivable for the total, credits every line's "
+		"income account and posts each charge row. The GL rows are READ BACK "
+		"from GL Entry rather than computed here, so what is reported is what "
+		"the ledger actually says — an empty gl_entries on a site that has GL "
+		"Entry means the submit posted nothing, which is worth investigating "
+		"before trusting the invoice. Already-submitted and cancelled invoices "
+		"are refused by name.",
+		{
+			"sales_invoice": _field(_STRING, "The Sales Invoice docname."),
+			"invoice": _field(_STRING, "Alias for sales_invoice."),
+			"name": _field(_STRING, "Alias for sales_invoice."),
+		},
+		required=("sales_invoice",),
+		mutating=True,
+		title="Submit sales invoice",
+		available=_needs_doctype("Sales Invoice"),
+		requires=_SALES_REQUIRES,
+	),
+	"receive_payment": _tool(
+		sales.receive_payment,
+		"MUTATING (default OFF). Record money received from a customer as a "
+		"DRAFT Payment Entry. payment_type is always Receive and party_type "
+		"always Customer — the AR side only, so a tool that can collect money "
+		"cannot be talked into spending it (create_payment_entry is the Pay / "
+		"Supplier mirror).\n\n"
+		"ALLOCATION IN TWO MODES. Pass `invoices` to say exactly which invoices "
+		"a cheque settles and for how much. Pass nothing and it allocates OLDEST "
+		"FIRST across the customer's submitted, outstanding invoices — by due "
+		"date, then posting date — which is what a remittance with no advice "
+		"attached means. Whichever ran comes back as allocation_method, with "
+		"every allocated invoice and amount listed.\n\n"
+		"MONEY LEFT OVER IS LEFT OVER: a payment larger than everything "
+		"outstanding is not refused and is not spread onto invoices that do not "
+		"exist — the remainder is reported as unallocated_amount, a real "
+		"on-account balance. ALWAYS A DRAFT: nothing moves until "
+		"submit_payment_entry runs.",
+		{
+			"customer": _field(_STRING, "The paying customer — docname or customer_name."),
+			"company": _COMPANY,
+			"paid_amount": _field(_NUMBER, "What was received. Must be positive."),
+			"posting_date": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"reference_no": _field(_STRING, "Cheque number or wire reference."),
+			"reference_date": _field(_STRING, "Date on the cheque or wire, YYYY-MM-DD."),
+			"paid_to": _field(
+				_STRING,
+				"The bank or cash account the money landed in. Defaults to the company's "
+				"default_bank_account, then default_cash_account.",
+			),
+			"paid_from": _field(
+				_STRING, "The receivable account being cleared. Defaults to the company default."
+			),
+			"invoices": {
+				"type": "array",
+				"description": (
+					"Specific allocation: each an object with sales_invoice and, optionally, "
+					"allocated_amount (defaults to that invoice's whole outstanding amount). "
+					"Omit the argument entirely to allocate oldest-first."
+				),
+				"items": {
+					"type": "object",
+					"properties": {"sales_invoice": _STRING, "allocated_amount": _NUMBER},
+				},
+			},
+			"mode_of_payment": _field(_STRING, "Cheque, Wire, Cash — whatever this site defines."),
+		},
+		required=("customer", "paid_amount"),
+		mutating=True,
+		title="Receive payment",
+		available=_all_doctypes("Payment Entry", "Sales Invoice"),
+		requires=_SALES_REQUIRES,
+	),
+	"get_settlement_shrink": _tool(
+		sales.get_settlement_shrink,
+		"Shrink for one settlement: delivered against packed against culled, "
+		"with the percentages computed from the weights rather than read off the "
+		"statement.\n\n"
+		"THE UNEXPLAINED REMAINDER IS REPORTED SEPARATELY from the cull, and "
+		"that split is the point: shrink is delivered minus packed, cull is the "
+		"part of it the packer reported as culled, and the rest — juice, storage "
+		"loss, fruit not yet run, and weight nobody accounted for — is "
+		"unexplained_weight. A cull percentage is what a grower renegotiates a "
+		"contract over; an unexplained percentage is what a grower asks a "
+		"question about.\n\n"
+		"PER VARIETY AND GRADE where the evidence allows it: packed from the "
+		"settlement's own priced lines, delivered from the grower's matched "
+		"Scale Tickets. A variety on one side and not the other is reported as "
+		"such rather than dropped — a packer regrading a load produces exactly "
+		"that. Tickets in another weight unit are excluded, never converted. "
+		"Includes the full ticket reconciliation. Read-only.",
+		{
+			"settlement_statement": _field(_STRING, "The Settlement Statement docname."),
+			"settlement": _field(_STRING, "Alias for settlement_statement."),
+			"statement": _field(_STRING, "Alias for settlement_statement."),
+			"name": _field(_STRING, "Alias for settlement_statement."),
+		},
+		required=("settlement_statement",),
+		title="Get settlement shrink",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"get_packout_summary": _tool(
+		sales.get_packout_summary,
+		"Packout across SUBMITTED settlements for a period, grouped by variety, "
+		"grade, customer, field or month. Packout is packed over delivered; "
+		"shrink is its complement.\n\n"
+		"READ `basis` BEFORE THE GROUPS. The overall figures come from the "
+		"settlement headers and are always exact. Per group, only what genuinely "
+		"attributes is reported: grouped by variety or grade, packed comes from "
+		"the priced lines and delivered from the matched Scale Tickets, and "
+		"CULLED IS NULL because a packer states one cull weight per statement. "
+		"Grouped by field — the tickets are the only records that name one — "
+		"packed and culled are attributed only where every ticket on a "
+		"settlement names the SAME field; the rest is reported under "
+		"`unattributed` rather than allocated pro-rata, because a pro-rata "
+		"packout by field is a made-up number that looks exactly like a measured "
+		"one.\n\n"
+		"A by_weight_uom naming more than one unit makes every total meaningless "
+		"and the answer says so. Read-only.",
+		{
+			"company": _COMPANY,
+			"customer": _field(_STRING, "The packer — docname or customer_name."),
+			"from_date": _field(_STRING, "Earliest statement date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest statement date, YYYY-MM-DD."),
+			"group_by": _field(
+				_STRING, "variety (default), grade, customer, field or month."
+			),
+		},
+		title="Get packout summary",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"get_ar_aging": _tool(
+		sales.get_ar_aging,
+		"Accounts Receivable ageing for one company, grouped by CUSTOMER — the "
+		"aggregate companion to get_outstanding_invoices, which lists invoices. "
+		"Both coexist because a collections call and a dashboard want different "
+		"shapes.\n\n"
+		"Each customer's gl_balance is the true GL Entry balance against every "
+		"account typed Receivable; the "
+		"current/0-30/31-60/61-90/90+/unknown breakdown comes from open Sales "
+		"Invoices' own outstanding_amount and due_date, because a payment's "
+		"ledger rows do not say which invoice they settled. A per-customer "
+		"'drift' field appears when the two disagree — a manual Journal Entry "
+		"against the Receivable account, or a settlement booked with "
+		"post_settlement_to_gl, are the two usual causes. Read-only.",
+		{
+			"company": _COMPANY,
+			"customer": _field(_STRING, "Customer docname. Omit for every customer who owes money."),
+			"as_of": _field(_STRING, "Date to age against, YYYY-MM-DD. Defaults to today."),
+			"limit": _LIMIT,
+		},
+		required=("company",),
+		title="AR ageing",
+		available=_needs_doctype("Sales Invoice"),
+		requires=_SALES_REQUIRES,
+	),
+	"get_season_summary": _tool(
+		sales.get_season_summary,
+		"The whole grower-packer pipeline for one date range in one answer: "
+		"deliveries (Scale Tickets), settlements, invoicing and what is still "
+		"outstanding.\n\n"
+		"THE GAPS ARE THE POINT. Any one register read alone looks fine; it is "
+		"the joins that go wrong, always in the same three places — fruit "
+		"delivered that no settlement ever claimed, settlements nobody "
+		"invoiced or posted, and invoices nobody collected. Each is counted and "
+		"weighed or valued, with up to a hundred docnames to go and look at, and "
+		"pipeline_health reads 'complete' only when all three are empty.\n\n"
+		"Every stage is filtered by ITS OWN date, so a November delivery settled "
+		"in January is in this window and its settlement is not — which is why "
+		"unmatched tickets near the end of a season is normal rather than "
+		"alarming. avg_packout_pct is WEIGHTED (total packed over total "
+		"delivered), not the mean of each statement's percentage. Read-only.",
+		{
+			"company": _COMPANY,
+			"customer": _field(_STRING, "One packer. Omit for all of them."),
+			"from_date": _field(_STRING, "First day of the season, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Last day of the season, YYYY-MM-DD."),
+		},
+		required=("company", "from_date", "to_date"),
+		title="Get season summary",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"post_settlement_to_gl": _tool(
+		sales.post_settlement_to_gl,
+		"MUTATING (default OFF). Book a SUBMITTED settlement as a DRAFT Journal "
+		"Entry: receivable debited with the net proceeds against the packer as "
+		"party, deductions debited, gross revenue credited.\n\n"
+		"THE ALTERNATIVE PATH, and one to choose deliberately. "
+		"create_sales_invoice_from_settlement produces a Sales Invoice, which is "
+		"what gives AR ageing, payment allocation and every standard receivables "
+		"report something to work with. This gives the same three GL movements "
+		"and NO SUBLEDGER — the receivable exists as a party balance, not as a "
+		"document anybody can age, and get_ar_aging will report it as drift. "
+		"Most operations want the invoice.\n\n"
+		"ALWAYS A DRAFT — submit_journal_entry is the separate tool that posts "
+		"it. The settlement is stamped `posted_journal_entry` and flipped to "
+		"Posted immediately, so a second posting through either path is refused "
+		"from now on; a settlement already invoiced is refused here for the same "
+		"reason.",
+		{
+			"settlement_statement": _field(_STRING, "The Settlement Statement docname."),
+			"settlement": _field(_STRING, "Alias for settlement_statement."),
+			"statement": _field(_STRING, "Alias for settlement_statement."),
+			"name": _field(_STRING, "Alias for settlement_statement."),
+			"income_account": _field(_STRING, "Revenue account. Defaults to the company default."),
+			"deduction_account": _field(
+				_STRING, "Where the packer's deductions are debited. Required if there are any."
+			),
+			"receivable_account": _field(_STRING, "AR account. Defaults to the company default."),
+			"cost_center": _field(_STRING, "Cost center applied to every line."),
+			"posting_date": _field(_STRING, "YYYY-MM-DD. Defaults to the settlement's own date."),
+		},
+		required=("settlement_statement",),
+		mutating=True,
+		title="Post settlement to GL",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
+	),
+	"reconcile_settlement_to_tickets": _tool(
+		sales.reconcile_settlement_to_tickets,
+		"MUTATING (default OFF). Match LATE-ARRIVING Scale Tickets to a "
+		"settlement that already exists. create_settlement_statement matches "
+		"tickets at capture; a driver's stub found in a truck in December "
+		"belongs to a statement filed in November, and this is the only way to "
+		"attach it afterwards.\n\n"
+		"THE SAME FOUR CHECKS run before anything is written, so a settlement is "
+		"never left with half its tickets claimed: a DRAFT ticket is refused "
+		"(its weights can still change), one already matched to another "
+		"settlement is refused (two statements paying for one load is the "
+		"overpayment this register exists to surface), and so is one from "
+		"another company or another packer.\n\n"
+		"NOTHING ABOUT THE SETTLEMENT'S OWN NUMBERS IS TOUCHED. What moves is "
+		"the comparison: variance_change is how far the disagreement with the "
+		"packer shifted and in which direction, and it is the whole reason to "
+		"make the call. Matching a ticket makes the variance SMALLER, so a "
+		"negative variance_change is the expected direction.",
+		{
+			"settlement_statement": _field(_STRING, "The Settlement Statement docname."),
+			"settlement": _field(_STRING, "Alias for settlement_statement."),
+			"statement": _field(_STRING, "Alias for settlement_statement."),
+			"name": _field(_STRING, "Alias for settlement_statement."),
+			"scale_tickets": _field(
+				_STRING_ARRAY,
+				"Docnames of the Scale Tickets to match. Call list_scale_tickets with "
+				"unmatched: true to find the candidates.",
+			),
+		},
+		required=("settlement_statement", "scale_tickets"),
+		mutating=True,
+		title="Reconcile settlement to tickets",
+		available=_receipts_ready("Settlement Statement"),
+		requires=_RECEIPT_REQUIRES,
 	),
 	# ── stock & inventory (v0.69.0) ─────────────────────────────────────────
 	# Sprint 4 of the Gap Closure Plan. `list_warehouses` and `get_item`

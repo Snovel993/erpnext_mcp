@@ -823,19 +823,63 @@ ERPNEXT_SCHEMA = {
 		"parenttype",
 		"parentfield",
 	],
+	# v0.70.0 widened this from the eleven columns `get_outstanding_invoices`
+	# reads to what a Sales Invoice this app WRITES actually carries. The
+	# `settlement_statement` link is deliberately NOT here: it is a Custom Field
+	# `tools/sales.py` installs on first use, and a fixture that shipped it
+	# would make the "this site has not got the field yet" degradation — which
+	# every link in that module reports rather than assumes — unreachable.
 	"Sales Invoice": [
 		"name",
 		"customer",
 		"customer_name",
 		"posting_date",
 		"due_date",
+		"debit_to",
+		"net_total",
+		"total_taxes_and_charges",
 		"grand_total",
+		"rounded_total",
 		"outstanding_amount",
 		"currency",
 		"status",
 		"company",
 		"is_return",
+		"remarks",
 		"docstatus",
+		"owner",
+		"items",
+		"taxes",
+	],
+	"Sales Invoice Item": [
+		"name",
+		"idx",
+		"item_code",
+		"item_name",
+		"description",
+		"qty",
+		"uom",
+		"rate",
+		"amount",
+		"income_account",
+		"cost_center",
+		"parent",
+		"parenttype",
+		"parentfield",
+	],
+	# ERPNext's charge table, and the shape a grower settlement's deductions
+	# land in: `charge_type: "Actual"` with a NEGATIVE `tax_amount`.
+	"Sales Taxes and Charges": [
+		"name",
+		"idx",
+		"charge_type",
+		"account_head",
+		"description",
+		"rate",
+		"tax_amount",
+		"parent",
+		"parenttype",
+		"parentfield",
 	],
 	# No "Purchase Invoice", deliberately: this fixture is a site that does not
 	# have one, which is what makes the "that DocType is not installed"
@@ -1586,6 +1630,16 @@ ERPNEXT_FIELD_LINKS = {
 	# Same reasoning again, and one link that earns its place twice over:
 	# `Stock Entry Detail.s_warehouse` and `.t_warehouse` are what make "the
 	# tool put the warehouse in the wrong column" a failure the double can see.
+	# v0.70.0. The sales side. `debit_to` is the one that earns its place: a
+	# tool that put a payable there instead of a receivable would be caught by
+	# nothing else in this fixture.
+	("Sales Invoice", "customer"): ("Link", "Customer"),
+	("Sales Invoice", "company"): ("Link", "Company"),
+	("Sales Invoice", "debit_to"): ("Link", "Account"),
+	("Sales Invoice Item", "item_code"): ("Link", "Item"),
+	("Sales Invoice Item", "income_account"): ("Link", "Account"),
+	("Sales Invoice Item", "cost_center"): ("Link", "Cost Center"),
+	("Sales Taxes and Charges", "account_head"): ("Link", "Account"),
 	("Stock Entry", "company"): ("Link", "Company"),
 	("Stock Entry", "stock_entry_type"): ("Link", "Stock Entry Type"),
 	("Stock Entry", "purchase_order"): ("Link", "Purchase Order"),
@@ -1956,6 +2010,9 @@ CHILD_TABLES = {
 	# v0.69.0. Stock Entry's one line table, and the Item's UOM conversions —
 	# the table `stock_inventory._conversion` reads before it will accept a qty
 	# in anything other than the item's own stock UOM.
+	# v0.70.0. A Sales Invoice's lines and its charge rows.
+	("Sales Invoice", "items"): "Sales Invoice Item",
+	("Sales Invoice", "taxes"): "Sales Taxes and Charges",
 	("Stock Entry", "items"): "Stock Entry Detail",
 	("Item", "uoms"): "UOM Conversion Detail",
 	("Certification", "renewals"): "Certification Renewal",
@@ -3112,6 +3169,122 @@ def post_payment_entry_gl(name: str) -> list[dict]:
 	return rows
 
 
+class SalesInvoiceDocument(Document):
+	"""Sales Invoice: net total from items, grand total after the charge rows.
+
+	`amount` IS RECOMPUTED FROM `qty × rate` ON EVERY VALIDATE, and that is the
+	whole reason this class exists rather than a plain Document. ERPNext really
+	does this, and `tools/sales.py` is built around it: a settlement line whose
+	stated gross amount does not equal weight × price has its RATE adjusted so
+	the product comes out right, because the amount will not survive. A double
+	that kept whatever `amount` the caller appended would let that adjustment be
+	deleted and every test of it still pass.
+
+	`outstanding_amount` is set equal to `grand_total` at submit and left alone
+	before it — same contract as `PurchaseInvoiceDocument`, and it is
+	`PaymentEntryDocument.on_submit` that moves it from there.
+	"""
+
+	def validate(self):
+		net = 0.0
+		for row in self.get("items") or []:
+			qty = float(row.get("qty") or 0)
+			rate = float(row.get("rate") or 0)
+			row["amount"] = round(qty * rate, 2)
+			net += row["amount"]
+		charges = 0.0
+		for row in self.get("taxes") or []:
+			if str(row.get("charge_type") or "") == "On Net Total":
+				row["tax_amount"] = round(net * float(row.get("rate") or 0) / 100.0, 2)
+			charges += float(row.get("tax_amount") or 0)
+		self.net_total = round(net, 2)
+		self.total_taxes_and_charges = round(charges, 2)
+		self.grand_total = round(net + charges, 2)
+		self.rounded_total = self.grand_total
+
+	def before_submit(self):
+		self.validate()
+
+	def on_submit(self):
+		# `db_set`, NOT a plain assignment. `Document.submit` writes the row to the
+		# store BEFORE it runs `on_submit`, exactly as Frappe writes to the
+		# database before its own submit hooks — so a controller that changes a
+		# field here has to write it through, which is what ERPNext's own
+		# controllers do and why `db_set` exists at all. A plain assignment would
+		# leave the value in memory only: the document in hand would look right and
+		# `frappe.db.get_value(..., "outstanding_amount")` would answer 0, which is
+		# what `receive_payment`'s allocation actually reads.
+		self.db_set("outstanding_amount", self.grand_total)
+		self.db_set("status", "Unpaid" if self.grand_total > 0.005 else "Paid")
+
+
+def post_sales_invoice_gl(name: str) -> list[dict]:
+	"""Write the GL Entry rows a real ERPNext submit would for one Sales Invoice.
+
+	One row per item line CREDITING its `income_account`, one per charge row
+	debiting its `account_head` (a negative charge is a debit — that is what a
+	withheld packing deduction is), and one DEBITING `debit_to` for the grand
+	total against the customer. Merged by account and party the way
+	`post_purchase_invoice_gl` merges, because two lines to one income account
+	are one ledger movement.
+
+	NOT wired into `SalesInvoiceDocument.on_submit`, for the reason none of the
+	others are: a test that only cares whether the docstatus moved should not
+	pay for postings nobody asked for. A test about AR ageing calls this.
+	"""
+	invoice = STORE.get_raw("Sales Invoice", name)
+	if invoice is None:
+		raise DoesNotExistError(f"Sales Invoice {name} not found")
+	if int(invoice.get("docstatus") or 0) != 1:
+		return []
+
+	merged: dict = {}
+	order: list = []
+
+	def _line(account, debit, credit, party_type=None, party=None):
+		key = (account, party_type or "", party or "")
+		if key not in merged:
+			merged[key] = {
+				"name": f"GL-{name}-{len(order) + 1}",
+				"account": account,
+				"posting_date": invoice.get("posting_date"),
+				"debit": 0.0,
+				"credit": 0.0,
+				"company": invoice.get("company"),
+				"is_cancelled": 0,
+				"voucher_type": "Sales Invoice",
+				"voucher_no": name,
+				"voucher_detail_no": "",
+				"party_type": party_type,
+				"party": party,
+				"cost_center": None,
+				"is_opening": "No",
+			}
+			order.append(key)
+		merged[key]["debit"] = round(merged[key]["debit"] + debit, 2)
+		merged[key]["credit"] = round(merged[key]["credit"] + credit, 2)
+
+	for row in invoice.get("items") or []:
+		_line(row.get("income_account"), 0.0, float(row.get("amount") or 0))
+	for row in invoice.get("taxes") or []:
+		_line(row.get("account_head"), -float(row.get("tax_amount") or 0), 0.0)
+	_line(
+		invoice.get("debit_to"),
+		float(invoice.get("grand_total") or 0),
+		0.0,
+		"Customer",
+		invoice.get("customer"),
+	)
+
+	rows = [merged[key] for key in order]
+	table = STORE.tables.setdefault("GL Entry", {})
+	for row in rows:
+		row.setdefault("docstatus", 1)
+		row.setdefault("creation", _now())
+		table[row["name"]] = row
+	return rows
+
+
 class StockEntryDocument(Document):
 	"""Stock Entry, in the respects `tools/stock_inventory.py` reads back.
 
@@ -3244,6 +3417,7 @@ STUB_CONTROLLERS = {
 	"Purchase Order": PurchaseOrderDocument,
 	"Purchase Receipt": PurchaseReceiptDocument,
 	"Purchase Invoice": PurchaseInvoiceDocument,
+	"Sales Invoice": SalesInvoiceDocument,
 	"Payment Entry": PaymentEntryDocument,
 	"Journal Entry": JournalEntryDocument,
 	"Stock Entry": StockEntryDocument,

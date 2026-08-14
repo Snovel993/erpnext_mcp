@@ -771,9 +771,23 @@ class ToolRegistration(unittest.TestCase):
 		# over Document Validation, which is what the deterministic half of
 		# document intelligence writes its answer into. Nothing about the ML
 		# model registry changed; the totals moved because the catalogue did.
-		self.assertEqual(len(self.registry.TOOLS), 491)
-		self.assertEqual(len(self.registry.READ_TOOLS), 232)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 259)
+		# v0.70.0 adds TWELVE over sales and settlements — six reads and six
+		# writes — Sprint 5 of the Gap Closure Plan, and the other end of the
+		# pipeline Sprints 2 and 3 opened: `create_sales_invoice` /
+		# `create_sales_invoice_from_settlement` / `get_sales_invoice` /
+		# `list_sales_invoices` / `submit_sales_invoice` turn a packer
+		# settlement into revenue, `receive_payment` collects it as a
+		# Receive/Customer Payment Entry, `post_settlement_to_gl` is the
+		# journal-entry alternative to the invoice, and
+		# `reconcile_settlement_to_tickets` attaches a ticket that arrived after
+		# the settlement was filed. `get_settlement_shrink`,
+		# `get_packout_summary`, `get_ar_aging` and `get_season_summary` are the
+		# reads that make a season legible. There is deliberately no Delivery
+		# Note tool: the packer owns the scale, so the Scale Ticket is the
+		# delivery evidence.
+		self.assertEqual(len(self.registry.TOOLS), 503)
+		self.assertEqual(len(self.registry.READ_TOOLS), 238)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 265)
 
 
 if __name__ == "__main__":

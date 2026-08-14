@@ -128,6 +128,20 @@
   "allow_submit_purchase_invoice",
   "allow_create_payment_entry",
   "allow_submit_payment_entry",
+  "sales_tools_section",
+  "allow_get_sales_invoice",
+  "allow_list_sales_invoices",
+  "allow_get_settlement_shrink",
+  "allow_get_packout_summary",
+  "allow_get_ar_aging",
+  "allow_get_season_summary",
+  "sales_tools_col",
+  "allow_create_sales_invoice",
+  "allow_create_sales_invoice_from_settlement",
+  "allow_submit_sales_invoice",
+  "allow_receive_payment",
+  "allow_post_settlement_to_gl",
+  "allow_reconcile_settlement_to_tickets",
   "stock_tools_section",
   "allow_get_stock_entry",
   "allow_list_stock_entries",
@@ -1444,6 +1458,101 @@
    "fieldname": "allow_submit_payment_entry",
    "fieldtype": "Check",
    "label": "Submit Payment Entry"
+  },
+  {
+   "description": "Sprint 5 of the Gap Closure Plan (v0.70.0): the grower-packer money pipeline, from the packer's settlement through revenue, receivables and the cheque.<br><br>The chain is <b>Scale Ticket \u2192 Settlement Statement \u2192 Sales Invoice \u2192 Payment Entry</b>. There is deliberately NO Delivery Note: the packer owns the scale, so the scale ticket IS the delivery evidence.<br><br>Every create tool below produces a DRAFT only. <b>create_sales_invoice_from_settlement</b> and <b>post_settlement_to_gl</b> are ALTERNATIVES \u2014 the first gives proper AR ageing and payment allocation, the second books the same three movements as a journal entry with no subledger. A settlement that has been through one is refused by the other, because two revenue postings for one statement is a double count nobody finds until the year end.",
+   "fieldname": "sales_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Sales, Settlements &amp; AR"
+  },
+  {
+   "default": "1",
+   "description": "READ. One Sales Invoice in full: line items, charge rows, every Payment Entry allocated against it, its ageing bucket, and the Settlement Statement it billed.",
+   "fieldname": "allow_get_sales_invoice",
+   "fieldtype": "Check",
+   "label": "Get Sales Invoice"
+  },
+  {
+   "default": "1",
+   "description": "READ. Sales Invoice headers by customer, company, status, settlement and posting date, with the billed and outstanding totals for the rows returned.",
+   "fieldname": "allow_list_sales_invoices",
+   "fieldtype": "Check",
+   "label": "List Sales Invoices"
+  },
+  {
+   "default": "1",
+   "description": "READ. Shrink for one settlement: delivered against packed against culled, with the unexplained remainder reported SEPARATELY from the cull \u2014 a cull percentage is what a grower renegotiates a contract over, an unexplained percentage is what a grower asks a question about. Broken down per variety and grade where the tickets and the priced lines can be compared.",
+   "fieldname": "allow_get_settlement_shrink",
+   "fieldtype": "Check",
+   "label": "Get Settlement Shrink"
+  },
+  {
+   "default": "1",
+   "description": "READ. Packout across settlements for a period, grouped by variety, grade, customer, field or month. Read `basis` first: for two of the five groupings one side of the ratio genuinely cannot be attributed and is returned as null rather than allocated pro-rata.",
+   "fieldname": "allow_get_packout_summary",
+   "fieldtype": "Check",
+   "label": "Get Packout Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. Accounts Receivable ageing grouped by CUSTOMER, cross-checked against GL Entry the way get_ap_aging is. The aggregate companion to get_outstanding_invoices, which lists invoices \u2014 both coexist because a collections call and a dashboard want different shapes.",
+   "fieldname": "allow_get_ar_aging",
+   "fieldtype": "Check",
+   "label": "Get AR Ageing"
+  },
+  {
+   "default": "1",
+   "description": "READ. The whole season in one answer: tickets, settlements, invoices and payments, with the three gaps between them named \u2014 fruit delivered that no settlement claimed, settlements nobody invoiced, invoices nobody collected.",
+   "fieldname": "allow_get_season_summary",
+   "fieldtype": "Check",
+   "label": "Get Season Summary"
+  },
+  {
+   "fieldname": "sales_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a DRAFT Sales Invoice, either from hand-written line items or from a submitted Settlement Statement. Cannot submit.",
+   "fieldname": "allow_create_sales_invoice",
+   "fieldtype": "Check",
+   "label": "Create Sales Invoice"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. One step from a submitted settlement to a DRAFT Sales Invoice: every priced line becomes an invoice line, every deduction a negative charge row, and both link fields are set. Refused on a settlement already invoiced or already posted to the ledger.",
+   "fieldname": "allow_create_sales_invoice_from_settlement",
+   "fieldtype": "Check",
+   "label": "Create Sales Invoice From Settlement"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a draft Sales Invoice, which is what recognises the revenue: ERPNext's own controller writes the GL entries and this tool reads them back.",
+   "fieldname": "allow_submit_sales_invoice",
+   "fieldtype": "Check",
+   "label": "Submit Sales Invoice"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Record money received from a customer as a DRAFT Payment Entry, allocated against named invoices or oldest-first across everything outstanding. Receive/Customer only \u2014 it cannot spend money. Submitting it is a separate switch.",
+   "fieldname": "allow_receive_payment",
+   "fieldtype": "Check",
+   "label": "Receive Payment"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Book a submitted settlement as a DRAFT Journal Entry instead of a Sales Invoice \u2014 receivable and deductions debited, gross revenue credited. The alternative path: it gives no subledger, so the receivable cannot be aged as a document. Stamps the settlement so a second posting through either path is refused.",
+   "fieldname": "allow_post_settlement_to_gl",
+   "fieldtype": "Check",
+   "label": "Post Settlement To GL"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Match late-arriving Scale Tickets to a settlement that already exists, running the same four checks create_settlement_statement runs. Reports how far the variance with the packer moved and in which direction; changes no weight, price or total on the settlement itself.",
+   "fieldname": "allow_reconcile_settlement_to_tickets",
+   "fieldtype": "Check",
+   "label": "Reconcile Settlement To Tickets"
   },
   {
    "description": "Sprint 4 of the Gap Closure Plan (v0.69.0): what is on hand, how it got there, and when to buy more. Three ERPNext doctypes answer three different questions and are easy to confuse — <b>Stock Entry</b> is the instruction, <b>Stock Ledger Entry</b> is the immutable history, and <b>Bin</b> is the current balance ERPNext maintains from that history.<br><br><b>create_stock_entry</b> produces a DRAFT only, which moves nothing; <b>submit_stock_entry</b> is the separately-switched tool that actually writes the ledger rows and moves every affected balance. Granting the first without the second gives a client a way to propose a movement a human still has to approve in the Desk.",

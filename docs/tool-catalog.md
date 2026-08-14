@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 491 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 503 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 232 read tools are **on** by default and can be switched off individually. A
+All 238 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -1449,6 +1449,309 @@ rule unset already does.
 
 **Returns** `item_code`, `warehouse`, `reorder_level`, `reorder_qty`, `created`,
 `stored_on`.
+
+## Sales, Settlements & AR (v0.70.0)
+
+Sprint 5 of the Gap Closure Plan. Sprints 2 and 3 built the two ends of the
+grower-packer pipeline — the Scale Ticket that says a load was delivered, and
+the Settlement Statement that says what the packer eventually paid for it.
+These twelve are the middle and the end.
+
+```
+Scale Ticket(s) → Settlement Statement → Sales Invoice → Payment Entry
+```
+
+**There is no Delivery Note, and that is the design.** ERPNext's Delivery Note
+is the *seller's* record of goods leaving on the seller's terms, priced, in
+Items and UOMs the seller controls. In grower-packer the seller controls none of
+that: the packer owns the scale, prints the ticket, decides the variety and the
+grade, and states the price months later. The Scale Ticket **is** the delivery
+evidence, so nothing here writes a second record of one delivery for the first
+to disagree with.
+
+**Two paths out of a settlement, and the invoice is the default.**
+`create_sales_invoice_from_settlement` produces a Sales Invoice, which is what
+gives AR ageing, payment allocation and every standard receivables report
+something to work with. `post_settlement_to_gl` produces a **draft Journal
+Entry** with the same three GL movements and no subledger, for operations that
+reconcile settlements against a bank deposit rather than against an invoice.
+**A settlement that has been through one is refused by the other** — two
+revenue postings for one statement is a double count nobody finds until the year
+end.
+
+**The invoice totals to the settlement, not to a recomputation.** A settlement
+line keeps a stated gross amount even where weight × price does not produce it
+(a pool adjustment is real; the multiplication is not). ERPNext's Sales Invoice
+Item has no such tolerance — it computes `amount = qty × rate` on every
+validate — so a disagreeing line has its **rate** adjusted, never its amount.
+The line comes back with `stated_price_per_unit` beside the rate that was used
+and `rate_differs_from_statement: true`, so the adjustment is visible rather
+than absorbed.
+
+**Deductions are negative charge rows, not a netted revenue line.** Each
+deduction becomes an `Actual` Sales Taxes and Charges row with a negative
+amount against `deduction_account`: revenue is recognised **gross**, packing and
+storage land in **expense**, and the receivable is the **net**. Netting them
+into the revenue line would delete the number a grower most wants a year later —
+what did storage cost me.
+
+**Two link fields, set together.** Settlement Statement gains `sales_invoice`
+(shipped in this app's own DocType JSON, so it needs `bench migrate`); Sales
+Invoice gains `settlement_statement` (a Custom Field, created at install and
+again lazily on first use). Either being absent is reported as
+`links.{settlement_points_at_invoice, invoice_points_at_settlement}: false`
+rather than silently skipped.
+
+### `create_sales_invoice` — MUTATING, default off
+
+A DRAFT Sales Invoice, from hand-written `items` **or** from a submitted
+`settlement_statement`. Passing both is refused rather than merged. Cannot
+submit.
+
+**Arguments:** `customer`, `company`, `settlement_statement`, `posting_date`,
+`due_date`, `items[]` (`item_code`, `qty`, `rate`, `amount`, `uom`,
+`description`, `income_account`, `cost_center`), `taxes[]` (`charge_type`,
+`account_head`, `description`, `rate`, `tax_amount`), `income_account`,
+`debit_to`, `deduction_account`, `include_deductions`, `cost_center`, `notes`.
+
+A settlement that is a draft, is cancelled, already has an invoice, or already
+has a posted Journal Entry is refused **by name**. Each priced line lands
+against a shared non-stock Item per variety and grade (`FRUIT-HONEYCRISP-XF`),
+created once and reused — never one Item per statement.
+
+**Returns** the invoice header, `items[]`, `taxes[]`, `settlement_statement`,
+`lines_from_settlement[]` (per line: the Item, how it was resolved, the rate
+used, the stated price, and whether they differ), `deductions_posted`,
+`deduction_account`, `links{}`, `total_check{}` (the invoice grand total against
+what the settlement said, with the variance named), `next_step`.
+
+### `create_sales_invoice_from_settlement` — MUTATING, default off
+
+The one-step form: `create_sales_invoice` with the settlement pre-filled, the
+posting date defaulted to the settlement's own date and the due date to thirty
+days after it. **Thin on purpose** — there is exactly one implementation of what
+a settlement line becomes.
+
+**Arguments:** `settlement_statement` (required; `settlement`/`statement`
+aliases), `posting_date`, `due_date`, `income_account`, `debit_to`,
+`deduction_account`, `include_deductions`, `cost_center`, `notes`.
+
+**Returns** the same shape as `create_sales_invoice`.
+
+### `get_sales_invoice`
+
+One invoice in full: header, `items[]`, `taxes[]`, `payments[]` (every Payment
+Entry allocated against it, with how much each one paid), `total_paid`,
+`ageing{}` and `linked_settlement`.
+
+**Arguments:** `sales_invoice` (required; `invoice`/`name` aliases), `as_of`.
+
+Payments are read from the **Payment Entry Reference** table, not from GL Entry
+— a payment's ledger rows do not say which invoice they settled. A **draft**
+invoice is not aged at all: nothing is owed until it is submitted.
+
+### `list_sales_invoices`
+
+**Arguments:** `customer`, `company`, `status`, `from_date`, `to_date`,
+`outstanding_only`, `settlement_statement`, `limit`.
+
+**Returns** `invoices[]`, `count`, `total_grand`, `total_outstanding`,
+`by_status{}`, `truncated`. Draft and cancelled invoices are included unless a
+status filter excludes them — a draft owes nothing, so it inflates
+`total_grand` and not `total_outstanding`.
+
+### `submit_sales_invoice` — MUTATING, default off
+
+Docstatus 0 → 1. **This is the tool that recognises revenue**: ERPNext's own
+controller debits the receivable, credits every line's income account and posts
+each charge row.
+
+**Arguments:** `sales_invoice` (required; `invoice`/`name` aliases).
+
+**Returns** the header plus `gl_entries[]`, `gl_entries_created`, `gl_totals{}`,
+`settlement_statement`. The GL rows are **read back** from GL Entry rather than
+computed here — an empty `gl_entries` on a site that has GL Entry means the
+submit posted nothing, which is worth investigating before trusting the invoice.
+
+### `receive_payment` — MUTATING, default off
+
+A DRAFT Payment Entry for money received. `payment_type` is always **Receive**
+and `party_type` always **Customer** — the AR side only, so a tool that can
+collect money cannot be talked into spending it (`create_payment_entry` is the
+Pay/Supplier mirror).
+
+**Arguments:** `customer`, `paid_amount` (both required), `company`,
+`posting_date`, `reference_no`, `reference_date`, `paid_to`, `paid_from`,
+`invoices[]` (`sales_invoice`, `allocated_amount`), `mode_of_payment`.
+
+**Allocation in two modes.** Pass `invoices` to say exactly which invoices a
+cheque settles. Pass nothing and it allocates **oldest first** across the
+customer's submitted, outstanding invoices — by due date, then posting date —
+which is what a remittance with no advice attached means. Whichever ran comes
+back as `allocation_method`.
+
+**Money left over is left over:** a payment larger than everything outstanding
+is not refused and is not spread onto invoices that do not exist. The remainder
+is `unallocated_amount`, a real on-account balance.
+
+**Returns** `payment_entry`, `allocation_method`, `allocated_invoices[]`,
+`allocated_total`, `unallocated_amount`, `next_step`. Submitting it is
+`submit_payment_entry`, with its own switch.
+
+### `get_settlement_shrink`
+
+Delivered against packed against culled, for one settlement.
+
+**Arguments:** `settlement_statement` (required; `settlement`/`statement`/`name`
+aliases).
+
+**The unexplained remainder is reported separately from the cull**, and that
+split is the point. Shrink is delivered minus packed; cull is the part of it the
+packer reported as culled; the rest — juice, storage loss, fruit not yet run,
+weight nobody accounted for — is `unexplained_weight`. A cull percentage is what
+a grower renegotiates a contract over; an unexplained percentage is what a
+grower asks a question about.
+
+**Returns** `gross_delivered_weight`, `packed_weight`, `cull_weight`,
+`shrink_weight`, `unexplained_weight`, `packout_pct`, `shrink_pct`, `cull_pct`,
+`unexplained_pct`, `by_variety_grade[]`, `ticket_reconciliation{}`.
+
+`by_variety_grade` takes packed from the settlement's own priced lines and
+delivered from the grower's matched Scale Tickets. A variety on one side and not
+the other is reported with `comparable: false` and a note rather than dropped —
+a packer regrading a load produces exactly that. Tickets in another weight unit
+are excluded, never converted.
+
+### `get_packout_summary`
+
+Packout across **submitted** settlements for a period. Packout is packed over
+delivered; shrink is its complement.
+
+**Arguments:** `company`, `customer`, `from_date`, `to_date`, `group_by`
+(`variety` default, `grade`, `customer`, `field`, `month`).
+
+**Read `basis` before the groups.** The overall figures come from the settlement
+headers and are always exact. Per group, only what genuinely attributes is
+reported:
+
+| `group_by` | delivered | packed | culled |
+|---|---|---|---|
+| `customer`, `month` | headers | headers | headers |
+| `variety`, `grade` | matched Scale Tickets | priced lines | **null** — a packer states one cull weight per statement |
+| `field` | matched Scale Tickets | only where every ticket on a settlement names the **same** field | same |
+
+Whatever cannot be attributed is reported under `unattributed` **rather than
+allocated pro-rata**: a pro-rata packout by field is a made-up number that looks
+exactly like a measured one.
+
+**Returns** `summary{}`, `groups[]`, `unattributed{}`, `period{}`,
+`by_weight_uom{}`, `basis`. More than one weight unit in `by_weight_uom` makes
+every total meaningless and the answer says so in `warning`.
+
+### `get_ar_aging`
+
+Receivables ageing grouped by **customer** — the aggregate companion to
+`get_outstanding_invoices`, which lists invoices. Both coexist because a
+collections call and a dashboard want different shapes.
+
+**Arguments:** `company` (required), `customer`, `as_of`, `limit`.
+
+The mirror of `get_ap_aging`, down to the buckets and the cross-check. Each
+customer's `gl_balance` is the true GL Entry balance against every account typed
+Receivable; the `current`/`0-30`/`31-60`/`61-90`/`90+`/`unknown` breakdown comes
+from open Sales Invoices' own `outstanding_amount` and `due_date`, because a
+payment's ledger rows do not say which invoice they settled. A per-customer
+`drift` field appears when the two disagree — a manual Journal Entry against the
+Receivable account, or a settlement booked with `post_settlement_to_gl`, are the
+two usual causes.
+
+**Returns** `customers[]` (each with `total_outstanding`, `buckets{}`,
+`invoices[]`, `gl_balance`, optional `drift`), `totals{}`, `buckets{}`,
+`total_outstanding`, `gl_total_outstanding`, `as_of`, `invoice_count`.
+
+### `get_season_summary`
+
+The whole pipeline for one date range in one answer.
+
+**Arguments:** `company`, `from_date`, `to_date` (all required), `customer`.
+
+**The gaps are the point.** Any one register read alone looks fine; it is the
+joins that go wrong, always in the same three places — fruit delivered that no
+settlement claimed, settlements nobody invoiced or posted, and invoices nobody
+collected. `pipeline_health` reads `complete` only when all three are empty, and
+`gaps[]` says which one is not.
+
+**Returns** `deliveries{}` (ticket count, net weight, `by_variety[]`),
+`settlements{}` (count, gross, deductions, net proceeds, weighted
+`avg_packout_pct`), `invoicing{}`, `unmatched_tickets{}` (also as
+`unsettled_deliveries`), `uninvoiced_settlements{}`, `pipeline_health`, `gaps[]`.
+
+Every stage is filtered by **its own** date, so a November delivery settled in
+January is in this window and its settlement is not — which is why unmatched
+tickets near the end of a season is normal rather than alarming. Draft Scale
+Tickets count in the delivery totals and are excluded from the unmatched list: a
+draft is not yet evidence. `avg_packout_pct` is **weighted** (total packed over
+total delivered), not the mean of each statement's own percentage.
+
+### `post_settlement_to_gl` — MUTATING, default off
+
+A submitted settlement as a **DRAFT Journal Entry**:
+
+```
+debit   receivable_account   net proceeds      (party: the packer)
+debit   deduction_account    total deductions
+credit  income_account       total gross revenue
+```
+
+**Arguments:** `settlement_statement` (required; `settlement`/`statement`/`name`
+aliases), `income_account`, `deduction_account`, `receivable_account`,
+`cost_center`, `posting_date`.
+
+**The alternative path, and one to choose deliberately.** It gives the same
+three GL movements and **no subledger** — the receivable exists as a party
+balance, not as a document anybody can age, and `get_ar_aging` will report it as
+drift. Most operations want the invoice.
+
+Always a draft: `mutate.insert_draft_journal_entry` is the one place this app
+writes a Journal Entry and it cannot be talked into submitting. The settlement is
+stamped `posted_journal_entry` and flipped to `Posted` **immediately**, because
+the point of the column is that a second posting is refused and a draft nobody
+notices is exactly how a second one gets written.
+
+**Returns** `journal_entry`, `debit_total`, `credit_total`, `line_count`,
+`accounts{}`, `amounts{}`, `settlement_linked`, `user_remark`, `next_step`.
+
+### `reconcile_settlement_to_tickets` — MUTATING, default off
+
+Match **late-arriving** Scale Tickets to a settlement that already exists.
+`create_settlement_statement` matches tickets at capture; a driver's stub found
+in a truck in December belongs to a statement filed in November, and this is the
+only way to attach it afterwards.
+
+**Arguments:** `settlement_statement`, `scale_tickets[]` (both required).
+
+**The same four checks** run before anything is written, so a settlement is
+never left with half its tickets claimed: a **draft** ticket is refused (its
+weights can still change), one already matched to another settlement is refused
+(two statements paying for one load is the overpayment this register exists to
+surface), and so is one from another company or another packer.
+
+**Nothing about the settlement's own numbers is touched.** What moves is the
+comparison: `variance_change` is how far the disagreement with the packer
+shifted and in which direction, and it is the whole reason to make the call.
+Matching a ticket makes the variance **smaller**, so a negative
+`variance_change` is the expected direction.
+
+**Returns** `matched_count`, `matched_scale_tickets[]`, `reconciliation_before`,
+`updated_reconciliation`, `variance_change`, `ticket_count_before/after`.
+
+**Example**
+
+```json
+{"name": "reconcile_settlement_to_tickets",
+ "arguments": {"settlement_statement": "SS-ETC-0001",
+               "scale_tickets": ["ST-ETC-0007"]}}
+```
 
 ## Receipt Enhancement & Owner Draw (v0.68.0)
 
