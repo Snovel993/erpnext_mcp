@@ -7126,6 +7126,21 @@ TOOLS = {
 		requires="the Audit Event DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── Wave 3: the kairotic compliance calendar ────────────────────────────
+	"get_compliance_alert": _tool(
+		calendar.get_compliance_alert,
+		"One Compliance Alert, described exactly as get_compliance_calendar describes it. "
+		"Read-only.\n\n"
+		"THE SINGLE-ROW READ. For a caller that already has a docname — reporting back "
+		"after materialize_task_for_alert or a rectification action, re-checking one alert "
+		"a mobile client is showing — rather than paying for the whole calendar sweep.",
+		{
+			"alert": _field(_STRING, "The Compliance Alert docname. get_compliance_calendar lists them."),
+		},
+		required=("alert",),
+		title="One compliance alert",
+		available=_needs_doctype("Compliance Alert"),
+		requires="the Compliance Alert DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	"get_compliance_calendar": _tool(
 		calendar.get_compliance_calendar,
 		"WHAT IS DUE AND WHAT IS LATE, worst first, grouped by category. The main "
@@ -8664,6 +8679,28 @@ TOOLS = {
 		},
 		mutating=True,
 		title="Generate tasks from compliance alerts",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"materialize_task_for_alert": _tool(
+		dispatch.materialize_task_for_alert,
+		"MUTATING (default OFF). The single-alert twin of "
+		"generate_tasks_from_compliance_alerts — turns exactly ONE named alert into its "
+		"dispatchable Farm Task, using the identical recipe lookup and task-shaping code, "
+		"rather than sweeping every open alert of that type.\n\n"
+		"IDEMPOTENT. An alert that already has a task returns it, `already_answered: true`, "
+		"and writes nothing.\n\n"
+		"An alert type with no recipe is REFUSED with the same explanation "
+		"generate_tasks_from_compliance_alerts reports in skipped_unmapped, because a single "
+		"caller has no batch report to read afterwards — the refusal is the report.\n\n"
+		"This is what a 'fix this' tap on one compliance alert calls: named work, for the "
+		"one thing that was tapped, nothing beside it.",
+		{
+			"alert": _field(_STRING, "The Compliance Alert docname. get_compliance_calendar lists them."),
+		},
+		required=("alert",),
+		mutating=True,
+		title="Materialize a task from one compliance alert",
 		available=_needs_doctype("Farm Task"),
 		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

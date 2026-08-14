@@ -334,6 +334,14 @@ ROUTES = (
 	Route("/mobile", mobile_api.create_expense_receipt),
 	Route("/mobile", mobile_api.create_scale_ticket),
 	Route("/mobile", mobile_api.list_scale_tickets),
+	# Sprint 3 (v0.68.0): compliance alert rectification — see api/rectify.py.
+	# Five direct fixes, and the one route every task-shaped fix shares.
+	Route("/mobile", mobile_api.renew_certification),
+	Route("/mobile", mobile_api.record_training),
+	Route("/mobile", mobile_api.sign_training_supervisor_review),
+	Route("/mobile", mobile_api.update_regulatory_filing),
+	Route("/mobile", mobile_api.advance_policy_review),
+	Route("/mobile", mobile_api.rectify_alert),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

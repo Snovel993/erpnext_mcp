@@ -2629,6 +2629,16 @@ def _recipe_from_template(template: str, row: dict) -> dict | None:
 	}
 
 
+def has_task_recipe(alert_type: str) -> bool:
+	"""Whether an alert type has ANY shape of task this app knows how to raise.
+
+	The public half of `_recipe_for`, for a caller that only needs the yes/no —
+	`api/rectify.py` reads it to decide whether "raise a task" is an honest thing
+	to offer a phone for an alert type it has no more specific answer for.
+	"""
+	return _recipe_for(alert_type) is not None
+
+
 def _recipe_for(alert_type: str, producers: dict | None = None) -> dict | None:
 	"""The shape of work one alert type becomes: the TEMPLATE, then the table, then the record.
 
@@ -3027,6 +3037,77 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 			f"{len(report['skipped_already_answered'])} already answered"
 		),
 		docstatus_delta="" if dry_run or not report["created"] else "none → 0 (created)",
+	)
+
+
+def materialize_task_for_alert(args: dict) -> ToolResult:
+	"""Turn ONE named alert into its dispatchable task. Idempotent, single-row twin of
+	`generate_tasks_from_compliance_alerts`.
+
+	A TAP ON THE PHONE NAMES ONE ALERT, not a filter that might also catch a coworker's.
+	`generate_tasks_from_compliance_alerts` sweeps every open alert matching a company
+	and a set of types — right for a nightly run, wrong for "fix the thing I am looking
+	at" — so this exists to answer exactly one docname and nothing beside it, using the
+	same recipe lookup and the same task-shaping code so the two paths cannot drift.
+
+	Refuses with the same "no recipe" explanation `generate_tasks_from_compliance_alerts`
+	reports in `skipped_unmapped`, rather than silently doing nothing, because a mobile
+	caller has no report to read afterwards — the refusal IS the report.
+	"""
+	_require()
+	compat.require_doctype(
+		ALERT, "It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app."
+	)
+	name = as_str(args, "alert", required=True)
+	row = frappe.db.get_value(
+		ALERT,
+		name,
+		[
+			"name",
+			"alert_type",
+			"severity",
+			"category",
+			"company",
+			"source_doctype",
+			"source_docname",
+			"alert_message",
+			"due_date",
+			"dismissed",
+		],
+		as_dict=True,
+	)
+	if not row:
+		raise ToolError(f"no Compliance Alert called {name!r}. get_compliance_calendar lists them.")
+	row = dict(row)
+	if row.get("dismissed"):
+		raise ToolError(f"{name} is dismissed. A dismissed alert is not open work. Nothing was created.")
+
+	existing = _already_answered([name])
+	if name in existing:
+		return ToolResult(
+			data={
+				"alert": name,
+				"alert_type": row["alert_type"],
+				"already_answered": True,
+				"task": existing[name],
+			},
+			summary=f"{name} already has a task: {existing[name]}",
+		)
+
+	recipe = _recipe_for(row["alert_type"])
+	if recipe is None:
+		raise ToolError(
+			f"no task recipe for {row['alert_type']!r}. This clears when the record behind it "
+			"changes; there is no step this app can turn into a task. Fill in the producer fields "
+			"on the Compliance Rule with update_compliance_rule, add it to ALERT_TASK_MAP, or raise "
+			"the task by hand with create_farm_task."
+		)
+
+	entry = _task_from_alert(row, recipe, dry_run=False)
+	return ToolResult(
+		data=entry,
+		summary=f"{name}: raised {entry.get('task_type')} task {entry.get('task')}",
+		docstatus_delta="none → 0 (created)",
 	)
 
 

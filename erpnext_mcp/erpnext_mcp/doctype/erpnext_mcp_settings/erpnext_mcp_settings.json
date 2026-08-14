@@ -281,6 +281,7 @@
   "allow_close_audit_event",
   "calendar_section",
   "allow_get_compliance_calendar",
+  "allow_get_compliance_alert",
   "allow_get_audit_readiness",
   "allow_list_compliance_rules",
   "calendar_col",
@@ -465,6 +466,7 @@
   "allow_complete_farm_task",
   "allow_reject_farm_task",
   "allow_generate_tasks_from_compliance_alerts",
+  "allow_materialize_task_for_alert",
   "task_templates_section",
   "allow_list_farm_task_templates",
   "allow_get_farm_task_template",
@@ -2437,6 +2439,13 @@
   },
   {
    "default": "1",
+   "description": "READ. One Compliance Alert, described exactly as get_compliance_calendar describes it — the single-row twin, for a caller that already has a docname.",
+   "fieldname": "allow_get_compliance_alert",
+   "fieldtype": "Check",
+   "label": "One Compliance Alert"
+  },
+  {
+   "default": "1",
    "description": "READ. Resolved alerts over alerts raised, as one comparable number, with the split between conditions that cleared themselves and dismissals somebody made by hand.",
    "fieldname": "allow_get_audit_readiness",
    "fieldtype": "Check",
@@ -3641,6 +3650,13 @@
    "fieldname": "allow_generate_tasks_from_compliance_alerts",
    "fieldtype": "Check",
    "label": "Generate Tasks from Compliance Alerts"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. The single-alert twin of generate_tasks_from_compliance_alerts — turns exactly one named alert into its dispatchable task, using the identical recipe lookup. Idempotent.",
+   "fieldname": "allow_materialize_task_for_alert",
+   "fieldtype": "Check",
+   "label": "Materialize Task for Alert"
   },
   {
    "fieldname": "task_templates_section",

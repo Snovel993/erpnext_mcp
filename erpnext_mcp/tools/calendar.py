@@ -258,6 +258,25 @@ def _alert_row(name: str) -> dict:
 	)
 
 
+# ── get_compliance_alert ────────────────────────────────────────────────────
+def get_compliance_alert(args: dict) -> ToolResult:
+	"""One alert, described the same way `get_compliance_calendar` describes it.
+
+	THE SINGLE-ROW TWIN OF THE CALENDAR. Most callers want the calendar; a caller
+	who already has a docname — a mobile client re-reading one alert after acting
+	on it, a rectification handler reporting what changed — wants one row without
+	paying for the whole sweep. Uses the identical `_describe`, so a row read here
+	and a row read off the calendar are never able to disagree.
+	"""
+	_require()
+	row = _alert_row(as_str(args, "alert", required=True))
+	today = frappe.utils.today()
+	stored = compat.doctype_exists(regimes_vocabulary.REGIME_LINK_DOCTYPE)
+	tags = alerts.regimes_for_alerts([row["name"]]) if stored else {}
+	described = _describe(row, today, tags.get(row["name"], []) if stored else None)
+	return ToolResult(data=described, summary=f"{row['name']}: {described['title']}")
+
+
 # ── get_compliance_calendar ─────────────────────────────────────────────────
 def get_compliance_calendar(args: dict) -> ToolResult:
 	"""What is due and what is late, worst first, grouped by category."""

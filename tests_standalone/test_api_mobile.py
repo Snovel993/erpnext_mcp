@@ -329,6 +329,14 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: is among them even though the app has photographed receipts since v0.31.0:
 	#: it reached `submit_expense_receipt` through the MCP surface, and this is
 	#: the first time the flow has a route of its own.
+	#: Sprint 3 (v0.68.0) adds the six compliance-alert-rectification methods on
+	#: the same footing. The server side is the whole of it — every alert now
+	#: names a `rectification` object and there is a route behind every one of
+	#: them — and the handset side is the button `ComplianceAlertDetailView.swift`
+	#: does not draw yet, which is separate, tracked work per the sprint's own
+	#: scope: server-side sidecar first, the phone reads it and draws a button
+	#: after. Listed here rather than in `MOBILE` so this file keeps claiming
+	#: only what `MobileAPI.swift` actually names.
 	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
 		"universal_scan",
 		"classify_receipt",
@@ -350,6 +358,12 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"clock_out_worker",
 		"get_shift_production",
 		"get_shift",
+		"renew_certification",
+		"record_training",
+		"sign_training_supervisor_review",
+		"update_regulatory_filing",
+		"advance_policy_review",
+		"rectify_alert",
 	}
 
 	def _whitelisted(self, module):

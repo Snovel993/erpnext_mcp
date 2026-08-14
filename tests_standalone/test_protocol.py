@@ -915,9 +915,9 @@ class Catalogue(SeededTestCase):
 		rather than one claiming labels somebody typed came out of a training
 		run.
 		"""
-		self.assertEqual(len(registry.TOOLS), 475)
-		self.assertEqual(len(registry.READ_TOOLS), 222)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 253)
+		self.assertEqual(len(registry.TOOLS), 477)
+		self.assertEqual(len(registry.READ_TOOLS), 223)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 254)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

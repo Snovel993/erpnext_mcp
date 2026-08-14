@@ -49,6 +49,7 @@ import frappe
 
 from .. import compat
 from .. import roles as role_lib
+from . import rectify
 
 ALERT = "Compliance Alert"
 FARM_TASK = "Farm Task"
@@ -237,6 +238,16 @@ def alert(row: dict) -> dict:
 	`signature_field` at the top level of a row that also carries a `name`, which
 	is one key collision away from a pad addressed at the alert instead of at the
 	form.
+
+	SPRINT 3 (v0.68.0) ADDS A FOURTH, `rectification` — see `api/rectify.py`. It
+	answers "what fixes this, and what do I call to start it" for every alert
+	type this release names one for: `action_type`, `action_label`,
+	`action_endpoint` (a sidecar route, absolute from `/farmops/api/mobile/`),
+	`action_params` (what to prefill) and `can_rectify_mobile`. Omitted only
+	where `describe_rectification` itself returns nothing, which it does not for
+	a row it can read — the "nothing this app can do from a phone yet" case is
+	still a `rectification` object, with `can_rectify_mobile: false` and an
+	`explanation`, so the app can tell "no fix" from "row not decoded".
 	"""
 	row = dict(row or {})
 	out = {
@@ -258,6 +269,9 @@ def alert(row: dict) -> dict:
 	request = row.get("signature_request")
 	if request:
 		out["signature_request"] = request
+	rectification = rectify.describe_rectification(row)
+	if rectification:
+		out["rectification"] = rectification
 	return out
 
 

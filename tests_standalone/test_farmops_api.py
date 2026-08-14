@@ -275,6 +275,14 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/create_expense_receipt",
 		"/mobile/create_scale_ticket",
 		"/mobile/list_scale_tickets",
+		# Sprint 3 (v0.68.0). Compliance alert rectification — see api/rectify.py.
+		# Five direct fixes, and the one route every task-shaped fix shares.
+		"/mobile/renew_certification",
+		"/mobile/record_training",
+		"/mobile/sign_training_supervisor_review",
+		"/mobile/update_regulatory_filing",
+		"/mobile/advance_policy_review",
+		"/mobile/rectify_alert",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 475 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 477 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 222 read tools are **on** by default and can be switched off individually. A
+All 223 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -11457,3 +11457,99 @@ the same employee changes nothing (`already_acknowledged: true`, no new row).
 every **Active** Employee whose `designation` is `Checker` — the same
 Link-to-Designation field `Position Wage Default` already reads. Answers with
 `checkers_total`, `acknowledged_count` and `pending` (the ones still owed).
+
+## `get_compliance_alert`
+
+**READ (default ON).** Required: `alert`. One Compliance Alert, described
+exactly as `get_compliance_calendar` describes it — the single-row twin, for a
+caller that already has a docname rather than a filter. Sprint 3 (v0.68.0)
+added it for `api/rectify.py` to re-read one alert's state after a
+rectification action; nothing about `get_compliance_calendar` changed.
+
+## `materialize_task_for_alert`
+
+**MUTATING, default off.** Required: `alert`. The single-alert twin of
+`generate_tasks_from_compliance_alerts` — turns exactly the one named alert
+into its dispatchable Farm Task, using the identical recipe lookup and
+task-shaping code, rather than sweeping every open alert of that type.
+**Idempotent**: an alert that already has a task returns it
+(`already_answered: true`) and writes nothing. Refused with the same "no
+recipe" explanation `generate_tasks_from_compliance_alerts` reports in
+`skipped_unmapped` for an alert type this app cannot turn into work. This is
+what the mobile sidecar's `rectify_alert` calls for every alert whose
+rectification names a task-shaped fix — see `api/rectify.py`.
+
+## Compliance alert rectification — the `rectification` field and its routes
+
+Every Compliance Alert the mobile sidecar shapes now carries a **`rectification`**
+object saying what fixes it and where to start:
+
+| key | meaning |
+| --- | --- |
+| `action_type` | the verb, e.g. `submit_w4`, `reverify_i9`, `claim_task`, `create_task` |
+| `action_label` | the words a worker reads off the button |
+| `action_endpoint` | a real sidecar route, absolute from `/farmops/api/` |
+| `action_params` | what to prefill, omitting anything that could not be resolved |
+| `can_rectify_mobile` | whether there is a fix this app can start from a phone |
+| `explanation` | present on a refusal, saying **why** there is none |
+
+It is **always an object, never a missing key** — a phone has to be able to tell
+"this app has no fix for that" from "this app did not decode the row", and only
+one of those is worth a support call.
+
+**All 27 seeded rule types are covered**, and `tests_standalone/test_rectify.py`
+keeps the map closed in both directions: every rule the app seeds has an entry,
+and every entry names a rule it seeds. It also joins every endpoint string back
+to the mounted route table, because the paths are written as constants on
+purpose and nothing else would catch a typo that 404s on the one tap that
+mattered.
+
+### The six new mobile routes
+
+`POST /farmops/api/mobile/` — `renew_certification`, `record_training`,
+`sign_training_supervisor_review`, `update_regulatory_filing`,
+`advance_policy_review`, `rectify_alert`.
+
+The first five are the fixes that are **one small form**; each is a narrow door
+onto a shipped tool rather than a second implementation of it —
+`advance_policy_review` takes the two fields its alert is about and not the
+version chain `update_compliance_policy` also accepts.
+
+**`rectify_alert` is the one route every task-shaped fix shares** — walk the
+cabin, sample the water, test the detectors, document the heat break. **It does
+not take an action name.** The mapping from alert to mechanism is decided
+server-side from the alert's own `alert_type`, never from an argument the caller
+sends, for the same reason no wrapper in `api/mobile.py` takes a doctype and a
+docname and calls whatever tool a body names. `confirm` is required and changes
+nothing by itself, so a mis-tap on the calendar cannot raise work. It returns
+the **task**, not the compliance record; completing it is
+`complete_task_via_mobile`, unchanged.
+
+### Where an alert routes at a shipped endpoint instead
+
+`submit_w4` (both W-4 alerts), `collect_signature` (the four signature boxes plus
+I-9 Supplement B), `submit_i9_section_2` (verification overdue), `reverify_i9`
+(an expired I-9, and one expiring), and `claim_task` for a field report nobody
+picked up — that last because **the task already exists**, which is what the
+alert is complaining about, and raising a second would answer an unclaimed task
+with an unclaimed task.
+
+Seven of these alert types also sit in `ALERT_TASK_MAP`, so the nightly sweep
+still raises its task for them. A tap takes the direct route; the sweep is
+unchanged. A list somebody works through and a button somebody presses are
+answering different questions.
+
+### The three deliberate refusals
+
+`i9_retention_destruction_eligible` reports that an I-9 may now be destroyed —
+irreversible, role-gated, and reviewed before it is taken rather than tapped
+through on a handset. `financial_kpi_threshold_breach` and
+`budget_variance_breach` report a computed figure crossing a line an operator
+set, which no single act moves back. Each says so in its own words instead of
+falling through to the generic sentence: "a lawyer signs off on this" and
+"nobody has written this yet" are different facts, and only the second invites
+somebody to go looking for a button that does not exist.
+
+**The handset side is separate, tracked work.** The server names the fix and
+mounts the route for every alert; `ComplianceAlertDetailView.swift` does not
+draw the button yet.

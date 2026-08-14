@@ -91,6 +91,7 @@ from .. import bucket_bridge, compat, datetimes
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
 from ..tools import signed_documents
+from ..tools import evidence as evidence_tools
 from ..tools import files as file_tools
 from ..tools import calendar as compliance_calendar
 from ..tools import employee as personnel
@@ -99,9 +100,10 @@ from ..tools import housing as housing_tools
 from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
 from ..tools import receipts as receipt_tools
+from ..tools import training as training_tools
 from ..tools import universal_scan as universal_scan_tool
 from ..tools import wallet as wallet_tools
-from . import guard, shape
+from . import guard, rectify, shape
 
 ALERT = "Compliance Alert"
 FARM_TASK = "Farm Task"
@@ -111,6 +113,10 @@ FARM_SHIFT = "Farm Shift"
 ML_MODEL = "ML Model"
 HOUSING_UNIT = "Housing Unit"
 HOUSING_ASSIGNMENT = "Housing Assignment"
+CERTIFICATION = "Certification"
+TRAINING_RECORD = "Employee Training Record"
+REGULATORY_FILING = "Regulatory Filing"
+COMPLIANCE_POLICY = "Compliance Policy"
 
 #: The four HR masters the wizard's Assignment step offers as dropdowns, mapped
 #: to the field on each that carries a human label. `Branch` has no second
@@ -5483,4 +5489,276 @@ def list_scale_tickets(
 		"total_net_weight": round(sum(float(row.get("net_weight") or 0) for row in rows), 3),
 		"by_weight_uom": data.get("by_weight_uom") or {},
 		"by_status": data.get("by_status") or {},
+	}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# COMPLIANCE ALERT RECTIFICATION — Sprint 3 (v0.68.0)
+# ────────────────────────────────────────────────────────────────────────────
+#
+# `api/rectify.py::describe_rectification` names, per alert type, which of these
+# routes fixes it. Five are direct forms — one small write and the alert clears
+# on the next sweep. The sixth, `rectify_alert`, is the one every task-shaped
+# alert type shares: it raises the Farm Task the fix actually is and lets the
+# claim/complete/evidence path that has shipped since Sprint 8 do the rest.
+
+
+# ── 59. renew_certification ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("renew_certification", mutating=True, limit=guard.WRITE_LIMIT)
+def renew_certification(
+	user: str,
+	certification=None,
+	new_expiration=None,
+	what_was_done=None,
+	renewed_on=None,
+	certificate_number=None,
+	attached_certificate=None,
+) -> dict:
+	"""Move a certificate's expiration out, and record what earned the renewal.
+
+	Answers the `certification_expiring` alert's rectification. `tools/evidence.py`
+	keeps the previous term on the row rather than overwriting it — a renewal is
+	an event, not a field edit — so this refuses the same way it does: a new
+	date that does not move the expiration forward, or a `renewed_on` in the
+	future.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(CERTIFICATION, certification, "certification", allowed)
+
+	inner = {"certification": name, "new_expiration": new_expiration, "what_was_done": what_was_done}
+	for key, value in (
+		("renewed_on", renewed_on),
+		("certificate_number", certificate_number),
+		("attached_certificate", attached_certificate),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = evidence_tools.renew_certification(inner)
+	return result.data
+
+
+# ── 60. record_training ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("record_training", mutating=True, limit=guard.WRITE_LIMIT)
+def record_training(
+	user: str,
+	employee=None,
+	company=None,
+	regimes=None,
+	content_topics_covered=None,
+	completed_date=None,
+	expires_date=None,
+	training_source=None,
+	training_type=None,
+	provider=None,
+	completed_time=None,
+	certificate_file=None,
+	person_performed_signature=None,
+	notes=None,
+) -> dict:
+	"""File one training event, tagged for every regime it answers.
+
+	Answers the `training_expiring` alert's rectification. `training_expiring`
+	fires on `expires_date`, not on a calendar date, so it goes away by itself
+	the moment a newer record with a later expiry is filed here — no separate
+	step closes the alert.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee_argument(employee, allowed)
+	entity = _company(user, company, allowed)
+
+	inner = {
+		"employee": person,
+		"company": entity,
+		"regimes": regimes,
+		"content_topics_covered": content_topics_covered,
+		"completed_date": completed_date,
+		"training_type": training_type,
+	}
+	for key, value in (
+		("expires_date", expires_date),
+		("training_source", training_source),
+		("provider", provider),
+		("completed_time", completed_time),
+		("certificate_file", certificate_file),
+		("person_performed_signature", person_performed_signature),
+		("notes", notes),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = training_tools.record_training(inner)
+	return result.data
+
+
+# ── 61. sign_training_supervisor_review ─────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("sign_training_supervisor_review", mutating=True, limit=guard.WRITE_LIMIT)
+def sign_training_supervisor_review(
+	user: str,
+	training_record=None,
+	supervisor=None,
+	reviewed_on=None,
+	supervisor_signature=None,
+	replace_reviewer=None,
+) -> dict:
+	"""Record the §112.161(b) supervisor review on one training record.
+
+	Answers the `supervisor_review_lapsed` alert's rectification. The reviewer
+	cannot be the person the record says was trained, and cannot be employed by
+	a different entity than the record belongs to — both refused one layer down,
+	in `tools/training.py`, exactly as they are from the Desk.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(TRAINING_RECORD, training_record, "training_record", allowed)
+	reviewer = _employee_argument(supervisor, allowed, "supervisor")
+
+	inner = {"record": name, "supervisor": reviewer}
+	for key, value in (
+		("reviewed_on", reviewed_on),
+		("supervisor_signature", supervisor_signature),
+		("replace_reviewer", replace_reviewer),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = training_tools.sign_training_supervisor_review(inner)
+	return result.data
+
+
+# ── 62. update_regulatory_filing ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("update_regulatory_filing", mutating=True, limit=guard.WRITE_LIMIT)
+def update_regulatory_filing(
+	user: str,
+	filing=None,
+	filing_type=None,
+	period_covered=None,
+	docket_number=None,
+	response=None,
+	attached_filing=None,
+	attached_response=None,
+	notes=None,
+	submission_date=None,
+	response_due_date=None,
+	response_received_date=None,
+	agency=None,
+	status=None,
+) -> dict:
+	"""Record the agency's response, the docket number, or the documents.
+
+	Answers the `filing_response_due` alert's rectification. Filing
+	`response_received_date` is what actually clears the alert — the sweep reads
+	it as the thing being waited for having happened — and the tool layer says so
+	back in the response.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(REGULATORY_FILING, filing, "filing", allowed)
+
+	inner = {"filing": name}
+	for key, value in (
+		("filing_type", filing_type),
+		("period_covered", period_covered),
+		("docket_number", docket_number),
+		("response", response),
+		("attached_filing", attached_filing),
+		("attached_response", attached_response),
+		("notes", notes),
+		("submission_date", submission_date),
+		("response_due_date", response_due_date),
+		("response_received_date", response_received_date),
+		("agency", agency),
+		("status", status),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = evidence_tools.update_regulatory_filing(inner)
+	return result.data
+
+
+# ── 63. advance_policy_review ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("advance_policy_review", mutating=True, limit=guard.WRITE_LIMIT)
+def advance_policy_review(user: str, policy=None, review_due_date=None, notes=None) -> dict:
+	"""Record that a procedure was reviewed, and move its next review date out.
+
+	Answers the `policy_review_overdue` alert's rectification. A narrow door onto
+	`update_compliance_policy`, which takes several more fields than a phone
+	answering this one alert has any business changing — `policy_name`,
+	`status`, the version chain — so only the two this alert is actually about
+	are accepted here.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(COMPLIANCE_POLICY, policy, "policy", allowed)
+	if not str(review_due_date or "").strip():
+		frappe.throw("review_due_date is required.", frappe.ValidationError)
+
+	inner = {"policy": name, "review_due_date": review_due_date}
+	if notes is not None:
+		inner["notes"] = notes
+
+	result = evidence_tools.update_compliance_policy(inner)
+	return result.data
+
+
+# ── 64. rectify_alert ────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("rectify_alert", mutating=True, limit=guard.WRITE_LIMIT)
+def rectify_alert(user: str, alert=None, confirm=None) -> dict:
+	"""Raise the task one compliance alert's rectification says to raise.
+
+	THE ONE ROUTE FOR EVERY TASK-SHAPED FIX. `api/rectify.py::describe_rectification`
+	answers `action_type: "create_task"` (or a more specific verb — "start_inspection_session",
+	"create_water_test", "log_shift_event" — that resolves to the same mechanism) for
+	every alert whose fix is real-world work before it is a compliance record: walk
+	the cabin, sample the water, test the detector, document the heat break. This
+	is what a tap on one of those alerts calls.
+
+	IT DOES NOT TAKE AN ACTION NAME. The mapping from alert to mechanism is decided
+	SERVER-SIDE, by this alert's own `alert_type`, never by an argument the caller
+	sends — the same reason no wrapper in this file takes a doctype and a docname
+	and calls whatever tool a body names. `confirm` is required and changes nothing
+	by itself; it exists so a client cannot raise a task by fetching the calendar
+	and mis-tapping.
+
+	RETURNS THE TASK, NOT THE COMPLIANCE RECORD. Completing it — with the
+	evidence its `evidence_required` contract asks for — is `complete_task_via_mobile`,
+	unchanged, because raising the task and doing the work it names are still two
+	different moments.
+
+	Refuses an alert this app has no task recipe for, and an alert with a more
+	specific rectification than a task — `submit_w4`, `collect_form_signature`,
+	`renew_certification` and the rest each have their own route above, because
+	each already IS the whole fix and a task in front of it would be a step
+	nobody needs.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(ALERT, alert, "alert", allowed)
+	if not frappe.utils.cint(confirm):
+		frappe.throw("confirm is required to rectify_alert. Nothing was changed.", frappe.ValidationError)
+
+	row = compliance_calendar.get_compliance_alert({"alert": name}).data
+	rectification = rectify.describe_rectification(row) or {}
+	if not rectification.get("can_rectify_mobile"):
+		frappe.throw(
+			f"{name} has no fix this app can start from a phone. "
+			+ str(rectification.get("explanation") or ""),
+			frappe.ValidationError,
+		)
+	if rectification.get("action_endpoint") != "/farmops/api/mobile/rectify_alert":
+		frappe.throw(
+			f"{name}'s fix is {rectification.get('action_label')!r}, at "
+			f"{rectification.get('action_endpoint')} — call that route instead of rectify_alert.",
+			frappe.ValidationError,
+		)
+
+	result = dispatch.materialize_task_for_alert({"alert": name})
+	updated = compliance_calendar.get_compliance_alert({"alert": name}).data
+	return {
+		"alert": shape.alert(updated),
+		"action_type": rectification.get("action_type"),
+		"task": result.data,
 	}

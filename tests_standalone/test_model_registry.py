@@ -760,9 +760,9 @@ class ToolRegistration(unittest.TestCase):
 		# write (`migrate_model_format`) — for the records v0.43.0, v0.52.0 and
 		# v0.59.0 each left in a different shape. The write moves metadata only:
 		# it never uploads, downloads or re-attaches a file.
-		self.assertEqual(len(self.registry.TOOLS), 475)
-		self.assertEqual(len(self.registry.READ_TOOLS), 222)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 253)
+		self.assertEqual(len(self.registry.TOOLS), 477)
+		self.assertEqual(len(self.registry.READ_TOOLS), 223)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 254)
 
 
 if __name__ == "__main__":

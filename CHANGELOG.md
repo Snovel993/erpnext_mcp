@@ -5,6 +5,69 @@ All notable changes to this project are documented here. Versions follow
 
 ## 0.68.0 — 2026-08-13
 
+**Sprint 3 of the Gap Closure Plan, part four: the alert that told a worker
+what was wrong and not what to do about it.** `ComplianceAlertDetailView` could
+open a signature pad for the four alerts carrying a `signature_request` and a
+task screen for the handful with a `linked_task`. For the other twenty-one it
+showed the problem and stopped — correctly, because nothing told it what the
+fix was. Every compliance alert now names its own fix and the route that starts
+it.
+
+- **`rectification` joins every alert the mobile sidecar shapes.**
+  `action_type`, `action_label` (words a worker reads off a button),
+  `action_endpoint` (a real sidecar route), `action_params` (what to prefill)
+  and `can_rectify_mobile`. It is always an object, never a missing key: a
+  phone has to be able to tell "this app has no fix for that" from "this app
+  did not decode the row", and only one of those is worth a support call.
+- **All 27 seeded rule types are covered, and the map is closed in both
+  directions.** `tests_standalone/test_rectify.py` asserts every rule this app
+  seeds has an entry and every entry names a rule it seeds, so a rule shipped
+  in a later release without a rectification fails the suite rather than
+  reaching a handset as a dead end. It also joins every endpoint string back to
+  the mounted route table — the paths are written as constants on purpose, and
+  nothing but a test catches a typo that would 404 on the one tap that mattered.
+- **Where a route already existed, the fix routes straight at it.** `submit_w4`
+  for the two W-4 alerts, `collect_signature` for the four signature boxes,
+  `submit_i9_section_2` for an overdue verification, `reverify_i9` for both an
+  expired I-9 and one expiring, and `claim_task` for a field report nobody
+  picked up — that last one because the task already exists, which is what the
+  alert is complaining about, and raising a second would answer an unclaimed
+  task with an unclaimed task. Seven of these alert types also sit in
+  `ALERT_TASK_MAP`; the nightly sweep still raises its task, because a list
+  somebody works through and a button somebody presses answer different
+  questions.
+- **Five new sidecar endpoints for the fixes that are one small form**:
+  `renew_certification`, `record_training`, `sign_training_supervisor_review`,
+  `update_regulatory_filing` and `advance_policy_review`. Each is a narrow door
+  onto a shipped tool — `advance_policy_review` takes the two fields this alert
+  is about and not the version chain `update_compliance_policy` also accepts.
+- **`rectify_alert` (sidecar) for every fix that is real-world work first** —
+  walk the cabin, sample the water, test the detectors, document the heat
+  break. **It does not take an action name.** The mapping from alert to
+  mechanism is decided server-side from the alert's own type, never from an
+  argument the caller sends, and `confirm` is required so a mis-tap on the
+  calendar cannot raise work. It returns the task; completing it is
+  `complete_task_via_mobile`, unchanged.
+- **`materialize_task_for_alert` (MUTATING, default off)** — the single-alert
+  twin of `generate_tasks_from_compliance_alerts`, same recipe lookup and same
+  task-shaping code so the two cannot drift. Idempotent: an alert that already
+  has a task returns it and writes nothing. An alert type with no recipe is
+  refused rather than silently doing nothing, because a mobile caller has no
+  batch report to read afterwards — the refusal is the report.
+- **`get_compliance_alert` (read)** — one alert, described exactly as
+  `get_compliance_calendar` describes it, for a caller that already has a
+  docname. `get_compliance_calendar` is unchanged.
+- **Three alert types are answered "no, and here is why."**
+  `i9_retention_destruction_eligible`, whose fix is irreversible and gets
+  reviewed before it is taken rather than tapped through on a handset, and the
+  two threshold breaches, which report a computed number crossing a line rather
+  than a missing record. "A lawyer signs off on this" and "nobody has written
+  this yet" are different facts, and only the second invites somebody to go
+  looking for a button that does not exist.
+- **The handset side is separate, tracked work.** The server names the fix and
+  mounts the route for every alert; `ComplianceAlertDetailView.swift` does not
+  draw the button yet.
+
 **Sprint 3 of the Gap Closure Plan, part three: the model records that predate
 the format.** Three releases have each defined what an ML Model record carries
 — v0.43.0 labels typed onto it, v0.52.0 a raw binary attached beside them,
