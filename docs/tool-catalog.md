@@ -1217,7 +1217,8 @@ line).
 **Returns** `name`, `docstatus` (0), `grand_total`, `outstanding_amount`,
 `credit_to`, `item_count`, `status`.
 
-This is the tool `create_purchase_invoice_from_receipt` (Receipt tools) builds
+This is the tool `create_purchase_invoice_from_receipt` (Receipt Enhancement &
+Owner Draw, below) builds
 on: it resolves the Supplier, expense account and Item from an Expense Receipt
 and hands the same shape to this one.
 
@@ -1262,6 +1263,140 @@ Invoice's `outstanding_amount`, exactly as ERPNext's own controller does.
 **Arguments:** `name` (required).
 
 **Returns** `name`, `docstatus` (1), `gl_entries_created`, `references[]`.
+
+## Receipt Enhancement & Owner Draw (v0.68.0)
+
+Sprint 3 of the Gap Closure Plan, part two: what happens to an Expense Receipt
+after it is captured — correction, reporting, Supplier matching, and the two
+destinations `classify_receipt`'s `bill` and `Owner Draw` categories point at.
+
+### `update_expense_receipt` — MUTATING, default off
+
+Correct `cost_center`, `supplier`, `category` or `notes` on a receipt already
+captured, in ANY status (Approved included). Never touches `merchant`,
+`amount`, `receipt_date`, or any review field — those are either the OCR
+reading or the record of a decision, and neither is this tool's business.
+
+**Arguments:** `name` (required; `expense_receipt`/`receipt` aliases),
+`cost_center`, `supplier`, `category`, `notes` — at least one required, and
+each may be set to `""` to clear it except `category`.
+
+**Returns** `name`, `merchant`, `amount`, `fields_changed[]`, `before{}`,
+`after{}`.
+
+**Refused:** no field named; every named field already reads what was asked
+for; an unknown `category`; a `cost_center` that does not exist.
+
+### `get_expense_summary`
+
+Expense receipts totalled by category and bucketed into a trend series by
+`period` (`week`, `month` or `quarter` — default `month`). Rejected receipts
+are excluded from the totals by default; pass `status="Rejected"` to see them
+on their own.
+
+**Arguments:** `company`, `from_date`, `to_date`, `period`, `group_by`
+(`merchant` or `supplier`, for a second breakdown), `status` (overrides the
+Rejected exclusion).
+
+**Returns** `count`, `total_amount`, `by_category{}`, `trend[]` (each with
+`period`, `period_start`, `period_end`, `count`, `total`), and `by_merchant{}`
+/ `by_supplier{}` when `group_by` is set.
+
+### `get_expense_report`
+
+Every expense receipt in a window, one row each — nothing excluded by default,
+unlike the summary. `csv:true` adds a `csv` field with the same rows as a
+ready-to-save comma-separated string.
+
+**Arguments:** `company`, `from_date`, `to_date`, `status`, `category`, `csv`,
+`limit`.
+
+**Returns** `receipts[]`, `count`, `total_amount`, `truncated`, and `csv` when
+asked for.
+
+### `normalize_merchant`
+
+The best-matching Supplier for a merchant string, and how confident that is.
+Punctuation and legal-form words (`Co`, `LLC`, `Inc`, `Corp`, `Ltd` …) are
+stripped from both sides before comparison, so `WILBUR ELLIS CO` scores high
+against `Wilbur-Ellis Company LLC`. Plain string similarity — no ML. This
+SUGGESTS a link; it never writes one, the same rule `submit_expense_receipt`'s
+own `supplier` argument already follows.
+
+**Arguments:** `merchant` (required).
+
+**Returns** `merchant`, `match` (`supplier`, `supplier_name`, `confidence`) or
+`null`, `alternatives[]`, `threshold`.
+
+### `list_merchant_aliases`
+
+Merchant strings already linked to a Supplier, grouped by which Supplier. Not
+a table of its own — built by reading every Expense Receipt whose `supplier`
+is already set.
+
+**Arguments:** `company`, `supplier`.
+
+**Returns** `aliases[]` (each `supplier`, `supplier_name`, `receipt_count`,
+`merchant_strings[]`), `count`.
+
+### `create_purchase_invoice_from_receipt` — MUTATING, default off
+
+Turn one **Approved** Expense Receipt into a DRAFT Purchase Invoice, via
+`purchasing.create_purchase_invoice` (above) — this tool's job is deciding
+what to hand it, not writing the document itself.
+
+The Supplier, in order: the receipt's own `supplier` link if set; the
+`supplier` argument if given; a `normalize_merchant` match, used automatically
+only above a high confidence bar; or a brand-new Supplier created from the
+merchant string. Whichever ran is reported as `supplier_resolved_by` — the one
+tool in the app that links or creates a Supplier with no human confirming the
+match first. The expense account is matched from the receipt's category
+against the company's leaf Expense accounts by a short keyword table, the same
+shape `record_member_event` uses for equity accounts. The line bills against a
+shared, non-stock Item per category (`EXP-<CATEGORY>`), created once and
+reused after that — pass `item` to bill against a real stock Item instead.
+
+**Arguments:** `receipt` (required; `expense_receipt` alias), `supplier`,
+`expense_account`, `cost_center` (defaults to the receipt's own),
+`posting_date` (defaults to `receipt_date`), `due_date`, `bill_no`,
+`credit_to`, `item`.
+
+**Returns** `purchase_invoice`, `docstatus` (0), `supplier`,
+`supplier_resolved_by`, `expense_account`, `expense_account_resolved_by`,
+`item`, `item_resolved_by`, `amount`, `posting_date`.
+
+**Refused:** the receipt is not Approved; the receipt is categorised
+`Owner Draw` (use `create_owner_draw` instead); the receipt is already linked
+to another document.
+
+### `create_owner_draw` — MUTATING, default off
+
+Record an owner draw / member distribution as a DRAFT Journal Entry: debit an
+equity "draw" account, credit bank or cash. **Requires the Member Manager
+role** (or System Manager) — checked before anything else runs; an operator
+creates that Role in the Desk. Not a new doctype, and independent of the cap
+table / Member Event machinery — works whether or not a site has adopted it.
+
+The draw account is matched from the company's leaf Equity accounts by name
+(`Member Draws`, `Owner Draw`, `Distributions`, `Drawings` — the same keyword
+table `record_member_event` uses for a Distribution or Withdrawal), or named
+explicitly with `draw_account`. `receipt` optionally links an Expense Receipt
+categorised `Owner Draw` to the Journal Entry this produces, via the same
+`linked_doctype`/`linked_document` pair `create_purchase_invoice_from_receipt`
+writes.
+
+**Arguments:** `company`, `amount` (required, positive), `date` (required;
+`effective_date` alias), `narrative` (required; `reason` alias),
+`draw_account` (`equity_account` alias), `counter_account`, `cost_center`,
+`party_type` + `party` (attribution on the equity line — pass both or
+neither), `receipt` (`expense_receipt` alias).
+
+**Returns** `name`, `docstatus` (0), `draw_account`,
+`draw_account_resolved_by`, `counter_account`, `recorded_by`.
+
+**Refused:** no Member Manager or System Manager role; `amount` not positive;
+`narrative` too short; `receipt` not categorised `Owner Draw`; `receipt`
+already linked to something.
 
 ---
 
@@ -10764,7 +10899,7 @@ identical flow — photograph, extract, file, review:
 | a fuel or parts slip | Expense Receipt | `submit_expense_receipt` (v0.31.0) |
 | a scale ticket | **Scale Ticket** | `create_scale_ticket` |
 | a packout settlement | **Settlement Statement** | `create_settlement_statement` |
-| a vendor invoice | Purchase Invoice | *not yet implemented* |
+| a vendor invoice | Purchase Invoice | `create_purchase_invoice_from_receipt` (v0.68.0), on an Approved receipt |
 
 `classify_receipt` is that branch, published as a tool.
 

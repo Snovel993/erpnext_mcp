@@ -3,9 +3,76 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
-## Unreleased
+## 0.68.0 — 2026-08-13
 
-**Sprint 3 of the Gap Closure Plan: the purchasing pipeline, end to end.**
+**Sprint 3 of the Gap Closure Plan, part two: what happens to a receipt after
+it is captured.** v0.67.0 gave a photographed slip four possible destinations
+and said the fourth — a vendor invoice, a Purchase Invoice — was "a later
+sprint." This is that sprint, closing the loop from both ends: an Expense
+Receipt can now be corrected after intake, reported on, matched to the Supplier
+it names, turned into a bill, or — where the money never was an expense at
+all — recorded as what it actually was.
+
+- **`update_expense_receipt` (MUTATING, default off).** Corrects `cost_center`,
+  `supplier`, `category` or `notes` on a receipt in ANY status, including one
+  already Approved — a receipt is captured fast, at a pump or a parts counter,
+  by whoever has the phone, and coded properly later, at a desk, by whoever
+  reconciles the books. Never touches `merchant`, `amount`, `receipt_date` or
+  the review trail: those are either the machine's reading of the paper or the
+  record of a decision, and this tool has no business rewriting either. Refuses
+  a call that names no field, and one whose values already match the record —
+  a silent no-op is not a thing this tool does.
+- **`get_expense_summary` and `get_expense_report` (read).** The dashboard and
+  the export. Summary totals by category and buckets a trend by week, month or
+  quarter, excluding Rejected receipts by default and reporting the excluded
+  count rather than hiding it. Report lists every receipt in a window — nothing
+  excluded by default, `csv:true` for a ready-to-save string — because a
+  detailed export is where somebody checks what happened to one specific
+  receipt, and a rejected one that vanished would look like it was never
+  captured.
+- **`normalize_merchant` and `list_merchant_aliases` (read).** The first scores
+  a merchant string against every Supplier by plain text similarity — no
+  ML — after stripping punctuation and legal-form words (Co, LLC, Inc, Corp,
+  Ltd …) from both sides, so "WILBUR ELLIS CO" and "Wilbur-Ellis Company LLC"
+  normalize to the same thing. It SUGGESTS a link and never sets one, the same
+  rule `submit_expense_receipt`'s own `supplier` argument already follows. The
+  second is not a table of its own: it is every Expense Receipt whose supplier
+  is already set, read back grouped by which Supplier — the alias register
+  this app keeps is exactly the data already on hand.
+- **`create_purchase_invoice_from_receipt` (MUTATING, default off).** The
+  fourth branch `classify_receipt` named, built. Takes an APPROVED Expense
+  Receipt and hands `purchasing.create_purchase_invoice` — this release's other
+  half — a resolved Supplier, a resolved expense account and a resolved Item,
+  rather than writing the document itself. The Supplier is the receipt's own
+  link if set, the `supplier` argument if given, a `normalize_merchant` match
+  used automatically only above a high confidence bar, or a brand-new Supplier
+  created from the merchant string — whichever ran is reported, because this
+  is the one tool in the app that links or creates a Supplier with no human
+  confirming the match first. The expense account is matched from the
+  category against the company's leaf Expense accounts by the same kind of
+  keyword table `record_member_event` uses for equity. The line bills against
+  a shared, non-stock Item per category — created once, reused after that,
+  never one Item per receipt. `Owner Draw` receipts are refused by name.
+- **`create_owner_draw` (MUTATING, default off).** An owner draw / member
+  distribution as a draft Journal Entry: debit an equity "draw" account
+  (`Member Draws`, `Owner Draw`, `Distributions`, `Drawings` — the same
+  keyword table `record_member_event` already carried), credit bank or cash.
+  It is not a new doctype and it is not folded into the cap table machinery —
+  it works whether or not a site has adopted Cap Table Entry / Member Event at
+  all, and it is gated on a role instead: **requires the Member Manager role**
+  (or System Manager), checked before anything else runs. This is the
+  `category: "Owner Draw"` receipt's destination — `create_purchase_invoice_
+  from_receipt` refuses that category by name and points here.
+- **`Owner Draw` joins Expense Receipt's category list**, and `cost_center` and
+  a generic `linked_doctype`/`linked_document` pair join the doctype itself —
+  one Dynamic Link pair reused by both `create_purchase_invoice_from_receipt`
+  and `create_owner_draw`, rather than a separate Link field per downstream
+  document type.
+- **All five mutating tools default off; the four read tools default on**, in
+  the existing "Expense Receipt Capture" and "Receipts & Scale Tickets"
+  settings sections.
+
+**Sprint 3 of the Gap Closure Plan, part one: the purchasing pipeline, end to end.**
 `list_purchase_orders` and `get_outstanding_invoices` (its receivables mirror)
 already existed; this adds everything else a purchase actually walks
 through — receiving goods, billing them, and paying the bill — sixteen tools
