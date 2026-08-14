@@ -9756,6 +9756,65 @@ TOOLS = {
 		available=_needs_doctype("I-9 Form"),
 		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
 	),
+	"patch_i9_section_1": _tool(
+		i9.patch_i9_section_1,
+		"MUTATING (default OFF). Correct a TRANSCRIPTION error in a Section 1 that "
+		"has already been filed — a form at 'Section 1 Complete' or 'Complete', which "
+		"submit_i9_section_1 cannot touch because it only works on a Draft.\n\n"
+		"THE HOLE THIS FILLS. Every other I-9 tool moves a form forward. A Section 1 "
+		"filed with a blank date of birth — because the caller that filed it never sent "
+		"one — had no route to a date of birth through any tool in this app, on any "
+		"status, while the form read Complete and its PDF was already rendered.\n\n"
+		"IT WRITES FOUR COLUMNS AND WILL NOT BE TALKED INTO A FIFTH: date_of_birth, "
+		"email, phone, ssn_last_four. Each is a transcription of something the employee "
+		"already told the employer. THE NAME, THE ADDRESS, THE CITIZENSHIP STATUS AND "
+		"THE IMMIGRATION IDENTIFIERS ARE REFUSED BY NAME — those are what the employee "
+		"swore to under penalty of perjury above their own signature, and a form whose "
+		"sworn answers were edited afterwards is a form whose signature no longer covers "
+		"what it says. They are changed by re-attesting, not by patching. A call naming "
+		"one is refused outright rather than quietly ignored.\n\n"
+		"A VALUE IS REQUIRED FOR EVERY FIELD NAMED. This corrects a field to the right "
+		"answer; it does not clear one. Refused on a Draft (submit_i9_section_1 fills "
+		"those) and on a Destroyed record.\n\n"
+		"MOVES NO STATUS AND SIGNS NOTHING. A Complete form stays Complete and both "
+		"attestation timestamps are untouched — fixing a typo does not make the "
+		"employee have signed on a different day.\n\n"
+		"REQUIRES System Manager, HR Manager or HR User on the account this app acts "
+		"as. Narrower than the personnel tools by one role: Farm Manager may hire, and "
+		"amending a retained federal record afterwards is a different question.\n\n"
+		"Logged to I-9 Audit Log as `section_1_correction`, recording WHICH fields "
+		"changed and which were blank before — never what they now say, for the reason "
+		"submit_i9_section_1 gives about the immigration identifiers. Redraws "
+		"generated_pdf where one had been rendered, so the retained page and the record "
+		"do not disagree; a form that was never rendered is left alone.",
+		{
+			"i9_form": _field(_STRING, "The I-9 Form docname, e.g. I9-2026-0001."),
+			"name": _field(_STRING, "An I-9 Form docname, or an employee."),
+			"employee": _field(_STRING, "Employee docname or employee_name, instead of the form."),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"date_of_birth": _field(_STRING, "YYYY-MM-DD. The employee's real date of birth."),
+			"email": _field(_STRING, "Email address, as Section 1 asks for it."),
+			"phone": _field(_STRING, "Phone number, as Section 1 asks for it."),
+			"ssn_last_four": _field(
+				_STRING,
+				"The last four digits of the SSN. A longer number is stripped to its last "
+				"four; a shorter one is refused. The nine-digit `ssn` argument that "
+				"submit_i9_section_1 takes is NOT accepted here — the encrypted column has "
+				"its own site switch and a correction path must not route around it.",
+			),
+			"reason": _field(
+				_STRING,
+				"Why the correction was made, recorded verbatim in the audit row. Not "
+				"required, and worth sending: it is the sentence an inspection reads beside "
+				"the change.",
+			),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Correct a filed I-9 Section 1",
+		available=_needs_doctype("I-9 Form"),
+		requires="the I-9 Form doctype (run bench migrate after installing v0.27.0)",
+	),
 	"submit_i9_section_2": _tool(
 		i9.submit_i9_section_2,
 		"MUTATING (default OFF). Fill Section 2 of an I-9 — employer verification "

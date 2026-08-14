@@ -30,6 +30,13 @@ v0.47.0, and each of the four is a federal requirement the app did not meet:
     carries both attestations; the documents are filed regardless and it rests
     at `Awaiting Verification` until the outstanding one is signed. And a
     signature that never happened gets no timestamp and no IP.
+
+13. `PatchSection1` — v0.67.1, and the hole it closes is that every other tool
+    in this module moves a form FORWARD. A Section 1 filed with a blank date of
+    birth had no route to one on any status, because `submit_i9_section_1` only
+    takes a Draft. `patch_i9_section_1` writes the four transcription columns
+    and refuses the sworn ones by name; the PDF half is asserted in
+    `test_i9_pdf.py`, where a rendered page exists to go stale.
 """
 import json
 from datetime import date, timedelta
@@ -39,7 +46,7 @@ import frappe
 from erpnext_mcp.tools import i9, newhire
 
 from .fixtures import MAIN, V12TestCase, install_hrms
-from .harness import STORE, add_field
+from .harness import ROLES, STORE, add_field, set_roles
 
 #: What the two attestations look like on a form that carries them. The tools
 #: take a file URL and store it; nothing here reads the bytes, and a test that
@@ -66,6 +73,7 @@ I9_TOOLS_ON = {
         "flag_i9_reverification",
         "reverify_i9",
         "destroy_i9",
+        "patch_i9_section_1",
     )
 }
 
@@ -1168,3 +1176,293 @@ class UpdateI9Settings(I9TestCase):
         self.tool_data("update_i9_settings", {"enrolled_in_e_verify": True})
         data = self.tool_data("get_i9_settings", {})
         self.assertTrue(data["enrolled_in_e_verify"])
+
+
+# ── 13 ────────────────────────────────────────────────────────────────────────
+class PatchSection1(I9TestCase):
+    """v0.67.1. The one way back into a Section 1 that has already been filed.
+
+    THE BUG THAT PRODUCED THIS TOOL IS THE FIRST TEST. An onboarding wizard
+    filed a Section 1 without sending `date_of_birth`, `email` or `phone`; the
+    form went to `Section 1 Complete`, then to `Complete`, then had its PDF
+    rendered, and `submit_i9_section_1` — which only takes a Draft — could not
+    be used to put the missing three in. There was no other tool that could
+    either, on any status.
+    """
+
+    def _filed_with_gaps(self, employee="HR-EMP-00001") -> str:
+        """A Complete I-9 whose Section 1 is missing exactly what I9-2026-0001's was."""
+        self._create_draft(employee=employee)
+        self._submit_section_1(employee=employee)
+        self._submit_section_2(employee=employee)
+        return str(frappe.db.get_value("I-9 Form", {"employee": employee}, "name"))
+
+    def _stored(self, name, *fields):
+        return frappe.db.get_value("I-9 Form", name, list(fields), as_dict=True)
+
+    def _corrections(self, name):
+        return [
+            row
+            for row in STORE.rows("I-9 Audit Log")
+            if row.get("i9_form") == name and row.get("action") == i9.CORRECTION_ACTION
+        ]
+
+    # -- the gap, and closing it ---------------------------------------------
+    def test_a_filed_section_1_really_does_have_the_gap(self):
+        """The premise. Without this the rest of the class proves nothing."""
+        name = self._filed_with_gaps()
+        row = self._stored(name, "status", "date_of_birth", "email", "phone")
+        self.assertEqual(row["status"], "Complete")
+        self.assertFalse(row["date_of_birth"])
+        self.assertFalse(row["email"])
+        self.assertFalse(row["phone"])
+
+    def test_submit_section_1_cannot_close_it(self):
+        """Why a second tool had to exist rather than the first one widening."""
+        self._filed_with_gaps()
+        msg = self.tool_error(
+            "submit_i9_section_1",
+            {
+                "employee": "HR-EMP-00001",
+                "legal_first_name": "Ada",
+                "legal_last_name": "Orchard",
+                "citizenship_status": "US Citizen",
+                "date_of_birth": "1978-11-05",
+            },
+        )
+        self.assertIn("no Draft I-9", msg)
+
+    def test_it_writes_the_three_missing_fields(self):
+        name = self._filed_with_gaps()
+        data = self.tool_data(
+            "patch_i9_section_1",
+            {
+                "i9_form": name,
+                "date_of_birth": "1978-11-05",
+                "email": "ada@example.test",
+                "phone": "509-555-0142",
+            },
+        )
+        self.assertEqual(sorted(data["changed"]), ["date_of_birth", "email", "phone"])
+        row = self._stored(name, "date_of_birth", "email", "phone")
+        self.assertEqual(str(row["date_of_birth"]), "1978-11-05")
+        self.assertEqual(row["email"], "ada@example.test")
+        self.assertEqual(row["phone"], "509-555-0142")
+
+    def test_it_is_found_by_the_employee_too(self):
+        """`_resolve_form`'s other half — an operator holding the person, not the docname."""
+        name = self._filed_with_gaps()
+        data = self.tool_data(
+            "patch_i9_section_1", {"employee": "HR-EMP-00001", "date_of_birth": "1978-11-05"}
+        )
+        self.assertEqual(data["name"], name)
+
+    def test_it_works_at_section_1_complete_as_well(self):
+        self._create_draft()
+        self._submit_section_1()
+        name = str(frappe.db.get_value("I-9 Form", {"employee": "HR-EMP-00001"}, "name"))
+        data = self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertEqual(data["status"], "Section 1 Complete")
+        self.assertEqual(data["changed"], ["phone"])
+
+    def test_the_ssn_is_stripped_to_its_last_four(self):
+        name = self._filed_with_gaps()
+        self.tool_data("patch_i9_section_1", {"i9_form": name, "ssn_last_four": "123-45-6789"})
+        self.assertEqual(self._stored(name, "ssn_last_four")["ssn_last_four"], "6789")
+
+    def test_a_short_ssn_is_refused_rather_than_stored_short(self):
+        name = self._filed_with_gaps()
+        msg = self.tool_error("patch_i9_section_1", {"i9_form": name, "ssn_last_four": "89"})
+        self.assertIn("2 digit(s)", msg)
+        self.assertFalse(self._stored(name, "ssn_last_four")["ssn_last_four"])
+
+    # -- the line it will not cross -------------------------------------------
+    def test_it_refuses_the_sworn_fields_by_name(self):
+        """Refused, not ignored. A success reporting a correction while the wrong
+        name is still on the form is the worse of the two failures."""
+        name = self._filed_with_gaps()
+        for field, value in (
+            ("legal_first_name", "Adelaide"),
+            ("legal_last_name", "Orchid"),
+            ("citizenship_status", "Alien Authorized to Work"),
+            ("alien_registration_number", "A123456789"),
+            ("address_street", "9 Elsewhere Lane"),
+            ("section_1_signature", SECTION_1_INK),
+        ):
+            with self.subTest(field=field):
+                msg = self.tool_error(
+                    "patch_i9_section_1", {"i9_form": name, field: value, "phone": "509-555-0142"}
+                )
+                self.assertIn(field, msg)
+                self.assertIn("Nothing was changed", msg)
+
+    def test_a_refused_field_takes_the_whole_call_with_it(self):
+        """The patchable field alongside it is not written either — a partial
+        success here would leave the caller believing the refused one landed."""
+        name = self._filed_with_gaps()
+        self.tool_error(
+            "patch_i9_section_1",
+            {"i9_form": name, "legal_first_name": "Adelaide", "phone": "509-555-0142"},
+        )
+        self.assertFalse(self._stored(name, "phone")["phone"])
+        self.assertEqual(self._stored(name, "legal_first_name")["legal_first_name"], "Ada")
+
+    def test_the_nine_digit_ssn_argument_is_refused(self):
+        """`ssn` reaches the encrypted column through its own site switch.
+        A correction path that took it would route around that switch."""
+        name = self._filed_with_gaps()
+        msg = self.tool_error("patch_i9_section_1", {"i9_form": name, "ssn": "123456789"})
+        self.assertIn("ssn", msg)
+
+    def test_it_refuses_a_call_naming_no_patchable_field(self):
+        name = self._filed_with_gaps()
+        msg = self.tool_error("patch_i9_section_1", {"i9_form": name})
+        self.assertIn("naming none of the fields", msg)
+
+    def test_it_will_not_clear_a_field(self):
+        name = self._filed_with_gaps()
+        self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        msg = self.tool_error("patch_i9_section_1", {"i9_form": name, "phone": ""})
+        self.assertIn("does not clear one", msg)
+        self.assertEqual(self._stored(name, "phone")["phone"], "509-555-0142")
+
+    # -- the statuses ---------------------------------------------------------
+    def test_a_draft_is_refused_and_told_where_to_go(self):
+        self._create_draft()
+        name = str(frappe.db.get_value("I-9 Form", {"employee": "HR-EMP-00001"}, "name"))
+        msg = self.tool_error("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertIn("submit_i9_section_1", msg)
+
+    def test_a_destroyed_record_is_refused(self):
+        name = self._filed_with_gaps()
+        frappe.db.set_value("I-9 Form", name, "status", "Destroyed")
+        msg = self.tool_error("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertIn("disposed of", msg)
+
+    def test_awaiting_verification_is_refused(self):
+        """Deliberate, and the narrower of the two readings: v0.67.1 shipped the
+        two statuses that were asked for. A form resting at `Awaiting
+        Verification` has a filed Section 1 and no way to correct it — the gap
+        is recorded here rather than closed quietly."""
+        name = self._filed_with_gaps()
+        frappe.db.set_value("I-9 Form", name, "status", "Awaiting Verification")
+        msg = self.tool_error("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertIn("Awaiting Verification", msg)
+
+    def test_it_moves_no_status_and_touches_no_attestation(self):
+        name = self._filed_with_gaps()
+        before = self._stored(name, "status", "section_1_signed_at", "section_2_signed_at")
+        self.tool_data("patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"})
+        after = self._stored(name, "status", "section_1_signed_at", "section_2_signed_at")
+        self.assertEqual(after, before)
+
+    # -- who may make one -----------------------------------------------------
+    def test_it_refuses_an_account_holding_none_of_the_three_roles(self):
+        name = self._filed_with_gaps()
+        held = list(ROLES.get("Administrator", []))
+        self.addCleanup(set_roles, "Administrator", held)
+        set_roles("Administrator", ["Farm Manager", "Foreman"])
+        msg = self.tool_error("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertIn("may not correct a filed I-9", msg)
+        self.assertFalse(self._stored(name, "phone")["phone"])
+
+    def test_hr_user_is_enough(self):
+        name = self._filed_with_gaps()
+        held = list(ROLES.get("Administrator", []))
+        self.addCleanup(set_roles, "Administrator", held)
+        set_roles("Administrator", ["HR User"])
+        data = self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertEqual(data["corrected_by"], "Administrator")
+
+    def test_farm_manager_alone_is_not(self):
+        """The one role `employee.HR_ROLES` has that this does not, asserted in
+        the direction that would silently widen if somebody swapped the tuples."""
+        name = self._filed_with_gaps()
+        held = list(ROLES.get("Administrator", []))
+        self.addCleanup(set_roles, "Administrator", held)
+        set_roles("Administrator", ["Farm Manager"])
+        self.tool_error("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+
+    # -- the audit trail ------------------------------------------------------
+    def test_every_correction_writes_one_audit_row(self):
+        name = self._filed_with_gaps()
+        self.tool_data(
+            "patch_i9_section_1",
+            {"i9_form": name, "date_of_birth": "1978-11-05", "email": "ada@example.test"},
+        )
+        rows = self._corrections(name)
+        self.assertEqual(len(rows), 1)
+        details = json.loads(rows[0]["details"])
+        self.assertEqual(sorted(details["fields"]), ["date_of_birth", "email"])
+        self.assertEqual(sorted(details["was_blank"]), ["date_of_birth", "email"])
+        self.assertEqual(details["status"], "Complete")
+        self.assertEqual(details["corrected_by"], "Administrator")
+
+    def test_the_audit_row_carries_the_reason_verbatim(self):
+        name = self._filed_with_gaps()
+        self.tool_data(
+            "patch_i9_section_1",
+            {
+                "i9_form": name,
+                "date_of_birth": "1978-11-05",
+                "reason": "iOS onboarding wizard did not send Section 1 contact fields",
+            },
+        )
+        details = json.loads(self._corrections(name)[0]["details"])
+        self.assertEqual(
+            details["reason"], "iOS onboarding wizard did not send Section 1 contact fields"
+        )
+
+    def test_the_audit_row_does_not_carry_the_values(self):
+        """Same rule `submit_i9_section_1` follows for the immigration
+        identifiers: an audit row is a second doctype, and a date of birth
+        copied into it is one more place a personal identifier lives."""
+        name = self._filed_with_gaps()
+        self.tool_data(
+            "patch_i9_section_1",
+            {"i9_form": name, "date_of_birth": "1978-11-05", "ssn_last_four": "6789"},
+        )
+        blob = self._corrections(name)[0]["details"]
+        self.assertNotIn("1978-11-05", blob)
+        self.assertNotIn("6789", blob)
+
+    def test_a_correction_over_a_field_that_already_had_a_value_says_so(self):
+        name = self._filed_with_gaps()
+        self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0199"})
+        details = json.loads(self._corrections(name)[1]["details"])
+        self.assertEqual(details["fields"], ["phone"])
+        self.assertEqual(details["was_blank"], [])
+
+    def test_it_is_visible_through_get_i9_audit_log(self):
+        """The action string has to be one the doctype's own Select declares, or
+        `_log_action` swallows the insert and the trail loses the row."""
+        name = self._filed_with_gaps()
+        self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        data = self.tool_data("get_i9_audit_log", {"employee": "HR-EMP-00001"})
+        self.assertIn(i9.CORRECTION_ACTION, [entry["action"] for entry in data["entries"]])
+
+    # -- the no-op ------------------------------------------------------------
+    def test_sending_what_the_form_already_says_writes_nothing(self):
+        name = self._filed_with_gaps()
+        self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        data = self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertEqual(data["changed"], [])
+        self.assertFalse(data["pdf"]["regenerated"])
+        self.assertEqual(len(self._corrections(name)), 1)
+
+    def test_the_pdf_key_is_always_there(self):
+        """A caller that had to test for it would have two code paths where it
+        needs one, and the one it exercises least is the one that ships broken."""
+        name = self._filed_with_gaps()
+        data = self.tool_data("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertIn("regenerated", data["pdf"])
+        self.assertFalse(data["pdf"]["regenerated"])
+        self.assertIn("render_i9_pdf", data["pdf"]["note"])
+
+    # -- the switch -----------------------------------------------------------
+    def test_it_is_off_out_of_the_box(self):
+        name = self._filed_with_gaps()
+        self.configure(enabled=1)
+        result = self.tool("patch_i9_section_1", {"i9_form": name, "phone": "509-555-0142"})
+        self.assertTrue(result.get("isError"))

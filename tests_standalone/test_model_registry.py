@@ -565,9 +565,13 @@ class ToolRegistration(unittest.TestCase):
 		# the two new registers, Scale Ticket and Settlement Statement, plus
 		# `classify_receipt`, which is the only read here that touches no doctype
 		# at all: it decides which of the four registers a photograph belongs in.
-		self.assertEqual(len(self.registry.TOOLS), 442)
+		# v0.67.1 adds ONE write, `patch_i9_section_1`, and it is the first tool
+		# in the I-9 module that moves a form sideways rather than forward: every
+		# other one advances a status, so a Section 1 filed with a blank date of
+		# birth had no route to one on any status.
+		self.assertEqual(len(self.registry.TOOLS), 443)
 		self.assertEqual(len(self.registry.READ_TOOLS), 204)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 238)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 239)
 
 
 if __name__ == "__main__":

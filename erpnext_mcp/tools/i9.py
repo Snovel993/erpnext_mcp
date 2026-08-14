@@ -89,6 +89,25 @@ code in this app that reads `ssn_full` back, it needs `include_full_ssn` from
 the caller AND `store_full_ssn` on the site, and it writes `full_ssn: true` into
 the audit row so a page carrying somebody's number is findable afterwards.
 `get_i9_form` still does not return it.
+
+────────────────────────────────────────────────────────────────────────────
+v0.67.1: THE ONE WAY BACK INTO A SECTION 1 THAT IS ALREADY FILED
+────────────────────────────────────────────────────────────────────────────
+
+EVERY TOOL ABOVE MOVES A FORM FORWARD, AND THAT WAS A HOLE. `submit_i9_section_1`
+takes a Draft and leaves it at `Section 1 Complete`; nothing takes it back. So a
+Section 1 filed with a blank date of birth — because the caller that filed it
+never sent one — had no route to a date of birth through any tool in this app,
+on any status. The form read Complete, its PDF was rendered, and the retained
+federal record was missing a box Section 1 asks for.
+
+`patch_i9_section_1` IS THAT ROUTE AND IS DELIBERATELY THE NARROWEST ONE THAT
+CLOSES IT. Four columns — date of birth, email, phone, the last four of the SSN
+— each of which is a TRANSCRIPTION of something the employee already told the
+employer. The name, the address, the citizenship status and the immigration
+identifier are the attestation itself, sworn above a signature, and are refused
+BY NAME rather than ignored: a form whose sworn answers were edited after the
+signature was made is a form whose signature no longer covers what it says.
 """
 from __future__ import annotations
 
@@ -98,7 +117,7 @@ from datetime import date, timedelta
 import frappe
 from frappe.utils import getdate
 
-from .. import compat, i9_pdf
+from .. import compat, i9_pdf, roles, security
 from ..args import as_bool, as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
@@ -130,6 +149,57 @@ REVERIFICATION_REASONS = ("Work Authorization Expired", "Rehire", "Receipt Repla
 #: The three identifiers Section 1 will take from an Alien Authorized to Work,
 #: any ONE of which answers the question. USCIS calls them exactly this.
 ALIEN_IDENTIFIERS = ("alien_registration_number", "i94_admission_number", "foreign_passport_number")
+
+# ── v0.67.1: correcting a Section 1 that has already been filed ────────────
+
+#: The four Section 1 columns `patch_i9_section_1` will write, and the whole of
+#: what it will write. Each one is a TRANSCRIPTION of something the employee
+#: already told the employer — a date, an address to reach them at, four digits
+#: — so a wrong one is a typing mistake and correcting it changes nothing the
+#: form attests to. The name, the address, the citizenship status and the
+#: immigration identifiers are the attestation itself, sworn under penalty of
+#: perjury, and they are deliberately absent for that reason.
+PATCHABLE_SECTION_1_FIELDS = ("date_of_birth", "email", "phone", "ssn_last_four")
+
+#: Section 1 arguments this REFUSES BY NAME rather than ignores.
+#: `submit_i9_section_1` takes every one of them, so a caller reaching for a
+#: correction reaches for the names it already knows; dropping them silently
+#: would return a success saying the form was corrected while leaving the wrong
+#: name on it. `ssn` — the nine-digit form — is here too: it has its own storage
+#: policy and its own site switch (see this module's header), and a correction
+#: path that quietly wrote the encrypted column would route around both.
+UNPATCHABLE_SECTION_1_FIELDS = (
+    "legal_first_name", "legal_middle_name", "legal_last_name", "other_last_names",
+    "address_street", "address_city", "address_state", "address_zip",
+    "citizenship_status", "alien_registration_number", "i94_admission_number",
+    "foreign_passport_number", "foreign_passport_country",
+    "alien_work_authorization_expiry",
+    "ssn", "section_1_signature",
+    "preparer_used", "preparer_name", "preparer_address", "preparer_signature",
+)
+
+#: The statuses a Section 1 correction may be written against. `Draft` is absent
+#: because `submit_i9_section_1` is what fills a draft and it is the tool
+#: carrying Section 1's own rules — an Alien Authorized to Work still has to
+#: answer with one of the three identifiers, and a patch tool that accepted a
+#: draft would be a second way in that skips them. `Destroyed` is absent for the
+#: reason `render_i9_pdf` gives about the same status.
+CORRECTABLE_STATUSES = ("Section 1 Complete", "Complete")
+
+#: Who may reach back into a Section 1 that has already been filed. NARROWER BY
+#: ONE ROLE than `employee.HR_ROLES`, and the missing one is `Farm Manager`.
+#: That set is what this app gates HIRING on, because on this site the farm
+#: manager is the person who actually hires. A filed I-9 is a different object:
+#: it is the retained record 8 U.S.C. §1324a asks an inspection to be shown, and
+#: who may amend one afterwards is the personnel-records question, not the
+#: hiring one.
+CORRECTION_ROLES = ("System Manager", "HR Manager", "HR User")
+
+#: The audit action a correction writes. Lowercase and underscored where every
+#: other action on this doctype is Title Case, because this is the string the
+#: I-9 Audit Log's own Select declares and a log written under a second spelling
+#: is a log `get_i9_audit_log` filters and misses.
+CORRECTION_ACTION = "section_1_correction"
 
 #: What a signed copy of an I-9 is allowed to arrive as. A wet-signed form comes
 #: back as a scan, and a scan is a PDF or a photograph of one — nothing here is
@@ -794,6 +864,284 @@ def submit_i9_section_1(args: dict) -> ToolResult:
         data={"name": doc.name, "employee": employee, "status": doc.status},
         summary=f"Section 1 submitted for {employee}",
         docstatus_delta="Draft → Section 1 Complete",
+    )
+
+
+def _require_correction_role() -> str:
+    """The principal a correction is attributed to, once it has proved it may make one.
+
+    THE SAME SHAPE AS `employee.require_hr_role` AND DELIBERATELY NOT A CALL TO
+    IT. That function gates on `HR_ROLES`, which this needs a strict subset of —
+    see `CORRECTION_ROLES` for why `Farm Manager` is not on this one — and
+    threading a role tuple through a function forty call sites depend on, for
+    the sake of one, would put this decision somewhere nobody correcting an I-9
+    would look for it.
+
+    WHICH IDENTITY is the part worth copying, and the reasoning is that
+    function's. `security.caller_identity()` is whoever Frappe authenticated
+    THIS request — a handset or a Desk session presenting its own credential —
+    and is empty on the ordinary MCP path, where the operator's client presents
+    a shared token and there is no human identity to read. There the principal
+    is `frappe.session.user`, which by the time any tool runs is the MCP System
+    User the operator configured. Both are real principals whose roles the
+    operator controls.
+    """
+    actor = security.caller_identity() or str(getattr(frappe.session, "user", "") or "")
+    if not actor or actor == "Guest":
+        raise ToolError(
+            "this call has no identity to attribute an I-9 correction to. A correction to a "
+            "retained federal record is worth nothing without the name of whoever made it, and "
+            "there is nobody here to name. Nothing was changed."
+        )
+    held = set(frappe.get_roles(actor) or []) or set(roles.all_roles_of(actor) or [])
+    if not held & set(CORRECTION_ROLES):
+        raise ToolError(
+            f"{actor} may not correct a filed I-9: it holds none of {', '.join(CORRECTION_ROLES)}. "
+            "This is the account this app acts as — an operator sets it with `mcp_system_user` on "
+            "ERPNext MCP Settings, and grants it a role in the Desk. Nothing was changed."
+        )
+    return actor
+
+
+def _correction_value(field: str, args: dict) -> str:
+    """One replacement value, normalised the way its column stores it.
+
+    EMPTY IS REFUSED, FOR EVERY FIELD. A correction supplies the RIGHT answer;
+    clearing a column is a deletion, and a tool whose entire justification is
+    "an onboarding wizard failed to send three fields" should not also be the
+    quickest way to empty three more. `submit_i9_section_1` is where a blank is
+    an ordinary absence, because there the form has not been filed yet.
+    """
+    if field == "date_of_birth":
+        value = as_date(args, field) or ""
+    elif field == "ssn_last_four":
+        raw = as_str(args, field)
+        digits = "".join(character for character in raw if character.isdigit())
+        if digits and len(digits) < 4:
+            raise ToolError(
+                f"ssn_last_four {raw!r} carries {len(digits)} digit(s). That column holds the last "
+                "four of a Social Security number, and a correction that shortened it would replace "
+                "a wrong answer with a shorter wrong one. Nothing was changed."
+            )
+        value = digits[-4:]
+    else:
+        value = as_str(args, field)
+    if not value:
+        raise ToolError(
+            f"{field} was named with no value. patch_i9_section_1 corrects a field to the right "
+            "answer; it does not clear one. A blank column on a filed I-9 is the gap this tool "
+            "exists to close, not one for it to open. Nothing was changed."
+        )
+    return value
+
+
+def _redraw_generated_pdf(name: str) -> dict:
+    """Bring the rendered page back into step with the record it was drawn from.
+
+    THE SAME DECISION `signatures._redraw` MAKES, for the same reason, and the
+    reason is why this is not a bare `render_i9_pdf` call. A form that has never
+    been rendered gets NOTHING: producing a federal form nobody asked for is
+    this app deciding something that is not its to decide, and `render_i9_pdf`
+    is one call away whenever the operator wants the page. What it will not
+    leave behind is a rendered page that has gone STALE — the attached PDF is
+    the copy an inspection is shown, and one still carrying the empty date of
+    birth this call just filled in is the record and its printable copy
+    disagreeing about the fact somebody would print it to prove. `overwrite` is
+    passed for that; the File that was there stays attached to the record, so
+    the copy somebody already printed is not lost.
+
+    NEVER RAISES. The renderer needs `pypdf` and the shipped federal form on
+    disk, and a site missing either ends with a corrected record and a stale
+    PDF — a smaller problem than a correction this call threw away because it
+    could not redraw a page afterwards. The note says which happened.
+    """
+    try:
+        existing = str(frappe.db.get_value(I9_FORM, name, "generated_pdf") or "").strip()
+    except Exception:  # pragma: no cover - a site whose column is not migrated
+        existing = ""
+    if not existing:
+        return {
+            "regenerated": False,
+            "note": (
+                "no PDF had been rendered for this form, so there was nothing to bring up to "
+                "date. render_i9_pdf draws one, with the correction on it."
+            ),
+        }
+    try:
+        result = render_i9_pdf({"i9_form": name, "overwrite": True})
+    except Exception as exc:
+        return {
+            "regenerated": False,
+            "note": (
+                f"the correction is on the record and the PDF was not redrawn ({exc}). The page "
+                f"at {existing} is now out of date with the record it was drawn from; nothing "
+                "about the correction depends on it, and render_i9_pdf with overwrite=true is "
+                "what brings it back into step."
+            ),
+        }
+    data = getattr(result, "data", None) or {}
+    return {
+        "regenerated": True,
+        "file_url": data.get("file_url"),
+        "file_name": data.get("file_name"),
+        "replaced": existing or None,
+    }
+
+
+def patch_i9_section_1(args: dict) -> ToolResult:
+    """Correct a transcription gap in a Section 1 that has already been filed.
+
+    THE HOLE THIS FILLS. `submit_i9_section_1` works on a Draft and moves it to
+    `Section 1 Complete`; from there the form only goes forward. So a Section 1
+    filed with a blank date of birth — because the caller that filed it never
+    sent one — had NO route to a date of birth at all, on any status, through
+    any tool in this app. The form was complete, its PDF was rendered, and the
+    federal record was missing a box that Section 1 asks for. That is the whole
+    of the case for this tool, and it is why the tool is this narrow.
+
+    IT WRITES FOUR COLUMNS AND WILL NOT BE TALKED INTO A FIFTH. Date of birth,
+    email, phone, and the last four of the SSN — see `PATCHABLE_SECTION_1_FIELDS`
+    for the line and `UNPATCHABLE_SECTION_1_FIELDS` for what is on the other
+    side of it. The name, the address, the citizenship status and the
+    immigration identifier are what the employee swore to under penalty of
+    perjury above their own signature; a tool that could edit those after the
+    signature was made would produce a form whose signature no longer covers
+    what it says. Those are changed by re-attesting, not by patching, and a
+    caller that names one is REFUSED rather than quietly ignored — a success
+    reporting that a form was corrected while the wrong name is still on it is
+    the worse of the two failures by a long way.
+
+    IT MOVES NO STATUS AND SIGNS NOTHING. A `Complete` form stays Complete, and
+    the two attestation timestamps are untouched: the employee signed on the day
+    they signed, and fixing a typo afterwards does not make that a different day.
+
+    EVERY CORRECTION IS LOGGED, AND THE LOG RECORDS WHICH FIELDS AND NOT WHAT
+    THEY NOW SAY. That is the same rule `submit_i9_section_1` follows for the
+    immigration identifiers and the reason is unchanged: an audit row is a
+    second doctype, and copying a date of birth or four SSN digits into a JSON
+    blob on it is one more place a personal identifier lives. What an inspection
+    asks of a corrected I-9 is who changed what, and when — which is what a
+    lined-through, initialled and dated paper correction records too. The values
+    themselves are on the form, and Frappe's own Version row carries the before.
+
+    THE RENDERED PDF IS REDRAWN WHERE THERE IS ONE. `_redraw_generated_pdf`
+    argues that at length, including why a form that was never rendered is left
+    alone.
+    """
+    actor = _require_correction_role()
+    name = _resolve_form(args)
+    row = frappe.db.get_value(
+        I9_FORM,
+        name,
+        ["employee", "employee_name", "status", *PATCHABLE_SECTION_1_FIELDS],
+        as_dict=True,
+    )
+    if not row:  # pragma: no cover - resolved a moment ago
+        raise ToolError(f"no I-9 Form called {name!r} on this site.")
+
+    status = str(row.get("status") or "")
+    if status not in CORRECTABLE_STATUSES:
+        detail = ""
+        if status == "Draft":
+            detail = (
+                "This form's Section 1 has not been filed yet — submit_i9_section_1 is what fills "
+                "a Draft, and it is the tool carrying Section 1's own rules. "
+            )
+        elif status == "Destroyed":
+            detail = (
+                "This record was certified as disposed of at the end of its retention period, and "
+                "amending it afterwards is the one thing that certificate says did not happen. "
+            )
+        raise ToolError(
+            f"I-9 {name} is {status!r}. A Section 1 correction may only be written against "
+            f"{' or '.join(repr(state) for state in CORRECTABLE_STATUSES)}. {detail}"
+            "Nothing was changed."
+        )
+
+    refused = [field for field in UNPATCHABLE_SECTION_1_FIELDS if field in args]
+    if refused:
+        raise ToolError(
+            f"patch_i9_section_1 will not write {', '.join(refused)}. It corrects transcription "
+            f"only — {', '.join(PATCHABLE_SECTION_1_FIELDS)} — and what it refused is the part of "
+            "Section 1 the employee attested to under penalty of perjury: who they are, where they "
+            "live, their citizenship status and the identifier behind it. A Form I-9 whose sworn "
+            "answers were edited after the signature was made is a form whose signature no longer "
+            "covers what it says. Those are changed by re-attesting. Nothing was changed."
+        )
+
+    named = [field for field in PATCHABLE_SECTION_1_FIELDS if field in args]
+    if not named:
+        raise ToolError(
+            "patch_i9_section_1 was called naming none of the fields it can correct. It writes "
+            f"{', '.join(PATCHABLE_SECTION_1_FIELDS)} and nothing else. Nothing was changed."
+        )
+
+    doc = frappe.get_doc(I9_FORM, name)
+    changed = []
+    for field in named:
+        value = _correction_value(field, args)
+        if str(doc.get(field) or "") == value:
+            continue
+        doc.set(field, value)
+        changed.append(field)
+
+    if not changed:
+        return ToolResult(
+            data={
+                "name": name,
+                "employee": row.get("employee"),
+                "employee_name": row.get("employee_name"),
+                "status": status,
+                "changed": [],
+                "corrected_by": actor,
+                # ALWAYS PRESENT AND ALWAYS THE SAME SHAPE, on this path as on
+                # the one below: a caller that had to test for the key would
+                # have two code paths where it needs one.
+                "pdf": {
+                    "regenerated": False,
+                    "note": (
+                        "every field named already held the value given, so nothing was written, "
+                        "nothing was logged, and there was nothing to redraw."
+                    ),
+                },
+            },
+            summary=f"I-9 {name} already carried what was sent; nothing was changed",
+        )
+
+    doc.flags.ignore_permissions = True
+    doc.save()
+
+    _log_action(name, str(row.get("employee") or ""), CORRECTION_ACTION, {
+        "fields": changed,
+        # WHICH boxes were blank before, never what they now say. See the
+        # docstring; `submit_i9_section_1` logs the immigration identifiers the
+        # same way and for the same reason.
+        "was_blank": [field for field in changed if not str(row.get(field) or "")],
+        "status": status,
+        "corrected_by": actor,
+        "reason": as_str(args, "reason"),
+    })
+
+    redraw = _redraw_generated_pdf(name)
+
+    return ToolResult(
+        data={
+            "name": name,
+            "employee": row.get("employee"),
+            "employee_name": row.get("employee_name"),
+            "status": status,
+            "changed": changed,
+            "corrected_by": actor,
+            "pdf": redraw,
+        },
+        summary=(
+            f"I-9 {name}: Section 1 corrected — {', '.join(changed)}"
+            + (
+                f"; the rendered page was redrawn as {redraw.get('file_name')}"
+                if redraw.get("regenerated")
+                else "; no rendered page was redrawn"
+            )
+        ),
     )
 
 

@@ -50,6 +50,7 @@ from datetime import date, timedelta
 import frappe
 
 from erpnext_mcp import i9_pdf, pdf_signing
+from erpnext_mcp.tools import i9
 
 from .fixtures import MAIN
 from .harness import STORE
@@ -1196,3 +1197,127 @@ class TheSignedFormCannotBeEdited(unittest.TestCase):
 
 if __name__ == "__main__":
 	unittest.main()
+
+
+# ── 10 ────────────────────────────────────────────────────────────────────────
+@needs_pypdf
+class PatchRedrawsThePage(I9PdfToolTestCase):
+	"""v0.67.1. A correction leaves the rendered page stale unless it redraws it.
+
+	THE HALF OF `patch_i9_section_1` THAT NEEDS A REAL RENDER. The rest of the
+	tool is asserted in `test_i9.py`, where no PDF exists; the claim here is the
+	one that matters to an inspection — the attached page is what somebody is
+	shown, and a page still carrying the empty date of birth the correction just
+	filled in is the record and its printable copy disagreeing about the fact
+	somebody would print it to prove.
+	"""
+
+	def _filed_with_gaps(self, employee="HR-EMP-00001") -> str:
+		"""A rendered, Complete I-9 whose Section 1 is missing its contact fields."""
+		self._create_draft(employee=employee)
+		self._submit_section_1(
+			employee=employee,
+			address_street="1420 Orchard Road",
+			address_city="Yakima",
+			address_state="WA",
+			address_zip="98901",
+		)
+		self._submit_section_2(employee=employee)
+		name = str(frappe.db.get_value("I-9 Form", {"employee": employee}, "name"))
+		self.tool_data("render_i9_pdf", {"i9_form": name})
+		return name
+
+	def test_the_page_is_redrawn_and_the_field_repointed(self):
+		name = self._filed_with_gaps()
+		before = frappe.db.get_value("I-9 Form", name, "generated_pdf")
+
+		data = self.tool_data(
+			"patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"}
+		)
+
+		self.assertTrue(data["pdf"]["regenerated"])
+		self.assertEqual(data["pdf"]["replaced"], before)
+		self.assertEqual(frappe.db.get_value("I-9 Form", name, "generated_pdf"), data["pdf"]["file_url"])
+
+	def _pages(self, name) -> list:
+		"""Every generated_pdf File attached to this form, oldest first."""
+		return [
+			row
+			for row in STORE.rows("File")
+			if row.get("attached_to_name") == name and row.get("attached_to_field") == "generated_pdf"
+		]
+
+	def test_the_redrawn_page_carries_the_corrected_value(self):
+		"""Read back OUT of the AcroForm, the way this file reads every page:
+		"the renderer ran" and "the form says 11/05/1978" are different claims."""
+		name = self._filed_with_gaps()
+		self.assertNotIn("11/05/1978", set(page_values(self._bytes(self._pages(name)[-1]), i9_pdf.PAGE_FORM).values()))
+
+		self.tool_data("patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"})
+
+		redrawn = page_values(self._bytes(self._pages(name)[-1]), i9_pdf.PAGE_FORM)
+		self.assertIn("11/05/1978", set(redrawn.values()))
+
+	def _bytes(self, row) -> bytes:
+		"""The stored page. A real site keeps the bytes in storage rather than on
+		the row, and the harness is faithful about that — see `FileDocument`."""
+		return STORE.file_contents[row["name"]]
+
+	def test_the_file_that_was_there_stays_attached(self):
+		"""The likeliest thing in that field is the copy somebody already
+		printed; repointing must not detach or overwrite it. Both pages carry the
+		same file_url — `file_name_for` is deterministic — so the claim has to be
+		made about the File ROWS, and about the stale page still being readable."""
+		name = self._filed_with_gaps()
+		before = self._pages(name)
+		self.assertEqual(len(before), 1)
+
+		self.tool_data("patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"})
+
+		after = self._pages(name)
+		self.assertEqual(len(after), 2)
+		self.assertEqual(after[0]["name"], before[0]["name"])
+		self.assertNotIn("11/05/1978", set(page_values(self._bytes(after[0]), i9_pdf.PAGE_FORM).values()))
+
+	def test_the_redraw_is_logged_as_a_print_beside_the_correction(self):
+		name = self._filed_with_gaps()
+		self.tool_data("patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"})
+		actions = self.audit_actions(name)
+		self.assertIn(i9.CORRECTION_ACTION, actions)
+		self.assertEqual(actions.count("Printed"), 2)
+
+	def test_a_form_that_was_never_rendered_gets_no_page(self):
+		"""Producing a federal form nobody asked for is this app deciding
+		something that is not its to decide. `render_i9_pdf` is one call away."""
+		self._create_draft()
+		self._submit_section_1()
+		self._submit_section_2()
+		name = str(frappe.db.get_value("I-9 Form", {"employee": "HR-EMP-00001"}, "name"))
+
+		data = self.tool_data("patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"})
+
+		self.assertFalse(data["pdf"]["regenerated"])
+		self.assertFalse(frappe.db.get_value("I-9 Form", name, "generated_pdf"))
+		self.assertEqual(str(frappe.db.get_value("I-9 Form", name, "date_of_birth")), "1978-11-05")
+
+	def test_a_renderer_that_fails_still_keeps_the_correction(self):
+		"""The correction is the irreplaceable half. A site that cannot draw the
+		page ends with a corrected record and a stale PDF, which is a smaller
+		problem than a correction thrown away because the redraw raised."""
+		name = self._filed_with_gaps()
+		stale = frappe.db.get_value("I-9 Form", name, "generated_pdf")
+
+		def boom(args):
+			raise RuntimeError("no pypdf on this bench")
+
+		real, i9.render_i9_pdf = i9.render_i9_pdf, boom
+		try:
+			data = self.tool_data("patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"})
+		finally:
+			i9.render_i9_pdf = real
+
+		self.assertFalse(data["pdf"]["regenerated"])
+		self.assertIn("no pypdf on this bench", data["pdf"]["note"])
+		self.assertEqual(data["changed"], ["date_of_birth"])
+		self.assertEqual(str(frappe.db.get_value("I-9 Form", name, "date_of_birth")), "1978-11-05")
+		self.assertEqual(frappe.db.get_value("I-9 Form", name, "generated_pdf"), stale)

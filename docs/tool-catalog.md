@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 442 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 443 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -10789,3 +10789,98 @@ that table.
 On `create_expense_receipt` and `create_scale_ticket` the **company comes from
 the caller's scope** and `submitted_by` from the authenticated account — an
 account that can name somebody else in a request body is not scoped to anything.
+
+---
+
+# v0.67.1 — Correcting a Section 1 that is already filed
+
+## The hole this closes
+
+Every I-9 tool before this one moves a form **forward**. `submit_i9_section_1`
+takes a Draft and leaves it at `Section 1 Complete`; nothing takes it back. So a
+Section 1 filed with a blank date of birth — because the caller that filed it
+never sent one — had **no route to a date of birth through any tool in this
+app, on any status**. The form read `Complete`, its PDF was rendered and
+attached, and the retained federal record was missing a box Section 1 asks for.
+
+That is the whole of the case for `patch_i9_section_1`, and it is why the tool
+is as narrow as it is.
+
+## `patch_i9_section_1` — MUTATING, default off
+
+| Argument | Required | Meaning |
+| --- | --- | --- |
+| `i9_form` / `name` / `employee` | yes | Which form, by docname or by the person it belongs to — resolved the same way `render_i9_pdf` resolves it |
+| `date_of_birth` | one of the four | `YYYY-MM-DD` |
+| `email` | one of the four | Email address, as Section 1 asks for it |
+| `phone` | one of the four | Phone number, as Section 1 asks for it |
+| `ssn_last_four` | one of the four | Last four of the SSN. A longer number is stripped to its last four; a shorter one is refused |
+| `reason` | no | Recorded verbatim in the audit row. Worth sending — it is the sentence an inspection reads beside the change |
+
+**Four columns, and it will not be talked into a fifth.** Each of the four is a
+*transcription* of something the employee already told the employer, so a wrong
+one is a typing mistake and correcting it changes nothing the form attests to.
+
+**The name, the address, the citizenship status and the immigration identifiers
+are refused BY NAME.** Those are what the employee swore to under penalty of
+perjury above their own signature, and a form whose sworn answers were edited
+after the signature was made is a form whose signature no longer covers what it
+says. They are changed by re-attesting, not by patching. A call naming one is
+refused outright — and the patchable field sent alongside it is **not** written
+either, because a partial success would leave the caller believing the refused
+one landed.
+
+`ssn` — the nine-digit argument `submit_i9_section_1` takes — is refused here
+too. It reaches the encrypted `ssn_full` column through its own site switch, and
+a correction path that quietly wrote it would route around that switch.
+
+**A value is required for every field named.** This corrects a field to the
+right answer; it does not clear one. A blank column on a filed I-9 is the gap
+this tool exists to close, not one for it to open.
+
+**Statuses.** `Section 1 Complete` and `Complete` only. A `Draft` is refused and
+told to use `submit_i9_section_1`, which is the tool carrying Section 1's own
+rules — an Alien Authorized to Work still has to answer with one of the three
+identifiers, and a patch tool that took a Draft would be a second way in that
+skips them. A `Destroyed` record is refused for the reason `render_i9_pdf`
+gives. A form resting at `Awaiting Verification` is **also** refused today, and
+that is a known gap rather than a decision: its Section 1 is filed and it has no
+correction path.
+
+**Moves no status and signs nothing.** A `Complete` form stays Complete and both
+attestation timestamps are untouched — fixing a typo does not make the employee
+have signed on a different day.
+
+**Requires System Manager, HR Manager or HR User** on the account this app acts
+as. Narrower than the personnel tools by one role: `Farm Manager` may hire on
+this site, and amending a retained federal record afterwards is a different
+question from hiring.
+
+## What the audit row says, and what it does not
+
+Logged to I-9 Audit Log as **`section_1_correction`**, carrying `fields` (which
+changed), `was_blank` (which were empty before), `status`, `corrected_by` and
+`reason`.
+
+**It does not carry the values.** Same rule `submit_i9_section_1` follows for
+the immigration identifiers: an audit row is a second doctype, and a date of
+birth or four SSN digits copied into a JSON blob on it is one more place a
+personal identifier lives. What an inspection asks of a corrected I-9 is *who
+changed what, and when* — which is exactly what a lined-through, initialled and
+dated paper correction records. The values themselves are on the form, and
+Frappe's own Version row carries the before.
+
+## The rendered page is redrawn
+
+The attached PDF is the copy an inspection is shown. One still carrying the
+empty date of birth the correction just filled in is the record and its
+printable copy disagreeing about the fact somebody would print it to prove — so
+`generated_pdf` is redrawn with `overwrite`, and the File that was there stays
+attached to the record.
+
+A form that has **never** been rendered gets nothing: producing a federal form
+nobody asked for is this app deciding something that is not its to decide, and
+`render_i9_pdf` is one call away. The redraw also never raises — a bench without
+`pypdf` ends with a corrected record and a stale page, which is a smaller
+problem than a correction thrown away because the redraw failed. `pdf` in the
+result says which of the three happened, and always has the same shape.

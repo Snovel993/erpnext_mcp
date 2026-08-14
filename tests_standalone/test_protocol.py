@@ -858,10 +858,16 @@ class Catalogue(SeededTestCase):
 		receipt is the financial atom" — one capture flow, four destinations — and
 		it returns the keywords that produced its answer, because a classifier
 		nobody can argue with is a classifier nobody will correct.
+
+		v0.67.1 adds ONE write, `patch_i9_section_1` — the only I-9 tool that
+		moves a form sideways instead of forward. Every other one advances a
+		status, so a Section 1 that was filed with a blank date of birth could
+		not be given one afterwards on any status, and the form still read
+		Complete.
 		"""
-		self.assertEqual(len(registry.TOOLS), 442)
+		self.assertEqual(len(registry.TOOLS), 443)
 		self.assertEqual(len(registry.READ_TOOLS), 204)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 238)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 239)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

@@ -3,6 +3,64 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.67.1 — 2026-08-13
+
+**A Section 1 that was already filed had no way back.** One tool,
+`patch_i9_section_1`, and the bug that produced it is worth stating plainly:
+I-9 `I9-2026-0001` reached status `Complete`, had its PDF rendered and attached,
+and carried a null `date_of_birth`, an empty `email` and an empty `phone` —
+because the iOS onboarding wizard never sent those three fields when it called
+`submit_i9_section_1`. There was then no tool in this app that could put them
+in. `submit_i9_section_1` only works on a Draft, and every other I-9 tool moves
+a form forward. The record was a federal one, it was missing boxes Section 1
+asks for, and nothing could reach them.
+
+- **`patch_i9_section_1` (MUTATING, default off).** Writes `date_of_birth`,
+  `email`, `phone` and `ssn_last_four` on a form at `Section 1 Complete` or
+  `Complete`. Each of the four is a TRANSCRIPTION of something the employee
+  already told the employer, so a wrong one is a typing mistake and correcting
+  it changes nothing the form attests to.
+- **The name, the address, the citizenship status and the immigration
+  identifiers are refused BY NAME rather than ignored** — those are what the
+  employee swore to under penalty of perjury above their own signature, and a
+  form whose sworn answers were edited afterwards is a form whose signature no
+  longer covers what it says. A patchable field sent alongside a refused one is
+  not written either: a partial success would leave the caller believing the
+  refused one landed. `ssn` (the nine-digit argument) is refused too — it
+  reaches the encrypted column through its own site switch, and a correction
+  path that wrote it would route around that switch.
+- **A value is required for every field named.** This corrects a field to the
+  right answer; it does not clear one. Refused on a `Draft` (that is
+  `submit_i9_section_1`'s job, and it is the tool carrying Section 1's own
+  rules) and on a `Destroyed` record.
+- **Moves no status and signs nothing.** A `Complete` form stays Complete and
+  both attestation timestamps are untouched — fixing a typo does not make the
+  employee have signed on a different day.
+- **Requires System Manager, HR Manager or HR User**, which is
+  `employee.HR_ROLES` less `Farm Manager`: the farm manager is the person who
+  hires on this site, and amending a retained federal record afterwards is a
+  different question from hiring.
+- **Logged to I-9 Audit Log as `section_1_correction`**, a new option on that
+  doctype's Select, carrying which fields changed, which were blank before, the
+  status, the correcting principal and a free-text `reason`. It does NOT carry
+  the values, for the reason `submit_i9_section_1` gives about the immigration
+  identifiers: an audit row is a second doctype. What an inspection asks of a
+  corrected I-9 is who changed what and when, which is what a lined-through,
+  initialled and dated paper correction records too.
+- **`generated_pdf` is redrawn where one had been rendered**, with `overwrite`,
+  so the retained page and the record do not disagree; the File that was there
+  stays attached. A form never rendered is left alone — producing a federal form
+  nobody asked for is this app deciding something that is not its to decide. The
+  redraw never raises: a bench without `pypdf` ends with a corrected record and
+  a stale page, which is the smaller problem.
+
+**Known gap, stated rather than closed:** a form resting at `Awaiting
+Verification` has a filed Section 1 and no correction path. v0.67.1 shipped the
+two statuses that were asked for; there is a test naming the third.
+
+442 → 443 tools (204 read unchanged, 238 → 239 write). Standalone suite: 7,350
+tests, all passing.
+
 ## 0.67.0 — 2026-08-13
 
 **Receipt capture: the two documents between a load of fruit and the money for

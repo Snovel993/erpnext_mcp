@@ -288,6 +288,7 @@
   "i9_col",
   "allow_create_i9_form",
   "allow_submit_i9_section_1",
+  "allow_patch_i9_section_1",
   "allow_submit_i9_section_2",
   "allow_update_i9_settings",
   "allow_flag_i9_reverification",
@@ -2439,6 +2440,13 @@
    "fieldname": "allow_submit_i9_section_1",
    "fieldtype": "Check",
    "label": "Submit I-9 Section 1"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Correct a transcription error in a Section 1 that is already filed — date of birth, email, phone, SSN last four, and nothing else. The name, address, citizenship status and immigration identifiers are refused by name: those are what the employee swore to above their signature. Requires System Manager, HR Manager or HR User. Logged as section_1_correction and the rendered PDF is redrawn.",
+   "fieldname": "allow_patch_i9_section_1",
+   "fieldtype": "Check",
+   "label": "Patch I-9 Section 1 (corrections)"
   },
   {
    "default": "0",
