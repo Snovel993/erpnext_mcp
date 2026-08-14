@@ -118,6 +118,15 @@ class ComplianceField:
 	options: str = ""
 	description: str = ""
 	insert_after: str = ""
+	#: A Frappe `depends_on` expression, so a field that is only meaningful for
+	#: some rows is only SHOWN on those rows. v0.69.0's Item target is the first
+	#: to need one: a restricted-entry interval belongs on a chemical and would
+	#: be nine columns of noise on a bin, a picking bag and a length of irrigation
+	#: pipe. It is a DISPLAY rule and nothing more — Frappe still stores the
+	#: column on every row, and a `depends_on` that hid a REQUIRED field would
+	#: make the record unsaveable in the Desk, which is why nothing here combines
+	#: the two.
+	depends_on: str = ""
 
 	def as_custom_field(self, doctype: str) -> dict:
 		"""The `Custom Field` row this becomes, minus the fields Frappe fills in."""
@@ -134,6 +143,8 @@ class ComplianceField:
 			row["options"] = self.options
 		if self.insert_after:
 			row["insert_after"] = self.insert_after
+		if self.depends_on:
+			row["depends_on"] = self.depends_on
 		return row
 
 	def describe(self, doctype: str) -> dict:
@@ -144,6 +155,11 @@ class ComplianceField:
 			"fieldtype": self.fieldtype,
 			"required": bool(self.reqd),
 			"options": [line for line in self.options.split("\n") if line] if self.options else [],
+			# The rows this field is shown on, when it is not shown on all of
+			# them. Reported rather than left in the code because "the column is
+			# there and you cannot see it" is the one thing about a `depends_on`
+			# an operator has to be told.
+			"shown_when": self.depends_on,
 			"framework": self.framework,
 			"why": self.why,
 			"breaks_operationally": self.operational,
@@ -620,28 +636,65 @@ _ASSET_FIELDS = (
 )
 
 
-# ── Item — ERPNext ──────────────────────────────────────────────────────────
+# ── Item — erpnext ──────────────────────────────────────────────────────────
 #
-# v0.69.0, AND IT IS THE SAME ARGUMENT AS Spray Log WITH THE SUBJECT CHANGED.
-# The REI and the PHI are on the Spray Log because that is where the person doing
-# the spraying is. They are ALSO on the product, because that is where the label
-# says them — and the label is the law. A site keeping them only on the spray
-# record has to have somebody read a jug before every application and type the
-# number in correctly, which is a data-entry step standing between a crew and a
-# block they may not enter.
+# v0.69.0, TWO SPRINT 4 HALVES ON ONE DOCTYPE, AND THE SAME ARGUMENT AS
+# Spray Log WITH THE SUBJECT CHANGED. The REI and the PHI are on the Spray Log
+# because that is where the person doing the spraying is. They are ALSO on the
+# product, because that is where the label says them — and the label is the law.
+# A site keeping them only on the spray record has to have somebody read a jug
+# before every application and type the number in correctly, which is a
+# data-entry step standing between a crew and a block they may not enter.
 #
-# WHAT THESE TWO COLUMNS BUY, CONCRETELY. `complete_farm_task` reads them off the
-# chemicals in the tank mix and stamps the WINDOW onto the task — an expiry to the
-# hour and a harvest date — which is what `rei_active_block_entry` and
-# `phi_harvest_window` raise from. Without them the app can record that a spray
-# happened and cannot say when the block reopens, which is the one question the
-# record exists to answer.
+# WHAT THE FIRST TWO COLUMNS BUY, CONCRETELY. `complete_farm_task` reads them
+# off the chemicals in the tank mix and stamps the WINDOW onto the task — an
+# expiry to the hour and a harvest date — which is what `rei_active_block_entry`
+# and `phi_harvest_window` raise from. Without them the app can record that a
+# spray happened and cannot say when the block reopens, which is the one
+# question the record exists to answer.
 #
-# NEITHER IS REQUIRED, and that is deliberate in the way `Asset.capex_type` is:
+# WHAT THE OTHER SEVEN BUY. They are the rest of what a photographed label
+# says, so a scanned pesticide label has somewhere to land and the numbers
+# above have something to be checked AGAINST rather than being the only copy
+# of what somebody typed. `label_scan_validation` links back to the
+# `Document Validation` they were read off, which is where the photograph, the
+# OCR text and every check run against it live.
+#
+# NONE IS REQUIRED, and that is deliberate in the way `Asset.capex_type` is:
 # most items in an orchard's register are bins, twine and diesel, and a required
 # REI would make every one of them unsaveable until somebody typed a zero into a
 # column that does not apply to a pallet.
+
+#: When the seven label-detail fields are SHOWN. Frappe stores the column on
+#: every Item either way; this decides whether a person editing a picking bag
+#: has to look at seven columns about pesticide labels.
+#:
+#: MATCHED ON THE GROUP'S NAME RATHER THAN ON A LIST OF GROUPS, because every
+#: site names its item groups differently and a hard-coded list would hide the
+#: fields on the first site whose group is called 'Crop Protection' instead of
+#: 'Chemicals'.
+#:
+#: THE SECOND HALF OF THE EXPRESSION IS THE IMPORTANT HALF. An Item that already
+#: carries an EPA registration number or a signal word shows the fields whatever
+#: its group is called. A `depends_on` that hides data somebody has already
+#: entered is not a display preference, it is a way to lose a record — and the
+#: site where the group is named something this expression does not anticipate
+#: is exactly the site where that would happen silently.
+#:
+#: `rei_hours` and `phi_days` do NOT carry it. See `_ITEM_FIELDS`.
+CHEMICAL_ITEM_DEPENDS_ON = (
+	"eval:(doc.item_group && "
+	"/chemical|pesticide|spray|agrochem|crop protection|fungicide|herbicide|insecticide/i"
+	".test(doc.item_group)) || doc.epa_registration_number || doc.signal_word"
+)
+
 _ITEM_FIELDS = (
+	# The two v0.69.0 spray-window columns. NO `depends_on`, deliberately:
+	# `complete_farm_task` reads them off every chemical in a tank mix, their own
+	# release frames them as 'leave at zero for anything that is not a
+	# restricted-entry product', and a display rule that hid them on a site whose
+	# item group this file's regex does not anticipate would silently give that
+	# feature a zero it could not distinguish from a real one.
 	ComplianceField(
 		fieldname="rei_hours",
 		label="REI (hours)",
@@ -685,6 +738,135 @@ _ITEM_FIELDS = (
 			"label. Leave at zero for anything with no pre-harvest restriction. A tank mix "
 			"takes the LONGEST PHI of the products in it."
 		),
+	),
+	# The seven label-detail columns, which ARE hidden on anything that is not a
+	# chemical — nothing computes off them, so hiding one costs a person a
+	# scroll rather than costing a crew a re-entry window.
+	ComplianceField(
+		fieldname="epa_registration_number",
+		label="EPA Registration Number",
+		fieldtype="Data",
+		framework="FIFRA 7 USC 136; 40 CFR 152.132 registration numbering",
+		why=(
+			"The registration number identifies the product as registered for this crop and "
+			"this use, and it is the number a residue detection is traced back through. On the "
+			"Item rather than only on each Spray Log it is stated once, from the label, instead "
+			"of typed from memory on every application."
+		),
+		operational=(
+			"Whether the jug in the shed may be used on the block at all. Without it nobody can "
+			"check the product against the crop, the rate or the buyer's maximum residue limit "
+			"before the tank is filled — which is a decision made at the shed, not at a desk "
+			"afterwards."
+		),
+		depends_on=CHEMICAL_ITEM_DEPENDS_ON,
+		insert_after="item_group",
+	),
+	ComplianceField(
+		fieldname="signal_word",
+		label="Signal Word",
+		fieldtype="Select",
+		options="\nDanger\nWarning\nCaution\nNone",
+		framework="FIFRA labeling — 40 CFR 156.64 signal words",
+		why=(
+			"The signal word is the label's own statement of acute toxicity, and it is what "
+			"decides the personal protective equipment the applicator wears. 'None' is a real "
+			"answer for a Category IV product and is in the list for that reason."
+		),
+		operational=(
+			"What the person mixing puts on before they open the jug. A blank here and a 'None' "
+			"here mean different things to that person, and only one of them is safe to act on."
+		),
+		depends_on=CHEMICAL_ITEM_DEPENDS_ON,
+	),
+	ComplianceField(
+		fieldname="phi_crop",
+		label="PHI Crop",
+		fieldtype="Data",
+		framework="FIFRA label; FDA tolerances 40 CFR 180",
+		why=(
+			"One label carries a different pre-harvest interval for cherries, apples and pears. "
+			"An interval with no crop beside it cannot be applied to a block, so the crop is "
+			"stored with the number rather than assumed from the operation."
+		),
+		operational=(
+			"Which blocks the interval above actually governs. A grower running cherries and "
+			"pears off one chemical shed has two answers for one jug, and a record holding only "
+			"one of them is wrong half the time."
+		),
+		depends_on=CHEMICAL_ITEM_DEPENDS_ON,
+	),
+	ComplianceField(
+		fieldname="active_ingredients",
+		label="Active Ingredients",
+		fieldtype="JSON",
+		framework="FIFRA 40 CFR 156.10(g) ingredient statement; FRAC/IRAC resistance management",
+		why=(
+			"The ingredient statement is what ties a product to a resistance-management group, "
+			"to the restricted-entry interval its class carries, and to every residue tolerance "
+			"downstream. Stored as [{name, concentration, unit}] because a product is often "
+			"several ingredients and the concentrations are what distinguish two formulations "
+			"of the same active."
+		),
+		operational=(
+			"Rotation. Two products with different trade names and the same active ingredient "
+			"are one spray as far as resistance is concerned, and a shed that cannot see that "
+			"builds resistance while believing it is rotating."
+		),
+		depends_on=CHEMICAL_ITEM_DEPENDS_ON,
+	),
+	ComplianceField(
+		fieldname="application_rate",
+		label="Application Rate",
+		fieldtype="Data",
+		framework="FIFRA label use directions — 40 CFR 156.10(i)",
+		why=(
+			"Applying above the labeled rate is an off-label application and a residue risk; "
+			"applying below it is a failed spray. The rate is on the label and belongs on the "
+			"product record beside the interval it goes with."
+		),
+		operational=(
+			"What goes in the tank. The mix is calculated from this number and the acreage, at "
+			"the shed, usually before anybody has opened a compliance record."
+		),
+		depends_on=CHEMICAL_ITEM_DEPENDS_ON,
+	),
+	ComplianceField(
+		fieldname="ppe_requirements",
+		label="PPE Requirements",
+		fieldtype="Small Text",
+		framework="EPA WPS 40 CFR 170.507 — handler PPE; label PPE statement",
+		why=(
+			"The label's PPE statement is what the handler and any early-entry worker must "
+			"wear, and the Worker Protection Standard requires the employer to provide it. It "
+			"is a property of the product, so it is recorded once per product."
+		),
+		operational=(
+			"What has to be in the shed before the spray can happen. A respirator nobody stocked "
+			"is a spray that does not go out, and this is the field that says so a week early "
+			"instead of on the morning."
+		),
+		depends_on=CHEMICAL_ITEM_DEPENDS_ON,
+	),
+	ComplianceField(
+		fieldname="label_scan_validation",
+		label="Label Scan Validation",
+		fieldtype="Link",
+		options="Document Validation",
+		framework="Internal provenance — v0.69.0 Document Intelligence",
+		why=(
+			"Where the eight fields above came from. A Document Validation holds the "
+			"photograph, the OCR text, the extraction and every check run against it, so a "
+			"number on this Item can be traced to the label it was read off rather than to "
+			"whoever typed it. It also carries whether a person has confirmed the reading, "
+			"which is the only thing on that record a machine did not produce."
+		),
+		operational=(
+			"Whether the numbers above can be trusted at the shed. An unvalidated REI and one "
+			"read off a photograph a supervisor confirmed are the same integer on the screen and "
+			"two very different things to bet a crew's re-entry on."
+		),
+		depends_on=CHEMICAL_ITEM_DEPENDS_ON,
 	),
 )
 
@@ -781,16 +963,22 @@ TARGETS = (
 		doctype="Item",
 		owner_app="erpnext",
 		purpose=(
-			"The restricted-entry and pre-harvest intervals off a product's own label, on the "
-			"product. Every application of a chemical inherits them, which is what lets a "
-			"finished spray task say when the block reopens and when it may be picked without "
-			"anybody reading a jug in the field."
+			"The pesticide label, as columns on the product it belongs to, and the two intervals "
+			"every application of a chemical inherits from it. A Spray Log records what one "
+			"application used; these record what the LABEL says — the restricted-entry and "
+			"pre-harvest intervals, the EPA registration number, the crop the PHI applies to, "
+			"the ingredient statement, the rate and the PPE — once per product. That is what "
+			"lets a finished spray task say when the block reopens and when it may be picked "
+			"without anybody reading a jug in the field, and what gives a scanned label's "
+			"figures something to be checked against."
 		),
 		fields=_ITEM_FIELDS,
 		absent_note=(
 			"This site has no Item DocType, which means ERPNext's stock module is not present. "
 			"Spray tasks still complete and still record what was used; no REI or PHI window is "
-			"computed, and the two interval rules raise nothing rather than raising wrongly."
+			"computed, and the two interval rules raise nothing rather than raising wrongly. A "
+			"Spray Log still carries its own EPA registration number and intervals, which is "
+			"where they were before v0.69.0 and still legally sufficient."
 		),
 	),
 	Target(

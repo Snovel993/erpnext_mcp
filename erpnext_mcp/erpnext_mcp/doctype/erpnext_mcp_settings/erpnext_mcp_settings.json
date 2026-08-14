@@ -642,7 +642,14 @@
   "allow_list_pending_threshold_acknowledgments",
   "fill_pipeline_write_section",
   "allow_update_fill_threshold",
-  "allow_acknowledge_threshold_update"
+  "allow_acknowledge_threshold_update",
+  "document_intel_read_section",
+  "allow_get_document_validation",
+  "allow_list_document_validations",
+  "allow_list_revalidation_due",
+  "document_intel_write_section",
+  "allow_validate_document_extraction",
+  "allow_revalidate_document"
  ],
  "fields": [
   {
@@ -4834,6 +4841,51 @@
    "fieldname": "allow_acknowledge_threshold_update",
    "fieldtype": "Check",
    "label": "Acknowledge Threshold Update"
+  },
+  {
+   "fieldname": "document_intel_read_section",
+   "fieldtype": "Section Break",
+   "label": "Document Intelligence — Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. One Document Validation in full — the stored OCR text, the extraction it produced, the LLM assessment if one was supplied, and the status, confidence and human confirmation.",
+   "fieldname": "allow_get_document_validation",
+   "fieldtype": "Check",
+   "label": "Get Document Validation"
+  },
+  {
+   "default": "1",
+   "description": "READ. The validation register, newest first, filterable by document type, source record and status. Carries neither the OCR text nor the extraction — get_document_validation has those.",
+   "fieldname": "allow_list_document_validations",
+   "fieldtype": "Check",
+   "label": "List Document Validations"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which stored validations are due to be re-checked, soonest first, with how many days each is overdue and how many have never been confirmed by a person. A document with no revalidation_due — a receipt, a signature — is never due and is excluded.",
+   "fieldname": "allow_list_revalidation_due",
+   "fieldtype": "Check",
+   "label": "List Revalidations Due"
+  },
+  {
+   "fieldname": "document_intel_write_section",
+   "fieldtype": "Section Break",
+   "label": "Document Intelligence — Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Check what on-device extraction read off a scanned document against document-type-specific rules — a pesticide label's EPA registration number and its two intervals, a licence's expiry and holder name, a receipt's line sums — and store the answer as a Document Validation. This app makes no model call: the caller supplies its own assessment, and without one the status is Pending and an issue says so. Requires the Farm Manager, HR Manager, Foreman or System Manager role on top of this switch.",
+   "fieldname": "allow_validate_document_extraction",
+   "fieldtype": "Check",
+   "label": "Validate Document Extraction"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Re-run the checks against what a Document Validation already stores. Nothing is re-photographed and nothing is re-extracted — the stored OCR text and extraction are the input. Increments revalidation_count and stamps last_revalidated. Requires the same role as validate_document_extraction.",
+   "fieldname": "allow_revalidate_document",
+   "fieldtype": "Check",
+   "label": "Revalidate Document"
   }
  ],
  "index_web_pages_for_search": 0,

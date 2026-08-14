@@ -274,16 +274,21 @@ class MigrateThreeTimes(V12TestCase):
 		for _ in range(3):
 			install.after_migrate()
 			counts.append(len(compliance_custom_fields()))
-		# Five on Employee, the v0.19.3 Attendance bridge column, the four
-		# v0.19.5 capex columns on ERPNext's Asset, and the v0.69.0 REI/PHI pair
-		# on ERPNext's Item. Spray Log and Bucket Log Entry are genuinely absent
-		# from the fixture site, so they add nothing here and are reported as
-		# skipped instead.
+		# Five on Employee, the v0.19.3 Attendance bridge column, the four v0.19.5
+		# capex columns on ERPNext's Asset, and the nine v0.69.0 columns on
+		# ERPNext's Item — the REI/PHI pair the spray window computes from, plus
+		# the seven label-detail columns a scanned pesticide label lands in. Spray
+		# Log and Bucket Log Entry are genuinely absent from the fixture site, so
+		# they add nothing here and are reported as skipped instead.
+		#
+		# All nine Item columns land on EVERY Item, not only the chemicals — the
+		# `depends_on` on seven of them decides what is SHOWN and Frappe stores the
+		# column either way, which is exactly why none of the nine is `reqd`.
 		self.assertEqual(
 			counts[0],
-			12,
-			"five Employee fields, the Attendance bridge, four Asset capex columns and the "
-			"two Item interval columns"
+			19,
+			"five Employee fields, the Attendance bridge, four Asset capex columns "
+			"and nine Item label columns",
 		)
 		self.assertEqual(counts, [counts[0]] * 3, f"custom fields multiplied across migrations: {counts}")
 

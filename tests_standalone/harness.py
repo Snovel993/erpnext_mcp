@@ -1406,6 +1406,12 @@ APP_DOCTYPES = {
 	"Container Fill Threshold": "container_fill_threshold",
 	"Fill Threshold Change Log": "fill_threshold_change_log",
 	"Fill Threshold Acknowledgment": "fill_threshold_acknowledgment",
+	# v0.69.0. Document Intelligence: one scanned document, everything that was
+	# read off it, and what checking it produced — the OCR text, the on-device
+	# extraction and the judgement stage as three columns rather than three
+	# records, so a value that turns out to be wrong can be traced to the stage
+	# that produced it.
+	"Document Validation": "document_validation",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

@@ -283,6 +283,25 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/update_regulatory_filing",
 		"/mobile/advance_policy_review",
 		"/mobile/rectify_alert",
+		# Sprint 4 (v0.69.0). Document intelligence, two routes: the phone reads
+		# a pesticide label at a chemical shed and this decides whether to
+		# believe what it read, and one stored validation read back.
+		#
+		# BOTH PATHS DIFFER FROM THE SPRINT 4 CONTRACT'S SPELLING — it named
+		# `/farmops/api/validate-document` and a GET at
+		# `/farmops/api/document-validation/<name>`. This transport builds every
+		# path from the method's own name, takes POST only, and matches whole
+		# paths rather than patterns; a hyphen is not a Python identifier and a
+		# path parameter has nowhere to land. The bodies and answers are the
+		# contract's.
+		#
+		# `list_document_validations`, `list_revalidation_due` and
+		# `revalidate_document` are tools with NO route here on purpose — two
+		# registers an office reads and one status a supervisor re-decides — and
+		# the assertion below in the other direction keeps that a decision
+		# rather than an omission.
+		"/mobile/validate_document",
+		"/mobile/get_document_validation",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

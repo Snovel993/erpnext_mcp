@@ -1,0 +1,262 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-14 09:00:00.000000",
+ "description": "One scanned document, everything that was read off it, and what checking it produced. The three stages a photograph goes through are three columns here rather than three records: `ocr_text` is what the phone's Vision pass read, `extraction_json` is the structured fields it pulled out of that text on-device, and `llm_assessment_json` is the judgement stage — so a value that turns out to be wrong can be traced to the stage that produced it instead of to 'the scanner'. validate_document_extraction is what writes one; revalidate_document re-runs the checks against the stored extraction without asking anybody to photograph the paper again, which is the whole reason the raw text is kept. Nothing here replaces the document: `scan_file_url` is the image, and every check is a claim about it that a person can go and disagree with.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "document_type",
+  "validation_status",
+  "overall_confidence",
+  "identity_col",
+  "company",
+  "source_doctype",
+  "source_name",
+  "scan_file_url",
+  "capture_section",
+  "ocr_text",
+  "extraction_section",
+  "extraction_json",
+  "assessment_section",
+  "llm_assessment_json",
+  "assessment_col",
+  "llm_model",
+  "confirmation_section",
+  "human_confirmed",
+  "human_confirmed_at",
+  "confirmation_col",
+  "human_confirmed_by",
+  "revalidation_section",
+  "revalidation_due",
+  "last_revalidated",
+  "revalidation_col",
+  "revalidation_count"
+ ],
+ "fields": [
+  {
+   "default": "DVAL-.YYYY.-.####",
+   "description": "The series a Document Validation is named from, expanded by the controller rather than by Frappe's naming_series hook so a docname is the same shape on a bench and in the standalone suite — DVAL-2026-0001. The year is the year the document was validated, not the year printed on the document.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "DVAL-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "What kind of paper this is, which is the only branch in an otherwise identical flow: it decides which rules run. A pesticide label is checked for a well-formed EPA registration number and for whether its restricted-entry interval matches the active ingredient it names; a licence is checked for an expiry that has not passed and a name that matches the person it is filed against; a receipt is checked for lines that add up. See document_intel.py for the rules each type carries.",
+   "fieldname": "document_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Document Type",
+   "options": "Pesticide Label\nApplicator License\nWPS Certificate\nInsurance Certificate\nI-9 Document\nReceipt\nInspection Evidence\nTask Evidence\nSignature\nTraining Certificate",
+   "reqd": 1
+  },
+  {
+   "default": "Pending",
+   "description": "Pending is the honest answer when the deterministic rules found nothing definite and no LLM assessment came with the call — it means 'nothing has judged this', not 'this is fine'. Validated is a judgement and only ever arrives with an assessment. Flagged is what a deterministic error produces, whatever any model thought of the photograph: an expired licence is expired. Rejected is the worst reading and needs both — a rule finding something definite and an assessment agreeing the document should not be relied on.",
+   "fieldname": "validation_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Validation Status",
+   "options": "Pending\nValidated\nFlagged\nRejected",
+   "reqd": 1
+  },
+  {
+   "description": "0–1, and it is the LOWER of the two readings rather than their average: the deterministic score and the LLM's own confidence are two independent looks at one document, and if either is unconvinced the document is not convincing. The deterministic half is itself two penalties multiplied — how much of what was read is wrong, times how much of the document was read at all — so a clean extraction that captured three fields out of eight does not score as though it had been checked.",
+   "fieldname": "overall_confidence",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Overall Confidence",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Which entity this document belongs to, and the reason it is a Link rather than a convenience: a Company User Permission restricts every document that links to a Company, at the framework level, in every list and report and API call. Without this column an applicator licence's OCR text and an I-9 document's number would be readable by anybody on a multi-entity site who could read the doctype at all — which is personnel data belonging to one entity. Resolved when the validation is written: from the argument if one was passed, otherwise from the source record's own company, otherwise from the site's default. Empty only on a site where none of the three answered, which is a single-company site where there is nothing to scope.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "description": "Which register the document belongs to — 'Item' for a pesticide label, 'Certification' for an applicator licence, 'Training' for a WPS certificate, 'Expense Receipt' for a receipt. Plain Data rather than a Link because a validation can be filed before the record it belongs to exists: a foreman photographs a label at a chemical shed and the Item is created afterwards, and a Link would refuse the capture that is the whole point.",
+   "fieldname": "source_doctype",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Source DocType"
+  },
+  {
+   "description": "The docname within source_doctype. Empty for a document validated before it was filed against anything — see source_doctype on why that is allowed.",
+   "fieldname": "source_name",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Source Name",
+   "search_index": 1
+  },
+  {
+   "description": "The image itself. Everything else in this record is a claim about these bytes, so a person who disagrees with a validation has somewhere to go and look.",
+   "fieldname": "scan_file_url",
+   "fieldtype": "Attach",
+   "label": "Scan File"
+  },
+  {
+   "fieldname": "capture_section",
+   "fieldtype": "Section Break",
+   "label": "What the phone read"
+  },
+  {
+   "description": "The raw text the on-device OCR pass produced, stored verbatim. It is kept for two reasons that are each sufficient: revalidate_document re-runs every check against it without anybody photographing the paper again, and half the checks that matter compare an extracted field against what was actually printed — an REI of 24 hours that appears nowhere in the text below did not come off this photograph.",
+   "fieldname": "ocr_text",
+   "fieldtype": "Long Text",
+   "label": "OCR Text"
+  },
+  {
+   "fieldname": "extraction_section",
+   "fieldtype": "Section Break",
+   "label": "What was pulled out of it"
+  },
+  {
+   "description": "The structured fields on-device extraction produced from the OCR text, as a JSON object — for a pesticide label, epa_registration_number/signal_word/rei_hours/phi_days/phi_crop/active_ingredients and the rest. Stored as given and never overwritten by a correction: a proposed correction lives in the validation result beside the value it would replace, so an OCR error that was silently fixed is not a thing this record can contain.",
+   "fieldname": "extraction_json",
+   "fieldtype": "JSON",
+   "label": "Extraction"
+  },
+  {
+   "fieldname": "assessment_section",
+   "fieldtype": "Section Break",
+   "label": "The judgement stage"
+  },
+  {
+   "description": "The LLM's own reading, shaped {status, issues[], confidence, reasoning}. THIS APP MAKES NO MODEL CALL — the AI is the MCP client, as proposals.py argues at length, so this is what the calling model said about the document rather than what this app went and asked. Empty means the judgement stage did not run, which is exactly why validation_status sits at Pending: a blank here and a Pending there are the same fact recorded twice, and an issue with the code llm_validation_unavailable says so in words.",
+   "fieldname": "llm_assessment_json",
+   "fieldtype": "JSON",
+   "label": "LLM Assessment"
+  },
+  {
+   "fieldname": "assessment_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Which model produced the assessment, as the caller named it. Recorded because a validation is only as re-checkable as its provenance: an assessment nobody can attribute is one nobody can re-run when the model behind it changes.",
+   "fieldname": "llm_model",
+   "fieldtype": "Data",
+   "label": "LLM Model"
+  },
+  {
+   "fieldname": "confirmation_section",
+   "fieldtype": "Section Break",
+   "label": "Human confirmation"
+  },
+  {
+   "default": "0",
+   "description": "A person looked at this validation and stands behind it. Neither the rules nor a model can tick it — the controller stamps who and when the moment it goes on, and refuses a confirmation that names nobody. This is the box an audit actually asks about: every other column on this record is a machine's reading of a photograph.",
+   "fieldname": "human_confirmed",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Human Confirmed"
+  },
+  {
+   "description": "When the confirmation was made. Stamped by the controller on the save that sets human_confirmed, and cleared if it is ever unticked — a confirmation time with no confirmation is a record that has been half-retracted.",
+   "fieldname": "human_confirmed_at",
+   "fieldtype": "Datetime",
+   "label": "Confirmed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "confirmation_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Who confirmed it. Stamped by the controller from the session user rather than taken as an argument, for the same reason no tool in this app lets a caller name somebody else as the signer: a confirmation somebody else's name is on is not a confirmation.",
+   "fieldname": "human_confirmed_by",
+   "fieldtype": "Link",
+   "label": "Confirmed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revalidation_section",
+   "fieldtype": "Section Break",
+   "label": "Revalidation"
+  },
+  {
+   "description": "When these checks should be run again. THE DOCUMENT'S OWN EXPIRY WINS where it has one: a licence is not due for revalidation on the anniversary of somebody scanning it, it is due when it expires. Otherwise it is a cadence per document type — a year for a label, whose registered uses and intervals are revised. Empty for the kinds that never go stale: a receipt photographed in March is the same receipt in December, and putting it on the list would bury the documents that do expire under the ones that cannot.",
+   "fieldname": "revalidation_due",
+   "fieldtype": "Date",
+   "in_standard_filter": 1,
+   "label": "Revalidation Due"
+  },
+  {
+   "description": "When revalidate_document last re-ran the checks. Empty for a validation that has only ever run once.",
+   "fieldname": "last_revalidated",
+   "fieldtype": "Datetime",
+   "label": "Last Revalidated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revalidation_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "How many times the checks have been re-run against the stored extraction. Worth reading beside validation_status: a document revalidated four times and still Flagged is a document nobody has fixed, which is a different problem from one flagged this morning.",
+   "fieldname": "revalidation_count",
+   "fieldtype": "Int",
+   "label": "Revalidation Count",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-14 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Document Validation",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Farm Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "document_type,source_doctype,source_name,validation_status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "document_type",
+ "track_changes": 1
+}

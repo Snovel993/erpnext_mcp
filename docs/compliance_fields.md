@@ -196,34 +196,66 @@ would demand a classification nobody present can make. The gate is in
 
 ### `Item` — erpnext
 
-The restricted-entry and pre-harvest intervals off a product's own label, on the product. Every application of a chemical inherits them, which is what lets a finished spray task say when the block reopens and when it may be picked without anybody reading a jug in the field.
+The pesticide label, as columns on the product it belongs to, and the two intervals every application of a chemical inherits from it. A Spray Log records what one application used; these record what the LABEL says — the restricted-entry and pre-harvest intervals, the EPA registration number, the crop the PHI applies to, the ingredient statement, the rate and the PPE — once per product. That is what lets a finished spray task say when the block reopens and when it may be picked without anybody reading a jug in the field, and what gives a scanned label's figures something to be checked against.
 
-**The same argument as `Spray Log`, with the subject changed.** The REI and the
-PHI are on the spray record because that is where the person doing the spraying
-is. They are *also* on the product, because that is where the label says them —
-and the label is the law. A site keeping them only on the spray record needs
-somebody to read a jug before every application and type the number in
-correctly, which is a data-entry step standing between a crew and a block they
-may not enter.
+**Two Sprint 4 halves on one DocType, and the same argument as `Spray Log` with
+the subject changed.** The REI and the PHI are on the spray record because that
+is where the person doing the spraying is. They are *also* on the product,
+because that is where the label says them — and the label is the law. A site
+keeping them only on the spray record needs somebody to read a jug before every
+application and type the number in correctly, which is a data-entry step
+standing between a crew and a block they may not enter.
 
-**What the two columns buy, concretely.** `complete_farm_task` reads them off
-the chemicals in the tank mix and stamps the *window* onto the task — an expiry
-to the hour and a harvest date — which is what the `rei_active_block_entry` and
-`phi_harvest_window` compliance rules raise from. Without them the app can
-record that a spray happened and cannot say when the block reopens, which is the
-one question the record exists to answer.
+**What the first two columns buy, concretely.** `complete_farm_task` reads them
+off the chemicals in the tank mix and stamps the *window* onto the task — an
+expiry to the hour and a harvest date — which is what the
+`rei_active_block_entry` and `phi_harvest_window` compliance rules raise from.
+Without them the app can record that a spray happened and cannot say when the
+block reopens, which is the one question the record exists to answer. A tank mix
+takes the **longest** REI and the longest PHI of the products in it: a mix is
+under the strictest thing in it, and a block does not become half-enterable at
+hour twelve.
 
-**Neither is `reqd`,** in the way `Asset.capex_type` is not: most items in an
+**What the other seven buy.** They are the rest of what a photographed label
+says, so a scanned pesticide label has somewhere to land and the two numbers
+above have something to be checked *against* rather than being the only copy of
+what somebody typed. `label_scan_validation` links back to the
+`Document Validation` they were read off — the photograph, the OCR text, every
+check run against it, and whether a person has confirmed the reading.
+
+**None is `reqd`,** in the way `Asset.capex_type` is not: most items in an
 orchard's register are bins, twine and diesel, and a required REI would make
 every one of them unsaveable until somebody typed a zero into a column that does
-not apply to a pallet. A tank mix takes the **longest** REI and the longest PHI
-of the products in it — a mix is under the strictest thing in it, and a block
-does not become half-enterable at hour twelve.
+not apply to a pallet.
+
+**`depends_on` decides what is SHOWN, and only for seven of the nine.** All nine
+columns exist on every Item row; the expression in `CHEMICAL_ITEM_DEPENDS_ON`
+decides whether a person editing a picking bag has to look at the seven
+label-detail ones. It matches on the group's *name* — `chemical`, `pesticide`,
+`spray`, `crop protection`, `fungicide`, `herbicide`, `insecticide` — rather than
+on a hard-coded list of groups, because every site names its item groups
+differently, and it shows them unconditionally on any Item already carrying an
+`epa_registration_number` or a `signal_word`: a `depends_on` that hides data
+somebody has already entered is not a display preference, it is a way to lose a
+record.
+
+**`rei_hours` and `phi_days` deliberately do not carry it.** The spray window
+computes off them, their own guidance is "leave at zero for anything that is not
+a restricted-entry product", and a display rule that hid them on a site whose
+item group this file's expression does not anticipate would silently hand that
+feature a zero it could not tell from a real one.
 
 | Field | Type | Required | Framework | Why the regulator wants it | What breaks in the WORK without it |
 | --- | --- | --- | --- | --- | --- |
 | `rei_hours` | Int | no | EPA WPS 40 CFR 170.407 — restricted-entry interval; FIFRA label | The label's restricted-entry interval for this product, in hours. It is the number the re-entry prohibition after every application of it is computed from, and it belongs to the product rather than to any one spray. | Crew scheduling, from the item register outwards. Recorded here, finishing a spray task states the hour the block reopens by itself; recorded nowhere, somebody reads a jug in the field and the crew boss guesses. |
 | `phi_days` | Int | no | FIFRA label; FDA tolerances 40 CFR 180 | The label's pre-harvest interval for this product, in days. Picking inside it is a residue violation on a shipped load, and the interval is a property of the product the same way the REI is. | Harvest scheduling weeks out. A block sprayed inside its PHI cannot be picked, and the pick date is planned against this number long before the sprayer is filled — so it has to be knowable from the product, not only from the last application record. |
+| `epa_registration_number` | Data | no | FIFRA 7 USC 136; 40 CFR 152.132 registration numbering | The registration number identifies the product as registered for this crop and this use, and it is the number a residue detection is traced back through. On the Item rather than only on each Spray Log it is stated once, from the label, instead of typed from memory on every application. | Whether the jug in the shed may be used on the block at all. Without it nobody can check the product against the crop, the rate or the buyer's maximum residue limit before the tank is filled — which is a decision made at the shed, not at a desk afterwards. |
+| `signal_word` | Select | no | FIFRA labeling — 40 CFR 156.64 signal words | The signal word is the label's own statement of acute toxicity, and it is what decides the personal protective equipment the applicator wears. 'None' is a real answer for a Category IV product and is in the list for that reason. | What the person mixing puts on before they open the jug. A blank here and a 'None' here mean different things to that person, and only one of them is safe to act on. |
+| `phi_crop` | Data | no | FIFRA label; FDA tolerances 40 CFR 180 | One label carries a different pre-harvest interval for cherries, apples and pears. An interval with no crop beside it cannot be applied to a block, so the crop is stored with the number rather than assumed from the operation. | Which blocks the interval above actually governs. A grower running cherries and pears off one chemical shed has two answers for one jug, and a record holding only one of them is wrong half the time. |
+| `active_ingredients` | JSON | no | FIFRA 40 CFR 156.10(g) ingredient statement; FRAC/IRAC resistance management | The ingredient statement is what ties a product to a resistance-management group, to the restricted-entry interval its class carries, and to every residue tolerance downstream. Stored as [{name, concentration, unit}] because a product is often several ingredients and the concentrations are what distinguish two formulations of the same active. | Rotation. Two products with different trade names and the same active ingredient are one spray as far as resistance is concerned, and a shed that cannot see that builds resistance while believing it is rotating. |
+| `application_rate` | Data | no | FIFRA label use directions — 40 CFR 156.10(i) | Applying above the labeled rate is an off-label application and a residue risk; applying below it is a failed spray. The rate is on the label and belongs on the product record beside the interval it goes with. | What goes in the tank. The mix is calculated from this number and the acreage, at the shed, usually before anybody has opened a compliance record. |
+| `ppe_requirements` | Small Text | no | EPA WPS 40 CFR 170.507 — handler PPE; label PPE statement | The label's PPE statement is what the handler and any early-entry worker must wear, and the Worker Protection Standard requires the employer to provide it. It is a property of the product, so it is recorded once per product. | What has to be in the shed before the spray can happen. A respirator nobody stocked is a spray that does not go out, and this is the field that says so a week early instead of on the morning. |
+| `label_scan_validation` | Link | no | Internal provenance — v0.69.0 Document Intelligence | Where the eight fields above came from. A Document Validation holds the photograph, the OCR text, the extraction and every check run against it, so a number on this Item can be traced to the label it was read off rather than to whoever typed it. It also carries whether a person has confirmed the reading, which is the only thing on that record a machine did not produce. | Whether the numbers above can be trusted at the shed. An unvalidated REI and one read off a photograph a supervisor confirmed are the same integer on the screen and two very different things to bet a crew's re-entry on. |
 
 ### `Housing Unit` — erpnext_mcp
 

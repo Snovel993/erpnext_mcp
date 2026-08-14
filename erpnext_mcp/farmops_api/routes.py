@@ -342,6 +342,27 @@ ROUTES = (
 	Route("/mobile", mobile_api.update_regulatory_filing),
 	Route("/mobile", mobile_api.advance_policy_review),
 	Route("/mobile", mobile_api.rectify_alert),
+	# Sprint 4 (v0.69.0): document intelligence. The phone reads a pesticide
+	# label at a chemical shed; `validate_document` is what decides whether to
+	# believe what it read, and `get_document_validation` reads one back.
+	#
+	# BOTH PATHS DIFFER FROM THE SPRINT 4 CONTRACT'S, AND THE WRAPPERS SAY SO AT
+	# LENGTH. The contract wrote `POST /farmops/api/validate-document` and
+	# `GET /farmops/api/document-validation/<name>`; this transport builds every
+	# path from the method's own name under `/mobile` (see `Route`), takes POST
+	# only, and matches whole paths rather than patterns. A hyphen cannot be a
+	# Python method name and a path parameter has nowhere to land, so honouring
+	# the contract's spelling would mean forking the router — and the closed,
+	# readable-in-one-screen table is the entire design of this file. The bodies
+	# and the answers are the contract's, unchanged.
+	#
+	# THE OTHER THREE TOOLS ARE DELIBERATELY ABSENT. `list_document_validations`
+	# and `list_revalidation_due` are an office's registers rather than anything
+	# a phone at a shed reads, and `revalidate_document` re-decides a stored
+	# status — which is a supervisor's call at a desk. A method with no route
+	# 404s, which is the whole design of this table.
+	Route("/mobile", mobile_api.validate_document),
+	Route("/mobile", mobile_api.get_document_validation),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

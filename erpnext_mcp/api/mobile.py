@@ -94,6 +94,7 @@ from ..tools import signed_documents
 from ..tools import evidence as evidence_tools
 from ..tools import files as file_tools
 from ..tools import calendar as compliance_calendar
+from ..tools import docvalidation
 from ..tools import employee as personnel
 from ..tools import expenses as expense_tools
 from ..tools import housing as housing_tools
@@ -117,6 +118,7 @@ CERTIFICATION = "Certification"
 TRAINING_RECORD = "Employee Training Record"
 REGULATORY_FILING = "Regulatory Filing"
 COMPLIANCE_POLICY = "Compliance Policy"
+DOCUMENT_VALIDATION = "Document Validation"
 
 #: The four HR masters the wizard's Assignment step offers as dropdowns, mapped
 #: to the field on each that carries a human label. `Branch` has no second
@@ -5762,3 +5764,120 @@ def rectify_alert(user: str, alert=None, confirm=None) -> dict:
 		"action_type": rectification.get("action_type"),
 		"task": result.data,
 	}
+
+
+# ── 65. validate_document ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("validate_document", mutating=True, limit=guard.WRITE_LIMIT)
+def validate_document(
+	user: str,
+	document_type=None,
+	ocr_text=None,
+	extracted_fields=None,
+	source_doctype=None,
+	source_name=None,
+	scan_file_url=None,
+	image_data=None,
+	company=None,
+	auto_store=None,
+	llm_assessment=None,
+	llm_model=None,
+	expected_name=None,
+) -> dict:
+	"""The phone has read a label. This decides whether to believe it. v0.69.0.
+
+	THE THIRD STAGE OF A PIPELINE WHOSE FIRST TWO ARE ON THE DEVICE. Vision
+	reads the paper and on-device extraction pulls fields out of what it read;
+	both are fast, both work offline, and neither can tell whether what it read
+	is TRUE — `0` and `O` are the same shape at 200 dpi in a dusty chemical
+	shed. This route runs the checks that need a rule rather than a camera, and
+	`document_intel.py` is where every one of them lives.
+
+	THE ROUTE IS `/farmops/api/mobile/validate_document`, not the hyphenated
+	`/farmops/api/validate-document` the Sprint 4 contract named. This transport
+	builds every path from the method's own name under `/mobile` (see
+	`farmops_api/routes.py::Route`), a method name cannot carry a hyphen, and
+	forking the router for two endpoints would break the closed-table invariant
+	`test_farmops_api.py` asserts in both directions. The body and the answer
+	are the contract's, unchanged.
+
+	`image_data` IS ACCEPTED AND DELIBERATELY NOT STORED. It is in the contract
+	because a client may hold the bytes before it holds a File; this route does
+	not write a File and does not put base64 in the record. Stage the image with
+	`stage_file_chunk`/`finalize_staged_file` and pass `scan_file_url`, which is
+	the path every other image on this surface already takes.
+
+	THE SOURCE RECORD IS SCOPE-CHECKED. `source_doctype`/`source_name` are how
+	the name on a licence gets compared to the person it is filed against, which
+	means an unscoped one would let a handset read employee names out of a
+	refusal message by guessing docnames. A record belonging to an entity this
+	account does not reach answers "not found", exactly as every other docname
+	on this surface does. `company` is narrowed the same way: it may only name
+	an entity this account already reaches, because the record it lands on is
+	what a Company User Permission scopes every later read by.
+	"""
+	allowed = guard.require_scope(user)
+	company = guard.require_company(user, company, allowed)
+
+	if not str(document_type or "").strip():
+		frappe.throw(
+			"document_type is required — it decides which checks run, so there is no default.",
+			frappe.ValidationError,
+		)
+	if extracted_fields in (None, "", {}):
+		frappe.throw(
+			"extracted_fields is required — what on-device extraction pulled out of the OCR text.",
+			frappe.ValidationError,
+		)
+
+	inner = {"document_type": document_type, "extracted_fields": extracted_fields}
+
+	if source_doctype:
+		target = str(source_doctype).strip()
+		if not compat.doctype_exists(target):
+			frappe.throw(f"{target} is not a doctype on this site.", frappe.ValidationError)
+		inner["source_doctype"] = target
+		if source_name:
+			inner["source_name"] = guard.require_scoped_doc(target, source_name, "source_name", allowed)
+	elif source_name:
+		frappe.throw(
+			"source_name was given without source_doctype, so there is no register to look it up in.",
+			frappe.ValidationError,
+		)
+
+	for key, value in (
+		("ocr_text", ocr_text),
+		("scan_file_url", scan_file_url),
+		("company", company),
+		("auto_store", auto_store),
+		("llm_assessment", llm_assessment),
+		("llm_model", llm_model),
+		("expected_name", expected_name),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return docvalidation.validate_document_extraction(inner).data
+
+
+# ── 66. get_document_validation ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("get_document_validation", limit=guard.READ_LIMIT)
+def get_document_validation(user: str, name=None, validation_id=None) -> dict:
+	"""One stored validation, read back. v0.69.0.
+
+	POST WITH THE DOCNAME IN THE BODY, not `GET /farmops/api/document-validation/<name>`
+	as the Sprint 4 contract wrote it: every route on this transport is POST and
+	the router matches whole paths rather than patterns, so a path parameter has
+	nowhere to land. See `validate_document` on why the router was not forked.
+
+	Carries the OCR text and the stored extraction, which the list does not —
+	this is the call a client makes when somebody has chosen one validation to
+	look at, and the raw text is half of what there is to look at.
+	"""
+	guard.require_scope(user)
+	reference = str(name or validation_id or "").strip()
+	if not reference:
+		frappe.throw("name is required — a Document Validation docname.", frappe.ValidationError)
+	guard.require_docname(DOCUMENT_VALIDATION, reference, "name")
+	return docvalidation.get_document_validation({"name": reference}).data

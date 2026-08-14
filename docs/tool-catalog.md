@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 486 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 491 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 229 read tools are **on** by default and can be switched off individually. A
+All 232 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -11762,3 +11762,169 @@ somebody to go looking for a button that does not exist.
 **The handset side is separate, tracked work.** The server names the fix and
 mounts the route for every alert; `ComplianceAlertDetailView.swift` does not
 draw the button yet.
+
+---
+
+## v0.69.0 — Document Intelligence
+
+Five tools, two of which write. **A phone reads a piece of paper; these decide
+whether to believe it.**
+
+**The pipeline is three stages and they are three stages on purpose.** Vision
+on the device reads a pesticide label at a chemical shed; on-device extraction
+pulls `rei_hours`, `phi_days` and an EPA registration number out of what it
+read. Both are fast, both work offline, and neither can tell whether what it
+read is *true* — `0` and `O` are the same shape at 200 dpi in a dusty shed.
+Stage two is the deterministic rules in `document_intel.py`; stage three is
+judgement, and it comes from the caller.
+
+**There is still no model call anywhere in this app.** `proposals.py` argues the
+architecture at length and it holds here: the AI is the MCP client. A model
+reading a scanned label calls `validate_document_extraction` and may hand its
+own assessment along in the same call, shaped `{status, issues, confidence,
+reasoning}`. What the tool does is what a tool can do and a model cannot do for
+itself — run the checks a model is bad at, refuse an assessment that is the
+wrong shape, and record which model said it.
+
+**Which is why a regex beats a model here.** A model asked whether `524-537` is
+a well-formed EPA registration number will usually say yes, and occasionally say
+yes about `S24-S37`. `EPA_REG_PATTERN` never does. The deterministic stage is
+not a cheap approximation of the judgement stage; it is better than it at the
+work it covers.
+
+### The rules, by document type
+
+| Type | What is checked |
+| --- | --- |
+| `Pesticide Label` | EPA registration number against 40 CFR 152.132's shape, with an OCR-look-alike repair *proposed* where one produces a well-formed number; signal word against the four a US label may carry; REI within plausible bounds **and against the active ingredient it names**; PHI within bounds and naming a crop; **PHI against REI** — you cannot harvest a block you may not walk into; ingredient concentrations summing past 100%; a rate that parses as amount-per-area; PPE, required outright on a `Danger` label |
+| `Applicator License` | Expiry present, readable, not passed, not before issue, not ten years out; licence number; issuing state; categories; **holder's name against the record it is filed against** |
+| `WPS Certificate` / `Training Certificate` | Completion date present, readable, not in the future, not more than a year old; trainer; course; name against the record |
+| `Insurance Certificate` | Policy expiry and number, carrier, a coverage limit that is a positive number |
+| `I-9 Document` | Document title and issuing authority; document number; expiry — and an expired one says *this person cannot lawfully be put on a crew tomorrow*, because that is what it means |
+| `Receipt` | A positive total, a merchant, a date that is not in the future, and lines that sum to the total once extracted tax and tip are counted |
+| `Inspection Evidence` / `Task Evidence` | Capture time present and not in the future — deliberately thin, because what makes a photograph evidence is the task it hangs off |
+| `Signature` | A signer, a signing time, neither absent nor in the future |
+
+Every check that compares a field to what was actually *printed* needs
+`ocr_text`. Without it those checks are skipped and an `info` issue says so:
+the values were checked against each other and against the rules, and against
+nothing on the page.
+
+### `validate_document_extraction`
+
+```json
+{"document_type": "Pesticide Label",
+ "ocr_text": "IMIDAN 70-W … EPA Reg. No. 10163-169 … RESTRICTED ENTRY INTERVAL 5 days …",
+ "extracted_fields": {"epa_registration_number": "1O163-169", "signal_word": "Warning",
+                      "rei_hours": 120, "phi_days": 14, "phi_crop": "Cherries",
+                      "active_ingredients": [{"name": "phosmet", "concentration": 70, "unit": "%"}],
+                      "application_rate": "2.125 lb/acre", "ppe_requirements": "coveralls, gloves"},
+ "source_doctype": "Item", "source_name": "CHEM-IMIDAN-70W"}
+```
+
+**MUTATING (default OFF).** Returns `validation_id`, `status`, `confidence`
+(0–1), `issues[]`, `corrected_fields` and `reasoning`. On the example above it
+comes back `Pending` — nothing judged it — with one warning:
+`epa_registration_number_repairable`, and `corrected_fields` proposing
+`10163-169`, naming the rule that proposed it and carrying the reading it would
+replace.
+
+**`corrected_fields` are proposals and nothing applies them.** They come back
+*beside* the extraction, never in place of it, so a screen can show "the phone
+read 1O163-169, the shape of an EPA number says 10163-169" and let a person
+decide. An OCR correction applied silently is an OCR error nobody can find
+afterwards, which is the whole reason `ocr_text` sits next to `extraction_json`
+on the record.
+
+**`auto_store` defaults to true, and storing is the point.** A validation that
+is computed, returned and forgotten cannot be revalidated when a label is
+revised, cannot be counted when somebody asks how many labels on this site have
+never been read by a person, and cannot be found again when a residue detection
+sends somebody looking. Pass `false` for the one honest case — a client checking
+an extraction mid-capture, before the worker has decided to keep the photograph.
+
+**The status rules, in the order they bind.** A deterministic **error** outranks
+everything: an expired licence is expired whatever a model thinks of the
+photograph, so the merged status stays `Flagged` (or `Rejected` if the model
+went further). Otherwise the worst reading wins —
+`Rejected` > `Flagged` > `Pending` > `Validated` — because the cost of looking
+at a document that turns out to be fine is a minute. With no assessment at all
+the status is `Pending` and an `llm_validation_unavailable` issue says so by
+name, so a Pending record can always be traced to either *nothing judged it* or
+*something judged it and was unsure*.
+
+**The confidence is the lower of the two readings, not their mean.** They are
+two independent looks at one document, and if either is unconvinced the document
+is not convincing. The deterministic half is itself two penalties *multiplied* —
+how much of what was read is wrong, times how much of the document was read at
+all — so a clean extraction that captured three fields out of eight does not
+score as though it had been checked.
+
+### `get_document_validation` / `list_document_validations`
+
+Read-only. `get_document_validation` returns one record in full, including the
+stored OCR text and extraction; `list_document_validations` is the register,
+filterable by `document_type`, `source_doctype`, `source_name`, `status` and
+`human_confirmed`, and it carries **neither** the OCR text nor the extraction —
+a list of forty validations carrying forty pages of OCR text is a payload a
+phone on a field connection cannot use.
+
+### `revalidate_document`
+
+**MUTATING (default OFF).** Re-runs the checks against what the record already
+stores. **Nothing is re-photographed and nothing is re-extracted** — which is
+the entire reason `ocr_text` and `extraction_json` are kept. A label whose
+registered intervals were revised, or a licence that has since expired, gets a
+fresh answer without anybody walking back to the chemical shed.
+
+`revalidation_count` is incremented and `last_revalidated` stamped every run, so
+a document revalidated four times and still `Flagged` is distinguishable from
+one flagged this morning. The stored LLM assessment is **reused** unless a new
+one is passed: a re-run that silently dropped it would move a `Validated` record
+to `Pending` and look like the document had gone stale, when what changed was
+only that nobody re-sent the assessment. Passing `extracted_fields` replaces the
+stored extraction, for the case that is not a re-run — somebody corrected a
+misread field and wants the checks made against the corrected reading.
+
+### `list_revalidation_due`
+
+Read-only. Which stored validations are due to be re-checked, soonest first,
+with `days_overdue` on each and a count of how many have never been confirmed by
+a person.
+
+**The document's own expiry wins over the cadence.** A licence is not due for
+revalidation on the anniversary of somebody scanning it; it is due when it
+expires. And a document type that never goes stale — a receipt, task evidence, a
+signature — carries no due date and is **never** in this list, which is what
+stops a site with ten thousand receipts and forty licences returning ten
+thousand rows.
+
+### The Item columns this release adds
+
+Nine Custom Fields on ERPNext's `Item`, so the label's own numbers live on the
+product rather than only on each application: `epa_registration_number`,
+`signal_word`, `rei_hours`, `phi_days`, `phi_crop`, `active_ingredients`,
+`application_rate`, `ppe_requirements`, and `label_scan_validation` linking back
+to the `Document Validation` they were read off. None is `reqd` — an Item is a
+picking bag and a length of irrigation pipe as well as a jug of captan — and a
+`depends_on` hides them on anything that is not a chemical. See
+`docs/compliance_fields.md` for the full argument, including why that
+`depends_on` also fires on any Item already carrying an EPA number.
+
+### The two mobile routes, and why they are spelled differently
+
+`POST /farmops/api/mobile/validate_document` and
+`POST /farmops/api/mobile/get_document_validation`. The Sprint 4 contract named
+`POST /farmops/api/validate-document` and
+`GET /farmops/api/document-validation/<name>`; this transport builds every path
+from the method's own name under `/mobile`, takes POST only, and matches whole
+paths rather than patterns. A hyphen is not a Python identifier and a path
+parameter has nowhere to land, so honouring the spelling would mean forking a
+router whose closed, readable-in-one-screen table is its entire design. **The
+bodies and the answers are the contract's, unchanged.** `image_data` is accepted
+and deliberately not stored — stage the image and pass `scan_file_url`.
+
+`list_document_validations`, `list_revalidation_due` and `revalidate_document`
+have no route: two are an office's registers rather than anything a phone at a
+shed reads, and the third re-decides a stored status, which is a supervisor's
+call at a desk.

@@ -929,10 +929,24 @@ class Catalogue(SeededTestCase):
 		purchase — with an item that has a rule and no Bin row at all reported
 		at zero rather than skipped, because never having arrived is the
 		strongest possible reason to buy.
+
+		v0.69.0 (Sprint 4) adds FIVE for Document Intelligence — three reads and
+		two writes. `validate_document_extraction` is the one that matters: it
+		takes what on-device OCR extraction read off a photographed document and
+		runs the rules a model is bad at (an EPA registration number's shape, a
+		restricted-entry interval against the active ingredient it names, a
+		pre-harvest interval that cannot be true beside its own REI, a licence
+		expiry, a holder's name against the record it is filed against), then
+		merges the CALLER's own assessment on top — this app still makes no
+		model call. `revalidate_document` re-runs those checks against the
+		stored extraction rather than against a fresh photograph, which is why
+		the record keeps the OCR text at all; `get_document_validation`,
+		`list_document_validations` and `list_revalidation_due` read the
+		register.
 		"""
-		self.assertEqual(len(registry.TOOLS), 486)
-		self.assertEqual(len(registry.READ_TOOLS), 229)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 257)
+		self.assertEqual(len(registry.TOOLS), 491)
+		self.assertEqual(len(registry.READ_TOOLS), 232)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 259)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

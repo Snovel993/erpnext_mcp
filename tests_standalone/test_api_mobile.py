@@ -364,6 +364,12 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"update_regulatory_filing",
 		"advance_policy_review",
 		"rectify_alert",
+		# Sprint 4 (v0.69.0). Document intelligence: the two halves a phone at a
+		# chemical shed needs — check what was read off a label, and read one
+		# stored answer back. The other three tools in the set stay off this
+		# surface (see `test_farmops_api.py`).
+		"validate_document",
+		"get_document_validation",
 	}
 
 	def _whitelisted(self, module):

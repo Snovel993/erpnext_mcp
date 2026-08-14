@@ -55,6 +55,7 @@ from .tools import (
 	compliance,
 	dimensions,
 	dispatch,
+	docvalidation,
 	employee,
 	evidence,
 	expenses,
@@ -16976,6 +16977,187 @@ TOOLS = {
 		title="Bulk render tax form PDFs",
 		available=_pdf_form_ready("Tax Form"),
 		requires=_TAX_FORM_PDF_REQUIRES,
+	),
+	# ── v0.69.0: Document Intelligence ──────────────────────────────────────
+	#
+	# A phone reads a piece of paper; these decide whether to believe it. The
+	# rules live in `document_intel.py` and are pure; `tools/docvalidation.py`
+	# is the only place a Document Validation is read or written.
+	"validate_document_extraction": _tool(
+		docvalidation.validate_document_extraction,
+		"MUTATING (default OFF). Check what on-device extraction read off a "
+		"scanned document, and — unless auto_store=false — keep the answer as a "
+		"Document Validation record.\n\n"
+		"THE CHECKS ARE DOCUMENT-TYPE-SPECIFIC. A Pesticide Label is checked for "
+		"a well-formed EPA registration number (40 CFR 152.132), for a "
+		"restricted-entry interval that matches the active ingredient it names, "
+		"for a pre-harvest interval that names a crop and is not shorter than "
+		"its own REI, and for an ingredient statement that does not exceed 100%. "
+		"An Applicator License, an Insurance Certificate and an I-9 Document are "
+		"checked for an expiry that has not passed and — when source_doctype/"
+		"source_name or expected_name names somebody — for a holder's name that "
+		"matches the record it is being filed against. A Receipt is checked for "
+		"lines that sum to its total.\n\n"
+		"YOU SUPPLY THE JUDGEMENT HALF. This app makes no model call: pass your "
+		"own assessment as llm_assessment ({status, issues, confidence, "
+		"reasoning}) and it is merged with the rules. Without one the status is "
+		"Pending and an issue with the code llm_validation_unavailable says so — "
+		"the checks still run and the record is still written.\n\n"
+		"NOTHING IS OVERWRITTEN. corrected_fields are PROPOSALS, returned beside "
+		"the extraction and never applied to it; each names the rule that "
+		"proposed it.",
+		{
+			"document_type": _field(
+				_STRING,
+				"REQUIRED. Pesticide Label, Applicator License, WPS Certificate, Insurance "
+				"Certificate, I-9 Document, Receipt, Inspection Evidence, Task Evidence, "
+				"Signature or Training Certificate. Decides which rules run, so there is no "
+				"default.",
+			),
+			"ocr_text": _field(
+				_STRING,
+				"The raw text the on-device OCR pass produced. Optional, and worth sending: "
+				"every check that compares an extracted value against what was actually "
+				"printed is skipped without it, and it is what revalidate_document re-runs "
+				"against later.",
+			),
+			"extracted_fields": _field(
+				_OBJECT,
+				"REQUIRED. What on-device extraction pulled out of the OCR text, as a JSON "
+				"object. For a Pesticide Label: epa_registration_number, signal_word, "
+				"rei_hours, phi_days, phi_crop, active_ingredients ([{name, concentration, "
+				"unit}]), application_rate, ppe_requirements.",
+			),
+			"source_doctype": _field(
+				_STRING,
+				"Which register the document belongs to — Item for a label, Certification "
+				"for a licence, Training for a WPS certificate, Expense Receipt for a "
+				"receipt. A record that does not exist yet is noted, not refused.",
+			),
+			"source_name": _field(_STRING, "The docname within source_doctype. Needs source_doctype."),
+			"company": _field(
+				_STRING,
+				"Which entity the validation belongs to. Resolved from the SOURCE RECORD's own "
+				"company when it is not passed, and from the site default when there is no "
+				"source — a Company User Permission scopes this record like every other, and "
+				"an unscoped licence's OCR text is one entity's personnel data.",
+			),
+			"scan_file_url": _field(_STRING, "The image itself, as a file URL already on this site."),
+			"auto_store": _field(
+				_BOOLEAN,
+				"Write a Document Validation record. Default TRUE — storing is the point, "
+				"since only a stored validation can be revalidated or found again. Pass "
+				"false to check an extraction mid-capture without keeping it.",
+			),
+			"llm_assessment": _field(
+				_OBJECT,
+				"YOUR OWN reading of the document: {status, issues, confidence, reasoning}. "
+				"status is Pending/Validated/Flagged/Rejected; confidence is 0–1. Stored "
+				"verbatim. A deterministic ERROR keeps the merged status at Flagged whatever "
+				"this says — a model cannot talk a rule out of a fact.",
+			),
+			"llm_model": _field(_STRING, "Which model produced llm_assessment, for the record."),
+			"expected_name": _field(
+				_STRING,
+				"The name the document should carry, where it differs from the source "
+				"record's. Wins over anything read off source_doctype/source_name.",
+			),
+			"as_of": _field(
+				_STRING,
+				"The date every expiry and future-date check is made against. Defaults to "
+				"today; pass one to ask what the answer WAS.",
+			),
+		},
+		required=("document_type", "extracted_fields"),
+		mutating=True,
+		title="Validate a document extraction",
+		available=_needs_doctype("Document Validation"),
+		requires="the Document Validation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_document_validation": _tool(
+		docvalidation.get_document_validation,
+		"One Document Validation in full — the stored OCR text, the extraction it "
+		"produced, the LLM assessment if one was supplied, and the status, "
+		"confidence and human confirmation. Read-only.",
+		{"name": _field(_STRING, "REQUIRED. The docname, e.g. DVAL-2026-0001.")},
+		required=("name",),
+		title="Get a document validation",
+		available=_needs_doctype("Document Validation"),
+		requires="the Document Validation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_document_validations": _tool(
+		docvalidation.list_document_validations,
+		"The validation register, newest first. Read-only.\n\n"
+		"CARRIES NEITHER THE OCR TEXT NOR THE EXTRACTION — a list of forty "
+		"validations carrying forty pages of OCR text is a payload a phone on a "
+		"field connection cannot use. get_document_validation has them.",
+		{
+			"document_type": _field(_STRING, "Filter to one document type."),
+			"company": _field(_STRING, "Only validations belonging to this entity."),
+			"source_doctype": _field(_STRING, "Only validations filed against this register."),
+			"source_name": _field(_STRING, "Only validations filed against this record."),
+			"status": _field(_STRING, "Pending, Validated, Flagged or Rejected."),
+			"human_confirmed": _field(_BOOLEAN, "Only those a person has confirmed, or only those nobody has."),
+			"limit": _LIMIT,
+		},
+		title="List document validations",
+		available=_needs_doctype("Document Validation"),
+		requires="the Document Validation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"revalidate_document": _tool(
+		docvalidation.revalidate_document,
+		"MUTATING (default OFF). Re-run the checks against what a Document "
+		"Validation already stores, and update the record.\n\n"
+		"NOTHING IS RE-PHOTOGRAPHED AND NOTHING IS RE-EXTRACTED. The stored "
+		"ocr_text and extraction are the input — which is the entire reason they "
+		"are kept. A label whose registered intervals were revised, or a licence "
+		"that has since expired, gets a fresh answer without anybody walking back "
+		"to the chemical shed.\n\n"
+		"revalidation_count is incremented and last_revalidated stamped on every "
+		"run, so a document revalidated four times and still Flagged is "
+		"distinguishable from one flagged this morning. The stored LLM assessment "
+		"is REUSED unless a new one is passed: a re-run that silently dropped it "
+		"would move a Validated record to Pending and look like the document had "
+		"gone stale.",
+		{
+			"name": _field(_STRING, "REQUIRED. The docname, e.g. DVAL-2026-0001."),
+			"reason": _field(_STRING, "Why it is being re-checked. Lands in the audit summary."),
+			"extracted_fields": _field(
+				_OBJECT,
+				"REPLACES the stored extraction, for the case that is not a re-run — somebody "
+				"corrected a misread field and wants the checks made against the corrected "
+				"reading.",
+			),
+			"ocr_text": _field(_STRING, "Replaces the stored OCR text. Rarely wanted."),
+			"llm_assessment": _field(_OBJECT, "A fresh assessment, replacing the stored one."),
+			"llm_model": _field(_STRING, "Which model produced it."),
+			"expected_name": _field(_STRING, "The name the document should carry."),
+			"as_of": _field(_STRING, "The date expiry checks are made against. Defaults to today."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Revalidate a document",
+		available=_needs_doctype("Document Validation"),
+		requires="the Document Validation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_revalidation_due": _tool(
+		docvalidation.list_revalidation_due,
+		"Which stored validations are due to be re-checked, soonest first, with "
+		"how many days each is overdue and how many have never been confirmed by "
+		"a person. Read-only.\n\n"
+		"A DOCUMENT WITH NO revalidation_due IS NEVER DUE. Receipts, task "
+		"evidence and signatures do not go stale by sitting, so they carry no due "
+		"date and are excluded — which is what stops a site with ten thousand "
+		"receipts and forty licences returning ten thousand rows.",
+		{
+			"as_of": _field(_STRING, "The cut-off date, YYYY-MM-DD. Defaults to today."),
+			"document_type": _field(_STRING, "Filter to one document type."),
+			"company": _field(_STRING, "Only validations belonging to this entity."),
+			"limit": _LIMIT,
+		},
+		title="List revalidations due",
+		available=_needs_doctype("Document Validation"),
+		requires="the Document Validation DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 

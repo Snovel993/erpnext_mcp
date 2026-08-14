@@ -767,9 +767,13 @@ class ToolRegistration(unittest.TestCase):
 		# pair `set_reorder_level` / `list_reorder_alerts`. Same draft/submit
 		# split as purchasing: `create_stock_entry` moves nothing and
 		# `submit_stock_entry` is the separately-switched tool that does.
-		self.assertEqual(len(self.registry.TOOLS), 486)
-		self.assertEqual(len(self.registry.READ_TOOLS), 229)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 257)
+		# v0.69.0 (Sprint 4) adds FIVE elsewhere — three reads and two writes
+		# over Document Validation, which is what the deterministic half of
+		# document intelligence writes its answer into. Nothing about the ML
+		# model registry changed; the totals moved because the catalogue did.
+		self.assertEqual(len(self.registry.TOOLS), 491)
+		self.assertEqual(len(self.registry.READ_TOOLS), 232)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 259)
 
 
 if __name__ == "__main__":
