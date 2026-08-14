@@ -2088,3 +2088,241 @@ class PurchasingTestCase(V2TestCase):
 		super().setUp()
 		seed_masters()
 		_purchasing()
+
+
+# ── v0.69.0 fixtures: stock on hand, how it got there, and when to buy ──────
+#: A second warehouse in MAIN, so a Material Transfer has somewhere to go.
+#: Added here rather than in `_master_warehouses` deliberately: the masters
+#: tests count warehouses, and a fixture that grew a third one under them would
+#: fail assertions about a list this module does not change.
+SHOP = f"Shop - {MAIN_ABBR}"
+
+#: A warehouse in the OTHER company. What makes "a company filter really scopes
+#: the balance" a test with something to exclude rather than a no-op.
+OTHER_STORES = f"Stores - {OTHER_ABBR}"
+
+#: The three purposes `create_stock_entry` writes. Named records because
+#: modern ERPNext's `stock_entry_type` is a Link, and a tool that checks the
+#: record exists is indistinguishable from one that does not on a site with no
+#: Stock Entry Type table at all.
+STOCK_ENTRY_TYPES = ("Material Receipt", "Material Issue", "Material Transfer")
+
+#: An item stocked in two warehouses, with a reorder rule in one of them and a
+#: UOM conversion (one Case is twelve Lb) that `create_stock_entry` has to
+#: apply rather than assume.
+CASE_FACTOR = 12.0
+
+
+def seed_stock() -> None:
+	"""Warehouses, entry types, balances, ledger history and reorder rules.
+
+	Additive to `seed_masters()`, which owns the Items and the first warehouse.
+	"""
+	_stock_warehouses()
+	_stock_entry_types()
+	_stock_uom_conversions()
+	_stock_reorder_rules()
+	_stock_bins()
+	_stock_ledger()
+
+
+def _stock_warehouses() -> None:
+	STORE.seed(
+		"Warehouse",
+		[
+			{
+				"name": SHOP,
+				"warehouse_name": "Shop",
+				"company": MAIN,
+				"parent_warehouse": MAIN_WAREHOUSE_ROOT,
+				"is_group": 0,
+			},
+			{
+				"name": OTHER_STORES,
+				"warehouse_name": "Stores",
+				"company": OTHER,
+				"parent_warehouse": OTHER_WAREHOUSE_ROOT,
+				"is_group": 0,
+			},
+		],
+	)
+
+
+def _stock_entry_types() -> None:
+	STORE.seed(
+		"Stock Entry Type",
+		[{"name": name, "purpose": name} for name in STOCK_ENTRY_TYPES],
+	)
+
+
+def _stock_uom_conversions() -> None:
+	"""One item that can be counted in Cases, and two that cannot.
+
+	Written onto the seeded Item row rather than reseeded, so the masters
+	fixtures stay the single source of what an Item is here.
+	"""
+	STORE.seed("UOM", [{"name": "Case", "enabled": 1}])
+	item = STORE.get_raw("Item", SPRAY)
+	if item is not None:
+		item["uoms"] = [
+			{
+				"name": f"{SPRAY}-uom-1",
+				"parent": SPRAY,
+				"parenttype": "Item",
+				"parentfield": "uoms",
+				"idx": 1,
+				"uom": "Case",
+				"conversion_factor": CASE_FACTOR,
+			}
+		]
+
+
+def _stock_reorder_rules() -> None:
+	"""A rule on SPRAY at STORES, and one on TWINE at a warehouse with no Bin.
+
+	TWINE is the important one: it has a reorder level, a level it is plainly
+	under, and no Bin row at all — the case `list_reorder_alerts` treats as zero
+	rather than skipping, and the one a report built off Bin alone would miss.
+	"""
+	spray = STORE.get_raw("Item", SPRAY)
+	if spray is not None:
+		spray["reorder_levels"] = [
+			{
+				"name": f"{SPRAY}-reorder-1",
+				"parent": SPRAY,
+				"parenttype": "Item",
+				"parentfield": "reorder_levels",
+				"idx": 1,
+				"warehouse": STORES,
+				"warehouse_reorder_level": 100.0,
+				"warehouse_reorder_qty": 250.0,
+				"material_request_type": "Purchase",
+			}
+		]
+	twine = STORE.get_raw("Item", TWINE)
+	if twine is not None:
+		twine["reorder_levels"] = [
+			{
+				"name": f"{TWINE}-reorder-1",
+				"parent": TWINE,
+				"parenttype": "Item",
+				"parentfield": "reorder_levels",
+				"idx": 1,
+				"warehouse": SHOP,
+				"warehouse_reorder_level": 20.0,
+				"warehouse_reorder_qty": 40.0,
+				"material_request_type": "Purchase",
+			}
+		]
+
+
+def _stock_bins() -> None:
+	"""Balances: SPRAY in two MAIN warehouses and one OTHER, TWINE nowhere.
+
+	SPRAY at STORES is 80 against a reorder level of 100 — under it, so the
+	alert has a real row — while SPRAY at SHOP is comfortably over its (absent)
+	rule, which is what makes "only the warehouse with a rule is reported" a
+	distinction the fixture can show.
+	"""
+	STORE.seed(
+		"Bin",
+		[
+			{
+				"name": f"{SPRAY}-{STORES}",
+				"item_code": SPRAY,
+				"warehouse": STORES,
+				"actual_qty": 80.0,
+				"valuation_rate": 2.5,
+				"stock_value": 200.0,
+			},
+			{
+				"name": f"{SPRAY}-{SHOP}",
+				"item_code": SPRAY,
+				"warehouse": SHOP,
+				"actual_qty": 45.0,
+				"valuation_rate": 2.5,
+				"stock_value": 112.5,
+			},
+			{
+				"name": f"{SPRAY}-{OTHER_STORES}",
+				"item_code": SPRAY,
+				"warehouse": OTHER_STORES,
+				"actual_qty": 500.0,
+				"valuation_rate": 3.0,
+				"stock_value": 1500.0,
+			},
+		],
+	)
+
+
+def _stock_ledger() -> None:
+	"""Three movements, one of them cancelled.
+
+	The cancelled row is the point: `get_stock_ledger` excludes it, and a net
+	change computed over all three would be wrong by the amount of a movement
+	that never happened.
+	"""
+	STORE.seed(
+		"Stock Ledger Entry",
+		[
+			{
+				"name": "SLE-FIX-0001",
+				"item_code": SPRAY,
+				"warehouse": STORES,
+				"posting_date": "2026-06-01",
+				"posting_time": "08:00:00",
+				"actual_qty": 200.0,
+				"qty_after_transaction": 200.0,
+				"valuation_rate": 2.5,
+				"stock_value": 500.0,
+				"stock_value_difference": 500.0,
+				"voucher_type": "Purchase Receipt",
+				"voucher_no": "PR-FIX-0001",
+				"company": MAIN,
+				"is_cancelled": 0,
+				"docstatus": 1,
+			},
+			{
+				"name": "SLE-FIX-0002",
+				"item_code": SPRAY,
+				"warehouse": STORES,
+				"posting_date": "2026-07-15",
+				"posting_time": "10:30:00",
+				"actual_qty": -120.0,
+				"qty_after_transaction": 80.0,
+				"valuation_rate": 2.5,
+				"stock_value": 200.0,
+				"stock_value_difference": -300.0,
+				"voucher_type": "Stock Entry",
+				"voucher_no": "STE-FIX-0001",
+				"company": MAIN,
+				"is_cancelled": 0,
+				"docstatus": 1,
+			},
+			{
+				"name": "SLE-FIX-0003",
+				"item_code": SPRAY,
+				"warehouse": SHOP,
+				"posting_date": "2026-07-20",
+				"posting_time": "09:00:00",
+				"actual_qty": 45.0,
+				"qty_after_transaction": 45.0,
+				"valuation_rate": 2.5,
+				"stock_value": 112.5,
+				"stock_value_difference": 112.5,
+				"voucher_type": "Stock Entry",
+				"voucher_no": "STE-FIX-0002",
+				"company": MAIN,
+				"is_cancelled": 1,
+				"docstatus": 2,
+			},
+		],
+	)
+
+
+class StockTestCase(MastersTestCase):
+	"""v0.69.0. The masters plus balances, ledger history and reorder rules."""
+
+	def setUp(self):
+		super().setUp()
+		seed_stock()

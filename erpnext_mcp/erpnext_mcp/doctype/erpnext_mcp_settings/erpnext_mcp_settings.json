@@ -128,6 +128,17 @@
   "allow_submit_purchase_invoice",
   "allow_create_payment_entry",
   "allow_submit_payment_entry",
+  "stock_tools_section",
+  "allow_get_stock_entry",
+  "allow_list_stock_entries",
+  "allow_get_stock_balance",
+  "allow_get_stock_ledger",
+  "allow_get_warehouse_summary",
+  "allow_list_reorder_alerts",
+  "stock_tools_col",
+  "allow_create_stock_entry",
+  "allow_submit_stock_entry",
+  "allow_set_reorder_level",
   "master_data_tools_section",
   "allow_list_item_groups",
   "allow_create_item_group",
@@ -1426,6 +1437,80 @@
    "fieldname": "allow_submit_payment_entry",
    "fieldtype": "Check",
    "label": "Submit Payment Entry"
+  },
+  {
+   "description": "Sprint 4 of the Gap Closure Plan (v0.69.0): what is on hand, how it got there, and when to buy more. Three ERPNext doctypes answer three different questions and are easy to confuse — <b>Stock Entry</b> is the instruction, <b>Stock Ledger Entry</b> is the immutable history, and <b>Bin</b> is the current balance ERPNext maintains from that history.<br><br><b>create_stock_entry</b> produces a DRAFT only, which moves nothing; <b>submit_stock_entry</b> is the separately-switched tool that actually writes the ledger rows and moves every affected balance. Granting the first without the second gives a client a way to propose a movement a human still has to approve in the Desk.",
+   "fieldname": "stock_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Stock &amp; Inventory"
+  },
+  {
+   "default": "1",
+   "description": "One Stock Entry in full, with each line's source and target warehouse and where the movement came from.",
+   "fieldname": "allow_get_stock_entry",
+   "fieldtype": "Check",
+   "label": "Get Stock Entry"
+  },
+  {
+   "default": "1",
+   "description": "Stock Entry headers by type, date range, warehouse and item. The warehouse and item filters are applied against the lines, since neither is a column on the header.",
+   "fieldname": "allow_list_stock_entries",
+   "fieldtype": "Check",
+   "label": "List Stock Entries"
+  },
+  {
+   "default": "1",
+   "description": "On-hand quantity and value for one item per warehouse, read from Bin. An item with no Bin row has never moved there, which is reported as such rather than as a counted zero.",
+   "fieldname": "allow_get_stock_balance",
+   "fieldtype": "Check",
+   "label": "Get Stock Balance"
+  },
+  {
+   "default": "1",
+   "description": "Movement history from Stock Ledger Entry: one row per movement with the balance it produced and the voucher that caused it. Cancelled rows excluded.",
+   "fieldname": "allow_get_stock_ledger",
+   "fieldtype": "Check",
+   "label": "Get Stock Ledger"
+  },
+  {
+   "default": "1",
+   "description": "Everything on hand in one warehouse, with each item's reorder rule and a below-reorder flag.",
+   "fieldname": "allow_get_warehouse_summary",
+   "fieldtype": "Check",
+   "label": "Get Warehouse Summary"
+  },
+  {
+   "default": "1",
+   "description": "Items below their reorder level, worst shortfall first. An item with a rule and no stock record at all is reported at zero rather than skipped.",
+   "fieldname": "allow_list_reorder_alerts",
+   "fieldtype": "Check",
+   "label": "List Reorder Alerts"
+  },
+  {
+   "fieldname": "stock_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a DRAFT Stock Entry (Material Receipt, Issue or Transfer). Writes no ledger row and moves no balance. Cannot submit.",
+   "fieldname": "allow_create_stock_entry",
+   "fieldtype": "Check",
+   "label": "Create Stock Entry"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a DRAFT Stock Entry. <b>This is the switch that lets a client move stock:</b> ERPNext writes the Stock Ledger Entries and updates every affected Bin, and undoing it is a cancellation rather than an edit.",
+   "fieldname": "allow_submit_stock_entry",
+   "fieldtype": "Check",
+   "label": "Submit Stock Entry"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Set the reorder level and quantity for one item in one warehouse. ERPNext keys a reorder rule by warehouse, so both are required.",
+   "fieldname": "allow_set_reorder_level",
+   "fieldtype": "Check",
+   "label": "Set Reorder Level"
   },
   {
    "description": "Items, Item Groups, Suppliers, Customers, Warehouses and prices — the records every other ERPNext document points at. None of these doctypes is submittable, so nothing here creates a draft: a master is live the moment it is created, and <b>disabled</b> is the nearest thing to holding one back.<br><br>The word <b>company</b> means three different things across these tools, and each one reports which it applied: a Warehouse really is company-scoped, an Item is scoped only through its per-company default row, and a Supplier or Customer is site-wide and has no company column at all.",

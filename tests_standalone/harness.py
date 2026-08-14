@@ -1008,6 +1008,12 @@ ERPNEXT_SCHEMA = {
 		"standard_rate",
 		"item_defaults",
 		"reorder_levels",
+		# v0.69.0. The per-item UOM conversion table. Present because
+		# `stock_inventory._conversion` REFUSES a UOM it cannot convert, and a
+		# fixture with no table at all could only ever exercise the refusal —
+		# the branch that actually converts (3 Case → 36 Lb) needs a site that
+		# has the row, and the one that refuses needs an item that has not.
+		"uoms",
 	],
 	"Item Default": [
 		"name",
@@ -1037,6 +1043,96 @@ ERPNEXT_SCHEMA = {
 	],
 	"Item Group": ["name", "item_group_name", "parent_item_group", "is_group"],
 	"UOM": ["name", "enabled"],
+	"UOM Conversion Detail": [
+		"name",
+		"parent",
+		"parenttype",
+		"parentfield",
+		"idx",
+		"uom",
+		"conversion_factor",
+	],
+	# ── v0.69.0: stock ──────────────────────────────────────────────────────
+	#
+	# The three doctypes that answer three different questions, and are easy to
+	# confuse — see `tools/stock_inventory.py`'s module docstring. Stock Entry is
+	# the instruction, Stock Ledger Entry is the history, Bin is the balance.
+	# All three are registered permanently: nothing in this suite depends on any
+	# of them being ABSENT, and the "that DocType is not installed" degradation
+	# already has Purchase Invoice to prove it against.
+	"Stock Entry": [
+		"name",
+		"company",
+		"posting_date",
+		"posting_time",
+		"stock_entry_type",
+		"purpose",
+		"docstatus",
+		"remarks",
+		"total_amount",
+		"total_outgoing_value",
+		"total_incoming_value",
+		"work_order",
+		"purchase_order",
+		"purchase_receipt_no",
+		"delivery_note_no",
+		"sales_invoice_no",
+		"outgoing_stock_entry",
+		"items",
+		"owner",
+	],
+	"Stock Entry Detail": [
+		"name",
+		"idx",
+		"item_code",
+		"item_name",
+		"qty",
+		"uom",
+		"stock_uom",
+		"conversion_factor",
+		"transfer_qty",
+		"s_warehouse",
+		"t_warehouse",
+		"batch_no",
+		"basic_rate",
+		"basic_amount",
+		"parent",
+		"parenttype",
+		"parentfield",
+	],
+	"Stock Entry Type": ["name", "purpose"],
+	"Stock Ledger Entry": [
+		"name",
+		"item_code",
+		"warehouse",
+		"posting_date",
+		"posting_time",
+		"actual_qty",
+		"qty_after_transaction",
+		"valuation_rate",
+		"stock_value",
+		"stock_value_difference",
+		"voucher_type",
+		"voucher_no",
+		"company",
+		"is_cancelled",
+	],
+	# NOTE what Bin does NOT have: a `company` column. It is scoped only through
+	# its warehouse, which is why every company-filtered balance read in
+	# `stock_inventory.py` resolves the company's warehouses first — a filter
+	# this fixture would silently accept if it invented the column.
+	"Bin": [
+		"name",
+		"item_code",
+		"warehouse",
+		"actual_qty",
+		"valuation_rate",
+		"stock_value",
+		"reserved_qty",
+		"ordered_qty",
+		"projected_qty",
+		"stock_uom",
+	],
 	# v0.66.0. The masters `tools/masters.py` creates and reads. `Customer` and
 	# `Supplier` carry no `company` column here, deliberately and faithfully:
 	# stock ERPNext puts none on either, and the tools' promise is that a company
@@ -1480,6 +1576,25 @@ ERPNEXT_FIELD_LINKS = {
 	("Purchase Invoice Item", "expense_account"): ("Link", "Account"),
 	("Purchase Invoice Item", "warehouse"): ("Link", "Warehouse"),
 	("Purchase Invoice Item", "cost_center"): ("Link", "Cost Center"),
+	# ── v0.69.0: stock ───────────────────────────────────────────────────────
+	# Same reasoning again, and one link that earns its place twice over:
+	# `Stock Entry Detail.s_warehouse` and `.t_warehouse` are what make "the
+	# tool put the warehouse in the wrong column" a failure the double can see.
+	("Stock Entry", "company"): ("Link", "Company"),
+	("Stock Entry", "stock_entry_type"): ("Link", "Stock Entry Type"),
+	("Stock Entry", "purchase_order"): ("Link", "Purchase Order"),
+	("Stock Entry", "purchase_receipt_no"): ("Link", "Purchase Receipt"),
+	("Stock Entry", "outgoing_stock_entry"): ("Link", "Stock Entry"),
+	("Stock Entry Detail", "item_code"): ("Link", "Item"),
+	("Stock Entry Detail", "s_warehouse"): ("Link", "Warehouse"),
+	("Stock Entry Detail", "t_warehouse"): ("Link", "Warehouse"),
+	("Stock Entry Detail", "uom"): ("Link", "UOM"),
+	("Stock Entry Detail", "stock_uom"): ("Link", "UOM"),
+	("UOM Conversion Detail", "uom"): ("Link", "UOM"),
+	("Bin", "item_code"): ("Link", "Item"),
+	("Bin", "warehouse"): ("Link", "Warehouse"),
+	("Stock Ledger Entry", "item_code"): ("Link", "Item"),
+	("Stock Ledger Entry", "warehouse"): ("Link", "Warehouse"),
 }
 
 
@@ -1832,6 +1947,11 @@ CHILD_TABLES = {
 	("Purchase Order", "items"): "Purchase Order Item",
 	("Purchase Receipt", "items"): "Purchase Receipt Item",
 	("Purchase Invoice", "items"): "Purchase Invoice Item",
+	# v0.69.0. Stock Entry's one line table, and the Item's UOM conversions —
+	# the table `stock_inventory._conversion` reads before it will accept a qty
+	# in anything other than the item's own stock UOM.
+	("Stock Entry", "items"): "Stock Entry Detail",
+	("Item", "uoms"): "UOM Conversion Detail",
 	("Certification", "renewals"): "Certification Renewal",
 	("Audit Event", "corrective_actions_required"): "Audit Corrective Action",
 	("Dashboard", "charts"): "Dashboard Chart Link",
@@ -2986,6 +3106,126 @@ def post_payment_entry_gl(name: str) -> list[dict]:
 	return rows
 
 
+class StockEntryDocument(Document):
+	"""Stock Entry, in the respects `tools/stock_inventory.py` reads back.
+
+	Real ERPNext's `StockEntry.validate` fills `transfer_qty` from
+	`qty * conversion_factor`, `basic_amount` from `transfer_qty * basic_rate`,
+	and the three totals from the lines. Modelled here for the reason
+	`PurchaseOrderDocument` models `grand_total`: `create_stock_entry` reports
+	`total_qty` and `total_value` straight off the document `insert()` returned,
+	and a double that left them at whatever the caller happened to pass would
+	make both numbers a fiction the tool never computed.
+
+	`total_incoming_value` and `total_outgoing_value` are split by which
+	warehouse column a line carries, which is the whole point of the split: a
+	Material Transfer is both, and nets to zero.
+	"""
+
+	def validate(self):
+		incoming = 0.0
+		outgoing = 0.0
+		for row in self.get("items") or []:
+			qty = float(row.get("qty") or 0)
+			factor = float(row.get("conversion_factor") or 1) or 1.0
+			row["transfer_qty"] = round(qty * factor, 6)
+			rate = float(row.get("basic_rate") or 0)
+			row["basic_amount"] = round(row["transfer_qty"] * rate, 2)
+			if row.get("t_warehouse"):
+				incoming += row["basic_amount"]
+			if row.get("s_warehouse"):
+				outgoing += row["basic_amount"]
+		self.total_incoming_value = round(incoming, 2)
+		self.total_outgoing_value = round(outgoing, 2)
+		# ERPNext's `total_amount` is the value of the movement, which for a
+		# transfer is one side of it rather than both added together.
+		self.total_amount = round(max(incoming, outgoing), 2)
+
+	def before_submit(self):
+		self.validate()
+
+
+def post_stock_entry_ledger(name: str) -> list[dict]:
+	"""Write the Stock Ledger Entry rows and Bin updates a real submit would.
+
+	One row per line per warehouse column — negative out of `s_warehouse`,
+	positive into `t_warehouse`, so a Material Transfer produces two — with the
+	Bin's `actual_qty` moved by the same amount and `qty_after_transaction`
+	recorded as the balance that resulted. An incoming line carrying a
+	`basic_rate` sets the Bin's valuation rate; this double does NOT model
+	ERPNext's moving-average revaluation, because nothing in this app computes a
+	valuation and a fake average would only invite a test to assert one.
+
+	NOT wired into `StockEntryDocument.on_submit`, for the reason
+	`post_purchase_invoice_gl` is not wired into its own document's: a test that
+	only cares whether `submit_stock_entry` moved the docstatus should not pay
+	for ledger rows nobody asked for. A test about balances calls this.
+
+	Creating the Bin on first touch is deliberate and load-bearing: ERPNext does
+	exactly that, and "no Bin row" versus "Bin row saying 0" is a distinction
+	`get_stock_balance` and `list_reorder_alerts` treat differently on purpose.
+	"""
+	entry = STORE.get_raw("Stock Entry", name)
+	if entry is None:
+		raise DoesNotExistError(f"Stock Entry {name} not found")
+	if int(entry.get("docstatus") or 0) != 1:
+		return []
+
+	bins = STORE.tables.setdefault("Bin", {})
+	ledger = STORE.tables.setdefault("Stock Ledger Entry", {})
+	rows = []
+
+	def _move(item_code, warehouse, qty_change, rate):
+		key = f"{item_code}-{warehouse}"
+		row = bins.get(key)
+		if row is None:
+			row = {
+				"name": key,
+				"item_code": item_code,
+				"warehouse": warehouse,
+				"actual_qty": 0.0,
+				"valuation_rate": 0.0,
+				"stock_value": 0.0,
+				"docstatus": 0,
+				"creation": _now(),
+			}
+			bins[key] = row
+		row["actual_qty"] = round(float(row.get("actual_qty") or 0) + qty_change, 6)
+		if qty_change > 0 and rate:
+			row["valuation_rate"] = rate
+		row["stock_value"] = round(row["actual_qty"] * float(row.get("valuation_rate") or 0), 2)
+
+		sle = {
+			"name": f"SLE-{name}-{len(rows) + 1}",
+			"item_code": item_code,
+			"warehouse": warehouse,
+			"posting_date": entry.get("posting_date"),
+			"posting_time": entry.get("posting_time") or "00:00:00",
+			"actual_qty": qty_change,
+			"qty_after_transaction": row["actual_qty"],
+			"valuation_rate": float(row.get("valuation_rate") or 0),
+			"stock_value": row["stock_value"],
+			"stock_value_difference": round(qty_change * float(row.get("valuation_rate") or 0), 2),
+			"voucher_type": "Stock Entry",
+			"voucher_no": name,
+			"company": entry.get("company"),
+			"is_cancelled": 0,
+			"docstatus": 1,
+			"creation": _now(),
+		}
+		ledger[sle["name"]] = sle
+		rows.append(sle)
+
+	for line in entry.get("items") or []:
+		qty = float(line.get("transfer_qty") or line.get("qty") or 0)
+		rate = float(line.get("basic_rate") or 0)
+		if line.get("s_warehouse"):
+			_move(line.get("item_code"), line.get("s_warehouse"), -qty, rate)
+		if line.get("t_warehouse"):
+			_move(line.get("item_code"), line.get("t_warehouse"), qty, rate)
+	return rows
+
+
 #: Doctypes whose stub behaviour differs from a plain Document.
 STUB_CONTROLLERS = {
 	"File": FileDocument,
@@ -3000,6 +3240,7 @@ STUB_CONTROLLERS = {
 	"Purchase Invoice": PurchaseInvoiceDocument,
 	"Payment Entry": PaymentEntryDocument,
 	"Journal Entry": JournalEntryDocument,
+	"Stock Entry": StockEntryDocument,
 }
 
 
@@ -3624,6 +3865,22 @@ CHILD_TABLE_SOURCES = {
 	# entry every change would report zero acknowledgments and every checker
 	# would look permanently pending, however many times they acknowledged.
 	"Fill Threshold Acknowledgment": (("Fill Threshold Change Log", "acknowledgments"),),
+	# v0.69.0. All three are read directly, parent unloaded, by
+	# `tools/stock_inventory.py`:
+	#
+	#   * `Item Reorder` — `_reorder_rules` asks "every rule on this site" before
+	#     it knows which items have one, which is the whole shape of a reorder
+	#     report. Without this entry `list_reorder_alerts` would find no rules
+	#     and answer "nothing to buy" on a site with a shed full of them.
+	#   * `UOM Conversion Detail` — `_conversion` looks up one item's factor to
+	#     decide whether to accept a qty or refuse it, and a lookup that always
+	#     came back empty would make the refusal unconditional.
+	#   * `Stock Entry Detail` — `list_stock_entries` filters on warehouse and
+	#     item by finding the LINES that match and then their parents, because
+	#     neither is a column on the Stock Entry header.
+	"Item Reorder": (("Item", "reorder_levels"),),
+	"UOM Conversion Detail": (("Item", "uoms"),),
+	"Stock Entry Detail": (("Stock Entry", "items"),),
 }
 
 

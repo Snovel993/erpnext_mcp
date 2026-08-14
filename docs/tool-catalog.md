@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 477 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 486 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 223 read tools are **on** by default and can be switched off individually. A
+All 229 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -1263,6 +1263,192 @@ Invoice's `outstanding_amount`, exactly as ERPNext's own controller does.
 **Arguments:** `name` (required).
 
 **Returns** `name`, `docstatus` (1), `gl_entries_created`, `references[]`.
+
+## Stock & Inventory (v0.69.0)
+
+Sprint 4 of the Gap Closure Plan. `list_warehouses` and `get_item` (v0.66.0)
+can name a shed and a chemical; these are the tools that say how much of the
+chemical is in the shed, how it got there, and when to buy more.
+
+**Three doctypes, three questions, and they are easy to confuse.** **Stock
+Entry** is the *instruction* and until it is submitted it has moved nothing.
+**Stock Ledger Entry** is the *immutable history* — one row per item per
+warehouse per movement, written by ERPNext at submit. **Bin** is the *current
+balance*, which ERPNext maintains from that history. Nothing in this app writes
+a ledger row or a Bin; `submit_stock_entry` asks ERPNext's own controller to,
+and the read tools report what it did.
+
+**One `warehouse` argument, two columns.** `Stock Entry Detail` has
+`s_warehouse` (out of) and `t_warehouse` (into), and the entry type decides
+where a line's warehouse goes: **Material Receipt** → it is where the stock
+lands; **Material Issue** → where it leaves from; **Material Transfer** → the
+source, with `target_warehouse` required and different. A `target_warehouse` on
+a Receipt or an Issue is **refused rather than ignored** — the two readings of
+"I passed both" have opposite consequences.
+
+**A UOM this site cannot convert is a refusal.** `qty: 3, uom: "Case"` on an
+item stocked in Lb needs a conversion on the Item's own UOMs table. Defaulting
+the factor to 1 would post three pounds where thirty-six were meant, so an
+unconvertible UOM raises with the stock UOM named and nothing written.
+
+### `get_stock_entry`
+
+One Stock Entry in full: every line with its source and target warehouse, the
+quantity in both the entered and the stock UOM, its status, and where the
+movement came from.
+
+**Arguments:** `name` (required).
+
+**Returns** `entry_type`, `status`, `items[]`, `item_count`, `total_qty`,
+`total_value`, `source` (`{doctype, name, stored_on}` or null).
+
+### `list_stock_entries`
+
+The `warehouse` and `item_code` filters are applied against the **lines** —
+neither is a column on the Stock Entry header — so an empty result carries a
+`note` saying it is an empty match rather than an unfiltered list.
+
+**Arguments:** `company` (required), `entry_type`, `warehouse`, `item_code`,
+`from_date`, `to_date`, `limit`.
+
+**Returns** `entries[]` with `entry_type`, `status` and `docstatus_label`; plus
+`count`, `total_value`, `truncated`.
+
+### `get_stock_balance`
+
+On-hand quantity and value for one item, per warehouse, read from Bin.
+
+**Arguments:** `item_code` (required), `warehouse`, `company`.
+
+**Bin has no `company` column** — it is scoped only through its warehouse — so
+a `company` argument resolves that company's warehouses and filters on them.
+
+**Returns** `item_code`, `item_name`, `uom`, `balances[]` (`warehouse`,
+`company`, `qty`, `valuation_rate`, `stock_value`, `reserved_qty`,
+`projected_qty`), `warehouse_count`, `total_qty`, `total_value`.
+
+**AN ITEM WITH NO BIN ROW HAS NEVER MOVED,** which is not the same as counted
+and empty. ERPNext creates a Bin the first time an item touches a warehouse, so
+an empty `balances[]` comes with a `note` saying which of the two it found.
+
+**Example**
+
+```json
+{"name": "get_stock_balance",
+ "arguments": {"item_code": "SURROUND-WP", "company": "Example Trading Co"}}
+```
+
+```json
+{
+  "item_code": "SURROUND-WP", "item_name": "Surround WP", "uom": "Lb",
+  "balances": [
+    {"warehouse": "Shop - ETC", "company": "Example Trading Co",
+     "qty": 45.0, "valuation_rate": 2.5, "stock_value": 112.5},
+    {"warehouse": "Stores - ETC", "company": "Example Trading Co",
+     "qty": 80.0, "valuation_rate": 2.5, "stock_value": 200.0}
+  ],
+  "warehouse_count": 2, "total_qty": 125.0, "total_value": 312.5
+}
+```
+
+### `get_stock_ledger`
+
+Movement history, newest first. **This is the audit trail, not a balance** —
+call `get_stock_balance` for on-hand. Cancelled rows are excluded where the site
+marks them: a cancelled movement did not happen, and including it would double
+every total built off this list.
+
+**Arguments:** `item_code`, `warehouse`, `from_date`, `to_date`, `limit`.
+
+**Returns** `movements[]` (`posting_date`, `posting_time`, `item_code`,
+`warehouse`, `qty_change`, `balance_qty`, `valuation_rate`, `value_change`,
+`voucher_type`, `voucher_no`); plus `count`, `net_qty_change`, `truncated`.
+`net_qty_change` covers the rows returned, and says so when they were truncated.
+
+### `get_warehouse_summary`
+
+Everything on hand in one warehouse, with each item's reorder rule.
+
+**Arguments:** `warehouse` (required), `company`.
+
+**Returns** `items[]` (`item_code`, `item_name`, `uom`, `qty`,
+`valuation_rate`, `stock_value`, `reorder_level`, `reorder_qty`,
+`below_reorder`); plus `item_count`, `total_qty`, `total_value`,
+`below_reorder_count`, `truncated`. This tool takes no `limit`, so a warehouse
+holding more than 500 stocked items reports `truncated` and a `note` rather
+than presenting a partial valuation as a total.
+
+### `list_reorder_alerts`
+
+Every item currently below its reorder level, worst shortfall first.
+
+**Arguments:** `company`, `warehouse`.
+
+**Returns** `alerts[]` (`item_code`, `item_name`, `uom`, `warehouse`,
+`current_qty`, `reorder_level`, `reorder_qty`, `shortfall`, `stored_on`); plus
+`count`, `rules_checked`, `truncated`.
+
+**An item with a rule and no Bin row at all is reported at zero, not skipped.**
+That is the opposite of `get_stock_balance`'s treatment of the same absence, and
+deliberately so: there the question is "what is on hand" and "never moved" is
+the honest answer; here the question is "what must be bought", and never having
+arrived is the strongest possible yes. Disabled items are excluded — an alert to
+reorder something nobody may buy is a purchase order somebody has to cancel.
+
+### `create_stock_entry` — MUTATING, default off
+
+Create a DRAFT Stock Entry. `docstatus 0`; no Stock Ledger Entry is written and
+no balance moves. Cannot submit — that is `submit_stock_entry`, separately
+switched.
+
+**Arguments:** `entry_type` (required — `Material Receipt`, `Material Issue` or
+`Material Transfer`), `company` (required), `items[]` (required), `posting_date`,
+`source_doctype`, `source_name`, `remarks`.
+
+**Each item** needs `item_code`, `qty` (positive) and `warehouse`; optionally
+`uom`, `target_warehouse` (Material Transfer only, and required there),
+`batch_no` and `basic_rate`.
+
+**Source linkage** is stored in Stock Entry's own link field where ERPNext has
+one for that doctype (`purchase_order`, `work_order`, `outgoing_stock_entry`,
+`purchase_receipt_no`, `delivery_note_no`, `sales_invoice_no`, `pick_list`) and
+otherwise as a `[source: <doctype> <name>]` marker on the first line of
+`remarks` — which is how a farm's real sources (a Farm Task, a Scale Ticket)
+get recorded without a custom field. `source` on the result reports `stored_on`
+either way, so a caller knows whether the link is queryable or just legible.
+Pass both `source_doctype` and `source_name` or neither.
+
+**Returns** `name`, `entry_type`, `posting_date`, `status` (`"Draft"`),
+`items[]`, `item_count`, `total_qty` (in the stock UOM), `total_value`,
+`source`, `next_step`.
+
+### `submit_stock_entry` — MUTATING, default off
+
+`docstatus 0 → 1`. **This is the call that moves the stock**: ERPNext writes the
+Stock Ledger Entries and updates every affected Bin, and undoing it is a
+cancellation somebody has to explain, not an edit. Cannot create the entry it
+submits.
+
+**Arguments:** `name` (required).
+
+**Returns** `name`, `status` (`"Submitted"`), `docstatus` (1), `entry_type`,
+`total_qty`, `total_value`.
+
+### `set_reorder_level` — MUTATING, default off
+
+**A reorder rule belongs to a warehouse** — ERPNext stores it on an `Item
+Reorder` row keyed by one, and "reorder at 50" with no shed named is not a thing
+the doctype can hold — so both are required. Item is not submittable: the rule is
+live the moment it is written. The write goes through the same
+`masters._set_reorder` that `update_item` uses, so there is one answer to where a
+reorder rule lives on a given ERPNext vintage.
+
+**Arguments:** `item_code`, `warehouse`, `reorder_level`, `reorder_qty` (all
+required). `reorder_qty` must be positive — ordering nothing is what leaving the
+rule unset already does.
+
+**Returns** `item_code`, `warehouse`, `reorder_level`, `reorder_qty`, `created`,
+`stored_on`.
 
 ## Receipt Enhancement & Owner Draw (v0.68.0)
 

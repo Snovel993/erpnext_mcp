@@ -3,6 +3,61 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## Unreleased
+
+**Sprint 4 of the Gap Closure Plan: stock and inventory.** v0.66.0's master
+data could name a shed and a chemical; nothing until now could say how much of
+the chemical is in the shed, how it got there, or when to buy more. Nine tools —
+six reads, three writes — over ERPNext's own Stock Entry, Stock Ledger Entry,
+Bin and Item Reorder. Nothing here computes a valuation, writes a ledger row or
+updates a balance: ERPNext's controllers do all three at submit, exactly as they
+would for a human in the Desk.
+
+- **Stock Entry.** `create_stock_entry` (MUTATING, default off) writes a DRAFT
+  only — no ledger row, no balance moved — for a `Material Receipt`,
+  `Material Issue` or `Material Transfer`. `submit_stock_entry` (MUTATING,
+  default off) is the separately-switched tool that actually moves the stock,
+  the same split `create_journal_entry` / `submit_journal_entry` established
+  and `purchasing.py` followed. `get_stock_entry` and `list_stock_entries` read
+  them back; the warehouse and item filters on the list are applied against the
+  **lines**, since neither is a column on the header, and an empty result says
+  it is an empty match rather than an unfiltered list.
+- **One `warehouse` argument, two columns, and the entry type decides which.**
+  On a Receipt it is where stock lands, on an Issue where it leaves from, on a
+  Transfer it is the source and `target_warehouse` is required and must differ.
+  A `target_warehouse` on a Receipt or an Issue is **refused rather than
+  ignored** — the two readings of "I passed both" have opposite consequences,
+  and guessing between them is how stock lands in the wrong shed.
+- **A UOM this site cannot convert is a refusal, not a guess.** `qty: 3,
+  uom: "Case"` on an item stocked in Lb is resolved against the Item's own UOMs
+  table; with no conversion there the call is refused with the stock UOM named
+  and nothing written. Defaulting the factor to 1 would post three pounds where
+  thirty-six were meant.
+- **`get_stock_balance`** (read) and **`get_warehouse_summary`** (read) read
+  Bin, the balance ERPNext maintains. Bin carries no `company` column — it is
+  scoped only through its warehouse — so a company argument resolves that
+  company's warehouses and filters on them. An item with **no Bin row** has
+  never moved there, which is reported as such rather than as a counted zero.
+- **`get_stock_ledger`** (read) reads Stock Ledger Entry: one row per movement
+  with the `balance_qty` it produced and the voucher that caused it. Cancelled
+  rows are excluded — a cancelled movement did not happen, and including it
+  would double every total built off the list.
+- **`set_reorder_level`** (MUTATING, default off) and **`list_reorder_alerts`**
+  (read). A reorder rule belongs to a warehouse, so both are required; the write
+  goes through the same `masters._set_reorder` `update_item` uses, so there is
+  one answer to where a rule lives on a given ERPNext vintage. An item with a
+  rule and **no Bin row at all is reported at zero rather than skipped** —
+  deliberately the opposite of `get_stock_balance`, because never having arrived
+  is the strongest possible reason to buy. Disabled items are excluded.
+- **Source linkage without a custom field.** `source_doctype` / `source_name`
+  writes Stock Entry's own link field where ERPNext has one and otherwise a
+  `[source: <doctype> <name>]` marker on the first line of `remarks`, which is
+  how a farm's real sources — a Farm Task, a Scale Ticket — get recorded. The
+  result reports `stored_on` either way, so a caller knows whether the link is
+  queryable or just legible.
+- **All three mutating tools default off; all six read tools default on**, in a
+  new "Stock & Inventory" settings section.
+
 ## 0.68.0 — 2026-08-13
 
 **Sprint 3 of the Gap Closure Plan, part four: the alert that told a worker

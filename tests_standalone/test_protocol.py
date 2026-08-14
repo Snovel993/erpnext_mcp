@@ -914,10 +914,25 @@ class Catalogue(SeededTestCase):
 		had a bundle gets a manifest built from its own fields that SAYS so,
 		rather than one claiming labels somebody typed came out of a training
 		run.
+
+		v0.69.0 adds NINE over stock and inventory — six reads and three writes
+		— Sprint 4 of the Gap Closure Plan, and the answer to a question
+		v0.66.0's masters could only pose: `list_warehouses` and `get_item` can
+		name a shed and a chemical, and nothing until now could say how much of
+		the chemical is in the shed. `create_stock_entry` /
+		`submit_stock_entry` / `get_stock_entry` / `list_stock_entries` are the
+		movement, split draft-from-post the same way purchasing is;
+		`get_stock_balance` and `get_warehouse_summary` read Bin, the balance
+		ERPNext maintains; `get_stock_ledger` reads Stock Ledger Entry, the
+		history that produced it; and `set_reorder_level` /
+		`list_reorder_alerts` are the rule that turns a balance into a
+		purchase — with an item that has a rule and no Bin row at all reported
+		at zero rather than skipped, because never having arrived is the
+		strongest possible reason to buy.
 		"""
-		self.assertEqual(len(registry.TOOLS), 477)
-		self.assertEqual(len(registry.READ_TOOLS), 223)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 254)
+		self.assertEqual(len(registry.TOOLS), 486)
+		self.assertEqual(len(registry.READ_TOOLS), 229)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 257)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

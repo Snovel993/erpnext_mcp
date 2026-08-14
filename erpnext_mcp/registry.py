@@ -100,6 +100,7 @@ from .tools import (
 	signers,
 	signing_evidence,
 	state_tax,
+	stock_inventory,
 	tasktemplates,
 	tax,
 	taxforms,
@@ -3049,6 +3050,209 @@ TOOLS = {
 		},
 		required=("company",),
 		title="AP ageing",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	# ── stock & inventory (v0.69.0) ─────────────────────────────────────────
+	# Sprint 4 of the Gap Closure Plan. `list_warehouses` and `get_item`
+	# (v0.66.0) can name a shed and a chemical; these are the tools that say how
+	# much of the chemical is in the shed, how it got there, and when to buy
+	# more. See `tools/stock_inventory.py`'s module docstring for which of Stock
+	# Entry / Stock Ledger Entry / Bin answers which question, and for why one
+	# `warehouse` argument lands in a different column per entry type.
+	"create_stock_entry": _tool(
+		stock_inventory.create_stock_entry,
+		"MUTATING (default OFF). Create a DRAFT Stock Entry — docstatus 0, no "
+		"Stock Ledger Entry written and no balance moved. entry_type decides "
+		"what each line's warehouse means: on a Material Receipt it is where "
+		"stock LANDS, on a Material Issue where it LEAVES FROM, and on a "
+		"Material Transfer it is the source and target_warehouse (required) is "
+		"the destination. Cannot submit; moving the stock requires the separate "
+		"submit_stock_entry tool.",
+		{
+			"entry_type": _field(
+				_STRING,
+				"'Material Receipt' (stock arriving from outside), 'Material Issue' "
+				"(consumed or written off) or 'Material Transfer' (between two warehouses).",
+			),
+			"company": _COMPANY,
+			"posting_date": _field(_STRING, "Movement date, YYYY-MM-DD. Defaults to today."),
+			"items": {
+				"type": "array",
+				"minItems": 1,
+				"description": "The movement's lines. Each needs item_code, qty and warehouse.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"item_code": _field(_STRING, "Item docname or item_name."),
+						"qty": _field(
+							_NUMBER,
+							"Quantity moved, positive. Never negative — "
+							"stock leaving a warehouse is a Material Issue.",
+						),
+						"uom": _field(
+							_STRING,
+							"Unit of measure. Defaults to the item's stock UOM; any other UOM "
+							"must have a conversion on the Item or the call is refused.",
+						),
+						"warehouse": _field(
+							_STRING,
+							"Where the stock lands (Material Receipt) or leaves from "
+							"(Material Issue, Material Transfer).",
+						),
+						"target_warehouse": _field(
+							_STRING,
+							"Material Transfer only, and required there: where the stock lands. "
+							"Refused on a Receipt or an Issue.",
+						),
+						"batch_no": _field(_STRING, "Batch docname, for a batched item."),
+						"basic_rate": _field(
+							_NUMBER,
+							"Valuation rate per stock unit. Usually given on a Material Receipt; "
+							"ERPNext values an Issue or a Transfer from existing valuation.",
+						),
+					},
+					"required": ["item_code", "qty", "warehouse"],
+					"additionalProperties": False,
+				},
+			},
+			"source_doctype": _field(
+				_STRING,
+				"What this movement came from, e.g. 'Purchase Order', 'Work Order' or "
+				"this app's own 'Farm Task'. Stored in Stock Entry's own link field where "
+				"ERPNext has one, otherwise as a marker in remarks. Needs source_name too.",
+			),
+			"source_name": _field(_STRING, "Docname of the source record. Needs source_doctype too."),
+			"remarks": _field(_STRING, "Free text explaining the movement."),
+		},
+		required=("entry_type", "company", "items"),
+		mutating=True,
+		title="Create draft stock entry",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"submit_stock_entry": _tool(
+		stock_inventory.submit_stock_entry,
+		"MUTATING (default OFF). Submit a DRAFT Stock Entry — docstatus 0 → 1. "
+		"THIS IS THE CALL THAT MOVES THE STOCK: ERPNext writes the Stock Ledger "
+		"Entries and updates every affected Bin, and undoing it is a "
+		"cancellation rather than an edit. Cannot create the entry it submits.",
+		{"name": _field(_STRING, "Stock Entry docname.")},
+		required=("name",),
+		mutating=True,
+		title="Submit stock entry",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_stock_entry": _tool(
+		stock_inventory.get_stock_entry,
+		"One Stock Entry in full: every line with its source and target "
+		"warehouse, the quantity in both the entered and the stock UOM, its "
+		"status, and where the movement came from. Read-only.",
+		{"name": _field(_STRING, "Stock Entry docname.")},
+		required=("name",),
+		title="Get stock entry",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_stock_entries": _tool(
+		stock_inventory.list_stock_entries,
+		"Stock Entry headers by type, date range, warehouse and item, newest "
+		"first. The warehouse and item filters are applied against the LINES "
+		"(neither is a column on the header), so an empty result means no line "
+		"matched rather than no entry exists. Read-only.",
+		{
+			"company": _COMPANY,
+			"entry_type": _field(_STRING, "'Material Receipt', 'Material Issue' or 'Material Transfer'."),
+			"warehouse": _field(_STRING, "Only entries with a line into or out of this warehouse."),
+			"item_code": _field(_STRING, "Only entries with a line for this item."),
+			"from_date": _field(_STRING, "Earliest posting_date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest posting_date, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		required=("company",),
+		title="List stock entries",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_stock_balance": _tool(
+		stock_inventory.get_stock_balance,
+		"On-hand quantity and value for one item, per warehouse, read from Bin "
+		"— ERPNext's own maintained balance. An item with NO Bin row for the "
+		"requested scope has never moved there, which is reported as such "
+		"rather than as a counted zero. Read-only.",
+		{
+			"item_code": _field(_STRING, "Item docname or item_name."),
+			"warehouse": _field(_STRING, "One warehouse. Omit for every warehouse holding it."),
+			"company": _COMPANY,
+		},
+		required=("item_code",),
+		title="Get stock balance",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_stock_ledger": _tool(
+		stock_inventory.get_stock_ledger,
+		"Movement history from Stock Ledger Entry, newest first: one row per "
+		"movement with qty_change, the balance_qty that resulted, and the "
+		"voucher that caused it. Cancelled rows are excluded. This is the audit "
+		"trail, not a balance — call get_stock_balance for on-hand. Read-only.",
+		{
+			"item_code": _field(_STRING, "Item docname or item_name."),
+			"warehouse": _field(_STRING, "Warehouse docname."),
+			"from_date": _field(_STRING, "Earliest posting_date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest posting_date, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="Get stock ledger",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_warehouse_summary": _tool(
+		stock_inventory.get_warehouse_summary,
+		"Everything on hand in one warehouse: each item with its quantity, "
+		"valuation rate, stock value and reorder rule, plus a below_reorder "
+		"flag and the warehouse's totals. Read-only.",
+		{
+			"warehouse": _field(_STRING, "Warehouse docname."),
+			"company": _COMPANY,
+		},
+		required=("warehouse",),
+		title="Warehouse summary",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"set_reorder_level": _tool(
+		stock_inventory.set_reorder_level,
+		"MUTATING (default OFF). Set the reorder level and reorder quantity for "
+		"one item in one warehouse. A reorder rule belongs to a warehouse — "
+		"ERPNext stores it on an Item Reorder row keyed by one — so both are "
+		"required. Item is not submittable: the rule is live immediately.",
+		{
+			"item_code": _field(_STRING, "Item docname or item_name."),
+			"warehouse": _field(_STRING, "The warehouse this rule applies to."),
+			"reorder_level": _field(_NUMBER, "Buy more when the balance falls below this."),
+			"reorder_qty": _field(_NUMBER, "How much to buy when it does. Must be positive."),
+		},
+		required=("item_code", "warehouse", "reorder_level", "reorder_qty"),
+		mutating=True,
+		idempotent=True,
+		title="Set reorder level",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_reorder_alerts": _tool(
+		stock_inventory.list_reorder_alerts,
+		"Every item currently below its reorder level, worst shortfall first, "
+		"with current_qty, reorder_level, reorder_qty and shortfall. An item "
+		"with a rule and no Bin row at all is reported at zero rather than "
+		"skipped — never having arrived is the strongest possible reason to "
+		"buy. Disabled items are excluded. Read-only.",
+		{
+			"company": _COMPANY,
+			"warehouse": _field(_STRING, "Only rules against this warehouse."),
+		},
+		title="List reorder alerts",
 		available=_app_installed("erpnext"),
 		requires="the ERPNext app",
 	),
