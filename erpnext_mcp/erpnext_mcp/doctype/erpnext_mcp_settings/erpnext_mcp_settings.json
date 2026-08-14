@@ -593,7 +593,15 @@
   "allow_retire_asset",
   "allow_log_asset_state_change",
   "allow_bulk_create_assets",
-  "allow_universal_scan"
+  "allow_universal_scan",
+  "fill_pipeline_read_section",
+  "allow_get_fill_determination",
+  "allow_get_fill_thresholds",
+  "allow_list_fill_threshold_changes",
+  "allow_list_pending_threshold_acknowledgments",
+  "fill_pipeline_write_section",
+  "allow_update_fill_threshold",
+  "allow_acknowledge_threshold_update"
  ],
  "fields": [
   {
@@ -4452,6 +4460,58 @@
    "fieldname": "allow_universal_scan",
    "fieldtype": "Check",
    "label": "Universal Scan"
+  },
+  {
+   "fieldname": "fill_pipeline_read_section",
+   "fieldtype": "Section Break",
+   "label": "Container-Agnostic Fill Pipeline — Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. The fill determination for one Bucket Log Entry or every entry in one session: mask area, container area, computed fill %, threshold applied, pass/fail.",
+   "fieldname": "allow_get_fill_determination",
+   "fieldtype": "Check",
+   "label": "Get Fill Determination"
+  },
+  {
+   "default": "1",
+   "description": "READ. The current fill threshold band for one container type at one company.",
+   "fieldname": "allow_get_fill_thresholds",
+   "fieldtype": "Check",
+   "label": "Get Fill Thresholds"
+  },
+  {
+   "default": "1",
+   "description": "READ. The audit log of every fill-threshold change, with each row's acknowledgment count.",
+   "fieldname": "allow_list_fill_threshold_changes",
+   "fieldtype": "Check",
+   "label": "List Fill Threshold Changes"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which active Checkers have not yet acknowledged the current fill threshold for one container type.",
+   "fieldname": "allow_list_pending_threshold_acknowledgments",
+   "fieldtype": "Check",
+   "label": "List Pending Threshold Acknowledgments"
+  },
+  {
+   "fieldname": "fill_pipeline_write_section",
+   "fieldtype": "Section Break",
+   "label": "Container-Agnostic Fill Pipeline — Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Set the fill-percentage band for one container type at one company. Requires the Foreman role (or above) on top of this switch.",
+   "fieldname": "allow_update_fill_threshold",
+   "fieldtype": "Check",
+   "label": "Update Fill Threshold"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. A checker acknowledges the current fill threshold for one container type. Idempotent.",
+   "fieldname": "allow_acknowledge_threshold_update",
+   "fieldtype": "Check",
+   "label": "Acknowledge Threshold Update"
   }
  ],
  "index_web_pages_for_search": 0,

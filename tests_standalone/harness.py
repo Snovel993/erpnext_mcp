@@ -1244,6 +1244,12 @@ APP_DOCTYPES = {
 	"Settlement Statement": "settlement_statement",
 	"Settlement Line Item": "settlement_line_item",
 	"Settlement Deduction": "settlement_deduction",
+	# v0.68.0. Container-Agnostic Fill Pipeline: the current threshold per
+	# (company, container_type), the append-only log of changes to it, and the
+	# per-checker acknowledgment child table on each change.
+	"Container Fill Threshold": "container_fill_threshold",
+	"Fill Threshold Change Log": "fill_threshold_change_log",
+	"Fill Threshold Acknowledgment": "fill_threshold_acknowledgment",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -1678,6 +1684,7 @@ CHILD_TABLES = {
 	("Workspace", "links"): "Workspace Link",
 	("Workspace", "number_cards"): "Workspace Number Card",
 	("Workspace", "charts"): "Workspace Chart",
+	("Fill Threshold Change Log", "acknowledgments"): "Fill Threshold Acknowledgment",
 	("Farm Task Assignment", "evidence_files"): "Farm Task Evidence",
 	("Housing Inspection", "photos"): "Farm Task Evidence",
 	("Detector Test", "photos"): "Farm Task Evidence",
@@ -3181,6 +3188,13 @@ CHILD_TABLE_SOURCES = {
 	# Without this entry the company filter on `list_items` would match nothing
 	# and the tool would report an empty catalogue as an answer.
 	"Item Default": (("Item", "item_defaults"),),
+	# v0.68.0. `tools/fill_pipeline.py` reads this child doctype directly with a
+	# `parenttype`/`parent` filter — once to count acknowledgments per change for
+	# list_fill_threshold_changes, once to know who has already acknowledged the
+	# CURRENT version for list_pending_threshold_acknowledgments. Without this
+	# entry every change would report zero acknowledgments and every checker
+	# would look permanently pending, however many times they acknowledged.
+	"Fill Threshold Acknowledgment": (("Fill Threshold Change Log", "acknowledgments"),),
 }
 
 

@@ -864,10 +864,19 @@ class Catalogue(SeededTestCase):
 		status, so a Section 1 that was filed with a blank date of birth could
 		not be given one afterwards on any status, and the form still read
 		Complete.
+
+		v0.68.0 adds SIX — four reads and two writes — the Container-Agnostic
+		Fill Pipeline: `get_fill_determination` explains one capture's fill
+		percentage against its threshold, `get_fill_thresholds` and
+		`update_fill_threshold` are the band a foreman controls per container
+		type, and `list_fill_threshold_changes` /
+		`acknowledge_threshold_update` / `list_pending_threshold_acknowledgments`
+		are the loop that makes a threshold change something a checker in the
+		field is known to have seen.
 		"""
-		self.assertEqual(len(registry.TOOLS), 443)
-		self.assertEqual(len(registry.READ_TOOLS), 204)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 239)
+		self.assertEqual(len(registry.TOOLS), 449)
+		self.assertEqual(len(registry.READ_TOOLS), 208)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 241)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

@@ -299,6 +299,22 @@ class TheRulesFindTheEmptyBoxes(SignatureTestCase):
 		self.sweep()
 		self.assertNotIn("w4_signature_missing", self.raised())
 
+	# ── v0.68.0: {{current_year}} in w4_tax_year_outdated's scope filter ─────
+	def test_a_prior_tax_year_active_w4_raises_the_outdated_informational_alert(self):
+		self.a_w4()  # tax_year 2026, matching TODAY's calendar year
+		self.a_w4(name="W4-2025-0002", tax_year=2025)
+		self.sweep()
+		rows = [
+			row for row in self.alerts_of("w4_tax_year_outdated")
+			if not frappe.utils.cint(row.get("dismissed"))
+		]
+		self.assertEqual([row["source_docname"] for row in rows], ["W4-2025-0002"])
+
+	def test_a_current_tax_year_w4_does_not_raise_the_outdated_alert(self):
+		self.a_w4()
+		self.sweep()
+		self.assertNotIn("w4_tax_year_outdated", self.raised())
+
 
 # ── 2. the tasks ────────────────────────────────────────────────────────────
 class TheAlertsBecomeWork(SignatureTestCase):

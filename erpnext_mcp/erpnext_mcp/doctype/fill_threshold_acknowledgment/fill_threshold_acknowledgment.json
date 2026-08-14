@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-13 09:00:00.000000",
+ "description": "One checker's acknowledgment of one Fill Threshold Change Log row — a child table on the change rather than a doctype of its own, because an acknowledgment has no existence apart from the change it acknowledges. acknowledge_threshold_update appends a row here; it never edits or removes one, so 'did Ada acknowledge version 3' is answered the same way a year later as the day it happened.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "acknowledged_at"
+ ],
+ "fields": [
+  {
+   "description": "The checker acknowledging the threshold in force. list_pending_threshold_acknowledgments reads this column to know who already has.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "description": "Snapshotted at acknowledgment time, so the row still reads correctly if the Employee is later renamed or leaves.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name"
+  },
+  {
+   "fieldname": "acknowledged_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Acknowledged At",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-13 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Fill Threshold Acknowledgment",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 443 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 449 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 204 read tools are **on** by default and can be switched off individually. A
+All 208 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -10884,3 +10884,101 @@ nobody asked for is this app deciding something that is not its to decide, and
 `pypdf` ends with a corrected record and a stale page, which is a smaller
 problem than a correction thrown away because the redraw failed. `pdf` in the
 result says which of the three happened, and always has the same shape.
+
+---
+
+# v0.68.0 — Container-Agnostic Fill Pipeline
+
+## What this connects
+
+`sync_bucket_entries` has taken a segmentation model's `coverage_percent` since
+v0.44.0, and as of this release its raw `mask_area_px` / `container_area_px`
+too — the pixel counts the model actually measured. This release is where that
+number meets a threshold a foreman controls, for a container type that can be
+anything a device and a foreman have agreed to call one: `cherry_bucket` and
+`pear_bin` are examples, never a hardcoded vocabulary.
+
+**Not pay.** The binary gate — Accepted is one bucket, Rejected is none,
+`coverage_percent` never scales it — is unchanged. A fill determination is
+quality-control information a foreman or checker reads; nothing here writes to
+`verdict` or to anything payroll reads.
+
+## `get_fill_determination`
+
+**READ (default ON).** Pass `entry` (docname or `entry_uuid`) for one capture,
+or `session` (docname or `session_uuid`) for every capture in it.
+
+```json
+{"entry": "OML-BLE-2026-0042"}
+```
+
+```json
+{"entry": "OML-BLE-2026-0042", "entry_uuid": "…", "container_type": "cherry_bucket",
+ "mask_area_px": 41200.0, "container_area_px": 48000.0,
+ "computed_fill_percentage": 85.83, "stored_coverage_percent": 86.0,
+ "fill_percentage": 85.83,
+ "math_explanation": "41200 mask px ÷ 48000 container px × 100 = 85.83%",
+ "threshold_applied": {"container_type": "cherry_bucket", "lower_bound_pct": 85.0,
+                       "upper_bound_pct": null, "version": 2},
+ "result": "Pass",
+ "explanation": "85.83% is at or above the 85% lower bound (this container type has no upper bound)"}
+```
+
+**Computed from pixel areas when both are present, falling back to the stored
+`coverage_percent` otherwise.** An entry synced before this release, or from a
+device that only ever sent `coverage_percent`, still gets an answer — just
+without the pixel-area explanation. `result` is `Pass`, `Underfill`, `Overfill`
+or `Unknown` (no fill percentage available, or no threshold set yet for that
+container type).
+
+## `get_fill_thresholds`
+
+**READ (default ON).** Required: `container_type`. `company` is required on a
+multi-company site.
+
+```json
+{"configured": true, "company": "Orchard Meadow, LLC", "container_type": "pear_bin",
+ "lower_bound_pct": 80.0, "upper_bound_pct": 115.0, "version": 1,
+ "last_updated_by": "ana@example.test", "last_updated_at": "2026-08-12 09:00:00"}
+```
+
+A container type nobody has set a threshold for yet answers `configured: false`
+rather than a refusal — a fresh install has none, and that is a fact worth
+returning.
+
+## `update_fill_threshold` — MUTATING, default off
+
+Required: `container_type`, `company`, `lower_bound_pct`. Optional:
+`upper_bound_pct`, `reason`. **Foreman or above only — never Checker**, because
+this app has no Checker role and gating on an ordinary personnel role would let
+anybody holding it move the number a checker is asked to trust.
+
+**A full definition, not a patch.** Omitting `upper_bound_pct` clears any
+existing one, every call — which is how a container type that cannot overfill
+(a cherry bucket) stays that way: nobody ever sends an upper bound for one. A
+caller changing only the lower bound on a container type that HAS an upper
+bound must resend both.
+
+Bumps `version` and writes a Fill Threshold Change Log row recording
+who/when/old→new, which `list_fill_threshold_changes` reads and
+`acknowledge_threshold_update` attaches checker sign-off to.
+
+## `list_fill_threshold_changes`
+
+**READ (default ON).** Filters: `container_type`, `company`. Every change, who
+made it, old and new bounds, and `acknowledged_count` — how many checkers have
+signed off on that specific version so far.
+
+## `acknowledge_threshold_update` — MUTATING, default off
+
+Required: `employee`, `container_type`, `company`. A checker acknowledging the
+CURRENT threshold — records their Employee, a timestamp and the version
+acknowledged. **Idempotent**: acknowledging a version already acknowledged by
+the same employee changes nothing (`already_acknowledged: true`, no new row).
+
+## `list_pending_threshold_acknowledgments`
+
+**READ (default ON).** Required: `container_type`, `company`. The population is
+every **Active** Employee whose `designation` is `Checker` — the same
+Link-to-Designation field `Position Wage Default` already reads. Answers with
+`checkers_total`, `acknowledged_count` and `pending` (the ones still owed).

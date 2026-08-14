@@ -64,6 +64,7 @@ or disabled stays that way across every future migrate.
 from __future__ import annotations
 
 import json
+import re
 
 import frappe
 
@@ -225,6 +226,55 @@ _NULLARY_OPS = ("isnull", "isnotnull", "istrue", "isfalse")
 #: Ops whose `value` must be a list.
 _LIST_OPS = ("in", "nin")
 
+#: v0.68.0. Dynamic values a scope-filter `value` may name instead of a literal,
+#: matched WHOLE-STRING — `"{{current_year}}"` resolves, `"before {{current_year}}"`
+#: does not, because a filter value is compared against a column as a number or as
+#: exact text, never as a blended string. This is what `w4_tax_year_outdated` was
+#: missing: "current year" is not a fact a rule authored today can hardcode, since
+#: the rule is still meant to be true next January. Each resolver is called AT SWEEP
+#: TIME, not at authoring time, so the same rule reads a different year every
+#: calendar year without an edit.
+#:
+#: A CLOSED REGISTRY, same reasoning as `THRESHOLD_SOURCES` above: "resolve a
+#: template" is one sentence away from "evaluate an expression", and this app's
+#: rule already has `custom_python` for the case a fixed vocabulary does not reach.
+TEMPLATE_VARIABLES = {
+	"current_year": lambda: frappe.utils.getdate().year,
+	"current_date": lambda: frappe.utils.today(),
+	"current_month": lambda: frappe.utils.getdate().month,
+}
+
+_TEMPLATE_RE = re.compile(r"^\{\{\s*(\w+)\s*\}\}$")
+
+
+def _is_template(value) -> bool:
+	return isinstance(value, str) and bool(_TEMPLATE_RE.match(value.strip()))
+
+
+def _template_name(value: str) -> str:
+	return _TEMPLATE_RE.match(value.strip()).group(1)
+
+
+def resolve_template(value):
+	"""A scope-filter `value`, with any `{{...}}` template resolved to its current
+	value. Lists resolve element-wise, for `in`/`nin`; anything else that is not a
+	templated string passes through unchanged.
+
+	Called at EVALUATION time (`_passes`), not at parse time — `parse_filters`
+	validates the template name is one this app knows but leaves the string alone,
+	because "unresolved" is what makes the value re-evaluate on every sweep rather
+	than freeze at whatever year the rule happened to be saved in.
+	"""
+	if isinstance(value, list):
+		return [resolve_template(entry) for entry in value]
+	if not _is_template(value):
+		return value
+	name = _template_name(value)
+	resolver = TEMPLATE_VARIABLES.get(name)
+	if resolver is None:  # pragma: no cover - parse_filters refuses this first
+		return value
+	return resolver()
+
 #: Evidence-contract keys, shared with Inspection Template sections so a rule's
 #: producer task and a template section ask for evidence in one vocabulary.
 CONTRACT_KEYS = (
@@ -374,6 +424,19 @@ def parse_filters(raw, label: str = "scope_filters") -> list:
 			value = list(value)
 		elif op in _NULLARY_OPS:
 			value = None
+		for candidate in value if isinstance(value, list) else [value]:
+			if isinstance(candidate, str) and "{{" in candidate and not _is_template(candidate):
+				raise ValueError(
+					f"{label}[{index}].value {candidate!r} looks like a template but is not one — "
+					'a template must be the WHOLE value, like "{{current_year}}", not embedded in '
+					"other text."
+				)
+			if _is_template(candidate) and _template_name(candidate) not in TEMPLATE_VARIABLES:
+				raise ValueError(
+					f"{label}[{index}].value names template variable "
+					f"{_template_name(candidate)!r}, which is not one of: "
+					f"{', '.join(sorted(TEMPLATE_VARIABLES))}."
+				)
 		row = {"field": field, "op": op, "value": value}
 		if "default" in entry:
 			row["default"] = entry["default"]
@@ -919,6 +982,7 @@ def row_matches(row: dict, filters: list, present_fields: set | None = None) -> 
 
 
 def _passes(value, op: str, wanted) -> bool:
+	wanted = resolve_template(wanted)
 	if op == "isnull":
 		return not str(value or "").strip()
 	if op == "isnotnull":
@@ -1761,6 +1825,7 @@ def declarative_seed_specs() -> list:
 			"cadence_days": 0,
 			"scope_filters": [
 				{"field": "status", "op": "eq", "value": "Active"},
+				{"field": "tax_year", "op": "lt", "value": "{{current_year}}"},
 			],
 			"message_template": (
 				"{{ row.employee_name }}'s active W-4 is for tax year {{ row.tax_year }}, "

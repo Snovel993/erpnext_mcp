@@ -20,6 +20,11 @@
   "capture_col",
   "coverage_percent",
   "model_uuid",
+  "fill_section",
+  "container_type",
+  "mask_area_px",
+  "fill_col",
+  "container_area_px",
   "traceability_section",
   "crew_id",
   "block_id",
@@ -132,6 +137,35 @@
    "fieldname": "model_uuid",
    "fieldtype": "Data",
    "label": "Model UUID"
+  },
+  {
+   "fieldname": "fill_section",
+   "fieldtype": "Section Break",
+   "label": "Fill Detection"
+  },
+  {
+   "description": "v0.68.0. Which Container Fill Threshold row this entry is checked against — 'cherry_bucket', 'pear_bin', or any other value the device and the foreman have agreed on. Blank on an entry synced before this field existed, or from a device that does not send it: get_fill_determination reports coverage_percent alone in that case rather than refusing.",
+   "fieldname": "container_type",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Container Type",
+   "search_index": 1
+  },
+  {
+   "description": "v0.68.0. The segmentation model's pixel count for the product (fruit) mask — the numerator get_fill_determination divides by container_area_px to show its work. Diagnostic, same as coverage_percent: never an input to pay.",
+   "fieldname": "mask_area_px",
+   "fieldtype": "Float",
+   "label": "Mask Area (px)"
+  },
+  {
+   "fieldname": "fill_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "v0.68.0. The segmentation model's pixel count for the container's own boundary — the denominator. Zero or blank means get_fill_determination cannot recompute a percentage from areas and falls back to coverage_percent.",
+   "fieldname": "container_area_px",
+   "fieldtype": "Float",
+   "label": "Container Area (px)"
   },
   {
    "fieldname": "traceability_section",

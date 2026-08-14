@@ -62,6 +62,7 @@ from .tools import (
 	feeds,
 	fieldwork,
 	files,
+	fill_pipeline,
 	fiscal,
 	funnel,
 	governance,
@@ -14742,6 +14743,118 @@ TOOLS = {
 		title="Reconcile bucket entries against payroll",
 		available=_needs_doctype("Bucket Log Entry"),
 		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.68.0: Container-Agnostic Fill Pipeline ──────────────────────────
+	"get_fill_determination": _tool(
+		fill_pipeline.get_fill_determination,
+		"The fill determination for one Bucket Log Entry, or for every entry "
+		"in one Bucket Log Session: segmentation mask area (px), container "
+		"boundary area (px), the fill percentage computed from them — falling "
+		"back to the stored coverage_percent when a capture never sent pixel "
+		"areas — which Container Fill Threshold was applied, and the "
+		"pass/underfill/overfill result, with the arithmetic spelled out "
+		"rather than left for the caller to re-derive. Pass entry OR session. "
+		"Read-only.",
+		{
+			"entry": _field(_STRING, "Bucket Log Entry docname or entry_uuid. One of entry/session is required."),
+			"session": _field(
+				_STRING,
+				"Bucket Log Session docname or session_uuid — every entry in it. One of "
+				"entry/session is required.",
+			),
+		},
+		title="Get a fill determination",
+		available=_needs_doctype("Bucket Log Entry"),
+		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_fill_thresholds": _tool(
+		fill_pipeline.get_fill_thresholds,
+		"The current fill threshold for one container type at one company: "
+		"lower_bound_pct, upper_bound_pct (null where the container type "
+		"cannot overfill), version, and who last changed it. `configured: "
+		"false` rather than a refusal when nobody has set one yet. Read-only.",
+		{
+			"container_type": _field(_STRING, "REQUIRED. e.g. 'cherry_bucket', 'pear_bin' — any agreed key."),
+			"company": _COMPANY,
+		},
+		required=("container_type",),
+		title="Get fill thresholds",
+		available=_needs_doctype("Container Fill Threshold"),
+		requires="the Container Fill Threshold DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_fill_threshold": _tool(
+		fill_pipeline.update_fill_threshold,
+		"MUTATING (default OFF). Set the fill-percentage band for one "
+		"container type at one company — Foreman or above only, never "
+		"Checker. A FULL DEFINITION, NOT A PATCH: omitting upper_bound_pct "
+		"CLEARS it, every call, which is how a container type that cannot "
+		"overfill (a cherry bucket) stays that way — nobody ever sends an "
+		"upper bound for one. Bumps version, and writes a Fill Threshold "
+		"Change Log row recording who/when/old→new that "
+		"list_fill_threshold_changes reads and acknowledge_threshold_update "
+		"attaches checker sign-off to.",
+		{
+			"container_type": _field(_STRING, "REQUIRED. e.g. 'cherry_bucket', 'pear_bin' — any agreed key."),
+			"company": _field(_STRING, "REQUIRED on a multi-company site."),
+			"lower_bound_pct": _field(_NUMBER, "REQUIRED. Below this, a container is underfilled."),
+			"upper_bound_pct": _field(
+				_NUMBER,
+				"Above this, a container is overfilled. Omit for a container type that cannot "
+				"overfill — omitting CLEARS any existing upper bound.",
+			),
+			"reason": _field(_STRING, "Why the band moved, in the foreman's own words. Optional."),
+		},
+		required=("container_type", "company", "lower_bound_pct"),
+		mutating=True,
+		title="Update a fill threshold",
+		available=_needs_doctype("Container Fill Threshold"),
+		requires="the Container Fill Threshold DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_fill_threshold_changes": _tool(
+		fill_pipeline.list_fill_threshold_changes,
+		"The audit log of every fill-threshold change: who, when, old value, "
+		"new value, and how many checkers have acknowledged it so far. "
+		"Read-only.",
+		{
+			"container_type": _field(_STRING, "Narrow to one container type."),
+			"company": _field(_STRING, "Narrow to one company."),
+		},
+		title="List fill threshold changes",
+		available=_needs_doctype("Fill Threshold Change Log"),
+		requires="the Fill Threshold Change Log DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"acknowledge_threshold_update": _tool(
+		fill_pipeline.acknowledge_threshold_update,
+		"MUTATING (default OFF). A checker acknowledges they have seen and "
+		"understood the CURRENT fill threshold for one container type — "
+		"records their Employee, a timestamp and the threshold version "
+		"acknowledged. Idempotent: acknowledging a version already "
+		"acknowledged by the same employee changes nothing.",
+		{
+			"employee": _field(_STRING, "REQUIRED. Employee docname of the checker acknowledging."),
+			"container_type": _field(_STRING, "REQUIRED. e.g. 'cherry_bucket', 'pear_bin'."),
+			"company": _field(_STRING, "REQUIRED on a multi-company site."),
+		},
+		required=("employee", "container_type", "company"),
+		mutating=True,
+		idempotent=True,
+		title="Acknowledge a threshold update",
+		available=_needs_doctype("Fill Threshold Change Log"),
+		requires="the Fill Threshold Change Log DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_pending_threshold_acknowledgments": _tool(
+		fill_pipeline.list_pending_threshold_acknowledgments,
+		"Which active Checkers have not yet acknowledged the CURRENT fill "
+		"threshold for one container type at one company. The population is "
+		"every Active Employee whose designation is 'Checker'. Read-only.",
+		{
+			"container_type": _field(_STRING, "REQUIRED. e.g. 'cherry_bucket', 'pear_bin'."),
+			"company": _field(_STRING, "REQUIRED on a multi-company site."),
+		},
+		required=("container_type", "company"),
+		title="List pending threshold acknowledgments",
+		available=_needs_doctype("Fill Threshold Change Log"),
+		requires="the Fill Threshold Change Log DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"revoke_mobile_user": _tool(
 		mobile.revoke_mobile_user,

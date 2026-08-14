@@ -234,6 +234,18 @@ def validate_bucket_entry(entry: dict) -> list[str]:
 	if status and status not in STATUSES:
 		errors.append(f"status must be one of {', '.join(STATUSES)}; got {status!r}")
 
+	# v0.68.0. Same plausibility check as coverage_percent, and the same reason:
+	# these two feed get_fill_determination's arithmetic, and a negative pixel
+	# count is not a smaller area, it is the sender's units being wrong.
+	for field in ("mask_area_px", "container_area_px"):
+		raw = entry.get(field)
+		if raw not in (None, ""):
+			value = _as_float(raw, default=None)
+			if value is None:
+				errors.append(f"{field} must be a number, got {raw!r}")
+			elif value < 0:
+				errors.append(f"{field} must not be negative, got {value!r}")
+
 	return errors
 
 
@@ -576,5 +588,126 @@ def badge_admission_errors(badge_id: str, facts: dict) -> list[str]:
 			f"badge {badge_id!r} resolves to {employee}, who is not clocked in on shift {shift} — "
 			"add them with add_worker_to_shift before their buckets can be attributed to it"
 		)
+
+	return errors
+
+
+# ── 7. fill_determination ────────────────────────────────────────────────
+#
+# v0.68.0. Container-Agnostic Fill Pipeline. NOT PAY, THE SAME WAY
+# `coverage_percent` IS NOT PAY — see the module docstring's binary gate. What
+# this answers is "does this capture's fill percentage sit inside the band a
+# foreman set for this container type", which is quality control a foreman or
+# checker reads; `verdict` on the entry is still the only thing that reaches a
+# payroll slip and this function does not touch it.
+
+FILL_UNKNOWN = "Unknown"
+FILL_UNDERFILL = "Underfill"
+FILL_OVERFILL = "Overfill"
+FILL_PASS = "Pass"
+
+
+def fill_determination(entry: dict, threshold: dict | None) -> dict:
+	"""The fill-percentage arithmetic and threshold comparison for ONE entry, pure.
+
+	`tools/fill_pipeline.py::get_fill_determination` is what fetches `entry`
+	(a Bucket Log Entry, as a plain dict) and `threshold` (the current
+	Container Fill Threshold row for that entry's `container_type`, or `None`
+	if none is set yet) and calls in — this function reads no database.
+
+	COMPUTED FROM AREAS WHEN BOTH ARE PRESENT, falling back to the stored
+	`coverage_percent` otherwise. That order is deliberate: `mask_area_px` /
+	`container_area_px` are the segmentation model's own numbers for THIS
+	capture, and recomputing from them is what makes the result "the math
+	behind it" rather than a number trusted verbatim. An entry synced before
+	v0.68.0, or from a device that only ever sent `coverage_percent`, still
+	gets an answer — just without the pixel-area explanation.
+
+	`result` is one of `FILL_UNKNOWN` (no fill percentage could be determined,
+	or no threshold is set for this container type yet), `FILL_UNDERFILL`,
+	`FILL_OVERFILL` or `FILL_PASS`. `FILL_OVERFILL` can only be reached when
+	the threshold carries an `upper_bound_pct` — a container type nobody has
+	ever set one for (a cherry bucket) cannot overfill by construction, not by
+	a special case naming it.
+	"""
+	entry = entry or {}
+	mask = entry.get("mask_area_px")
+	container = entry.get("container_area_px")
+
+	computed_pct = None
+	math_explanation = None
+	if mask not in (None, "") and container not in (None, ""):
+		mask_val = _as_float(mask, default=None)
+		container_val = _as_float(container, default=None)
+		if mask_val is not None and container_val is not None and container_val > 0:
+			computed_pct = round((mask_val / container_val) * 100, 2)
+			math_explanation = (
+				f"{mask_val:g} mask px ÷ {container_val:g} container px × 100 = {computed_pct:g}%"
+			)
+
+	stored_pct = entry.get("coverage_percent")
+	stored_val = _as_float(stored_pct, default=None) if stored_pct not in (None, "") else None
+	fill_percentage = computed_pct if computed_pct is not None else stored_val
+
+	result = {
+		"entry": entry.get("name") or None,
+		"entry_uuid": entry.get("entry_uuid") or None,
+		"container_type": entry.get("container_type") or None,
+		"mask_area_px": mask,
+		"container_area_px": container,
+		"computed_fill_percentage": computed_pct,
+		"stored_coverage_percent": stored_pct if stored_pct not in (None, "") else None,
+		"fill_percentage": fill_percentage,
+		"math_explanation": math_explanation,
+	}
+
+	if fill_percentage is None:
+		result["threshold_applied"] = None
+		result["result"] = FILL_UNKNOWN
+		result["explanation"] = (
+			"no fill percentage is available for this entry — it carries neither "
+			"mask_area_px/container_area_px nor coverage_percent"
+		)
+		return result
+
+	if not threshold:
+		result["threshold_applied"] = None
+		result["result"] = FILL_UNKNOWN
+		container_type = entry.get("container_type") or "(no container_type on this entry)"
+		result["explanation"] = (
+			f"no Container Fill Threshold is set for {container_type!r} yet — "
+			"update_fill_threshold has not been called for it"
+		)
+		return result
+
+	lower = _as_float(threshold.get("lower_bound_pct"), default=0.0) or 0.0
+	upper_raw = threshold.get("upper_bound_pct")
+	upper = _as_float(upper_raw, default=None) if upper_raw not in (None, "") else None
+
+	if fill_percentage < lower:
+		verdict = FILL_UNDERFILL
+		explanation = f"{fill_percentage:g}% is below the {lower:g}% lower bound"
+	elif upper is not None and fill_percentage > upper:
+		verdict = FILL_OVERFILL
+		explanation = f"{fill_percentage:g}% is above the {upper:g}% upper bound"
+	elif upper is not None:
+		verdict = FILL_PASS
+		explanation = f"{fill_percentage:g}% is within the {lower:g}%–{upper:g}% band"
+	else:
+		verdict = FILL_PASS
+		explanation = (
+			f"{fill_percentage:g}% is at or above the {lower:g}% lower bound "
+			"(this container type has no upper bound)"
+		)
+
+	result["threshold_applied"] = {
+		"container_type": threshold.get("container_type"),
+		"lower_bound_pct": lower,
+		"upper_bound_pct": upper,
+		"version": threshold.get("version"),
+	}
+	result["result"] = verdict
+	result["explanation"] = explanation
+	return result
 
 	return errors

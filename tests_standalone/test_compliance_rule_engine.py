@@ -21,6 +21,7 @@ approval gate, and the seeder's idempotency.
 """
 
 import json
+import unittest
 
 import frappe
 
@@ -690,6 +691,83 @@ class TheDeclarativeEngine(RuleEngineTestCase):
 			scope_filters=[{"field": "i9_status", "op": "eq", "value": "Expired"}],
 		)
 		self.assertEqual(engine.preview(row, {"today": TODAY, "company": ""})["observed"], 0)
+
+	# -- template variables (v0.68.0) -----------------------------------------
+	def test_current_date_narrows_by_the_records_own_clock_at_sweep_time(self):
+		"""`{{current_date}}` is resolved when the sweep runs, not when the rule was
+		saved — this is what makes it different from hardcoding `TODAY` into the
+		filter, and the whole reason the feature exists. Bands are opened wide so
+		both records would otherwise be observed; the scope filter is the only
+		thing excluding the one whose review is not yet due."""
+		self.a_policy("Overdue SOP", review_in_days=-3)
+		self.a_policy("Future SOP", review_in_days=10)
+		row = self.a_rule(
+			scope_filters=[{"field": "review_due_date", "op": "lt", "value": "{{current_date}}"}],
+			threshold_warning_days=900,
+			threshold_critical_days=900,
+		)
+		result = engine.preview(row, {"today": TODAY, "company": ""})
+		self.assertEqual([entry["source_docname"] for entry in result["observations"]], ["Overdue SOP"])
+
+
+# ── scope-filter template variables, as pure functions ──────────────────────
+class TheScopeFilterTemplateVariables(unittest.TestCase):
+	"""v0.68.0. `w4_tax_year_outdated` needed `tax_year < current_year` and, until
+	this release, had no way to say "current year" without hardcoding it — which
+	is a rule that stops being true every January. These test the resolution
+	mechanism directly, against `TODAY = "2026-07-24"` (harness.py), rather than
+	through a full rule sweep — `TheDeclarativeEngine` above covers that end of it
+	for `{{current_date}}`, and `test_missing_signatures.py` covers the rule this
+	was built for.
+	"""
+
+	def test_current_year_and_current_month_resolve_at_evaluation_time(self):
+		matched, _warnings = compliance_rules.row_matches(
+			{"tax_year": 2025}, [{"field": "tax_year", "op": "lt", "value": "{{current_year}}"}]
+		)
+		self.assertTrue(matched)
+
+		matched, _warnings = compliance_rules.row_matches(
+			{"tax_year": 2026}, [{"field": "tax_year", "op": "lt", "value": "{{current_year}}"}]
+		)
+		self.assertFalse(matched, "2026 is not less than current_year (2026 on TODAY)")
+
+		matched, _warnings = compliance_rules.row_matches(
+			{"review_month": 7}, [{"field": "review_month", "op": "eq", "value": "{{current_month}}"}]
+		)
+		self.assertTrue(matched)
+
+	def test_current_date_resolves_to_todays_iso_string(self):
+		self.assertEqual(compliance_rules.resolve_template("{{current_date}}"), frappe.utils.today())
+
+	def test_a_template_inside_a_list_op_resolves_element_wise(self):
+		matched, _warnings = compliance_rules.row_matches(
+			{"tax_year": 2026}, [{"field": "tax_year", "op": "in", "value": ["2024", "{{current_year}}"]}]
+		)
+		self.assertTrue(matched)
+
+	def test_an_unknown_template_variable_is_refused_at_authoring_time(self):
+		with self.assertRaises(ValueError) as ctx:
+			compliance_rules.parse_filters(
+				json.dumps([{"field": "tax_year", "op": "lt", "value": "{{current_decade}}"}])
+			)
+		self.assertIn("current_decade", str(ctx.exception))
+
+	def test_a_template_embedded_in_other_text_is_refused_rather_than_ignored(self):
+		"""A filter value is compared whole, as a number or as exact text — a
+		template glued into a sentence would silently compare against the literal
+		string `"before {{current_year}}"` forever, which is a quieter failure than
+		refusing it up front."""
+		with self.assertRaises(ValueError):
+			compliance_rules.parse_filters(
+				json.dumps([{"field": "tax_year", "op": "lt", "value": "before {{current_year}}"}])
+			)
+
+	def test_a_plain_value_that_is_not_shaped_like_a_template_is_untouched(self):
+		parsed = compliance_rules.parse_filters(
+			json.dumps([{"field": "status", "op": "eq", "value": "Active"}])
+		)
+		self.assertEqual(parsed[0]["value"], "Active")
 
 
 # ── the sandbox ─────────────────────────────────────────────────────────────

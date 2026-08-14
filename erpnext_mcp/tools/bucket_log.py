@@ -240,6 +240,9 @@ def _describe_entry(doc) -> dict:
 		"verdict": doc.verdict,
 		"coverage_percent": doc.get("coverage_percent"),
 		"model_uuid": doc.get("model_uuid") or None,
+		"container_type": doc.get("container_type") or None,
+		"mask_area_px": doc.get("mask_area_px"),
+		"container_area_px": doc.get("container_area_px"),
 		"gps_lat": doc.get("gps_lat"),
 		"gps_lon": doc.get("gps_lon"),
 		"h3_cell": doc.get("h3_cell") or None,
@@ -479,6 +482,11 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 		if entry.get("coverage_percent") not in (None, ""):
 			doc.coverage_percent = _num(entry.get("coverage_percent"))
 		doc.model_uuid = str(entry.get("model_uuid") or "").strip() or None
+		doc.container_type = str(entry.get("container_type") or "").strip() or None
+		if entry.get("mask_area_px") not in (None, ""):
+			doc.mask_area_px = _num(entry.get("mask_area_px"))
+		if entry.get("container_area_px") not in (None, ""):
+			doc.container_area_px = _num(entry.get("container_area_px"))
 		if entry.get("gps_lat") not in (None, ""):
 			doc.gps_lat = _num(entry.get("gps_lat"))
 		if entry.get("gps_lon") not in (None, ""):
@@ -611,6 +619,9 @@ def list_bucket_entries(args: dict) -> ToolResult:
 			"verdict",
 			"coverage_percent",
 			"model_uuid",
+			"container_type",
+			"mask_area_px",
+			"container_area_px",
 			"shift",
 			"status",
 			"synced_at",

@@ -569,9 +569,16 @@ class ToolRegistration(unittest.TestCase):
 		# in the I-9 module that moves a form sideways rather than forward: every
 		# other one advances a status, so a Section 1 filed with a blank date of
 		# birth had no route to one on any status.
-		self.assertEqual(len(self.registry.TOOLS), 443)
-		self.assertEqual(len(self.registry.READ_TOOLS), 204)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 239)
+		# v0.68.0 adds six over the Container-Agnostic Fill Pipeline — four
+		# reads (`get_fill_determination`, `get_fill_thresholds`,
+		# `list_fill_threshold_changes`, `list_pending_threshold_acknowledgments`)
+		# and two writes (`update_fill_threshold`, `acknowledge_threshold_update`)
+		# — connecting a segmentation model's mask/container pixel areas to a
+		# foreman-controlled band per container type, with a change log a checker
+		# acknowledges.
+		self.assertEqual(len(self.registry.TOOLS), 449)
+		self.assertEqual(len(self.registry.READ_TOOLS), 208)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 241)
 
 
 if __name__ == "__main__":

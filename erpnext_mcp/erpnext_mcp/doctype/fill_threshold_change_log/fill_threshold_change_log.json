@@ -1,0 +1,173 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-13 09:00:00.000000",
+ "description": "One update_fill_threshold call, in full: who changed what, from what, to what, and when. Append-only — a change log is a fact about the past, not a draft to be edited — and it is the ONLY place the old value survives; Container Fill Threshold holds only the current one. Carries its own Fill Threshold Acknowledgment child table, because 'who has acknowledged THIS version' is a fact about this specific change and not about the container type in general.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "container_type",
+  "version",
+  "info_col",
+  "changed_by",
+  "changed_at",
+  "bounds_section",
+  "old_lower_bound_pct",
+  "new_lower_bound_pct",
+  "bounds_col",
+  "old_upper_bound_pct",
+  "new_upper_bound_pct",
+  "reason_section",
+  "reason",
+  "ack_section",
+  "acknowledgments"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "container_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Container Type",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Container Fill Threshold version this change produced. What a Fill Threshold Acknowledgment row is acknowledging.",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Version",
+   "reqd": 1
+  },
+  {
+   "fieldname": "info_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The identity update_fill_threshold attributed this change to — same resolution require_foreman_role returns.",
+   "fieldname": "changed_by",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Changed By",
+   "reqd": 1
+  },
+  {
+   "fieldname": "changed_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Changed At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "bounds_section",
+   "fieldtype": "Section Break",
+   "label": "What Changed"
+  },
+  {
+   "description": "Blank on the row a container type's first threshold produced — there was no prior value.",
+   "fieldname": "old_lower_bound_pct",
+   "fieldtype": "Float",
+   "label": "Old Lower Bound %",
+   "precision": "1"
+  },
+  {
+   "fieldname": "new_lower_bound_pct",
+   "fieldtype": "Float",
+   "label": "New Lower Bound %",
+   "precision": "1",
+   "reqd": 1
+  },
+  {
+   "fieldname": "bounds_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "old_upper_bound_pct",
+   "fieldtype": "Float",
+   "label": "Old Upper Bound %",
+   "precision": "1"
+  },
+  {
+   "description": "Blank means this change left (or set) the container type as unable to overfill.",
+   "fieldname": "new_upper_bound_pct",
+   "fieldtype": "Float",
+   "label": "New Upper Bound %",
+   "precision": "1"
+  },
+  {
+   "fieldname": "reason_section",
+   "fieldtype": "Section Break",
+   "label": "Reason"
+  },
+  {
+   "description": "Why the foreman moved the band, in their own words. Optional — update_fill_threshold does not require it.",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  },
+  {
+   "fieldname": "ack_section",
+   "fieldtype": "Section Break",
+   "label": "Checker Acknowledgments"
+  },
+  {
+   "fieldname": "acknowledgments",
+   "fieldtype": "Table",
+   "label": "Acknowledgments",
+   "options": "Fill Threshold Acknowledgment"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-13 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Fill Threshold Change Log",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Farm Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "company,container_type,changed_by",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
