@@ -14936,6 +14936,115 @@ TOOLS = {
 		available=_needs_doctype("ML Model"),
 		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	# ── v0.68.0: ML Model format migration ────────────────────────────────
+	"list_models_needing_migration": _tool(
+		ml_model.list_models_needing_migration,
+		"Which ML Model records are NOT in the current manifest schema, and "
+		"what is outdated about each. Read-only, and reads no files — the "
+		"cheap metadata pass over the whole register.\n\n"
+		"A RECORD APPEARS HERE for no bundle_manifest at all (the pre-v0.59.0 "
+		"shape, where the labels lived only in class_names), a manifest with no "
+		"schema_version or an older one, a missing or disagreeing userDefined "
+		"class_names mirror, an unrecognised model_kind/model_format, or a "
+		"record whose own class_names disagree with its manifest's. Each row "
+		"carries its own `reasons`, because the fix differs.\n\n"
+		"READ `blockers` FIRST. A record with one cannot be migrated as it "
+		"stands — no class_names anywhere to build a manifest out of, or a "
+		"model_format nothing recognises — and wants update_model or "
+		"pull_model_from_vv before migrate_model_format will touch it. "
+		"`ready_to_migrate` counts the rest.\n\n"
+		"A MODEL PULLED TODAY WILL NOT BE HERE: attach_model_file and "
+		"pull_model_from_vv normalize on the way in, so this is a register of "
+		"records that predate the format, not a queue that refills.",
+		{
+			"company": _COMPANY,
+			"status": _field(_STRING, "Draft, Active, Deprecated or Archived."),
+			"piecework_activity": _field(_STRING, "Filter to one activity."),
+			"include_current": _field(
+				_BOOLEAN,
+				"Return the already-current records too, rather than only the outdated ones. "
+				"Default false. The counts are reported either way.",
+			),
+			"limit": _LIMIT,
+		},
+		title="List models needing migration",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"validate_model_bundle": _tool(
+		ml_model.validate_model_bundle,
+		"Hold ONE ML Model record's stored manifest to the current schema and "
+		"report every way it falls short — pass/fail plus the specific issues, "
+		"not the first thing that went wrong. Read-only; nothing is corrected, "
+		"including nothing that is obviously wrong.\n\n"
+		"THREE LAYERS. The manifest itself (required fields, class_names an "
+		"ordered array of labels, model_kind/model_format recognised, and the "
+		"userDefined mirror agreeing with the array it mirrors); the RECORD "
+		"against its manifest, where two label lists that disagree about what "
+		"output index 2 means is an error rather than a note; and the FILE "
+		"references — model_file resolving to a File on this site, the bytes "
+		"being the shape the manifest claims, and a zip still containing its "
+		"manifest.json and a model payload.\n\n"
+		"check_payload=false skips the byte reads. Frappe reads a File whole, "
+		"so the metadata checks alone are the cheap pass over a compiled model "
+		"of any size.",
+		{
+			"model": _field(_STRING, "REQUIRED. By docname, model_name, or source_uuid."),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"check_payload": _field(
+				_BOOLEAN,
+				"Open the attached binary and check it against the manifest. Default true; false "
+				"runs the metadata checks only.",
+			),
+		},
+		required=("model",),
+		title="Validate a model bundle",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"migrate_model_format": _tool(
+		ml_model.migrate_model_format,
+		"MUTATING (default OFF). Restate one ML Model record's manifest in the "
+		"current schema. METADATA ONLY — nothing is uploaded, downloaded or "
+		"re-attached, and the binary is never read.\n\n"
+		"A RECORD THAT ALREADY HAD A BUNDLE keeps that provenance and every key "
+		"the exporter wrote, and gains schema_version and the userDefined "
+		"mirror. A RECORD THAT NEVER HAD ONE gets a manifest assembled from its "
+		"own fields, with manifest_origin='record' and a manifest_source that "
+		"names this tool — it does not claim the labels came out of training "
+		"when somebody typed them, and is_bundle stays false so no client tries "
+		"to unpack a raw model.\n\n"
+		"REFUSES BY NAME rather than inventing: a record with no class_names "
+		"anywhere has nothing to build a manifest out of (pull_model_from_vv or "
+		"update_model), and an unrecognised model_format is preserved rather "
+		"than replaced with a default.\n\n"
+		"ALREADY CURRENT IS NOT AN ERROR — it returns a result saying so, which "
+		"is what makes this safe to run straight down "
+		"list_models_needing_migration without filtering. dry_run=true computes "
+		"everything and saves nothing.",
+		{
+			"model": _field(_STRING, "REQUIRED. By docname, model_name, or source_uuid."),
+			"company": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"version": _field(_STRING, "Narrows a model_name lookup that matches more than one record."),
+			"dry_run": _field(
+				_BOOLEAN,
+				"Compute the migration and save nothing, returning the manifest it would have "
+				"written. Default false.",
+			),
+			"force": _field(
+				_BOOLEAN,
+				"Rewrite a record that is already in the current schema. Default false, which "
+				"reports it as already current and changes nothing.",
+			),
+		},
+		required=("model",),
+		mutating=True,
+		idempotent=True,
+		title="Migrate a model's manifest format",
+		available=_needs_doctype("ML Model"),
+		requires="the ML Model DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	# ── v0.44.0: BucketLog → ERPNext Piecework Bridge ──────────────────────
 	"sync_bucket_entries": _tool(
 		bucket_log.sync_bucket_entries,

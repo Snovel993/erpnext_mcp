@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 472 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 475 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 220 read tools are **on** by default and can be switched off individually. A
+All 222 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -9674,6 +9674,123 @@ enforces http/https only, no credentials in the URL, no redirects followed, and
 a 512 MB ceiling checked against `Content-Length` before the body is read and
 against the body after — see `erpnext_mcp/services/volume_vision.py` on why the
 allowlist posture is different from `validate_public_endpoint`'s.
+
+---
+
+## v0.68.0 — ML Model Format Migration
+
+Three tools, two of them read. Three releases have each defined what an ML
+Model record carries, and a site running since v0.43.0 holds all three shapes
+at once: labels typed onto a record with no file, a raw `.mlmodel` attached
+beside them, and a bundle manifest stored exactly as Volume Vision's exporter
+wrote it. `get_active_model` served all three identically and a client could
+not tell them apart — the same "nothing fails, the answer is just wrong" shape
+the bundle format was introduced to close, one level up.
+
+**The current schema** is `schema_version` `1.0`, and on top of v0.59.0's
+bundle contract it requires two things this app can always supply itself:
+
+- **`schema_version`**, so a manifest cached on a handset months ago says what
+  shape it is without asking the site what release it is running.
+- **`userDefined`** — CoreML's own string-to-string metadata dictionary, the
+  one an iOS client reads off the *compiled model* as
+  `modelDescription.metadata[.creatorDefinedKey]`, carrying the label list in
+  the spelling that lives in the weights. That mirror is the point: labels
+  agreeing with the model's own embedded metadata have been corroborated by
+  something other than whoever typed them. It is comma-joined, except where a
+  label contains a comma — splitting `"bucket, full"` in two would renumber
+  every output index after it, so that case is written as JSON instead.
+
+**`manifest_origin`** is the third addition and the one that changed an
+existing answer. Until now "this record has a `bundle_manifest`" and "the
+attached file is a zip" were the same fact, and `is_bundle` was computed from
+the first. A migrated record breaks that — it has a manifest built from its own
+fields and a raw model beside it — so `is_bundle` now reads the origin, and a
+manifest predating the field still reads as the bundle it could only have been.
+`get_active_model`'s `metadata.bundle` block gains `schema_version`,
+`manifest_origin` and `user_defined` alongside it.
+
+**A model attached today is already current.** `attach_model_file` and
+`pull_model_from_vv` normalize on the way in, additively — every key the
+exporter wrote survives untouched — so this is a migration for records that
+predate the format, not a queue that refills.
+
+### `list_models_needing_migration`
+
+```json
+{"company": "Example Trading Co"}
+```
+
+Read-only, and reads no files — the cheap metadata pass over the whole
+register. A record appears for no `bundle_manifest` at all (the pre-v0.59.0
+shape), a manifest with no `schema_version` or an older one, a missing or
+disagreeing `userDefined` mirror, an unrecognised `model_kind`/`model_format`,
+or a record whose own `class_names` disagree with its manifest's. Each row
+carries its own `reasons`, because the fix differs.
+
+**Read `blockers` first.** A record with one cannot be migrated as it stands —
+no `class_names` anywhere to build a manifest out of, or a `model_format`
+nothing recognises — and wants `update_model` or `pull_model_from_vv` before
+`migrate_model_format` will touch it. `ready_to_migrate` counts the rest.
+`include_current: true` returns the up-to-date records too; the counts split
+them either way.
+
+### `validate_model_bundle`
+
+```json
+{"model": "MLM-2026-0001"}
+```
+
+Read-only. One record, held to the current schema, reporting **every** issue
+rather than the first — split into errors and warnings, with a `code` per issue
+and a `checks` block of what was actually looked at. Three layers:
+
+1. **The manifest**, against the schema above: required fields, `class_names`
+   an ordered array of labels, `model_kind`/`model_format` recognised, and the
+   `userDefined` mirror agreeing with the array it mirrors.
+2. **The record against its manifest.** Two label lists that disagree about
+   what output index 2 means is an *error*, not a note — only one of them is
+   the output-index order and nothing here can say which.
+3. **The file references.** `model_file` resolving to a File on this site
+   (`get_model_file_chunk` would refuse otherwise, and an iOS app would find
+   out on a handset); the bytes being the shape `manifest_origin` claims, in
+   both directions — a manifest saying `bundle` over a raw model, and a stored
+   zip whose `manifest.json` nobody ever read; and, for a real bundle, that the
+   zip still contains its manifest and a model payload.
+
+`check_payload: false` skips layer 3's byte reads. Frappe reads a File whole,
+so the metadata checks alone are the cheap pass over a compiled model of any
+size. **Nothing is corrected**, including nothing that is obviously wrong —
+`migrate_model_format` is the tool that writes, and the split is what makes
+this one safe to run across a register.
+
+### `migrate_model_format`
+
+```json
+{"model": "MLM-2026-0001"}
+```
+
+**MUTATING (default OFF).** Restates one record's manifest in the current
+schema. **Metadata only** — nothing is uploaded, downloaded or re-attached, and
+the binary is never read, so `get_model_file_chunk` serves the same bytes
+afterwards.
+
+A record that **already had a bundle** keeps that provenance and every key the
+exporter wrote, and gains the schema fields. A record that **never had one**
+gets a manifest assembled from its own fields, with `manifest_origin: "record"`
+and a `manifest_source` naming this tool — it does not claim the labels came
+out of training when somebody typed them, which is the distinction
+`manifest_source` was added to preserve, and `is_bundle` stays false so no
+client tries to unpack a raw model.
+
+**Refuses rather than inventing.** A record with no `class_names` anywhere has
+nothing to build a manifest out of, and an unrecognised `model_format` is
+preserved rather than quietly replaced with the default; both are refused by
+name with the tool that settles them. **Already current is not an error** — it
+returns a result saying so, which is what makes this safe to run straight down
+`list_models_needing_migration` without filtering first. `dry_run: true`
+computes everything and saves nothing; `force: true` rewrites a record that
+needed nothing.
 
 ---
 

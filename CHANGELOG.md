@@ -5,6 +5,66 @@ All notable changes to this project are documented here. Versions follow
 
 ## 0.68.0 — 2026-08-13
 
+**Sprint 3 of the Gap Closure Plan, part three: the model records that predate
+the format.** Three releases have each defined what an ML Model record carries
+— v0.43.0 labels typed onto it, v0.52.0 a raw binary attached beside them,
+v0.59.0 a bundle manifest written at export time — and a site running since the
+first of them holds all three shapes at once. `get_active_model` served them
+identically and a client could not tell them apart, which is the same "nothing
+fails, the answer is just wrong" failure the bundle format was introduced to
+close, one level up. Three tools bring them to one shape.
+
+- **The current manifest schema is `schema_version` `1.0`**, and on top of
+  v0.59.0's bundle contract it requires two things this app can always supply
+  itself. `schema_version`, so a manifest cached on a handset says what shape
+  it is without asking the site what release it is running. And `userDefined` —
+  CoreML's own string-to-string metadata dictionary, the one an iOS client
+  reads off the *compiled model*, carrying the label list in the spelling that
+  lives in the weights. That mirror is the point: labels that agree with the
+  model's own embedded metadata have been corroborated by something other than
+  whoever typed them. Comma-joined, except where a label contains a comma —
+  splitting `"bucket, full"` in two would renumber every output index after it,
+  so that case is written as JSON instead.
+- **`manifest_origin` splits a fact that used to be one.** Until now "this
+  record has a `bundle_manifest`" and "the attached file is a zip" were the same
+  thing, and `is_bundle` was computed from the first. A migrated record has a
+  manifest built from its own fields and a raw model beside it, so `is_bundle`
+  now reads the origin instead — a manifest predating the field still reads as
+  the bundle it could only have been. `get_active_model`'s `metadata.bundle`
+  block gains `schema_version`, `manifest_origin` and `user_defined` alongside
+  it.
+- **`list_models_needing_migration` (read).** The register: every record not in
+  the current schema, with the reasons per record rather than a code, because
+  the fix differs. Reads no files. `blockers` is the column to read first — a
+  record with no `class_names` anywhere, or a `model_format` nothing
+  recognises, cannot be migrated as it stands and wants `update_model` or
+  `pull_model_from_vv` first; `ready_to_migrate` counts the rest.
+- **`validate_model_bundle` (read).** One record in depth, reporting every
+  issue at once rather than the first, split error/warning with a code each.
+  The manifest against the schema; the record against its own manifest, where
+  two label lists that disagree about what output index 2 means is an error and
+  not a note; and the file references — `model_file` resolving to a File on
+  this site, the bytes being the shape `manifest_origin` claims *in both
+  directions*, and a real bundle still containing its `manifest.json` and a
+  model payload. `check_payload: false` skips the byte reads. Corrects nothing
+  it finds, which is what makes it safe to run across a register.
+- **`migrate_model_format` (MUTATING, default off).** The only one of the three
+  that writes, and it moves **metadata only** — nothing uploaded, downloaded or
+  re-attached, and the binary is never read. A record that already had a bundle
+  keeps that provenance and every key the exporter wrote; a record that never
+  had one gets a manifest assembled from its own fields with
+  `manifest_origin: "record"` and a `manifest_source` that names this tool. It
+  does not claim typed labels came out of a training run — that distinction is
+  the entire reason `manifest_source` exists — and `is_bundle` stays false so
+  no client tries to unpack a raw model. Refuses rather than inventing: no
+  `class_names` anywhere, and an unrecognised `model_format`, are both named
+  with the tool that settles them. Already current is not an error, which is
+  what makes it safe to run straight down the register above.
+- **A model attached today is already current.** `attach_model_file` and
+  `pull_model_from_vv` normalize on the way in, additively — every key Volume
+  Vision's exporter wrote survives untouched — so this is a migration for
+  records that predate the format, not a queue that refills.
+
 **Sprint 3 of the Gap Closure Plan, part two: what happens to a receipt after
 it is captured.** v0.67.0 gave a photographed slip four possible destinations
 and said the fourth — a vendor invoice, a Purchase Invoice — was "a later

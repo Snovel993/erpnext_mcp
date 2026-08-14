@@ -30,8 +30,14 @@ THREE CLAIMS, ONE CLASS EACH, PLUS THE REGISTRATION ITSELF.
    manifest cannot be the source of `class_names`, and
    `reconcile_bundle_manifest` lets the bundle win over the record's own labels
    while refusing to settle the three things that are the record's identity.
-5. `ToolRegistration` — the ten tools exist in `registry.TOOLS`, split four
-   read / six write the way the release describes, and the registry's total
+5. `TheManifestSchema` — v0.68.0. `normalize_manifest` restates a manifest of
+   any vintage in the current schema without losing a key,
+   `validate_manifest_schema` finds exactly the reasons a stored manifest is
+   not in it, `is_bundle_payload` stops confusing "has a manifest" with "the
+   file is a zip", and `manifest_migration_report` separates what migration
+   fixes from what it refuses to guess.
+6. `ToolRegistration` — the thirteen tools exist in `registry.TOOLS`, split six
+   read / seven write the way the releases describe, and the registry's total
    counts reflect them.
 """
 
@@ -361,8 +367,19 @@ class ReadingABundle(unittest.TestCase):
 		self.assertEqual(result["warnings"], [])
 
 	def test_the_manifest_is_stored_whole_and_the_provenance_sentence_names_the_uuid(self):
+		"""v0.68.0 normalizes on the way in, so "whole" now means EVERY KEY THE
+		EXPORTER WROTE SURVIVES UNCHANGED — not that the stored dict is byte-
+		identical to the one that arrived. What is added is derived (the schema
+		version, the origin, the userDefined mirror); nothing that came out of
+		training is dropped or rewritten. See `normalize_manifest`."""
 		result = engine.reconcile_bundle_manifest(model(), MANIFEST, "cherry.bundle.zip")
-		self.assertEqual(result["updates"]["bundle_manifest"], MANIFEST)
+		stored = result["updates"]["bundle_manifest"]
+		for key, value in MANIFEST.items():
+			with self.subTest(key=key):
+				self.assertEqual(stored[key], value)
+		self.assertEqual(stored["schema_version"], engine.MANIFEST_SCHEMA_VERSION)
+		self.assertEqual(stored["manifest_origin"], engine.MANIFEST_ORIGIN_BUNDLE)
+		self.assertEqual(engine.validate_manifest_schema(stored), [])
 		note = result["updates"]["manifest_source"]
 		self.assertTrue(note.startswith(engine.MANIFEST_SOURCE_BUNDLE))
 		self.assertIn(MANIFEST["uuid"], note)
@@ -483,10 +500,158 @@ class ConvertingATimestamp(unittest.TestCase):
 		self.assertEqual(manifest["manifest_source"], engine.MANIFEST_SOURCE_RECORD)
 
 
-class ToolRegistration(unittest.TestCase):
-	"""Ten tools, four reads and six writes, wired into the catalogue."""
+class TheManifestSchema(unittest.TestCase):
+	"""v0.68.0. What the current manifest shape is, and what is not in it yet.
 
-	READ_TOOLS = ("get_model", "list_models", "get_active_model", "get_model_file_chunk")
+	`MANIFEST` above is a v0.59.0 bundle manifest exactly as Volume Vision's
+	exporter writes one, which is what makes it the right fixture here: it is
+	the shape that WAS current, and everything below is about the distance
+	between it and the shape that is.
+	"""
+
+	def test_a_v059_manifest_is_not_in_the_current_schema(self):
+		errors = engine.validate_manifest_schema(MANIFEST)
+		self.assertTrue(any("schema_version" in e for e in errors))
+		self.assertTrue(any("manifest_origin" in e for e in errors))
+		self.assertTrue(any(engine.MANIFEST_USER_DEFINED_KEY in e for e in errors))
+
+	def test_normalizing_it_makes_it_current_and_keeps_every_key_it_had(self):
+		normalized = engine.normalize_manifest(MANIFEST, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
+		self.assertEqual(engine.validate_manifest_schema(normalized), [])
+		for key, value in MANIFEST.items():
+			with self.subTest(key=key):
+				self.assertEqual(normalized[key], value)
+
+	def test_normalizing_is_idempotent(self):
+		once = engine.normalize_manifest(MANIFEST, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
+		twice = engine.normalize_manifest(once, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
+		self.assertEqual(once, twice)
+
+	def test_the_user_defined_mirror_carries_the_labels_in_coremls_own_spelling(self):
+		normalized = engine.normalize_manifest(MANIFEST, model())
+		user_defined = normalized[engine.MANIFEST_USER_DEFINED_KEY]
+		self.assertEqual(user_defined["class_names"], "background,cherry,bucket,lip")
+		self.assertTrue(all(isinstance(value, str) for value in user_defined.values()))
+		self.assertEqual(
+			engine.decode_user_defined_class_names(user_defined["class_names"]),
+			MANIFEST["class_names"],
+		)
+
+	def test_a_label_containing_a_comma_is_written_as_json_rather_than_split(self):
+		"""SPLITTING IT WOULD RENUMBER EVERY OUTPUT INDEX AFTER IT, which is the
+		silent wrong answer the whole format exists to stop."""
+		labels = ["background", "bucket, full", "lip"]
+		encoded = engine.encode_user_defined_class_names(labels)
+		self.assertTrue(encoded.startswith("["))
+		self.assertEqual(engine.decode_user_defined_class_names(encoded), labels)
+
+	def test_a_manifest_whose_mirror_disagrees_with_its_array_is_refused(self):
+		normalized = engine.normalize_manifest(MANIFEST, model())
+		normalized[engine.MANIFEST_USER_DEFINED_KEY]["class_names"] = "background,cherry"
+		errors = engine.validate_manifest_schema(normalized)
+		self.assertTrue(any("cannot both be" in e for e in errors))
+
+	def test_a_manifest_built_from_a_record_alone_carries_the_records_labels(self):
+		record = model(
+			class_names=json.dumps(["a", "b"]), source_uuid=MANIFEST["uuid"], model_kind="Segmentation"
+		)
+		normalized = engine.normalize_manifest({}, record, origin=engine.MANIFEST_ORIGIN_RECORD)
+		self.assertEqual(engine.validate_manifest_schema(normalized), [])
+		self.assertEqual(normalized["class_names"], ["a", "b"])
+		self.assertEqual(normalized["manifest_origin"], engine.MANIFEST_ORIGIN_RECORD)
+		self.assertEqual(normalized["uuid"], MANIFEST["uuid"])
+		self.assertEqual(normalized["name"], "Cherry Fill Detection")
+		self.assertEqual(normalized["model_format"], engine.DEFAULT_MODEL_FORMAT)
+
+	def test_a_bundle_origin_is_never_downgraded_by_a_caller_that_guessed(self):
+		"""`bundle` is a claim about the STORED BYTES. A caller passing `record`
+		over a manifest that already says `bundle` would be telling a phone to
+		compile a zip."""
+		normalized = engine.normalize_manifest(MANIFEST, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
+		again = engine.normalize_manifest(normalized, model(), origin=engine.MANIFEST_ORIGIN_RECORD)
+		self.assertEqual(again["manifest_origin"], engine.MANIFEST_ORIGIN_BUNDLE)
+
+	def test_an_unrecognised_model_format_is_preserved_and_reported_not_defaulted(self):
+		normalized = engine.normalize_manifest(dict(MANIFEST, model_format="PyTorch"), model())
+		self.assertEqual(normalized["model_format"], "PyTorch")
+		self.assertTrue(any("PyTorch" in e for e in engine.validate_manifest_schema(normalized)))
+
+	def test_is_bundle_payload_reads_the_origin_and_not_the_mere_presence_of_a_manifest(self):
+		from_bundle = engine.normalize_manifest(MANIFEST, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
+		from_record = engine.normalize_manifest({}, model(class_names='["a"]'), origin=engine.MANIFEST_ORIGIN_RECORD)
+		self.assertTrue(engine.is_bundle_payload(model(bundle_manifest=json.dumps(from_bundle))))
+		self.assertFalse(engine.is_bundle_payload(model(bundle_manifest=json.dumps(from_record))))
+		self.assertFalse(engine.is_bundle_payload(model()))
+		# A manifest predating the field could only ever have come from a zip.
+		self.assertTrue(engine.is_bundle_payload(model(bundle_manifest=json.dumps(MANIFEST))))
+
+	def test_a_migrated_record_does_not_tell_an_ios_client_to_unpack_a_raw_model(self):
+		from_record = engine.normalize_manifest({}, model(class_names='["a"]'), origin=engine.MANIFEST_ORIGIN_RECORD)
+		bundle_block = engine.build_model_manifest(
+			model(bundle_manifest=json.dumps(from_record), manifest_source=engine.MANIFEST_SOURCE_MIGRATED)
+		)["metadata"]["bundle"]
+		self.assertFalse(bundle_block["is_bundle"])
+		self.assertEqual(bundle_block["manifest_origin"], engine.MANIFEST_ORIGIN_RECORD)
+		self.assertEqual(bundle_block["schema_version"], engine.MANIFEST_SCHEMA_VERSION)
+		self.assertEqual(bundle_block["user_defined"]["class_names"], "a")
+
+	def test_a_pre_v059_record_needs_migration_and_can_be_migrated(self):
+		report = engine.manifest_migration_report(model(class_names=json.dumps(["a", "b"])))
+		self.assertTrue(report["needs_migration"])
+		self.assertTrue(report["can_migrate"])
+		self.assertFalse(report["has_manifest"])
+		self.assertEqual(report["manifest_origin"], engine.MANIFEST_ORIGIN_RECORD)
+		self.assertTrue(any("no bundle_manifest at all" in r for r in report["reasons"]))
+
+	def test_a_normalized_record_needs_nothing(self):
+		normalized = engine.normalize_manifest(MANIFEST, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
+		record = model(class_names=json.dumps(MANIFEST["class_names"]), bundle_manifest=json.dumps(normalized))
+		report = engine.manifest_migration_report(record)
+		self.assertFalse(report["needs_migration"])
+		self.assertEqual(report["reasons"], [])
+		self.assertEqual(report["manifest_origin"], engine.MANIFEST_ORIGIN_BUNDLE)
+
+	def test_a_record_with_no_labels_anywhere_is_blocked_rather_than_migrated(self):
+		report = engine.manifest_migration_report(model())
+		self.assertTrue(report["needs_migration"])
+		self.assertFalse(report["can_migrate"])
+		self.assertTrue(any("no class_names anywhere" in b for b in report["blockers"]))
+
+	def test_an_unrecognised_model_format_on_the_record_blocks_migration(self):
+		report = engine.manifest_migration_report(
+			model(class_names=json.dumps(["a"]), model_format="PyTorch")
+		)
+		self.assertFalse(report["can_migrate"])
+		self.assertTrue(any("update_model" in b for b in report["blockers"]))
+
+	def test_two_label_lists_that_disagree_are_a_reason_to_migrate(self):
+		normalized = engine.normalize_manifest(MANIFEST, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
+		record = model(class_names=json.dumps(["something", "else"]), bundle_manifest=json.dumps(normalized))
+		report = engine.manifest_migration_report(record)
+		self.assertTrue(report["needs_migration"])
+		self.assertTrue(report["can_migrate"])
+		self.assertTrue(any("Only one of them" in r or "the other is not" in r for r in report["reasons"]))
+
+	def test_an_unreadable_bundle_manifest_is_a_reason_and_not_a_raise(self):
+		report = engine.manifest_migration_report(
+			model(class_names=json.dumps(["a"]), bundle_manifest="{not json")
+		)
+		self.assertTrue(report["needs_migration"])
+		self.assertTrue(report["can_migrate"])
+		self.assertTrue(any("not a manifest anything can read" in r for r in report["reasons"]))
+
+
+class ToolRegistration(unittest.TestCase):
+	"""Thirteen tools, six reads and seven writes, wired into the catalogue."""
+
+	READ_TOOLS = (
+		"get_model",
+		"list_models",
+		"get_active_model",
+		"get_model_file_chunk",
+		"list_models_needing_migration",
+		"validate_model_bundle",
+	)
 	MUTATING_TOOLS = (
 		"register_model",
 		"update_model",
@@ -494,6 +659,7 @@ class ToolRegistration(unittest.TestCase):
 		"deprecate_model",
 		"attach_model_file",
 		"pull_model_from_vv",
+		"migrate_model_format",
 	)
 
 	def setUp(self):
@@ -589,9 +755,14 @@ class ToolRegistration(unittest.TestCase):
 		# Payment Entry create/get/list/submit, and `get_ap_aging`, which reads
 		# GL Entry for a supplier's true balance and Purchase Invoice's own
 		# outstanding_amount for the per-invoice ageing buckets.
-		self.assertEqual(len(self.registry.TOOLS), 472)
-		self.assertEqual(len(self.registry.READ_TOOLS), 220)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 252)
+		# v0.68.0 also adds THREE HERE — two reads
+		# (`list_models_needing_migration`, `validate_model_bundle`) and one
+		# write (`migrate_model_format`) — for the records v0.43.0, v0.52.0 and
+		# v0.59.0 each left in a different shape. The write moves metadata only:
+		# it never uploads, downloads or re-attaches a file.
+		self.assertEqual(len(self.registry.TOOLS), 475)
+		self.assertEqual(len(self.registry.READ_TOOLS), 222)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 253)
 
 
 if __name__ == "__main__":

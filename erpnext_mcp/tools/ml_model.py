@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""ML Model Registry — v0.43.0, plus v0.52.0's file serving and v0.59.0's
-bundles. Ten tools, and only six of them write.
+"""ML Model Registry — v0.43.0, plus v0.52.0's file serving, v0.59.0's bundles
+and v0.68.0's migration. Thirteen tools, and only seven of them write.
 
 WHAT THIS APP TRACKS, AND WHAT IT DOES NOT. Volume Vision (Flask/SQLAlchemy)
 trains models and holds the weights; this app never sees a weight and never
@@ -102,6 +102,45 @@ is NOT reconciled is `source_uuid`: a bundle for a different trained model is th
 wrong file for this record, and attaching it would make every iOS cache keyed on
 that uuid wrong. That is refused by name, with `force=true` for the operator who
 means it. See `model_registry.reconcile_bundle_manifest`.
+
+────────────────────────────────────────────────────────────────────────────
+v0.68.0: THE RECORDS THAT PREDATE ALL OF THAT
+────────────────────────────────────────────────────────────────────────────
+
+Three releases have now each defined what an ML Model record carries, and a
+site that has been running since v0.43.0 holds all three shapes at once: a
+record with labels typed onto it and no file, a record with a raw `.mlmodel`
+attached, and a record with a bundle manifest stored exactly as Volume Vision's
+exporter wrote it. `get_active_model` serves all three identically and a client
+cannot tell them apart — which is the same "nothing fails, the answer is just
+wrong" shape the bundle format was introduced to close, one level up.
+
+`model_registry.MANIFEST_SCHEMA_VERSION` is the shape they are all brought to,
+and the three tools here are the operator's route to it:
+
+  * `list_models_needing_migration` — the register. Every record not in the
+    current schema, with the reasons per record, and separately the ones that
+    CANNOT be migrated as they stand because there are no labels anywhere to
+    build a manifest out of. Metadata only, no file reads.
+
+  * `validate_model_bundle` — one record, in depth. The manifest against the
+    schema, the record against its own manifest, and — this is the half a pure
+    function cannot do — the FILE against both: does `model_file` resolve, are
+    the bytes the shape the manifest claims, and does a zip still contain what
+    it says it does.
+
+  * `migrate_model_format` — the write, and the only one of the three. It moves
+    METADATA ONLY: no upload, no download, no re-attach, and it never reads the
+    binary. A record that already had a bundle keeps that provenance and gains
+    the schema fields; a record that never had one gets a manifest assembled
+    from its own fields and `manifest_source` SAYING SO, because claiming the
+    labels came out of a training run when somebody typed them is exactly the
+    lie the `manifest_source` field was added to prevent.
+
+WHAT MIGRATION DELIBERATELY DOES NOT FIX. A record with no `class_names` at all,
+and a `model_format` this app does not recognise. Both are refused by name with
+the tool that settles them — inventing a label list is the one thing worse than
+not having one.
 """
 
 from __future__ import annotations
@@ -259,7 +298,10 @@ def _describe(doc) -> dict:
 		"model_file": doc.get("model_file") or None,
 		"manifest_source": doc.get("manifest_source") or None,
 		"bundle_manifest": model_registry.bundle_manifest_of(doc.as_dict()) or None,
-		"is_bundle": bool(model_registry.bundle_manifest_of(doc.as_dict())),
+		# v0.68.0: read from the manifest's `manifest_origin`, not from whether
+		# there IS a manifest — a migrated record has one and a raw file. See
+		# `model_registry.is_bundle_payload`.
+		"is_bundle": model_registry.is_bundle_payload(doc.as_dict()),
 		"class_names": model_registry.class_names_of(doc.as_dict()),
 		"metrics": model_registry.metrics_of(doc.as_dict()),
 		"file_size_bytes": doc.get("file_size_bytes") or None,
@@ -1062,4 +1104,550 @@ def pull_model_from_vv(args: dict) -> ToolResult:
 		summary=summary,
 		docstatus_delta=f"model_file set on {doc.name} from {fetched['url']}"
 		+ ("; class_names/metrics taken from the bundle manifest" if bundle["is_bundle"] else ""),
+	)
+
+
+# ── 11-13. v0.68.0: the records that predate the format ──────────────────
+
+
+#: What `manifest_migration_report` reads off a record. Listed rather than
+#: fetching whole documents because `list_models_needing_migration` runs the
+#: report over every model on the site, and loading 200 documents to look at ten
+#: fields on each is 200 round trips for a question one query answers.
+_MIGRATION_FIELDS = (
+	"name",
+	"model_name",
+	"version",
+	"status",
+	"company",
+	"piecework_activity",
+	"class_names",
+	"bundle_manifest",
+	"manifest_source",
+	"model_format",
+	"model_file",
+	"modified",
+)
+
+
+def _attached_file(doc):
+	"""The File holding this record's `model_file`, or `None`.
+
+	The same lookup `get_model_file_chunk` makes, without its refusal: this is a
+	VALIDATION path, where "the record points at a File that is not there" is a
+	finding to report rather than an error to raise. A caller asking what is
+	wrong with a record should get the whole list, not the first item on it.
+	"""
+	model_file = doc.get("model_file")
+	if not model_file:
+		return None
+	file_name = frappe.db.get_value(
+		"File",
+		{"attached_to_doctype": DOCTYPE, "attached_to_name": doc.name, "file_url": model_file},
+		"name",
+	)
+	if not file_name:
+		return None
+	return frappe.get_doc("File", file_name)
+
+
+def _payload_bytes(file_doc) -> bytes:
+	content = file_doc.get_content()
+	if isinstance(content, str):
+		return content.encode("utf-8", "surrogateescape")
+	return bytes(content or b"")
+
+
+def _issue(severity: str, code: str, message: str) -> dict:
+	return {"severity": severity, "code": code, "message": message}
+
+
+def migrate_model_format(args: dict) -> ToolResult:
+	"""MUTATING (default OFF). Restate one ML Model record's manifest in the
+	current schema. METADATA ONLY — nothing is uploaded, downloaded or
+	re-attached, and the bytes on the record are not read or moved.
+
+	WHAT "LEGACY" MEANS HERE, AND WHAT EACH SHAPE BECOMES.
+
+	  * A v0.43.0/v0.52.0 record has NO manifest — labels typed onto it at
+	    registration and, if anything is attached at all, a raw `.mlmodel`
+	    beside them. There is no bundle to read, so the manifest is BUILT FROM
+	    THE RECORD'S OWN FIELDS and says so: `manifest_origin` is `record` and
+	    `manifest_source` becomes the sentence that names this tool. It does not
+	    claim the labels came out of training, because they did not, and
+	    `is_bundle` stays false so no client tries to unzip the weights.
+
+	  * A v0.59.x record HAS a manifest, stored exactly as Volume Vision's
+	    exporter wrote it. Its origin is `bundle` — that fact is real and is
+	    preserved, along with every key the exporter put in it. What migration
+	    adds is `schema_version` and the `userDefined` mirror.
+
+	NOTHING IS INVENTED. A record with no `class_names` anywhere has nothing to
+	build a manifest out of and is REFUSED by name, pointing at
+	`pull_model_from_vv` (which gets them from the training run) or
+	`update_model` (which sets them by hand). A `model_format` this app does not
+	recognise is refused the same way rather than being quietly replaced with the
+	default — see `model_registry.manifest_migration_report`'s blockers.
+
+	ALREADY CURRENT IS NOT AN ERROR. A record needing nothing returns a result
+	saying so, which is what makes this safe to run across a register from
+	`list_models_needing_migration` without filtering first. `force=true`
+	rewrites one anyway.
+
+	`dry_run=true` computes the whole thing and saves nothing, returning the
+	manifest it would have written.
+	"""
+	_require()
+	actor = kpi_tools.require_kpi_role()
+	doc = _resolve(_reference(args), company=as_str(args, "company"), version=as_str(args, "version"))
+	before = _describe(doc)
+
+	dry_run = as_bool(args, "dry_run", False)
+	force = as_bool(args, "force", False)
+	report = model_registry.manifest_migration_report(doc.as_dict())
+
+	if report["blockers"]:
+		raise ToolError(
+			"; ".join(report["blockers"])
+			+ f". {doc.name} was left exactly as it was."
+		)
+
+	if not report["needs_migration"] and not force:
+		return ToolResult(
+			data={
+				"actor": actor,
+				"model": before,
+				"migrated": False,
+				"already_current": True,
+				"report": report,
+				"changed_fields": [],
+				"warnings": [],
+			},
+			summary=(
+				f"{doc.name} is already in manifest schema {model_registry.MANIFEST_SCHEMA_VERSION} "
+				"— nothing to migrate"
+			),
+		)
+
+	origin = report["manifest_origin"]
+	existing = model_registry.bundle_manifest_of(doc.as_dict())
+	normalized = model_registry.normalize_manifest(existing, doc.as_dict(), origin=origin)
+
+	# THE OUTPUT IS CHECKED BEFORE IT IS WRITTEN. `manifest_migration_report`
+	# clears a record for migration; this asserts that migrating it actually
+	# produced the schema, so a future change to `normalize_manifest` that stops
+	# satisfying `validate_manifest_schema` fails here rather than leaving a
+	# register full of records that claim to be current and are not.
+	errors = model_registry.validate_manifest_schema(normalized)
+	if errors:
+		raise ToolError(
+			"migrating "
+			+ doc.name
+			+ " would produce a manifest that is still not in the current schema: "
+			+ "; ".join(errors)
+			+ ". That is a bug in this app rather than in the record. Nothing was changed."
+		)
+
+	warnings: list = []
+	changed: list = []
+
+	manifest_class_names = list(normalized.get("class_names") or [])
+	if manifest_class_names != before["class_names"]:
+		if origin == model_registry.MANIFEST_ORIGIN_BUNDLE and before["class_names"]:
+			warnings.append(
+				f"class_names on this record were {json.dumps(before['class_names'])} and its stored "
+				f"bundle manifest says {json.dumps(manifest_class_names)}. The manifest wins, the same "
+				"way it does on an attach — it was written at export time from the config the weights "
+				"came out of. The old list is in this call's `previous` block."
+			)
+		doc.class_names = json.dumps(manifest_class_names, default=str)
+		changed.append("class_names")
+
+	if not (doc.get("model_format") or "").strip():
+		doc.model_format = normalized["model_format"]
+		changed.append("model_format")
+
+	doc.bundle_manifest = json.dumps(normalized, default=str)
+	changed.append("bundle_manifest")
+
+	if origin == model_registry.MANIFEST_ORIGIN_RECORD:
+		doc.manifest_source = model_registry.MANIFEST_SOURCE_MIGRATED
+		changed.append("manifest_source")
+		warnings.append(
+			f"{doc.name} had no bundle, so its manifest was assembled from the record's own fields. "
+			"The labels are still unverified against the weights — manifest_origin says 'record' and "
+			"manifest_source names this tool. pull_model_from_vv is what replaces them with a "
+			"manifest written at export time."
+		)
+	elif not str(doc.get("manifest_source") or "").startswith(model_registry.MANIFEST_SOURCE_BUNDLE):
+		doc.manifest_source = model_registry.manifest_source_note(normalized)
+		changed.append("manifest_source")
+
+	if dry_run:
+		return ToolResult(
+			data={
+				"actor": actor,
+				"model": before,
+				"migrated": False,
+				"dry_run": True,
+				"already_current": False,
+				"report": report,
+				"manifest": normalized,
+				"changed_fields": changed,
+				"warnings": warnings,
+				"previous": {"class_names": before["class_names"], "bundle_manifest": existing or None},
+			},
+			summary=(
+				f"dry run: {doc.name} would be migrated to manifest schema "
+				f"{model_registry.MANIFEST_SCHEMA_VERSION} ({origin} origin), changing "
+				f"{', '.join(changed)}. Nothing was changed."
+			),
+		)
+
+	doc.flags.ignore_permissions = True
+	doc.save(ignore_permissions=True)
+
+	described = _describe(doc)
+	after = model_registry.manifest_migration_report(doc.as_dict())
+	return ToolResult(
+		data={
+			"actor": actor,
+			"model": described,
+			"migrated": True,
+			"dry_run": False,
+			"already_current": False,
+			"manifest_origin": origin,
+			"schema_version": model_registry.MANIFEST_SCHEMA_VERSION,
+			"report": report,
+			"report_after": after,
+			"manifest": normalized,
+			"changed_fields": changed,
+			"warnings": warnings,
+			"previous": {"class_names": before["class_names"], "bundle_manifest": existing or None},
+		},
+		summary=(
+			f"migrated {doc.name} to manifest schema {model_registry.MANIFEST_SCHEMA_VERSION} "
+			f"({origin} origin): {', '.join(changed)}"
+		)
+		+ (f"; {len(warnings)} warning(s)" if warnings else ""),
+		docstatus_delta=f"bundle_manifest restated on {doc.name}; no file was uploaded or replaced",
+	)
+
+
+def validate_model_bundle(args: dict) -> ToolResult:
+	"""Read-only. Hold ONE ML Model record's stored manifest to the current
+	schema and report every way it falls short — pass/fail plus the specific
+	issues, rather than the first thing that went wrong.
+
+	THREE LAYERS, AND THEY FAIL DIFFERENTLY.
+
+	  1. THE MANIFEST ITSELF, against `model_registry.validate_manifest_schema`:
+	     required fields present, `class_names` an ordered array of labels,
+	     `model_kind`/`model_format` recognised, and the `userDefined` mirror
+	     agreeing with the label array it mirrors.
+
+	  2. THE RECORD AGAINST ITS MANIFEST. Two lists that disagree about what
+	     output index 2 means is the failure the bundle format exists to prevent,
+	     and it is an ERROR here rather than a note.
+
+	  3. THE FILE REFERENCES. `model_file` set but resolving to no File on this
+	     site is an error — `get_model_file_chunk` would refuse and an iOS app
+	     would find out on a handset. A manifest whose `manifest_origin` says
+	     `bundle` over bytes that are not a zip is the same class of error read
+	     from the other side, and a bundle whose zip has lost its `manifest.json`
+	     or its model payload is reported entry by entry.
+
+	`check_payload=false` skips layer 3's byte reads. Frappe reads a File whole,
+	so validating a register of compiled models pulls every one of them into
+	memory; the metadata checks alone are the cheap pass.
+
+	NOTHING IS CHANGED, INCLUDING NOTHING THAT IS OBVIOUSLY WRONG.
+	`migrate_model_format` is the tool that writes, and the split is deliberate:
+	this one is safe to run over a whole register.
+	"""
+	_require()
+	doc = _resolve(_reference(args), company=as_str(args, "company"), version=as_str(args, "version"))
+	check_payload = as_bool(args, "check_payload", True)
+
+	record = doc.as_dict()
+	report = model_registry.manifest_migration_report(record)
+	manifest = model_registry.bundle_manifest_of(record)
+	issues: list = []
+
+	if not manifest:
+		issues.append(
+			_issue(
+				"error",
+				"no_manifest",
+				"this record has no bundle_manifest — nothing on this site records what its model's "
+				"output indices mean or where that claim came from. migrate_model_format builds one "
+				"from the record's own fields; pull_model_from_vv gets the real one from training.",
+			)
+		)
+	else:
+		for error in model_registry.validate_manifest_schema(manifest):
+			issues.append(_issue("error", "schema", error))
+
+	record_class_names = model_registry.class_names_of(record)
+	manifest_class_names = manifest.get("class_names") if isinstance(manifest, dict) else None
+	manifest_class_names = (
+		[str(label) for label in manifest_class_names] if isinstance(manifest_class_names, list) else []
+	)
+	if not record_class_names:
+		issues.append(
+			_issue(
+				"error",
+				"no_class_names",
+				"class_names is empty on this record, so an inference result's output index cannot be "
+				"mapped back to a label at all.",
+			)
+		)
+	elif manifest_class_names and manifest_class_names != record_class_names:
+		issues.append(
+			_issue(
+				"error",
+				"class_names_disagree",
+				f"class_names on the record are {json.dumps(record_class_names)} and its manifest says "
+				f"{json.dumps(manifest_class_names)}. Only one of them is the output-index order, and "
+				"nothing here can say which.",
+			)
+		)
+
+	model_format = str(doc.get("model_format") or "").strip()
+	if model_format and model_format not in model_registry.MODEL_FORMATS:
+		issues.append(
+			_issue(
+				"error",
+				"model_format",
+				f"model_format on the record is {model_format!r}, not one of "
+				f"{', '.join(model_registry.MODEL_FORMATS)}.",
+			)
+		)
+
+	if report["manifest_origin"] == model_registry.MANIFEST_ORIGIN_RECORD:
+		issues.append(
+			_issue(
+				"warning",
+				"labels_unverified",
+				"this manifest was assembled from the record's own fields, not read out of a bundle, "
+				"so its labels have never been checked against the weights. pull_model_from_vv is what "
+				"replaces them with a manifest written at export time.",
+			)
+		)
+
+	checks = {
+		"has_manifest": bool(manifest),
+		"schema_version": report["schema_version"],
+		"expected_schema_version": model_registry.MANIFEST_SCHEMA_VERSION,
+		"manifest_origin": report["manifest_origin"],
+		"class_names_count": len(record_class_names),
+		"needs_migration": report["needs_migration"],
+		"file_attached": bool(doc.get("model_file")),
+		"file_resolves": None,
+		"file_size_bytes_matches": None,
+		"payload_is_bundle": None,
+		"payload_matches_manifest_origin": None,
+	}
+
+	if not doc.get("model_file"):
+		checks["file_resolves"] = False
+		issues.append(
+			_issue(
+				"warning",
+				"no_model_file",
+				"nothing is attached to this record yet, so it is metadata only — get_model_file_chunk "
+				"has nothing to serve. attach_model_file or pull_model_from_vv gives it a binary.",
+			)
+		)
+	else:
+		file_doc = _attached_file(doc)
+		checks["file_resolves"] = bool(file_doc)
+		if not file_doc:
+			issues.append(
+				_issue(
+					"error",
+					"file_missing",
+					f"model_file points at {doc.get('model_file')!r} and no File attached to this "
+					"record has that URL. get_model_file_chunk would refuse; attach_model_file again "
+					"is the fix.",
+				)
+			)
+		elif check_payload:
+			content = _payload_bytes(file_doc)
+			is_bundle = model_registry.looks_like_bundle(content)
+			checks["payload_is_bundle"] = is_bundle
+			declared_bundle = report["manifest_origin"] == model_registry.MANIFEST_ORIGIN_BUNDLE
+			checks["payload_matches_manifest_origin"] = is_bundle == declared_bundle
+			recorded_size = int(doc.get("file_size_bytes") or 0)
+			checks["file_size_bytes_matches"] = recorded_size == len(content)
+			if recorded_size and recorded_size != len(content):
+				issues.append(
+					_issue(
+						"warning",
+						"file_size_drift",
+						f"file_size_bytes on the record says {recorded_size} and the stored file is "
+						f"{len(content)} bytes. attach_model_file rewrites both together, so a "
+						"disagreement means the File was replaced underneath the record.",
+					)
+				)
+			if declared_bundle and not is_bundle:
+				issues.append(
+					_issue(
+						"error",
+						"payload_not_a_bundle",
+						"the manifest's manifest_origin says 'bundle' and the attached bytes are not a "
+						"zip. A client reading this record would try to unpack a raw model and fail on "
+						"the handset.",
+					)
+				)
+			elif is_bundle and not declared_bundle:
+				issues.append(
+					_issue(
+						"error",
+						"payload_is_an_unread_bundle",
+						"the attached bytes ARE a zip and this record's manifest does not come from "
+						"one — so a bundle was stored without its manifest ever being read. "
+						"attach_model_file on the same file reads it.",
+					)
+				)
+			if is_bundle:
+				read = model_registry.read_bundle(content)
+				for error in read["errors"]:
+					issues.append(_issue("error", "bundle_contents", error))
+				checks["bundle_entries"] = read["entries"]
+				checks["bundle_model_entry"] = read["model_entry"] or None
+				checks["bundle_manifest_entry"] = read["manifest_entry"] or None
+				if not read["errors"] and not read["model_entry"]:
+					issues.append(
+						_issue(
+							"warning",
+							"bundle_model_entry_missing",
+							"the bundle's manifest.json is readable but no entry in the zip looks like a "
+							"model payload (.mlpackage/.mlmodelc/.mlmodel/.onnx/.tflite/.pb). A client "
+							"unpacking it would have labels and nothing to apply them to.",
+						)
+					)
+
+	errors = [issue for issue in issues if issue["severity"] == "error"]
+	warnings = [issue for issue in issues if issue["severity"] == "warning"]
+	valid = not errors
+	summary = (
+		f"{doc.name} ({doc.model_name} v{doc.version}): "
+		+ ("PASS" if valid else f"FAIL — {len(errors)} error(s)")
+		+ (f", {len(warnings)} warning(s)" if warnings else "")
+	)
+	return ToolResult(
+		data={
+			"model": doc.name,
+			"model_name": doc.model_name,
+			"version": doc.version,
+			"status": doc.status,
+			"company": doc.company,
+			"valid": valid,
+			"error_count": len(errors),
+			"warning_count": len(warnings),
+			"issues": issues,
+			"checks": checks,
+			"needs_migration": report["needs_migration"],
+			"can_migrate": report["can_migrate"],
+			"blockers": report["blockers"],
+			"payload_checked": check_payload,
+		},
+		summary=summary,
+	)
+
+
+def list_models_needing_migration(args: dict) -> ToolResult:
+	"""Read-only. Which ML Model records are NOT in the current manifest schema,
+	and what is outdated about each — the register `migrate_model_format` works
+	through.
+
+	WHY A RECORD APPEARS HERE. No `bundle_manifest` at all (the pre-v0.59.0
+	shape, where labels lived only in `class_names`), a manifest with no
+	`schema_version` or an older one, a missing `userDefined` mirror or one that
+	disagrees with the label array, an unrecognised `model_kind`/`model_format`,
+	or a record whose own `class_names` disagree with its manifest's. Each row
+	carries its own `reasons` rather than a code, because the fix differs.
+
+	`blockers` IS THE COLUMN TO READ FIRST. A record with one cannot be migrated
+	by `migrate_model_format` at all — there are no labels anywhere to build a
+	manifest out of, or a `model_format` nothing recognises — and needs
+	`update_model` or `pull_model_from_vv` before migration will touch it.
+	`ready_to_migrate` counts the rest.
+
+	A MODEL PULLED TODAY WILL NOT BE HERE. `attach_model_file` and
+	`pull_model_from_vv` normalize on the way in as of v0.68.0, so this is a
+	register of records that predate the format, not a queue that refills.
+
+	Reads no files: this is the cheap metadata pass over the whole register.
+	`validate_model_bundle` is the deep single-record check that opens the
+	attached bytes.
+	"""
+	_require()
+	limit = min(as_limit(args), RECORD_CAP)
+	include_current = as_bool(args, "include_current", False)
+
+	filters: dict = {}
+	company = resolve_company(as_str(args, "company"), required=False)
+	if company:
+		filters["company"] = company
+	status = as_str(args, "status")
+	if status:
+		if status not in model_registry.STATUSES:
+			raise ToolError(
+				f"status must be one of {', '.join(model_registry.STATUSES)}; got {status!r}."
+			)
+		filters["status"] = status
+	piecework_activity = as_str(args, "piecework_activity")
+	if piecework_activity:
+		filters["piecework_activity"] = piecework_activity
+
+	found = frappe.db.get_all(
+		DOCTYPE,
+		filters=filters,
+		fields=list(_MIGRATION_FIELDS),
+		order_by="modified desc",
+		limit=limit + 1,
+	)
+	truncated = len(found) > limit
+	found = found[:limit]
+
+	rows = []
+	current = 0
+	blocked = 0
+	for record in found:
+		report = model_registry.manifest_migration_report(record)
+		report["has_model_file"] = bool(record.get("model_file"))
+		if not report["needs_migration"]:
+			current += 1
+			if not include_current:
+				continue
+		elif not report["can_migrate"]:
+			blocked += 1
+		rows.append(report)
+
+	needing = sum(1 for row in rows if row["needs_migration"])
+	summary = (
+		f"{needing} of {len(found)} model(s) need migration to manifest schema "
+		f"{model_registry.MANIFEST_SCHEMA_VERSION}"
+	)
+	if blocked:
+		summary += f"; {blocked} of them blocked and cannot be migrated as they stand"
+	if truncated:
+		summary += f"; scan truncated at {limit}"
+
+	return ToolResult(
+		data={
+			"models": rows,
+			"count": needing,
+			"scanned": len(found),
+			"already_current": current,
+			"blocked": blocked,
+			"ready_to_migrate": needing - blocked,
+			"schema_version": model_registry.MANIFEST_SCHEMA_VERSION,
+			"truncated": truncated,
+			"limit": limit,
+			"include_current": include_current,
+		},
+		summary=summary,
 	)

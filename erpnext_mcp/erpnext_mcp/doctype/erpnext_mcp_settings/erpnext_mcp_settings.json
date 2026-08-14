@@ -533,6 +533,8 @@
   "allow_list_models",
   "allow_get_active_model",
   "allow_get_model_file_chunk",
+  "allow_list_models_needing_migration",
+  "allow_validate_model_bundle",
   "ml_model_write_section",
   "allow_register_model",
   "allow_update_model",
@@ -540,6 +542,7 @@
   "allow_deprecate_model",
   "allow_attach_model_file",
   "allow_pull_model_from_vv",
+  "allow_migrate_model_format",
   "bucket_log_read_section",
   "allow_list_bucket_entries",
   "allow_get_bucket_session",
@@ -4084,6 +4087,20 @@
    "label": "Get Model File Chunk"
   },
   {
+   "default": "1",
+   "description": "READ. Which ML Model records are not in the current manifest schema, and what is outdated about each. Reads no files — the cheap metadata pass over the whole register. `blockers` names the records migrate_model_format cannot fix on its own.",
+   "fieldname": "allow_list_models_needing_migration",
+   "fieldtype": "Check",
+   "label": "List Models Needing Migration"
+  },
+  {
+   "default": "1",
+   "description": "READ. Holds one ML Model record's stored manifest to the current schema and reports every way it falls short — the manifest itself, the record against its manifest, and whether the attached file resolves and is the shape the manifest claims. Corrects nothing.",
+   "fieldname": "allow_validate_model_bundle",
+   "fieldtype": "Check",
+   "label": "Validate Model Bundle"
+  },
+  {
    "fieldname": "ml_model_write_section",
    "fieldtype": "Section Break",
    "label": "ML Model Registry — Write"
@@ -4129,6 +4146,13 @@
    "fieldname": "allow_pull_model_from_vv",
    "fieldtype": "Check",
    "label": "Pull Model From Volume Vision"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Restates one ML Model record's manifest in the current schema. Metadata only — nothing is uploaded, downloaded or re-attached, and the binary is never read. A record that never had a bundle gets a manifest built from its own fields, saying so rather than claiming the labels came out of training.",
+   "fieldname": "allow_migrate_model_format",
+   "fieldtype": "Check",
+   "label": "Migrate Model Format"
   },
   {
    "fieldname": "bucket_log_read_section",

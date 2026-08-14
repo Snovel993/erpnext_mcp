@@ -903,10 +903,21 @@ class Catalogue(SeededTestCase):
 		Entry against every account typed Payable, aged per open invoice from
 		Purchase Invoice's own outstanding_amount and due_date, with a `drift`
 		field where the two disagree.
+
+		v0.68.0 also adds THREE over the ML model registry — two reads and one
+		write — for the records three earlier releases each left in a different
+		shape: `list_models_needing_migration` is the register of records not in
+		the current manifest schema, `validate_model_bundle` is the deep
+		single-record check that opens the attached bytes, and
+		`migrate_model_format` is the only one that writes. It moves METADATA
+		ONLY — no upload, no download, no re-attach — and a record that never
+		had a bundle gets a manifest built from its own fields that SAYS so,
+		rather than one claiming labels somebody typed came out of a training
+		run.
 		"""
-		self.assertEqual(len(registry.TOOLS), 472)
-		self.assertEqual(len(registry.READ_TOOLS), 220)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 252)
+		self.assertEqual(len(registry.TOOLS), 475)
+		self.assertEqual(len(registry.READ_TOOLS), 222)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 253)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
