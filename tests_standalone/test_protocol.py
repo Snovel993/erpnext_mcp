@@ -873,10 +873,40 @@ class Catalogue(SeededTestCase):
 		`acknowledge_threshold_update` / `list_pending_threshold_acknowledgments`
 		are the loop that makes a threshold change something a checker in the
 		field is known to have seen.
+
+		v0.68.0 also adds SEVEN over expense-receipt capture — three writes and
+		four reads: `create_owner_draw` records a distribution as a draft
+		Journal Entry rather than an expense, because equity leaving the company
+		is not a bill; `update_expense_receipt` corrects cost_center, supplier,
+		category or notes at a desk after the phone that captured the receipt
+		has moved on; `create_purchase_invoice_from_receipt` turns one APPROVED
+		receipt into a draft Purchase Invoice by calling
+		`purchasing.create_purchase_invoice` rather than writing the document
+		itself; `normalize_merchant` and `list_merchant_aliases` are the fuzzy
+		match and the register behind that tool's automatic Supplier
+		resolution; `get_expense_summary` and `get_expense_report` are the
+		bookkeeper's dashboard and export over the same receipts.
+
+		v0.68.0 also adds SIXTEEN over the rest of the purchasing pipeline —
+		eight reads and eight writes — Sprint 3 of the Gap Closure Plan:
+		`create_purchase_order` / `get_purchase_order` / `submit_purchase_order`
+		close the loop `list_purchase_orders` (v0.66.0) started;
+		`create_purchase_receipt` / `get_purchase_receipt` /
+		`list_purchase_receipts` / `submit_purchase_receipt` are goods received
+		against a supplier;
+		`create_purchase_invoice` / `get_purchase_invoice` /
+		`list_purchase_invoices` / `submit_purchase_invoice` are the bill, and
+		it is `create_purchase_invoice` the receipt-capture tool above builds
+		on; `create_payment_entry` / `get_payment_entry` / `list_payment_entries`
+		/ `submit_payment_entry` pay it, partial amounts allowed; and
+		`get_ap_aging` closes the sprint — a supplier's true balance from GL
+		Entry against every account typed Payable, aged per open invoice from
+		Purchase Invoice's own outstanding_amount and due_date, with a `drift`
+		field where the two disagree.
 		"""
-		self.assertEqual(len(registry.TOOLS), 449)
-		self.assertEqual(len(registry.READ_TOOLS), 208)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 241)
+		self.assertEqual(len(registry.TOOLS), 472)
+		self.assertEqual(len(registry.READ_TOOLS), 220)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 252)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

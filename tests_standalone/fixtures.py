@@ -16,7 +16,15 @@ import json
 import sys
 import types
 
-from .harness import STORE, MCPTestCase, add_field, register_doctype, set_roles
+from .harness import (
+	STORE,
+	MCPTestCase,
+	add_field,
+	purchase_invoice_fields,
+	purchase_invoice_item_fields,
+	register_doctype,
+	set_roles,
+)
 
 MAIN = "Example Trading Co"
 OTHER = "Second Example Ltd"
@@ -175,6 +183,10 @@ def sales(company_abbr: str = MAIN_ABBR) -> str:
 
 def supplies(company_abbr: str = MAIN_ABBR) -> str:
 	return f"5100 - Office Supplies - {company_abbr}"
+
+
+def payable(company_abbr: str = MAIN_ABBR) -> str:
+	return f"2100 - Accounts Payable - {company_abbr}"
 
 
 #: (cost_center_name, number, is_group, parent_name, disabled)
@@ -536,6 +548,18 @@ def _workflow() -> None:
 
 
 def _trade() -> None:
+	# v0.68.0's harness now models Purchase Order.supplier as a real Link (it
+	# always should have been), so the two suppliers these Purchase Orders name
+	# have to exist as Supplier records — a fixture that named one without
+	# seeding it used to insert unchecked and now raises LinkValidationError,
+	# exactly as a real site would refuse the same Purchase Order.
+	STORE.seed(
+		"Supplier",
+		[
+			{"name": "Example Supplies Inc", "supplier_name": "Example Supplies Inc"},
+			{"name": "Second Supplier LLC", "supplier_name": "Second Supplier LLC"},
+		],
+	)
 	STORE.seed(
 		"Purchase Order",
 		[
@@ -650,6 +674,129 @@ def _invoice(name, customer, due_date, grand_total, outstanding, docstatus=1):
 		"status": "Overdue" if outstanding else "Paid",
 		"company": MAIN,
 		"docstatus": docstatus,
+	}
+
+
+#: v0.68.0. Purchasing & AP read-tool fixtures. Registers Purchase Invoice
+#: (absent by default — see the note in `harness.ERPNEXT_SCHEMA`), and seeds
+#: Purchase Receipt headers plus a Purchase Invoice ageing scenario that mirrors
+#: `_trade()`'s Sales Invoice one: `as_of` 2026-07-24 puts one invoice in each
+#: bucket, an eighth is fully settled (its GL rows net to zero) and must not
+#: appear at all, and the ninth has no due_date at all — read from GL Entry
+#: rather than from `outstanding_amount`, because `get_ap_aging` does.
+def _purchasing() -> None:
+	register_doctype("Purchase Invoice", purchase_invoice_fields())
+	register_doctype("Purchase Invoice Item", purchase_invoice_item_fields())
+
+	STORE.seed(
+		"Purchase Receipt",
+		[
+			{
+				"name": "PUR-RCPT-2026-00001",
+				"supplier": MASTER_SUPPLIER,
+				"supplier_name": MASTER_SUPPLIER,
+				"company": MAIN,
+				"posting_date": "2026-06-10",
+				"purchase_order": "PUR-ORD-2026-00002",
+				"grand_total": 875.5,
+				"currency": "USD",
+				"status": "Completed",
+				"per_billed": 100,
+				"docstatus": 1,
+				"owner": BUYER,
+			},
+			{
+				"name": "PUR-RCPT-2026-00002",
+				"supplier": MASTER_SUPPLIER,
+				"supplier_name": MASTER_SUPPLIER,
+				"company": MAIN,
+				"posting_date": "2026-06-25",
+				"grand_total": 210.0,
+				"currency": "USD",
+				"status": "Draft",
+				"per_billed": 0,
+				"docstatus": 0,
+				"owner": BUYER,
+			},
+		],
+	)
+
+	invoices = [
+		_purchase_invoice("ACC-PINV-2026-00001", MASTER_SUPPLIER, "2026-08-30", 1000),
+		_purchase_invoice("ACC-PINV-2026-00002", MASTER_SUPPLIER, "2026-07-10", 500),
+		_purchase_invoice("ACC-PINV-2026-00003", MASTER_SUPPLIER, "2026-06-10", 3000),
+		_purchase_invoice("ACC-PINV-2026-00004", MASTER_SUPPLIER, "2026-05-10", 4000),
+		_purchase_invoice("ACC-PINV-2026-00005", RETIRED_SUPPLIER, "2026-01-02", 5000),
+		_purchase_invoice("ACC-PINV-2026-00006", RETIRED_SUPPLIER, None, 600),
+		# Settled: its GL rows below net to zero and must not appear in the report.
+		_purchase_invoice("ACC-PINV-2026-00007", MASTER_SUPPLIER, "2026-06-01", 900, outstanding=0),
+	]
+	STORE.seed("Purchase Invoice", invoices)
+
+	gl_rows = []
+	for invoice in invoices:
+		gl_rows.append(
+			_gl_payable(
+				f"GL-{invoice['name']}-cr",
+				invoice["company"],
+				invoice["supplier"],
+				credit=invoice["grand_total"],
+				voucher_no=invoice["name"],
+			)
+		)
+	# The settled invoice's offsetting payment: a debit for the same amount
+	# against the same account and party, which is what makes the two rows net
+	# to nothing rather than to a residual a rounding tolerance would have to
+	# absorb.
+	gl_rows.append(
+		_gl_payable(
+			"GL-PAY-2026-00099-dr",
+			MAIN,
+			MASTER_SUPPLIER,
+			debit=900,
+			voucher_no="PAY-2026-00099",
+			voucher_type="Payment Entry",
+		)
+	)
+	STORE.seed("GL Entry", gl_rows)
+
+
+def _purchase_invoice(name, supplier, due_date, grand_total, outstanding=None, docstatus=1):
+	return {
+		"name": name,
+		"supplier": supplier,
+		"supplier_name": supplier,
+		"company": MAIN,
+		"posting_date": "2026-05-01",
+		"due_date": due_date,
+		"credit_to": payable(),
+		"grand_total": grand_total,
+		"outstanding_amount": grand_total if outstanding is None else outstanding,
+		"currency": "USD",
+		"status": "Paid" if outstanding == 0 else "Unpaid",
+		"docstatus": docstatus,
+	}
+
+
+def _gl_payable(
+	name, company, supplier, *, voucher_no, voucher_type="Purchase Invoice", debit=0.0, credit=0.0
+):
+	return {
+		"name": name,
+		"account": payable(),
+		"posting_date": "2026-05-01",
+		"debit": debit,
+		"credit": credit,
+		"company": company,
+		"is_cancelled": 0,
+		"voucher_type": voucher_type,
+		"voucher_no": voucher_no,
+		"voucher_detail_no": "",
+		"party_type": "Supplier",
+		"party": supplier,
+		"cost_center": None,
+		"is_opening": "No",
+		"docstatus": 1,
 	}
 
 
@@ -1926,3 +2073,18 @@ class MastersTestCase(SeededTestCase):
 	def setUp(self):
 		super().setUp()
 		seed_masters()
+
+
+class PurchasingTestCase(V2TestCase):
+	"""v0.68.0. Trade fixtures plus masters plus the purchasing ageing scenario.
+
+	Needs `V2TestCase` for `PUR-ORD-2026-00002` (a submitted Purchase Order the
+	Purchase Receipt fixture links to) and `seed_masters()` for the Supplier,
+	Item and Warehouse a `create_purchase_order`-style test resolves against —
+	neither alone is enough for this module's tools.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		seed_masters()
+		_purchasing()

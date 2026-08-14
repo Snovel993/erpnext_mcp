@@ -38,8 +38,9 @@ from .fixtures import (
 	OTHER,
 	V7TestCase,
 	cash,
+	install_hrms,
 )
-from .harness import STORE, frappe
+from .harness import ROLES, STORE, frappe, set_roles
 
 BANK = f"1110 - Bank Checking - {MAIN_ABBR}"
 
@@ -845,3 +846,191 @@ class GovernanceSwitches(V7TestCase):
 		)
 		row = self.assertAudited("create_cap_table_entry", status="Error")
 		self.assertIn("entity_type", row["result_summary"])
+
+
+# ── v0.68.0: create_owner_draw ────────────────────────────────────────────────
+
+
+class CreateOwnerDraw(V7TestCase):
+	"""Independent of the cap table on purpose — no member, no dimension, just a
+	role and an equity account. `V7TestCase` gives it `MEMBER_DISTRIBUTIONS`,
+	whose name ("Member Distributions") already matches the same keyword table
+	`record_member_event` uses, and `MAIN`'s default bank account."""
+
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, allow_create_owner_draw=1)
+		self._roles_before = {user: list(held) for user, held in ROLES.items()}
+		ROLES.clear()
+
+	def tearDown(self):
+		ROLES.clear()
+		ROLES.update(self._roles_before)
+		super().tearDown()
+
+	def draw_args(self, **overrides):
+		payload = {
+			"company": MAIN,
+			"amount": 5000,
+			"date": "2026-07-01",
+			"narrative": "Quarterly distribution approved by the members.",
+		}
+		payload.update(overrides)
+		return payload
+
+	def journal_entry(self, name):
+		return frappe.get_doc("Journal Entry", name)
+
+	def test_refused_with_no_role_at_all(self):
+		error = self.tool_error("create_owner_draw", self.draw_args())
+		self.assertIn("may not record an owner draw", error)
+		self.assertIn("Member Manager", error)
+
+	def test_a_role_that_is_not_member_manager_is_refused(self):
+		set_roles("Administrator", ["Accounts User"])
+		error = self.tool_error("create_owner_draw", self.draw_args())
+		self.assertIn("may not record an owner draw", error)
+
+	def test_member_manager_role_is_accepted(self):
+		set_roles("Administrator", ["Member Manager"])
+		data = self.tool_data("create_owner_draw", self.draw_args())
+		self.assertTrue(data["name"])
+		self.assertEqual(data["recorded_by"], "Administrator")
+
+	def test_system_manager_is_accepted_too(self):
+		set_roles("Administrator", ["System Manager"])
+		data = self.tool_data("create_owner_draw", self.draw_args())
+		self.assertTrue(data["name"])
+
+	def test_debits_the_matched_distributions_account_and_credits_the_bank(self):
+		set_roles("Administrator", ["Member Manager"])
+		data = self.tool_data("create_owner_draw", self.draw_args(amount=1200))
+		doc = self.journal_entry(data["name"])
+		lines = {row.account: (row.debit, row.credit) for row in doc.accounts}
+		self.assertEqual(lines[MEMBER_DISTRIBUTIONS], (1200.0, 0.0))
+		self.assertEqual(lines[BANK], (0.0, 1200.0))
+
+	def test_it_is_always_a_draft(self):
+		set_roles("Administrator", ["Member Manager"])
+		data = self.tool_data("create_owner_draw", self.draw_args())
+		self.assertEqual(data["docstatus"], 0)
+		doc = self.journal_entry(data["name"])
+		self.assertEqual(int(doc.docstatus), 0)
+
+	def test_amount_must_be_positive(self):
+		set_roles("Administrator", ["Member Manager"])
+		error = self.tool_error("create_owner_draw", self.draw_args(amount=-100))
+		self.assertIn("positive", error)
+
+	def test_amount_is_required(self):
+		set_roles("Administrator", ["Member Manager"])
+		payload = self.draw_args()
+		payload.pop("amount")
+		error = self.tool_error("create_owner_draw", payload)
+		self.assertIn("amount is required", error)
+
+	def test_narrative_too_short_is_refused(self):
+		set_roles("Administrator", ["Member Manager"])
+		error = self.tool_error("create_owner_draw", self.draw_args(narrative="why"))
+		self.assertIn("narrative must be a real explanation", error)
+
+	def test_date_is_required(self):
+		set_roles("Administrator", ["Member Manager"])
+		payload = self.draw_args()
+		payload.pop("date")
+		error = self.tool_error("create_owner_draw", payload)
+		self.assertIn("date", error)
+
+	def test_effective_date_is_accepted_as_an_alias(self):
+		set_roles("Administrator", ["Member Manager"])
+		payload = self.draw_args()
+		payload["effective_date"] = payload.pop("date")
+		data = self.tool_data("create_owner_draw", payload)
+		self.assertTrue(data["name"])
+
+	def test_explicit_draw_account_overrides_the_keyword_match(self):
+		set_roles("Administrator", ["Member Manager"])
+		data = self.tool_data("create_owner_draw", self.draw_args(draw_account=MEMBER_CAPITAL))
+		self.assertEqual(data["draw_account"], MEMBER_CAPITAL)
+		self.assertEqual(data["draw_account_resolved_by"], "argument")
+
+	def test_switched_off_by_default(self):
+		self.configure(enabled=1, allow_create_owner_draw=0)
+		set_roles("Administrator", ["Member Manager"])
+		error = self.tool_error("create_owner_draw", self.draw_args())
+		self.assertIn("switched off", error)
+
+
+class CreateOwnerDrawFromReceipt(V7TestCase):
+	def setUp(self):
+		super().setUp()
+		self.configure(
+			enabled=1,
+			allow_create_owner_draw=1,
+			allow_submit_expense_receipt=1,
+		)
+		self._roles_before = {user: list(held) for user, held in ROLES.items()}
+		ROLES.clear()
+		set_roles("Administrator", ["Member Manager"])
+		install_hrms()
+
+	def tearDown(self):
+		ROLES.clear()
+		ROLES.update(self._roles_before)
+		super().tearDown()
+
+	def owner_draw_receipt(self, **overrides):
+		payload = {
+			"merchant": "Owner Draw",
+			"amount": 2500,
+			"receipt_date": "2026-07-01",
+			"category": "Owner Draw",
+			"company": MAIN,
+			"submitted_by": "HR-EMP-00001",
+		}
+		payload.update(overrides)
+		return self.tool_data("submit_expense_receipt", payload)["name"]
+
+	def test_links_the_receipt_to_the_journal_entry(self):
+		name = self.owner_draw_receipt()
+		data = self.tool_data(
+			"create_owner_draw",
+			{
+				"company": MAIN,
+				"amount": 2500,
+				"date": "2026-07-01",
+				"narrative": "Owner draw captured from a photographed slip.",
+				"receipt": name,
+			},
+		)
+		receipt = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(receipt["linked_doctype"], "Journal Entry")
+		self.assertEqual(receipt["linked_document"], data["name"])
+
+	def test_a_non_owner_draw_receipt_is_refused(self):
+		name = self.owner_draw_receipt(category="Fuel")
+		error = self.tool_error(
+			"create_owner_draw",
+			{
+				"company": MAIN,
+				"amount": 2500,
+				"date": "2026-07-01",
+				"narrative": "This should not work.",
+				"receipt": name,
+			},
+		)
+		self.assertIn("not", error)
+		self.assertIn("Owner Draw", error)
+
+	def test_an_already_linked_receipt_is_refused(self):
+		name = self.owner_draw_receipt()
+		args = {
+			"company": MAIN,
+			"amount": 2500,
+			"date": "2026-07-01",
+			"narrative": "First draw against this receipt.",
+			"receipt": name,
+		}
+		self.tool_data("create_owner_draw", args)
+		error = self.tool_error("create_owner_draw", {**args, "narrative": "Second attempt."})
+		self.assertIn("already linked", error)

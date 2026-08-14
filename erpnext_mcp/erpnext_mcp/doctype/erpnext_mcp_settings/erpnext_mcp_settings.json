@@ -110,6 +110,24 @@
   "allow_list_sales_orders",
   "allow_get_outstanding_invoices",
   "allow_list_purchase_orders",
+  "purchasing_tools_section",
+  "allow_get_purchase_order",
+  "allow_get_purchase_receipt",
+  "allow_list_purchase_receipts",
+  "allow_get_purchase_invoice",
+  "allow_list_purchase_invoices",
+  "allow_get_payment_entry",
+  "allow_list_payment_entries",
+  "allow_get_ap_aging",
+  "purchasing_tools_col",
+  "allow_create_purchase_order",
+  "allow_submit_purchase_order",
+  "allow_create_purchase_receipt",
+  "allow_submit_purchase_receipt",
+  "allow_create_purchase_invoice",
+  "allow_submit_purchase_invoice",
+  "allow_create_payment_entry",
+  "allow_submit_payment_entry",
   "master_data_tools_section",
   "allow_list_item_groups",
   "allow_create_item_group",
@@ -149,6 +167,7 @@
   "allow_list_member_events",
   "allow_record_member_event",
   "allow_submit_member_event",
+  "allow_create_owner_draw",
   "archive_tools_section",
   "allow_list_governance_documents",
   "allow_get_governance_document_content",
@@ -377,21 +396,27 @@
   "expense_receipt_section",
   "allow_list_expense_receipts",
   "allow_get_expense_receipt",
+  "allow_get_expense_summary",
+  "allow_get_expense_report",
   "expense_receipt_col",
   "allow_submit_expense_receipt",
   "allow_approve_expense_receipt",
   "allow_reject_expense_receipt",
+  "allow_update_expense_receipt",
   "receipts_section",
   "allow_list_scale_tickets",
   "allow_get_scale_ticket",
   "allow_list_settlement_statements",
   "allow_get_settlement_statement",
   "allow_classify_receipt",
+  "allow_normalize_merchant",
+  "allow_list_merchant_aliases",
   "receipts_col",
   "allow_create_scale_ticket",
   "allow_submit_scale_ticket",
   "allow_create_settlement_statement",
   "allow_submit_settlement_statement",
+  "allow_create_purchase_invoice_from_receipt",
   "shift_section",
   "allow_list_shifts",
   "allow_get_shift",
@@ -1275,6 +1300,129 @@
    "label": "List Purchase Orders"
   },
   {
+   "description": "Sprint 3 of the Gap Closure Plan (v0.68.0): create, receive, bill and pay a purchase. Every create tool below produces a DRAFT only (docstatus 0) and cannot submit — posting is the separate, separately-switched submit tool for that same document, so an operator can grant \"propose a Purchase Order\" without granting \"commit the company to buying\".",
+   "fieldname": "purchasing_tools_section",
+   "fieldtype": "Section Break",
+   "label": "Purchasing &amp; AP"
+  },
+  {
+   "default": "1",
+   "description": "One Purchase Order in full, including its line items with received_qty and billed_amt.",
+   "fieldname": "allow_get_purchase_order",
+   "fieldtype": "Check",
+   "label": "Get Purchase Order"
+  },
+  {
+   "default": "1",
+   "description": "One Purchase Receipt in full, including its line items.",
+   "fieldname": "allow_get_purchase_receipt",
+   "fieldtype": "Check",
+   "label": "Get Purchase Receipt"
+  },
+  {
+   "default": "1",
+   "description": "Purchase Receipt headers by supplier, status, purchase order, company and date range.",
+   "fieldname": "allow_list_purchase_receipts",
+   "fieldtype": "Check",
+   "label": "List Purchase Receipts"
+  },
+  {
+   "default": "1",
+   "description": "One Purchase Invoice in full, including its line items.",
+   "fieldname": "allow_get_purchase_invoice",
+   "fieldtype": "Check",
+   "label": "Get Purchase Invoice"
+  },
+  {
+   "default": "1",
+   "description": "Purchase Invoice headers by supplier, status, company, date range and outstanding amount.",
+   "fieldname": "allow_list_purchase_invoices",
+   "fieldtype": "Check",
+   "label": "List Purchase Invoices"
+  },
+  {
+   "default": "1",
+   "description": "One Payment Entry in full, including its invoice references.",
+   "fieldname": "allow_get_payment_entry",
+   "fieldtype": "Check",
+   "label": "Get Payment Entry"
+  },
+  {
+   "default": "1",
+   "description": "Payment Entry headers by supplier, company and date range. Pay/Supplier only — the AP side.",
+   "fieldname": "allow_list_payment_entries",
+   "fieldtype": "Check",
+   "label": "List Payment Entries"
+  },
+  {
+   "default": "1",
+   "description": "Accounts Payable ageing by supplier, read from GL Entry against every account typed Payable — the true ledger balance, not any one invoice's own column.",
+   "fieldname": "allow_get_ap_aging",
+   "fieldtype": "Check",
+   "label": "Get AP Ageing"
+  },
+  {
+   "fieldname": "purchasing_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a DRAFT Purchase Order against a Supplier. Cannot submit.",
+   "fieldname": "allow_create_purchase_order",
+   "fieldtype": "Check",
+   "label": "Create Purchase Order"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a DRAFT Purchase Order, committing the company to the buy.",
+   "fieldname": "allow_submit_purchase_order",
+   "fieldtype": "Check",
+   "label": "Submit Purchase Order"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a DRAFT Purchase Receipt against a Supplier. Cannot submit.",
+   "fieldname": "allow_create_purchase_receipt",
+   "fieldtype": "Check",
+   "label": "Create Purchase Receipt"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a DRAFT Purchase Receipt. On a real site this is what creates the Stock Ledger Entries that move goods into the warehouse.",
+   "fieldname": "allow_submit_purchase_receipt",
+   "fieldtype": "Check",
+   "label": "Submit Purchase Receipt"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a DRAFT Purchase Invoice against a Supplier. Cannot submit.",
+   "fieldname": "allow_create_purchase_invoice",
+   "fieldtype": "Check",
+   "label": "Create Purchase Invoice"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a DRAFT Purchase Invoice, posting GL Entries for the expense and the payable.",
+   "fieldname": "allow_submit_purchase_invoice",
+   "fieldtype": "Check",
+   "label": "Submit Purchase Invoice"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a DRAFT Payment Entry paying a Supplier, optionally allocated against submitted Purchase Invoices. Cannot submit.",
+   "fieldname": "allow_create_payment_entry",
+   "fieldtype": "Check",
+   "label": "Create Payment Entry"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Submit a DRAFT Payment Entry, posting GL Entries and reducing every referenced invoice's outstanding amount.",
+   "fieldname": "allow_submit_payment_entry",
+   "fieldtype": "Check",
+   "label": "Submit Payment Entry"
+  },
+  {
    "description": "Items, Item Groups, Suppliers, Customers, Warehouses and prices — the records every other ERPNext document points at. None of these doctypes is submittable, so nothing here creates a draft: a master is live the moment it is created, and <b>disabled</b> is the nearest thing to holding one back.<br><br>The word <b>company</b> means three different things across these tools, and each one reports which it applied: a Warehouse really is company-scoped, an Item is scoped only through its per-company default row, and a Supplier or Customer is site-wide and has no company column at all.",
    "fieldname": "master_data_tools_section",
    "fieldtype": "Section Break",
@@ -1535,6 +1683,13 @@
    "fieldname": "allow_submit_member_event",
    "fieldtype": "Check",
    "label": "Submit Member Event"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record an owner draw / member distribution as a draft Journal Entry — debit an equity draw account, credit bank or cash. Requires the Member Manager role (or System Manager) on top of this switch. Independent of the cap table: works whether or not this site uses Member Event.",
+   "fieldname": "allow_create_owner_draw",
+   "fieldtype": "Check",
+   "label": "Create Owner Draw"
   },
   {
    "description": "The durable archive: operating agreements, trust documents, resolutions, prior statements, and the amendment chain between them.",
@@ -3028,6 +3183,20 @@
    "label": "Get Expense Receipt"
   },
   {
+   "default": "1",
+   "description": "READ. Expense receipts totalled by category and by period (week/month/quarter), optionally broken down by merchant or supplier. Rejected receipts are excluded from the totals by default.",
+   "fieldname": "allow_get_expense_summary",
+   "fieldtype": "Check",
+   "label": "Get Expense Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every expense receipt in a window, one row each, with an optional CSV export string. Nothing is excluded by default.",
+   "fieldname": "allow_get_expense_report",
+   "fieldtype": "Check",
+   "label": "Get Expense Report"
+  },
+  {
    "fieldname": "expense_receipt_col",
    "fieldtype": "Column Break"
   },
@@ -3051,6 +3220,13 @@
    "fieldname": "allow_reject_expense_receipt",
    "fieldtype": "Check",
    "label": "Reject Expense Receipt"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Correct cost_center, supplier, category or notes on a receipt already captured, in any status. Never touches merchant, amount, receipt_date or the review trail.",
+   "fieldname": "allow_update_expense_receipt",
+   "fieldtype": "Check",
+   "label": "Update Expense Receipt"
   },
   {
    "fieldname": "receipts_section",
@@ -3093,6 +3269,20 @@
    "label": "Classify Receipt"
   },
   {
+   "default": "1",
+   "description": "READ. The best-matching Supplier for a merchant string, and how confident that is — plain string similarity, no ML. Suggests a link; never sets one.",
+   "fieldname": "allow_normalize_merchant",
+   "fieldtype": "Check",
+   "label": "Normalize Merchant"
+  },
+  {
+   "default": "1",
+   "description": "READ. Merchant strings already linked to a Supplier, grouped by which Supplier. Built by reading Expense Receipt rows, not a table of its own.",
+   "fieldname": "allow_list_merchant_aliases",
+   "fieldtype": "Check",
+   "label": "List Merchant Aliases"
+  },
+  {
    "fieldname": "receipts_col",
    "fieldtype": "Column Break"
   },
@@ -3123,6 +3313,13 @@
    "fieldname": "allow_submit_settlement_statement",
    "fieldtype": "Check",
    "label": "Submit Settlement Statement"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Turn one Approved Expense Receipt into a draft Purchase Invoice — resolving or creating the Supplier, matching the expense account from the category, and linking the two documents. Refuses an Owner Draw receipt by name.",
+   "fieldname": "allow_create_purchase_invoice_from_receipt",
+   "fieldtype": "Check",
+   "label": "Create Purchase Invoice From Receipt"
   },
   {
    "fieldname": "shift_section",

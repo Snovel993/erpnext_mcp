@@ -59,14 +59,20 @@ able to freeze them. One switch cannot express that; two can.
 
 from __future__ import annotations
 
+import difflib
+import re
+
 import frappe
 
-from ..args import as_date, as_float, as_int, as_str, resolve_company
+from .. import compat
+from ..args import as_date, as_float, as_int, as_str, resolve_account, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
+from . import expenses, masters, purchasing
 
 SCALE_TICKET = "Scale Ticket"
 SETTLEMENT_STATEMENT = "Settlement Statement"
+PURCHASE_INVOICE = "Purchase Invoice"
 CUSTOMER = "Customer"
 FIELD = "Field"
 
@@ -1097,4 +1103,508 @@ def classify_receipt(args: dict) -> ToolResult:
 		data=data,
 		summary=f"{winner} (confidence {confidence}) on "
 		f"{len(matched[winner])} signal(s): {', '.join(matched[winner][:5]) or '<none>'}",
+	)
+
+
+# ── merchant → supplier matching ─────────────────────────────────────────────
+#
+# v0.68.0. `submit_expense_receipt`'s design principle is that NOTHING is ever
+# inferred: `merchant` and `supplier` stay independent unless a human sets the
+# link. `normalize_merchant` does not break that — it is the SUGGESTION a human
+# reviews before they set it, published as its own read-only tool rather than
+# folded into capture. `create_purchase_invoice_from_receipt` is the one caller
+# in this app that acts on a match without a human in the loop first, and it
+# only does so above a high confidence bar, and it says which branch it took.
+#
+# NO ML. A merchant string and a Supplier's legal name are both short, mostly
+# stable strings, and the differences between them are punctuation and a
+# corporate suffix — "WILBUR ELLIS CO" against "Wilbur-Ellis Company LLC" is the
+# same six letters twice with three extra words neither company chose. Stripping
+# the suffix and comparing what is left is the whole algorithm, and it is
+# auditable by reading it, which a trained model is not.
+
+#: Corporate-entity words stripped before comparison. Every one of them is a
+#: legal-form marker that varies between how a receipt printer abbreviates a
+#: vendor and how that vendor is registered, and neither variant is evidence
+#: about which company it is.
+_CORPORATE_SUFFIXES = frozenset(
+	{
+		"CO",
+		"COMPANY",
+		"LLC",
+		"LLP",
+		"LP",
+		"INC",
+		"INCORPORATED",
+		"CORP",
+		"CORPORATION",
+		"LTD",
+		"LIMITED",
+		"PC",
+		"PLLC",
+		"THE",
+	}
+)
+
+_NON_ALNUM = re.compile(r"[^A-Z0-9 ]+")
+
+#: Below this, a match is noise rather than a suggestion — `normalize_merchant`
+#: reports it as `null` rather than as a low-confidence guess a client might
+#: render as though it meant something.
+_MATCH_FLOOR = 0.35
+
+#: Above this, `create_purchase_invoice_from_receipt` links a Supplier without
+#: asking — high enough that "WILBUR ELLIS CO" → "Wilbur-Ellis Company LLC"
+#: clears it (it normalizes to an exact match) and "ACE HARDWARE #4102" against
+#: an unrelated "ACE RENTALS" does not.
+_AUTO_LINK_THRESHOLD = 0.85
+
+#: A similarity algorithm is never certain it has found the same legal entity,
+#: only that the text looks alike — same reasoning as `classify_receipt`'s
+#: ceiling, and the same number.
+_MATCH_CEILING = 0.95
+
+
+def _normalize_merchant_name(value: str) -> str:
+	"""Upper-case, punctuation stripped to spaces, corporate suffixes dropped."""
+	text = _NON_ALNUM.sub(" ", str(value or "").upper())
+	tokens = [token for token in text.split() if token and token not in _CORPORATE_SUFFIXES]
+	return " ".join(tokens)
+
+
+def _merchant_similarity(a: str, b: str) -> float:
+	"""How alike two vendor names are, 0 to 1, after stripping legal-form noise.
+
+	Blends two measures because either alone is fooled differently: a character
+	ratio (`SequenceMatcher`) is fooled by word order, a word-set ratio (Jaccard)
+	is fooled by a single extra digit run like a store number. Averaging them
+	keeps a genuine match from either failure mode alone.
+	"""
+	norm_a, norm_b = _normalize_merchant_name(a), _normalize_merchant_name(b)
+	if not norm_a or not norm_b:
+		return 0.0
+	char_ratio = difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
+	tokens_a, tokens_b = set(norm_a.split()), set(norm_b.split())
+	word_ratio = len(tokens_a & tokens_b) / len(tokens_a | tokens_b) if (tokens_a | tokens_b) else 0.0
+	return round(min(_MATCH_CEILING, 0.5 * char_ratio + 0.5 * word_ratio), 4)
+
+
+def _candidate_suppliers(limit: int = 3000) -> list[dict]:
+	return frappe.db.get_all(
+		masters.SUPPLIER, fields=["name", "supplier_name"], limit_page_length=limit, order_by="name asc"
+	)
+
+
+def _ranked_supplier_matches(merchant: str, top: int = 5) -> list[dict]:
+	"""Every Supplier on the site, scored against `merchant`, best first."""
+	scored = []
+	for row in _candidate_suppliers():
+		label = row.get("supplier_name") or row.get("name")
+		confidence = _merchant_similarity(merchant, label)
+		if confidence <= 0:
+			continue
+		scored.append(
+			{"supplier": row["name"], "supplier_name": row.get("supplier_name"), "confidence": confidence}
+		)
+	scored.sort(key=lambda row: (-row["confidence"], row["supplier"]))
+	return scored[:top]
+
+
+def normalize_merchant(args: dict) -> ToolResult:
+	"""The best-matching Supplier for a merchant string, and how confident that is.
+
+	Read-only, and touches nothing: it exists so a client can show a picker
+	"did you mean Wilbur-Ellis Company LLC?" and let a person confirm it, the
+	same way `classify_receipt` proposes a register and shows its evidence. The
+	match is never written anywhere by this call — `update_expense_receipt` or
+	`submit_expense_receipt`'s own `supplier` argument is how a human accepts it.
+	"""
+	compat.require_doctype(masters.SUPPLIER, masters._HINT)
+	merchant = as_str(args, "merchant", required=True)
+
+	ranked = _ranked_supplier_matches(merchant, top=5)
+	best = ranked[0] if ranked and ranked[0]["confidence"] >= _MATCH_FLOOR else None
+	alternatives = [row for row in ranked if row is not best]
+
+	data = {
+		"merchant": merchant,
+		"match": best,
+		"alternatives": alternatives,
+		"threshold": _MATCH_FLOOR,
+		"suppliers_considered": len(_candidate_suppliers()),
+		"note": (
+			"Similarity is computed from the vendor name alone, after stripping punctuation and "
+			"legal-form words (Co, LLC, Inc, Corp, Ltd …) from both sides — never from a fitted "
+			"model, so a low score does not mean the two are unrelated, only that their names "
+			"read differently. This suggests a link; it does not set one."
+		),
+	}
+	summary = (
+		f"best match for {merchant!r}: {best['supplier_name'] or best['supplier']} "
+		f"(confidence {best['confidence']})"
+		if best
+		else f"no Supplier scored above {_MATCH_FLOOR} for {merchant!r}"
+	)
+	return ToolResult(data=data, summary=summary)
+
+
+def list_merchant_aliases(args: dict) -> ToolResult:
+	"""Merchant strings already linked to a Supplier, grouped by which Supplier.
+
+	The alias register this app keeps is not a table of its own — it is every
+	Expense Receipt whose `supplier` was set, read back grouped by that
+	Supplier. Maximal use of data already on hand rather than a doctype that
+	exists only to duplicate it: the day a receipt's supplier link changes, this
+	list changes with it for free.
+	"""
+	filters: dict = {"supplier": ("is", "set")}
+	company = as_str(args, "company")
+	if company:
+		filters["company"] = resolve_company(company)
+	supplier = as_str(args, "supplier")
+	if supplier:
+		if not frappe.db.exists(masters.SUPPLIER, supplier):
+			raise ToolError(f"no Supplier called {supplier!r} on this site.")
+		filters["supplier"] = supplier
+
+	rows = frappe.db.get_all(
+		expenses.EXPENSE_RECEIPT,
+		filters=filters,
+		fields=["merchant", "supplier"],
+		limit_page_length=5000,
+	)
+
+	by_supplier: dict = {}
+	for row in rows:
+		entry = by_supplier.setdefault(row["supplier"], {})
+		merchant = row.get("merchant") or "<blank>"
+		entry[merchant] = entry.get(merchant, 0) + 1
+
+	names = sorted(by_supplier)
+	labels = (
+		{r["name"]: r.get("supplier_name") for r in frappe.db.get_all(masters.SUPPLIER, filters={"name": ("in", names)}, fields=["name", "supplier_name"])}
+		if names
+		else {}
+	)
+
+	aliases = []
+	for name in names:
+		merchants = by_supplier[name]
+		receipt_count = sum(merchants.values())
+		aliases.append(
+			{
+				"supplier": name,
+				"supplier_name": labels.get(name),
+				"receipt_count": receipt_count,
+				"merchant_strings": [
+					{"merchant": merchant, "receipt_count": count}
+					for merchant, count in sorted(merchants.items(), key=lambda kv: (-kv[1], kv[0]))
+				],
+			}
+		)
+	aliases.sort(key=lambda row: (-row["receipt_count"], row["supplier"]))
+
+	data = {
+		"aliases": aliases,
+		"count": len(aliases),
+		"filters": {"company": filters.get("company") or None, "supplier": supplier or None},
+		"note": (
+			"Built from Expense Receipt rows whose supplier is already set — there is no separate "
+			"alias table. A merchant string appears once per distinct spelling a receipt was "
+			"captured with, so 'WILBUR ELLIS CO' and 'Wilbur Ellis #14' both list under the same "
+			"Supplier once each has been linked at least once."
+		),
+	}
+	return ToolResult(data=data, summary=f"{len(aliases)} supplier(s) with a known merchant alias")
+
+
+# ── create_purchase_invoice_from_receipt ─────────────────────────────────────
+
+#: Keyword groups an Expense Receipt category is matched against a company's
+#: leaf Expense accounts with. Same shape as governance._DISTRIBUTION_KEYWORDS:
+#: a short, readable, auditable table rather than a fitted mapping.
+_CATEGORY_ACCOUNT_KEYWORDS = {
+	"Fuel": ("fuel",),
+	"Equipment Parts": ("equipment", "repair", "maintenance", "parts"),
+	"Supplies": ("supplies",),
+	"Hardware": ("hardware",),
+	"Feed": ("feed",),
+	"Seed": ("seed",),
+	"Fertilizer": ("fertilizer", "chemical", "spray"),
+	"Other": ("miscellaneous", "sundry", "other", "general"),
+}
+
+
+def _leaf_expense_accounts(company: str) -> list[dict]:
+	fields = compat.existing_fields(
+		"Account", ("name", "account_name", "account_number", "is_group", "disabled", "root_type")
+	)
+	rows = frappe.db.get_all(
+		"Account",
+		filters={"company": company, "root_type": "Expense"},
+		fields=fields,
+		order_by="name asc",
+		limit=500,
+	)
+	return [
+		dict(row) for row in rows if not int(row.get("is_group") or 0) and not int(row.get("disabled") or 0)
+	]
+
+
+def _match_expense_account(company: str, category: str) -> str:
+	"""One leaf Expense account whose name matches a receipt category.
+
+	Same shape and same reasoning as `governance._match_equity_account`:
+	refuses on zero matches and on more than one rather than picking the first
+	one that sorts first, because either silent choice puts a receipt on a P&L
+	line nobody chose and nobody notices until the category total is wrong.
+	"""
+	keywords = _CATEGORY_ACCOUNT_KEYWORDS.get(category, (category.lower(),))
+	candidates = _leaf_expense_accounts(company)
+	matches = [
+		row
+		for row in candidates
+		if any(keyword in str(row.get("account_name") or "").lower() for keyword in keywords)
+	]
+	if len(matches) == 1:
+		return matches[0]["name"]
+	listing = ", ".join(row["name"] for row in candidates) or "<none>"
+	if not matches:
+		raise ToolError(
+			f"could not find an expense account for category {category!r} on {company}: no leaf "
+			f"Expense account is named after {', '.join(keywords)}. Name it explicitly with "
+			f"expense_account, or create one with create_account. Leaf expense accounts on this "
+			f"company: {listing}. Nothing was created."
+		)
+	raise ToolError(
+		f"{len(matches)} leaf Expense accounts could be the {category} account for {company}: "
+		f"{', '.join(row['name'] for row in matches)}. Name it explicitly with expense_account. "
+		"Nothing was created."
+	)
+
+
+_RECEIPT_FIELDS_FOR_PI = (
+	"merchant",
+	"amount",
+	"receipt_date",
+	"category",
+	"status",
+	"company",
+	"supplier",
+	"cost_center",
+	"linked_doctype",
+	"linked_document",
+	"notes",
+)
+
+
+#: One non-stock Item per category, found or created — never one per receipt.
+#: `purchasing.create_purchase_invoice` requires an `item_code` on every line
+#: (it is the general purchasing pipeline's tool, and ERPNext's own Purchase
+#: Invoice Item makes one mandatory there); a receipt has no Item behind it at
+#: all. Rather than invent a fresh Item per receipt — which would flood the
+#: Item master with one-off rows for the same eight categories this app
+#: already has a closed list of — this resolves to a stable, shared,
+#: non-stock Item per category, created once and reused by every receipt in
+#: it after that.
+_CATEGORY_ITEM_PREFIX = "EXP-"
+
+
+def _service_item_for_category(category: str) -> str:
+	item_code = f"{_CATEGORY_ITEM_PREFIX}{category.upper().replace(' ', '-')}"
+	if frappe.db.exists(masters.ITEM, item_code):
+		return item_code
+	created = masters.create_item(
+		{
+			"item_code": item_code,
+			"item_name": f"{category} (Expense)",
+			"is_stock_item": False,
+			"description": (
+				f"Non-stock service item for {category} expense receipts. Created automatically by "
+				"create_purchase_invoice_from_receipt the first time this category was billed."
+			),
+		}
+	)
+	return created.data["name"]
+
+
+def create_purchase_invoice_from_receipt(args: dict) -> ToolResult:
+	"""Turn one APPROVED Expense Receipt into a DRAFT Purchase Invoice.
+
+	BUILDS ON `purchasing.create_purchase_invoice` rather than writing the
+	document itself — this tool's whole job is deciding what to hand that one:
+	which Supplier, which expense account, which Item. The Purchase Invoice
+	itself is whatever the general purchasing pipeline would produce for a
+	human who typed the same choices in by hand.
+
+	APPROVED ONLY. A Submitted receipt has not yet been looked at by anyone but
+	the foreman who photographed it; billing it would put an unreviewed number
+	into the payables ledger. `approve_expense_receipt` is the gate.
+
+	OWNER DRAW IS REFUSED BY NAME. `create_owner_draw` exists precisely because
+	an owner draw is equity leaving the company, not a bill from a vendor, and
+	this tool would otherwise happily invent a Supplier called after the
+	owner's own name and post it as a payable.
+
+	THE SUPPLIER, IN ORDER: the receipt's own `supplier` link if one is already
+	set; the `supplier` argument if given; otherwise the best match
+	`normalize_merchant` would return, used automatically ONLY above a high
+	confidence bar; and failing all three, a brand-new Supplier created from
+	the merchant string, exactly as the merchant printed it. Whichever branch
+	ran is reported as `supplier_resolved_by` — this is the one tool in the app
+	that links or creates a Supplier without a human confirming the match
+	first, and it says so rather than leaving the caller to guess.
+
+	THE EXPENSE ACCOUNT is matched from the receipt's category the same way a
+	member distribution's equity account is matched from event type — a short
+	keyword table against the company's own leaf Expense accounts — or named
+	explicitly with `expense_account`.
+
+	ONE LINE, AGAINST A SHARED NON-STOCK ITEM per category (`item` overrides
+	this with a real stock Item). The merchant string, the notes and the
+	photograph stay on the Expense Receipt — `linked_document` is how a reader
+	gets from the invoice back to them.
+
+	ALWAYS A DRAFT. `purchasing.create_purchase_invoice` never submits — review
+	it and post it in ERPNext, or with `submit_purchase_invoice` if this site
+	enables it.
+	"""
+	compat.require_doctype(
+		PURCHASE_INVOICE, "It ships with ERPNext's Buying module — install ERPNext to use this tool."
+	)
+	receipt_name = as_str(args, "receipt") or as_str(args, "expense_receipt") or as_str(args, "name")
+	if not receipt_name:
+		raise ToolError("receipt (the Expense Receipt docname) is required.")
+	if not frappe.db.exists(expenses.EXPENSE_RECEIPT, receipt_name):
+		raise ToolError(f"no Expense Receipt called {receipt_name!r} on this site.")
+
+	receipt = frappe.db.get_value(
+		expenses.EXPENSE_RECEIPT, receipt_name, list(_RECEIPT_FIELDS_FOR_PI), as_dict=True
+	)
+
+	if receipt.get("status") != expenses.APPROVED:
+		raise ToolError(
+			f"expense receipt {receipt_name} is {receipt.get('status')!r}, not Approved. Billing an "
+			f"unreviewed receipt would put a number nobody has checked into the payables ledger — "
+			f"approve it first with approve_expense_receipt. Nothing was created."
+		)
+	if receipt.get("category") == expenses.OWNER_DRAW_CATEGORY:
+		raise ToolError(
+			f"expense receipt {receipt_name} is categorised {expenses.OWNER_DRAW_CATEGORY!r}, which "
+			"is equity leaving the company, not a bill from a vendor. Use create_owner_draw instead. "
+			"Nothing was created."
+		)
+	if receipt.get("linked_document"):
+		raise ToolError(
+			f"expense receipt {receipt_name} is already linked to "
+			f"{receipt.get('linked_doctype')} {receipt.get('linked_document')}. Nothing was created."
+		)
+	amount = float(receipt.get("amount") or 0)
+	if amount <= 0:
+		raise ToolError(f"expense receipt {receipt_name} has amount {amount} — nothing to bill.")
+
+	company = receipt.get("company")
+	merchant = receipt.get("merchant") or ""
+	category = receipt.get("category") or "Other"
+
+	supplier = receipt.get("supplier")
+	supplier_resolved_by = "receipt link"
+	persist_supplier = False
+	if not supplier:
+		explicit_supplier = as_str(args, "supplier")
+		if explicit_supplier:
+			if not frappe.db.exists(masters.SUPPLIER, explicit_supplier):
+				raise ToolError(f"no Supplier called {explicit_supplier!r} on this site. Nothing was created.")
+			supplier = explicit_supplier
+			supplier_resolved_by = "argument"
+			persist_supplier = True
+		else:
+			best = _ranked_supplier_matches(merchant, top=1)
+			if best and best[0]["confidence"] >= _AUTO_LINK_THRESHOLD:
+				supplier = best[0]["supplier"]
+				supplier_resolved_by = f"matched to merchant name (confidence {best[0]['confidence']})"
+				persist_supplier = True
+			else:
+				created = masters.create_supplier({"supplier_name": merchant})
+				supplier = created.data["name"]
+				supplier_resolved_by = "created from merchant name — no confident match found"
+				persist_supplier = True
+
+	expense_account = as_str(args, "expense_account")
+	if expense_account:
+		expense_account = resolve_account(expense_account, company)
+		account_resolved_by = "argument"
+	else:
+		expense_account = _match_expense_account(company, category)
+		account_resolved_by = "category match"
+
+	cost_center = as_str(args, "cost_center") or receipt.get("cost_center") or None
+	posting_date = as_date(args, "posting_date") or str(receipt.get("receipt_date") or "")
+	item = as_str(args, "item")
+	if item:
+		if not frappe.db.exists(masters.ITEM, item):
+			raise ToolError(f"no Item called {item!r} on this site. Nothing was created.")
+		item_resolved_by = "argument"
+	else:
+		item = _service_item_for_category(category)
+		item_resolved_by = "shared category item"
+
+	pi_args = {
+		"company": company,
+		"supplier": supplier,
+		"posting_date": posting_date,
+		"items": [
+			{
+				"item_code": item,
+				"qty": 1,
+				"rate": amount,
+				"expense_account": expense_account,
+				**({"cost_center": cost_center} if cost_center else {}),
+			}
+		],
+	}
+	bill_no = as_str(args, "bill_no")
+	if bill_no:
+		pi_args["bill_no"] = bill_no
+	due_date = as_date(args, "due_date")
+	if due_date:
+		pi_args["due_date"] = due_date
+	credit_to = as_str(args, "credit_to")
+	if credit_to:
+		pi_args["credit_to"] = credit_to
+
+	result = purchasing.create_purchase_invoice(pi_args)
+	pi_name = result.data["name"]
+
+	updates = {"linked_doctype": PURCHASE_INVOICE, "linked_document": pi_name}
+	if persist_supplier:
+		updates["supplier"] = supplier
+	frappe.db.set_value(expenses.EXPENSE_RECEIPT, receipt_name, updates)
+
+	data = {
+		"purchase_invoice": pi_name,
+		"docstatus": 0,
+		"docstatus_label": "draft",
+		"expense_receipt": receipt_name,
+		"supplier": supplier,
+		"supplier_resolved_by": supplier_resolved_by,
+		"company": company,
+		"amount": amount,
+		"expense_account": expense_account,
+		"expense_account_resolved_by": account_resolved_by,
+		"item": item,
+		"item_resolved_by": item_resolved_by,
+		"cost_center": cost_center,
+		"credit_to": result.data.get("credit_to"),
+		"posting_date": posting_date,
+		"next_step": (
+			f"Purchase Invoice {pi_name} is a DRAFT and has moved no balance. Review it in ERPNext, "
+			"or submit it with submit_purchase_invoice if this site enables that tool."
+		),
+	}
+	return ToolResult(
+		data=data,
+		summary=f"created draft Purchase Invoice {pi_name} for {supplier} ({amount}) from "
+		f"expense receipt {receipt_name}",
+		docstatus_delta="none → 0 (draft)",
 	)

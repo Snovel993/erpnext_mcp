@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 449 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 472 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 208 read tools are **on** by default and can be switched off individually. A
+All 220 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -1039,6 +1039,229 @@ The mirror of `list_sales_orders`, with the nouns swapped: `supplier` instead of
 `per_delivered`.
 
 **Arguments:** `status`, `from_date`, `to_date`, `supplier`, `company`, `limit`.
+
+---
+
+## Purchasing & AP (v0.68.0)
+
+Sprint 3 of the Gap Closure Plan: the rest of the purchasing pipeline
+`list_purchase_orders` and `get_outstanding_invoices` did not cover — receiving
+goods, billing them, and paying the bill. The mutating half (create/submit for
+each of the four documents) is under **Mutating tools**.
+
+### `get_purchase_order`
+
+One Purchase Order in full, including its line items with `received_qty` and
+`billed_amt`.
+
+**Arguments:** `name` (required).
+
+### `get_purchase_receipt`
+
+One Purchase Receipt in full, including its line items.
+
+**Arguments:** `name` (required).
+
+### `list_purchase_receipts`
+
+**Arguments:** `status`, `supplier`, `purchase_order`, `company`, `from_date`,
+`to_date`, `limit`.
+
+**Returns** `receipts[]` with `docstatus_label`; plus `count`, `total_value`,
+`truncated`.
+
+### `get_purchase_invoice`
+
+One Purchase Invoice in full, including its line items.
+
+**Arguments:** `name` (required).
+
+### `list_purchase_invoices`
+
+**Arguments:** `status`, `supplier`, `from_date`, `to_date`, `outstanding_only`,
+`company`, `limit`.
+
+**Returns** `invoices[]` with `docstatus_label`; plus `count`, `total_value`,
+`total_outstanding`.
+
+### `get_payment_entry`
+
+One Payment Entry in full, including its `references[]` (the invoices it
+allocates against, with `allocated_amount` and `outstanding_amount`).
+
+**Arguments:** `name` (required).
+
+### `list_payment_entries`
+
+`payment_type='Pay'` and `party_type='Supplier'` only — the AP side. A Payment
+Entry that receives money from a Customer does not appear here.
+
+**Arguments:** `supplier`, `from_date`, `to_date`, `docstatus`, `company`,
+`limit`.
+
+**Returns** `payments[]` with `docstatus_label`; plus `count`, `total_paid`.
+
+### `get_ap_aging`
+
+Accounts Payable ageing for one company, grouped by supplier.
+
+**Arguments:** `company` (required), `supplier`, `as_of` (defaults to today),
+`limit`.
+
+**THE TOTAL** comes from GL Entry against every account typed Payable —
+`credit - debit` summed per supplier, the true ledger balance regardless of
+what wrote it. **THE BUCKETS** come from open Purchase Invoices' own
+`outstanding_amount` and `due_date` — the same approach `get_outstanding_invoices`
+takes on the receivables side, and the only reliable one: a Payment Entry's own
+GL rows do not say which invoice they paid, so there is no way to net a
+payment's debit against one specific invoice's credit by reading GL Entry
+alone. The two are cross-checked per supplier, and a `drift` field appears
+where they disagree — usually a manual Journal Entry against the Payable
+account outside the normal invoice/payment flow.
+
+**Buckets:** `current`, `0-30`, `31-60`, `61-90`, `90+`, `unknown` (no
+`due_date`) — same definitions as `get_outstanding_invoices`.
+
+**Example**
+
+```json
+{"name": "get_ap_aging",
+ "arguments": {"company": "Example Trading Co", "as_of": "2026-07-24"}}
+```
+
+```json
+{
+  "suppliers": [
+    {
+      "supplier": "Example Supplies Inc",
+      "outstanding": 8500.0,
+      "gl_balance": 8500.0,
+      "invoices": [
+        {"name": "ACC-PINV-2026-00002", "due_date": "2026-07-10",
+         "outstanding_amount": 500.0, "days_overdue": 14, "ageing_bucket": "0-30"}
+      ],
+      "buckets": {"0-30": {"count": 1, "outstanding": 500.0}}
+    }
+  ],
+  "count": 1,
+  "as_of": "2026-07-24",
+  "total_outstanding": 8500.0,
+  "gl_total_outstanding": 8500.0,
+  "buckets": {"0-30": {"count": 1, "outstanding": 500.0}}
+}
+```
+
+A supplier whose GL balance and open-invoice total disagree carries `drift`
+(the difference) and `drift_note` (why it likely happened) on that row.
+
+### `create_purchase_order` — MUTATING, default off
+
+Create a DRAFT Purchase Order against a Supplier. `docstatus 0`, affects no
+balance. Cannot submit — that is `submit_purchase_order`, separately switched.
+
+**Arguments:** `company`, `supplier` (required), `transaction_date` (defaults
+to today), `schedule_date` (required — applied to every line that does not set
+its own), `items[]` (required, each `item_code`, `qty`, `rate`, `warehouse`
+required; `uom`, `cost_center` optional).
+
+**Returns** `name`, `docstatus` (0), `grand_total`, `item_count`, `status`.
+
+### `submit_purchase_order` — MUTATING, default off
+
+`docstatus 0 → 1`, status moves to an active buying state (`To Receive and
+Bill`, or further along if `per_received`/`per_billed` already progressed).
+Takes a name, not a document — cannot create the order it submits.
+
+**Arguments:** `name` (required).
+
+**Refused:** already submitted, cancelled, or does not exist.
+
+### `create_purchase_receipt` — MUTATING, default off
+
+Create a DRAFT Purchase Receipt — goods received from a Supplier. `docstatus
+0`, no stock ledger entries yet.
+
+**Arguments:** `company`, `supplier` (required), `posting_date` (defaults to
+today), `purchase_order` (optional — validated as submitted, for the same
+supplier), `items[]` (required, each `item_code`, `qty`, `warehouse` required;
+`rate`, `purchase_order`, `purchase_order_item`, `cost_center` optional).
+
+**Returns** `name`, `docstatus` (0), `grand_total`, `item_count`, `status`.
+
+**Refused:** `purchase_order` for a different supplier, or one that is not yet
+submitted.
+
+### `submit_purchase_receipt` — MUTATING, default off
+
+`docstatus 0 → 1`. On a real site this is what creates the Stock Ledger
+Entries that move the received quantity into the warehouse — this tool
+triggers ERPNext's own controller; it computes nothing itself.
+
+**Arguments:** `name` (required).
+
+### `create_purchase_invoice` — MUTATING, default off
+
+Create a DRAFT Purchase Invoice against a Supplier. `docstatus 0`, affects no
+balance. Optionally linked to `purchase_order` and/or `purchase_receipt` for
+provenance — neither is required, since a utility bill has no receipt behind
+it.
+
+**Arguments:** `company`, `supplier` (required), `posting_date` (defaults to
+today), `due_date`, `bill_no`, `bill_date`, `purchase_order`,
+`purchase_receipt`, `credit_to` (defaults to the company's
+`default_payable_account`, or its sole account typed Payable), `items[]`
+(required, each `item_code`, `qty`, `rate`, `expense_account` required;
+`cost_center`, `warehouse`, `purchase_order`, `purchase_receipt` optional per
+line).
+
+**Returns** `name`, `docstatus` (0), `grand_total`, `outstanding_amount`,
+`credit_to`, `item_count`, `status`.
+
+This is the tool `create_purchase_invoice_from_receipt` (Receipt tools) builds
+on: it resolves the Supplier, expense account and Item from an Expense Receipt
+and hands the same shape to this one.
+
+### `submit_purchase_invoice` — MUTATING, default off
+
+`docstatus 0 → 1`. **This writes GL Entries and moves a balance** — books
+every line's `expense_account` and credits `credit_to` for the total, exactly
+as ERPNext's own controller does.
+
+**Arguments:** `name` (required).
+
+**Returns** `name`, `docstatus` (1), `status`, `outstanding_amount`,
+`gl_entries_created`.
+
+### `create_payment_entry` — MUTATING, default off
+
+Create a DRAFT Payment Entry paying a Supplier. `payment_type` is always
+`Pay`, `party_type` always `Supplier` — the AP side only. `docstatus 0`,
+affects no balance.
+
+**Arguments:** `company`, `supplier` (required), `posting_date` (defaults to
+today), `paid_amount` (required), `paid_from` (defaults to the company's
+`default_bank_account` or `default_cash_account`), `paid_to` (defaults like
+`credit_to` above), `reference_no`, `reference_date`, `mode_of_payment`,
+`references[]` (optional — each `reference_name` and `allocated_amount`;
+omit, or allocate less than `paid_amount` in total, for an on-account
+payment).
+
+**Returns** `name`, `docstatus` (0), `allocated_total`, `unallocated_amount`,
+`paid_from`, `paid_to`.
+
+**Refused:** a reference's `allocated_amount` exceeding that invoice's
+`outstanding_amount`; a reference to an invoice billed to a different
+supplier; references allocating more than `paid_amount` in total.
+
+### `submit_payment_entry` — MUTATING, default off
+
+`docstatus 0 → 1`. **This writes GL Entries and moves a balance** — debits
+`paid_to`, credits `paid_from`, and reduces every referenced Purchase
+Invoice's `outstanding_amount`, exactly as ERPNext's own controller does.
+
+**Arguments:** `name` (required).
+
+**Returns** `name`, `docstatus` (1), `gl_entries_created`, `references[]`.
 
 ---
 

@@ -399,6 +399,9 @@ ERPNEXT_SCHEMA = {
 		"name",
 		"posting_date",
 		"paid_amount",
+		"received_amount",
+		"total_allocated_amount",
+		"unallocated_amount",
 		"docstatus",
 		"company",
 		"payment_type",
@@ -761,6 +764,64 @@ ERPNEXT_SCHEMA = {
 		"company",
 		"owner",
 		"workflow_state",
+		"items",
+	],
+	# v0.68.0. Purchase Order's one child table. Registered here rather than left
+	# to a test's own `register_doctype`, unlike Purchase Invoice below: nothing
+	# in this suite depends on Purchase Order Item being ABSENT, so there is no
+	# reason to make every purchasing test re-declare it.
+	"Purchase Order Item": [
+		"name",
+		"idx",
+		"item_code",
+		"item_name",
+		"description",
+		"qty",
+		"rate",
+		"amount",
+		"uom",
+		"warehouse",
+		"schedule_date",
+		"received_qty",
+		"billed_amt",
+		"cost_center",
+		"parent",
+		"parenttype",
+		"parentfield",
+	],
+	# v0.68.0. Goods received against a Supplier. Registered permanently — same
+	# reasoning as Purchase Order Item above.
+	"Purchase Receipt": [
+		"name",
+		"posting_date",
+		"supplier",
+		"supplier_name",
+		"company",
+		"currency",
+		"status",
+		"docstatus",
+		"grand_total",
+		"per_billed",
+		"purchase_order",
+		"items",
+		"owner",
+	],
+	"Purchase Receipt Item": [
+		"name",
+		"idx",
+		"item_code",
+		"item_name",
+		"qty",
+		"received_qty",
+		"rate",
+		"amount",
+		"warehouse",
+		"purchase_order",
+		"purchase_order_item",
+		"cost_center",
+		"parent",
+		"parenttype",
+		"parentfield",
 	],
 	"Sales Invoice": [
 		"name",
@@ -894,7 +955,6 @@ ERPNEXT_SCHEMA = {
 		"owner",
 		"modified",
 	],
-	"Purchase Receipt": ["name", "supplier", "posting_date", "docstatus"],
 	# ── v0.7.0: assets ──────────────────────────────────────────────────────
 	"Asset": [
 		"name",
@@ -1388,7 +1448,97 @@ ERPNEXT_FIELD_LINKS = {
 	("GL Entry", "party"): ("Dynamic Link", "party_type"),
 	("Journal Entry Account", "party_type"): ("Link", "DocType"),
 	("Journal Entry Account", "party"): ("Dynamic Link", "party_type"),
+	# ── v0.68.0: the purchasing pipeline's Links ─────────────────────────────
+	# Modelled for the same reason the master-data links above are: a tool that
+	# checks a supplier or an item exists before appending a line is
+	# indistinguishable from one that does not, on a double where the bad row
+	# inserts anyway. `STORE.seed()` bypasses this (it writes rows directly,
+	# never through `insert()`), so the existing `_trade()` fixture's Purchase
+	# Order rows are unaffected by adding it here.
+	("Purchase Order", "supplier"): ("Link", "Supplier"),
+	("Purchase Order", "company"): ("Link", "Company"),
+	("Purchase Order Item", "item_code"): ("Link", "Item"),
+	("Purchase Order Item", "warehouse"): ("Link", "Warehouse"),
+	("Purchase Order Item", "cost_center"): ("Link", "Cost Center"),
+	("Purchase Receipt", "supplier"): ("Link", "Supplier"),
+	("Purchase Receipt", "company"): ("Link", "Company"),
+	("Purchase Receipt", "purchase_order"): ("Link", "Purchase Order"),
+	("Purchase Receipt Item", "item_code"): ("Link", "Item"),
+	("Purchase Receipt Item", "warehouse"): ("Link", "Warehouse"),
+	("Purchase Receipt Item", "purchase_order"): ("Link", "Purchase Order"),
+	("Purchase Receipt Item", "cost_center"): ("Link", "Cost Center"),
+	# Purchase Invoice's own Links are declared here even though the doctype
+	# stays absent by default — a test that registers it with
+	# `harness.purchase_invoice_fields()` gets these for free rather than
+	# re-declaring fieldtypes a fixture already knows.
+	("Purchase Invoice", "supplier"): ("Link", "Supplier"),
+	("Purchase Invoice", "company"): ("Link", "Company"),
+	("Purchase Invoice", "credit_to"): ("Link", "Account"),
+	("Purchase Invoice", "purchase_order"): ("Link", "Purchase Order"),
+	("Purchase Invoice", "purchase_receipt"): ("Link", "Purchase Receipt"),
+	("Purchase Invoice Item", "item_code"): ("Link", "Item"),
+	("Purchase Invoice Item", "expense_account"): ("Link", "Account"),
+	("Purchase Invoice Item", "warehouse"): ("Link", "Warehouse"),
+	("Purchase Invoice Item", "cost_center"): ("Link", "Cost Center"),
 }
+
+
+def purchase_invoice_fields() -> list:
+	"""Field objects for a test that needs Purchase Invoice to exist.
+
+	The fixture keeps the doctype out of `ERPNEXT_SCHEMA` on purpose — see the
+	"No Purchase Invoice" note there — so a test that needs it (this app's own
+	purchasing tools, and `create_accounting_dimension`'s default-document-types
+	path) calls `register_doctype("Purchase Invoice", purchase_invoice_fields())`
+	rather than re-typing the field list, which is how the two callers drifted
+	before this existed: `test_dimensions.py` registered one Data field, enough
+	for its own purposes and not enough for a Purchase Invoice `insert()` to
+	validate against.
+	"""
+	names = [
+		"name",
+		"supplier",
+		"supplier_name",
+		"company",
+		"posting_date",
+		"due_date",
+		"bill_no",
+		"bill_date",
+		"credit_to",
+		"currency",
+		"status",
+		"docstatus",
+		"grand_total",
+		"rounded_total",
+		"outstanding_amount",
+		"purchase_order",
+		"purchase_receipt",
+		"items",
+		"owner",
+	]
+	return [_erpnext_field("Purchase Invoice", name) for name in names]
+
+
+def purchase_invoice_item_fields() -> list:
+	names = [
+		"name",
+		"idx",
+		"item_code",
+		"item_name",
+		"qty",
+		"rate",
+		"amount",
+		"expense_account",
+		"cost_center",
+		"warehouse",
+		"purchase_order",
+		"purchase_receipt",
+		"parent",
+		"parenttype",
+		"parentfield",
+	]
+	return [_erpnext_field("Purchase Invoice Item", name) for name in names]
+
 
 #: Fieldtypes that are neither Link, Dynamic Link, Select nor plain Data.
 #: v0.17.0 needed this because a Password field is not cosmetic in the double —
@@ -1673,6 +1823,15 @@ CHILD_TABLES = {
 	("Note Payable", "payment_events"): "Note Payable Event",
 	("Parcel", "conveyance_events"): "Parcel Conveyance Event",
 	("Payment Entry", "references"): "Payment Entry Reference",
+	# v0.68.0. The purchasing pipeline's three item tables. Purchase Invoice
+	# Item is mapped here even though the Purchase Invoice DOCTYPE stays absent
+	# by default (see the "No Purchase Invoice" note in ERPNEXT_SCHEMA) — this
+	# mapping only matters once a test has registered the parent, and having it
+	# ready is what lets `create_purchase_invoice`'s `doc.append("items", …)`
+	# behave the same whether or not that test bothered to add the child too.
+	("Purchase Order", "items"): "Purchase Order Item",
+	("Purchase Receipt", "items"): "Purchase Receipt Item",
+	("Purchase Invoice", "items"): "Purchase Invoice Item",
 	("Certification", "renewals"): "Certification Renewal",
 	("Audit Event", "corrective_actions_required"): "Audit Corrective Action",
 	("Dashboard", "charts"): "Dashboard Chart Link",
@@ -2561,6 +2720,272 @@ def post_journal_entry_gl(name: str) -> list[dict]:
 	return rows
 
 
+class PurchaseOrderDocument(Document):
+	"""Purchase Order, in the two respects `tools/purchasing.py` reads back.
+
+	Real ERPNext computes `grand_total` from `items` and derives `status` from
+	`docstatus`, `per_received` and `per_billed` in `set_status()`, run on every
+	validate and every submit. Modelled here for the same reason `AccountDocument`
+	reproduces `validate_root_details`: `create_purchase_order` reports
+	`grand_total` straight off the document `insert()` returned, and a double
+	that left it at whatever the caller happened to pass would make that number
+	a fiction the tool never actually computed.
+	"""
+
+	def validate(self):
+		total = 0.0
+		for row in self.get("items") or []:
+			qty = float(row.get("qty") or 0)
+			rate = float(row.get("rate") or 0)
+			row["amount"] = round(qty * rate, 2)
+			total += row["amount"]
+		self.grand_total = round(total, 2)
+		self.rounded_total = self.grand_total
+		self.per_received = float(self.get("per_received") or 0)
+		self.per_billed = float(self.get("per_billed") or 0)
+		self.status = self._computed_status()
+
+	def before_submit(self):
+		self.validate()
+
+	def _computed_status(self) -> str:
+		docstatus = int(self.get("docstatus") or 0)
+		if docstatus == 2:
+			return "Cancelled"
+		if docstatus == 0:
+			return "Draft"
+		received = self.per_received >= 100
+		billed = self.per_billed >= 100
+		if received and billed:
+			return "Completed"
+		if received:
+			return "To Bill"
+		if billed:
+			return "To Receive"
+		return "To Receive and Bill"
+
+
+class PurchaseReceiptDocument(Document):
+	"""Purchase Receipt: `grand_total` from items, `status` from `per_billed`.
+
+	Same reasoning as `PurchaseOrderDocument` — `create_purchase_receipt` and
+	`submit_purchase_receipt` report fields ERPNext's own controller computes,
+	not fields this app writes.
+	"""
+
+	def validate(self):
+		total = 0.0
+		for row in self.get("items") or []:
+			qty = float(row.get("qty") or 0)
+			rate = float(row.get("rate") or 0)
+			row["amount"] = round(qty * rate, 2)
+			total += row["amount"]
+		self.grand_total = round(total, 2)
+		self.per_billed = float(self.get("per_billed") or 0)
+		self.status = self._computed_status()
+
+	def before_submit(self):
+		self.validate()
+
+	def _computed_status(self) -> str:
+		docstatus = int(self.get("docstatus") or 0)
+		if docstatus == 2:
+			return "Cancelled"
+		if docstatus == 0:
+			return "Draft"
+		return "Completed" if self.per_billed >= 100 else "To Bill"
+
+
+class PurchaseInvoiceDocument(Document):
+	"""Purchase Invoice: `grand_total` and `outstanding_amount` from items.
+
+	`outstanding_amount` is set equal to `grand_total` the moment the invoice is
+	submitted, and left alone before that — real ERPNext's payment ledger starts
+	an invoice fully outstanding at submit, and it is `PaymentEntryDocument.on_submit`
+	that moves it from there, exactly as ERPNext's own controller does when a
+	real Payment Entry against the invoice is submitted. This class does not
+	touch it a second time.
+	"""
+
+	def validate(self):
+		total = 0.0
+		for row in self.get("items") or []:
+			qty = float(row.get("qty") or 0)
+			rate = float(row.get("rate") or 0)
+			row["amount"] = round(qty * rate, 2)
+			total += row["amount"]
+		self.grand_total = round(total, 2)
+		self.rounded_total = self.grand_total
+
+	def before_submit(self):
+		self.validate()
+
+	def on_submit(self):
+		self.outstanding_amount = self.grand_total
+		self.status = "Unpaid" if self.grand_total > 0.005 else "Paid"
+
+
+class PaymentEntryDocument(Document):
+	"""Payment Entry: allocation totals on validate, invoice balances on submit.
+
+	`total_allocated_amount` and `unallocated_amount` are what a caller reading
+	`get_payment_entry` back expects to see computed, not typed. `on_submit` is
+	this double's model of ERPNext's own `PaymentEntry.on_submit ->
+	update_outstanding_amt`, which is what actually reduces a Purchase Invoice's
+	`outstanding_amount` on a real site — `submit_payment_entry` triggers it and
+	reports the result; it does not compute the reduction itself, and neither
+	does anything in this file outside this one method.
+	"""
+
+	def validate(self):
+		total_allocated = 0.0
+		for row in self.get("references") or []:
+			total_allocated += float(row.get("allocated_amount") or 0)
+		self.total_allocated_amount = round(total_allocated, 2)
+		self.unallocated_amount = round(float(self.get("paid_amount") or 0) - total_allocated, 2)
+
+	def before_submit(self):
+		self.validate()
+
+	def on_submit(self):
+		for row in self.get("references") or []:
+			doctype = row.get("reference_doctype")
+			name = row.get("reference_name")
+			allocated = float(row.get("allocated_amount") or 0)
+			if not doctype or not name or allocated <= 0:
+				continue
+			raw = STORE.get_raw(doctype, name)
+			if raw is None:
+				continue
+			outstanding = float(raw.get("outstanding_amount") or 0)
+			new_outstanding = round(max(0.0, outstanding - allocated), 2)
+			raw["outstanding_amount"] = new_outstanding
+			if new_outstanding <= 0.005:
+				raw["status"] = "Paid"
+
+
+def post_purchase_invoice_gl(name: str) -> list[dict]:
+	"""Write the GL Entry rows a real ERPNext submit would write for one Purchase Invoice.
+
+	One row per item line debiting its `expense_account`, and one row crediting
+	`credit_to` for the total — merged by account and party the way
+	`post_journal_entry_gl` merges Journal Entry lines, because two items
+	expensed to the same account are one ledger movement, not two.
+
+	NOT wired into `PurchaseInvoiceDocument.on_submit`, for the reason
+	`post_journal_entry_gl` is not wired into `JournalEntryDocument.submit`: a
+	test that needs GL rows to exist (an AP ageing report reading GL Entry
+	against a Payable account) calls this explicitly, so the tests that only
+	care about the invoice's own fields are not paying for postings nobody
+	asked for.
+	"""
+	invoice = STORE.get_raw("Purchase Invoice", name)
+	if invoice is None:
+		raise DoesNotExistError(f"Purchase Invoice {name} not found")
+	if int(invoice.get("docstatus") or 0) != 1:
+		return []
+
+	merged: dict = {}
+	order: list = []
+
+	def _line(account, debit, credit, party_type=None, party=None):
+		key = (account, party_type or "", party or "")
+		if key not in merged:
+			merged[key] = {
+				"name": f"GL-{name}-{len(order) + 1}",
+				"account": account,
+				"posting_date": invoice.get("posting_date"),
+				"debit": 0.0,
+				"credit": 0.0,
+				"company": invoice.get("company"),
+				"is_cancelled": 0,
+				"voucher_type": "Purchase Invoice",
+				"voucher_no": name,
+				"voucher_detail_no": "",
+				"party_type": party_type,
+				"party": party,
+				"cost_center": None,
+				"is_opening": "No",
+			}
+			order.append(key)
+		merged[key]["debit"] = round(merged[key]["debit"] + debit, 2)
+		merged[key]["credit"] = round(merged[key]["credit"] + credit, 2)
+
+	for row in invoice.get("items") or []:
+		_line(row.get("expense_account"), float(row.get("amount") or 0), 0.0)
+	_line(
+		invoice.get("credit_to"),
+		0.0,
+		float(invoice.get("grand_total") or 0),
+		"Supplier",
+		invoice.get("supplier"),
+	)
+
+	rows = [merged[key] for key in order]
+	table = STORE.tables.setdefault("GL Entry", {})
+	for row in rows:
+		row.setdefault("docstatus", 1)
+		row.setdefault("creation", _now())
+		table[row["name"]] = row
+	return rows
+
+
+def post_payment_entry_gl(name: str) -> list[dict]:
+	"""Write the GL Entry rows a real ERPNext submit would write for one Payment Entry.
+
+	Debits `paid_to` (extinguishing the payable) and credits `paid_from`
+	(reducing the bank/cash balance) for `paid_amount`. Explicit, not automatic,
+	for the same reason `post_purchase_invoice_gl` is.
+	"""
+	payment = STORE.get_raw("Payment Entry", name)
+	if payment is None:
+		raise DoesNotExistError(f"Payment Entry {name} not found")
+	if int(payment.get("docstatus") or 0) != 1:
+		return []
+
+	amount = round(float(payment.get("paid_amount") or 0), 2)
+	rows = [
+		{
+			"name": f"GL-{name}-1",
+			"account": payment.get("paid_to"),
+			"posting_date": payment.get("posting_date"),
+			"debit": amount,
+			"credit": 0.0,
+			"company": payment.get("company"),
+			"is_cancelled": 0,
+			"voucher_type": "Payment Entry",
+			"voucher_no": name,
+			"voucher_detail_no": "",
+			"party_type": payment.get("party_type"),
+			"party": payment.get("party"),
+			"cost_center": None,
+			"is_opening": "No",
+		},
+		{
+			"name": f"GL-{name}-2",
+			"account": payment.get("paid_from"),
+			"posting_date": payment.get("posting_date"),
+			"debit": 0.0,
+			"credit": amount,
+			"company": payment.get("company"),
+			"is_cancelled": 0,
+			"voucher_type": "Payment Entry",
+			"voucher_no": name,
+			"voucher_detail_no": "",
+			"party_type": None,
+			"party": None,
+			"cost_center": None,
+			"is_opening": "No",
+		},
+	]
+	table = STORE.tables.setdefault("GL Entry", {})
+	for row in rows:
+		row.setdefault("docstatus", 1)
+		row.setdefault("creation", _now())
+		table[row["name"]] = row
+	return rows
+
+
 #: Doctypes whose stub behaviour differs from a plain Document.
 STUB_CONTROLLERS = {
 	"File": FileDocument,
@@ -2570,6 +2995,10 @@ STUB_CONTROLLERS = {
 	"Warehouse": WarehouseDocument,
 	"DocType": DocTypeDocument,
 	"Custom Field": CustomFieldDocument,
+	"Purchase Order": PurchaseOrderDocument,
+	"Purchase Receipt": PurchaseReceiptDocument,
+	"Purchase Invoice": PurchaseInvoiceDocument,
+	"Payment Entry": PaymentEntryDocument,
 	"Journal Entry": JournalEntryDocument,
 }
 

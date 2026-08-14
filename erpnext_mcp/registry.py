@@ -87,6 +87,7 @@ from .tools import (
 	payroll,
 	payroll_gl,
 	printing,
+	purchasing,
 	read,
 	realestate,
 	receipts,
@@ -236,6 +237,33 @@ def _receipts_ready(*doctypes: str):
 	def predicate() -> bool:
 		try:
 			return bool(needs_doctype() and erpnext_installed())
+		except Exception:
+			return False
+
+	return predicate
+
+
+_PURCHASE_INVOICE_FROM_RECEIPT_REQUIRES = (
+	"the Expense Receipt doctype (ships with erpnext_mcp; run `bench migrate`) and "
+	"the ERPNext app's Buying module, which is where Purchase Invoice and Supplier "
+	"come from"
+)
+
+
+def _purchase_invoice_from_receipt_ready():
+	"""Predicate: this site can both hold the source receipt AND post the bill.
+
+	Unlike `_needs_doctype`'s OR-of-either semantics, this genuinely needs BOTH
+	doctypes present — a site with Expense Receipt but no ERPNext Buying module
+	can classify and capture receipts and has nothing to turn one into.
+	"""
+	needs_receipt = _needs_doctype("Expense Receipt")
+	needs_pi = _needs_doctype("Purchase Invoice")
+	erpnext_installed = _app_installed("erpnext")
+
+	def predicate() -> bool:
+		try:
+			return bool(needs_receipt() and needs_pi() and erpnext_installed())
 		except Exception:
 			return False
 
@@ -2688,6 +2716,342 @@ TOOLS = {
 		available=_app_installed("erpnext"),
 		requires="the ERPNext app",
 	),
+	# ── purchasing & AP (v0.68.0) ────────────────────────────────────────────
+	# Sprint 3 of the Gap Closure Plan. The rest of the purchasing pipeline
+	# `list_purchase_orders` and `get_outstanding_invoices` (above) did not
+	# cover: creating and submitting a Purchase Order, receiving against it,
+	# billing it, and paying the bill. See `tools/purchasing.py`'s module
+	# docstring for why every create is a draft-only tool with its own submit.
+	"create_purchase_order": _tool(
+		purchasing.create_purchase_order,
+		"MUTATING (default OFF). Create a DRAFT Purchase Order against a Supplier "
+		"— docstatus 0, no balance affected. Cannot submit; posting requires the "
+		"separate submit_purchase_order tool.",
+		{
+			"company": _COMPANY,
+			"supplier": _field(_STRING, "Supplier docname or supplier_name."),
+			"transaction_date": _field(_STRING, "Order date, YYYY-MM-DD. Defaults to today."),
+			"schedule_date": _field(
+				_STRING,
+				"Promised delivery date, YYYY-MM-DD, applied to every line that does not set its own.",
+			),
+			"items": {
+				"type": "array",
+				"minItems": 1,
+				"description": "The order's lines. Each needs item_code, qty, rate and warehouse.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"item_code": _field(_STRING, "Item docname or item_name."),
+						"qty": _field(_NUMBER, "Quantity ordered, positive."),
+						"rate": _field(_NUMBER, "Rate per unit, in the company's currency."),
+						"warehouse": _field(_STRING, "Warehouse the goods will be received into."),
+						"uom": _field(_STRING, "Unit of measure. Defaults to the item's stock UOM."),
+						"schedule_date": _field(_STRING, "Per-line promise date, YYYY-MM-DD."),
+						"cost_center": _field(_STRING, "Cost Center docname."),
+					},
+					"required": ["item_code", "qty", "rate", "warehouse"],
+					"additionalProperties": False,
+				},
+			},
+		},
+		required=("company", "supplier", "schedule_date", "items"),
+		mutating=True,
+		title="Create draft purchase order",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_purchase_order": _tool(
+		purchasing.get_purchase_order,
+		"One Purchase Order in full, including its line items with received_qty "
+		"and billed_amt. Read-only.",
+		{"name": _field(_STRING, "Purchase Order docname.")},
+		required=("name",),
+		title="Get purchase order",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"submit_purchase_order": _tool(
+		purchasing.submit_purchase_order,
+		"MUTATING (default OFF). Submit a DRAFT Purchase Order — docstatus 0 → "
+		"1, status moves to an active buying state. Cannot create the order it "
+		"submits.",
+		{"name": _field(_STRING, "Purchase Order docname.")},
+		required=("name",),
+		mutating=True,
+		title="Submit purchase order",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"create_purchase_receipt": _tool(
+		purchasing.create_purchase_receipt,
+		"MUTATING (default OFF). Create a DRAFT Purchase Receipt — goods "
+		"received from a Supplier, docstatus 0, no stock ledger entries yet. "
+		"Optionally linked to a submitted purchase_order for the same "
+		"supplier. Cannot submit; posting requires submit_purchase_receipt.",
+		{
+			"company": _COMPANY,
+			"supplier": _field(_STRING, "Supplier docname or supplier_name."),
+			"posting_date": _field(_STRING, "Receipt date, YYYY-MM-DD. Defaults to today."),
+			"purchase_order": _field(_STRING, "A submitted Purchase Order for the same supplier, if any."),
+			"items": {
+				"type": "array",
+				"minItems": 1,
+				"description": "The receipt's lines. Each needs item_code, qty and warehouse.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"item_code": _field(_STRING, "Item docname or item_name."),
+						"qty": _field(_NUMBER, "Quantity received, positive."),
+						"rate": _field(_NUMBER, "Rate per unit, for valuation."),
+						"warehouse": _field(_STRING, "Warehouse the goods land in."),
+						"purchase_order": _field(
+							_STRING, "The Purchase Order this line receives against, if any."
+						),
+						"purchase_order_item": _field(_STRING, "That order's line docname, if known."),
+						"cost_center": _field(_STRING, "Cost Center docname."),
+					},
+					"required": ["item_code", "qty", "warehouse"],
+					"additionalProperties": False,
+				},
+			},
+		},
+		required=("company", "supplier", "items"),
+		mutating=True,
+		title="Create draft purchase receipt",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_purchase_receipt": _tool(
+		purchasing.get_purchase_receipt,
+		"One Purchase Receipt in full, including its line items. Read-only.",
+		{"name": _field(_STRING, "Purchase Receipt docname.")},
+		required=("name",),
+		title="Get purchase receipt",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_purchase_receipts": _tool(
+		purchasing.list_purchase_receipts,
+		"Purchase Receipt headers by supplier, status, purchase_order, company "
+		"and date range, newest first. Read-only.",
+		{
+			"status": _field(_STRING, "ERPNext Purchase Receipt status, e.g. 'To Bill', 'Completed'."),
+			"supplier": _field(_STRING, "Supplier docname."),
+			"purchase_order": _field(_STRING, "Purchase Order docname."),
+			"from_date": _field(_STRING, "Earliest posting_date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest posting_date, YYYY-MM-DD."),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="List purchase receipts",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"submit_purchase_receipt": _tool(
+		purchasing.submit_purchase_receipt,
+		"MUTATING (default OFF). Submit a DRAFT Purchase Receipt — docstatus 0 "
+		"→ 1. On a real site this is what creates the Stock Ledger Entries "
+		"that move the received quantity into the warehouse.",
+		{"name": _field(_STRING, "Purchase Receipt docname.")},
+		required=("name",),
+		mutating=True,
+		title="Submit purchase receipt",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"create_purchase_invoice": _tool(
+		purchasing.create_purchase_invoice,
+		"MUTATING (default OFF). Create a DRAFT Purchase Invoice against a "
+		"Supplier — docstatus 0, no balance affected. Optionally linked to "
+		"purchase_order and/or purchase_receipt for provenance. Cannot "
+		"submit; posting requires submit_purchase_invoice.",
+		{
+			"company": _COMPANY,
+			"supplier": _field(_STRING, "Supplier docname or supplier_name."),
+			"posting_date": _field(_STRING, "Invoice date, YYYY-MM-DD. Defaults to today."),
+			"due_date": _field(_STRING, "Payment due date, YYYY-MM-DD."),
+			"bill_no": _field(_STRING, "The supplier's own invoice number."),
+			"bill_date": _field(_STRING, "The date on the supplier's own invoice, YYYY-MM-DD."),
+			"purchase_order": _field(_STRING, "A Purchase Order this invoice bills, if any."),
+			"purchase_receipt": _field(_STRING, "A Purchase Receipt this invoice bills, if any."),
+			"credit_to": _field(
+				_STRING,
+				"The Payable account to credit. Defaults to the company's "
+				"default_payable_account, or its sole account typed Payable.",
+			),
+			"items": {
+				"type": "array",
+				"minItems": 1,
+				"description": "The invoice's lines. Each needs item_code, qty, rate and expense_account.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"item_code": _field(_STRING, "Item docname or item_name."),
+						"qty": _field(_NUMBER, "Quantity billed, positive."),
+						"rate": _field(_NUMBER, "Rate per unit."),
+						"expense_account": _field(_STRING, "Account this line's cost is expensed to."),
+						"cost_center": _field(_STRING, "Cost Center docname."),
+						"warehouse": _field(_STRING, "Warehouse, for a stock item billed directly."),
+						"purchase_order": _field(_STRING, "This line's Purchase Order, if any."),
+						"purchase_receipt": _field(_STRING, "This line's Purchase Receipt, if any."),
+					},
+					"required": ["item_code", "qty", "rate", "expense_account"],
+					"additionalProperties": False,
+				},
+			},
+		},
+		required=("company", "supplier", "items"),
+		mutating=True,
+		title="Create draft purchase invoice",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_purchase_invoice": _tool(
+		purchasing.get_purchase_invoice,
+		"One Purchase Invoice in full, including its line items. Read-only.",
+		{"name": _field(_STRING, "Purchase Invoice docname.")},
+		required=("name",),
+		title="Get purchase invoice",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_purchase_invoices": _tool(
+		purchasing.list_purchase_invoices,
+		"Purchase Invoice headers by supplier, status, company, date range and "
+		"outstanding amount, newest first. Read-only.",
+		{
+			"status": _field(_STRING, "ERPNext Purchase Invoice status, e.g. 'Unpaid', 'Paid', 'Overdue'."),
+			"supplier": _field(_STRING, "Supplier docname."),
+			"from_date": _field(_STRING, "Earliest posting_date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest posting_date, YYYY-MM-DD."),
+			"outstanding_only": _field(_BOOLEAN, "Only invoices with outstanding_amount > 0."),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="List purchase invoices",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"submit_purchase_invoice": _tool(
+		purchasing.submit_purchase_invoice,
+		"MUTATING (default OFF). Submit a DRAFT Purchase Invoice — docstatus 0 "
+		"→ 1. This is the tool that moves a balance: on a real site it books "
+		"every line's expense_account and credits credit_to for the total, "
+		"exactly as ERPNext's own controller does.",
+		{"name": _field(_STRING, "Purchase Invoice docname.")},
+		required=("name",),
+		mutating=True,
+		title="Submit purchase invoice",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"create_payment_entry": _tool(
+		purchasing.create_payment_entry,
+		"MUTATING (default OFF). Create a DRAFT Payment Entry paying a "
+		"Supplier — payment_type is always 'Pay', party_type always "
+		"'Supplier'. Optionally allocates the payment across one or more "
+		"submitted Purchase Invoices, partial amounts allowed. Cannot "
+		"submit; posting requires submit_payment_entry.",
+		{
+			"company": _COMPANY,
+			"supplier": _field(_STRING, "Supplier docname or supplier_name."),
+			"posting_date": _field(_STRING, "Payment date, YYYY-MM-DD. Defaults to today."),
+			"paid_amount": _field(_NUMBER, "Total amount paid, positive."),
+			"paid_from": _field(
+				_STRING, "Bank/Cash account money leaves from. Defaults to the company's default."
+			),
+			"paid_to": _field(
+				_STRING, "Payable account being reduced. Defaults to the company's default_payable_account."
+			),
+			"reference_no": _field(_STRING, "Check number or transfer reference, if any."),
+			"reference_date": _field(_STRING, "Date on that reference, YYYY-MM-DD."),
+			"mode_of_payment": _field(_STRING, "e.g. 'Check', 'Wire Transfer', 'ACH'."),
+			"references": {
+				"type": "array",
+				"description": (
+					"Invoices this payment settles. Omit, or allocate less than "
+					"paid_amount in total, for an on-account payment."
+				),
+				"items": {
+					"type": "object",
+					"properties": {
+						"reference_doctype": _field(_STRING, "Always 'Purchase Invoice'. Defaults to it."),
+						"reference_name": _field(_STRING, "The Purchase Invoice's docname."),
+						"allocated_amount": _field(
+							_NUMBER, "How much of paid_amount settles this invoice. May be a partial payment."
+						),
+					},
+					"required": ["reference_name", "allocated_amount"],
+					"additionalProperties": False,
+				},
+			},
+		},
+		required=("company", "supplier", "paid_amount"),
+		mutating=True,
+		title="Create draft payment entry",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_payment_entry": _tool(
+		purchasing.get_payment_entry,
+		"One Payment Entry in full, including its invoice references. Read-only.",
+		{"name": _field(_STRING, "Payment Entry docname.")},
+		required=("name",),
+		title="Get payment entry",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"list_payment_entries": _tool(
+		purchasing.list_payment_entries,
+		"Payment Entry headers by supplier, company, docstatus and date range, "
+		"newest first. payment_type='Pay' and party_type='Supplier' only — "
+		"the AP side. Read-only.",
+		{
+			"supplier": _field(_STRING, "Supplier docname."),
+			"from_date": _field(_STRING, "Earliest posting_date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest posting_date, YYYY-MM-DD."),
+			"docstatus": _field(_INTEGER, "0 (draft), 1 (submitted) or 2 (cancelled). Omit for any."),
+			"company": _COMPANY,
+			"limit": _LIMIT,
+		},
+		title="List payment entries",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"submit_payment_entry": _tool(
+		purchasing.submit_payment_entry,
+		"MUTATING (default OFF). Submit a DRAFT Payment Entry — docstatus 0 → "
+		"1. On a real site this debits paid_to, credits paid_from, and "
+		"reduces every referenced Purchase Invoice's outstanding_amount, "
+		"exactly as ERPNext's own controller does.",
+		{"name": _field(_STRING, "Payment Entry docname.")},
+		required=("name",),
+		mutating=True,
+		title="Submit payment entry",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
+	"get_ap_aging": _tool(
+		purchasing.get_ap_aging,
+		"Accounts Payable ageing for one company, grouped by supplier. Each "
+		"supplier's total is the true GL Entry balance against every account "
+		"typed Payable; the current/0-30/31-60/61-90/90+/unknown bucket "
+		"breakdown comes from open Purchase Invoices' own outstanding_amount "
+		"and due_date. A per-supplier 'drift' field appears when the two "
+		"disagree — usually a manual Journal Entry against the Payable "
+		"account outside the normal invoice/payment flow. Read-only.",
+		{
+			"company": _COMPANY,
+			"supplier": _field(_STRING, "Supplier docname. Omit for every supplier owed money."),
+			"as_of": _field(_STRING, "Date to age against, YYYY-MM-DD. Defaults to today."),
+			"limit": _LIMIT,
+		},
+		required=("company",),
+		title="AP ageing",
+		available=_app_installed("erpnext"),
+		requires="the ERPNext app",
+	),
 	# ── master data ─────────────────────────────────────────────────────────
 	# v0.66.0. The records every other document points at. Read the module
 	# docstring in tools/masters.py before touching these: `company` means three
@@ -3582,6 +3946,54 @@ TOOLS = {
 		title="Post a member event",
 		available=_needs_doctype("Member Event"),
 		requires="the Member Event DocType, which ships with erpnext_mcp (run bench migrate)",
+	),
+	"create_owner_draw": _tool(
+		governance.create_owner_draw,
+		"MUTATING (default OFF). Record an owner draw / member distribution as a "
+		"DRAFT Journal Entry: debit an equity 'draw' account, credit the bank or "
+		"cash it left from. NOT an expense and never posts to one, whatever "
+		"category a receipt behind this call carried.\n\n"
+		"REQUIRES THE Member Manager ROLE (or System Manager), checked before "
+		"anything else — an operator grants it in the Desk to whoever is "
+		"actually authorised to move the company's equity. A caller without it "
+		"is refused by name.\n\n"
+		"THE DRAW ACCOUNT is matched from the company's leaf Equity accounts by "
+		"name ('Member Draws', 'Owner Draw', 'Distributions', 'Drawings' …) — "
+		"the same keyword table record_member_event uses for a Distribution or "
+		"Withdrawal — or named explicitly with draw_account. Zero matches or "
+		"more than one is refused with the candidates listed.\n\n"
+		"OPTIONALLY LINKED TO A RECEIPT. `receipt` names an Expense Receipt "
+		"categorised Owner Draw — the case create_purchase_invoice_from_receipt "
+		"refuses and points here. Works with no receipt too: an owner draw is "
+		"often just a transfer nobody photographed.\n\n"
+		"NOT A NEW DOCTYPE. This is a Journal Entry with specific routing, "
+		"independent of whether this site has adopted the cap table / Member "
+		"Event machinery at all. ALWAYS A DRAFT — post it with "
+		"submit_journal_entry, which needs its own switch on as well as this "
+		"tool's.",
+		{
+			"company": _COMPANY,
+			"amount": _field(_NUMBER, "Positive. The size of the draw."),
+			"date": _field(_STRING, "The posting date, YYYY-MM-DD."),
+			"effective_date": _field(_STRING, "Alias for date."),
+			"narrative": _field(
+				_STRING, "What this draw was for and who authorised it. Mandatory and checked for length."
+			),
+			"reason": _field(_STRING, "Alias for narrative."),
+			"draw_account": _field(_STRING, "The equity account, instead of matching one by name."),
+			"equity_account": _field(_STRING, "Alias for draw_account."),
+			"counter_account": _field(_STRING, "The cash/bank side, instead of the company default."),
+			"cost_center": _field(_STRING, "Optional Cost Center for both lines."),
+			"party_type": _field(
+				_STRING, "Optional attribution on the equity line — e.g. Family. Pass with party, or neither."
+			),
+			"party": _field(_STRING, "The party named by party_type. Pass with party_type, or neither."),
+			"receipt": _field(_STRING, "An Expense Receipt categorised Owner Draw to link this draw to."),
+			"expense_receipt": _field(_STRING, "Alias for receipt."),
+		},
+		required=("company", "amount", "date", "narrative"),
+		mutating=True,
+		title="Create owner draw",
 	),
 	"attach_governance_document": _tool(
 		governance.attach_governance_document,
@@ -11759,6 +12171,92 @@ TOOLS = {
 		available=_needs_doctype("Expense Receipt"),
 		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
 	),
+	# ── v0.68.0: correcting a receipt after intake, and reporting on the pile ─
+	"update_expense_receipt": _tool(
+		expenses.update_expense_receipt,
+		"MUTATING (default OFF). Correct cost_center, supplier, category or notes "
+		"on a receipt already captured — the fields a bookkeeper fixes at a desk, "
+		"after the phone that photographed it has moved on. Works on a receipt "
+		"in ANY status, including Approved or Rejected: none of the four fields "
+		"is the thing that was approved or rejected.\n\n"
+		"WHAT IT WILL NOT TOUCH. merchant, amount, receipt_date, the photograph, "
+		"the OCR text, farm_task, and every review field. Those are either the "
+		"machine's reading of the paper or the record of a decision — correcting "
+		"one is a fresh capture with submit_expense_receipt, not an edit here.\n\n"
+		"AT LEAST ONE FIELD, AND AT LEAST ONE REAL CHANGE. A call naming no "
+		"field, or naming only values the record already has, is refused rather "
+		"than accepted as a silent no-op.",
+		{
+			"name": _field(_STRING, "The Expense Receipt docname."),
+			"expense_receipt": _field(_STRING, "Alias for name."),
+			"receipt": _field(_STRING, "Alias for name."),
+			"cost_center": _field(_STRING, "A Cost Center docname, or '' to clear it."),
+			"supplier": _field(_STRING, "A Supplier docname, or '' to clear it."),
+			"category": _field(
+				_STRING,
+				"Fuel, Equipment Parts, Supplies, Hardware, Feed, Seed, Fertilizer, "
+				"Owner Draw or Other.",
+			),
+			"notes": _field(_STRING, "Free text, or '' to clear it."),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Update expense receipt",
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+	),
+	"get_expense_summary": _tool(
+		expenses.get_expense_summary,
+		"Expense receipts totalled by category and by period — what a dashboard "
+		"reads. `period` (week, month or quarter — default month) buckets a "
+		"`trend` series; `group_by` (merchant or supplier) adds a second "
+		"breakdown alongside the category one. Rejected receipts are EXCLUDED "
+		"by default — a rejected receipt was decided not to be a real expense, "
+		"and the excluded count is reported rather than hidden; pass `status` "
+		"explicitly to see one status only, Rejected included. Read-only.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Earliest receipt_date as YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest receipt_date as YYYY-MM-DD."),
+			"period": _field(_STRING, "week, month or quarter for the trend series. Defaults to month."),
+			"group_by": _field(_STRING, "Optional second breakdown: merchant or supplier."),
+			"status": _field(
+				_STRING,
+				"Restrict to one status (Draft, Submitted, Approved or Rejected) "
+				"instead of the default all-but-Rejected.",
+			),
+		},
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+		title="Expense summary",
+	),
+	"get_expense_report": _tool(
+		expenses.get_expense_report,
+		"Every expense receipt in a window, one row each — category, amount, "
+		"merchant, supplier link, cost center and status — for a bookkeeper's "
+		"export. Unlike get_expense_summary, NOTHING is excluded by default: "
+		"Draft, Submitted, Approved and Rejected all appear, because a detailed "
+		"export is where somebody checks what happened to a specific receipt. "
+		"Pass csv:true to also get a `csv` field with the same rows as a "
+		"ready-to-save comma-separated string. Read-only.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Earliest receipt_date as YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest receipt_date as YYYY-MM-DD."),
+			"status": _field(_STRING, "Draft, Submitted, Approved or Rejected."),
+			"category": _field(
+				_STRING,
+				"Fuel, Equipment Parts, Supplies, Hardware, Feed, Seed, Fertilizer, "
+				"Owner Draw or Other.",
+			),
+			"csv": _field(_BOOLEAN, "Also return a `csv` string of the same rows. Defaults to false."),
+			"limit": _LIMIT,
+		},
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+		title="Expense report",
+	),
 	# ── v0.67.0: scale tickets, settlements, and which one a photo is ───────
 	"list_scale_tickets": _tool(
 		receipts.list_scale_tickets,
@@ -12033,6 +12531,85 @@ TOOLS = {
 			),
 		},
 		title="Classify receipt",
+	),
+	# ── v0.68.0: merchant ↔ Supplier matching, and the bill a receipt becomes ─
+	"normalize_merchant": _tool(
+		receipts.normalize_merchant,
+		"The best-matching Supplier for a merchant string, and how confident "
+		"that is — 'WILBUR ELLIS CO' against 'Wilbur-Ellis Company LLC' scores "
+		"high because punctuation and legal-form words (Co, LLC, Inc, Corp, "
+		"Ltd …) are stripped from both before they are compared. NO ML — plain "
+		"string similarity, auditable by reading it. Returns null when nothing "
+		"scores above the threshold, never a low-confidence guess dressed as an "
+		"answer. This SUGGESTS a link; it never sets one — the same 'nothing is "
+		"ever inferred' rule submit_expense_receipt's own supplier argument "
+		"follows. Read-only.",
+		{
+			"merchant": _field(_STRING, "The vendor string off a receipt, exactly as captured."),
+		},
+		required=("merchant",),
+		title="Normalize merchant",
+	),
+	"list_merchant_aliases": _tool(
+		receipts.list_merchant_aliases,
+		"Merchant strings already linked to a Supplier, grouped by which "
+		"Supplier — every spelling a receipt has been captured with, once that "
+		"receipt's supplier link was set. Not a table of its own: built by "
+		"reading Expense Receipt rows that already carry a supplier link, so it "
+		"changes for free the day a link changes. Read-only.",
+		{
+			"company": _COMPANY,
+			"supplier": _field(_STRING, "Restrict to the aliases of one Supplier docname."),
+		},
+		available=_needs_doctype("Expense Receipt"),
+		requires="the Expense Receipt doctype (run bench migrate after installing v0.31.0)",
+		title="List merchant aliases",
+	),
+	"create_purchase_invoice_from_receipt": _tool(
+		receipts.create_purchase_invoice_from_receipt,
+		"MUTATING (default OFF). Turn one APPROVED Expense Receipt into a DRAFT "
+		"Purchase Invoice, via purchasing.create_purchase_invoice — the general "
+		"purchasing pipeline's own tool. This tool's job is deciding what to "
+		"hand it: which Supplier, which expense account, which Item.\n\n"
+		"APPROVED ONLY — billing a Submitted receipt would put a number nobody "
+		"has reviewed into the payables ledger; approve_expense_receipt is the "
+		"gate. `Owner Draw` receipts are REFUSED BY NAME: that category is "
+		"equity leaving the company, not a bill, and create_owner_draw is where "
+		"it goes instead.\n\n"
+		"THE SUPPLIER, in order: the receipt's own supplier link if set; the "
+		"`supplier` argument if given; a normalize_merchant match, used "
+		"automatically only ABOVE A HIGH CONFIDENCE BAR; or, failing all three, "
+		"a brand-new Supplier created from the merchant string as printed. "
+		"Whichever ran is reported as supplier_resolved_by — this is the one "
+		"tool in the app that links or creates a Supplier with no human "
+		"confirming the match first.\n\n"
+		"THE EXPENSE ACCOUNT is matched from the receipt's category against the "
+		"company's leaf Expense accounts by a short keyword table (the same "
+		"shape record_member_event uses for equity accounts), or named "
+		"explicitly with expense_account.\n\n"
+		"ONE LINE, against a shared NON-STOCK ITEM per category — created once "
+		"and reused, never one Item per receipt. Pass `item` to bill against a "
+		"real stock Item instead. Links back to the receipt via "
+		"linked_doctype/linked_document; a receipt already linked to something "
+		"is refused. ALWAYS A DRAFT — review and submit it in ERPNext, or with "
+		"submit_purchase_invoice if this site enables it.",
+		{
+			"receipt": _field(_STRING, "The Expense Receipt docname."),
+			"expense_receipt": _field(_STRING, "Alias for receipt."),
+			"supplier": _field(_STRING, "Name the Supplier explicitly instead of matching or creating one."),
+			"expense_account": _field(_STRING, "Name the expense account explicitly instead of matching one."),
+			"cost_center": _field(_STRING, "Defaults to the receipt's own cost_center, if it has one."),
+			"posting_date": _field(_STRING, "Defaults to the receipt's receipt_date. YYYY-MM-DD."),
+			"due_date": _field(_STRING, "YYYY-MM-DD. Optional."),
+			"bill_no": _field(_STRING, "The vendor's own invoice/bill number, if there is one."),
+			"credit_to": _field(_STRING, "Name the payable account explicitly instead of the company default."),
+			"item": _field(_STRING, "Bill against this Item instead of the shared per-category service item."),
+		},
+		required=("receipt",),
+		mutating=True,
+		title="Create purchase invoice from receipt",
+		available=_purchase_invoice_from_receipt_ready(),
+		requires=_PURCHASE_INVOICE_FROM_RECEIPT_REQUIRES,
 	),
 	# ── v0.19.0: the training register ──────────────────────────────────────
 	"record_training": _tool(

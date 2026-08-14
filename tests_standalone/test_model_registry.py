@@ -259,9 +259,7 @@ def bundle_bytes(manifest=None, entries=None, manifest_name="manifest.json", mod
 	buffer = io.BytesIO()
 	with zipfile.ZipFile(buffer, "w") as archive:
 		if manifest is not None:
-			archive.writestr(
-				manifest_name, manifest if isinstance(manifest, str) else json.dumps(manifest)
-			)
+			archive.writestr(manifest_name, manifest if isinstance(manifest, str) else json.dumps(manifest))
 		if model_name:
 			archive.writestr(model_name, b"\x00\x01coreml-weights\x02\x03")
 		for name, payload in (entries or {}).items():
@@ -305,7 +303,9 @@ class ReadingABundle(unittest.TestCase):
 	def test_a_bundle_zipped_as_a_folder_is_still_read(self):
 		"""`zip -r bundle.zip cherry_fill_v1/` is what a hand-built bundle looks like."""
 		read = engine.read_bundle(
-			bundle_bytes(MANIFEST, manifest_name="cherry_v1/manifest.json", model_name="cherry_v1/model.mlmodel")
+			bundle_bytes(
+				MANIFEST, manifest_name="cherry_v1/manifest.json", model_name="cherry_v1/model.mlmodel"
+			)
 		)
 		self.assertEqual(read["errors"], [])
 		self.assertEqual(read["manifest_entry"], "cherry_v1/manifest.json")
@@ -576,9 +576,22 @@ class ToolRegistration(unittest.TestCase):
 		# — connecting a segmentation model's mask/container pixel areas to a
 		# foreman-controlled band per container type, with a change log a checker
 		# acknowledges.
-		self.assertEqual(len(self.registry.TOOLS), 449)
-		self.assertEqual(len(self.registry.READ_TOOLS), 208)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 241)
+		# v0.68.0 also adds seven over expense-receipt capture — four reads
+		# (`get_expense_summary`, `get_expense_report`, `normalize_merchant`,
+		# `list_merchant_aliases`) and three writes (`create_owner_draw`,
+		# `update_expense_receipt`, `create_purchase_invoice_from_receipt`) —
+		# the last of which builds a Purchase Invoice by calling
+		# `purchasing.create_purchase_invoice` rather than writing one itself.
+		# v0.68.0 also adds sixteen over the rest of the purchasing pipeline —
+		# eight reads and eight writes — Sprint 3 of the Gap Closure Plan:
+		# Purchase Order create/get/submit, Purchase Receipt
+		# create/get/list/submit, Purchase Invoice create/get/list/submit,
+		# Payment Entry create/get/list/submit, and `get_ap_aging`, which reads
+		# GL Entry for a supplier's true balance and Purchase Invoice's own
+		# outstanding_amount for the per-invoice ageing buckets.
+		self.assertEqual(len(self.registry.TOOLS), 472)
+		self.assertEqual(len(self.registry.READ_TOOLS), 220)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 252)
 
 
 if __name__ == "__main__":

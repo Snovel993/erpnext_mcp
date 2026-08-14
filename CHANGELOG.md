@@ -3,6 +3,46 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## Unreleased
+
+**Sprint 3 of the Gap Closure Plan: the purchasing pipeline, end to end.**
+`list_purchase_orders` and `get_outstanding_invoices` (its receivables mirror)
+already existed; this adds everything else a purchase actually walks
+through — receiving goods, billing them, and paying the bill — sixteen tools
+over four ERPNext documents plus an AP ageing report.
+
+- **Purchase Order.** `create_purchase_order` (MUTATING, default off) and
+  `get_purchase_order` (read); `submit_purchase_order` (MUTATING, default off)
+  moves `docstatus 0 → 1`.
+- **Purchase Receipt.** `create_purchase_receipt`, `get_purchase_receipt`,
+  `list_purchase_receipts`, `submit_purchase_receipt` — goods received against
+  a Supplier, optionally against a submitted Purchase Order for the same
+  supplier.
+- **Purchase Invoice.** `create_purchase_invoice`, `get_purchase_invoice`,
+  `list_purchase_invoices`, `submit_purchase_invoice` — the bill.
+  `submit_purchase_invoice` is the tool that moves a balance: it books every
+  line's `expense_account` and credits `credit_to` (the Payable account) for
+  the total, through ERPNext's own controller.
+- **Payment Entry.** `create_payment_entry`, `get_payment_entry`,
+  `list_payment_entries`, `submit_payment_entry` — `payment_type='Pay'` and
+  `party_type='Supplier'` only, the AP side. Allocates across one or more
+  submitted Purchase Invoices, partial amounts allowed, or on-account with no
+  reference at all.
+- **`get_ap_aging`** (read). A supplier's true balance from GL Entry against
+  every account typed Payable — the ledger, not any one invoice's own
+  column — aged per open invoice from `Purchase Invoice.outstanding_amount`
+  and `due_date`, the same approach `get_outstanding_invoices` takes on
+  receivables. A per-supplier `drift` field appears where the ledger total and
+  the open-invoice total disagree, which is usually a manual Journal Entry
+  against the Payable account outside the normal invoice/payment flow.
+- **Every create is draft-only and cannot submit** — posting is the separate,
+  separately-switched submit tool for that same document, the same split
+  `create_journal_entry` / `submit_journal_entry` established: an operator can
+  grant "propose a Purchase Order" without granting "commit the company to
+  buying".
+- **All eight mutating tools default off; all eight read tools default on**,
+  in a new "Purchasing & AP" settings section.
+
 ## 0.67.1 — 2026-08-13
 
 **A Section 1 that was already filed had no way back.** One tool,

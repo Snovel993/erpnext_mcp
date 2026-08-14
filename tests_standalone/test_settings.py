@@ -535,6 +535,11 @@ class SelfTest(SeededTestCase):
 			out += list(PDF_TOOLS)
 		if not i9_pdf.available():
 			out += list(I9_PDF_TOOLS)
+		# v0.68.0. This fixture is a plain `SeededTestCase` site: it never
+		# registers the Purchase Invoice doctype (only `PurchasingTestCase`
+		# does, for the tests that need to insert one), so the one tool that
+		# gates on it being present is correctly unavailable here.
+		out.append("create_purchase_invoice_from_receipt")
 		return out
 
 	def test_it_reports_not_ready_when_disabled(self):

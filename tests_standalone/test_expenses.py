@@ -983,3 +983,207 @@ class VendorAndItemLinks(ExpenseTestCase):
 		self.assertEqual(by_name["supplier"]["fieldtype"], "Link")
 		self.assertEqual(by_name["supplier"]["options"], "Supplier")
 		self.assertFalse(by_name["supplier"].get("reqd"))
+
+
+# ── v0.68.0: update_expense_receipt, get_expense_summary, get_expense_report ─
+
+RECEIPT_ENHANCEMENT_TOOLS = ("update_expense_receipt", "get_expense_summary", "get_expense_report")
+RECEIPT_ENHANCEMENT_TOOLS_ON = {f"allow_{name}": 1 for name in RECEIPT_ENHANCEMENT_TOOLS}
+
+
+class EnhancementTestCase(ExpenseTestCase):
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, **EXPENSE_TOOLS_ON, **RECEIPT_ENHANCEMENT_TOOLS_ON)
+		STORE.seed(
+			"Supplier",
+			[{"name": "Valley Co-operative", "supplier_name": "Valley Co-operative"}],
+		)
+
+
+class UpdateExpenseReceipt(EnhancementTestCase):
+	def test_updates_category_supplier_cost_center_and_notes(self):
+		name = self.capture()["name"]
+		data = self.tool_data(
+			"update_expense_receipt",
+			{
+				"name": name,
+				"category": "Equipment Parts",
+				"supplier": "Valley Co-operative",
+				"cost_center": "110 - Field Work - ETC",
+				"notes": "recoded at month end",
+			},
+		)
+		self.assertEqual(data["fields_changed"], ["category", "cost_center", "notes", "supplier"])
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(got["category"], "Equipment Parts")
+		self.assertEqual(got["supplier"], "Valley Co-operative")
+		self.assertEqual(got["cost_center"], "110 - Field Work - ETC")
+		self.assertIn("recoded at month end", got["notes"])
+
+	def test_works_on_an_approved_receipt(self):
+		"""The whole point: a bookkeeper corrects categorisation after review,
+		not only before it."""
+		name = self.capture()["name"]
+		self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00001"})
+		data = self.tool_data("update_expense_receipt", {"name": name, "category": "Hardware"})
+		self.assertEqual(data["after"]["category"], "Hardware")
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(got["status"], "Approved")
+		self.assertEqual(got["category"], "Hardware")
+
+	def test_it_never_touches_merchant_amount_or_receipt_date(self):
+		required = set(registry.TOOLS["update_expense_receipt"]["inputSchema"]["properties"])
+		self.assertNotIn("merchant", required)
+		self.assertNotIn("amount", required)
+		self.assertNotIn("receipt_date", required)
+
+	def test_no_fields_named_is_refused(self):
+		name = self.capture()["name"]
+		error = self.tool_error("update_expense_receipt", {"name": name})
+		self.assertIn("nothing to update", error)
+
+	def test_no_real_change_is_refused(self):
+		name = self.capture(category="Fuel")["name"]
+		error = self.tool_error("update_expense_receipt", {"name": name, "category": "Fuel"})
+		self.assertIn("already reads what was asked for", error)
+		self.assertIn("Nothing to change", error)
+
+	def test_an_unknown_category_is_refused_with_the_list(self):
+		name = self.capture()["name"]
+		error = self.tool_error("update_expense_receipt", {"name": name, "category": "Bribes"})
+		self.assertIn("category must be one of", error)
+
+	def test_a_cost_center_that_does_not_exist_is_refused(self):
+		name = self.capture()["name"]
+		error = self.tool_error("update_expense_receipt", {"name": name, "cost_center": "Nowhere - ETC"})
+		self.assertIn("no Cost Center called", error)
+
+	def test_supplier_can_be_cleared_with_an_empty_string(self):
+		name = self.capture(supplier="Valley Co-operative")["name"]
+		data = self.tool_data("update_expense_receipt", {"name": name, "supplier": ""})
+		self.assertIsNone(data["after"]["supplier"])
+		got = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertIsNone(got["supplier"])
+
+	def test_a_missing_receipt_is_refused_by_name(self):
+		error = self.tool_error("update_expense_receipt", {"name": "EXR-NOPE", "category": "Fuel"})
+		self.assertIn("no Expense Receipt called", error)
+
+	def test_the_update_is_audited_with_a_diff_an_operator_can_read(self):
+		name = self.capture(category="Fuel")["name"]
+		self.tool_data("update_expense_receipt", {"name": name, "category": "Feed"})
+		rows = self.audit_rows(tool_name="update_expense_receipt")
+		self.assertTrue(rows)
+		self.assertIn("Fuel", rows[-1]["result_summary"])
+		self.assertIn("Feed", rows[-1]["result_summary"])
+
+	def test_switched_off_by_default(self):
+		name = self.capture()["name"]
+		self.configure(
+			enabled=1, **{**EXPENSE_TOOLS_ON, **RECEIPT_ENHANCEMENT_TOOLS_ON, "allow_update_expense_receipt": 0}
+		)
+		error = self.tool_error("update_expense_receipt", {"name": name, "category": "Feed"})
+		self.assertIn("switched off", error)
+
+
+class ExpenseSummary(EnhancementTestCase):
+	def _seed_three_receipts(self):
+		self.capture(category="Fuel", amount=100, receipt_date="2026-06-05")
+		self.capture(category="Fuel", amount=50, receipt_date="2026-06-20")
+		self.capture(category="Equipment Parts", amount=75, receipt_date="2026-07-02")
+
+	def test_totals_by_category(self):
+		self._seed_three_receipts()
+		data = self.tool_data("get_expense_summary", {"company": MAIN})
+		self.assertEqual(data["by_category"]["Fuel"], {"count": 2, "total": 150.0})
+		self.assertEqual(data["by_category"]["Equipment Parts"], {"count": 1, "total": 75.0})
+		self.assertEqual(data["total_amount"], 225.0)
+
+	def test_trend_is_bucketed_by_month_by_default(self):
+		self._seed_three_receipts()
+		data = self.tool_data("get_expense_summary", {"company": MAIN, "period": "month"})
+		labels = {row["period"] for row in data["trend"]}
+		self.assertEqual(labels, {"2026-06", "2026-07"})
+		june = next(row for row in data["trend"] if row["period"] == "2026-06")
+		self.assertEqual(june["total"], 150.0)
+
+	def test_quarter_bucketing(self):
+		self._seed_three_receipts()
+		data = self.tool_data("get_expense_summary", {"company": MAIN, "period": "quarter"})
+		self.assertEqual({row["period"] for row in data["trend"]}, {"2026-Q2", "2026-Q3"})
+
+	def test_an_unknown_period_is_refused(self):
+		error = self.tool_error("get_expense_summary", {"company": MAIN, "period": "fortnight"})
+		self.assertIn("period must be one of", error)
+
+	def test_rejected_receipts_are_excluded_by_default_and_the_count_is_reported(self):
+		self.capture(category="Fuel", amount=100)
+		rejected = self.capture(category="Fuel", amount=999)["name"]
+		self.tool_data("reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "duplicate"})
+		data = self.tool_data("get_expense_summary", {"company": MAIN})
+		self.assertEqual(data["total_amount"], 100.0)
+		self.assertIn("1 Rejected receipt", data["note"])
+
+	def test_explicit_status_includes_rejected(self):
+		rejected = self.capture(category="Fuel", amount=999)["name"]
+		self.tool_data("reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "duplicate"})
+		data = self.tool_data("get_expense_summary", {"company": MAIN, "status": "Rejected"})
+		self.assertEqual(data["total_amount"], 999.0)
+
+	def test_group_by_merchant(self):
+		self.capture(merchant="Valley Co-op Fuel", amount=100)
+		self.capture(merchant="Valley Co-op Fuel", amount=50)
+		self.capture(merchant="Cascade Ag Parts", amount=75, category="Equipment Parts")
+		data = self.tool_data("get_expense_summary", {"company": MAIN, "group_by": "merchant"})
+		self.assertEqual(data["by_merchant"]["Valley Co-op Fuel"]["total"], 150.0)
+		self.assertEqual(data["by_merchant"]["Cascade Ag Parts"]["total"], 75.0)
+
+	def test_an_unknown_group_by_is_refused(self):
+		error = self.tool_error("get_expense_summary", {"company": MAIN, "group_by": "planet"})
+		self.assertIn("group_by must be", error)
+
+	def test_date_range_narrows_the_totals(self):
+		self._seed_three_receipts()
+		data = self.tool_data("get_expense_summary", {"company": MAIN, "from_date": "2026-07-01", "to_date": "2026-07-31"})
+		self.assertEqual(data["total_amount"], 75.0)
+
+
+class ExpenseReport(EnhancementTestCase):
+	def test_lists_every_status_by_default(self):
+		self.capture(category="Fuel", amount=100)
+		rejected = self.capture(category="Fuel", amount=50)["name"]
+		self.tool_data("reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "no"})
+		data = self.tool_data("get_expense_report", {"company": MAIN})
+		self.assertEqual(data["count"], 2)
+		self.assertEqual(data["total_amount"], 150.0)
+		statuses = {row["status"] for row in data["receipts"]}
+		self.assertEqual(statuses, {"Submitted", "Rejected"})
+
+	def test_status_filter_narrows_it(self):
+		self.capture(category="Fuel", amount=100)
+		data = self.tool_data("get_expense_report", {"company": MAIN, "status": "Submitted"})
+		self.assertEqual(data["count"], 1)
+
+	def test_category_filter_narrows_it(self):
+		self.capture(category="Fuel", amount=100)
+		self.capture(category="Feed", amount=40)
+		data = self.tool_data("get_expense_report", {"company": MAIN, "category": "Feed"})
+		self.assertEqual(data["count"], 1)
+		self.assertEqual(data["receipts"][0]["category"], "Feed")
+
+	def test_csv_export_carries_the_same_rows(self):
+		self.capture(merchant="Valley Co-op Fuel", category="Fuel", amount=100)
+		data = self.tool_data("get_expense_report", {"company": MAIN, "csv": True})
+		self.assertIn("csv", data)
+		self.assertIn("Valley Co-op Fuel", data["csv"])
+		self.assertIn("merchant", data["csv"].splitlines()[0])
+
+	def test_csv_is_omitted_unless_asked_for(self):
+		self.capture()
+		data = self.tool_data("get_expense_report", {"company": MAIN})
+		self.assertNotIn("csv", data)
+
+	def test_an_unknown_category_is_refused(self):
+		error = self.tool_error("get_expense_report", {"company": MAIN, "category": "Bribes"})
+		self.assertIn("category must be one of", error)

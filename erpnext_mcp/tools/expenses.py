@@ -57,10 +57,15 @@ have is a record that cannot be opened in the Desk.
 
 from __future__ import annotations
 
-import frappe
-from frappe.utils import today
+import csv
+import datetime
+import io
 
-from ..args import as_date, as_float, as_int, as_str, resolve_company
+import frappe
+from frappe.utils import getdate, today
+
+from .. import compat
+from ..args import as_bool, as_date, as_float, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 
@@ -70,6 +75,7 @@ EMPLOYEE = "Employee"
 FARM_TASK = "Farm Task"
 SUPPLIER = "Supplier"
 ITEM = "Item"
+COST_CENTER = "Cost Center"
 
 DRAFT = "Draft"
 SUBMITTED = "Submitted"
@@ -100,8 +106,26 @@ CATEGORIES = (
 	"Feed",
 	"Seed",
 	"Fertilizer",
+	"Owner Draw",
 	"Other",
 )
+
+#: v0.68.0. `Owner Draw` is not an expense — it is equity leaving the company —
+#: and it does not get a Purchase Invoice. `create_purchase_invoice_from_receipt`
+#: refuses a receipt in this category by name and points at `create_owner_draw`
+#: instead. Kept as a constant of one rather than a bare string comparison
+#: scattered across two modules, so the day a second non-expense category is
+#: added, both refusals are one edit.
+OWNER_DRAW_CATEGORY = "Owner Draw"
+
+#: Fields `update_expense_receipt` may change. Deliberately NOT `merchant`,
+#: `amount` or `receipt_date` — those are the machine's reading of the paper and
+#: correcting them is `submit_expense_receipt` capturing a fresh photograph, not
+#: an edit to this one. What IS here is exactly what a bookkeeper adds once the
+#: paper is off a truck seat and onto a desk: which vendor it really was, which
+#: bucket it is coded to, and a note. None of the four affects `amount`, so
+#: nothing here can turn one receipt into a different expense.
+UPDATABLE_FIELDS = ("cost_center", "supplier", "category", "notes")
 
 #: What every read tool returns for a receipt, minus the raw OCR text and the
 #: line items — both of which are large and only `get_expense_receipt` returns.
@@ -115,6 +139,7 @@ _LIST_FIELDS = (
 	"company",
 	"submitted_by",
 	"supplier",
+	"cost_center",
 	"farm_task",
 	"ocr_confidence",
 	"receipt_image",
@@ -123,6 +148,8 @@ _LIST_FIELDS = (
 	"rejected_by",
 	"rejected_date",
 	"rejection_reason",
+	"linked_doctype",
+	"linked_document",
 	"notes",
 	"modified",
 )
@@ -507,3 +534,344 @@ def reject_expense_receipt(args: dict) -> ToolResult:
 		f"on {rejected_date}: {reason}",
 		docstatus_delta=f"{status} → {REJECTED}",
 	)
+
+
+# ── update_expense_receipt ───────────────────────────────────────────────────
+
+
+def update_expense_receipt(args: dict) -> ToolResult:
+	"""Correct cost_center, supplier, category or notes on a receipt already captured.
+
+	WHY THIS EXISTS. A receipt is captured fast, at a fuel pump or a parts
+	counter, by whoever has the phone — and coded properly later, at a desk, by
+	whoever reconciles the books. `submit_expense_receipt` is the first act;
+	this is the second. It runs on a receipt in ANY status, including one already
+	Approved or Rejected, because none of the four fields it touches is the thing
+	that was approved or rejected — the merchant, the amount and the date are.
+	Recoding what bucket a $184 fuel stop landed in does not reopen the question
+	of whether $184 was a reasonable fuel stop.
+
+	WHAT IT WILL NOT TOUCH. `merchant`, `amount`, `receipt_date`, `receipt_image`,
+	`ocr_raw_text`, `ocr_confidence`, `farm_task`, and every review field. Those
+	are either the machine's reading of the paper (correcting one is a fresh
+	capture, not an edit) or the record of a decision this tool has no business
+	rewriting.
+
+	AT LEAST ONE FIELD, AND AT LEAST ONE REAL CHANGE. A call that touches none of
+	`cost_center`, `supplier`, `category`, `notes` has nothing to do, and a call
+	whose values already match the record has nothing to change — both are
+	refused rather than silently accepted as a no-op write, because the caller's
+	next question after either is "did that do anything?" and the answer should
+	not require a second call to find out.
+	"""
+	name = _require_receipt(args)
+	present = [key for key in UPDATABLE_FIELDS if key in args]
+	if not present:
+		raise ToolError(
+			f"nothing to update — pass at least one of: {', '.join(UPDATABLE_FIELDS)}. "
+			"Nothing was changed."
+		)
+
+	doc = frappe.get_doc(EXPENSE_RECEIPT, name)
+	before = {}
+	after = {}
+
+	for key in present:
+		if key == "cost_center":
+			value = as_str(args, "cost_center")
+			if value and not frappe.db.exists(COST_CENTER, value):
+				raise ToolError(f"no Cost Center called {value!r} on this site. Nothing was changed.")
+		elif key == "supplier":
+			value = _linked(SUPPLIER, as_str(args, "supplier"), "supplier")
+		elif key == "category":
+			value = as_str(args, "category")
+			if not value or value not in CATEGORIES:
+				raise ToolError(f"category must be one of: {', '.join(CATEGORIES)}.")
+		else:  # notes
+			value = as_str(args, "notes")
+
+		current = doc.get(key)
+		current = "" if current is None else current
+		if str(value) == str(current):
+			continue
+		before[key] = current or None
+		after[key] = value or None
+
+	if not before:
+		raise ToolError(
+			f"expense receipt {name} already reads what was asked for on every field named "
+			f"({', '.join(present)}). Nothing to change, and nothing was changed."
+		)
+
+	frappe.db.set_value(EXPENSE_RECEIPT, name, after)
+
+	diff = "; ".join(f"{key}: {before[key]!r} → {after[key]!r}" for key in before)
+	try:
+		doc.add_comment("Comment", f"Updated via MCP (erpnext_mcp): {diff}.")
+	except Exception:
+		# The write itself already succeeded and is the operation the caller
+		# asked for; a failed comment must not report it as a failure. The
+		# MCP Action Log carries the same diff regardless.
+		frappe.log_error(
+			title="erpnext_mcp: could not attach update comment to Expense Receipt",
+			message=compat.traceback_text(),
+		)
+
+	merchant, amount = frappe.db.get_value(EXPENSE_RECEIPT, name, ["merchant", "amount"])
+	return ToolResult(
+		data={
+			"name": name,
+			"merchant": merchant,
+			"amount": float(amount or 0),
+			"fields_changed": sorted(before),
+			"before": before,
+			"after": after,
+		},
+		summary=f"Expense receipt {name} ({merchant} {amount}) updated: {diff}",
+		docstatus_delta="",
+	)
+
+
+# ── get_expense_summary / get_expense_report ─────────────────────────────────
+
+#: Aggregation buckets `get_expense_summary`'s trend series can be sliced into.
+PERIODS = ("week", "month", "quarter")
+
+#: Hard ceiling on how many receipts a summary or a report will scan in one
+#: call. Not a page size — both tools aggregate or export everything that
+#: matches, so this exists purely to keep one request from walking an unbounded
+#: table. `truncated` in the response says when it bit.
+_SCAN_CAP = 5000
+
+
+def _period_bucket(date_value, period: str) -> tuple[str, str, str, str]:
+	"""One receipt_date's bucket: a sort key, a label, and the span it covers."""
+	date = getdate(date_value)
+	if period == "week":
+		start = date - datetime.timedelta(days=date.weekday())
+		end = start + datetime.timedelta(days=6)
+		key = start.isoformat()
+		label = f"Week of {start.isoformat()}"
+	elif period == "quarter":
+		quarter = (date.month - 1) // 3 + 1
+		start_month = (quarter - 1) * 3 + 1
+		end_month = start_month + 2
+		start = date.replace(month=start_month, day=1)
+		end = _last_day_of_month(date.replace(month=end_month, day=1))
+		key = f"{date.year}-Q{quarter}"
+		label = key
+	else:  # month
+		start = date.replace(day=1)
+		end = _last_day_of_month(start)
+		key = f"{date.year:04d}-{date.month:02d}"
+		label = key
+	return key, label, start.isoformat(), end.isoformat()
+
+
+def _last_day_of_month(first_of_month: datetime.date) -> datetime.date:
+	next_month = first_of_month.replace(day=28) + datetime.timedelta(days=4)
+	return next_month.replace(day=1) - datetime.timedelta(days=1)
+
+
+def _summary_date_range(args: dict, filters: dict) -> tuple:
+	from_date = as_date(args, "from_date")
+	to_date = as_date(args, "to_date")
+	if from_date and to_date:
+		if from_date > to_date:
+			raise ToolError(f"from_date {from_date} is after to_date {to_date}")
+		filters["receipt_date"] = ("between", [from_date, to_date])
+	elif from_date:
+		filters["receipt_date"] = (">=", from_date)
+	elif to_date:
+		filters["receipt_date"] = ("<=", to_date)
+	return from_date, to_date
+
+
+def get_expense_summary(args: dict) -> ToolResult:
+	"""Expense receipts totalled by category and by period — what the dashboard reads.
+
+	`status` is left OFF the filter by default and Rejected receipts are
+	excluded instead: a rejected receipt was decided not to be a real expense,
+	and a dashboard total that included it would overstate spend by exactly the
+	amount somebody already refused. Passing `status` explicitly asks for one
+	status only, Rejected included, and the exclusion note does not apply.
+	"""
+	filters: dict = {}
+	company = as_str(args, "company")
+	if company:
+		filters["company"] = resolve_company(company)
+	from_date, to_date = _summary_date_range(args, filters)
+
+	period = as_str(args, "period") or "month"
+	if period not in PERIODS:
+		raise ToolError(f"period must be one of: {', '.join(PERIODS)}.")
+
+	group_by = as_str(args, "group_by")
+	if group_by and group_by not in ("merchant", "supplier"):
+		raise ToolError("group_by must be 'merchant' or 'supplier'.")
+
+	explicit_status = as_str(args, "status")
+	rejected_excluded = 0
+	if explicit_status:
+		if explicit_status not in STATUSES:
+			raise ToolError(f"status must be one of: {', '.join(STATUSES)}.")
+		filters["status"] = explicit_status
+	else:
+		filters["status"] = ("!=", REJECTED)
+		rejected_excluded = frappe.db.count(EXPENSE_RECEIPT, {**filters, "status": REJECTED})
+
+	rows = frappe.db.get_all(
+		EXPENSE_RECEIPT,
+		filters=filters,
+		fields=["merchant", "amount", "receipt_date", "category", "supplier"],
+		order_by="receipt_date asc",
+		limit_page_length=_SCAN_CAP,
+	)
+	truncated = len(rows) == _SCAN_CAP
+
+	by_category: dict = {}
+	by_group: dict = {}
+	buckets: dict = {}
+	total = 0.0
+	for row in rows:
+		amount = float(row.get("amount") or 0)
+		total += amount
+
+		category = row.get("category") or "Other"
+		cat = by_category.setdefault(category, {"count": 0, "total": 0.0})
+		cat["count"] += 1
+		cat["total"] = round(cat["total"] + amount, 2)
+
+		if group_by:
+			key = row.get(group_by) or f"<no {group_by}>"
+			grp = by_group.setdefault(key, {"count": 0, "total": 0.0})
+			grp["count"] += 1
+			grp["total"] = round(grp["total"] + amount, 2)
+
+		if row.get("receipt_date"):
+			key, label, start, end = _period_bucket(row["receipt_date"], period)
+			bucket = buckets.setdefault(
+				key, {"period": label, "period_start": start, "period_end": end, "count": 0, "total": 0.0}
+			)
+			bucket["count"] += 1
+			bucket["total"] = round(bucket["total"] + amount, 2)
+
+	trend = [buckets[key] for key in sorted(buckets)]
+
+	data = {
+		"count": len(rows),
+		"total_amount": round(total, 2),
+		"by_category": by_category,
+		"trend": trend,
+		"period": period,
+		"truncated": truncated,
+		"filters": {
+			"company": filters.get("company") or None,
+			"status": explicit_status or None,
+			"from_date": from_date,
+			"to_date": to_date,
+			"group_by": group_by or None,
+		},
+		"note": (
+			f"{rejected_excluded} Rejected receipt(s) excluded from these totals; pass "
+			"status='Rejected' explicitly to see them on their own. "
+			if not explicit_status
+			else ""
+		)
+		+ (
+			f"Scanned the {_SCAN_CAP} most recent matching receipts and stopped; these totals "
+			"are a PARTIAL figure. Narrow from_date/to_date to see everything in a window."
+			if truncated
+			else ""
+		),
+	}
+	if group_by:
+		data[f"by_{group_by}"] = by_group
+	return ToolResult(
+		data,
+		f"{len(rows)} expense receipt(s) totalling {round(total, 2)} across "
+		f"{len(by_category)} categor{'y' if len(by_category) == 1 else 'ies'}",
+	)
+
+
+#: Columns `get_expense_report` lists per receipt, and the CSV export mirrors.
+_REPORT_FIELDS = (
+	"name",
+	"receipt_date",
+	"merchant",
+	"category",
+	"amount",
+	"supplier",
+	"cost_center",
+	"status",
+	"company",
+)
+
+
+def get_expense_report(args: dict) -> ToolResult:
+	"""Every expense receipt in a window, one row each, for a bookkeeper's export.
+
+	Unlike `get_expense_summary`, nothing is excluded by default — Draft,
+	Submitted, Approved and Rejected all appear, because a detailed export is
+	where somebody checks what happened to a specific receipt, and a rejected
+	one that silently disappeared would look like it was never captured at all.
+	Filter to one `status` to narrow it.
+	"""
+	filters: dict = {}
+	company = as_str(args, "company")
+	if company:
+		filters["company"] = resolve_company(company)
+	from_date, to_date = _summary_date_range(args, filters)
+
+	status = as_str(args, "status")
+	if status:
+		if status not in STATUSES:
+			raise ToolError(f"status must be one of: {', '.join(STATUSES)}.")
+		filters["status"] = status
+
+	category = as_str(args, "category")
+	if category:
+		if category not in CATEGORIES:
+			raise ToolError(f"category must be one of: {', '.join(CATEGORIES)}.")
+		filters["category"] = category
+
+	limit = as_int(args, "limit", 100) or 100
+	if limit > 500:
+		limit = 500
+
+	rows = frappe.db.get_all(
+		EXPENSE_RECEIPT,
+		filters=filters,
+		fields=list(_REPORT_FIELDS),
+		order_by="receipt_date asc, name asc",
+		limit_page_length=limit,
+	)
+	receipts = [_row_out(row) for row in rows]
+	total = round(sum(r["amount"] for r in receipts), 2)
+
+	data = {
+		"receipts": receipts,
+		"count": len(receipts),
+		"total_amount": total,
+		"limit": limit,
+		"truncated": len(receipts) == limit,
+		"filters": {
+			"company": filters.get("company") or None,
+			"status": status or None,
+			"category": category or None,
+			"from_date": from_date,
+			"to_date": to_date,
+		},
+	}
+	if as_bool(args, "csv", False):
+		data["csv"] = _csv_export(receipts)
+	return ToolResult(data, f"{len(receipts)} expense receipt(s) totalling {total}")
+
+
+def _csv_export(receipts: list[dict]) -> str:
+	buffer = io.StringIO()
+	writer = csv.DictWriter(buffer, fieldnames=list(_REPORT_FIELDS), extrasaction="ignore")
+	writer.writeheader()
+	for row in receipts:
+		writer.writerow(row)
+	return buffer.getvalue()

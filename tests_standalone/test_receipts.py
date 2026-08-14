@@ -40,7 +40,17 @@ from erpnext_mcp.erpnext_mcp.doctype.settlement_statement.settlement_statement i
 )
 from erpnext_mcp.tools import receipts
 
-from .fixtures import MAIN, MAIN_ABBR, MASTER_CUSTOMER, OTHER, MastersTestCase
+from .fixtures import (
+	MAIN,
+	MAIN_ABBR,
+	MASTER_CUSTOMER,
+	MASTER_SUPPLIER,
+	OTHER,
+	MastersTestCase,
+	PurchasingTestCase,
+	install_hrms,
+	supplies,
+)
 from .harness import STORE, _load_app_doctype
 
 READ_TOOLS = (
@@ -1049,3 +1059,208 @@ class TheDoctypesThemselves(ReceiptsTestCase):
 		self.assertIn("only copy", precious["Scale Ticket"].lower())
 		self.assertIn("unauditable", precious["Scale Ticket"])
 		self.assertIn("deducted", precious["Settlement Statement"])
+
+
+# ── v0.68.0: merchant matching and the bill a receipt becomes ───────────────
+
+
+class NormalizeMerchant(MastersTestCase):
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, allow_normalize_merchant=1)
+		STORE.seed(
+			"Supplier",
+			[{"name": "Wilbur-Ellis Company LLC", "supplier_name": "Wilbur-Ellis Company LLC"}],
+		)
+
+	def test_matches_a_similarly_punctuated_name(self):
+		data = self.tool_data("normalize_merchant", {"merchant": "WILBUR ELLIS CO"})
+		self.assertIsNotNone(data["match"])
+		self.assertEqual(data["match"]["supplier"], "Wilbur-Ellis Company LLC")
+		self.assertGreater(data["match"]["confidence"], 0.8)
+
+	def test_an_unrelated_name_matches_nothing(self):
+		data = self.tool_data("normalize_merchant", {"merchant": "Zzyzx Quantum Widgets"})
+		self.assertIsNone(data["match"])
+
+	def test_merchant_is_required(self):
+		error = self.tool_error("normalize_merchant", {})
+		self.assertIn("merchant", error)
+
+	def test_switched_off_by_default(self):
+		self.configure(enabled=1, allow_normalize_merchant=0)
+		error = self.tool_error("normalize_merchant", {"merchant": "WILBUR ELLIS CO"})
+		self.assertIn("switched off", error)
+
+
+class ListMerchantAliases(MastersTestCase):
+	def setUp(self):
+		super().setUp()
+		install_hrms()
+		self.configure(enabled=1, allow_submit_expense_receipt=1, allow_list_merchant_aliases=1)
+
+	def _receipt(self, merchant, supplier=None, **overrides):
+		payload = {
+			"merchant": merchant,
+			"amount": 50,
+			"receipt_date": "2026-06-01",
+			"company": MAIN,
+			"submitted_by": "HR-EMP-00001",
+		}
+		if supplier:
+			payload["supplier"] = supplier
+		payload.update(overrides)
+		return self.tool_data("submit_expense_receipt", payload)
+
+	def test_groups_every_spelling_under_its_supplier(self):
+		self._receipt("VALLEY CO-OP #14", supplier=MASTER_SUPPLIER)
+		self._receipt("Valley Co-op Fuel", supplier=MASTER_SUPPLIER)
+		data = self.tool_data("list_merchant_aliases", {})
+		self.assertEqual(data["count"], 1)
+		entry = data["aliases"][0]
+		self.assertEqual(entry["supplier"], MASTER_SUPPLIER)
+		self.assertEqual(entry["receipt_count"], 2)
+		merchants = {row["merchant"] for row in entry["merchant_strings"]}
+		self.assertEqual(merchants, {"VALLEY CO-OP #14", "Valley Co-op Fuel"})
+
+	def test_a_receipt_with_no_supplier_link_does_not_appear(self):
+		self._receipt("Some Unlinked Vendor")
+		data = self.tool_data("list_merchant_aliases", {})
+		self.assertEqual(data["count"], 0)
+
+	def test_supplier_filter_narrows_it(self):
+		self._receipt("Cascade Ag Parts", supplier=MASTER_SUPPLIER)
+		data = self.tool_data("list_merchant_aliases", {"supplier": MASTER_SUPPLIER})
+		self.assertEqual(data["count"], 1)
+
+	def test_an_unknown_supplier_filter_is_refused(self):
+		error = self.tool_error("list_merchant_aliases", {"supplier": "Nobody Inc"})
+		self.assertIn("no Supplier called", error)
+
+
+PI_FROM_RECEIPT_TOOLS_ON = {
+	"allow_submit_expense_receipt": 1,
+	"allow_approve_expense_receipt": 1,
+	"allow_create_purchase_invoice_from_receipt": 1,
+}
+
+
+class PurchaseInvoiceFromReceipt(PurchasingTestCase):
+	def setUp(self):
+		super().setUp()
+		install_hrms()
+		self.configure(enabled=1, **PI_FROM_RECEIPT_TOOLS_ON)
+
+	def approved_receipt(self, **overrides):
+		payload = {
+			"merchant": "Cascade Ag Parts",
+			"amount": 96.40,
+			"receipt_date": "2026-06-14",
+			"category": "Supplies",
+			"company": MAIN,
+			"submitted_by": "HR-EMP-00001",
+		}
+		payload.update(overrides)
+		name = self.tool_data("submit_expense_receipt", payload)["name"]
+		self.tool_data("approve_expense_receipt", {"name": name, "approved_by": "HR-EMP-00001"})
+		return name
+
+	def test_creates_a_draft_purchase_invoice_and_links_it_back(self):
+		name = self.approved_receipt()
+		data = self.tool_data("create_purchase_invoice_from_receipt", {"receipt": name})
+		self.assertTrue(data["purchase_invoice"])
+		self.assertEqual(data["docstatus"], 0)
+		self.assertEqual(data["amount"], 96.40)
+		self.assertEqual(data["expense_account"], supplies())
+
+		receipt = self.tool_data("get_expense_receipt", {"name": name})
+		self.assertEqual(receipt["linked_doctype"], "Purchase Invoice")
+		self.assertEqual(receipt["linked_document"], data["purchase_invoice"])
+
+		invoice = self.tool_data("get_purchase_invoice", {"name": data["purchase_invoice"]})
+		self.assertEqual(invoice["grand_total"], 96.40)
+		self.assertEqual(invoice["items"][0]["item_code"], "EXP-SUPPLIES")
+
+	def test_a_supplier_is_created_from_the_merchant_when_nothing_matches(self):
+		name = self.approved_receipt(merchant="Totally New Vendor Ninety Two")
+		data = self.tool_data("create_purchase_invoice_from_receipt", {"receipt": name})
+		self.assertEqual(data["supplier"], "Totally New Vendor Ninety Two")
+		self.assertIn("created from merchant name", data["supplier_resolved_by"])
+		self.assertTrue(STORE.get_raw("Supplier", "Totally New Vendor Ninety Two"))
+
+	def test_a_confident_merchant_match_is_linked_automatically(self):
+		STORE.seed(
+			"Supplier",
+			[{"name": "Wilbur-Ellis Company LLC", "supplier_name": "Wilbur-Ellis Company LLC"}],
+		)
+		name = self.approved_receipt(merchant="WILBUR ELLIS CO")
+		data = self.tool_data("create_purchase_invoice_from_receipt", {"receipt": name})
+		self.assertEqual(data["supplier"], "Wilbur-Ellis Company LLC")
+		self.assertIn("matched to merchant name", data["supplier_resolved_by"])
+
+	def test_the_receipts_own_supplier_link_is_used_first(self):
+		name = self.approved_receipt(supplier=MASTER_SUPPLIER, merchant="Whatever The Slip Said")
+		data = self.tool_data("create_purchase_invoice_from_receipt", {"receipt": name})
+		self.assertEqual(data["supplier"], MASTER_SUPPLIER)
+		self.assertEqual(data["supplier_resolved_by"], "receipt link")
+
+	def test_explicit_supplier_argument_is_honoured(self):
+		name = self.approved_receipt()
+		data = self.tool_data(
+			"create_purchase_invoice_from_receipt", {"receipt": name, "supplier": MASTER_SUPPLIER}
+		)
+		self.assertEqual(data["supplier"], MASTER_SUPPLIER)
+		self.assertEqual(data["supplier_resolved_by"], "argument")
+
+	def test_explicit_expense_account_is_honoured(self):
+		name = self.approved_receipt()
+		data = self.tool_data(
+			"create_purchase_invoice_from_receipt", {"receipt": name, "expense_account": supplies()}
+		)
+		self.assertEqual(data["expense_account_resolved_by"], "argument")
+
+	def test_two_receipts_of_the_same_category_share_one_item(self):
+		first = self.approved_receipt()
+		second = self.approved_receipt(merchant="Different Vendor Co")
+		data1 = self.tool_data("create_purchase_invoice_from_receipt", {"receipt": first})
+		data2 = self.tool_data("create_purchase_invoice_from_receipt", {"receipt": second})
+		self.assertEqual(data1["item"], data2["item"])
+
+	def test_a_submitted_not_approved_receipt_is_refused(self):
+		name = self.tool_data(
+			"submit_expense_receipt",
+			{
+				"merchant": "Cascade Ag Parts",
+				"amount": 50,
+				"receipt_date": "2026-06-14",
+				"category": "Supplies",
+				"company": MAIN,
+				"submitted_by": "HR-EMP-00001",
+			},
+		)["name"]
+		error = self.tool_error("create_purchase_invoice_from_receipt", {"receipt": name})
+		self.assertIn("not Approved", error)
+
+	def test_an_owner_draw_receipt_is_refused_by_name(self):
+		name = self.approved_receipt(category="Owner Draw")
+		error = self.tool_error("create_purchase_invoice_from_receipt", {"receipt": name})
+		self.assertIn("Owner Draw", error)
+		self.assertIn("create_owner_draw", error)
+
+	def test_an_already_linked_receipt_is_refused(self):
+		name = self.approved_receipt()
+		self.tool_data("create_purchase_invoice_from_receipt", {"receipt": name})
+		error = self.tool_error("create_purchase_invoice_from_receipt", {"receipt": name})
+		self.assertIn("already linked", error)
+
+	def test_a_missing_receipt_is_refused_by_name(self):
+		error = self.tool_error("create_purchase_invoice_from_receipt", {"receipt": "EXR-NOPE"})
+		self.assertIn("no Expense Receipt called", error)
+
+	def test_switched_off_by_default(self):
+		name = self.approved_receipt()
+		self.configure(
+			enabled=1, **{**PI_FROM_RECEIPT_TOOLS_ON, "allow_create_purchase_invoice_from_receipt": 0}
+		)
+		error = self.tool_error("create_purchase_invoice_from_receipt", {"receipt": name})
+		self.assertIn("switched off", error)

@@ -39,7 +39,7 @@ import hashlib
 
 import frappe
 
-from .. import compat, convert, settings
+from .. import compat, convert, roles, security, settings
 from ..args import (
 	as_bool,
 	as_choice,
@@ -54,7 +54,7 @@ from ..args import (
 )
 from ..errors import ToolError
 from ..result import ToolResult
-from . import files, mutate
+from . import expenses, files, mutate
 
 CAP_TABLE = "Cap Table Entry"
 MEMBER_EVENT = "Member Event"
@@ -366,6 +366,211 @@ def _counter_account(args: dict, company: str) -> str:
 		f"{company} has no default bank or cash account set, so there is no account for the "
 		"money side of this event. Pass counter_account explicitly, or set the company "
 		"defaults with set_company_defaults. Nothing was created."
+	)
+
+
+# ── create_owner_draw ────────────────────────────────────────────────────────
+#
+# v0.68.0. `record_member_event` already books a Distribution or a Withdrawal
+# against exactly this kind of equity account — `_DISTRIBUTION_KEYWORDS` above
+# has named "owner draw" and "member draw" since it was written. What it does
+# NOT have is a role gate of its own, or a door that does not first require a
+# Cap Table Entry to exist. `create_owner_draw` is that door: a narrower tool,
+# for the specific case of "a receipt came in tagged Owner Draw, or somebody
+# with authority over the company's equity says money left as a draw" — gated
+# on a role rather than on membership in the cap table, and usable whether or
+# not this site has adopted the cap table machinery at all.
+#
+# IT IS NOT A NEW DOCTYPE. Per the gap-closure plan: this is a Journal Entry
+# with specific routing — debit an equity "draw" account, credit the bank or
+# cash it left from — and nothing else. No new register, no new table.
+
+#: `System Manager` is the universal escape every role gate in this app keeps
+#: (see `employee.HR_ROLES`). `Member Manager` is this tool's own: an operator
+#: creates the Role in the Desk — typing a new name into a Role field creates
+#: it — and assigns it to whoever is actually authorised to move the company's
+#: equity. Deliberately NOT one of the six roles `roles.install_roles` ships:
+#: those are job descriptions for running the farm, and "may declare an owner
+#: draw" is a narrower, higher-stakes permission than any of the six grants.
+OWNER_DRAW_ROLES = ("System Manager", "Member Manager")
+
+
+def _require_member_manager() -> str:
+	"""The principal this call is attributed to, once it has proved it may draw equity.
+
+	Same shape as `employee.require_hr_role`, and for the same reason:
+	`security.caller_identity()` is whoever Frappe authenticated THIS request —
+	a phone or a Desk session presenting its own credential — and is empty on
+	the ordinary MCP path, where the operator's client presents a shared token
+	and no human identity exists to read. There the principal is
+	`frappe.session.user`, which by the time any tool runs is the MCP System
+	User the operator configured. Raises rather than returning a flag: there is
+	no half-permitted path through this check.
+	"""
+	actor = security.caller_identity() or str(getattr(frappe.session, "user", "") or "")
+	if not actor or actor == "Guest":
+		raise ToolError("this call has no identity to attribute an owner draw to. Nothing was created.")
+	held = set(frappe.get_roles(actor) or []) or set(roles.all_roles_of(actor) or [])
+	if not held & set(OWNER_DRAW_ROLES):
+		raise ToolError(
+			f"{actor} may not record an owner draw: it holds none of {', '.join(OWNER_DRAW_ROLES)}. "
+			"This is the account this app acts as — an operator sets it with `mcp_system_user` on "
+			"ERPNext MCP Settings, and grants it the Member Manager role in the Desk. Nothing was "
+			"created."
+		)
+	return actor
+
+
+def create_owner_draw(args: dict) -> ToolResult:
+	"""Record an owner draw / member distribution as a DRAFT Journal Entry.
+
+	REQUIRES THE Member Manager ROLE (or System Manager). Checked before
+	anything else runs — an owner draw is equity leaving the company on
+	somebody's say-so, and this tool is the say-so.
+
+	NOT AN EXPENSE. Debits an equity "draw" account — matched from the
+	company's leaf Equity accounts by the same keyword table
+	`record_member_event` uses for a Distribution or a Withdrawal
+	(`_DISTRIBUTION_KEYWORDS`: "owner draw", "member draw", "drawings",
+	"distribution" …), or named explicitly with `draw_account` — and credits
+	the bank or cash account it left from. Never touches an Expense account,
+	whatever category a receipt behind this call carried.
+
+	OPTIONALLY LINKED TO A RECEIPT. `receipt` names an Expense Receipt whose
+	category is `Owner Draw` — the case `create_purchase_invoice_from_receipt`
+	refuses and points here instead. The receipt must not already be linked to
+	another document, and this call links it to the Journal Entry it creates,
+	the same `linked_doctype`/`linked_document` pair a Purchase Invoice uses.
+	The tool works with no receipt at all: an owner draw is frequently just a
+	transfer nobody photographed.
+
+	ALWAYS A DRAFT, never submitted. Post it with `submit_journal_entry`, which
+	needs its own switch on as well as this tool's — same two-lock shape as
+	`record_member_event`.
+	"""
+	actor = _require_member_manager()
+	company = resolve_company(as_str(args, "company"), required=True)
+
+	amount = as_float(args.get("amount"), "amount")
+	if args.get("amount") in (None, ""):
+		raise ToolError("amount is required. Nothing was created.")
+	if amount <= 0:
+		raise ToolError(f"amount must be positive — got {amount}. Nothing was created.")
+
+	date_value = as_date(args, "date") or as_date(args, "effective_date")
+	if not date_value:
+		raise ToolError("date (the posting date for this draw) is required. Nothing was created.")
+
+	narrative = as_str(args, "narrative") or as_str(args, "reason") or as_str(args, "notes")
+	if len(narrative) < 8:
+		raise ToolError(
+			"narrative must be a real explanation — what this draw was for and who authorised it. "
+			"It is the part of this record that cannot be reconstructed later. Nothing was created."
+		)
+
+	explicit_draw_account = as_str(args, "draw_account") or as_str(args, "equity_account")
+	draw_account = (
+		resolve_account(explicit_draw_account, company)
+		if explicit_draw_account
+		else _match_equity_account(company, _DISTRIBUTION_KEYWORDS, "owner draw")
+	)
+	counter_account = _counter_account(args, company)
+
+	cost_center = as_str(args, "cost_center")
+	if cost_center:
+		cost_center = resolve_cost_center(cost_center, company)
+
+	party_type = as_str(args, "party_type")
+	party = as_str(args, "party")
+	if bool(party_type) != bool(party):
+		raise ToolError(
+			f"party_type is {party_type!r} and party is {party!r}. Set both to attribute the draw "
+			"to somebody, or leave both empty. Nothing was created."
+		)
+
+	receipt_name = as_str(args, "receipt") or as_str(args, "expense_receipt")
+	if receipt_name:
+		if not frappe.db.exists(expenses.EXPENSE_RECEIPT, receipt_name):
+			raise ToolError(f"no Expense Receipt called {receipt_name!r} on this site. Nothing was created.")
+		receipt = frappe.db.get_value(
+			expenses.EXPENSE_RECEIPT,
+			receipt_name,
+			["category", "linked_doctype", "linked_document", "company"],
+			as_dict=True,
+		)
+		if receipt.get("category") != expenses.OWNER_DRAW_CATEGORY:
+			raise ToolError(
+				f"expense receipt {receipt_name} is categorised {receipt.get('category')!r}, not "
+				f"{expenses.OWNER_DRAW_CATEGORY!r}. Recategorise it with update_expense_receipt "
+				"first, or omit receipt if this draw is not from a captured receipt. "
+				"Nothing was created."
+			)
+		if receipt.get("linked_document"):
+			raise ToolError(
+				f"expense receipt {receipt_name} is already linked to "
+				f"{receipt.get('linked_doctype')} {receipt.get('linked_document')}. Nothing was created."
+			)
+		if receipt.get("company") != company:
+			raise ToolError(
+				f"expense receipt {receipt_name} belongs to {receipt.get('company')!r}, not "
+				f"{company!r}. Nothing was created."
+			)
+
+	raw_lines = [
+		{
+			"account": draw_account,
+			"debit": amount,
+			"cost_center": cost_center or None,
+			"user_remark": "Owner draw",
+			"party_type": party_type or None,
+			"party": party or None,
+		},
+		{
+			"account": counter_account,
+			"credit": amount,
+			"cost_center": cost_center or None,
+			"user_remark": "Owner draw",
+		},
+	]
+	raw_lines = [{key: value for key, value in line.items() if value is not None} for line in raw_lines]
+	lines = mutate.validated_journal_lines(raw_lines, company)
+	remark = f"Owner Draw — {narrative}"
+	doc = mutate.insert_draft_journal_entry(company, date_value, lines, remark)
+
+	if receipt_name:
+		frappe.db.set_value(
+			expenses.EXPENSE_RECEIPT,
+			receipt_name,
+			{"linked_doctype": "Journal Entry", "linked_document": doc.name},
+		)
+
+	data = {
+		"name": doc.name,
+		"docstatus": 0,
+		"docstatus_label": "draft",
+		"company": company,
+		"date": date_value,
+		"amount": amount,
+		"draw_account": draw_account,
+		"draw_account_resolved_by": "argument" if explicit_draw_account else "name match",
+		"counter_account": counter_account,
+		"cost_center": cost_center or None,
+		"party_type": party_type or None,
+		"party": party or None,
+		"expense_receipt": receipt_name or None,
+		"recorded_by": actor,
+		"narrative": narrative,
+		"next_step": (
+			f"Journal Entry {doc.name} is a DRAFT and has moved no balance. Post it with "
+			"submit_journal_entry, which needs its own switch on as well as this tool's."
+		),
+	}
+	return ToolResult(
+		data,
+		f"recorded owner draw of {amount} for {company} on {date_value} by {actor}; "
+		f"draft Journal Entry {doc.name}"
+		+ (f", linked to expense receipt {receipt_name}" if receipt_name else ""),
+		docstatus_delta="none → 0 (draft)",
 	)
 
 

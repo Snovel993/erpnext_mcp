@@ -16,6 +16,7 @@
   "company",
   "submitted_by",
   "supplier",
+  "cost_center",
   "farm_task",
   "status",
   "image_section",
@@ -32,6 +33,9 @@
   "rejected_by",
   "rejected_date",
   "rejection_reason",
+  "routing_section",
+  "linked_doctype",
+  "linked_document",
   "notes_section",
   "notes"
  ],
@@ -78,7 +82,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Category",
-   "options": "Fuel\nEquipment Parts\nSupplies\nHardware\nFeed\nSeed\nFertilizer\nOther"
+   "options": "Fuel\nEquipment Parts\nSupplies\nHardware\nFeed\nSeed\nFertilizer\nOwner Draw\nOther"
   },
   {
    "fieldname": "col_break_header",
@@ -110,6 +114,14 @@
    "in_standard_filter": 1,
    "label": "Supplier",
    "options": "Supplier",
+   "search_index": 1
+  },
+  {
+   "description": "Where this cost is booked for reporting, if the operation tracks that below Company. OPTIONAL — a receipt with no cost center still totals fine at the company level.",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center",
    "search_index": 1
   },
   {
@@ -214,6 +226,27 @@
    "fieldname": "rejection_reason",
    "fieldtype": "Small Text",
    "label": "Rejection Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "routing_section",
+   "fieldtype": "Section Break",
+   "label": "Downstream Posting"
+  },
+  {
+   "description": "What this receipt turned into, if anything: create_purchase_invoice_from_receipt writes 'Purchase Invoice' here, create_owner_draw writes 'Journal Entry'. Blank means nothing has been posted from this receipt yet.",
+   "fieldname": "linked_doctype",
+   "fieldtype": "Select",
+   "label": "Linked Document Type",
+   "options": "\nPurchase Invoice\nJournal Entry",
+   "read_only": 1
+  },
+  {
+   "description": "The document create_purchase_invoice_from_receipt or create_owner_draw produced from this receipt. A DRAFT — posting it is a separate, later step.",
+   "fieldname": "linked_document",
+   "fieldtype": "Dynamic Link",
+   "label": "Linked Document",
+   "options": "linked_doctype",
    "read_only": 1
   },
   {
