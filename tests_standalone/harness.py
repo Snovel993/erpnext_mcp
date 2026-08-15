@@ -1467,6 +1467,10 @@ APP_DOCTYPES = {
 	"Statement Anchor": "statement_anchor",
 	"Statement Anchor Line": "statement_anchor_line",
 	"Advisory Agreement": "advisory_agreement",
+	# v0.75.0. The one spelling a till prints for one vendor, taught the moment a
+	# bookkeeper links a receipt to a Supplier by hand — see `tools/receipts.py`
+	# for why "SIATAPING" is a mapping no string algorithm can ever compute.
+	"Merchant Alias": "merchant_alias",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

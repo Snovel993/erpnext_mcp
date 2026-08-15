@@ -217,6 +217,23 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# records. Per-company narrowing is available and belongs where it can be
 		# read: a `scope_filters` entry on the rule, which says so on the record
 		# an auditor is looking at.
+		#
+		# THE v0.75.0 ADDITION IS THE SAME ARGUMENT ABOUT A VENDOR. A Merchant
+		# Alias says that a till which prints "SIATAPING" belongs to Sawyer's Ace
+		# Hardware. That is a fact about a shop's receipt printer, not about
+		# anybody's operation: it names no amount, no date, no employee and no
+		# purchase. The rows that carry those are the Expense RECEIPTS the alias
+		# resolves, every one of which links to Company and is scoped by Frappe
+		# exactly as before.
+		#
+		# Scoping it would also be wrong rather than merely unnecessary, for the
+		# reason the Compliance Rule paragraph gives: a Supplier is already
+		# site-wide in ERPNext, so a per-company alias would mean either the same
+		# spelling taught once per entity — two rows that will eventually
+		# disagree about one vendor — or an alias owned by one entity quietly
+		# resolving another's receipts. And the whole design of the register
+		# rests on one alias key resolving to exactly one Supplier, which a
+		# company column would break by making the key non-unique.
 		self.assertEqual(
 			sorted(unscoped),
 			[
@@ -229,6 +246,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"Inspection Template",
 				"Labor Break Policy",
 				"MCP Action Log",
+				"Merchant Alias",
 				"Staged File Chunk",
 				"Staged File Upload Session",
 				"State Tax Table",

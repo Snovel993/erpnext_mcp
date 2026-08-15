@@ -5325,6 +5325,10 @@ def create_expense_receipt(
 	ocr_confidence=None,
 	items=None,
 	notes=None,
+	card_last_four=None,
+	merchant_phone=None,
+	merchant_url=None,
+	store_number=None,
 ) -> dict:
 	"""The fuel slip at the pump, with v0.67.0's Supplier and Item links.
 
@@ -5345,6 +5349,21 @@ def create_expense_receipt(
 	recognises one; nothing here fuzzy-matches `VALLEY CO-OP #14` onto a
 	Supplier record, because a wrong link is worse than no link and is
 	indistinguishable from a right one afterwards.
+
+	v0.75.0 FORWARDS THE FOUR CAPTURE SIGNALS — `card_last_four`,
+	`merchant_phone`, `merchant_url`, `store_number` — because the phone is where
+	they are read. Vision has the full-resolution image in its hands; this app
+	has a text blob the phone chose to send, and four anchored regexes over it.
+	Every one of them is OPTIONAL, and `ocr_raw_text` alone still works: the tool
+	reads whatever the phone did not send off the text itself.
+
+	THE RESOLUTION TRIPLE IS DELIBERATELY NOT ON THIS SIGNATURE.
+	`resolved_merchant`, `resolution_method` and `resolution_confidence` are a
+	CALLER'S OWN JUDGEMENT and they short-circuit the whole cascade — which is
+	the right shape for a desk client with a model in the loop, and the wrong
+	one for a phone in a truck, where the same field would let a bad on-device
+	guess overrule a mapping a bookkeeper taught by hand. The phone reports what
+	it READ; deciding what that means stays on this side.
 	"""
 	allowed = guard.require_scope(user)
 
@@ -5364,6 +5383,10 @@ def create_expense_receipt(
 		("ocr_raw_text", ocr_raw_text),
 		("ocr_confidence", ocr_confidence),
 		("notes", notes),
+		("card_last_four", card_last_four),
+		("merchant_phone", merchant_phone),
+		("merchant_url", merchant_url),
+		("store_number", store_number),
 	):
 		if value not in (None, ""):
 			inner[key] = value

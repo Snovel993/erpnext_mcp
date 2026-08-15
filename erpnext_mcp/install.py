@@ -145,6 +145,7 @@ def after_install() -> None:
 	_settlement_invoice_link()
 	_bank_categorization_fields()
 	_bank_pairing_fields()
+	_receipt_intelligence_fields()
 	frappe.db.commit()
 
 
@@ -175,6 +176,7 @@ def after_migrate() -> None:
 	_settlement_invoice_link()
 	_bank_categorization_fields()
 	_bank_pairing_fields()
+	_receipt_intelligence_fields()
 
 
 def _settlement_invoice_link() -> None:
@@ -284,6 +286,45 @@ def _bank_pairing_fields() -> None:
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(
 			f"erpnext_mcp: the Bank Account pairing fields were not installed — "
+			f"{type(exc).__name__}: {exc}"
+		)
+
+
+def _receipt_intelligence_fields() -> None:
+	"""Give Expense Receipt the seven columns multi-vector resolution needs.
+
+	v0.75.0, and the fifth place this app installs Custom Fields at migrate time.
+	The four before it extend somebody else's doctype; this one extends our own,
+	and `receipts.ensure_receipt_intelligence_fields` argues why — a register a
+	site has been capturing into since v0.31.0 should not gain seven mandatory
+	columns for a feature that site may never enable, and a Custom Field is
+	something an operator can remove while a JSON field is something only a
+	release can.
+
+	`tools/receipts.py` creates the same columns lazily on first use, so a bench
+	that pulled the code without running the installer resolves a merchant the
+	first time somebody captures a receipt. Doing it here means they exist before
+	anybody needs them, which is what makes them filterable in the Desk.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import receipts
+
+		if not frappe.db.exists("DocType", "Expense Receipt"):
+			return
+		if receipts.ensure_receipt_intelligence_fields():
+			return
+		print(
+			"erpnext_mcp: Expense Receipt did not take the receipt-intelligence Custom Fields. "
+			"Merchant resolution still RUNS and is still reported by submit_expense_receipt and "
+			"normalize_merchant; only the storing of its answer on the record is skipped, and "
+			"card-fingerprint bank matching is unavailable. Capture is otherwise unaffected."
+		)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(
+			f"erpnext_mcp: the Expense Receipt intelligence fields were not installed — "
 			f"{type(exc).__name__}: {exc}"
 		)
 

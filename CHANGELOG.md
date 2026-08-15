@@ -3,6 +3,72 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.75.0 — 2026-08-15 — the receipt says more than the merchant line
+
+**`SIATAPING` is Sawyer's Ace Hardware, and no string algorithm will ever say
+so** — the letters are not there. v0.68.0's name matcher gets from `WILBUR ELLIS
+CO` to `Wilbur-Ellis Company LLC` and is structurally incapable of the rest, so
+every receipt from that till arrived unresolved, a bookkeeper coded each one by
+hand, and the app learned nothing from being told. Meanwhile the evidence was on
+the paper the whole time: the same slip prints a domain, a phone number, a store
+number and the last four of the card, and every one of those is a harder
+identifier than the name.
+
+### New
+
+- **Seven Custom Fields on Expense Receipt** — `card_last_four`,
+  `merchant_phone`, `merchant_url`, `store_number`, `resolved_merchant`,
+  `resolution_method`, `resolution_confidence`. Installed at `bench migrate` and
+  lazily on first use. `merchant` and `resolved_merchant` are separate columns
+  for ever: overwriting the reading with the conclusion would delete the only
+  evidence that the conclusion was wrong. A site that will not take them still
+  RUNS and REPORTS the resolution — only the storing of it is skipped.
+- **`Merchant Alias`** — a taught register, written the moment a bookkeeper sets
+  a `supplier` with `update_expense_receipt`, so the NEXT receipt with that
+  spelling resolves itself at capture. Nothing is asked of the bookkeeper. **The
+  docname is the normalised alias**, which makes "one alias, one Supplier" a
+  primary key rather than a rule somebody has to remember, and makes `Valley
+  Co-op #14` and `VALLEY CO-OP 14` one row. Re-pointing is allowed and keeps the
+  count; an identity mapping is skipped; learning never fails the update.
+- **A five-step resolution cascade** under `normalize_merchant` and on every
+  capture: **Alias** (a person's own decision replayed — the only thing in this
+  app that reaches 1.0), then **URL**, then **Phone**, then the existing name
+  similarity, then the question for a caller that has a model. Every step is
+  reported *including the ones that found nothing*, because "why didn't the URL
+  match" is the interesting question the day a farm's receipts stop resolving.
+- **Four anchored patterns over raw OCR text**, so `ocr_raw_text` alone is
+  enough. A bare four-digit run is never read as a card (a receipt is full of
+  times, totals and item codes); a full card number is **refused, not
+  truncated**; a payment-processor or survey domain is never the merchant.
+- **The card fingerprint in `auto_match_receipts`** — where a receipt's card last
+  four matches the bank's memo line within a day, the proposal is marked, lifted
+  `+0.15` toward the ceiling, and **outranks a higher-scoring receipt without
+  one**. Two $47.83 fuel slips on one day at one station used to be `contested`
+  and handed to a person; two trucks carry two cards, and now they are two
+  proposals. A bonus rather than a fourth weight, so a receipt with no card
+  scores exactly what it scored before.
+
+### Changed
+
+- `list_merchant_aliases` returns `taught[]` beside the derived `aliases[]` — the
+  subset of the history somebody turned into a rule, with a `match_count` saying
+  whether teaching it was worth anything.
+- `create_expense_receipt` (mobile) forwards the four capture signals. The
+  resolution triple is deliberately **not** on that signature: it short-circuits
+  the cascade, which is right for a desk client with a model and wrong for a
+  phone in a truck.
+
+### Unchanged on purpose
+
+- **No new tools.** Every capability lands on tools that already exist, so the
+  catalogue is the same size and an operator has no new switch to reason about.
+- **Nothing is still inferred**, with exactly one exception: an alias hit sets
+  the `supplier` link, because it is a replay of a link a person already made,
+  and it says so under `supplier_resolved_by`.
+- **This app makes no model call.** Step 5 prepares `llm_context` and returns it;
+  the answer comes back through `resolved_merchant`. Same contract
+  `validate_document_extraction` has followed since v0.69.0.
+
 ## 0.74.0 — 2026-08-15 — the account survives the reconnection
 
 **An aggregator id goes dead without saying so.** When a bank connection is

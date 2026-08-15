@@ -1,0 +1,146 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-15 09:00:00.000000",
+ "description": "One spelling a receipt printer uses for one vendor, and the Supplier it actually is. `SIATAPING` on a thermal slip is Sawyer's Ace Hardware, and no amount of string similarity will ever say so — the letters are not there. So this is a TAUGHT mapping rather than a computed one: it is written the moment a bookkeeper links a receipt to a Supplier by hand, and every later receipt carrying that same spelling resolves to the same vendor without anybody being asked twice. The docname is the alias NORMALISED — upper-cased, punctuation dropped, legal-form words removed — which is what makes 'Valley Co-op #14' and 'VALLEY CO-OP 14' one row instead of two, and what makes 'one alias resolves to exactly one Supplier' a primary key rather than a rule somebody has to remember. Nothing here is ever inferred from the alias table alone: it records a decision a person already made, and replays it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "alias",
+  "canonical_supplier",
+  "alias_key",
+  "header_col",
+  "source",
+  "match_count",
+  "last_matched_on",
+  "provenance_section",
+  "first_learned_from",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The merchant string exactly as it was captured off the paper, before anything was stripped from it. Kept as printed because it is the evidence: a reader asking why 'SIATAPING' resolves to a hardware store needs to see the string the scanner actually read, not a tidied version of it.",
+   "fieldname": "alias",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Alias",
+   "reqd": 1
+  },
+  {
+   "description": "What that spelling actually is. A Link, so the mapping dies with the Supplier rather than outliving it as a string pointing at nothing.",
+   "fieldname": "canonical_supplier",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Canonical Supplier",
+   "options": "Supplier",
+   "reqd": 1
+  },
+  {
+   "description": "The alias upper-cased with punctuation dropped and legal-form words (Co, LLC, Inc, Corp, Ltd …) removed — the key a lookup is done on, and the docname. Derived by the controller from `alias`; editing it by hand would make the row unfindable by the receipts it exists to resolve.",
+   "fieldname": "alias_key",
+   "fieldtype": "Data",
+   "label": "Alias Key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "header_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Manual",
+   "description": "How this mapping was learned. Manual is a person linking a receipt to a Supplier, and is the only source a replay of it is allowed to treat as certain — it is somebody's own decision handed back to them. Auto is this app's own high-confidence name match, and LLM is a model reading the raw receipt text; both are opinions that happened to be recorded, and they resolve at the same ceiling every other guess in this app does.",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Source",
+   "options": "Manual\nAuto\nLLM",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "How many receipts this alias has resolved since it was learned, itself included. It is the only measure of whether a taught mapping was worth teaching — a row that has never fired again is a one-off spelling, and a row in the hundreds is a vendor this farm buys from every week.",
+   "fieldname": "match_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Match Count",
+   "read_only": 1
+  },
+  {
+   "description": "The last day a receipt resolved through this alias. Read-only, and the answer to 'is this mapping still live or did that vendor close in 2024'.",
+   "fieldname": "last_matched_on",
+   "fieldtype": "Date",
+   "label": "Last Matched On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "provenance_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "description": "The Expense Receipt whose supplier link taught this mapping. A mapping nobody can trace back to the paper that produced it is a mapping nobody can argue with — the same reason a categorised Bank Transaction carries the rule that categorised it.",
+   "fieldname": "first_learned_from",
+   "fieldtype": "Link",
+   "label": "First Learned From",
+   "options": "Expense Receipt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2026-08-15 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Merchant Alias",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Farm Manager"
+  }
+ ],
+ "search_fields": "alias,canonical_supplier,source",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "alias",
+ "track_changes": 1
+}

@@ -12863,7 +12863,27 @@ TOOLS = {
 		"OCR text and the scanner's confidence, so a bookkeeper can always check "
 		"the machine's reading against the paper. Creates the receipt as "
 		"Submitted; pass status Draft for a client holding an offline queue. "
-		"Approval and rejection are separate tools with separate switches.",
+		"Approval and rejection are separate tools with separate switches.\n\n"
+		"v0.75.0: MULTI-VECTOR RESOLUTION RUNS ON EVERY CAPTURE. The merchant "
+		"line is no longer the only evidence — pass `merchant_url`, "
+		"`merchant_phone`, `card_last_four` or `store_number`, or just send the "
+		"`ocr_raw_text` and they are read off it — and a five-step cascade runs: "
+		"a TAUGHT ALIAS first (a person's own earlier decision about this exact "
+		"spelling, replayed), then a DOMAIN, then a PHONE number, then the NAME "
+		"similarity, and finally the question for a caller that has a model. The "
+		"answer comes back as resolved_merchant / resolution_method / "
+		"resolution_confidence, with `resolution_steps` saying what every step "
+		"found AND what it did not.\n\n"
+		"IT STILL NEVER INFERS A SUPPLIER, with exactly one exception: an exact "
+		"alias hit, which is not an inference but a replay of a human's own "
+		"link, and which says so in `supplier_resolved_by`. A domain match, a "
+		"phone match or a name score fills in resolved_merchant and leaves the "
+		"supplier link to a person.\n\n"
+		"THIS APP MAKES NO MODEL CALL, EVER — the same contract "
+		"validate_document_extraction follows. When the four deterministic steps "
+		"are silent, the result carries `llm_context`: the signals off the paper "
+		"and the candidate Suppliers, packaged as a question. Answer it and hand "
+		"the answer back as resolved_merchant with resolution_method='LLM'.",
 		{
 			"merchant": _field(_STRING, "The vendor as it reads on the receipt."),
 			"amount": _field(_NUMBER, "The receipt total, including tax."),
@@ -12918,6 +12938,54 @@ TOOLS = {
 				"figure somewhere downstream.",
 			),
 			"notes": _field(_STRING, "Anything the person capturing it wants to add."),
+			"card_last_four": _field(
+				_STRING,
+				"v0.75.0. The LAST FOUR digits of the card, as printed. Never a "
+				"full card number — more than four digits is REFUSED rather than "
+				"truncated, because storing the fingerprint and silently dropping "
+				"the rest would hide that a PAN was ever sent. It is what tells "
+				"two identical fuel receipts on one day apart, and what lets "
+				"auto_match_receipts confirm a bank line by fingerprint.",
+			),
+			"merchant_phone": _field(
+				_STRING,
+				"v0.75.0. The phone number on the receipt, in any format. A "
+				"number rings in one building, which makes it harder evidence "
+				"than the merchant line.",
+			),
+			"merchant_url": _field(
+				_STRING,
+				"v0.75.0. The domain on the receipt, with or without a scheme. "
+				"Registered to one company. Payment-processor, survey and social "
+				"domains are ignored by name — they identify the till's supplier, "
+				"not the shop.",
+			),
+			"store_number": _field(
+				_STRING,
+				"v0.75.0. The store or location number. It does NOT resolve a "
+				"vendor on its own (every chain has a store 14); it is how a "
+				"bookkeeper tells one branch's account from another's.",
+			),
+			"resolved_merchant": _field(
+				_STRING,
+				"v0.75.0. The caller's OWN answer to what this merchant is, which "
+				"short-circuits the cascade — for a client that read the raw text "
+				"with a model, or a person who typed it. The deterministic steps "
+				"still run and are still reported, so a reader can see what this "
+				"app would have said. Requires resolution_method.",
+			),
+			"resolution_method": _field(
+				_STRING,
+				"v0.75.0. How the caller resolved it: OCR, URL, Phone, Alias, LLM "
+				"or Manual. Required alongside resolved_merchant — a method with "
+				"no answer beside it records how nothing was decided.",
+			),
+			"resolution_confidence": _field(
+				_NUMBER,
+				"v0.75.0. The caller's confidence in resolved_merchant, as a "
+				"FRACTION from 0 to 1. Defaults to 0.95, the same ceiling every "
+				"algorithmic guess in this app lives under.",
+			),
 		},
 		required=("merchant", "amount", "receipt_date", "submitted_by"),
 		mutating=True,
@@ -12982,13 +13050,27 @@ TOOLS = {
 		"one is a fresh capture with submit_expense_receipt, not an edit here.\n\n"
 		"AT LEAST ONE FIELD, AND AT LEAST ONE REAL CHANGE. A call naming no "
 		"field, or naming only values the record already has, is refused rather "
-		"than accepted as a silent no-op.",
+		"than accepted as a silent no-op.\n\n"
+		"v0.75.0: SETTING A SUPPLIER TEACHES A MERCHANT ALIAS. Coding a "
+		"'SIATAPING' slip to Sawyer's Ace Hardware answers a question no "
+		"algorithm could — those letters are not in that name — and the same "
+		"till will print the same string every week for years, so the mapping is "
+		"recorded and the NEXT such receipt resolves itself at capture. Nothing "
+		"is asked of the person doing it. `alias_learned` reports which of "
+		"created / repointed / unchanged / skipped happened and why; a merchant "
+		"that already normalises to the Supplier's own name is skipped, because "
+		"name matching finds it and a row would be one fact stored twice. "
+		"Learning NEVER fails the update.",
 		{
 			"name": _field(_STRING, "The Expense Receipt docname."),
 			"expense_receipt": _field(_STRING, "Alias for name."),
 			"receipt": _field(_STRING, "Alias for name."),
 			"cost_center": _field(_STRING, "A Cost Center docname, or '' to clear it."),
-			"supplier": _field(_STRING, "A Supplier docname, or '' to clear it."),
+			"supplier": _field(
+				_STRING,
+				"A Supplier docname, or '' to clear it. v0.75.0: setting one "
+				"teaches a Merchant Alias from this receipt's merchant string.",
+			),
 			"category": _field(
 				_STRING,
 				"Fuel, Equipment Parts, Supplies, Hardware, Feed, Seed, Fertilizer, "
@@ -13340,9 +13422,38 @@ TOOLS = {
 		"scores above the threshold, never a low-confidence guess dressed as an "
 		"answer. This SUGGESTS a link; it never sets one — the same 'nothing is "
 		"ever inferred' rule submit_expense_receipt's own supplier argument "
-		"follows. Read-only.",
+		"follows. Read-only.\n\n"
+		"v0.75.0: THE NAME IS NO LONGER THE ONLY EVIDENCE. Pass merchant_url, "
+		"merchant_phone or the whole ocr_raw_text and a five-step cascade runs "
+		"under `resolution`: a TAUGHT ALIAS (a person's own decision about this "
+		"exact spelling, replayed — the only step that ever reaches 1.0), then a "
+		"DOMAIN, then a PHONE number, then the name similarity this tool has "
+		"always done, and finally the question for a caller that has a model. "
+		"That is how 'SIATAPING' resolves to Sawyer's Ace Hardware, which no "
+		"amount of string similarity can do — the letters are not there.\n\n"
+		"`match` and `alternatives` are UNCHANGED and still mean the name match "
+		"specifically, so a client written against the old shape keeps working. "
+		"`resolution.steps` lists every step including the ones that found "
+		"nothing, with the reason — because 'why didn't the URL match' is the "
+		"interesting question on the day somebody's receipts stop resolving. "
+		"When nothing deterministic clears the floor, `resolution.llm_context` "
+		"carries the signals and the candidate Suppliers as a question; this app "
+		"makes no model call itself.",
 		{
 			"merchant": _field(_STRING, "The vendor string off a receipt, exactly as captured."),
+			"merchant_url": _field(_STRING, "v0.75.0. A domain off the receipt, with or without a scheme."),
+			"merchant_phone": _field(_STRING, "v0.75.0. A phone number off the receipt, in any format."),
+			"store_number": _field(_STRING, "v0.75.0. The store or location number, if the slip printed one."),
+			"card_last_four": _field(_STRING, "v0.75.0. The last four digits of the card. Never a full number."),
+			"ocr_raw_text": _field(
+				_STRING,
+				"v0.75.0. The whole raw OCR text. THE MOST USEFUL SINGLE "
+				"ARGUMENT: the domain, phone, card last four and store number are "
+				"read off it by anchored patterns, so a caller that has the text "
+				"need not extract anything itself. `resolution.signals_from_raw_"
+				"text` names which were found this way rather than passed.",
+			),
+			"text": _field(_STRING, "Alias for ocr_raw_text."),
 		},
 		required=("merchant",),
 		title="Normalize merchant",
@@ -13351,9 +13462,16 @@ TOOLS = {
 		receipts.list_merchant_aliases,
 		"Merchant strings already linked to a Supplier, grouped by which "
 		"Supplier — every spelling a receipt has been captured with, once that "
-		"receipt's supplier link was set. Not a table of its own: built by "
-		"reading Expense Receipt rows that already carry a supplier link, so it "
-		"changes for free the day a link changes. Read-only.",
+		"receipt's supplier link was set. `aliases` is not a table of its own: "
+		"it is built by reading Expense Receipt rows that already carry a "
+		"supplier link, so it changes for free the day a link changes.\n\n"
+		"v0.75.0: `taught` is the Merchant Alias register beside it — the subset "
+		"of that history somebody turned into a RULE, which the resolver reads "
+		"at step 1 of its cascade, with a `match_count` saying how many receipts "
+		"each rule has since resolved. A spelling in the first and not the "
+		"second is usually not a gap: one that already normalises to its "
+		"Supplier's own name needs no rule, because name matching finds it. "
+		"Read-only.",
 		{
 			"company": _COMPANY,
 			"supplier": _field(_STRING, "Restrict to the aliases of one Supplier docname."),
@@ -17753,7 +17871,19 @@ TOOLS = {
 		"CONTESTED PROPOSALS ARE REPORTED, NOT RESOLVED. Two slips for the same "
 		"amount on the same day at the same vendor happen on a farm with two "
 		"trucks; the higher scorer is proposed and the other is listed under "
-		"`contested` with the transaction named, rather than dropped. Read-only.",
+		"`contested` with the transaction named, rather than dropped.\n\n"
+		"v0.75.0: THE CARD FINGERPRINT SETTLES THE CASE THAT USED TO BE "
+		"CONTESTED. Two trucks carry two cards, and the bank's memo line prints "
+		"the last four of the one that was swiped. Where a receipt's "
+		"`card_last_four` matches those digits within a day, the proposal comes "
+		"back with `card_fingerprint: true`, is lifted toward the ceiling, and "
+		"OUTRANKS a higher-scoring receipt with no fingerprint — the bank naming "
+		"the physical card is better evidence about which slip this is than any "
+		"margin in a similarity number. A bare four-digit run in a memo line is "
+		"never read as a card (memo lines are full of terminal ids and "
+		"authorisation codes); it must be masked or introduced by a word that "
+		"means card. Receipts with no card score exactly as they did before. "
+		"Read-only.",
 		{
 			"company": _field(_STRING, "Scope to one company. Defaults to the site's default."),
 			"bank_account": _field(_STRING, "Scope to one Bank Account."),

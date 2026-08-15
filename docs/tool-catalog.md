@@ -1771,10 +1771,34 @@ reading or the record of a decision, and neither is this tool's business.
 each may be set to `""` to clear it except `category`.
 
 **Returns** `name`, `merchant`, `amount`, `fields_changed[]`, `before{}`,
-`after{}`.
+`after{}`, `alias_learned`.
 
 **Refused:** no field named; every named field already reads what was asked
 for; an unknown `category`; a `cost_center` that does not exist.
+
+**v0.75.0: setting a `supplier` teaches a Merchant Alias.** This is the one
+place this app's merchant resolution learns anything. Coding a `SIATAPING` slip
+to Sawyer's Ace Hardware answers a question no algorithm could — those letters
+are not in that name — and the same till prints the same string every week for
+years, so the mapping is recorded and the **next** such receipt resolves itself
+at capture with its supplier already set. Nothing is asked of the bookkeeper:
+they were never shown a form about aliases, and the register grows out of work
+they were doing anyway.
+
+`alias_learned.action` is one of:
+
+| Action | What happened |
+|---|---|
+| `created` | a spelling nothing had seen before |
+| `repointed` | the key existed against a *different* Supplier — a later human decision beats an earlier one. The `match_count` is kept, not reset |
+| `unchanged` | same key, same Supplier |
+| `skipped` | the merchant already normalises to the Supplier's own name, so name matching finds it and a row would be one fact stored twice |
+
+The receipt's own `resolution_method` becomes `Manual` at confidence `1.0` —
+not this app being certain, but this app recording that it was not asked.
+**Learning never fails the update:** it is a side effect of a write that has
+already succeeded, and an alias register that refuses a row must not turn a
+completed supplier correction into an error.
 
 ### `get_expense_summary`
 
@@ -1812,21 +1836,59 @@ against `Wilbur-Ellis Company LLC`. Plain string similarity — no ML. This
 SUGGESTS a link; it never writes one, the same rule `submit_expense_receipt`'s
 own `supplier` argument already follows.
 
-**Arguments:** `merchant` (required).
+**v0.75.0 — the name is no longer the only evidence.** Pass `merchant_url`,
+`merchant_phone`, `store_number`, `card_last_four`, or just the whole
+`ocr_raw_text` (they are read off it by anchored patterns), and a five-step
+cascade runs under `resolution`:
+
+| # | Step | What it is | Confidence |
+|---|------|-----------|-----------|
+| 1 | `Alias` | a person's own earlier link for this exact spelling, replayed | 1.0 taught by hand, 0.95 taught by this app or a model |
+| 2 | `URL` | a domain, which is registered to one company | 0.90 (0.85 from other coded receipts) |
+| 3 | `Phone` | a number, which rings in one building | 0.88 (0.83 from other coded receipts) |
+| 4 | `OCR` | the name similarity above | whatever it scores |
+| 5 | `LLM` | the raw text read as prose — **prepared here, never asked from here** | the caller's own |
+
+That is how `SIATAPING` resolves to Sawyer's Ace Hardware, which no amount of
+string similarity can do: the letters are not there.
+
+`match` and `alternatives` are **unchanged** and still mean the name match
+specifically, so a client written against the v0.68.0 shape keeps working.
+`resolution.steps` lists every step *including the ones that found nothing*,
+with the reason — "why didn't the URL match" is the interesting question on the
+day a farm's receipts stop resolving. When nothing deterministic clears the
+floor, `resolution.llm_context` carries the signals, the candidate Suppliers
+and the question; **this app makes no model call, ever**, the same contract
+`validate_document_extraction` follows.
+
+**Arguments:** `merchant` (required), `merchant_url`, `merchant_phone`,
+`store_number`, `card_last_four`, `ocr_raw_text` (`text` alias).
 
 **Returns** `merchant`, `match` (`supplier`, `supplier_name`, `confidence`) or
-`null`, `alternatives[]`, `threshold`.
+`null`, `alternatives[]`, `threshold`, and `resolution` (`resolved_merchant`,
+`supplier`, `method`, `confidence`, `steps[]`, `signals`,
+`signals_from_raw_text[]`, `alias`, `llm_context`).
 
 ### `list_merchant_aliases`
 
-Merchant strings already linked to a Supplier, grouped by which Supplier. Not
-a table of its own — built by reading every Expense Receipt whose `supplier`
-is already set.
+Merchant strings already linked to a Supplier, grouped by which Supplier.
+`aliases` is not a table of its own — it is built by reading every Expense
+Receipt whose `supplier` is already set, so it changes for free the day a link
+changes.
+
+**v0.75.0** adds `taught` beside it: the **Merchant Alias** register, the
+subset of that history somebody turned into a rule the resolver reads at step 1
+of its cascade, with a `match_count` saying how many receipts each rule has
+since resolved. A spelling in the first and not the second is usually not a
+gap — one that already normalises to its Supplier's own name needs no rule,
+because name matching finds it.
 
 **Arguments:** `company`, `supplier`.
 
 **Returns** `aliases[]` (each `supplier`, `supplier_name`, `receipt_count`,
-`merchant_strings[]`), `count`.
+`merchant_strings[]`), `count`, `taught[]` (each `alias`, `alias_key`,
+`canonical_supplier`, `source`, `match_count`, `last_matched_on`,
+`first_learned_from`), `taught_count`, `alias_register_installed`.
 
 ### `create_purchase_invoice_from_receipt` — MUTATING, default off
 
@@ -8854,6 +8916,13 @@ cannot create an already-approved receipt.
 | `ocr_confidence` | | A **fraction from 0 to 1**, not a percentage |
 | `items` | | `[{description, item, quantity, unit_price, line_total}, …]` |
 | `notes` | | Anything the person capturing it wants to add |
+| `card_last_four` | | v0.75.0. The **last four** digits of the card. More than four is refused, never truncated |
+| `merchant_phone` | | v0.75.0. The phone number on the slip, in any format |
+| `merchant_url` | | v0.75.0. The domain on the slip, with or without a scheme |
+| `store_number` | | v0.75.0. The store or location number |
+| `resolved_merchant` | | v0.75.0. The caller's own answer, which short-circuits the cascade. Needs `resolution_method` |
+| `resolution_method` | | v0.75.0. `OCR`, `URL`, `Phone`, `Alias`, `LLM` or `Manual` |
+| `resolution_confidence` | | v0.75.0. A **fraction from 0 to 1**. Defaults to 0.95 |
 
 `ocr_confidence` is range-checked rather than rescaled. A scanner reporting `87`
 meant `0.87` and is refused with that sentence — silently dividing by 100 would
@@ -8879,6 +8948,45 @@ catalogue, and a guess would put a fabricated consumption figure somewhere a
 person later reads as a measurement. On a bench with no ERPNext, both are
 **refused by name** rather than written as dangling links, and the receipt
 captures fine without them.
+
+**v0.75.0: multi-vector resolution runs on every capture.** The merchant line
+is no longer the only evidence on the paper. Send the four signals above — or
+just `ocr_raw_text`, and they are read off it by anchored patterns — and the
+five-step cascade under `normalize_merchant` runs, writing its answer to
+`resolved_merchant`, `resolution_method` and `resolution_confidence`. The
+result carries `resolution_steps`, which says what every step found *and what
+it did not*, plus `signals_from_raw_text[]` naming which signals this app read
+rather than the caller sent (worth different amounts of trust when one turns
+out wrong).
+
+**`merchant` is never overwritten by `resolved_merchant`.** Two columns, for
+ever: the first is what the scanner read and the second is what it means, and
+collapsing them would delete the only evidence anybody could use to find out
+the conclusion was wrong.
+
+**Nothing is still inferred, with exactly one exception.** An exact **alias**
+hit sets the `supplier` link, because it is not an inference — it is a link a
+person already made for this exact spelling, replayed, and the call says so
+under `supplier_resolved_by`. A domain match, a phone match, a name score and a
+caller's own LLM answer all stop at `resolved_merchant` and leave the link to a
+human.
+
+**The patterns are anchored, and the refusals are the point.** A bare
+four-digit run is never read as a card — a receipt is full of times, totals and
+item codes — and a payment-processor, survey or social domain is never read as
+the merchant, because it identifies the till's supplier rather than the shop.
+
+**This app makes no model call, ever.** When the four deterministic steps are
+silent, the result carries `llm_context`: the signals off the paper, the
+candidate Suppliers and the question, for a caller that has a model. Answer it
+and hand the answer back as `resolved_merchant` with
+`resolution_method: "LLM"`. Same contract `validate_document_extraction`
+follows, and for the same reason — a step that quietly dialled an API would put
+a network call, a key and a bill inside a `bench migrate`.
+
+A site whose Expense Receipt lacks the seven Custom Fields still **runs and
+reports** the resolution; only the storing of it is skipped, and
+`intelligence_fields_installed: false` says so rather than pretending.
 
 ### `approve_expense_receipt`
 
@@ -12329,6 +12437,29 @@ unreadable, and an exact amount a week later with no name agreement does not.
 on the same day at the same vendor are a real thing on a farm with two trucks.
 The higher scorer is proposed; the other comes back under `contested` with the
 transaction named, rather than dropped.
+
+**v0.75.0: the card fingerprint settles the case that used to be contested.**
+Two trucks carry two cards, and the bank's memo line prints the last four of
+the one that was swiped. Where a receipt's `card_last_four` matches those digits
+**within a day**, the proposal comes back with `card_fingerprint: true`, gains
+`+0.15` toward the 0.95 ceiling, and **outranks a higher-scoring receipt with
+no fingerprint** — the bank naming the physical card is better evidence about
+*which slip this is* than any margin in a similarity number.
+
+Three conditions, all required, and each is a way the check would otherwise be
+wrong: the receipt has to carry a card last four (an absent one is silence, and
+never lowers a score); the memo line has to name those digits **as a card** —
+masked (`XXXX4417`) or introduced by a word that means card, because a bare
+four-digit run in a memo is as likely a terminal id or an authorisation code;
+and the dates have to be within a day, because the seven-day window is for
+*finding* a match while this is for *confirming* one, and a same-card
+same-amount charge a week later is next week's fill-up.
+
+Receipts with no card score **exactly** what they scored before this release —
+the fingerprint is a bonus, not a fourth weight, so no evidence was taken away
+from the amount to pay for it. `card_fingerprint_count` totals the confirmed
+ones, and `settings.card_last_four_available` says whether this site has the
+column at all.
 
 ### `get_bank_reconciliation_status`
 

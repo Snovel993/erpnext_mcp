@@ -154,8 +154,28 @@ _LIST_FIELDS = (
 	"modified",
 )
 
+#: v0.75.0. The seven receipt-intelligence columns, read back when the site has
+#: them. KEPT OUT OF `_LIST_FIELDS` and filtered through `compat` on every query
+#: instead, because they are Custom Fields an operator is allowed to remove —
+#: naming them in a `get_all` unconditionally would turn "I deleted a column I
+#: never used" into an unreadable receipt register.
+_INTELLIGENCE_FIELDS = (
+	"card_last_four",
+	"merchant_phone",
+	"merchant_url",
+	"store_number",
+	"resolved_merchant",
+	"resolution_method",
+	"resolution_confidence",
+)
+
 
 # ── helpers ───────────────────────────────────────────────────────────────
+
+
+def _read_fields() -> list[str]:
+	"""The receipt columns to read: the shipped ones, plus whichever extras exist."""
+	return [*_LIST_FIELDS, *compat.existing_fields(EXPENSE_RECEIPT, _INTELLIGENCE_FIELDS)]
 
 
 def _resolve_employee(value: str, label: str) -> str:
@@ -190,7 +210,7 @@ def _row_out(row: dict) -> dict:
 	for key, value in dict(row).items():
 		if value is None:
 			out[key] = None
-		elif key in ("amount", "ocr_confidence"):
+		elif key in ("amount", "ocr_confidence", "resolution_confidence"):
 			out[key] = float(value or 0)
 		elif key in ("receipt_date", "approved_date", "rejected_date", "modified"):
 			out[key] = str(value)
@@ -340,7 +360,7 @@ def list_expense_receipts(args: dict) -> ToolResult:
 	rows = frappe.db.get_all(
 		EXPENSE_RECEIPT,
 		filters=filters,
-		fields=list(_LIST_FIELDS),
+		fields=_read_fields(),
 		limit_page_length=limit,
 		order_by="ocr_confidence asc, receipt_date desc",
 	)
@@ -363,7 +383,7 @@ def get_expense_receipt(args: dict) -> ToolResult:
 	name = _require_receipt(args)
 	doc = frappe.get_doc(EXPENSE_RECEIPT, name)
 
-	data = _row_out({field: doc.get(field) for field in _LIST_FIELDS})
+	data = _row_out({field: doc.get(field) for field in _read_fields()})
 	data["ocr_raw_text"] = doc.get("ocr_raw_text")
 	data["items"] = _items_out(doc)
 	data["items_total"] = round(sum(item["line_total"] for item in data["items"]), 2)
@@ -408,29 +428,59 @@ def submit_expense_receipt(args: dict) -> ToolResult:
 
 	supplier = _linked(SUPPLIER, as_str(args, "supplier"), "supplier")
 
-	doc = frappe.get_doc(
-		{
-			"doctype": EXPENSE_RECEIPT,
-			"merchant": merchant,
-			"amount": amount,
-			"receipt_date": receipt_date,
-			"category": category,
-			"company": company,
-			"submitted_by": submitted_by,
-			"supplier": supplier or None,
-			"farm_task": farm_task or None,
-			"status": status,
-			"receipt_image": as_str(args, "receipt_image") or None,
-			"ocr_raw_text": as_str(args, "ocr_raw_text") or None,
-			"ocr_confidence": _confidence(args),
-			"notes": as_str(args, "notes") or None,
-		}
-	)
+	# IMPORTED IN THE FUNCTION, not at the top. `tools/receipts.py` imports this
+	# module for the Expense Receipt name and its statuses, so a module-level
+	# import here would be a cycle. Same shape and same reason as `read.py`'s
+	# local import of `mutate`.
+	from . import receipts
+
+	ocr_raw_text = as_str(args, "ocr_raw_text")
+
+	# v0.75.0. The cascade runs BEFORE the insert and writes nothing itself —
+	# what it returns is folded into the same document, so a receipt is never
+	# briefly on the site without its own resolution. See `resolve_merchant`.
+	intelligence = _receipt_intelligence(args, merchant, ocr_raw_text)
+	resolution = intelligence["resolution"]
+
+	# THE ONE PLACE A CAPTURE MAY SET A SUPPLIER IT WAS NOT GIVEN, and it is not
+	# an inference: an exact alias hit is a person's own earlier decision about
+	# this exact spelling, replayed. Every other step of the cascade — a domain,
+	# a phone number, a name score — stops at `resolved_merchant` and leaves the
+	# link to a human, which is the rule this tool has had since v0.31.0.
+	supplier_resolved_by = "argument" if supplier else ""
+	if not supplier and resolution.get("method") == "Alias" and resolution.get("supplier"):
+		supplier = resolution["supplier"]
+		supplier_resolved_by = (
+			f"alias {resolution['alias']['alias_key']!r} taught from a person's own supplier link"
+		)
+
+	payload = {
+		"doctype": EXPENSE_RECEIPT,
+		"merchant": merchant,
+		"amount": amount,
+		"receipt_date": receipt_date,
+		"category": category,
+		"company": company,
+		"submitted_by": submitted_by,
+		"supplier": supplier or None,
+		"farm_task": farm_task or None,
+		"status": status,
+		"receipt_image": as_str(args, "receipt_image") or None,
+		"ocr_raw_text": ocr_raw_text or None,
+		"ocr_confidence": _confidence(args),
+		"notes": as_str(args, "notes") or None,
+	}
+	payload.update(intelligence["columns"])
+
+	doc = frappe.get_doc(payload)
 	for row in _read_items(args):
 		doc.append("items", row)
 
 	doc.flags.ignore_permissions = True
 	doc.insert()
+
+	if resolution.get("method") == "Alias" and (resolution.get("alias") or {}).get("name"):
+		receipts.record_alias_use(resolution["alias"]["name"])
 
 	return ToolResult(
 		data={
@@ -443,15 +493,105 @@ def submit_expense_receipt(args: dict) -> ToolResult:
 			"company": company,
 			"submitted_by": submitted_by,
 			"supplier": supplier or None,
+			"supplier_resolved_by": supplier_resolved_by or None,
 			"farm_task": farm_task or None,
 			"ocr_confidence": doc.get("ocr_confidence"),
 			"receipt_image": doc.get("receipt_image"),
 			"items": _items_out(doc),
+			**intelligence["reported"],
 		},
 		summary=f"Expense receipt {doc.name} captured: {merchant} {amount} on {receipt_date} "
-		f"({category}) by {submitted_by}",
+		f"({category}) by {submitted_by}"
+		+ (
+			f" — resolved to {resolution['resolved_merchant']} by {resolution['method']} "
+			f"(confidence {resolution['confidence']})"
+			if resolution.get("resolved_merchant")
+			else ""
+		),
 		docstatus_delta=f"none → {status}",
 	)
+
+
+def _receipt_intelligence(args: dict, merchant: str, ocr_raw_text: str) -> dict:
+	"""What the paper says besides the name, and what it resolves to.
+
+	THREE THINGS COME BACK, and they are separated because they go to three
+	different places: `columns` are written onto the document (and only the ones
+	this site actually has), `resolution` is the cascade in full for the tool
+	layer to act on, and `reported` is what the caller is told — which includes
+	the cascade's own step list, because a suggestion with no evidence beside it
+	is a number a person can only accept or reject.
+
+	AN ARGUMENT ALWAYS BEATS THE TEXT. A client that ran its own extraction over
+	a higher-resolution image than the raw text it sent knows better than four
+	regexes; what is read off the text fills in the fields it did not send, and
+	`signals_from_raw_text` says which those were.
+	"""
+	from . import receipts  # see submit_expense_receipt on why this is local
+
+	card = receipts.card_last_four(as_str(args, "card_last_four"))
+	phone = receipts.normalize_phone(as_str(args, "merchant_phone"))
+	if as_str(args, "merchant_phone") and not phone:
+		raise ToolError(
+			f"merchant_phone {as_str(args, 'merchant_phone')!r} is not a ten-digit phone number. "
+			"Nothing was created."
+		)
+	url = as_str(args, "merchant_url")
+	domain = receipts.normalize_domain(url)
+	if url and not domain:
+		raise ToolError(f"merchant_url {url!r} is not a domain or a URL. Nothing was created.")
+
+	resolution = receipts.resolve_merchant(
+		merchant,
+		merchant_url=url,
+		merchant_phone=phone,
+		store_number=as_str(args, "store_number"),
+		card_last_four=card,
+		ocr_raw_text=ocr_raw_text,
+		resolved_merchant=as_str(args, "resolved_merchant"),
+		resolution_method=as_str(args, "resolution_method"),
+		resolution_confidence=args.get("resolution_confidence"),
+	)
+
+	installed = receipts.intelligence_fields_installed()
+	values = {
+		receipts.CARD_LAST_FOUR_FIELD: resolution["signals"][receipts.CARD_LAST_FOUR_FIELD],
+		receipts.MERCHANT_PHONE_FIELD: resolution["signals"][receipts.MERCHANT_PHONE_FIELD],
+		receipts.MERCHANT_URL_FIELD: resolution["signals"][receipts.MERCHANT_URL_FIELD],
+		receipts.STORE_NUMBER_FIELD: resolution["signals"][receipts.STORE_NUMBER_FIELD],
+		receipts.RESOLVED_MERCHANT_FIELD: resolution.get("resolved_merchant"),
+		receipts.RESOLUTION_METHOD_FIELD: resolution.get("method"),
+		receipts.RESOLUTION_CONFIDENCE_FIELD: resolution.get("confidence") or None,
+	}
+	columns = {}
+	if installed:
+		columns = {key: value for key, value in values.items() if value not in (None, "")}
+
+	return {
+		"columns": columns,
+		"resolution": resolution,
+		"reported": {
+			"signals": resolution["signals"],
+			"signals_from_raw_text": resolution["signals_from_raw_text"],
+			"resolved_merchant": resolution.get("resolved_merchant"),
+			"resolution_method": resolution.get("method"),
+			"resolution_confidence": resolution.get("confidence"),
+			"resolution_steps": resolution["steps"],
+			"llm_context": resolution.get("llm_context"),
+			"intelligence_fields_installed": installed,
+			**(
+				{}
+				if installed
+				else {
+					"intelligence_note": (
+						"this site's Expense Receipt does not have the seven receipt-intelligence "
+						"columns, so the resolution above was computed and reported but NOT stored "
+						"on the record. Run `bench migrate`; capture is otherwise unaffected."
+					)
+				}
+			),
+		},
+	}
 
 
 def approve_expense_receipt(args: dict) -> ToolResult:
@@ -563,7 +703,28 @@ def update_expense_receipt(args: dict) -> ToolResult:
 	refused rather than silently accepted as a no-op write, because the caller's
 	next question after either is "did that do anything?" and the answer should
 	not require a second call to find out.
+
+	v0.75.0. SETTING A SUPPLIER TEACHES AN ALIAS, and that is the one place this
+	app's merchant resolution learns anything. A bookkeeper who codes a
+	"SIATAPING" slip to Sawyer's Ace Hardware has answered a question no
+	algorithm could — those letters are not in that name — and the answer is
+	worth keeping, because the same till will print the same string every week
+	for years. So the mapping is recorded, and the NEXT such receipt resolves
+	itself at capture. Nothing is asked of the bookkeeper: they were never shown
+	a form about aliases, and the register grows out of work they were doing
+	anyway.
+
+	IT IS SKIPPED WHEN IT WOULD BE REDUNDANT — a merchant string that already
+	normalises to the Supplier's own name is found by name matching, and a row
+	teaching that would be one fact stored twice. `alias_learned.action` says
+	which of created / repointed / unchanged / skipped happened, and why.
+
+	AND IT NEVER FAILS THE UPDATE. Learning is a side effect of a write that has
+	already succeeded; an alias register that refuses a row must not turn a
+	completed supplier correction into an error the caller has to interpret.
 	"""
+	from . import receipts  # see submit_expense_receipt on why this is local
+
 	name = _require_receipt(args)
 	present = [key for key in UPDATABLE_FIELDS if key in args]
 	if not present:
@@ -605,6 +766,29 @@ def update_expense_receipt(args: dict) -> ToolResult:
 
 	frappe.db.set_value(EXPENSE_RECEIPT, name, after)
 
+	alias_learned = None
+	if after.get("supplier"):
+		alias_learned = receipts.learn_merchant_alias(
+			doc.get("merchant") or "",
+			after["supplier"],
+			source=receipts.ALIAS_MANUAL,
+			receipt=name,
+		)
+		# The receipt's own resolution follows the human, whatever the cascade
+		# had decided at capture. `Manual` at 1.0 is not this app being certain —
+		# it is this app recording that it was not asked.
+		if receipts.intelligence_fields_installed():
+			frappe.db.set_value(
+				EXPENSE_RECEIPT,
+				name,
+				{
+					receipts.RESOLVED_MERCHANT_FIELD: receipts._supplier_label(after["supplier"]),
+					receipts.RESOLUTION_METHOD_FIELD: "Manual",
+					receipts.RESOLUTION_CONFIDENCE_FIELD: 1.0,
+				},
+				update_modified=False,
+			)
+
 	diff = "; ".join(f"{key}: {before[key]!r} → {after[key]!r}" for key in before)
 	try:
 		doc.add_comment("Comment", f"Updated via MCP (erpnext_mcp): {diff}.")
@@ -626,8 +810,15 @@ def update_expense_receipt(args: dict) -> ToolResult:
 			"fields_changed": sorted(before),
 			"before": before,
 			"after": after,
+			"alias_learned": alias_learned,
 		},
-		summary=f"Expense receipt {name} ({merchant} {amount}) updated: {diff}",
+		summary=f"Expense receipt {name} ({merchant} {amount}) updated: {diff}"
+		+ (
+			f" — alias {alias_learned['alias_key']!r} → {alias_learned['supplier']} "
+			f"({alias_learned['action']})"
+			if alias_learned and alias_learned["action"] in ("created", "repointed")
+			else ""
+		),
 		docstatus_delta="",
 	)
 

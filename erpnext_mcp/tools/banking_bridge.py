@@ -69,6 +69,7 @@ a memo field.
 from __future__ import annotations
 
 import datetime
+import re
 
 import frappe
 from frappe.utils import getdate, today
@@ -167,6 +168,41 @@ WEIGHT_MERCHANT = 0.2
 #: `receipts._MATCH_CEILING` and `classify_receipt`.
 CONFIDENCE_CEILING = 0.95
 
+#: v0.75.0. THE CARD FINGERPRINT, and it is the only signal here that can tell
+#: two identical receipts apart. Two $47.83 fuel slips on one day at one station
+#: — two trucks, two drivers — are indistinguishable by amount, date and vendor,
+#: which is exactly the case `auto_match_receipts` has always had to report as
+#: contested and hand to a person. But the two trucks carry two cards, and the
+#: bank memo line prints the last four of the one that was swiped. That turns an
+#: unanswerable question into a lookup.
+#:
+#: WHY THE WINDOW IS ONE DAY AND NOT SEVEN. The general window is wide because a
+#: fuel card can batch for a week and the alternative is missing the match
+#: entirely. A fingerprint is not looking for a match — it is CONFIRMING one, and
+#: a same-amount same-card charge six days later is more likely to be next week's
+#: fill-up at the same pump than this one posting late. Narrow is the point.
+CARD_FINGERPRINT_DAY_WINDOW = 1
+
+#: What a fingerprint adds to a score that already cleared its gates. Sized so an
+#: exact amount a day apart with an unreadable memo line lands at the ceiling —
+#: which is the case this exists for, because a bank memo that carries a card
+#: number usually carries a terminal ID instead of a vendor name.
+CARD_FINGERPRINT_BONUS = 0.15
+
+#: The last four of a card in a bank description, and ONLY where the line says
+#: that is what it is: after a mask (`XXXX1234`, `****1234`), or after a word
+#: that means card (`CARD 1234`, `ENDING IN 1234`, `ACCT ...1234`). A bare
+#: four-digit run is NEVER read as a card, because a memo line is full of them —
+#: a terminal id, a store number, a date, an authorisation code — and a
+#: fingerprint that matched a clock would be worse than no fingerprint at all.
+#: Built per call around the digits being looked for, so the digits are escaped
+#: and cannot themselves be pattern syntax.
+_CARD_IN_DESCRIPTION = (
+	r"(?:(?:[*x#•]\s*){2,}|"
+	r"(?:card|acct|account|visa|mastercard|amex|discover|debit|credit|ending(?:\s+in)?|last\s*4|xx)"
+	r"[\s\W]{0,12})"
+)
+
 #: Below this, a proposal is not worth a person's attention by default.
 DEFAULT_MIN_CONFIDENCE = 0.70
 
@@ -213,6 +249,10 @@ _RECEIPT_FIELDS = (
 	"cost_center",
 	"linked_doctype",
 	"linked_document",
+	# v0.75.0. Filtered through `compat.existing_fields` at every query like the
+	# rest of this tuple, so a site without the receipt-intelligence columns
+	# simply scores the way it always did.
+	"card_last_four",
 )
 
 #: Rule fields, in the order the evaluator wants them.
@@ -558,6 +598,17 @@ def score_match(receipt: dict, transaction: dict, *, tolerance: float, window: i
 	tolerance, a wrong direction, or a transaction that posted before the paper
 	existed are all disqualifications rather than low scores, because a very good
 	name match must never drag one of them over a threshold.
+
+	v0.75.0. THE CARD FINGERPRINT IS A BONUS AND NOT A FOURTH WEIGHT, and the
+	difference matters. The three weights are a partition of one unit of evidence
+	about a purchase; the fingerprint is a different KIND of evidence — the bank
+	naming the physical card that was swiped — and folding it into the partition
+	would have meant taking weight away from the amount, which is the signal that
+	is nearly impossible to coincide by accident. So a receipt with no card last
+	four scores exactly what it scored before this release, and one with a card
+	the memo line confirms is lifted to near the ceiling. It is reported as its
+	own boolean rather than only inside the number, because "the bank says it was
+	card 4417 and so does the slip" is a sentence a bookkeeper can check.
 	"""
 	receipt_amount = _money(receipt.get("amount"))
 	gross = _money(transaction.get("gross_amount"))
@@ -600,19 +651,21 @@ def score_match(receipt: dict, transaction: dict, *, tolerance: float, window: i
 	elif day_gap == 0:
 		date_score = 1.0
 
-	confidence = round(
-		min(
-			CONFIDENCE_CEILING,
-			WEIGHT_AMOUNT * amount_score + WEIGHT_DATE * date_score + WEIGHT_MERCHANT * merchant_score,
-		),
-		4,
-	)
+	base = WEIGHT_AMOUNT * amount_score + WEIGHT_DATE * date_score + WEIGHT_MERCHANT * merchant_score
+
+	card = str(receipt.get("card_last_four") or "").strip()
+	fingerprint = card_fingerprint(card, transaction.get("description"), day_gap)
+	if fingerprint:
+		base += CARD_FINGERPRINT_BONUS
+
+	confidence = round(min(CONFIDENCE_CEILING, base), 4)
 
 	return {
 		"bank_transaction": transaction.get("name"),
 		"expense_receipt": receipt.get("name"),
 		"confidence": confidence if not reasons else 0.0,
 		"eligible": not reasons,
+		"card_fingerprint": fingerprint,
 		"blockers": reasons,
 		"signals": {
 			"amount_gap": amount_gap,
@@ -624,8 +677,46 @@ def score_match(receipt: dict, transaction: dict, *, tolerance: float, window: i
 			"transaction_amount": gross,
 			"merchant": receipt.get("merchant"),
 			"description": transaction.get("description"),
+			"card_last_four": card or None,
+			"card_fingerprint": fingerprint,
+			"card_fingerprint_bonus": CARD_FINGERPRINT_BONUS if fingerprint else 0.0,
 		},
 	}
+
+
+def card_fingerprint(last_four: str, description: str, day_gap) -> bool:
+	"""Whether the bank line names the same card the slip does, within a day.
+
+	THREE CONDITIONS, ALL REQUIRED, and each one is a way the check would
+	otherwise be wrong:
+
+	  * The receipt has to carry a card last four. Most do not, and an absent
+	    fingerprint is silence rather than a negative — it must never lower a
+	    score, only fail to raise one.
+	  * The description has to name those digits AS A CARD. See
+	    `_CARD_IN_DESCRIPTION`: a bare four-digit run in a memo line is as likely
+	    to be a terminal id or an authorisation code, and matching one would
+	    manufacture confidence out of a coincidence.
+	  * The two dates have to be within a day. The general seven-day window is
+	    for FINDING a match; this is for confirming one, and a same-card
+	    same-amount charge a week later is more likely next week's fill-up.
+
+	Never raises: it is called inside a scoring loop over a season of
+	transactions, and a malformed description is not an error, it is a
+	description.
+	"""
+	digits = re.sub(r"\D", "", str(last_four or ""))
+	if len(digits) != 4:
+		return False
+	if day_gap is None or abs(int(day_gap)) > CARD_FINGERPRINT_DAY_WINDOW:
+		return False
+	text = str(description or "")
+	if not text:
+		return False
+	try:
+		return bool(re.search(_CARD_IN_DESCRIPTION + re.escape(digits) + r"(?!\d)", text, re.IGNORECASE))
+	except re.error:  # pragma: no cover - the pattern is a constant and the digits are escaped
+		return False
 
 
 # ── who is matched to what ───────────────────────────────────────────────────
@@ -936,6 +1027,14 @@ def auto_match_receipts(args: dict) -> ToolResult:
 	scorer is proposed and the others come back under `contested` with the
 	transaction named. Dropping them silently would leave a bookkeeper believing
 	those receipts had no bank line at all.
+
+	v0.75.0. EXCEPT WHEN THE CARDS SAY WHICH IS WHICH. Two trucks carry two
+	cards, and the bank memo prints the last four of the one that was swiped. A
+	contest between a receipt whose card the memo line confirms and one whose
+	card it does not is not a contest — it is a lookup, and it is settled here
+	rather than sent to a person, with `card_fingerprint: true` on the proposal
+	saying exactly why. Where NEITHER receipt has a card, or both cards match,
+	nothing has changed: it is contested, and it goes to a person.
 	"""
 	_require_bank_transaction()
 	_require_receipts()
@@ -962,7 +1061,11 @@ def auto_match_receipts(args: dict) -> ToolResult:
 		if best is None:
 			continue
 		held = best_by_transaction.get(best["bank_transaction"])
-		if held is None or best["confidence"] > held["confidence"]:
+		# A confirmed card fingerprint outranks a higher score without one: the
+		# bank naming the physical card is better evidence about WHICH slip this
+		# is than any margin in a similarity number. Ties on the fingerprint fall
+		# through to the score, exactly as before.
+		if held is None or _outranks(best, held):
 			if held is not None:
 				contested.append(held)
 			best_by_transaction[best["bank_transaction"]] = best
@@ -970,13 +1073,17 @@ def auto_match_receipts(args: dict) -> ToolResult:
 			contested.append(best)
 
 	for score in sorted(
-		best_by_transaction.values(), key=lambda row: (-row["confidence"], str(row["expense_receipt"]))
+		best_by_transaction.values(),
+		key=lambda row: (not row.get("card_fingerprint"), -row["confidence"], str(row["expense_receipt"])),
 	)[:limit]:
 		proposals.append(_proposal(score, by_name))
+
+	fingerprinted = [row for row in proposals if row.get("card_fingerprint")]
 
 	data = {
 		"proposals": proposals,
 		"count": len(proposals),
+		"card_fingerprint_count": len(fingerprinted),
 		"contested": [_proposal(score, by_name, contested=True) for score in contested],
 		"unmatched_receipts_scanned": len(receipt_rows),
 		"unmatched_transactions_scanned": len(transaction_rows),
@@ -989,13 +1096,20 @@ def auto_match_receipts(args: dict) -> ToolResult:
 			"min_confidence": threshold,
 			"amount_tolerance": tolerance,
 			"date_window_days": window,
+			"card_fingerprint_day_window": CARD_FINGERPRINT_DAY_WINDOW,
+			"card_fingerprint_bonus": CARD_FINGERPRINT_BONUS,
+			"card_last_four_available": compat.has_field(EXPENSE_RECEIPT, "card_last_four"),
 		},
 		"committed": False,
 		"note": (
 			"NOTHING WAS WRITTEN. Each proposal carries the exact "
 			"match_receipt_to_bank_transaction call that would commit it. A wrong link between a "
 			"slip and a withdrawal is invisible afterwards — both documents exist and both amounts "
-			"are right — so each one is a person's decision."
+			"are right — so each one is a person's decision.\n\n"
+			"`card_fingerprint: true` means the bank's own memo line names the same card last four "
+			"the slip does, within a day. That is the bank identifying the physical card that was "
+			"swiped, which is the only signal here that can tell two identical receipts apart — "
+			"and it is still a proposal, because a card says which truck, not which purchase."
 		),
 	}
 	if contested:
@@ -1009,8 +1123,24 @@ def auto_match_receipts(args: dict) -> ToolResult:
 	return ToolResult(
 		data,
 		f"{len(proposals)} proposed match(es) from {len(receipt_rows)} unmatched receipt(s) "
-		f"against {len(transaction_rows)} unmatched transaction(s) — nothing written",
+		f"against {len(transaction_rows)} unmatched transaction(s) — nothing written"
+		+ (f", {len(fingerprinted)} confirmed by card fingerprint" if fingerprinted else ""),
 	)
+
+
+def _outranks(challenger: dict, held: dict) -> bool:
+	"""Whether one score beats another for the same transaction.
+
+	A confirmed card fingerprint first, then confidence. Written as its own
+	function rather than as a tuple comparison inline because the ORDER is the
+	claim being made — that the bank naming a card is better evidence about
+	which slip this is than any margin in a similarity score — and a claim that
+	load-bearing should be somewhere a test can point at.
+	"""
+	mine, theirs = bool(challenger.get("card_fingerprint")), bool(held.get("card_fingerprint"))
+	if mine != theirs:
+		return mine
+	return challenger["confidence"] > held["confidence"]
 
 
 def _proposal(score: dict, by_name: dict, *, contested: bool = False) -> dict:
