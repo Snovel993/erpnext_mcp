@@ -46,6 +46,8 @@ THE THREE THAT WRITE, and what each is allowed to touch:
 
 from __future__ import annotations
 
+import json
+
 import frappe
 from frappe.utils import getdate
 
@@ -83,6 +85,15 @@ PLAID_TYPE_FIELD = "plaid_account_type"
 PLAID_SUBTYPE_FIELD = "plaid_account_subtype"
 SYNC_FIELD = "sync_enabled"
 
+#: The eighth column, added in v0.74.0, and deliberately NOT part of the gate
+#: below. An aggregator issues new account ids when a bank connection is
+#: re-linked, so the id on file goes dead and the pipe pushes a different one for
+#: the same account; this holds the ids that came before, oldest first. A site
+#: that will not take this one column still pairs and still records metadata —
+#: it just cannot answer "was this account once known as X", which is worth less
+#: than the writes it would otherwise block.
+PLAID_ID_HISTORY_FIELD = "plaid_account_id_history"
+
 PAIRING_FIELDS = (
 	PAIRED_FIELD,
 	PAIRING_TYPE_FIELD,
@@ -93,9 +104,19 @@ PAIRING_FIELDS = (
 	SYNC_FIELD,
 )
 
+#: Written when the column is there and skipped when it is not. See above.
+OPTIONAL_PAIRING_FIELDS = (PLAID_ID_HISTORY_FIELD,)
+
 PAIRING_TYPES = ("Brokerage", "Cash Services")
 
 PLAID_ACCOUNT_TYPES = ("investment", "depository", "credit", "loan")
+
+#: How many superseded aggregator ids one account keeps. A re-link happens when a
+#: bank changes its auth, which is a handful of times a decade per account, so
+#: this is not a number anybody reaches honestly — it is a ceiling on a Small
+#: Text column in the case where something re-links in a loop. The OLDEST are
+#: dropped: the recent ids are the ones a feed or a support ticket still names.
+MAX_ID_HISTORY = 100
 
 #: How far off a period may be and still count as tied out, when nothing says
 #: otherwise. A cent. See the doctype field description for why widening this is
@@ -147,6 +168,7 @@ _BANK_ACCOUNT_FIELDS = (
 	"disabled",
 	"is_company_account",
 	*PAIRING_FIELDS,
+	*OPTIONAL_PAIRING_FIELDS,
 )
 
 _ANCHOR_HINT = "It ships with erpnext_mcp — run `bench migrate` after installing v0.73.0."
@@ -156,7 +178,7 @@ _ANCHOR_HINT = "It ships with erpnext_mcp — run `bench migrate` after installi
 
 
 def ensure_pairing_fields() -> bool:
-	"""Give Bank Account the seven columns a pairing and a Plaid identity need.
+	"""Give Bank Account the eight columns a pairing and a Plaid identity need.
 
 	Same mechanism and same argument as `banking_bridge.ensure_categorization_fields`
 	— Custom Fields on somebody else's doctype, which is Frappe's supported way
@@ -171,9 +193,14 @@ def ensure_pairing_fields() -> bool:
 	NEVER RAISES. A site that will not take the fields loses pairing and keeps
 	everything else; the tools report `fields_installed: false` with the reason
 	rather than pretending the columns are there.
+
+	THE PRESENCE CHECK COVERS EVERY COLUMN THIS FUNCTION CREATES, including the
+	optional one. A check that only asked about the gate's seven would return
+	early on every site installed before v0.74.0 — which is every site that has
+	the id history to keep — and the column would never appear.
 	"""
 	try:
-		if _pairing_fields_present():
+		if _pairing_fields_present() and _history_field_present():
 			return True
 		if not compat.doctype_exists(CUSTOM_FIELD) or not compat.doctype_exists(BANK_ACCOUNT):
 			return False
@@ -253,6 +280,28 @@ def ensure_pairing_fields() -> bool:
 				"account no transactions since March' has an answer that is not a shrug."
 			),
 		},
+		{
+			"fieldname": PLAID_ID_HISTORY_FIELD,
+			"label": "Plaid Account ID History",
+			"fieldtype": "Small Text",
+			"insert_after": SYNC_FIELD,
+			# Read-only AND hidden, which the other seven are not. This one is
+			# machine-maintained bookkeeping rather than something an operator
+			# sets: a hand-edited array silently changes what the next push
+			# thinks it replaced. It stays readable through `get_account_pairing`
+			# and the API, which is where the question "was this account once
+			# known as X" actually gets asked from.
+			"read_only": 1,
+			"hidden": 1,
+			"description": (
+				"A JSON array of the aggregator ids this account used to have, oldest first, appended "
+				"automatically whenever a push carries a different one. A re-link issues new ids for "
+				"the same real account, and without this the old id is simply overwritten — after "
+				"which nothing connects a year of feed rows, a support ticket or an aggregator's own "
+				"logs to the account they belong to. Maintained by the push endpoints; edit it by "
+				"hand and the next push will not know what it replaced."
+			),
+		},
 	)
 
 	created = False
@@ -288,6 +337,107 @@ def _pairing_fields_present() -> bool:
 		return all(compat.has_field(BANK_ACCOUNT, fieldname) for fieldname in PAIRING_FIELDS)
 	except Exception:
 		return False
+
+
+def _history_field_present() -> bool:
+	try:
+		return compat.has_field(BANK_ACCOUNT, PLAID_ID_HISTORY_FIELD)
+	except Exception:
+		return False
+
+
+# ── schema: the aggregator ids this account used to have ────────────────────
+
+
+def id_history(value) -> list:
+	"""The stored id history as a list of ids, whatever shape it is in on a site.
+
+	TOLERANT ON THE WAY IN, because the alternative to tolerance in this one
+	place is deleting the record the column exists to keep. A value that is not
+	JSON is read as a single legacy id rather than as nothing: somebody who typed
+	a dead id into the field by hand answered the same question this field asks,
+	and parsing it to `[]` would erase that on the next push.
+
+	Public because `_pairing_out` reads it and the push endpoints write it, and a
+	second parser for the same column would eventually disagree with this one.
+	"""
+	if value in (None, ""):
+		return []
+	if isinstance(value, (list, tuple)):
+		items = list(value)
+	else:
+		text = str(value).strip()
+		if not text:
+			return []
+		try:
+			parsed = json.loads(text)
+		except ValueError:
+			parsed = [text]
+		items = parsed if isinstance(parsed, list) else [parsed]
+
+	out: list = []
+	for item in items:
+		entry = str(item or "").strip()
+		if entry and entry not in out:
+			out.append(entry)
+	return out
+
+
+def id_history_update(current: dict, new_id: str, provided=None) -> dict:
+	"""`{field: json}` when the history on file should change, `{}` otherwise.
+
+	WHAT THIS IS FOR. An aggregator issues fresh account ids when a bank
+	connection is re-linked, so the id ERPNext holds goes dead and the next sync
+	pushes a different one for the same real account. Overwriting is correct —
+	the new id is the live one — but overwriting ALONE loses the only handle that
+	ties a year of already-stored feed rows, an aggregator's support logs and the
+	pipe's own history to this account. So the id it replaces is appended here
+	first, in the SAME write, because a push interrupted between two writes would
+	leave the new id recorded and its predecessor gone.
+
+	TWO SOURCES, AND NEITHER IS TRUSTED TO BE COMPLETE. `provided` is the chain
+	the pipe believes in, which reaches back before this site was ever told about
+	the account and is the only place the early ids can come from; the observed
+	half is what this site watched happen and is the only thing that still works
+	when the pipe sends nothing. They are UNIONED rather than one replacing the
+	other — a pipe pushing a short chain must not truncate ids this site saw
+	itself, and a site that missed a re-link (it happened between syncs, or while
+	the column did not exist) must not stay ignorant of ids the pipe kept. Order
+	is oldest-first with `provided` laid down first, since the pipe's chain
+	predates anything observed here.
+
+	Nothing is recorded when the result matches what is already stored — which
+	covers the first push ever, every ordinary sync, and a pipe re-sending the
+	same chain — or when the site has no history column. The result is
+	idempotent: pushing the same id and the same chain all day appends once.
+	"""
+	if not _history_field_present():
+		return {}
+
+	stored = id_history(current.get(PLAID_ID_HISTORY_FIELD))
+	previous = str(current.get(PLAID_ID_FIELD) or "").strip()
+	live = str(new_id or "").strip() or previous
+
+	history = id_history(provided) if provided not in (None, "") else []
+	for entry in stored:
+		if entry not in history:
+			history.append(entry)
+	# The id being retired by THIS push, appended last because it is the most
+	# recent thing to stop being current.
+	if previous and live and previous != live and previous not in history:
+		history.append(previous)
+
+	# A re-link can land back on a connection this account already had, which
+	# makes an id in the history current again. It comes out of the history when
+	# that happens: an id that is both current and superseded reads as two
+	# accounts to anything matching on it.
+	history = [entry for entry in history if entry != live]
+	if len(history) > MAX_ID_HISTORY:
+		history = history[-MAX_ID_HISTORY:]
+
+	if history == stored:
+		return {}
+	return {PLAID_ID_HISTORY_FIELD: json.dumps(history)}
 
 
 # ── shared resolvers and shapes ──────────────────────────────────────────────
@@ -1397,6 +1547,7 @@ def _pairing_out(row: dict) -> dict:
 		"paired_bank_account": row.get(PAIRED_FIELD) or None,
 		"pairing_type": row.get(PAIRING_TYPE_FIELD) or None,
 		"plaid_account_id": row.get(PLAID_ID_FIELD) or None,
+		"plaid_account_id_history": id_history(row.get(PLAID_ID_HISTORY_FIELD)),
 		"plaid_account_mask": row.get(PLAID_MASK_FIELD) or None,
 		"plaid_account_type": row.get(PLAID_TYPE_FIELD) or None,
 		"plaid_account_subtype": row.get(PLAID_SUBTYPE_FIELD) or None,
@@ -1796,13 +1947,19 @@ def upsert_pairing(payload: dict) -> dict:
 	which aggregator account this is, what kind it is, and whether the pipe is
 	pulling it. Only keys actually present are written, so a pipe that knows the
 	mask and not the subtype does not blank the subtype somebody typed.
+
+	THE DOCNAME IS THE IDENTIFIER AND THE AGGREGATOR ID IS NOT, which is the
+	whole reason this keys off `bank_account`. A re-linked connection issues a
+	new id for the same real account, so a push that found its target by id would
+	stop finding it precisely when the record most needs correcting. The id it
+	replaces is appended to `plaid_account_id_history` in the same write — see
+	`id_history_update` — so the chain survives any number of reconnections.
 	"""
 	_require_bank_account()
-	bank_account = str(payload.get("bank_account") or "").strip()
-	if not bank_account:
-		raise ToolError("bank_account is required.")
-	if not frappe.db.exists(BANK_ACCOUNT, bank_account):
-		raise ToolError(f"no Bank Account named {bank_account!r} on this site.")
+	# The docname, or the mask when that is all the pipe has — resolved the same
+	# way every other tool in this module resolves an account, and refused rather
+	# than guessed when two accounts share four digits.
+	bank_account = _resolve_bank_account(payload, required=True)
 	if not (_pairing_fields_present() or ensure_pairing_fields()):
 		raise ToolError(
 			"this site's Bank Account will not take the pairing columns, so there is nowhere to put "
@@ -1825,6 +1982,26 @@ def upsert_pairing(payload: dict) -> dict:
 		)
 	if "sync_enabled" in payload and payload["sync_enabled"] is not None:
 		updates[SYNC_FIELD] = 1 if payload["sync_enabled"] in (1, True, "1", "true", "True") else 0
+
+	# The id chain across re-links. Read before anything is written, folded into
+	# the same write, so the superseded id cannot be lost between two statements.
+	# A pushed `plaid_account_id_history` is merged in rather than trusted as the
+	# whole truth — see `id_history_update` — so this works whether the pipe
+	# tracks the chain itself or leaves it entirely to what this site observes.
+	before = _bank_account_row(bank_account)
+	history_update = id_history_update(
+		before, updates.get(PLAID_ID_FIELD, ""), payload.get("plaid_account_id_history")
+	)
+	if history_update:
+		updates.update(history_update)
+
+	# Reported only for an id this push actually retired. A history that merely
+	# grew because the pipe sent ids this site had not heard of is not a
+	# repointing, and logging it as one would put a re-link in the sync log on
+	# the day somebody backfilled.
+	live = updates.get(PLAID_ID_FIELD, "")
+	was = str(before.get(PLAID_ID_FIELD) or "")
+	superseded = was if (live and was and was != live) else ""
 
 	paired = str(payload.get("paired_bank_account") or "").strip()
 	pairing_type = str(payload.get("pairing_type") or "").strip()
@@ -1852,5 +2029,9 @@ def upsert_pairing(payload: dict) -> dict:
 		"bank_account": bank_account,
 		"updated_fields": sorted(updates.keys()),
 		"pairing": paired_result,
+		# Named rather than left to be inferred from the history array, because
+		# "this push repointed the account" is the event an operator wants in the
+		# sync log, and diffing two arrays to discover it is not the same thing.
+		"plaid_account_id_superseded": superseded or None,
 		"account": _pairing_out(_bank_account_row(bank_account)),
 	}

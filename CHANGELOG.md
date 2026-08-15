@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.74.0 — 2026-08-15 — the account survives the reconnection
+
+**An aggregator id goes dead without saying so.** When a bank connection is
+re-linked the aggregator issues *new* account ids for the same real accounts, and
+ERPNext goes on holding the old one — ••6030 was `ZE4ZoOpA…` here and
+`jN7xBz83…` in the pipe, two systems naming one bank account with two identifiers
+and neither aware of the other. Overwriting is the right answer to *which id is
+live* and the wrong answer to everything else: a year of stored feed rows, the
+aggregator's support logs and the pipe's push history all name the dead id, and
+once it is gone nothing connects them to this account. The overwrite looks
+exactly like a successful sync from every direction.
+
+### New
+
+- **`push_account_metadata`** — a third whitelisted endpoint,
+  `push_account_pairing` with the pairing taken out, over one shared
+  implementation so the two cannot drift. A nightly metadata refresh no longer
+  needs a credential path that can also repoint which two accounts are
+  companions: `paired_bank_account` and `pairing_type` are **refused by name**,
+  and *declared in order to be refused* — Frappe drops kwargs a whitelisted
+  method does not name and answers `200` anyway, so a dropped key is
+  indistinguishable from an honoured one.
+- **`plaid_account_id_history`** — an eighth Custom Field on Bank Account. Small
+  Text, read-only, hidden, a JSON array of the ids this account used to have,
+  oldest first, appended **in the same write** that installs the new one. Both
+  push endpoints maintain it and both name the change under `repointed`.
+  Idempotent (a nightly push of an unchanged id appends nothing), and an id that
+  becomes current again leaves the history — an id both current and superseded
+  reads as two accounts to anything matching on it.
+- **A pushed chain is merged, not trusted as the whole truth.** Both endpoints
+  take an optional `plaid_account_id_history` from the pipe. The pipe's chain
+  reaches back before this site was told about the account; the observed half is
+  what this site watched happen and works when the pipe sends nothing. Neither
+  truncates the other.
+
+### Changed
+
+- **The account resolves by docname, or by four-digit mask** — refused when two
+  accounts share one, rather than guessed. The Plaid id is deliberately *not* a
+  resolver: an endpoint that found its target by aggregator id would stop finding
+  it precisely when the record most needs correcting.
+- **`ensure_pairing_fields` checks every column it creates**, so the eighth
+  appears on sites that already have v0.73.0's seven. The gate itself still asks
+  only about the seven: a site that will not take the history column keeps
+  pairing and metadata rather than losing both.
+
+`tests_standalone/test_bank_consolidation.py` gains a thirteenth claim,
+`TheMetadataEndpoint`, 34 tests. Full suite: 8243 tests.
+
 ## 0.73.0 — 2026-08-14 — the Bank Bridge consolidation
 
 **ERPNext becomes the single source of truth for reconciliation.** A Flask

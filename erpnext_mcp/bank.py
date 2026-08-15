@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """The door a bank pipe pushes reconciliation truth through.
 
-v0.73.0. Two whitelisted methods, and they exist because the thing that can talk
+v0.74.0. Three whitelisted methods, and they exist because the thing that can talk
 to a bank cannot be the thing that owns the books. Reading a statement PDF needs
 credentials, an aggregator session and a parser that changes whenever a bank
 redesigns its layout; owning the reconciliation record needs to be beside the
@@ -10,6 +10,17 @@ jobs with different lifetimes, and the seam between them is here:
 
     POST /api/method/erpnext_mcp.bank.push_statement_anchor
     POST /api/method/erpnext_mcp.bank.push_account_pairing
+    POST /api/method/erpnext_mcp.bank.push_account_metadata
+
+THE THIRD IS THE SECOND WITH THE PAIRING TAKEN OUT, and it is separate for a
+reason worth stating. `push_account_pairing` can repoint which two accounts are
+companions; a nightly metadata refresh has no business being able to do that, and
+a pipe that only ever wants to say "this is what the aggregator calls this
+account today" should not have to send a payload whose other half could rewrite a
+relationship an operator set by hand. Both land through one implementation, so
+the two can never drift; the narrow one REFUSES a pairing key by name rather than
+ignoring it, because a dropped key that returns 200 is the failure this whole
+module is shaped to avoid.
 
 After this, the pipe holds NO authoritative data. It parses, it pushes, and if
 this site is unreachable it retries on the next sync. Everything a person or an
@@ -298,7 +309,101 @@ def _lines(value):
 	return _as_list(value, "statement_lines")
 
 
-# ── 2. push_account_pairing ─────────────────────────────────────────────────
+# ── 2 and 3: the two account pushes, over one implementation ────────────────
+
+#: The keys `push_account_metadata` refuses by name. See the module docstring:
+#: the narrow endpoint exists precisely so a metadata refresh cannot repoint a
+#: relationship, and a key it silently dropped would be indistinguishable from a
+#: key it honoured.
+PAIRING_KEYS = ("paired_bank_account", "pairing_type")
+
+
+def _refuse_pairing_keys(row: dict) -> None:
+	carried = [key for key in PAIRING_KEYS if row.get(key) not in (None, "")]
+	if carried:
+		raise ToolError(
+			f"push_account_metadata does not write {', '.join(carried)} — it writes an account's "
+			"aggregator identity and nothing about which account it is paired with. Use "
+			"push_account_pairing for that. Nothing was written for this account."
+		)
+
+
+def _push_accounts(method, single, accounts, user, note, warning, guard=None) -> dict:
+	"""Gate, batch, upsert, audit — the body both account endpoints run.
+
+	ONE IMPLEMENTATION ON PURPOSE. Two endpoints writing the same six columns
+	through two code paths is two answers to what "only the keys actually sent
+	are written" means, and the day they diverge is the day a metadata refresh
+	blanks something a pairing push preserved.
+	"""
+	arguments = {key: value for key, value in single.items() if value not in (None, "")}
+
+	try:
+		_may_write("Bank Account")
+		rows, is_batch = _payloads(single, accounts, "accounts")
+		updated, failed = [], []
+		for row in rows:
+			row = dict(row)
+			try:
+				if guard is not None:
+					guard(row)
+				updated.append(anchors.upsert_pairing(row))
+			except Exception as exc:
+				if not is_batch:
+					raise
+				failed.append(
+					{"bank_account": row.get("bank_account"), "error": f"{type(exc).__name__}: {exc}"}
+				)
+
+		# Spelled out rather than left to be read off the history array. A
+		# re-link is the one thing in a metadata push that changes what an
+		# identifier MEANS, and a sync log that did not name it would leave an
+		# operator comparing two id columns to find out whether it happened.
+		repointed = [
+			{
+				"bank_account": outcome.get("bank_account"),
+				"was": outcome.get("plaid_account_id_superseded"),
+				"now": (outcome.get("account") or {}).get("plaid_account_id"),
+			}
+			for outcome in updated
+			if outcome.get("plaid_account_id_superseded")
+		]
+
+		result = {
+			"updated": updated,
+			"updated_count": len(updated),
+			"failed": failed,
+			"failed_count": len(failed),
+			"repointed": repointed,
+			"repointed_count": len(repointed),
+			"summary": f"updated {len(updated)} bank account(s)"
+			+ (f", {len(repointed)} repointed" if repointed else "")
+			+ (f", {len(failed)} refused" if failed else ""),
+			"note": note,
+		}
+		if repointed:
+			result["repoint_note"] = (
+				"An account's aggregator id changed, which is what a re-linked bank connection looks "
+				"like from here. The id it replaced was appended to plaid_account_id_history in the "
+				"same write, so the feed rows, tickets and logs that name the old id still lead back "
+				"to this account."
+			)
+		if failed:
+			result["warning"] = warning.format(count=len(failed))
+		return _finish(method, arguments, result, user)
+	except ToolError as exc:
+		_refuse(method, arguments, user, exc)
+		frappe.throw(str(exc), frappe.ValidationError)
+	except Exception as exc:
+		_refuse(method, arguments, user, exc)
+		raise
+
+
+_NO_SUCH_ACCOUNT_WARNING = (
+	"{count} account(s) were refused and the rest were written. This endpoint does not create "
+	"Bank Accounts: an account nobody chose has no GL account and no company, and anchors hanging "
+	"off it would look exactly like reconciliation."
+)
 
 
 @frappe.whitelist()
@@ -311,6 +416,7 @@ def push_account_pairing(
 	plaid_account_type=None,
 	plaid_account_subtype=None,
 	sync_enabled=None,
+	plaid_account_id_history=None,
 	accounts=None,
 ):
 	"""Write a Bank Account's aggregator identity, and its companion, from a sync.
@@ -328,6 +434,13 @@ def push_account_pairing(
 	A pairing writes BOTH accounts, through the same code path as
 	`pair_bank_accounts` — a companion relationship recorded on one side only
 	reads as working from that side and as absent from the other.
+
+	`plaid_account_id_history` is a JSON array of ids this account used to have,
+	and it is OPTIONAL IN BOTH DIRECTIONS. Send it and the chain the pipe kept is
+	merged with the chain this site observed; send nothing and the observed half
+	still stands on its own, because a `plaid_account_id` that differs from the
+	one on file appends the old one here automatically. That is the point: the
+	chain survives a re-link whether or not the pipe was ever taught to track it.
 	"""
 	user = _named_user()
 	single = {
@@ -339,46 +452,106 @@ def push_account_pairing(
 		"plaid_account_type": plaid_account_type,
 		"plaid_account_subtype": plaid_account_subtype,
 		"sync_enabled": sync_enabled,
+		"plaid_account_id_history": plaid_account_id_history,
 	}
-	arguments = {key: value for key, value in single.items() if value not in (None, "")}
+	return _push_accounts(
+		"push_account_pairing",
+		single,
+		accounts,
+		user,
+		note=(
+			"Only the keys this push actually carried were written. A pairing writes both sides, "
+			"because a companion relationship recorded on one account and not the other reads as "
+			"working from one end and absent from the other."
+		),
+		warning=_NO_SUCH_ACCOUNT_WARNING,
+	)
 
-	try:
-		_may_write("Bank Account")
-		rows, is_batch = _payloads(single, accounts, "accounts")
-		updated, failed = [], []
-		for row in rows:
-			try:
-				updated.append(anchors.upsert_pairing(dict(row)))
-			except Exception as exc:
-				if not is_batch:
-					raise
-				failed.append(
-					{"bank_account": row.get("bank_account"), "error": f"{type(exc).__name__}: {exc}"}
-				)
 
-		result = {
-			"updated": updated,
-			"updated_count": len(updated),
-			"failed": failed,
-			"failed_count": len(failed),
-			"summary": f"updated {len(updated)} bank account(s)"
-			+ (f", {len(failed)} refused" if failed else ""),
-			"note": (
-				"Only the keys this push actually carried were written. A pairing writes both sides, "
-				"because a companion relationship recorded on one account and not the other reads as "
-				"working from one end and absent from the other."
-			),
-		}
-		if failed:
-			result["warning"] = (
-				f"{len(failed)} account(s) were refused and the rest were written. This endpoint does "
-				"not create Bank Accounts: an account nobody chose has no GL account and no company, "
-				"and anchors hanging off it would look exactly like reconciliation."
-			)
-		return _finish("push_account_pairing", arguments, result, user)
-	except ToolError as exc:
-		_refuse("push_account_pairing", arguments, user, exc)
-		frappe.throw(str(exc), frappe.ValidationError)
-	except Exception as exc:
-		_refuse("push_account_pairing", arguments, user, exc)
-		raise
+# ── 3. push_account_metadata ────────────────────────────────────────────────
+
+
+@frappe.whitelist()
+def push_account_metadata(
+	bank_account=None,
+	plaid_account_id=None,
+	plaid_account_mask=None,
+	plaid_account_type=None,
+	plaid_account_subtype=None,
+	sync_enabled=None,
+	plaid_account_id_history=None,
+	accounts=None,
+	# DECLARED IN ORDER TO BE REFUSED, which is not a contradiction. Frappe hands
+	# a whitelisted method only the kwargs its signature names and drops the rest
+	# without a word, so a pipe that sent a pairing to this endpoint would get the
+	# same 200 as one that sent nothing — and would go on believing it had set a
+	# relationship that was never written. Naming them here is what turns that
+	# silence into a sentence that says which endpoint to call instead.
+	paired_bank_account=None,
+	pairing_type=None,
+):
+	"""Write a Bank Account's aggregator identity from a sync. No pairing, ever.
+
+	WHAT A SYNC IS ACTUALLY SAYING when it calls this: "here is what the
+	aggregator calls this account today". That is a fact with a short life — the
+	id changes when a connection is re-linked, the subtype changes when a bank
+	reclassifies, `sync_enabled` changes when somebody turns the pull off — and
+	it is pushed on every sync, forever. What it is NOT is a statement about
+	which two accounts are companions, and this endpoint cannot make one: a
+	payload carrying `paired_bank_account` or `pairing_type` is refused by name
+	rather than quietly ignored, so a pipe that thought it was setting a pairing
+	finds out on the first call instead of on the day somebody notices the
+	relationship is missing.
+
+	KEYED ON THE ERPNEXT DOCNAME, WHICH IS THE ONLY STABLE IDENTIFIER HERE. The
+	Plaid id is not: a re-link issues a new one for the same real account, so the
+	whole point of this call is often to REPLACE an id that has gone dead. The id
+	being replaced is appended to `plaid_account_id_history` in the same write,
+	which is what keeps a year of stored feed rows, an aggregator's support logs
+	and this site's records pointing at the same account across any number of
+	reconnections. When that happens the reply names it under `repointed` rather
+	than leaving it to be spotted.
+
+	`bank_account` also accepts a four-digit mask, and refuses it when more than
+	one account carries it — the mask is what a person has, and a metadata write
+	onto the wrong account of two that end in 6030 looks exactly like a right one.
+
+	ONLY THE KEYS ACTUALLY SENT ARE WRITTEN, and `sync_enabled` is the exception
+	that proves it: `0` is a value, not an absence, and "this account is no longer
+	pulled" is precisely the fact that must survive the trip.
+
+	`plaid_account_id_history` is accepted here for the same reason
+	`push_account_pairing` accepts it: a pipe that kept its own chain holds the
+	re-links that happened before this site was told about the account, and they
+	are merged with what this site observed rather than replacing it. It is
+	optional in both directions — send nothing and the observed chain still builds
+	itself from the ids that arrive.
+
+	Pass `accounts` as a list to push a sync's whole account set in one call.
+	"""
+	user = _named_user()
+	single = {
+		"bank_account": bank_account,
+		"plaid_account_id": plaid_account_id,
+		"plaid_account_mask": plaid_account_mask,
+		"plaid_account_type": plaid_account_type,
+		"plaid_account_subtype": plaid_account_subtype,
+		"sync_enabled": sync_enabled,
+		"plaid_account_id_history": plaid_account_id_history,
+		"paired_bank_account": paired_bank_account,
+		"pairing_type": pairing_type,
+	}
+	return _push_accounts(
+		"push_account_metadata",
+		single,
+		accounts,
+		user,
+		note=(
+			"Only the keys this push actually carried were written, and the account was found by its "
+			"ERPNext docname — not by its aggregator id, which is the identifier that changes when a "
+			"connection is re-linked. A superseded id is appended to plaid_account_id_history rather "
+			"than overwritten away."
+		),
+		warning=_NO_SUCH_ACCOUNT_WARNING,
+		guard=_refuse_pairing_keys,
+	)

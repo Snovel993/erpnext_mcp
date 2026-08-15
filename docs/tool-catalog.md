@@ -12768,11 +12768,12 @@ sixty of them would change what a site's audit trail says its rules were.
   livestock need not seed a Feed rule that will never fire and will sit in
   `never_fired` forever looking like a problem.
 
-### The two push endpoints
+### The three push endpoints
 
 ```
 POST /api/method/erpnext_mcp.bank.push_statement_anchor
 POST /api/method/erpnext_mcp.bank.push_account_pairing
+POST /api/method/erpnext_mcp.bank.push_account_metadata   (v0.74.0)
 ```
 
 Not MCP tools — whitelisted Frappe methods a bank pipe calls with its own ERPNext
@@ -12798,8 +12799,35 @@ disagree.
 - **Neither endpoint creates a Bank Account.** An auto-created account has no GL
   account, no company anybody chose, and no way to be noticed, and the anchors
   hanging off it would look exactly like reconciliation.
-- **`push_account_pairing` writes only the keys actually sent**, so a sync that
+- **Both account endpoints write only the keys actually sent**, so a sync that
   knows the mask and not the subtype does not blank a subtype somebody typed.
+  `sync_enabled` is the exception: `0` is a value, not an absence.
+- **`push_account_metadata` is `push_account_pairing` with the pairing taken
+  out** (v0.74.0). A nightly metadata refresh has no business being able to
+  repoint which two accounts are companions, so this one cannot: a payload
+  carrying `paired_bank_account` or `pairing_type` is **refused by name**. Both
+  run one implementation, so the two can never drift on what "only the keys sent"
+  means. The pairing keys are *declared in order to be refused* — Frappe drops
+  undeclared kwargs silently, and a dropped key that returns `200` is
+  indistinguishable from an honoured one.
+- **The ERPNext docname is the identifier; the Plaid id is not** (v0.74.0). A
+  re-linked bank connection issues fresh account ids, so an endpoint that found
+  its target by id would stop finding it exactly when the record most needs
+  correcting. `bank_account` takes a docname, or a four-digit mask when that is
+  all the pipe has — refused when two accounts share it.
+- **A superseded aggregator id is appended to `plaid_account_id_history`, in the
+  same write** (v0.74.0). Overwriting the id is right; overwriting *alone* loses
+  the only handle tying a year of stored feed rows, an aggregator's support logs
+  and this site's records to the same account. The reply names the change under
+  `repointed` rather than leaving it to be spotted. Idempotent — a nightly push
+  of an unchanged id appends nothing — and an id that becomes current again comes
+  back out of the history, because an id that is both current and superseded
+  reads as two accounts to anything matching on it.
+- **A chain the pipe kept is merged, not swapped in** (v0.74.0). Both endpoints
+  take an optional `plaid_account_id_history`. Neither source is complete: the
+  pipe's chain holds the re-links that happened before this site knew the
+  account, the observed chain is what this site watched and is all there is when
+  the pipe sends nothing. A backfill alone is not reported as a `repointing`.
 - **The gate** is a named user plus `frappe.has_permission(..., "write")` — the
   `api/gis.py` choice, not `api/guard.py`'s, whose Mobile Access Grant is the
   wrong gate for a server-to-server credential. **Every call writes an MCP Action

@@ -569,21 +569,27 @@ is untouched — the two switches are separate on purpose.
 
 ---
 
-## The third transport: the bank push endpoints (v0.73.0)
+## The third transport: the bank push endpoints (v0.73.0, v0.74.0)
 
-Two whitelisted methods a bank pipe calls with its own ERPNext credential:
+Three whitelisted methods a bank pipe calls with its own ERPNext credential:
 
 ```
 POST /api/method/erpnext_mcp.bank.push_statement_anchor
 POST /api/method/erpnext_mcp.bank.push_account_pairing
+POST /api/method/erpnext_mcp.bank.push_account_metadata   (v0.74.0)
 ```
+
+The third is the second with the pairing taken out, and it exists so a nightly
+metadata refresh does not need a credential path that can also repoint which two
+accounts are companions. It refuses `paired_bank_account` and `pairing_type` by
+name — least authority applied to a payload rather than to a role.
 
 **They do not use the MCP gates and they do not use the mobile gates.** Neither
 is right for this caller, and the reasons are different.
 
 The MCP transport's three gates are a bearer token, a CIDR allowlist and a master
 switch — a *surface* control over what an AI client may reach. A bank pipe is not
-an AI client: it does not choose what to call, it has exactly two things to say,
+an AI client: it does not choose what to call, it has a handful of things to say,
 and giving it the MCP token would give it the whole tool catalogue.
 
 The mobile surface's seven gates include an **Active Mobile Access Grant**, which
@@ -592,7 +598,7 @@ There is no handset here and no enrolment to speak of, and a server-to-server
 credential that had to be registered as a phone would be a lie in the register a
 `revoke_mobile_user` reads.
 
-So these two use **Frappe's own permission system**, the same choice `api/gis.py`
+So these use **Frappe's own permission system**, the same choice `api/gis.py`
 makes for the Desk map:
 
 1. **A named user.** Guest is refused before anything is read. A pipe gets its own
@@ -619,7 +625,8 @@ transactions already on file.
 
 **Turning them off.** There is no dedicated switch and deliberately so: the
 control is the credential. Disable the pipe's User, or remove its write permission
-on Statement Anchor, and both methods refuse on the next call.
+on Statement Anchor and Bank Account, and all three methods refuse on the next
+call.
 
 ---
 

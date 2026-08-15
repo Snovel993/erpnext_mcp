@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """The Bank Bridge consolidation — whether a year of bank data is COMPLETE.
 
-v0.73.0. TWELVE CLAIMS.
+v0.74.0. THIRTEEN CLAIMS.
 
  1. `TheAnchorDoctype` — the arithmetic is computed, never accepted; one anchor per period.
  2. `ChainGaps` — a missing statement is a gap, and the gap is detected rather than declared.
@@ -15,6 +15,7 @@ v0.73.0. TWELVE CLAIMS.
 10. `ReconReport` — statement, feed and ledger side by side, never summed.
 11. `Advisory` — a fee that cannot be computed is null and not zero; amendment is versioning.
 12. `ThePushEndpoint` — idempotent on the period, batched, gated, and audited either way.
+13. `TheMetadataEndpoint` — the aggregator identity, and an id chain that survives a re-link.
 
 THE TWO TESTS THAT MATTER MOST HERE.
 
@@ -1225,6 +1226,321 @@ class ThePushEndpoint(ConsolidationTestCase):
 		with self.assertRaises(frappe.ValidationError) as caught:
 			push_api.push_account_pairing(bank_account=BROKERAGE, plaid_account_type="chequing")
 		self.assertIn("plaid_account_type must be one of", str(caught.exception))
+
+
+# ── 13. the metadata endpoint and the id chain ──────────────────────────────
+class TheMetadataEndpoint(ConsolidationTestCase):
+	"""What a sync says about an account, and what happens when the bank re-links.
+
+	THE TEST THAT MATTERS MOST HERE is
+	`test_a_new_aggregator_id_does_not_erase_the_one_it_replaced`. Overwriting the
+	id is correct — the new one is live — and it is also the failure: a year of
+	stored feed rows, the aggregator's own support logs and the pipe's history all
+	name the dead id, and nothing else connects them to this account once it is
+	gone. The overwrite looks like a successful sync from every direction, which
+	is why the chain has to be asserted rather than trusted.
+	"""
+
+	def push(self, **payload):
+		return push_api.push_account_metadata(**payload)
+
+	def stored(self, fieldname, bank_account=BROKERAGE):
+		return frappe.db.get_value("Bank Account", bank_account, fieldname)
+
+	def history(self, bank_account=BROKERAGE):
+		return anchors.id_history(self.stored(anchors.PLAID_ID_HISTORY_FIELD, bank_account))
+
+	# -- the metadata itself -------------------------------------------------
+	def test_a_push_writes_every_metadata_field_onto_the_bank_account(self):
+		"""The gap this release closes: a push that reported success and left
+		the columns null."""
+		result = self.push(
+			bank_account=BROKERAGE,
+			plaid_account_id="jN7xBz83JaHPyQ5k1oVJSVeeraMO63tRE55ek",
+			plaid_account_mask="6030",
+			plaid_account_type="depository",
+			plaid_account_subtype="checking",
+			sync_enabled=1,
+		)
+		self.assertEqual(result["updated_count"], 1)
+		self.assertEqual(self.stored(anchors.PLAID_ID_FIELD), "jN7xBz83JaHPyQ5k1oVJSVeeraMO63tRE55ek")
+		self.assertEqual(self.stored(anchors.PLAID_MASK_FIELD), "6030")
+		self.assertEqual(self.stored(anchors.PLAID_TYPE_FIELD), "depository")
+		self.assertEqual(self.stored(anchors.PLAID_SUBTYPE_FIELD), "checking")
+		self.assertEqual(self.stored(anchors.SYNC_FIELD), 1)
+
+	def test_the_reply_echoes_the_account_as_it_now_reads(self):
+		"""The pipe verifies its push against this echo rather than the status
+		line, so an echo that did not reflect the write would defeat the check."""
+		account = self.push(bank_account=BROKERAGE, plaid_account_mask="6030")["updated"][0]["account"]
+		self.assertEqual(account["plaid_account_mask"], "6030")
+		self.assertEqual(account["plaid_account_id_history"], [])
+
+	def test_only_the_keys_actually_sent_are_written(self):
+		self.push(bank_account=BROKERAGE, plaid_account_subtype="brokerage")
+		self.push(bank_account=BROKERAGE, plaid_account_mask="9401")
+		self.assertEqual(self.stored(anchors.PLAID_SUBTYPE_FIELD), "brokerage")
+
+	def test_sync_enabled_off_is_a_value_and_not_an_absence(self):
+		"""'This account is no longer pulled' is precisely the fact that must
+		survive the trip."""
+		self.push(bank_account=BROKERAGE, sync_enabled=1)
+		self.push(bank_account=BROKERAGE, sync_enabled=0)
+		self.assertEqual(self.stored(anchors.SYNC_FIELD), 0)
+
+	def test_an_account_can_be_found_by_its_mask(self):
+		self.push(bank_account=BROKERAGE, plaid_account_mask="6030")
+		self.push(bank_account="6030", plaid_account_subtype="checking")
+		self.assertEqual(self.stored(anchors.PLAID_SUBTYPE_FIELD), "checking")
+
+	def test_a_mask_two_accounts_share_is_refused_rather_than_guessed(self):
+		self.push(bank_account=BROKERAGE, plaid_account_mask="6030")
+		self.push(bank_account=SWEEP, plaid_account_mask="6030")
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.push(bank_account="6030", plaid_account_subtype="checking")
+		self.assertIn("Name one of them", str(caught.exception))
+
+	# -- the id chain across reconnections -----------------------------------
+	def test_a_new_aggregator_id_does_not_erase_the_one_it_replaced(self):
+		old = "ZE4ZoOpA5bUKEkPd5Lb8hDMg4b7e84Ubx7Jeb"
+		new = "jN7xBz83JaHPyQ5k1oVJSVeeraMO63tRE55ek"
+		self.push(bank_account=BROKERAGE, plaid_account_id=old)
+		result = self.push(bank_account=BROKERAGE, plaid_account_id=new)
+		self.assertEqual(self.stored(anchors.PLAID_ID_FIELD), new)
+		self.assertEqual(self.history(), [old])
+		self.assertEqual(result["repointed"], [{"bank_account": BROKERAGE, "was": old, "now": new}])
+
+	def test_the_first_id_ever_pushed_supersedes_nothing(self):
+		result = self.push(bank_account=BROKERAGE, plaid_account_id="acc_first")
+		self.assertEqual(self.history(), [])
+		self.assertEqual(result["repointed_count"], 0)
+
+	def test_pushing_the_same_id_every_night_appends_nothing(self):
+		"""A sync runs whether or not anything changed; a history that grew on
+		every run would be a log of syncs rather than a chain of identities."""
+		for _ in range(3):
+			self.push(bank_account=BROKERAGE, plaid_account_id="acc_stable", plaid_account_mask="6030")
+		self.assertEqual(self.history(), [])
+
+	def test_several_reconnections_chain_oldest_first(self):
+		for identifier in ("acc_one", "acc_two", "acc_three", "acc_four"):
+			self.push(bank_account=BROKERAGE, plaid_account_id=identifier)
+		self.assertEqual(self.stored(anchors.PLAID_ID_FIELD), "acc_four")
+		self.assertEqual(self.history(), ["acc_one", "acc_two", "acc_three"])
+
+	def test_an_id_that_becomes_current_again_leaves_the_history(self):
+		"""A re-link can land back on a connection the account already had. An
+		id that is both current and superseded reads as two accounts to anything
+		matching on it."""
+		for identifier in ("acc_one", "acc_two", "acc_one"):
+			self.push(bank_account=BROKERAGE, plaid_account_id=identifier)
+		self.assertEqual(self.stored(anchors.PLAID_ID_FIELD), "acc_one")
+		self.assertEqual(self.history(), ["acc_two"])
+
+	def test_the_history_is_capped_and_drops_the_oldest(self):
+		ids = [f"acc_{index}" for index in range(anchors.MAX_ID_HISTORY + 5)]
+		for identifier in ids:
+			self.push(bank_account=BROKERAGE, plaid_account_id=identifier)
+		history = self.history()
+		self.assertEqual(len(history), anchors.MAX_ID_HISTORY)
+		self.assertEqual(history[-1], ids[-2])
+		self.assertNotIn(ids[0], history)
+
+	def test_a_pairing_push_keeps_the_chain_too(self):
+		"""One implementation under both endpoints — a pipe that repoints
+		through push_account_pairing must not lose what the other would keep."""
+		push_api.push_account_pairing(bank_account=BROKERAGE, plaid_account_id="acc_one")
+		push_api.push_account_pairing(bank_account=BROKERAGE, plaid_account_id="acc_two")
+		self.assertEqual(self.history(), ["acc_one"])
+
+	def test_a_hand_typed_id_in_the_history_column_is_not_parsed_away(self):
+		"""Somebody who typed a dead id into the field answered the same
+		question this column asks."""
+		frappe.db.set_value(
+			"Bank Account",
+			BROKERAGE,
+			{anchors.PLAID_ID_HISTORY_FIELD: "acc_legacy", anchors.PLAID_ID_FIELD: "acc_one"},
+		)
+		self.push(bank_account=BROKERAGE, plaid_account_id="acc_two")
+		self.assertEqual(self.history(), ["acc_legacy", "acc_one"])
+
+	def test_the_chain_is_readable_through_get_account_pairing(self):
+		self.push(bank_account=BROKERAGE, plaid_account_id="acc_one")
+		self.push(bank_account=BROKERAGE, plaid_account_id="acc_two")
+		data = self.tool_data("get_account_pairing", {"bank_account": BROKERAGE})
+		self.assertEqual(data["accounts"][0]["plaid_account_id_history"], ["acc_one"])
+
+	# -- a chain the pipe kept, pushed explicitly ----------------------------
+	def test_a_pushed_history_is_recorded_for_ids_this_site_never_saw(self):
+		"""The re-links that happened before this site was told about the
+		account, or between syncs — the only place those ids can come from."""
+		push_api.push_account_pairing(
+			bank_account=BROKERAGE,
+			plaid_account_id="acc_three",
+			plaid_account_id_history=json.dumps(["acc_one", "acc_two"]),
+		)
+		self.assertEqual(self.history(), ["acc_one", "acc_two"])
+		self.assertEqual(self.stored(anchors.PLAID_ID_FIELD), "acc_three")
+
+	def test_a_pushed_history_is_merged_with_what_this_site_observed(self):
+		"""Neither source is trusted to be complete: a pipe sending a short
+		chain must not truncate ids this site watched being retired."""
+		self.push(bank_account=BROKERAGE, plaid_account_id="acc_two")
+		push_api.push_account_pairing(
+			bank_account=BROKERAGE,
+			plaid_account_id="acc_four",
+			plaid_account_id_history=json.dumps(["acc_one"]),
+		)
+		# acc_one from the pipe, acc_two observed here, acc_three never existed.
+		self.assertEqual(self.history(), ["acc_one", "acc_two"])
+
+	def test_a_pushed_history_does_not_truncate_a_longer_stored_chain(self):
+		for identifier in ("acc_one", "acc_two", "acc_three"):
+			self.push(bank_account=BROKERAGE, plaid_account_id=identifier)
+		push_api.push_account_pairing(
+			bank_account=BROKERAGE, plaid_account_id_history=json.dumps(["acc_one"])
+		)
+		self.assertEqual(self.history(), ["acc_one", "acc_two"])
+
+	def test_the_metadata_endpoint_takes_a_pushed_history_too(self):
+		"""It declares the key. An endpoint that did not would have Frappe drop
+		it before the method ever saw it, and answer 200."""
+		self.push(
+			bank_account=BROKERAGE,
+			plaid_account_id="acc_three",
+			plaid_account_id_history=json.dumps(["acc_one", "acc_two"]),
+		)
+		self.assertEqual(self.history(), ["acc_one", "acc_two"])
+
+	def test_the_metadata_endpoint_takes_a_pushed_history_too(self):
+		"""Declared on both, because Frappe drops a kwarg a whitelisted method
+		does not name and answers 200 anyway."""
+		self.push(
+			bank_account=BROKERAGE,
+			plaid_account_id="acc_three",
+			plaid_account_id_history=json.dumps(["acc_one", "acc_two"]),
+		)
+		self.assertEqual(self.history(), ["acc_one", "acc_two"])
+
+	def test_a_pushed_history_can_arrive_as_a_list_rather_than_json_text(self):
+		push_api.push_account_pairing(bank_account=BROKERAGE, plaid_account_id_history=["acc_one", "acc_two"])
+		self.assertEqual(self.history(), ["acc_one", "acc_two"])
+
+	def test_re_pushing_the_same_history_appends_nothing(self):
+		"""A sync sends its chain every night; a column that grew each time
+		would be a log of syncs rather than a chain of identities."""
+		for _ in range(3):
+			push_api.push_account_pairing(
+				bank_account=BROKERAGE,
+				plaid_account_id="acc_three",
+				plaid_account_id_history=json.dumps(["acc_one", "acc_two"]),
+			)
+		self.assertEqual(self.history(), ["acc_one", "acc_two"])
+
+	def test_a_pushed_history_naming_the_live_id_does_not_keep_it_as_superseded(self):
+		"""An id that is both current and superseded reads as two accounts to
+		anything matching on it."""
+		push_api.push_account_pairing(
+			bank_account=BROKERAGE,
+			plaid_account_id="acc_two",
+			plaid_account_id_history=json.dumps(["acc_one", "acc_two"]),
+		)
+		self.assertEqual(self.history(), ["acc_one"])
+
+	def test_a_pushed_history_alone_is_not_reported_as_a_repointing(self):
+		"""Backfilling a chain is not a re-link, and a sync log that called it
+		one would put a reconnection on the day somebody ran a backfill."""
+		result = push_api.push_account_pairing(
+			bank_account=BROKERAGE, plaid_account_id_history=json.dumps(["acc_one"])
+		)
+		self.assertEqual(result["repointed_count"], 0)
+		self.assertEqual(self.history(), ["acc_one"])
+
+	def test_a_pushed_history_and_a_repointing_in_one_call_keep_both(self):
+		self.push(bank_account=BROKERAGE, plaid_account_id="acc_two")
+		result = push_api.push_account_pairing(
+			bank_account=BROKERAGE,
+			plaid_account_id="acc_three",
+			plaid_account_id_history=json.dumps(["acc_one"]),
+		)
+		self.assertEqual(self.history(), ["acc_one", "acc_two"])
+		self.assertEqual(
+			result["repointed"], [{"bank_account": BROKERAGE, "was": "acc_two", "now": "acc_three"}]
+		)
+
+	# -- what it refuses -----------------------------------------------------
+	def test_a_pairing_key_is_refused_by_name_rather_than_dropped(self):
+		"""A key that returns 200 and writes nothing is the failure this whole
+		module is shaped to avoid."""
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.push(bank_account=BROKERAGE, paired_bank_account=SWEEP)
+		self.assertIn("push_account_pairing", str(caught.exception))
+		self.assertIsNone(self.stored(anchors.PAIRED_FIELD))
+
+	def test_a_pairing_key_inside_a_batch_row_is_refused_too(self):
+		result = self.push(
+			accounts=[
+				{"bank_account": BROKERAGE, "plaid_account_id": "acc_one"},
+				{"bank_account": SWEEP, "paired_bank_account": BROKERAGE},
+			]
+		)
+		self.assertEqual(result["updated_count"], 1)
+		self.assertEqual(result["failed_count"], 1)
+		self.assertIn("push_account_pairing", result["failed"][0]["error"])
+		self.assertIsNone(self.stored(anchors.PAIRED_FIELD, SWEEP))
+
+	def test_an_unknown_bank_account_is_refused_rather_than_created(self):
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.push(bank_account="Nobody's Account", plaid_account_id="acc_one")
+		self.assertIn("no Bank Account named", str(caught.exception))
+		self.assertEqual(frappe.db.count("Bank Account"), 4)
+
+	def test_an_unknown_plaid_account_type_is_refused(self):
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.push(bank_account=BROKERAGE, plaid_account_type="chequing")
+		self.assertIn("plaid_account_type must be one of", str(caught.exception))
+
+	def test_guest_never_gets_past_the_first_line(self):
+		frappe.local.session.user = "Guest"
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				self.push(bank_account=BROKERAGE, plaid_account_id="acc_one")
+		finally:
+			frappe.local.session.user = "Administrator"
+		self.assertIsNone(self.stored(anchors.PLAID_ID_FIELD))
+
+	def test_a_credential_without_write_permission_is_refused(self):
+		STORE.denied_permissions.add(("Bank Account", "write"))
+		with self.assertRaises(frappe.PermissionError):
+			self.push(bank_account=BROKERAGE, plaid_account_id="acc_one")
+		self.assertIsNone(self.stored(anchors.PLAID_ID_FIELD))
+
+	# -- batches and the audit trail -----------------------------------------
+	def test_a_batch_pushes_a_whole_sync_and_one_bad_row_does_not_lose_the_rest(self):
+		result = self.push(
+			accounts=[
+				{"bank_account": BROKERAGE, "plaid_account_id": "acc_one", "sync_enabled": 1},
+				{"bank_account": SWEEP, "plaid_account_id": "acc_two", "sync_enabled": 0},
+				{"bank_account": "No Such Account", "plaid_account_id": "acc_three"},
+			]
+		)
+		self.assertEqual(result["updated_count"], 2)
+		self.assertEqual(result["failed_count"], 1)
+		self.assertIn("No Such Account", result["failed"][0]["error"])
+		self.assertEqual(self.stored(anchors.PLAID_ID_FIELD, SWEEP), "acc_two")
+
+	def test_a_batch_can_arrive_as_json_text(self):
+		payload = json.dumps([{"bank_account": BROKERAGE, "plaid_account_mask": "6030"}])
+		self.assertEqual(self.push(accounts=payload)["updated_count"], 1)
+
+	def test_every_push_writes_an_audit_row(self):
+		self.push(bank_account=BROKERAGE, plaid_account_id="acc_one")
+		self.assertAudited("push:push_account_metadata", "Success")
+
+	def test_a_refused_push_writes_one_too(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.push(bank_account="Nobody's Account", plaid_account_id="acc_one")
+		self.assertAudited("push:push_account_metadata", "Error")
 
 
 # ── the switches ────────────────────────────────────────────────────────────
