@@ -64,7 +64,7 @@ import frappe
 from werkzeug.test import Client
 from werkzeug.wrappers import Response
 
-from erpnext_mcp import audit
+from erpnext_mcp import audit, task_templates
 from erpnext_mcp.api import fallback_auth, guard
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import mobile as mobile_api
@@ -75,7 +75,14 @@ from erpnext_mcp.farmops_api import session as farmops_session
 
 from .fixtures import MAIN, OTHER, install_hrms
 from .harness import ROLES, STORE, set_roles
-from .test_api_mobile import OUTSIDER, WORKER, MobileAPITestCase
+from .test_api_mobile import (
+	OUTSIDER,
+	OUTSIDER_EMPLOYEE,
+	WORKER,
+	WORKER_EMPLOYEE,
+	MobileAPITestCase,
+)
+from .test_dispatch import WALK
 
 #: What the phone will call after the v0.18.0 iOS change.
 CONTEXT = f"{PREFIX}/mobile/get_current_user_context"
@@ -302,6 +309,28 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# rather than an omission.
 		"/mobile/validate_document",
 		"/mobile/get_document_validation",
+		# Sprint 7 (v0.72.0). The foreman's crew-task dashboard, five routes: the
+		# board for the crew on this foreman's own open shift, the dispatch that
+		# moves a job between people, the task raised on the spot, and the two
+		# ends of the template register.
+		#
+		# THE FIRST FIVE PATHS HERE THAT A FIELD WORKER CANNOT CALL. Every route
+		# above is a worker's own work; each of these calls
+		# `guard.require_dispatch_role` in its own body, because the tools behind
+		# them have no role check of their own — on the MCP transport the
+		# operator's enablement switch is what stands in front of them, and a
+		# phone does not go through it.
+		#
+		# `get_farm_task_template`, `create_farm_task_template` and
+		# `update_farm_task_template` are tools with NO route here on purpose —
+		# authoring the shape of a recurring job is a desk decision with the
+		# regulation open — and the assertion below in the other direction is
+		# what keeps that a decision rather than an omission.
+		"/mobile/list_dispatched_tasks",
+		"/mobile/assign_farm_task",
+		"/mobile/create_farm_task",
+		"/mobile/list_farm_task_templates",
+		"/mobile/create_task_from_template",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}
@@ -1204,6 +1233,321 @@ class TheIdentityStepAnswersOverTheFunnel(FarmOpsAPITestCase):
 		self.assertIsNone(
 			self.message(f"{PREFIX}/mobile/get_employee", {"employee": created["name"]})["badge_id"]
 		)
+
+
+#: The foreman's dashboard, Sprint 7 (v0.72.0).
+DISPATCHED = f"{PREFIX}/mobile/list_dispatched_tasks"
+ASSIGN = f"{PREFIX}/mobile/assign_farm_task"
+RAISE = f"{PREFIX}/mobile/create_farm_task"
+TEMPLATES = f"{PREFIX}/mobile/list_farm_task_templates"
+FROM_TEMPLATE = f"{PREFIX}/mobile/create_task_from_template"
+
+FOREMAN = "flor@example.test"
+FOREMAN_EMPLOYEE = "EMP-FLOR"
+STRANGER_EMPLOYEE = "EMP-DIEGO"
+A_SHIFT = "SHIFT-2026-0001"
+
+
+class TheForemanDashboard(FarmOpsAPITestCase):
+	"""The five Sprint 5 routes, over the transport a handset actually uses.
+
+	THE CLAIM UNDER TEST IS THAT DISPATCH IS NOT A PICKER'S. Every route above
+	these is a worker's own work and is reachable by anybody enrolled; these five
+	read somebody else's board and move somebody else's afternoon, and the whole
+	of what stands between an enrolled Field Worker and them is
+	`guard.require_dispatch_role` in each wrapper's own body. A test that only
+	drove them as a foreman would assert the feature and none of the gate.
+
+	THE SECOND CLAIM IS THE CREW SCOPE. `dispatch.list_dispatched_tasks` will read
+	any named worker's board, so a wrapper that forwarded the name would publish
+	"what is everybody on this farm doing today" to one enrolled handset. The
+	workers are computed off the caller's own open shifts instead, and the tests
+	below drive both halves: a name on the crew narrows, a name that is not on it
+	is refused, and the tool's own `worker_id` spelling never arrives at all.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": FOREMAN_EMPLOYEE,
+					"employee_name": "Flor Diaz",
+					"user_id": FOREMAN,
+					"company": MAIN,
+					"status": "Active",
+				},
+				{
+					"name": STRANGER_EMPLOYEE,
+					"employee_name": "Diego Salas",
+					"company": MAIN,
+					"status": "Active",
+				},
+			],
+		)
+		self.foreman = self.enrol(email=FOREMAN, name="Flor Diaz", role="Foreman")
+		self.a_camp()
+		# The five templates this app ships. Seeded rather than hand-built so the
+		# register a foreman scrolls in these tests is the register a foreman
+		# scrolls on a site that has only ever been migrated.
+		task_templates.seed_farm_task_templates()
+
+	# ── the site's furniture ────────────────────────────────────────────────
+	def an_open_shift(self, crew=(WORKER_EMPLOYEE,), foreman=FOREMAN_EMPLOYEE, name=A_SHIFT):
+		"""One shift with no end time — which is what `shifts.status_for` calls open.
+
+		The crew goes on the parent as `crew`, because that is where it lives: the
+		double flattens the child table out of its parent exactly as
+		`shifts.crew_of` reads it back off the site.
+		"""
+		STORE.seed(
+			"Farm Shift",
+			[
+				{
+					"name": name,
+					"foreman": foreman,
+					"foreman_name": "Flor Diaz",
+					"company": MAIN,
+					"location": "Block 7 North",
+					"shift_type": "Harvest",
+					"start_datetime": f"{frappe.utils.today()} 06:00:00",
+					"end_datetime": "",
+					"cancelled": 0,
+					"status": "Active",
+					"crew": [
+						{
+							"name": f"{name}-CREW-{index}",
+							"idx": index,
+							"employee": person,
+							"employee_name": str(
+								frappe.db.get_value("Employee", person, "employee_name") or ""
+							),
+							"role": "Worker",
+							"joined_at": f"{frappe.utils.today()} 06:00:00",
+							"left_at": "",
+						}
+						for index, person in enumerate(crew, start=1)
+					],
+				}
+			],
+		)
+		return name
+
+	def a_dispatched_task(self, worker=WORKER_EMPLOYEE, **overrides):
+		"""A task already in somebody's hands, so there is a board to read."""
+		return self.a_task(assigned_to=worker, **overrides)
+
+	# ── the gate ────────────────────────────────────────────────────────────
+	def test_an_enrolled_field_worker_is_refused_every_one_of_the_five(self):
+		"""Ana holds a perfectly good credential, an Active grant and MAIN. What
+		she does not hold is Foreman, and that is the whole of the refusal."""
+		for path, body in (
+			(DISPATCHED, {}),
+			(ASSIGN, {"task": "FT-WHATEVER", "assigned_to": WORKER_EMPLOYEE}),
+			(RAISE, {"task_name": "x", "task_type": "Inspection", "evidence_required": dict(WALK)}),
+			(TEMPLATES, {}),
+			(FROM_TEMPLATE, {"template": "whatever"}),
+		):
+			with self.subTest(path=path):
+				status, parsed = self.refusal(path, body)
+				self.assertEqual(status, 403)
+				self.assertIn("Foreman", parsed["error"])
+
+	def test_the_refusal_names_what_a_picker_may_still_do(self):
+		"""A field worker told only 'no' taps the button again. The sentence lists
+		the seven routes that ARE theirs, which is a thing they can act on."""
+		_status, parsed = self.refusal(DISPATCHED)
+		self.assertIn("claim_task", parsed["error"])
+		self.assertIn("Nothing was read and nothing was changed.", parsed["error"])
+
+	def test_a_foreman_holding_the_role_gets_through(self):
+		self.an_open_shift()
+		answer = self.message(DISPATCHED, credential=self.foreman)
+		self.assertEqual(answer["shifts"], [A_SHIFT])
+
+	# ── the crew scope ──────────────────────────────────────────────────────
+	def test_the_board_is_the_crew_on_this_foremans_own_open_shift(self):
+		self.an_open_shift()
+		task = self.a_dispatched_task()
+		answer = self.message(DISPATCHED, credential=self.foreman)
+
+		crew = {entry["employee"]: entry for entry in answer["crew"]}
+		# Ana is on the crew; the foreman is in the answer whether or not they
+		# rostered themselves; Diego is on neither shift nor answer.
+		self.assertIn(WORKER_EMPLOYEE, crew)
+		self.assertIn(FOREMAN_EMPLOYEE, crew)
+		self.assertNotIn(STRANGER_EMPLOYEE, crew)
+		self.assertEqual([row["name"] for row in crew[WORKER_EMPLOYEE]["tasks"]], [task])
+		self.assertEqual(answer["count"], 1)
+
+	def test_a_foreman_with_no_open_shift_gets_their_own_board_and_is_told_why(self):
+		"""Not an empty answer and not an unscoped one. A dashboard that showed
+		nothing before roll call would read as 'no work today'."""
+		self.a_dispatched_task()
+		answer = self.message(DISPATCHED, credential=self.foreman)
+		self.assertEqual(answer["shifts"], [])
+		self.assertEqual([entry["employee"] for entry in answer["crew"]], [FOREMAN_EMPLOYEE])
+		self.assertIn("no open shift", answer["note"])
+
+	def test_a_name_on_the_crew_narrows_the_board(self):
+		self.an_open_shift()
+		task = self.a_dispatched_task()
+		answer = self.message(DISPATCHED, {"employee": WORKER_EMPLOYEE}, credential=self.foreman)
+		self.assertEqual([entry["employee"] for entry in answer["crew"]], [WORKER_EMPLOYEE])
+		self.assertEqual([row["name"] for row in answer["crew"][0]["tasks"]], [task])
+
+	def test_a_name_that_is_not_on_the_crew_is_refused_rather_than_answered(self):
+		"""The check this whole wrapper exists for. Without it, one enrolled
+		handset could walk the payroll a docname at a time."""
+		self.an_open_shift()
+		self.a_dispatched_task(worker=STRANGER_EMPLOYEE)
+		status, parsed = self.refusal(DISPATCHED, {"employee": STRANGER_EMPLOYEE}, credential=self.foreman)
+		self.assertEqual(status, 403)
+		self.assertIn("not on the crew", parsed["error"])
+
+	def test_the_tools_own_worker_id_spelling_never_reaches_it(self):
+		"""`worker_id` is undeclared on purpose, so `bind` drops it. The board comes
+		back as the whole crew rather than as the one worker the body named."""
+		self.an_open_shift()
+		self.a_dispatched_task(worker=STRANGER_EMPLOYEE)
+		answer = self.message(DISPATCHED, {"worker_id": STRANGER_EMPLOYEE}, credential=self.foreman)
+		self.assertNotIn("worker_id", farmops_routes.accepted_arguments(mobile_api.list_dispatched_tasks))
+		self.assertEqual(
+			sorted(entry["employee"] for entry in answer["crew"]),
+			sorted([FOREMAN_EMPLOYEE, WORKER_EMPLOYEE]),
+		)
+
+	def test_another_foremans_shift_is_not_this_foremans_board(self):
+		self.an_open_shift(crew=(STRANGER_EMPLOYEE,), foreman=WORKER_EMPLOYEE, name="SHIFT-2026-0009")
+		status, parsed = self.refusal(DISPATCHED, {"shift": "SHIFT-2026-0009"}, credential=self.foreman)
+		self.assertEqual(status, 403)
+		self.assertIn("not a shift you have open", parsed["error"])
+
+	# ── the dispatch ────────────────────────────────────────────────────────
+	def test_a_foreman_dispatches_an_unclaimed_task(self):
+		task = self.a_task()
+		answer = self.message(ASSIGN, {"task": task, "assigned_to": WORKER_EMPLOYEE}, credential=self.foreman)
+		self.assertEqual(answer["name"], task)
+		self.assertEqual(answer["state"], "Claimed")
+		self.assertEqual(answer["assigned_to"], WORKER_EMPLOYEE)
+		self.assertIsNone(answer["reassigned_from"])
+
+	def test_taking_work_off_somebody_needs_reassign_and_then_needs_a_reason(self):
+		"""Both halves of `dispatch.assign_farm_task`'s refusal, forwarded intact.
+		The wrapper does not restate the rule — it makes sure the two arguments
+		that satisfy it can arrive."""
+		task = self.a_dispatched_task()
+		status, parsed = self.refusal(
+			ASSIGN, {"task": task, "assigned_to": STRANGER_EMPLOYEE}, credential=self.foreman
+		)
+		self.assertEqual(status, 400)
+		self.assertIn("reassign=true", parsed["error"])
+
+		status, parsed = self.refusal(
+			ASSIGN,
+			{"task": task, "assigned_to": STRANGER_EMPLOYEE, "reassign": True},
+			credential=self.foreman,
+		)
+		self.assertEqual(status, 400)
+		self.assertIn("needs a reason", parsed["error"])
+
+		answer = self.message(
+			ASSIGN,
+			{
+				"task": task,
+				"assigned_to": STRANGER_EMPLOYEE,
+				"reassign": True,
+				"reason": "Ana is on the packing line all afternoon",
+			},
+			credential=self.foreman,
+		)
+		self.assertEqual(answer["assigned_to"], STRANGER_EMPLOYEE)
+		self.assertEqual(answer["reassigned_from"], "Ana Ramos")
+
+	def test_the_dispatched_workers_name_cannot_be_written_from_the_body(self):
+		"""`assigned_to_name` is undeclared, so a dispatch record cannot be made to
+		say somebody was sent who was not. The register supplies the name."""
+		task = self.a_task()
+		answer = self.message(
+			ASSIGN,
+			{"task": task, "assigned_to": WORKER_EMPLOYEE, "assigned_to_name": "Somebody Else"},
+			credential=self.foreman,
+		)
+		self.assertEqual(answer["assigned_to_name"], "Ana Ramos")
+		self.assertNotIn("assigned_to_name", farmops_routes.accepted_arguments(mobile_api.assign_farm_task))
+
+	def test_an_employee_of_another_entity_reads_as_not_found(self):
+		task = self.a_task()
+		status, _ = self.refusal(
+			ASSIGN, {"task": task, "assigned_to": OUTSIDER_EMPLOYEE}, credential=self.foreman
+		)
+		self.assertEqual(status, 404)
+
+	# ── the task raised on the spot ─────────────────────────────────────────
+	def test_a_task_raised_from_the_handset_is_published_and_carries_its_contract(self):
+		answer = self.message(
+			RAISE,
+			{
+				"task_name": "Fix the gate latch — Block 7",
+				"task_type": "Repair",
+				"evidence_required": dict(WALK),
+				"urgency": "High",
+				"skill_required": "camp_maintenance",
+			},
+			credential=self.foreman,
+		)
+		self.assertEqual(answer["state"], "Available")
+		self.assertEqual(answer["urgency"], "High")
+		self.assertEqual(answer["company"], MAIN)
+		self.assertTrue(answer["evidence_required"])
+
+	def test_the_four_arguments_a_handset_may_not_compose_are_undeclared(self):
+		"""`creates_record` and `creates_record_data` write a compliance record and
+		its fields; `draft` hides the work from every other handset; `source_alert`
+		is `rectify_alert`'s to link. None of them has a parameter to land in."""
+		accepted = farmops_routes.accepted_arguments(mobile_api.create_farm_task)
+		for argument in ("creates_record", "creates_record_data", "draft", "source_alert", "materials_used"):
+			self.assertNotIn(argument, accepted)
+
+	def test_a_task_raised_with_no_evidence_contract_is_refused_by_name(self):
+		status, parsed = self.refusal(
+			RAISE, {"task_name": "x", "task_type": "Inspection"}, credential=self.foreman
+		)
+		self.assertEqual(status, 400)
+		self.assertIn("evidence_required", parsed["error"])
+
+	# ── the template register ───────────────────────────────────────────────
+	def test_the_template_register_answers_and_says_which_may_raise_work(self):
+		answer = self.message(TEMPLATES, credential=self.foreman)
+		self.assertTrue(answer["templates"])
+		self.assertTrue(answer["enabled_templates"])
+		self.assertEqual(answer["count"], len(answer["templates"]))
+
+	def test_one_task_raised_from_a_template_carries_the_templates_shape(self):
+		listed = self.message(TEMPLATES, credential=self.foreman)
+		template = listed["enabled_templates"][0]
+		shaped = {entry["name"]: entry for entry in listed["templates"]}[template]
+
+		answer = self.message(
+			FROM_TEMPLATE,
+			{"template": template, "location_doctype": "Housing Unit", "location": self.unit},
+			credential=self.foreman,
+		)
+		self.assertEqual(answer["template"], template)
+		self.assertEqual(answer["task_type"], shaped["task_type"])
+		self.assertEqual(answer["state"], "Available")
+		self.assertEqual(answer["location"], self.unit)
+
+	def test_the_authoring_calls_are_not_on_this_surface_at_all(self):
+		"""Reading the register is a foreman's; deciding what a recurring job asks
+		for is a desk decision with the regulation open."""
+		for absent in (
+			"create_farm_task_template",
+			"update_farm_task_template",
+			"get_farm_task_template",
+		):
+			self.assertFalse(hasattr(mobile_api, absent), absent)
 
 
 # ── 8. the row and the secrets ──────────────────────────────────────────────

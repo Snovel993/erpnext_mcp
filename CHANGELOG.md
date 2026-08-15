@@ -3,6 +3,61 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.72.0 — 2026-08-14 — Sprint 7: the foreman's crew-task dashboard
+
+**Five tools that have existed since Sprint 8's dispatch board and have never
+been reachable from a handset.** The phone could claim work, start it, finish it
+and hand it back — all of it a picker's own — and could not answer the question
+a foreman asks at two in the afternoon: *what is my crew holding, and can I move
+one of these jobs.* Five wrappers in `api/mobile.py`, five rows in
+`farmops_api/routes.py`, and no new tool code at all.
+
+| Route | What it answers |
+|---|---|
+| `POST /farmops/api/mobile/list_dispatched_tasks` | what the crew on my open shift is holding |
+| `POST /farmops/api/mobile/assign_farm_task` | send this job to that person |
+| `POST /farmops/api/mobile/create_farm_task` | raise work on the spot |
+| `POST /farmops/api/mobile/list_farm_task_templates` | the standing shapes of work |
+| `POST /farmops/api/mobile/create_task_from_template` | raise one of them, here, now |
+
+- **These are the first routes on that table a Field Worker cannot call.** Every
+  path published before them is a worker's own work, gated on
+  `guard.FARM_OPS_ROLES`, which admits a picker. Each of these five calls the new
+  `guard.require_dispatch_role` in its own body — Foreman or Farm Manager, the
+  same two names `dispatch.py` already draws the line between for Critical
+  urgency on a field report. The gate is in the wrapper because **the tools have
+  none**: on the MCP transport what stands in front of them is the operator's own
+  tool-enablement switch, and a phone does not go through that switch.
+- **The board is scoped to the crew, not to the site.**
+  `dispatch.list_dispatched_tasks` reads one named worker's assignments and will
+  read anybody's — on a handset that is not a scope, it is "walk the payroll one
+  docname at a time". The wrapper does not declare `worker_id` at all. It computes
+  the workers from the caller's own OPEN shifts (`end_datetime` unset, not
+  cancelled), adds the caller, and lets `employee` narrow that set and nothing
+  else; a name that is not on the crew is refused by name. A foreman with no open
+  shift gets their own board and a sentence saying why, rather than an empty
+  answer or an unscoped one.
+- **`assign_farm_task` is the widest write on the surface and is the only one
+  whose effect lands on somebody else.** `reassign=true` and a `reason` are still
+  `dispatch.py`'s refusal and are forwarded rather than restated — the rule is
+  conditional (it means nothing on a task nobody holds) and a wrapper demanding a
+  reason for dispatching unclaimed work would refuse the ordinary case to guard
+  the rare one. `assigned_to_name` is **not accepted**: a dispatch record that can
+  be made to name somebody who was never sent is not a dispatch record.
+- **Five arguments the three writes deliberately do not accept.**
+  `creates_record` and `creates_record_data` write a compliance record and
+  pre-fill its fields, which is `record_data` under another name; `draft` hides
+  raised work from every other handset; `source_alert` is `rectify_alert`'s link
+  to make, one task per alert; `materials_used` is a tank mix decided before
+  anybody drives anywhere. Work that must produce a compliance record comes off a
+  template, which is why both template routes are in the same set.
+- **`get_farm_task_template`, `create_farm_task_template` and
+  `update_farm_task_template` have no route.** Authoring the shape of a recurring
+  job — its evidence contract, the record it builds, its checklist — is a desk
+  decision with the regulation open. A method with no route 404s, and
+  `test_farmops_api.py` asserts the table in both directions so that stays a
+  decision rather than an omission.
+
 ## 0.71.0 — 2026-08-14 — Sprint 6: CFL Banking
 
 **Sprint 6 of the Gap Closure Plan, and its capstone: the bridge from the paper

@@ -43,6 +43,12 @@ SEVEN CHECKS, IN THIS ORDER, ALL OF THEM ON EVERY CALL:
   7. **The audit row and the secret strip**, which happen whichever way the
      call went, including the ways it was refused.
 
+AN EIGHTH CHECK EXISTS AND IS NOT IN THAT LIST ON PURPOSE. `require_dispatch_role`
+is Foreman-or-above, and the five dispatch methods call it themselves in their
+own bodies rather than wearing it in the decorator — because it is not true of
+this surface, it is true of five methods on it. Every other method here is a
+picker's own work.
+
 WHY THE AUDIT ROW GOES TO MCP Action Log AND NOT TO Audit Event. "Audit Event"
 on this site is a COMPLIANCE record — a GlobalGAP walk-through, an auditor, a
 finding, a corrective action. Forty phones polling a task list would put tens of
@@ -87,6 +93,19 @@ GRANT = "Mobile Access Grant"
 #: and Compliance Officer is deliberately absent because the twelve methods are
 #: field work — a compliance reviewer reads the register in the Desk.
 FARM_OPS_ROLES = frozenset({"Field Worker", "Farm Worker", "Foreman", "Farm Manager"})
+
+#: The roles that may DISPATCH: raise work, send somebody to it, or read a board
+#: that is not their own. A SUBSET of the list above rather than a second list
+#: beside it — everybody here has already been through all seven gates, and what
+#: this adds is the one distinction the dispatch surface turns on.
+#:
+#: THE SAME TWO NAMES `dispatch._CRITICAL_ROLES` USES, and for the same argument
+#: it makes: a field worker choosing their own urgency is alarm inflation, and a
+#: field worker choosing who does the work is that failure with somebody else's
+#: afternoon in it. `fill_pipeline.FOREMAN_ROLES` adds System Manager, which is
+#: right there and pointless here — the enrolment gate has already refused an
+#: operator's own account, grant or no grant.
+DISPATCH_ROLES = frozenset({"Foreman", "Farm Manager"})
 
 #: Calls per minute for a read. Generous — a phone refreshing three screens on a
 #: pull-to-refresh is three calls, and a worker who does that twice a minute is
@@ -207,6 +226,35 @@ def roles_held(user: str) -> set:
 	"""
 	held = set(frappe.get_roles(user) or [])
 	return held or set(role_lib.all_roles_of(user) or [])
+
+
+def require_dispatch_role(user: str, action: str) -> None:
+	"""Foreman or above, or nothing doing. The eighth gate, on the dispatch methods.
+
+	NOT IN `endpoint` AND NOT IN THE SEVEN, because it is not true of the surface
+	— it is true of five methods on it. A picker claiming their own work, filing a
+	completion or photographing a receipt is the ordinary case this API exists
+	for, and gating all sixty-odd methods on Foreman would close the app to the
+	people it was built for.
+
+	IT IS WORDED, unlike the role gate above, which answers everything with one
+	sentence so an unauthorised caller gets no oracle. The difference is who is
+	asking: this caller has already proved a named login, a field role and an
+	Active grant, so the fact that dispatch is a foreman's is not a secret being
+	leaked — it is the one thing they need to be told to stop tapping the button.
+
+	`frappe.PermissionError` rather than `ToolError`, so it answers 403 and
+	`endpoint` files the refusal as `unauthorized` rather than as an error the
+	operator would go looking for a bug behind.
+	"""
+	if roles_held(user) & DISPATCH_ROLES:
+		return
+	raise frappe.PermissionError(
+		f"{action} is restricted to {' and '.join(sorted(DISPATCH_ROLES))}. This account holds a "
+		"Farm Ops credential and none of those roles, so it may work its own tasks — list_my_tasks, "
+		"list_available_tasks, claim_task, start_task, complete_task_via_mobile, reject_task and "
+		"report_field_task are all open to it. Nothing was read and nothing was changed."
+	)
 
 
 def _require_mobile_grant(user: str) -> None:

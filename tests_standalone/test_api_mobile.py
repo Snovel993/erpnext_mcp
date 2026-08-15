@@ -370,6 +370,18 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# surface (see `test_farmops_api.py`).
 		"validate_document",
 		"get_document_validation",
+		# Sprint 7 (v0.72.0). The foreman's crew-task dashboard: the board for
+		# the crew on a foreman's own open shift, the dispatch that moves a job
+		# between people, the task raised on the spot, and the two ends of the
+		# template register. The server side is the whole of it — the handset's
+		# dashboard is the iOS half of the same sprint — and these five are the
+		# first methods on this surface a Field Worker cannot call at all: each
+		# carries `guard.require_dispatch_role` in its own body.
+		"list_dispatched_tasks",
+		"assign_farm_task",
+		"create_farm_task",
+		"list_farm_task_templates",
+		"create_task_from_template",
 	}
 
 	def _whitelisted(self, module):

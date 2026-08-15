@@ -363,6 +363,40 @@ ROUTES = (
 	# 404s, which is the whole design of this table.
 	Route("/mobile", mobile_api.validate_document),
 	Route("/mobile", mobile_api.get_document_validation),
+	# Sprint 7 (v0.72.0): the foreman's crew-task dashboard. Five tools that have
+	# existed since Sprint 8 and have never been reachable from a handset — the
+	# board for somebody else's work, the dispatch that moves it, the task raised
+	# on the spot, and the two ends of the template register.
+	#
+	# THESE FIVE ARE THE FIRST ROUTES ON THIS TABLE THAT A FIELD WORKER CANNOT
+	# CALL. Every path above is a worker's own work and is gated on
+	# `guard.FARM_OPS_ROLES`, which admits a picker; each of these calls
+	# `guard.require_dispatch_role` in its own body — Foreman or Farm Manager,
+	# the same two names `dispatch.py` already draws the line between for
+	# Critical urgency. The gate is in the wrapper rather than in the tools
+	# because the tools have none: on the MCP transport what stands in front of
+	# them is the operator's enablement switch, and a phone does not go through
+	# it.
+	#
+	# `list_dispatched_tasks` IS THE ONE WHOSE ARGUMENT CHANGED SHAPE. The tool
+	# takes `worker_id` and will read anybody's board; the wrapper does not
+	# declare that key at all — it computes the crew off the caller's own open
+	# shifts and lets `employee` narrow that set and nothing else. This table's
+	# own argument filter is what makes the undeclared key unreachable rather
+	# than merely unused.
+	#
+	# `get_farm_task_template`, `create_farm_task_template` and
+	# `update_farm_task_template` are deliberately absent. Reading one template
+	# in full is what the list already carries enough of, and AUTHORING the shape
+	# of a recurring job — its evidence contract, the record it builds, its
+	# checklist — is a decision made at a desk with the regulation open, not at a
+	# tailgate. A method with no route 404s, which is the whole design of this
+	# table.
+	Route("/mobile", mobile_api.list_dispatched_tasks),
+	Route("/mobile", mobile_api.assign_farm_task),
+	Route("/mobile", mobile_api.create_farm_task),
+	Route("/mobile", mobile_api.list_farm_task_templates),
+	Route("/mobile", mobile_api.create_task_from_template),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

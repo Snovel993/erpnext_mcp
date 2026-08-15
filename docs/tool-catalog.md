@@ -12450,3 +12450,61 @@ machinery than the problem deserves.
 `account_map` is `{category: account}` and every account in it is vetted
 **before any rule is created**, so a bad one produces nothing rather than half a
 book. Categories left out of it are named in `categories_without_account`.
+
+---
+
+## The foreman's crew-task dashboard (v0.72.0)
+
+Sprint 7. Five tools built in Sprint 8 and never reachable from a handset get a
+route: `list_dispatched_tasks`, `assign_farm_task`, `create_farm_task`,
+`list_farm_task_templates` and `create_task_from_template`, all at
+`POST /farmops/api/mobile/…`. No tool changed; the rules stay where they are.
+
+### These are the first mobile routes a Field Worker cannot call
+
+Every path published before them is a picker acting on their own work and is
+gated on `guard.FARM_OPS_ROLES`, which admits a Field Worker. Each of these five
+calls `guard.require_dispatch_role` in its own body — **Foreman or Farm Manager**,
+the same two names `dispatch.py` already draws the line between for Critical
+urgency on a field report, and for the same reason.
+
+The gate is in the wrapper rather than delegated to the tool because **these five
+tools have no role check at all**. What stands in front of them on the MCP
+transport is the operator's own `allow_…` switch, and a phone does not go through
+that switch.
+
+### `list_dispatched_tasks` is scoped to the crew, and does not take `worker_id`
+
+The tool reads one named worker's assignments and will read anybody's. On a
+handset that is not a scope — it is "walk the payroll one docname at a time" — so
+the wrapper computes the workers instead: the caller's own OPEN shifts
+(`end_datetime` unset, not cancelled), everybody rostered on them, and the caller.
+`employee` may narrow that set; a name outside it is **refused by name** rather
+than answered with an empty list. `worker_id` is not declared at all, so a body
+carrying it has the key dropped and gets the whole crew.
+
+A crew member with a `left_at` is kept and reported, not dropped: whoever clocked
+out at noon still holds what they were sent to that morning. A foreman with no
+open shift gets their own board and a sentence saying why.
+
+### What the three writes will not accept
+
+`assigned_to_name` (it replaces the register's name on both records),
+`creates_record` and `creates_record_data` (`record_data` under another name),
+`draft` (invisible work), `source_alert` (`rectify_alert` owns that link, one task
+per alert) and `materials_used` (a tank mix decided before anybody drives
+anywhere). Work that must produce a compliance record comes off a template, which
+is why both template routes are in the same set.
+
+`reassign=true` and `reason` are forwarded rather than restated: the refusal is
+`assign_farm_task`'s, it is conditional on somebody actually holding the task, and
+a wrapper demanding a reason for dispatching unclaimed work would refuse the
+ordinary case to guard the rare one.
+
+### Three template tools with no route
+
+`get_farm_task_template`, `create_farm_task_template` and
+`update_farm_task_template`. Reading one template in full is what the list already
+carries enough of, and authoring the shape of a recurring job — its evidence
+contract, the record it builds, its checklist — is a desk decision with the
+regulation open.

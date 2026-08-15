@@ -37,8 +37,9 @@ returning it to the pool; a worker handing work back must not be able to delete
 it, so the wrapper never forwards it. `complete_farm_task` takes `record_data`,
 which writes arbitrary fields into the compliance record it produces; the phone
 has no business composing that. `list_dispatched_tasks` takes `worker_id`, and
-the wrapper fills it in from the authenticated caller rather than the body — an
-account that can name somebody else in a request body is not scoped to anything.
+the wrapper declares `employee` instead and refuses any name that is not on the
+caller's own crew — an account that can name somebody else in a request body is
+not scoped to anything, and a foreman's crew is what scopes this one.
 
 THE RULES STAY IN `tools/dispatch.py`. The concurrent-claim limit, the refusal
 to self-pick Dispatched work, the evidence contract and the refusal of a
@@ -88,8 +89,10 @@ import json
 import frappe
 
 from .. import bucket_bridge, compat, datetimes
+from .. import shifts as shift_records
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
+from ..tools import tasktemplates as template_tools
 from ..tools import signed_documents
 from ..tools import evidence as evidence_tools
 from ..tools import files as file_tools
@@ -119,6 +122,20 @@ TRAINING_RECORD = "Employee Training Record"
 REGULATORY_FILING = "Regulatory Filing"
 COMPLIANCE_POLICY = "Compliance Policy"
 DOCUMENT_VALIDATION = "Document Validation"
+FARM_TASK_TEMPLATE = template_tools.TEMPLATE
+
+#: Most crew members `list_dispatched_tasks` will read a board for in one call.
+#: `shifts.CREW_CAP` is what `start_shift` will roster and is read rather than
+#: restated, so a phone and the crew clock cannot come to disagree about how big
+#: a crew is. It matters here because the board is read ONE WORKER AT A TIME —
+#: see the wrapper on why that is the right cost.
+CREW_BOARD_CAP = shifts.CREW_CAP
+
+#: Most templates the picker hands back. `tasktemplates` caps the register at 200
+#: and this is the same number: a template list is a screen somebody scrolls to
+#: find the job they are about to raise, and an operation with more standing jobs
+#: than this has a register question rather than a paging one.
+TEMPLATE_LIST_LIMIT = 200
 
 #: The four HR masters the wizard's Assignment step offers as dropdowns, mapped
 #: to the field on each that carries a human label. `Branch` has no second
@@ -5881,3 +5898,522 @@ def get_document_validation(user: str, name=None, validation_id=None) -> dict:
 		frappe.throw("name is required — a Document Validation docname.", frappe.ValidationError)
 	guard.require_docname(DOCUMENT_VALIDATION, reference, "name")
 	return docvalidation.get_document_validation({"name": reference}).data
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Sprint 7 (v0.72.0) — THE FOREMAN'S CREW-TASK DASHBOARD
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Five tools that have existed since Sprint 8 and have never been reachable from
+# a handset: the board for somebody else's work, the dispatch that moves it, the
+# task raised on the spot, and the two ends of the template register. Audited
+# against v0.71.0 by the iOS session, which found no wrapper and no route for any
+# of them.
+#
+# ALL FIVE CARRY `guard.require_dispatch_role`, WHICH NOTHING ABOVE THIS LINE
+# DOES. Every method on this surface until now is a worker's own work — their
+# tasks, their shift, their onboarding, the receipt they photographed — and the
+# gate that fits it is `FARM_OPS_ROLES`, which admits a picker. These five are
+# the other thing: reading a board that is not yours, and deciding whose
+# afternoon a job lands in. `dispatch.py` already draws that line for Critical
+# urgency on a field report and draws it between exactly these two roles, so this
+# is the same line rather than a new one.
+#
+# THE TOOLS HAVE NO ROLE CHECK OF THEIR OWN, and that is why the gate is here
+# rather than delegated the way `require_hr_role` is on the onboarding methods.
+# `assign_farm_task`, `create_farm_task` and `create_task_from_template` reach
+# `frappe`'s writer with `ignore_permissions=True` after checking their
+# arguments and nothing else — on the MCP transport what stands in front of them
+# is the operator's own tool-enablement switch, and a phone does not go through
+# that switch. Publishing them here without the gate would put "take this job off
+# Ana and give it to me" on every enrolled handset in the orchard.
+#
+# WHAT IS DELIBERATELY NOT PASSED THROUGH, on the three writes:
+#
+#   * `assigned_to_name` — the tools take it and write it onto the task AND onto
+#     the assignment, in place of the name the Employee register holds. A phone
+#     that can put arbitrary text where the dispatched worker's name goes can
+#     make a dispatch record say somebody else was sent. The register has the
+#     name; `_worker_name` reads it.
+#   * `creates_record` and `creates_record_data` — which compliance record
+#     completing the task produces, and the fields pre-filled into it. This is
+#     `record_data` under another name and the answer is the same one
+#     `complete_task_via_mobile` gives: the phone has no business composing it.
+#     Work that must produce a Housing Inspection is work that comes off a
+#     template, which is why `create_task_from_template` is in this set.
+#   * `draft` — a task raised from a handset that lands in Draft is invisible to
+#     every other handset, so the foreman standing in the block believes they
+#     dispatched something and nobody can see it. Everything raised here is
+#     published.
+#   * `source_alert` — one task per alert is a rule with a refusal behind it, and
+#     `rectify_alert` is the route that owns that link. A second door onto it
+#     would be a second place for the one-per-alert rule to be got wrong.
+#   * `materials_used` — the tank mix, which `complete_farm_task` draws down out
+#     of stock. A spray task's mix is decided before anybody drives anywhere,
+#     which is what a template is for.
+#   * `worker_id` on the read — see `list_dispatched_tasks`, which declares
+#     `employee` instead and checks it against the caller's own crew.
+
+
+def _open_shifts_led_by(employee: str, allowed: list, company: str = "", shift: str = "") -> list:
+	"""The shifts this person has OPEN and is the foreman of, newest first.
+
+	Open is `end_datetime` unset, which is `shifts.status_for`'s own rule and not
+	the stored `status` column — a shift ticked Closed with no end time is still
+	being worked, and that ordering is settled in `shifts.py` rather than
+	re-decided here. A cancelled shift is dropped: it has no end time either, and
+	a crew that was stood down is not a crew whose board anybody is working from.
+	"""
+	if not compat.doctype_exists(FARM_SHIFT):
+		return []
+	filters = {
+		"foreman": employee,
+		"end_datetime": ("is", "not set"),
+		"company": company if company else ("in", list(allowed)),
+	}
+	if shift:
+		filters["name"] = shift
+	rows = shift_records.rows(filters, limit=CREW_BOARD_CAP)
+	return [row for row in rows if not compat.checked(row.get("cancelled"))]
+
+
+def _crew_under(user: str, allowed: list, company: str, shift: str) -> tuple:
+	"""(the open shifts this caller leads, the people whose boards they may read).
+
+	THE CALLER IS ALWAYS IN THE ANSWER, whether or not they rostered themselves.
+	A foreman is on the crew in every sense that matters to a dashboard — they
+	take work too — and a board that showed everybody's tasks except the reader's
+	own would be a board nobody trusts.
+
+	A LEFT `left_at` DOES NOT REMOVE SOMEBODY. Whoever was clocked out at noon
+	still holds whatever they were sent to that morning, and dropping them is how
+	an unfinished job stops being anybody's. It is reported instead: `left_at` is
+	on every crew entry, so the dashboard can grey the row rather than lose it.
+	"""
+	me = _employee(user)
+	shift_rows = _open_shifts_led_by(me, allowed, company, shift)
+
+	crew, seen = [], set()
+	for row in shift_rows:
+		for member in shift_records.crew_of(str(row.get("name") or "")):
+			person = str(member.get("employee") or "").strip()
+			if not person or person in seen:
+				continue
+			seen.add(person)
+			crew.append(
+				{
+					"employee": person,
+					"employee_name": member.get("employee_name") or person,
+					"role": member.get("role") or "Worker",
+					"shift": row.get("name"),
+					"joined_at": str(member.get("joined_at") or "") or None,
+					"left_at": str(member.get("left_at") or "") or None,
+				}
+			)
+			if len(crew) >= CREW_BOARD_CAP:
+				break
+	if me not in seen:
+		crew.insert(
+			0,
+			{
+				"employee": me,
+				"employee_name": str(frappe.db.get_value(EMPLOYEE, me, "employee_name") or "") or me,
+				"role": "Foreman",
+				"shift": (shift_rows[0].get("name") if shift_rows else None),
+				"joined_at": None,
+				"left_at": None,
+			},
+		)
+	return shift_rows, crew
+
+
+# ── 67. list_dispatched_tasks ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_dispatched_tasks", limit=guard.READ_LIMIT)
+def list_dispatched_tasks(
+	user: str,
+	employee=None,
+	shift=None,
+	farm_shift=None,
+	state=None,
+	include_finished=None,
+	company=None,
+) -> dict:
+	"""What the crew on this foreman's open shift is holding. v0.72.0.
+
+	SCOPED TO THE CREW, NOT TO THE SITE. `dispatch.list_dispatched_tasks` reads
+	one named worker's assignments and will read anybody's — it is an MCP tool
+	behind an operator's own enablement switch, and "which worker" is the whole
+	of its argument. On a handset that is not a scope: an account able to name
+	anybody would be able to walk the payroll one docname at a time and read what
+	every person on the farm is doing today. So the WORKERS ARE COMPUTED HERE
+	rather than accepted — the caller's own open shifts, the crew rostered on
+	them, and the caller — and `employee` may only narrow that set.
+
+	`worker_id` IS NOT A PARAMETER, and `employee` is the one that is. The tool's
+	own spelling is left undeclared on purpose: `routes.bind` reduces a body to
+	the keys a signature names, so a handset that sent `worker_id` would have it
+	dropped and would get the whole crew — which is the one direction this filter
+	fails safely in, and the refusal below makes the other direction loud.
+
+	A FOREMAN WITH NO OPEN SHIFT GETS THEIR OWN BOARD AND A NOTE SAYING SO,
+	rather than an empty answer or an unscoped one. The crew clock is what
+	populates this — somebody has to have started a shift — and a dashboard that
+	silently showed nothing on a morning before roll call would read as "no work
+	today".
+
+	IT COSTS ONE READ PER CREW MEMBER, capped at `CREW_BOARD_CAP`. The alternative
+	is a second implementation of the board query here, which is the copy of the
+	dispatch rules `api/mobile.py` refuses everywhere else — the claim ceiling,
+	the terminal states and the assignment-to-task join all live in
+	`tools/dispatch.py` and get to stay there.
+	"""
+	guard.require_dispatch_role(user, "Reading a crew's dispatch board")
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed)
+
+	named_shift, _label = _one_spelling(shift, farm_shift, "shift", "farm_shift")
+	if named_shift:
+		named_shift = guard.require_scoped_doc(FARM_SHIFT, named_shift, "shift", allowed)
+
+	shift_rows, crew = _crew_under(user, allowed, wanted, named_shift)
+	if named_shift and not shift_rows:
+		frappe.throw(
+			f"{named_shift} is not a shift you have open. This board answers for the crew on your "
+			"own shifts — another foreman's crew is a Desk question, and list_dispatch_board is the "
+			"tool that answers it. Nothing was read.",
+			frappe.PermissionError,
+		)
+
+	wanted_person = str(employee or "").strip()
+	if wanted_person:
+		known = {entry["employee"] for entry in crew}
+		if wanted_person not in known:
+			frappe.throw(
+				f"{wanted_person} is not on the crew of any shift you have open, so this board does "
+				"not answer for them. Roster them with add_worker_to_shift, or read the whole board "
+				"in the Desk. Nothing was read.",
+				frappe.PermissionError,
+			)
+		crew = [entry for entry in crew if entry["employee"] == wanted_person]
+
+	total, boards = 0, []
+	for entry in crew:
+		inner = {"worker_id": entry["employee"], "limit": CREW_BOARD_CAP}
+		if wanted:
+			inner["company"] = wanted
+		if state is not None:
+			inner["state"] = state
+		if include_finished is not None:
+			inner["include_finished"] = include_finished
+
+		data = dispatch.list_dispatched_tasks(inner).data
+		rows = []
+		for assignment in data.get("assignments") or []:
+			detail = assignment.get("task_detail")
+			if detail:
+				rows.append(shape.task(detail, assignment))
+		rows = guard.scoped(rows, allowed)
+		total += len(rows)
+		boards.append(
+			{
+				**entry,
+				"tasks": rows,
+				"count": len(rows),
+				"holding_now": data.get("holding_now"),
+				"claims_remaining": data.get("claims_remaining"),
+			}
+		)
+
+	answer = {
+		"shifts": [str(row.get("name")) for row in shift_rows],
+		"company": wanted or None,
+		"crew": boards,
+		"crew_size": len(boards),
+		"count": total,
+	}
+	if not shift_rows:
+		answer["note"] = (
+			"You have no open shift, so this is your own board and nobody else's. Start one with "
+			"start_shift and roster the crew with add_worker_to_shift, and everybody on it appears "
+			"here."
+		)
+	return answer
+
+
+# ── 68. assign_farm_task ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("assign_farm_task", mutating=True, limit=guard.WRITE_LIMIT)
+def assign_farm_task(
+	user: str,
+	task=None,
+	assigned_to=None,
+	employee=None,
+	reassign=None,
+	reason=None,
+	shift=None,
+	farm_shift=None,
+) -> dict:
+	"""Send one named person to one task. v0.72.0.
+
+	THE WIDEST WRITE ON THIS SURFACE, and the only one whose effect lands on
+	somebody who is not the caller. Everything else a phone can do it does to its
+	own work or to a record it is filing; this takes a job off one person and
+	gives it to another. Three things stand in front of it:
+
+	  * `guard.require_dispatch_role` — Foreman or Farm Manager. See the block
+	    above this set.
+	  * `guard.require_scoped_doc` on the task and `_employee_argument` on the
+	    person, so neither may name anything outside the caller's own entities,
+	    and something that is outside reads as not found rather than as refused.
+	  * `reassign` and `reason`, WHICH THE TOOL ENFORCES AND THIS FORWARDS. Taking
+	    work off somebody already holding it is refused unless the body says
+	    `reassign=true` AND carries a reason, which is written onto the assignment
+	    being closed. That rule is `dispatch.assign_farm_task`'s and it stays
+	    there — restating it here would be a second copy of a refusal an auditor
+	    reads off one record.
+
+	    IT IS NOT RESTATED EVEN THOUGH `reject_task` RESTATES ITS OWN. The
+	    difference is that this refusal is CONDITIONAL: `reassign` means nothing
+	    on a task nobody holds, and a wrapper demanding a reason for dispatching
+	    unclaimed work would refuse the ordinary case to guard the rare one.
+
+	`assigned_to_name` IS NOT ACCEPTED. The tools write it onto both records in
+	place of the name the Employee register holds, and a dispatch record that can
+	be made to name somebody who was never sent is not a dispatch record.
+	"""
+	guard.require_dispatch_role(user, "Dispatching a task to somebody")
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
+
+	person, label = _one_spelling(assigned_to, employee, "assigned_to", "employee")
+	if not person:
+		frappe.throw(
+			"assigned_to is required — the Employee being sent. A dispatch with no name on it "
+			"answers none of the questions it exists to answer. Nothing was changed.",
+			frappe.ValidationError,
+		)
+	person = _employee_argument(person, allowed, label)
+
+	inner = {"task": name, "assigned_to": person}
+	if reassign is not None:
+		inner["reassign"] = reassign
+	if reason is not None:
+		inner["reason"] = reason
+
+	named_shift, shift_label = _one_spelling(farm_shift, shift, "farm_shift", "shift")
+	if named_shift:
+		inner["farm_shift"] = guard.require_scoped_doc(FARM_SHIFT, named_shift, shift_label, allowed)
+
+	result = dispatch.assign_farm_task(inner)
+	data = result.data
+	out = shape.task(data, data.get("assignment") or {})
+	out["reassigned_from"] = data.get("reassigned_from")
+	out["concurrent_claims"] = data.get("concurrent_claims")
+	return out
+
+
+# ── 69. create_farm_task ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_farm_task", mutating=True, limit=guard.WRITE_LIMIT)
+def create_farm_task(
+	user: str,
+	task_name=None,
+	task_type=None,
+	evidence_required=None,
+	urgency=None,
+	dispatch_mode=None,
+	company=None,
+	location_doctype=None,
+	location=None,
+	skill_required=None,
+	estimated_duration_minutes=None,
+	notes=None,
+	assigned_to=None,
+	employee=None,
+	shift=None,
+	farm_shift=None,
+) -> dict:
+	"""Raise one piece of work on the spot, with its evidence contract. v0.72.0.
+
+	`report_field_task` IS THE OTHER DOOR ONTO THIS DOCTYPE AND IS NOT THIS ONE.
+	A worker reports a problem and the server decides the shape of the work; a
+	foreman raising a task decides it themselves — the type, the urgency, the
+	skill, and above all what closing it obliges somebody to produce. Both stay:
+	the field report is open to every enrolled worker and rate-limited against
+	alarm inflation, and this is Foreman-and-above with the whole form in the
+	body.
+
+	`evidence_required` IS MANDATORY AND IS THE POINT. `tools/dispatch.py` refuses
+	without it and the refusal names the argument; it is not defaulted here,
+	because a wrapper quietly supplying "a photograph will do" would put a
+	contract nobody chose onto a compliance record.
+
+	The five arguments this does not accept — `creates_record`,
+	`creates_record_data`, `draft`, `source_alert` and `materials_used` — are set
+	out in the block that opens this set. Work that has to produce a compliance
+	record comes off a template.
+	"""
+	guard.require_dispatch_role(user, "Raising a farm task")
+	allowed = guard.require_scope(user)
+	entity = _company(user, company, allowed)
+
+	inner = {"company": entity}
+	for key, value in (
+		("task_name", task_name),
+		("task_type", task_type),
+		("evidence_required", evidence_required),
+		("urgency", urgency),
+		("dispatch_mode", dispatch_mode),
+		("location_doctype", location_doctype),
+		("location", location),
+		("skill_required", skill_required),
+		("estimated_duration_minutes", estimated_duration_minutes),
+		("notes", notes),
+	):
+		if value is not None:
+			inner[key] = value
+
+	person, label = _one_spelling(assigned_to, employee, "assigned_to", "employee")
+	if person:
+		inner["assigned_to"] = _employee_argument(person, allowed, label)
+
+	named_shift, shift_label = _one_spelling(farm_shift, shift, "farm_shift", "shift")
+	if named_shift:
+		inner["farm_shift"] = guard.require_scoped_doc(FARM_SHIFT, named_shift, shift_label, allowed)
+
+	result = dispatch.create_farm_task(inner)
+	data = result.data
+	out = shape.task(data, data.get("assignment") or {})
+	if data.get("warnings"):
+		out["warnings"] = data["warnings"]
+	return out
+
+
+# ── 70. list_farm_task_templates ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_farm_task_templates", limit=guard.READ_LIMIT)
+def list_farm_task_templates(
+	user: str,
+	task_type=None,
+	skill_required=None,
+	enabled=None,
+	regime=None,
+	company=None,
+	limit=None,
+) -> dict:
+	"""The standing shapes of work this operation has defined. v0.72.0.
+
+	THE PICKER `create_task_from_template` NEEDS, and gated with it rather than
+	one step below it. A template register is not sensitive on its own — it is a
+	list of the jobs this farm does — but it exists on this surface to be the
+	screen a foreman chooses from before raising work, and a read that answers for
+	a screen nobody else can reach may as well have the same gate as the screen.
+
+	SCOPED ON THE WAY OUT RATHER THAN ONLY ON THE WAY IN. `company` narrows the
+	query when it is sent, and `guard.scoped` runs on the answer either way — a
+	template with no company is a template that belongs to the operation rather
+	than to an entity, and `scoped` keeps it for the reason it keeps a task with
+	none: it is a data question, not another entity's secret.
+
+	A DISABLED TEMPLATE IS STILL LISTED, which is the tool's own decision and is
+	forwarded intact: `enabled_templates` is the set new work may be raised from,
+	and the app greys the rest rather than hiding them. Hiding them would make a
+	foreman who cannot find last season's job believe it never existed.
+	"""
+	guard.require_dispatch_role(user, "Reading the farm task template register")
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed)
+
+	# `limit` goes through UNPARSED, because `as_limit` is what parses it and
+	# `tasktemplates` already caps the answer at the register's own ceiling. An
+	# `int()` here would 500 on a body that sent "twenty" instead of refusing it,
+	# and would be a second opinion about a number the tool already has one about.
+	inner = {"limit": limit if limit is not None else TEMPLATE_LIST_LIMIT}
+	if wanted:
+		inner["company"] = wanted
+	for key, value in (
+		("task_type", task_type),
+		("skill_required", skill_required),
+		("enabled", enabled),
+		("regime", regime),
+	):
+		if value is not None:
+			inner[key] = value
+
+	data = template_tools.list_farm_task_templates(inner).data
+	templates = guard.scoped(data.get("templates") or [], allowed)
+	live = [entry["name"] for entry in templates if entry.get("enabled")]
+	return {
+		"templates": templates,
+		"count": len(templates),
+		"enabled_templates": live,
+		"company": wanted or None,
+	}
+
+
+# ── 71. create_task_from_template ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_task_from_template", mutating=True, limit=guard.WRITE_LIMIT)
+def create_task_from_template(
+	user: str,
+	template=None,
+	location_doctype=None,
+	location=None,
+	task_name=None,
+	urgency=None,
+	notes=None,
+	company=None,
+	assigned_to=None,
+	employee=None,
+) -> dict:
+	"""Raise one task from a standing template, pre-filled. v0.72.0.
+
+	THE ROUTE FOR WORK THAT PRODUCES A COMPLIANCE RECORD, which is why
+	`create_farm_task` above refuses `creates_record` and this does not need to
+	accept it. Everything about the task's shape — the type, the skill, the
+	duration, the dispatch mode, the evidence contract, the record it builds and
+	its defaults, the instructions and the whole checklist — is COPIED off the
+	template at creation, by the template's own code. The phone chooses which
+	template and where; it composes none of it.
+
+	THE OVERRIDES ARE THE THREE A FOREMAN ACTUALLY HAS AN OPINION ABOUT: where the
+	work is, how urgent this instance is, and a note about this particular cabin.
+	`creates_record_data` is not among them for the reason the block above gives —
+	it writes fields into the compliance record, which is `record_data` wearing a
+	different name.
+
+	THE TEMPLATE IS SCOPE-CHECKED like every other docname here. A template
+	belonging to an entity this account cannot reach reads as not found, and one
+	belonging to no entity is the operation's own and is reachable — the same
+	rule `guard.scoped` applies to the list this picks from.
+	"""
+	guard.require_dispatch_role(user, "Raising a farm task from a template")
+	allowed = guard.require_scope(user)
+
+	name = guard.require_scoped_doc(FARM_TASK_TEMPLATE, template, "template", allowed)
+	entity = _company(user, company, allowed)
+
+	inner = {"template": name, "company": entity}
+	for key, value in (
+		("location_doctype", location_doctype),
+		("location", location),
+		("task_name", task_name),
+		("urgency", urgency),
+		("notes", notes),
+	):
+		if value is not None:
+			inner[key] = value
+
+	person, label = _one_spelling(assigned_to, employee, "assigned_to", "employee")
+	if person:
+		inner["assigned_to"] = _employee_argument(person, allowed, label)
+
+	result = template_tools.create_task_from_template(inner)
+	data = result.data
+	out = shape.task(data, data.get("assignment") or {})
+	out["template"] = data.get("template")
+	out["checklist"] = data.get("checklist") or []
+	if data.get("warnings"):
+		out["warnings"] = data["warnings"]
+	return out
