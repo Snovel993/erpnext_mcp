@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 513 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 527 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 244 read tools are **on** by default and can be switched off individually. A
+All 252 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -12508,3 +12508,306 @@ ordinary case to guard the rare one.
 carries enough of, and authoring the shape of a recurring job — its evidence
 contract, the record it builds, its checklist — is a desk decision with the
 regulation open.
+
+---
+
+## The Bank Bridge consolidation (v0.73.0)
+
+Fourteen tools, three doctypes and two whitelisted endpoints that move the
+**reconciliation truth** out of a Flask sidecar and into the system that already
+holds the transactions, the ledger and the company.
+
+**The question none of the earlier bank tools could answer: is the data
+COMPLETE.** `get_bank_reconciliation_status` answers three questions about a
+transaction that is *present* — allocated, receipted, categorised. A transaction
+the feed never delivered leaves no row to inspect, no gap in a sequence and no
+trace of any kind. The only thing that finds it is arithmetic across a whole
+period:
+
+```
+computed_closing = anchored_opening + transaction_sum
+variance         = anchored_closing - computed_closing
+```
+
+Where the variance is not zero, the difference **is** the missing movement, to
+the cent, before anybody knows what it was. Positive is money **in**, on every
+number in this section and on ERPNext's own Bank Transaction, so nothing here
+flips a sign.
+
+### What a Statement Anchor is
+
+One row per `(bank_account, statement period)`. Unique on that triple, enforced
+in the controller because Frappe has no composite unique index in a DocType JSON
+— and it has to be, because two anchors for one October is two answers to
+whether October tied out, and the push endpoint's idempotency depends on the
+site being unable to hold both.
+
+`computed_closing`, `variance`, `reconciled` and `chain_gap_from_prior` are
+**read-only and recomputed on every save**. A payload carrying its own variance
+gets it recomputed rather than adopted: a pipe that could assert a variance could
+assert a zero, and a zero variance is indistinguishable from a reconciled
+account.
+
+`Statement Anchor Line` is an optional child table holding the statement's own
+lines. It is **not** a second copy of a Bank Transaction — it is the other
+party's record of the same week, and the difference between the two is the only
+thing that can name a movement the feed dropped.
+
+### `get_statement_anchor_chain`
+
+**Arguments:** `bank_account` (docname or four-digit mask), `plaid_account_mask`,
+`company`, `from_date`, `to_date`, `limit`.
+
+In **period** order, because the list is the chain and reading it top to bottom
+is how somebody finds the month it broke. `cumulative_variance` is the number to
+read first: periods that vary a few hundred either way are timing differences, a
+cumulative variance that grows every month is a recurring charge nobody has
+booked, and the two look identical period by period.
+
+A **chain gap** — one period's opening balance is not the prior period's closing
+balance — is a *missing statement*, which no amount of per-transaction checking
+will find. Gaps are warned about, with the sentence saying that a chain broken at
+March says nothing reliable about April.
+
+A mask that matches more than one account is **refused by name**. A
+reconciliation answer for the wrong account looks exactly like a right one.
+
+### `list_unreconciled_anchors`
+
+**Arguments:** `company`, `bank_account`, `tolerance`, `include_explained`,
+`from_date`, `to_date`, `limit`.
+
+The same data worst-first by **absolute** variance, which is the worklist
+ordering — the sort happens in Python because a database ordering on the signed
+variance would put the largest overstatement and the largest understatement at
+opposite ends of the list.
+
+A period carrying a `variance_reason` is **still listed**. It is a recorded fact
+about an account — a quarterly advisory fee deducted outside the feed — and
+hiding it would make somebody rediscover it every quarter. `include_explained:
+false` drops them when that is genuinely what you want.
+
+`tolerance` re-judges every period rather than reading the stored `reconciled`
+flag, because "what is off by more than a hundred dollars" is a different
+question from the one each record was saved with.
+
+### `get_anchor_variance_breakdown`
+
+**Arguments:** `anchor`, or `bank_account` + `period_start` + `period_end`;
+`day_window`, `tolerance`, `limit`.
+
+Three sums that are routinely confused, reported separately and **never added**:
+
+| Field | What it is | What a mismatch means |
+|---|---|---|
+| `anchored_transaction_sum` | what the *statement* said moved | — |
+| `ledger_transaction_sum` | what the Bank Transactions on file add up to | the two records of the period disagree before any variance is computed — a FEED problem |
+| `variance` | the statement disagreeing with its own opening and closing | a movement outside the transaction list, e.g. a fee deducted at source |
+
+`diagnosis` is prose rather than a code, because it is a hypothesis: every number
+it is drawn from is in the payload beside it, so a reader who disagrees has
+everything needed to say so.
+
+### `list_unmatched_statement_lines`
+
+**Arguments:** `bank_account`, `company`, `from_date`, `to_date`, `day_window`
+(default 3), `tolerance`, `limit`.
+
+The one list that **names** a missing movement rather than its size — the date
+the bank printed, the memo, the amount.
+
+Matching is nearest-in-time among exact-enough amounts, and **each transaction is
+consumed once**. Two identical $184.62 fuel purchases in one week is the ordinary
+case on a farm, and a matcher that let one transaction satisfy both lines would
+report the account complete while a movement was genuinely missing.
+
+**An empty list is not automatically a clean result.** Where no anchor in scope
+carries statement lines the tool says so, loudly, because "nothing is missing"
+and "we have nothing to check against" are opposite answers. The reverse list —
+transactions with no statement line — is reported separately: one is a gap in the
+feed, the other is a transaction that should not be on the account at all.
+
+It writes nothing, including the matches it works out.
+
+### `get_statement_recon_report`
+
+**Arguments:** `bank_account`, `company`, `from_date`, `to_date`, `limit`.
+
+The **statement**, the **feed** and the **ledger** for the same periods, side by
+side and never summed. Feed against ledger disagreeing is the ordinary backlog —
+transactions have arrived and nobody has posted them. Statement against feed
+disagreeing is the serious one, because two independent records of one period do
+not match and every categorisation built on the feed inherits the difference.
+
+`ledger_movement` is debit minus credit on the GL account the Bank Account names,
+and is **null** where it names none — reporting zero would claim the ledger
+disagrees with the feed by the whole month.
+
+### `get_account_pairing` and `pair_bank_accounts` — the second MUTATING, default off
+
+**Arguments (pair):** `bank_account` (required), `paired_bank_account`
+(required), `pairing_type`, `paired_pairing_type`, `replace`.
+
+A pairing is a **property of an account**, not an entity: `paired_bank_account`
+and six Plaid metadata columns are Custom Fields on ERPNext's Bank Account,
+created at install and lazily on first use. A brokerage and the cash-services
+account its trades settle through are one relationship seen from two sides, and
+an anchor chain reconciles cash and sweep only because the securities leg lives
+on the companion.
+
+`pair_bank_accounts` **writes both sides**, which is why it is a tool rather than
+a note telling somebody to set a field: a pairing stored on one account reads as
+working from that end and as absent from the other, and the missing half is the
+one a reconciliation run happens to start from. Naming one role names the other,
+since the pair has exactly two. Refused: pairing across companies, an account
+with itself, and silently breaking an existing pairing — `replace=true` repoints
+it and names the account left with no companion.
+
+### `set_anchor_variance_reason` — MUTATING, default off
+
+**Arguments:** `anchor` or `bank_account` + period; `variance_reason`, `clear`.
+
+Writes **one** prose field, and it does **not** mark the period reconciled.
+`reconciled` is arithmetic; this is a human judgement beside it; both are
+reported and neither overwrites the other.
+
+Why a sentence beats a wider tolerance: a managed account's quarterly advisory
+fee is $3,774.81 this quarter and a different number next quarter, so a tolerance
+wide enough to swallow this one is wide enough to swallow a genuinely missing
+deposit — while the sentence stays true and hides nothing.
+
+### `rebuild_anchor_chain` — MUTATING, default off
+
+**Arguments:** `bank_account` (required), `from_date`, `to_date`,
+`recompute_transaction_sum`, `day_window`, `tolerance`, `dry_run`.
+
+Recomputes what is **derived** — closing, variance, reconciled, chain gaps, and
+the Bank Transaction each statement line matches. A chain built one anchor at a
+time gets the gap flags wrong whenever a statement arrives out of order, which is
+what this exists to fix.
+
+**It leaves `anchored_opening`, `anchored_closing` and `transaction_sum` alone.**
+Those came off a bank statement this app did not read, and rewriting them from
+the transaction feed would replace the independent record with a restatement of
+the thing it exists to check — after which every period ties out perfectly and
+the chain proves nothing. `recompute_transaction_sum=true` overrides it for
+accounts whose anchors came from the feed to begin with, reports the before and
+after per period, and warns in those words.
+
+### `create_advisory_agreement`, `update_advisory_agreement` — MUTATING, default off; `get_advisory_agreement_summary`, `list_advisory_agreements` — read
+
+An advisory fee is the one recurring cost on a farm's books that arrives
+**already deducted**. Nobody approves it, no invoice precedes it, and on a
+statement it looks like every other line. The only thing that says whether it is
+the right number is the agreement it was charged under.
+
+Every creation refusal is a number that would otherwise **compute wrong rather
+than fail**: a `Percent of AUM` agreement with no percentage computes zero, which
+looks exactly like an account managed for free; a `Hybrid` missing its flat half
+computes the percentage alone and looks reasonable. A second **Active** agreement
+on one account is refused, because two live sets of terms is two answers to what
+the fee is.
+
+`get_advisory_agreement_summary` computes what the terms say a period costs and
+**always names its basis** in `aum_source`. Where no portfolio value can be
+established the fee is **null, not zero** — a fee of zero and a fee nobody can
+compute are opposite findings. A bank balance is deliberately never used as a
+substitute: it is a fraction of the portfolio, so a fee computed against it would
+be wrong and plausible.
+
+`update_advisory_agreement` **amends by versioning**: a new record, `amended_from`
+pointing back, the old one Superseded. Last quarter's fee was charged under last
+quarter's terms, and an in-place edit would leave the site holding a charge it
+cannot justify. `in_place=true` corrects a description — a name, a client's
+spelling, a document link — and **refuses** to touch a fee, a date or a status.
+`terminate=true` with a `termination_date` ends an agreement without creating a
+version, because terms that stopped did not change. The date is required rather
+than defaulted to today: an agreement that ended in March and is being recorded
+in August would otherwise claim five months of coverage it did not have.
+
+### `create_bank_categorization_rules` — MUTATING, default off
+
+**Arguments:** `company` (required), `rules` (required array), `dry_run`.
+
+A whole book in one call. The point is not saving round trips — a single-rule
+call can only see the rules that already exist, so thirty of them get their
+priorities wrong relative to each other. **Vetted in full before anything is
+written**: every account resolved and checked, every name checked against the
+site *and* against the rest of the batch. A batch produces the book you described
+or produces nothing, because half a book categorises a month of statement on its
+own and looks like it worked.
+
+### What v0.73.0 changed about categorization rules
+
+Six new match types beside v0.71.0's four operators: `merchant_exact`,
+`merchant_contains`, `description_regex`, `plaid_category_matches`,
+`amount_range`, `combined`. **Nothing was migrated** — `contains CHEVRON on
+description` and `merchant_contains CHEVRON` are the same rule, and rewriting
+sixty of them would change what a site's audit trail says its rules were.
+
+- **Direction and the amount bounds AND onto every match type**, not just onto
+  `amount_range` and `combined`. That is what makes `amount_range` a match type
+  rather than a modifier, and why a regex-plus-ceiling rule needs no special
+  support.
+- **The merchant match falls back to the description** where the feed left
+  `bank_party_name` empty — disproportionately the small local suppliers a farm
+  actually buys from, so a rule reading only that column would match the national
+  chains and miss the co-op.
+- **`plaid_category_matches` is a PREFIX match**: `TRANSPORTATION` catches
+  `TRANSPORTATION_GAS` today and `TRANSPORTATION_TOLLS` the day the aggregator
+  adds it.
+- **`combined` requires at least two criteria.** One criterion is not a
+  combination, it is a simpler match type written the long way round — and it
+  would behave subtly differently, because `combined` compares text as a
+  substring whatever `match_field` says.
+- New fields: `bank_cost_center`, `party_name`, `plaid_category`. The two cost
+  centers are **reported** by `apply_categorization_rules` and never written onto
+  a Bank Transaction: a cost center is a property of a posting, and nothing here
+  posts.
+- `seed_farm_categorization_rules` takes `categories`, so an orchard with no
+  livestock need not seed a Feed rule that will never fire and will sit in
+  `never_fired` forever looking like a problem.
+
+### The two push endpoints
+
+```
+POST /api/method/erpnext_mcp.bank.push_statement_anchor
+POST /api/method/erpnext_mcp.bank.push_account_pairing
+```
+
+Not MCP tools — whitelisted Frappe methods a bank pipe calls with its own ERPNext
+credential.
+
+**Idempotent on `(bank_account, period_start, period_end)`.** A pipe retries, a
+parse gets re-run, an operator syncs by hand while the scheduled job is still
+going. An endpoint that appended would leave two anchors for October that
+disagree.
+
+- **A batch tolerates a bad row; a single push does not.** Per-row tolerance is
+  right for thirteen months and wrong for one: a payload that failed and came
+  back `200` with `failed_count: 1` is a pipe that believes it succeeded.
+- **Statement lines are replaced, not appended.** A re-parse produces the same
+  lines again, and doubling them would make every line match a transaction and
+  the unmatched count — the entire product — quietly wrong. Omitting the key
+  leaves what is on file alone; `[]` clears it.
+- **`variance_reason` is the one field a later push will not overwrite.** It
+  lands on an anchor that has none — which is what makes a one-time migration of
+  a pipe's own variance tags work — and never over one that does, because after
+  consolidation the sentence is a person's and a nightly sync would otherwise
+  erase it.
+- **Neither endpoint creates a Bank Account.** An auto-created account has no GL
+  account, no company anybody chose, and no way to be noticed, and the anchors
+  hanging off it would look exactly like reconciliation.
+- **`push_account_pairing` writes only the keys actually sent**, so a sync that
+  knows the mask and not the subtype does not blank a subtype somebody typed.
+- **The gate** is a named user plus `frappe.has_permission(..., "write")` — the
+  `api/gis.py` choice, not `api/guard.py`'s, whose Mobile Access Grant is the
+  wrong gate for a server-to-server credential. **Every call writes an MCP Action
+  Log row, refusals included**, prefixed `push:`.
+
+### Nothing in this release posts to the ledger
+
+Not one of the fourteen tools writes a GL Entry, a Journal Entry, a Payment Entry
+or an allocation — the same promise v0.71.0 made, for the same reason. An anchor
+says whether the books tie out. Making them tie out is `create_journal_entry`,
+which has its own switch and its own review.

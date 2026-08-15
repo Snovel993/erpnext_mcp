@@ -1,0 +1,83 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-14 09:00:00.000000",
+ "description": "One line as the STATEMENT prints it, kept beside the anchor it belongs to. This is not a second copy of a Bank Transaction — it is the other party's record of the same week, and the only thing that can say a transaction the feed never returned exists at all.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "line_date",
+  "description",
+  "amount",
+  "line_type",
+  "reference",
+  "matched_bank_transaction",
+  "match_note"
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-14 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Statement Anchor Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "line_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date"
+  },
+  {
+   "columns": 4,
+   "description": "The memo exactly as the statement prints it, not normalised. A line matched by description is matched against what the bank actually wrote.",
+   "fieldname": "description",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Description"
+  },
+  {
+   "columns": 2,
+   "description": "Signed the same way as everything else here: POSITIVE IS MONEY IN.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount"
+  },
+  {
+   "columns": 2,
+   "fieldname": "line_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Type",
+   "options": "\nDeposit\nWithdrawal\nFee\nInterest\nDividend\nTransfer\nOther"
+  },
+  {
+   "fieldname": "reference",
+   "fieldtype": "Data",
+   "label": "Reference"
+  },
+  {
+   "description": "The Bank Transaction this line turned out to be, once something matched them. Read-only and written by rebuild_anchor_chain; list_unmatched_statement_lines works the match out afresh and writes nothing. A line with nothing here is a line the feed never delivered, which is exactly the list worth reading.",
+   "fieldname": "matched_bank_transaction",
+   "fieldtype": "Link",
+   "label": "Matched Bank Transaction",
+   "options": "Bank Transaction",
+   "read_only": 1
+  },
+  {
+   "description": "How the match was made, or why it was not.",
+   "fieldname": "match_note",
+   "fieldtype": "Data",
+   "label": "Match Note",
+   "read_only": 1
+  }
+ ]
+}

@@ -569,6 +569,60 @@ is untouched — the two switches are separate on purpose.
 
 ---
 
+## The third transport: the bank push endpoints (v0.73.0)
+
+Two whitelisted methods a bank pipe calls with its own ERPNext credential:
+
+```
+POST /api/method/erpnext_mcp.bank.push_statement_anchor
+POST /api/method/erpnext_mcp.bank.push_account_pairing
+```
+
+**They do not use the MCP gates and they do not use the mobile gates.** Neither
+is right for this caller, and the reasons are different.
+
+The MCP transport's three gates are a bearer token, a CIDR allowlist and a master
+switch — a *surface* control over what an AI client may reach. A bank pipe is not
+an AI client: it does not choose what to call, it has exactly two things to say,
+and giving it the MCP token would give it the whole tool catalogue.
+
+The mobile surface's seven gates include an **Active Mobile Access Grant**, which
+exists to make "enrolled" a fact about a handset somebody deliberately issued.
+There is no handset here and no enrolment to speak of, and a server-to-server
+credential that had to be registered as a phone would be a lie in the register a
+`revoke_mobile_user` reads.
+
+So these two use **Frappe's own permission system**, the same choice `api/gis.py`
+makes for the Desk map:
+
+1. **A named user.** Guest is refused before anything is read. A pipe gets its own
+   ERPNext user with an API key.
+2. **`frappe.has_permission(doctype, "write", throw=True)`** on the doctype being
+   written — `Statement Anchor` or `Bank Account`. This is what makes a **User
+   Permission scoping the credential to one company** apply here as it applies in
+   the Desk, and it is the reason to give a pipe a real user rather than reusing
+   an administrator's key.
+3. **An audit row on every call, including the refusals**, in MCP Action Log,
+   prefixed `push:`. "Which credential pushed the October anchor, and when" is the
+   first question anybody asks when two systems disagree about a number, and an
+   endpoint that answered it with silence would put the operator back to reading
+   server logs. Refusal rows are committed on their own transaction so they
+   outlive the rollback.
+
+**What a compromised pipe credential can do**, which is the question worth asking:
+write statement anchors and Plaid metadata for accounts that already exist. It
+cannot create a Bank Account, cannot post to the ledger, cannot reach any MCP
+tool, and cannot assert a variance — every derived number on an anchor is
+recomputed from the pushed inputs, so the worst available lie is a wrong opening
+or closing balance, which shows up immediately as a variance against the
+transactions already on file.
+
+**Turning them off.** There is no dedicated switch and deliberately so: the
+control is the credential. Disable the pipe's User, or remove its write permission
+on Statement Anchor, and both methods refuse on the next call.
+
+---
+
 ## What the endpoint is not
 
 *(This section is about the MCP endpoint. The mobile surface described above

@@ -37,8 +37,8 @@ import pathlib
 import frappe
 
 from erpnext_mcp import registry
-from erpnext_mcp.erpnext_mcp.doctype.bank_categorization_rule.bank_categorization_rule import (
-	BankCategorizationRule,
+from erpnext_mcp.erpnext_mcp.doctype.bank_categorization_rule import (
+	bank_categorization_rule as rule_module,
 )
 from erpnext_mcp.tools import banking_bridge
 
@@ -833,15 +833,23 @@ class TheRuleDoctype(BankBridgeTestCase):
 			).read_text()
 		)
 		options = {field["fieldname"]: field.get("options") for field in payload["fields"]}
-		self.assertEqual(
-			tuple(options["match_type"].split("\n")),
-			BankCategorizationRule and ("contains", "starts_with", "equals", "regex"),
-		)
-		self.assertEqual(
-			tuple(options["match_field"].split("\n")),
-			("description", "reference_number", "bank_party_name"),
-		)
-		self.assertEqual(tuple(options["direction"].split("\n")), ("Any", "Deposit", "Withdrawal"))
+		# Asserted against the module constants rather than against a literal
+		# list: the evaluator reads MATCH_TYPES and the form reads the JSON, and
+		# what breaks a site is the two disagreeing — a rule saved through the
+		# Desk with an option the evaluator has never heard of matches nothing.
+		self.assertEqual(tuple(options["match_type"].split("\n")), rule_module.MATCH_TYPES)
+		self.assertEqual(tuple(options["match_field"].split("\n")), rule_module.MATCH_FIELDS)
+		self.assertEqual(tuple(options["direction"].split("\n")), rule_module.DIRECTIONS)
+		# Every match type that compares text has to name an operator, or it
+		# would silently match nothing at all.
+		for match_type in rule_module.MATCH_TYPES:
+			if match_type in rule_module.TEXTLESS_MATCH_TYPES:
+				continue
+			with self.subTest(match_type=match_type):
+				self.assertTrue(
+					match_type in rule_module.TEXT_OPERATORS or match_type == "plaid_category_matches",
+					f"{match_type} compares nothing",
+				)
 
 
 # ── 9. creating rules ───────────────────────────────────────────────────────

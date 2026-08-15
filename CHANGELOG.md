@@ -3,6 +3,171 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.73.0 — 2026-08-14 — the Bank Bridge consolidation
+
+**ERPNext becomes the single source of truth for reconciliation.** A Flask
+sidecar held the statement anchor chain — the period-by-period record that says
+whether a month ties out — in its own database, so "does account ••6030
+reconcile in October?" could not be answered by the system that holds October's
+transactions. Three doctypes, fourteen tools and two whitelisted endpoints move
+that authority here; the pipe keeps the job only it can do (talk to the
+aggregator, parse the PDFs) and pushes the result.
+
+**The question this answers that nothing else could: is the bank data
+COMPLETE.** Every bank tool before this answers something about a transaction
+that is present. A transaction the feed never delivered leaves no row to
+inspect. `anchored_opening + transaction_sum` against `anchored_closing` is the
+only thing that finds it, and the difference *is* the missing movement, to the
+cent, before anybody knows what it was.
+
+### New doctypes
+
+- **`Statement Anchor`** — one bank account, one statement period. Carries the
+  three numbers off the statement (`anchored_opening`, `anchored_closing`,
+  `transaction_sum`), the brokerage figures (`portfolio_opening_value`,
+  `portfolio_closing_value`, `mark_to_market_delta`), the parser version and the
+  source id. Unique on `(bank_account, period_start, period_end)`, enforced in
+  the controller because Frappe has no composite unique index — two anchors for
+  one October is two answers to whether October tied out.
+- **`Statement Anchor Line`** — the statement's own lines, as an optional child
+  table. Not a second copy of a Bank Transaction: it is the *other party's*
+  record of the same week, and the difference between the two is the only thing
+  that names a movement the feed dropped.
+- **`Advisory Agreement`** — the terms an investment account is managed under,
+  with `amended_from` versioning.
+- **Seven Custom Fields on ERPNext's Bank Account** — `paired_bank_account`,
+  `pairing_type` and five Plaid metadata columns. A pairing is a *property* of an
+  account, not an entity: two Bank Accounts pointing at each other is the whole
+  relationship, and a separate register of pairs is a second place for one fact
+  to be wrong.
+
+### `computed_closing`, `variance`, `reconciled` and `chain_gap_from_prior` are COMPUTED, never accepted
+
+Read-only fields written by the controller on every save. A payload arriving with
+its own variance gets it recomputed, not adopted — a pipe that could assert a
+variance could assert a zero, and a zero variance is indistinguishable from a
+reconciled account. The entire value of the record is that the number is
+arithmetic over inputs somebody else supplied.
+
+### Eight new read tools
+
+- **`get_statement_anchor_chain`** — the chain in PERIOD order, because the list
+  is the chain and reading it top to bottom is how somebody finds the month it
+  broke. `cumulative_variance` is the number to read first: alternating
+  few-hundred variances are timing, a cumulative variance that grows every month
+  is a recurring charge nobody has booked, and the two look identical period by
+  period.
+- **`list_unreconciled_anchors`** — the same data worst-first by ABSOLUTE
+  variance, which is the worklist ordering. A period carrying an explanation is
+  still listed: a recorded fact is not a problem, and hiding it makes somebody
+  rediscover it every quarter.
+- **`get_anchor_variance_breakdown`** — three sums that are routinely confused,
+  reported separately and never added: what the statement said moved, what the
+  transactions on file add up to, and the gap between the statement's own opening
+  and closing balances. They fail for different reasons and only one of them is a
+  missing transaction.
+- **`list_unmatched_statement_lines`** — the one list that NAMES a missing
+  movement rather than its size. Says so plainly when no statement lines are on
+  file: "nothing is missing" and "we have nothing to check against" are opposite
+  answers and look identical in an empty array.
+- **`get_statement_recon_report`** — statement, feed and ledger side by side.
+  Feed against ledger is the ordinary posting backlog; statement against feed is
+  two independent records of one month that do not agree, which every
+  categorisation built on the feed inherits.
+- **`get_account_pairing`** — accounts with their companions and aggregator
+  identity, with one-sided pairings called out: a link stored on one account and
+  not the other reads as working from that end and absent from the other.
+- **`get_advisory_agreement_summary`** — terms, assets under management, and what
+  the fee *should* be. Where no portfolio value can be established the fee is
+  **null, not zero** — a fee of zero and a fee nobody can compute are opposite
+  findings, and a bank balance is deliberately never used as a substitute because
+  it is a fraction of the portfolio.
+- **`list_advisory_agreements`** — the register, including Superseded ones (they
+  justify charges taken under terms that have since changed) and naming the
+  managed accounts with no terms on file.
+
+### Six new write tools, none of which post
+
+- **`set_anchor_variance_reason`** — one prose field, and it does NOT mark the
+  period reconciled. A sentence beats a wider tolerance because next quarter's
+  advisory fee is a different number: a tolerance wide enough to swallow this
+  one is wide enough to swallow a genuinely missing deposit.
+- **`rebuild_anchor_chain`** — recomputes what is DERIVED and leaves the three
+  anchored numbers alone. Rebuilding those from the transaction feed would
+  replace the independent record with a restatement of the thing it exists to
+  check, after which every period ties out perfectly and the chain proves
+  nothing. `recompute_transaction_sum=true` overrides it, reports the before and
+  after per period, and warns in those words.
+- **`pair_bank_accounts`** — writes BOTH sides, which is why it is a tool rather
+  than a note telling somebody to set a field. Naming one role names the other;
+  cross-company pairing and self-pairing are refused; breaking an existing
+  pairing needs `replace=true` and names the account left with no companion.
+- **`create_advisory_agreement`** — every refusal is a number that would
+  otherwise compute wrong rather than fail. A Percent-of-AUM agreement with no
+  percentage computes zero, which looks exactly like an account managed for free.
+- **`update_advisory_agreement`** — amendment is a NEW record with the old one
+  Superseded. Last quarter's fee was charged under last quarter's terms, and an
+  in-place edit would leave the site unable to justify money it has already paid.
+  `in_place=true` corrects a description and refuses to touch a term.
+- **`create_bank_categorization_rules`** — a whole book from an array, vetted as
+  a SET. A single-rule call can only see the rules that already exist, so thirty
+  of them get their priorities wrong relative to each other. A batch produces the
+  book you described or produces nothing.
+
+### Two whitelisted endpoints
+
+```
+POST /api/method/erpnext_mcp.bank.push_statement_anchor
+POST /api/method/erpnext_mcp.bank.push_account_pairing
+```
+
+Idempotent on `(bank_account, period_start, period_end)`. A batch tolerates a bad
+row and a single push does not — a payload that failed and came back `200` with
+`failed_count: 1` is a pipe that believes it succeeded. Statement lines are
+REPLACED rather than appended, because a re-parse produces the same lines again
+and doubling them would make the unmatched count quietly wrong. `variance_reason`
+is the one field a later push will NOT overwrite — it lands on an anchor that has
+none and never over one that does, because after consolidation the sentence is a
+person's and a nightly sync would otherwise erase it. Neither endpoint creates a
+Bank Account. The gate is a named user plus Frappe's own write
+permission (the `api/gis.py` choice, not `api/guard.py`'s mobile grant), and
+every call writes an audit row, refusals included.
+
+### `Bank Categorization Rule` grew a match vocabulary and got faster
+
+- **Six new match types** beside v0.71.0's four: `merchant_exact`,
+  `merchant_contains`, `description_regex`, `plaid_category_matches`,
+  `amount_range` and `combined`. **Nothing was migrated** — a rule that says
+  `contains CHEVRON on description` and one that says `merchant_contains CHEVRON`
+  are the same rule, and rewriting sixty would change what a site's audit trail
+  says its rules were.
+- **Direction and the amount bounds AND onto EVERY match type**, which is what
+  makes `amount_range` a match type rather than a modifier and why a
+  regex-plus-ceiling rule needs no special support.
+- **The merchant match falls back to the description** where a feed left
+  `bank_party_name` empty — disproportionately the small local suppliers a farm
+  actually buys from, so a rule reading only that column would match the national
+  chains and miss the co-op.
+- **`plaid_category_matches` is a PREFIX match**, so `TRANSPORTATION` catches
+  `TRANSPORTATION_GAS` today and `TRANSPORTATION_TOLLS` the day the aggregator
+  adds it.
+- **New fields**: `bank_cost_center`, `party_name`, `plaid_category`. The two
+  cost centers are reported by `apply_categorization_rules` and never written
+  onto a Bank Transaction — a cost center is a property of a posting, and nothing
+  here posts.
+- **`apply_categorization_rules` was quadratic and is not any more.** It built a
+  document and recompiled every regex *inside* the transaction loop: sixty rules
+  over five hundred lines was thirty thousand document constructions. Rules are
+  built once, the compiled pattern is cached on the controller, and the inner
+  loop is comparisons.
+- **`seed_farm_categorization_rules` takes `categories`.** An orchard with no
+  livestock does not want a Feed rule that will never fire and sits in
+  `never_fired` forever looking like a problem.
+
+### Counts
+
+527 tools (252 read, 275 mutating); 8,210 standalone tests.
+
 ## 0.72.0 — 2026-08-14 — Sprint 7: the foreman's crew-task dashboard
 
 **Five tools that have existed since Sprint 8's dispatch board and have never

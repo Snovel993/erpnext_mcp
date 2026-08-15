@@ -674,8 +674,24 @@
   "banking_bridge_write_section",
   "allow_match_receipt_to_bank_transaction",
   "allow_create_bank_categorization_rule",
+  "allow_create_bank_categorization_rules",
   "allow_apply_categorization_rules",
-  "allow_seed_farm_categorization_rules"
+  "allow_seed_farm_categorization_rules",
+  "bank_consolidation_read_section",
+  "allow_get_statement_anchor_chain",
+  "allow_list_unreconciled_anchors",
+  "allow_get_anchor_variance_breakdown",
+  "allow_list_unmatched_statement_lines",
+  "allow_get_statement_recon_report",
+  "allow_get_account_pairing",
+  "allow_get_advisory_agreement_summary",
+  "allow_list_advisory_agreements",
+  "bank_consolidation_write_section",
+  "allow_set_anchor_variance_reason",
+  "allow_rebuild_anchor_chain",
+  "allow_pair_bank_accounts",
+  "allow_create_advisory_agreement",
+  "allow_update_advisory_agreement"
  ],
  "fields": [
   {
@@ -5089,6 +5105,116 @@
    "fieldname": "allow_seed_farm_categorization_rules",
    "fieldtype": "Check",
    "label": "Seed Farm Categorization Rules"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a whole book of categorization rules from an array, vetted as a set before anything is written \u2014 which is what gets their priorities right relative to each other. A batch either produces the book you described or produces nothing.",
+   "fieldname": "allow_create_bank_categorization_rules",
+   "fieldtype": "Check",
+   "label": "Create Bank Categorization Rules (Bulk)"
+  },
+  {
+   "description": "The reconciliation chain: whether a year of bank data is <b>complete</b>. A transaction the feed never delivered leaves no row to inspect, so the only thing that finds it is opening balance + everything on file \u2260 closing balance. Nothing in this section writes, posts or allocates.<br><br>ERPNext is the authority for this data as of v0.73.0; a bank pipe pushes anchors in through <code>/api/method/erpnext_mcp.bank.push_statement_anchor</code> and holds nothing itself.",
+   "fieldname": "bank_consolidation_read_section",
+   "fieldtype": "Section Break",
+   "label": "Bank Reconciliation Chain \u2014 Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every anchored statement period for one account, in period order, with the cumulative variance and any chain gap named. A chain gap is a MISSING STATEMENT, which no amount of per-transaction checking will find.",
+   "fieldname": "allow_get_statement_anchor_chain",
+   "fieldtype": "Check",
+   "label": "Get Statement Anchor Chain"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every period that does not tie out, worst first by absolute variance, totalled per account. Periods with a recorded explanation are listed too \u2014 a known fact is not a problem, and hiding it makes somebody rediscover it every quarter.",
+   "fieldname": "allow_list_unreconciled_anchors",
+   "fieldtype": "Check",
+   "label": "List Unreconciled Anchors"
+  },
+  {
+   "default": "1",
+   "description": "READ. One period taken apart: what the statement said moved, what the transactions on file add up to, and the gap between the statement's own opening and closing balances \u2014 three sums that fail for different reasons and are never added together.",
+   "fieldname": "allow_get_anchor_variance_breakdown",
+   "fieldtype": "Check",
+   "label": "Get Anchor Variance Breakdown"
+  },
+  {
+   "default": "1",
+   "description": "READ. The lines a bank printed that no Bank Transaction accounts for \u2014 the one list that names a missing movement rather than just its size. Says so plainly when no statement lines are on file, because \"nothing is missing\" and \"nothing to check against\" are opposite answers.",
+   "fieldname": "allow_list_unmatched_statement_lines",
+   "fieldtype": "Check",
+   "label": "List Unmatched Statement Lines"
+  },
+  {
+   "default": "1",
+   "description": "READ. The statement, the feed and the ledger for the same periods, side by side. Feed against ledger is the ordinary posting backlog; statement against feed is two independent records of one month that do not agree.",
+   "fieldname": "allow_get_statement_recon_report",
+   "fieldtype": "Check",
+   "label": "Get Statement Recon Report"
+  },
+  {
+   "default": "1",
+   "description": "READ. Bank accounts with their companion account and aggregator identity \u2014 mask, type, subtype, sync state \u2014 and the one-sided pairings called out by name.",
+   "fieldname": "allow_get_account_pairing",
+   "fieldtype": "Check",
+   "label": "Get Account Pairing"
+  },
+  {
+   "default": "1",
+   "description": "READ. One advisory agreement's terms, the assets under management they apply to, and what the fee should be \u2014 with the basis for the AUM always named, and a null fee rather than a zero one where none can be established.",
+   "fieldname": "allow_get_advisory_agreement_summary",
+   "fieldtype": "Check",
+   "label": "Get Advisory Agreement Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. The register of advisory agreements, superseded ones included, plus the investment accounts with no active agreement on file \u2014 the accounts whose fees nobody can check.",
+   "fieldname": "allow_list_advisory_agreements",
+   "fieldtype": "Check",
+   "label": "List Advisory Agreements"
+  },
+  {
+   "description": "The write half of the consolidation. <b>Nothing here posts to the ledger</b> \u2014 not one tool writes a GL Entry, a Journal Entry or an allocation. An anchor says whether the books tie out; making them tie out is a Journal Entry somebody decided on, with its own switch.<br><br><code>rebuild_anchor_chain</code> recomputes only DERIVED values by default and leaves the three numbers that came off a bank statement alone, because rewriting those from the transaction feed would make every period tie out perfectly and prove nothing.",
+   "fieldname": "bank_consolidation_write_section",
+   "fieldtype": "Section Break",
+   "label": "Bank Reconciliation Chain \u2014 Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Record why a period does not tie out, in one prose field. It does not mark the period reconciled and is not meant to \u2014 <code>reconciled</code> is arithmetic, and this is a human judgement beside it.",
+   "fieldname": "allow_set_anchor_variance_reason",
+   "fieldtype": "Check",
+   "label": "Set Anchor Variance Reason"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Recompute the derived values on one account's chain in period order \u2014 closing, variance, reconciled, chain gaps and statement-line matches. Leaves the anchored opening, closing and statement transaction sum alone unless explicitly told otherwise.",
+   "fieldname": "allow_rebuild_anchor_chain",
+   "fieldtype": "Check",
+   "label": "Rebuild Anchor Chain"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Link two Bank Accounts as companions and write BOTH sides. A pairing stored on one account and not the other reads as working from one end and absent from the other. Changes no transaction and no anchor.",
+   "fieldname": "allow_pair_bank_accounts",
+   "fieldtype": "Check",
+   "label": "Pair Bank Accounts"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Register the terms an investment account is managed under. A fee type with no fee, and a second live agreement on one account, are both refused \u2014 each would compute a plausible wrong number rather than fail.",
+   "fieldname": "allow_create_advisory_agreement",
+   "fieldtype": "Check",
+   "label": "Create Advisory Agreement"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Amend an agreement, which creates a new version and supersedes the old one rather than editing it \u2014 last quarter's fee was charged under last quarter's terms. Correcting a description in place is allowed; changing a fee, a date or a status in place is refused.",
+   "fieldname": "allow_update_advisory_agreement",
+   "fieldtype": "Check",
+   "label": "Update Advisory Agreement"
   }
  ],
  "index_web_pages_for_search": 0,

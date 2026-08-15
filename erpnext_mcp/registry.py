@@ -42,6 +42,8 @@ from .render import qr
 from .result import ToolResult
 from .tools import (
 	accounts,
+	advisory,
+	anchors,
 	asset_tags,
 	assets,
 	auditpacket,
@@ -305,6 +307,29 @@ _CATEGORIZATION_REQUIRES = (
 	"the Bank Categorization Rule doctype, which ships with erpnext_mcp — run `bench migrate` "
 	"after installing v0.71.0 — and, for the tools that read statements, the ERPNext app's "
 	"Bank Transaction"
+)
+
+#: v0.73.0. What the reconciliation chain needs: our own register of periods.
+#: The tools that also read transactions say so in their own descriptions rather
+#: than in the predicate — an anchor chain is readable, and worth reading, on a
+#: site whose feed has not run yet.
+_ANCHOR_REQUIRES = (
+	"the Statement Anchor doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.73.0 — and the ERPNext app's Bank Account, which every anchor belongs to"
+)
+
+#: What the pairing tools need: only ERPNext's Bank Account. The seven pairing
+#: columns are Custom Fields this app creates on first use, so a site that has
+#: never run the installer still pairs two accounts — which is why the predicate
+#: is the doctype and not the columns.
+_PAIRING_REQUIRES = "the ERPNext app's Bank Account doctype, which ships with its Accounts module"
+
+#: What the advisory register needs. `Governance Document` is NOT in it: linking
+#: the signed agreement is optional, and a site without the governance register
+#: keeps every fee computation.
+_ADVISORY_REQUIRES = (
+	"the Advisory Agreement doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.73.0"
 )
 
 
@@ -17958,6 +17983,387 @@ TOOLS = {
 		title="Seed farm categorization rules",
 		available=_needs_doctype("Bank Categorization Rule"),
 		requires=_CATEGORIZATION_REQUIRES,
+	),
+	"create_bank_categorization_rules": _tool(
+		banking_bridge.create_bank_categorization_rules,
+		"MUTATING (default OFF). Create a WHOLE BOOK of categorization rules in "
+		"one call, from an array. The point is not saving round trips: each "
+		"single-rule call can only see the rules that already exist, so thirty "
+		"of them get their priorities wrong relative to each other. Passing the "
+		"set together checks it as a set.\n\n"
+		"VETTED IN FULL BEFORE ANYTHING IS WRITTEN — every account resolved and "
+		"checked, every name checked against the site AND against the rest of "
+		"the batch. A batch either produces the book you described or produces "
+		"nothing, because half a book categorises a month of statement on its "
+		"own and looks like it worked. `dry_run=true` runs the whole vetting "
+		"pass and writes nothing.",
+		{
+			"company": _field(_STRING, "REQUIRED. Every rule in the batch belongs to it."),
+			"rules": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'REQUIRED. [{"rule_name": "Fuel — Chevron", "category": "Fuel", "pattern": '
+				'"CHEVRON", "match_type": "merchant_contains", "priority": 10, "account": '
+				'"5200 - Fuel - ABC", "direction": "Withdrawal"}, …]. Every key '
+				"create_bank_categorization_rule takes is accepted on each item.",
+			),
+			"dry_run": _field(_BOOLEAN, "Vet the whole batch and write nothing. Default false."),
+		},
+		required=("company", "rules"),
+		mutating=True,
+		title="Create bank categorization rules (bulk)",
+		available=_needs_doctype("Bank Categorization Rule"),
+		requires=_CATEGORIZATION_REQUIRES,
+	),
+	"get_statement_anchor_chain": _tool(
+		anchors.get_statement_anchor_chain,
+		"The anchored statement periods for one bank account, IN PERIOD ORDER, "
+		"with the chain checked — which is how you answer 'is a year of bank "
+		"data complete?'. A transaction the feed never delivered leaves no row "
+		"to inspect; the only thing that finds it is opening balance + "
+		"everything on file ≠ closing balance.\n\n"
+		"`cumulative_variance` is the number to read first: periods that vary a "
+		"few hundred either way are timing, a cumulative variance that grows "
+		"every month is a recurring charge nobody has booked, and the two look "
+		"identical period by period. A CHAIN GAP — one period's opening balance "
+		"is not the prior period's closing balance — is a MISSING STATEMENT, "
+		"which no amount of per-transaction checking will find. Read-only.",
+		{
+			"bank_account": _field(_STRING, "The Bank Account docname, or a four-digit mask."),
+			"plaid_account_mask": _field(_STRING, "Find the account by its mask instead. Refused if ambiguous."),
+			"company": _field(_STRING, "Every account in one company, when no bank_account is named."),
+			"from_date": _field(_STRING, "Earliest period start, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest period start, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="Get statement anchor chain",
+		available=_needs_doctype("Statement Anchor"),
+		requires=_ANCHOR_REQUIRES,
+	),
+	"list_unreconciled_anchors": _tool(
+		anchors.list_unreconciled_anchors,
+		"Every statement period that does not tie out, WORST FIRST by absolute "
+		"variance — the worklist ordering, where get_statement_anchor_chain is "
+		"the same data in period order. Totals the variance per account and "
+		"counts the periods nobody has explained.\n\n"
+		"A period carrying a variance_reason is NOT a problem and is still "
+		"listed: it is a recorded fact about an account — a quarterly advisory "
+		"fee deducted outside the bank feed — and hiding it would make somebody "
+		"rediscover it every quarter. Pass `tolerance` to re-judge every period "
+		"against a different threshold rather than reading the stored flag. "
+		"Read-only.",
+		{
+			"company": _field(_STRING, "Scope to one company."),
+			"bank_account": _field(_STRING, "Scope to one account, by docname or mask."),
+			"tolerance": _field(_NUMBER, "Re-judge every period against this instead of its stored one."),
+			"include_explained": _field(_BOOLEAN, "Include periods that have a reason. Default true."),
+			"from_date": _field(_STRING, "Earliest period start, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest period start, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List unreconciled anchors",
+		available=_needs_doctype("Statement Anchor"),
+		requires=_ANCHOR_REQUIRES,
+	),
+	"get_anchor_variance_breakdown": _tool(
+		anchors.get_anchor_variance_breakdown,
+		"One statement period taken apart, with THREE SUMS THAT ARE ROUTINELY "
+		"CONFUSED reported separately and never added: what the statement said "
+		"moved, what the Bank Transactions on file actually add up to, and the "
+		"gap between the statement's own opening and closing balances.\n\n"
+		"They fail for different reasons. The first two disagreeing is a FEED "
+		"problem — two records of one period that do not match before any "
+		"variance is computed. The first two agreeing while the variance stands "
+		"is the statement disagreeing with ITSELF, which is what a fee deducted "
+		"outside the transaction list looks like. Returns every transaction in "
+		"the period, the largest five, any statement lines with nothing behind "
+		"them, and a plain-English diagnosis. Read-only.",
+		{
+			"anchor": _field(_STRING, "The Statement Anchor docname."),
+			"bank_account": _field(_STRING, "With period_start and period_end, instead of a docname."),
+			"period_start": _field(_STRING, "YYYY-MM-DD."),
+			"period_end": _field(_STRING, "YYYY-MM-DD."),
+			"day_window": _field(_INTEGER, "Days a statement line and a transaction may differ by. Default 3."),
+			"tolerance": _field(_NUMBER, "How close two amounts must be to be the same movement."),
+			"limit": _LIMIT,
+		},
+		title="Get anchor variance breakdown",
+		available=_needs_doctype("Statement Anchor"),
+		requires=_ANCHOR_REQUIRES,
+	),
+	"list_unmatched_statement_lines": _tool(
+		anchors.list_unmatched_statement_lines,
+		"The lines a bank PRINTED that no Bank Transaction accounts for — the "
+		"one list that names a missing transaction rather than just its size. A "
+		"variance says how much is missing; this says what it was, by date, "
+		"memo and amount.\n\n"
+		"It can only answer where a statement parser has pushed the statement's "
+		"own lines onto the anchor. Where none have been pushed it says so "
+		"rather than returning an empty list, because 'nothing is missing' and "
+		"'we have nothing to check against' are opposite answers. The reverse "
+		"list — transactions with no statement line — is reported separately: "
+		"one is a gap in the feed, the other is a transaction that should not be "
+		"on the account. Read-only; it writes nothing, including the matches it "
+		"works out.",
+		{
+			"bank_account": _field(_STRING, "The Bank Account docname, or a four-digit mask."),
+			"company": _field(_STRING, "Every account in one company, when no bank_account is named."),
+			"from_date": _field(_STRING, "Earliest period start, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest period start, YYYY-MM-DD."),
+			"day_window": _field(_INTEGER, "Days a line and a transaction may differ by. Default 3."),
+			"tolerance": _field(_NUMBER, "How close two amounts must be to be the same movement."),
+			"limit": _LIMIT,
+		},
+		title="List unmatched statement lines",
+		available=_needs_doctype("Statement Anchor"),
+		requires=_ANCHOR_REQUIRES,
+	),
+	"get_account_pairing": _tool(
+		anchors.get_account_pairing,
+		"Every bank account with its COMPANION and its aggregator identity — "
+		"mask, account type, subtype, whether the sync pulls it — plus how many "
+		"anchored periods each one has. A brokerage and the cash-services "
+		"account its trades settle through are one relationship seen from two "
+		"sides, and the anchor chain reconciles cash and sweep only because the "
+		"securities leg lives on the companion.\n\n"
+		"One-sided pairings are called out by name: a link stored on one account "
+		"and not the other reads as working from that end and as absent from the "
+		"other, which is the half a reconciliation run happens to start from. "
+		"Read-only.",
+		{
+			"company": _field(_STRING, "Scope to one company."),
+			"bank_account": _field(_STRING, "One account, by docname or mask."),
+			"limit": _LIMIT,
+		},
+		title="Get account pairing",
+		available=_needs_doctype("Bank Account"),
+		requires=_PAIRING_REQUIRES,
+	),
+	"get_statement_recon_report": _tool(
+		anchors.get_statement_recon_report,
+		"The STATEMENT, the FEED and the LEDGER for the same periods, side by "
+		"side — three records of one month that no single one of them can be "
+		"compared against.\n\n"
+		"Feed against ledger disagreeing is the ordinary backlog: transactions "
+		"have arrived and nobody has posted them. STATEMENT against feed "
+		"disagreeing is the serious one, because two independent records of the "
+		"same period do not match and every categorisation built on the feed "
+		"inherits the difference. `by_category` breaks the movement out by the "
+		"category rules assigned, which is what makes 'we booked 40,000 of fuel "
+		"and the bank moved 52,000' answerable. Read-only; it posts nothing and "
+		"proposes nothing.",
+		{
+			"bank_account": _field(_STRING, "The Bank Account docname, or a four-digit mask."),
+			"company": _field(_STRING, "Every account in one company, when no bank_account is named."),
+			"from_date": _field(_STRING, "Earliest period start, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest period start, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="Get statement recon report",
+		available=_needs_doctype("Statement Anchor"),
+		requires=_ANCHOR_REQUIRES,
+	),
+	"get_advisory_agreement_summary": _tool(
+		advisory.get_advisory_agreement_summary,
+		"One advisory agreement's terms, the assets they apply to, and WHAT THE "
+		"FEE SHOULD BE — which is the only way a charge that arrives already "
+		"deducted can be checked against anything.\n\n"
+		"The computed fee always carries its basis: `aum_source` says whether "
+		"the assets came from a figure you passed, from the most recent anchored "
+		"portfolio value, or from nowhere — and in the last case the fee is NULL "
+		"rather than zero, because a fee of zero and a fee nobody can compute "
+		"are opposite findings. A bank balance is deliberately never used as a "
+		"substitute for a portfolio value. Also returns the account's anchor "
+		"chain summary and the whole amendment history. Read-only.",
+		{
+			"agreement": _field(_STRING, "The docname, or the agreement name within a company."),
+			"company": _field(_STRING, "Disambiguates an agreement named by its human name."),
+			"assets_under_management": _field(
+				_NUMBER, "Compute the fee against this instead of the anchored portfolio value."
+			),
+		},
+		title="Get advisory agreement summary",
+		available=_needs_doctype("Advisory Agreement"),
+		requires=_ADVISORY_REQUIRES,
+	),
+	"list_advisory_agreements": _tool(
+		advisory.list_advisory_agreements,
+		"The register of advisory agreements — Active, Terminated and "
+		"Superseded alike, because a superseded agreement is what justifies a "
+		"charge taken under terms that have since changed. Also names the "
+		"investment accounts with NO active agreement on file, which are the "
+		"accounts whose fees nobody can check. Read-only.",
+		{
+			"company": _field(_STRING, "Scope to one company."),
+			"status": _field(_STRING, "Active, Terminated or Superseded."),
+			"bank_account": _field(_STRING, "Only agreements on this account."),
+			"limit": _LIMIT,
+		},
+		title="List advisory agreements",
+		available=_needs_doctype("Advisory Agreement"),
+		requires=_ADVISORY_REQUIRES,
+	),
+	"set_anchor_variance_reason": _tool(
+		anchors.set_anchor_variance_reason,
+		"MUTATING (default OFF). Record WHY a statement period does not tie "
+		"out, in a sentence a person wrote — 'quarterly advisory fee 3774.81, "
+		"deducted outside the transaction feed'.\n\n"
+		"Why a sentence beats a wider tolerance: next quarter's fee is a "
+		"different number, so a tolerance wide enough to swallow this one is "
+		"wide enough to swallow a genuinely missing deposit, while the sentence "
+		"stays true and hides nothing. It writes ONE field. An explanation does "
+		"NOT mark the period reconciled and is not meant to — `reconciled` is "
+		"arithmetic and this is a human judgement beside it.",
+		{
+			"anchor": _field(_STRING, "The Statement Anchor docname."),
+			"bank_account": _field(_STRING, "With period_start and period_end, instead of a docname."),
+			"period_start": _field(_STRING, "YYYY-MM-DD."),
+			"period_end": _field(_STRING, "YYYY-MM-DD."),
+			"variance_reason": _field(_STRING, "The explanation. REQUIRED unless clear=true."),
+			"clear": _field(_BOOLEAN, "Remove the explanation instead of setting one."),
+		},
+		mutating=True,
+		idempotent=True,
+		title="Set anchor variance reason",
+		available=_needs_doctype("Statement Anchor"),
+		requires=_ANCHOR_REQUIRES,
+	),
+	"rebuild_anchor_chain": _tool(
+		anchors.rebuild_anchor_chain,
+		"MUTATING (default OFF). Recompute every DERIVED value on one account's "
+		"anchor chain, in period order: computed closing, variance, the "
+		"reconciled flag, the chain-gap flags and the Bank Transaction each "
+		"statement line matches. A chain built one anchor at a time gets the gap "
+		"flags wrong whenever a statement arrives out of order, which is what "
+		"this fixes.\n\n"
+		"IT LEAVES THE THREE ANCHORED NUMBERS ALONE — opening, closing and the "
+		"statement's transaction sum came off a document this app did not read, "
+		"and rewriting them from the transaction feed would replace the "
+		"independent record with a restatement of the thing it exists to check, "
+		"after which every period ties out perfectly and the chain proves "
+		"nothing. `recompute_transaction_sum=true` overrides that for accounts "
+		"whose anchors were built from the feed to begin with, reports the "
+		"before and after per period, and warns loudly. `dry_run` writes "
+		"nothing.",
+		{
+			"bank_account": _field(_STRING, "REQUIRED. The docname, or a four-digit mask."),
+			"from_date": _field(_STRING, "Earliest period start, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest period start, YYYY-MM-DD."),
+			"recompute_transaction_sum": _field(
+				_BOOLEAN,
+				"Replace each period's statement sum with the Bank Transactions on file. Default "
+				"false, and read the warning before setting it.",
+			),
+			"day_window": _field(_INTEGER, "Days a statement line and a transaction may differ by. Default 3."),
+			"tolerance": _field(_NUMBER, "How close two amounts must be to be the same movement."),
+			"dry_run": _field(_BOOLEAN, "Do the whole computation and write nothing. Default false."),
+		},
+		required=("bank_account",),
+		mutating=True,
+		idempotent=True,
+		title="Rebuild anchor chain",
+		available=_needs_doctype("Statement Anchor"),
+		requires=_ANCHOR_REQUIRES,
+	),
+	"pair_bank_accounts": _tool(
+		anchors.pair_bank_accounts,
+		"MUTATING (default OFF). Link two Bank Accounts as companions — a "
+		"brokerage and the cash-services account its trades settle through — "
+		"and WRITE BOTH SIDES, which is the whole reason this is a tool rather "
+		"than a note telling somebody to set a field. A pairing written from one "
+		"end reads as working from that end and as absent from the other.\n\n"
+		"Naming one side's role names the other's, since the pair has exactly "
+		"two. It refuses to pair across companies, refuses an account with "
+		"itself, and refuses to break an existing pairing silently — "
+		"`replace=true` repoints it and names the account left with no "
+		"companion. It changes no transaction and no anchor.",
+		{
+			"bank_account": _field(_STRING, "REQUIRED. The docname, or a four-digit mask."),
+			"paired_bank_account": _field(_STRING, "REQUIRED. The companion account's docname."),
+			"pairing_type": _field(_STRING, "Brokerage or Cash Services. The other side is inferred."),
+			"paired_pairing_type": _field(_STRING, "The companion's role, if you would rather state both."),
+			"replace": _field(_BOOLEAN, "Repoint an account that is already paired. Default false."),
+		},
+		required=("bank_account", "paired_bank_account"),
+		mutating=True,
+		idempotent=True,
+		title="Pair bank accounts",
+		available=_needs_doctype("Bank Account"),
+		requires=_PAIRING_REQUIRES,
+	),
+	"create_advisory_agreement": _tool(
+		advisory.create_advisory_agreement,
+		"MUTATING (default OFF). Register the terms an investment account is "
+		"managed under: who the client is, who the advisor is, the fee and how "
+		"often it is billed, the objective and the term.\n\n"
+		"Every refusal here is a number that would otherwise COMPUTE WRONG "
+		"rather than fail — a Percent-of-AUM agreement with no percentage "
+		"computes a fee of zero, which looks exactly like an account managed for "
+		"free, and a Hybrid missing its flat half computes the percentage alone "
+		"and looks reasonable. A second Active agreement on one account is "
+		"refused, because two live sets of terms is two answers to what the fee "
+		"is. It charges nothing and posts nothing.",
+		{
+			"company": _field(_STRING, "REQUIRED."),
+			"agreement_name": _field(_STRING, "REQUIRED. What this agreement is called."),
+			"effective_date": _field(_STRING, "REQUIRED. YYYY-MM-DD."),
+			"bank_account": _field(_STRING, "The managed account, by docname or mask."),
+			"client_entity": _field(_STRING, 'The legal client, e.g. "Orchard Meadow, LLC".'),
+			"advisor_entity": _field(_STRING, "The legal advisor."),
+			"objective": _field(_STRING, "Growth, Income, Balanced or Preservation."),
+			"investment_horizon_years": _field(_INTEGER, "The horizon the mandate was written for."),
+			"fee_type": _field(_STRING, "Percent of AUM (default), Flat Annual or Hybrid."),
+			"fee_percent_of_aum": _field(_NUMBER, "Annualised percentage. 1.0 means 1%."),
+			"fee_flat_annual": _field(_NUMBER, "The flat annual amount."),
+			"billing_frequency": _field(_STRING, "Monthly, Quarterly (default) or Annually."),
+			"termination_date": _field(_STRING, "YYYY-MM-DD, where it has one."),
+			"status": _field(_STRING, "Active (default), Terminated or Superseded."),
+			"document_reference": _field(_STRING, "The signed agreement in the governance register."),
+		},
+		required=("company", "agreement_name", "effective_date"),
+		mutating=True,
+		title="Create advisory agreement",
+		available=_needs_doctype("Advisory Agreement"),
+		requires=_ADVISORY_REQUIRES,
+	),
+	"update_advisory_agreement": _tool(
+		advisory.update_advisory_agreement,
+		"MUTATING (default OFF). Amend an advisory agreement — which creates a "
+		"NEW record pointing back at the old one and marks the old one "
+		"Superseded, rather than editing it.\n\n"
+		"NOT CEREMONY: last quarter's fee was charged under last quarter's "
+		"terms, and an in-place change would leave the site holding a charge it "
+		"cannot justify beside a record that says something else. "
+		"`amendment_reason` is required, because the new record shows WHAT "
+		"changed and says nothing about why. `in_place=true` corrects a "
+		"description — a name, a client's spelling, a document link — and "
+		"REFUSES to touch a fee, a date or a status. `terminate=true` with a "
+		"termination_date ends it without creating a version, because terms "
+		"that stopped did not change.",
+		{
+			"agreement": _field(_STRING, "REQUIRED. The docname, or the agreement name."),
+			"amendment_reason": _field(_STRING, "REQUIRED for an amendment. Why the terms changed."),
+			"company": _field(_STRING, "Disambiguates an agreement named by its human name."),
+			"in_place": _field(_BOOLEAN, "Correct a description without creating a version."),
+			"terminate": _field(_BOOLEAN, "End the agreement. Needs termination_date."),
+			"agreement_name": _field(_STRING, "New value."),
+			"bank_account": _field(_STRING, "New value."),
+			"client_entity": _field(_STRING, "New value."),
+			"advisor_entity": _field(_STRING, "New value."),
+			"document_reference": _field(_STRING, "New value."),
+			"objective": _field(_STRING, "New value."),
+			"investment_horizon_years": _field(_INTEGER, "New value."),
+			"fee_type": _field(_STRING, "New value."),
+			"fee_percent_of_aum": _field(_NUMBER, "New value."),
+			"fee_flat_annual": _field(_NUMBER, "New value."),
+			"billing_frequency": _field(_STRING, "New value."),
+			"effective_date": _field(_STRING, "New value, YYYY-MM-DD."),
+			"termination_date": _field(_STRING, "New value, YYYY-MM-DD."),
+		},
+		required=("agreement",),
+		mutating=True,
+		title="Update advisory agreement",
+		available=_needs_doctype("Advisory Agreement"),
+		requires=_ADVISORY_REQUIRES,
 	),
 }
 

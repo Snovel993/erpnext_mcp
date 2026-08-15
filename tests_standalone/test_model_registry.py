@@ -802,9 +802,27 @@ class ToolRegistration(unittest.TestCase):
 		# `get_cash_flow_summary` reports the cash apart from the documents and
 		# deduplicates a receipt against the withdrawal it is matched to.
 		# Nothing in Sprint 6 posts to the ledger.
-		self.assertEqual(len(self.registry.TOOLS), 513)
-		self.assertEqual(len(self.registry.READ_TOOLS), 244)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 269)
+		# v0.73.0 adds FOURTEEN over the Bank Bridge consolidation — eight
+		# reads and six writes — moving the statement anchor chain, the account
+		# pairings and the advisory agreements out of a sidecar Flask app and
+		# into the system that already holds the transactions, the ledger and
+		# the company. `get_statement_anchor_chain`,
+		# `list_unreconciled_anchors`, `get_anchor_variance_breakdown`,
+		# `list_unmatched_statement_lines` and `get_statement_recon_report` are
+		# the reads that answer whether a year of bank data is COMPLETE, which
+		# no transaction list can answer on its own.
+		# `set_anchor_variance_reason` and `rebuild_anchor_chain` are the two
+		# writes on the chain, and neither touches the three numbers that came
+		# off a bank statement. `get_account_pairing` and `pair_bank_accounts`
+		# store a brokerage-to-cash-services relationship on both sides. The
+		# four advisory tools make a fee that arrives already deducted
+		# checkable against its own terms, amended by versioning rather than by
+		# editing. `create_bank_categorization_rules` vets a whole book of
+		# rules as a set.
+		# Nothing in the consolidation posts to the ledger.
+		self.assertEqual(len(self.registry.TOOLS), 527)
+		self.assertEqual(len(self.registry.READ_TOOLS), 252)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 275)
 
 
 if __name__ == "__main__":

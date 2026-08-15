@@ -144,6 +144,7 @@ def after_install() -> None:
 	_badge_form_action()
 	_settlement_invoice_link()
 	_bank_categorization_fields()
+	_bank_pairing_fields()
 	frappe.db.commit()
 
 
@@ -173,6 +174,7 @@ def after_migrate() -> None:
 	_badge_form_action()
 	_settlement_invoice_link()
 	_bank_categorization_fields()
+	_bank_pairing_fields()
 
 
 def _settlement_invoice_link() -> None:
@@ -245,6 +247,43 @@ def _bank_categorization_fields() -> None:
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(
 			f"erpnext_mcp: the Bank Transaction categorisation fields were not installed — "
+			f"{type(exc).__name__}: {exc}"
+		)
+
+
+def _bank_pairing_fields() -> None:
+	"""Give Bank Account the seven columns a pairing and a Plaid identity need.
+
+	v0.73.0, and the fourth place this app adds Custom Fields to somebody else's
+	doctype. The argument is the one `tools/anchors.py` makes at length: a pairing
+	is a PROPERTY of an account — a brokerage and the cash-services account its
+	trades settle through — and the alternative is an "Account Pairing" doctype
+	with one row per pair, which is a shadow of a relationship a Link already
+	expresses.
+
+	`tools/anchors.py` creates the same fields lazily on first use, so a bench
+	that pulled the code without running the installer works the first time
+	somebody pairs two accounts. Doing it here means the columns exist before
+	anybody needs them, which is what makes them filterable in the Desk.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import anchors
+
+		if not frappe.db.exists("DocType", "Bank Account"):
+			return
+		if anchors.ensure_pairing_fields():
+			return
+		print(
+			"erpnext_mcp: Bank Account did not take the pairing Custom Fields. get_account_pairing "
+			"will report every pairing as absent and pair_bank_accounts will refuse to write until "
+			"they exist; every other tool is unaffected."
+		)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(
+			f"erpnext_mcp: the Bank Account pairing fields were not installed — "
 			f"{type(exc).__name__}: {exc}"
 		)
 

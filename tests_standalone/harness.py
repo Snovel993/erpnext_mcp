@@ -1460,6 +1460,13 @@ APP_DOCTYPES = {
 	# code — see `tools/banking_bridge.py` for why the dictionary a farm uses to
 	# read its own statement cannot live in a release.
 	"Bank Categorization Rule": "bank_categorization_rule",
+	# v0.73.0. The Bank Bridge consolidation: one statement period and whether
+	# the books tie out against it, the statement's own lines beside it, and the
+	# terms an investment account is managed under. See `tools/anchors.py` for
+	# why the reconciliation truth cannot live in the pipe that parses the PDFs.
+	"Statement Anchor": "statement_anchor",
+	"Statement Anchor Line": "statement_anchor_line",
+	"Advisory Agreement": "advisory_agreement",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -1999,6 +2006,7 @@ CHILD_TABLES = {
 	("Customer", "accounts"): "Party Account",
 	("Asset Cost Profile", "cost_center_allocation"): "Asset Cost Center Allocation",
 	("Asset Cost Profile", "depreciation_postings"): "Asset Depreciation Posting",
+	("Statement Anchor", "statement_lines"): "Statement Anchor Line",
 	("Note Payable", "payment_events"): "Note Payable Event",
 	("Parcel", "conveyance_events"): "Parcel Conveyance Event",
 	("Payment Entry", "references"): "Payment Entry Reference",
@@ -3973,6 +3981,7 @@ CHILD_TABLE_SOURCES = {
 	"Journal Entry Account": (("Journal Entry", "accounts"),),
 	"Parcel Conveyance Event": (("Parcel", "conveyance_events"),),
 	"Bank Transaction Payments": (("Bank Transaction", "payment_entries"),),
+	"Statement Anchor Line": (("Statement Anchor", "statement_lines"),),
 	"Fiscal Year Company": (("Fiscal Year", "companies"),),
 	"Workflow Document State": (("Workflow", "states"),),
 	"Workflow Transition": (("Workflow", "transitions"),),

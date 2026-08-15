@@ -17,10 +17,12 @@
   "priority",
   "account",
   "cost_center",
+  "bank_cost_center",
   "match_section",
   "match_field",
   "match_type",
   "pattern",
+  "plaid_category",
   "match_col",
   "direction",
   "amount_min",
@@ -28,6 +30,7 @@
   "party_section",
   "party_type",
   "party",
+  "party_name",
   "stats_section",
   "times_applied",
   "last_applied",
@@ -156,35 +159,47 @@
    "options": "Cost Center"
   },
   {
+   "description": "The cost center for the BANK side of a posting, where an operation books its cash movements somewhere other than the cost they pay for. Separate from Cost Center because they are two different sides of one entry and a single field would make a transfer between two accounts land entirely on whichever one was named.",
+   "fieldname": "bank_cost_center",
+   "fieldtype": "Link",
+   "label": "Bank Cost Center",
+   "options": "Cost Center"
+  },
+  {
    "fieldname": "match_section",
    "fieldtype": "Section Break",
    "label": "What This Rule Matches"
   },
   {
    "default": "description",
-   "description": "Which field on the Bank Transaction the pattern is tested against. `description` is the memo line a bank feed writes and is what nearly every rule wants.",
+   "description": "Which field on the Bank Transaction the pattern is tested against. `description` is the memo line a bank feed writes and is what nearly every rule wants. IGNORED by the match types that name their own field — merchant_exact and merchant_contains read the merchant, description_regex reads the description, plaid_category_matches reads the feed's own category.",
    "fieldname": "match_field",
    "fieldtype": "Select",
    "label": "Match Field",
-   "options": "description\nreference_number\nbank_party_name",
+   "options": "description\nreference_number\nbank_party_name\nplaid_category",
    "reqd": 1
   },
   {
    "default": "contains",
-   "description": "How the pattern is compared. All four are case-insensitive. `regex` is Python's syntax and is validated when the rule is saved, so a rule that would explode at apply time is refused here instead.",
+   "description": "How this rule decides. The first four compare `pattern` against `match_field`, case-insensitively. The rest name their own field so a rule reads as what it is: `merchant_exact` and `merchant_contains` test the MERCHANT (bank_party_name, falling back to the description where the feed left it empty); `description_regex` is a regular expression on the memo; `plaid_category_matches` tests the feed's own category and matches a prefix, so FOOD_AND_DRINK catches FOOD_AND_DRINK_RESTAURANTS; `amount_range` has no text at all and matches on the amount bounds alone; `combined` ANDs every criterion that is filled in. Direction and the amount bounds are ANDed onto EVERY match type — they are not a match type of their own, they are a gate on all of them. Every regular expression is compiled when the rule is saved, so one that would explode mid-run is refused here.",
    "fieldname": "match_type",
    "fieldtype": "Select",
    "label": "Match Type",
-   "options": "contains\nstarts_with\nequals\nregex",
+   "options": "contains\nstarts_with\nequals\nregex\nmerchant_exact\nmerchant_contains\ndescription_regex\nplaid_category_matches\namount_range\ncombined",
    "reqd": 1
   },
   {
-   "description": "The text to look for. Case-insensitive — bank feeds shout, and a rule that only matched CHEVRON would miss Chevron.",
+   "description": "The text to look for. Case-insensitive — bank feeds shout, and a rule that only matched CHEVRON would miss Chevron. Not required for `amount_range`, which has no text criterion, and optional on `combined`.",
    "fieldname": "pattern",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Pattern",
-   "reqd": 1
+   "label": "Pattern"
+  },
+  {
+   "description": "The aggregator's own category, for `plaid_category_matches` and as one criterion of a `combined` rule. Matched as a PREFIX and case-insensitively, because these categories are hierarchical — TRANSPORTATION catches TRANSPORTATION_GAS, and a rule that had to name every leaf would be out of date the next time the taxonomy grew one.",
+   "fieldname": "plaid_category",
+   "fieldtype": "Data",
+   "label": "Plaid Category"
   },
   {
    "fieldname": "match_col",
@@ -228,6 +243,12 @@
    "fieldtype": "Dynamic Link",
    "label": "Party",
    "options": "party_type"
+  },
+  {
+   "description": "The vendor's name as it should READ, for a transaction whose feed left `bank_party_name` empty. Not a Link and not a substitute for one: a name is what a person sees on a statement line, a Party is what a 1099 totals — a rule may set either, both, or neither, and neither is ever written over a value that is already there.",
+   "fieldname": "party_name",
+   "fieldtype": "Data",
+   "label": "Party Name"
   },
   {
    "fieldname": "stats_section",

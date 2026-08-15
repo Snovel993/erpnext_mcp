@@ -1,0 +1,247 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-14 09:00:00.000000",
+ "description": "The terms somebody manages an investment account under: who the client is, who the advisor is, what they charge and how often, and when it started. A record rather than a PDF in a drawer because the fee is a recurring cost with compliance consequences — a fee disclosure that does not match what is actually being charged is the finding, and nobody can check that against a scan.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "agreement_name",
+  "company",
+  "bank_account",
+  "status",
+  "parties_col",
+  "client_entity",
+  "advisor_entity",
+  "document_reference",
+  "mandate_section",
+  "objective",
+  "investment_horizon_years",
+  "fee_section",
+  "fee_type",
+  "fee_percent_of_aum",
+  "fee_flat_annual",
+  "fee_col",
+  "billing_frequency",
+  "term_section",
+  "effective_date",
+  "termination_date",
+  "term_col",
+  "amended_from",
+  "amendment_reason"
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2026-08-14 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Advisory Agreement",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "search_fields": "agreement_name,client_entity,advisor_entity",
+ "sort_field": "effective_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "agreement_name",
+ "track_changes": 1,
+ "fields": [
+  {
+   "default": "AA-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "AA-.#####",
+   "read_only": 1
+  },
+  {
+   "description": "What this agreement is called, for a person reading the list.",
+   "fieldname": "agreement_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Agreement Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The managed account. Optional — an agreement can be signed before the account is opened — but where it is set it must belong to the same company, because a fee charged against one entity's account cannot be a cost of another's.",
+   "fieldname": "bank_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Bank Account",
+   "options": "Bank Account",
+   "search_index": 1
+  },
+  {
+   "default": "Active",
+   "description": "Active is the one in force. Superseded is what an amendment leaves behind — kept, never deleted, because the terms that were in force when a fee was charged are the terms that justify the fee.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nTerminated\nSuperseded",
+   "reqd": 1
+  },
+  {
+   "fieldname": "parties_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The legal client, as the agreement names it — \"Orchard Meadow, LLC\". Free text rather than a Link to Company, deliberately: the signing entity on an agreement is frequently a trust or an individual that has no reason to exist in the chart of accounts.",
+   "fieldname": "client_entity",
+   "fieldtype": "Data",
+   "label": "Client Entity"
+  },
+  {
+   "description": "The legal advisor, as the agreement names it.",
+   "fieldname": "advisor_entity",
+   "fieldtype": "Data",
+   "label": "Advisor Entity"
+  },
+  {
+   "description": "The signed agreement in the governance register, where it has been filed there.",
+   "fieldname": "document_reference",
+   "fieldtype": "Link",
+   "label": "Document Reference",
+   "options": "Governance Document"
+  },
+  {
+   "fieldname": "mandate_section",
+   "fieldtype": "Section Break",
+   "label": "Mandate"
+  },
+  {
+   "description": "What the account is being managed FOR. It is the half of suitability that can be recorded; the other half is the client's circumstances, which do not belong in an accounting system.",
+   "fieldname": "objective",
+   "fieldtype": "Select",
+   "label": "Objective",
+   "options": "\nGrowth\nIncome\nBalanced\nPreservation"
+  },
+  {
+   "fieldname": "investment_horizon_years",
+   "fieldtype": "Int",
+   "label": "Investment Horizon (Years)"
+  },
+  {
+   "fieldname": "fee_section",
+   "fieldtype": "Section Break",
+   "label": "Fees"
+  },
+  {
+   "default": "Percent of AUM",
+   "description": "Which of the two fee fields below is in force. Hybrid means both — a flat retainer plus a percentage — and is refused unless both are filled in, because a hybrid missing half of itself computes as whichever half survived.",
+   "fieldname": "fee_type",
+   "fieldtype": "Select",
+   "label": "Fee Type",
+   "options": "Percent of AUM\nFlat Annual\nHybrid",
+   "reqd": 1
+  },
+  {
+   "description": "Annualised percentage of assets under management. 1.0 means 1%.",
+   "fieldname": "fee_percent_of_aum",
+   "fieldtype": "Percent",
+   "label": "Fee Percent of AUM"
+  },
+  {
+   "fieldname": "fee_flat_annual",
+   "fieldtype": "Currency",
+   "label": "Fee Flat Annual"
+  },
+  {
+   "fieldname": "fee_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Quarterly",
+   "description": "How often the fee is actually billed. It is what turns an annualised rate into the number that will appear on a statement, and it is the one field that makes a computed fee comparable to a charged one.",
+   "fieldname": "billing_frequency",
+   "fieldtype": "Select",
+   "label": "Billing Frequency",
+   "options": "Monthly\nQuarterly\nAnnually",
+   "reqd": 1
+  },
+  {
+   "fieldname": "term_section",
+   "fieldtype": "Section Break",
+   "label": "Term"
+  },
+  {
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective Date",
+   "reqd": 1
+  },
+  {
+   "description": "When it ends. Empty means it has not — a Terminated agreement without one is refused, because \"this ended\" and \"we do not know when\" are different facts and only one of them can be billed against.",
+   "fieldname": "termination_date",
+   "fieldtype": "Date",
+   "label": "Termination Date"
+  },
+  {
+   "fieldname": "term_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The agreement this one replaces. An amendment is a NEW record pointing back, and the old one becomes Superseded rather than being edited, so the terms in force on any past date are still readable.",
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Advisory Agreement",
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "description": "Why the terms changed. On an amendment this is the only place the reason is recorded — the prior record shows WHAT changed and says nothing about why.",
+   "fieldname": "amendment_reason",
+   "fieldtype": "Small Text",
+   "label": "Amendment Reason"
+  }
+ ]
+}

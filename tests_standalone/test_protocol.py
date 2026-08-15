@@ -1001,10 +1001,40 @@ class Catalogue(SeededTestCase):
 
 		NOTHING in Sprint 6 posts to the ledger. Not one of the ten writes a GL
 		Entry, a Journal Entry or an allocation.
+
+		v0.73.0 adds FOURTEEN over the Bank Bridge consolidation — eight reads
+		and six writes — and what they consolidate is AUTHORITY. A sidecar Flask
+		app held the statement anchor chain in its own database, which meant two
+		systems held reconciliation truth and nothing said which was right when
+		they disagreed. `get_statement_anchor_chain`, `list_unreconciled_anchors`
+		and `get_anchor_variance_breakdown` answer the question a transaction
+		list cannot — whether a year of bank data is COMPLETE — because a
+		movement the feed never delivered leaves no row to inspect and shows up
+		only as opening plus everything on file not equalling closing.
+		`list_unmatched_statement_lines` is the one list that NAMES a missing
+		movement rather than its size, and it says so plainly when no statement
+		lines are on file, because "nothing is missing" and "nothing to check
+		against" are opposite answers. `get_statement_recon_report` puts the
+		statement, the feed and the ledger side by side and never sums them.
+		`set_anchor_variance_reason` records why a period does not tie out and
+		does NOT mark it reconciled; `rebuild_anchor_chain` recomputes only what
+		is derived, because rewriting the anchored numbers from the transaction
+		feed would make every period tie out perfectly and prove nothing.
+		`get_account_pairing` and `pair_bank_accounts` make a brokerage and its
+		cash-services companion one relationship stored on both sides.
+		`create_advisory_agreement`, `update_advisory_agreement`,
+		`get_advisory_agreement_summary` and `list_advisory_agreements` make an
+		advisory fee — the one recurring cost that arrives already deducted —
+		checkable against the terms it was charged under, with amendment as
+		versioning rather than editing. `create_bank_categorization_rules` is
+		the fourteenth: a whole book of rules vetted as a set, because a
+		single-rule call can only see the rules that already exist.
+
+		NOTHING in the consolidation posts to the ledger either.
 		"""
-		self.assertEqual(len(registry.TOOLS), 513)
-		self.assertEqual(len(registry.READ_TOOLS), 244)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 269)
+		self.assertEqual(len(registry.TOOLS), 527)
+		self.assertEqual(len(registry.READ_TOOLS), 252)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 275)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

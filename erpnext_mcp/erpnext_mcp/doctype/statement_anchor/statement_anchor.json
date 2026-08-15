@@ -1,0 +1,297 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-14 09:00:00.000000",
+ "description": "One statement period on one bank account, and whether the books tie out against it. Opening balance plus everything that moved is what the closing balance SHOULD be; the bank's own closing balance is what it is; the gap between them is the variance and it is the only number on this record that matters. A period-by-period chain of these is the proof that a year of transactions is complete — a missing month shows up as a chain gap, a missing transaction shows up as a variance, and neither is findable from the transaction list alone.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "bank_account",
+  "company",
+  "plaid_account_mask",
+  "period_col",
+  "period_start",
+  "period_end",
+  "parser_version",
+  "source_statement_id",
+  "balance_section",
+  "anchored_opening",
+  "transaction_sum",
+  "computed_closing",
+  "balance_col",
+  "anchored_closing",
+  "variance",
+  "variance_tolerance",
+  "reconciled",
+  "chain_gap_from_prior",
+  "explanation_section",
+  "variance_reason",
+  "portfolio_section",
+  "portfolio_opening_value",
+  "portfolio_closing_value",
+  "portfolio_col",
+  "mark_to_market_delta",
+  "lines_section",
+  "statement_lines",
+  "document_section",
+  "statement_pdf",
+  "amended_from"
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2026-08-14 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Statement Anchor",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "search_fields": "bank_account,period_start,period_end",
+ "sort_field": "period_start",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "bank_account",
+ "track_changes": 1,
+ "fields": [
+  {
+   "default": "SA-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "SA-.#####",
+   "read_only": 1
+  },
+  {
+   "description": "The account this period belongs to. A proper Link rather than a raw Plaid account id, which is what makes an anchor company-scoped, joinable to its Bank Transactions, and exportable with the rest of a company's records.",
+   "fieldname": "bank_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Bank Account",
+   "options": "Bank Account",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Copied from the Bank Account when the anchor is saved, and read-only here. Derived rather than entered, and stored rather than joined: every reconciliation question is asked one company at a time, and a filter that needed a join to the Bank Account would be the join every one of those queries pays for.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The last four digits the bank prints on the statement. Indexed, because a person asking whether ••6030 tied out in October has the mask and not the docname.",
+   "fieldname": "plaid_account_mask",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Plaid Account Mask",
+   "search_index": 1
+  },
+  {
+   "fieldname": "period_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period Start",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period End",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Which version of the statement parser produced these numbers. Kept because a variance that appears across every account in one month is a parser change, not a bookkeeping problem, and this is the column that says so.",
+   "fieldname": "parser_version",
+   "fieldtype": "Data",
+   "label": "Parser Version"
+  },
+  {
+   "description": "The upstream statement id, for tracing a row back to the PDF it was read off. Migration traceability only — nothing here reads it to make a decision.",
+   "fieldname": "source_statement_id",
+   "fieldtype": "Int",
+   "label": "Source Statement ID"
+  },
+  {
+   "fieldname": "balance_section",
+   "fieldtype": "Section Break",
+   "label": "The Chain"
+  },
+  {
+   "description": "Opening balance per the statement. In a healthy chain this equals the prior period's closing balance; where it does not, chain_gap_from_prior says so.",
+   "fieldname": "anchored_opening",
+   "fieldtype": "Currency",
+   "label": "Anchored Opening"
+  },
+  {
+   "description": "Everything that moved in the period. POSITIVE IS MONEY IN — deposits, interest, dividends, sale proceeds — and negative is money out. Same convention as Bank Transaction's signed amount, so no sign is flipped anywhere between the two.",
+   "fieldname": "transaction_sum",
+   "fieldtype": "Currency",
+   "label": "Transaction Sum"
+  },
+  {
+   "description": "anchored_opening + transaction_sum. What the closing balance would be if every movement in the period were on file.",
+   "fieldname": "computed_closing",
+   "fieldtype": "Currency",
+   "label": "Computed Closing",
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Closing balance per the statement. The bank's number, not ours.",
+   "fieldname": "anchored_closing",
+   "fieldtype": "Currency",
+   "label": "Anchored Closing"
+  },
+  {
+   "description": "anchored_closing - computed_closing. Positive means the bank has more money than the transactions on file account for, so something that came IN is missing; negative means something that went OUT is missing.",
+   "fieldname": "variance",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Variance",
+   "read_only": 1
+  },
+  {
+   "default": "0.01",
+   "description": "How far off a period may be and still count as reconciled. A cent by default, which is rounding. A brokerage account whose advisory fee never appears in the bank feed needs a variance_reason, not a wider tolerance — widening this is how a real missing transaction gets filed as noise.",
+   "fieldname": "variance_tolerance",
+   "fieldtype": "Currency",
+   "label": "Variance Tolerance"
+  },
+  {
+   "description": "Computed on save: abs(variance) is within the tolerance. Read-only, because a period nobody can explain is not reconciled by ticking a box.",
+   "fieldname": "reconciled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Reconciled",
+   "read_only": 1
+  },
+  {
+   "description": "Computed on save: the prior period's closing balance is not this period's opening balance. Usually a statement nobody has loaded yet — a gap in the chain is a MISSING PERIOD, which no amount of per-transaction checking will find.",
+   "fieldname": "chain_gap_from_prior",
+   "fieldtype": "Check",
+   "label": "Chain Gap From Prior",
+   "read_only": 1
+  },
+  {
+   "fieldname": "explanation_section",
+   "fieldtype": "Section Break",
+   "label": "Explanation"
+  },
+  {
+   "description": "Why this period does not tie out, in a sentence a person wrote. \"Quarterly advisory fee $3,774.81, not in the bank feed\" is an explained variance and is worth more than a tolerance wide enough to swallow it, because next quarter's fee will be a different number and the explanation still fits.",
+   "fieldname": "variance_reason",
+   "fieldtype": "Small Text",
+   "label": "Variance Reason"
+  },
+  {
+   "fieldname": "portfolio_section",
+   "fieldtype": "Section Break",
+   "label": "Brokerage"
+  },
+  {
+   "description": "Total account value including securities, at the start of the period. Empty on a depository account. NOT part of the chain: the anchor reconciles cash and sweep, never market value.",
+   "fieldname": "portfolio_opening_value",
+   "fieldtype": "Currency",
+   "label": "Portfolio Opening Value"
+  },
+  {
+   "description": "Total account value including securities, at the end of the period. Empty on a depository account.",
+   "fieldname": "portfolio_closing_value",
+   "fieldtype": "Currency",
+   "label": "Portfolio Closing Value"
+  },
+  {
+   "fieldname": "portfolio_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The part of the portfolio move that no cash movement explains — the market, in other words. Reported beside the cash chain and never added to it, because a position that went up is not money that arrived.",
+   "fieldname": "mark_to_market_delta",
+   "fieldtype": "Currency",
+   "label": "Mark To Market Delta"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Statement Lines"
+  },
+  {
+   "description": "The period as the STATEMENT prints it, where a parser has supplied it. Optional, and empty on most anchors: the chain arithmetic above needs only three numbers. What these buy is the one question the numbers cannot answer — WHICH movement is missing — because a line here with no Bank Transaction behind it is a transaction the feed never delivered.",
+   "fieldname": "statement_lines",
+   "fieldtype": "Table",
+   "label": "Statement Lines",
+   "options": "Statement Anchor Line"
+  },
+  {
+   "fieldname": "document_section",
+   "fieldtype": "Section Break",
+   "label": "Source Document"
+  },
+  {
+   "description": "The statement PDF, where somebody has attached one. OPTIONAL by design — the pipe that parses statements already stores them, and this app owns the reconciliation truth whether or not it owns the bytes.",
+   "fieldname": "statement_pdf",
+   "fieldtype": "Attach",
+   "label": "Statement PDF"
+  },
+  {
+   "description": "The anchor this one replaces. A restated period is a new record pointing at the old one rather than an edit, so the number somebody reconciled against last quarter is still readable.",
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Statement Anchor",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ]
+}

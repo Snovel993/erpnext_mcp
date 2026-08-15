@@ -107,6 +107,15 @@ CATEGORY_FIELD = "farm_category"
 ACCOUNT_FIELD = "farm_expense_account"
 RULE_FIELD = "categorization_rule"
 
+#: v0.73.0's fourth column, and the odd one out: the other three are what a
+#: categorisation WRITES, and this is one a bank pipe FILLS IN before any rule
+#: runs. It is here so a rule can match on the aggregator's own category rather
+#: than on a memo line, which is the single highest-yield criterion available —
+#: the feed has already done the merchant identification a pattern is guessing
+#: at. It is deliberately NOT part of `_categorization_fields_present`: a site
+#: without it loses one match type and categorises normally with the rest.
+PLAID_CATEGORY_FIELD = "plaid_category"
+
 #: What Expense Receipt gained in v0.71.0. Shipped in the doctype JSON — this is
 #: our own doctype, so there is no Custom Field dance — but read through
 #: `compat.has_field` anyway, because a bench that pulled the code and has not
@@ -214,16 +223,19 @@ _RULE_FIELDS = (
 	"category",
 	"account",
 	"cost_center",
+	"bank_cost_center",
 	"enabled",
 	"priority",
 	"match_field",
 	"match_type",
 	"pattern",
+	"plaid_category",
 	"direction",
 	"amount_min",
 	"amount_max",
 	"party_type",
 	"party",
+	"party_name",
 	"times_applied",
 	"last_applied",
 	"notes",
@@ -298,6 +310,19 @@ def ensure_categorization_fields() -> bool:
 				"Which rule categorised this transaction. Read-only and the whole point of the "
 				"exercise: a category nobody can trace back to a rule is a category nobody can argue "
 				"with."
+			),
+		},
+		{
+			"fieldname": PLAID_CATEGORY_FIELD,
+			"label": "Feed Category",
+			"fieldtype": "Data",
+			"insert_after": RULE_FIELD,
+			"description": (
+				"The category the bank feed itself assigned — TRANSPORTATION_GAS, "
+				"GENERAL_SERVICES_ACCOUNTING. Written by the sync, never by a rule, and matched "
+				"against by a plaid_category_matches rule. It is the aggregator's opinion and not a "
+				"farm's: it knows this was fuel and has no idea whether it was the orchard sprayer "
+				"or the shop truck, which is why farm_category is a separate column."
 			),
 		},
 	)
@@ -441,7 +466,8 @@ def _transaction_rows(filters: dict, *, limit: int = MAX_SCAN, order_by: str = "
 	# `existing_fields` when they are not there, so one query serves a site that
 	# has them and a site that has never categorised anything.
 	fields = compat.existing_fields(
-		BANK_TRANSACTION, [*list(_TRANSACTION_FIELDS), CATEGORY_FIELD, ACCOUNT_FIELD, RULE_FIELD]
+		BANK_TRANSACTION,
+		[*list(_TRANSACTION_FIELDS), CATEGORY_FIELD, ACCOUNT_FIELD, RULE_FIELD, PLAID_CATEGORY_FIELD],
 	)
 	rows = frappe.db.get_all(BANK_TRANSACTION, filters=filters, fields=fields, order_by=order_by, limit=limit)
 	money = compat.bank_transaction_amount_fields()
@@ -1356,6 +1382,72 @@ def list_unmatched_bank_transactions(args: dict) -> ToolResult:
 # ── 6. create_bank_categorization_rule ───────────────────────────────────────
 
 
+def _insert_rule(spec: dict, company: str):
+	"""Validate and insert ONE rule from a spec dict. The single creation path.
+
+	Shared by `create_bank_categorization_rule`, the bulk tool and the seeder, so
+	all three vet an account the same way, refuse a duplicate name the same way,
+	and produce a rule of the same shape. Three creation paths would be three
+	slightly different rules, and the differences would only show up in what a
+	season of transactions got categorised as.
+
+	Everything it writes is validated by the controller as well — the match type
+	against its own criteria, the amount range, the account's company. This layer
+	adds the two checks a controller cannot make: an account resolved from
+	whatever the caller typed, and a duplicate name refused with the existing
+	rule's docname in the message.
+	"""
+	rule_name = as_str(spec, "rule_name", required=True)
+	category = as_str(spec, "category", required=True)
+
+	duplicate = frappe.db.get_value(RULE, {"rule_name": rule_name, "company": company}, "name")
+	if duplicate:
+		raise ToolError(
+			f"{company} already has a rule called {rule_name!r} ({duplicate}). Two rules with one "
+			"name are indistinguishable in the report that says which rule categorised a "
+			"transaction. Nothing was created."
+		)
+
+	account = _rule_account(spec, company)
+	party_type, party = _rule_party(spec)
+
+	doc = frappe.new_doc(RULE)
+	doc.rule_name = rule_name
+	doc.company = company
+	doc.category = category
+	doc.pattern = as_str(spec, "pattern")
+	doc.match_field = as_str(spec, "match_field") or "description"
+	doc.match_type = as_str(spec, "match_type") or "contains"
+	doc.direction = as_str(spec, "direction") or "Any"
+	priority = as_int(spec, "priority", 100)
+	doc.priority = 100 if priority is None else int(priority)
+	doc.enabled = 1 if as_bool(spec, "enabled", True) else 0
+	if account:
+		doc.account = account
+	for key in ("cost_center", "bank_cost_center", "plaid_category", "party_name", "notes"):
+		value = as_str(spec, key)
+		if value:
+			doc.set(key, value)
+	if party_type:
+		doc.party_type = party_type
+		doc.party = party
+	for key in ("amount_min", "amount_max"):
+		value = spec.get(key)
+		if value not in (None, ""):
+			doc.set(key, as_float(value, key))
+	doc.insert()
+	return doc
+
+
+def _describe_rule(doc) -> str:
+	"""What a rule matches on, in the few words an audit summary has room for."""
+	if doc.match_type == "amount_range":
+		return f"amount_range {doc.get('amount_min')}–{doc.get('amount_max')}"
+	if doc.match_type == "plaid_category_matches":
+		return f"plaid_category_matches {doc.get('plaid_category') or doc.get('pattern')!r}"
+	return f"{doc.match_type} {doc.get('pattern')!r}"
+
+
 def create_bank_categorization_rule(args: dict) -> ToolResult:
 	"""One rule: when a statement line looks like THIS, it is THAT.
 
@@ -1374,52 +1466,10 @@ def create_bank_categorization_rule(args: dict) -> ToolResult:
 	"""
 	_require_rules()
 	company = resolve_company(as_str(args, "company"), required=True)
-	rule_name = as_str(args, "rule_name", required=True)
-	category = as_str(args, "category", required=True)
-	pattern = as_str(args, "pattern", required=True)
-
-	match_field = as_str(args, "match_field") or "description"
-	match_type = as_str(args, "match_type") or "contains"
-	direction = as_str(args, "direction") or "Any"
-	priority = as_int(args, "priority", 100)
-
-	duplicate = frappe.db.get_value(RULE, {"rule_name": rule_name, "company": company}, "name")
-	if duplicate:
-		raise ToolError(
-			f"{company} already has a rule called {rule_name!r} ({duplicate}). Two rules with one "
-			"name are indistinguishable in the report that says which rule categorised a "
-			"transaction. Nothing was created."
-		)
-
-	account = _rule_account(args, company)
-	cost_center = as_str(args, "cost_center")
-	party_type, party = _rule_party(args)
-
-	doc = frappe.new_doc(RULE)
-	doc.rule_name = rule_name
-	doc.company = company
-	doc.category = category
-	doc.pattern = pattern
-	doc.match_field = match_field
-	doc.match_type = match_type
-	doc.direction = direction
-	doc.priority = 100 if priority is None else int(priority)
-	doc.enabled = 1 if as_bool(args, "enabled", True) else 0
-	if account:
-		doc.account = account
-	if cost_center:
-		doc.cost_center = cost_center
-	if party_type:
-		doc.party_type = party_type
-		doc.party = party
-	for key in ("amount_min", "amount_max"):
-		value = args.get(key)
-		if value not in (None, ""):
-			doc.set(key, as_float(value, key))
-	notes = as_str(args, "notes")
-	if notes:
-		doc.notes = notes
-	doc.insert()
+	doc = _insert_rule(args, company)
+	account = doc.get("account")
+	rule_name = doc.rule_name
+	category = doc.category
 
 	overlapping = _overlapping_rules(doc)
 	data = {
@@ -1447,8 +1497,137 @@ def create_bank_categorization_rule(args: dict) -> ToolResult:
 
 	return ToolResult(
 		data,
-		f"created categorization rule {doc.name} ({rule_name}) — {match_type} {pattern!r} → {category}",
+		f"created categorization rule {doc.name} ({rule_name}) — {_describe_rule(doc)} → {category}",
 		docstatus_delta="none → 0 (created)",
+	)
+
+
+def create_bank_categorization_rules(args: dict) -> ToolResult:
+	"""A whole book of rules in ONE call. MUTATING.
+
+	WHY THIS EXISTS BESIDE THE SINGULAR TOOL. A farm that changes packers, or one
+	being set up, writes thirty rules at once — and thirty round trips is thirty
+	chances to get the priorities wrong relative to each other, because each call
+	can only see the rules that already exist. Passing the set together means the
+	overlap report is computed across the whole batch, so `CHEVRON` at 10 and
+	`FUEL` at 100 are checked against each other before either is written.
+
+	VETTED IN FULL BEFORE ANYTHING IS WRITTEN. Every account is resolved and
+	checked, every name is checked against the site AND against the rest of the
+	batch, and every match type is checked for the criterion it needs. A batch
+	either produces the book the caller described or produces nothing — half a
+	book is worse than none, because the half that landed will categorise a month
+	of statement on its own and look like it worked.
+
+	`dry_run` runs the whole vetting pass and writes nothing, which is the right
+	first call for a batch anybody typed by hand.
+	"""
+	_require_rules()
+	company = resolve_company(as_str(args, "company"), required=True)
+	dry_run = bool(as_bool(args, "dry_run", False))
+
+	raw = args.get("rules")
+	if not isinstance(raw, list) or not raw:
+		raise ToolError(
+			'rules is a non-empty list of objects, e.g. [{"rule_name": "Fuel — Chevron", '
+			'"category": "Fuel", "pattern": "CHEVRON", "match_type": "merchant_contains", '
+			'"priority": 10}]. Nothing was created.'
+		)
+	if len(raw) > MAX_SCAN:
+		raise ToolError(f"{len(raw)} rules in one call; the ceiling is {MAX_SCAN}. Nothing was created.")
+
+	specs, seen = [], {}
+	for index, item in enumerate(raw):
+		if not isinstance(item, dict):
+			raise ToolError(f"rules[{index}] is not an object. Nothing was created.")
+		spec = {**item}
+		spec.setdefault("company", company)
+		name = as_str(spec, "rule_name", required=True)
+		if name in seen:
+			raise ToolError(
+				f"rules[{index}] and rules[{seen[name]}] are both called {name!r}. Two rules with one "
+				"name are indistinguishable in the report that says which rule categorised a "
+				"transaction. Nothing was created."
+			)
+		seen[name] = index
+		# Vetted here so a bad account in the twentieth rule refuses the batch
+		# before the first one is written. `_rule_account` raises with the reason.
+		_rule_account(spec, company)
+		specs.append(spec)
+
+	existing = {
+		row["rule_name"]
+		for row in frappe.db.get_all(RULE, filters={"company": company}, fields=["rule_name"], limit=MAX_SCAN)
+	}
+	clashes = [name for name in seen if name in existing]
+	if clashes:
+		raise ToolError(
+			f"{company} already has {len(clashes)} of these rules: {', '.join(sorted(clashes))}. "
+			"Rename them, or edit the existing ones. Nothing was created."
+		)
+
+	if dry_run:
+		data = {
+			"company": company,
+			"dry_run": True,
+			"would_create": [
+				{
+					"rule_name": as_str(spec, "rule_name"),
+					"category": as_str(spec, "category"),
+					"pattern": as_str(spec, "pattern") or None,
+					"match_type": as_str(spec, "match_type") or "contains",
+					"priority": as_int(spec, "priority", 100),
+					"account": as_str(spec, "account") or as_str(spec, "expense_account") or None,
+				}
+				for spec in specs
+			],
+			"count": len(specs),
+			"warning": "dry_run=true — every rule was vetted and NOTHING was written.",
+		}
+		return ToolResult(data, f"would create {len(specs)} categorization rule(s) for {company}")
+
+	created, failed = [], []
+	for spec in specs:
+		try:
+			doc = _insert_rule(spec, company)
+		except Exception as exc:
+			failed.append({"rule_name": as_str(spec, "rule_name"), "error": f"{type(exc).__name__}: {exc}"})
+			continue
+		created.append(_rule_out(_rule_row(doc.name)))
+
+	priorities = sorted({rule["priority"] for rule in created})
+	data = {
+		"company": company,
+		"dry_run": False,
+		"created": created,
+		"created_count": len(created),
+		"failed": failed,
+		"failed_count": len(failed),
+		"priorities_used": priorities,
+		"note": (
+			"Rules are tried in priority order and the FIRST match wins, so a specific merchant "
+			"belongs at a LOWER number than the generic word that would otherwise swallow it. "
+			"Creating rules categorises nothing — apply_categorization_rules runs them, and "
+			"dry_run=true on that call is the sensible next step."
+		),
+	}
+	if failed:
+		data["warning"] = (
+			f"{len(failed)} rule(s) were refused by the doctype after the batch had been vetted, and "
+			"the rest were written. Each names its own reason."
+		)
+	if len(priorities) == 1 and len(created) > 1:
+		data["priority_warning"] = (
+			f"every rule in this batch is at priority {priorities[0]}, so which one wins a "
+			"transaction that matches two of them is decided by docname order rather than by "
+			"anything anybody chose. Give the specific merchant rules a lower number."
+		)
+
+	return ToolResult(
+		data,
+		f"created {len(created)} categorization rule(s) for {company}"
+		+ (f", {len(failed)} refused" if failed else ""),
+		docstatus_delta="none → 0 (created)" if created else "",
 	)
 
 
@@ -1498,16 +1677,29 @@ def _rule_party(args: dict) -> tuple:
 
 
 def _overlapping_rules(doc) -> list:
-	"""Existing rules whose pattern also matches this one's, and which would win."""
+	"""Existing rules whose pattern also matches this one's, and which would win.
+
+	COMPARED ON THE EFFECTIVE FIELD, not on `match_field`. A `merchant_contains`
+	rule and a `contains`-on-`bank_party_name` rule read the same column under
+	different names, and a comparison on the stored field would report the two as
+	unrelated — which is exactly the pair most likely to swallow each other.
+
+	Rules with no text criterion (`amount_range`) are skipped: overlap between an
+	amount band and a merchant pattern is real but it is not something a pattern
+	comparison can see, and a report that guessed at it would be noise on every
+	rule anybody created.
+	"""
+	mine = _rule_doc(doc.as_dict())
 	out = []
 	for row in _enabled_rules(doc.company):
 		if row["name"] == doc.name:
 			continue
-		if row.get("match_field") != doc.match_field:
+		theirs = _rule_doc(row)
+		if theirs.match_field_for() != mine.match_field_for():
 			continue
-		if not (
-			_rule_doc(row).matches_text(doc.pattern) or _rule_doc(doc.as_dict()).matches_text(row["pattern"])
-		):
+		if not (doc.pattern or "") or not (row.get("pattern") or ""):
+			continue
+		if not (theirs.matches_text(doc.pattern) or mine.matches_text(row["pattern"])):
 			continue
 		out.append(
 			{
@@ -1586,16 +1778,19 @@ def _rule_out(row: dict) -> dict:
 		"category": row.get("category"),
 		"account": row.get("account") or None,
 		"cost_center": row.get("cost_center") or None,
+		"bank_cost_center": row.get("bank_cost_center") or None,
 		"enabled": bool(int(row.get("enabled") or 0)),
 		"priority": int(row.get("priority") or 0),
 		"match_field": row.get("match_field"),
 		"match_type": row.get("match_type"),
-		"pattern": row.get("pattern"),
+		"pattern": row.get("pattern") or None,
+		"plaid_category": row.get("plaid_category") or None,
 		"direction": row.get("direction"),
 		"amount_min": _money(row.get("amount_min")) if row.get("amount_min") not in (None, "") else None,
 		"amount_max": _money(row.get("amount_max")) if row.get("amount_max") not in (None, "") else None,
 		"party_type": row.get("party_type") or None,
 		"party": row.get("party") or None,
+		"party_name": row.get("party_name") or None,
 		"times_applied": int(row.get("times_applied") or 0),
 		"last_applied": _date_text(row.get("last_applied")),
 		"notes": row.get("notes") or None,
@@ -1687,6 +1882,12 @@ def apply_categorization_rules(args: dict) -> ToolResult:
 	rows = _transaction_rows(filters)
 	limit = as_limit(args)
 
+	# ONE PASS OVER THE TRANSACTIONS, against rules built once and already in
+	# priority order — `_enabled_rules` sorts them and the first match wins, so
+	# the run is O(transactions x rules) comparisons with no database work and no
+	# document construction inside the loop.
+	prepared = _prepare_rules(rules)
+
 	applied, skipped, per_rule = [], [], {}
 	uncategorised = []
 	for row in rows:
@@ -1697,7 +1898,7 @@ def apply_categorization_rules(args: dict) -> ToolResult:
 			)
 			continue
 
-		hit = _first_matching_rule(rules, row)
+		hit = _first_matching_rule(prepared, row)
 		if hit is None:
 			uncategorised.append(
 				{
@@ -1718,11 +1919,21 @@ def apply_categorization_rules(args: dict) -> ToolResult:
 			"rule": hit["name"],
 			"rule_name": hit.get("rule_name"),
 			"category": hit.get("category"),
+			"match_type": hit.get("match_type"),
 			"account": hit.get("account") or None,
 			"cost_center": hit.get("cost_center") or None,
+			"bank_cost_center": hit.get("bank_cost_center") or None,
 			"previous_category": existing or None,
 			"party_set": None,
+			"party_name_set": None,
 		}
+
+		# The two cost centers are REPORTED and not written. There is no cost
+		# center column on a Bank Transaction and this app does not add one:
+		# a cost center is a property of a POSTING, and nothing here posts. They
+		# travel in the result so whoever raises the Journal Entry has them.
+		party_pending = hit.get("party_type") and hit.get("party") and not row.get("party")
+		name_pending = hit.get("party_name") and not row.get("bank_party_name")
 
 		if not dry_run:
 			payload = {
@@ -1730,13 +1941,19 @@ def apply_categorization_rules(args: dict) -> ToolResult:
 				ACCOUNT_FIELD: hit.get("account") or None,
 				RULE_FIELD: hit["name"],
 			}
-			if hit.get("party_type") and hit.get("party") and not row.get("party"):
+			if party_pending:
 				payload["party_type"] = hit["party_type"]
 				payload["party"] = hit["party"]
 				change["party_set"] = f"{hit['party_type']}: {hit['party']}"
+			if name_pending and compat.has_field(BANK_TRANSACTION, "bank_party_name"):
+				payload["bank_party_name"] = hit["party_name"]
+				change["party_name_set"] = hit["party_name"]
 			frappe.db.set_value(BANK_TRANSACTION, row["name"], payload)
-		elif hit.get("party_type") and hit.get("party") and not row.get("party"):
-			change["party_set"] = f"{hit['party_type']}: {hit['party']} (would be set)"
+		else:
+			if party_pending:
+				change["party_set"] = f"{hit['party_type']}: {hit['party']} (would be set)"
+			if name_pending:
+				change["party_name_set"] = f"{hit['party_name']} (would be set)"
 
 		applied.append(change)
 		bucket = per_rule.setdefault(
@@ -1785,20 +2002,43 @@ def apply_categorization_rules(args: dict) -> ToolResult:
 	)
 
 
-def _first_matching_rule(rules: list, row: dict):
-	"""The first rule in priority order that matches this transaction, or None."""
-	for rule in rules:
-		direction = rule.get("direction") or "Any"
-		if direction != "Any" and direction != row["direction"]:
-			continue
-		gross = row["gross_amount"]
-		if rule.get("amount_min") not in (None, "") and gross < float(rule["amount_min"]):
-			continue
-		if rule.get("amount_max") not in (None, "") and gross > float(rule["amount_max"]):
-			continue
-		text = row.get(rule.get("match_field") or "description") or ""
-		if _rule_doc(rule).matches_text(text):
-			return rule
+def _prepare_rules(rules: list) -> list:
+	"""Each rule row paired with its controller, built ONCE for the whole run.
+
+	THIS IS THE HOT LOOP AND IT USED TO BE QUADRATIC. A run evaluates every rule
+	against every transaction, and the previous shape built a fresh
+	`frappe.get_doc` inside that loop — sixty rules over five hundred statement
+	lines is thirty thousand document constructions and thirty thousand regex
+	compilations to answer a question that depends on sixty rules. Building them
+	here makes it sixty of each, and the controller caches its compiled pattern
+	on itself, so the inner loop is comparisons and nothing else.
+
+	Rules that will not build are DROPPED WITH A LOG rather than taking the run
+	down. One rule edited into an invalid state straight in the database must not
+	stop the other fifty-nine from categorising a month of statement.
+	"""
+	prepared = []
+	for row in rules:
+		try:
+			prepared.append((row, _rule_doc(row)))
+		except Exception:
+			frappe.log_error(
+				title=f"erpnext_mcp: categorization rule {row.get('name')} could not be evaluated",
+				message=compat.traceback_text(),
+			)
+	return prepared
+
+
+def _first_matching_rule(prepared: list, row: dict):
+	"""The first rule in priority order that matches this transaction, or None.
+
+	The whole decision lives on the controller — direction, amount bounds, text,
+	feed category — so the Desk, this run and any future scheduled job agree about
+	what a rule matches. A second implementation here would be a second answer.
+	"""
+	for source, doc in prepared:
+		if doc.matches_transaction(row):
+			return source
 	return None
 
 
@@ -2095,50 +2335,57 @@ def _category_block(company: str, from_date, to_date, args: dict) -> dict:
 #: The specific rules sit at 10-40 and the generic words at 100+ so a `CHEVRON`
 #: line lands in Fuel by name rather than by the word FUEL never appearing in it.
 #: Every one of these is an ordinary record: edit it, disable it, delete it.
+#:
+#: v0.73.0 RESTATED THE MATCH TYPES AND CHANGED NOTHING ABOUT WHAT MATCHES. A
+#: merchant seed now says `merchant_contains` instead of `contains`-on-
+#: `description`, which is what it always meant — and because the merchant match
+#: falls back to the description wherever a feed left `bank_party_name` empty,
+#: every one of these catches exactly the lines it caught before, plus the ones
+#: where the feed DID identify the merchant and the memo happened not to name it.
 FARM_RULE_SEEDS = (
 	# Fuel
-	("Fuel", "Fuel — Chevron", "CHEVRON", 10, "contains"),
-	("Fuel", "Fuel — Shell", "SHELL OIL", 10, "contains"),
-	("Fuel", "Fuel — Pacific Pride", "PACIFIC PRIDE", 10, "contains"),
-	("Fuel", "Fuel — CFN cardlock", "CFN", 12, "contains"),
+	("Fuel", "Fuel — Chevron", "CHEVRON", 10, "merchant_contains"),
+	("Fuel", "Fuel — Shell", "SHELL OIL", 10, "merchant_contains"),
+	("Fuel", "Fuel — Pacific Pride", "PACIFIC PRIDE", 10, "merchant_contains"),
+	("Fuel", "Fuel — CFN cardlock", "CFN", 12, "merchant_contains"),
 	("Fuel", "Fuel — cardlock", "CARDLOCK", 20, "contains"),
 	("Fuel", "Fuel — generic", "FUEL", 100, "contains"),
 	("Fuel", "Fuel — diesel", "DIESEL", 100, "contains"),
 	# Chemicals and spray
-	("Chemicals/Spray", "Chemicals — Wilbur-Ellis", "WILBUR-ELLIS", 10, "contains"),
-	("Chemicals/Spray", "Chemicals — Nutrien", "NUTRIEN", 10, "contains"),
-	("Chemicals/Spray", "Chemicals — Helena", "HELENA AGRI", 10, "contains"),
-	("Chemicals/Spray", "Chemicals — Simplot Grower", "SIMPLOT GROWER", 12, "contains"),
-	("Chemicals/Spray", "Chemicals — Crop Production Services", "CROP PRODUCTION", 12, "contains"),
+	("Chemicals/Spray", "Chemicals — Wilbur-Ellis", "WILBUR-ELLIS", 10, "merchant_contains"),
+	("Chemicals/Spray", "Chemicals — Nutrien", "NUTRIEN", 10, "merchant_contains"),
+	("Chemicals/Spray", "Chemicals — Helena", "HELENA AGRI", 10, "merchant_contains"),
+	("Chemicals/Spray", "Chemicals — Simplot Grower", "SIMPLOT GROWER", 12, "merchant_contains"),
+	("Chemicals/Spray", "Chemicals — Crop Production Services", "CROP PRODUCTION", 12, "merchant_contains"),
 	("Chemicals/Spray", "Chemicals — generic", "CHEMICAL", 100, "contains"),
 	# Equipment and parts
-	("Equipment Parts", "Parts — NAPA", "NAPA AUTO", 10, "contains"),
-	("Equipment Parts", "Parts — Tractor Supply", "TRACTOR SUPPLY", 10, "contains"),
-	("Equipment Parts", "Parts — John Deere", "JOHN DEERE", 10, "contains"),
-	("Equipment Parts", "Parts — Kubota", "KUBOTA", 10, "contains"),
-	("Equipment Parts", "Parts — O'Reilly", "O'REILLY", 12, "contains"),
+	("Equipment Parts", "Parts — NAPA", "NAPA AUTO", 10, "merchant_contains"),
+	("Equipment Parts", "Parts — Tractor Supply", "TRACTOR SUPPLY", 10, "merchant_contains"),
+	("Equipment Parts", "Parts — John Deere", "JOHN DEERE", 10, "merchant_contains"),
+	("Equipment Parts", "Parts — Kubota", "KUBOTA", 10, "merchant_contains"),
+	("Equipment Parts", "Parts — O'Reilly", "O'REILLY", 12, "merchant_contains"),
 	("Equipment Parts", "Parts — generic", "AUTO PARTS", 100, "contains"),
 	# Labor services
 	("Labor Services", "Labor — farm labor contractor", "FARM LABOR", 20, "contains"),
 	("Labor Services", "Labor — ag labor", "AG LABOR", 20, "contains"),
 	("Labor Services", "Labor — staffing", "STAFFING", 100, "contains"),
 	# Irrigation
-	("Irrigation", "Irrigation — district", "IRRIGATION DISTRICT", 10, "contains"),
-	("Irrigation", "Irrigation — Netafim", "NETAFIM", 10, "contains"),
-	("Irrigation", "Irrigation — Jain", "JAIN IRRIGATION", 10, "contains"),
+	("Irrigation", "Irrigation — district", "IRRIGATION DISTRICT", 10, "merchant_contains"),
+	("Irrigation", "Irrigation — Netafim", "NETAFIM", 10, "merchant_contains"),
+	("Irrigation", "Irrigation — Jain", "JAIN IRRIGATION", 10, "merchant_contains"),
 	("Irrigation", "Irrigation — generic", "IRRIGATION", 100, "contains"),
 	# Insurance
 	("Insurance", "Insurance — crop", "CROP INSURANCE", 10, "contains"),
-	("Insurance", "Insurance — Farm Bureau", "FARM BUREAU", 12, "contains"),
+	("Insurance", "Insurance — Farm Bureau", "FARM BUREAU", 12, "merchant_contains"),
 	("Insurance", "Insurance — generic", "INSURANCE", 100, "contains"),
 	# Utilities
-	("Utilities", "Utilities — PUD", r"\bPUD\b", 10, "regex"),
+	("Utilities", "Utilities — PUD", r"\bPUD\b", 10, "description_regex"),
 	("Utilities", "Utilities — electric", "ELECTRIC", 100, "contains"),
 	("Utilities", "Utilities — power", "POWER CO", 100, "contains"),
 	("Utilities", "Utilities — waste", "WASTE MGMT", 100, "contains"),
 	# Feed and supplies
 	("Feed", "Feed — feed store", "FEED", 100, "contains"),
-	("Supplies", "Supplies — Grainger", "GRAINGER", 10, "contains"),
+	("Supplies", "Supplies — Grainger", "GRAINGER", 10, "merchant_contains"),
 	("Supplies", "Supplies — farm supply", "FARM SUPPLY", 20, "contains"),
 	("Supplies", "Supplies — co-op", "CO-OP", 40, "contains"),
 	# Professional services
@@ -2176,11 +2423,20 @@ def seed_farm_categorization_rules(args: dict) -> ToolResult:
 	is no keyword search of the chart of accounts here on purpose: a seeder that
 	picked an expense account by name would put a season of spraying wherever the
 	fuzziest match landed.
+
+	v0.73.0 MADE THE BOOK SELECTABLE AND RESTATED ITS MATCH TYPES. Pass
+	`categories` to seed only the templates a farm actually needs — an orchard
+	with no livestock does not want a Feed rule that will never fire and will sit
+	in `never_fired` forever, looking like a problem. Every merchant seed now says
+	`merchant_contains` rather than `contains` on the description, which is what it
+	always meant; the merchant match falls back to the memo line wherever the feed
+	could not identify a merchant, so nothing that matched before stops matching.
 	"""
 	_require_rules()
 	company = resolve_company(as_str(args, "company"), required=True)
 	dry_run = bool(as_bool(args, "dry_run", False))
 	account_map = _account_map(args, company)
+	wanted = _seed_categories(args)
 
 	existing = {
 		row["rule_name"]
@@ -2189,9 +2445,25 @@ def seed_farm_categorization_rules(args: dict) -> ToolResult:
 
 	created, skipped, failed = [], [], []
 	for category, rule_name, pattern, priority, match_type in FARM_RULE_SEEDS:
+		if wanted and category not in wanted:
+			continue
 		if rule_name in existing:
 			skipped.append({"rule_name": rule_name, "reason": "already on this site"})
 			continue
+		spec = {
+			"rule_name": rule_name,
+			"category": category,
+			"pattern": pattern,
+			"priority": priority,
+			"match_type": match_type,
+			"match_field": "description",
+			# Every seeded rule is an EXPENSE rule. A refund from Chevron is not a
+			# tank of diesel, and filing one as a cost is a real error that nets
+			# out against nothing.
+			"direction": "Withdrawal",
+			"enabled": True,
+			"account": account_map.get(category) or "",
+		}
 		if dry_run:
 			created.append(
 				{
@@ -2206,22 +2478,7 @@ def seed_farm_categorization_rules(args: dict) -> ToolResult:
 			)
 			continue
 		try:
-			doc = frappe.new_doc(RULE)
-			doc.rule_name = rule_name
-			doc.company = company
-			doc.category = category
-			doc.pattern = pattern
-			doc.priority = priority
-			doc.match_field = "description"
-			doc.match_type = match_type
-			# Every seeded rule is an EXPENSE rule. A refund from Chevron is not
-			# a tank of diesel, and filing one as a cost is a real error that
-			# nets out against nothing.
-			doc.direction = "Withdrawal"
-			doc.enabled = 1
-			if account_map.get(category):
-				doc.account = account_map[category]
-			doc.insert()
+			doc = _insert_rule(spec, company)
 			created.append(
 				{
 					"name": doc.name,
@@ -2236,7 +2493,8 @@ def seed_farm_categorization_rules(args: dict) -> ToolResult:
 		except Exception as exc:
 			failed.append({"rule_name": rule_name, "error": f"{type(exc).__name__}: {exc}"})
 
-	categories = sorted({category for category, _, _, _, _ in FARM_RULE_SEEDS})
+	available = sorted({category for category, _, _, _, _ in FARM_RULE_SEEDS})
+	categories = sorted(wanted) if wanted else available
 	without_account = [category for category in categories if category not in account_map]
 
 	data = {
@@ -2248,6 +2506,8 @@ def seed_farm_categorization_rules(args: dict) -> ToolResult:
 		"skipped_count": len(skipped),
 		"failed": failed,
 		"categories": categories,
+		"available_categories": available,
+		"seeded_only": sorted(wanted) if wanted else None,
 		"categories_with_account": dict(sorted(account_map.items())),
 		"categories_without_account": without_account,
 		"note": (
@@ -2281,6 +2541,40 @@ def seed_farm_categorization_rules(args: dict) -> ToolResult:
 		f"({len(skipped)} already present, {len(failed)} failed)",
 		docstatus_delta="none → 0 (created)" if created and not dry_run else "",
 	)
+
+
+def _seed_categories(args: dict) -> set:
+	"""Which templates to seed, or an empty set meaning all of them.
+
+	AN UNKNOWN CATEGORY IS REFUSED BY NAME rather than ignored. A caller who asks
+	for "Chemicals" and gets nothing — because the template is called
+	"Chemicals/Spray" — would read the empty result as "already seeded" and move
+	on, and the rules they wanted would never exist.
+	"""
+	raw = args.get("categories")
+	if raw in (None, ""):
+		return set()
+	if isinstance(raw, str):
+		raw = [part.strip() for part in raw.split(",") if part.strip()]
+	if not isinstance(raw, list):
+		raise ToolError(
+			'categories is a list of template names, e.g. ["Fuel", "Chemicals/Spray"]. Nothing was created.'
+		)
+	available = {category for category, _, _, _, _ in FARM_RULE_SEEDS}
+	wanted, unknown = set(), []
+	for item in raw:
+		name = str(item).strip()
+		match = next((category for category in available if category.lower() == name.lower()), "")
+		if match:
+			wanted.add(match)
+		else:
+			unknown.append(name)
+	if unknown:
+		raise ToolError(
+			f"no seed template for: {', '.join(unknown)}. This book has "
+			f"{', '.join(sorted(available))}. Nothing was created."
+		)
+	return wanted
 
 
 def _account_map(args: dict, company: str) -> dict:
