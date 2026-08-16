@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat
+from .. import compat, timezones
 from ..args import as_date, as_float, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
@@ -137,6 +137,11 @@ def _window(args: dict) -> tuple[str, str]:
 	`to_date` naming today includes what has run this morning rather than
 	stopping at midnight.
 	"""
+	# THE DAY BOUNDARIES ARE THE SITE'S, not the requested display zone's. A
+	# `to_date` of 2026-07-31 means that day as the farm lived it, and the column
+	# being filtered is stored in the site zone — so the bounds are built in the
+	# same zone the comparison happens in. Rendering the result in Denver moves
+	# the wall clock on each timestamp; it must not move which day was measured.
 	to_date = as_date(args, "to_date") or str(frappe.utils.today())
 	from_date = as_date(args, "from_date") or str(frappe.utils.add_days(to_date, -DEFAULT_WINDOW_DAYS))
 	if from_date > to_date:
@@ -468,6 +473,17 @@ def get_irrigation_runtime(args: dict) -> ToolResult:
 	measured = [_runs_for(valve, opened, closed, now) for valve in valves]
 	rate = _rate(args, company or "")
 
+	# WHICH six o'clock the water went on. A runtime report is read against a
+	# wall clock — "it ran from six to nine thirty" — and the naive columns this
+	# is summed from cannot say which zone that is. Every timestamp gets its
+	# offset-bearing twin; the MINUTES are unaffected, because a duration is the
+	# difference between two instants and both were already in one zone.
+	clock = timezones.Renderer(args)
+	for entry in measured:
+		clock.add(entry, "open_since")
+		for run in entry["runs"]:
+			clock.add(run, "opened_at", "closed_at", "actual_closed_at")
+
 	total = round(sum(entry["runtime_minutes"] for entry in measured), 1)
 	open_minutes = round(sum(entry["open_run_minutes"] for entry in measured), 1)
 	runs = sorted(
@@ -482,7 +498,10 @@ def get_irrigation_runtime(args: dict) -> ToolResult:
 		"company": root.get("company") or None,
 		"from": opened,
 		"to": closed,
+		"from_local": clock(opened),
+		"to_local": clock(closed),
 		"measured_at": now,
+		"measured_at_local": clock(now),
 		"valve_count": len(valves),
 		"valves": measured,
 		"run_count": sum(entry["run_count"] for entry in measured),
@@ -500,6 +519,7 @@ def get_irrigation_runtime(args: dict) -> ToolResult:
 		"runs": runs[:RUN_CAP],
 		"runs_truncated": len(runs) > RUN_CAP,
 		**rate,
+		**clock.block(),
 	}
 
 	if rate["flow_rate_gpm"]:

@@ -88,7 +88,7 @@ import json
 
 import frappe
 
-from .. import bucket_bridge, compat, datetimes
+from .. import bucket_bridge, compat, datetimes, timezones
 from .. import shifts as shift_records
 from ..erpnext_mcp.doctype.farm_task_assignment import farm_task_assignment as assignment_states
 from ..errors import ToolError
@@ -714,19 +714,26 @@ def get_current_user_context(user: str) -> dict:
 # ── 2. list_my_tasks ────────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("list_my_tasks", limit=guard.READ_LIMIT)
-def list_my_tasks(user: str, company=None) -> dict:
-	"""What this worker is holding right now: claimed and in progress."""
+def list_my_tasks(user: str, company=None, timezone=None) -> dict:
+	"""What this worker is holding right now: claimed and in progress.
+
+	`timezone` is optional and affects DISPLAY only: every timestamp keeps its
+	stored spelling and gains a `*_local` twin rendered in the zone named here,
+	or in the site's own when it is not. An unknown zone is refused rather than
+	quietly answered in UTC — see `erpnext_mcp/timezones.py`.
+	"""
 	allowed = guard.require_scope(user)
 	wanted = guard.require_company(user, company, allowed)
 
+	clock = timezones.Renderer({"timezone": timezone} if timezone else {})
 	result = fieldwork.list_my_tasks({"company": wanted} if wanted else {})
 	rows = []
 	for entry in result.data.get("assignments") or []:
 		detail = entry.get("task_detail")
 		if detail:
-			rows.append(shape.task(detail, entry))
+			rows.append(shape.task(detail, entry, clock))
 	rows = guard.scoped(rows, allowed)
-	return {"tasks": rows, "count": len(rows), "company": wanted or None}
+	return {"tasks": rows, "count": len(rows), "company": wanted or None, **clock.block()}
 
 
 # ── 3. list_available_tasks ─────────────────────────────────────────────────
@@ -774,7 +781,7 @@ def list_available_tasks(user: str, company=None) -> dict:
 # ── 4. get_task ─────────────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("get_task", limit=guard.READ_LIMIT)
-def get_task(user: str, task=None) -> dict:
+def get_task(user: str, task=None, timezone=None) -> dict:
 	"""One task in full: the job, the contract, and why it exists.
 
 	v0.76.0. A FINISHED TASK IS SHAPED AGAINST THE ASSIGNMENT THAT FINISHED IT.
@@ -789,12 +796,15 @@ def get_task(user: str, task=None) -> dict:
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
 
+	clock = timezones.Renderer({"timezone": timezone} if timezone else {})
 	result = fieldwork.get_task_with_evidence_contract({"task": name})
 	data = result.data
 	out = shape.task(
 		data.get("task") or {},
 		data.get("live_assignment") or _last_completed(data.get("history")),
+		clock,
 	)
+	out.update(clock.block())
 	out["is_mine"] = data.get("is_mine")
 	out["evidence_contract"] = data.get("evidence_contract")
 	out["evidence_outstanding"] = data.get("evidence_outstanding")

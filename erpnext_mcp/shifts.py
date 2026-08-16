@@ -501,8 +501,17 @@ def describe_event_row(row: dict) -> dict:
 	return out
 
 
-def describe(row: dict, with_children: bool = False) -> dict:
-	"""One shift in the shape every tool and packet reports it."""
+def describe(row: dict, with_children: bool = False, clock=None) -> dict:
+	"""One shift in the shape every tool and packet reports it.
+
+	`clock` is a `timezones.Renderer`. Passed in by a caller describing a list of
+	shifts so the site's zone is read once; omitted, the stored naive timestamps
+	come back on their own exactly as they always have. NOT constructed here when
+	absent, unlike `shape.task`: this describer runs inside audit packets and
+	report generators where nothing wants the extra keys, and a shift's start
+	time is the one timestamp on this farm that a payroll figure is computed
+	from — quietly adding columns to it is not free.
+	"""
 	name = str(row.get("name") or "")
 	end = str(row.get("end_datetime") or "") or None
 	out = {
@@ -523,6 +532,11 @@ def describe(row: dict, with_children: bool = False) -> dict:
 		"supervisor_review_on": str(row.get("supervisor_review_on") or "") or None,
 		"foreman_notes": row.get("foreman_notes") or None,
 	}
+	if clock is not None:
+		# Which six o'clock the crew started. A shift that began at 05:30 and a
+		# server reporting 12:30 are the same instant and only one of them is the
+		# morning anybody turned up for.
+		clock.add(out, "start_datetime", "end_datetime", "supervisor_review_on")
 	if not with_children or not name:
 		return out
 	crew = crew_of(name)

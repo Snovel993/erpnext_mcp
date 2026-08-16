@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat
+from .. import compat, timezones
 from .. import roles as role_lib
 from . import rectify
 
@@ -103,8 +103,14 @@ def _minutes(value):
 		return None
 
 
-def task(row: dict, assignment: dict | None = None) -> dict:
-	"""One Farm Task in the shape `FarmOpsKit.FarmTask` decodes."""
+def task(row: dict, assignment: dict | None = None, clock=None) -> dict:
+	"""One Farm Task in the shape `FarmOpsKit.FarmTask` decodes.
+
+	`clock` is a `timezones.Renderer`, threaded in by a caller shaping more than
+	one task so the site's zone is read once for the response rather than once
+	per row. Omitted, one is made here — a single-task read should not have to
+	construct furniture to get a timestamp it can act on.
+	"""
 	row = dict(row or {})
 	live = dict(assignment or {})
 	out = {
@@ -148,6 +154,19 @@ def task(row: dict, assignment: dict | None = None) -> dict:
 		"actual_duration_minutes": _minutes(_first(live, row, "actual_duration_minutes")),
 	}
 
+	# v0.77.0. WHICH six o'clock a job was claimed, started and finished. The
+	# three existing keys are untouched and still naive — `FrappeDate.parse` on
+	# the handset reads them and would fail the whole row on a shape it has not
+	# seen — and each gains a `*_local` twin carrying the offset. A worker looking
+	# at "finished 16:04" should not have to know whether the server meant their
+	# afternoon or somebody else's. See `erpnext_mcp/timezones.py`.
+	#
+	# THE ZONE BLOCK IS NOT ON THE ROW. It is one fact about the response, and
+	# repeating three keys on each of forty tasks is forty copies of it — the
+	# caller puts `clock.block()` at the top level once. `tasks()` below threads
+	# one renderer through the whole list so the site's zone is read once too.
+	(clock or timezones.Renderer()).add(out, "claimed_at", "started_at", "completed_at")
+
 	source = alert_row(row.get("source_alert"))
 	explanation = str(source.get("alert_message") or "").strip()
 	if explanation:
@@ -172,10 +191,15 @@ def task(row: dict, assignment: dict | None = None) -> dict:
 	return out
 
 
-def tasks(rows: list, assignments: dict | None = None) -> list:
+def tasks(rows: list, assignments: dict | None = None, clock=None) -> list:
 	"""A list of tasks, each carrying its live assignment where there is one."""
 	by_task = assignments or {}
-	return [task(row, by_task.get(str(row.get("name")))) for row in rows or [] if isinstance(row, dict)]
+	clock = clock or timezones.Renderer()
+	return [
+		task(row, by_task.get(str(row.get("name"))), clock)
+		for row in rows or []
+		if isinstance(row, dict)
+	]
 
 
 def coordinates(location_doctype, location) -> tuple:

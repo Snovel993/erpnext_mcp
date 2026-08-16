@@ -59,7 +59,7 @@ import itertools
 import frappe
 
 from .. import breaks as breaks_mod
-from .. import compat, geo, shifts
+from .. import compat, geo, shifts, timezones
 from ..args import as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
@@ -778,8 +778,9 @@ def list_shifts(args: dict) -> ToolResult:
 	if shift_type:
 		filters["shift_type"] = as_choice(DOCTYPE, "shift_type", shift_type, "shift_type")
 
+	clock = timezones.Renderer(args)
 	found = shifts.rows(filters, limit=max(limit * 2, limit))
-	described = [shifts.describe(row) for row in found]
+	described = [shifts.describe(row, clock=clock) for row in found]
 
 	status = as_str(args, "status")
 	if status:
@@ -839,6 +840,7 @@ def list_shifts(args: dict) -> ToolResult:
 			f"More than {limit} shift(s) matched and this is the first {limit}. Narrow by company, "
 			"foreman or period before relying on the counts above."
 		)
+	data.update(clock.block())
 	return ToolResult(
 		data=data,
 		summary=(
@@ -857,7 +859,9 @@ def get_shift(args: dict) -> ToolResult:
 	row = _resolve_shift(args, "name")
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
-	described = shifts.describe(row, with_children=True)
+	clock = timezones.Renderer(args)
+	described = shifts.describe(row, with_children=True, clock=clock)
+	described.update(clock.block())
 	heat = shifts.heat_rows({"farm_shift": row["name"]}, limit=2)
 
 	data = {

@@ -2531,3 +2531,74 @@ class TheFinishingTimestampsReachThePhone(MobileAPITestCase):
 			"Farm Task Assignment", row["assignment"], "completed_at"
 		)
 		self.assertEqual(str(row["completed_at"]), str(assignment))
+
+
+# ── which six o'clock, on a phone ───────────────────────────────────────────
+class TheTaskTimesSayWhichClock(MobileAPITestCase):
+	"""v0.77.0. A worker reading "finished 16:04" should not have to convert it."""
+
+	def setUp(self):
+		super().setUp()
+		STORE.singles["System Settings"] = {"time_zone": "America/Los_Angeles"}
+		self.unit = self.a_camp()
+		self.task = self.a_task(
+			evidence_required={"findings_text": True},
+			location_doctype="Housing Unit",
+			location=self.unit,
+		)
+
+	def finish(self):
+		self.be()
+		mobile_api.claim_task(task=self.task)
+		mobile_api.start_task(task=self.task)
+		mobile_api.complete_task_via_mobile(
+			task=self.task,
+			findings_text="",
+			clean_pass=True,
+			completed_at="2026-07-24 16:04:00",
+			actual_duration_minutes=22,
+		)
+
+	def test_a_completed_task_carries_the_offset_beside_the_stored_value(self):
+		self.finish()
+		row = mobile_api.get_task(task=self.task)
+		self.assertEqual(row["completed_at"], "2026-07-24 16:04:00")
+		self.assertEqual(row["completed_at_local"], "2026-07-24T16:04:00.000-07:00")
+		self.assertEqual(row["timezone"], "America/Los_Angeles")
+
+	def test_the_claim_and_start_times_get_the_same_treatment(self):
+		self.finish()
+		row = mobile_api.get_task(task=self.task)
+		self.assertTrue(row["claimed_at_local"].endswith(("-07:00", "-08:00")))
+		self.assertTrue(row["started_at_local"].endswith(("-07:00", "-08:00")))
+
+	def test_a_requested_zone_moves_the_clock_on_the_read(self):
+		self.finish()
+		row = mobile_api.get_task(task=self.task, timezone="America/Denver")
+		self.assertEqual(row["timezone"], "America/Denver")
+		self.assertEqual(row["completed_at_local"], "2026-07-24T17:04:00.000-06:00")
+		self.assertEqual(row["completed_at"], "2026-07-24 16:04:00")
+
+	def test_an_unknown_zone_is_refused_rather_than_answered_in_utc(self):
+		self.be()
+		with self.assertRaises(frappe.ValidationError) as caught:
+			mobile_api.get_task(task=self.task, timezone="America/Yakima")
+		self.assertIn("America/Yakima", str(caught.exception))
+
+	def test_my_tasks_carries_the_block_once_rather_than_per_task(self):
+		"""Three keys on each of forty tasks is forty copies of one fact."""
+		self.be()
+		mobile_api.claim_task(task=self.task)
+		found = mobile_api.list_my_tasks()
+		self.assertEqual(found["timezone"], "America/Los_Angeles")
+		self.assertTrue(found["tasks"])
+		for row in found["tasks"]:
+			self.assertNotIn("timezone", row)
+			self.assertIn("claimed_at_local", row)
+
+	def test_the_milliseconds_survive_because_the_handset_needs_them(self):
+		"""`FrappeDate.parse` uses ISO8601DateFormatter with
+		`.withFractionalSeconds`, which is a requirement and not a tolerance."""
+		self.finish()
+		row = mobile_api.get_task(task=self.task)
+		self.assertRegex(row["completed_at_local"], r"\.\d{3}[+-]\d{2}:\d{2}$")

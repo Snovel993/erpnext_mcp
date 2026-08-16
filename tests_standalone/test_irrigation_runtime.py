@@ -461,3 +461,55 @@ class TheSwitch(RuntimeTestCase):
 		self.configure(enabled=1)
 		data = self.tool_data("get_irrigation_runtime", {"asset": "MC-Valve-05"})
 		self.assertEqual(data["runtime_minutes"], 0)
+
+
+# ── which six o'clock ─────────────────────────────────────────────────────────
+class TheRuntimeSaysWhichClock(RuntimeTestCase):
+	"""v0.77.0. A runtime report is read against a wall clock."""
+
+	def setUp(self):
+		super().setUp()
+		STORE.singles["System Settings"] = {"time_zone": "America/Los_Angeles"}
+		self.a_valve()
+		self.event("MC-Valve-05", "open", "2026-07-10 06:00:00")
+		self.event("MC-Valve-05", "closed", "2026-07-10 09:30:00")
+
+	def test_the_window_and_every_run_carry_an_offset(self):
+		data = self.runtime("MC-Valve-05", from_date="2026-07-01", to_date="2026-07-31")
+		self.assertEqual(data["timezone"], "America/Los_Angeles")
+		self.assertEqual(data["from_local"], "2026-07-01T00:00:00.000-07:00")
+		self.assertEqual(data["runs"][0]["opened_at_local"], "2026-07-10T06:00:00.000-07:00")
+		self.assertEqual(data["runs"][0]["closed_at_local"], "2026-07-10T09:30:00.000-07:00")
+
+	def test_the_stored_spelling_is_untouched_beside_it(self):
+		"""`FrappeDate.parse` on the handset reads the naive form and would fail
+		the whole row on a shape it has not seen."""
+		run = self.runtime("MC-Valve-05", from_date="2026-07-01", to_date="2026-07-31")["runs"][0]
+		self.assertEqual(run["opened_at"], "2026-07-10 06:00:00")
+
+	def test_asking_in_another_zone_moves_the_clock_and_not_the_minutes(self):
+		"""A duration is the difference between two instants. Rendering them
+		elsewhere must not change how long the water ran."""
+		pacific = self.runtime("MC-Valve-05", from_date="2026-07-01", to_date="2026-07-31")
+		denver = self.runtime(
+			"MC-Valve-05", from_date="2026-07-01", to_date="2026-07-31", timezone="America/Denver"
+		)
+		self.assertEqual(pacific["runtime_minutes"], denver["runtime_minutes"])
+		self.assertEqual(denver["runs"][0]["opened_at_local"], "2026-07-10T07:00:00.000-06:00")
+
+	def test_the_day_measured_is_the_farms_day_whatever_zone_is_asked_for(self):
+		"""A `to_date` of the 10th means that day as the farm lived it. Rendering
+		in Denver moves the wall clock on each timestamp; it must not move which
+		day was measured."""
+		here = self.runtime("MC-Valve-05", from_date="2026-07-10", to_date="2026-07-10")
+		there = self.runtime(
+			"MC-Valve-05", from_date="2026-07-10", to_date="2026-07-10", timezone="Asia/Tokyo"
+		)
+		self.assertEqual(here["runtime_minutes"], there["runtime_minutes"])
+		self.assertEqual(here["from"], there["from"])
+
+	def test_an_unknown_zone_is_refused(self):
+		error = self.tool_error(
+			"get_irrigation_runtime", {"asset": "MC-Valve-05", "timezone": "America/Yakima"}
+		)
+		self.assertIn("America/Yakima", error)
