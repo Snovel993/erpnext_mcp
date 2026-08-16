@@ -1069,6 +1069,9 @@ def create_farm_task(args: dict) -> ToolResult:
 	shift_note = _shift_note(farm_shift)
 	if shift_note:
 		warnings.append(shift_note)
+	# Raised against a block that is closed to entry. Same sentence, same source
+	# and same posture as the dispatch above: told, not refused.
+	warnings.extend(_rei_warnings(dict(doc.as_dict())))
 
 	data = {**described, "assignment": assignment}
 	if warnings:
@@ -1289,12 +1292,52 @@ def assign_farm_task(args: dict) -> ToolResult:
 	}
 	if reassigned_from:
 		data["reassigned_from"] = reassigned_from
+
+	# THE DISPATCH IS NOT REFUSED OVER A LIVE RESTRICTED-ENTRY WINDOW, AND THAT
+	# IS DELIBERATE. Work inside an REI is lawful with the label's PPE on — 40
+	# CFR §170.607 permits early entry for specific tasks — so a server refusing
+	# it outright would be inventing a rule stricter than the regulation and
+	# training foremen to route around this app. What the foreman is owed is the
+	# sentence, at the moment they send somebody, and it is the same sentence the
+	# worker will read when they scan the block: see `spray_rei.warning_line`.
+	rei_warnings = _rei_warnings(dict(task_doc.as_dict()))
+	if rei_warnings:
+		data["warnings"] = list(data.get("warnings") or []) + rei_warnings
+
 	return ToolResult(
 		data=data,
 		summary=f"dispatched {row['name']} to {worker_name}"
-		+ (f" (taken off {reassigned_from})" if reassigned_from else ""),
+		+ (f" (taken off {reassigned_from})" if reassigned_from else "")
+		+ (f" — {len(rei_warnings)} REI warning(s)" if rei_warnings else ""),
 		docstatus_delta=f"{row['state']} → {CLAIMED}",
 	)
+
+
+def _rei_warnings(task: dict) -> list[str]:
+	"""Live restricted-entry windows on the place this task sends somebody.
+
+	NEVER RAISES AND NEVER BLOCKS. A dispatch that failed because the REI
+	register would not answer would be an outage in the one part of the day a
+	farm cannot pause, so a section that cannot be read is a dispatch with no
+	warning on it rather than no dispatch.
+
+	The location is taken as the block name whatever register the task names it
+	in — `Spray REI.block` is keyed on the docname and `active_for_blocks` filters
+	on exactly that, so a task pointing at Field 'Home-7' and a restriction on
+	Field 'Home-7' meet without either having to know about the other's doctype.
+	"""
+	location = str(task.get("location") or "")
+	asset = str(task.get("asset") or "")
+	candidates = [name for name in (location, asset) if name]
+	if not candidates:
+		return []
+	try:
+		from . import spray_rei
+
+		windows = spray_rei.active_for_blocks(candidates, str(task.get("company") or ""))
+	except Exception:  # pragma: no cover - a warning, never a refusal
+		return []
+	return [window["warning"] for window in windows]
 
 
 # ── 3. claim_farm_task ──────────────────────────────────────────────────────
