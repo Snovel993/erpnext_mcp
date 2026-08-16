@@ -74,7 +74,7 @@ from ..args import as_int, as_str
 from ..erpnext_mcp.doctype.farm_task.farm_task import STATES, TERMINAL_STATES
 from ..errors import ToolError
 from ..result import ToolResult
-from . import asset_tags, badges, farm, housing
+from . import asset_actions, asset_tags, badges, farm, housing
 
 ASSET_REGISTER = "Asset Register"
 BADGE_MAP = badges.BADGE_DOCTYPE
@@ -482,7 +482,18 @@ def _history(entity_type: str, docname: str, limit: int) -> list:
 #: What the three state keys say on a branch with no state machine behind it.
 #: Named once so the empty answer and the populated one cannot drift into
 #: different key sets.
-_EMPTY_STATE = {"state_asset": None, "current_state": None, "state_actions": []}
+_EMPTY_STATE = {
+	"state_asset": None,
+	"current_state": None,
+	"state_actions": [],
+	# v0.77.0. The full menu for the asset's TYPE, of which `state_actions` is
+	# the subset that is a legal transition right now. A pre-trip inspection and
+	# a calibration record are things a worker does at the machine and neither is
+	# a state change, so a screen built from `state_actions` alone could not
+	# draw them. Every row says whether it is implemented — see
+	# `tools/asset_actions.py` for why that is published rather than filtered.
+	"action_menu": [],
+}
 
 
 def _state_actions(asset_name: str) -> dict:
@@ -529,13 +540,18 @@ def _state_actions(asset_name: str) -> dict:
 	asset_type = str(row.get("asset_type") or "") or "General"
 	defn = asset_tags._STATE_DEFINITIONS.get(asset_type)
 	if not defn:
-		return {"state_asset": row.get("name"), "current_state": None, "state_actions": []}
+		return {
+			**_EMPTY_STATE,
+			"state_asset": row.get("name"),
+			"action_menu": asset_actions.menu_for(asset_type),
+		}
 
 	current = asset_tags._current_state_value(row.get("current_state")) or defn["default"]
 	return {
 		"state_asset": row.get("name"),
 		"current_state": current,
 		"state_actions": asset_tags._actions_for(asset_type, current),
+		"action_menu": asset_actions.menu_for(asset_type, current),
 	}
 
 

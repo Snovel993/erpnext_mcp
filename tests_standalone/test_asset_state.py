@@ -527,3 +527,194 @@ class ClosingAMainValveCascades(StateTestCase):
         lateral = self.tool_data("list_asset_state_history", {"asset_name": "MC-Lateral-A"})
         self.assertEqual(main["events"][0]["gps_latitude"], 46.6)
         self.assertIsNone(lateral["events"][0]["gps_latitude"])
+
+
+# ── the menu a handset draws ──────────────────────────────────────────────────
+class TheActionMenuIsPerEquipmentType(StateTestCase):
+    """v0.77.0. What comes up after a scan depends on what was scanned.
+
+    `state_actions` is the state machine — the transitions legal right now — and
+    that is strictly smaller than the menu a screen has to lay out. A pre-trip
+    inspection is not a state change. Neither is logging engine hours.
+    """
+
+    def menu(self, asset_name):
+        return self.tool_data("get_available_actions", {"asset_name": asset_name})["action_menu"]
+
+    def by_action(self, asset_name):
+        return {entry["action"]: entry for entry in self.menu(asset_name)}
+
+    def test_a_valve_offers_on_and_off_in_a_workers_words(self):
+        self.an_asset()
+        entries = self.by_action("MC-Valve-05")
+        self.assertEqual(entries["open_valve"]["label"], "Turn On")
+        self.assertEqual(entries["close_valve"]["label"], "Turn Off")
+
+    def test_a_closed_valve_can_be_opened_and_not_closed(self):
+        self.an_asset()
+        entries = self.by_action("MC-Valve-05")
+        self.assertTrue(entries["open_valve"]["available"])
+        self.assertFalse(entries["close_valve"]["available"])
+        self.assertIn("closed", entries["close_valve"]["unavailable_reason"])
+
+    def test_a_sprayer_offers_mixing_spraying_and_an_inspection(self):
+        self.an_asset(name="MC-Sprayer-01", asset_type="Sprayer")
+        entries = self.by_action("MC-Sprayer-01")
+        self.assertEqual(entries["fill_tank"]["label"], "Mix / Load Tank")
+        self.assertTrue(entries["fill_tank"]["available"])
+        self.assertEqual(entries["pre_use_inspection"]["method"], "start_inspection")
+        self.assertTrue(entries["pre_use_inspection"]["implemented"])
+
+    def test_a_tractor_offers_checkout_and_a_pre_trip_inspection(self):
+        self.an_asset(name="MC-Tractor-01", asset_type="Tractor")
+        entries = self.by_action("MC-Tractor-01")
+        self.assertEqual(entries["check_out"]["label"], "Check Out")
+        self.assertTrue(entries["check_out"]["available"])
+        self.assertEqual(entries["pre_trip_inspection"]["method"], "start_inspection")
+
+    def test_checking_a_tractor_out_and_back_in_works_end_to_end(self):
+        self.an_asset(name="MC-Tractor-02", asset_type="Tractor")
+        out = self.do_action("MC-Tractor-02", "check_out")
+        self.assertEqual(out["to_state"], "checked_out")
+
+        entries = self.by_action("MC-Tractor-02")
+        self.assertTrue(entries["check_in"]["available"])
+        self.assertFalse(entries["check_out"]["available"])
+
+        back = self.do_action("MC-Tractor-02", "check_in")
+        self.assertEqual(back["to_state"], "in_service")
+
+    def test_a_tractor_that_breaks_while_checked_out_can_go_to_maintenance(self):
+        """Which is where a breakdown happens. `put_in_service` deliberately
+        does not reach from `checked_out`: a machine coming back from the field
+        is checked IN, by the person who has it."""
+        self.an_asset(name="MC-Tractor-03", asset_type="Tractor")
+        self.do_action("MC-Tractor-03", "check_out")
+        entries = self.by_action("MC-Tractor-03")
+        self.assertTrue(entries["start_maintenance"]["available"])
+        self.assertFalse(entries["put_in_service"]["available"])
+
+    def test_a_vehicle_asks_the_same_questions_as_a_tractor(self):
+        self.an_asset(name="MC-Truck-01", asset_type="Vehicle")
+        entries = self.by_action("MC-Truck-01")
+        self.assertTrue(entries["check_out"]["available"])
+        self.assertIn("pre_trip_inspection", entries)
+
+    def test_an_implement_attaches_and_detaches(self):
+        self.an_asset(name="MC-Disc-01", asset_type="Implement")
+        entries = self.by_action("MC-Disc-01")
+        self.assertEqual(entries["attach"]["label"], "Attach to Tractor")
+        self.assertTrue(entries["attach"]["available"])
+        self.assertFalse(entries["detach"]["available"])
+
+        self.do_action("MC-Disc-01", "attach")
+        self.assertTrue(self.by_action("MC-Disc-01")["detach"]["available"])
+
+    def test_which_tractor_an_implement_is_on_is_the_register_tree(self):
+        """Not a state. `parent_asset` already points one asset at another, and
+        duplicating the link inside a state blob gives one fact two homes."""
+        self.an_asset(name="MC-Disc-02", asset_type="Implement")
+        entry = self.by_action("MC-Disc-02")["set_tractor"]
+        self.assertEqual(entry["method"], "update_registered_asset")
+        self.assertTrue(entry["implemented"])
+        self.assertIn("parent_asset", entry["note"])
+
+    def test_an_unbuilt_action_is_published_and_says_it_is_unbuilt(self):
+        """Publishing only the finished actions gives iOS no way to lay out a
+        screen it will need next month; publishing them undifferentiated gives a
+        worker a button that fails after they have walked to the machine."""
+        self.an_asset(name="MC-Tractor-04", asset_type="Tractor")
+        entry = self.by_action("MC-Tractor-04")["log_hours"]
+        self.assertFalse(entry["implemented"])
+        self.assertFalse(entry["available"])
+        self.assertIsNone(entry["method"])
+        self.assertIn("NOT BUILT", entry["note"])
+
+    def test_unbuilt_and_unavailable_are_different_reasons(self):
+        """A screen greys out one and badges or hides the other, and it cannot
+        tell them apart from a single flag."""
+        self.an_asset(name="MC-Tractor-05", asset_type="Tractor")
+        entries = self.by_action("MC-Tractor-05")
+        self.assertIn("not implemented", entries["log_hours"]["unavailable_reason"])
+        self.assertIn("not a legal move", entries["check_in"]["unavailable_reason"])
+
+    def test_every_row_carries_the_keys_a_client_switches_on(self):
+        self.an_asset(name="MC-Sprayer-02", asset_type="Sprayer")
+        for entry in self.menu("MC-Sprayer-02"):
+            with self.subTest(action=entry["action"]):
+                for key in ("action", "label", "kind", "method", "implemented", "available"):
+                    self.assertIn(key, entry)
+
+    def test_reporting_a_problem_is_offered_on_everything(self):
+        for name, asset_type in (("MC-V-1", "Irrigation Valve"), ("MC-T-1", "Tractor"), ("MC-B-1", "Block")):
+            with self.subTest(asset_type=asset_type):
+                self.an_asset(name=name, asset_type=asset_type)
+                self.assertIn("report_issue", self.by_action(name))
+
+    def test_a_type_with_no_hand_written_menu_still_lists_its_transitions(self):
+        """Block, Water Source and General have states and no equipment
+        workflow. The table exists for types whose menu is MORE than their state
+        machine, not to decide which types have one."""
+        self.an_asset(name="MC-Block-Z", asset_type="Block")
+        entries = self.by_action("MC-Block-Z")
+        self.assertIn("set_dormant", entries)
+        self.assertTrue(entries["set_dormant"]["available"])
+
+    def test_every_state_change_row_names_the_endpoint_that_performs_it(self):
+        self.an_asset()
+        for entry in self.menu("MC-Valve-05"):
+            if entry["kind"] == "state_change":
+                self.assertEqual(entry["method"], "log_asset_state_change")
+
+    def test_an_available_state_row_carries_the_transition_it_would_make(self):
+        self.an_asset()
+        entry = self.by_action("MC-Valve-05")["open_valve"]
+        self.assertEqual(entry["from_state"], "closed")
+        self.assertEqual(entry["to_state"], "open")
+
+    def test_a_scan_returns_the_same_menu_the_actions_call_does(self):
+        """One card, one code path on the handset."""
+        self.an_asset(name="MC-Sprayer-03", asset_type="Sprayer")
+        scanned = self.tool_data("scan_asset", {"asset_name": "MC-Sprayer-03"})
+        self.assertEqual(scanned["action_menu"], self.menu("MC-Sprayer-03"))
+        self.assertEqual(scanned["state"], "empty")
+
+
+# ── which six o'clock ─────────────────────────────────────────────────────────
+class TheValveLogSaysWhichClock(StateTestCase):
+    """v0.77.0. "The valve went off at 18:12" is only a sentence with a zone."""
+
+    def setUp(self):
+        super().setUp()
+        STORE.singles["System Settings"] = {"time_zone": "America/Los_Angeles"}
+
+    def test_a_toggle_answers_with_an_offset_and_the_stored_value(self):
+        self.an_asset()
+        data = self.do_action("MC-Valve-05", "open_valve")
+        self.assertEqual(data["timezone"], "America/Los_Angeles")
+        self.assertEqual(data["stored_timezone"], "America/Los_Angeles")
+        self.assertTrue(data["performed_at_local"].endswith("-07:00"))
+        self.assertNotIn("T", data["performed_at"])
+
+    def test_the_history_carries_one_per_event(self):
+        self.an_asset()
+        self.do_action("MC-Valve-05", "open_valve")
+        self.do_action("MC-Valve-05", "close_valve")
+        history = self.tool_data("list_asset_state_history", {"asset_name": "MC-Valve-05"})
+        self.assertEqual(len(history["events"]), 2)
+        for event in history["events"]:
+            self.assertTrue(event["performed_at_local"].endswith(("-07:00", "-08:00")))
+
+    def test_a_requested_zone_is_honoured(self):
+        self.an_asset()
+        data = self.do_action("MC-Valve-05", "open_valve", timezone="America/Denver")
+        self.assertEqual(data["timezone"], "America/Denver")
+        self.assertEqual(data["stored_timezone"], "America/Los_Angeles")
+        self.assertTrue(data["performed_at_local"].endswith("-06:00"))
+
+    def test_an_unset_site_zone_says_it_fell_back_rather_than_claiming_utc(self):
+        STORE.singles.pop("System Settings", None)
+        self.an_asset()
+        data = self.do_action("MC-Valve-05", "open_valve")
+        self.assertEqual(data["timezone"], "UTC")
+        self.assertIn("not set", data["timezone_source"])
