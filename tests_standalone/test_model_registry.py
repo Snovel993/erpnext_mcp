@@ -820,8 +820,8 @@ class ToolRegistration(unittest.TestCase):
 		# editing. `create_bank_categorization_rules` vets a whole book of
 		# rules as a set.
 		# Nothing in the consolidation posts to the ledger.
-		self.assertEqual(len(self.registry.TOOLS), 527)
-		self.assertEqual(len(self.registry.READ_TOOLS), 252)
+		self.assertEqual(len(self.registry.TOOLS), 528)
+		self.assertEqual(len(self.registry.READ_TOOLS), 253)
 		self.assertEqual(len(self.registry.MUTATING_TOOLS), 275)
 
 

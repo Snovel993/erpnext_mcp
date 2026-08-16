@@ -1032,8 +1032,8 @@ class Catalogue(SeededTestCase):
 
 		NOTHING in the consolidation posts to the ledger either.
 		"""
-		self.assertEqual(len(registry.TOOLS), 527)
-		self.assertEqual(len(registry.READ_TOOLS), 252)
+		self.assertEqual(len(registry.TOOLS), 528)
+		self.assertEqual(len(registry.READ_TOOLS), 253)
 		self.assertEqual(len(registry.MUTATING_TOOLS), 275)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):

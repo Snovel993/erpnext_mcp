@@ -76,6 +76,7 @@ from .tools import (
 	i9,
 	inspections,
 	investment_report,
+	irrigation,
 	kpi,
 	kpidefs,
 	masters,
@@ -17369,6 +17370,53 @@ TOOLS = {
 		title="List asset state change history",
 		available=_needs_doctype("Asset Register"),
 		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.76.0: what the valve log adds up to ──────────────────────────────
+	"get_irrigation_runtime": _tool(
+		irrigation.get_irrigation_runtime,
+		"How long the water actually ran. Sums the open/close pairs already in "
+		"the Asset State Log for every valve at or below one asset in the "
+		"register — pass a valve for that valve, a zone for its valves, a block "
+		"for all of them. Read-only, and no new record: a run IS two log rows.\n\n"
+		"HANDLES THE CASES THAT MAKE THIS MORE THAN SUBTRACTION. A run that "
+		"STARTED BEFORE the window is counted from the window's start, and one "
+		"that ENDED AFTER it is a finished run clipped to the window's end — the "
+		"events either side are read, so water opened in June and closed in July "
+		"is billed to both months and to neither twice. A run that HAS NOT ENDED "
+		"AT ALL is counted to the window's end or now, whichever is earlier, and "
+		"reported separately as `open_run_minutes`, so `runtime_minutes` does "
+		"not change between two identical calls. A close written by the CASCADE "
+		"(shutting a main valve closes everything below it) ends a run like any "
+		"other and is counted in `cascaded_closes`.\n\n"
+		"GALLONS ARE OPTIONAL AND NEVER GUESSED. Nothing on the Asset Register "
+		"carries a flow rate — an asset's parent is another asset, not an "
+		"Irrigation Zone — so volume is computed only from an explicit "
+		"`flow_rate_gpm` or an `irrigation_zone` whose record has one. "
+		"`flow_rate_source` always says which, and with neither the answer is "
+		"minutes and says so.",
+		{
+			"asset": _field(
+				_STRING,
+				"The Asset Register docname to measure at or below — a valve, an "
+				"irrigation zone, a block. list_assets has the register.",
+			),
+			"from_date": _field(_STRING, "Start of the window, YYYY-MM-DD. Default 30 days before to_date."),
+			"to_date": _field(_STRING, "End of the window, YYYY-MM-DD, inclusive of the whole day. Default today."),
+			"irrigation_zone": _field(
+				_STRING,
+				"Optional. An Irrigation Zone docname whose flow_rate_gpm and area_acres "
+				"price the runtime as gallons, gallons per acre and inches applied.",
+			),
+			"flow_rate_gpm": _field(
+				_NUMBER,
+				"Optional. Gallons per minute, stated outright. Wins over irrigation_zone.",
+			),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+		},
+		required=("asset",),
+		title="Get irrigation runtime",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
 	),
 	# ── v0.65.0: one scan, whatever it turns out to be ──────────────────────
 	"universal_scan": _tool(

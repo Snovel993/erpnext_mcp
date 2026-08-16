@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 527 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 528 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 252 read tools are **on** by default and can be switched off individually. A
+All 253 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -12970,3 +12970,112 @@ Not one of the fourteen tools writes a GL Entry, a Journal Entry, a Payment Entr
 or an allocation — the same promise v0.71.0 made, for the same reason. An anchor
 says whether the books tie out. Making them tie out is `create_journal_entry`,
 which has its own switch and its own review.
+
+---
+
+## Irrigation runtime and the closing cascade (v0.76.0)
+
+One new read tool, and one change to how `log_asset_state_change` behaves on a
+valve. Both rest on a structure that has been in the register since v0.25.0:
+`Asset Register.location` is a Link to Asset Register, so a valve sits under a
+zone, a zone under a block, a block under a ranch.
+
+### `close_valve` carries downhill
+
+`log_asset_state_change(asset_name, action="close_valve")` on an asset of type
+`Irrigation Valve` now closes **every valve below it** in that tree, each with
+its own Asset State Log row naming the cause in `cascaded_from`. The reply grows
+four keys:
+
+| Field | Meaning |
+| --- | --- |
+| `cascaded[]` | `{asset_name, asset_type, from_state, to_state, log_name}` per valve closed |
+| `cascaded_count` | How many |
+| `cascade_skipped[]` | `{asset_name, asset_type, reason}` — retired, already closed, or not a valve |
+| `cascade_truncated` | Whether the walk hit its 500-record or 12-level bound |
+
+**Opening does not cascade.** Closing an upstream valve stops the water for
+certain; opening it only makes water *available* to whatever is below, each of
+which is open or shut on its own account.
+
+**Every descendant is accounted for**, applied or skipped with the reason: the
+valve that was already winterized is precisely the one somebody needs to know
+the main did not shut.
+
+**The GPS fix and the photograph stay on the record that was scanned.** A
+cascaded row carries the time, the transition and its cause; it does not claim
+somebody was standing there.
+
+### `get_irrigation_runtime`
+
+How long the water ran, summed from open/close pairs already in the log.
+Read-only, and it creates nothing — a run *is* two log rows.
+
+**Arguments:** `asset` (required), `from_date`, `to_date`, `irrigation_zone`,
+`flow_rate_gpm`, `company`. The window defaults to the last 30 days and includes
+the whole of `to_date`.
+
+**Returns**
+
+| Field | Meaning |
+| --- | --- |
+| `valve_count`, `valves[]` | Every valve at or below `asset`, each with its own `runtime_minutes`, `run_count`, `still_open` |
+| `runtime_minutes`, `runtime_hours` | Finished runs only — does not change between two identical calls |
+| `open_run_minutes`, `valves_open_now[]` | Water moving right now, counted to the window's end or now, whichever is earlier |
+| `total_minutes_including_open` | The two above, added |
+| `runs[]` | Each run: `opened_at`, `closed_at`, `minutes`, `open_at_window_start`, `closed_after_window`, `actual_closed_at`, `still_open`, `closed_by_cascade`, `cascaded_from` |
+| `cascaded_closes` | Runs ended by a main valve closing rather than by somebody at this valve |
+| `flow_rate_gpm`, `flow_rate_source` | The rate used and where it came from — always stated |
+| `gallons`, `acre_inches`, `gallons_per_acre`, `inches_applied` | Present only when a rate is known; the last two only when the zone carries an acreage |
+
+**Runs that cross the window are counted at both ends.** The last event before
+the window is read, so water opened on 28 June and closed on 2 July is July's
+irrigation and not a close with no open. The first event after it is read too, so
+the same run is June's hours clipped at midnight rather than something reported
+as "still running" when the report is written in August.
+
+**Gallons are never guessed.** Nothing on the Asset Register carries a flow rate,
+so volume comes from `flow_rate_gpm` or from an `irrigation_zone` whose record
+has one. With neither, the answer is minutes and `flow_rate_source` says why.
+
+**Example**
+
+```json
+{"name": "get_irrigation_runtime",
+ "arguments": {"asset": "MC-Zone-3", "from_date": "2026-07-01",
+               "to_date": "2026-07-31", "irrigation_zone": "ZONE-3"}}
+```
+
+```json
+{
+  "asset": "MC-Zone-3", "asset_type": "Irrigation Zone",
+  "from": "2026-07-01 00:00:00", "to": "2026-07-31 23:59:59",
+  "valve_count": 2, "run_count": 2,
+  "runtime_minutes": 180.0, "runtime_hours": 3.0,
+  "open_run_minutes": 0, "valves_open_now": [],
+  "cascaded_closes": 1,
+  "flow_rate_gpm": 250.0,
+  "flow_rate_source": "Irrigation Zone 'ZONE-3' (flow_rate_gpm)",
+  "gallons": 45000.0, "gallons_per_acre": 4500.0, "inches_applied": 0.166
+}
+```
+
+### `universal_scan` answers which state change
+
+Three keys on every branch, populated on the asset branch:
+
+| Field | Meaning |
+| --- | --- |
+| `state_asset` | The Asset Register record the actions apply to, or `null` |
+| `current_state` | `closed`, `open`, `winterized` … or `null` |
+| `state_actions[]` | `{action, from_state, to_state}` — the shape `get_available_actions` returns |
+
+`available_actions` is unchanged: it is the handset's own five-string vocabulary,
+and `log_state_change` in it names a *screen*. A worker at a valve is choosing
+between open and close, and `state_actions` is that choice — so the scan draws
+the card without a second round trip.
+
+A Housing Unit scan carries no actions despite having states: they live on an
+Asset Register row and nothing links a unit to one (`Housing Unit.related_asset`
+points at ERPNext's own fixed-Asset doctype). Scanning the cabin's own asset tag
+is what carries them.

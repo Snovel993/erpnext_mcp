@@ -639,6 +639,7 @@
   "allow_get_asset_detail",
   "allow_get_asset_history",
   "allow_list_asset_state_history",
+  "allow_get_irrigation_runtime",
   "allow_generate_asset_qr",
   "allow_generate_asset_qr_sheet",
   "asset_tag_col",
@@ -4919,6 +4920,13 @@
    "fieldname": "allow_list_asset_state_history",
    "fieldtype": "Check",
    "label": "List Asset State History"
+  },
+  {
+   "default": "1",
+   "description": "READ. How long the water ran: sums the open/close pairs in the Asset State Log for every valve at or below one asset, over a date window. Handles runs that cross the window's edges and reports still-running valves separately. Gallons only when a flow rate is given.",
+   "fieldname": "allow_get_irrigation_runtime",
+   "fieldtype": "Check",
+   "label": "Get Irrigation Runtime"
   },
   {
    "default": "0",
