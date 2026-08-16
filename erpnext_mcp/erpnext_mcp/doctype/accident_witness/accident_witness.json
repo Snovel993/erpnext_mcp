@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One person who saw it. Recorded as a row rather than as a line of free text because a witness is somebody an investigator has to go back to: they need a name, a way to reach them, and a note of whether their account has been taken yet. A comma-separated string cannot say 'we still have not interviewed Miguel', which is the single most useful thing a half-finished investigation knows.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "witness_name",
+  "employee",
+  "role",
+  "contact_col",
+  "contact",
+  "statement_taken",
+  "statement_taken_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "witness_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "reqd": 1
+  },
+  {
+   "description": "Their Employee id, where they work here. Empty for a contractor, a delivery driver or a member of the public — all of whom witness farm accidents and none of whom are on the payroll.",
+   "fieldname": "employee",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee"
+  },
+  {
+   "default": "Witness",
+   "fieldname": "role",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Role",
+   "options": "Witness\nInjured Party\nFirst Responder\nSupervisor\nOther"
+  },
+  {
+   "fieldname": "contact_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "contact",
+   "fieldtype": "Data",
+   "label": "Contact"
+  },
+  {
+   "default": "0",
+   "description": "Whether their account has been taken. THE OUTSTANDING-WORK FLAG: an investigation cannot close while a witness named here has no statement, because 'we knew he saw it and never asked him' is the finding that survives every other one.",
+   "fieldname": "statement_taken",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Statement Taken"
+  },
+  {
+   "fieldname": "statement_taken_on",
+   "fieldtype": "Datetime",
+   "label": "Statement Taken On"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Accident Witness",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,421 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One workplace incident and the investigation of it. 29 CFR 1904 is the rule behind the recordability columns; the rest of this record exists because an investigation IS NOT A FORM SOMEBODY FILLS IN ONCE. It opens at the scene, on a phone, with whatever is known in the first ten minutes — who, what, where, who saw it, what was done immediately. Root cause arrives days later, after the witnesses have been interviewed and the machine has been looked at. Corrective actions arrive after that, and closing needs them documented and a date set to check they happened. So the status walks Open → In Progress → Corrective Actions Pending → Closed, the narrative is a table that grows, and nothing about this record assumes a single session.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "status",
+  "severity",
+  "occurred_at",
+  "reported_at",
+  "identity_col",
+  "company",
+  "reported_by",
+  "reported_by_name",
+  "investigation_lead",
+  "what_section",
+  "incident_description",
+  "location_doctype",
+  "location",
+  "location_description",
+  "asset",
+  "injury_section",
+  "injured_person",
+  "injured_person_name",
+  "injury_type",
+  "body_part",
+  "injury_col",
+  "medical_treatment",
+  "treatment_facility",
+  "days_away_from_work",
+  "days_restricted_duty",
+  "immediate_section",
+  "immediate_actions",
+  "witnesses_section",
+  "witnesses",
+  "osha_section",
+  "osha_recordable",
+  "osha_determination_basis",
+  "osha_col",
+  "osha_determined_by",
+  "osha_determined_on",
+  "osha_form_301_filed",
+  "reportable_to_osha_within_24h",
+  "analysis_section",
+  "root_cause",
+  "contributing_factors",
+  "analysis_col",
+  "corrective_actions",
+  "corrective_actions_completed_on",
+  "closure_section",
+  "followup_date",
+  "closed_on",
+  "closure_col",
+  "closed_by",
+  "closure_summary",
+  "narrative_section",
+  "investigation_notes"
+ ],
+ "fields": [
+  {
+   "default": "Open",
+   "description": "Open is the record made at the scene. In Progress means somebody is actively investigating. Corrective Actions Pending means the cause is known and the fix is not done yet — the state most investigations sit in longest, and the one a status of just Open/Closed cannot express. Closed needs corrective actions documented and a follow-up date set.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Open\nIn Progress\nCorrective Actions Pending\nClosed",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "First Aid",
+   "description": "How bad it was. Drives nothing automatically — recordability is a separate determination somebody makes and states — but it is what a list of open investigations sorts on when a safety manager has twenty minutes.",
+   "fieldname": "severity",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Severity",
+   "options": "Near Miss\nFirst Aid\nMedical Treatment\nLost Time\nHospitalisation\nAmputation\nLoss of Eye\nFatality",
+   "reqd": 1
+  },
+  {
+   "description": "When it happened. Separate from when it was reported, because the gap between the two is itself a finding — and because OSHA's 8-hour fatality and 24-hour hospitalisation clocks run from this one.",
+   "fieldname": "occurred_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Occurred At",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reported_at",
+   "fieldtype": "Datetime",
+   "label": "Reported At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "fieldname": "reported_by",
+   "fieldtype": "Data",
+   "label": "Reported By"
+  },
+  {
+   "fieldname": "reported_by_name",
+   "fieldtype": "Data",
+   "label": "Reported By Name"
+  },
+  {
+   "description": "Who is running the investigation. Named because an investigation with no owner is the one that is still Open in March.",
+   "fieldname": "investigation_lead",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Investigation Lead"
+  },
+  {
+   "fieldname": "what_section",
+   "fieldtype": "Section Break",
+   "label": "What Happened"
+  },
+  {
+   "description": "The account of the incident. A Text and not a Small Text: 'describe what happened' is the first question an investigator asks and the last one a field should truncate. Written at the scene with whatever is known; everything learned afterwards goes in the narrative table rather than over the top of this.",
+   "fieldname": "incident_description",
+   "fieldtype": "Text",
+   "label": "What Happened",
+   "reqd": 1
+  },
+  {
+   "description": "Which register the place is in — 'Field', 'Housing Unit', 'Asset Register'. The same dynamic pair Farm Task uses, so a task raised about the scene and this report key alike.",
+   "fieldname": "location_doctype",
+   "fieldtype": "Link",
+   "label": "Location DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "location",
+   "fieldtype": "Dynamic Link",
+   "in_standard_filter": 1,
+   "label": "Location",
+   "options": "location_doctype",
+   "search_index": 1
+  },
+  {
+   "description": "Where it happened, in words. Kept alongside the link because 'the third ladder from the north end of the packing line' is not a docname and is what somebody standing there needs.",
+   "fieldname": "location_description",
+   "fieldtype": "Small Text",
+   "label": "Location Description"
+  },
+  {
+   "description": "The machine involved, where there was one. Scanning its tag afterwards is how a worker finds out this happened here.",
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Asset",
+   "options": "Asset Register",
+   "search_index": 1
+  },
+  {
+   "fieldname": "injury_section",
+   "fieldtype": "Section Break",
+   "label": "Injury",
+   "description": "Empty on a near miss, and a near miss is worth recording precisely because it is empty — it is the same event with a better outcome."
+  },
+  {
+   "fieldname": "injured_person",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Injured Person",
+   "search_index": 1
+  },
+  {
+   "fieldname": "injured_person_name",
+   "fieldtype": "Data",
+   "label": "Injured Person Name"
+  },
+  {
+   "fieldname": "injury_type",
+   "fieldtype": "Select",
+   "label": "Injury Type",
+   "options": "\nLaceration\nFracture\nSprain or Strain\nBurn\nChemical Exposure\nHeat Illness\nEye Injury\nCrush\nAmputation\nRespiratory\nOther"
+  },
+  {
+   "fieldname": "body_part",
+   "fieldtype": "Data",
+   "label": "Body Part"
+  },
+  {
+   "fieldname": "injury_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "None",
+   "description": "What treatment was given. THE RECORDABILITY LINE RUNS THROUGH HERE: 29 CFR 1904.7 turns on medical treatment beyond first aid, and first aid is a defined list rather than a judgement — which is why this is a Select and why the determination below is stated separately by a person.",
+   "fieldname": "medical_treatment",
+   "fieldtype": "Select",
+   "label": "Medical Treatment",
+   "options": "None\nFirst Aid Only\nMedical Treatment Beyond First Aid\nEmergency Room\nHospitalised"
+  },
+  {
+   "fieldname": "treatment_facility",
+   "fieldtype": "Data",
+   "label": "Treatment Facility"
+  },
+  {
+   "fieldname": "days_away_from_work",
+   "fieldtype": "Int",
+   "label": "Days Away From Work"
+  },
+  {
+   "fieldname": "days_restricted_duty",
+   "fieldtype": "Int",
+   "label": "Days on Restricted Duty"
+  },
+  {
+   "fieldname": "immediate_section",
+   "fieldtype": "Section Break",
+   "label": "Immediate Actions"
+  },
+  {
+   "description": "What was done in the first minutes: the machine locked out, the block closed, the ambulance called. Asked for at the scene because it is the part nobody remembers accurately a week later, and because an investigation that cannot say what was done immediately cannot show the hazard was controlled.",
+   "fieldname": "immediate_actions",
+   "fieldtype": "Text",
+   "label": "Immediate Actions Taken"
+  },
+  {
+   "fieldname": "witnesses_section",
+   "fieldtype": "Section Break",
+   "label": "Witnesses"
+  },
+  {
+   "fieldname": "witnesses",
+   "fieldtype": "Table",
+   "label": "Witnesses",
+   "options": "Accident Witness"
+  },
+  {
+   "fieldname": "osha_section",
+   "fieldtype": "Section Break",
+   "label": "OSHA Recordability",
+   "description": "29 CFR 1904. Whether this goes on the 300 log is a determination a person makes and states the basis for — not something this app infers from a severity dropdown, because the consequence of being wrong is a citation and the reasoning is what an inspector asks to see."
+  },
+  {
+   "default": "Undetermined",
+   "description": "Undetermined is the honest state of a report ten minutes old and is the DEFAULT deliberately: a record that defaulted to 'No' would put an unmade decision on the 300 log's right side. An investigation cannot close while this says Undetermined.",
+   "fieldname": "osha_recordable",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "OSHA Recordable",
+   "options": "Undetermined\nYes\nNo",
+   "reqd": 1
+  },
+  {
+   "description": "WHY. 'Medical treatment beyond first aid — sutures — under 1904.7(b)(5)' is a determination an inspector can check; 'No' on its own is one they will ask about. Required by the tool whenever the answer stops being Undetermined.",
+   "fieldname": "osha_determination_basis",
+   "fieldtype": "Text",
+   "label": "Basis for Determination"
+  },
+  {
+   "fieldname": "osha_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "osha_determined_by",
+   "fieldtype": "Data",
+   "label": "Determined By"
+  },
+  {
+   "fieldname": "osha_determined_on",
+   "fieldtype": "Datetime",
+   "label": "Determined On"
+  },
+  {
+   "default": "0",
+   "fieldname": "osha_form_301_filed",
+   "fieldtype": "Check",
+   "label": "Form 301 Filed"
+  },
+  {
+   "default": "0",
+   "description": "Set where 1904.39 requires a call to OSHA — 8 hours for a fatality, 24 for an in-patient hospitalisation, amputation or loss of an eye. A flag rather than a computation, because the clock starts when the employer LEARNS of it and only a person knows when that was.",
+   "fieldname": "reportable_to_osha_within_24h",
+   "fieldtype": "Check",
+   "label": "Immediately Reportable to OSHA"
+  },
+  {
+   "fieldname": "analysis_section",
+   "fieldtype": "Section Break",
+   "label": "Root Cause and Corrective Actions",
+   "description": "Filled in over days, not at the scene. An investigation that had these on the first screen would get 'operator error' written into it in the first ten minutes, which is the answer that stops anybody looking further."
+  },
+  {
+   "description": "Why it happened, past the immediate cause. 'The guard was removed' is a fact; 'the guard was removed in June to clear a jam and nothing put it back because no one owns the checklist for that line' is a root cause. A Text, for the same reason the incident description is one.",
+   "fieldname": "root_cause",
+   "fieldtype": "Text",
+   "label": "Root Cause"
+  },
+  {
+   "fieldname": "contributing_factors",
+   "fieldtype": "Text",
+   "label": "Contributing Factors"
+  },
+  {
+   "fieldname": "analysis_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What is being changed so it does not happen again. REQUIRED TO CLOSE: an investigation that identified a cause and changed nothing is a filing exercise, and closing one is the moment that becomes permanent.",
+   "fieldname": "corrective_actions",
+   "fieldtype": "Text",
+   "label": "Corrective Actions"
+  },
+  {
+   "fieldname": "corrective_actions_completed_on",
+   "fieldtype": "Date",
+   "label": "Corrective Actions Completed On"
+  },
+  {
+   "fieldname": "closure_section",
+   "fieldtype": "Section Break",
+   "label": "Closure"
+  },
+  {
+   "description": "When somebody will check the corrective actions actually held. Required to close, because a fix nobody verified is a fix that gets undone the next time the line jams.",
+   "fieldname": "followup_date",
+   "fieldtype": "Date",
+   "label": "Follow-Up Date"
+  },
+  {
+   "fieldname": "closed_on",
+   "fieldtype": "Datetime",
+   "label": "Closed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "closure_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "closed_by",
+   "fieldtype": "Data",
+   "label": "Closed By",
+   "read_only": 1
+  },
+  {
+   "fieldname": "closure_summary",
+   "fieldtype": "Text",
+   "label": "Closure Summary"
+  },
+  {
+   "fieldname": "narrative_section",
+   "fieldtype": "Section Break",
+   "label": "Investigation Narrative",
+   "description": "The investigation as it happened, appended and never edited. Four days of work is four or forty entries, each stamped when it was written and attributed to whoever wrote it — which is the whole reason a hearing believes any of it."
+  },
+  {
+   "fieldname": "investigation_notes",
+   "fieldtype": "Table",
+   "label": "Investigation Notes",
+   "options": "Task Note"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Accident Report",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "injured_person_name,severity,status,occurred_at",
+ "sort_field": "occurred_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
