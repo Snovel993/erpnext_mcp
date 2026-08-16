@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 528 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 529 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 253 read tools are **on** by default and can be switched off individually. A
+All 254 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -13079,3 +13079,115 @@ A Housing Unit scan carries no actions despite having states: they live on an
 Asset Register row and nothing links a unit to one (`Housing Unit.related_asset`
 points at ERPNext's own fixed-Asset doctype). Scanning the cabin's own asset tag
 is what carries them.
+
+---
+
+## Equipment, insurance and clocks (v0.77.0)
+
+### Timestamps now say which zone
+
+Every timestamp on the endpoints below keeps its existing key, unchanged and
+naive, and gains a `*_local` twin carrying the offset:
+
+```json
+{"performed_at": "2026-07-24 06:00:00",
+ "performed_at_local": "2026-07-24T06:00:00.000-07:00",
+ "timezone": "America/Los_Angeles",
+ "timezone_source": "System Settings.time_zone",
+ "stored_timezone": "America/Los_Angeles"}
+```
+
+Additive rather than in place, because a shipped handset parses the naive form
+and cannot be upgraded from the server. Applied to `log_asset_state_change`,
+`list_asset_state_history`, `get_irrigation_runtime`,
+`export_insurance_schedule`, `list_shifts`, `get_shift`, and the mobile
+`get_task` / `list_my_tasks`.
+
+**`timezone` is accepted on all of them** — any IANA name. An unknown one is
+refused rather than answered in UTC. Display only: no stored value moves, no
+duration changes, and the days a window covers stay the site's days.
+
+**What is stored is the SITE's zone, not UTC.** Frappe writes naive site-local
+datetimes and every timestamp in this app is one; `stored_timezone` says so in
+every payload. Writing UTC into new columns while the old ones stay site-local
+would put two zones in one table — an `open_valve` at 06:00 local paired with a
+`close_valve` at 13:00 UTC is an hour of irrigation that was sixty seconds.
+
+**There is no `utc_offset` key** anywhere. Pacific is -07:00 in July and -08:00
+in January; each timestamp carries the offset in force at its own instant.
+
+### `export_insurance_schedule`
+
+Every capital asset as an insurance schedule line. Read-only.
+
+**Arguments:** `company`, `asset_types`, `include_retired`, `acquired_after`,
+`acquired_before`, `limit`, `timezone`. Defaults to Tractor, Vehicle, Implement
+and Sprayer — a valve is a fitting and a block is land.
+
+**Returns**
+
+| Field | Meaning |
+| --- | --- |
+| `schedule[]` | One line per machine |
+| `.serial_number`, `.model`, `.acquired_on` | What an adjuster matches a claim against |
+| `.purchase_value`, `.replacement_value` | Both, always; separate columns for ever |
+| `.insured_value`, `.value_basis` | The number the schedule is written against, and whether it came from `replacement`, `purchase` or `none` |
+| `.location_path[]`, `.location` | The chain of assets above it — `MC-Ranch › MC-Shed` |
+| `.photos[]`, `.photo_url`, `.photo_count` | File attachments, newest first; private URLs reported as stored |
+| `gaps` | Every missing serial, value, photograph and acquisition date, listed **and** counted |
+| `by_asset_type` | Count and insured value per type |
+| `total_insured_value` | **Withheld unless scoped to one company** — two entities are two policies |
+
+**Replacement value falls back to purchase value** and says so per row. A 2011
+price presented as today's cover understates the loss on exactly the machines
+most likely to be old.
+
+### `register_asset` takes the whole registration
+
+New arguments: `parent_asset` (a second spelling of `location` — both work;
+disagreeing values are refused rather than resolved by precedence),
+`serial_number`, `model`, `acquired_on`, `purchase_value`, `replacement_value`,
+and `photo_file_token`.
+
+**The photograph is a two-step flow.** Upload with `stage_file_chunk` →
+`finalize_staged_file` (which verifies a SHA-256), then pass the File docname
+that returns as `photo_file_token`. A failed attach does **not** undo the
+registration — the reply carries `photo_error` and the asset name, and
+`attach_file_to_document` completes it.
+
+### `action_menu`: what to offer for what was scanned
+
+On `universal_scan`, `scan_asset` and `get_available_actions`.
+
+| Field | Meaning |
+| --- | --- |
+| `action` | The action name a method takes |
+| `label` | The worker's words — `open_valve` is `Turn On` |
+| `kind` | `state_change`, `inspection`, `task` or `record` |
+| `method` | The endpoint that performs it, or `null` |
+| `implemented` | Whether this server can do it yet |
+| `available` | Whether it can be done *right now*, given the current state |
+| `from_state`, `to_state` | On an available state change |
+| `unavailable_reason` | Why not — an illegal move and an unbuilt action read differently |
+| `note` | On unbuilt rows: what is missing, and why the obvious shortcut is wrong |
+
+`state_actions` remains the subset that is a legal transition right now.
+`available_actions` on a scan is unchanged — it is the handset's own five-string
+button vocabulary.
+
+**Unbuilt actions are published, marked.** Publishing only the finished ones
+gives iOS no way to lay out a screen it will need next month; publishing them
+undifferentiated gives a worker a button that fails after they have walked to the
+machine. Today the unbuilt rows are engine hours, application rates, calibration
+records and the REI timer — each with a note saying what building it would take.
+
+**Tractors and vehicles gained `check_out` / `check_in`.** Who has the machine is
+a different question from whether it runs. `start_maintenance` reaches from
+`checked_out` because that is where a breakdown happens; `put_in_service` does
+not, because a machine coming back from the field is checked in by the person who
+has it.
+
+**Which tractor an implement is on is the register tree, not a state.** `attach`
+records that it is hitched and when; `update_registered_asset(parent_asset=…)`
+records what to. Duplicating the link inside a state blob would give one fact two
+homes.

@@ -75,6 +75,7 @@ from .tools import (
 	hr,
 	i9,
 	inspections,
+	insurance,
 	investment_report,
 	irrigation,
 	kpi,
@@ -17412,11 +17413,63 @@ TOOLS = {
 				"Optional. Gallons per minute, stated outright. Wins over irrigation_zone.",
 			),
 			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
 		},
 		required=("asset",),
 		title="Get irrigation runtime",
 		available=_needs_doctype("Asset Register", "Asset State Log"),
 		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	# ── v0.77.0: the schedule an insurer asks for ───────────────────────────
+	"export_insurance_schedule": _tool(
+		insurance.export_insurance_schedule,
+		"Every capital asset as an insurance schedule line: serial number or "
+		"VIN, model, what it would cost to replace, where it lives, when it was "
+		"acquired, and the URL of every photograph attached to it. Read-only, "
+		"and off the register that has been collecting these machines all "
+		"along — the spreadsheet somebody rebuilds each year was a "
+		"transcription of this.\n\n"
+		"DEFAULTS TO THE CAPITAL TYPES — Tractor, Vehicle, Implement, Sprayer. "
+		"A valve is a fitting and a block is land; neither goes on an equipment "
+		"schedule. Pass `asset_types` to widen it (cold storage on the same "
+		"policy is a real choice, just not the default).\n\n"
+		"`gaps` IS THE POINT. A schedule of forty machines where nine have no "
+		"serial number and four have no value is a list plus an afternoon's "
+		"work, and the afternoon is invisible until an adjuster asks. Every "
+		"missing serial, value, photograph and acquisition date is itemised and "
+		"counted, so it can be closed before renewal rather than during a "
+		"claim.\n\n"
+		"REPLACEMENT VALUE FALLS BACK TO PURCHASE VALUE and says so per row "
+		"(`value_basis`), because a 2011 price presented as today's cover "
+		"understates the loss on exactly the machines most likely to be old. "
+		"The TOTAL is withheld unless the call is scoped to one company: "
+		"equipment held in two entities is insured on two policies, and one "
+		"figure across them is wrong for both.",
+		{
+			"company": _field(_STRING, "Company. Inferred on a single-company site; required for a total."),
+			"asset_types": _field(
+				_STRING_ARRAY,
+				"Asset Register types to schedule. Default: Tractor, Vehicle, Implement, Sprayer.",
+			),
+			"include_retired": _field(
+				_BOOLEAN,
+				"Include assets with a retired_at date. Default false — a sold tractor is not "
+				"insured, and a schedule that carried it would be paying for it.",
+			),
+			"acquired_after": _field(_STRING, "Only assets acquired on or after this date, YYYY-MM-DD."),
+			"acquired_before": _field(_STRING, "Only assets acquired on or before this date, YYYY-MM-DD."),
+			"limit": _field(_INTEGER, "Maximum rows. Default 100, capped at 500."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		title="Export an insurance schedule",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── v0.65.0: one scan, whatever it turns out to be ──────────────────────
 	"universal_scan": _tool(

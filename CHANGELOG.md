@@ -3,6 +3,102 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.77.0 — 2026-08-15 — which six o'clock, and what the machine is worth
+
+**A worker turned a valve on at six in the morning and every endpoint answered
+`2026-07-24 06:00:00`** — a string whose meaning depends on a sentence nobody
+could complete from the payload. This release says which zone, on every timestamp
+it returns. It also gives the register the columns an insurer asks for, and gives
+a handset the menu for whatever it just scanned rather than only the state
+machine behind it.
+
+### The storage is NOT UTC, and that is deliberate
+
+The brief asked for UTC internally. **It was not done, and the reason is worth
+stating.** Frappe writes naive datetimes in the SITE'S timezone —
+`frappe.utils.now()` is `convert_utc_to_system_timezone` applied to the clock, and
+a MariaDB `DATETIME` has nowhere to put a zone. Every timestamp this app has ever
+written is that. Storing UTC in the new columns would put two zones in one table:
+an `open_valve` at 06:00 site-local and a `close_valve` at 13:00 UTC are the same
+seven o'clock, and `get_irrigation_runtime` pairing them would report an hour of
+irrigation that was sixty seconds.
+
+So the storage is left alone — one consistent zone, the framework's own — and the
+fix is at the boundary where a value is READ, which is where the ambiguity
+actually bit. `stored_timezone` is in every payload saying what the naive columns
+mean. Migrating the whole app to UTC storage is a real option; it is a data
+migration plus every read path, not a change to five endpoints.
+
+### New
+
+- **`erpnext_mcp/timezones.py`.** Every timestamp keeps its existing key,
+  unchanged and naive, and gains a `*_local` twin: `2026-07-24T06:00:00.000-07:00`.
+  Additive because `FrappeDate.parse` on the handset tries three naive formats and
+  would fail the whole row on a shape it has not seen, and a shipped client cannot
+  be upgraded from the server.
+  - **The milliseconds are load-bearing.** `FrappeDate.parse` reaches for
+    `ISO8601DateFormatter` with `.withFractionalSeconds`, and that option is a
+    REQUIREMENT rather than a tolerance: given `...T06:00:00-07:00` it returns
+    nil. Every value is rendered to milliseconds so the shipped app parses it
+    without a new build. `test_timezones.py` fails loudly if they are tidied away.
+  - **No site-wide `utc_offset` key**, because Pacific is -07:00 in July and
+    -08:00 in January and a report crossing the change would have half of itself
+    an hour out. Each timestamp carries the offset in force at its own instant.
+  - **The zone is never guessed.** It comes from System Settings, and a site that
+    has configured none falls back to UTC and SAYS it fell back
+    (`timezone_source`). A farm in the Pacific being told `+00:00` by a server
+    that assumed is the bug this ends; assuming `America/Los_Angeles` instead
+    would be the same bug pointed at a different farm.
+  - An optional `timezone` argument on the read endpoints renders in any IANA
+    zone. An unknown one is **refused**: a caller that typo'd and got UTC back has
+    no way to tell from the numbers, and the numbers are what irrigation is
+    scheduled against. Applied to valve state changes, the state history, asset
+    registration and scan times, irrigation runtime, task `completed_at`, and
+    `list_shifts` / `get_shift`.
+- **Five capital-asset columns on Asset Register** — `serial_number` (the VIN or
+  plate string an adjuster matches a claim against, which iOS captures by OCR),
+  `model`, `acquired_on`, `purchase_value`, `replacement_value`. Purchase and
+  replacement are separate columns for ever: an insurer settles on one and the
+  books depreciate from the other, and a single column holding whichever was
+  entered last answers neither. A zero is kept distinct from an empty column —
+  a machine valued at nothing has been valued.
+- **`Implement` and `Vehicle` asset types**, each with a state machine. Tractors
+  and vehicles gained `check_out` / `check_in`: who has the machine is a
+  different question from whether it runs, and the register could only answer the
+  second.
+- **`export_insurance_schedule`.** Every capital asset as a schedule line, with
+  its photographs joined on. `gaps` is the point of it — every missing serial,
+  value, photograph and acquisition date, itemised and counted, so the afternoon
+  of work that is invisible until an adjuster asks can be closed before renewal.
+  Replacement value falls back to purchase value and says so per row; the total is
+  **withheld** unless the call names one company, because equipment in two
+  entities is insured on two policies.
+- **`register_asset` takes the whole thing at once** — `parent_asset` (a second
+  spelling of `location`, which was named before the tree was; both work, and
+  disagreeing values are refused rather than resolved by precedence), the five
+  capital columns, and `photo_file_token` to attach an already-uploaded
+  photograph. A failed attach does not undo the registration: the asset is the
+  record, the photograph is evidence about it.
+- **`action_menu` on `universal_scan`, `scan_asset` and `get_available_actions`.**
+  The state machine answers "what transitions are legal"; this answers "what does
+  a worker standing at this machine do", which is longer — a pre-trip inspection
+  and a calibration are neither transitions nor absent from the job. Valves get
+  on/off, sprayers mix/spray/clean plus a pre-use inspection, tractors and
+  vehicles check out and in plus a pre-trip walk, implements attach and detach.
+  **Every row says whether it is built.** Publishing only the finished actions
+  gives iOS no way to lay out a screen it will need next month; publishing them
+  undifferentiated gives a worker a button that fails after they have walked to
+  the machine. `available` and `implemented` are separate flags for the same
+  reason. The unbuilt rows — engine hours, application rates, calibration
+  records, the REI timer — each carry a note saying what is missing and why the
+  obvious shortcut is wrong.
+
+### Changed
+
+- `list_asset_state_history` reports `cascaded_from` and `cascaded` per event.
+- `_describe_asset` returns `parent_asset` alongside `location`, and the five new
+  columns, so a scan at the machine shows the same serial an adjuster is holding.
+
 ## 0.76.0 — 2026-08-15 — the register agrees with the pipe
 
 **A worker sent out on a line break shuts the main at the turnout, and every

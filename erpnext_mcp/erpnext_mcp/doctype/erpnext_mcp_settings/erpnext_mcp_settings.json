@@ -640,6 +640,7 @@
   "allow_get_asset_history",
   "allow_list_asset_state_history",
   "allow_get_irrigation_runtime",
+  "allow_export_insurance_schedule",
   "allow_generate_asset_qr",
   "allow_generate_asset_qr_sheet",
   "asset_tag_col",
@@ -4920,6 +4921,13 @@
    "fieldname": "allow_list_asset_state_history",
    "fieldtype": "Check",
    "label": "List Asset State History"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every capital asset (tractor, vehicle, implement, sprayer) as an insurance schedule line — serial/VIN, model, replacement value, location, date acquired, photo URLs — plus an itemised list of what is missing from it. Creates nothing.",
+   "fieldname": "allow_export_insurance_schedule",
+   "fieldtype": "Check",
+   "label": "Export Insurance Schedule"
   },
   {
    "default": "1",
