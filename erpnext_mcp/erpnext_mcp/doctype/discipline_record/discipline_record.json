@@ -1,0 +1,339 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One step in a progressive discipline chain: a verbal warning, a written warning, a final warning, a suspension or a termination. THE CHAIN IS THE DEFENCE. In a wrongful-termination claim the question is not whether the last step was fair, it is whether the employer can produce a documented, escalating, acknowledged series of steps that gave the employee a chance to correct — so every record after the first names the one before it, every record states what improvement was expected and by when, and every record carries the employee's acknowledgement or the fact that they declined to sign. A termination at the end of an unbroken chain is defensible; the same termination with a gap in the middle is the gap.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "discipline_type",
+  "status",
+  "identity_col",
+  "company",
+  "incident_date",
+  "issued_on",
+  "issued_by",
+  "issued_by_name",
+  "chain_section",
+  "prior_record",
+  "step_number",
+  "chain_col",
+  "supersedes_note",
+  "incident_section",
+  "incident_description",
+  "policy_violated",
+  "witnesses",
+  "followup_section",
+  "expected_improvement",
+  "followup_date",
+  "followup_col",
+  "consequence_of_no_improvement",
+  "suspension_start",
+  "suspension_end",
+  "acknowledgement_section",
+  "employee_acknowledged",
+  "employee_signature",
+  "employee_acknowledged_on",
+  "acknowledgement_col",
+  "employee_declined_to_sign",
+  "employee_statement",
+  "manager_signature",
+  "manager_signed_on",
+  "narrative_section",
+  "discipline_notes",
+  "attachments_section",
+  "sealed_pdf"
+ ],
+ "fields": [
+  {
+   "description": "Who this concerns. A Data field rather than a Link for the reason Farm Task.assigned_to is one: Frappe HR is not a dependency of this app, and a Link would make the whole doctype fail to migrate on a site without it. The id is validated against the Employee register where there is one.",
+   "fieldname": "employee",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name"
+  },
+  {
+   "description": "Where in the chain this step sits. The order is the escalation and it is not a preference: skipping straight to a Final Warning for a first offence is exactly what a claim argues was arbitrary, and the tool refuses a jump unless somebody states a reason for it.",
+   "fieldname": "discipline_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Type",
+   "options": "Verbal Warning\nWritten Warning\nFinal Warning\nSuspension\nTermination",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Active",
+   "description": "Active while the step still counts toward the chain. Expired is a step that has aged out of the employer's own look-back window — many policies discount a warning after twelve months, and a chain that silently kept counting a two-year-old verbal warning is a chain a claim will attack. Rescinded is a step withdrawn on review; it is kept rather than deleted, because a withdrawn warning is itself something an employee may point to.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nExpired\nRescinded",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "When the incident happened — NOT when the paperwork was written. The gap between the two is the first thing a claim measures: discipline issued three weeks after the event reads as pretextual, and the two dates being separate columns is what makes that visible rather than hidden.",
+   "fieldname": "incident_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Incident Date",
+   "reqd": 1
+  },
+  {
+   "description": "When this step was issued to the employee.",
+   "fieldname": "issued_on",
+   "fieldtype": "Date",
+   "label": "Issued On",
+   "reqd": 1
+  },
+  {
+   "fieldname": "issued_by",
+   "fieldtype": "Data",
+   "label": "Issued By"
+  },
+  {
+   "fieldname": "issued_by_name",
+   "fieldtype": "Data",
+   "label": "Issued By Name"
+  },
+  {
+   "fieldname": "chain_section",
+   "fieldtype": "Section Break",
+   "label": "Chain of Escalation",
+   "description": "What came before this. The single most important thing on the record: a documented, escalating series is the defence, and a step that names no predecessor is a step that has to explain itself."
+  },
+  {
+   "description": "The step immediately before this one for this employee. AUTO-LINKED at creation from the employee's own active history — a chain assembled by hand is a chain with a link missing on the day somebody is in a hurry.",
+   "fieldname": "prior_record",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Prior Record",
+   "options": "Discipline Record",
+   "search_index": 1
+  },
+  {
+   "description": "How many steps into the chain this is, counting from one. Stored rather than derived so a report can sort and filter on it without walking the chain per row.",
+   "fieldname": "step_number",
+   "fieldtype": "Int",
+   "label": "Step Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "chain_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Why this step is where it is, when it did not follow the previous one in order. A jump from a verbal warning straight to a final one may be entirely correct — a safety violation is not a progressive matter — and the reason stated here at the time is what makes it defensible later. Required by the tool whenever a step skips.",
+   "fieldname": "supersedes_note",
+   "fieldtype": "Small Text",
+   "label": "Reason for Escalation Level"
+  },
+  {
+   "fieldname": "incident_section",
+   "fieldtype": "Section Break",
+   "label": "The Incident"
+  },
+  {
+   "description": "What happened, in specifics. 'Attitude problem' is what a claim wins on; 'arrived 40 minutes late on 3 and 7 August without notice, after the 22 July verbal warning about the same' is what it loses on. A Text and not a Small Text: this is the field the whole record turns on.",
+   "fieldname": "incident_description",
+   "fieldtype": "Text",
+   "label": "What Happened",
+   "reqd": 1
+  },
+  {
+   "description": "The rule, policy or standard this breached. A discipline record that cites nothing is discipline for breaking a rule nobody wrote down.",
+   "fieldname": "policy_violated",
+   "fieldtype": "Small Text",
+   "label": "Policy or Rule Breached"
+  },
+  {
+   "description": "Who else was there, as names. Witnesses are what turn one person's account into a documented event, and the time to record them is the day it happened.",
+   "fieldname": "witnesses",
+   "fieldtype": "Small Text",
+   "label": "Witnesses"
+  },
+  {
+   "fieldname": "followup_section",
+   "fieldtype": "Section Break",
+   "label": "What Happens Next",
+   "description": "Progressive discipline is progressive because it gives somebody a chance to correct. A step that states no expected improvement and sets no date to check is a punishment rather than a step, and it is the half claims most often find missing."
+  },
+  {
+   "description": "What the employee has to do differently, stated so that both sides can tell later whether it happened. 'Improve punctuality' cannot be assessed; 'clock in by 06:00 on every scheduled shift for the next 60 days' can.",
+   "fieldname": "expected_improvement",
+   "fieldtype": "Text",
+   "label": "Expected Improvement",
+   "reqd": 1
+  },
+  {
+   "description": "When somebody will actually check. Required, because a follow-up date nobody set is a follow-up nobody did, and an unreviewed warning is the one a claim points at to show the process was theatre.",
+   "fieldname": "followup_date",
+   "fieldtype": "Date",
+   "label": "Follow-Up Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "followup_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What happens if it does not improve. Stating it at each step is what makes the next step foreseeable rather than arbitrary.",
+   "fieldname": "consequence_of_no_improvement",
+   "fieldtype": "Small Text",
+   "label": "Consequence If Not Corrected"
+  },
+  {
+   "fieldname": "suspension_start",
+   "fieldtype": "Date",
+   "label": "Suspension Start"
+  },
+  {
+   "fieldname": "suspension_end",
+   "fieldtype": "Date",
+   "label": "Suspension End"
+  },
+  {
+   "fieldname": "acknowledgement_section",
+   "fieldtype": "Section Break",
+   "label": "Acknowledgement",
+   "description": "That the employee was told. An undelivered warning is not a step in a chain — it is a note in a file — and the acknowledgement is what separates the two."
+  },
+  {
+   "default": "0",
+   "fieldname": "employee_acknowledged",
+   "fieldtype": "Check",
+   "label": "Employee Acknowledged"
+  },
+  {
+   "description": "The employee's signature capture, filed through the same evidence chain every other signature in this app uses.",
+   "fieldname": "employee_signature",
+   "fieldtype": "Attach",
+   "label": "Employee Signature"
+  },
+  {
+   "fieldname": "employee_acknowledged_on",
+   "fieldtype": "Datetime",
+   "label": "Acknowledged On"
+  },
+  {
+   "fieldname": "acknowledgement_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "A REFUSAL TO SIGN IS A RECORDED OUTCOME, NOT A GAP. An employee is entitled to decline, and a record that simply lacked a signature could not tell 'they refused' from 'nobody asked'. Ticking this with a witness named above is what keeps the chain intact when somebody will not put their name to it.",
+   "fieldname": "employee_declined_to_sign",
+   "fieldtype": "Check",
+   "label": "Employee Declined to Sign"
+  },
+  {
+   "description": "The employee's own account, in their words, if they gave one. Recording it is not a courtesy — a chain that shows the employee was heard is materially stronger than one that shows only the employer's side.",
+   "fieldname": "employee_statement",
+   "fieldtype": "Text",
+   "label": "Employee Statement"
+  },
+  {
+   "fieldname": "manager_signature",
+   "fieldtype": "Attach",
+   "label": "Manager Signature"
+  },
+  {
+   "fieldname": "manager_signed_on",
+   "fieldtype": "Datetime",
+   "label": "Manager Signed On"
+  },
+  {
+   "fieldname": "narrative_section",
+   "fieldtype": "Section Break",
+   "label": "Narrative"
+  },
+  {
+   "description": "The account of the conversation, appended over time and never edited. A voice note recorded straight after the meeting lands here as a transcription with the recording attached — which is the closest thing to a contemporaneous record a manager on a farm will realistically produce.",
+   "fieldname": "discipline_notes",
+   "fieldtype": "Table",
+   "label": "Narrative Notes",
+   "options": "Task Note"
+  },
+  {
+   "fieldname": "attachments_section",
+   "fieldtype": "Section Break",
+   "label": "Documents"
+  },
+  {
+   "description": "The signed, sealed PDF of this record, where one has been produced.",
+   "fieldname": "sealed_pdf",
+   "fieldtype": "Attach",
+   "label": "Sealed PDF"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Discipline Record",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "employee,employee_name,discipline_type,incident_date",
+ "sort_field": "incident_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
