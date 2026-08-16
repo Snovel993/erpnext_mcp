@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 539 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 559 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 260 read tools are **on** by default and can be switched off individually. A
+All 268 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -13399,3 +13399,261 @@ register the asset, get the QR back to print, attach the photograph.
 the wrapper. The tool will attach to any document on the site; a phone may attach
 to the registers a field app actually writes into, and everything else is refused
 by name. `allow_cancelled` is not passed through at all.
+
+---
+
+## The day as it actually happens (v0.79.0)
+
+Ten features, six new doctypes, nineteen new mobile routes. Every one of them is
+about the gap between how the app modelled a day and how a day goes.
+
+### `pause_farm_task` / `resume_farm_task` — MUTATING, default off
+
+A worker sets an irrigation line at nine and is called to a broken valve at half
+past. The irrigation is not finished, not abandoned, and not being done — and
+until now the app had three bad answers: leave it In-Progress and lie about who
+is working on what, complete it and lie about it being done, or reject it and
+throw away the morning.
+
+**`Paused` is a state, not a flag.** A boolean beside In-Progress would leave the
+Kanban board showing two tasks in one column with one of them not being worked,
+which is the picture a dispatch board exists to prevent.
+
+**The hour is the sum of the segments.** A run is now `Task Time Segment` rows —
+start to pause, resume to pause, resume to completion — and
+`actual_duration_minutes` is their total. The wall clock across an interruption
+bills the valve repair to the irrigating, on exactly the fragmented afternoons
+where an hour charged to a job matters most. Assignments written before this
+release have no segments and fall back to the old arithmetic; a duration that
+came back zero for a season of history would be the worse bug.
+
+**One task In-Progress per worker, enforced by pausing rather than by refusing.**
+Starting or resuming a second task auto-pauses the first, marks it `auto_paused`,
+and **says so in the answer** — a silent stand-down would leave a worker
+discovering at the end of the day that their morning went to a task they thought
+they were still on. Refusing would be defensible and routed around within a week.
+Claiming does **not** auto-pause: claiming is planning a morning, and a worker may
+hold three.
+
+A paused task can be rejected without resuming it first. "I was called away and
+the ladder is still broken" is the sentence a board needs.
+
+### `link_farm_tasks` / `merge_farm_task` — MUTATING, default off
+
+Two workers walk past the same leaking valve an hour apart and both do the right
+thing. **A dispatch board that silently deduplicated them would be guessing that
+two reports of a valve are the same valve** — and on a farm with four hundred of
+them, sometimes they are not.
+
+So `claim` and `start` return a `duplicate_hint`:
+
+```
+There is already an open task for this: Leaking valve at Home-7 (FT-2026-08-00031)
+held by Ana Ramos. Link to it?
+```
+
+…and nothing merges itself. `link_farm_tasks` writes a row on **both** sides —
+a relationship stored on one record only is invisible from whichever of the two
+somebody opens. `merge_farm_task` folds a duplicate into a primary:
+
+- the **primary keeps its state and its clock** — a merge says which record the
+  work is under, it is not an event in the work
+- the duplicate goes to **`Merged`** with `merged_into` naming the primary
+- its **evidence is copied** onto the primary's completion
+- its **assignments and time segments stay where they are**, so `combined_minutes`
+  is the effort both people actually put in
+
+Nothing is deleted. Merging a *finished* task is refused — link it instead; a
+completed job is a record of work that happened.
+
+### Sub-tasks, and work that does not finish today
+
+`Farm Task.parent_task` is a **Dynamic Link**, because the thing with steps under
+it is as often an `Accident Report` as another task. An investigation's steps are
+"interview the witness", "photograph the scene", "write the root cause" — each
+with its own assignee, its own clock and its own state.
+
+**A parent does not close while a step is live.** Without that rule the first
+person to finish their piece closes the investigation, and the camera footage
+nobody pulled becomes a finding nobody made. The refusal names the steps.
+
+One level of nesting only: a tree of sub-tasks is a project plan, and a dispatch
+board that became one would stop being readable at a tailgate.
+
+**Nothing auto-closes at the end of a shift.** `end_shift` ends a *shift*; a task
+is not a shift.
+
+### Narrative notes, typed and spoken
+
+`Task Note` is **one child table with three parents** — Farm Task, Accident
+Report, Discipline Record — because appending an account of what happened is one
+act, and three near-identical tables would drift the first time one grew a column.
+
+**Entries are appended and never edited.** An investigation spanning four days is
+four entries with four timestamps, and the reason a hearing believes any of it is
+that Monday's account was written on Monday.
+
+`attach_audio_note` is the call this release exists for on the day somebody is on
+the ground. A foreman at an accident scene has a phone in one hand and about
+ninety seconds of clear memory; typing is not what happens next. iOS's Speech
+framework transcribes **on-device**, so a foreman in a block with no signal still
+gets text, and this stores what the phone produced.
+
+**The transcript is the required half and the audio is optional** — the opposite
+of what the name suggests and the right way round. The text is what a report, a
+search and a reviewer read; the recording is evidence *about* it. A failed file
+link comes back as `audio_error` with the words already saved.
+
+`source_type` and `source_language` are on every entry. A transcript presented as
+a verbatim quote is being presented as something it is not, and a Spanish account
+tagged as English is a translation nobody knows is needed.
+
+### Progressive discipline
+
+**In a wrongful-termination claim the documentation is the case.** The question
+is almost never whether the final step was deserved; it is whether the employer
+can produce a documented, escalating, acknowledged series.
+
+| Tool | What it does |
+| --- | --- |
+| `create_discipline_record` | One step, auto-linked to the prior one |
+| `acknowledge_discipline_record` | Signed, or declined with a witness |
+| `get_discipline_record` | One step with its narrative and predecessor |
+| `list_discipline_history` | The chain in order, current level, next step |
+| `get_discipline_report` | The document for legal review — **including its gaps** |
+| `expire_discipline_record` | Age one out, or withdraw it. Never deletes |
+
+**The prior record is found, not asked for.** Asking whoever is typing which
+docname the last warning was is asking them to go and look, which is how a chain
+acquires a missing link.
+
+**A skip has to be explained.** More than one rung at a time is refused until
+`supersedes_note` says why. It may be entirely right — a safety violation is not
+a progressive matter — and the reason is worth more written today than
+reconstructed in two years. The same rung twice needs no explanation; nor does a
+step *down*, because somebody being generous never has to be defended.
+
+**A refusal to sign is an outcome, not a gap.** An acknowledgement with neither a
+signature nor an explicit refusal is refused; a refusal with no witness named is
+refused. What the file may not contain is silence presented as agreement.
+
+**`get_discipline_report` names the holes**, the same argument
+`export_insurance_schedule` makes about missing serial numbers:
+
+```
+4 gap(s) in this chain. Each is listed above with what is missing and why it
+matters. THESE ARE FIXABLE NOW AND NOT LATER: an acknowledgement obtained today
+for a warning issued in March is worth something; the same signature obtained
+after a claim is filed is worth very little.
+```
+
+It reports whether the *documentation* is complete and says plainly that it is
+not legal advice and never whether a step was warranted.
+
+**Nothing expires on a schedule.** The look-back window that discounts an old
+warning differs by employer and by state; a server quietly ageing steps out would
+be making that decision for somebody.
+
+### Accident investigation
+
+29 CFR 1904 is the regulation. **The design problem is the first ten minutes.**
+This record is opened on a phone, in a block, by a foreman whose attention is on
+somebody sitting on the ground. Asking for a root cause at that moment produces
+exactly one outcome: nobody opens the record until the evening, and the evening's
+account is worth a fraction of the scene's.
+
+So it is four calls: `create_accident_report` (when, what, who was hurt, who saw
+it, what was done) → `update_accident_investigation`, as many times as it takes →
+`close_accident_investigation`. Status walks Open → In Progress → Corrective
+Actions Pending → Closed.
+
+**Witnesses are rows, not a string.** A witness is somebody an investigator has to
+go back to, and *we still have not interviewed Miguel* is the most useful thing a
+half-finished investigation knows. A comma-separated string is accepted and split
+into rows so the outstanding-statement flag works either way.
+
+**Recordability is a person's determination and this app does not infer it.** It
+would be easy to map severity onto the 300 log and wrong: 1904.7 turns on medical
+treatment beyond first aid, and the consequence of being wrong is a citation.
+`osha_recordable` defaults to `Undetermined`, changing it requires the **basis**,
+and an investigation cannot close while it stands.
+
+A fatality, hospitalisation, amputation or loss of an eye returns the 1904.39
+telephone obligation in `urgent_obligations` — this record does not make that
+call and cannot.
+
+**Closing is checked.** No corrective action, no follow-up date, an undetermined
+recordability, an untaken witness statement or an open sub-task and it does not
+close — and **everything outstanding is named at once**, because a close that
+fails four times naming one more field each time is how somebody learns to stop
+closing things. `outstanding` is on every read, not just the close: an
+investigation that tells you on day three what it is waiting for is one somebody
+finishes.
+
+### Wizards as data
+
+**The problem is the App Store.** A flow compiled into Swift needs a release to
+change a question, and the questions change when the law does. A farm that
+discovers in July that its state now requires a heat-illness acknowledgement at
+hire cannot wait three weeks for a build and a review.
+
+`get_wizard_definition` returns ordered steps, the fields on each, their
+validation, and the conditional logic that decides what comes next. The field
+types are the **handset's** — `photo`, `signature`, `qr_scan`, `audio_note`,
+`employee_select` — things a phone does and a Desk form does not.
+
+Five shipped: `accident_investigation`, `progressive_discipline`,
+`asset_registration`, `employee_onboarding`, `inspection_session`. **A shipped
+wizard is never overwritten** once an operator has edited it — a flow somebody
+tuned for their own crew being reset by a migration is what would make "config
+not code" a lie.
+
+**The validation is a courtesy, not a control.** It is there so a worker finds out
+about a malformed VIN at the machine rather than at submission; the endpoint in
+`submit_method` applies its own refusals to whatever arrives.
+
+### Bilingual, and loud about the gaps
+
+Every label, title, description, help text and select option carries `_en` and
+`_es`, and `get_wizard_definition` resolves them against the caller's own
+`Employee.preferred_language` — a new compliance field, because OSHA 1910.1200(h)
+and WPS 40 CFR 170.501 both require training in a language the worker understands,
+and an employer who cannot say which language they used cannot show they did.
+
+**Never inferred from a device locale.** A phone set to English by whoever handed
+it over says nothing about who is holding it now.
+
+**A missing translation falls back to English and is listed** in `untranslated`.
+Silently serving English means nobody finds out until a worker is in front of a
+screen they cannot read; refusing to serve the wizard locks the crew out over a
+missing string. Fall back, and be loud about it.
+
+### What a scan says now
+
+The status report gained two sections. `paused_tasks` is keyed on the **worker**
+rather than the asset, because it is a fact about the person holding the phone:
+
+```
+You have a paused task: Irrigate Block 3 (paused 22 min ago)
+```
+
+That belongs on a scan because the scan is the moment they have forgotten the
+line — the sentence is not on the screen of the job they walked away from, it is
+on the screen in front of them now. `subtasks_by_parent` shows the steps of any
+open investigation on the asset.
+
+### The nineteen mobile routes, and why the gates differ
+
+| Group | Gate | Why |
+| --- | --- | --- |
+| `pause` / `resume` | enrolment | A worker's own work. `worker_id` is not on the signature, so the argument filter stops an account stopping a stranger's clock |
+| `link_tasks` | enrolment | An observation. Noticing two jobs are one valve is what a worker in a block sees and a foreman at a desk does not |
+| `merge_task` | Foreman+ | A decision. It takes somebody's work off the board under another name |
+| narrative trio | enrolment | A worker's account of their own job. The Discipline Record parent takes HR |
+| five discipline routes | **HR role** | A personnel document. A field credential has no business in one |
+| `create_accident_report`, `get_accident_report` | enrolment | **The person who finds somebody on the ground is whoever finds them.** A server that refused their report because they are not a foreman is one people work around at the exact moment that matters |
+| update / close / list accidents | Foreman+ | The investigation is somebody's job |
+| wizard reads | enrolment | Answered in the caller's own language |
+
+`expire_discipline_record` has no route: ageing a step out of a chain is a policy
+decision made at a desk with the handbook open.

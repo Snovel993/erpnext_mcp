@@ -41,6 +41,7 @@ from .errors import ToolError
 from .render import qr
 from .result import ToolResult
 from .tools import (
+	accidents,
 	accounts,
 	advisory,
 	anchors,
@@ -58,6 +59,7 @@ from .tools import (
 	company,
 	compliance,
 	dimensions,
+	discipline,
 	dispatch,
 	docvalidation,
 	employee,
@@ -88,6 +90,7 @@ from .tools import (
 	ml_model,
 	mobile,
 	mutate,
+	narrative,
 	newhire,
 	notes,
 	opening,
@@ -124,6 +127,7 @@ from .tools import (
 	wagedefaults,
 	wallet,
 	weather,
+	wizards,
 	workflow,
 )
 
@@ -17426,6 +17430,568 @@ TOOLS = {
 		title="Get irrigation runtime",
 		available=_needs_doctype("Asset Register", "Asset State Log"),
 		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	# ── v0.79.0: interruption, and the hour that survives it ───────────────
+	"pause_farm_task": _tool(
+		dispatch.pause_farm_task,
+		"MUTATING (default OFF). Stop the clock on a task a worker is coming "
+		"back to. FIELD WORK IS INTERRUPTED: somebody sets an irrigation line at "
+		"nine and is called to a broken valve at half past, and until now this "
+		"app had three bad answers — leave it In-Progress and lie about who is "
+		"working on what, complete it and lie about it being done, or reject it "
+		"and throw away the morning.\n\n"
+		"THE MINUTES ARE BANKED, NOT LOST. A run is a list of segments — start "
+		"to pause, resume to pause, resume to completion — and "
+		"`actual_duration_minutes` is their SUM. The wall clock across an "
+		"interruption would bill the valve repair to the irrigating.\n\n"
+		"Only work that is actually being done can be paused: a claimed task "
+		"nobody has started has no clock to stop.",
+		{
+			"task": _field(_STRING, "The Farm Task docname. The live assignment on it is inferred."),
+			"assignment": _field(_STRING, "Or name the Farm Task Assignment directly."),
+			"reason": _field(
+				_STRING,
+				"Why they stopped. 'Called to the valve at Home-7' is what makes a fragmented "
+				"afternoon legible six weeks later.",
+			),
+			"worker_id": _field(_STRING, "The Employee, checked against who holds the task."),
+			"paused_at": _field(_STRING, "YYYY-MM-DD HH:MM:SS. Defaults to now."),
+		},
+		required=("task",),
+		mutating=True,
+		title="Pause a farm task",
+		available=_needs_doctype("Farm Task", "Farm Task Assignment"),
+		requires="the Farm Task and Farm Task Assignment DocTypes — run `bench migrate`",
+	),
+	"resume_farm_task": _tool(
+		dispatch.resume_farm_task,
+		"MUTATING (default OFF). Pick a paused task back up. Opens a new time "
+		"segment; every minute already banked against the job stays.\n\n"
+		"RESUMING IS STARTING, so the same exclusivity applies: whatever this "
+		"worker had in progress is auto-paused first, and the answer says which. "
+		"Nobody is in two places at once, and nobody is refused their second job "
+		"to make that true.",
+		{
+			"task": _field(_STRING, "The Farm Task docname."),
+			"assignment": _field(_STRING, "Or the Farm Task Assignment directly."),
+			"worker_id": _field(_STRING, "The Employee, checked against who holds the task."),
+			"resumed_at": _field(_STRING, "YYYY-MM-DD HH:MM:SS. Defaults to now."),
+		},
+		required=("task",),
+		mutating=True,
+		title="Resume a farm task",
+		available=_needs_doctype("Farm Task", "Farm Task Assignment"),
+		requires="the Farm Task and Farm Task Assignment DocTypes — run `bench migrate`",
+	),
+	# ── v0.79.0: two people, one broken valve ──────────────────────────────
+	"link_farm_tasks": _tool(
+		dispatch.link_farm_tasks,
+		"MUTATING (default OFF). Record that two tasks are related — two people "
+		"working one job on purpose, or two reports of the same thing.\n\n"
+		"WRITTEN ON BOTH SIDES. A relationship stored on one record only is "
+		"invisible from whichever of the two somebody happens to open, and the "
+		"whole point is that the second person to walk up to a job finds the "
+		"first person's. The reverse relationship is written automatically: "
+		"`duplicate_of` on one side is `merged_from` on the other.",
+		{
+			"task": _field(_STRING, "One Farm Task docname."),
+			"linked_task": _field(_STRING, "The other Farm Task docname."),
+			"relationship": _field(
+				_STRING,
+				"related (default), duplicate_of, merged_from, blocked_by or follows.",
+			),
+			"note": _field(_STRING, "Why these two belong together. A link nobody explained is one the next person undoes."),
+			"linked_by": _field(_STRING, "Who linked them. Defaults to the session user."),
+		},
+		required=("task", "linked_task"),
+		mutating=True,
+		title="Link two farm tasks",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"merge_farm_task": _tool(
+		dispatch.merge_farm_task,
+		"MUTATING (default OFF). Fold a duplicate into the task that is actually "
+		"being worked. THE SYSTEM SURFACES AND THE HUMAN DECIDES — nothing merges "
+		"itself, because two reports of a valve are sometimes two valves and a "
+		"server that deduplicated on a name match would destroy one worker's "
+		"record on a guess.\n\n"
+		"THE PRIMARY KEEPS ITS STATE AND ITS CLOCK. A merge says which record the "
+		"work is being done under; it is not an event in the work, so a worker "
+		"mid-job does not find their clock reset because a foreman tidied a "
+		"board.\n\n"
+		"THE DUPLICATE IS NOT DELETED. It goes to `Merged` with `merged_into` "
+		"naming the primary. Its evidence is COPIED onto the primary's "
+		"completion; its assignments, time segments and narrative stay where "
+		"they are, so `combined_minutes` is the effort both people actually put "
+		"in and somebody opening the duplicate six weeks later is told where the "
+		"work went.\n\n"
+		"REFUSES: merging into a finished task; merging a finished task away "
+		"(link it instead — a completed job is a record of work that happened); "
+		"a merge with no reason.",
+		{
+			"task": _field(_STRING, "The duplicate — the task being folded away."),
+			"into": _field(_STRING, "The primary — the task the work is being done under."),
+			"reason": _field(
+				_STRING,
+				"Why they are one job. Required: a merge takes somebody's work off the board "
+				"under another name, and this is what makes that reviewable.",
+			),
+			"merged_by": _field(_STRING, "Who decided. Defaults to the session user."),
+		},
+		required=("task", "into", "reason"),
+		mutating=True,
+		title="Merge a duplicate farm task",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.79.0: narrative, spoken and typed ───────────────────────────────
+	"add_task_note": _tool(
+		narrative.add_task_note,
+		"MUTATING (default OFF). Append a narrative entry to a Farm Task, an "
+		"Accident Report or a Discipline Record — a foreman's account of what "
+		"was done and why, at whatever length it takes.\n\n"
+		"ENTRIES ARE APPENDED AND NEVER EDITED, and that is the whole "
+		"evidentiary value. An investigation spanning four days is four entries "
+		"with four timestamps, and the reason a hearing believes any of it is "
+		"that Monday's account was written on Monday.",
+		{
+			"doctype": _field(_STRING, "Farm Task, Accident Report or Discipline Record."),
+			"name": _field(_STRING, "Which record."),
+			"task": _field(_STRING, "Shorthand for a Farm Task — the common case."),
+			"narrative": _field(_STRING, "The account itself."),
+			"note_type": _field(
+				_STRING,
+				"Note (default), Finding, Corrective Action, Conversation, Witness Statement or Root Cause.",
+			),
+			"author": _field(_STRING, "The Employee writing it."),
+			"author_name": _field(_STRING, "Their name."),
+			"source_language": _field(_STRING, "ISO code — 'es', 'en'. Stored, never guessed."),
+		},
+		required=("narrative",),
+		mutating=True,
+		title="Add a narrative note",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"attach_audio_note": _tool(
+		narrative.attach_audio_note,
+		"MUTATING (default OFF). File a voice note and the transcription the "
+		"handset produced from it. A FOREMAN AT AN ACCIDENT SCENE DOES NOT TYPE: "
+		"they have a phone in one hand, somebody on the ground, and about ninety "
+		"seconds of clear memory. This is the call that turns speech into the "
+		"written record.\n\n"
+		"THE TRANSCRIPT IS THE REQUIRED HALF AND THE AUDIO IS OPTIONAL, which is "
+		"the right way round. The text is what a report, a search and a reviewer "
+		"read; the recording is evidence ABOUT it, kept so a challenge to the "
+		"wording has something to check against. A recording with no words "
+		"attached is a file nobody on a farm will open.\n\n"
+		"TRANSCRIPTION HAPPENS ON THE HANDSET. iOS's Speech framework runs "
+		"on-device, so a foreman in a block with no signal still gets text. This "
+		"stores what the phone produced; it does not transcribe and does not "
+		"pretend to have heard the recording.\n\n"
+		"A FAILED ATTACH DOES NOT LOSE THE WORDS — the narrative is written "
+		"first, and a broken file link comes back as `audio_error`.",
+		{
+			"doctype": _field(_STRING, "Farm Task, Accident Report or Discipline Record."),
+			"name": _field(_STRING, "Which record."),
+			"task": _field(_STRING, "Shorthand for a Farm Task."),
+			"transcription": _field(_STRING, "What the handset transcribed. Required."),
+			"audio_file": _field(
+				_STRING,
+				"The File docname from stage_file_chunk / finalize_staged_file. Optional.",
+			),
+			"audio_duration_seconds": _field(_NUMBER, "How long the recording runs."),
+			"note_type": _field(_STRING, "Note, Finding, Witness Statement, Root Cause…"),
+			"author": _field(_STRING, "Who spoke."),
+			"source_language": _field(
+				_STRING,
+				"What it was spoken in — 'es', 'en'. On a bilingual crew this is the flag a "
+				"reviewer needs, and the answer says so when it is missing.",
+			),
+		},
+		required=("transcription",),
+		mutating=True,
+		title="Attach a voice note and its transcription",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_task_notes": _tool(
+		narrative.list_task_notes,
+		"A record's accumulated narrative, OLDEST FIRST — unlike almost every "
+		"other list in this app, because a narrative is read as a story and "
+		"reversing it turns an investigation into disconnected observations. "
+		"`full_narrative` is the whole thing assembled in order with each "
+		"entry's author, timestamp and whether it was spoken. Read-only.",
+		{
+			"doctype": _field(_STRING, "Farm Task, Accident Report or Discipline Record."),
+			"name": _field(_STRING, "Which record."),
+			"task": _field(_STRING, "Shorthand for a Farm Task."),
+			"limit": _field(_INTEGER, "Maximum entries."),
+		},
+		title="List narrative notes",
+		available=_needs_doctype("Farm Task"),
+		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.79.0: progressive discipline ────────────────────────────────────
+	"create_discipline_record": _tool(
+		discipline.create_discipline_record,
+		"MUTATING (default OFF). File one step of progressive discipline — "
+		"Verbal Warning → Written Warning → Final Warning → Suspension → "
+		"Termination.\n\n"
+		"THE CHAIN IS THE DEFENCE. In a wrongful-termination claim the question "
+		"is almost never whether the last step was deserved; it is whether the "
+		"employer can produce a documented, escalating, acknowledged series that "
+		"told this person what was wrong, what had to change, by when, and what "
+		"would happen if it did not.\n\n"
+		"THE PRIOR RECORD IS FOUND, NOT ASKED FOR. `prior_record` is auto-linked "
+		"to the newest active step for this employee, because a chain assembled "
+		"by hand is a chain with a link missing on the day somebody is in a "
+		"hurry — and the missing link is what the claim is about.\n\n"
+		"A SKIP HAS TO BE EXPLAINED. Jumping more than one rung is refused until "
+		"`supersedes_note` says why. It may be entirely right — a safety "
+		"violation is not a progressive matter — and the reason is worth more "
+		"written today than reconstructed in two years.\n\n"
+		"REFUSES: a step after a Termination (there is no chain past the end of "
+		"employment); an unexplained jump; a record with no expected improvement "
+		"or no follow-up date.",
+		{
+			"employee": _field(_STRING, "The Employee this concerns."),
+			"discipline_type": _field(
+				_STRING,
+				"Verbal Warning, Written Warning, Final Warning, Suspension or Termination.",
+			),
+			"incident_date": _field(_STRING, "YYYY-MM-DD. When it happened, not when this was typed."),
+			"incident_description": _field(
+				_STRING,
+				"What happened, in specifics. 'Attitude problem' is what a claim wins on.",
+			),
+			"expected_improvement": _field(
+				_STRING,
+				"What must change, stated so both sides can tell later whether it happened.",
+			),
+			"followup_date": _field(_STRING, "YYYY-MM-DD. When somebody will actually check."),
+			"policy_violated": _field(_STRING, "The rule or policy breached."),
+			"witnesses": _field(_STRING, "Who else was there."),
+			"consequence_of_no_improvement": _field(_STRING, "What happens if it does not improve."),
+			"supersedes_note": _field(_STRING, "Why this level, where it skips a rung."),
+			"employee_statement": _field(_STRING, "The employee's own account, if they gave one."),
+			"narrative": _field(_STRING, "The manager's account of the conversation."),
+			"suspension_start": _field(_STRING, "YYYY-MM-DD."),
+			"suspension_end": _field(_STRING, "YYYY-MM-DD."),
+			"issued_on": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"issued_by": _field(_STRING, "Who issued it."),
+			"company": _field(_STRING, "Company."),
+		},
+		required=("employee", "discipline_type", "incident_description", "expected_improvement", "followup_date"),
+		mutating=True,
+		title="Create a discipline record",
+		available=_needs_doctype("Discipline Record"),
+		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"acknowledge_discipline_record": _tool(
+		discipline.acknowledge_discipline_record,
+		"MUTATING (default OFF). Record that the employee was told — or that "
+		"they declined to sign.\n\n"
+		"TWO OUTCOMES AND NO THIRD. An employee may sign or may refuse; what the "
+		"file may not contain is silence presented as agreement. An "
+		"acknowledgement with neither a signature nor an explicit refusal is "
+		"refused, and a refusal with no witness named is refused — a declining "
+		"nobody saw is the employer's word for it.",
+		{
+			"record": _field(_STRING, "The Discipline Record docname."),
+			"employee_signature": _field(_STRING, "The signature File."),
+			"declined_to_sign": _field(_BOOLEAN, "They refused. Needs a witness."),
+			"witnesses": _field(_STRING, "Who saw the refusal."),
+			"employee_statement": _field(_STRING, "What they said."),
+			"manager_signature": _field(_STRING, "The manager's signature File."),
+			"acknowledged_on": _field(_STRING, "YYYY-MM-DD HH:MM:SS. Defaults to now."),
+		},
+		required=("record",),
+		mutating=True,
+		title="Acknowledge a discipline record",
+		available=_needs_doctype("Discipline Record"),
+		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_discipline_record": _tool(
+		discipline.get_discipline_record,
+		"One step in full, with its narrative and the step before it. Read-only.",
+		{"record": _field(_STRING, "The Discipline Record docname.")},
+		required=("record",),
+		title="Get a discipline record",
+		available=_needs_doctype("Discipline Record"),
+		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_discipline_history": _tool(
+		discipline.list_discipline_history,
+		"One employee's whole chain, OLDEST FIRST, with the current level and "
+		"what the next step would be. Read-only.",
+		{
+			"employee": _field(_STRING, "The Employee."),
+			"include_inactive": _field(_BOOLEAN, "Include Expired and Rescinded steps. Default true."),
+			"limit": _field(_INTEGER, "Maximum steps."),
+		},
+		required=("employee",),
+		title="List discipline history",
+		available=_needs_doctype("Discipline Record"),
+		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_discipline_report": _tool(
+		discipline.get_discipline_report,
+		"The chain as a document somebody hands a lawyer — the timeline, every "
+		"step's narrative, and ITS GAPS. Read-only.\n\n"
+		"THE GAPS ARE THE POINT, the same argument export_insurance_schedule "
+		"makes about missing serial numbers: a report that only listed what is "
+		"there leaves the reader to find what is not, and what is not there is "
+		"what decides the case. Every unacknowledged step, every unwitnessed "
+		"refusal, every missed follow-up and every broken link is itemised with "
+		"a sentence saying why it matters — so it can be fixed before a hearing "
+		"rather than discovered during one.\n\n"
+		"It is not legal advice and says so: it reports whether the "
+		"DOCUMENTATION is complete, never whether a step was warranted.",
+		{
+			"employee": _field(_STRING, "The Employee."),
+		},
+		required=("employee",),
+		title="Get a discipline report",
+		available=_needs_doctype("Discipline Record"),
+		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"expire_discipline_record": _tool(
+		discipline.expire_discipline_record,
+		"MUTATING (default OFF). Age a step out of the chain, or withdraw one on "
+		"review.\n\n"
+		"NOTHING EXPIRES ON A SCHEDULE IN THIS APP. The look-back window that "
+		"discounts an old warning differs by employer and by state, and a server "
+		"quietly ageing steps out would be making that decision for somebody. "
+		"The record is KEPT — a rescinded warning is itself something an "
+		"employee may point to, and a chain that had one deleted cannot explain "
+		"the gap where it was.",
+		{
+			"record": _field(_STRING, "The Discipline Record docname."),
+			"status": _field(_STRING, "Expired or Rescinded."),
+			"reason": _field(_STRING, "Why. Required."),
+		},
+		required=("record", "reason"),
+		mutating=True,
+		title="Expire or rescind a discipline record",
+		available=_needs_doctype("Discipline Record"),
+		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.79.0: accident investigation ────────────────────────────────────
+	"create_accident_report": _tool(
+		accidents.create_accident_report,
+		"MUTATING (default OFF). Open an incident record at the scene, with "
+		"whatever is known in the first ten minutes: when, what, who was hurt, "
+		"who saw it, what was done.\n\n"
+		"IT ASKS FOR FIVE THINGS AND NO MORE, and that is the design. A create "
+		"call demanding a root cause and a recordability determination is one "
+		"nobody makes until the evening — and the account written in the evening "
+		"is worth a fraction of the one written at the scene. Everything else is "
+		"filled in over the following days with "
+		"update_accident_investigation.\n\n"
+		"WITNESSES ARE ROWS, NOT A STRING. A witness is somebody an investigator "
+		"has to go back to, and 'we still have not interviewed Miguel' is the "
+		"most useful thing a half-finished investigation knows. A "
+		"comma-separated string is accepted and split into rows.\n\n"
+		"A fatality, hospitalisation, amputation or loss of an eye comes back "
+		"with the 29 CFR 1904.39 telephone obligation stated in "
+		"`urgent_obligations` — this record does not make that call and cannot.",
+		{
+			"occurred_at": _field(_STRING, "YYYY-MM-DD HH:MM:SS. When it happened."),
+			"incident_description": _field(_STRING, "What happened, in the reporter's own words."),
+			"severity": _field(
+				_STRING,
+				"Near Miss, First Aid, Medical Treatment, Lost Time, Hospitalisation, Amputation, "
+				"Loss of Eye or Fatality.",
+			),
+			"injured_person": _field(_STRING, "The Employee who was hurt. Empty on a near miss."),
+			"injury_type": _field(_STRING, "Laceration, Fracture, Heat Illness, Chemical Exposure…"),
+			"body_part": _field(_STRING, "What part of the body."),
+			"medical_treatment": _field(
+				_STRING,
+				"None, First Aid Only, Medical Treatment Beyond First Aid, Emergency Room or "
+				"Hospitalised. The 1904.7 recordability line runs through here.",
+			),
+			"witnesses": _field(
+				_STRING_ARRAY,
+				'Names, or objects like {"witness_name": "Ana Ramos", "employee": "HR-EMP-001"}.',
+			),
+			"immediate_actions": _field(_STRING, "What was done in the first minutes."),
+			"location_doctype": _field(_STRING, "Field, Housing Unit, Asset Register…"),
+			"location": _field(_STRING, "Which one."),
+			"location_description": _field(_STRING, "Where exactly, in words."),
+			"asset": _field(_STRING, "The machine involved."),
+			"investigation_lead": _field(_STRING, "Who is running the investigation."),
+			"narrative": _field(_STRING, "A longer account, appended as the first narrative entry."),
+			"reported_by": _field(_STRING, "Who is reporting it."),
+			"company": _field(_STRING, "Company."),
+		},
+		required=("occurred_at", "incident_description"),
+		mutating=True,
+		title="Create an accident report",
+		available=_needs_doctype("Accident Report"),
+		requires="the Accident Report DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_accident_investigation": _tool(
+		accidents.update_accident_investigation,
+		"MUTATING (default OFF). Add what was learned. Called as many times as "
+		"the investigation takes — INVESTIGATIONS SPAN DAYS AND THIS RECORD "
+		"EXPECTS THEM TO. There is no auto-close and nothing expires.\n\n"
+		"THE NARRATIVE APPENDS AND THE COLUMNS OVERWRITE. `root_cause` is a "
+		"conclusion and there is one of it; a revised conclusion replaces the "
+		"earlier one, and the earlier one survives in the narrative where it was "
+		"written. 'What did we think on Tuesday' is a question a hearing asks.\n\n"
+		"CHANGING RECORDABILITY REQUIRES THE BASIS. 'Medical treatment beyond "
+		"first aid — sutures — under 1904.7(b)(5)' is a determination an "
+		"inspector can check; 'No' on its own is one they will ask about.\n\n"
+		"`outstanding` on every answer names what still has to happen before "
+		"this can close — an investigation that tells you on day three what it "
+		"is waiting for is one somebody finishes.",
+		{
+			"report": _field(_STRING, "The Accident Report docname."),
+			"narrative": _field(_STRING, "What was learned, appended as a dated entry."),
+			"note_type": _field(_STRING, "Finding (default), Root Cause, Witness Statement…"),
+			"root_cause": _field(_STRING, "Why it happened, past the immediate cause."),
+			"contributing_factors": _field(_STRING, "What else played a part."),
+			"corrective_actions": _field(_STRING, "What is changing so it does not happen again."),
+			"osha_recordable": _field(_STRING, "Undetermined, Yes or No."),
+			"osha_determination_basis": _field(_STRING, "WHY. Required once the answer is decided."),
+			"osha_form_301_filed": _field(_BOOLEAN, "Whether the 301 has been filed."),
+			"witnesses": _field(_STRING_ARRAY, "More witnesses, added to the list."),
+			"statement_taken_from": _field(_STRING, "Tick a named witness's statement as taken."),
+			"followup_date": _field(_STRING, "YYYY-MM-DD."),
+			"corrective_actions_completed_on": _field(_STRING, "YYYY-MM-DD."),
+			"days_away_from_work": _field(_INTEGER, "Days lost."),
+			"days_restricted_duty": _field(_INTEGER, "Days on light duty."),
+			"severity": _field(_STRING, "Revised severity, where it turned out worse or better."),
+			"status": _field(_STRING, "Open, In Progress or Corrective Actions Pending. Not Closed."),
+			"reopen": _field(_BOOLEAN, "Reopen a closed investigation because new information arrived."),
+			"author": _field(_STRING, "Who is adding this."),
+		},
+		required=("report",),
+		mutating=True,
+		title="Update an accident investigation",
+		available=_needs_doctype("Accident Report"),
+		requires="the Accident Report DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"close_accident_investigation": _tool(
+		accidents.close_accident_investigation,
+		"MUTATING (default OFF). Close it — with the corrective action, the "
+		"recordability determination and a date to check the fix held.\n\n"
+		"THE THREE CHECKS ARE THE CLOSE. An investigation closed with no "
+		"corrective action, no determination and no follow-up will not survive "
+		"being read, and closing is the moment that becomes permanent. It also "
+		"refuses while a witness has no statement or a sub-task is still open — "
+		"'we knew they saw it and never asked' is the finding that survives "
+		"every other one. Everything outstanding is named at once rather than "
+		"one refusal at a time.",
+		{
+			"report": _field(_STRING, "The Accident Report docname."),
+			"corrective_actions": _field(_STRING, "What changed. Required to close."),
+			"followup_date": _field(_STRING, "YYYY-MM-DD. Required to close."),
+			"osha_recordable": _field(_STRING, "Yes or No. Cannot close on Undetermined."),
+			"osha_determination_basis": _field(_STRING, "The basis for that determination."),
+			"closure_summary": _field(_STRING, "How it ended."),
+			"corrective_actions_completed_on": _field(_STRING, "YYYY-MM-DD."),
+			"closed_by": _field(_STRING, "Who signed it off."),
+		},
+		required=("report",),
+		mutating=True,
+		title="Close an accident investigation",
+		available=_needs_doctype("Accident Report"),
+		requires="the Accident Report DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_accident_report": _tool(
+		accidents.get_accident_report,
+		"One investigation in full: the record, its witnesses, its whole "
+		"narrative, its sub-tasks and what is still outstanding. Read-only.\n\n"
+		"`activity_by_day` is the multi-day activity log — which days were "
+		"actually worked and by whom. 'Nothing happened between the 3rd and the "
+		"11th' is a finding about the investigation.",
+		{"report": _field(_STRING, "The Accident Report docname.")},
+		required=("report",),
+		title="Get an accident report",
+		available=_needs_doctype("Accident Report"),
+		requires="the Accident Report DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_accident_reports": _tool(
+		accidents.list_accident_reports,
+		"The register, filterable by status, severity, recordability and date "
+		"range. Read-only.\n\n"
+		"`undetermined_recordability` NAMES rather than counts: every one of "
+		"those is a decision nobody has made, and the 300 log is missing an "
+		"entry or carrying one it should not until somebody does.",
+		{
+			"status": _field(_STRING, "Open, In Progress, Corrective Actions Pending or Closed."),
+			"open_only": _field(_BOOLEAN, "Everything not Closed."),
+			"severity": _field(_STRING, "Narrow to one severity."),
+			"osha_recordable": _field(_STRING, "Undetermined, Yes or No."),
+			"from_date": _field(_STRING, "YYYY-MM-DD."),
+			"to_date": _field(_STRING, "YYYY-MM-DD."),
+			"company": _field(_STRING, "Company."),
+			"limit": _field(_INTEGER, "Maximum rows. Capped at 200."),
+		},
+		title="List accident reports",
+		available=_needs_doctype("Accident Report"),
+		requires="the Accident Report DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.79.0: wizards as data ───────────────────────────────────────────
+	"get_wizard_definition": _tool(
+		wizards.get_wizard_definition,
+		"One wizard's spec for a handset to render: ordered steps, the fields on "
+		"each with their types and validation, and the conditional logic that "
+		"decides what comes next.\n\n"
+		"THE PROBLEM THIS SOLVES IS THE APP STORE. A flow compiled into Swift "
+		"needs a release to change a question, and the questions change when the "
+		"law does. A wizard is a ROW: adding one is adding a record.\n\n"
+		"RESOLVED INTO THE CALLER'S LANGUAGE. Every label, title, help text and "
+		"select option carries its translations, and this returns one set of "
+		"strings in the language the Employee's `preferred_language` says they "
+		"read. A MISSING TRANSLATION FALLS BACK TO ENGLISH AND IS LISTED in "
+		"`untranslated` — silently serving English means nobody finds out until "
+		"a worker is in front of a screen they cannot read; refusing to serve it "
+		"locks the crew out over a missing string.\n\n"
+		"THE VALIDATION IS A COURTESY, NOT A CONTROL. It is there so a worker "
+		"finds out about a malformed VIN at the machine rather than at "
+		"submission; the endpoint named in `submit_method` applies its own "
+		"refusals to whatever arrives.\n\n"
+		"Field types are the HANDSET'S: photo, signature, qr_scan, audio_note, "
+		"employee_select — things a phone does and a Desk form does not.",
+		{
+			"wizard": _field(
+				_STRING,
+				"The wizard key — accident_investigation, progressive_discipline, "
+				"asset_registration, employee_onboarding, inspection_session, or one an "
+				"operator added.",
+			),
+			"language": _field(
+				_STRING,
+				"ISO code. Defaults to the Employee's preferred_language, then to English.",
+			),
+			"employee": _field(_STRING, "Whose language preference to read."),
+			"user": _field(_STRING, "Or the login, resolved to their Employee."),
+			"include_disabled": _field(_BOOLEAN, "Read a withdrawn wizard anyway."),
+		},
+		required=("wizard",),
+		title="Get a wizard definition",
+		available=_needs_doctype("Wizard Definition"),
+		requires="the Wizard Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_wizard_definitions": _tool(
+		wizards.list_wizard_definitions,
+		"What flows this site can render, with their titles in the caller's "
+		"language — without pulling every field of every one. Read-only.",
+		{
+			"language": _field(_STRING, "ISO code."),
+			"employee": _field(_STRING, "Whose language preference to read."),
+			"category": _field(_STRING, "HR, Safety, Assets, Compliance, Operations or Other."),
+			"include_disabled": _field(_BOOLEAN, "Include withdrawn wizards."),
+			"limit": _field(_INTEGER, "Maximum rows."),
+		},
+		title="List wizard definitions",
+		available=_needs_doctype("Wizard Definition"),
+		requires="the Wizard Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── v0.78.0: what the water adds up to, rolled up and priced ────────────
 	"get_water_usage_report": _tool(

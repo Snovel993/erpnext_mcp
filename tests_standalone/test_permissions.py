@@ -234,6 +234,20 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# resolving another's receipts. And the whole design of the register
 		# rests on one alias key resolving to exactly one Supplier, which a
 		# company column would break by making the key non-unique.
+		# THE v0.79.0 ADDITION IS THE SAME ARGUMENT ABOUT A FORM. A Wizard
+		# Definition is the SHAPE of a question — "ask when it happened, then who
+		# was hurt, and show the injury step only when it was not a near miss" —
+		# and a shape belongs to no entity. It names no incident, no employee and
+		# no company; the records it produces carry all three and are scoped by
+		# Frappe exactly as before.
+		#
+		# Scoping it would be actively wrong for the reason the Compliance Rule
+		# paragraph gives, plus one of its own: the docname IS the wizard key a
+		# handset asks for, so a per-company definition would mean either the
+		# same key existing several times — which the unique constraint refuses —
+		# or a key prefixed per entity, which every client would have to learn.
+		# Per-company narrowing, when somebody wants it, is `required_role` and a
+		# second definition under its own key.
 		self.assertEqual(
 			sorted(unscoped),
 			[
@@ -251,6 +265,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"Staged File Upload Session",
 				"State Tax Table",
 				"Training Type",
+				"Wizard Definition",
 			],
 		)
 

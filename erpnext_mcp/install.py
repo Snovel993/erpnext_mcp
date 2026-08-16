@@ -177,6 +177,41 @@ def after_migrate() -> None:
 	_bank_categorization_fields()
 	_bank_pairing_fields()
 	_receipt_intelligence_fields()
+	_wizard_definitions()
+
+
+def _wizard_definitions() -> None:
+	"""Seed the five shipped wizards. Never overwrites one an operator has edited.
+
+	THE NON-OVERWRITE IS THE POINT OF THE WHOLE DOCTYPE. A wizard is data so that
+	a farm can reword a question, add the step their state started requiring in
+	July, or translate a field their crew kept misreading — without waiting for
+	an App Store review. A migration that reset those edits every upgrade would
+	make "config not code" a slogan rather than a property, so the seeder writes
+	a definition only where none exists.
+
+	Runs on install AND after every migrate, so a site upgrading from any earlier
+	version gets the five on its next migrate rather than needing a bespoke patch.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import wizards
+
+		report = wizards.install_wizard_definitions()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the wizard definitions were not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['created'])} wizard definition(s) — a multi-step "
+			"flow is now a record, so its steps, its fields, its validation and its Spanish are "
+			"editable with no code release and no App Store review. list_wizard_definitions has "
+			"the register. AN EDITED WIZARD IS NEVER OVERWRITTEN by a later migrate."
+		)
+	for failure in report.get("failed") or ():
+		print(f"erpnext_mcp: could not seed wizard {failure.get('wizard')} — {failure.get('reason')}")
 
 
 def _settlement_invoice_link() -> None:

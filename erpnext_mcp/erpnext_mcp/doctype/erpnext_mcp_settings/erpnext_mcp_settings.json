@@ -703,7 +703,28 @@
   "allow_rebuild_anchor_chain",
   "allow_pair_bank_accounts",
   "allow_create_advisory_agreement",
-  "allow_update_advisory_agreement"
+  "allow_update_advisory_agreement",
+  "v79_section",
+  "allow_pause_farm_task",
+  "allow_resume_farm_task",
+  "allow_link_farm_tasks",
+  "allow_merge_farm_task",
+  "allow_add_task_note",
+  "allow_attach_audio_note",
+  "allow_list_task_notes",
+  "allow_create_discipline_record",
+  "allow_acknowledge_discipline_record",
+  "allow_get_discipline_record",
+  "allow_list_discipline_history",
+  "allow_get_discipline_report",
+  "allow_expire_discipline_record",
+  "allow_create_accident_report",
+  "allow_update_accident_investigation",
+  "allow_close_accident_investigation",
+  "allow_get_accident_report",
+  "allow_list_accident_reports",
+  "allow_get_wizard_definition",
+  "allow_list_wizard_definitions"
  ],
  "fields": [
   {
@@ -1500,7 +1521,7 @@
    "label": "Submit Payment Entry"
   },
   {
-   "description": "Sprint 5 of the Gap Closure Plan (v0.70.0): the grower-packer money pipeline, from the packer's settlement through revenue, receivables and the cheque.<br><br>The chain is <b>Scale Ticket \u2192 Settlement Statement \u2192 Sales Invoice \u2192 Payment Entry</b>. There is deliberately NO Delivery Note: the packer owns the scale, so the scale ticket IS the delivery evidence.<br><br>Every create tool below produces a DRAFT only. <b>create_sales_invoice_from_settlement</b> and <b>post_settlement_to_gl</b> are ALTERNATIVES \u2014 the first gives proper AR ageing and payment allocation, the second books the same three movements as a journal entry with no subledger. A settlement that has been through one is refused by the other, because two revenue postings for one statement is a double count nobody finds until the year end.",
+   "description": "Sprint 5 of the Gap Closure Plan (v0.70.0): the grower-packer money pipeline, from the packer's settlement through revenue, receivables and the cheque.<br><br>The chain is <b>Scale Ticket → Settlement Statement → Sales Invoice → Payment Entry</b>. There is deliberately NO Delivery Note: the packer owns the scale, so the scale ticket IS the delivery evidence.<br><br>Every create tool below produces a DRAFT only. <b>create_sales_invoice_from_settlement</b> and <b>post_settlement_to_gl</b> are ALTERNATIVES — the first gives proper AR ageing and payment allocation, the second books the same three movements as a journal entry with no subledger. A settlement that has been through one is refused by the other, because two revenue postings for one statement is a double count nobody finds until the year end.",
    "fieldname": "sales_tools_section",
    "fieldtype": "Section Break",
    "label": "Sales, Settlements &amp; AR"
@@ -1521,7 +1542,7 @@
   },
   {
    "default": "1",
-   "description": "READ. Shrink for one settlement: delivered against packed against culled, with the unexplained remainder reported SEPARATELY from the cull \u2014 a cull percentage is what a grower renegotiates a contract over, an unexplained percentage is what a grower asks a question about. Broken down per variety and grade where the tickets and the priced lines can be compared.",
+   "description": "READ. Shrink for one settlement: delivered against packed against culled, with the unexplained remainder reported SEPARATELY from the cull — a cull percentage is what a grower renegotiates a contract over, an unexplained percentage is what a grower asks a question about. Broken down per variety and grade where the tickets and the priced lines can be compared.",
    "fieldname": "allow_get_settlement_shrink",
    "fieldtype": "Check",
    "label": "Get Settlement Shrink"
@@ -1535,14 +1556,14 @@
   },
   {
    "default": "1",
-   "description": "READ. Accounts Receivable ageing grouped by CUSTOMER, cross-checked against GL Entry the way get_ap_aging is. The aggregate companion to get_outstanding_invoices, which lists invoices \u2014 both coexist because a collections call and a dashboard want different shapes.",
+   "description": "READ. Accounts Receivable ageing grouped by CUSTOMER, cross-checked against GL Entry the way get_ap_aging is. The aggregate companion to get_outstanding_invoices, which lists invoices — both coexist because a collections call and a dashboard want different shapes.",
    "fieldname": "allow_get_ar_aging",
    "fieldtype": "Check",
    "label": "Get AR Ageing"
   },
   {
    "default": "1",
-   "description": "READ. The whole season in one answer: tickets, settlements, invoices and payments, with the three gaps between them named \u2014 fruit delivered that no settlement claimed, settlements nobody invoiced, invoices nobody collected.",
+   "description": "READ. The whole season in one answer: tickets, settlements, invoices and payments, with the three gaps between them named — fruit delivered that no settlement claimed, settlements nobody invoiced, invoices nobody collected.",
    "fieldname": "allow_get_season_summary",
    "fieldtype": "Check",
    "label": "Get Season Summary"
@@ -1575,14 +1596,14 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Record money received from a customer as a DRAFT Payment Entry, allocated against named invoices or oldest-first across everything outstanding. Receive/Customer only \u2014 it cannot spend money. Submitting it is a separate switch.",
+   "description": "MUTATING. Record money received from a customer as a DRAFT Payment Entry, allocated against named invoices or oldest-first across everything outstanding. Receive/Customer only — it cannot spend money. Submitting it is a separate switch.",
    "fieldname": "allow_receive_payment",
    "fieldtype": "Check",
    "label": "Receive Payment"
   },
   {
    "default": "0",
-   "description": "MUTATING. Book a submitted settlement as a DRAFT Journal Entry instead of a Sales Invoice \u2014 receivable and deductions debited, gross revenue credited. The alternative path: it gives no subledger, so the receivable cannot be aged as a document. Stamps the settlement so a second posting through either path is refused.",
+   "description": "MUTATING. Book a submitted settlement as a DRAFT Journal Entry instead of a Sales Invoice — receivable and deductions debited, gross revenue credited. The alternative path: it gives no subledger, so the receivable cannot be aged as a document. Stamps the settlement so a second posting through either path is refused.",
    "fieldname": "allow_post_settlement_to_gl",
    "fieldtype": "Check",
    "label": "Post Settlement To GL"
@@ -5197,23 +5218,23 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Put a starting book of farm categorization rules on the site — fuel, chemicals, parts, labor, irrigation, insurance, utilities, supplies, professional services, owner draw. Idempotent by (company, rule name): a second run creates nothing and leaves every edit alone. Disable a rule that does not fit rather than deleting it \u2014 a deleted rule is re-created by the next run.",
+   "description": "MUTATING. Put a starting book of farm categorization rules on the site — fuel, chemicals, parts, labor, irrigation, insurance, utilities, supplies, professional services, owner draw. Idempotent by (company, rule name): a second run creates nothing and leaves every edit alone. Disable a rule that does not fit rather than deleting it — a deleted rule is re-created by the next run.",
    "fieldname": "allow_seed_farm_categorization_rules",
    "fieldtype": "Check",
    "label": "Seed Farm Categorization Rules"
   },
   {
    "default": "0",
-   "description": "MUTATING. Create a whole book of categorization rules from an array, vetted as a set before anything is written \u2014 which is what gets their priorities right relative to each other. A batch either produces the book you described or produces nothing.",
+   "description": "MUTATING. Create a whole book of categorization rules from an array, vetted as a set before anything is written — which is what gets their priorities right relative to each other. A batch either produces the book you described or produces nothing.",
    "fieldname": "allow_create_bank_categorization_rules",
    "fieldtype": "Check",
    "label": "Create Bank Categorization Rules (Bulk)"
   },
   {
-   "description": "The reconciliation chain: whether a year of bank data is <b>complete</b>. A transaction the feed never delivered leaves no row to inspect, so the only thing that finds it is opening balance + everything on file \u2260 closing balance. Nothing in this section writes, posts or allocates.<br><br>ERPNext is the authority for this data as of v0.73.0; a bank pipe pushes anchors in through <code>/api/method/erpnext_mcp.bank.push_statement_anchor</code> and holds nothing itself.",
+   "description": "The reconciliation chain: whether a year of bank data is <b>complete</b>. A transaction the feed never delivered leaves no row to inspect, so the only thing that finds it is opening balance + everything on file ≠ closing balance. Nothing in this section writes, posts or allocates.<br><br>ERPNext is the authority for this data as of v0.73.0; a bank pipe pushes anchors in through <code>/api/method/erpnext_mcp.bank.push_statement_anchor</code> and holds nothing itself.",
    "fieldname": "bank_consolidation_read_section",
    "fieldtype": "Section Break",
-   "label": "Bank Reconciliation Chain \u2014 Read"
+   "label": "Bank Reconciliation Chain — Read"
   },
   {
    "default": "1",
@@ -5224,21 +5245,21 @@
   },
   {
    "default": "1",
-   "description": "READ. Every period that does not tie out, worst first by absolute variance, totalled per account. Periods with a recorded explanation are listed too \u2014 a known fact is not a problem, and hiding it makes somebody rediscover it every quarter.",
+   "description": "READ. Every period that does not tie out, worst first by absolute variance, totalled per account. Periods with a recorded explanation are listed too — a known fact is not a problem, and hiding it makes somebody rediscover it every quarter.",
    "fieldname": "allow_list_unreconciled_anchors",
    "fieldtype": "Check",
    "label": "List Unreconciled Anchors"
   },
   {
    "default": "1",
-   "description": "READ. One period taken apart: what the statement said moved, what the transactions on file add up to, and the gap between the statement's own opening and closing balances \u2014 three sums that fail for different reasons and are never added together.",
+   "description": "READ. One period taken apart: what the statement said moved, what the transactions on file add up to, and the gap between the statement's own opening and closing balances — three sums that fail for different reasons and are never added together.",
    "fieldname": "allow_get_anchor_variance_breakdown",
    "fieldtype": "Check",
    "label": "Get Anchor Variance Breakdown"
   },
   {
    "default": "1",
-   "description": "READ. The lines a bank printed that no Bank Transaction accounts for \u2014 the one list that names a missing movement rather than just its size. Says so plainly when no statement lines are on file, because \"nothing is missing\" and \"nothing to check against\" are opposite answers.",
+   "description": "READ. The lines a bank printed that no Bank Transaction accounts for — the one list that names a missing movement rather than just its size. Says so plainly when no statement lines are on file, because \"nothing is missing\" and \"nothing to check against\" are opposite answers.",
    "fieldname": "allow_list_unmatched_statement_lines",
    "fieldtype": "Check",
    "label": "List Unmatched Statement Lines"
@@ -5252,41 +5273,41 @@
   },
   {
    "default": "1",
-   "description": "READ. Bank accounts with their companion account and aggregator identity \u2014 mask, type, subtype, sync state \u2014 and the one-sided pairings called out by name.",
+   "description": "READ. Bank accounts with their companion account and aggregator identity — mask, type, subtype, sync state — and the one-sided pairings called out by name.",
    "fieldname": "allow_get_account_pairing",
    "fieldtype": "Check",
    "label": "Get Account Pairing"
   },
   {
    "default": "1",
-   "description": "READ. One advisory agreement's terms, the assets under management they apply to, and what the fee should be \u2014 with the basis for the AUM always named, and a null fee rather than a zero one where none can be established.",
+   "description": "READ. One advisory agreement's terms, the assets under management they apply to, and what the fee should be — with the basis for the AUM always named, and a null fee rather than a zero one where none can be established.",
    "fieldname": "allow_get_advisory_agreement_summary",
    "fieldtype": "Check",
    "label": "Get Advisory Agreement Summary"
   },
   {
    "default": "1",
-   "description": "READ. The register of advisory agreements, superseded ones included, plus the investment accounts with no active agreement on file \u2014 the accounts whose fees nobody can check.",
+   "description": "READ. The register of advisory agreements, superseded ones included, plus the investment accounts with no active agreement on file — the accounts whose fees nobody can check.",
    "fieldname": "allow_list_advisory_agreements",
    "fieldtype": "Check",
    "label": "List Advisory Agreements"
   },
   {
-   "description": "The write half of the consolidation. <b>Nothing here posts to the ledger</b> \u2014 not one tool writes a GL Entry, a Journal Entry or an allocation. An anchor says whether the books tie out; making them tie out is a Journal Entry somebody decided on, with its own switch.<br><br><code>rebuild_anchor_chain</code> recomputes only DERIVED values by default and leaves the three numbers that came off a bank statement alone, because rewriting those from the transaction feed would make every period tie out perfectly and prove nothing.",
+   "description": "The write half of the consolidation. <b>Nothing here posts to the ledger</b> — not one tool writes a GL Entry, a Journal Entry or an allocation. An anchor says whether the books tie out; making them tie out is a Journal Entry somebody decided on, with its own switch.<br><br><code>rebuild_anchor_chain</code> recomputes only DERIVED values by default and leaves the three numbers that came off a bank statement alone, because rewriting those from the transaction feed would make every period tie out perfectly and prove nothing.",
    "fieldname": "bank_consolidation_write_section",
    "fieldtype": "Section Break",
-   "label": "Bank Reconciliation Chain \u2014 Write"
+   "label": "Bank Reconciliation Chain — Write"
   },
   {
    "default": "0",
-   "description": "MUTATING. Record why a period does not tie out, in one prose field. It does not mark the period reconciled and is not meant to \u2014 <code>reconciled</code> is arithmetic, and this is a human judgement beside it.",
+   "description": "MUTATING. Record why a period does not tie out, in one prose field. It does not mark the period reconciled and is not meant to — <code>reconciled</code> is arithmetic, and this is a human judgement beside it.",
    "fieldname": "allow_set_anchor_variance_reason",
    "fieldtype": "Check",
    "label": "Set Anchor Variance Reason"
   },
   {
    "default": "0",
-   "description": "MUTATING. Recompute the derived values on one account's chain in period order \u2014 closing, variance, reconciled, chain gaps and statement-line matches. Leaves the anchored opening, closing and statement transaction sum alone unless explicitly told otherwise.",
+   "description": "MUTATING. Recompute the derived values on one account's chain in period order — closing, variance, reconciled, chain gaps and statement-line matches. Leaves the anchored opening, closing and statement transaction sum alone unless explicitly told otherwise.",
    "fieldname": "allow_rebuild_anchor_chain",
    "fieldtype": "Check",
    "label": "Rebuild Anchor Chain"
@@ -5300,17 +5321,163 @@
   },
   {
    "default": "0",
-   "description": "MUTATING. Register the terms an investment account is managed under. A fee type with no fee, and a second live agreement on one account, are both refused \u2014 each would compute a plausible wrong number rather than fail.",
+   "description": "MUTATING. Register the terms an investment account is managed under. A fee type with no fee, and a second live agreement on one account, are both refused — each would compute a plausible wrong number rather than fail.",
    "fieldname": "allow_create_advisory_agreement",
    "fieldtype": "Check",
    "label": "Create Advisory Agreement"
   },
   {
    "default": "0",
-   "description": "MUTATING. Amend an agreement, which creates a new version and supersedes the old one rather than editing it \u2014 last quarter's fee was charged under last quarter's terms. Correcting a description in place is allowed; changing a fee, a date or a status in place is refused.",
+   "description": "MUTATING. Amend an agreement, which creates a new version and supersedes the old one rather than editing it — last quarter's fee was charged under last quarter's terms. Correcting a description in place is allowed; changing a fee, a date or a status in place is refused.",
    "fieldname": "allow_update_advisory_agreement",
    "fieldtype": "Check",
    "label": "Update Advisory Agreement"
+  },
+  {
+   "fieldname": "v79_section",
+   "fieldtype": "Section Break",
+   "label": "Interruption, Investigation and Discipline (v0.79.0)",
+   "description": "Field work is interrupted, investigations span days, and discipline is a chain. The two REGISTERS here are legally load-bearing: a progressive discipline chain is the defence in a wrongful-termination claim, and an accident investigation is what 29 CFR 1904 asks for. Their reads default ON for the same reason the REI reads do — a history an operator has to switch on is one nobody has when they need it."
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Stop the clock on a task a worker is coming back to. The minutes already worked are banked as a time segment; the gap is not charged to the job.",
+   "fieldname": "allow_pause_farm_task",
+   "fieldtype": "Check",
+   "label": "Pause Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Pick a paused task back up. Auto-pauses whatever else that worker had running — nobody is in two places at once.",
+   "fieldname": "allow_resume_farm_task",
+   "fieldtype": "Check",
+   "label": "Resume Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record that two tasks are related, on both sides. Two people working one job on purpose, or two reports of the same thing.",
+   "fieldname": "allow_link_farm_tasks",
+   "fieldtype": "Check",
+   "label": "Link Farm Tasks"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Fold a duplicate into the task actually being worked. Nothing merges itself: the evidence transfers, the duplicate goes to Merged pointing at the primary, and both sets of minutes stay countable.",
+   "fieldname": "allow_merge_farm_task",
+   "fieldtype": "Check",
+   "label": "Merge Farm Task"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Append a narrative entry to a Farm Task, Accident Report or Discipline Record. Entries are appended and never edited.",
+   "fieldname": "allow_add_task_note",
+   "fieldtype": "Check",
+   "label": "Add Task Note"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. File a voice note and the transcription the handset produced on-device. The transcript is required, the recording is kept beside it.",
+   "fieldname": "allow_attach_audio_note",
+   "fieldtype": "Check",
+   "label": "Attach Audio Note"
+  },
+  {
+   "default": "1",
+   "description": "READ. A record's accumulated narrative, oldest first, with the whole thing assembled in order.",
+   "fieldname": "allow_list_task_notes",
+   "fieldtype": "Check",
+   "label": "List Task Notes"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. LEGALLY CRITICAL. File one step of progressive discipline, auto-linked to the prior step for that employee. Refuses an unexplained jump up the chain and a step after a termination.",
+   "fieldname": "allow_create_discipline_record",
+   "fieldtype": "Check",
+   "label": "Create Discipline Record"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record that the employee acknowledged a step — or that they declined to sign, with a witness. There is no third outcome.",
+   "fieldname": "allow_acknowledge_discipline_record",
+   "fieldtype": "Check",
+   "label": "Acknowledge Discipline Record"
+  },
+  {
+   "default": "1",
+   "description": "READ. One discipline step in full, with its narrative and the step before it.",
+   "fieldname": "allow_get_discipline_record",
+   "fieldtype": "Check",
+   "label": "Get Discipline Record"
+  },
+  {
+   "default": "1",
+   "description": "READ. One employee's whole chain in order, with the current level and what the next step would be.",
+   "fieldname": "allow_list_discipline_history",
+   "fieldtype": "Check",
+   "label": "List Discipline History"
+  },
+  {
+   "default": "1",
+   "description": "READ. The chain as a document for legal or HR review — the timeline, the narratives, and every documentation gap itemised with why it matters.",
+   "fieldname": "allow_get_discipline_report",
+   "fieldtype": "Check",
+   "label": "Get Discipline Report"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Age a step out of the chain, or withdraw one on review. Nothing expires on a schedule in this app — the look-back window is a policy decision.",
+   "fieldname": "allow_expire_discipline_record",
+   "fieldtype": "Check",
+   "label": "Expire Discipline Record"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. OSHA-CRITICAL. Open an incident record at the scene with what is known in the first ten minutes. Everything else is filled in over the following days.",
+   "fieldname": "allow_create_accident_report",
+   "fieldtype": "Check",
+   "label": "Create Accident Report"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Add findings, root cause and corrective actions to an open investigation. Called as many times as it takes; the narrative appends and is never edited.",
+   "fieldname": "allow_update_accident_investigation",
+   "fieldtype": "Check",
+   "label": "Update Accident Investigation"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Close an investigation. Refuses without corrective actions, a follow-up date, a recordability determination, every witness statement taken and every sub-task resolved.",
+   "fieldname": "allow_close_accident_investigation",
+   "fieldtype": "Check",
+   "label": "Close Accident Investigation"
+  },
+  {
+   "default": "1",
+   "description": "READ. One investigation in full: witnesses, narrative, sub-tasks, which days were worked, and what is still outstanding.",
+   "fieldname": "allow_get_accident_report",
+   "fieldtype": "Check",
+   "label": "Get Accident Report"
+  },
+  {
+   "default": "1",
+   "description": "READ. The incident register, filterable by status, severity, recordability and date. Names every report whose recordability nobody has determined.",
+   "fieldname": "allow_list_accident_reports",
+   "fieldtype": "Check",
+   "label": "List Accident Reports"
+  },
+  {
+   "default": "1",
+   "description": "READ. One wizard's spec for a handset to render, resolved into the caller's language. Adding a flow is adding a record, not shipping an app.",
+   "fieldname": "allow_get_wizard_definition",
+   "fieldtype": "Check",
+   "label": "Get Wizard Definition"
+  },
+  {
+   "default": "1",
+   "description": "READ. What flows this site can render, with their titles in the caller's language.",
+   "fieldname": "allow_list_wizard_definitions",
+   "fieldtype": "Check",
+   "label": "List Wizard Definitions"
   }
  ],
  "index_web_pages_for_search": 0,

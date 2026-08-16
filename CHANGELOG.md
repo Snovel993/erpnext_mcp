@@ -3,6 +3,87 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.79.0 — 2026-08-16 — the day as it actually happens
+
+Ten features, six new doctypes, twenty new tools and nineteen new mobile routes.
+All of it is the gap between how this app modelled a day and how a day goes.
+
+### Field work is interrupted
+
+A worker sets an irrigation line at nine and is called to a broken valve at half
+past. The irrigation is not finished, not abandoned, and not being done — and the
+app had three bad answers for that. `Paused` is a state now, and the hour is the
+SUM OF THE SEGMENTS rather than the wall clock, because the wall clock across an
+interruption bills the valve repair to the irrigating.
+
+**One task In-Progress per worker, enforced by pausing rather than by refusing.**
+Somebody standing at a broken valve does not want to be told to go and tidy up
+first, so starting a second task auto-pauses the first and SAYS SO. Refusing
+would be defensible and routed around within a week.
+
+### Two people, one broken valve
+
+`claim` and `start` return a `duplicate_hint` naming the other open task and who
+holds it. **Nothing merges itself** — two reports of a valve are sometimes two
+valves. `link_farm_tasks` writes on both sides; `merge_farm_task` folds a
+duplicate into a primary, moves the evidence, leaves the assignments and time
+segments where they are, and sends the duplicate to `Merged` pointing at where
+the work went. Nothing is deleted.
+
+### Work that does not finish today
+
+`Farm Task.parent_task` is a Dynamic Link, so an Accident Report can own steps.
+**A parent does not close while a step is live** — without that rule the first
+person to finish their piece closes the investigation, and the camera footage
+nobody pulled becomes a finding nobody made. One level of nesting; nothing
+auto-closes at the end of a shift.
+
+### Narrative, spoken and typed
+
+`Task Note` is one child table with three parents. Entries are appended and never
+edited, because the reason a hearing believes any of it is that Monday's account
+was written on Monday. `attach_audio_note` stores the on-device transcription and
+keeps the recording beside it: a foreman at an accident scene has a phone in one
+hand and about ninety seconds of clear memory, and typing is not what happens
+next.
+
+### Progressive discipline
+
+In a wrongful-termination claim the documentation IS the case. `prior_record` is
+found rather than asked for; a skip up the chain is refused until somebody says
+why; an acknowledgement with neither a signature nor a witnessed refusal is
+refused, because what the file may not contain is silence presented as agreement.
+`get_discipline_report` names the GAPS — unacknowledged steps, unwitnessed
+refusals, missed follow-ups, broken links — with a sentence each on why they
+matter, because what is missing is what decides the case.
+
+### Accident investigation
+
+The design problem is the first ten minutes. Four calls rather than one form, so
+the account gets written at the scene. Witnesses are ROWS, because 'we still have
+not interviewed Miguel' is the most useful thing a half-finished investigation
+knows. **Recordability is a person's determination and this app does not infer
+it**: `Undetermined` by default, the basis required to change it, and no closing
+while it stands. Closing also refuses on a missing corrective action, a missing
+follow-up date, an untaken witness statement or an open step — and names
+everything at once.
+
+### Wizards as data, in the worker's language
+
+Five shipped definitions; adding one is adding a record, not shipping an app. An
+operator's edits are never overwritten by a migrate. Every string carries `_en`
+and `_es`, resolved against a new `Employee.preferred_language` compliance field
+— OSHA 1910.1200(h) and WPS 170.501 both require training in a language the
+worker understands. **A missing translation falls back to English and is listed**:
+silently serving English means nobody finds out until a worker is in front of a
+screen they cannot read.
+
+### The scan
+
+`paused_tasks` is keyed on the worker rather than the asset, because the scan is
+the moment they have forgotten the irrigation line. `subtasks_by_parent` shows
+the steps of any open investigation on the machine.
+
 ## 0.78.0 — 2026-08-15 — what the register knew, and could not say
 
 **A worker scanned a tractor and got back a name, a state and a menu.** Every
