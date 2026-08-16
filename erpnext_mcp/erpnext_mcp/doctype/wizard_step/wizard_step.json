@@ -1,0 +1,108 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One screen of a wizard: a title, an explanation, the fields on it, and the rule for what comes next. A step is the unit a worker sees, so it is the unit that carries translation and conditional logic — 'skip the injury step on a near miss' is a property of the step, not of the fields on it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "step_key",
+  "title_en",
+  "title_es",
+  "optional",
+  "detail_col",
+  "description_en",
+  "description_es",
+  "logic_section",
+  "visible_if",
+  "next_step",
+  "fields_section",
+  "fields"
+ ],
+ "fields": [
+  {
+   "fieldname": "step_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Step Key",
+   "reqd": 1
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title (English)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "title_es",
+   "fieldtype": "Data",
+   "label": "Title (Spanish)"
+  },
+  {
+   "default": "0",
+   "description": "A step the worker may skip outright. Different from `visible_if`, which decides whether it is shown at all: an optional step is offered and declined, a conditional one never appears.",
+   "fieldname": "optional",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Optional"
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What this step is for, in a sentence the worker reads. On an accident wizard the difference between a usable investigation and a form is largely written here.",
+   "fieldname": "description_en",
+   "fieldtype": "Small Text",
+   "label": "Description (English)"
+  },
+  {
+   "fieldname": "description_es",
+   "fieldtype": "Small Text",
+   "label": "Description (Spanish)"
+  },
+  {
+   "fieldname": "logic_section",
+   "fieldtype": "Section Break",
+   "label": "Flow"
+  },
+  {
+   "description": "Show this step only when the condition holds, as JSON: {\"field\": \"severity\", \"not_equals\": \"Near Miss\"}. The condition reads answers given on EARLIER steps, which is what makes a wizard a flow rather than a list of screens.",
+   "fieldname": "visible_if",
+   "fieldtype": "Small Text",
+   "label": "Visible If (JSON)"
+  },
+  {
+   "description": "The step key to jump to when this one is finished, where it is not simply the next in order. Empty means 'the next visible step', which is the ordinary case.",
+   "fieldname": "next_step",
+   "fieldtype": "Data",
+   "label": "Next Step"
+  },
+  {
+   "fieldname": "fields_section",
+   "fieldtype": "Section Break",
+   "label": "Fields"
+  },
+  {
+   "fieldname": "fields",
+   "fieldtype": "Table",
+   "label": "Fields",
+   "options": "Wizard Field"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Wizard Step",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

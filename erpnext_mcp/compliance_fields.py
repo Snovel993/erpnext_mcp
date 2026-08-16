@@ -327,6 +327,36 @@ _SPRAY_FIELDS = (
 # be lawfully paid, and payroll is an operation.
 _EMPLOYEE_FIELDS = (
 	ComplianceField(
+		fieldname="preferred_language",
+		label="Preferred Language",
+		fieldtype="Select",
+		options="\nes\nen",
+		framework=(
+			"EEOC national-origin guidance (29 CFR 1606); OSHA 1910.1200(h) and the Worker "
+			"Protection Standard 40 CFR 170.501, both of which require training and hazard "
+			"communication 'in a manner the employee can understand'"
+		),
+		why=(
+			"Hazard communication, pesticide safety training and heat-illness training are all "
+			"required to be delivered in a language the worker understands. An employer who "
+			"trained a Spanish-speaking crew in English has not trained them, and the citation "
+			"reads the same as if the training had not happened. This column is what lets the "
+			"app prove which language each person was served in."
+		),
+		operational=(
+			"Which language every wizard, warning, task and REI notice this person sees comes "
+			"back in. NEVER INFERRED FROM A DEVICE LOCALE: a phone set to English by whoever "
+			"handed it over says nothing about who is holding it now, and getting this wrong "
+			"silently is exactly the failure the column exists to prevent. Where it is empty the "
+			"app serves English and says so rather than guessing."
+		),
+		description=(
+			"ISO code — 'es' for Spanish, 'en' for English. Asked at hire. Extensible: any code "
+			"is stored, and a wizard with no translation for it falls back to English and reports "
+			"the gap rather than serving a half-translated screen."
+		),
+	),
+	ComplianceField(
 		fieldname="i9_status",
 		label="I-9 Status",
 		fieldtype="Select",
@@ -898,8 +928,8 @@ TARGETS = (
 		owner_app="farm_hr / hrms",
 		purpose=(
 			"Employment eligibility, tax withholding, the wage law that governs this "
-			"person's pay, and farm labor contractor licensing. Every hire is a "
-			"compliance event."
+			"person's pay, farm labor contractor licensing, and the language this person "
+			"is trained and warned in. Every hire is a compliance event."
 		),
 		fields=_EMPLOYEE_FIELDS,
 		absent_note=(

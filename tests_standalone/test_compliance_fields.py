@@ -170,7 +170,19 @@ class TheInstaller(V12TestCase):
 		added = {row["fieldname"] for row in custom_fields("Employee")}
 		self.assertEqual(
 			added,
-			{"i9_status", "w4_status", "jurisdiction", "flc_license_status", "flc_license_expiration"},
+			{
+				"i9_status",
+				"w4_status",
+				"jurisdiction",
+				"flc_license_status",
+				"flc_license_expiration",
+				# v0.79.0. Which language this person is trained, warned and
+				# disciplined in. A compliance field rather than a preference:
+				# 1910.1200(h) and WPS 170.501 both require the training to be
+				# in a language the worker understands, and an employer who
+				# cannot say which language they used cannot show they did.
+				"preferred_language",
+			},
 		)
 		self.assertIn("Employee.i9_status", report["created"])
 
@@ -274,7 +286,8 @@ class MigrateThreeTimes(V12TestCase):
 		for _ in range(3):
 			install.after_migrate()
 			counts.append(len(compliance_custom_fields()))
-		# Five on Employee, the v0.19.3 Attendance bridge column, the four v0.19.5
+		# Six on Employee since v0.79.0 added `preferred_language`, the v0.19.3
+		# Attendance bridge column, the four v0.19.5
 		# capex columns on ERPNext's Asset, and the nine v0.69.0 columns on
 		# ERPNext's Item — the REI/PHI pair the spray window computes from, plus
 		# the seven label-detail columns a scanned pesticide label lands in. Spray
@@ -286,8 +299,8 @@ class MigrateThreeTimes(V12TestCase):
 		# column either way, which is exactly why none of the nine is `reqd`.
 		self.assertEqual(
 			counts[0],
-			19,
-			"five Employee fields, the Attendance bridge, four Asset capex columns "
+			20,
+			"six Employee fields, the Attendance bridge, four Asset capex columns "
 			"and nine Item label columns",
 		)
 		self.assertEqual(counts, [counts[0]] * 3, f"custom fields multiplied across migrations: {counts}")

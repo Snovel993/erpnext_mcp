@@ -1,0 +1,163 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One multi-step flow, as DATA. The handset renders whatever this says — steps in order, fields per step, validation, conditional logic, and every label in every language the site has — and adding a wizard is adding a row, not shipping an app. That is the whole point: an onboarding flow compiled into Swift needs an App Store release to change a question, and the question changes when the law does.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "wizard_key",
+  "title_en",
+  "title_es",
+  "enabled",
+  "identity_col",
+  "category",
+  "version",
+  "submit_method",
+  "icon",
+  "description_section",
+  "description_en",
+  "description_es",
+  "steps_section",
+  "steps",
+  "meta_section",
+  "required_role",
+  "shipped_default"
+ ],
+ "fields": [
+  {
+   "description": "The key a handset asks for — 'accident_investigation', 'progressive_discipline'. THE DOCNAME IS THIS STRING, so a wizard a client names and a wizard an operator edits are the same row.",
+   "fieldname": "wizard_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Wizard Key",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title (English)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "title_es",
+   "fieldtype": "Data",
+   "label": "Title (Spanish)"
+  },
+  {
+   "default": "1",
+   "description": "A disabled wizard is not served. It is how an operator withdraws a flow that is being revised without deleting the definition somebody spent an afternoon on.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "HR\nSafety\nAssets\nCompliance\nOperations\nOther"
+  },
+  {
+   "default": "1",
+   "description": "Bumped when the shape changes. A handset that cached a definition can tell whether the one it holds is current without re-fetching every field of it.",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Version"
+  },
+  {
+   "description": "The endpoint the completed wizard posts to — `create_accident_report`, `create_discipline_record`. Named on the definition rather than known by the app, because a wizard the app knows where to submit is a wizard the app has code for, which is exactly what this doctype exists to avoid.",
+   "fieldname": "submit_method",
+   "fieldtype": "Data",
+   "label": "Submit Method"
+  },
+  {
+   "fieldname": "icon",
+   "fieldtype": "Data",
+   "label": "Icon"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "fieldname": "description_en",
+   "fieldtype": "Small Text",
+   "label": "Description (English)"
+  },
+  {
+   "fieldname": "description_es",
+   "fieldtype": "Small Text",
+   "label": "Description (Spanish)"
+  },
+  {
+   "fieldname": "steps_section",
+   "fieldtype": "Section Break",
+   "label": "Steps"
+  },
+  {
+   "fieldname": "steps",
+   "fieldtype": "Table",
+   "label": "Steps",
+   "options": "Wizard Step"
+  },
+  {
+   "fieldname": "meta_section",
+   "fieldtype": "Section Break",
+   "label": "Access"
+  },
+  {
+   "description": "A role required to run this wizard, where one is. Empty means any enrolled worker — which is right for an inspection and wrong for a discipline record.",
+   "fieldname": "required_role",
+   "fieldtype": "Data",
+   "label": "Required Role"
+  },
+  {
+   "default": "0",
+   "description": "Set on the definitions this app seeds. A SHIPPED WIZARD IS NOT OVERWRITTEN once an operator has edited it — the seeder writes it if it is absent and leaves it alone after that, because a flow somebody tuned for their own crew being reset by a migration is the behaviour that makes 'config not code' a lie.",
+   "fieldname": "shipped_default",
+   "fieldtype": "Check",
+   "label": "Shipped Default",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Wizard Definition",
+ "autoname": "field:wizard_key",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "wizard_key,title_en,category",
+ "sort_field": "wizard_key",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}
