@@ -74,8 +74,10 @@ from ..erpnext_mcp.doctype.farm_task.farm_task import (
 	EVIDENCE_KEYS,
 	IN_PROGRESS,
 	MAX_CONCURRENT_CLAIMS,
+	MERGED,
 	ORIGIN_COMPLIANCE_RULE,
 	ORIGIN_FIELD_REPORTED,
+	PAUSED,
 	REJECTED,
 	SELF_PICKABLE,
 	STATES,
@@ -1028,6 +1030,11 @@ def create_farm_task(args: dict) -> ToolResult:
 		parse_json_object(args.get("creates_record_data"), "creates_record_data")
 	)
 	doc.notes = as_str(args, "notes")
+	# v0.79.0. A step of a longer piece of work — see the multi-day block below.
+	parent_doctype, parent = _parent_argument(args, "created")
+	if parent:
+		doc.parent_doctype = parent_doctype
+		doc.parent_task = parent
 	# v0.69.0. THE TANK MIX, STATED WHEN THE WORK IS RAISED. Refused here rather
 	# than absorbed: a spray task is dispatched with the mix on it precisely so
 	# the applicator is not deciding at the sprayer, and a malformed list is a
@@ -1390,14 +1397,28 @@ def claim_farm_task(args: dict) -> ToolResult:
 	task_doc.save(ignore_permissions=True)
 	assignment = _open_assignment(task_doc, worker, worker_name, dispatched=False)
 
-	return ToolResult(
-		data={
+	claimed = {
 			**_describe_task(dict(task_doc.as_dict())),
 			"assignment": assignment,
 			"concurrent_claims": len(holding) + 1,
 			"claims_remaining": MAX_CONCURRENT_CLAIMS - len(holding) - 1,
 			"evidence_you_will_need": _contract_sentence(evidence_contract(task_doc.evidence_required)),
-		},
+		}
+	# v0.79.0. THE HINT, NOT THE MERGE. A claim is the moment somebody has
+	# decided to do this job, which is exactly when telling them that another
+	# open task names the same valve is useful and not yet too late. Nothing is
+	# merged: two reports of a valve are sometimes two valves.
+	#
+	# NO AUTO-PAUSE HERE, and the asymmetry with `start_farm_task` is deliberate.
+	# Claiming is planning a morning — a worker may hold three — and pausing
+	# somebody's running job because they picked up their next one would stop the
+	# clock on work they are still doing.
+	hint = _duplicate_hint(dict(task_doc.as_dict()))
+	if hint:
+		claimed["duplicate_hint"] = hint
+
+	return ToolResult(
+		data=claimed,
 		summary=f"{worker_name} claimed {row['name']} ({len(holding) + 1} of {MAX_CONCURRENT_CLAIMS} held)",
 		docstatus_delta=f"{AVAILABLE} → {CLAIMED}",
 	)
@@ -1428,9 +1449,21 @@ def start_farm_task(args: dict) -> ToolResult:
 	task = task_row(assignment["task"])
 	farm_shift = _shift_argument(args, str(task.get("company") or ""))
 
+	# ONE TASK IN PROGRESS PER WORKER, ENFORCED BY PAUSING RATHER THAN REFUSING.
+	# Somebody standing at a broken valve does not want to be told to go and tidy
+	# up the job they walked away from; they want the valve fixed. So whatever
+	# they had running is stood down, the answer says so, and nobody has to route
+	# around this app to do the urgent thing. See the v0.79.0 block below.
+	auto_paused = _auto_pause_for(
+		str(assignment.get("assigned_to") or ""),
+		exclude_task=str(assignment["task"]),
+		reason=f"Started {assignment['task']}",
+	)
+
 	doc = frappe.get_doc(FARM_TASK_ASSIGNMENT, assignment["name"])
 	doc.state = IN_PROGRESS
 	doc.started_at = as_str(args, "started_at") or frappe.utils.now()
+	_start_segment(doc, str(doc.started_at))
 	if farm_shift:
 		doc.farm_shift = farm_shift
 	elif not doc.farm_shift:
@@ -1447,8 +1480,7 @@ def start_farm_task(args: dict) -> ToolResult:
 	doc.save(ignore_permissions=True)
 	_set_task_state(assignment["task"], IN_PROGRESS)
 
-	return ToolResult(
-		data={
+	started = {
 			"assignment": _describe_assignment(dict(doc.as_dict())),
 			"task": _describe_task(task_row(assignment["task"])),
 			"evidence_you_will_need": _contract_sentence(evidence_contract(task.get("evidence_required"))),
@@ -1465,8 +1497,22 @@ def start_farm_task(args: dict) -> ToolResult:
 				"assignment alone and nothing will reach a compliance record spanning an exposure "
 				"period. Pass farm_shift here or at completion if the worker was on one."
 			),
-		},
-		summary=f"{doc.assigned_to_name} started {assignment['task']} at {doc.started_at}",
+		}
+	if auto_paused:
+		started["auto_paused"] = auto_paused
+		started["auto_pause_note"] = (
+			f"{auto_paused['task_name'] or auto_paused['task']} was in progress and has been paused "
+			f"so this one can run — {auto_paused['segment_minutes']} minute(s) were banked against "
+			"it and nothing was lost. Resume it with resume_farm_task."
+		)
+	started["duplicate_hint"] = _duplicate_hint(task_row(assignment["task"]))
+
+	return ToolResult(
+		data=started,
+		summary=(
+			f"{doc.assigned_to_name} started {assignment['task']} at {doc.started_at}"
+			+ (f" (paused {auto_paused['task']})" if auto_paused else "")
+		),
 		docstatus_delta=f"{CLAIMED} → {IN_PROGRESS}",
 	)
 
@@ -1478,6 +1524,22 @@ def complete_farm_task(args: dict) -> ToolResult:
 	assignment = _assignment_for(args, or_completed=True)
 	task = task_row(assignment["task"])
 	worker = _worker(args)
+
+	# A PARENT DOES NOT CLOSE WHILE A STEP IS LIVE. This is what makes a
+	# multi-day investigation survive an evening: without it the first person to
+	# finish their piece closes the whole thing, and the camera footage nobody
+	# pulled becomes a finding nobody made. The refusal names the steps, because
+	# "it is not finished" is useless and "you are waiting on the witness
+	# interview" is actionable.
+	blocking = _blocking_subtasks(task["name"])
+	if blocking and assignment.get("state") != COMPLETED:
+		waiting = ", ".join(f"{child['name']} ({child['task_name']})" for child in blocking)
+		raise ToolError(
+			f"{task['name']} has {len(blocking)} step(s) still open: {waiting}. A parent task is "
+			"finished when its steps are — closing it now would file an investigation whose "
+			"outstanding work is invisible from the record that is supposed to carry it. Finish or "
+			"reject the steps first, or reject this one with a reason. Nothing was changed."
+		)
 
 	if assignment.get("assigned_to") != worker:
 		raise ToolError(
@@ -1588,9 +1650,15 @@ def complete_farm_task(args: dict) -> ToolResult:
 	elif not doc.farm_shift:
 		doc.farm_shift = _open_shift_for(worker, str(task.get("company") or "")) or None
 	doc.signature_file = signature or doc.signature_file
-	doc.actual_duration_minutes = as_int(args, "actual_duration_minutes") or _elapsed(
-		doc.started_at, doc.completed_at
-	)
+	# v0.79.0. THE SUM OF THE SEGMENTS, NOT THE WALL CLOCK. A worker interrupted
+	# twice spent three stretches on this job and the gaps belong to whatever
+	# they were doing instead — see `active_minutes`, which falls back to the old
+	# arithmetic for every assignment written before segments existed. A stated
+	# `actual_duration_minutes` still wins: a foreman correcting a figure is
+	# making a claim about the past that this app does not get to overrule.
+	_close_segment(doc, str(doc.completed_at), SEGMENT_COMPLETION)
+	doc.paused_at = None
+	doc.actual_duration_minutes = as_int(args, "actual_duration_minutes") or active_minutes(doc)
 	for row in evidence:
 		doc.append("evidence_files", dict(row))
 
@@ -2251,7 +2319,11 @@ def reject_farm_task(args: dict) -> ToolResult:
 			f"{assignment['task']} is held by {assignment.get('assigned_to_name')}, not {worker}. "
 			"Nothing was changed."
 		)
-	if assignment.get("state") not in (CLAIMED, IN_PROGRESS):
+	# A PAUSED TASK CAN BE HANDED BACK. That is the honest end of an interruption
+	# somebody never got back to — "I was called away and the ladder is still
+	# broken" is the sentence a board needs, and forcing a resume first to reject
+	# it would put a minute of clock on a job nobody touched.
+	if assignment.get("state") not in (CLAIMED, IN_PROGRESS, PAUSED):
 		raise ToolError(
 			f"{assignment['name']} is {assignment.get('state')} and cannot be rejected. Nothing was changed."
 		)
@@ -2269,6 +2341,12 @@ def reject_farm_task(args: dict) -> ToolResult:
 	doc.state = REJECTED
 	doc.rejection_reason = reason
 	doc.completed_at = frappe.utils.now()
+	# The minutes somebody DID spend before handing it back are kept. A rejection
+	# is not a claim that no work happened — it is a claim that the work could
+	# not be finished, and the half hour spent finding that out was still worked.
+	_close_segment(doc, str(doc.completed_at), SEGMENT_REJECTION, reason)
+	doc.paused_at = None
+	doc.actual_duration_minutes = active_minutes(doc)
 	doc.save(ignore_permissions=True)
 
 	# Back to the pool, with the name cleared. The rejected assignment stays: it
@@ -4046,3 +4124,937 @@ def report_field_task(args: dict) -> ToolResult:
 		),
 		docstatus_delta="none → 0 (created)",
 	)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v0.79.0 — interruption, and the hour that survives it
+#
+# FIELD WORK IS INTERRUPTED. A worker sets an irrigation line at nine and is
+# called to a broken valve at half past; the irrigating is not finished, it is
+# not abandoned, and it is not being done. Until now this app had no way to say
+# that, so a handset had three bad options: leave the task In-Progress and lie
+# about who was working on what, complete it and lie about it being done, or
+# reject it and throw away the morning.
+#
+# WHAT THE CLOCK HAS TO DO. `actual_duration_minutes` was the wall clock from
+# `started_at` to `completed_at`, which across an interruption bills the valve
+# repair to the irrigating. So a run is now a LIST OF SEGMENTS — start to pause,
+# resume to pause, resume to completion — and the duration is their sum. The
+# segments are the record; the total is derived from them and stored so a report
+# can add a column up.
+#
+# ONE TASK IN PROGRESS PER WORKER, AND THAT IS ENFORCED BY PAUSING RATHER THAN
+# BY REFUSING. Somebody standing at a broken valve does not want to be told they
+# must first go and tidy up the job they walked away from — they want the valve
+# fixed. So starting or claiming a second task AUTO-PAUSES the first, records
+# that the server did it rather than the worker, and says so in the answer.
+# Refusing would be defensible and would be routed around within a week.
+# ══════════════════════════════════════════════════════════════════════════════
+
+#: How the segment that a given event closed is labelled. Read by
+#: `get_farm_task` and the mobile board, and worth telling apart: `auto_pause`
+#: is the one nobody chose.
+SEGMENT_PAUSE = "pause"
+SEGMENT_AUTO_PAUSE = "auto_pause"
+SEGMENT_COMPLETION = "completion"
+SEGMENT_REJECTION = "rejection"
+SEGMENT_MERGE = "merge"
+
+#: Most segments one assignment will carry. A job paused two hundred times is a
+#: handset in a pocket rather than a worker, and the cap is what stops one bad
+#: client turning a child table into a performance problem for a whole board.
+SEGMENT_CAP = 200
+
+
+def _row_set(row, **values) -> None:
+	"""Write onto a child row, whether it is a Document or a plain dict.
+
+	A row this call just appended is a Document with `.set`; a row loaded back off
+	a stored parent may be a plain mapping. Both shapes are real — the second is
+	what a re-read gives — and a helper that assumed either one would work in the
+	tests and fail in a bench, or the reverse.
+	"""
+	setter = getattr(row, "set", None)
+	for key, value in values.items():
+		if callable(setter):
+			setter(key, value)
+		else:
+			row[key] = value
+
+
+def _segment_rows(doc) -> list:
+	return list(doc.get("time_segments") or [])
+
+
+def _open_segment(doc):
+	"""The segment that is still running on this assignment, or None."""
+	for row in _segment_rows(doc):
+		if not row.get("ended_at"):
+			return row
+	return None
+
+
+def _start_segment(doc, when: str) -> None:
+	"""Open a stretch of work. Refuses to open a second one.
+
+	A second open segment would double-count every minute between the two, which
+	is the failure mode that makes a timesheet indefensible rather than merely
+	wrong.
+	"""
+	if _open_segment(doc) is not None:
+		return
+	if len(_segment_rows(doc)) >= SEGMENT_CAP:
+		raise ToolError(
+			f"{doc.name} already has {SEGMENT_CAP} time segments on it, which is a handset in "
+			"somebody's pocket rather than a worker. Complete or reject it and raise a new task. "
+			"Nothing was changed."
+		)
+	doc.append("time_segments", {"started_at": when, "ended_at": None, "minutes": 0.0})
+
+
+def _close_segment(doc, when: str, ended_by: str, reason: str = "") -> float:
+	"""Stop the running stretch and return its minutes. Zero where none was open.
+
+	NEVER RAISES ON A MISSING SEGMENT. An assignment started before v0.79.0 has
+	no segments at all, and refusing to complete it would strand every task that
+	was open on the day this shipped. The fallback is the old arithmetic, which
+	is what those rows have always meant.
+	"""
+	row = _open_segment(doc)
+	if row is None:
+		return 0.0
+	minutes = float(_elapsed(row.get("started_at"), when))
+	_row_set(row, ended_at=when, minutes=minutes, ended_by=ended_by)
+	if reason:
+		_row_set(row, reason=reason)
+	return minutes
+
+
+def active_minutes(doc) -> int:
+	"""The sum of the closed segments, or the wall clock where there are none.
+
+	THE FALLBACK IS THE POINT OF THE SECOND BRANCH. Every assignment written
+	before v0.79.0 has an empty `time_segments` table and a perfectly good
+	`started_at`/`completed_at` pair, and a duration that came back zero for all
+	of them would rewrite a season of history the day this shipped.
+	"""
+	rows = _segment_rows(doc)
+	if rows:
+		return round(sum(float(row.get("minutes") or 0) for row in rows))
+	return int(_elapsed(doc.get("started_at"), doc.get("completed_at")))
+
+
+def _describe_segments(doc) -> list:
+	out = []
+	for row in _segment_rows(doc):
+		out.append({
+			"started_at": str(row.get("started_at") or "") or None,
+			"ended_at": str(row.get("ended_at") or "") or None,
+			"minutes": round(float(row.get("minutes") or 0), 1),
+			"ended_by": row.get("ended_by") or None,
+			"reason": row.get("reason") or None,
+			"running": not row.get("ended_at"),
+		})
+	return out
+
+
+def in_progress_assignment(worker: str, exclude_task: str = "") -> dict:
+	"""The one assignment this worker is actually working right now, or `{}`.
+
+	ONE, BY CONSTRUCTION. `EXCLUSIVE_STATES` says a worker is In-Progress on at
+	most one task, and every door that could open a second one auto-pauses the
+	first — so this returning a list would be describing a state the app does
+	not allow. Where a site somehow has two (a Desk edit, a half-finished
+	migration), the OLDEST is returned, because that is the one that has been
+	wrong for longest.
+	"""
+	worker = str(worker or "").strip()
+	if not worker:
+		return {}
+	rows = (
+		frappe.db.get_all(
+			FARM_TASK_ASSIGNMENT,
+			filters={"assigned_to": worker, "state": IN_PROGRESS},
+			fields=compat.existing_fields(FARM_TASK_ASSIGNMENT, _ASSIGNMENT_FIELDS),
+			order_by="creation asc",
+			limit=5,
+		)
+		or []
+	)
+	for row in rows:
+		row = dict(row)
+		if exclude_task and str(row.get("task")) == exclude_task:
+			continue
+		return row
+	return {}
+
+
+def _pause_assignment(name: str, reason: str, when: str, automatic: bool) -> dict:
+	"""Move one assignment to Paused and stop its clock. The shared write.
+
+	`pause_farm_task` and the auto-pause on claim/start both go through here, so
+	a job a worker paused and a job the server paused leave the same shape of
+	evidence — same state, same closed segment, same count — differing only in
+	`auto_paused` and the segment's `ended_by`. A near-copy for the automatic
+	path is how the two would come to disagree about what a pause is.
+	"""
+	doc = frappe.get_doc(FARM_TASK_ASSIGNMENT, name)
+	minutes = _close_segment(
+		doc, when, SEGMENT_AUTO_PAUSE if automatic else SEGMENT_PAUSE, reason
+	)
+	doc.state = PAUSED
+	doc.paused_at = when
+	doc.pause_reason = reason or None
+	doc.pause_count = int(doc.pause_count or 0) + 1
+	doc.auto_paused = 1 if automatic else 0
+	doc.actual_duration_minutes = active_minutes(doc)
+	doc.save(ignore_permissions=True)
+	_set_task_state(doc.task, PAUSED)
+	return {
+		"assignment": doc.name,
+		"task": doc.task,
+		"task_name": doc.task_name,
+		"paused_at": str(doc.paused_at or ""),
+		"reason": reason or None,
+		"segment_minutes": round(minutes, 1),
+		"active_minutes": int(doc.actual_duration_minutes or 0),
+		"pause_count": int(doc.pause_count or 0),
+		"auto_paused": bool(automatic),
+	}
+
+
+def _auto_pause_for(worker: str, exclude_task: str, reason: str) -> dict | None:
+	"""Stand down whatever this worker had running, so the new job can start.
+
+	RETURNS THE RECORD RATHER THAN SWALLOWING IT. The handset has to be able to
+	say "your irrigation job was paused" — a server that silently stood a job
+	down would leave a worker discovering at the end of the day that their
+	morning is attributed to a task they thought they were still on.
+	"""
+	running = in_progress_assignment(worker, exclude_task=exclude_task)
+	if not running:
+		return None
+	return _pause_assignment(
+		str(running["name"]), reason, frappe.utils.now(), automatic=True
+	)
+
+
+# ── pause_farm_task ─────────────────────────────────────────────────────────
+def pause_farm_task(args: dict) -> ToolResult:
+	"""Stop the clock on a task a worker is coming back to."""
+	_require()
+	assignment = _assignment_for(args)
+	worker = _worker(args, required=False)
+	if worker and assignment.get("assigned_to") != worker:
+		raise ToolError(
+			f"{assignment['task']} is held by {assignment.get('assigned_to_name')}, not {worker}. "
+			"Nothing was changed."
+		)
+	if assignment.get("state") == PAUSED:
+		raise ToolError(
+			f"{assignment['name']} was already paused at {assignment.get('paused_at')}. Pausing it "
+			"twice would close a segment that is not open and leave the count saying a worker "
+			"stopped twice for one interruption. Nothing was changed."
+		)
+	if assignment.get("state") != IN_PROGRESS:
+		raise ToolError(
+			f"{assignment['name']} is {assignment.get('state')}, not {IN_PROGRESS}. Only work that "
+			"is actually being done can be interrupted — a claimed task nobody has started has no "
+			"clock to stop. Nothing was changed."
+		)
+
+	reason = as_str(args, "reason")
+	when = as_str(args, "paused_at") or frappe.utils.now()
+	paused = _pause_assignment(assignment["name"], reason, when, automatic=False)
+
+	return ToolResult(
+		data={
+			**paused,
+			"state": PAUSED,
+			"task_detail": _describe_task(task_row(assignment["task"])),
+			"note": (
+				"The clock is stopped and the task is still yours. `resume_farm_task` picks it back "
+				"up; the minutes already on it are kept, and the gap is not charged to this job."
+			),
+		},
+		summary=(
+			f"{assignment.get('assigned_to_name')} paused {assignment['task']} after "
+			f"{paused['segment_minutes']} min" + (f": {reason}" if reason else "")
+		),
+		docstatus_delta=f"{IN_PROGRESS} → {PAUSED}",
+	)
+
+
+# ── resume_farm_task ────────────────────────────────────────────────────────
+def resume_farm_task(args: dict) -> ToolResult:
+	"""Pick a paused task back up. Opens a new segment; the old minutes stay."""
+	_require()
+	assignment = _assignment_for(args)
+	worker = _worker(args, required=False)
+	if worker and assignment.get("assigned_to") != worker:
+		raise ToolError(
+			f"{assignment['task']} is held by {assignment.get('assigned_to_name')}, not {worker}. "
+			"Nothing was changed."
+		)
+	if assignment.get("state") == IN_PROGRESS:
+		raise ToolError(
+			f"{assignment['name']} is already in progress. Nothing was changed."
+		)
+	if assignment.get("state") != PAUSED:
+		raise ToolError(
+			f"{assignment['name']} is {assignment.get('state')}, not {PAUSED}. Nothing was changed."
+		)
+
+	holder = str(assignment.get("assigned_to") or "")
+	# RESUMING IS STARTING, so the same exclusivity applies: whatever this worker
+	# had running is stood down first. Without this a resume would be the one door
+	# left that could put somebody In-Progress on two jobs at once.
+	auto_paused = _auto_pause_for(
+		holder,
+		exclude_task=str(assignment["task"]),
+		reason=f"Resumed {assignment['task']}",
+	)
+
+	when = as_str(args, "resumed_at") or frappe.utils.now()
+	doc = frappe.get_doc(FARM_TASK_ASSIGNMENT, assignment["name"])
+	_start_segment(doc, when)
+	doc.state = IN_PROGRESS
+	doc.paused_at = None
+	doc.auto_paused = 0
+	doc.actual_duration_minutes = active_minutes(doc)
+	doc.save(ignore_permissions=True)
+	_set_task_state(assignment["task"], IN_PROGRESS)
+
+	data = {
+		"assignment": doc.name,
+		"task": doc.task,
+		"task_name": doc.task_name,
+		"state": IN_PROGRESS,
+		"resumed_at": when,
+		"active_minutes": int(doc.actual_duration_minutes or 0),
+		"pause_count": int(doc.pause_count or 0),
+		"segments": _describe_segments(doc),
+		"task_detail": _describe_task(task_row(assignment["task"])),
+		"note": (
+			f"{int(doc.actual_duration_minutes or 0)} minute(s) were already on this job before the "
+			"interruption and are kept. The clock is running again from now."
+		),
+	}
+	if auto_paused:
+		data["auto_paused"] = auto_paused
+		data["auto_pause_note"] = (
+			f"{auto_paused['task_name'] or auto_paused['task']} was in progress and has been paused "
+			"so this one can run. Nobody is in two places at once."
+		)
+
+	return ToolResult(
+		data=data,
+		summary=f"{doc.assigned_to_name} resumed {assignment['task']} ({data['active_minutes']} min so far)",
+		docstatus_delta=f"{PAUSED} → {IN_PROGRESS}",
+	)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v0.79.0 — two people, one broken valve
+#
+# TWO TASKS FOR ONE JOB IS NOT A BUG, IT IS WHAT HAPPENS. Two workers walk past
+# the same leaking valve an hour apart and both do the right thing: they report
+# it. A dispatch board that silently deduplicated them would be guessing that
+# two reports of a valve are the same valve — and on a farm with four hundred of
+# them, sometimes they are not.
+#
+# SO THE SYSTEM SURFACES AND THE HUMAN DECIDES. `_duplicate_hint` puts the other
+# open task in front of whoever claims or starts one; `link_farm_tasks` records
+# that two jobs are related, on BOTH sides; `merge_farm_task` folds a duplicate
+# into a primary. Nothing merges itself.
+#
+# A MERGE MOVES THE EVIDENCE AND KEEPS THE HISTORY. The duplicate carries
+# somebody's photographs, their minutes and their account of what they found —
+# throwing that away to tidy a board would be destroying the record to improve
+# the view of it. So the evidence transfers to the primary, the merged task's
+# assignments and time segments stay exactly where they are (their minutes show
+# up in the combined effort), and the task itself goes to `Merged` with
+# `merged_into` pointing at where the work went.
+# ══════════════════════════════════════════════════════════════════════════════
+
+#: Relationships a link may carry. `related` is two people working one job on
+#: purpose; `duplicate_of` and `merged_from` are what a merge writes on each
+#: side. The rest are ordinary dispatch vocabulary.
+LINK_RELATED = "related"
+LINK_DUPLICATE_OF = "duplicate_of"
+LINK_MERGED_FROM = "merged_from"
+LINK_RELATIONSHIPS = (LINK_RELATED, LINK_DUPLICATE_OF, LINK_MERGED_FROM, "blocked_by", "follows")
+
+#: The mirror of each relationship, for the row written on the other side. A
+#: link is one fact about two records and both of them have to be able to state
+#: it — `A duplicate_of B` means `B merged_from A` when it is acted on, and a
+#: table that stored only the forward direction would make the relationship
+#: invisible from whichever record somebody happened to open.
+_MIRROR = {
+	LINK_RELATED: LINK_RELATED,
+	LINK_DUPLICATE_OF: LINK_MERGED_FROM,
+	LINK_MERGED_FROM: LINK_DUPLICATE_OF,
+	"blocked_by": "follows",
+	"follows": "blocked_by",
+}
+
+#: Most links one task carries. Past this somebody is linking a whole board
+#: together, which is a conversation rather than a data structure.
+LINK_CAP = 50
+
+
+def _link_rows(doc) -> list:
+	return list(doc.get("linked_tasks") or [])
+
+
+def _already_linked(doc, other: str) -> bool:
+	return any(str(row.get("linked_task")) == other for row in _link_rows(doc))
+
+
+def _write_link(doc, other: dict, relationship: str, by: str, note: str) -> bool:
+	"""Add one link row. Returns whether it was new.
+
+	IDEMPOTENT ON THE PAIR rather than on the relationship, so re-linking two
+	tasks does not stack rows — and a caller correcting a relationship removes
+	the link and writes it again rather than ending up with two contradictory
+	rows on one record.
+	"""
+	if _already_linked(doc, str(other["name"])):
+		return False
+	if len(_link_rows(doc)) >= LINK_CAP:
+		raise ToolError(
+			f"{doc.name} already links to {LINK_CAP} other tasks, which is a board being tied "
+			"together rather than a job. Nothing was changed."
+		)
+	doc.append("linked_tasks", {
+		"linked_task": other["name"],
+		"linked_task_name": other.get("task_name"),
+		"relationship": relationship,
+		"linked_by": by or None,
+		"linked_on": frappe.utils.now(),
+		"note": note or None,
+	})
+	return True
+
+
+def _describe_links(row: dict) -> list:
+	"""The link table off a stored Farm Task row, as plain dicts."""
+	out = []
+	for link in row.get("linked_tasks") or []:
+		link = dict(link)
+		out.append({
+			"task": link.get("linked_task"),
+			"task_name": link.get("linked_task_name") or None,
+			"relationship": link.get("relationship") or LINK_RELATED,
+			"linked_by": link.get("linked_by") or None,
+			"linked_on": str(link.get("linked_on") or "") or None,
+			"note": link.get("note") or None,
+		})
+	return out
+
+
+def open_tasks_on(asset: str, exclude: str = "", location_doctype: str = "", location: str = "") -> list:
+	"""Live tasks against the same thing, for the duplicate hint. Never raises.
+
+	BOTH ROUTES TO A PLACE, because a field report writes `asset` and a
+	dispatched job writes the dynamic `location` pair, and a hint that read one
+	column would miss exactly the case it exists for: a worker reporting a valve
+	somebody has already been sent to.
+	"""
+	if not compat.doctype_exists(FARM_TASK):
+		return []
+	live = [state for state in STATES if state not in TERMINAL_STATES]
+	filter_sets = []
+	if asset and compat.has_field(FARM_TASK, "asset"):
+		filter_sets.append({"asset": asset})
+	if location and location_doctype and compat.has_field(FARM_TASK, "location"):
+		filter_sets.append({"location_doctype": location_doctype, "location": location})
+	seen: dict = {}
+	for filters in filter_sets:
+		try:
+			rows = (
+				frappe.db.get_all(
+					FARM_TASK,
+					filters={**filters, "state": ("in", live)},
+					fields=compat.existing_fields(
+						FARM_TASK,
+						("name", "task_name", "task_type", "state", "assigned_to", "assigned_to_name", "creation"),
+					),
+					order_by="creation asc",
+					limit=20,
+				)
+				or []
+			)
+		except Exception:  # pragma: no cover - a site shaping these columns differently
+			continue
+		for raw in rows:
+			raw = dict(raw)
+			if str(raw.get("name")) == exclude:
+				continue
+			seen.setdefault(str(raw.get("name")), raw)
+	return list(seen.values())
+
+
+def _duplicate_hint(task: dict) -> dict | None:
+	""""There is already an open task for this asset" — the sentence, not the act.
+
+	SURFACED, NEVER ACTED ON. Two reports of a valve are sometimes two valves,
+	and a server that merged them on a name match would be destroying one
+	worker's record on a guess. The hint carries the other task, who has it, and
+	the two calls a person can make about it; the decision is the foreman's.
+
+	Never raises: a hint that failed would take a claim down with it, and a claim
+	is the call somebody makes standing in front of the work.
+	"""
+	try:
+		others = open_tasks_on(
+			str(task.get("asset") or ""),
+			exclude=str(task.get("name") or ""),
+			location_doctype=str(task.get("location_doctype") or ""),
+			location=str(task.get("location") or ""),
+		)
+	except Exception:  # pragma: no cover - a hint, never a refusal
+		return None
+	if not others:
+		return None
+	first = others[0]
+	holder = first.get("assigned_to_name") or first.get("assigned_to") or "nobody yet"
+	return {
+		"open_task_count": len(others),
+		"tasks": [
+			{
+				"name": row.get("name"),
+				"task_name": row.get("task_name"),
+				"task_type": row.get("task_type"),
+				"state": row.get("state"),
+				"assigned_to_name": row.get("assigned_to_name") or row.get("assigned_to") or None,
+				"raised_at": str(row.get("creation") or "") or None,
+			}
+			for row in others
+		],
+		"message": (
+			f"There is already an open task for this: {first.get('task_name')} "
+			f"({first.get('name')}) held by {holder}. Link to it?"
+		),
+		"message_key": "task.duplicate_hint",
+		"actions": ["link_farm_tasks", "merge_farm_task"],
+		"note": (
+			"NOTHING WAS MERGED. Two reports of one valve are sometimes two valves, and this app "
+			"does not guess which. Link them if two people are working the job together; merge the "
+			"duplicate into the primary if it is one job reported twice."
+		),
+	}
+
+
+# ── link_farm_tasks ─────────────────────────────────────────────────────────
+def link_farm_tasks(args: dict) -> ToolResult:
+	"""Record that two tasks are related. Written on both sides."""
+	_require()
+	first = task_row(as_str(args, "task", required=True))
+	second = task_row(as_str(args, "linked_task", required=True) or as_str(args, "other_task"))
+	if first["name"] == second["name"]:
+		raise ToolError(
+			f"{first['name']} cannot be linked to itself. Nothing was changed."
+		)
+
+	relationship = as_str(args, "relationship") or LINK_RELATED
+	if relationship not in LINK_RELATIONSHIPS:
+		raise ToolError(
+			f"relationship must be one of {', '.join(LINK_RELATIONSHIPS)}, not {relationship!r}. "
+			"Nothing was changed."
+		)
+	by = as_str(args, "linked_by") or (frappe.session.user if hasattr(frappe, "session") else "")
+	note = as_str(args, "note")
+
+	forward = frappe.get_doc(FARM_TASK, first["name"])
+	back = frappe.get_doc(FARM_TASK, second["name"])
+	wrote_forward = _write_link(forward, second, relationship, by, note)
+	wrote_back = _write_link(back, first, _MIRROR.get(relationship, relationship), by, note)
+	if wrote_forward:
+		forward.save(ignore_permissions=True)
+	if wrote_back:
+		back.save(ignore_permissions=True)
+
+	if not (wrote_forward or wrote_back):
+		raise ToolError(
+			f"{first['name']} and {second['name']} are already linked. Nothing was changed."
+		)
+
+	return ToolResult(
+		data={
+			"task": first["name"],
+			"linked_task": second["name"],
+			"relationship": relationship,
+			"reverse_relationship": _MIRROR.get(relationship, relationship),
+			"linked_by": by or None,
+			"note": note or None,
+			"links_on_task": _describe_links(dict(forward.as_dict())),
+			"links_on_linked_task": _describe_links(dict(back.as_dict())),
+			"detail": (
+				"The link is written on BOTH records. A relationship stored on one side only is "
+				"invisible from whichever of the two somebody happens to open, and the whole point "
+				"is that the second person to walk up to a job finds the first person's."
+			),
+		},
+		summary=f"linked {first['name']} ↔ {second['name']} ({relationship})",
+		docstatus_delta="0 → 0 (updated)",
+	)
+
+
+def _transfer_evidence(from_task: str, into_task: str) -> dict:
+	"""Move a merged task's evidence onto the primary. Reports what moved.
+
+	THE ASSIGNMENTS THEMSELVES DO NOT MOVE. A Farm Task Assignment is the record
+	that a named person was sent, went and did something — re-pointing it at
+	another task would rewrite whose work it was. What moves is the EVIDENCE:
+	the photographs and signatures filed against the duplicate, copied onto the
+	primary's own completion so the record that survives carries the proof both
+	people produced.
+
+	The originals are left in place. A copy is not a loss and a move would make
+	the merged task's own history unreadable — which is the thing `Merged`
+	exists to avoid.
+	"""
+	moved, minutes = [], 0
+	assignments = (
+		frappe.db.get_all(
+			FARM_TASK_ASSIGNMENT,
+			filters={"task": from_task},
+			fields=compat.existing_fields(FARM_TASK_ASSIGNMENT, _ASSIGNMENT_FIELDS),
+			order_by="creation asc",
+			limit=50,
+		)
+		or []
+	)
+	target = live_assignment(into_task) or _last_completion(into_task)
+	target_doc = frappe.get_doc(FARM_TASK_ASSIGNMENT, target) if target else None
+
+	for row in assignments:
+		row = dict(row)
+		minutes += int(row.get("actual_duration_minutes") or 0)
+		if not target_doc:
+			continue
+		source = frappe.get_doc(FARM_TASK_ASSIGNMENT, str(row["name"]))
+		for evidence in source.get("evidence_files") or []:
+			entry = dict(evidence)
+			entry.pop("name", None)
+			entry.pop("parent", None)
+			entry.pop("parenttype", None)
+			entry.pop("parentfield", None)
+			entry.pop("idx", None)
+			caption = str(entry.get("caption") or "").strip()
+			entry["caption"] = (
+				f"{caption} (merged from {from_task})" if caption else f"Merged from {from_task}"
+			)
+			target_doc.append("evidence_files", entry)
+			moved.append(entry.get("file") or entry.get("file_url"))
+	if target_doc and moved:
+		target_doc.save(ignore_permissions=True)
+
+	return {
+		"evidence_moved": [name for name in moved if name],
+		"evidence_moved_count": len(moved),
+		"target_assignment": target or None,
+		"minutes_from_merged_task": minutes,
+		"assignments_preserved": [str(row["name"]) for row in assignments],
+	}
+
+
+# ── merge_farm_task ─────────────────────────────────────────────────────────
+def merge_farm_task(args: dict) -> ToolResult:
+	"""Fold a duplicate into the task that is actually being worked.
+
+	THE PRIMARY KEEPS ITS STATE AND ITS CLOCK. A merge is a statement about which
+	record the work is being done under, not an event in the work itself — so the
+	primary's assignment, its segments and its minutes are untouched, and a
+	worker who was mid-job does not find their clock reset because a foreman
+	tidied the board.
+
+	THE DUPLICATE IS NOT DELETED. It goes to `Merged` with `merged_into` naming
+	the primary; its assignments, its time segments and its narrative stay
+	exactly where they are. `combined_minutes` is what a report reads for the
+	effort both people actually put in.
+	"""
+	_require()
+	primary = task_row(as_str(args, "into", required=True) or as_str(args, "primary"))
+	duplicate = task_row(as_str(args, "task", required=True) or as_str(args, "duplicate"))
+
+	if primary["name"] == duplicate["name"]:
+		raise ToolError("A task cannot be merged into itself. Nothing was changed.")
+	if duplicate["state"] == MERGED:
+		existing = frappe.db.get_value(FARM_TASK, duplicate["name"], "merged_into")
+		raise ToolError(
+			f"{duplicate['name']} was already merged into {existing}. Nothing was changed."
+		)
+	if duplicate["state"] in TERMINAL_STATES:
+		raise ToolError(
+			f"{duplicate['name']} is {duplicate['state']}. A finished task is a record of work that "
+			"happened and folding it away would hide it — link it instead if the two belong "
+			"together. Nothing was changed."
+		)
+	if primary["state"] in TERMINAL_STATES:
+		raise ToolError(
+			f"{primary['name']} is {primary['state']}, so it is not where any more work is going. "
+			"Merge into the task somebody is actually doing. Nothing was changed."
+		)
+
+	reason = as_str(args, "reason")
+	if not reason:
+		raise ToolError(
+			"reason is required. A merge takes one worker's job off the board under somebody "
+			"else's name, and 'duplicate of the valve report from this morning' is what makes that "
+			"reviewable six weeks later. Nothing was changed."
+		)
+	by = as_str(args, "merged_by") or (frappe.session.user if hasattr(frappe, "session") else "")
+
+	transfer = _transfer_evidence(duplicate["name"], primary["name"])
+
+	# The duplicate's live assignment is closed as Merged rather than left
+	# holding a task that is no longer being worked — otherwise its worker's
+	# concurrent-claim count would carry a job that has gone.
+	live = live_assignment(duplicate["name"])
+	if live:
+		doc = frappe.get_doc(FARM_TASK_ASSIGNMENT, live)
+		_close_segment(doc, frappe.utils.now(), SEGMENT_MERGE, f"Merged into {primary['name']}")
+		doc.state = MERGED
+		doc.paused_at = None
+		doc.actual_duration_minutes = active_minutes(doc)
+		doc.save(ignore_permissions=True)
+
+	merged_doc = frappe.get_doc(FARM_TASK, duplicate["name"])
+	primary_doc = frappe.get_doc(FARM_TASK, primary["name"])
+	_write_link(merged_doc, primary, LINK_DUPLICATE_OF, by, reason)
+	_write_link(primary_doc, duplicate, LINK_MERGED_FROM, by, reason)
+	merged_doc.state = MERGED
+	merged_doc.merged_into = primary["name"]
+	merged_doc.assigned_to = ""
+	merged_doc.assigned_to_name = ""
+	merged_doc.save(ignore_permissions=True)
+	primary_doc.save(ignore_permissions=True)
+
+	primary_minutes = sum(
+		int(row.get("actual_duration_minutes") or 0)
+		for row in frappe.db.get_all(
+			FARM_TASK_ASSIGNMENT,
+			filters={"task": primary["name"]},
+			fields=["actual_duration_minutes"],
+			limit=50,
+		)
+		or []
+	)
+
+	return ToolResult(
+		data={
+			"merged": duplicate["name"],
+			"into": primary["name"],
+			"reason": reason,
+			"merged_by": by or None,
+			"primary_state": primary_doc.state,
+			**transfer,
+			"minutes_on_primary": primary_minutes,
+			"combined_minutes": primary_minutes + int(transfer["minutes_from_merged_task"] or 0),
+			"note": (
+				f"{duplicate['name']} is Merged and points at {primary['name']}. Nothing was "
+				"deleted: its assignments, its time segments and its narrative stay on it, so the "
+				"effort both people put in is still countable and somebody opening the duplicate "
+				"six weeks later is told where the work went."
+			),
+		},
+		summary=(
+			f"merged {duplicate['name']} into {primary['name']}: {transfer['evidence_moved_count']} "
+			f"evidence file(s) moved, {transfer['minutes_from_merged_task']} min carried"
+		),
+		docstatus_delta=f"{duplicate['state']} → {MERGED}",
+	)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v0.79.0 — work that does not finish today
+#
+# AN ACCIDENT INVESTIGATION IS NOT A TASK, IT IS A SET OF THEM. Interview the
+# witness. Photograph the scene. Pull the camera footage. Write the root cause.
+# Those happen on different days, by different people, and the investigation is
+# not finished until they all are — which is a shape this app's dispatch board
+# could not express: every task was a thing one person did in one visit.
+#
+# SO A TASK MAY HAVE A PARENT. Each child carries its own assignee, its own
+# clock and its own state; the parent carries the narrative and does not close
+# while a child is live. That last rule is what makes a multi-day investigation
+# survive an evening — without it, the first person to finish their piece closes
+# the investigation, and the camera footage nobody pulled becomes a finding
+# nobody made.
+#
+# NOTHING AUTO-CLOSES AT THE END OF A SHIFT, and this is worth stating because
+# the crew clock does close things: `end_shift` ends a SHIFT, and a task is not
+# a shift. A worker who goes home mid-investigation leaves it In-Progress or
+# Paused, and picks it up in the morning.
+# ══════════════════════════════════════════════════════════════════════════════
+
+#: Most children one parent carries. An investigation with more steps than this
+#: is a project, and this app is not a project planner.
+SUBTASK_CAP = 100
+
+
+def subtasks_of(task: str, limit: int = SUBTASK_CAP) -> list:
+	"""Every task whose parent is this record, oldest first. Never raises.
+
+	KEYED ON THE DOCNAME ALONE and not on the doctype pair, because the caller
+	holds one name and the pair would make every call site learn which register
+	it was asking about. Docnames across these two registers do not collide —
+	`FT-2026-08-00012` and an Accident Report's hash are not the same string —
+	so the narrower filter would buy nothing and cost every caller an argument.
+	"""
+	if not compat.doctype_exists(FARM_TASK) or not compat.has_field(FARM_TASK, "parent_task"):
+		return []
+	try:
+		rows = (
+			frappe.db.get_all(
+				FARM_TASK,
+				filters={"parent_task": task},
+				fields=compat.existing_fields(
+					FARM_TASK,
+					(
+						"name",
+						"task_name",
+						"task_type",
+						"state",
+						"urgency",
+						"assigned_to",
+						"assigned_to_name",
+						"creation",
+					),
+				),
+				order_by="creation asc",
+				limit=limit,
+			)
+			or []
+		)
+	except Exception:  # pragma: no cover - a site shaping these columns differently
+		return []
+	out = []
+	for raw in rows:
+		row = dict(raw)
+		out.append({
+			"name": row.get("name"),
+			"task_name": row.get("task_name"),
+			"task_type": row.get("task_type") or None,
+			"state": row.get("state"),
+			"urgency": row.get("urgency") or "Normal",
+			"assigned_to": row.get("assigned_to") or None,
+			"assigned_to_name": row.get("assigned_to_name") or row.get("assigned_to") or None,
+			"open": row.get("state") not in TERMINAL_STATES,
+			"raised_at": str(row.get("creation") or "") or None,
+		})
+	return out
+
+
+def open_subtasks(task: str) -> list:
+	return [child for child in subtasks_of(task) if child["open"]]
+
+
+def subtask_summary(task: str) -> dict:
+	"""The parent's own progress line: how many of its steps are done.
+
+	Returned on a scan and on `get_farm_task`, because "3 of 5 done, waiting on
+	the camera footage" is the sentence somebody wants and counting the list
+	client-side is how two screens come to disagree.
+	"""
+	children = subtasks_of(task)
+	if not children:
+		return {"subtask_count": 0, "subtasks": [], "open_subtask_count": 0, "subtasks_complete": True}
+	open_children = [child for child in children if child["open"]]
+	return {
+		"subtask_count": len(children),
+		"open_subtask_count": len(open_children),
+		"subtasks_complete": not open_children,
+		"subtasks": children,
+		"progress": f"{len(children) - len(open_children)} of {len(children)} done",
+		"waiting_on": [child["task_name"] or child["name"] for child in open_children],
+	}
+
+
+#: Which registers may own steps. An Accident Report is the reason this is not
+#: simply "another Farm Task": an investigation's steps are interviews and
+#: photographs and a root-cause write-up, and the investigation itself is not a
+#: dispatchable job. Anything else is refused rather than accepted, because
+#: "hang a task off any doctype" is a general-purpose project tree, which this
+#: app is deliberately not.
+PARENT_DOCTYPES = (FARM_TASK, "Accident Report")
+
+
+def _parent_argument(args: dict, verb: str) -> tuple[str, str]:
+	"""`(parent_doctype, parent)` for a create call. `("", "")` where none given.
+
+	REFUSES A TERMINAL PARENT and refuses a chain. A step added to a finished
+	investigation is a step nobody will see; and a sub-task of a sub-task is a
+	project plan, which is a different tool and one this app is not.
+	"""
+	parent = as_str(args, "parent_task")
+	if not parent:
+		return "", ""
+	if not compat.has_field(FARM_TASK, "parent_task"):
+		raise ToolError(
+			"this site's Farm Task has no parent_task column, so a sub-task has nowhere to hang — "
+			f"run `bench --site <site> migrate` after upgrading the app. Nothing was {verb}."
+		)
+
+	doctype = as_str(args, "parent_doctype")
+	if not doctype:
+		# INFERRED WHERE IT CAN BE, because a handset raising a step from an
+		# investigation screen holds one docname and should not have to name the
+		# register this app keeps it in.
+		found = [
+			candidate
+			for candidate in PARENT_DOCTYPES
+			if compat.doctype_exists(candidate) and frappe.db.exists(candidate, parent)
+		]
+		if len(found) > 1:
+			raise ToolError(
+				f"{parent!r} is a record in {' and in '.join(found)}. Pass parent_doctype. "
+				f"Nothing was {verb}."
+			)
+		if not found:
+			raise ToolError(
+				f"no {' or '.join(PARENT_DOCTYPES)} called {parent!r} on this site. Nothing was {verb}."
+			)
+		doctype = found[0]
+	if doctype not in PARENT_DOCTYPES:
+		raise ToolError(
+			f"parent_doctype must be one of {', '.join(PARENT_DOCTYPES)}, not {doctype!r}. Hanging "
+			"a task off an arbitrary record would be a project tree, which this app is not. "
+			f"Nothing was {verb}."
+		)
+	if not frappe.db.exists(doctype, parent):
+		raise ToolError(f"no {doctype} called {parent!r} on this site. Nothing was {verb}.")
+
+	if doctype == FARM_TASK:
+		row = task_row(parent)
+		if row["state"] in TERMINAL_STATES:
+			raise ToolError(
+				f"{row['name']} is {row['state']}, so a step added to it is a step nobody will see. "
+				f"Nothing was {verb}."
+			)
+		grandparent = frappe.db.get_value(FARM_TASK, row["name"], "parent_task")
+		if grandparent:
+			raise ToolError(
+				f"{row['name']} is itself a sub-task of {grandparent}. One level of nesting is "
+				"deliberate: a tree of sub-tasks is a project plan, and a dispatch board that "
+				f"became one would stop being readable at a tailgate. Nothing was {verb}."
+			)
+		parent = row["name"]
+	elif str(frappe.db.get_value(doctype, parent, "status") or "") == "Closed":
+		raise ToolError(
+			f"{doctype} {parent} is closed, so a step added to it is a step nobody will see. "
+			f"Reopen it first. Nothing was {verb}."
+		)
+
+	if len(subtasks_of(parent)) >= SUBTASK_CAP:
+		raise ToolError(f"{parent} already has {SUBTASK_CAP} steps under it. Nothing was {verb}.")
+	return doctype, parent
+
+
+def _blocking_subtasks(task: str) -> list:
+	"""Live children that stand between this task and being finished."""
+	if not compat.has_field(FARM_TASK, "parent_task"):
+		return []
+	return open_subtasks(task)
