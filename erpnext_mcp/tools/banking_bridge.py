@@ -2098,7 +2098,8 @@ def apply_categorization_rules(args: dict) -> ToolResult:
 		"company": company,
 		"dry_run": dry_run,
 		"overwrite": overwrite,
-		"rules_evaluated": len(rules),
+		"rules_evaluated": len(prepared),
+		"rules_loaded": len(rules),
 		"transactions_scanned": len(rows),
 		"categorized": applied,
 		"categorized_count": len(applied),
@@ -2127,7 +2128,8 @@ def apply_categorization_rules(args: dict) -> ToolResult:
 	return ToolResult(
 		data,
 		("would categorise" if dry_run else "categorised")
-		+ f" {len(applied)} of {len(rows)} transaction(s) for {company} using {len(rules)} rule(s)",
+		+ f" {len(applied)} of {len(rows)} transaction(s) for {company} using {len(prepared)} rule(s)"
+		+ (f" ({len(rules) - len(prepared)} failed to load)" if len(prepared) < len(rules) else ""),
 		docstatus_delta="none (fields on existing transactions)" if not dry_run else "",
 	)
 

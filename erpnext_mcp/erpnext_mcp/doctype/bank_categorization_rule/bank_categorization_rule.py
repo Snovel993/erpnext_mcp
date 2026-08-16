@@ -374,9 +374,11 @@ class BankCategorizationRule(Document):
 			return False
 
 		gross = float(row.get("gross_amount") or 0)
-		if self.amount_min not in (None, "") and gross < float(self.amount_min):
+		lo = self.amount_min
+		if lo not in (None, "") and float(lo) > 0 and gross < float(lo):
 			return False
-		if self.amount_max not in (None, "") and gross > float(self.amount_max):
+		hi = self.amount_max
+		if hi not in (None, "") and float(hi) > 0 and gross > float(hi):
 			return False
 
 		if self.match_type == "amount_range":
