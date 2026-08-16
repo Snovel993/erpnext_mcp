@@ -248,6 +248,14 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# v0.81.0. The register read, defaulted to the caller's own shifts — how a
 		# handset that lost the docname finds the shift it left open.
 		"/mobile/list_shifts",
+		# The compliance timeline, the crew track and the per-worker envelope —
+		# tools since v0.19.3, v0.32.0 and v0.64.0, reachable until now only from a
+		# Desk, which is the one place a break that happened on the block cannot be
+		# logged at the moment it happened.
+		"/mobile/log_shift_event",
+		"/mobile/log_shift_location",
+		"/mobile/get_shift_track",
+		"/mobile/get_shift_crew_timeline",
 		# v0.62.0. The seven the handset names and this table did not carry. The
 		# first three reach the same functions as `list_onboarding_reference_data`,
 		# `list_available_housing` and `assign_housing` above; they are separate

@@ -72,13 +72,23 @@ admits, only **Farm Manager** is also in `employee.HR_ROLES` and
 `kpi.KPI_ROLES`. A Field Worker or a Foreman holding a perfectly good grant
 gets through all seven of `guard`'s gates and is then refused by the tool with
 its own sentence. That is the correct refusal — an I-9 is a personnel record
-and a shift is a wage record, and neither is a picker's to write — but it means
-an operator enrolling somebody to run onboarding or the crew clock must enrol
-them as a Farm Manager, or grant the account one of the HR roles in the Desk.
+and it is not a picker's to write — but it means an operator enrolling somebody
+to run onboarding must enrol them as a Farm Manager, or grant the account one of
+the HR roles in the Desk.
 
-Copying the gate up here, or widening it, would be the same mistake the
-paragraph above refuses for the dispatch rules: two sets of personnel rules to
-keep in step.
+THE CREW CLOCK IS THE EXCEPTION AND IT IS THE TOOL'S OWN LIST THAT CHANGED,
+not a copy of the gate up here. `tools/shifts.py` gates on
+`employee.SHIFT_ROLES` — the HR roles plus Foreman and Crew Leader — because a
+shift is the one register whose obligations OAR 437-004-1131 puts on the NAMED
+supervisor, and because this app's own role table already grants Foreman full
+permission on `Farm Shift`. The observable failure was a handset showing a Crew
+Clock button to exactly the roles the server then refused. Hiring did not move
+with it: those two roles still cannot create or edit an Employee, an I-9 or a
+W-4.
+
+Copying either gate up here, or widening one at this layer, would be the same
+mistake the paragraph above refuses for the dispatch rules: two sets of
+personnel rules to keep in step.
 """
 
 from __future__ import annotations
@@ -7755,3 +7765,184 @@ def confirm_shipment_movement(user: str, shipment=None, movement=None, occurred_
 		"movement": movement,
 		"changed": data.get("changed"),
 	}
+
+
+# ── 98. log_shift_event ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("log_shift_event", mutating=True, limit=guard.WRITE_LIMIT)
+def log_shift_event(
+	user: str,
+	shift=None,
+	event_type=None,
+	event_datetime=None,
+	description=None,
+	logged_by=None,
+	weather_snapshot_temp_f=None,
+	weather_snapshot_heat_index_f=None,
+	evidence_file_token=None,
+) -> dict:
+	"""One thing the supervisor did about the conditions, logged where it happened.
+
+	THE TIMELINE IS THE EVIDENCE AND THE PHONE IS WHERE IT IS WRITTEN. `-1131`
+	does not ask whether water was available in principle; it asks what happened
+	during the shift, and four timestamped breaks answer that in a way an annual
+	policy never can. The tool has existed since v0.19.3 and had no route, so the
+	only way to log one was the Desk — which is to say, in the evening, from
+	memory, which is exactly the record an investigator discounts.
+
+	`log_shift_break` IS NOT THIS AND BOTH ARE PUBLISHED. A break carries a
+	payroll classification and a duration and is the thing the handset's break
+	coach counts from; this is everything else on the timeline — a supervisor
+	observation, a heat-illness signs check, a shade trailer that broke down.
+
+	`producer_record_doctype` AND `producer_record_name` ARE NOT FORWARDED. They
+	point one compliance record at another and are how a packet builder follows a
+	trail; a body that could set them could file this event as the product of a
+	record it had nothing to do with. The MCP surface keeps them.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	inner = {"shift": name, "event_type": event_type}
+	for key, value in (
+		("event_datetime", event_datetime),
+		("description", description),
+		("weather_snapshot_temp_f", weather_snapshot_temp_f),
+		("weather_snapshot_heat_index_f", weather_snapshot_heat_index_f),
+		("evidence_file_token", evidence_file_token),
+	):
+		if value is not None:
+			inner[key] = value
+	if logged_by is not None:
+		# The lead worker who actually called the break, when it was not the
+		# foreman — scoped like every other employee argument on this surface, so
+		# an account cannot credit somebody in another entity with the call.
+		inner["logged_by"] = _employee_argument(logged_by, allowed, "logged_by")
+
+	result = shifts.log_shift_event(inner)
+	return result.data
+
+
+# ── 99. log_shift_location ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("log_shift_location", mutating=True, limit=guard.UPLOAD_LIMIT)
+def log_shift_location(
+	user: str,
+	shift=None,
+	latitude=None,
+	longitude=None,
+	lat=None,
+	lon=None,
+	timestamp=None,
+	accuracy_meters=None,
+	source=None,
+	employee=None,
+	notes=None,
+) -> dict:
+	"""Append one GPS fix to a shift's track. Appends only; never edits.
+
+	THE ONE WRITE ON THIS SURFACE THE WORKER'S PHONE DRIVES RATHER THAN THE
+	FOREMAN'S, and it is not a hole in the sole-actor rule. That rule is about who
+	is ANSWERABLE — who forms the crew, calls the water break, signs the close —
+	and none of it moves. A breadcrumb attests to nothing; it records where a
+	device was, which is a measurement, and the foreman's record is the thing it
+	corroborates.
+
+	ONE FIX PER CALL, IN THE SHAPE A PHONE ACTUALLY SENDS, and on `UPLOAD_LIMIT`
+	rather than `WRITE_LIMIT` for the reason `sync_bucket_entries` is: a handset
+	that walked a canyon posts its backlog one call at a time the moment the bars
+	return, and ten a minute would refuse most of it — throwing away the half of
+	the track that is hardest to collect. `lat`/`lon` are accepted beside the full
+	spellings because that is what a phone's location API calls them.
+
+	IT IS LIVE ON THIS SURFACE AND DOES NOT READ `allow_log_shift_location`, which
+	is the same posture every other method on this transport takes. The per-tool
+	switches answer "what may the AI do"; a phone is not the AI, and the gates
+	that hold here are the four in `guard` — the mobile kill switch, a named
+	human, a Farm Ops role, and an Active grant. An operator who wants no crew
+	tracking on a handset revokes the grant or leaves the app's tracking off; the
+	MCP surface still honours the switch, so an AI client cannot post a fix on a
+	site that has not opened it.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	inner = {"shift": name}
+	for key, value in (
+		("latitude", latitude),
+		("longitude", longitude),
+		("lat", lat),
+		("lon", lon),
+		("timestamp", timestamp),
+		("accuracy_meters", accuracy_meters),
+		("source", source),
+		("notes", notes),
+	):
+		if value is not None:
+			inner[key] = value
+	if employee is not None:
+		inner["employee"] = _employee_argument(employee, allowed)
+
+	result = shifts.log_shift_location(inner)
+	return result.data
+
+
+# ── 100. get_shift_track ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_shift_track", limit=guard.READ_LIMIT)
+def get_shift_track(user: str, shift=None, employee=None, limit=None) -> dict:
+	"""Where the crew went during one shift, in the order the fixes were taken.
+
+	NOT THE ORDER THEY ARRIVED. A phone out of signal posts an hour of
+	breadcrumbs at once, and a track sorted by insertion draws the crew standing
+	still all morning where the signal came back and then teleporting across the
+	farm.
+
+	THE GAPS ARE REPORTED, because a track's silences are the part a reader
+	misjudges. `limit` is passed through to the tool's own `TRACK_CAP`, which is
+	deliberately much larger than the register cap — a nine-hour shift at a fix
+	every thirty seconds is eleven hundred points, and cutting at five hundred
+	would lose the afternoon without saying which half went.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	inner = {"shift": name}
+	if employee is not None:
+		inner["employee"] = _employee_argument(employee, allowed)
+	if limit is not None:
+		inner["limit"] = limit
+
+	result = shifts.get_shift_track(inner)
+	return result.data
+
+
+# ── 101. get_shift_crew_timeline ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_shift_crew_timeline", limit=guard.READ_LIMIT)
+def get_shift_crew_timeline(user: str, shift=None, employee=None) -> dict:
+	"""Each crew member's own envelope: their span, their weather, their events.
+
+	THE SHIFT IS ONE RECORD AND THE CREW IS NOT ONE PERSON. `get_shift` answers
+	what happened on this shift; this answers what happened TO ANA, who joined at
+	09:40, left at 13:00, and was therefore present for two of the shift's five
+	water breaks and absent for the hour it was hottest. Every number is computed
+	against the worker's OWN span — the foreman's 96 °F at three in the afternoon
+	is not evidence about a picker who went home at one.
+
+	IT IS THE READ BEHIND THE CLOSE SCREEN. A supervisor about to sign a shift off
+	is attesting to the crew's day and not to their own, and until this route
+	existed the phone had no way to show them the difference.
+
+	`employee` NARROWS IT TO ONE ENVELOPE and nothing else; it cannot widen the
+	read past the shift the caller already named and was scoped against.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+
+	inner = {"shift": name}
+	if employee is not None:
+		inner["employee"] = _employee_argument(employee, allowed)
+
+	result = shifts.get_shift_crew_timeline(inner)
+	return result.data

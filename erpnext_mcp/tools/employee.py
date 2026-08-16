@@ -175,6 +175,37 @@ GRANT = "Mobile Access Grant"
 #: is required and would be surprised to find missing.
 HR_ROLES = ("System Manager", "HR Manager", "HR User", "Farm Manager")
 
+#: Who may run a crew shift — form it, log what happened on it, and sign it off.
+#:
+#: `HR_ROLES` PLUS THE TWO ROLES THAT ARE ACTUALLY STANDING ON THE BLOCK, and
+#: built from that tuple rather than beside it so the two lists cannot drift.
+#:
+#: THE GAP THIS CLOSES WAS A HANDSET SHOWING A BUTTON THE SERVER REFUSED.
+#: `ShiftToolsToolbar` offers Crew Clock to Farm Manager, System Manager, Foreman
+#: and Crew Leader, and the shift tools gated on `HR_ROLES`, which has neither of
+#: the last two — so a foreman who tapped it was told they "may not change the
+#: personnel register" for the one record that is unambiguously theirs.
+#:
+#: IT IS NOT A LOOSENING OF THE PERSONNEL GATE, and the two lists are separate
+#: for that reason. A Foreman still cannot hire, edit an Employee, touch an I-9
+#: or a W-4, or read the wage tables — `create_employee` and everything beside it
+#: keep `HR_ROLES` exactly as it was. What this adds is the register OAR
+#: 437-004-1131 already puts on them: the water, shade, rest-cycle and
+#: observation obligations sit on the NAMED supervisor, `roles.py` grants Foreman
+#: FULL permission on `Farm Shift` for exactly that reason, and a supervisor who
+#: cannot open the shift cannot discharge the obligation the rule names them for.
+#:
+#: THE ATTENDANCE ROWS ARE THE POINT OF THE CLOSE. `end_shift` writes one
+#: submitted Attendance per crew member from their own `joined_at`/`left_at`, so
+#: a foreman who cannot close is a crew with no wage record for the day.
+#:
+#: "Crew Leader" IS NOT ONE OF THE SIX ROLES `roles.py` SHIPS. It is a role
+#: operators create by hand on sites where the crew lead is not the foreman, and
+#: naming it here costs nothing on a site that has not got one — `frappe.get_roles`
+#: simply never returns it — while a site that does have one stops being a site
+#: where the app's own iOS client offers a button its server refuses.
+SHIFT_ROLES = HR_ROLES + ("Foreman", "Crew Leader")
+
 
 def _farm_ops_roles() -> frozenset:
 	"""The roles that make a login worth linking to an Employee.
@@ -395,14 +426,40 @@ def require_hr_role() -> str:
 	controls, and gating on whichever one is present is what makes this check mean
 	something on both transports instead of meaning nothing on one.
 	"""
+	return _require_one_of(HR_ROLES, "a personnel change", "change the personnel register")
+
+
+def require_shift_role() -> str:
+	"""The principal this call is attributed to, once it has proved it may run a shift.
+
+	`require_hr_role` WITH TWO MORE ROLES AND NOTHING ELSE DIFFERENT — same
+	identity resolution, same refusal shape, same company scope applied by the
+	caller afterwards. See `SHIFT_ROLES` for why the crew's own supervisor is on
+	a list the personnel register's gate does not have.
+	"""
+	return _require_one_of(SHIFT_ROLES, "a shift record", "form or close a crew shift")
+
+
+def _require_one_of(allowed: tuple, attribution: str, refusal: str) -> str:
+	"""The shared body of the two gates above: one identity, one role set.
+
+	WHICH IDENTITY. `security.caller_identity()` is whoever Frappe authenticated
+	THIS request — a phone or a Desk session presenting its own credential — and
+	is empty on the ordinary MCP path, where the operator's client presents a
+	shared token and no human identity exists to read. There the principal is
+	`frappe.session.user`, which by the time any tool runs is the MCP System User
+	the operator configured. Both are real principals whose roles the operator
+	controls, and gating on whichever one is present is what makes this check mean
+	something on both transports instead of meaning nothing on one.
+	"""
 	actor = security.caller_identity() or str(getattr(frappe.session, "user", "") or "")
 	if not actor or actor == "Guest":
-		raise ToolError("this call has no identity to attribute a personnel change to. Nothing was changed.")
+		raise ToolError(f"this call has no identity to attribute {attribution} to. Nothing was changed.")
 	held = set(frappe.get_roles(actor) or []) or set(roles.all_roles_of(actor) or [])
-	if not held & set(HR_ROLES):
+	if not held & set(allowed):
 		raise ToolError(
-			f"{actor} may not change the personnel register: it holds none of "
-			f"{', '.join(HR_ROLES)}. This is the account this app acts as — an operator "
+			f"{actor} may not {refusal}: it holds none of "
+			f"{', '.join(allowed)}. This is the account this app acts as — an operator "
 			"sets it with `mcp_system_user` on ERPNext MCP Settings, and grants it a role "
 			"in the Desk. Nothing was changed."
 		)

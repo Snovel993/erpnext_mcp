@@ -486,9 +486,24 @@ class TheTaskShiftJoin(ShiftAnchoredTestCase):
 		self.assertIn("anchored to shift", started["shift_note"])
 
 	def test_two_open_shifts_naming_the_same_person_infer_nothing(self):
-		"""Guessing would put the evidence on a crew that was somewhere else."""
+		"""Guessing would put the evidence on a crew that was somewhere else.
+
+		THE SECOND CREW ROW IS WRITTEN ON THE DOCUMENT RATHER THAN THROUGH
+		`start_shift`, and the reason is worth stating: the tools now REFUSE to
+		roster somebody onto a second open shift, because two open shifts become
+		two overlapping Attendance days when both close. That guard does not make
+		this state impossible — a crew row added in the Desk, or data migrated in
+		from whatever the operation used before, produces it without going near a
+		tool — and a shift-inference that guessed as soon as the tools stopped
+		producing the ambiguity would be wrong in exactly the case it was written
+		for. So the state is built the way a site actually arrives at it.
+		"""
 		self.start()
-		self.start(location="Block 9 South", start_datetime=at(7))
+		second = self.start(location="Block 9 South", start_datetime=at(7), crew_employees=[])
+		doc = frappe.get_doc(shifts.DOCTYPE, second)
+		doc.append("crew", {"employee": WORKER, "joined_at": at(7)})
+		doc.flags.ignore_permissions = True
+		doc.save(ignore_permissions=True)
 		task = self.a_task()
 		self.tool_data("claim_farm_task", {"task": task["name"], "worker_id": WORKER})
 		started = self.tool_data("start_farm_task", {"task": task["name"], "worker_id": WORKER})

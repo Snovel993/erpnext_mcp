@@ -189,6 +189,69 @@ def is_open(row: dict) -> bool:
 	return not str(row.get("end_datetime") or "").strip()
 
 
+#: Most crew rows one cross-shift check will walk for a single employee. A
+#: picker's whole season is a few hundred rows and the query is filtered to one
+#: employee, so this is a runaway guard rather than a real ceiling.
+CREW_HISTORY_CAP = 1000
+
+
+def open_shifts_for(employee: str, exclude: str = "") -> list:
+	"""Every OPEN shift this employee is still standing on, `exclude` aside.
+
+	THE QUESTION A SINGLE SHIFT CANNOT ANSWER ABOUT ITSELF. The Farm Shift
+	controller refuses the same Employee twice on ONE crew, which stops the
+	duplicate somebody can see — two rows side by side on one form. It says
+	nothing about the same person being on two DIFFERENT open shifts, and that is
+	the shape that actually happens: a foreman rosters Ana at six, the packing
+	shed's lead rosters her again at ten on a shift of their own, and neither
+	form shows the other. Both close, the Attendance bridge writes one row per
+	crew row, and Ana is paid twice for one day out of records that each look
+	correct on their own.
+
+	STILL ON means two facts together: the crew row has no `left_at`, so nobody
+	clocked them out of it, AND the shift itself has no `end_datetime`, so it is
+	running. A worker whose morning shift was closed at noon is on nothing at
+	one o'clock, and a `remove_worker_from_shift` at eleven ends their span
+	whether or not the shift they were on carries on without them.
+
+	Returns the shift rows rather than a bool, because a refusal that cannot
+	name the other shift is one nobody can act on — the whole fix is "close
+	SHIFT-2026-0114 first", and that needs the docname in the sentence.
+	"""
+	employee = str(employee or "").strip()
+	if not employee or not compat.doctype_exists(CREW_DOCTYPE):
+		return []
+	rows = (
+		frappe.db.get_all(
+			CREW_DOCTYPE,
+			filters={"employee": employee, "parenttype": DOCTYPE, "parentfield": "crew"},
+			# `parent` IS NOT PASSED THROUGH `existing_fields`, because it is one of
+			# Frappe's own standard columns on every child table rather than a field
+			# the doctype declares — filtering it out would leave every row without
+			# the one value this function is here to read.
+			fields=["parent", *compat.existing_fields(CREW_DOCTYPE, ("joined_at", "left_at"))],
+			limit=CREW_HISTORY_CAP,
+		)
+		or []
+	)
+	out = []
+	seen = set()
+	for row in rows:
+		parent = str(row.get("parent") or "")
+		if not parent or parent == str(exclude or "") or parent in seen:
+			continue
+		if str(row.get("left_at") or "").strip():
+			continue
+		shift = frappe.db.get_value(DOCTYPE, parent, list(FIELDS), as_dict=True)
+		if not shift or not is_open(dict(shift)):
+			continue
+		seen.add(parent)
+		entry = dict(shift)
+		entry["joined_at"] = row.get("joined_at")
+		out.append(entry)
+	return sorted(out, key=lambda entry: str(entry.get("start_datetime") or ""))
+
+
 # ── reading ─────────────────────────────────────────────────────────────────
 FIELDS = (
 	"name",

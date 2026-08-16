@@ -976,12 +976,18 @@ class ContractTestCase(MobileAPITestCase):
 
 		THE ROLE IS THE POINT OF THIS HELPER. `tools/i9.py`, `tools/w4.py`,
 		`tools/shifts.py` and `tools/bucket_log.py` each gate on
-		`employee.require_hr_role` or `kpi.require_kpi_role`, and the only role in
-		BOTH those lists and `guard.FARM_OPS_ROLES` is Farm Manager. Ana is enrolled
-		as a Field Worker like every other test in this file, so she is granted the
-		second role here — which is exactly what an operator has to do on a real
-		site before a phone can open a shift or file an I-9. A fixture that widened
-		the gate instead would be testing a site nobody runs.
+		`employee.require_hr_role`, `employee.require_shift_role` or
+		`kpi.require_kpi_role`, and the only role in ALL of those lists and
+		`guard.FARM_OPS_ROLES` is Farm Manager. Ana is enrolled as a Field Worker
+		like every other test in this file, so she is granted the second role here
+		— which is exactly what an operator has to do on a real site before a phone
+		can file an I-9. A fixture that widened the gate instead would be testing a
+		site nobody runs.
+
+		THE SHIFT TOOLS ARE THE ONE PLACE THAT IS NO LONGER THE ONLY WAY IN:
+		`SHIFT_ROLES` adds Foreman and Crew Leader, so a supervisor enrolled as a
+		Foreman opens and closes shifts without being made a Farm Manager. Farm
+		Manager still reaches them, which is why this helper does not change.
 		"""
 		install_hrms()
 		STORE.singles["I-9 Settings"] = {

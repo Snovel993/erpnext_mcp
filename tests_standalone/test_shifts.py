@@ -61,6 +61,7 @@ ON = {
 		"remove_worker_from_shift",
 		"log_shift_event",
 		"end_shift",
+		"cancel_shift",
 		"create_heat_exposure_event",
 		"list_shifts",
 		"get_shift",
@@ -450,6 +451,166 @@ class TheTimelineIsTheEvidence(ShiftTestCase):
 			"log_shift_event", {"shift": shift, "event_type": "Water Break", "logged_by": WORKER}
 		)
 		self.assertEqual(data["compliance_events"][0]["logged_by"], WORKER)
+
+
+# ── 3b ──────────────────────────────────────────────────────────────────────
+class TheThirdEndingIsACancellation(ShiftTestCase):
+	"""`cancel_shift`: the shift was formed and then not worked.
+
+	THE TWO ENDINGS BEFORE IT WERE BOTH WRONG FOR THIS DAY. Left open, the shift
+	is walked by the weather sweep for ever and reported by `list_shifts` as work
+	in progress. Closed with a signature, it files a §112.161(b) attestation that
+	a day happened and writes an Attendance row per crew member for a day nobody
+	worked — which payroll pays.
+	"""
+
+	def cancel(self, shift: str, **overrides):
+		payload = {"shift": shift, "cancellation_reason": "crew stood down at 06:40, heat index 94 °F"}
+		payload.update(overrides)
+		return self.tool_data("cancel_shift", payload)
+
+	def test_a_cancelled_shift_is_cancelled_not_closed_and_pays_nobody(self):
+		shift = self.start()["name"]
+		data = self.cancel(shift, cancelled_at=at(6, 40))
+
+		row = self.raw(shift)
+		self.assertEqual(shifts.describe(row)["status"], shifts.STATUS_CANCELLED)
+		self.assertTrue(row["cancelled"])
+		self.assertIn("heat index", row["cancellation_reason"])
+		# THE ASSERTION THE WHOLE TOOL EXISTS FOR.
+		self.assertEqual(self.attendance(), [])
+		self.assertEqual(data["attendance_created"], 0)
+
+	def test_the_end_time_is_set_or_the_shift_would_still_be_active(self):
+		"""`status_for` reads `end_datetime` FIRST — a Cancelled tick with no end
+		time is an Active shift the weather sweep keeps walking."""
+		shift = self.start()["name"]
+		self.cancel(shift, cancelled_at=at(6, 40))
+		self.assertEqual(self.raw(shift)["end_datetime"], at(6, 40))
+		self.assertFalse(shifts.is_open(self.raw(shift)))
+
+	def test_the_crew_rows_survive_because_they_turned_up(self):
+		"""'They were rostered and stood down' is what answers a wage claim from
+		somebody who drove in for nothing."""
+		shift = self.start()["name"]
+		self.cancel(shift)
+		self.assertEqual(len(self.crew_rows(shift)), len([WORKER, *CREW]))
+
+	def test_a_cancellation_with_no_reason_is_refused_and_the_shift_stays_open(self):
+		shift = self.start()["name"]
+		message = self.tool_error("cancel_shift", {"shift": shift})
+		self.assertIn("cancellation_reason is required", message)
+		self.assertIn("THE SHIFT IS STILL OPEN", message)
+		self.assertEqual(shifts.describe(self.raw(shift))["status"], shifts.STATUS_ACTIVE)
+
+	def test_a_closed_shift_cannot_be_cancelled_afterwards(self):
+		"""The Attendance rows are already written. Cancelling would claim the day
+		was not worked while the rows saying it was stay on the register."""
+		shift = self.start()["name"]
+		self.close(shift)
+		message = self.tool_error(
+			"cancel_shift", {"shift": shift, "cancellation_reason": "changed my mind"}
+		)
+		self.assertIn("was CLOSED", message)
+		self.assertIn("Attendance", message)
+		self.assertEqual(len(self.attendance()), len([WORKER, *CREW]))
+
+	def test_a_second_cancellation_is_refused_and_names_the_first_reason(self):
+		shift = self.start()["name"]
+		self.cancel(shift)
+		message = self.tool_error(
+			"cancel_shift", {"shift": shift, "cancellation_reason": "again"}
+		)
+		self.assertIn("already cancelled", message)
+		self.assertIn("heat index", message)
+
+	def test_a_cancellation_before_the_shift_started_is_refused(self):
+		shift = self.start()["name"]
+		message = self.tool_error(
+			"cancel_shift",
+			{"shift": shift, "cancellation_reason": "never happened", "cancelled_at": at(5)},
+		)
+		self.assertIn("before it was formed", message)
+
+	def test_a_timeline_on_a_cancelled_day_is_kept_and_flagged(self):
+		"""A water break called before the stand-down happened, and a
+		cancellation does not unhappen it — but a crew that needed water may be
+		owed the hours."""
+		shift = self.start()["name"]
+		self.tool_data("log_shift_event", {"shift": shift, "event_type": "Water Break"})
+		data = self.cancel(shift)
+		self.assertEqual(len(data["compliance_events"]), 1)
+		self.assertIn("may be owed the hours", data["timeline_note"])
+
+	def test_the_crew_is_free_to_be_rostered_again_once_it_is_cancelled(self):
+		"""The point of cancelling rather than leaving it open: a stood-down crew
+		is not on a shift, so the day can be started again when the weather
+		lifts."""
+		first = self.start()["name"]
+		self.cancel(first)
+		second = self.start(start_datetime=at(10))
+		self.assertNotEqual(second["name"], first)
+		self.assertEqual(second["crew_size"], len([WORKER, *CREW]))
+
+
+# ── 3c ──────────────────────────────────────────────────────────────────────
+class NobodyIsOnTwoOpenShiftsAtOnce(ShiftTestCase):
+	"""The cross-shift guard, and why the same-crew dedup does not cover it.
+
+	The controller refuses one Employee twice on ONE crew — two rows on one form,
+	visible to whoever is looking. This is the other shape: the block foreman
+	rosters Ana at six, the packing shed's lead rosters her at ten on a shift of
+	their own, and NEITHER FORM SHOWS THE OTHER. Both close, the bridge writes one
+	Attendance row per crew row, and Ana is paid twice for one day out of two
+	records that each look correct.
+	"""
+
+	def test_a_second_open_shift_cannot_roster_somebody_already_on_one(self):
+		first = self.start()["name"]
+		message = self.start_error(start_datetime=at(10), crew_employees=[WORKER])
+		self.assertIn(first, message)
+		self.assertIn("already on", message)
+		self.assertIn("two overlapping days", message)
+
+	def test_the_refusal_leaves_no_half_built_shift_behind(self):
+		"""Checked in the same pre-write pass as the company check, and for the
+		same reason: a shift refused on its ninth crew member must not leave an
+		open shift nobody meant to open."""
+		before = len(STORE.rows(shifts.DOCTYPE))
+		self.start()
+		self.start_error(start_datetime=at(10), crew_employees=[WORKER])
+		self.assertEqual(len(STORE.rows(shifts.DOCTYPE)), before + 1)
+
+	def test_add_worker_to_shift_asks_the_same_question_of_every_other_shift(self):
+		"""The loop over `doc.crew` cannot answer it: a worker on a second crew is
+		invisible from the shift being added to."""
+		first = self.start()["name"]
+		second = self.start(start_datetime=at(10), crew_employees=[])["name"]
+		message = self.tool_error("add_worker_to_shift", {"shift": second, "employee": WORKER})
+		self.assertIn(first, message)
+		self.assertIn("remove_worker_from_shift", message)
+
+	def test_somebody_clocked_out_of_the_first_shift_may_join_the_second(self):
+		"""`left_at` is what ends a span. Somebody sent home from the block at
+		eleven and put on the packing line at noon is one person working one day,
+		and refusing that would be a guard nobody could work around."""
+		first = self.start()["name"]
+		self.tool_data(
+			"remove_worker_from_shift", {"shift": first, "employee": WORKER, "left_at": at(11)}
+		)
+		second = self.start(start_datetime=at(12), crew_employees=[WORKER])
+		self.assertEqual(second["crew_size"], 1)
+
+	def test_a_closed_shift_holds_nobody(self):
+		first = self.start()["name"]
+		self.close(first)
+		self.assertEqual(self.start(start_datetime=at(16))["crew_size"], len([WORKER, *CREW]))
+
+	def test_the_same_shift_is_not_its_own_second_shift(self):
+		"""`exclude` on the add path. Without it every add_worker_to_shift call
+		would refuse against the shift it is adding to."""
+		shift = self.start(crew_employees=[])["name"]
+		self.assertTrue(self.tool_data("add_worker_to_shift", {"shift": shift, "employee": WORKER}))
 
 
 # ── 4 ───────────────────────────────────────────────────────────────────────
@@ -850,12 +1011,68 @@ class TheGuards(ShiftTestCase):
 		("get_heat_exposure_event", {"name": "HEAT-2026-0001"}),
 	)
 
-	def test_an_account_with_no_hr_role_is_refused_by_every_one_of_them(self):
+	#: The seven of them that are the SHIFT, gated on `employee.SHIFT_ROLES`. The
+	#: other three in `TOOLS` are the heat record and its register, which stay on
+	#: `employee.HR_ROLES` — see below.
+	SHIFT_TOOLS = (
+		"start_shift",
+		"add_worker_to_shift",
+		"remove_worker_from_shift",
+		"log_shift_event",
+		"end_shift",
+		"list_shifts",
+		"get_shift",
+	)
+
+	def test_an_account_with_no_role_at_all_is_refused_by_every_one_of_them(self):
 		set_roles(frappe.session.user, ["Accounts Manager"])
 		for name, arguments in self.TOOLS:
 			with self.subTest(tool=name):
 				message = self.tool_error(name, arguments)
-				self.assertIn("may not change the personnel register", message)
+				expected = (
+					"may not form or close a crew shift"
+					if name in self.SHIFT_TOOLS
+					else "may not change the personnel register"
+				)
+				self.assertIn(expected, message)
+
+	def test_a_foreman_may_run_a_shift_end_to_end(self):
+		"""THE GATE THE HANDSET'S OWN BUTTON WAS REFUSED BY.
+
+		`ShiftToolsToolbar` offers Crew Clock to Foreman and Crew Leader; the
+		tools gated on `HR_ROLES`, which has neither — so the supervisor OAR
+		437-004-1131 names was told they may not change the personnel register
+		for the one record that is unambiguously theirs. The close is the half
+		that mattered most: it is what writes the crew's Attendance rows, so a
+		foreman who could not close was a crew with no wage record for the day.
+		"""
+		set_roles(frappe.session.user, ["Foreman"])
+		shift = self.start()["name"]
+		self.tool_data("log_shift_event", {"shift": shift, "event_type": "Water Break"})
+		self.close(shift)
+
+		attendance = self.attendance()
+		self.assertEqual(len(attendance), len([WORKER, *CREW]))
+		self.assertTrue(all(row.get("farm_shift") == shift for row in attendance))
+
+	def test_a_crew_leader_may_too_even_though_this_app_does_not_ship_the_role(self):
+		"""It is a role operators create by hand where the crew lead is not the
+		foreman. Naming it costs a site that has not got one nothing, and buys a
+		site that has one a server that agrees with its own iOS client."""
+		set_roles(frappe.session.user, ["Crew Leader"])
+		shift = self.start()["name"]
+		self.assertTrue(self.close(shift)["name"])
+
+	def test_running_a_shift_is_still_not_permission_to_hire(self):
+		"""The two lists are separate for this reason. Widening the shift gate to
+		the crew's own supervisor is not widening the personnel register's."""
+		self.configure(enabled=1, **ON, allow_create_employee=1)
+		set_roles(frappe.session.user, ["Foreman"])
+		self.start()
+		message = self.tool_error(
+			"create_employee", {"employee_name": "New Hire", "company": MAIN, "date_of_joining": at(6)[:10]}
+		)
+		self.assertIn("may not change the personnel register", message)
 
 	def test_every_switch_turns_its_tool_off_individually(self):
 		for name, arguments in self.TOOLS:
@@ -926,7 +1143,11 @@ class TheGuards(ShiftTestCase):
 class ReadingItBack(ShiftTestCase):
 	def test_the_register_reports_what_is_still_open(self):
 		open_shift = self.start()["name"]
-		closed = self.start(start_datetime=at(5))["name"]
+		# THE SECOND SHIFT CARRIES NO CREW, because nobody is on two open shifts
+		# at once — see `NobodyIsOnTwoOpenShiftsAtOnce`. This test is about the
+		# register, and a crew it does not read would only be a way of tripping
+		# a guard it is not testing.
+		closed = self.start(start_datetime=at(5), crew_employees=[])["name"]
 		self.close(closed, end_datetime=at(5, 30))
 		data = self.tool_data("list_shifts", {"company": MAIN})
 		self.assertEqual(data["count"], 2)
@@ -934,7 +1155,7 @@ class ReadingItBack(ShiftTestCase):
 
 	def test_the_status_filter_is_computed_rather_than_read_off_the_column(self):
 		self.start()
-		closed = self.start(start_datetime=at(5))["name"]
+		closed = self.start(start_datetime=at(5), crew_employees=[])["name"]
 		self.close(closed, end_datetime=at(5, 30))
 		self.assertEqual(self.tool_data("list_shifts", {"status": "Closed"})["count"], 1)
 		self.assertEqual(self.tool_data("list_shifts", {"status": "Active"})["count"], 1)
@@ -1003,7 +1224,9 @@ class ReadingItBack(ShiftTestCase):
 
 	def test_with_gaps_only_is_the_worklist(self):
 		full = self.start()["name"]
-		short = self.start(start_datetime=at(5))["name"]
+		# Its own crew, for the reason above: the heat record is about the shift
+		# and two open shifts may not hold the same person.
+		short = self.start(start_datetime=at(5), crew_employees=[])["name"]
 		for person in (WORKER, *CREW):
 			self.tool_data(
 				"record_training",

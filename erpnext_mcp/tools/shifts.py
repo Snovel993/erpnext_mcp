@@ -45,11 +45,21 @@ missing §112.161 element — state it, keep it.
 THE GUARDS ARE `create_employee`'s, SHARED RATHER THAN RESTATED
 ────────────────────────────────────────────────────────────────────────────
 
-`employee.require_hr_role` and `employee.require_company_scope`, imported. A
+`employee.require_shift_role` and `employee.require_company_scope`, imported. A
 shift is a personnel record before it is a compliance record: it names who was at
 work and for how long, it is read in a wage claim, and forming one for an entity
 you cannot see would put a crew on a register you cannot read. Reads are scoped
 the same way, so a scoped account listing "every shift" gets its own entity's.
+
+THE ROLE LIST IS `employee.SHIFT_ROLES` AND NOT `employee.HR_ROLES`, which is
+the one place these tools differ from the personnel ones they borrow the guards
+from. It is that list plus Foreman and Crew Leader, argued where it is defined:
+-1131 puts the water, shade, rest-cycle and observation obligations on the NAMED
+supervisor, this app's own role table already grants Foreman full permission on
+`Farm Shift` for that reason, and a supervisor who cannot open the shift cannot
+discharge the obligation the rule names them for — nor close it, which is what
+writes the crew's Attendance rows for the day. Hiring stays where it was: none
+of these two roles can create or edit an Employee, an I-9 or a W-4.
 """
 
 from __future__ import annotations
@@ -114,6 +124,48 @@ def _readable_companies(actor: str) -> list:
 	from .. import roles
 
 	return roles.companies_for(actor) or []
+
+
+def _refuse_a_second_open_shift(employee: str, employee_name: str = "", exclude: str = "") -> None:
+	"""Nobody is on two open shifts at once, and the reason is a wage record.
+
+	THE SAME-CREW DEDUP IS NOT THIS CHECK AND DOES NOT COVER IT. The Farm Shift
+	controller refuses one Employee twice on ONE crew — two rows on one form,
+	visible to whoever is looking at that form. This is the other shape, and it
+	is the one that actually happens on a farm with more than one crew running:
+	the block foreman rosters Ana at six, the packing shed's lead rosters her at
+	ten on a shift of their own, and NEITHER FORM SHOWS THE OTHER. Nothing is
+	wrong with either record on its own.
+
+	It goes wrong at the close. `end_shift` writes one submitted Attendance per
+	crew row spanning that person's own joined_at to their own left_at, so two
+	open shifts become two overlapping Attendance days for one person for one
+	date — which payroll pays, because each row is a correct row about a shift
+	that really happened. Nobody finds it in the shift register, because the
+	register is two entries that both look right.
+
+	REFUSED RATHER THAN WARNED, which is the opposite of what this file does with
+	an unverified I-9, and the difference is what the mistake costs. A crew
+	member without a Verified I-9 is a paperwork gap that a hard refusal would
+	turn into a crew stranded mid-harvest; a double roster is money out of the
+	door and a wage record that cannot be defended. The refusal names the other
+	shift, because the fix is always to close it or clock them out of it first.
+	"""
+	others = shifts.open_shifts_for(employee, exclude=exclude)
+	if not others:
+		return
+	other = others[0]
+	where = f" at {other.get('location')}" if other.get("location") else ""
+	raise ToolError(
+		f"{employee_name or employee} is already on {other['name']}, an OPEN shift"
+		f"{where} that started at {other.get('start_datetime')} under "
+		f"{other.get('foreman_name') or other.get('foreman')}, and they have not been clocked out "
+		"of it. Nobody works two shifts at once, and the reason this is refused rather than "
+		"recorded is what happens when both close: end_shift writes one Attendance row per crew "
+		"row, so the same person gets two overlapping days for one date and payroll pays both. "
+		f"Clock them out with remove_worker_from_shift on {other['name']}, or close that shift "
+		"first. Nothing was changed."
+	)
 
 
 def _resolve_shift(args: dict, key: str = "shift") -> dict:
@@ -264,7 +316,7 @@ def start_shift(args: dict) -> ToolResult:
 	"""Form a crew at a place, and start the exposure period compliance is read against."""
 	_require()
 	compat.require_doctype("Employee", "It comes with the Frappe HR (hrms) app.")
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 
 	foreman = employee_tool.resolve_employee(as_str(args, "foreman", required=True))
 	row = frappe.db.get_value("Employee", foreman, ["employee_name", "company", "status"], as_dict=True) or {}
@@ -293,6 +345,15 @@ def start_shift(args: dict) -> ToolResult:
 				"A crew list crossing entities produces Attendance rows on a payroll register "
 				"that did not employ the person. Nothing was created."
 			)
+		# AND NOBODY IS ROSTERED ONTO A SECOND OPEN SHIFT. Checked in the same
+		# pre-write pass and for the same reason it is here rather than after the
+		# insert: a shift refused on its ninth crew member must leave no shift
+		# behind. See `_refuse_a_second_open_shift` — the same-crew dedup the
+		# controller does is a different check and does not reach this.
+		_refuse_a_second_open_shift(
+			entry["employee"],
+			str(frappe.db.get_value("Employee", entry["employee"], "employee_name") or ""),
+		)
 
 	doc = frappe.new_doc(DOCTYPE)
 	doc.foreman = foreman
@@ -367,7 +428,7 @@ def start_shift(args: dict) -> ToolResult:
 def add_worker_to_shift(args: dict) -> ToolResult:
 	"""Roster somebody onto a shift already running — a late arrival, or a transfer."""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 	if not shifts.is_open(row):
@@ -397,6 +458,12 @@ def add_worker_to_shift(args: dict) -> ToolResult:
 				"Somebody who left and came back is one row spanning both — clear their left_at "
 				"instead. Nothing was changed."
 			)
+
+	# THE SAME QUESTION ASKED OF EVERY OTHER SHIFT ON THE SITE, which the loop
+	# above cannot answer: it reads this crew, and a worker rostered onto a
+	# second crew is invisible from here. `remove_worker_from_shift` on the other
+	# shift is the fix, and the refusal names it.
+	_refuse_a_second_open_shift(person, theirs.get("employee_name") or person, exclude=row["name"])
 
 	# DEFAULTS TO NOW, WHICH IS THE OPPOSITE OF `start_shift`'s DEFAULT AND IS
 	# RIGHT FOR THE SAME REASON. A worker rostered at the beginning was there at
@@ -470,7 +537,7 @@ def remove_worker_from_shift(args: dict) -> ToolResult:
 	the storage is the compliance one, and the two are allowed to differ.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -547,7 +614,7 @@ def log_shift_event(args: dict) -> ToolResult:
 	evening is what an investigator discounts.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -635,6 +702,127 @@ def log_shift_event(args: dict) -> ToolResult:
 	)
 
 
+# ── 4b. cancel_shift ────────────────────────────────────────────────────────
+def cancel_shift(args: dict) -> ToolResult:
+	"""Call a shift off: it was formed and then not worked.
+
+	THE THIRD ENDING, AND IT IS NOT A CLOSE. `end_shift` says the crew worked and
+	writes their Attendance; this says the crew did not, and writes none. Weather
+	turned at 06:40 and everybody was sent home, the block was not ready, the
+	sprayer never arrived — a shift that was opened and abandoned is an ordinary
+	thing on a farm, and the two ways it was handled before this tool were both
+	wrong. Leaving it open leaves a shift the weather sweep walks for ever and
+	`list_shifts` reports as work in progress; closing it with a signature files
+	an FSMA §112.161(b) attestation that a day happened, and writes an Attendance
+	row per crew member for a day nobody worked.
+
+	NO ATTENDANCE IS WRITTEN AND THAT IS THE POINT. If the crew DID work part of
+	the day before being sent home, this is the wrong tool: close it with
+	`end_shift` at the hour they stopped, which pays them for the hours they were
+	there. The choice between the two tools is the choice between "they were paid
+	for this" and "they were not", so it is made by a person and never inferred.
+
+	THE CREW ROWS ARE KEPT. "They were rostered and stood down" is a fact
+	somebody may need to answer a wage claim with — a crew list deleted on
+	cancellation is the evidence that the people who turned up did turn up.
+
+	THE REASON IS REQUIRED. A bare Cancelled flag is a gap somebody will be asked
+	about, and the flag is reconstructable from the record where the sentence
+	never is. The doctype asks for the same thing; this refuses first, so the
+	message is about the decision rather than about a field.
+
+	AN END TIME IS SET, because `status` is computed from `end_datetime` FIRST —
+	a shift with the Cancelled box ticked and no end time is still Active, still
+	walked by the weather sweep, still open. The default is now; pass
+	`cancelled_at` where the crew was actually stood down.
+	"""
+	_require()
+	actor = employee_tool.require_shift_role()
+	row = _resolve_shift(args)
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	if not shifts.is_open(row):
+		already = shifts.status_for(row.get("end_datetime"), row.get("cancelled"))
+		if already == shifts.STATUS_CANCELLED:
+			raise ToolError(
+				f"{row['name']} was already cancelled at {row.get('end_datetime')}: "
+				f"{row.get('cancellation_reason') or 'no reason was recorded'}. Nothing was changed."
+			)
+		raise ToolError(
+			f"{row['name']} was CLOSED at {row.get('end_datetime')} by a signed supervisor review, "
+			"and closing wrote one Attendance record per crew member. Cancelling it now would "
+			"claim the day was not worked while the payroll rows saying it was stay on the "
+			"register — two answers to one question about somebody's wages. A day that was worked "
+			"and then mis-recorded is corrected on the Attendance rows themselves. Nothing was "
+			"changed."
+		)
+
+	reason = as_str(args, "cancellation_reason") or as_str(args, "reason")
+	if not reason:
+		raise ToolError(
+			"cancellation_reason is required. 'Crew stood down at 06:40, heat index already 94 °F' "
+			"is a record and a bare Cancelled flag is a gap somebody will be asked about — the flag "
+			"can be reconstructed from the shift and the sentence cannot. THE SHIFT IS STILL OPEN "
+			"and nothing was changed."
+		)
+
+	when = _when(args, "cancelled_at")
+	if str(when) < str(row.get("start_datetime") or ""):
+		raise ToolError(
+			f"this call cancels the shift at {when} and it started at "
+			f"{row.get('start_datetime')} — it would have been called off before it was formed. "
+			"Nothing was changed."
+		)
+
+	doc = frappe.get_doc(DOCTYPE, row["name"])
+	doc.cancelled = 1
+	doc.cancellation_reason = reason
+	doc.end_datetime = when
+	if as_str(args, "foreman_notes"):
+		doc.foreman_notes = as_str(args, "foreman_notes")
+	doc.flags.ignore_permissions = True
+	doc.save(ignore_permissions=True)
+
+	described = shifts.describe(dict(doc.as_dict()), with_children=True)
+	crew = shifts.crew_of(row["name"])
+	data = {
+		**described,
+		"actor": actor,
+		"cancelled": {
+			"cancelled_at": when,
+			"cancellation_reason": reason,
+			"crew_size": len(crew),
+		},
+		"attendance_created": 0,
+		"note": (
+			f"{row['name']} is CANCELLED and NO Attendance was written — this says the day was not "
+			f"worked. {len(crew)} crew row(s) are kept, because 'they were rostered and stood down' "
+			"is what answers a wage question about the people who turned up. If they DID work part "
+			"of the day, this was the wrong tool: nothing here pays them for the hours they were "
+			"there."
+		),
+	}
+	if not crew:
+		data["crew_note"] = (
+			"No crew was rostered on this shift, so the cancellation is a shift that was opened "
+			"and never filled. Recorded rather than refused — a foreman who opens a shift at five "
+			"and calls it off at six before anybody arrives is the ordinary case."
+		)
+	events = described.get("compliance_events") or []
+	if events:
+		data["timeline_note"] = (
+			f"{len(events)} event(s) are on this cancelled shift's timeline. They are KEPT: a water "
+			"break called before the crew was stood down happened, and a cancellation does not "
+			"unhappen it. But a timeline on a day nobody worked is worth reading — if the crew was "
+			"out long enough to need water, they may be owed the hours."
+		)
+	return ToolResult(
+		data=data,
+		summary=f"cancelled {row['name']} at {when}: {reason}",
+		docstatus_delta="0 → 0 (cancelled)",
+	)
+
+
 # ── 5. end_shift ────────────────────────────────────────────────────────────
 def end_shift(args: dict) -> ToolResult:
 	"""Close a shift with the supervisor's signature, and write the crew's payroll rows.
@@ -645,7 +833,7 @@ def end_shift(args: dict) -> ToolResult:
 	merely recorded.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 	if not shifts.is_open(row):
@@ -748,7 +936,7 @@ def end_shift(args: dict) -> ToolResult:
 def list_shifts(args: dict) -> ToolResult:
 	"""The shift register, filtered the four ways a question about a period asks."""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	limit = min(as_limit(args), RECORD_CAP)
 
 	filters = {}
@@ -855,7 +1043,7 @@ def list_shifts(args: dict) -> ToolResult:
 def get_shift(args: dict) -> ToolResult:
 	"""One shift in full: the crew and their spans, the timeline, the weather, the heat record."""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args, "name")
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -998,7 +1186,7 @@ def log_shift_location(args: dict) -> ToolResult:
 		shifts.LOCATION_DOCTYPE,
 		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
 	)
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -1125,7 +1313,7 @@ def get_shift_track(args: dict) -> ToolResult:
 	ends of either one is a line the crew did not walk.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args, "shift")
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -1229,7 +1417,7 @@ def log_shift_break(args: dict) -> ToolResult:
 	values.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -1316,7 +1504,7 @@ def end_shift_break(args: dict) -> ToolResult:
 	`duration_source` to Observed.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -1394,7 +1582,7 @@ def get_break_policy(args: dict) -> ToolResult:
 		BREAK_POLICY_DOCTYPE,
 		"The Labor Break Policy DocType ships with erpnext_mcp v0.58.0 — run `bench migrate`.",
 	)
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	company = resolve_company(args, actor)
 	work_state = as_str(args, "work_state") or ""
 
@@ -1477,7 +1665,7 @@ BUCKET_LOG = "Bucket Log Entry"
 def get_shift_production(args: dict) -> ToolResult:
 	"""Per-worker bucket counts for a shift, sorted by count desc."""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -1662,7 +1850,7 @@ def get_shift_crew_timeline(args: dict) -> ToolResult:
 	to the end" the moment the shift's end time changed.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 

@@ -14044,6 +14044,58 @@ TOOLS = {
 		available=_needs_doctype("Farm Shift"),
 		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"cancel_shift": _tool(
+		shifts.cancel_shift,
+		"MUTATING (default OFF). Call a shift off: it was formed and then not "
+		"worked. Sets `cancelled`, records why, and stamps an end time so the "
+		"shift stops being Active.\n\n"
+		"IT IS NOT A CLOSE AND IT WRITES NO ATTENDANCE. `end_shift` says the crew "
+		"worked and writes one payroll row per crew member; this says they did "
+		"not. Weather turned at 06:40 and the crew was sent home, the block was "
+		"not ready, the sprayer never came — before this tool the two ways of "
+		"handling that were both wrong. Left open, the shift is walked by the "
+		"weather sweep for ever and reported by list_shifts as work in progress; "
+		"closed with a signature, it files an FSMA §112.161(b) attestation that a "
+		"day happened and pays a crew for a day nobody worked.\n\n"
+		"IF THE CREW WORKED PART OF THE DAY THIS IS THE WRONG TOOL. Close it with "
+		"end_shift at the hour they stopped, which pays them for the hours they "
+		"were there. The choice between the two is the choice between 'they were "
+		"paid for this' and 'they were not', so it is made by a person and never "
+		"inferred.\n\n"
+		"THE CREW ROWS ARE KEPT, because 'they were rostered and stood down' is "
+		"what answers a wage claim about the people who turned up. So is the "
+		"event timeline: a water break called before the stand-down happened, and "
+		"a cancellation does not unhappen it.\n\n"
+		"REFUSES: a shift that is already closed — cancelling it would claim the "
+		"day was not worked while the Attendance rows saying it was stay on the "
+		"register — one that is already cancelled, a missing "
+		"cancellation_reason, and a cancellation timestamped before the shift "
+		"started.",
+		{
+			"shift": _field(_STRING, "The Farm Shift docname."),
+			"name": _field(_STRING, "Alias for shift."),
+			"cancellation_reason": _field(
+				_STRING,
+				"Why it was called off. REQUIRED. 'Crew stood down at 06:40, heat index already "
+				"94 °F' is a record; a bare Cancelled flag is a gap somebody will be asked about, "
+				"and the flag can be reconstructed from the shift where the sentence cannot.",
+			),
+			"reason": _field(_STRING, "Alias for cancellation_reason."),
+			"cancelled_at": _field(
+				_STRING,
+				"When the crew was stood down, YYYY-MM-DD HH:MM:SS. Defaults to now. Earlier than "
+				"the shift's start is refused. It is written to end_datetime, because status is "
+				"computed from the end time first — a Cancelled tick with no end time is still an "
+				"Active shift the weather sweep walks.",
+			),
+			"foreman_notes": _field(_STRING, "What the foreman wants on the record about the stand-down."),
+		},
+		required=("cancellation_reason",),
+		mutating=True,
+		title="Cancel a crew shift",
+		available=_needs_doctype("Farm Shift"),
+		requires="the Farm Shift DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	"end_shift": _tool(
 		shifts.end_shift,
 		"MUTATING (default OFF). Close a shift with the supervisor's signature, and "

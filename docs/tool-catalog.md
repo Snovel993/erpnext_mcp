@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 635 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 636 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -7333,6 +7333,43 @@ direction that gets litigated. Rows are **submitted**, because
 archived since the shift ran, a day somebody already keyed in by hand — every one
 is reported in `attendance` and none stops a signed shift closing. The signature
 is the compliance act; the payroll row is the convenience.
+
+## 207a. `cancel_shift`
+
+**MUTATING, default OFF.** The third ending: the shift was formed and then not
+worked.
+
+| Argument | Notes |
+| --- | --- |
+| `shift` | **Required.** `name` is an alias. |
+| `cancellation_reason` | **Required.** `reason` is an alias. A bare Cancelled flag is a gap somebody will be asked about. |
+| `cancelled_at` | When the crew was stood down. Defaults to now. Earlier than the start is refused. |
+| `foreman_notes` | Optional. |
+
+**It is not a close and it writes no Attendance.** `end_shift` says the crew
+worked and writes one payroll row per crew member; this says they did not.
+Weather turned at 06:40 and everybody was sent home, the block was not ready, the
+sprayer never came — before this tool the two ways of handling that were both
+wrong. Left open, the shift is walked by the weather sweep for ever and reported
+by `list_shifts` as work in progress; closed with a signature, it files a
+§112.161(b) attestation that a day happened and pays a crew for a day nobody
+worked.
+
+**If the crew worked part of the day this is the wrong tool.** Close it with
+`end_shift` at the hour they stopped, which pays them for the hours they were
+there. The choice between the two is the choice between "they were paid for this"
+and "they were not", so it is made by a person and never inferred.
+
+**The crew rows and the event timeline are kept.** "They were rostered and stood
+down" is what answers a wage claim about the people who turned up, and a water
+break called before the stand-down happened — a cancellation does not unhappen
+it.
+
+`cancelled_at` is written to `end_datetime`, because status is computed from the
+end time first: a Cancelled tick with no end time is still an Active shift the
+weather sweep walks. A shift that is already closed is **refused** — cancelling
+it would claim the day was not worked while the Attendance rows saying it was
+stay on the register.
 
 ## 208. `create_heat_exposure_event`
 

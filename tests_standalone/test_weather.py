@@ -879,8 +879,16 @@ class TheSweepAndTheTools(WeatherTestCase):
 		self.assertEqual(self.api.calls, [])
 
 	def test_three_open_shifts_get_three_readings(self):
+		# ONLY THE FIRST CARRIES THE CREW, because nobody is on two open shifts at
+		# once — see `test_shifts.NobodyIsOnTwoOpenShiftsAtOnce`. The sweep reads
+		# each shift's own coordinates and never looks at its crew, so a roster
+		# here would only be a way of tripping a guard this test is not about.
 		names = [
-			self.start(location=f"Block {index}", farm_location_gps=gps)["name"]
+			self.start(
+				location=f"Block {index}",
+				farm_location_gps=gps,
+				crew_employees=[WORKER] if index == 1 else [],
+			)["name"]
 			for index, gps in enumerate(("45.52,-122.68", "46.10,-119.00", "44.05,-121.30"), start=1)
 		]
 		self.assertEqual(weather.sweep_open_shifts(), 3)
@@ -891,9 +899,11 @@ class TheSweepAndTheTools(WeatherTestCase):
 		"""A block whose coordinates the far end refuses is one block's gap, not
 		a day nobody's crew is documented."""
 		blocked = self.start(location="Block 1", farm_location_gps="45.52,-122.68")["name"]
+		# Crewless for the reason above: the other two blocks are here for their
+		# coordinates, and the same picker cannot stand on all three at once.
 		others = [
-			self.start(location="Block 2", farm_location_gps="46.10,-119.00")["name"],
-			self.start(location="Block 3", farm_location_gps="44.05,-121.30")["name"],
+			self.start(location="Block 2", farm_location_gps="46.10,-119.00", crew_employees=[])["name"],
+			self.start(location="Block 3", farm_location_gps="44.05,-121.30", crew_employees=[])["name"],
 		]
 		api = self.api
 

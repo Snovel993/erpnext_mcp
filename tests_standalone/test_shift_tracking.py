@@ -356,15 +356,25 @@ class TheGuards(TrackingTestCase):
 				self.assertIn(f"allow_{name}", message)
 				self.assertIn("switched off", message)
 
-	def test_an_account_with_no_hr_role_is_refused_by_both(self):
+	def test_an_account_with_no_shift_role_is_refused_by_both(self):
 		shift = self.a_shift()
 		set_roles(frappe.session.user, ["Accounts Manager"])
 		for name, arguments in self.TOOLS:
 			with self.subTest(tool=name):
 				self.assertIn(
-					"may not change the personnel register",
+					"may not form or close a crew shift",
 					self.tool_error(name, {**arguments, "shift": shift}),
 				)
+
+	def test_the_supervisor_who_owns_the_shift_may_read_and_write_its_track(self):
+		"""`employee.SHIFT_ROLES`, which is `HR_ROLES` plus the two roles that are
+		standing on the block. A track is corroboration of the foreman's own
+		record, and a gate that refused them it refused the wrong account."""
+		shift = self.a_shift()
+		set_roles(frappe.session.user, ["Foreman"])
+		for name, arguments in self.TOOLS:
+			with self.subTest(tool=name):
+				self.assertTrue(self.tool_data(name, {**arguments, "shift": shift}))
 
 	def test_a_scoped_account_cannot_read_another_entity_s_track(self):
 		shift = self.a_shift()

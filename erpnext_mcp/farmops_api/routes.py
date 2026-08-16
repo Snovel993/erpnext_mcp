@@ -266,6 +266,28 @@ ROUTES = (
 	# held the record, asks to find its way back. Defaults to the caller's own
 	# shifts — see the wrapper for why that default is not a convenience.
 	Route("/mobile", mobile_api.list_shifts),
+	# THE THREE SHIFT TOOLS THE HANDSET COULD NOT REACH. Each has existed as an
+	# MCP tool for releases — `log_shift_event` since v0.19.3, the two location
+	# ones since v0.32.0, the crew timeline since v0.64.0 — and each was reachable
+	# only from a Desk, which is the one place none of them is any use.
+	#
+	# A COMPLIANCE TIMELINE WRITTEN IN THE EVENING IS THE RECORD AN INVESTIGATOR
+	# DISCOUNTS, and that is the whole argument for the first of these: OAR
+	# 437-004-1131 asks what happened during the shift, and the answer is only
+	# worth anything if it was logged when it happened — on the block, on the
+	# phone in the supervisor's hand.
+	#
+	# `log_shift_location` IS THE ONE WRITE HERE A WORKER'S PHONE DRIVES rather
+	# than the foreman's, and like every other route on this table it is LIVE
+	# rather than held behind the per-tool switch — those govern the AI surface,
+	# and this transport's gates are `guard`'s four. A track is still a record of
+	# where people were: the controls that bound it here are the grant an
+	# operator issues per person and revokes per person, and the handset's own
+	# tracking setting.
+	Route("/mobile", mobile_api.log_shift_event),
+	Route("/mobile", mobile_api.log_shift_location),
+	Route("/mobile", mobile_api.get_shift_track),
+	Route("/mobile", mobile_api.get_shift_crew_timeline),
 	# v0.62.0. THE SEVEN `MobileAPI.swift` NAMES AND THIS TABLE DID NOT CARRY.
 	# Audited against v0.61.0 on 2026-08-12; see the block comment in
 	# `api/mobile.py` that opens this set for the argument each one settles.

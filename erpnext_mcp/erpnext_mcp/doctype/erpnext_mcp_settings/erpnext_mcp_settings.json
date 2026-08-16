@@ -455,6 +455,7 @@
   "allow_remove_worker_from_shift",
   "allow_log_shift_event",
   "allow_end_shift",
+  "allow_cancel_shift",
   "allow_log_shift_break",
   "allow_end_shift_break",
   "allow_get_break_policy",
@@ -3755,6 +3756,13 @@
    "fieldname": "allow_end_shift",
    "fieldtype": "Check",
    "label": "End Shift"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Calls a shift off: it was formed and then not worked. Sets `cancelled`, records why, and stamps an end time so the shift stops being Active. IT IS NOT A CLOSE AND WRITES NO ATTENDANCE — `end_shift` says the crew worked and pays them for it; this says they did not. Where the crew worked part of the day before being sent home, end_shift at the hour they stopped is the right tool, and choosing between the two is choosing between 'they were paid for this' and 'they were not'. The crew rows and the event timeline are kept either way. OFF by default like every other write on this form.",
+   "fieldname": "allow_cancel_shift",
+   "fieldtype": "Check",
+   "label": "Cancel Shift"
   },
   {
    "default": "0",

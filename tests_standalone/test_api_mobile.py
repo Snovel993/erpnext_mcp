@@ -58,8 +58,9 @@ from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import guard, shape
 from erpnext_mcp.api import mobile as mobile_api
 from erpnext_mcp.tools import mobile as mobile_tools
+from erpnext_mcp.tools import shifts as shift_tools
 
-from .fixtures import MAIN, OTHER, V12TestCase
+from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
 from .harness import ROLES, STORE, set_roles
 from .test_dispatch import WALK
 
@@ -457,6 +458,21 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_accident_reports",
 		"get_wizard_definition",
 		"list_wizard_definitions",
+		# The three shift tools that had no route. `log_shift_event` is the
+		# compliance timeline — the record OAR 437-004-1131 actually asks for, and
+		# the one thing on the shift surface that is worth nothing written in the
+		# evening from a Desk. `log_shift_location`/`get_shift_track` are the crew
+		# track, and `get_shift_crew_timeline` is the per-worker envelope the close
+		# screen wants: what happened to ANA, not to the shift.
+		#
+		# HERE RATHER THAN IN `MOBILE` BECAUSE `MobileAPI.swift` NAMES NONE OF THEM
+		# YET, which is this set's whole rule. The server side is published so the
+		# iOS half is a client change and not a release of both; they move up when
+		# the constants land.
+		"log_shift_event",
+		"log_shift_location",
+		"get_shift_track",
+		"get_shift_crew_timeline",
 	}
 
 	def _whitelisted(self, module):
@@ -2769,3 +2785,92 @@ class TheHandsetConfirmsMovementAndNothingElse(MobileAPITestCase):
 		self.be()
 		answer = mobile_api.list_shipments()
 		self.assertEqual([row["name"] for row in answer["shipments"]], [self.shipment])
+
+
+class TheShiftTimelineReachesThePhone(MobileAPITestCase):
+	"""The three shift tools that had a switch, a doctype and no route.
+
+	`log_shift_event` has existed since v0.19.3, the location pair since v0.32.0
+	and the crew timeline since v0.64.0, and every one of them was reachable only
+	from a Desk. For the compliance timeline that is the same as not existing: OAR
+	437-004-1131 asks what happened DURING the shift, and a water break typed into
+	a browser that evening is the record an investigator discounts.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		from erpnext_mcp import compliance_fields
+
+		install_hrms()
+		compliance_fields.install_compliance_fields(respect_switch=False)
+		# The supervisor's own role, which is the other half of this release: a
+		# Foreman is who -1131 names, and until now the tools refused them —
+		# `require_hr_role` would have needed Ana made a Farm Manager, which is a
+		# very different set of keys to hand somebody who runs a crew.
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+		self.shift = mobile_api.start_shift(
+			location="Block 7 North", shift_type="Harvest", company=MAIN
+		)["name"]
+
+	def test_a_water_break_is_logged_from_the_block_it_happened_on(self):
+		answer = mobile_api.log_shift_event(shift=self.shift, event_type="Water Break")
+		self.assertEqual(answer["logged"]["event_type"], "Water Break")
+		self.assertEqual(answer["events_of_this_type"], 1)
+
+	def test_the_producer_reference_is_not_in_the_signature_so_it_cannot_be_sent(self):
+		"""It points one compliance record at another and is how a packet builder
+		follows a trail. A body that could set it could file an event as the
+		product of a record it had nothing to do with."""
+		signature = inspect.signature(mobile_api.log_shift_event)
+		self.assertNotIn("producer_record_doctype", signature.parameters)
+		self.assertNotIn("producer_record_name", signature.parameters)
+
+	def test_the_crew_timeline_answers_for_one_worker_and_not_for_the_shift(self):
+		mobile_api.add_worker_to_shift(shift=self.shift, employee=WORKER_EMPLOYEE)
+		answer = mobile_api.get_shift_crew_timeline(shift=self.shift)
+		self.assertEqual([row["employee"] for row in answer["crew"]], [WORKER_EMPLOYEE])
+
+	def test_a_track_is_read_even_where_no_fix_has_been_posted(self):
+		"""An empty track is an answer — 'nobody logged one' — and the close
+		screen has to be able to draw it."""
+		answer = mobile_api.get_shift_track(shift=self.shift)
+		self.assertEqual(answer["count"], 0)
+		self.assertFalse(answer["truncated"])
+
+	def test_a_fix_is_logged_and_read_back_on_the_track(self):
+		"""`lat`/`lon` as well as the full spellings, because that is what a
+		phone's location API calls them."""
+		answer = mobile_api.log_shift_location(shift=self.shift, lat=45.52, lon=-122.68)
+		self.assertEqual(answer["logs_on_this_shift"], 1)
+		self.assertEqual(mobile_api.get_shift_track(shift=self.shift)["count"], 1)
+
+	def test_the_route_does_not_consult_the_per_tool_switch(self):
+		"""LIVE, like every other method on this transport. The `allow_` switches
+		govern the AI surface; the gates that hold here are `guard`'s four, and
+		what bounds a crew track is the grant an operator issues per person."""
+		self.configure(enabled=1, **ON, allow_log_shift_location=0)
+		self.assertEqual(
+			mobile_api.log_shift_location(shift=self.shift, lat=45.52, lon=-122.68)["logs_on_this_shift"],
+			1,
+		)
+
+	def test_another_entitys_shift_is_not_reachable_by_any_of_them(self):
+		# Formed by an unrestricted account, because the point of the assertion
+		# is what Ana's credential can REACH rather than what it can create.
+		# `caller_identity` is what the tool layer scopes on, and `be()` captured
+		# Ana into it — so both have to be put back for this one call.
+		self.request({}, headers={})
+		frappe.local.session.user = "Administrator"
+		other = shift_tools.start_shift(
+			{"foreman": OUTSIDER_EMPLOYEE, "location": "Elsewhere", "company": OTHER}
+		).data["name"]
+		self.be()
+		for method, arguments in (
+			("log_shift_event", {"event_type": "Water Break"}),
+			("get_shift_track", {}),
+			("get_shift_crew_timeline", {}),
+		):
+			with self.subTest(method=method):
+				with self.assertRaises(Exception):
+					getattr(mobile_api, method)(shift=other, **arguments)
