@@ -123,6 +123,7 @@ CERTIFICATION = "Certification"
 TRAINING_RECORD = "Employee Training Record"
 REGULATORY_FILING = "Regulatory Filing"
 COMPLIANCE_POLICY = "Compliance Policy"
+EXPENSE_RECEIPT = "Expense Receipt"
 DOCUMENT_VALIDATION = "Document Validation"
 FARM_TASK_TEMPLATE = template_tools.TEMPLATE
 
@@ -6533,3 +6534,45 @@ def list_expense_receipts(user: str, company=None, status=None, limit=None) -> d
 		"company": wanted or None,
 		"total_amount": round(sum(float(row.get("amount") or 0) for row in rows), 2),
 	}
+
+
+# ── 75. update_expense_receipt ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("update_expense_receipt", mutating=True, limit=guard.WRITE_LIMIT)
+def update_expense_receipt(
+	user: str,
+	receipt_name=None,
+	category=None,
+	supplier=None,
+	cost_center=None,
+	notes=None,
+) -> dict:
+	"""Recode a captured receipt's cost center, supplier, category or notes.
+
+	ONLY THE FOUR FIELDS THE TOOL HONORS ARE ON THIS SIGNATURE. The underlying
+	`tools/expenses.py::update_expense_receipt` refuses to touch `merchant`,
+	`amount`, `receipt_date` or `status` — those are the machine's reading of
+	the paper and the record of a decision, not something a desk correction
+	rewrites — so this wrapper does not offer fields that would silently do
+	nothing.
+
+	`receipt_name` IS SCOPED THE SAME WAY `update_regulatory_filing`'s `filing`
+	is: `guard.require_scoped_doc` confirms the receipt exists AND belongs to
+	an entity the caller may reach, before the tool ever sees it. `_company`
+	would have resolved a company to default TO, not verified the receipt
+	being edited is actually IN one the caller is allowed to touch.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(EXPENSE_RECEIPT, receipt_name, "receipt_name", allowed)
+
+	inner = {"name": name}
+	for key, value in (
+		("category", category),
+		("supplier", supplier),
+		("cost_center", cost_center),
+		("notes", notes),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return expense_tools.update_expense_receipt(inner).data
