@@ -3,6 +3,86 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.76.0 — 2026-08-15 — the register agrees with the pipe
+
+**A worker sent out on a line break shuts the main at the turnout, and every
+valve below it goes dry in the same second.** The register did not know that.
+Each valve carried its own `current_state` and nothing connected them, so the
+laterals downstream of a closed main went on reporting `open` — which is the
+reading the next person acts on, and the reading a water figure would have been
+computed from. The tree those valves already sit in (`Asset Register.location`,
+a self-link, shipped v0.25.0) had the answer; nothing walked it.
+
+### New
+
+- **The closing cascade.** `log_asset_state_change` on an `Irrigation Valve`
+  with `close_valve` now closes every valve below it in the register, each with
+  its own Asset State Log row. **Opening does not cascade**, and the asymmetry is
+  the physical one: closing upstream stops the water for certain, while opening
+  it only makes water *available* to valves that are shut on their own account.
+  A cascade in that direction would report a whole line as running because
+  somebody turned on the main.
+- **`Asset State Log.cascaded_from`** — the valve whose closure caused this one.
+  A column rather than a wording, so "was anybody actually at this valve" is a
+  filter and not a string search. The sentence goes in `notes` as well, for a
+  site that has not migrated the column. **The GPS fix and the photograph stay on
+  the record the worker was standing at**: a fix taken at the turnout is not
+  where the lateral three hundred yards away is.
+- **`get_irrigation_runtime`** — how long the water actually ran, summed from the
+  open/close pairs already in the log. No new doctype: a run *is* two rows, and
+  an Irrigation Run table would be a second account of the same events written by
+  the same call. Pass a valve for that valve, a zone for its valves, a block for
+  all of them — the same tree walk the cascade uses, so the set of valves a main
+  shuts and the set this counts are the same set by construction.
+- **Runs that cross the window's edges are counted, at both ends.** The last
+  event *before* the window is read, so water opened on 28 June and closed on 2
+  July is July irrigation rather than a close with no open; the first event
+  *after* it is read too, so the same run is June's hours clipped at midnight
+  rather than something called "still running" when the report is written in
+  August. That second one is the bug that shortens every month whose last night
+  was irrigated.
+- **A still-running valve is reported apart from the finished ones.**
+  `runtime_minutes` does not change between two identical calls;
+  `open_run_minutes` is the water moving right now, and does.
+- **Gallons are optional and never guessed.** Nothing on the Asset Register
+  carries a flow rate — an asset's parent is another asset, not an Irrigation
+  Zone — so volume comes from an explicit `flow_rate_gpm` or an
+  `irrigation_zone` whose record has one, and `flow_rate_source` always says
+  which. With neither, the answer is minutes and says so. A volume computed from
+  a rate nobody confirmed is the number that ends up in a water report.
+- **`universal_scan` carries the state machine.** `current_state`,
+  `state_asset` and `state_actions` on every branch, populated on the asset
+  branch. `available_actions` is the handset's five fixed strings and
+  `log_state_change` is one of them — it names a *screen*; a worker at a valve is
+  choosing between open and close. The scan now answers that in the same call,
+  in the shape `get_available_actions` returns, rather than sending the phone
+  back for a second round trip before it can draw the card.
+
+### Fixed
+
+- **`completed_at` and `actual_duration_minutes` reach the app.**
+  `complete_task_via_mobile` has written both onto the Farm Task Assignment since
+  v0.16.0 and `shape.task` never carried them up onto the task, so
+  `FarmTask.completedAt` decoded as nil on every read and `elapsedMinutes` fell
+  through to counting from `startedAt` to *now*. A job closed at four in the
+  afternoon read as eleven hours' work when somebody opened it the next morning.
+- **A finished task is shaped against the assignment that finished it.**
+  `live_assignment` is Claimed-or-In-Progress by definition, so `get_task` on a
+  completed task came back with every assignment field null — the same
+  open-ended timer by another route. A **rejected** assignment is still not
+  eligible: a worker who handed the job back has a `started_at` and no
+  completion, which is the open-ended timer with a name against it.
+
+### Also on main in this release
+
+The four mobile wrappers that landed before this one — `list_expense_receipts`,
+`update_expense_receipt`, `list_suppliers` and `list_cost_centers` — are
+published but are not yet in `test_api_mobile.TheSurfaceIsClosed.MOBILE` or
+mirrored in `test_ios_contract`, and both tests fail on them. Left failing rather
+than silenced: they are the guard that says the app and the server agree on the
+surface, and widening the expected set without the mirror tests would turn the
+guard off.
+
 ## 0.75.0 — 2026-08-15 — the receipt says more than the merchant line
 
 **`SIATAPING` is Sawyer's Ace Hardware, and no string algorithm will ever say
