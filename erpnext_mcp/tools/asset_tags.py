@@ -23,13 +23,14 @@ import json
 import frappe
 
 from .. import compat, timezones
-from ..args import as_bool, as_date, as_float, as_limit, as_str, resolve_company
+from ..args import as_bool, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..render import qr
 from ..result import ToolResult
 
 ASSET_REGISTER = "Asset Register"
 ASSET_STATE_LOG = "Asset State Log"
+IRRIGATION_ZONE = "Irrigation Zone"
 
 REGISTER_CAP = 500
 
@@ -55,6 +56,17 @@ _ASSET_FIELDS = (
     "replacement_value",
     "gps_latitude",
     "gps_longitude",
+    # v0.78.0 — the service schedule, the hour meter and the zone link. Read on
+    # every describe rather than fetched by the maintenance tools alone, so a
+    # scan at the machine shows the same figures `check_maintenance_due` and
+    # `get_water_usage_report` are computing from.
+    "service_interval_hours",
+    "service_interval_days",
+    "last_service_date",
+    "last_service_hours",
+    "current_hours",
+    "hours_updated_at",
+    "irrigation_zone",
     "creation",
     "owner",
 )
@@ -174,6 +186,18 @@ def _describe_asset(row: dict) -> dict:
         "replacement_value": _money(row.get("replacement_value")),
         "gps_latitude": round(float(row.get("gps_latitude") or 0), 7) or None,
         "gps_longitude": round(float(row.get("gps_longitude") or 0), 7) or None,
+        # The schedule and the meter, each kept apart from "not set" the same way
+        # the currency columns above are: a machine with a zero-hour interval is
+        # not on an hours schedule, and one reading 0.0 is straight off the lot.
+        "service_interval_hours": _money(row.get("service_interval_hours")),
+        "service_interval_days": (
+            int(row["service_interval_days"]) if row.get("service_interval_days") else None
+        ),
+        "last_service_date": str(row.get("last_service_date") or "") or None,
+        "last_service_hours": _money(row.get("last_service_hours")),
+        "current_hours": _money(row.get("current_hours")),
+        "hours_updated_at": str(row.get("hours_updated_at") or "") or None,
+        "irrigation_zone": row.get("irrigation_zone") or None,
     }
 
 
@@ -453,12 +477,21 @@ def scan_asset(args: dict) -> ToolResult:
     # moment: a worker is standing at the machine with the tag on their screen.
     # The two scan routes answering different questions is how a handset ends up
     # with two code paths for one card.
-    from . import asset_actions
+    from . import asset_actions, asset_status
 
     defn = _STATE_DEFINITIONS.get(asset_type)
     effective = _current_state_value(described.get("current_state")) or (
         defn["default"] if defn else ""
     )
+
+    # v0.78.0. THE SAME ARGUMENT ONE STEP FURTHER. The menu said what a worker
+    # may DO; the status report says what they need to KNOW before they do it —
+    # what it is due, what it has run, what is outstanding on it, and whether the
+    # ground under it is closed to entry. Composed once in `asset_status` and
+    # returned by both scan routes, because seven round trips on a rural cell is
+    # a screen nobody waits for. Every section degrades to empty with a reason;
+    # a scan never fails over a section.
+    report = asset_status.status_report(dict(doc.as_dict()), args)
 
     return ToolResult(
         data={
@@ -473,8 +506,23 @@ def scan_asset(args: dict) -> ToolResult:
             "state": effective or None,
             "state_actions": _actions_for(asset_type, effective) if effective else [],
             "action_menu": asset_actions.menu_for(asset_type, effective),
+            # SPREAD LAST AND DELIBERATELY. `status_report` re-answers `state`
+            # and `open_tasks` in richer shapes under keys of its own
+            # (`status.state`, `status.open_tasks`), and it must not overwrite
+            # the flat keys above that every shipped handset already decodes —
+            # so it lands under one key and the old surface is untouched.
+            "status": report,
+            # Hoisted out of `status` because they are the two facts a screen
+            # colours the whole card on, and a client should not have to reach
+            # into a nested object to find out whether to show a red banner.
+            "needs_attention": report["needs_attention"],
+            "warnings": report["warnings"],
         },
-        summary=f"scanned {doc.name}" + (f" by {scanned_by}" if scanned_by else ""),
+        summary=(
+            f"scanned {doc.name}"
+            + (f" by {scanned_by}" if scanned_by else "")
+            + (f" — {report['warnings'][0]['message']}" if report["warnings"] else "")
+        ),
         docstatus_delta="0 → 0 (updated)",
     )
 
@@ -523,6 +571,33 @@ def _capital_fields(doc, args: dict) -> None:
     for key in ("purchase_value", "replacement_value"):
         if args.get(key) is not None:
             doc.set(key, as_float(args.get(key), key))
+
+
+def _service_fields(doc, args: dict) -> None:
+    """The service schedule and the zone link, set at registration.
+
+    ACCEPTED AT REGISTRATION rather than only on a later update, because the one
+    moment somebody has the manual open is the moment they are entering the
+    machine — and a schedule nobody sets is a machine that never comes up as
+    due. `current_hours` is deliberately absent: the meter is a series written by
+    a metered check-out, not a number typed onto a new record.
+    """
+    for key in ("service_interval_hours", "last_service_hours"):
+        if args.get(key) is not None:
+            doc.set(key, as_float(args.get(key), key))
+    if args.get("service_interval_days") is not None:
+        doc.service_interval_days = as_int(args, "service_interval_days")
+    serviced = as_date(args, "last_service_date")
+    if serviced:
+        doc.last_service_date = serviced
+    zone = as_str(args, "irrigation_zone")
+    if zone:
+        if not frappe.db.exists(IRRIGATION_ZONE, zone):
+            raise ToolError(
+                f"no Irrigation Zone called {zone!r} on this site. list_irrigation_zones has the "
+                "register. Nothing was created."
+            )
+        doc.irrigation_zone = zone
 
 
 def _attach_photo(asset: str, args: dict) -> str:
@@ -598,6 +673,7 @@ def register_asset(args: dict) -> ToolResult:
     doc.description = as_str(args, "description")
     doc.nfc_uid = as_str(args, "nfc_uid")
     _capital_fields(doc, args)
+    _service_fields(doc, args)
 
     lat = args.get("gps_latitude")
     lon = args.get("gps_longitude")
@@ -666,6 +742,30 @@ def update_registered_asset(args: dict) -> ToolResult:
     for key in ("gps_latitude", "gps_longitude"):
         if key in args:
             _stage(changes, doc, key, as_float(args.get(key), key))
+    # v0.78.0. The service schedule and the zone link. `current_hours` is NOT
+    # settable here on purpose: it is a cache of the Asset State Log's own
+    # series, written by a metered check-out or check-in, and a column somebody
+    # could type over would make "hours since service" mean whatever was entered
+    # last. `last_service_hours` IS settable, because closing out a service is a
+    # statement about the past that record_service also makes.
+    for key in ("service_interval_hours", "last_service_hours"):
+        if key in args:
+            value = args.get(key)
+            _stage(changes, doc, key, as_float(value, key) if value is not None else None)
+    if "service_interval_days" in args:
+        value = args.get("service_interval_days")
+        _stage(changes, doc, "service_interval_days", as_int(args, "service_interval_days") if value is not None else None)
+    if "last_service_date" in args:
+        _stage(changes, doc, "last_service_date", as_date(args, "last_service_date"))
+    if "irrigation_zone" in args:
+        zone = as_str(args, "irrigation_zone")
+        if zone and not frappe.db.exists(IRRIGATION_ZONE, zone):
+            raise ToolError(
+                f"no Irrigation Zone called {zone!r} on this site. list_irrigation_zones has the "
+                "register, and the link is what lets get_water_usage_report price this valve's "
+                "minutes as gallons. Nothing was changed."
+            )
+        _stage(changes, doc, "irrigation_zone", zone or None)
     if "current_state" in args:
         state = args.get("current_state")
         if state and isinstance(state, str):
@@ -1194,7 +1294,20 @@ def _write_state_change(row: dict, asset_type: str, action: str, from_state: str
     the row names the asset whose closure caused it. The sentence goes in `notes`
     as well, because a site that has not migrated the column would otherwise have
     no trace at all of why a valve nobody visited changed state.
+
+    THE METER READING IS VALIDATED BEFORE THE STATE MOVES, and that ordering is
+    the point of doing it here at all. A reading below the one already on record
+    is a typo or a swapped instrument, and refusing it AFTER writing the state
+    change would leave a tractor checked in with no hours on it and nothing to
+    say why. See `engine_hours.apply_reading`.
+
+    A CASCADED ROW NEVER CARRIES A READING, for the reason it carries no GPS fix
+    and no photograph: nobody was standing at that machine.
     """
+    from . import engine_hours
+
+    meter = {} if cascaded_from else engine_hours.apply_reading(row, asset_type, action, args)
+
     doc = frappe.get_doc(ASSET_REGISTER, row["name"])
     doc.current_state = json.dumps({"state": to_state})
     doc.save(ignore_permissions=True)
@@ -1244,7 +1357,22 @@ def _write_state_change(row: dict, asset_type: str, action: str, from_state: str
         if photo:
             log.photo = photo
 
+    if meter:
+        log.engine_hours = meter["engine_hours"]
+        if meter["hours_used"] is not None and compat.has_field(ASSET_STATE_LOG, "hours_used"):
+            log.hours_used = meter["hours_used"]
+        if meter["meter_note"]:
+            log.notes = f"{log.notes} {meter['meter_note']}".strip() if log.notes else meter["meter_note"]
+
     log.insert(ignore_permissions=True)
+
+    # The register's cached reading follows the log, never the other way round —
+    # see `engine_hours` on why the series is the record and the column is a
+    # screen. Written after the insert so a cache can never be ahead of the row
+    # it caches.
+    if meter:
+        engine_hours.cache_reading(row["name"], meter["engine_hours"], reset=meter["meter_reset"])
+
     return log.name
 
 
@@ -1388,7 +1516,12 @@ def log_asset_state_change(args: dict) -> ToolResult:
 
     log_name = _write_state_change(row, asset_type, action, effective, to_state, args)
     log_row = frappe.db.get_value(
-        ASSET_STATE_LOG, log_name, ["performed_by", "performed_at"], as_dict=True
+        ASSET_STATE_LOG,
+        log_name,
+        compat.existing_fields(
+            ASSET_STATE_LOG, ("performed_by", "performed_at", "engine_hours", "hours_used")
+        ),
+        as_dict=True,
     ) or {}
 
     cascade = (
@@ -1415,10 +1548,23 @@ def log_asset_state_change(args: dict) -> ToolResult:
         "log_name": log_name,
         "performed_by": log_row.get("performed_by"),
         "performed_at": str(log_row.get("performed_at") or ""),
+        # The meter, where one was read. Present as explicit nulls rather than
+        # absent keys so a handset renders one card for every state change
+        # instead of testing which shape arrived.
+        "engine_hours": (
+            round(float(log_row["engine_hours"]), 1) if log_row.get("engine_hours") is not None else None
+        ),
+        "hours_used": (
+            round(float(log_row["hours_used"]), 1) if log_row.get("hours_used") else None
+        ),
         **cascade,
         **clock.block(),
     }
     clock.add(data, "performed_at")
+    if data["engine_hours"] is not None:
+        summary += f", meter {data['engine_hours']} h"
+    if data["hours_used"] is not None:
+        summary += f" ({data['hours_used']} h this session)"
 
     return ToolResult(
         data=data,

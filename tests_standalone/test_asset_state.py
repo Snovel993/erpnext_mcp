@@ -622,21 +622,44 @@ class TheActionMenuIsPerEquipmentType(StateTestCase):
     def test_an_unbuilt_action_is_published_and_says_it_is_unbuilt(self):
         """Publishing only the finished actions gives iOS no way to lay out a
         screen it will need next month; publishing them undifferentiated gives a
-        worker a button that fails after they have walked to the machine."""
-        self.an_asset(name="MC-Tractor-04", asset_type="Tractor")
-        entry = self.by_action("MC-Tractor-04")["log_hours"]
+        worker a button that fails after they have walked to the machine.
+
+        `set_rates` is the example rather than `log_hours` because v0.78.0 BUILT
+        the latter — see the test below. This assertion is about the shape an
+        unbuilt row has, and it wants a row that is genuinely still unbuilt.
+        """
+        self.an_asset(name="MC-Sprayer-04", asset_type="Sprayer")
+        entry = self.by_action("MC-Sprayer-04")["set_rates"]
         self.assertFalse(entry["implemented"])
         self.assertFalse(entry["available"])
         self.assertIsNone(entry["method"])
         self.assertIn("NOT BUILT", entry["note"])
 
+    def test_logging_engine_hours_stopped_being_unbuilt(self):
+        """v0.78.0. The note that used to sit on this row said building it meant
+        a Float column plus a log row per entry, because the reading is only
+        useful as a SERIES. That is exactly what shipped — and the action is not
+        a call of its own, because the moment somebody reads an hour meter is
+        the moment they are checking the machine out or bringing it back."""
+        self.an_asset(name="MC-Tractor-04", asset_type="Tractor")
+        entry = self.by_action("MC-Tractor-04")["log_hours"]
+        self.assertTrue(entry["implemented"])
+        self.assertTrue(entry["available"])
+        self.assertEqual(entry["method"], "log_asset_state_change")
+        self.assertIn("engine_hours", entry["note"])
+
     def test_unbuilt_and_unavailable_are_different_reasons(self):
         """A screen greys out one and badges or hides the other, and it cannot
         tell them apart from a single flag."""
+        self.an_asset(name="MC-Sprayer-05", asset_type="Sprayer")
+        self.assertIn(
+            "not implemented", self.by_action("MC-Sprayer-05")["set_rates"]["unavailable_reason"]
+        )
+
         self.an_asset(name="MC-Tractor-05", asset_type="Tractor")
-        entries = self.by_action("MC-Tractor-05")
-        self.assertIn("not implemented", entries["log_hours"]["unavailable_reason"])
-        self.assertIn("not a legal move", entries["check_in"]["unavailable_reason"])
+        self.assertIn(
+            "not a legal move", self.by_action("MC-Tractor-05")["check_in"]["unavailable_reason"]
+        )
 
     def test_every_row_carries_the_keys_a_client_switches_on(self):
         self.an_asset(name="MC-Sprayer-02", asset_type="Sprayer")

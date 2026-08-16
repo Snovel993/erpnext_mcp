@@ -74,7 +74,7 @@ from ..args import as_int, as_str
 from ..erpnext_mcp.doctype.farm_task.farm_task import STATES, TERMINAL_STATES
 from ..errors import ToolError
 from ..result import ToolResult
-from . import asset_actions, asset_tags, badges, farm, housing
+from . import asset_actions, asset_tags, badges, farm, housing, spray_rei
 
 ASSET_REGISTER = "Asset Register"
 BADGE_MAP = badges.BADGE_DOCTYPE
@@ -495,6 +495,17 @@ _EMPTY_STATE = {
 	"action_menu": [],
 }
 
+#: v0.78.0. The status block's own two headline keys, empty. Present on every
+#: branch for the reason `_EMPTY_STATE` is: a client draws one banner and reads
+#: two keys rather than testing which of five entity types it got back. Only the
+#: asset branch fills them — a badge and a cabin have no service schedule, no
+#: hour meter and no restricted-entry window of their own.
+_EMPTY_STATUS = {
+	"status": None,
+	"needs_attention": False,
+	"warnings": [],
+}
+
 
 def _state_actions(asset_name: str) -> dict:
 	"""The concrete state changes this asset can take right now.
@@ -660,13 +671,15 @@ def _asset_branch(candidate: str, args: dict) -> dict | None:
 	scanned_by = as_str(args, "scanned_by")
 	if scanned_by:
 		inner["scanned_by"] = scanned_by
-	for key in ("gps_lat", "gps_lon", "gps_latitude", "gps_longitude"):
+	for key in ("gps_lat", "gps_lon", "gps_latitude", "gps_longitude", "history_limit", "timezone"):
 		if args.get(key) is not None:
 			inner[key] = args[key]
 
+	entity = dict(asset_tags.scan_asset(inner).data)
+
 	return {
 		"entity_type": ASSET,
-		"entity": dict(asset_tags.scan_asset(inner).data),
+		"entity": entity,
 		"docname": candidate,
 		"alert_doctype": ASSET_REGISTER,
 		"task_filters": [
@@ -677,6 +690,15 @@ def _asset_branch(candidate: str, args: dict) -> dict | None:
 		# READ AFTER `scan_asset`, not before, so the state reported is the state
 		# after this scan's own write rather than the one it replaced.
 		"state": _state_actions(candidate),
+		# v0.78.0. LIFTED OUT OF THE ENTITY RATHER THAN RECOMPUTED. `scan_asset`
+		# already composed the status report — it is the same scan and the same
+		# moment — and asking `asset_status` for it a second time here would
+		# double every query behind a screen a worker is waiting on.
+		"status": {
+			"status": entity.get("status"),
+			"needs_attention": bool(entity.get("needs_attention")),
+			"warnings": entity.get("warnings") or [],
+		},
 	}
 
 
@@ -727,6 +749,16 @@ def _field_branch(candidate: str, args: dict) -> dict | None:
 		inner["company"] = company
 
 	entity = dict(farm.get_field(inner).data)
+
+	# v0.78.0. THE BRANCH WHERE A RESTRICTED-ENTRY WARNING MATTERS MOST, because
+	# this is a worker standing at the gate of the block itself rather than at a
+	# machine parked near one. A `Spray REI` names a block directly, so no
+	# location resolution is needed here — the docname IS the key.
+	reis = spray_rei.active_for_blocks([candidate], company)
+	entity["active_reis"] = reis
+	entity["active_rei_count"] = len(reis)
+	entity["rei_blocked"] = bool(reis)
+
 	return {
 		"entity_type": BLOCK,
 		"entity": entity,
@@ -734,6 +766,13 @@ def _field_branch(candidate: str, args: dict) -> dict | None:
 		"alert_doctype": FIELD,
 		"task_filters": [{"location_doctype": FIELD, "location": candidate}],
 		"scan_recorded": False,
+		"status": {
+			"status": None,
+			"needs_attention": bool(reis),
+			"warnings": [
+				{"kind": "rei", "severity": "Critical", "message": rei["warning"]} for rei in reis
+			],
+		},
 	}
 
 
@@ -786,6 +825,9 @@ def universal_scan(args: dict) -> ToolResult:
 		# behind them. A client that renders the same card for five entity types
 		# reads three keys that are always there rather than testing for them.
 		**resolved.get("state", _EMPTY_STATE),
+		# v0.78.0, same promise: the status panel and the warning banner are on
+		# every branch and populated on the two that have anything to say.
+		**resolved.get("status", _EMPTY_STATUS),
 	}
 	return ToolResult(
 		data=data,
@@ -840,6 +882,7 @@ def _unresolved(raw: str, candidate: str, args: dict) -> ToolResult:
 			"available_actions": list(AVAILABLE_ACTIONS[UNKNOWN]),
 			"scan_recorded": False,
 			**_EMPTY_STATE,
+			**_EMPTY_STATUS,
 			"searched": searched,
 			"note": (
 				"Nothing in this site's badge, asset, housing or block register is called "

@@ -170,16 +170,33 @@ _MENU: dict[str, tuple[dict, ...]] = {
 			"record that matters is what went on which block on which day. Building this means "
 			"deciding whether a sprayer carries a standing rate that a task pre-fills from.",
 		),
-		_todo(
-			"rei_timer",
-			"Restricted-Entry Timer",
+		# v0.78.0. WAS `_todo`, AND THE NOTE THAT SAT HERE WAS RIGHT ABOUT THE
+		# DESIGN AND WRONG ABOUT THE CONCLUSION. It said REI is a property of the
+		# block rather than of the machine — it is — and concluded that a sprayer
+		# therefore has no REI action. But the moment a window OPENS is the moment
+		# a sprayer finishes, and the person holding the phone is standing at the
+		# sprayer. So the action lives on this menu and the RECORD it writes names
+		# blocks: one `Spray REI` per block, keyed on the block, readable by
+		# `get_active_rei` without going near this machine. See `tools/spray_rei.py`.
+		_elsewhere(
+			"record_spray",
+			"Record Spray & Start REI",
 			KIND_RECORD,
-			"NOT BUILT AS A SPRAYER ACTION, and the underlying fact already exists: completing a "
-			"spray task writes `rei_expires_at` and `phi_clears_on` onto that Farm Task from the "
-			"product's own label, via stock_bridge.spray_windows. REI is a property of the BLOCK "
-			"that was sprayed and the material used, not of the machine that sprayed it — a timer "
-			"started against the sprayer would say nothing about which field a worker may re-enter. "
-			"Read the windows off the block's last spray task; get_farm_task returns them.",
+			"record_spray_application",
+			"Files what went out over which blocks, opens a restricted-entry window per block from "
+			"the longest REI in the tank, ends the spray on this machine, and stamps each block's "
+			"last_spray_date. The window is a `Spray REI` record keyed on the BLOCK — a timer "
+			"against the sprayer would say nothing about which field a worker may re-enter — and "
+			"get_active_rei answers for one block, list_active_reis for the whole farm.",
+		),
+		_elsewhere(
+			"rei_status",
+			"Restricted-Entry Status",
+			KIND_RECORD,
+			"list_active_reis",
+			"What this sprayer has closed and until when. A scan of the machine returns the same "
+			"list in `status.applied_reis` without a second call; this entry is the button for a "
+			"screen opened from somewhere other than a scan.",
 		),
 	),
 	"Tractor": (
@@ -196,15 +213,33 @@ _MENU: dict[str, tuple[dict, ...]] = {
 			"start_inspection",
 			_INSPECTION_NOTE,
 		),
-		_todo(
+		# v0.78.0. BUILT, AND BUILT THE WAY THE OLD NOTE HERE SAID IT WOULD HAVE
+		# TO BE: `Asset State Log.engine_hours` is the series and
+		# `Asset Register.current_hours` is a cache of it, so hours-since-service
+		# and hours-this-season are arithmetic rather than a single overwritten
+		# number. IT IS NOT A CALL OF ITS OWN — the moment somebody reads an hour
+		# meter is the moment they are sitting in the machine checking it out or
+		# bringing it back, so the reading rides on those two state changes.
+		_elsewhere(
 			"log_hours",
 			"Log Engine Hours",
 			KIND_RECORD,
-			"NOT BUILT. Nothing on the Asset Register holds a meter reading, so there is nowhere "
-			"to put the number and nothing to compare it against. Building it means one Float "
-			"column for the last reading plus a log row per entry — the reading is only useful as "
-			"a SERIES (hours since last service, hours this season), and a single overwritten "
-			"column would answer none of those questions.",
+			"log_asset_state_change",
+			"Send `engine_hours` with a check_out or a check_in and the reading is filed against "
+			"that event; a check-in with a reading at both ends also records the hours run that "
+			"session. A reading below the last one on record is refused as a typo unless "
+			"allow_meter_reset=true says the instrument was swapped. get_engine_hours_summary is "
+			"the series read back — total, this season, since the last service.",
+		),
+		_elsewhere(
+			"service_due",
+			"Service Status",
+			KIND_RECORD,
+			"check_maintenance_due",
+			"Whether this machine is due on hours, on the calendar, or neither — and by how much. "
+			"A scan returns the same answer in `status.maintenance` without a second call. Set the "
+			"schedule with update_registered_asset(service_interval_hours=…, "
+			"service_interval_days=…) and close one out with record_service.",
 		),
 	),
 	"Implement": (
