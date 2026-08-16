@@ -134,6 +134,19 @@ def create_journal_entry(args: dict) -> ToolResult:
 		if value:
 			extras[field] = as_date(args, field) if field.endswith("_date") else value
 
+	# v0.80.0. THE FINANCIAL CONTROLS RUN HERE, BEFORE THE INSERT, and the
+	# placement is the whole of what makes an enforced control mean anything: a
+	# control consulted after the write can report and cannot refuse. In Advisory
+	# — which is what every control ships as — this files its findings against the
+	# entry and returns them, and the entry is written exactly as it always was.
+	# In Enforced it raises, and nothing below this line runs.
+	#
+	# `preparer` is the effective user rather than `frappe.session.user`: with
+	# `require_user_context` on, mutations run as the configured MCP System User
+	# and that is the principal the entry will be attributed to in `owner`, so it
+	# is also the one segregation of duties has to be asked about.
+	gate = controls_gate(company, posting_date, total_debit, lines, args)
+
 	doc = insert_draft_journal_entry(company, posting_date, lines, user_remark, extras)
 
 	data = {
@@ -151,13 +164,67 @@ def create_journal_entry(args: dict) -> ToolResult:
 			"This is a draft and affects no balance. Submit it in ERPNext, or via "
 			"submit_journal_entry if that tool is enabled."
 		),
+		# v0.80.0. What the financial controls made of this entry. Present on
+		# every response, including the clean case: a caller has to be able to tell
+		# "the controls looked and found nothing" from "the controls did not run",
+		# and a key that appeared only on findings would collapse the two.
+		"controls": gate,
 	}
-	return ToolResult(
-		data,
+	summary = (
 		f"created draft Journal Entry {doc.name} for {company} on {posting_date}: "
 		f"{len(lines)} line(s), {round(total_debit, 2)} debit = "
-		f"{round(total_credit, 2)} credit",
-		docstatus_delta="none → 0 (draft)",
+		f"{round(total_credit, 2)} credit"
+	)
+	findings = gate.get("findings") or []
+	if findings:
+		# Said in the SUMMARY and not only in the payload, because the summary is
+		# what lands in MCP Action Log and what an operator scans a month later. An
+		# advisory finding that was only ever in `data` would be a finding nobody
+		# reads, which is the failure mode Advisory mode exists to avoid.
+		data["controls_note"] = (
+			f"{len(findings)} financial control finding(s) were raised against this entry and it was "
+			"WRITTEN ANYWAY, because the control(s) concerned are Advisory on this site. Each one is "
+			"filed as a compliance alert against the entry. Under enforcement this call would have "
+			"been refused — list_control_points shows which controls are which."
+		)
+		summary += f" — {len(findings)} advisory control finding(s)"
+	return ToolResult(data, summary, docstatus_delta="none → 0 (draft)")
+
+
+def controls_gate(company: str, posting_date, total_debit: float, lines: list, args: dict) -> dict:
+	"""Run the Phase 1 financial controls over an entry about to be written.
+
+	A THIN SEAM, ON PURPOSE. Everything it knows is in `tools/controls.py`; what
+	lives here is the decision to CALL it, before the insert, from the one
+	function every Journal Entry this app writes goes through. Keeping the seam
+	this small is what lets `mutate.py` go on being the file a reviewer reads to
+	answer "can this change the ledger?" without also having to hold four control
+	definitions in their head.
+
+	`approved_by` is an argument rather than something read off the document
+	because ERPNext's Journal Entry has no approver column — the release is a
+	docstatus transition, and who made it is in the version history rather than on
+	the row. A caller booking an entry on somebody else's authority says so here,
+	and segregation of duties is then a real check rather than a comparison of a
+	field against itself.
+
+	A LATE IMPORT. `tools/controls.py` reaches back into `enforcement`, which
+	reads the Compliance Rule table; importing it at module load would put that
+	chain in front of every `bench migrate` that touches this module. It costs
+	nothing here and cannot break a migration.
+	"""
+	from . import controls as control_tools
+
+	accounts = tuple(sorted({str(line.get("account") or "") for line in lines or [] if line.get("account")}))
+	preparer = as_str(args, "prepared_by") or settings.effective_user()
+	approver = as_str(args, "approved_by")
+	return control_tools.journal_entry_gate(
+		company,
+		posting_date,
+		total_debit,
+		accounts,
+		preparer=preparer,
+		approver=approver,
 	)
 
 

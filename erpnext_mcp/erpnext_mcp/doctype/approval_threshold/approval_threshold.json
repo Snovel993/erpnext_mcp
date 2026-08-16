@@ -1,0 +1,142 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "WHO MAY RELEASE A TRANSACTION OF THIS SIZE, as a record rather than as a convention. One threshold covers one document type for one company: an auto-approve floor beneath which nothing needs releasing, and a chain of rungs above it saying which role may release up to which amount. It is consulted at the moment a transaction is written, by the `approval_threshold` control point — Advisory reports what exceeded whose authority and lets the work through; Enforced refuses it. See `erpnext_mcp/enforcement.py`.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "threshold_name",
+  "company",
+  "document_type",
+  "identity_col",
+  "enabled",
+  "currency",
+  "auto_approve_below",
+  "chain_section",
+  "levels",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this threshold is called in conversation — 'Operating spend', 'Capital purchases'. The docname is built from it and the company abbreviation.",
+   "fieldname": "threshold_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threshold Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Whose authority table this is. A REQUIRED Link to Company, which is what lets Frappe's own User Permission scoping restrict it — see `permissions.py` on why that matters more than a hook of this app's own.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Any",
+   "description": "Which kind of transaction this threshold governs. `Any` is the catch-all and is consulted only when no threshold names the document type specifically — so a site can run one blanket table and override it for capital purchases without the two fighting.",
+   "fieldname": "document_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Applies To",
+   "options": "Any\nJournal Entry\nPurchase Order\nPurchase Invoice\nPayment Entry\nExpense Report\nStock Entry"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Whether this threshold is consulted. OFF is not deleted: a table an operation suspended for a season stays readable, and the transactions it released still point at the authority that was in force when they were written.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "description": "The currency every amount on this threshold is stated in. Left blank it is read as the company's default, which is right on the single-currency sites this app expects; a threshold in a currency the transaction is not in is REPORTED rather than silently converted, because a spending limit crossed on somebody's guess at an exchange rate is not a limit.",
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "description": "Transactions strictly below this need no approval at all and the control says nothing about them. THIS IS THE FIELD THAT MAKES THE CONTROL SURVIVABLE. Without it every fuel receipt raises a finding, the calendar fills with noise inside a week, and somebody turns the whole thing off. Zero means every transaction of this type needs somebody, which is a real answer for capital spend and a bad one for anything operational.",
+   "fieldname": "auto_approve_below",
+   "fieldtype": "Currency",
+   "label": "Auto-Approve Below",
+   "options": "currency"
+  },
+  {
+   "fieldname": "chain_section",
+   "fieldtype": "Section Break",
+   "label": "The chain"
+  },
+  {
+   "description": "The rungs, in any order — they are evaluated by amount, not by row position. The first rung whose ceiling covers the transaction is the authority it needs.",
+   "fieldname": "levels",
+   "fieldtype": "Table",
+   "label": "Levels",
+   "options": "Approval Threshold Level"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "What this table is FOR, for the person who inherits it. The amounts say what; only this says why.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Approval Threshold",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "threshold_name",
+ "sort_order": "ASC",
+ "states": [],
+ "quick_entry": 0,
+ "track_changes": 1,
+ "search_fields": "threshold_name,company,document_type"
+}

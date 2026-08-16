@@ -1,0 +1,193 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "ONE ACCOUNTING PERIOD: the steps that have to be finished before it closes, and — on the same row — whether it is now locked against posting. Two controls read it. `closing_checklist` is consulted when somebody closes the period and reports (Advisory) or refuses (Enforced) a close with required steps outstanding. `period_close_lockdown` is consulted when somebody dates a posting into it and reports or refuses that. Both are bypassable, both file the same finding either way — see `erpnext_mcp/enforcement.py`.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "period_type",
+  "period_start",
+  "period_end",
+  "identity_col",
+  "fiscal_year",
+  "status",
+  "locked",
+  "locked_on",
+  "locked_by",
+  "items_section",
+  "items",
+  "counts_section",
+  "item_count",
+  "counts_col",
+  "outstanding_count",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "Whose period this is. A REQUIRED Link to Company, so Frappe's own User Permission scoping restricts it without this app needing a hook of its own.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Month",
+   "description": "What kind of close this is. It changes what somebody expects on the list — a year-end carries steps a month does not — and nothing else: the period is the DATE RANGE below, and every comparison is made against that.",
+   "fieldname": "period_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Period Type",
+   "options": "Month\nQuarter\nYear",
+   "reqd": 1
+  },
+  {
+   "description": "First day of the period, INCLUSIVE.",
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period Start",
+   "reqd": 1
+  },
+  {
+   "description": "Last day of the period, INCLUSIVE. A posting dated on this day is inside the period.",
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period End",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Which year this period rolls into. Optional and informational: the lock is decided by the date range, never by this link, so a site whose fiscal years are incomplete still locks correctly.",
+   "fieldname": "fiscal_year",
+   "fieldtype": "Link",
+   "label": "Fiscal Year",
+   "options": "Fiscal Year"
+  },
+  {
+   "default": "Open",
+   "description": "Where the close has got to. Maintained by the tools; `Reopened` is what a period that was locked and then unlocked reads as, and it is a different word from `Open` on purpose — a month that has been closed once and opened again is a fact an auditor wants to see without diffing a version history.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Open\nIn Progress\nClosed\nReopened"
+  },
+  {
+   "description": "Whether the `period_close_lockdown` control treats a posting dated into this period as a finding. THE FLAG IS THE FACT; the ENFORCEMENT MODE decides whether the finding is reported or refused. A site running Advisory locks its periods and watches what would have been stopped, which is the point.",
+   "fieldname": "locked",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Locked Against Posting"
+  },
+  {
+   "fieldname": "locked_on",
+   "fieldtype": "Datetime",
+   "label": "Locked On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "locked_by",
+   "fieldtype": "Link",
+   "label": "Locked By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "The steps"
+  },
+  {
+   "description": "What has to be finished. A step with `required` ticked can hold the close; one without is tracked and cannot.",
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Steps",
+   "options": "Closing Checklist Item"
+  },
+  {
+   "fieldname": "counts_section",
+   "fieldtype": "Section Break",
+   "label": "Counts"
+  },
+  {
+   "description": "Computed on save. Stored rather than derived because the list view is where somebody scans twelve periods for the unfinished one, and a list view cannot aggregate a child table.",
+   "fieldname": "item_count",
+   "fieldtype": "Int",
+   "label": "Steps",
+   "read_only": 1
+  },
+  {
+   "fieldname": "counts_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Computed on save: required steps not yet done. This is the number the `closing_checklist` control reads, and zero is what lets a period close clean.",
+   "fieldname": "outstanding_count",
+   "fieldtype": "Int",
+   "label": "Required Steps Outstanding",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Closing Checklist",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "period_start",
+ "sort_order": "DESC",
+ "states": [],
+ "quick_entry": 0,
+ "track_changes": 1,
+ "search_fields": "company,period_type,period_start,status"
+}

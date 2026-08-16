@@ -939,6 +939,15 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		self.seed_rules()
 		shapes: dict = {}
 		for row in compliance_rules.rule_rows():
+			# v0.80.0. GATES ARE NOT ONE OF THE THREE SHAPES, and this is the
+			# second place that has to say so. `shape_of` reads "declarative" off a
+			# gate rule because a gate carries no scanner — but the shapes describe
+			# how the SWEEP runs a rule, and a rule with a `control_point` is never
+			# swept: it is consulted at the moment of a transaction. Counting the
+			# IPO-readiness controls here would quietly restate this test's claim
+			# about the seeded population as something it does not mean.
+			if row.get("control_point"):
+				continue
 			shapes.setdefault(compliance_rules.shape_of(row), []).append(row["rule_id"])
 		# Twenty-one since v0.55.0: the three record-only missing-signature rules
 		# each ask one question of one signature column on one row, which is the

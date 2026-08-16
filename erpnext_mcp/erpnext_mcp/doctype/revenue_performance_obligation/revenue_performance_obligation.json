@@ -1,0 +1,70 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "ONE PROMISE IN A CONTRACT, and the amount of the transaction price allocated to it. ASC 606 recognises revenue when control of a distinct good or service transfers — so the unit of recognition is the obligation, not the contract and not the invoice. A contract to grow, pack and ship is three obligations that are satisfied on three different days, and a system that recognised the whole contract on the first of them would be wrong for the whole gap between them.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "obligation",
+  "allocated_amount",
+  "satisfied",
+  "satisfied_on",
+  "evidence",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What was promised, in the words of the contract — 'Deliver 4,000 bins of Gala', 'Provide controlled-atmosphere storage through March'.",
+   "fieldname": "obligation",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Obligation",
+   "reqd": 1
+  },
+  {
+   "description": "The share of the contract's transaction price allocated to this promise. ASC 606-10-32-31 allocates on relative standalone selling price; this app stores what somebody allocated and checks that the parts sum to the whole — it does not compute the allocation, because a standalone selling price is a judgement about a market and not an arithmetic operation on a contract.",
+   "fieldname": "allocated_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Allocated"
+  },
+  {
+   "description": "Whether control has transferred. THE FIELD THE `revenue_recognition` CONTROL READS: recognising against an unsatisfied obligation is reported (Advisory) or refused (Enforced).",
+   "fieldname": "satisfied",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Satisfied"
+  },
+  {
+   "fieldname": "satisfied_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Satisfied On"
+  },
+  {
+   "description": "What shows control transferred — a scale ticket, a bill of lading, a settlement statement. The date says when somebody claims it happened; this says how anybody else could check.",
+   "fieldname": "evidence",
+   "fieldtype": "Data",
+   "label": "Evidence"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Revenue Performance Obligation",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1
+}

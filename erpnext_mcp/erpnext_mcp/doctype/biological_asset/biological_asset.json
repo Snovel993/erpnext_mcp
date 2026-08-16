@@ -1,0 +1,189 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "A GROWING CROP CARRIED AT A VALUE: an orchard block, an annual planting, a nursery lot. IAS 41's unit of account, which ERPNext's Asset cannot express — a bearer plant bears fruit for thirty years and is depreciated once mature, while a consumable planting IS the harvest and grows in value until it ceases to exist. `current_value` and `last_valuation_date` are DERIVED from the newest valuation row and are never typed: a figure no valuation supports is the unevidenced assertion this doctype exists to prevent.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "asset_name",
+  "company",
+  "asset_type",
+  "identity_col",
+  "valuation_method",
+  "status",
+  "parcel",
+  "field",
+  "value_section",
+  "current_value",
+  "value_col",
+  "last_valuation_date",
+  "cost_center",
+  "valuations_section",
+  "valuations",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this is called on the ground — 'Home Block Gala', 'Nursery lot 7'.",
+   "fieldname": "asset_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Asset Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Whose crop this is. A REQUIRED Link to Company, for the scoping reason every register in this app carries one.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Bearer",
+   "description": "BEARER bears a harvest and remains — an orchard block, depreciated once mature (IAS 16 since 2014). CONSUMABLE is the harvest — an annual planting, remeasured until it is picked and never depreciated. The difference is what happens at the end, and it is why one doctype cannot be ERPNext's Asset.",
+   "fieldname": "asset_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Type",
+   "options": "Bearer\nConsumable",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Cost",
+   "description": "The basis of the LATEST valuation, tracked from the newest row so the register and that row cannot disagree. IAS 41.30 presumes fair value and permits cost only while fair value is not reliably measurable — which on a block of trees nobody is selling is often the honest answer.",
+   "fieldname": "valuation_method",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Method",
+   "options": "Fair Value\nCost",
+   "read_only": 1
+  },
+  {
+   "default": "Growing",
+   "description": "Where the crop is in its life. `Mature` is the point a bearer asset starts being depreciated; `Harvested` and `Removed` are the two ways it stops being one.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Establishing\nGrowing\nMature\nHarvested\nRemoved"
+  },
+  {
+   "description": "The ground it is on, where this site tracks parcels. Optional: a nursery lot in pots is a biological asset on nobody's parcel.",
+   "fieldname": "parcel",
+   "fieldtype": "Link",
+   "label": "Parcel",
+   "options": "Parcel"
+  },
+  {
+   "description": "The block, where this site tracks fields.",
+   "fieldname": "field",
+   "fieldtype": "Link",
+   "label": "Field",
+   "options": "Field"
+  },
+  {
+   "fieldname": "value_section",
+   "fieldtype": "Section Break",
+   "label": "Carrying value"
+  },
+  {
+   "description": "DERIVED from the newest valuation row and never typed. Empty on an asset with no valuations — 'not yet valued' and 'valued at nothing' are different statements about a growing crop, and a zero would collapse them.",
+   "fieldname": "current_value",
+   "fieldtype": "Currency",
+   "label": "Current Value",
+   "read_only": 1
+  },
+  {
+   "fieldname": "value_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_valuation_date",
+   "fieldtype": "Date",
+   "label": "Last Valued",
+   "read_only": 1
+  },
+  {
+   "description": "Where establishment and maintenance cost accumulates. It is what makes a COST-basis valuation computable from the ledger rather than typed from a spreadsheet.",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "valuations_section",
+   "fieldtype": "Section Break",
+   "label": "Valuation history"
+  },
+  {
+   "description": "Every remeasurement, oldest first. The sequence IS the evidence — a current value with no trail behind it is an assertion nobody can test.",
+   "fieldname": "valuations",
+   "fieldtype": "Table",
+   "label": "Valuations",
+   "options": "Biological Asset Valuation"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Biological Asset",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "asset_name",
+ "sort_order": "ASC",
+ "states": [],
+ "quick_entry": 0,
+ "track_changes": 1,
+ "search_fields": "asset_name,company,asset_type,status"
+}

@@ -72,6 +72,7 @@ class ComplianceRule(Document):
 	def validate(self):
 		self._tidy()
 		self._check_the_key()
+		self._check_the_control_point()
 		self._check_the_blobs()
 		self._check_the_program()
 		self._check_the_producer()
@@ -150,6 +151,60 @@ class ComplianceRule(Document):
 					"is read when they ask why an alert fired."
 				),
 				title=_("No kairotic gate"),
+			)
+
+	# ── the control point ───────────────────────────────────────────────────
+	def _check_the_control_point(self) -> None:
+		"""v0.80.0. A gate rule must name a gate this app actually consults.
+
+		THE FAILURE THIS PREVENTS IS THE WORST ONE THE REGISTER CAN PRODUCE. An
+		operator reads a row saying the site enforces segregation of duties,
+		believes it, and tells an auditor so — while nothing anywhere asks that row
+		anything. A swept rule that matches nothing is visibly quiet; a gate that
+		nothing calls is indistinguishable from a gate that never had to fire.
+
+		THE MODE IS NORMALISED RATHER THAN REFUSED WHEN BLANK, and it normalises to
+		Advisory. A gate whose strictness was somehow unset must not fall to the
+		strict reading: the cost of quietly enforcing something an operator did not
+		ask to enforce is a locked ledger, and the cost of quietly advising is a
+		calendar entry.
+		"""
+		from erpnext_mcp import enforcement
+
+		control_point = str(self.control_point or "").strip()
+		self.control_point = control_point
+		if not control_point:
+			# Not a gate. `enforcement_mode` is meaningless on a swept rule and is
+			# blanked rather than left at a default, so a register sorted by it does
+			# not show every cadence rule as "Advisory" — which would read as a
+			# claim that they are gates somebody softened.
+			self.enforcement_mode = None
+			return
+
+		if control_point not in enforcement.CONTROL_POINTS:
+			frappe.throw(
+				_(
+					"{0} is not a control point this app implements, so nothing would ever consult "
+					"this rule. The control points are: {1}. A rule naming a gate that does not "
+					"exist is worse than no rule — it tells an operator their site enforces "
+					"something it does not."
+				).format(control_point, ", ".join(sorted(enforcement.CONTROL_POINTS))),
+				title=_("No such control point"),
+			)
+
+		if str(self.enforcement_mode or "").strip() not in enforcement.MODES:
+			self.enforcement_mode = enforcement.ADVISORY
+
+		if str(self.builtin_scanner or "").strip() or str(self.custom_python or "").strip():
+			frappe.throw(
+				_(
+					"A rule with a control point is a GATE — it is consulted at the moment of the "
+					"transaction and is never scanned. Giving it a scanner as well would create a "
+					"second, nightly opinion about the same condition, filed under the same alert "
+					"key, which would fight the gate's own findings. Clear the scanner, or clear "
+					"the control point."
+				),
+				title=_("A gate is not swept"),
 			)
 
 	# ── the blobs ───────────────────────────────────────────────────────────

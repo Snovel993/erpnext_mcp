@@ -325,6 +325,13 @@ RULE_FIELDS = (
 	"title",
 	"category",
 	"enabled",
+	# v0.80.0. Selected on every read because the SWEEP filters on it: a rule
+	# carrying a control point is a transaction-time gate and is skipped by
+	# `engine.rule_set`. `existing_fields` drops both on a site mid-migrate, and
+	# the filter then sees a blank and sweeps nothing differently — which is the
+	# correct behaviour for a site that has no gates yet.
+	"control_point",
+	"enforcement_mode",
 	"version",
 	"superseded_by",
 	"active_row_flag",
@@ -1234,6 +1241,16 @@ def describe(row: dict, with_definition: bool = False) -> dict:
 		"superseded_by": str(row.get("superseded_by") or "") or None,
 		"shape": shape_of(row),
 		"target_doctype": row.get("target_doctype"),
+		# v0.80.0. WHETHER THIS RULE IS A GATE OR A SWEEP, ON THE LIST SHAPE, because
+		# it changes what the row MEANS more than any other field on it. A swept rule
+		# that is enabled watches the site nightly; a gate that is enabled is
+		# consulted at the moment of a transaction and may refuse it. Somebody
+		# scanning the register to answer "what does this system stop me doing"
+		# should not have to open each row to find the two that can.
+		"control_point": str(row.get("control_point") or "") or None,
+		"is_gate": bool(str(row.get("control_point") or "").strip()),
+		"enforcement_mode": str(row.get("enforcement_mode") or "") or None,
+		"enforced": str(row.get("enforcement_mode") or "") == "Enforced",
 		# The same text as `framework` above, under the name the DocType and the
 		# tools use. Both, because `framework` is the key every client since
 		# v0.19.2 reads and `regulation_citations` is the field somebody editing
@@ -1333,6 +1350,12 @@ RULE_DEFAULTS = {
 	"title": "",
 	"category": "Records",
 	"enabled": 0,
+	# v0.80.0. Both default to "" so a swept rule written through `build_rule` is
+	# explicitly not a gate, rather than inheriting whatever the column happened
+	# to hold. The controller blanks `enforcement_mode` on a rule with no control
+	# point and normalises it to Advisory on one that has.
+	"control_point": "",
+	"enforcement_mode": "",
 	"version": 1,
 	"target_doctype": "",
 	"requires_doctypes": "",
@@ -2395,6 +2418,25 @@ def declarative_seed_specs() -> list:
 	]
 
 
+def _gate_seed_specs() -> list:
+	"""v0.80.0. The IPO-readiness control points, every one of them Advisory.
+
+	Kept behind a function rather than imported at module scope because
+	`enforcement` imports `compat` and `errors` only — but the seeder runs during
+	`bench migrate`, where a circular import at module load aborts the migration
+	for the whole bench rather than for this app. A late import costs nothing and
+	cannot do that.
+
+	A GATE RULE IS SEEDED ENABLED AND ADVISORY. Enabled so the control runs and
+	starts filling the calendar from the first migrate — an operation should be
+	accumulating the evidence for its own enforcement decision before anybody
+	configures anything. Advisory so it refuses nothing while it does.
+	"""
+	from .enforcement import seed_specs as gate_specs
+
+	return list(gate_specs())
+
+
 def seed_compliance_rules(approver: str = "") -> dict:
 	"""One Compliance Rule per shipped rule. Idempotent, and never raises.
 
@@ -2420,7 +2462,7 @@ def seed_compliance_rules(approver: str = "") -> dict:
 	approver = approver or _seed_approver()
 	stamped = frappe.utils.now()
 	try:
-		specs = seed_specs() + declarative_seed_specs()
+		specs = seed_specs() + declarative_seed_specs() + _gate_seed_specs()
 	except Exception as exc:  # pragma: no cover - a site mid-import
 		report["failed"].append({"name": "declarative_seed_specs", "reason": f"{type(exc).__name__}: {exc}"})
 		specs = seed_specs()

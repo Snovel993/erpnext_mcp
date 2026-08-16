@@ -1,0 +1,247 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "WHAT WAS PROMISED TO A CUSTOMER, WHAT IT IS WORTH, AND WHEN EACH PART OF IT IS EARNED. The ASC 606 unit of account, which a Sales Order cannot carry: the distinct performance obligations, the transaction price allocated between them, whether control transfers at a point in time or over time, and the schedule that turns all of that into journal entries. On a produce operation the gap this closes is at its widest — fruit delivered in September against a settlement that arrives in December at a price nobody knew in September.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "contract_name",
+  "company",
+  "customer",
+  "contract_date",
+  "identity_col",
+  "status",
+  "recognition_method",
+  "start_date",
+  "end_date",
+  "value_section",
+  "total_value",
+  "currency",
+  "value_col",
+  "scheduled_amount",
+  "recognized_amount",
+  "unrecognized_amount",
+  "accounts_section",
+  "revenue_account",
+  "accounts_col",
+  "receivable_account",
+  "obligations_section",
+  "obligations",
+  "schedule_section",
+  "schedule",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this contract is called in conversation — 'Stemilt 2026 Gala pool', 'CA storage agreement 2026'. The docname is built from it and the company abbreviation.",
+   "fieldname": "contract_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Contract Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Whose contract this is. A REQUIRED Link to Company, so Frappe's own User Permission scoping restricts it with no hook of this app's own.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The counterparty. Required: ASC 606 is about contracts WITH CUSTOMERS, and an arrangement with no customer on it is something else.",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "contract_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Contract Date"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Draft",
+   "description": "Where the contract has got to. `Completed` means every obligation is satisfied and every scheduled tranche recognised; it is set by whoever decides that, not computed, because a contract can be finished commercially with a tail of recognition still to run.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nActive\nCompleted\nCancelled"
+  },
+  {
+   "default": "Point in Time",
+   "description": "ASC 606-10-25-27. OVER TIME where the customer simultaneously receives and consumes the benefit — controlled-atmosphere storage, a management agreement. POINT IN TIME where control transfers on a day — a bin of fruit changing hands. It is a property of the contract for reporting; each schedule row still carries its own basis, because a contract can genuinely contain both.",
+   "fieldname": "recognition_method",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Recognition",
+   "options": "Point in Time\nOver Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Start Date"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "End Date"
+  },
+  {
+   "fieldname": "value_section",
+   "fieldtype": "Section Break",
+   "label": "The transaction price"
+  },
+  {
+   "description": "What the operation expects to be entitled to for the whole contract. On a consignment pool this is an ESTIMATE until the settlement arrives, which is exactly what ASC 606's variable-consideration guidance is about — update it with update_revenue_contract as the estimate firms, and the schedule and the obligation sums are re-checked against the new figure.",
+   "fieldname": "total_value",
+   "fieldtype": "Currency",
+   "label": "Transaction Price",
+   "options": "currency"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "value_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Computed on save: the schedule's total. Stored because a list view cannot aggregate a child table, and 'which contracts have an incomplete schedule' is the question somebody scans this list to answer.",
+   "fieldname": "scheduled_amount",
+   "fieldtype": "Currency",
+   "label": "Scheduled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "recognized_amount",
+   "fieldtype": "Currency",
+   "label": "Recognized",
+   "read_only": 1
+  },
+  {
+   "fieldname": "unrecognized_amount",
+   "fieldtype": "Currency",
+   "label": "Unrecognized",
+   "read_only": 1
+  },
+  {
+   "fieldname": "accounts_section",
+   "fieldtype": "Section Break",
+   "label": "Where recognition posts"
+  },
+  {
+   "description": "Credited when a tranche is recognised. Left blank, recognize_revenue_milestone refuses rather than guessing — an account picked by an algorithm is a misstatement somebody finds at year end.",
+   "fieldname": "revenue_account",
+   "fieldtype": "Link",
+   "label": "Revenue Account",
+   "options": "Account"
+  },
+  {
+   "fieldname": "accounts_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Debited when a tranche is recognised — contract asset or receivable. Also never guessed.",
+   "fieldname": "receivable_account",
+   "fieldtype": "Link",
+   "label": "Receivable Account",
+   "options": "Account"
+  },
+  {
+   "fieldname": "obligations_section",
+   "fieldtype": "Section Break",
+   "label": "Performance obligations"
+  },
+  {
+   "description": "The distinct promises. One is the common case and is not a failure to decompose — a contract to deliver one lot of fruit contains one promise.",
+   "fieldname": "obligations",
+   "fieldtype": "Table",
+   "label": "Obligations",
+   "options": "Revenue Performance Obligation"
+  },
+  {
+   "fieldname": "schedule_section",
+   "fieldtype": "Section Break",
+   "label": "Recognition schedule"
+  },
+  {
+   "description": "When each part is earned. Milestone rows wait for their obligation; time rows come due on their date.",
+   "fieldname": "schedule",
+   "fieldtype": "Table",
+   "label": "Schedule",
+   "options": "Revenue Recognition Schedule"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Revenue Contract",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "contract_date",
+ "sort_order": "DESC",
+ "states": [],
+ "quick_entry": 0,
+ "track_changes": 1,
+ "search_fields": "contract_name,customer,company,status"
+}

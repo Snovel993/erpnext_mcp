@@ -25,12 +25,28 @@ import unittest
 
 import frappe
 
-from erpnext_mcp import alerts, compliance_rules
+from erpnext_mcp import alerts, compliance_rules, enforcement
 from erpnext_mcp.alerts import engine, sandbox
 
 from .fixtures import MAIN
 from .harness import STORE
 from .test_alerts import ALL_ON, TODAY, AlertTestCase, days_from_today
+
+#: The rules that are SWEPT — walked nightly against the site's records. Thirty
+#: since v0.69.0, and the number is spelled out rather than derived because it is
+#: the claim these tests exist to make: every rule this app ships became a record,
+#: one for one, and a release that drops one should fail here loudly.
+SWEPT_RULES = 30
+
+#: v0.80.0. The rules that are GATES — consulted at the moment of a transaction
+#: rather than swept. Derived from `enforcement.CONTROL_POINTS` rather than
+#: written out, because unlike the thirty these are expected to grow with each
+#: control an IPO-readiness phase adds, and a hardcoded total would make every
+#: such addition look like a regression in a test about something else.
+GATE_RULES = len(enforcement.CONTROL_POINTS)
+
+#: What the seeder writes on a fresh site, all told.
+ALL_RULES = SWEPT_RULES + GATE_RULES
 
 RULE_TOOLS = {
 	f"allow_{name}": 1
@@ -278,8 +294,13 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		it is read against live on two different doctypes.
 		"""
 		report = self.seed_rules()
-		self.assertEqual(len(report["created"]), 30)
-		self.assertEqual(len(compliance_rules.rule_rows()), 30)
+		self.assertEqual(len(report["created"]), ALL_RULES)
+		self.assertEqual(len(compliance_rules.rule_rows()), ALL_RULES)
+		# v0.80.0. The thirty are still thirty. What grew is the gate register
+		# beside them, and the two are counted separately here so that adding a
+		# control point can never be mistaken for losing a swept rule.
+		swept = [row for row in compliance_rules.rule_rows() if not row.get("control_point")]
+		self.assertEqual(len(swept), SWEPT_RULES)
 		self.assertIn("shift_heat_threshold_crossed", report["created"])
 		self.assertNotIn("shift_heat_threshold_crossed", alerts.RULES)
 
@@ -303,6 +324,13 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 		self.seed_rules()
 		shapes = {}
 		for row in compliance_rules.rule_rows():
+			# v0.80.0. GATES ARE NOT ONE OF THE THREE SHAPES. `shape_of` reads
+			# "declarative" off a gate rule because a gate carries no scanner — but
+			# the shapes are a statement about how the SWEEP runs a rule, and a gate
+			# is never swept. Counting them here would silently restate this test's
+			# claim as something it does not mean.
+			if row.get("control_point"):
+				continue
 			shapes.setdefault(compliance_rules.shape_of(row), []).append(row["rule_id"])
 		self.assertEqual(
 			sorted(shapes.get(compliance_rules.SHAPE_DECLARATIVE, [])),
@@ -1077,11 +1105,11 @@ class TheApprovalGate(RuleEngineTestCase):
 
 class TheSeederIsIdempotent(RuleEngineTestCase):
 	def test_seeding_twice_writes_thirty_rules_once(self):
-		self.assertEqual(len(self.seed_rules()["created"]), 30)
+		self.assertEqual(len(self.seed_rules()["created"]), ALL_RULES)
 		again = compliance_rules.seed_compliance_rules()
 		self.assertEqual(again["created"], [])
-		self.assertEqual(len(again["present"]), 30)
-		self.assertEqual(len(compliance_rules.rule_rows()), 30)
+		self.assertEqual(len(again["present"]), ALL_RULES)
+		self.assertEqual(len(compliance_rules.rule_rows()), ALL_RULES)
 
 	def test_an_operator_edit_is_not_overwritten_on_the_next_migrate(self):
 		"""The difference between a seeder and a Frappe fixture, and the reason
@@ -1129,7 +1157,7 @@ class TheRuleTools(RuleEngineTestCase):
 		"""Clients read this. Additive is fine; renamed is a breaking change."""
 		self.seed_rules()
 		data = self.tool_data("list_compliance_rules", {})
-		self.assertEqual(data["rule_count"], 30)
+		self.assertEqual(data["rule_count"], ALL_RULES)
 		for rule in data["rules"]:
 			for key in ("alert_type", "title", "category", "purpose", "kairotic_gate", "framework"):
 				self.assertIn(key, rule)

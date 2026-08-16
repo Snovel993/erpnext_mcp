@@ -1,0 +1,90 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "ONE PLANNED RECOGNITION EVENT: how much revenue, on what date or against which milestone, and — once it has happened — the draft journal entry that recorded it. Time-based rows carry a date and no obligation; milestone-based rows carry an obligation and become recognisable the day it is satisfied. Both shapes live in one table because they are the same row with a different trigger, and splitting them would mean every report that asks 'what is left to recognise on this contract' had to union two tables.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basis",
+  "obligation",
+  "due_date",
+  "amount",
+  "recognized",
+  "recognized_on",
+  "journal_entry",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "Milestone",
+   "description": "What makes this row ripe. `Milestone` waits for its obligation to be satisfied — point-in-time recognition. `Time` comes due on its own date — over-time recognition, which is what a storage or management agreement earns.",
+   "fieldname": "basis",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Basis",
+   "options": "Milestone\nTime",
+   "reqd": 1
+  },
+  {
+   "description": "For a milestone row: which performance obligation on this contract, matched by its text. Blank on a time row.",
+   "fieldname": "obligation",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Obligation"
+  },
+  {
+   "description": "For a time row: the date this tranche is earned. For a milestone row it is the EXPECTED date and nothing turns on it — the obligation's own `satisfied_on` is what actually decides.",
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Due"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "reqd": 1
+  },
+  {
+   "description": "Set by recognize_revenue_milestone. Never typed: a row marked recognised by hand would claim a journal entry exists that does not.",
+   "fieldname": "recognized",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Recognized"
+  },
+  {
+   "fieldname": "recognized_on",
+   "fieldtype": "Date",
+   "label": "Recognized On",
+   "read_only": 1
+  },
+  {
+   "description": "The DRAFT entry this recognition produced. Draft, like every journal entry this app writes — recognising revenue is a posting somebody signs off, not a side effect of ticking a box.",
+   "fieldname": "journal_entry",
+   "fieldtype": "Link",
+   "label": "Journal Entry",
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Revenue Recognition Schedule",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1
+}

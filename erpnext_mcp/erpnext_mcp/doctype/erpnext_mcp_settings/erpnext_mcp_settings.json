@@ -742,7 +742,40 @@
   "allow_seal_trade_document",
   "allow_generate_shipment_packet",
   "allow_create_trade_document_template",
-  "allow_set_destination_requirements"
+  "allow_set_destination_requirements",
+  "ipo_phase1_section",
+  "allow_list_control_points",
+  "allow_check_journal_entry_controls",
+  "allow_get_approval_threshold",
+  "allow_list_approval_thresholds",
+  "allow_get_closing_checklist",
+  "allow_list_closing_checklists",
+  "allow_create_approval_threshold",
+  "allow_update_approval_threshold",
+  "allow_create_closing_checklist",
+  "allow_update_closing_checklist",
+  "allow_complete_checklist_item",
+  "allow_close_accounting_period",
+  "allow_reopen_accounting_period",
+  "ipo_phase23_section",
+  "allow_get_revenue_contract",
+  "allow_list_revenue_contracts",
+  "allow_trace_contract_to_cash",
+  "allow_get_biological_asset",
+  "allow_list_biological_assets",
+  "allow_get_standard_cost",
+  "allow_list_standard_costs",
+  "allow_get_cost_variance_report",
+  "allow_get_absorption_cost_report",
+  "allow_create_revenue_contract",
+  "allow_update_revenue_contract",
+  "allow_link_settlement_to_contract",
+  "allow_recognize_revenue_milestone",
+  "allow_create_biological_asset",
+  "allow_update_biological_asset",
+  "allow_record_biological_asset_valuation",
+  "allow_create_standard_cost",
+  "allow_update_standard_cost"
  ],
  "fields": [
   {
@@ -5620,6 +5653,235 @@
    "fieldname": "allow_set_destination_requirements",
    "fieldtype": "Check",
    "label": "Set Destination Requirements"
+  },
+  {
+   "description": "IPO readiness Phase 1: spending authority, period close, and the checks a journal entry is put through before it is written. EVERY ONE OF THESE CONTROLS IS BYPASSABLE AND EVERY ONE SHIPS ADVISORY — it evaluates, files what it finds to the compliance calendar, and lets the work through. Turning one up to Enforced is done on its own Compliance Rule, not here; these switches decide only whether the TOOLS are reachable. The reads default ON, because an operator who cannot see which controls are set to what cannot make the decision the advisory season exists to inform.",
+   "fieldname": "ipo_phase1_section",
+   "fieldtype": "Section Break",
+   "label": "Financial Controls (v0.80.0)"
+  },
+  {
+   "default": "1",
+   "description": "THE REGISTER OF WHAT THIS SYSTEM WILL AND WILL NOT STOP YOU DOING. Every transaction-time control this app implements, with the mode each one is set to on this site: Off, Advisory or Enforced. Read-only.",
+   "fieldname": "allow_list_control_points",
+   "fieldtype": "Check",
+   "label": "List Control Points"
+  },
+  {
+   "default": "1",
+   "description": "What the financial controls would say about a journal entry — a duplicate, an unusual amount, a closed period, a self-approval, a spend above somebody's authority. Read-only: NOTHING IS WRITTEN, no alert is filed, and nothing is refused however the controls are set.",
+   "fieldname": "allow_check_journal_entry_controls",
+   "fieldtype": "Check",
+   "label": "Check Journal Entry Controls"
+  },
+  {
+   "default": "1",
+   "description": "One approval threshold with its chain, sorted the way the chain is EVALUATED rather than the way the grid was typed. Pass `amount` and it also answers the question you actually have: who has to release a transaction of that size. Read-only.",
+   "fieldname": "allow_get_approval_threshold",
+   "fieldtype": "Check",
+   "label": "Get Approval Threshold"
+  },
+  {
+   "default": "1",
+   "description": "The spending-authority register: every threshold with its floor and its chain. A site with no threshold for a document type has expressed NO OPINION about authority for it, which is reported as such rather than read as unlimited. Read-only.",
+   "fieldname": "allow_list_approval_thresholds",
+   "fieldtype": "Check",
+   "label": "List Approval Thresholds"
+  },
+  {
+   "default": "1",
+   "description": "One accounting period: every step with who ticked it and when, what is still outstanding, and whether the period is locked against posting. Read-only.",
+   "fieldname": "allow_get_closing_checklist",
+   "fieldtype": "Check",
+   "label": "Get Closing Checklist"
+  },
+  {
+   "default": "1",
+   "description": "The period register, most recent first, with each period's outstanding count and lock state. This is the read that answers 'which months are actually closed'. Read-only.",
+   "fieldname": "allow_list_closing_checklists",
+   "fieldtype": "Check",
+   "label": "List Closing Checklists"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Define who may release a transaction of a given size: an auto-approve floor beneath which nothing needs releasing, and a chain of rungs above it saying which ROLE may release up to which amount.",
+   "fieldname": "allow_create_approval_threshold",
+   "fieldtype": "Check",
+   "label": "Create Approval Threshold"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Change a threshold's floor, currency, document type, enabled state or chain.",
+   "fieldname": "allow_update_approval_threshold",
+   "fieldtype": "Check",
+   "label": "Update Approval Threshold"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Open an accounting period with the steps that have to be finished before it closes. Give no steps and the eight a month-end close almost always has are seeded, in English and Spanish, every one of them required and every one editable.",
+   "fieldname": "allow_create_closing_checklist",
+   "fieldtype": "Check",
+   "label": "Create Closing Checklist"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Edit a period's dates, type, status, notes or steps. DOES NOT LOCK OR UNLOCK — close_accounting_period and reopen_accounting_period do that, so a period can never be locked as a side effect of fixing a typo.",
+   "fieldname": "allow_update_closing_checklist",
+   "fieldtype": "Check",
+   "label": "Update Closing Checklist"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Tick one close step, recording who and when. Pass `evidence` — a reconciliation docname, a report reference, a journal entry — because a checklist of bare ticks is a claim and a checklist of ticks that each point at something is evidence.",
+   "fieldname": "allow_complete_checklist_item",
+   "fieldtype": "Check",
+   "label": "Complete Checklist Item"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Lock a period against posting.",
+   "fieldname": "allow_close_accounting_period",
+   "fieldtype": "Check",
+   "label": "Close Accounting Period"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Unlock a closed period. A reason is REQUIRED and goes on the record.",
+   "fieldname": "allow_reopen_accounting_period",
+   "fieldtype": "Check",
+   "label": "Reopen Accounting Period"
+  },
+  {
+   "description": "IPO readiness Phases 2 and 3. REVENUE: the ASC 606 unit of account — what was promised, how the price is allocated between the promises, when each is earned — plus the contract-to-cash trace an auditor's question actually reduces to. COST: a growing crop carried at a value with its remeasurements behind it, what things are supposed to cost, and the variance between that and what they did. The reads default ON; every write is off until an operator turns it on, including recognize_revenue_milestone, which produces a DRAFT journal entry and never posts.",
+   "fieldname": "ipo_phase23_section",
+   "fieldtype": "Section Break",
+   "label": "Revenue Recognition and Cost Accounting (v0.80.0)"
+  },
+  {
+   "default": "1",
+   "description": "One contract in full: every performance obligation with whether control has transferred, the recognition schedule with what has been drawn and what is left, and any settlement statements linked to it. Read-only.",
+   "fieldname": "allow_get_revenue_contract",
+   "fieldtype": "Check",
+   "label": "Get Revenue Contract"
+  },
+  {
+   "default": "1",
+   "description": "The contract register with each one's recognition progress, and the totals across them: contracted, recognised, and still to recognise. Read-only.",
+   "fieldname": "allow_list_revenue_contracts",
+   "fieldtype": "Check",
+   "label": "List Revenue Contracts"
+  },
+  {
+   "default": "1",
+   "description": "THE WHOLE CHAIN FOR ONE CONTRACT: contract → settlement → invoice → payment → GL entries, each hop with its date, its amount and its docname. Read-only.",
+   "fieldname": "allow_trace_contract_to_cash",
+   "fieldtype": "Check",
+   "label": "Trace Contract To Cash"
+  },
+  {
+   "default": "1",
+   "description": "One growing crop with its FULL valuation history, oldest first, plus the movement between the first and the latest. The sequence is the evidence: a current value with no trail behind it is an assertion nobody can test. Read-only.",
+   "fieldname": "allow_get_biological_asset",
+   "fieldtype": "Check",
+   "label": "Get Biological Asset"
+  },
+  {
+   "default": "1",
+   "description": "The growing-crop register with each asset's carrying value and the total across them. ASSETS THAT HAVE NEVER BEEN VALUED ARE EXCLUDED FROM THE TOTAL and counted separately, rather than added in as zero — a carrying value that silently included un-valued crops would understate the balance sheet and look like a measurement. Read-only.",
+   "fieldname": "allow_list_biological_assets",
+   "fieldtype": "Check",
+   "label": "List Biological Assets"
+  },
+  {
+   "default": "1",
+   "description": "One standard by docname — or, given `subject` and `on_date`, THE STANDARD THAT COVERED THAT DAY. It refuses rather than picking the nearest when nothing covered the date, because a variance against the wrong season's standard is a confident wrong number. Read-only.",
+   "fieldname": "allow_get_standard_cost",
+   "fieldtype": "Check",
+   "label": "Get Standard Cost"
+  },
+  {
+   "default": "1",
+   "description": "The standards register. Pass `on_date` to collapse it to the one standard per subject and basis that covered that day, which is what a costing run wants. Names the standards whose actual side cannot be read from the ledger. Read-only.",
+   "fieldname": "allow_list_standard_costs",
+   "fieldtype": "Check",
+   "label": "List Standard Costs"
+  },
+  {
+   "default": "1",
+   "description": "Actual against standard, per subject, with the gaps past each standard's own tolerance flagged. THE COMPARISON IS THE CONTROL — a standard nobody compares against is a number in a table. Read-only.",
+   "fieldname": "allow_get_cost_variance_report",
+   "fieldtype": "Check",
+   "label": "Get Cost Variance Report"
+  },
+  {
+   "default": "1",
+   "description": "Cost from field through packhouse, per unit, with overhead absorbed or excluded. Read-only.",
+   "fieldname": "allow_get_absorption_cost_report",
+   "fieldtype": "Check",
+   "label": "Get Absorption Cost Report"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Record what was promised to a customer, what it is worth, and when each part of it is earned — the ASC 606 unit of account.",
+   "fieldname": "allow_create_revenue_contract",
+   "fieldtype": "Check",
+   "label": "Create Revenue Contract"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Revise a contract's transaction price, status, accounts, obligations or schedule — and mark an obligation SATISFIED, which is what makes its milestone tranche recognisable.",
+   "fieldname": "allow_update_revenue_contract",
+   "fieldtype": "Check",
+   "label": "Update Revenue Contract"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Attach a settlement statement to the revenue contract it settles — the join that makes contract-to-cash traceable in one hop. A settlement is where a consignment pool stops being an estimate and becomes a number, which is the moment ASC 606's variable consideration resolves.",
+   "fieldname": "allow_link_settlement_to_contract",
+   "fieldtype": "Check",
+   "label": "Link Settlement To Contract"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Recognise one scheduled tranche, producing a DRAFT journal entry that debits the receivable account and credits the revenue account.",
+   "fieldname": "allow_recognize_revenue_milestone",
+   "fieldtype": "Check",
+   "label": "Recognize Revenue Milestone"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Register a growing crop carried at a value — an orchard block, an annual planting, a nursery lot.",
+   "fieldname": "allow_create_biological_asset",
+   "fieldtype": "Check",
+   "label": "Create Biological Asset"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Change a crop's type, status, ground or cost center.",
+   "fieldname": "allow_update_biological_asset",
+   "fieldtype": "Check",
+   "label": "Update Biological Asset"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Remeasure a growing crop, APPENDING to its valuation history. IAS 41 remeasures at each reporting date and the sequence is what an auditor tests, so this never overwrites — `current_value` simply follows the newest row.",
+   "fieldname": "allow_record_biological_asset_valuation",
+   "fieldtype": "Check",
+   "label": "Record Biological Asset Valuation"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Define what a thing should cost — per bin, per acre, per hour — for a date range.",
+   "fieldname": "allow_create_standard_cost",
+   "fieldtype": "Check",
+   "label": "Create Standard Cost"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Change a standard's rate, date range, classification or tolerance. CLOSING ONE IS HOW A NEW SEASON'S IS MADE: set `effective_to` on the current row, then create the next — the overlap check then guarantees there is never a day with two answers to 'what should this have cost'.",
+   "fieldname": "allow_update_standard_cost",
+   "fieldtype": "Check",
+   "label": "Update Standard Cost"
   }
  ],
  "index_web_pages_for_search": 0,

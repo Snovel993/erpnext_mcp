@@ -121,6 +121,16 @@ def rule_set() -> tuple:
 		key = str(row.get("rule_id") or "").strip()
 		if not key or key in assembled:
 			continue
+		# v0.80.0. A GATE IS NOT SWEPT. A rule carrying a `control_point` is
+		# consulted at the moment of the transaction by the tool performing it —
+		# see `enforcement.py` — and has no scan semantics at all: no target
+		# doctype to walk, no date field to age, no condition that is true of a
+		# record sitting still. Handing it to `_declarative_scan` would walk
+		# whatever `target_doctype` happened to be blank and raise nothing, which
+		# is harmless, and would put a "could not be assembled" note in front of
+		# an operator every night, which is not.
+		if str(row.get("control_point") or "").strip():
+			continue
 		try:
 			assembled[key] = rule_from_row(row)
 		except Exception as exc:

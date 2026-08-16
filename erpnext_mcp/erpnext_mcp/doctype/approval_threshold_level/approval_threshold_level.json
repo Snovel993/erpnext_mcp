@@ -1,0 +1,58 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "One rung of an approval chain: everything up to `up_to_amount` may be released by `approver_role`. Rows are read in ascending amount order, and the FIRST rung whose ceiling covers the transaction is the authority it needs — so a chain reads as 'a foreman to five thousand, a manager to fifty, an officer above that'. A rung with no ceiling is the top of the chain and there may be only one.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "level",
+  "up_to_amount",
+  "approver_role",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "Ordinal position, 1 upwards. Display only — the chain is evaluated by amount, never by this number, so a mis-numbered row still authorises correctly.",
+   "fieldname": "level",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Level"
+  },
+  {
+   "description": "The largest transaction this rung may release, in the threshold's currency. BLANK OR ZERO MEANS NO CEILING and makes this the top of the chain. Exactly one rung may be uncapped: two would make 'who approves a million' depend on row order, which is the one thing an authority table must never do.",
+   "fieldname": "up_to_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Up To"
+  },
+  {
+   "description": "The Frappe role that may release a transaction at this rung. A ROLE RATHER THAN A PERSON, deliberately: a named approver goes on holiday and the chain stops, and the fix somebody applies at that point is to widen the threshold permanently.",
+   "fieldname": "approver_role",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Approver Role",
+   "options": "Role",
+   "reqd": 1
+  },
+  {
+   "description": "Why this rung is where it is — 'board resolution 2026-03' — for the auditor who asks who set fifty thousand and on what authority.",
+   "fieldname": "notes",
+   "fieldtype": "Data",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Approval Threshold Level",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1
+}

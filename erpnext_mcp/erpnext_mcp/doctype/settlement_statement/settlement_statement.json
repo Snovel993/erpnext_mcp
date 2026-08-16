@@ -18,6 +18,7 @@
   "status",
   "posted_journal_entry",
   "sales_invoice",
+  "revenue_contract",
   "weight_section",
   "gross_delivered_weight",
   "packed_weight",
@@ -127,6 +128,15 @@
    "label": "Sales Invoice",
    "options": "Sales Invoice",
    "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "v0.80.0. THE REVENUE CONTRACT THIS SETTLEMENT SETTLES, and the link that makes contract-to-cash traceable in one hop. A settlement is where a consignment pool stops being an estimate and becomes a number — which is the exact moment ASC 606's variable consideration resolves — so it is the natural join between what was promised and what was received. A LINK FIELD HERE RATHER THAN A CHILD TABLE ON THE CONTRACT, deliberately, and it is this repository's stated design philosophy rather than a shortcut: one settlement belongs to at most one contract, so a join table would add a doctype to express a relationship a column already expresses, and `trace_contract_to_cash` would become a three-way join instead of a filter. OPTIONAL, AND MOST SETTLEMENTS WILL NOT CARRY ONE. A farm that sells at the day's price has settlements and no contracts, and this app is not going to make it invent one.",
+   "fieldname": "revenue_contract",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Revenue Contract",
+   "options": "Revenue Contract",
    "search_index": 1
   },
   {

@@ -14,6 +14,8 @@
   "category",
   "identity_col",
   "enabled",
+  "control_point",
+  "enforcement_mode",
   "version",
   "superseded_by",
   "active_row_flag",
@@ -132,6 +134,25 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Enabled"
+  },
+  {
+   "description": "THE TRANSACTION-TIME GATE THIS RULE GOVERNS, and the field that makes this row a GATE rather than a SWEEP. Blank on every rule authored before v0.80.0 and on every rule that watches the site on a cadence: those are scanned nightly, raise an alert about a record that has drifted, and dismiss it when the drift resolves. A rule with a control point is not scanned at all — it is consulted at the moment somebody tries to do the thing, by name, from the tool that does it. `approval_threshold` is asked before a spend is booked; `period_close_lockdown` before a posting lands in a closed month. WHY THE TWO KINDS SHARE ONE DOCTYPE. Because an operator asking 'what does this system check, and how hard' should get ONE register back, not two — and because everything that makes a swept rule auditable (the citation, the version-by-copy, the human approval, the purpose) is exactly what makes a gate auditable. What differs is when it runs, which is one field. `erpnext_mcp/enforcement.py` holds the list of control points that mean anything; a rule naming one this app does not implement is refused on save, because a control nothing consults is a control an operator believes they have.",
+   "fieldname": "control_point",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Control Point",
+   "search_index": 1
+  },
+  {
+   "default": "Advisory",
+   "depends_on": "eval:doc.control_point",
+   "description": "HOW HARD THIS GATE PUSHES, and the whole of what an operator turns up as they grow. ADVISORY (the default, and the default is the load-bearing part) means the control still runs, still decides, and still writes the finding to the compliance calendar as an alert against the record — and then LETS THE WORK THROUGH. ENFORCED means the same code reaches the same finding and refuses the action, naming what was wrong and what would make it right. THE CODE PATH AND THE DATA TRAIL ARE IDENTICAL EITHER WAY. That is the design: an operation runs a season in Advisory, reads the alerts the controls would have blocked on, fixes the ones that are real, widens the thresholds that are not, and turns the toggle over having already seen what it will cost. A control whose enforced behaviour is discovered on the day it is switched on is a control that gets switched off that afternoon. IT SHIPS ADVISORY FOR EVERY SEEDED CONTROL, deliberately. A four-person farm that cannot book a fuel invoice because nobody has been named an approver does not conclude that its controls need configuring; it concludes that this app is in the way.",
+   "fieldname": "enforcement_mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enforcement",
+   "options": "Advisory\nEnforced"
   },
   {
    "default": "1",

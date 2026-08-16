@@ -24,7 +24,7 @@ import json
 
 import frappe
 
-from erpnext_mcp import compliance_rules, records
+from erpnext_mcp import compliance_rules, enforcement, records
 from erpnext_mcp.alerts import engine
 
 from .fixtures import MAIN
@@ -1247,7 +1247,18 @@ class TheUpgradeFromV0220(PrimitiveTestCase):
 		# Thirty since v0.69.0, on the same reading again: the two spray-interval
 		# rules and the reorder rule were authored long after v0.22.0 and are
 		# seeded fresh, so the patch has nothing of theirs to migrate either.
-		self.assertEqual(len(compliance_rules.rule_rows()), 30)
+		#
+		# v0.80.0 adds the IPO-readiness GATES on exactly the same reading a third
+		# time, and they are counted apart from the thirty rather than folded into
+		# the number. This test is about what the v0.22.0 patch MIGRATES, and a
+		# gate is not something it could ever have migrated: control points did not
+		# exist until this release, so there is no v0.22.0 site with one to carry
+		# forward. Deriving the addend from `enforcement.CONTROL_POINTS` keeps the
+		# sentence above true — the patch still leaves exactly thirty swept rules —
+		# without this assertion breaking every time a phase adds a control.
+		swept = [row for row in compliance_rules.rule_rows() if not row.get("control_point")]
+		self.assertEqual(len(swept), 30)
+		self.assertEqual(len(compliance_rules.rule_rows()), 30 + len(enforcement.CONTROL_POINTS))
 
 	def test_an_operator_edited_threshold_survives_the_migration(self):
 		"""The question the patch exists to answer well. A site that contracted its

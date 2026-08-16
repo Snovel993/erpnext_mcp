@@ -1,0 +1,178 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "WHAT A THING IS SUPPOSED TO COST — per bin, per acre, per hour — for a date range. The other half of a variance: an actual with nothing to compare it against is a number, and the comparison is the control. DATED RATHER THAN A VALUE ON AN ITEM, because costs move every season and a variance computed against the wrong season's standard is a confident wrong number, which is worse than no variance. Two standards for one subject and basis may not overlap.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "subject",
+  "company",
+  "cost_basis",
+  "identity_col",
+  "standard_rate",
+  "currency",
+  "effective_from",
+  "effective_to",
+  "classification_section",
+  "cost_category",
+  "cost_center",
+  "classification_col",
+  "expense_account",
+  "variance_tolerance_pct",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this is the standard cost OF — an item code, or the name of an activity: 'HARVEST-GALA', 'Hand thinning', 'Packing line hour'. FREE TEXT RATHER THAN A LINK, deliberately: half of what a farm wants a standard for is an activity that is not an Item on anybody's site, and forcing 'hand thinning' to become an Item to be costed would put a row in the stock module that has no business there.",
+   "fieldname": "subject",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Subject",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Per Unit",
+   "description": "The denominator. Part of the identity: a standard per acre and a standard per bin for the same activity are two different standards and may both be live.",
+   "fieldname": "cost_basis",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Basis",
+   "options": "Per Unit\nPer Acre\nPer Hour\nPer Bin\nPer Box\nPer Ton",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "standard_rate",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Standard Rate",
+   "reqd": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "description": "First day this standard applies, INCLUSIVE.",
+   "fieldname": "effective_from",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective From",
+   "reqd": 1
+  },
+  {
+   "description": "Last day it applies, INCLUSIVE. BLANK MEANS OPEN-ENDED, which is the normal shape — a standard set this season and not yet superseded. Closing one is how a new season's standard is made without an overlap.",
+   "fieldname": "effective_to",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective To"
+  },
+  {
+   "fieldname": "classification_section",
+   "fieldtype": "Section Break",
+   "label": "Classification"
+  },
+  {
+   "description": "Which pool this belongs to, so a variance report can group by it. A variance of nine thousand dollars is a fact; nine thousand dollars OF LABOR is a finding somebody can act on.",
+   "fieldname": "cost_category",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "\nLabor\nMaterials\nMachinery\nOverhead\nPacking\nStorage\nFreight\nOther"
+  },
+  {
+   "description": "Where actuals for this subject accumulate. It is what lets get_cost_variance_report read the actual side out of the ledger instead of being told it.",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "classification_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The GL account actuals for this subject land in. With this and a cost center the actual side is computable; with neither, the report says so rather than reporting zero — a variance against an actual of zero would flag every standard on the site as massively under budget.",
+   "fieldname": "expense_account",
+   "fieldtype": "Link",
+   "label": "Account",
+   "options": "Account"
+  },
+  {
+   "default": "10",
+   "description": "How far actual may drift from standard before the `cost_variance` control has an opinion. PER STANDARD rather than one site-wide number, because a fuel standard and a labor standard do not deserve the same band — and a single tolerance that fits neither is how a variance report becomes noise.",
+   "fieldname": "variance_tolerance_pct",
+   "fieldtype": "Percent",
+   "label": "Tolerance %"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Where this number came from — 'three-year average', '2026 grower contract'. A standard nobody can source is a standard nobody defends when the variance is large.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Standard Cost",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "effective_from",
+ "sort_order": "DESC",
+ "states": [],
+ "quick_entry": 0,
+ "track_changes": 1,
+ "search_fields": "subject,company,cost_basis,effective_from"
+}

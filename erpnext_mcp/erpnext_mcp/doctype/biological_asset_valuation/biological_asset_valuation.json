@@ -1,0 +1,72 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "ONE VALUATION OF A GROWING CROP, ON ONE DATE, ON ONE BASIS. The history rather than the current figure: IAS 41 remeasures a biological asset at each reporting date, and the SEQUENCE of those remeasurements is what an auditor tests — a single current_value with no trail behind it is an assertion nobody can check. Each row records what the value was, how it was arrived at, and who says so.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "valuation_date",
+  "valuation_method",
+  "value",
+  "basis",
+  "recorded_by",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "valuation_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date",
+   "reqd": 1
+  },
+  {
+   "description": "Which basis THIS valuation used. On the row rather than only on the asset, because a change of basis is itself an accounting event — IAS 41.30 presumes fair value and permits cost only while fair value is not reliably measurable, so the date an operation moved from one to the other is a disclosure.",
+   "fieldname": "valuation_method",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Method",
+   "options": "Fair Value\nCost",
+   "reqd": 1
+  },
+  {
+   "fieldname": "value",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Value",
+   "reqd": 1
+  },
+  {
+   "description": "HOW THIS NUMBER WAS REACHED — 'orchard appraisal, Smith & Co, 12 Mar', 'accumulated establishment cost per the cost centre'. THE MOST IMPORTANT COLUMN ON THE ROW. A fair value with no stated basis is somebody's opinion formatted as a figure, and it is the first thing an auditor asks about.",
+   "fieldname": "basis",
+   "fieldtype": "Small Text",
+   "label": "Basis"
+  },
+  {
+   "fieldname": "recorded_by",
+   "fieldtype": "Link",
+   "label": "Recorded By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Biological Asset Valuation",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1
+}

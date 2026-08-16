@@ -838,6 +838,17 @@ def _compliance_rules() -> None:
 	version gets the thirteen on its next migrate rather than needing a bespoke
 	patch. Until it does, the sweep runs the shipped definitions and says so in
 	its report — the calendar never goes blank.
+
+	v0.80.0 SEEDS THE IPO-READINESS GATES THROUGH THIS SAME PATH, and there is
+	nothing to do here for them: `seed_compliance_rules` now returns the swept
+	rules plus one rule per control point in `enforcement.CONTROL_POINTS`. They
+	arrive ENABLED AND ADVISORY, which is a different pairing from anything above
+	and worth reading twice. Enabled, so the control runs from the first migrate
+	and an operation starts accumulating the findings that will inform its own
+	enforcement decision without configuring anything. Advisory, so it refuses
+	nothing while it does. The usual "everything mutating ships off" instinct is
+	not violated by that: an advisory control writes a calendar entry, which is
+	the same thing the thirteen have been doing since v0.22.0.
 	"""
 	try:
 		from . import compliance_rules

@@ -70,6 +70,15 @@ DOCTYPE = compliance_rules.DOCTYPE
 _TEXT_FIELDS = (
 	"title",
 	"category",
+	# v0.80.0. `enforcement_mode` IS THE FIELD AN OPERATOR ACTUALLY COMES HERE TO
+	# CHANGE, and it goes through `update_compliance_rule` like everything else —
+	# which means turning a control from Advisory to Enforced writes a NEW VERSION
+	# of the rule and supersedes the old one. That is not incidental. The date an
+	# operation began enforcing a control, and who decided it, is exactly the
+	# question an auditor asks about a control environment, and version-by-copy is
+	# already how this register answers it.
+	"control_point",
+	"enforcement_mode",
 	"target_doctype",
 	"requires_doctypes",
 	"requires_fields",

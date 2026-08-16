@@ -89,6 +89,22 @@ PARCEL_REFERRERS = (
 	("Irrigation Zone", "parcel"),
 	("Housing Unit", "parcel"),
 	("Housing Assignment", "parcel"),
+	# v0.80.0. The crop growing on the ground follows the ground, and this entry
+	# is here because `test_realestate` refused to let it be forgotten — which is
+	# the check working exactly as its own comment says it should.
+	#
+	# ITS `company` IS DELIBERATELY NOT IN `REFERRER_COMPANY_FIELDS` BELOW, and
+	# that is the interesting half. A Field's `owning_entity` is a statement about
+	# who owns the ground, so it must move with the deed. A Biological Asset's
+	# `company` is a statement about WHO CARRIES THE CROP ON ITS BALANCE SHEET,
+	# which a conveyance does not settle: selling the land under a standing
+	# orchard and selling the orchard are two transactions, and which of them
+	# happened is a question about the deed that this app cannot read. Moving the
+	# carrying entity automatically would silently transfer an asset — and its
+	# whole valuation history — between two sets of books on the strength of a
+	# land transfer nobody said included it. So the link follows and the
+	# accounting does not, and whoever conveyed the parcel is left to decide.
+	("Biological Asset", "parcel"),
 )
 
 #: Referring registers that also carry their own `owning_entity`, which has to

@@ -58,6 +58,8 @@ from .tools import (
 	collab,
 	company,
 	compliance,
+	controls,
+	costing,
 	dimensions,
 	discipline,
 	dispatch,
@@ -104,6 +106,7 @@ from .tools import (
 	realestate,
 	receipts,
 	reports,
+	revenue,
 	rules,
 	sales,
 	sessions,
@@ -341,6 +344,40 @@ _PAIRING_REQUIRES = "the ERPNext app's Bank Account doctype, which ships with it
 _ADVISORY_REQUIRES = (
 	"the Advisory Agreement doctype, which ships with erpnext_mcp — run `bench migrate` after "
 	"installing v0.73.0"
+)
+
+#: v0.80.0. What the IPO-readiness financial controls need. Each names only its
+#: OWN register, not the whole phase: a site that has migrated Approval Threshold
+#: and not Closing Checklist should lose the four checklist tools and keep the
+#: four threshold ones, rather than losing a phase because one doctype is late.
+_THRESHOLD_REQUIRES = (
+	"the Approval Threshold doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.80.0"
+)
+_CHECKLIST_REQUIRES = (
+	"the Closing Checklist doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.80.0"
+)
+#: The two register reads over the controls themselves need only the rule table,
+#: because a control point with no register behind it still HAS a mode and an
+#: operator still needs to see it — "advisory, and the doctype it reads is not on
+#: this site" is a more useful answer than a missing tool.
+_RULE_REQUIRES = "the Compliance Rule DocType, which ships with erpnext_mcp — run `bench migrate`"
+
+#: Phases 2 and 3, split by register for the same reason Phase 1 is: a site that
+#: migrated one doctype and not another should lose the tools for the one that is
+#: missing, not the whole phase.
+_CONTRACT_REQUIRES = (
+	"the Revenue Contract doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.80.0"
+)
+_BIO_REQUIRES = (
+	"the Biological Asset doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.80.0"
+)
+_STANDARD_REQUIRES = (
+	"the Standard Cost doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.80.0"
 )
 
 
@@ -20058,6 +20095,878 @@ TOOLS = {
 		title="Update advisory agreement",
 		available=_needs_doctype("Advisory Agreement"),
 		requires=_ADVISORY_REQUIRES,
+	),
+	# ── v0.80.0 · IPO readiness Phase 1 — financial controls ─────────────────
+	"list_control_points": _tool(
+		controls.list_control_points,
+		"THE REGISTER OF WHAT THIS SYSTEM WILL AND WILL NOT STOP YOU DOING. Every "
+		"transaction-time control this app implements, with the mode each one is "
+		"set to on this site: Off, Advisory or Enforced. Read-only.\n\n"
+		"WHAT ADVISORY MEANS, BECAUSE IT IS NOT 'THE CONTROL IS WEAKER'. It is the "
+		"SAME evaluation reaching the SAME finding and filing the SAME compliance "
+		"alert against the same record — without the refusal. An operation that "
+		"runs a season in Advisory ends it holding exactly the register of "
+		"findings it would hold had it been enforcing, minus the work that was "
+		"stopped. That is what makes turning a control up a decision with evidence "
+		"behind it rather than a leap, and it is why every control ships Advisory.\n\n"
+		"Each control is its own switch, so an operation can enforce period locks "
+		"while leaving duplicate detection advisory. Flip one with "
+		"update_compliance_rule(name=<rule>, enforcement_mode='Enforced') — which "
+		"writes a new version of the rule and therefore records the date "
+		"enforcement began and who decided it.",
+		{},
+		title="Control points and their enforcement",
+		available=_needs_doctype("Compliance Rule"),
+		requires=_RULE_REQUIRES,
+	),
+	"check_journal_entry_controls": _tool(
+		controls.check_journal_entry_controls,
+		"What the financial controls would say about a journal entry — a "
+		"duplicate, an unusual amount, a closed period, a self-approval, a spend "
+		"above somebody's authority. Read-only: NOTHING IS WRITTEN, no alert is "
+		"filed, and nothing is refused however the controls are set.\n\n"
+		"THE HONEST WAY TO DECIDE WHETHER TO ENFORCE SOMETHING IS TO LOOK FIRST. "
+		"This runs the identical evaluation create_journal_entry runs, against the "
+		"identical switches, and reports `would_block` per control. Ask it about "
+		"an entry that already exists (pass journal_entry) or about one that does "
+		"not yet (pass total and accounts).",
+		{
+			"journal_entry": _field(
+				_STRING,
+				"An existing Journal Entry to check. Its company, date, total and accounts "
+				"are read off it, and it is excluded from its own duplicate search.",
+			),
+			"company": _COMPANY,
+			"posting_date": _field(_STRING, "The date the entry would carry, YYYY-MM-DD."),
+			"total": _field(_NUMBER, "The entry's total debit, when checking one not yet written."),
+			"accounts": _field(
+				_STRING_ARRAY,
+				"The accounts the entry would touch, when checking one not yet written. "
+				"Order does not matter — the duplicate test compares them as a set.",
+			),
+			"preparer": _field(
+				_STRING,
+				"Who is writing it. Defaults to the entry's owner when checking an existing one.",
+			),
+			"approver": _field(
+				_STRING,
+				"Who would release it. Segregation of duties compares this against the "
+				"preparer; a blank approver is NOT a match, because an entry nobody has "
+				"approved is a different finding from one approved by its own author.",
+			),
+			"limit": _LIMIT,
+		},
+		title="Preview the financial controls",
+		available=_needs_doctype("Compliance Rule"),
+		requires=_RULE_REQUIRES,
+	),
+	"create_approval_threshold": _tool(
+		controls.create_approval_threshold,
+		"MUTATING (default OFF). Define who may release a transaction of a given "
+		"size: an auto-approve floor beneath which nothing needs releasing, and a "
+		"chain of rungs above it saying which ROLE may release up to which "
+		"amount.\n\n"
+		"SET THE AUTO-APPROVE FLOOR. It is the field that makes this control "
+		"survivable — without one, every fuel receipt raises a finding, the "
+		"calendar fills inside a week and somebody turns the whole thing off.\n\n"
+		"ROLES, NOT PEOPLE: a named approver goes on holiday and the chain stops, "
+		"and the fix somebody applies at that point is to widen the limit "
+		"permanently. Exactly one rung may be left uncapped and it is the top of "
+		"the chain; two would make 'who approves a million' depend on row order.",
+		{
+			"threshold_name": _field(
+				_STRING,
+				"What this table is called — 'Operating spend', 'Capital purchases'.",
+			),
+			"company": _COMPANY,
+			"document_type": _field(
+				_STRING,
+				"Any (default), Journal Entry, Purchase Order, Purchase Invoice, Payment "
+				"Entry, Expense Report or Stock Entry. A specific table beats the blanket "
+				"`Any` one, so a site can tighten capital purchases without restating "
+				"everything.",
+			),
+			"auto_approve_below": _field(
+				_NUMBER,
+				"Transactions strictly below this need no release and the control says "
+				"nothing about them. Zero means everything of this type needs somebody — a "
+				"real answer for capital spend and a bad one for anything operational.",
+			),
+			"currency": _field(_STRING, "Currency the amounts are stated in. Defaults to the company's."),
+			"enabled": _field(_BOOLEAN, "Default true."),
+			"levels": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The chain: [{"approver_role": "Farm Manager", "up_to_amount": 5000}, '
+				'{"approver_role": "Accounts Manager", "up_to_amount": 50000}, '
+				'{"approver_role": "System Manager"}]. The last row has no ceiling and is '
+				"the top. Order does not matter — rungs are evaluated by amount.",
+			),
+			"notes": _field(_STRING, "What this table is FOR, for whoever inherits it."),
+		},
+		required=("threshold_name",),
+		mutating=True,
+		title="Create approval threshold",
+		available=_needs_doctype("Approval Threshold"),
+		requires=_THRESHOLD_REQUIRES,
+	),
+	"get_approval_threshold": _tool(
+		controls.get_approval_threshold,
+		"One approval threshold with its chain, sorted the way the chain is "
+		"EVALUATED rather than the way the grid was typed. Pass `amount` and it "
+		"also answers the question you actually have: who has to release a "
+		"transaction of that size. Read-only.",
+		{
+			"name": _field(_STRING, "The threshold's docname or its threshold_name."),
+			"company": _COMPANY,
+			"amount": _field(
+				_NUMBER,
+				"Answer 'who must release this much' for this specific amount, including "
+				"whether it falls under the auto-approve floor.",
+			),
+		},
+		required=("name",),
+		title="Get approval threshold",
+		available=_needs_doctype("Approval Threshold"),
+		requires=_THRESHOLD_REQUIRES,
+	),
+	"list_approval_thresholds": _tool(
+		controls.list_approval_thresholds,
+		"The spending-authority register: every threshold with its floor and its "
+		"chain. A site with no threshold for a document type has expressed NO "
+		"OPINION about authority for it, which is reported as such rather than "
+		"read as unlimited. Read-only.",
+		{
+			"company": _COMPANY,
+			"document_type": _field(_STRING, "Only thresholds covering this document type."),
+			"enabled": _field(_BOOLEAN, "Only enabled thresholds, or only disabled ones."),
+			"limit": _LIMIT,
+		},
+		title="List approval thresholds",
+		available=_needs_doctype("Approval Threshold"),
+		requires=_THRESHOLD_REQUIRES,
+	),
+	"update_approval_threshold": _tool(
+		controls.update_approval_threshold,
+		"MUTATING (default OFF). Change a threshold's floor, currency, document "
+		"type, enabled state or chain.\n\n"
+		"PASSING `levels` REPLACES THE CHAIN RATHER THAN MERGING INTO IT. A "
+		"partial update of an authority table is the one edit shape that can "
+		"silently leave a rung nobody meant to keep — and a stale rung in an "
+		"approval chain authorises spending.",
+		{
+			"name": _field(_STRING, "The threshold's docname or its threshold_name."),
+			"company": _COMPANY,
+			"document_type": _field(_STRING, "New value."),
+			"auto_approve_below": _field(_NUMBER, "New value. Pass 0 to require release on everything."),
+			"currency": _field(_STRING, "New value."),
+			"enabled": _field(_BOOLEAN, "Turn the table on or off. Off is not deleted."),
+			"levels": _field(
+				{"type": "array", "items": {"type": "object"}},
+				"The chain, in full. Replaces every existing rung.",
+			),
+			"notes": _field(_STRING, "New value."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Update approval threshold",
+		available=_needs_doctype("Approval Threshold"),
+		requires=_THRESHOLD_REQUIRES,
+	),
+	"create_closing_checklist": _tool(
+		controls.create_closing_checklist,
+		"MUTATING (default OFF). Open an accounting period with the steps that "
+		"have to be finished before it closes. Give no steps and the eight a "
+		"month-end close almost always has are seeded, in English and Spanish, "
+		"every one of them required and every one editable.\n\n"
+		"THE PERIOD IS A DATE RANGE, NOT A NAME. 'March' is not a period — a "
+		"company on an August year-end has a March in two fiscal years — and a "
+		"range answers 'is this posting inside a closed period' in one comparison "
+		"with no calendar arithmetic. Both bounds are inclusive, and periods for "
+		"one company may not overlap.",
+		{
+			"company": _COMPANY,
+			"period_start": _field(_STRING, "First day of the period, INCLUSIVE. YYYY-MM-DD."),
+			"period_end": _field(_STRING, "Last day of the period, INCLUSIVE. YYYY-MM-DD."),
+			"period_type": _field(_STRING, "Month (default), Quarter or Year."),
+			"fiscal_year": _field(_STRING, "Which year this rolls into. Informational — the lock is decided by the dates."),
+			"items": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The steps: [{"step": "Reconcile every bank account", "step_es": "Conciliar '
+				'cada cuenta bancaria", "sequence": 1, "required": true}]. A bare list of '
+				"strings is accepted and read as a list of steps. `required` false means "
+				"the step is tracked and cannot hold the close.",
+			),
+			"notes": _field(_STRING, "Anything about this particular close."),
+		},
+		required=("period_start", "period_end"),
+		mutating=True,
+		title="Open a closing checklist",
+		available=_needs_doctype("Closing Checklist"),
+		requires=_CHECKLIST_REQUIRES,
+	),
+	"get_closing_checklist": _tool(
+		controls.get_closing_checklist,
+		"One accounting period: every step with who ticked it and when, what is "
+		"still outstanding, and whether the period is locked against posting. "
+		"Read-only.",
+		{"name": _field(_STRING, "The checklist's docname.")},
+		required=("name",),
+		title="Get closing checklist",
+		available=_needs_doctype("Closing Checklist"),
+		requires=_CHECKLIST_REQUIRES,
+	),
+	"list_closing_checklists": _tool(
+		controls.list_closing_checklists,
+		"The period register, most recent first, with each period's outstanding "
+		"count and lock state. This is the read that answers 'which months are "
+		"actually closed'. Read-only.",
+		{
+			"company": _COMPANY,
+			"period_type": _field(_STRING, "Month, Quarter or Year."),
+			"status": _field(_STRING, "Open, In Progress, Closed or Reopened."),
+			"locked": _field(_BOOLEAN, "Only locked periods, or only unlocked ones."),
+			"limit": _LIMIT,
+		},
+		title="List closing checklists",
+		available=_needs_doctype("Closing Checklist"),
+		requires=_CHECKLIST_REQUIRES,
+	),
+	"update_closing_checklist": _tool(
+		controls.update_closing_checklist,
+		"MUTATING (default OFF). Edit a period's dates, type, status, notes or "
+		"steps. DOES NOT LOCK OR UNLOCK — close_accounting_period and "
+		"reopen_accounting_period do that, so a period can never be locked as a "
+		"side effect of fixing a typo.\n\n"
+		"Passing `items` replaces the step list, but COMPLETIONS ARE CARRIED "
+		"ACROSS BY STEP TEXT: rewording step 7 does not lose the record that "
+		"somebody reconciled the bank on the 3rd.",
+		{
+			"name": _field(_STRING, "The checklist's docname."),
+			"period_start": _field(_STRING, "New value, YYYY-MM-DD."),
+			"period_end": _field(_STRING, "New value, YYYY-MM-DD."),
+			"period_type": _field(_STRING, "Month, Quarter or Year."),
+			"fiscal_year": _field(_STRING, "New value."),
+			"status": _field(_STRING, "Open, In Progress, Closed or Reopened."),
+			"items": _field(
+				{"type": "array", "items": {"type": "object"}},
+				"The steps, in full. Replaces the list; completions survive by step text.",
+			),
+			"notes": _field(_STRING, "New value."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Update closing checklist",
+		available=_needs_doctype("Closing Checklist"),
+		requires=_CHECKLIST_REQUIRES,
+	),
+	"complete_checklist_item": _tool(
+		controls.complete_checklist_item,
+		"MUTATING (default OFF). Tick one close step, recording who and when. "
+		"Pass `evidence` — a reconciliation docname, a report reference, a journal "
+		"entry — because a checklist of bare ticks is a claim and a checklist of "
+		"ticks that each point at something is evidence.\n\n"
+		"Pass uncomplete=true to un-tick one that was ticked in error.",
+		{
+			"name": _field(_STRING, "The checklist's docname."),
+			"step": _field(_STRING, "The step's text, matched case-insensitively."),
+			"evidence": _field(_STRING, "What backs the tick."),
+			"notes": _field(_STRING, "Anything about how this step went."),
+			"uncomplete": _field(_BOOLEAN, "Un-tick instead of ticking. Clears who and when."),
+		},
+		required=("name", "step"),
+		mutating=True,
+		title="Complete a checklist step",
+		available=_needs_doctype("Closing Checklist"),
+		requires=_CHECKLIST_REQUIRES,
+	),
+	"close_accounting_period": _tool(
+		controls.close_accounting_period,
+		"MUTATING (default OFF). Lock a period against posting.\n\n"
+		"THE `closing_checklist` CONTROL RUNS HERE. Advisory: a required step "
+		"still outstanding is reported and filed as an alert against the period, "
+		"AND THE PERIOD STILL LOCKS. Enforced: the same finding refuses the close "
+		"and nothing is written. Once locked, the `period_close_lockdown` control "
+		"reports or refuses any journal entry dated into the range.",
+		{
+			"name": _field(_STRING, "The checklist's docname."),
+			"reason": _field(_STRING, "Anything worth recording about this close. Appended to the notes."),
+		},
+		required=("name",),
+		mutating=True,
+		title="Close an accounting period",
+		available=_needs_doctype("Closing Checklist"),
+		requires=_CHECKLIST_REQUIRES,
+	),
+	"reopen_accounting_period": _tool(
+		controls.reopen_accounting_period,
+		"MUTATING (default OFF). Unlock a closed period. A reason is REQUIRED and "
+		"goes on the record.\n\n"
+		"NO CONTROL GATES THIS, deliberately. A period locked by mistake, or one "
+		"that has to take a correcting entry an auditor asked for, is a normal "
+		"event and making it hard would teach people to avoid locking periods at "
+		"all. What matters is that it is recorded: the status becomes `Reopened` "
+		"rather than `Open`, so a month closed once and opened again is readable "
+		"off the row instead of reconstructed from a version history.",
+		{
+			"name": _field(_STRING, "The checklist's docname."),
+			"reason": _field(_STRING, "Why it is being reopened. Required, and appended to the notes."),
+		},
+		required=("name", "reason"),
+		mutating=True,
+		title="Reopen an accounting period",
+		available=_needs_doctype("Closing Checklist"),
+		requires=_CHECKLIST_REQUIRES,
+	),
+	# ── v0.80.0 · IPO readiness Phase 2 — revenue recognition ────────────────
+	"create_revenue_contract": _tool(
+		revenue.create_revenue_contract,
+		"MUTATING (default OFF). Record what was promised to a customer, what it "
+		"is worth, and when each part of it is earned — the ASC 606 unit of "
+		"account.\n\n"
+		"WHAT THIS HOLDS THAT A SALES ORDER CANNOT. A Sales Order is a fulfilment "
+		"document: what to ship, when, at what price. ASC 606 asks four things it "
+		"has no field for — the distinct performance obligations, how the "
+		"transaction price is allocated between them, whether control transfers "
+		"at a point in time or over time, and when each was actually satisfied. "
+		"On a produce operation the gap is at its widest: fruit delivered in "
+		"September against a pool that settles in December at a price nobody knew "
+		"in September.\n\n"
+		"The obligations may not allocate MORE than the transaction price, and "
+		"the schedule may not total more than it. Less is fine — that is a "
+		"contract somebody is still writing.",
+		{
+			"contract_name": _field(_STRING, "What this contract is called — 'Stemilt 2026 Gala pool'."),
+			"company": _COMPANY,
+			"customer": _field(_STRING, "The counterparty. Must be a Customer on this site."),
+			"contract_date": _field(_STRING, "YYYY-MM-DD."),
+			"start_date": _field(_STRING, "YYYY-MM-DD."),
+			"end_date": _field(_STRING, "YYYY-MM-DD."),
+			"total_value": _field(
+				_NUMBER,
+				"The transaction price. On a consignment pool this is an ESTIMATE until the "
+				"settlement arrives — ASC 606's variable consideration — and revising it with "
+				"update_revenue_contract is the normal life of the record, not a correction.",
+			),
+			"currency": _field(_STRING, "Defaults to the company's."),
+			"status": _field(_STRING, "Draft (default), Active, Completed or Cancelled."),
+			"recognition_method": _field(
+				_STRING,
+				"Point in Time (default) where control transfers on a day — a bin of fruit "
+				"changing hands. Over Time where the customer simultaneously receives and "
+				"consumes the benefit — storage, a management agreement.",
+			),
+			"revenue_account": _field(
+				_STRING,
+				"Credited when a tranche is recognised. Never guessed: without it "
+				"recognize_revenue_milestone refuses rather than picking one.",
+			),
+			"receivable_account": _field(_STRING, "Debited when a tranche is recognised."),
+			"obligations": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The distinct promises: [{"obligation": "Deliver 4,000 bins of Gala", '
+				'"allocated_amount": 240000}]. A bare list of strings is accepted. ONE '
+				"obligation is the common case and is not a failure to decompose.",
+			),
+			"schedule": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'When each part is earned: [{"basis": "Milestone", "obligation": "Deliver '
+				'4,000 bins of Gala", "amount": 240000}] or [{"basis": "Time", "due_date": '
+				'"2026-10-31", "amount": 5000}]. A Milestone row waits for its obligation to '
+				"be satisfied; a Time row comes due on its date. A Milestone row naming no "
+				"obligation, or a Time row with no due_date, is refused — nothing could ever "
+				"make it ripe.",
+			),
+			"notes": _field(_STRING, "Anything about the deal itself."),
+		},
+		required=("contract_name", "customer"),
+		mutating=True,
+		title="Create revenue contract",
+		available=_needs_doctype("Revenue Contract"),
+		requires=_CONTRACT_REQUIRES,
+	),
+	"get_revenue_contract": _tool(
+		revenue.get_revenue_contract,
+		"One contract in full: every performance obligation with whether control "
+		"has transferred, the recognition schedule with what has been drawn and "
+		"what is left, and any settlement statements linked to it. Read-only.",
+		{
+			"contract": _field(_STRING, "The contract's docname or its contract_name."),
+			"company": _COMPANY,
+		},
+		required=("contract",),
+		title="Get revenue contract",
+		available=_needs_doctype("Revenue Contract"),
+		requires=_CONTRACT_REQUIRES,
+	),
+	"list_revenue_contracts": _tool(
+		revenue.list_revenue_contracts,
+		"The contract register with each one's recognition progress, and the "
+		"totals across them: contracted, recognised, and still to recognise. "
+		"Read-only.",
+		{
+			"company": _COMPANY,
+			"customer": _field(_STRING, "One customer's contracts."),
+			"status": _field(_STRING, "Draft, Active, Completed or Cancelled."),
+			"recognition_method": _field(_STRING, "Point in Time or Over Time."),
+			"limit": _LIMIT,
+		},
+		title="List revenue contracts",
+		available=_needs_doctype("Revenue Contract"),
+		requires=_CONTRACT_REQUIRES,
+	),
+	"update_revenue_contract": _tool(
+		revenue.update_revenue_contract,
+		"MUTATING (default OFF). Revise a contract's transaction price, status, "
+		"accounts, obligations or schedule — and mark an obligation SATISFIED, "
+		"which is what makes its milestone tranche recognisable.\n\n"
+		"REVISING THE PRICE IS NORMAL, not a correction: a consignment pool's "
+		"price is an estimate until the settlement lands. Both sum checks re-run "
+		"against the new figure, so a price revised downwards below what is "
+		"already scheduled is refused rather than leaving a schedule that can be "
+		"drawn past the contract.\n\n"
+		"Passing `obligations` replaces the list, but SATISFACTION SURVIVES by "
+		"obligation text — rewording one line does not un-recognise another's "
+		"revenue. Passing `schedule` is REFUSED outright once any tranche has "
+		"been recognised, because the journal entries would point at tranches "
+		"that no longer say what they said.",
+		{
+			"contract": _field(_STRING, "The contract's docname or its contract_name."),
+			"company": _COMPANY,
+			"total_value": _field(_NUMBER, "New transaction price."),
+			"status": _field(_STRING, "Draft, Active, Completed or Cancelled."),
+			"recognition_method": _field(_STRING, "Point in Time or Over Time."),
+			"contract_date": _field(_STRING, "YYYY-MM-DD."),
+			"start_date": _field(_STRING, "YYYY-MM-DD."),
+			"end_date": _field(_STRING, "YYYY-MM-DD."),
+			"revenue_account": _field(_STRING, "New value."),
+			"receivable_account": _field(_STRING, "New value."),
+			"obligations": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The obligations in full, replacing the list. Mark one satisfied with '
+				'{"obligation": "...", "satisfied": true, "satisfied_on": "2026-09-12", '
+				'"evidence": "SCALE-0031"} — the date says when somebody claims control '
+				"transferred and the evidence says how anybody else could check.",
+			),
+			"schedule": _field(
+				{"type": "array", "items": {"type": "object"}},
+				"The schedule in full, replacing it. Refused if anything has been recognised.",
+			),
+			"notes": _field(_STRING, "New value."),
+		},
+		required=("contract",),
+		mutating=True,
+		title="Update revenue contract",
+		available=_needs_doctype("Revenue Contract"),
+		requires=_CONTRACT_REQUIRES,
+	),
+	"link_settlement_to_contract": _tool(
+		revenue.link_settlement_to_contract,
+		"MUTATING (default OFF). Attach a settlement statement to the revenue "
+		"contract it settles — the join that makes contract-to-cash traceable in "
+		"one hop. A settlement is where a consignment pool stops being an "
+		"estimate and becomes a number, which is the moment ASC 606's variable "
+		"consideration resolves.\n\n"
+		"REFUSES A CUSTOMER MISMATCH, because a settlement attached to another "
+		"buyer's contract corrupts every trace and every revenue figure reading "
+		"through it. Pass force=true where the settling party genuinely is not "
+		"the contracting party. A settlement already linked elsewhere is refused "
+		"outright — counted against two contracts it would double the revenue.\n\n"
+		"LINKING DOES NOT RECOGNISE ANYTHING. Recognition follows the performance "
+		"obligations, not the cash, which is the whole of ASC 606's argument.",
+		{
+			"settlement": _field(_STRING, "The Settlement Statement's docname."),
+			"contract": _field(_STRING, "The contract's docname or its contract_name."),
+			"force": _field(_BOOLEAN, "Link despite a customer mismatch. Default false."),
+		},
+		required=("settlement", "contract"),
+		mutating=True,
+		title="Link settlement to contract",
+		available=_all_doctypes("Revenue Contract", "Settlement Statement"),
+		requires=_CONTRACT_REQUIRES,
+	),
+	"recognize_revenue_milestone": _tool(
+		revenue.recognize_revenue_milestone,
+		"MUTATING (default OFF). Recognise one scheduled tranche, producing a "
+		"DRAFT journal entry that debits the receivable account and credits the "
+		"revenue account.\n\n"
+		"THE `revenue_recognition` CONTROL RUNS FIRST. A milestone tranche whose "
+		"obligation is not marked satisfied — or a time tranche not yet due — is "
+		"reported and recognised anyway (Advisory) or refused (Enforced). ASC 606 "
+		"recognises revenue when control transfers, not when a schedule says it "
+		"should have.\n\n"
+		"THE ENTRY IS A DRAFT, like every journal entry this app writes. Revenue "
+		"recognition is the posting most likely to be wrong in a way that "
+		"matters, because it is the one that moves the top line.",
+		{
+			"contract": _field(_STRING, "The contract's docname or its contract_name."),
+			"company": _COMPANY,
+			"tranche": _field(
+				_INTEGER,
+				"Which schedule row, 1-based. Omit and the first unrecognised tranche is "
+				"taken — optionally narrowed by `obligation`.",
+			),
+			"obligation": _field(_STRING, "Take the first unrecognised tranche for this obligation."),
+			"posting_date": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"user_remark": _field(_STRING, "Overrides the generated remark on the journal entry."),
+		},
+		required=("contract",),
+		mutating=True,
+		title="Recognize a revenue milestone",
+		available=_needs_doctype("Revenue Contract"),
+		requires=_CONTRACT_REQUIRES,
+	),
+	"trace_contract_to_cash": _tool(
+		revenue.trace_contract_to_cash,
+		"THE WHOLE CHAIN FOR ONE CONTRACT: contract → settlement → invoice → "
+		"payment → GL entries, each hop with its date, its amount and its "
+		"docname. Read-only.\n\n"
+		"THIS IS THE READ AN AUDITOR'S QUESTION ACTUALLY REDUCES TO. It is almost "
+		"never 'what is the revenue balance' — it is 'show me one sale all the "
+		"way through', and answering that otherwise means opening five documents "
+		"in five modules and writing the links down on paper.\n\n"
+		"IT REPORTS THE BREAK RATHER THAN HIDING IT. `hops_missing` names the "
+		"stages that are not there and `breaks` says what each absence means. "
+		"'Recognised and not collected' is the most useful thing this tool says, "
+		"and a trace that quietly returned only the hops it found would bury it. "
+		"Where no settlement links the invoices, candidates found by heuristic "
+		"(same customer, inside the contract's dates) are labelled as such rather "
+		"than presented as the chain.",
+		{
+			"contract": _field(_STRING, "The contract's docname or its contract_name."),
+			"company": _COMPANY,
+		},
+		required=("contract",),
+		title="Trace contract to cash",
+		available=_needs_doctype("Revenue Contract"),
+		requires=_CONTRACT_REQUIRES,
+	),
+	# ── v0.80.0 · IPO readiness Phase 3 — cost accounting ────────────────────
+	"create_biological_asset": _tool(
+		costing.create_biological_asset,
+		"MUTATING (default OFF). Register a growing crop carried at a value — an "
+		"orchard block, an annual planting, a nursery lot.\n\n"
+		"WHY NOT ERPNEXT'S Asset. An Asset is a depreciating purchase. A BEARER "
+		"plant is close to that and is depreciated once mature (IAS 16 since "
+		"2014), but a CONSUMABLE asset is its opposite: an annual planting GROWS "
+		"in value until it is harvested and then ceases to exist. Modelling that "
+		"as an Asset with a negative depreciation rate would be a lie every "
+		"report repeated.\n\n"
+		"Pass `current_value` and a `basis` to record an opening valuation in the "
+		"same call. Otherwise the asset is registered UNVALUED — reported as null "
+		"rather than zero, because 'not yet valued' and 'valued at nothing' are "
+		"different statements about a growing crop.",
+		{
+			"asset_name": _field(_STRING, "What this is called on the ground — 'Home Block Gala'."),
+			"company": _COMPANY,
+			"asset_type": _field(
+				_STRING,
+				"Bearer (default) bears a harvest and remains — depreciated once Mature. "
+				"Consumable IS the harvest — remeasured until picked, never depreciated.",
+			),
+			"status": _field(_STRING, "Establishing, Growing (default), Mature, Harvested or Removed."),
+			"parcel": _field(_STRING, "The ground it is on, where this site tracks parcels."),
+			"field": _field(_STRING, "The block, where this site tracks fields."),
+			"cost_center": _field(
+				_STRING,
+				"Where establishment and maintenance cost accumulates. It is what makes a "
+				"COST-basis valuation computable from the ledger rather than typed.",
+			),
+			"current_value": _field(_NUMBER, "An opening valuation, recorded as the first history row."),
+			"valuation_method": _field(
+				_STRING,
+				"Fair Value or Cost (default). IAS 41.30 presumes fair value and permits cost "
+				"only while fair value is not reliably measurable — which for a block of trees "
+				"nobody is selling is often the honest answer.",
+			),
+			"valuation_date": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"basis": _field(_STRING, "How the opening figure was reached."),
+			"notes": _field(_STRING, "Anything about the planting."),
+		},
+		required=("asset_name",),
+		mutating=True,
+		title="Create biological asset",
+		available=_needs_doctype("Biological Asset"),
+		requires=_BIO_REQUIRES,
+	),
+	"get_biological_asset": _tool(
+		costing.get_biological_asset,
+		"One growing crop with its FULL valuation history, oldest first, plus the "
+		"movement between the first and the latest. The sequence is the evidence: "
+		"a current value with no trail behind it is an assertion nobody can test. "
+		"Read-only.",
+		{
+			"asset": _field(_STRING, "The asset's docname or its asset_name."),
+			"company": _COMPANY,
+		},
+		required=("asset",),
+		title="Get biological asset",
+		available=_needs_doctype("Biological Asset"),
+		requires=_BIO_REQUIRES,
+	),
+	"list_biological_assets": _tool(
+		costing.list_biological_assets,
+		"The growing-crop register with each asset's carrying value and the total "
+		"across them. ASSETS THAT HAVE NEVER BEEN VALUED ARE EXCLUDED FROM THE "
+		"TOTAL and counted separately, rather than added in as zero — a carrying "
+		"value that silently included un-valued crops would understate the "
+		"balance sheet and look like a measurement. Read-only.",
+		{
+			"company": _COMPANY,
+			"asset_type": _field(_STRING, "Bearer or Consumable."),
+			"status": _field(_STRING, "Establishing, Growing, Mature, Harvested or Removed."),
+			"valuation_method": _field(_STRING, "Fair Value or Cost."),
+			"parcel": _field(_STRING, "One parcel's crops."),
+			"field": _field(_STRING, "One block's crops."),
+			"limit": _LIMIT,
+		},
+		title="List biological assets",
+		available=_needs_doctype("Biological Asset"),
+		requires=_BIO_REQUIRES,
+	),
+	"update_biological_asset": _tool(
+		costing.update_biological_asset,
+		"MUTATING (default OFF). Change a crop's type, status, ground or cost "
+		"center.\n\n"
+		"IT CANNOT CHANGE THE VALUE, and refuses `current_value` by name. The "
+		"carrying value is DERIVED from the newest valuation row, so a figure "
+		"written directly would be one no valuation supports — exactly the "
+		"unevidenced assertion this register exists to prevent. Use "
+		"record_biological_asset_valuation.",
+		{
+			"asset": _field(_STRING, "The asset's docname or its asset_name."),
+			"company": _COMPANY,
+			"asset_type": _field(_STRING, "Bearer or Consumable."),
+			"status": _field(_STRING, "Establishing, Growing, Mature, Harvested or Removed."),
+			"parcel": _field(_STRING, "New value."),
+			"field": _field(_STRING, "New value."),
+			"cost_center": _field(_STRING, "New value."),
+			"notes": _field(_STRING, "New value."),
+		},
+		required=("asset",),
+		mutating=True,
+		title="Update biological asset",
+		available=_needs_doctype("Biological Asset"),
+		requires=_BIO_REQUIRES,
+	),
+	"record_biological_asset_valuation": _tool(
+		costing.record_biological_asset_valuation,
+		"MUTATING (default OFF). Remeasure a growing crop, APPENDING to its "
+		"valuation history. IAS 41 remeasures at each reporting date and the "
+		"sequence is what an auditor tests, so this never overwrites — "
+		"`current_value` simply follows the newest row.\n\n"
+		"A `basis` IS REQUIRED. A fair value with no stated basis is somebody's "
+		"opinion formatted as a figure, and it is the first thing anybody asks "
+		"about.\n\n"
+		"NO JOURNAL ENTRY IS WRITTEN. Under IAS 41.26 a change in fair value less "
+		"costs to sell goes to profit or loss in the period it arises — but which "
+		"accounts a biological gain belongs in is a decision about this "
+		"operation's chart, and an app that guessed would put a gain somewhere "
+		"nobody looked. The response says what moved; create_journal_entry is "
+		"where you post it.",
+		{
+			"asset": _field(_STRING, "The asset's docname or its asset_name."),
+			"company": _COMPANY,
+			"value": _field(_NUMBER, "What the asset is now carried at."),
+			"valuation_method": _field(_STRING, "Fair Value or Cost. Defaults to the asset's current basis."),
+			"valuation_date": _field(_STRING, "YYYY-MM-DD. Defaults to today. May not be in the future."),
+			"basis": _field(
+				_STRING,
+				"HOW this number was reached — 'orchard appraisal, Smith & Co, 12 Mar', "
+				"'accumulated establishment cost per the cost centre'. Required.",
+			),
+			"notes": _field(_STRING, "Anything else about this remeasurement."),
+		},
+		required=("asset", "value", "basis"),
+		mutating=True,
+		title="Record a biological asset valuation",
+		available=_needs_doctype("Biological Asset"),
+		requires=_BIO_REQUIRES,
+	),
+	"create_standard_cost": _tool(
+		costing.create_standard_cost,
+		"MUTATING (default OFF). Define what a thing should cost — per bin, per "
+		"acre, per hour — for a date range.\n\n"
+		"DATED RATHER THAN A VALUE ON AN ITEM, and the date is the whole design. "
+		"Costs move every season, and a variance computed against the wrong "
+		"season's standard is not a missing number, it is a confident wrong one. "
+		"Two standards for one subject and basis may not have overlapping ranges: "
+		"close the old one with `effective_to` before starting the new.\n\n"
+		"NAME A COST CENTER OR AN ACCOUNT if you want the variance report to read "
+		"the actual side out of the ledger. Without either it is reported as "
+		"UNMEASURABLE rather than as a variance against zero — which would flag "
+		"it as 100% under budget and look exactly like a real finding.",
+		{
+			"subject": _field(
+				_STRING,
+				"What this is the standard cost OF — an item code, or an activity: "
+				"'HARVEST-GALA', 'Hand thinning'. Free text, because half of what a farm wants "
+				"a standard for is not an Item on anybody's site.",
+			),
+			"company": _COMPANY,
+			"cost_basis": _field(
+				_STRING,
+				"Per Unit (default), Per Acre, Per Hour, Per Bin, Per Box or Per Ton. Part of "
+				"the identity: per-acre and per-bin for one activity are two standards.",
+			),
+			"standard_rate": _field(_NUMBER, "What it should cost per unit of that basis."),
+			"effective_from": _field(_STRING, "First day it applies, INCLUSIVE. YYYY-MM-DD."),
+			"effective_to": _field(
+				_STRING,
+				"Last day it applies, INCLUSIVE. Blank means open-ended, which is the normal shape.",
+			),
+			"cost_category": _field(
+				_STRING,
+				"Labor, Materials, Machinery, Overhead, Packing, Storage, Freight or Other. A "
+				"variance of nine thousand dollars is a fact; nine thousand OF LABOR is a "
+				"finding somebody can act on.",
+			),
+			"cost_center": _field(_STRING, "Where actuals for this subject accumulate."),
+			"expense_account": _field(_STRING, "The GL account actuals land in."),
+			"variance_tolerance_pct": _field(
+				_NUMBER,
+				"How far actual may drift before the cost_variance control has an opinion. "
+				"Default 10. PER STANDARD, because a fuel standard and a labor standard do not "
+				"deserve the same band.",
+			),
+			"currency": _field(_STRING, "Defaults to the company's."),
+			"notes": _field(_STRING, "Where this number came from — 'three-year average'."),
+		},
+		required=("subject", "standard_rate", "effective_from"),
+		mutating=True,
+		title="Create standard cost",
+		available=_needs_doctype("Standard Cost"),
+		requires=_STANDARD_REQUIRES,
+	),
+	"get_standard_cost": _tool(
+		costing.get_standard_cost,
+		"One standard by docname — or, given `subject` and `on_date`, THE "
+		"STANDARD THAT COVERED THAT DAY. It refuses rather than picking the "
+		"nearest when nothing covered the date, because a variance against the "
+		"wrong season's standard is a confident wrong number. Read-only.",
+		{
+			"standard": _field(_STRING, "The standard's docname."),
+			"subject": _field(_STRING, "With on_date: pick the standard covering that day."),
+			"on_date": _field(_STRING, "YYYY-MM-DD."),
+			"cost_basis": _field(_STRING, "Narrow the subject lookup to one basis."),
+			"company": _COMPANY,
+		},
+		title="Get standard cost",
+		available=_needs_doctype("Standard Cost"),
+		requires=_STANDARD_REQUIRES,
+	),
+	"list_standard_costs": _tool(
+		costing.list_standard_costs,
+		"The standards register. Pass `on_date` to collapse it to the one "
+		"standard per subject and basis that covered that day, which is what a "
+		"costing run wants. Names the standards whose actual side cannot be read "
+		"from the ledger. Read-only.",
+		{
+			"company": _COMPANY,
+			"subject": _field(_STRING, "One subject's standards, across seasons."),
+			"cost_basis": _field(_STRING, "One basis."),
+			"cost_category": _field(_STRING, "One category."),
+			"cost_center": _field(_STRING, "Standards pointing at one cost center."),
+			"on_date": _field(_STRING, "YYYY-MM-DD. Collapses to the standard effective that day."),
+			"limit": _LIMIT,
+		},
+		title="List standard costs",
+		available=_needs_doctype("Standard Cost"),
+		requires=_STANDARD_REQUIRES,
+	),
+	"update_standard_cost": _tool(
+		costing.update_standard_cost,
+		"MUTATING (default OFF). Change a standard's rate, date range, "
+		"classification or tolerance. CLOSING ONE IS HOW A NEW SEASON'S IS MADE: "
+		"set `effective_to` on the current row, then create the next — the "
+		"overlap check then guarantees there is never a day with two answers to "
+		"'what should this have cost'.",
+		{
+			"standard": _field(_STRING, "The standard's docname."),
+			"company": _COMPANY,
+			"standard_rate": _field(_NUMBER, "New rate."),
+			"effective_from": _field(_STRING, "YYYY-MM-DD."),
+			"effective_to": _field(_STRING, "YYYY-MM-DD. Closing the row."),
+			"cost_basis": _field(_STRING, "New basis."),
+			"cost_category": _field(_STRING, "New category."),
+			"cost_center": _field(_STRING, "New value."),
+			"expense_account": _field(_STRING, "New value."),
+			"variance_tolerance_pct": _field(_NUMBER, "New tolerance."),
+			"currency": _field(_STRING, "New value."),
+			"notes": _field(_STRING, "New value."),
+		},
+		required=("standard",),
+		mutating=True,
+		title="Update standard cost",
+		available=_needs_doctype("Standard Cost"),
+		requires=_STANDARD_REQUIRES,
+	),
+	"get_cost_variance_report": _tool(
+		costing.get_cost_variance_report,
+		"Actual against standard, per subject, with the gaps past each "
+		"standard's own tolerance flagged. THE COMPARISON IS THE CONTROL — a "
+		"standard nobody compares against is a number in a table. Read-only.\n\n"
+		"TWO WAYS TO SUPPLY THE ACTUAL. Pass `actuals` and the report uses what "
+		"you give it, which is right when the figure comes off a packout sheet. "
+		"Pass nothing and it reads the ledger for every standard naming a cost "
+		"center or an account.\n\n"
+		"A VARIANCE NEEDS A QUANTITY. A standard is a RATE, so expected cost is "
+		"rate x quantity — without one the report gives the actual and the rate "
+		"and says why it cannot do more, rather than inventing a denominator. "
+		"UNMEASURABLE IS NOT ZERO: standards whose actual cannot be read are "
+		"listed apart, because a variance against an actual of zero reports every "
+		"one of them as 100% under budget and is indistinguishable from a "
+		"finding.\n\n"
+		"The `cost_variance` control runs over the flagged rows — Advisory files "
+		"them, Enforced refuses the report.",
+		{
+			"company": _COMPANY,
+			"subject": _field(_STRING, "One subject only."),
+			"cost_category": _field(_STRING, "One category only."),
+			"from_date": _field(_STRING, "Start of the window actuals are read over. YYYY-MM-DD."),
+			"to_date": _field(_STRING, "End of that window. YYYY-MM-DD."),
+			"on_date": _field(
+				_STRING,
+				"Which day decides WHICH standard applies. Defaults to to_date, then today.",
+			),
+			"actuals": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'[{"subject": "HARVEST-GALA", "actual_amount": 91000, "quantity": 3800}]. '
+				"`quantity` is what turns a rate into an expected amount; supply it even when "
+				"letting the ledger provide `actual_amount`.",
+			),
+			"limit": _LIMIT,
+		},
+		title="Cost variance report",
+		available=_needs_doctype("Standard Cost"),
+		requires=_STANDARD_REQUIRES,
+	),
+	"get_absorption_cost_report": _tool(
+		costing.get_absorption_cost_report,
+		"Cost from field through packhouse, per unit, with overhead absorbed or "
+		"excluded. Read-only.\n\n"
+		"THE TOGGLE IS ON THE READ, NOT A SECOND SET OF BOOKS. absorption=false "
+		"(default) totals the direct pools — what the ledger already says. "
+		"absorption=true adds the indirect pools to the same direct base and "
+		"divides by the same quantity, so the two answers are two readings of ONE "
+		"ledger. An app maintaining a parallel absorbed-cost ledger would have two "
+		"numbers for one bin and no way to reconcile them, which is exactly what "
+		"absorption costing exists to avoid.\n\n"
+		"IT WILL NOT INVENT AN ALLOCATION BASE. With no `quantity` it reports the "
+		"pools and says it cannot divide them — picking a denominator is the step "
+		"that turns a costing report into fiction.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "YYYY-MM-DD."),
+			"to_date": _field(_STRING, "YYYY-MM-DD."),
+			"absorption": _field(_BOOLEAN, "Fold the overhead pools in. Default false."),
+			"direct_cost_centers": _field(_STRING_ARRAY, "Cost centers carrying direct field and pack cost."),
+			"direct_accounts": _field(_STRING_ARRAY, "Accounts carrying direct cost."),
+			"overhead_cost_centers": _field(_STRING_ARRAY, "Cost centers carrying indirect cost. Used only with absorption."),
+			"overhead_accounts": _field(_STRING_ARRAY, "Accounts carrying indirect cost."),
+			"quantity": _field(_NUMBER, "Bins packed, boxes shipped, acres — the denominator."),
+			"uom": _field(_STRING, "What that quantity counts. Label only."),
+		},
+		title="Absorption cost report",
 	),
 }
 

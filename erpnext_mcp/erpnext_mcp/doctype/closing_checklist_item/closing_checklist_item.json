@@ -1,0 +1,94 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "One step of a period close: what has to be done, whether it is required before the period may be locked, and — once somebody has done it — who and when. The Spanish label is beside the English rather than in a translation file because the person ticking 'conciliación bancaria hecha' on a phone in a packing shed is reading this row, not a PO file somebody has to remember to regenerate.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "step",
+  "step_es",
+  "sequence",
+  "required",
+  "completed",
+  "completed_by",
+  "completed_on",
+  "evidence",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What has to happen, in the imperative — 'Reconcile every bank account', 'Post accruals', 'Run depreciation'.",
+   "fieldname": "step",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Step",
+   "reqd": 1
+  },
+  {
+   "description": "The same step in Spanish. Optional: a step with no Spanish is shown in English rather than hidden, because a missing translation must never make a required close step invisible to the person who has to do it.",
+   "fieldname": "step_es",
+   "fieldtype": "Data",
+   "label": "Step (Español)"
+  },
+  {
+   "description": "The order a closer works in. Display and sort only — nothing enforces that step 3 waits for step 2, because a real close runs several steps in parallel and a system that pretended otherwise would be worked around on the first busy month.",
+   "fieldname": "sequence",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Sequence"
+  },
+  {
+   "default": "1",
+   "description": "Whether the `closing_checklist` control counts this step when the period is closed. UNTICKED IS A REAL AND USEFUL ANSWER: a step somebody wants tracked but not gated — 'email the lender the flash figures' — belongs on the list without being able to hold the close.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required To Close"
+  },
+  {
+   "description": "Set by complete_checklist_item, together with who and when. Tick it by hand in the Desk and the same thing happens; the attribution comes off the session either way.",
+   "fieldname": "completed",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Done"
+  },
+  {
+   "fieldname": "completed_by",
+   "fieldtype": "Link",
+   "label": "Done By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completed_on",
+   "fieldtype": "Datetime",
+   "label": "Done On",
+   "read_only": 1
+  },
+  {
+   "description": "What backs the tick — a reconciliation docname, a report reference, a journal entry. A checklist of bare ticks is a claim; a checklist of ticks that each point at something is evidence, and this column is the whole of that difference.",
+   "fieldname": "evidence",
+   "fieldtype": "Data",
+   "label": "Evidence"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Closing Checklist Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1
+}

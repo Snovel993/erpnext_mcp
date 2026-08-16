@@ -468,6 +468,12 @@ ERPNEXT_SCHEMA = {
 		"api_secret",
 		"send_welcome_email",
 		"roles",
+		# v0.81.0. Both are standard Frappe columns and both are read by
+		# `itgc.generate_access_control_report` through `compat.existing_fields`.
+		# They are here because the double lacking them made the report answer
+		# "this site does not record last login" for a field every real site has
+		# — which is the double being wrong rather than the app, and it would
+		# have made the dormant-login flags untestable.
 	],
 	# ── v0.17.0: the permission tables the six mobile roles are written into ──
 	#
@@ -1505,6 +1511,35 @@ APP_DOCTYPES = {
 	"Trade Shipment": "trade_shipment",
 	"Trade Shipment Document": "trade_shipment_document",
 	"Trade Document": "trade_document",
+	# v0.80.0, IPO readiness Phase 1 — the financial controls. Spending authority
+	# as a table with a chain on it, and one accounting period carrying both the
+	# steps that have to be finished before it closes AND whether it is now locked
+	# against posting. See `tools/controls.py` for why the checklist and the lock
+	# are one row rather than two doctypes.
+	"Approval Threshold": "approval_threshold",
+	"Approval Threshold Level": "approval_threshold_level",
+	"Closing Checklist": "closing_checklist",
+	"Closing Checklist Item": "closing_checklist_item",
+	# v0.80.0, IPO readiness Phase 2 — revenue. The ASC 606 unit of account: what
+	# was promised, how the transaction price is allocated between the promises,
+	# and when each is earned. See `tools/revenue.py` for why a Sales Order cannot
+	# hold any of the four questions ASC 606 asks.
+	"Revenue Contract": "revenue_contract",
+	"Revenue Performance Obligation": "revenue_performance_obligation",
+	"Revenue Recognition Schedule": "revenue_recognition_schedule",
+	# v0.80.0, IPO readiness Phase 3 — cost. A growing crop carried at a value
+	# with the remeasurements behind it, and what a thing is supposed to cost for
+	# a date range. See `tools/costing.py` on why a consumable biological asset
+	# cannot be an ERPNext Asset.
+	"Biological Asset": "biological_asset",
+	"Biological Asset Valuation": "biological_asset_valuation",
+	"Standard Cost": "standard_cost",
+	# v0.81.0, IPO readiness Phases 4 to 6 — the governance domain. The
+	# arm's-length case for a related-party dealing; the three ITGC records
+	# (who changed what and who approved it, and whether a backup has ever
+	# been restored from); and the two reporting shapes — which SECTIONS a
+	# report has, and which DISCLOSURES a filing must make, which are
+	# deliberately different objects. See `tools/disclosure.py` for why.
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -4123,6 +4158,32 @@ CHILD_TABLE_SOURCES = {
 	"Item Reorder": (("Item", "reorder_levels"),),
 	"UOM Conversion Detail": (("Item", "uoms"),),
 	"Stock Entry Detail": (("Stock Entry", "items"),),
+	# v0.80.0. `tools/controls.approval_findings` reads the rungs of every
+	# enabled threshold in one query rather than loading each parent document,
+	# because it runs on the write path of every journal entry and a document
+	# load per threshold is a cost the ledger should not pay. Without this entry
+	# every rung would come back empty, `required_authority` would see a chain
+	# with no ceilings, and the control would report EVERY transaction as being
+	# above an authority table that in fact covered it — a false refusal under
+	# enforcement, which is the worst way for this control to be wrong.
+	"Approval Threshold Level": (("Approval Threshold", "levels"),),
+	"Closing Checklist Item": (("Closing Checklist", "items"),),
+	# v0.80.0 Phases 2 and 3. `Payment Entry Reference` is ERPNext's own and is
+	# flattened because `revenue.trace_contract_to_cash` walks invoice → payment
+	# through it — without this the trace would report "no payment references any
+	# of these invoices", which is the one break in that chain a reader is most
+	# likely to act on, and it would be wrong.
+	"Payment Entry Reference": (("Payment Entry", "references"),),
+	"Revenue Performance Obligation": (("Revenue Contract", "obligations"),),
+	"Revenue Recognition Schedule": (("Revenue Contract", "schedule"),),
+	"Biological Asset Valuation": (("Biological Asset", "valuations"),),
+	# v0.81.0. `disclosure.list_reporting_templates` counts a template's sections
+	# with `frappe.db.count` rather than loading each document, because the list
+	# is a register view and a document load per template is a cost paid for one
+	# integer. Without this entry every count would come back zero and a list of
+	# real templates would read as a list of empty ones.
+	"Reporting Template Section": (("Reporting Template", "sections"),),
+	"Disclosure Checklist Item": (("Disclosure Checklist", "items"),),
 }
 
 
