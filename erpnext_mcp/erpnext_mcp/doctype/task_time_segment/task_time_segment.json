@@ -1,0 +1,74 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One stretch of time a worker was actually on a task. A job interrupted twice is three segments, and the hour charged to it is their sum — NOT the wall clock from the first start to the last finish, which on a valve repair that interrupted an irrigation set would bill the irrigating to the repair. The segments are the record; `Farm Task Assignment.actual_duration_minutes` is their total.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "started_at",
+  "ended_at",
+  "minutes",
+  "detail_col",
+  "ended_by",
+  "reason"
+ ],
+ "fields": [
+  {
+   "description": "When this stretch of work began — a start, or a resume after a pause.",
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Started",
+   "reqd": 1
+  },
+  {
+   "description": "When it stopped. EMPTY MEANS THIS SEGMENT IS STILL RUNNING, which is the one open segment an in-progress assignment carries; a paused or completed assignment has none.",
+   "fieldname": "ended_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Ended"
+  },
+  {
+   "description": "Minutes in this segment, computed when it closes. Stored rather than derived so a total does not change when somebody corrects a clock, and so a report can sum a column.",
+   "fieldname": "minutes",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Minutes",
+   "precision": "1",
+   "read_only": 1
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "pause",
+   "description": "What closed this segment. `auto_pause` is the one worth telling apart: the worker did not pause this job, they started another one and the server paused this for them — which is a different sentence in front of a payroll question about the gap.",
+   "fieldname": "ended_by",
+   "fieldtype": "Select",
+   "label": "Ended By",
+   "options": "\npause\nauto_pause\ncompletion\nrejection\nmerge"
+  },
+  {
+   "description": "Why the worker stopped. 'Called to the valve at Home-7' is what makes a fragmented afternoon legible six weeks later.",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Task Time Segment",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -316,10 +316,21 @@ DISPATCH_COLUMNS = (
 	("Available", "blue"),
 	("Claimed", "purple"),
 	("In-Progress", "orange"),
+	# v0.79.0. Paused sits between In-Progress and Awaiting-Review, which is where
+	# it sits in a day: the work is somebody's, it is not finished, and it is not
+	# being done this minute. Yellow rather than orange so a board read across a
+	# yard tells the two apart at a glance — "who is actually working" is the
+	# question this column exists to keep answerable.
+	("Paused", "yellow"),
 	("Awaiting-Review", "red"),
 	("Completed", "green"),
 	("Rejected", "red"),
 	("Cancelled", "gray"),
+	# Merged is last and grey because it is an archive column: nothing is worked
+	# out of it and every card in it points at another card. It is on the board
+	# rather than hidden so a foreman looking for a job somebody swears they
+	# raised finds it, with the arrow to where it went.
+	("Merged", "gray"),
 )
 
 #: The shortcut row across the top of the workspace, in the order somebody uses

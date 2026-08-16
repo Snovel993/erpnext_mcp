@@ -1377,6 +1377,25 @@ APP_DOCTYPES = {
 	# asset scan, and a double without the register would make every one of
 	# those a silently-empty section rather than a real query.
 	"Spray REI": "spray_rei",
+	# v0.79.0. The narrative table and the two tables that make a Farm Task
+	# something other than a thing one person does in one visit: the time it was
+	# actually worked, and what it is related to.
+	"Task Note": "task_note",
+	"Task Time Segment": "task_time_segment",
+	"Farm Task Link": "farm_task_link",
+	# v0.79.0. The two registers this release exists for. Both are on the SCAN
+	# and TASK paths — a discipline chain is read from a mobile wrapper and an
+	# accident report spawns sub-tasks — so they are registered here rather than
+	# seeded per-test, for the reason Spray REI is.
+	"Discipline Record": "discipline_record",
+	"Accident Report": "accident_report",
+	"Accident Witness": "accident_witness",
+	# v0.79.0. The wizard registry. Definitions are DATA, so the double has to
+	# hold them the same way a bench does — a test that hard-coded a wizard would
+	# be testing a shape this app does not use.
+	"Wizard Definition": "wizard_definition",
+	"Wizard Step": "wizard_step",
+	"Wizard Field": "wizard_field",
 	# v0.27.0. The structured I-9 workflow.
 	"I-9 Form": "i_9_form",
 	"I-9 Audit Log": "i_9_audit_log",
@@ -2004,6 +2023,17 @@ def _key(value):
 
 # ── documents ───────────────────────────────────────────────────────────────
 CHILD_TABLES = {
+	# v0.79.0. The narrative table has THREE PARENTS and that is the point of it:
+	# appending an account of what happened is one act, and three near-identical
+	# tables would drift the first time one of them grew a column.
+	("Farm Task", "task_notes"): "Task Note",
+	("Accident Report", "investigation_notes"): "Task Note",
+	("Discipline Record", "discipline_notes"): "Task Note",
+	("Farm Task Assignment", "time_segments"): "Task Time Segment",
+	("Farm Task", "linked_tasks"): "Farm Task Link",
+	("Accident Report", "witnesses"): "Accident Witness",
+	("Wizard Definition", "steps"): "Wizard Step",
+	("Wizard Step", "fields"): "Wizard Field",
 	("Journal Entry", "accounts"): "Journal Entry Account",
 	("Bank Transaction", "payment_entries"): "Bank Transaction Payments",
 	("Fiscal Year", "companies"): "Fiscal Year Company",

@@ -48,36 +48,64 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-#: The eight states, in the order they read across a dispatch board.
+#: The ten states, in the order they read across a dispatch board.
 DRAFT = "Draft"
 AVAILABLE = "Available"
 CLAIMED = "Claimed"
 IN_PROGRESS = "In-Progress"
+PAUSED = "Paused"
 AWAITING_REVIEW = "Awaiting-Review"
 COMPLETED = "Completed"
 REJECTED = "Rejected"
 CANCELLED = "Cancelled"
+MERGED = "Merged"
 
 STATES = (
 	DRAFT,
 	AVAILABLE,
 	CLAIMED,
 	IN_PROGRESS,
+	PAUSED,
 	AWAITING_REVIEW,
 	COMPLETED,
 	REJECTED,
 	CANCELLED,
+	MERGED,
 )
+
+#: v0.79.0. PAUSED IS A STATE AND NOT A FLAG, and the reason is the board. A
+#: worker irrigating who is called to a broken valve has not stopped holding the
+#: irrigation job and has not finished it; a boolean beside In-Progress would
+#: leave the Kanban board showing two tasks in the same column with one of them
+#: not being worked, which is the picture a dispatch board exists to prevent.
+#: The clock stops here — see `Task Time Segment`.
+#:
+#: MERGED IS TERMINAL AND NAMES ANOTHER RECORD. Two people who independently
+#: raised a job about the same valve leave two tasks, and folding one into the
+#: other must not delete it: the duplicate carries somebody's photographs, their
+#: minutes and their account of what they found. It goes to Merged with
+#: `merged_into` pointing at where the work actually went.
 
 #: States in which the work is finished or abandoned. Nothing claims, starts,
 #: completes or rejects out of one of these.
-TERMINAL_STATES = (COMPLETED, REJECTED, CANCELLED)
+TERMINAL_STATES = (COMPLETED, REJECTED, CANCELLED, MERGED)
 
 #: States that hold a worker's name and count against their concurrent-claim
 #: limit. Awaiting-Review deliberately does NOT: the worker has finished and the
 #: task is somebody else's problem, so holding it against their limit would
 #: punish them for finding something.
-LIVE_ASSIGNMENT_STATES = (CLAIMED, IN_PROGRESS)
+#:
+#: PAUSED DOES COUNT. A paused task is still that worker's to come back to, and
+#: a limit that ignored them would let somebody pause their way through the whole
+#: pool — which is the exact hoarding the limit exists to stop, performed one
+#: interruption at a time.
+LIVE_ASSIGNMENT_STATES = (CLAIMED, IN_PROGRESS, PAUSED)
+
+#: The one state a worker may be in on more than one task at once is NOT this
+#: one. Being in two places is not a scheduling preference; `pause_farm_task`
+#: and the auto-pause on claim/start are what make that true without refusing
+#: anybody's second job.
+EXCLUSIVE_STATES = (IN_PROGRESS,)
 
 #: How many tasks one worker may hold at once. Three is a morning: enough to
 #: plan a trip round the camp, few enough that nobody can empty the pool onto

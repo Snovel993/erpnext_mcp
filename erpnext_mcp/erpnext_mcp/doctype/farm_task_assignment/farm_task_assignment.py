@@ -50,13 +50,21 @@ from frappe.model.document import Document
 
 CLAIMED = "Claimed"
 IN_PROGRESS = "In-Progress"
+PAUSED = "Paused"
 COMPLETED = "Completed"
 REJECTED = "Rejected"
+MERGED = "Merged"
 
-STATES = (CLAIMED, IN_PROGRESS, COMPLETED, REJECTED)
+STATES = (CLAIMED, IN_PROGRESS, PAUSED, COMPLETED, REJECTED, MERGED)
 
 #: The states in which this assignment is the one that owns the task.
-LIVE_STATES = (CLAIMED, IN_PROGRESS)
+#:
+#: v0.79.0 ADDS PAUSED, and it has to be here rather than beside the finished
+#: states: a paused assignment is still the one holding the task, so
+#: `live_assignment` must find it — otherwise `resume_farm_task` would be told
+#: nobody is holding the job it is trying to pick back up, and a second worker
+#: could claim a task somebody is coming back to.
+LIVE_STATES = (CLAIMED, IN_PROGRESS, PAUSED)
 
 
 class FarmTaskAssignment(Document):
@@ -107,6 +115,18 @@ class FarmTaskAssignment(Document):
 
 		if int(self.actual_duration_minutes or 0) < 0:
 			frappe.throw(_("Actual Duration cannot be negative."))
+
+		if int(self.pause_count or 0) < 0:
+			frappe.throw(_("Pause Count cannot be negative."))
+		if self.state == PAUSED and not self.paused_at:
+			frappe.throw(
+				_(
+					"A paused assignment has to say WHEN it was paused. Without the timestamp the "
+					"segment that stopped has no end, and the hour charged to this job becomes the "
+					"wall clock across an interruption."
+				),
+				title=_("Paused At is required"),
+			)
 
 		self.task_name = self.task_name or frappe.db.get_value("Farm Task", self.task, "task_name")
 		self.company = self.company or frappe.db.get_value("Farm Task", self.task, "company")

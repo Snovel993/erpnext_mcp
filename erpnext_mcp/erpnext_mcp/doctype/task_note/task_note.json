@@ -1,0 +1,112 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One narrative entry against a task, an accident investigation or a discipline record: who wrote it, when, in what language, and whether they typed it or spoke it. ONE CHILD TABLE FOR THREE PARENTS, because it is one act — somebody putting an account of what happened into a record — and three near-identical tables would drift the first time one of them grew a column. Entries are APPENDED, never edited: an investigation that spans four days is four entries, and rewriting Monday's account on Thursday is how a contemporaneous record stops being one.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "note_type",
+  "author",
+  "author_name",
+  "written_at",
+  "meta_col",
+  "source_type",
+  "source_language",
+  "audio_file",
+  "audio_duration_seconds",
+  "body_section",
+  "narrative"
+ ],
+ "fields": [
+  {
+   "default": "Note",
+   "description": "What kind of entry this is. `Finding` and `Corrective Action` exist because an accident investigation's entries are not all the same thing and a legal reader needs to tell them apart without reading every one; `Conversation` is what a discipline record's account of a meeting is.",
+   "fieldname": "note_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Type",
+   "options": "Note\nFinding\nCorrective Action\nConversation\nWitness Statement\nRoot Cause",
+   "reqd": 1
+  },
+  {
+   "description": "The Employee who wrote it. A Data field rather than a Link for the reason Farm Task.assigned_to is one: Frappe HR is not a dependency of this app, and a Link would make this table fail to migrate on a site without it.",
+   "fieldname": "author",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Author"
+  },
+  {
+   "fieldname": "author_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Author Name"
+  },
+  {
+   "description": "When it was written. STAMPED AT APPEND and never moved — an investigation's value in a hearing is that each entry says when somebody knew what.",
+   "fieldname": "written_at",
+   "fieldtype": "Datetime",
+   "label": "Written At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "meta_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "typed",
+   "description": "Whether somebody typed this or spoke it. IT MATTERS TO A READER: a transcription is a machine's reading of speech and carries the errors speech recognition makes, and a hearing that treats it as a verbatim quote is treating it as something it is not.",
+   "fieldname": "source_type",
+   "fieldtype": "Select",
+   "label": "Source",
+   "options": "typed\naudio_transcription\nimported",
+   "reqd": 1
+  },
+  {
+   "description": "The language this was written or spoken in, as an ISO code — 'en', 'es'. Recorded rather than assumed: a Spanish account transcribed by a Spanish recogniser and then read by an English-speaking reviewer is a translation waiting to happen, and one that nobody knows is needed is the worse case.",
+   "fieldname": "source_language",
+   "fieldtype": "Data",
+   "label": "Source Language"
+  },
+  {
+   "description": "The recording this was transcribed from, where there was one. THE AUDIO IS KEPT: a transcription is evidence about the recording, and a record that discarded the original would have no way to answer a challenge to the wording.",
+   "fieldname": "audio_file",
+   "fieldtype": "Link",
+   "label": "Audio File",
+   "options": "File"
+  },
+  {
+   "fieldname": "audio_duration_seconds",
+   "fieldtype": "Float",
+   "label": "Audio Duration (s)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "body_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "The account itself, at whatever length it takes. A `Text` and not a `Small Text` deliberately — 'describe what happened' is the question an OSHA investigation and a discipline meeting both ask, and a field that runs out of room teaches people to answer it in note form.",
+   "fieldname": "narrative",
+   "fieldtype": "Text",
+   "in_list_view": 1,
+   "label": "Narrative",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Task Note",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

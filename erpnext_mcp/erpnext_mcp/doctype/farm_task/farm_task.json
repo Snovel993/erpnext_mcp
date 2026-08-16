@@ -39,6 +39,12 @@
   "reported_at",
   "field_report_col",
   "report_photo",
+  "hierarchy_section",
+  "parent_doctype",
+  "parent_task",
+  "merged_into",
+  "hierarchy_col",
+  "linked_tasks",
   "evidence_section",
   "evidence_required",
   "checklist_section",
@@ -58,7 +64,9 @@
   "phi_clears_on",
   "phi_source_item",
   "notes_section",
-  "notes"
+  "notes",
+  "narrative_section",
+  "task_notes"
  ],
  "fields": [
   {
@@ -92,13 +100,13 @@
   },
   {
    "default": "Draft",
-   "description": "Where the work has got to. Draft is not yet dispatchable; Available is in the pool; Claimed has somebody's name on it; In-Progress means they are stood in front of it; Awaiting-Review means it was done AND the record it produced needs somebody to look at it; Completed, Rejected and Cancelled are terminal. This is the field the Kanban board columns are built from.",
+   "description": "Where the work has got to. Draft is not yet dispatchable; Available is in the pool; Claimed has somebody's name on it; In-Progress means they are stood in front of it; PAUSED means they were interrupted and are coming back — the task is still theirs and its clock is stopped; Awaiting-Review means it was done AND the record it produced needs somebody to look at it; Completed, Rejected, Cancelled and MERGED are terminal. Merged is the one that names another record: a duplicate folded into a primary task keeps its history and points at where the work actually went. This is the field the Kanban board columns are built from.",
    "fieldname": "state",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "State",
-   "options": "Draft\nAvailable\nClaimed\nIn-Progress\nAwaiting-Review\nCompleted\nRejected\nCancelled",
+   "options": "Draft\nAvailable\nClaimed\nIn-Progress\nPaused\nAwaiting-Review\nCompleted\nRejected\nCancelled\nMerged",
    "reqd": 1,
    "search_index": 1
   },
@@ -419,10 +427,69 @@
    "label": "Instructions"
   },
   {
-   "description": "What the worker needs to know before they get there: where the key is, which breaker, who to ask. This is the field that decides whether a task is doable by somebody who was not in the room when it was written.",
+   "description": "What the worker needs to know before they get there: where the key is, which breaker, who to ask. This is the field that decides whether a task is doable by somebody who was not in the room when it was written. A `Text` and not a `Small Text` since v0.79.0 — a foreman's account of a job runs longer than a line, and a field that runs out of room teaches people to write in note form. For an account written AFTER the fact, and for anything spoken rather than typed, see the `task_notes` table: this field is the brief, that one is the record.",
    "fieldname": "notes",
-   "fieldtype": "Small Text",
+   "fieldtype": "Text",
    "label": "Instructions"
+  },
+  {
+   "fieldname": "hierarchy_section",
+   "fieldtype": "Section Break",
+   "label": "Hierarchy and Links",
+   "description": "How this task relates to other tasks. A multi-day investigation is a parent with sub-tasks under it; two people who independently raised the same job are two tasks somebody links or merges."
+  },
+  {
+   "description": "The record this task is a step of. A DYNAMIC LINK and not a Link to Farm Task, because the thing with steps under it is as often an Accident Report as another task — an investigation's steps are 'interview the witness', 'photograph the scene', 'write the root cause', and the investigation is not a Farm Task. The same pair Farm Task already uses for location_doctype/location, for the same reason. A PARENT DOES NOT CLOSE WHILE A CHILD IS LIVE, which is what makes multi-day work stay open across shifts instead of being ticked off on the first evening.",
+   "fieldname": "parent_task",
+   "fieldtype": "Dynamic Link",
+   "in_standard_filter": 1,
+   "label": "Parent Task",
+   "options": "parent_doctype",
+   "search_index": 1
+  },
+  {
+   "description": "Where the work went when this task was merged away. Set only on a task in the Merged state, and it is what makes that state readable rather than a dead end: somebody opening a duplicate six weeks later is told which record carries the evidence.",
+   "fieldname": "merged_into",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Merged Into",
+   "options": "Farm Task",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "hierarchy_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Other tasks this one is related to, duplicated by, or blocked by. WRITTEN ON BOTH SIDES — see Farm Task Link — so the relationship is visible from whichever record somebody opens.",
+   "fieldname": "linked_tasks",
+   "fieldtype": "Table",
+   "label": "Linked Tasks",
+   "options": "Farm Task Link"
+  },
+  {
+   "fieldname": "narrative_section",
+   "fieldtype": "Section Break",
+   "label": "Narrative",
+   "description": "The account of what was done and why, appended over time. Multiple people may contribute over multiple days; entries are never edited, because a contemporaneous record that gets rewritten is not one."
+  },
+  {
+   "description": "Narrative entries, each with its author, its timestamp, and whether it was typed or spoken. A voice note transcribed on the handset lands here with `source_type = audio_transcription` and the recording attached, so the written record and the audio it came from stay together.",
+   "fieldname": "task_notes",
+   "fieldtype": "Table",
+   "label": "Narrative Notes",
+   "options": "Task Note"
+  },
+  {
+   "default": "Farm Task",
+   "description": "Which register the parent is in — 'Farm Task' for a step of a bigger job, 'Accident Report' for a step of an investigation.",
+   "fieldname": "parent_doctype",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Parent DocType",
+   "options": "DocType"
   }
  ],
  "index_web_pages_for_search": 0,

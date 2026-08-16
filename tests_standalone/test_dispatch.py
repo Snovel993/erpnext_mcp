@@ -919,10 +919,12 @@ class TheKanbanBoard(DispatchTestCase):
 				"Available",
 				"Claimed",
 				"In-Progress",
+				"Paused",
 				"Awaiting-Review",
 				"Completed",
 				"Rejected",
 				"Cancelled",
+				"Merged",
 			],
 		)
 
@@ -1011,11 +1013,21 @@ class TheIndicatorPaletteIsNotAssumed(DispatchTestCase):
 
 	def test_capitalised_options_are_matched_and_stored_in_the_sites_own_casing(self):
 		"""The exact shape that broke Tim's site."""
-		self.repalette("Blue\nOrange\nRed\nGreen\nGray\nPurple")
+		self.repalette("Blue\nOrange\nRed\nGreen\nGray\nPurple\nYellow")
 		self.assertEqual(
 			[column["indicator"] for column in self.board()["columns"]],
-			["Gray", "Blue", "Purple", "Orange", "Red", "Green", "Red", "Gray"],
+			["Gray", "Blue", "Purple", "Orange", "Yellow", "Red", "Green", "Red", "Gray", "Gray"],
 		)
+
+	def test_a_colour_this_sites_palette_lacks_is_dropped_and_its_column_survives(self):
+		"""v0.79.0 added Paused in yellow, and a site whose Kanban palette predates
+		yellow must still get the column — without it a board loses the state that
+		says who is actually working."""
+		self.repalette("Blue\nOrange\nRed\nGreen\nGray\nPurple")
+		columns = self.board()["columns"]
+		paused = next(column for column in columns if column["column_name"] == "Paused")
+		self.assertFalse(paused.get("indicator"))
+		self.assertEqual(len(columns), 10)
 
 	def test_lowercase_options_are_matched_too(self):
 		self.repalette("blue\norange\nred\ngreen\ngray\npurple")
@@ -1025,7 +1037,7 @@ class TheIndicatorPaletteIsNotAssumed(DispatchTestCase):
 		"""A column with no colour is cosmetic. A board that does not exist is not."""
 		self.repalette("#4287f5\n#f54242\n#42f554")
 		board = self.board()
-		self.assertEqual(len(board["columns"]), 8)
+		self.assertEqual(len(board["columns"]), 10)
 		self.assertFalse(any(column.get("indicator") for column in board["columns"]))
 
 	def test_a_select_with_no_options_at_all_takes_the_value_unchanged(self):

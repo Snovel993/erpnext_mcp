@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One task's relationship to another. LINKS ARE WRITTEN ON BOTH SIDES — a row here and a row on the other task — because a link that existed on one record only would be invisible from whichever of the two somebody happened to open, and the whole point is that the second person to walk up to a broken valve finds the first person's job.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "linked_task",
+  "relationship",
+  "linked_task_name",
+  "detail_col",
+  "linked_by",
+  "linked_on",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "linked_task",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Linked Task",
+   "options": "Farm Task",
+   "reqd": 1
+  },
+  {
+   "default": "related",
+   "description": "What the two are to each other. `duplicate_of` and `merged_from` are what a merge leaves behind on each side; `related` is a deliberate link between two jobs somebody is working together.",
+   "fieldname": "relationship",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Relationship",
+   "options": "related\nduplicate_of\nmerged_from\nblocked_by\nfollows",
+   "reqd": 1
+  },
+  {
+   "description": "The other task's title, copied at link time so a list of links reads without a second query per row.",
+   "fieldname": "linked_task_name",
+   "fieldtype": "Data",
+   "label": "Linked Task Name"
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "linked_by",
+   "fieldtype": "Data",
+   "label": "Linked By"
+  },
+  {
+   "fieldname": "linked_on",
+   "fieldtype": "Datetime",
+   "label": "Linked On"
+  },
+  {
+   "description": "Why these two are the same job, or why they are being worked together. A link nobody explained is one the next person undoes.",
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Note"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Task Link",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

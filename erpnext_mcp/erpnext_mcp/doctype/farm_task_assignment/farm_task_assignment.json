@@ -23,6 +23,14 @@
   "timing_col",
   "completed_at",
   "actual_duration_minutes",
+  "pause_section",
+  "paused_at",
+  "pause_reason",
+  "pause_col",
+  "pause_count",
+  "auto_paused",
+  "segments_section",
+  "time_segments",
   "outcome_section",
   "completion_narrative",
   "findings_text",
@@ -66,13 +74,13 @@
   },
   {
    "default": "Claimed",
-   "description": "Claimed, In-Progress, Completed or Rejected. Rejected is a FIRST-CLASS STATE and the reason is mandatory: 'I could not get to it and dispatch never followed up' is the answer nobody can defend, and this is the field that makes it impossible to end there silently.",
+   "description": "Claimed, In-Progress, Paused, Completed, Rejected or Merged. Rejected is a FIRST-CLASS STATE and the reason is mandatory: 'I could not get to it and dispatch never followed up' is the answer nobody can defend, and this is the field that makes it impossible to end there silently. PAUSED (v0.79.0) is the worker's — the job is still theirs and its clock is stopped; MERGED is what happens to the assignment on a duplicate whose work was folded into another task.",
    "fieldname": "state",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "State",
-   "options": "Claimed\nIn-Progress\nCompleted\nRejected",
+   "options": "Claimed\nIn-Progress\nPaused\nCompleted\nRejected\nMerged",
    "reqd": 1,
    "search_index": 1
   },
@@ -142,7 +150,7 @@
    "label": "Completed"
   },
   {
-   "description": "Minutes actually spent. Computed from started_at and completed_at where both are there, and takeable from the worker where they are not — a phone that was in a pocket all morning is not a clock.",
+   "description": "How long the work actually took, in minutes. SINCE v0.79.0 THIS IS THE SUM OF THE ACTIVE SEGMENTS and not the wall clock from start to finish. A worker who began irrigating at nine, was called to a broken valve at half past, and came back at eleven spent thirty minutes plus whatever they did after — not two hours. The wall clock would bill the valve repair to the irrigating, on exactly the fragmented afternoons where an hour charged to a job matters most. See `time_segments`.",
    "fieldname": "actual_duration_minutes",
    "fieldtype": "Int",
    "label": "Actual Duration (Minutes)"
@@ -155,7 +163,7 @@
   {
    "description": "What the worker did, in their words.",
    "fieldname": "completion_narrative",
-   "fieldtype": "Small Text",
+   "fieldtype": "Text",
    "label": "Completion Narrative"
   },
   {
@@ -229,6 +237,56 @@
    "fieldtype": "Data",
    "label": "Completion Signature",
    "read_only": 1
+  },
+  {
+   "fieldname": "pause_section",
+   "fieldtype": "Section Break",
+   "label": "Interruptions",
+   "description": "Field work is interrupted. This is where that is recorded rather than hidden inside a start and an end time that no longer mean what they say."
+  },
+  {
+   "description": "When the current pause began, where this assignment is paused. Cleared on resume — the history lives in `time_segments`, and a column that kept the last pause would be a second, disagreeing account of the same fact.",
+   "fieldname": "paused_at",
+   "fieldtype": "Datetime",
+   "label": "Paused At"
+  },
+  {
+   "description": "Why the worker stopped. 'Called to the valve at Home-7' is what makes a fragmented afternoon legible six weeks later, and it is what a foreman reading a two-hour gap actually wants.",
+   "fieldname": "pause_reason",
+   "fieldtype": "Small Text",
+   "label": "Pause Reason"
+  },
+  {
+   "fieldname": "pause_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "How many times this assignment has been paused. A count rather than a derived figure so a report can sort on it: a job paused six times is a job somebody should look at, whatever its total minutes say.",
+   "fieldname": "pause_count",
+   "fieldtype": "Int",
+   "label": "Pause Count",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Set when the SERVER paused this rather than the worker — they started another task and this one was stood down for them. Worth telling apart in front of a payroll question about a gap: nobody chose to stop.",
+   "fieldname": "auto_paused",
+   "fieldtype": "Check",
+   "label": "Auto-Paused",
+   "read_only": 1
+  },
+  {
+   "fieldname": "segments_section",
+   "fieldtype": "Section Break",
+   "label": "Time Segments"
+  },
+  {
+   "description": "Every stretch this worker was actually on this task. One segment for an uninterrupted job; three for one interrupted twice. `actual_duration_minutes` is their sum, and the segments are the record it is computed from.",
+   "fieldname": "time_segments",
+   "fieldtype": "Table",
+   "label": "Time Segments",
+   "options": "Task Time Segment"
   }
  ],
  "index_web_pages_for_search": 0,
