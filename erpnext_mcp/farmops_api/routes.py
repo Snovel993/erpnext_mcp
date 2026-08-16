@@ -255,6 +255,17 @@ ROUTES = (
 	Route("/mobile", mobile_api.clock_out_worker),
 	Route("/mobile", mobile_api.get_shift_production),
 	Route("/mobile", mobile_api.get_shift),
+	# v0.81.0. THE READ THAT MAKES AN OPEN SHIFT FINDABLE AGAIN. Every other
+	# shift method on this table takes a docname, and the only place a docname
+	# ever came from was `start_shift`'s answer, held in memory by the screen
+	# that made the call. A dismissed sheet, a tab switch, a relaunch or a flat
+	# battery lost it, and the shift then stayed open forever with nothing on the
+	# handset able to name it — no Attendance rows for that crew, for that day,
+	# ever. The app now writes the docname to disk as well (`OpenShiftRecord`),
+	# and this is the other half: what a reinstalled app, or a handset that never
+	# held the record, asks to find its way back. Defaults to the caller's own
+	# shifts — see the wrapper for why that default is not a convenience.
+	Route("/mobile", mobile_api.list_shifts),
 	# v0.62.0. THE SEVEN `MobileAPI.swift` NAMES AND THIS TABLE DID NOT CARRY.
 	# Audited against v0.61.0 on 2026-08-12; see the block comment in
 	# `api/mobile.py` that opens this set for the argument each one settles.

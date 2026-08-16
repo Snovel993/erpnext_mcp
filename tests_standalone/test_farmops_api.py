@@ -245,6 +245,9 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/clock_out_worker",
 		"/mobile/get_shift_production",
 		"/mobile/get_shift",
+		# v0.81.0. The register read, defaulted to the caller's own shifts — how a
+		# handset that lost the docname finds the shift it left open.
+		"/mobile/list_shifts",
 		# v0.62.0. The seven the handset names and this table did not carry. The
 		# first three reach the same functions as `list_onboarding_reference_data`,
 		# `list_available_housing` and `assign_housing` above; they are separate

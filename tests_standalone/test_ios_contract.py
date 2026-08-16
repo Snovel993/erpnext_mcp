@@ -844,6 +844,51 @@ class EmployeePhotoModel(Codable):
 	)
 
 
+class OpenShiftRowModel(Codable):
+	"""`ShiftAPI.OpenShift` — one row of the register, as the recovery read decodes it.
+
+	EVERY FIELD BUT `name` IS OPTIONAL AND THAT IS THE POINT OF THE STRUCT. The
+	docname is the only thing the handset actually needs: it is what `end_shift`
+	takes, and the whole reason `list_shifts` reached this surface was a phone
+	that had lost it. The rest is what the recovery screen shows a foreman so
+	they can tell WHICH shift they are being asked to sign closed, and a missing
+	block name is a thinner screen rather than a row that throws.
+
+	`crew_size` is nil on this read and that is correct, not a gap: `shifts.describe`
+	only walks the crew child table under `with_children`, which the register does
+	not pass. `get_shift` is where the count comes from.
+	"""
+
+	SWIFT = "ShiftAPI.swift"
+	STRICT = (("name", str, 18),)
+	NULLABLE = (
+		("foreman", str, 19),
+		("foreman_name", str, 20),
+		("company", str, 21),
+		("start_datetime", str, 22),
+		("crew_size", int, 23),
+		("location", str, 31),
+		("shift_type", str, 32),
+		("open", bool, 35),
+	)
+
+
+class ShiftRegisterModel(Codable):
+	"""`ShiftAPI.ShiftRegisterPage` — the answer `list_shifts` hands the handset.
+
+	`shifts` is optional in Swift so an empty or absent list is a quiet "nothing
+	of yours is open" rather than a throw — which is the ordinary answer and must
+	not look like a fault. The register's own summary keys (`open`,
+	`closed_without_a_signature`, the notes) are deliberately NOT transcribed: the
+	phone asks a narrower question than they answer, and mirroring keys nothing
+	decodes would assert a contract the app does not actually depend on.
+	"""
+
+	SWIFT = "ShiftAPI.swift"
+	NULLABLE = (("count", int, 72),)
+	NESTED = (("shifts", OpenShiftRowModel, True, 71),)
+
+
 class UndecodedResponseModel(Codable):
 	"""A method `MobileAPI.swift` names and no Swift struct decodes yet.
 
@@ -3944,6 +3989,75 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			self.wire("get_attachment_content", file=finalized["file_token"])
 		self.assertIn("attached to no document", str(caught.exception))
 
+	# ── v0.81.0: finding a shift the handset lost the docname for ───────────
+	def test_55_list_shifts(self):
+		"""THE READ THAT MAKES AN OPEN SHIFT REACHABLE AGAIN.
+
+		Every other shift method takes a docname, and the docname only ever came
+		from `start_shift`'s answer — held in memory by the screen that asked. A
+		dismissed sheet, a tab switch, a relaunch or a flat battery lost it, and
+		the shift then stayed open with nothing able to name it: no Attendance
+		rows for that crew, for that day, ever, because `end_shift` is what
+		writes them.
+		"""
+		self.the_hr_furniture()
+		shift = self.a_shift(crew_employees=[self.NEW_HIRE, self.SECOND_HAND])
+
+		row = self.wire("list_shifts", status="Active")
+		ShiftRegisterModel.decode(row, "list_shifts")
+
+		self.assertEqual([entry["name"] for entry in row["shifts"]], [shift["name"]])
+		self.assertTrue(row["shifts"][0]["open"])
+		self.assertTrue(row["mine"])
+
+	def test_55_a_closed_shift_is_not_in_the_active_answer(self):
+		"""`status` is COMPUTED from the absence of an end time rather than read
+		off a stored column, so closing one is what takes it out of this list —
+		which is exactly the transition the recovery banner watches for."""
+		self.the_hr_furniture()
+		shift = self.a_shift(crew_employees=[self.NEW_HIRE])
+		_staged, signature = self.upload("signature", "shift_signature.png")
+		self.wire(
+			"end_shift",
+			shift=shift["name"],
+			supervisor_signature_file_token=signature["file_token"],
+		)
+
+		row = self.wire("list_shifts", status="Active")
+		self.assertEqual(row["shifts"], [])
+
+	def test_55_the_default_answers_only_the_callers_own_shifts(self):
+		"""`mine` DEFAULTS TO TRUE AND IT IS NOT A CONVENIENCE.
+
+		Closing a shift signs an FSMA §112.161(b) supervisor review in somebody's
+		name. An unfiltered register handed to a handset is a list of other
+		foremen's shifts with a Close button beside each one.
+		"""
+		self.the_hr_furniture()
+		mine = self.a_shift(crew_employees=[self.NEW_HIRE])
+		STORE.tables["Farm Shift"][mine["name"]]["foreman"] = "EMP-SOMEBODY-ELSE"
+
+		row = self.wire("list_shifts", status="Active")
+		self.assertEqual(row["shifts"], [])
+
+		everyone = self.wire("list_shifts", status="Active", mine=False)
+		self.assertEqual([entry["name"] for entry in everyone["shifts"]], [mine["name"]])
+		self.assertFalse(everyone["mine"])
+
+	def test_55_the_flag_survives_the_spelling_a_form_post_uses(self):
+		"""A phone sends `false`; a form post sends the STRING `"false"`, and
+		`bool("false")` is True. `_as_flag` is what keeps the two the same
+		answer — getting this wrong would silently widen the default from "mine"
+		to "everybody's"."""
+		self.the_hr_furniture()
+		self.a_shift(crew_employees=[self.NEW_HIRE])
+		STORE.tables["Farm Shift"][
+			next(iter(STORE.tables["Farm Shift"]))
+		]["foreman"] = "EMP-SOMEBODY-ELSE"
+
+		self.assertEqual(self.wire("list_shifts", mine="false")["mine"], False)
+		self.assertEqual(self.wire("list_shifts", mine="true")["mine"], True)
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -4127,6 +4241,10 @@ class TheContractIsComplete(ContractTestCase):
 		"set_employee_contact_fields": "test_52",
 		"list_attachments": "test_53",
 		"get_attachment_content": "test_54",
+		# v0.81.0 — the read a handset that lost the shift's docname asks. Every
+		# other shift method takes a docname and there was no way to find one
+		# again, so an open shift became permanently un-closeable from the app.
+		"list_shifts": "test_55",
 	}
 
 	def _published(self, module):

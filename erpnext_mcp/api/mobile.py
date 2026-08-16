@@ -4390,6 +4390,72 @@ def get_shift(user: str, shift=None) -> dict:
 	return result.data
 
 
+# ── 45. list_shifts ───────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_shifts", limit=guard.READ_LIMIT)
+def list_shifts(user: str, company=None, status=None, mine=None, limit=None, timezone=None) -> dict:
+	"""Which shifts are still open, so a phone can find one it lost.
+
+	THE READ THAT CLOSED A HOLE IN THE HANDSET, AND THE HOLE WAS PERMANENT.
+	`get_shift` and `end_shift` both take a docname. `start_shift` hands one back
+	and the app held it in memory — so a dismissed screen, a tab switch, a
+	relaunch or a flat battery lost the only copy, and the shift stayed open with
+	nothing on the phone able to name it. There was no read on this surface that
+	could find it again: this is that read. A shift that never closes is a crew
+	with no Attendance rows for the day, because `end_shift` is what writes them.
+
+	`mine` DEFAULTS TO TRUE AND THAT IS THE WHOLE POINT OF THE ARGUMENT. Closing
+	a shift signs an FSMA §112.161(b) supervisor review in somebody's name, and a
+	register handed to a phone unfiltered is a list of other foremen's shifts with
+	a Close button next to each. The default answers "which of MINE is open"; a
+	caller who genuinely wants the company's register — a manager clearing up
+	after a foreman who has gone home — passes `mine=false` and is still held to
+	`require_hr_role` and the company scope underneath. An account with no linked
+	Employee has no shifts of its own, so `mine=true` answers nothing rather than
+	falling back to everything.
+
+	`status` is passed through to the tool, which COMPUTES Active/Closed from the
+	absence of an end time rather than reading a stored column — so "Active" is
+	the question a close actually changes.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed)
+	only_mine = _as_flag(mine, True)
+
+	inner = {}
+	if wanted:
+		inner["company"] = wanted
+	if status not in (None, ""):
+		inner["status"] = str(status).strip()
+	if limit is not None:
+		# Clamped inside the tool against its own RECORD_CAP — passed through
+		# rather than second-guessed here.
+		inner["limit"] = limit
+	if timezone:
+		inner["timezone"] = timezone
+
+	if only_mine:
+		person = fieldwork._employee_for(user)
+		if not person:
+			# No Employee behind this login, so there is no shift it could own.
+			# ANSWERED RATHER THAN REFUSED, and not widened to the whole register
+			# either: an office account reading its own open shifts and finding
+			# none is a correct answer, and falling back to everybody's would
+			# quietly turn `mine=true` into `mine=false` for exactly the accounts
+			# least likely to notice.
+			return {"shifts": [], "count": 0, "company": wanted or None, "mine": True}
+		inner["foreman"] = person
+
+	data = dict(shifts.list_shifts(inner).data)
+	# Scoped again on the way out for the reason `list_my_tasks` does it: the
+	# tool filters on the companies it was told about and `allowed` is what this
+	# CREDENTIAL may see, which is the narrower of the two.
+	data["shifts"] = guard.scoped(data.get("shifts") or [], allowed)
+	data["count"] = len(data["shifts"])
+	data["mine"] = only_mine
+	return data
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # v0.62.0 — THE SEVEN THE APP CALLS AND THIS SURFACE DID NOT ANSWER
 # ════════════════════════════════════════════════════════════════════════════

@@ -247,6 +247,11 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"start_shift",
 		"add_worker_to_shift",
 		"end_shift",
+		# v0.81.0 — how a handset finds an open shift whose docname it lost. Not
+		# in PENDING_IOS_INTEGRATION with the rest of the shift reads: this one
+		# has a Swift Codable already (`ShiftAPI.ShiftRegisterPage`) and
+		# `test_ios_contract` transcribes it.
+		"list_shifts",
 		# v0.48.3 — the second half of an onboarding upload. Without it the
 		# wizard's six photographs and signatures went to Frappe's own
 		# `/api/method/upload_file`, which this app's auth hook does not look at,
