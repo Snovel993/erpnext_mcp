@@ -382,6 +382,29 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"create_farm_task",
 		"list_farm_task_templates",
 		"create_task_from_template",
+		# v0.67.0's receipt reads. Three pickers and the detail-view write that
+		# `create_expense_receipt`'s screen needs — a cost center to code the
+		# receipt to, a supplier to link it against, the receipts already filed,
+		# and the recode of one that was coded wrong. They belong here rather
+		# than in `MOBILE` for the reason the four capture methods above them do:
+		# this is Sprint 2's SERVER side and `MobileAPI.swift` does not name them
+		# yet. (Listed from v0.78.0, which is when the omission was found: they
+		# had routes and were on neither set, so this file's two assertions were
+		# both red on `main`.)
+		"list_cost_centers",
+		"list_suppliers",
+		"list_expense_receipts",
+		"update_expense_receipt",
+		# Sprint 8 (v0.78.0). Field asset registration: register the machine,
+		# get its printable tag back, file the photograph against it. The Swift
+		# screens for this ARE built — this is the rare set where the client is
+		# ahead of the server — but `MobileAPI.swift` reaches them through a
+		# generic request builder rather than through a named constant, so they
+		# are listed here rather than in `MOBILE`, which claims only what the app
+		# names. They move up when the constants land.
+		"register_asset",
+		"generate_asset_qr",
+		"attach_file_to_document",
 	}
 
 	def _whitelisted(self, module):

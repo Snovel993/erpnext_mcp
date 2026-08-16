@@ -404,6 +404,23 @@ ROUTES = (
 	Route("/mobile", mobile_api.create_farm_task),
 	Route("/mobile", mobile_api.list_farm_task_templates),
 	Route("/mobile", mobile_api.create_task_from_template),
+	# Sprint 8 (v0.78.0): field asset registration, three routes. The iOS
+	# screens are built and the flow they perform — photograph the plate,
+	# register the asset, print the tag, file the photograph — stopped at step
+	# two, because `register_asset` and `generate_asset_qr` have been MCP tools
+	# since v0.25.0 with no route and a phone does not speak that transport.
+	#
+	# `attach_file_to_document` IS THE ONE THAT CHANGED SHAPE ON THE WAY HERE,
+	# and this table's own argument filter is half of how. The tool takes any
+	# doctype on the site; the wrapper carries an allowlist of the registers a
+	# field device already writes into and refuses the rest by name — and it
+	# does not DECLARE `allow_cancelled`, so `bind` cannot deliver it and the
+	# tool's own refusal of a cancelled parent stands whatever a body says.
+	# Personnel evidence keeps its own door: `attach_onboarding_document` above
+	# checks the HR role, and `Employee` is deliberately off the allowlist.
+	Route("/mobile", mobile_api.register_asset),
+	Route("/mobile", mobile_api.generate_asset_qr),
+	Route("/mobile", mobile_api.attach_file_to_document),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

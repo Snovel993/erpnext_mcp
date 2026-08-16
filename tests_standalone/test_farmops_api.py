@@ -335,6 +335,27 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/create_farm_task",
 		"/mobile/list_farm_task_templates",
 		"/mobile/create_task_from_template",
+		# Sprint 8 (v0.78.0). Field asset registration, three routes: register
+		# the machine, get the printable tag back, file the photograph against
+		# it. The first two are MCP tools from v0.25.0 that never had a route,
+		# so the iOS flow stopped at step two with a 404.
+		#
+		# `attach_file_to_document` IS THE ONE THAT IS NARROWED HERE RATHER THAN
+		# PUBLISHED WHOLE. The tool attaches to any doctype; the wrapper carries
+		# an allowlist of the registers this surface already writes into and
+		# refuses the rest by name, and it does not declare `allow_cancelled` at
+		# all — so this table's own argument filter is what keeps a cancelled
+		# parent unreachable from a phone whatever a body says.
+		#
+		# `bulk_create_assets`, `retire_asset` and `update_registered_asset` are
+		# tools with NO route here on purpose. Retiring a machine and rewriting
+		# a register are desk decisions, and a five-hundred-asset bulk load is a
+		# rollout rather than anything anybody does at a tailgate. The assertion
+		# below in the other direction is what keeps that a decision rather than
+		# an omission.
+		"/mobile/register_asset",
+		"/mobile/generate_asset_qr",
+		"/mobile/attach_file_to_document",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}
@@ -1867,3 +1888,214 @@ class ROLESIsRestored(FarmOpsAPITestCase):
 
 	def test_the_shared_role_map_is_the_one_the_suite_started_with(self):
 		self.assertIn("Administrator", ROLES)
+
+
+# ── 16. field asset registration (v0.78.0) ──────────────────────────────────
+class TheFieldRegistrationFlow(FarmOpsAPITestCase):
+	"""The three Sprint 8 routes, over the transport a handset actually uses.
+
+	THE FIRST CLAIM IS THAT THE FLOW COMPLETES. Photograph the plate, register
+	the asset, get the printable tag back, file the photograph against it. Each
+	of those was an MCP tool with no route, so the iOS screens — which are
+	already built — stopped at step two with a 404.
+
+	THE SECOND CLAIM IS THE ONE THAT MATTERS MORE. `attach_file_to_document`
+	will attach a file to ANY document on this site, and publishing it unmodified
+	would put "grow the evidence on a submitted Journal Entry" and "add a page to
+	a verified I-9" inside a picker's credential. Half the tests below drive the
+	allowlist, the scope check and the argument that is deliberately not on the
+	signature at all.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.configure(
+			enabled=1,
+			public_url="https://umbrel.tail4a2b.ts.net",
+			allow_register_asset=1,
+			allow_generate_asset_qr=1,
+			allow_attach_file_to_document=1,
+		)
+
+	def register(self, **overrides):
+		body = {"name": "MC-Tractor-07", "asset_type": "Tractor", "company": MAIN}
+		body.update(overrides)
+		return self.message(f"{PREFIX}/mobile/register_asset", body)
+
+	def a_file(self, name="FILE-PLATE-01", private=1):
+		STORE.seed(
+			"File",
+			[
+				{
+					"name": name,
+					"file_name": "plate.jpg",
+					"file_url": f"/private/files/{name}.jpg",
+					"is_private": private,
+					"attached_to_doctype": None,
+					"attached_to_name": None,
+				}
+			],
+		)
+		return name
+
+	# ── the flow ─────────────────────────────────────────────────────────────
+	def test_a_worker_can_register_an_asset_from_the_field(self):
+		data = self.register()
+		self.assertEqual(data["name"], "MC-Tractor-07")
+		self.assertEqual(data["asset_type"], "Tractor")
+
+	def test_the_docname_is_the_printed_tag_and_the_qr_encodes_it(self):
+		self.register()
+		qr = self.message(f"{PREFIX}/mobile/generate_asset_qr", {"asset_name": "MC-Tractor-07"})
+		self.assertIn("MC-Tractor-07", qr["qr_url"])
+		self.assertTrue(qr["png_base64"])
+
+	def test_the_qr_bytes_travel_in_the_answer_and_not_as_a_file_url(self):
+		"""This door authenticates with `X-FarmOps-Token`, and a private File URL
+		is a login page to it — the same reason the badge PNG and the `.pkpass`
+		come back inline."""
+		self.register()
+		qr = self.message(f"{PREFIX}/mobile/generate_asset_qr", {"asset_name": "MC-Tractor-07"})
+		self.assertNotIn("file_url", qr)
+		self.assertGreater(qr["png_bytes"], 0)
+
+	def test_the_photograph_can_be_filed_against_the_asset_it_registered(self):
+		self.register()
+		data = self.message(
+			f"{PREFIX}/mobile/attach_file_to_document",
+			{
+				"doctype": "Asset Register",
+				"name": "MC-Tractor-07",
+				"file_name": "plate.jpg",
+				"file_url": "/private/files/plate.jpg",
+			},
+		)
+		self.assertEqual(data["attached_to_name"], "MC-Tractor-07")
+		self.assertEqual(data["attached_to_doctype"], "Asset Register")
+
+	def test_registration_carries_the_capital_columns_an_adjuster_asks_for(self):
+		data = self.register(serial_number="1M0R4045ABC123456", model="John Deere 5075E")
+		self.assertEqual(data["serial_number"], "1M0R4045ABC123456")
+		self.assertEqual(data["model"], "John Deere 5075E")
+
+	def test_registration_carries_the_service_schedule(self):
+		"""The one moment somebody has the manual open is the moment they are
+		entering the machine."""
+		data = self.register(service_interval_hours=250)
+		self.assertEqual(data["service_interval_hours"], 250.0)
+
+	# ── the scope ────────────────────────────────────────────────────────────
+	def test_the_company_is_the_callers_and_not_the_bodys(self):
+		"""An account that can register a tractor into somebody else's entity is
+		not scoped to anything, and an asset is what every later inspection,
+		spray log and insurance line hangs off."""
+		status, body = self.refusal(
+			f"{PREFIX}/mobile/register_asset",
+			{"name": "MC-Tractor-08", "asset_type": "Tractor", "company": OTHER},
+		)
+		self.assertEqual(status, 403)
+
+	def test_a_qr_for_another_entitys_machine_is_refused(self):
+		STORE.seed(
+			"Asset Register",
+			[{"name": "SEL-Tractor-01", "asset_type": "Tractor", "company": OTHER}],
+		)
+		status, _ = self.refusal(
+			f"{PREFIX}/mobile/generate_asset_qr", {"asset_name": "SEL-Tractor-01"}
+		)
+		self.assertGreaterEqual(status, 400)
+
+	def test_an_attach_against_another_entitys_record_is_refused(self):
+		STORE.seed(
+			"Asset Register",
+			[{"name": "SEL-Tractor-02", "asset_type": "Tractor", "company": OTHER}],
+		)
+		status, _ = self.refusal(
+			f"{PREFIX}/mobile/attach_file_to_document",
+			{
+				"doctype": "Asset Register",
+				"name": "SEL-Tractor-02",
+				"file_name": "plate.jpg",
+				"file_url": "/private/files/plate.jpg",
+			},
+		)
+		self.assertGreaterEqual(status, 400)
+
+	# ── the allowlist ────────────────────────────────────────────────────────
+	def test_a_doctype_off_the_allowlist_is_refused_by_name(self):
+		status, refused = self.refusal(
+			f"{PREFIX}/mobile/attach_file_to_document",
+			{
+				"doctype": "Journal Entry",
+				"name": "JE-0001",
+				"file_name": "statement.pdf",
+				"file_url": "/private/files/statement.pdf",
+			},
+		)
+		self.assertEqual(status, 403)
+		self.assertIn("Journal Entry", json.dumps(refused))
+
+	def test_the_refusal_lists_what_a_handset_may_attach_to(self):
+		_, body = self.refusal(
+			f"{PREFIX}/mobile/attach_file_to_document",
+			{
+				"doctype": "Journal Entry",
+				"name": "JE-0001",
+				"file_name": "statement.pdf",
+				"file_url": "/private/files/x.pdf",
+			},
+		)
+		self.assertIn("Asset Register", json.dumps(body))
+
+	def test_employee_is_deliberately_off_the_allowlist(self):
+		"""`attach_onboarding_document` is the door onto personnel evidence and
+		it checks the HR role. A second door with one fewer gate on it is the
+		thing this list exists to prevent."""
+		_, body = self.refusal(
+			f"{PREFIX}/mobile/attach_file_to_document",
+			{
+				"doctype": "Employee",
+				"name": WORKER_EMPLOYEE,
+				"file_name": "passport.jpg",
+				"file_url": "/private/files/passport.jpg",
+			},
+		)
+		self.assertIn("attach_onboarding_document", json.dumps(body))
+
+	def test_allow_cancelled_is_not_on_the_signature_so_bind_cannot_deliver_it(self):
+		"""The table's own argument filter is what makes it unreachable — not a
+		check inside the wrapper that a later edit could drop."""
+		accepted = farmops_routes.accepted_arguments(mobile_api.attach_file_to_document)
+		self.assertNotIn("allow_cancelled", accepted)
+		self.assertIn("doctype", accepted)
+
+	def test_the_asset_registration_wrapper_takes_both_parent_spellings(self):
+		"""`bind` keeps only the keys a signature names, and `asset_tags._parent`
+		refuses the two only when they DISAGREE — so dropping either spelling
+		here would silently unparent a valve."""
+		accepted = farmops_routes.accepted_arguments(mobile_api.register_asset)
+		self.assertIn("parent_asset", accepted)
+		self.assertIn("location", accepted)
+
+	def test_the_registration_wrapper_declares_the_tag_id_as_name(self):
+		"""Renaming it to `asset_name` would make `bind` drop the tag ID off
+		every registration, because the tool declares `name`."""
+		self.assertIn("name", farmops_routes.accepted_arguments(mobile_api.register_asset))
+
+	def test_every_allowlisted_doctype_carries_the_column_the_scope_check_reads(self):
+		"""`guard.require_scoped_doc` decides reachability by reading `company`.
+		A doctype on this list without that column would be scoped by nothing at
+		all — which is how `Asset State Log` came off it."""
+		from .harness import META
+
+		for doctype in mobile_api.ATTACHABLE_DOCTYPES:
+			with self.subTest(doctype=doctype):
+				self.assertIsNotNone(
+					META[doctype].get_field("company"),
+					f"{doctype} is attachable from a handset and has no company column",
+				)
+
+	def test_the_append_only_state_log_is_not_attachable(self):
+		"""It has no company of its own, and a photograph taken at a state change
+		already has a home in `log_asset_state_change`'s `photo_file_token`."""
+		self.assertNotIn("Asset State Log", mobile_api.ATTACHABLE_DOCTYPES)

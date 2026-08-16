@@ -6626,3 +6626,273 @@ def update_expense_receipt(
 			inner[key] = value
 
 	return expense_tools.update_expense_receipt(inner).data
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sprint 8 (v0.78.0) — field asset registration
+#
+# THE THREE THE iOS REGISTRATION SCREENS WERE BLOCKED ON. `register_asset` and
+# `generate_asset_qr` have existed as MCP tools since v0.25.0 and
+# `attach_file_to_document` since v0.11.0, and none of the three had a route —
+# so the flow a worker actually performs at a machine (photograph the plate,
+# register it, print the tag, file the photograph) stopped at step two with a
+# 404. The Swift screens are built and call these names.
+#
+# THE ARGUMENT SPELLINGS ARE THE TOOLS' OWN, deliberately. `routes.bind` reduces
+# a request body to the keys a signature declares, so a wrapper that renamed
+# `name` to `asset_name` would silently drop the tag ID off every registration.
+# Where a tool takes two spellings for one column — `parent_asset` and
+# `location` — both are declared, because both are equally likely to arrive and
+# the tool refuses them only when they DISAGREE.
+#
+# `attach_file_to_document` IS THE ONE THAT IS NARROWED, and the narrowing is
+# the point of publishing it at all. The tool will attach a file to any document
+# on the site, which on this surface would mean a field worker's handset could
+# grow the evidence on a submitted Journal Entry or a signed I-9. So the wrapper
+# carries an allowlist of the registers a field app legitimately writes into,
+# refuses everything else by name, and does not declare `allow_cancelled` at
+# all — a cancelled document is history, and a phone is not where somebody
+# decides to add to it.
+# ══════════════════════════════════════════════════════════════════════════════
+
+#: Which doctypes a handset may file an attachment against. EVERY ENTRY IS A
+#: REGISTER THIS SURFACE ALREADY WRITES TO through some other route — an asset it
+#: just registered, a task it is completing, a receipt it photographed, an
+#: inspection it is running. A doctype that is not on this list is not refused
+#: because attaching to it would be wrong in principle; it is refused because
+#: nothing on this surface has a reason to, and an allowlist that grows only when
+#: a screen needs it is the one that stays readable.
+#:
+#: `Employee` IS DELIBERATELY ABSENT even though the wizard files six documents
+#: against one. `attach_onboarding_document` is that route: it takes a
+#: `document_kind`, checks the HR role and files against the Employee the caller
+#: named. Letting the general attach reach Employee would be a second door onto
+#: personnel evidence with one fewer gate on it.
+#:
+#: EVERY ENTRY CARRIES A `company` COLUMN, and that is a requirement rather than
+#: a coincidence: `guard.require_scoped_doc` reads exactly that column to decide
+#: whether the caller may reach the record, so a doctype without one would be
+#: scoped by nothing at all. `Asset State Log` is the register this rules out —
+#: it is append-only by its own controller and has no company of its own, and a
+#: photograph taken at a state change already has a home, in
+#: `log_asset_state_change`'s own `photo_file_token`.
+ATTACHABLE_DOCTYPES = (
+	"Asset Register",
+	"Farm Task",
+	"Farm Task Assignment",
+	"Expense Receipt",
+	"Scale Ticket",
+	"Inspection Session",
+	"Housing Inspection",
+	"Compliance Alert",
+	"Spray REI",
+	"Document Validation",
+)
+
+#: Most bytes one attach carries in a request body. The chunked upload path
+#: (`stage_file_chunk` → `finalize_staged_file`) is what a photograph should go
+#: through — it verifies a SHA-256 before anything is written — and this ceiling
+#: is here so the convenience door cannot quietly become the upload path for a
+#: 40-megapixel plate photograph over a rural cell.
+ATTACH_INLINE_LIMIT = 8 * 1024 * 1024
+
+
+# ── 71. register_asset ───────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("register_asset", mutating=True, limit=guard.WRITE_LIMIT)
+def register_asset(
+	user: str,
+	name=None,
+	asset_type=None,
+	company=None,
+	location=None,
+	parent_asset=None,
+	description=None,
+	nfc_uid=None,
+	serial_number=None,
+	model=None,
+	acquired_on=None,
+	purchase_value=None,
+	replacement_value=None,
+	gps_latitude=None,
+	gps_longitude=None,
+	irrigation_zone=None,
+	service_interval_hours=None,
+	service_interval_days=None,
+	last_service_date=None,
+	last_service_hours=None,
+	photo_file_token=None,
+) -> dict:
+	"""Register a new asset from the field. The docname IS the printed tag ID.
+
+	THE COMPANY IS THE CALLER'S, not the body's, wherever the body does not name
+	one the caller can reach. `guard.require_company` is what makes that true —
+	an account that can register a tractor into somebody else's entity is not
+	scoped to anything, and an asset is the record every later inspection, spray
+	log and insurance line hangs off.
+
+	`photo_file_token` IS A `File` DOCNAME AND NOT BYTES, which is the same
+	two-step every other upload on this surface takes: `stage_file_chunk` and
+	`finalize_staged_file` move the bytes and verify a SHA-256, and this
+	re-points what they produced at the new asset. A failed attach does NOT undo
+	the registration — the reply carries `photo_error` and the asset name, and
+	`attach_file_to_document` completes it.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+
+	tag = str(name or "").strip()
+	if not tag:
+		frappe.throw(
+			"name is required — it is the tag ID that gets printed on the label and it is also "
+			"the docname, so 'MC-Valve-05' on the sticker and 'MC-Valve-05' in the database are "
+			"the same string.",
+			frappe.ValidationError,
+		)
+	if not str(asset_type or "").strip():
+		frappe.throw("asset_type is required.", frappe.ValidationError)
+
+	inner = {"name": tag, "asset_type": str(asset_type).strip(), "company": entity}
+	# BOTH SPELLINGS FORWARDED, NEITHER RESOLVED HERE. `asset_tags._parent`
+	# refuses them only when they disagree, and a wrapper that picked a winner
+	# would put a valve under the wrong turnout — which is what the closing
+	# cascade then walks.
+	for key, value in (
+		("location", location),
+		("parent_asset", parent_asset),
+		("description", description),
+		("nfc_uid", nfc_uid),
+		("serial_number", serial_number),
+		("model", model),
+		("acquired_on", acquired_on),
+		("irrigation_zone", irrigation_zone),
+		("last_service_date", last_service_date),
+		("photo_file_token", photo_file_token),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	for key, value in (
+		("purchase_value", purchase_value),
+		("replacement_value", replacement_value),
+		("gps_latitude", gps_latitude),
+		("gps_longitude", gps_longitude),
+		("service_interval_hours", service_interval_hours),
+		("service_interval_days", service_interval_days),
+		("last_service_hours", last_service_hours),
+	):
+		if value is not None:
+			inner[key] = value
+
+	return asset_tags.register_asset(inner).data
+
+
+# ── 72. generate_asset_qr ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("generate_asset_qr", limit=guard.READ_LIMIT)
+def generate_asset_qr(user: str, asset_name=None, format=None) -> dict:
+	"""The QR for one asset's tag, as a base64 PNG or the raw matrix.
+
+	THE BYTES TRAVEL IN THE ANSWER, exactly as the badge PNG, the `.pkpass` and
+	the signed page do, and for the identical reason: this door authenticates
+	with `X-FarmOps-Token` and a private `File` URL is a login page to it.
+
+	`format` SHADOWS A BUILTIN AND KEEPS THE NAME ANYWAY. `routes.bind` reduces
+	a body to the keys the signature declares, so spelling it `qr_format` here
+	would drop the argument the tool documents and the app sends. The builtin is
+	not used in this function.
+
+	SCOPED ON THE WAY IN, not on the way out. `guard.require_scoped_doc` checks
+	the asset exists and belongs to an entity this caller may reach before the
+	tool reads it — an unscoped QR would let anybody holding a field credential
+	mint a printable tag for another farm's machine.
+	"""
+	allowed = guard.require_scope(user)
+	asset = guard.require_scoped_doc(asset_tags.ASSET_REGISTER, asset_name, "asset_name", allowed)
+
+	inner = {"asset_name": asset}
+	wanted = str(format or "").strip()
+	if wanted:
+		inner["format"] = wanted
+	return asset_tags.generate_asset_qr(inner).data
+
+
+# ── 73. attach_file_to_document ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("attach_file_to_document", mutating=True, limit=guard.WRITE_LIMIT)
+def attach_file_to_document(
+	user: str,
+	doctype=None,
+	name=None,
+	file_name=None,
+	file_content=None,
+	file_url=None,
+	is_private=None,
+	dry_run=None,
+) -> dict:
+	"""File one attachment against a record a field app is allowed to write to.
+
+	THE ALLOWLIST IS THE WHOLE REASON THIS WRAPPER EXISTS. The tool underneath
+	attaches to ANY document on this site, and publishing that unmodified would
+	put "grow the evidence on a submitted Journal Entry" and "add a page to a
+	verified I-9" inside a field worker's credential. `ATTACHABLE_DOCTYPES` is
+	the set of registers some other route on this surface already writes into,
+	and everything else is refused by name with the list in the sentence.
+
+	`allow_cancelled` IS NOT DECLARED AT ALL, so `routes.bind` cannot deliver it
+	and the tool's own default (refuse) stands. A cancelled document is history;
+	deciding to add to it anyway is a desk decision with the record open, not a
+	checkbox on a handset.
+
+	THE PARENT IS SCOPED BEFORE ANYTHING IS DECODED. `guard.require_scoped_doc`
+	confirms the record exists and belongs to an entity this caller may reach —
+	so an attachment cannot be filed against another farm's asset, and a caller
+	cannot learn whether a docname exists there by watching which error comes
+	back.
+
+	`file_content` IS BASE64 AND IS CAPPED. The chunked path
+	(`stage_file_chunk` → `finalize_staged_file`) is what a photograph should
+	take, because it verifies a SHA-256 before anything is written; this door is
+	for the small attachment that does not justify a session, and the cap stops
+	it quietly becoming the upload path.
+	"""
+	allowed = guard.require_scope(user)
+
+	target = str(doctype or "").strip()
+	if not target:
+		frappe.throw("doctype is required.", frappe.ValidationError)
+	if target not in ATTACHABLE_DOCTYPES:
+		frappe.throw(
+			f"{target} is not something this app may attach to from a handset. The registers a "
+			f"field device may file evidence against are: {', '.join(ATTACHABLE_DOCTYPES)}. "
+			"Personnel documents go through attach_onboarding_document, which checks the HR role. "
+			"Nothing was attached.",
+			frappe.PermissionError,
+		)
+
+	docname = guard.require_scoped_doc(target, name, "name", allowed)
+	label = str(file_name or "").strip()
+	if not label:
+		frappe.throw("file_name is required.", frappe.ValidationError)
+
+	body = str(file_content or "").strip()
+	url = str(file_url or "").strip()
+	if body and len(body) > ATTACH_INLINE_LIMIT:
+		frappe.throw(
+			f"file_content is {len(body)} characters of base64, over the "
+			f"{ATTACH_INLINE_LIMIT} this route carries inline. Upload it with stage_file_chunk "
+			"and finalize_staged_file, which verify a SHA-256, then pass the file_url that "
+			"returns. Nothing was attached.",
+			frappe.ValidationError,
+		)
+
+	inner = {"doctype": target, "name": docname, "file_name": label}
+	if body:
+		inner["file_content"] = body
+	if url:
+		inner["file_url"] = url
+	if is_private is not None:
+		inner["is_private"] = is_private
+	if dry_run is not None:
+		inner["dry_run"] = dry_run
+
+	return file_tools.attach_file_to_document(inner).data
