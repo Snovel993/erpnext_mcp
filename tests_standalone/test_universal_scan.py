@@ -542,3 +542,114 @@ class TheSwitchIsHonoured(ScanTestCase):
 
 		fields = {field["fieldname"] for field in _load_app_doctype("erpnext_mcp_settings")["fields"]}
 		self.assertIn("allow_universal_scan", fields)
+
+
+# ── 10. what the valve can actually be told to do ───────────────────────────
+class TheScanCarriesTheStateMachine(ScanTestCase):
+	"""v0.76.0. `available_actions` says a state change is offered; these say which.
+
+	The handset's `ScanAction` enum is five fixed strings — `log_state_change` is
+	one of them, and it names a SCREEN. A worker standing at a valve is choosing
+	between "open" and "close", and a scan that returned only the button sent the
+	phone back for a second round trip to `get_available_actions` before it could
+	draw the card the scan exists to draw.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.configure(enabled=1, allow_log_asset_state_change=1, **ON)
+
+	def test_a_valve_scan_carries_its_current_state(self):
+		self.an_asset()
+		data = self.scan(VALVE)
+		self.assertEqual(data["current_state"], "closed")
+		self.assertEqual(data["state_asset"], VALVE)
+
+	def test_a_closed_valve_offers_opening_and_not_closing(self):
+		self.an_asset()
+		actions = [entry["action"] for entry in self.scan(VALVE)["state_actions"]]
+		self.assertIn("open_valve", actions)
+		self.assertNotIn("close_valve", actions)
+
+	def test_an_open_valve_offers_closing_and_not_opening(self):
+		self.an_asset()
+		self.tool_data("log_asset_state_change", {"asset_name": VALVE, "action": "open_valve"})
+		data = self.scan(VALVE)
+
+		self.assertEqual(data["current_state"], "open")
+		actions = [entry["action"] for entry in data["state_actions"]]
+		self.assertIn("close_valve", actions)
+		self.assertNotIn("open_valve", actions)
+
+	def test_the_actions_carry_the_transition_they_would_make(self):
+		self.an_asset()
+		action = next(
+			entry for entry in self.scan(VALVE)["state_actions"] if entry["action"] == "open_valve"
+		)
+		self.assertEqual(action["from_state"], "closed")
+		self.assertEqual(action["to_state"], "open")
+
+	def test_the_shape_is_the_one_get_available_actions_returns(self):
+		"""Same fact, same state machine — a screen that renders one renders the
+		other, and an action offered here is one the log tool will accept."""
+		self.configure(enabled=1, allow_get_available_actions=1, **ON)
+		self.an_asset()
+		scanned = self.scan(VALVE)["state_actions"]
+		asked = self.tool_data("get_available_actions", {"asset_name": VALVE})["available_actions"]
+		self.assertEqual(scanned, asked)
+
+	def test_an_offered_action_is_one_the_log_tool_accepts(self):
+		self.an_asset()
+		offered = self.scan(VALVE)["state_actions"][0]["action"]
+		data = self.tool_data(
+			"log_asset_state_change", {"asset_name": VALVE, "action": offered}
+		)
+		self.assertEqual(data["action"], offered)
+
+	def test_the_state_is_read_after_the_scans_own_write(self):
+		"""The asset branch stamps `last_scan_at` before this is read. A state
+		read first would be the one this scan replaced."""
+		self.an_asset()
+		self.tool_data("log_asset_state_change", {"asset_name": VALVE, "action": "open_valve"})
+		self.assertEqual(self.scan(VALVE)["current_state"], "open")
+
+	def test_the_button_vocabulary_is_left_alone(self):
+		"""`available_actions` is the client's five strings and unknown values are
+		dropped by its decoder. Putting `open_valve` in there would be a button
+		that silently vanishes on the handset."""
+		self.an_asset()
+		data = self.scan(VALVE)
+		self.assertEqual(data["available_actions"], ["create_task", "log_state_change", "report_issue"])
+
+	def test_a_cabin_carries_no_actions_because_nothing_links_it_to_the_register(self):
+		"""A Housing Unit has states, but they live on an Asset Register row and
+		`related_asset` points at ERPNext's fixed-Asset doctype instead. Empty is
+		the honest answer; resolving a docname out of the wrong register is not."""
+		unit = self.a_cabin()
+		data = self.scan(unit)
+		self.assertIsNone(data["state_asset"])
+		self.assertEqual(data["state_actions"], [])
+
+	def test_the_cabins_own_asset_tag_is_what_carries_them(self):
+		self.an_asset(name="MC-Cabin-Asset", asset_type="Housing Unit")
+		data = self.scan("MC-Cabin-Asset")
+		self.assertEqual(data["current_state"], "vacant")
+		self.assertIn("mark_occupied", [entry["action"] for entry in data["state_actions"]])
+
+	def test_every_branch_carries_the_three_keys(self):
+		"""A client renders one card for five entity types rather than testing
+		for keys that are only on two of them."""
+		self.an_asset()
+		badge = self.a_badge()
+		block = self.a_block()
+		for content in (VALVE, badge, block, "a supplier's carton barcode"):
+			with self.subTest(scan=content):
+				data = self.scan(content)
+				for key in ("state_asset", "current_state", "state_actions"):
+					self.assertIn(key, data)
+
+	def test_a_block_scan_carries_no_state_machine(self):
+		block = self.a_block()
+		data = self.scan(block)
+		self.assertIsNone(data["current_state"])
+		self.assertEqual(data["state_actions"], [])

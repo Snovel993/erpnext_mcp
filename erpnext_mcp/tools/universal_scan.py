@@ -479,6 +479,66 @@ def _history(entity_type: str, docname: str, limit: int) -> list:
 	return events[:limit]
 
 
+#: What the three state keys say on a branch with no state machine behind it.
+#: Named once so the empty answer and the populated one cannot drift into
+#: different key sets.
+_EMPTY_STATE = {"state_asset": None, "current_state": None, "state_actions": []}
+
+
+def _state_actions(asset_name: str) -> dict:
+	"""The concrete state changes this asset can take right now.
+
+	WHY THIS IS NOT `available_actions`. Those are the CLIENT'S vocabulary — five
+	fixed strings a handset turns into buttons, and `log_state_change` is one of
+	them. It says a state change is offered here; it does not say WHICH, and a
+	worker standing at a valve is choosing between "open" and "close", not
+	between "log a state change" and nothing. The two lists answer different
+	questions and a scan that returned only the first sent the phone back for a
+	second round trip to `get_available_actions` before it could draw the screen
+	the scan exists to draw.
+
+	POPULATED ON THE ASSET BRANCH ONLY, because it is the only branch whose
+	docname is an Asset Register record — the register the state machine and the
+	state log both key on. See `_housing_branch` for why a cabin does not carry
+	its own actions despite having states.
+
+	KEPT IN THE SHAPE `get_available_actions` RETURNS, field for field, because
+	they are the same fact from the same state machine. A screen that renders one
+	renders the other, and an action that appears here is one `log_asset_state_change`
+	will accept — the transition is validated against the same table when it does.
+
+	Empty rather than absent for an asset type with no state machine, and the
+	whole block is skipped where the register has not migrated: a scan is not the
+	place to discover that.
+	"""
+	empty = dict(_EMPTY_STATE)
+	if not asset_name or not compat.doctype_exists(ASSET_REGISTER):
+		return empty
+	if not frappe.db.exists(ASSET_REGISTER, asset_name):
+		return empty
+	try:
+		row = dict(
+			frappe.db.get_value(
+				ASSET_REGISTER, asset_name, ["name", "asset_type", "current_state"], as_dict=True
+			)
+			or {}
+		)
+	except Exception:  # pragma: no cover - a site shaping these columns differently
+		return empty
+
+	asset_type = str(row.get("asset_type") or "") or "General"
+	defn = asset_tags._STATE_DEFINITIONS.get(asset_type)
+	if not defn:
+		return {"state_asset": row.get("name"), "current_state": None, "state_actions": []}
+
+	current = asset_tags._current_state_value(row.get("current_state")) or defn["default"]
+	return {
+		"state_asset": row.get("name"),
+		"current_state": current,
+		"state_actions": asset_tags._actions_for(asset_type, current),
+	}
+
+
 def _active_shift(employee: str, company: str = "") -> dict | None:
 	"""The open shift this person is on right now, or None.
 
@@ -598,6 +658,9 @@ def _asset_branch(candidate: str, args: dict) -> dict | None:
 			{"location_doctype": ASSET_REGISTER, "location": candidate},
 		],
 		"scan_recorded": True,
+		# READ AFTER `scan_asset`, not before, so the state reported is the state
+		# after this scan's own write rather than the one it replaced.
+		"state": _state_actions(candidate),
 	}
 
 
@@ -626,6 +689,14 @@ def _housing_branch(candidate: str, args: dict) -> dict | None:
 		"alert_doctype": HOUSING_UNIT,
 		"task_filters": filters,
 		"scan_recorded": False,
+		# NO STATE MACHINE ON THIS BRANCH, and not for want of one. A Housing Unit
+		# has states — vacant, occupied, winterized — but they live on an ASSET
+		# REGISTER row of type "Housing Unit", and nothing links a unit to one:
+		# `Housing Unit.related_asset` points at ERPNext's own fixed-Asset doctype,
+		# which is the depreciation record and has no `current_state` on it. So
+		# the three keys come back empty here rather than resolving a docname from
+		# the wrong register. Scanning the cabin's own asset tag is what carries
+		# the actions, and that is the asset branch above.
 	}
 
 
@@ -695,6 +766,10 @@ def universal_scan(args: dict) -> ToolResult:
 		"recent_history": _history(entity_type, docname, limit) if docname else [],
 		"available_actions": list(AVAILABLE_ACTIONS[entity_type]),
 		"scan_recorded": resolved["scan_recorded"],
+		# Present on every branch, populated on the two that have a state machine
+		# behind them. A client that renders the same card for five entity types
+		# reads three keys that are always there rather than testing for them.
+		**resolved.get("state", _EMPTY_STATE),
 	}
 	return ToolResult(
 		data=data,
@@ -748,6 +823,7 @@ def _unresolved(raw: str, candidate: str, args: dict) -> ToolResult:
 			"recent_history": [],
 			"available_actions": list(AVAILABLE_ACTIONS[UNKNOWN]),
 			"scan_recorded": False,
+			**_EMPTY_STATE,
 			"searched": searched,
 			"note": (
 				"Nothing in this site's badge, asset, housing or block register is called "
