@@ -13,6 +13,13 @@
   "identity_col",
   "description",
   "retired_at",
+  "capital_section",
+  "serial_number",
+  "model",
+  "acquired_on",
+  "capital_col",
+  "purchase_value",
+  "replacement_value",
   "tag_section",
   "qr_url",
   "tag_col",
@@ -36,7 +43,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Asset Type",
-   "options": "\nHousing Unit\nIrrigation Zone\nIrrigation Valve\nSprayer\nTractor\nBlock\nWater Source\nStorage\nCold Storage\nGeneral",
+   "options": "\nHousing Unit\nIrrigation Zone\nIrrigation Valve\nSprayer\nTractor\nImplement\nVehicle\nBlock\nWater Source\nStorage\nCold Storage\nGeneral",
    "reqd": 1,
    "search_index": 1
   },
@@ -75,6 +82,49 @@
    "fieldname": "retired_at",
    "fieldtype": "Date",
    "label": "Retired At"
+  },
+  {
+   "fieldname": "capital_section",
+   "fieldtype": "Section Break",
+   "label": "Capital Asset",
+   "description": "What an insurance schedule asks for. Empty on a valve or a cabin; filled on a tractor, an implement or a vehicle. export_insurance_schedule reads exactly these columns."
+  },
+  {
+   "description": "The VIN, serial number or model number stamped on the machine itself — the string an adjuster matches a claim against, and the one the iOS app captures by OCR off the plate. Not the docname: the tag ID is what this farm calls it, and this is what the manufacturer does.",
+   "fieldname": "serial_number",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Serial / VIN",
+   "search_index": 1
+  },
+  {
+   "description": "Make and model as the manufacturer writes it, e.g. 'John Deere 5075E'. Free text rather than a link: a register of every model of every machine is a table nobody on a farm will maintain.",
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "label": "Model"
+  },
+  {
+   "description": "When this asset was acquired. A DATE and not a datetime — nobody records the hour a tractor was bought, and a date has no timezone to get wrong.",
+   "fieldname": "acquired_on",
+   "fieldtype": "Date",
+   "label": "Date Acquired"
+  },
+  {
+   "fieldname": "capital_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What was paid for it. Kept apart from replacement value for ever: an insurer settles on replacement and the books depreciate from purchase, and one column holding whichever was entered last answers neither question.",
+   "fieldname": "purchase_value",
+   "fieldtype": "Currency",
+   "label": "Purchase Value"
+  },
+  {
+   "description": "What it would cost to replace today. This is the number an insurance schedule is written against. Where it is empty, export_insurance_schedule falls back to purchase value and SAYS it did rather than presenting a decade-old price as cover.",
+   "fieldname": "replacement_value",
+   "fieldtype": "Currency",
+   "label": "Replacement Value"
   },
   {
    "fieldname": "tag_section",
@@ -193,7 +243,7 @@
   }
  ],
  "quick_entry": 0,
- "search_fields": "asset_type,company,location,description",
+ "search_fields": "asset_type,company,location,serial_number,description",
  "sort_field": "name",
  "sort_order": "ASC",
  "states": [],

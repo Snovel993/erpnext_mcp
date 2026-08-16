@@ -22,7 +22,7 @@ import json
 
 import frappe
 
-from .. import compat
+from .. import compat, timezones
 from ..args import as_bool, as_date, as_float, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..render import qr
@@ -45,6 +45,14 @@ _ASSET_FIELDS = (
     "last_scan_by",
     "retired_at",
     "description",
+    # v0.77.0 — what an insurance schedule asks for. Read on every describe
+    # rather than fetched by the export alone, so a scan at the machine shows
+    # the same serial an adjuster is holding.
+    "serial_number",
+    "model",
+    "acquired_on",
+    "purchase_value",
+    "replacement_value",
     "gps_latitude",
     "gps_longitude",
     "creation",
@@ -57,6 +65,8 @@ ASSET_TYPES = (
     "Irrigation Valve",
     "Sprayer",
     "Tractor",
+    "Implement",
+    "Vehicle",
     "Block",
     "Water Source",
     "Storage",
@@ -81,6 +91,8 @@ ASSET_TYPE_SKILL_MAP: dict[str, str] = {
     "Irrigation Zone": "irrigation",
     "Sprayer": "equipment_maintenance",
     "Tractor": "equipment_maintenance",
+    "Implement": "equipment_maintenance",
+    "Vehicle": "equipment_maintenance",
     "Water Source": "water_management",
     "Storage": "facility_maintenance",
     "Cold Storage": "facility_maintenance",
@@ -113,12 +125,36 @@ def _parse_state(value) -> dict | None:
         return None
 
 
+def _money(value) -> float | None:
+    """A Currency column as a number, or None where the column is empty.
+
+    NOT `float(x) or None`. Zero is an answer — "this was valued and it is worth
+    nothing" — and an unset column is the absence of one, and an insurance
+    schedule that cannot tell them apart reports a valued write-off and an
+    unvalued tractor in the same line.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        return round(float(value), 2)
+    except (TypeError, ValueError):
+        return None
+
+
 def _describe_asset(row: dict) -> dict:
     return {
         "name": row.get("name"),
         "asset_type": row.get("asset_type") or None,
         "company": row.get("company") or None,
         "location": row.get("location") or None,
+        # BOTH SPELLINGS, and `location` is the one that stays. The column has
+        # been called that since v0.25.0 and its label reads "Location (Parent
+        # Asset)", which is exactly the confusion the second key removes: a
+        # valve's parent is a zone, not a place, and a caller setting the
+        # hierarchy should not have to know the column was named before the
+        # tree was. Renaming the column would break every stored filter and
+        # every client reading it.
+        "parent_asset": row.get("location") or None,
         "qr_url": row.get("qr_url") or None,
         "nfc_uid": row.get("nfc_uid") or None,
         "current_state": _parse_state(row.get("current_state")),
@@ -127,6 +163,15 @@ def _describe_asset(row: dict) -> dict:
         "retired": bool(row.get("retired_at")),
         "retired_at": str(row.get("retired_at") or "") or None,
         "description": row.get("description") or None,
+        "serial_number": row.get("serial_number") or None,
+        "model": row.get("model") or None,
+        "acquired_on": str(row.get("acquired_on") or "") or None,
+        # Zero and absent are kept apart. A tractor entered with no replacement
+        # value has not been valued; one entered as 0 has been, by somebody who
+        # meant it. `or None` on a Currency column would have merged the two and
+        # the insurance schedule would report both as "no cover stated".
+        "purchase_value": _money(row.get("purchase_value")),
+        "replacement_value": _money(row.get("replacement_value")),
         "gps_latitude": round(float(row.get("gps_latitude") or 0), 7) or None,
         "gps_longitude": round(float(row.get("gps_longitude") or 0), 7) or None,
     }
@@ -404,6 +449,17 @@ def scan_asset(args: dict) -> ToolResult:
     can_report = compat.doctype_exists("Farm Task") and compat.has_field("Farm Task", "asset")
     suggested_skill = ASSET_TYPE_SKILL_MAP.get(asset_type, "general_maintenance")
 
+    # v0.77.0. THE SAME MENU `universal_scan` RETURNS, because this is the same
+    # moment: a worker is standing at the machine with the tag on their screen.
+    # The two scan routes answering different questions is how a handset ends up
+    # with two code paths for one card.
+    from . import asset_actions
+
+    defn = _STATE_DEFINITIONS.get(asset_type)
+    effective = _current_state_value(described.get("current_state")) or (
+        defn["default"] if defn else ""
+    )
+
     return ToolResult(
         data={
             **described,
@@ -414,6 +470,9 @@ def scan_asset(args: dict) -> ToolResult:
             "due_compliance_count": len(due_compliance),
             "can_report": can_report,
             "suggested_skill": suggested_skill,
+            "state": effective or None,
+            "state_actions": _actions_for(asset_type, effective) if effective else [],
+            "action_menu": asset_actions.menu_for(asset_type, effective),
         },
         summary=f"scanned {doc.name}" + (f" by {scanned_by}" if scanned_by else ""),
         docstatus_delta="0 → 0 (updated)",
@@ -421,8 +480,97 @@ def scan_asset(args: dict) -> ToolResult:
 
 
 # ── create_asset ───────────────────────────────────────────────────────────
+def _parent(args: dict, verb: str) -> str:
+    """The parent asset, under either name, checked to exist.
+
+    `parent_asset` AND `location` BOTH WORK, and neither is deprecated. The
+    column has been `location` since v0.25.0 and its own label reads "Location
+    (Parent Asset)" — which is the confusion, not the fix: a valve's parent is a
+    zone, not a place. Renaming it would break every stored filter, every report
+    column and every client already sending it, so the second spelling is
+    accepted at the door instead and `_describe_asset` answers with both.
+
+    Passing the two with DIFFERENT values is refused rather than resolved by
+    precedence. There is no reading of that call which is not somebody's mistake,
+    and picking a winner silently would put a valve under the wrong turnout —
+    which is what the closing cascade walks.
+    """
+    parent = as_str(args, "parent_asset")
+    location = as_str(args, "location")
+    if parent and location and parent != location:
+        raise ToolError(
+            f"parent_asset {parent!r} and location {location!r} are two names for one column "
+            f"and they disagree. Send one. Nothing was {verb}."
+        )
+    parent = parent or location
+    if parent and not frappe.db.exists(ASSET_REGISTER, parent):
+        raise ToolError(
+            f"Parent asset {parent!r} does not exist in Asset Register. The parent must be "
+            f"registered first — a turnout before the valves under it. Nothing was {verb}."
+        )
+    return parent
+
+
+def _capital_fields(doc, args: dict) -> None:
+    """The insurance columns, set from whichever of them the caller sent."""
+    for key in ("serial_number", "model"):
+        value = as_str(args, key)
+        if value:
+            doc.set(key, value)
+    acquired = as_date(args, "acquired_on")
+    if acquired:
+        doc.acquired_on = acquired
+    for key in ("purchase_value", "replacement_value"):
+        if args.get(key) is not None:
+            doc.set(key, as_float(args.get(key), key))
+
+
+def _attach_photo(asset: str, args: dict) -> str:
+    """Point an already-uploaded File at this asset, and say whether it stuck.
+
+    THE BYTES DO NOT COME THROUGH HERE. The upload path this app has is
+    `stage_file_chunk` → `finalize_staged_file`, which verifies a SHA-256 before
+    anything is written, and re-implementing it inline would be a second way to
+    put a file on this site with one fewer check on it. So registration takes the
+    File docname that path returns and re-points it, which is what
+    `attach_file_to_document` does for every other doctype.
+
+    A FAILURE HERE DOES NOT UNDO THE REGISTRATION. The asset is the record; the
+    photograph is evidence about it. Losing a tractor's registration because its
+    photo could not be attached would be the wrong trade, so the reason comes
+    back in `photo_attached` / `photo_error` and the caller can retry the attach
+    alone.
+    """
+    token = as_str(args, "photo_file_token") or as_str(args, "photo")
+    if not token:
+        return ""
+    if not frappe.db.exists("File", token):
+        raise ToolError(
+            f"no File called {token!r} on this site. Upload the photograph with "
+            "stage_file_chunk and finalize_staged_file first, then pass the docname that "
+            "returns as photo_file_token."
+        )
+    frappe.db.set_value(
+        "File",
+        token,
+        {"attached_to_doctype": ASSET_REGISTER, "attached_to_name": asset},
+        update_modified=False,
+    )
+    return token
+
+
 def register_asset(args: dict) -> ToolResult:
-    """Register a new asset with its tag ID, type, and location."""
+    """Register a new asset with its tag ID, type, parent and insurance detail.
+
+    THE PHOTOGRAPH IS A TWO-STEP FLOW AND IS DOCUMENTED AS ONE. A handset that
+    has just OCR'd a VIN off a plate has the photograph in hand, and the natural
+    thing to want is one call. It is still two: `stage_file_chunk` /
+    `finalize_staged_file` move the bytes and verify the hash, and the docname
+    that returns goes in `photo_file_token` here. What this saves over calling
+    `attach_file_to_document` afterwards is the round trip and the failure mode
+    where the asset exists and nobody remembered to attach anything —
+    `export_insurance_schedule` reads exactly these attachments.
+    """
     _require()
     company = _company(args, required=True)
     name = as_str(args, "name", required=True)
@@ -440,13 +588,7 @@ def register_asset(args: dict) -> ToolResult:
 
         asset_type = as_choice(ASSET_REGISTER, "asset_type", asset_type, "asset_type")
 
-    location = as_str(args, "location")
-    if location:
-        if not frappe.db.exists(ASSET_REGISTER, location):
-            raise ToolError(
-                f"Location {location!r} does not exist in Asset Register. The parent must "
-                "be registered first. Nothing was created."
-            )
+    location = _parent(args, "created")
 
     doc = frappe.new_doc(ASSET_REGISTER)
     doc.__newname = name
@@ -455,6 +597,7 @@ def register_asset(args: dict) -> ToolResult:
     doc.location = location or None
     doc.description = as_str(args, "description")
     doc.nfc_uid = as_str(args, "nfc_uid")
+    _capital_fields(doc, args)
 
     lat = args.get("gps_latitude")
     lon = args.get("gps_longitude")
@@ -464,11 +607,26 @@ def register_asset(args: dict) -> ToolResult:
         doc.gps_longitude = as_float(lon, "gps_longitude")
 
     doc.insert(ignore_permissions=True)
+
+    photo, photo_error = "", ""
+    try:
+        photo = _attach_photo(doc.name, args)
+    except ToolError as exc:
+        photo_error = str(exc)
+
     described = _describe_asset(dict(doc.as_dict()))
+    described["photo_attached"] = photo or None
+    if photo_error:
+        described["photo_error"] = (
+            f"{photo_error} The asset itself WAS registered as {doc.name} — attach the "
+            "photograph with attach_file_to_document rather than registering it again."
+        )
 
     return ToolResult(
         data=described,
-        summary=f"registered asset {doc.name} ({asset_type})",
+        summary=f"registered asset {doc.name} ({asset_type})"
+        + (f", parent {location}" if location else "")
+        + (", photo attached" if photo else ""),
         docstatus_delta="none → 0 (created)",
     )
 
@@ -484,9 +642,15 @@ def update_registered_asset(args: dict) -> ToolResult:
     doc = frappe.get_doc(ASSET_REGISTER, row["name"])
     changes = {}
 
-    for key in ("description", "nfc_uid"):
+    for key in ("description", "nfc_uid", "serial_number", "model"):
         if key in args:
             _stage(changes, doc, key, as_str(args, key))
+    if "acquired_on" in args:
+        _stage(changes, doc, "acquired_on", as_date(args, "acquired_on"))
+    for key in ("purchase_value", "replacement_value"):
+        if key in args:
+            value = args.get(key)
+            _stage(changes, doc, key, as_float(value, key) if value is not None else None)
     if "asset_type" in args:
         value = as_str(args, "asset_type")
         if value:
@@ -494,12 +658,10 @@ def update_registered_asset(args: dict) -> ToolResult:
 
             value = as_choice(ASSET_REGISTER, "asset_type", value, "asset_type")
         _stage(changes, doc, "asset_type", value)
-    if "location" in args:
-        location = as_str(args, "location")
+    if "location" in args or "parent_asset" in args:
+        location = _parent(args, "changed")
         if location and location == row["name"]:
             raise ToolError("An asset cannot be its own parent. Nothing was changed.")
-        if location and not frappe.db.exists(ASSET_REGISTER, location):
-            raise ToolError(f"Location {location!r} does not exist in Asset Register. Nothing was changed.")
         _stage(changes, doc, "location", location or None)
     for key in ("gps_latitude", "gps_longitude"):
         if key in args:
@@ -517,8 +679,9 @@ def update_registered_asset(args: dict) -> ToolResult:
 
     if not changes:
         raise ToolError(
-            "nothing to change. Pass at least one of: asset_type, location, description, "
-            "nfc_uid, gps_latitude, gps_longitude, current_state."
+            "nothing to change. Pass at least one of: asset_type, parent_asset (or location), "
+            "description, nfc_uid, serial_number, model, acquired_on, purchase_value, "
+            "replacement_value, gps_latitude, gps_longitude, current_state."
         )
 
     doc.save(ignore_permissions=True)
@@ -806,13 +969,52 @@ _STATE_DEFINITIONS: dict[str, dict] = {
             "clean_tank": {"from": ["empty"], "to": "cleaned"},
         },
     },
+    # v0.77.0 adds check-out/check-in. Who has the tractor is a different
+    # question from whether it runs, and the register could previously only
+    # answer the second — so a machine somebody had driven to the far block read
+    # `in_service`, which is true and not the answer anybody was asking for.
+    # `start_maintenance` reaches from `checked_out` because that is where a
+    # breakdown happens; `put_in_service` does not, because a tractor coming
+    # back from the field is checked IN, by the person who has it.
     "Tractor": {
         "default": "in_service",
         "actions": {
             "put_in_service": {"from": ["out_of_service", "maintenance"], "to": "in_service"},
-            "take_out_of_service": {"from": ["in_service"], "to": "out_of_service"},
-            "start_maintenance": {"from": ["in_service", "out_of_service"], "to": "maintenance"},
+            "take_out_of_service": {"from": ["in_service", "checked_out"], "to": "out_of_service"},
+            "start_maintenance": {"from": ["in_service", "out_of_service", "checked_out"], "to": "maintenance"},
             "end_maintenance": {"from": ["maintenance"], "to": "in_service"},
+            "check_out": {"from": ["in_service"], "to": "checked_out"},
+            "check_in": {"from": ["checked_out"], "to": "in_service"},
+        },
+    },
+    # A pickup and a tractor are the same question — is it running, and who has
+    # it — so Vehicle shares the machine rather than getting a near-copy that
+    # would drift. Defined as its own entry rather than an alias so an operator
+    # reading `_STATE_DEFINITIONS` sees what a Vehicle does without following a
+    # reference.
+    "Vehicle": {
+        "default": "in_service",
+        "actions": {
+            "put_in_service": {"from": ["out_of_service", "maintenance"], "to": "in_service"},
+            "take_out_of_service": {"from": ["in_service", "checked_out"], "to": "out_of_service"},
+            "start_maintenance": {"from": ["in_service", "out_of_service", "checked_out"], "to": "maintenance"},
+            "end_maintenance": {"from": ["maintenance"], "to": "in_service"},
+            "check_out": {"from": ["in_service"], "to": "checked_out"},
+            "check_in": {"from": ["checked_out"], "to": "in_service"},
+        },
+    },
+    # An implement is attached or it is not, and WHICH tractor it is attached to
+    # is the register tree rather than a state: `parent_asset` already points one
+    # asset at another, and duplicating the link inside a state blob would give
+    # the same fact two homes. See `asset_actions._MENU`, which says so in the
+    # entry a handset draws.
+    "Implement": {
+        "default": "detached",
+        "actions": {
+            "attach": {"from": ["detached"], "to": "attached"},
+            "detach": {"from": ["attached"], "to": "detached"},
+            "flag_repair": {"from": ["attached", "detached"], "to": "needs_repair"},
+            "clear_repair": {"from": ["needs_repair"], "to": "detached"},
         },
     },
     "Water Source": {
@@ -1114,6 +1316,9 @@ def get_available_actions(args: dict) -> ToolResult:
         all_states.update(rule["from"])
         all_states.add(rule["to"])
 
+    from . import asset_actions
+
+    menu = asset_actions.menu_for(asset_type, effective)
     return ToolResult(
         data={
             "asset_name": row["name"],
@@ -1121,6 +1326,11 @@ def get_available_actions(args: dict) -> ToolResult:
             "current_state": effective,
             "available_actions": actions,
             "all_states": sorted(all_states),
+            # v0.77.0. The state machine answers "what transitions are legal";
+            # this answers "what does a worker standing at this machine do",
+            # which is a longer list — an inspection and a calibration are
+            # neither transitions nor absent from the job.
+            "action_menu": menu,
         },
         summary=f"{row['name']}: {len(actions)} available action(s) from {effective!r}",
     )
@@ -1191,18 +1401,27 @@ def log_asset_state_change(args: dict) -> ToolResult:
     if cascade["cascaded_count"]:
         summary += f", cascaded to {cascade['cascaded_count']} downstream asset(s)"
 
+    # WHICH six o'clock. The stored column is naive and always has been; the
+    # `_local` twin beside it carries the offset, so "the valve went off at 18:12"
+    # is a sentence a worker can check against their own watch. See
+    # `erpnext_mcp/timezones.py` for why the stored value is left alone.
+    clock = timezones.Renderer(args)
+    data = {
+        "asset_name": row["name"],
+        "asset_type": asset_type,
+        "action": action,
+        "from_state": effective,
+        "to_state": to_state,
+        "log_name": log_name,
+        "performed_by": log_row.get("performed_by"),
+        "performed_at": str(log_row.get("performed_at") or ""),
+        **cascade,
+        **clock.block(),
+    }
+    clock.add(data, "performed_at")
+
     return ToolResult(
-        data={
-            "asset_name": row["name"],
-            "asset_type": asset_type,
-            "action": action,
-            "from_state": effective,
-            "to_state": to_state,
-            "log_name": log_name,
-            "performed_by": log_row.get("performed_by"),
-            "performed_at": str(log_row.get("performed_at") or ""),
-            **cascade,
-        },
+        data=data,
         summary=summary,
         docstatus_delta="0 → 0 (updated)",
     )
@@ -1237,6 +1456,7 @@ def list_asset_state_history(args: dict) -> ToolResult:
         limit=limit,
     )
 
+    clock = timezones.Renderer(args)
     events = []
     for r in rows or []:
         events.append({
@@ -1256,6 +1476,7 @@ def list_asset_state_history(args: dict) -> ToolResult:
             "gps_longitude": round(float(r.get("gps_longitude") or 0), 7) or None,
             "photo": r.get("photo") or None,
         })
+        clock.add(events[-1], "performed_at")
 
     return ToolResult(
         data={
@@ -1263,6 +1484,7 @@ def list_asset_state_history(args: dict) -> ToolResult:
             "asset_type": row.get("asset_type"),
             "event_count": len(events),
             "events": events,
+            **clock.block(),
         },
         summary=f"{row['name']}: {len(events)} state change(s)",
     )
