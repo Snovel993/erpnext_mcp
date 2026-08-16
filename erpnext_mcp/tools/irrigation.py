@@ -57,6 +57,17 @@ name, the rate is taken from an explicit `flow_rate_gpm`, or from an
 (`flow_rate_source`). With neither, the runtime comes back without gallons and
 says so. A volume computed from a rate nobody confirmed is worse than no volume:
 it is the number that ends up in a water report.
+
+v0.78.0 CLOSES THAT GAP WITHOUT GUESSING AT IT. `Asset Register.irrigation_zone`
+is a real column now — a valve names the zone it draws through — so
+`get_water_usage_report` can price each valve at its OWN zone's rate and roll the
+minutes up by zone, by the block that zone waters, or by week or month. It is
+still never inferred: a valve with the column empty contributes minutes and no
+gallons, and the report names it in `unpriced_valves` rather than quietly
+excluding it from a total somebody is about to file with a water district.
+`get_irrigation_runtime` above is deliberately left alone — its `flow_rate_gpm`
+and `irrigation_zone` arguments mean exactly what they meant, because a report
+somebody has been running all season must not change its answer on an upgrade.
 """
 
 from __future__ import annotations
@@ -72,6 +83,11 @@ from . import asset_tags
 ASSET_REGISTER = asset_tags.ASSET_REGISTER
 ASSET_STATE_LOG = asset_tags.ASSET_STATE_LOG
 IRRIGATION_ZONE = "Irrigation Zone"
+
+#: The planted block. `Irrigation Zone.field` is the only column in this app that
+#: joins a pipe to the ground it waters, which is why the water report's `field`
+#: filter goes through the zone rather than through the asset tree.
+FIELD_DOCTYPE = "Field"
 
 #: The state that means water is moving. A valve is `open`, `closed` or
 #: `winterized` (see `asset_tags._STATE_DEFINITIONS`), and only the first of
@@ -536,6 +552,390 @@ def get_irrigation_runtime(args: dict) -> ToolResult:
 		summary=(
 			f"{root['name']}: {len(valves)} valve(s), {data['run_count']} run(s), "
 			f"{data['runtime_hours']} h{volume}"
+			+ (f", {len(data['valves_open_now'])} open now" if data["valves_open_now"] else "")
+		),
+	)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v0.78.0 — the water usage report
+# ══════════════════════════════════════════════════════════════════════════════
+
+#: How a report may be grouped. `zone` and `block` are the two places the water
+#: physically went; `week` and `month` are when it went there. A water-rights
+#: filing wants the first pair, a cost allocation wants a cross of the two, and
+#: an operator asking "did we over-irrigate in July" wants the second.
+GROUPINGS = ("zone", "block", "week", "month", "valve", "day")
+
+#: Most valves one report will measure. A district-scale system past this is a
+#: report run per zone rather than one call over everything, and the cap is
+#: REPORTED — a total that silently stopped counting is the worst possible
+#: number to hand a regulator.
+VALVE_CAP = 500
+
+#: Gallons in an acre-inch. The conversion every irrigation report in the United
+#: States is written in, and the reason the volume figures below are given in
+#: both: a water right is measured in acre-feet and a pump is rated in gallons
+#: per minute.
+GALLONS_PER_ACRE_INCH = 27154.0
+
+
+def _zone_rates(zone_names: list) -> dict:
+	"""`{zone: {flow_rate_gpm, area_acres, field, water_right_id}}` for these zones.
+
+	ONE QUERY FOR THE WHOLE SET rather than one per valve. A block with forty
+	laterals on it is ordinary, and a report that cost forty round trips to price
+	them is one nobody runs twice.
+	"""
+	names = sorted({str(name) for name in zone_names if name})
+	if not names or not compat.doctype_exists(IRRIGATION_ZONE):
+		return {}
+	fields = compat.existing_fields(
+		IRRIGATION_ZONE,
+		("name", "zone_name", "flow_rate_gpm", "area_acres", "field", "water_right_id", "owning_entity"),
+	)
+	rows = (
+		frappe.db.get_all(IRRIGATION_ZONE, filters={"name": ("in", names)}, fields=fields, limit=len(names))
+		or []
+	)
+	out = {}
+	for raw in rows:
+		row = dict(raw)
+		out[str(row["name"])] = {
+			"irrigation_zone": row.get("name"),
+			"zone_name": row.get("zone_name") or row.get("name"),
+			"flow_rate_gpm": round(float(row.get("flow_rate_gpm") or 0), 2) or None,
+			"area_acres": round(float(row.get("area_acres") or 0), 3) or None,
+			"field": row.get("field") or None,
+			"water_right_id": row.get("water_right_id") or None,
+			"owning_entity": row.get("owning_entity") or None,
+		}
+	return out
+
+
+def _report_valves(args: dict, company: str) -> tuple[list[dict], bool]:
+	"""Every valve the report covers, with its zone link. Root-scoped or farm-wide.
+
+	`asset` narrows to one node of the register tree exactly as
+	`get_irrigation_runtime` does — pass a zone asset and it is that zone's
+	valves. With no `asset`, the whole register is measured, which is what a
+	water-rights filing is written from.
+	"""
+	fields = compat.existing_fields(
+		ASSET_REGISTER,
+		("name", "asset_type", "company", "location", "irrigation_zone", "retired_at"),
+	)
+	root_name = as_str(args, "asset")
+	if root_name:
+		root = asset_tags.asset_row(root_name, company or "")
+		valves = _valves(root)
+		# `_valves` walks the tree with the child field set, which does not carry
+		# `irrigation_zone`; the rows are re-read here so every valve arrives with
+		# the column the pricing needs.
+		names = [valve["name"] for valve in valves][: VALVE_CAP + 1]
+		if not names:
+			return [], False
+		rows = (
+			frappe.db.get_all(
+				ASSET_REGISTER,
+				filters={"name": ("in", names)},
+				fields=fields,
+				order_by="name asc",
+				limit=VALVE_CAP + 1,
+			)
+			or []
+		)
+		return [dict(row) for row in rows[:VALVE_CAP]], len(rows) > VALVE_CAP
+
+	filters: dict = {
+		"asset_type": ("in", list(_valve_types())),
+		"retired_at": ("is", "not set"),
+	}
+	if company:
+		filters["company"] = company
+	zone = as_str(args, "irrigation_zone")
+	if zone:
+		filters["irrigation_zone"] = zone
+	rows = (
+		frappe.db.get_all(
+			ASSET_REGISTER, filters=filters, fields=fields, order_by="name asc", limit=VALVE_CAP + 1
+		)
+		or []
+	)
+	return [dict(row) for row in rows[:VALVE_CAP]], len(rows) > VALVE_CAP
+
+
+def _period(stamp: str, grouping: str) -> str:
+	"""The bucket one run's OPENING falls in, as a sortable label.
+
+	KEYED ON THE OPEN AND NOT ON THE CLOSE, and a run that straddles two periods
+	is billed whole to the one it started in. The alternative — splitting the
+	minutes at midnight on a Sunday — is arithmetically tidier and produces a
+	report nobody can reconcile against the valve log, where the run is one row
+	with one start. A set on Saturday night that ran into Sunday belongs to
+	Saturday's irrigation, which is also how the person who opened it would
+	describe it.
+	"""
+	date = str(stamp or "")[:10]
+	if not date:
+		return "(undated)"
+	if grouping == "day":
+		return date
+	if grouping == "month":
+		return date[:7]
+	if grouping == "week":
+		try:
+			year, week, _ = frappe.utils.getdate(date).isocalendar()
+			return f"{year}-W{week:02d}"
+		except Exception:  # pragma: no cover - an unparseable stored date
+			return date
+	return date
+
+
+def get_water_usage_report(args: dict) -> ToolResult:
+	"""Valve runtime rolled up by zone, block, week or month, priced where it can be.
+
+	THE MEASUREMENT IS `get_irrigation_runtime`'s, REUSED RATHER THAN REBUILT.
+	Every run in every total here comes from `_runs_for`, which is the function
+	that already handles the four hard cases — a run that started before the
+	window, one that ended after it, one still open, and a close written by the
+	cascade. A second pass over the same log with its own arithmetic would be two
+	answers to one question, and the one that disagreed would be whichever a
+	water district happened to be reading.
+
+	GALLONS ARE PER-VALVE AND NEVER GUESSED. Each valve is priced at its own
+	`Asset Register.irrigation_zone`'s `flow_rate_gpm`; a `flow_rate_gpm`
+	argument overrides that for every valve, for a system with one pump and no
+	zone records. A valve with neither contributes its MINUTES to every total it
+	belongs to and no gallons at all, and is named in `unpriced_valves` — so a
+	volume figure is always the volume of a stated set of valves rather than a
+	total that quietly dropped the ones nobody had mapped.
+
+	THE TWO TOTALS STAY APART, as they do upstream: `runtime_minutes` is finished
+	runs and does not change between two identical calls, and `open_run_minutes`
+	is water moving right now, which does.
+	"""
+	asset_tags._require()
+	_require()
+
+	company = resolve_company(as_str(args, "company"))
+	grouping = (as_str(args, "group_by") or as_str(args, "grouping") or "zone").strip().lower()
+	if grouping not in GROUPINGS:
+		raise ToolError(
+			f"group_by must be one of {', '.join(GROUPINGS)}, not {grouping!r}. Nothing was measured."
+		)
+
+	opened, closed = _window(args)
+	now = _now()
+	valves, truncated = _report_valves(args, company or "")
+	if not valves:
+		raise ToolError(
+			"no valve matched — nothing at or below the asset named, or nothing in the register "
+			f"with one of these types: {', '.join(_valve_types())}. Runtime is measured from "
+			"valve open/close events, so there is nothing here to measure. list_assets has the "
+			"register."
+		)
+
+	zones = _zone_rates([valve.get("irrigation_zone") for valve in valves])
+
+	# A `field` filter narrows to the valves whose zone waters that block, which
+	# is the only linkage between a planted block and a pipe that this app has —
+	# an asset's parent is another asset, and `Irrigation Zone.field` is the row
+	# that names the ground.
+	field_filter = as_str(args, "field") or as_str(args, "block")
+	if field_filter:
+		if compat.doctype_exists(FIELD_DOCTYPE) and not frappe.db.exists(FIELD_DOCTYPE, field_filter):
+			raise ToolError(
+				f"no {FIELD_DOCTYPE} called {field_filter!r} on this site. list_fields has the "
+				"register. Nothing was measured."
+			)
+		kept = [
+			valve
+			for valve in valves
+			if zones.get(str(valve.get("irrigation_zone") or ""), {}).get("field") == field_filter
+		]
+		if not kept:
+			raise ToolError(
+				f"no valve is linked to a zone that waters {field_filter!r}. The link is "
+				f"Asset Register.irrigation_zone → Irrigation Zone.field; set it with "
+				"update_registered_asset(irrigation_zone=...) on each valve. Nothing was measured."
+			)
+		valves = kept
+
+	stated_rate = args.get("flow_rate_gpm")
+	override = as_float(stated_rate, "flow_rate_gpm") if stated_rate is not None else None
+	if override is not None and override <= 0:
+		raise ToolError("flow_rate_gpm must be greater than zero. Nothing was measured.")
+
+	buckets: dict = {}
+	unpriced: list[str] = []
+	measured_valves = []
+	events_truncated = False
+
+	for valve in valves:
+		measured = _runs_for(valve, opened, closed, now)
+		events_truncated = events_truncated or measured["events_truncated"]
+		zone_name = str(valve.get("irrigation_zone") or "")
+		zone = zones.get(zone_name, {})
+		rate = override if override is not None else zone.get("flow_rate_gpm")
+		if not rate:
+			unpriced.append(str(valve["name"]))
+
+		measured_valves.append(
+			{
+				**measured,
+				"irrigation_zone": zone.get("irrigation_zone"),
+				"block": zone.get("field"),
+				"flow_rate_gpm": rate,
+				"gallons": round(measured["runtime_minutes"] * rate, 1) if rate else None,
+			}
+		)
+
+		for run in measured["runs"]:
+			if run["still_open"]:
+				# A run with no close does not belong in a period total — see the
+				# two-totals rule above. Its minutes are carried at the top level
+				# as `open_run_minutes` and nowhere else.
+				continue
+			if grouping == "zone":
+				key = zone.get("irrigation_zone") or "(no zone mapped)"
+			elif grouping == "block":
+				key = zone.get("field") or "(no block mapped)"
+			elif grouping == "valve":
+				key = str(valve["name"])
+			else:
+				key = _period(run["opened_at"], grouping)
+
+			bucket = buckets.setdefault(
+				key,
+				{
+					"group": key,
+					"run_count": 0,
+					"runtime_minutes": 0.0,
+					"gallons": 0.0,
+					"priced_minutes": 0.0,
+					"unpriced_minutes": 0.0,
+					"valves": set(),
+					"zones": set(),
+					"blocks": set(),
+					"acres": 0.0,
+					"_acre_zones": set(),
+				},
+			)
+			bucket["run_count"] += 1
+			bucket["runtime_minutes"] += run["minutes"]
+			bucket["valves"].add(str(valve["name"]))
+			if zone.get("irrigation_zone"):
+				bucket["zones"].add(str(zone["irrigation_zone"]))
+			if zone.get("field"):
+				bucket["blocks"].add(str(zone["field"]))
+			if rate:
+				bucket["gallons"] += run["minutes"] * rate
+				bucket["priced_minutes"] += run["minutes"]
+			else:
+				bucket["unpriced_minutes"] += run["minutes"]
+			# Acreage is counted once per zone per bucket, not once per run —
+			# a zone that ran forty times in July has not grown forty times bigger,
+			# and inches-applied divides by this.
+			if zone.get("area_acres") and zone["irrigation_zone"] not in bucket["_acre_zones"]:
+				bucket["_acre_zones"].add(zone["irrigation_zone"])
+				bucket["acres"] += float(zone["area_acres"])
+
+	groups = []
+	for key in sorted(buckets):
+		bucket = buckets[key]
+		minutes = round(bucket["runtime_minutes"], 1)
+		gallons = round(bucket["gallons"], 1)
+		acres = round(bucket["acres"], 3)
+		entry = {
+			"group": bucket["group"],
+			"run_count": bucket["run_count"],
+			"runtime_minutes": minutes,
+			"runtime_hours": round(minutes / 60.0, 2),
+			"valve_count": len(bucket["valves"]),
+			"valves": sorted(bucket["valves"]),
+			"zones": sorted(bucket["zones"]),
+			"blocks": sorted(bucket["blocks"]),
+			"priced_minutes": round(bucket["priced_minutes"], 1),
+			"unpriced_minutes": round(bucket["unpriced_minutes"], 1),
+			"gallons": gallons if bucket["priced_minutes"] else None,
+			"acre_inches": round(gallons / GALLONS_PER_ACRE_INCH, 3) if gallons else None,
+			"acres": acres or None,
+		}
+		if gallons and acres:
+			entry["gallons_per_acre"] = round(gallons / acres, 1)
+			entry["inches_applied"] = round(gallons / GALLONS_PER_ACRE_INCH / acres, 3)
+		groups.append(entry)
+
+	total_minutes = round(sum(entry["runtime_minutes"] for entry in measured_valves), 1)
+	open_minutes = round(sum(entry["open_run_minutes"] for entry in measured_valves), 1)
+	total_gallons = round(sum(bucket["gallons"] for bucket in buckets.values()), 1)
+	priced_minutes = round(sum(bucket["priced_minutes"] for bucket in buckets.values()), 1)
+
+	clock = timezones.Renderer(args)
+	for entry in measured_valves:
+		clock.add(entry, "open_since")
+		# The runs themselves are dropped from the per-valve rows here: this
+		# report is a roll-up, and a district-scale call carrying every run would
+		# be megabytes of JSON nobody reads. `get_irrigation_runtime` on one
+		# asset is where the individual runs live.
+		entry.pop("runs", None)
+
+	data = {
+		"company": company,
+		"group_by": grouping,
+		"from": opened,
+		"to": closed,
+		"from_local": clock(opened),
+		"to_local": clock(closed),
+		"measured_at": now,
+		"measured_at_local": clock(now),
+		"field": field_filter or None,
+		"valve_count": len(measured_valves),
+		"group_count": len(groups),
+		"groups": groups,
+		"valves": measured_valves,
+		"runtime_minutes": total_minutes,
+		"runtime_hours": round(total_minutes / 60.0, 2),
+		"open_run_minutes": open_minutes,
+		"total_minutes_including_open": round(total_minutes + open_minutes, 1),
+		"gallons": total_gallons if priced_minutes else None,
+		"acre_inches": round(total_gallons / GALLONS_PER_ACRE_INCH, 3) if total_gallons else None,
+		"acre_feet": round(total_gallons / GALLONS_PER_ACRE_INCH / 12.0, 4) if total_gallons else None,
+		"priced_minutes": priced_minutes,
+		"unpriced_minutes": round(total_minutes - priced_minutes, 1),
+		"flow_rate_source": (
+			f"the flow_rate_gpm argument ({override} gpm), applied to every valve"
+			if override is not None
+			else "each valve's own Asset Register.irrigation_zone → Irrigation Zone.flow_rate_gpm"
+		),
+		# NAMED RATHER THAN EXCLUDED. These valves' minutes ARE in every total
+		# above; only their gallons are missing, because nothing on this site
+		# says how fast they run. A water report that dropped them would be short
+		# by an unknown amount and would not say so.
+		"unpriced_valves": sorted(unpriced),
+		"unpriced_valve_count": len(unpriced),
+		"valves_open_now": [entry["asset_name"] for entry in measured_valves if entry["still_open"]],
+		"cascaded_closes": sum(entry["cascaded_closes"] for entry in measured_valves),
+		"events_truncated": events_truncated,
+		"valves_truncated": truncated,
+		**clock.block(),
+	}
+	if unpriced:
+		data["unpriced_note"] = (
+			f"{len(unpriced)} valve(s) have no flow rate, so their minutes are counted and their "
+			"gallons are not. Link each to its zone with update_registered_asset(irrigation_zone=…) "
+			"and set flow_rate_gpm on that zone, or pass flow_rate_gpm here to price them all "
+			"at one rate."
+		)
+
+	volume = f", {data['gallons']:,.0f} gal ({data['acre_feet']} acre-ft)" if data.get("gallons") else ""
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{len(measured_valves)} valve(s) over {len(groups)} {grouping} group(s): "
+			f"{data['runtime_hours']} h{volume}"
+			+ (f", {len(unpriced)} unpriced" if unpriced else "")
 			+ (f", {len(data['valves_open_now'])} open now" if data["valves_open_now"] else "")
 		),
 	)
