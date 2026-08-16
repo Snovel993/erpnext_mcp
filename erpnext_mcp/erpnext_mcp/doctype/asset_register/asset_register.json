@@ -10,6 +10,7 @@
   "asset_type",
   "company",
   "location",
+  "irrigation_zone",
   "identity_col",
   "description",
   "retired_at",
@@ -30,6 +31,14 @@
   "gps_longitude",
   "state_section",
   "current_state",
+  "service_section",
+  "service_interval_hours",
+  "service_interval_days",
+  "last_service_date",
+  "service_col",
+  "last_service_hours",
+  "current_hours",
+  "hours_updated_at",
   "scan_section",
   "last_scan_at",
   "scan_col",
@@ -64,6 +73,15 @@
    "in_standard_filter": 1,
    "label": "Location (Parent Asset)",
    "options": "Asset Register",
+   "search_index": 1
+  },
+  {
+   "description": "The Irrigation Zone this asset draws through, for a valve or anything below one. THE ONE LINK OUT OF THE ASSET TREE, and it exists because the tree cannot carry it: an asset's parent is another asset, so a valve could name the zone-shaped ASSET above it and never the Irrigation Zone record that holds the flow rate, the water right and the block. Without this column get_water_usage_report can count minutes and can price nothing, which is the half a water-rights filing actually asks for. Empty is fine and is the honest answer on a farm that has not mapped its zones — the report says so per valve rather than guessing a rate.",
+   "fieldname": "irrigation_zone",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Irrigation Zone",
+   "options": "Irrigation Zone",
    "search_index": 1
   },
   {
@@ -183,6 +201,57 @@
    "fieldname": "current_state",
    "fieldtype": "JSON",
    "label": "Current State"
+  },
+  {
+   "fieldname": "service_section",
+   "fieldtype": "Section Break",
+   "label": "Service Schedule",
+   "description": "When this machine is next due, and what it has run since it was last touched. Both intervals are optional and either alone is a complete schedule — a tractor is serviced on hours, a fire extinguisher on the calendar, and a pump on whichever comes first. check_maintenance_due reads exactly these columns; trigger_maintenance_tasks raises a Farm Task off them."
+  },
+  {
+   "description": "Hours of running between services, e.g. 250 on a tractor. Zero or empty means this machine is not on an hours schedule — which is the right answer for a valve, and is different from a schedule that is due.",
+   "fieldname": "service_interval_hours",
+   "fieldtype": "Float",
+   "label": "Service Interval (Hours)",
+   "precision": "1"
+  },
+  {
+   "description": "Days between services, e.g. 365 on an annual inspection. Zero or empty means this machine is not on a calendar schedule.",
+   "fieldname": "service_interval_days",
+   "fieldtype": "Int",
+   "label": "Service Interval (Days)"
+  },
+  {
+   "description": "The date of the last completed service. The calendar interval counts from here; where it is empty and an interval is set, the asset's own creation date stands in and the answer says so.",
+   "fieldname": "last_service_date",
+   "fieldtype": "Date",
+   "label": "Last Service Date"
+  },
+  {
+   "fieldname": "service_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The hour-meter reading at the last completed service. The hours interval counts from here; where it is empty, hours since service is measured from zero.",
+   "fieldname": "last_service_hours",
+   "fieldtype": "Float",
+   "label": "Hours at Last Service",
+   "precision": "1"
+  },
+  {
+   "description": "The latest hour-meter reading anybody has entered, cumulative over the life of the machine. WRITTEN BY log_asset_state_change, not typed here: a worker checking a tractor out or back in enters what the meter says and this column follows the highest reading seen. It is a CACHE of the Asset State Log's own series — get_engine_hours_summary computes every figure from the log rows, so a wrong value here cannot corrupt a season's hours.",
+   "fieldname": "current_hours",
+   "fieldtype": "Float",
+   "label": "Current Hour Meter",
+   "precision": "1"
+  },
+  {
+   "description": "When the hour meter above was last written.",
+   "fieldname": "hours_updated_at",
+   "fieldtype": "Datetime",
+   "label": "Hours Updated At",
+   "read_only": 1
   },
   {
    "fieldname": "scan_section",

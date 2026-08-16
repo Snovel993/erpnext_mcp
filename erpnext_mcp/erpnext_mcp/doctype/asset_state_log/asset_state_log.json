@@ -21,6 +21,10 @@
   "detail_col",
   "notes",
   "cascaded_from",
+  "meter_section",
+  "engine_hours",
+  "meter_col",
+  "hours_used",
   "location_section",
   "gps_latitude",
   "location_col",
@@ -106,6 +110,32 @@
    "options": "Asset Register",
    "read_only": 1,
    "search_index": 1
+  },
+  {
+   "fieldname": "meter_section",
+   "fieldtype": "Section Break",
+   "label": "Hour Meter",
+   "description": "What the meter read when this happened. Filled on a check-out or a check-in of a tractor or a vehicle; empty on everything else, and empty is not zero — a reading of 0.0 is a machine straight off the lot."
+  },
+  {
+   "description": "The hour-meter reading the worker entered at this event, cumulative over the life of the machine. THE SERIES IS THE RECORD: hours this season, hours since service and hours per checkout are all computed from these rows, and Asset Register.current_hours is only a cache of the highest one seen.",
+   "fieldname": "engine_hours",
+   "fieldtype": "Float",
+   "label": "Engine Hours",
+   "precision": "1"
+  },
+  {
+   "fieldname": "meter_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Hours run during the checkout this event closed — this row's reading minus the reading on the check-out that opened it. Written on a check-in and only where BOTH readings exist; a checkout nobody metered leaves this empty rather than guessing at a session length.",
+   "fieldname": "hours_used",
+   "fieldtype": "Float",
+   "label": "Hours Used This Session",
+   "precision": "1",
+   "read_only": 1
   },
   {
    "fieldname": "location_section",

@@ -1371,6 +1371,12 @@ APP_DOCTYPES = {
 	"Asset Register": "asset_register",
 	# v0.25.0. State-change events on assets — who did what, when, where.
 	"Asset State Log": "asset_state_log",
+	# v0.78.0. One block, restricted from entry until one moment, because of one
+	# product. Registered here rather than seeded per-test because the REI reads
+	# are on the SCAN path: `asset_status` asks for live restrictions on every
+	# asset scan, and a double without the register would make every one of
+	# those a silently-empty section rather than a real query.
+	"Spray REI": "spray_rei",
 	# v0.27.0. The structured I-9 workflow.
 	"I-9 Form": "i_9_form",
 	"I-9 Audit Log": "i_9_audit_log",

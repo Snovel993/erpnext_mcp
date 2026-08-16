@@ -1,0 +1,237 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-15 12:00:00.000000",
+ "description": "One block, restricted from entry until one moment, because of one product. A tank mix that went out over four blocks writes four of these — the window is a fact about a PLACE and the label that reached it, not about the machine that drove there, and a worker asking 'may I walk into this row' is asking about the row. Created by record_spray_application; closed by close_expired_reis or by the next read that finds it expired. Nothing about a person's entry is stored here: this record says the block is restricted, not who went in.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "status",
+  "block_doctype",
+  "block",
+  "company",
+  "identity_col",
+  "sprayer",
+  "applicator",
+  "source_task",
+  "product_section",
+  "product",
+  "product_name",
+  "rei_hours",
+  "product_col",
+  "all_products",
+  "window_section",
+  "started_at",
+  "expires_at",
+  "window_col",
+  "closed_at",
+  "closed_by_job",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "Active",
+   "description": "Active until the window passes, then Expired. Cancelled is a window somebody withdrew — a spray that was logged against the wrong block — and is kept rather than deleted, because a restriction that was published to a crew and then lifted is itself a thing an inspector may ask about.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nExpired\nCancelled",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Field",
+   "description": "Which register the restricted block is in — 'Field' for a planted block, 'Asset Register' for a block-shaped asset tag. A DYNAMIC LINK because this app has both and a spray reaches whichever one the farm actually maps its rows in; the same pair Farm Task uses for location_doctype/location, so a task raised on a block and a restriction on the same block key alike.",
+   "fieldname": "block_doctype",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Block DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "description": "The block this restriction is on.",
+   "fieldname": "block",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Block",
+   "options": "block_doctype",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The machine that applied it. Recorded because a scan of the sprayer should tell whoever is holding it what it left behind, and because a mis-set rate is traced through the machine. It is NOT what the window belongs to — see the doctype description.",
+   "fieldname": "sprayer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Sprayer",
+   "options": "Asset Register",
+   "search_index": 1
+  },
+  {
+   "description": "Who applied it.",
+   "fieldname": "applicator",
+   "fieldtype": "Link",
+   "label": "Applicator",
+   "options": "User"
+  },
+  {
+   "description": "The Farm Task this spray closed, where it came off one. A spray logged at the machine with no task raised for it has this empty, and that is a legitimate record rather than a gap — the restriction is real either way.",
+   "fieldname": "source_task",
+   "fieldtype": "Link",
+   "label": "Source Task",
+   "options": "Farm Task",
+   "search_index": 1
+  },
+  {
+   "fieldname": "product_section",
+   "fieldtype": "Section Break",
+   "label": "Product"
+  },
+  {
+   "description": "The item whose label set this window — THE LONGEST REI IN THE TANK, not the first product and not an average. A mix of a four-hour and a twenty-four-hour product restricts the block for twenty-four hours, and the block does not become half-enterable at hour twelve. Every other product in the mix is listed in All Products.",
+   "fieldname": "product",
+   "fieldtype": "Link",
+   "label": "Product (Longest REI)",
+   "options": "Item",
+   "search_index": 1
+  },
+  {
+   "description": "The product's name as the register spells it, copied at application time. Stored rather than fetched so a warning read years later still names what actually went out, even if the Item has since been renamed or disabled.",
+   "fieldname": "product_name",
+   "fieldtype": "Data",
+   "label": "Product Name"
+  },
+  {
+   "description": "Hours of restricted entry, off the product's own rei_hours column.",
+   "fieldname": "rei_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "REI Hours",
+   "precision": "2",
+   "reqd": 1
+  },
+  {
+   "fieldname": "product_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Every product in the tank as JSON — [{item_code, item_name, qty, uom, rei_hours}] — because the one that set the window is not the whole of what a worker was exposed to, and a medical question asked after the fact is asked about the mix.",
+   "fieldname": "all_products",
+   "fieldtype": "Long Text",
+   "label": "All Products"
+  },
+  {
+   "fieldname": "window_section",
+   "fieldtype": "Section Break",
+   "label": "Window"
+  },
+  {
+   "description": "When the application finished. The window runs from here and not from when this record was written, so a spray filed off a handset that was out of signal for two hours does not restrict the block for two hours longer than the label says.",
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Started At",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "When entry is permitted again — started_at plus rei_hours, computed once and STORED rather than derived on every read. A stored instant is what a worker was told at the tailgate, and it stays true if somebody later corrects the interval on the Item.",
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Expires At",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "window_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When this record was moved off Active. For an expiry that is the moment the sweep or a read noticed, which is at or after expires_at — the two are kept apart because the difference is the lag in the closing, and expires_at is the compliance fact.",
+   "fieldname": "closed_at",
+   "fieldtype": "Datetime",
+   "label": "Closed At",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Set when the scheduled sweep closed this rather than a person.",
+   "fieldname": "closed_by_job",
+   "fieldtype": "Check",
+   "label": "Closed By Scheduled Job",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Spray REI",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "block,product,status,expires_at",
+ "sort_field": "expires_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
