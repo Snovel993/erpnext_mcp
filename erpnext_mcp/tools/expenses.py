@@ -428,6 +428,10 @@ def submit_expense_receipt(args: dict) -> ToolResult:
 
 	supplier = _linked(SUPPLIER, as_str(args, "supplier"), "supplier")
 
+	cost_center = as_str(args, "cost_center")
+	if cost_center:
+		_linked(COST_CENTER, cost_center, "cost_center")
+
 	# IMPORTED IN THE FUNCTION, not at the top. `tools/receipts.py` imports this
 	# module for the Expense Receipt name and its statuses, so a module-level
 	# import here would be a cycle. Same shape and same reason as `read.py`'s
@@ -463,6 +467,7 @@ def submit_expense_receipt(args: dict) -> ToolResult:
 		"company": company,
 		"submitted_by": submitted_by,
 		"supplier": supplier or None,
+		"cost_center": cost_center or None,
 		"farm_task": farm_task or None,
 		"status": status,
 		"receipt_image": as_str(args, "receipt_image") or None,
@@ -494,6 +499,7 @@ def submit_expense_receipt(args: dict) -> ToolResult:
 			"submitted_by": submitted_by,
 			"supplier": supplier or None,
 			"supplier_resolved_by": supplier_resolved_by or None,
+			"cost_center": cost_center or None,
 			"farm_task": farm_task or None,
 			"ocr_confidence": doc.get("ocr_confidence"),
 			"receipt_image": doc.get("receipt_image"),

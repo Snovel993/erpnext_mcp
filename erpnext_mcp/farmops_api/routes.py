@@ -334,6 +334,12 @@ ROUTES = (
 	Route("/mobile", mobile_api.create_expense_receipt),
 	Route("/mobile", mobile_api.create_scale_ticket),
 	Route("/mobile", mobile_api.list_scale_tickets),
+	# The three reads `create_expense_receipt`'s pickers and detail view need:
+	# a cost center to code the receipt to, a supplier to link it against, and
+	# the receipts already filed, for the screen that opens one back up.
+	Route("/mobile", mobile_api.list_cost_centers),
+	Route("/mobile", mobile_api.list_suppliers),
+	Route("/mobile", mobile_api.list_expense_receipts),
 	# Sprint 3 (v0.68.0): compliance alert rectification — see api/rectify.py.
 	# Five direct fixes, and the one route every task-shaped fix shares.
 	Route("/mobile", mobile_api.renew_certification),

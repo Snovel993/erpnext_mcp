@@ -97,10 +97,12 @@ from ..tools import signed_documents
 from ..tools import evidence as evidence_tools
 from ..tools import files as file_tools
 from ..tools import calendar as compliance_calendar
+from ..tools import dimensions as dimension_tools
 from ..tools import docvalidation
 from ..tools import employee as personnel
 from ..tools import expenses as expense_tools
 from ..tools import housing as housing_tools
+from ..tools import masters as master_tools
 from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
 from ..tools import receipts as receipt_tools
@@ -5329,6 +5331,7 @@ def create_expense_receipt(
 	merchant_phone=None,
 	merchant_url=None,
 	store_number=None,
+	cost_center=None,
 ) -> dict:
 	"""The fuel slip at the pump, with v0.67.0's Supplier and Item links.
 
@@ -5377,6 +5380,7 @@ def create_expense_receipt(
 	for key, value in (
 		("category", category),
 		("supplier", supplier),
+		("cost_center", cost_center),
 		("farm_task", farm_task),
 		("status", status),
 		("receipt_image", receipt_image),
@@ -6440,3 +6444,92 @@ def create_task_from_template(
 	if data.get("warnings"):
 		out["warnings"] = data["warnings"]
 	return out
+
+
+# ── 72. list_cost_centers ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_cost_centers", limit=guard.READ_LIMIT)
+def list_cost_centers(user: str, company=None, include_disabled=None) -> dict:
+	"""The cost center tree for one entity, so a receipt has something to be coded to.
+
+	`create_expense_receipt` and `update_expense_receipt` both take a
+	`cost_center` docname; until this route existed, the only way a phone
+	learned a valid one was a bookkeeper reciting it. `tools/dimensions.py`'s
+	`list_cost_centers` REQUIRES a company, so this falls back to the caller's
+	first entity the same way `create_expense_receipt` does, rather than
+	refusing a call that named none.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = _company(user, company, allowed)
+
+	inner = {"company": wanted}
+	if include_disabled is not None:
+		inner["include_disabled"] = include_disabled
+
+	return dimension_tools.list_cost_centers(inner).data
+
+
+# ── 73. list_suppliers ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_suppliers", limit=guard.READ_LIMIT)
+def list_suppliers(user: str, company=None, supplier_group=None, search=None, limit=None) -> dict:
+	"""Suppliers by group and name, for the picker `create_expense_receipt` feeds.
+
+	Supplier IS A SHARED REGISTER, not a per-company one — the doctype carries no
+	company field of its own, so `company` only narrows the answer where the
+	underlying tool's own company-scoping note says it can. `guard.scoped` still
+	runs on the way out, the same belt every list on this surface wears.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed)
+
+	inner = {}
+	for key, value in (
+		("company", wanted),
+		("supplier_group", supplier_group),
+		("search", search),
+		("limit", limit),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	data = master_tools.list_suppliers(inner).data
+	rows = guard.scoped(data.get("suppliers") or [], allowed)
+	return {
+		"suppliers": rows,
+		"count": len(rows),
+		"company": wanted or None,
+	}
+
+
+# ── 74. list_expense_receipts ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_expense_receipts", limit=guard.READ_LIMIT)
+def list_expense_receipts(user: str, company=None, status=None, limit=None) -> dict:
+	"""Receipts already captured, for the detail view `create_expense_receipt` feeds into.
+
+	SCOPED TWICE, like every other list here. The tool filters by company when
+	one is sent; `guard.scoped` runs on the answer either way, because a row
+	that escapes the filter through a code path nobody thought about is the
+	failure this surface exists to prevent.
+	"""
+	allowed = guard.require_scope(user)
+	wanted = guard.require_company(user, company, allowed)
+
+	inner = {}
+	for key, value in (
+		("company", wanted),
+		("status", status),
+		("limit", limit),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	data = expense_tools.list_expense_receipts(inner).data
+	rows = guard.scoped(data.get("receipts") or [], allowed)
+	return {
+		"receipts": rows,
+		"count": len(rows),
+		"company": wanted or None,
+		"total_amount": round(sum(float(row.get("amount") or 0) for row in rows), 2),
+	}
