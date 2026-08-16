@@ -108,6 +108,7 @@ from .tools import (
 	sales,
 	sessions,
 	shifts,
+	shipments,
 	signatures,
 	signed_documents,
 	signers,
@@ -17992,6 +17993,512 @@ TOOLS = {
 		title="List wizard definitions",
 		available=_needs_doctype("Wizard Definition"),
 		requires="the Wizard Definition DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.80.0: trade documentation across three tiers ──────────────────────
+	"create_shipment": _tool(
+		shipments.create_shipment,
+		"MUTATING (default OFF). Open a shipment and BUILD ITS DOCUMENT CHECKLIST "
+		"from the destination's own rules — Local, Domestic or International, and "
+		"for an export, the country.\n\n"
+		"WHY ONE RECORD FOR ALL THREE TIERS. A desk that keeps local deliveries in "
+		"a spreadsheet, interstate freight in a folder and exports in a broker's "
+		"portal is a desk where the export paperwork is the only paperwork anybody "
+		"checks. The tier decides how much paper, not which system.\n\n"
+		"THE CHECKLIST IS A SNAPSHOT and is never silently rebuilt. A destination's "
+		"rules changing in March must not quietly add a requirement to a February "
+		"shipment that has already sailed — `get_shipment_readiness` reports the "
+		"drift instead.\n\n"
+		"An empty checklist is SAID SO LOUDLY: it means nothing is being tracked "
+		"for that destination, not that nothing is needed.",
+		{
+			"destination_tier": _field(
+				_STRING,
+				"Local, Domestic or International. Local is inside the region, Domestic "
+				"crosses a state line, International crosses a border.",
+			),
+			"destination_country": _field(
+				_STRING, "Required for International. What the country's own rules are looked up by."
+			),
+			"company": _COMPANY,
+			"customer": _field(_STRING, "Customer docname."),
+			"sales_order": _field(_STRING, "The order this fulfils."),
+			"sales_invoice": _field(_STRING, "The invoice raised against it — what a commercial invoice draws from."),
+			"ship_date": _field(_STRING, "When it is meant to leave, YYYY-MM-DD."),
+			"commodity": _field(_STRING, "What is on the truck, e.g. 'Fresh sweet cherries, Bing'."),
+			"total_packages": _field(_INTEGER, "Package count."),
+			"gross_weight": _field(_NUMBER, "Gross weight."),
+			"net_weight": _field(_NUMBER, "Net weight."),
+			"weight_uom": _field(_STRING, "Kg, Lb, Ton, Bin or Box."),
+			"destination_name": _field(_STRING, "Consignee, where that is not the customer."),
+			"destination_address": _field(_STRING, "Delivery address."),
+			"destination_state": _field(_STRING, "State or province."),
+			"destination_city": _field(_STRING, "City."),
+			"destination_postal_code": _field(_STRING, "Postal code."),
+			"carrier": _field(_STRING, "Carrier."),
+			"tracking_number": _field(_STRING, "Tracking number."),
+			"container_number": _field(_STRING, "Reefer or dry container."),
+			"vessel": _field(_STRING, "Vessel."),
+			"voyage_number": _field(_STRING, "Voyage number."),
+			"port_of_loading": _field(_STRING, "DCSA's port of loading."),
+			"port_of_discharge": _field(_STRING, "DCSA's port of discharge."),
+			"enforcement": _field(
+				_STRING,
+				"Site Default (the default), Advisory or Enforced. Whether an incomplete "
+				"checklist blocks this one shipment, overriding the site setting either way.",
+			),
+			"status": _field(_STRING, "Opening status. Draft by default."),
+			"notes": _field(_STRING, "Anything the desk needs on the record."),
+		},
+		required=("destination_tier",),
+		mutating=True,
+		title="Create a shipment",
+		available=_needs_doctype("Trade Shipment"),
+		requires="the Trade Shipment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_shipment": _tool(
+		shipments.get_shipment,
+		"ONE SHIPMENT IN FULL: the load, the route, the checklist the destination "
+		"asked for, every document raised against it, and whether it can move. "
+		"Read-only.\n\n"
+		"Carries its own readiness rather than making a caller ask twice — a "
+		"second call to find out whether a shipment can go is a call mostly not "
+		"made. Labels resolve into the caller's language, with anything that fell "
+		"back to English listed in `untranslated`.",
+		{
+			"shipment": _field(_STRING, "Trade Shipment docname."),
+			"language": _field(_STRING, "ISO code. Defaults to the Employee's preferred_language, then English."),
+			"employee": _field(_STRING, "Whose language preference to read."),
+			"user": _field(_STRING, "Or the login, resolved to their Employee."),
+		},
+		required=("shipment",),
+		title="Get a shipment",
+		available=_needs_doctype("Trade Shipment"),
+		requires="the Trade Shipment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_shipments": _tool(
+		shipments.list_shipments,
+		"The shipping register, newest first, filterable by status, customer, "
+		"tier, destination country, company and ship-date range. Names every "
+		"shipment released with its checklist incomplete. Read-only.",
+		{
+			"status": _field(_STRING, "Draft, Documents Pending, Ready to Ship, In Transit, Delivered or Cancelled."),
+			"customer": _field(_STRING, "Customer docname."),
+			"destination_tier": _field(_STRING, "Local, Domestic or International."),
+			"destination_country": _field(_STRING, "Destination country."),
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Earliest ship date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest ship date, YYYY-MM-DD."),
+			"open_only": _field(_BOOLEAN, "Only shipments that have not been delivered or cancelled."),
+			"limit": _LIMIT,
+		},
+		title="List shipments",
+		available=_needs_doctype("Trade Shipment"),
+		requires="the Trade Shipment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_shipment_status": _tool(
+		shipments.update_shipment_status,
+		"MUTATING (default OFF). Walk a shipment forward: Draft → Documents "
+		"Pending → Ready to Ship → In Transit → Delivered, or Cancelled from any "
+		"open state.\n\n"
+		"THE ONE GATE IN THIS MODULE IS ON READY TO SHIP. It refuses when a "
+		"required document is not Approved or Sealed, has EXPIRED, or requires an "
+		"external filing (PCIT, AES, DCSA) and carries no reference back from it — "
+		"because this app files nothing, and an ePhyto nobody lodged is a row in a "
+		"database.\n\n"
+		"AND IT IS ADVISORY UNLESS TURNED ON. `trade_document_enforcement` ships "
+		"OFF: the gaps are reported and the shipment goes. A two-truck operation "
+		"held by a certificate it will never need turns the module off entirely, "
+		"and then gets no warnings either. Turn it on per site, or per shipment "
+		"with the shipment's own Enforcement field.\n\n"
+		"OVERRIDING IS RECORDED. Where enforcement is on, `override_reason` is "
+		"required to release anyway and is written to the shipment — a bypass "
+		"nobody recorded is a bypass nobody can review.\n\n"
+		"The walk itself is enforced by the doctype: a shipment is not delivered "
+		"before it has departed, whatever a status column says.",
+		{
+			"shipment": _field(_STRING, "Trade Shipment docname."),
+			"status": _field(
+				_STRING,
+				"Draft, Documents Pending, Ready to Ship, In Transit, Delivered or Cancelled.",
+			),
+			"override_reason": _field(
+				_STRING,
+				"Why this shipment is going with required documents outstanding. Required to "
+				"pass the gate where enforcement is on; recorded either way when given.",
+			),
+			"reason": _field(_STRING, "Why it was cancelled. Required for Cancelled."),
+			"departed_on": _field(_STRING, "When it actually left. Defaults to now."),
+			"delivered_on": _field(_STRING, "When it actually arrived. Defaults to now."),
+			"notes": _field(_STRING, "Appended to the shipment's notes."),
+		},
+		required=("shipment", "status"),
+		mutating=True,
+		title="Update shipment status",
+		available=_needs_doctype("Trade Shipment"),
+		requires="the Trade Shipment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_shipment_readiness": _tool(
+		shipments.get_shipment_readiness,
+		"REQUIRED VERSUS DONE for one shipment, and exactly what is holding it. "
+		"Read-only, and the same computation the Ready to Ship gate reads — so a "
+		"caller cannot be told it is ready here and held there.\n\n"
+		"FOUR WAYS A DOCUMENT THAT LOOKS DONE IS NOT, and this names each: it is "
+		"not approved; it has been VOIDED; it has EXPIRED (a phytosanitary "
+		"certificate approved in June for a September sailing is one a border "
+		"rejects); or it requires an external filing and has no reference back "
+		"from that system.\n\n"
+		"Also reports `requirement_drift` — what the destination asks for TODAY "
+		"that this shipment's frozen checklist does not have. Reported, never "
+		"applied.",
+		{"shipment": _field(_STRING, "Trade Shipment docname.")},
+		required=("shipment",),
+		title="Get shipment readiness",
+		available=_needs_doctype("Trade Shipment"),
+		requires="the Trade Shipment DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_trade_document": _tool(
+		shipments.create_trade_document,
+		"MUTATING (default OFF). Start one trade document for a shipment — a "
+		"commercial invoice, a phytosanitary certificate, a bill of lading, a "
+		"cold chain record — POPULATED from the record it is about where its "
+		"template says where to look.\n\n"
+		"THE POPULATION IS A STARTING POINT, NOT A BINDING. Values are copied once "
+		"and the document owns them after that: a certificate that silently "
+		"changed when somebody edited the invoice behind it is a certificate whose "
+		"seal proves nothing. Anything passed in `document_data` beats the copy.\n\n"
+		"Refuses a template scoped to a tier this shipment is not, unless "
+		"`allow_off_tier` — a buyer really can ask for an export document on a "
+		"domestic load, but it is usually a template picked by mistake.",
+		{
+			"shipment": _field(_STRING, "Trade Shipment docname."),
+			"trade_document_template": _field(
+				_STRING, "Which kind of document. list_trade_document_templates has the register."
+			),
+			"document_data": _field(
+				_OBJECT,
+				'The document\'s own fields, e.g. {"certificate_number": "US-2026-0041", '
+				'"treatment": "MB 32g/m3 2h 21C"}. Merged over anything auto-populated, and wins.',
+			),
+			"title": _field(_STRING, "What it is called on the checklist. Defaults to the template's label."),
+			"source_name": _field(
+				_STRING,
+				"The record to populate from, where the shipment does not already name it.",
+			),
+			"issued_on": _field(_STRING, "When it was issued, YYYY-MM-DD."),
+			"expires_on": _field(
+				_STRING,
+				"When it stops being good, YYYY-MM-DD. An expired document is reported as NOT "
+				"satisfied however approved it is.",
+			),
+			"external_reference": _field(_STRING, "The reference the external system issued, if already filed."),
+			"required": _field(_BOOLEAN, "Override whether the shipment is held for it."),
+			"allow_off_tier": _field(_BOOLEAN, "Create it even though its template does not apply to this tier."),
+			"notes": _field(_STRING, "Notes."),
+		},
+		required=("shipment", "trade_document_template"),
+		mutating=True,
+		title="Create a trade document",
+		available=_needs_doctype("Trade Document"),
+		requires="the Trade Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_trade_document": _tool(
+		shipments.get_trade_document,
+		"One trade document in full: its content, its template's schema, which "
+		"declared fields are still empty, whether it satisfies its checklist line "
+		"and why not where it does not — and, for a sealed one, WHETHER IT STILL "
+		"HASHES TO WHAT WAS SEALED. Read-only.\n\n"
+		"The seal is recomputed on every read rather than trusted, so a document "
+		"whose content changed underneath its seal reports the seal as broken "
+		"instead of looking intact.",
+		{
+			"trade_document": _field(_STRING, "Trade Document docname."),
+			"language": _field(_STRING, "ISO code for the schema's labels."),
+			"employee": _field(_STRING, "Whose language preference to read."),
+			"user": _field(_STRING, "Or the login."),
+		},
+		required=("trade_document",),
+		title="Get a trade document",
+		available=_needs_doctype("Trade Document"),
+		requires="the Trade Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_trade_document": _tool(
+		shipments.update_trade_document,
+		"MUTATING (default OFF). Fill in a document's fields, its dates, and the "
+		"reference its external filing returned.\n\n"
+		"MERGES BY DEFAULT rather than replacing. A desk completing a "
+		"phytosanitary certificate over three calls, each carrying what it just "
+		"learned, would find each call erasing the last under replace semantics — "
+		"and would find it at the worst moment. `replace=true` is there for the "
+		"caller who means to discard what is in the document.\n\n"
+		"WILL NOT MOVE A DOCUMENT TO APPROVED OR SEALED. Those are acts with a "
+		"principal behind them: approve_trade_document and seal_trade_document "
+		"check the role, stamp who did it, and write the attestation.",
+		{
+			"trade_document": _field(_STRING, "Trade Document docname."),
+			"document_data": _field(_OBJECT, "Fields to set. Merged over what is there unless `replace`."),
+			"replace": _field(_BOOLEAN, "Discard the existing document_data instead of merging into it."),
+			"title": _field(_STRING, "Title."),
+			"issued_on": _field(_STRING, "YYYY-MM-DD."),
+			"expires_on": _field(_STRING, "YYYY-MM-DD."),
+			"external_reference": _field(
+				_STRING,
+				"What PCIT, AES or the eBL platform issued. Until this is here, the document is "
+				"reported as outstanding however approved it looks.",
+			),
+			"external_filed_on": _field(_STRING, "When it was filed. Stamped automatically when a reference arrives."),
+			"external_system": _field(_STRING, "Override which system files it."),
+			"required": _field(_BOOLEAN, "Whether the shipment is held for it."),
+			"status": _field(_STRING, "Draft, Pending Review or Void. Not Approved or Sealed — see above."),
+			"notes": _field(_STRING, "Notes."),
+		},
+		required=("trade_document",),
+		mutating=True,
+		title="Update a trade document",
+		available=_needs_doctype("Trade Document"),
+		requires="the Trade Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"approve_trade_document": _tool(
+		shipments.approve_trade_document,
+		"MUTATING (default OFF). Approve a trade document, WITH AN ATTESTATION "
+		"where its template asks for a signature — a Signing Evidence row over the "
+		"document's fingerprint, taken BEFORE the approval columns are written, "
+		"which is the only moment that answers what this person actually saw.\n\n"
+		"REQUIRES A TRADE ROLE: System Manager, Farm Manager, Compliance Officer, "
+		"Sales Manager or Accounts Manager. A commercial invoice is a customs "
+		"declaration and a phytosanitary certificate is a claim about a pest; "
+		"neither is anonymous and neither is a picker's to sign off.\n\n"
+		"REPORTS UNFILLED FIELDS RATHER THAN REFUSING OVER THEM. A template's "
+		"schema is this app's reading of the document, and the person holding the "
+		"actual certificate is a better authority on what it needs than a JSON "
+		"list is. It also warns where the document still awaits an external "
+		"filing — approving it does not make it filed.",
+		{
+			"trade_document": _field(_STRING, "Trade Document docname."),
+			"approval_notes": _field(_STRING, "A condition, a caveat, the broker it was checked with."),
+			"signer_employee": _field(_STRING, "The Employee attesting, where one exists."),
+			"signer_name": _field(_STRING, "Their name, where there is no Employee record."),
+			"verification_method": _field(_STRING, "Badge QR, Employee ID or Photo, where identity was checked."),
+		},
+		required=("trade_document",),
+		mutating=True,
+		title="Approve a trade document",
+		available=_needs_doctype("Trade Document"),
+		requires="the Trade Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"seal_trade_document": _tool(
+		shipments.seal_trade_document,
+		"MUTATING (default OFF). Fingerprint an approved document and CLOSE IT TO "
+		"EDITING.\n\n"
+		"SEALING IS WHAT MAKES A ROW EVIDENCE. Until it is sealed, 'this is the "
+		"certificate we presented' is an assertion about a record anybody could "
+		"have edited since. After it, the claim is checkable — and the document "
+		"refuses content edits, because a seal over a row that can still change "
+		"is a timestamp wearing a seal's clothes. Correcting a sealed document "
+		"means voiding it and issuing a replacement, which is also what happens "
+		"to a real certificate that is withdrawn.\n\n"
+		"The hash covers an ALLOW-LIST of columns, stored beside it, so a column "
+		"added in a later version cannot make every previously sealed document "
+		"fail verification. Only an Approved document can be sealed: sealing an "
+		"unapproved one would certify that nobody had checked it.",
+		{"trade_document": _field(_STRING, "Trade Document docname.")},
+		required=("trade_document",),
+		mutating=True,
+		title="Seal a trade document",
+		available=_needs_doctype("Trade Document"),
+		requires="the Trade Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_trade_documents": _tool(
+		shipments.list_trade_documents,
+		"The trade document register, filterable by shipment, type, template, "
+		"status and company. Names every document AWAITING AN EXTERNAL FILING and "
+		"every EXPIRED one, because those are the two that look done and are not. "
+		"Read-only.",
+		{
+			"shipment": _field(_STRING, "Trade Shipment docname."),
+			"document_type": _field(_STRING, "Commercial Invoice, Bill of Lading, Phytosanitary Certificate (ePhyto) …"),
+			"trade_document_template": _field(_STRING, "Template docname."),
+			"status": _field(_STRING, "Draft, Pending Review, Approved, Sealed or Void."),
+			"company": _COMPANY,
+			"outstanding_only": _field(_BOOLEAN, "Only documents that are neither approved, sealed nor void."),
+			"limit": _LIMIT,
+		},
+		title="List trade documents",
+		available=_needs_doctype("Trade Document"),
+		requires="the Trade Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"generate_shipment_packet": _tool(
+		shipments.generate_shipment_packet,
+		"MUTATING (default OFF). Bundle a shipment's documents into ONE "
+		"TAMPER-EVIDENT RECORD: each document's own seal, a hash over the whole "
+		"bundle, and the shipment's readiness at the moment of assembly. Filed as "
+		"a Governance Document where the site has one.\n\n"
+		"IT REFUSES BY DEFAULT WHEN DOCUMENTS ARE UNSEALED, on the same argument "
+		"generate_audit_packet refuses an open corrective action: a packet is "
+		"something somebody carries into a room and defends, and one assembled "
+		"from documents that can still be edited is a claim rather than evidence. "
+		"`allow_unsealed=true` produces it anyway with the unsealed ones NAMED AT "
+		"THE FRONT — an operation that genuinely has to hand something over "
+		"mid-preparation is better served by disclosing that than by hiding it.\n\n"
+		"A DOCUMENT WHOSE CONTENT CHANGED UNDER ITS SEAL IS REPORTED as a broken "
+		"seal rather than bundled quietly.",
+		{
+			"shipment": _field(_STRING, "Trade Shipment docname."),
+			"allow_unsealed": _field(
+				_BOOLEAN,
+				"Produce the packet with unsealed documents in it, listed at the front.",
+			),
+		},
+		required=("shipment",),
+		mutating=True,
+		title="Generate a shipment packet",
+		available=_needs_doctype("Trade Document"),
+		requires="the Trade Document DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_trade_document_template": _tool(
+		shipments.create_trade_document_template,
+		"MUTATING (default OFF). Add or amend a KIND of trade document — its "
+		"schema, which tiers it applies to, where it populates from, whether it "
+		"needs a signature, and whose system files it.\n\n"
+		"CONFIG, NOT CODE, and that is the only way this module survives contact "
+		"with trade. A farm that lands a buyer in a country it has never shipped "
+		"to needs documents it has never issued, this week — if that is a release, "
+		"the release is the bottleneck and the desk goes back to the broker's "
+		"portal.\n\n"
+		"REFUSES TO OVERWRITE AN EXISTING TEMPLATE unless `update_existing`: "
+		"silently resetting a template an operator tuned for their own broker is "
+		"how 'config not code' becomes a lie. A template requires nothing of any "
+		"shipment on its own — set_destination_requirements is what makes a "
+		"destination ask for it.",
+		{
+			"template_name": _field(_STRING, "The docname. Short and stable — 'Commercial Invoice'."),
+			"document_type": _field(_STRING, "The closed-list type this template is of."),
+			"label_en": _field(_STRING, "What the sales desk sees."),
+			"label_es": _field(_STRING, "The Spanish label. A gap is reported, never silently served in English."),
+			"description_en": _field(_STRING, "What this document is for and who reads it."),
+			"description_es": _field(_STRING, "The same in Spanish."),
+			"applicable_tiers": _field(
+				_STRING, "Comma-separated from Local, Domestic and International. Empty means every tier."
+			),
+			"required_fields": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The fields this document carries: [{"fieldname": "certificate_number", '
+				'"label_en": "Certificate Number", "type": "text", "required": true}]. Plain '
+				"strings are accepted where a field needs no explaining.",
+			),
+			"auto_populate_from": _field(_STRING, "The DocType a new document draws its opening values from."),
+			"auto_populate_map": _field(
+				_OBJECT, 'How the source maps in: {"invoice_total": "grand_total"}.'
+			),
+			"requires_signature": _field(_BOOLEAN, "Whether approving it writes a Signing Evidence attestation."),
+			"signature_role": _field(_STRING, "The capacity it is signed in — Officer, Inspector, Employer Representative …"),
+			"requires_external_filing": _field(
+				_BOOLEAN, "Whether somebody else's system has to file it. Needs external_system set."
+			),
+			"external_system": _field(_STRING, "PCIT, AES, ACE, DCSA, IPPC ePhyto Hub …"),
+			"standard_reference": _field(_STRING, "'IPPC ISPM-12', 'DCSA eBL 3.0', 'AES/EEI 15 CFR 30' …"),
+			"sequence": _field(_INTEGER, "Display order in a checklist. Lower first."),
+			"enabled": _field(_BOOLEAN, "A disabled template is not offered and is required of no new shipment."),
+			"update_existing": _field(_BOOLEAN, "Amend a template that already exists instead of refusing."),
+			"notes": _field(_STRING, "Lead times, who issues it, what holds it up."),
+		},
+		required=("template_name", "document_type"),
+		mutating=True,
+		title="Create a trade document template",
+		available=_needs_doctype("Trade Document Template"),
+		requires="the Trade Document Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_trade_document_templates": _tool(
+		shipments.list_trade_document_templates,
+		"What kinds of trade document this site can issue, with their tiers, their "
+		"declared fields, whose system files them and which standard their field "
+		"names follow. Labels resolve into the caller's language. Read-only.",
+		{
+			"destination_tier": _field(_STRING, "Only templates that apply to Local, Domestic or International."),
+			"document_type": _field(_STRING, "Only one type."),
+			"include_disabled": _field(_BOOLEAN, "Include withdrawn templates."),
+			"language": _field(_STRING, "ISO code."),
+			"employee": _field(_STRING, "Whose language preference to read."),
+			"user": _field(_STRING, "Or the login."),
+			"limit": _LIMIT,
+		},
+		title="List trade document templates",
+		available=_needs_doctype("Trade Document Template"),
+		requires="the Trade Document Template DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_destination_requirements": _tool(
+		shipments.get_destination_requirements,
+		"WHAT PAPERWORK A DESTINATION ASKS FOR, before any shipment exists — the "
+		"question a sales desk asks while it is still quoting. Read-only.\n\n"
+		"A COUNTRY'S RULES ADD TO THE TIER'S RATHER THAN REPLACING THEM. The paper "
+		"a country asks for sits on top of the paper an export always needs; a "
+		"lookup that returned only the country's rows would drop the AES "
+		"declaration from exactly the shipments most likely to need it. A "
+		"company-scoped rule beats an unscoped one for the same template.\n\n"
+		"A destination with nothing configured is SAID SO LOUDLY: a shipment "
+		"created for it would get an empty checklist, which means nothing is "
+		"tracked, not that nothing is needed.",
+		{
+			"destination_tier": _field(_STRING, "Local, Domestic or International."),
+			"destination_country": _field(_STRING, "Only read on International lookups."),
+			"company": _COMPANY,
+			"language": _field(_STRING, "ISO code."),
+			"employee": _field(_STRING, "Whose language preference to read."),
+			"user": _field(_STRING, "Or the login."),
+		},
+		required=("destination_tier",),
+		title="Get destination requirements",
+		available=_needs_doctype("Destination Document Requirement"),
+		requires="the Destination Document Requirement DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"set_destination_requirements": _tool(
+		shipments.set_destination_requirements,
+		"MUTATING (default OFF). Configure what a destination asks for. A NEW "
+		"EXPORT MARKET IS ROWS, NOT A RELEASE — nothing in this app's code knows "
+		"the name of a country.\n\n"
+		"ADDITIVE BY DEFAULT. A caller stating the four documents a country needs "
+		"should not silently delete a fifth somebody added last week for a reason "
+		"nobody wrote down. `replace=true` restates the destination outright and "
+		"says what it removed — and removal DISABLES rather than deletes, because "
+		"a shipment made under a rule is audited against what was asked for then, "
+		"and a deleted rule cannot answer why it was needed.\n\n"
+		"THE WHOLE LIST IS CHECKED BEFORE ANYTHING IS WRITTEN, so a typo in the "
+		"fourth entry does not leave three rules half-applied.\n\n"
+		"Existing shipments are NOT re-checked: their checklists were a snapshot "
+		"of the day they were created, and get_shipment_readiness reports the "
+		"drift instead.",
+		{
+			"destination_tier": _field(_STRING, "Local, Domestic or International."),
+			"destination_country": _field(
+				_STRING,
+				"The country, for an International rule. Omit with all_countries=true to state "
+				"what EVERY export needs.",
+			),
+			"all_countries": _field(
+				_BOOLEAN,
+				"This International rule applies to every export — right for an AES declaration, "
+				"wrong for an import permit.",
+			),
+			"requirements": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The documents this destination asks for: a list of template names, or of '
+				'objects like {"trade_document_template": "Phytosanitary Certificate (ePhyto)", '
+				'"required": true, "sequence": 60, "notes": "Allow three working days"}.',
+			),
+			"company": _field(
+				_STRING,
+				"Scope these rules to one Company. Omit for every company, which is the "
+				"ordinary case — the paper Japan asks for does not depend on which entity ships.",
+			),
+			"replace": _field(
+				_BOOLEAN,
+				"Restate this destination outright, disabling any rule not in the list.",
+			),
+		},
+		required=("destination_tier", "requirements"),
+		mutating=True,
+		title="Set destination requirements",
+		available=_needs_doctype("Destination Document Requirement"),
+		requires="the Destination Document Requirement DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── v0.78.0: what the water adds up to, rolled up and priced ────────────
 	"get_water_usage_report": _tool(

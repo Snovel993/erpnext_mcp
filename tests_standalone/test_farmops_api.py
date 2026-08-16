@@ -386,6 +386,19 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/list_accident_reports",
 		"/mobile/get_wizard_definition",
 		"/mobile/list_wizard_definitions",
+		# v0.80.0. Four trade-documentation reads and one write. The write is
+		# `/mobile/confirm_shipment_movement` and NOT `/mobile/update_shipment_status`,
+		# which is the whole point: the tool behind it can release a shipment to
+		# Ready to Ship — the module's one gate — can cancel one, and takes an
+		# `override_reason` that walks past an incomplete document checklist. The
+		# wrapper's signature carries none of the three, so `bind` cannot pass
+		# them. A driver confirming a load left and arrived is a different act
+		# from a desk asserting the paperwork is in order.
+		"/mobile/list_shipments",
+		"/mobile/get_shipment",
+		"/mobile/get_shipment_readiness",
+		"/mobile/list_trade_documents",
+		"/mobile/confirm_shipment_movement",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

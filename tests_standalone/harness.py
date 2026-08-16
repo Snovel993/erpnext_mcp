@@ -1496,6 +1496,15 @@ APP_DOCTYPES = {
 	# bookkeeper links a receipt to a Supplier by hand — see `tools/receipts.py`
 	# for why "SIATAPING" is a mapping no string algorithm can ever compute.
 	"Merchant Alias": "merchant_alias",
+	# v0.80.0. Trade documentation across three tiers: the shape of a kind of
+	# paper, the rule saying which destination asks for it, one shipment, its
+	# checklist, and the documents themselves. See `tools/shipments.py` for why
+	# thirteen document types are one polymorphic doctype rather than thirteen.
+	"Trade Document Template": "trade_document_template",
+	"Destination Document Requirement": "destination_document_requirement",
+	"Trade Shipment": "trade_shipment",
+	"Trade Shipment Document": "trade_shipment_document",
+	"Trade Document": "trade_document",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

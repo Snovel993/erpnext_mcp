@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 559 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 575 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 268 read tools are **on** by default and can be switched off individually. A
+All 275 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -13657,3 +13657,137 @@ open investigation on the asset.
 
 `expire_discipline_record` has no route: ageing a step out of a chain is a policy
 decision made at a desk with the handbook open.
+
+## Trade documentation across three tiers (v0.80.0)
+
+Sixteen tools, five doctypes, and one idea: **fruit leaves a farm three ways and
+the paperwork is the only thing that differs.** A truck to the packing house down
+the road, a truck across a state line, and a reefer on a vessel. The tier decides
+how much paper, not which system.
+
+### The mistake this prevents
+
+A desk that keeps local deliveries in a spreadsheet, interstate freight in a
+folder and exports in a broker's portal is a desk where **the export paperwork is
+the only paperwork anybody checks** — because it is the only one that lives
+somewhere that looks like paperwork. Then a domestic load moves without a cold
+chain record and nobody notices until a buyer asks, by which time the truck
+arrived three weeks ago and the record cannot be made honestly.
+
+So: one `Trade Shipment`, one checklist built from the destination's own rules,
+one register of documents.
+
+### Config, not code
+
+| Doctype | What it is |
+| --- | --- |
+| `Trade Document Template` | The SHAPE of a kind of paper — its schema, where it populates from, who signs it, whose system files it |
+| `Destination Document Requirement` | Shipping HERE needs THAT |
+| `Trade Shipment` | One load, its route, and its frozen checklist |
+| `Trade Shipment Document` | One checklist line |
+| `Trade Document` | One piece of paperwork, any of the sixteen types |
+
+**Nothing in this app's code names a country.** Adding Vietnam is adding rows —
+`create_trade_document_template` and `set_destination_requirements`. If it were a
+release, the release would be the bottleneck and the desk would go back to the
+broker's portal.
+
+Thirteen document types are **one polymorphic doctype** rather than thirteen.
+They share a lifecycle (drafted → reviewed → approved → sealed), a home, and an
+evidence requirement; they share almost no fields. So the lifecycle is columns
+and the content is `document_data`, because the alternative is thirteen
+near-empty doctypes or one table that is ninety per cent NULL.
+
+### Advisory by default — and the default is the load-bearing part
+
+`update_shipment_status` is the only gate, and it guards one transition: **Ready
+to Ship**. `trade_document_enforcement` ships **off**.
+
+A two-truck operation locked out of its own delivery by a phytosanitary
+certificate it will never need turns this module off within a week — and an
+operation that has turned it off gets no warnings either, which is strictly worse
+than an advisory gate that reports the gaps and lets the truck go. Advisory mode
+returns the identical readiness answer. An operation big enough to want the gate
+turns it on, per site or per shipment via the shipment's own `enforcement` field.
+
+**The override is recorded.** Where enforcement is on, releasing anyway needs
+`override_reason`, written to the shipment. A bypass nobody recorded is a bypass
+nobody can review — which is the difference between an advisory control and no
+control.
+
+### Four ways a document that looks done is not
+
+`get_shipment_readiness` names each, and every one has held a container:
+
+1. it is not approved yet;
+2. it has been **voided** — a withdrawn certificate is not a certificate;
+3. it has **expired**. An ePhyto approved in June for a September sailing is one a
+   border rejects, and a checklist that counted it because the status column said
+   Approved would report a shipment ready that is not;
+4. it requires an **external filing** and carries no reference back.
+
+### This app files nothing
+
+An ePhyto is lodged in PCIT. An EEI is filed in AES. An eBL is issued on a DCSA
+platform. **This app records that somebody filed and what reference came back** —
+and a document whose template says it needs an external filing and which has no
+reference is reported outstanding however approved it looks. A module that
+implied it had transmitted a certificate would be the most dangerous thing in
+this repository.
+
+Field names follow the published data models so a broker's schema and this app's
+can be reconciled **by reading**: IPPC/ISPM-12 (ePhyto), the DCSA data model
+(eBL), 15 CFR 30 EEI elements (AES), WCO origin criteria. Those are the
+standards' *names*, not an implementation of their transports.
+
+### The seal
+
+`seal_trade_document` fingerprints an approved document and closes it to editing.
+Until then, "this is the certificate we presented" is an assertion about a record
+anybody could have edited since; after it, the claim is checkable. A sealed
+document **refuses content edits** — a seal over a row that can still change is a
+timestamp wearing a seal's clothes. Correcting one means voiding it and issuing a
+replacement, which is what happens to a real certificate that is withdrawn.
+
+The hash covers an **allow-list** of columns, stored beside it, so a column added
+in a later version cannot make every previously sealed document fail
+verification. `get_trade_document` recomputes on every read, so a document
+changed underneath its seal reports the seal as broken rather than looking intact.
+
+`generate_shipment_packet` bundles the lot and hashes the bundle over its
+members' hashes. It refuses unsealed documents by default — a packet is something
+somebody carries into a room and defends — and `allow_unsealed=true` names them
+at the front rather than dropping them, because a bundle that quietly omitted
+them would read as a shipment with less paperwork than it has.
+
+### Two things that are reported and never applied
+
+**The checklist is a snapshot.** It is built once, at creation, and is never
+silently rebuilt: a destination's rules changing in March must not quietly add a
+requirement to a February shipment that has already sailed.
+`get_shipment_readiness` reports `requirement_drift` instead.
+
+**Removed requirements are disabled, not deleted.** A shipment made under a rule
+is audited against what was asked for *then*, and a deleted rule cannot answer
+why it was needed.
+
+### The five mobile routes, and what is deliberately not among them
+
+| Route | Gate | Why |
+| --- | --- | --- |
+| `list_shipments`, `get_shipment` | enrolment | What is going out, scoped to the entities the caller may reach |
+| `get_shipment_readiness` | enrolment | The question somebody standing next to a truck actually has |
+| `list_trade_documents` | enrolment | The paperwork on a load |
+| `confirm_shipment_movement` | enrolment | A driver says "I have left" / "I have arrived" — nobody needs a certificate to perform that act |
+
+`confirm_shipment_movement` takes `departed` or `delivered` and **nothing else**.
+It does not forward `override_reason`, cannot release a shipment to Ready to Ship
+and cannot cancel one. A release is an assertion that the paperwork is in order,
+made by somebody with a trade role at a desk; an account that could make it from
+a phone in a yard would make the gate worth nothing. Same argument that keeps
+`cancel=true` off `reject_farm_task`.
+
+`approve_trade_document` and `seal_trade_document` have no route at all, and
+require one of **System Manager, Farm Manager, Compliance Officer, Sales Manager
+or Accounts Manager**. A commercial invoice is a customs declaration and a
+phytosanitary certificate is a claim about a pest; neither is anonymous.

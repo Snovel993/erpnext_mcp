@@ -248,6 +248,24 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# or a key prefixed per entity, which every client would have to learn.
 		# Per-company narrowing, when somebody wants it, is `required_role` and a
 		# second definition under its own key.
+		#
+		# THE v0.80.0 ADDITION IS THE SAME ARGUMENT ABOUT A KIND OF PAPER. A Trade
+		# Document Template is the SHAPE of a document — "a phytosanitary
+		# certificate carries a botanical name, a treatment schedule and an
+		# additional declaration" — and a shape belongs to no entity. It names no
+		# shipment, no customer and no container. The records that carry those are
+		# the Trade SHIPMENTS and the Trade DOCUMENTS themselves, both of which
+		# link to Company and are scoped by Frappe exactly as before.
+		#
+		# Scoping it would be wrong for the docname reason as well as the shape
+		# one: the docname IS the template name a Destination Document Requirement
+		# points at, so a per-company template would mean either the same name
+		# existing several times — which the unique constraint refuses — or a name
+		# prefixed per entity, which every rule would have to spell. Per-company
+		# narrowing exists and is on the layer where it belongs: `Destination
+		# Document Requirement.company`, which is a Link to Company and IS scoped
+		# by Frappe, so one entity really can be made to ask for a document
+		# another does not — without two spellings of the certificate itself.
 		self.assertEqual(
 			sorted(unscoped),
 			[
@@ -264,6 +282,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"Staged File Chunk",
 				"Staged File Upload Session",
 				"State Tax Table",
+				"Trade Document Template",
 				"Training Type",
 				"Wizard Definition",
 			],

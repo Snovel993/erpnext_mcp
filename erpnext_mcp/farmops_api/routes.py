@@ -472,6 +472,16 @@ ROUTES = (
 	# answer in the caller's own language off `Employee.preferred_language`.
 	Route("/mobile", mobile_api.get_wizard_definition),
 	Route("/mobile", mobile_api.list_wizard_definitions),
+	# v0.80.0. Trade documentation: four reads and one write. The write is a
+	# DRIVER'S CONFIRMATION and not the desk's tool — `confirm_shipment_movement`
+	# takes 'departed' or 'delivered' and its signature carries neither `status`
+	# nor `override_reason`, so `bind` cannot pass either. Releasing a shipment
+	# and cancelling one stay on the MCP surface, where the trade-role gate is.
+	Route("/mobile", mobile_api.list_shipments),
+	Route("/mobile", mobile_api.get_shipment),
+	Route("/mobile", mobile_api.get_shipment_readiness),
+	Route("/mobile", mobile_api.list_trade_documents),
+	Route("/mobile", mobile_api.confirm_shipment_movement),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

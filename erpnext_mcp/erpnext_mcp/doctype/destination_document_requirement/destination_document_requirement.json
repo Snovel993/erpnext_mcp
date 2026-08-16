@@ -1,0 +1,142 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One rule: shipping to HERE needs THAT document. This is the compliance-rules-driven half of the module and the reason a new export market is a row rather than a release — a farm that lands a buyer in Vietnam adds the documents Vietnam asks for and the next shipment to Vietnam builds its own checklist. The lookup is by tier first and country second: a Local or Domestic rule leaves the country empty and applies to every shipment at that tier, and an International rule names the country it is about. A COUNTRY RULE ADDS TO THE TIER'S RULES RATHER THAN REPLACING THEM, because the paper a country asks for is on top of the paper an export always needs, never instead of it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "destination_tier",
+  "destination_country",
+  "trade_document_template",
+  "identity_col",
+  "required",
+  "enabled",
+  "company",
+  "detail_section",
+  "sequence",
+  "notes",
+  "meta_section",
+  "shipped_default"
+ ],
+ "fields": [
+  {
+   "description": "Which tier this rule is about. Local and Domestic rules leave the country empty and apply to every shipment at that tier; International rules name a country.",
+   "fieldname": "destination_tier",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Destination Tier",
+   "options": "Local\nDomestic\nInternational",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The country this rule is about, for an International rule. EMPTY MEANS EVERY COUNTRY AT THIS TIER — which is how the documents every export needs (an AES declaration, a certificate of origin) are stated once rather than copied per country. A country's own rules are read IN ADDITION to those, never instead of them.",
+   "fieldname": "destination_country",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Destination Country",
+   "search_index": 1
+  },
+  {
+   "description": "The document this destination asks for.",
+   "fieldname": "trade_document_template",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Trade Document Template",
+   "options": "Trade Document Template",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "1",
+   "description": "Whether the shipment is held for this document or merely offered it. A REQUIRED document blocks 'Ready to Ship' where enforcement is on and is named in every readiness answer; an unrequired one is created as a placeholder and tracked, which is the right shape for paper a buyer usually wants and no rule compels.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required"
+  },
+  {
+   "default": "1",
+   "description": "A disabled rule is not applied to new shipments. It is how a requirement that a destination has dropped is withdrawn without deleting the record of what used to be asked for — which an audit of a shipment made last season will want.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "description": "Scope this rule to one Company. EMPTY MEANS EVERY COMPANY on the site, which is the ordinary case — the paper Japan asks for does not depend on which of an operator's entities is shipping. Set it only where two entities on one site genuinely ship under different arrangements.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "default": "50",
+   "description": "Where this document sits in the checklist, overriding the template's own sequence for this destination. Lower first.",
+   "fieldname": "sequence",
+   "fieldtype": "Int",
+   "label": "Sequence"
+  },
+  {
+   "description": "Why this destination asks for this, and anything the sales desk needs to know about getting it — who issues it, how long it takes, what holds it up. On an ePhyto this is where 'lodged in PCIT, allow three working days, inspection must be booked first' belongs.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "meta_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "Set on the requirements this app seeds. A SHIPPED REQUIREMENT IS NOT OVERWRITTEN once an operator has edited it, and the seeder writes a rule only where no rule for that destination and template exists at all — because the seeded set is this app's reading of a general case, and the operator's is their own broker's reading of their own trade.",
+   "fieldname": "shipped_default",
+   "fieldtype": "Check",
+   "label": "Shipped Default",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Destination Document Requirement",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "destination_tier,destination_country,trade_document_template",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -1,0 +1,408 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "Fruit leaving the farm, and the paperwork that has to leave with it. ONE RECORD FOR ALL THREE TIERS on purpose: a sales desk that ran local deliveries out of one system, interstate freight out of a second and exports out of a third is a desk where the export paperwork is the only paperwork anybody checks, because it is the only one that lives somewhere that looks like paperwork. The tier decides how much paper, not which system. NAMED 'Trade Shipment' RATHER THAN 'Shipment' because ERPNext core already owns the name Shipment (its parcel-service record), and DocType names are unique across every installed app — a doctype called Shipment here would not install alongside it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "status",
+  "destination_tier",
+  "destination_country",
+  "identity_col",
+  "customer",
+  "customer_name",
+  "company",
+  "ship_date",
+  "commerce_section",
+  "sales_order",
+  "sales_invoice",
+  "commerce_col",
+  "commodity",
+  "total_packages",
+  "gross_weight",
+  "net_weight",
+  "weight_uom",
+  "destination_section",
+  "destination_name",
+  "destination_address",
+  "destination_col",
+  "destination_state",
+  "destination_city",
+  "destination_postal_code",
+  "transport_section",
+  "carrier",
+  "tracking_number",
+  "container_number",
+  "transport_col",
+  "vessel",
+  "voyage_number",
+  "port_of_loading",
+  "port_of_discharge",
+  "documents_section",
+  "documents",
+  "control_section",
+  "enforcement",
+  "released_by",
+  "released_on",
+  "control_col",
+  "override_reason",
+  "packet_document",
+  "timeline_section",
+  "departed_on",
+  "delivered_on",
+  "timeline_col",
+  "cancelled_on",
+  "cancellation_reason",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "TSHIP-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "options": "TSHIP-.YYYY.-.####"
+  },
+  {
+   "default": "Draft",
+   "description": "Draft is a shipment being planned. Documents Pending means the checklist has been built and is not satisfied. Ready to Ship means every required document is Approved or Sealed — the one transition this module actually gates. In Transit means it has left. Delivered means it arrived. Cancelled is a shipment that did not go, kept rather than deleted because the paperwork raised for it is a fact about the season.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nDocuments Pending\nReady to Ship\nIn Transit\nDelivered\nCancelled",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "How far this is going, which is what decides how much paper it needs. Local is inside the region — a scale ticket, a receipt, an invoice, a grade. Domestic crosses a state line and picks up federal food-safety and cold-chain records. International crosses a border and picks up everything a border asks for.",
+   "fieldname": "destination_tier",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Destination Tier",
+   "options": "Local\nDomestic\nInternational",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Where it is going, for an International shipment. This is what the checklist looks its country rules up by, so it is stored in one normalised spelling — a country spelled a second way is a shipment that gets none of that country's rules and looks like a shipment that needed nothing.",
+   "fieldname": "destination_country",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Destination Country",
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "search_index": 1
+  },
+  {
+   "fetch_from": "customer.customer_name",
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "label": "Customer Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "When it is meant to leave. The date every document's lead time is counted back from.",
+   "fieldname": "ship_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ship Date",
+   "search_index": 1
+  },
+  {
+   "fieldname": "commerce_section",
+   "fieldtype": "Section Break",
+   "label": "Commerce"
+  },
+  {
+   "description": "The order this shipment fulfils, where there is one. A commercial invoice's auto-population reads through it.",
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "options": "Sales Order"
+  },
+  {
+   "description": "The invoice raised against it. On an export this is the document a customs value is taken from, which is why a commercial invoice draws from it rather than restating it.",
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Sales Invoice",
+   "options": "Sales Invoice"
+  },
+  {
+   "fieldname": "commerce_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What is on the truck, in words a customs officer and a grower both use — 'Fresh sweet cherries, Bing'.",
+   "fieldname": "commodity",
+   "fieldtype": "Data",
+   "label": "Commodity"
+  },
+  {
+   "fieldname": "total_packages",
+   "fieldtype": "Int",
+   "label": "Total Packages"
+  },
+  {
+   "fieldname": "gross_weight",
+   "fieldtype": "Float",
+   "label": "Gross Weight"
+  },
+  {
+   "fieldname": "net_weight",
+   "fieldtype": "Float",
+   "label": "Net Weight"
+  },
+  {
+   "default": "Kg",
+   "fieldname": "weight_uom",
+   "fieldtype": "Select",
+   "label": "Weight UOM",
+   "options": "Kg\nLb\nTon\nBin\nBox"
+  },
+  {
+   "fieldname": "destination_section",
+   "fieldtype": "Section Break",
+   "label": "Destination"
+  },
+  {
+   "description": "Who receives it, where that is not the customer — a packing house, a distribution centre, a consignee named on the bill of lading.",
+   "fieldname": "destination_name",
+   "fieldtype": "Data",
+   "label": "Consignee"
+  },
+  {
+   "fieldname": "destination_address",
+   "fieldtype": "Small Text",
+   "label": "Destination Address"
+  },
+  {
+   "fieldname": "destination_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The state or province. On a Domestic shipment this is what makes it interstate, and it is worth having even where the tier already says so — a state is what a produce-licensing question is answered with.",
+   "fieldname": "destination_state",
+   "fieldtype": "Data",
+   "label": "Destination State"
+  },
+  {
+   "fieldname": "destination_city",
+   "fieldtype": "Data",
+   "label": "Destination City"
+  },
+  {
+   "fieldname": "destination_postal_code",
+   "fieldtype": "Data",
+   "label": "Postal Code"
+  },
+  {
+   "fieldname": "transport_section",
+   "fieldtype": "Section Break",
+   "label": "Transport"
+  },
+  {
+   "fieldname": "carrier",
+   "fieldtype": "Data",
+   "label": "Carrier"
+  },
+  {
+   "fieldname": "tracking_number",
+   "fieldtype": "Data",
+   "label": "Tracking Number"
+  },
+  {
+   "description": "The reefer or dry container. On an export this appears on the bill of lading and on the phytosanitary certificate, and the two disagreeing is a hold at the far end.",
+   "fieldname": "container_number",
+   "fieldtype": "Data",
+   "label": "Container Number"
+  },
+  {
+   "fieldname": "transport_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "vessel",
+   "fieldtype": "Data",
+   "label": "Vessel"
+  },
+  {
+   "fieldname": "voyage_number",
+   "fieldtype": "Data",
+   "label": "Voyage Number"
+  },
+  {
+   "description": "DCSA names it port of loading; a grower calls it the port it sails from. Both mean this column.",
+   "fieldname": "port_of_loading",
+   "fieldtype": "Data",
+   "label": "Port of Loading"
+  },
+  {
+   "fieldname": "port_of_discharge",
+   "fieldtype": "Data",
+   "label": "Port of Discharge"
+  },
+  {
+   "fieldname": "documents_section",
+   "fieldtype": "Section Break",
+   "label": "Document Checklist"
+  },
+  {
+   "description": "What this destination asks for, built from the Destination Document Requirements when the shipment was created. A line with no Trade Document on it is paperwork nobody has started.",
+   "fieldname": "documents",
+   "fieldtype": "Table",
+   "label": "Documents",
+   "options": "Trade Shipment Document"
+  },
+  {
+   "fieldname": "control_section",
+   "fieldtype": "Section Break",
+   "label": "Release Control"
+  },
+  {
+   "default": "Site Default",
+   "description": "Whether an incomplete checklist BLOCKS this shipment or merely warns about it. Site Default follows `trade_document_enforcement` on ERPNext MCP Settings, which ships OFF — a two-truck operation should not be locked out of its own delivery by a certificate nobody needs. Advisory and Enforced override that for this one shipment, which is what an operation shipping mostly local and occasionally to Japan actually needs.",
+   "fieldname": "enforcement",
+   "fieldtype": "Select",
+   "label": "Enforcement",
+   "options": "Site Default\nAdvisory\nEnforced"
+  },
+  {
+   "fieldname": "released_by",
+   "fieldtype": "Link",
+   "label": "Released By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "description": "When it was marked Ready to Ship. Distinct from when it departed.",
+   "fieldname": "released_on",
+   "fieldtype": "Datetime",
+   "label": "Released On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "control_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Why this shipment was released with its checklist incomplete. Written by `update_shipment_status` when somebody overrides enforcement, and kept because a bypass nobody recorded is a bypass nobody can review — which is the difference between an advisory control and no control.",
+   "fieldname": "override_reason",
+   "fieldtype": "Small Text",
+   "label": "Override Reason",
+   "read_only": 1
+  },
+  {
+   "description": "The sealed bundle of this shipment's documents, once one has been generated.",
+   "fieldname": "packet_document",
+   "fieldtype": "Link",
+   "label": "Document Packet",
+   "options": "Governance Document",
+   "read_only": 1
+  },
+  {
+   "fieldname": "timeline_section",
+   "fieldtype": "Section Break",
+   "label": "Timeline"
+  },
+  {
+   "fieldname": "departed_on",
+   "fieldtype": "Datetime",
+   "label": "Departed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "delivered_on",
+   "fieldtype": "Datetime",
+   "label": "Delivered On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "timeline_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "cancelled_on",
+   "fieldtype": "Datetime",
+   "label": "Cancelled On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancellation_reason",
+   "fieldtype": "Small Text",
+   "label": "Cancellation Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Trade Shipment",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "customer_name,destination_tier,destination_country,status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

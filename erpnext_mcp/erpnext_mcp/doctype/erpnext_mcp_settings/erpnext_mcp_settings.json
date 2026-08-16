@@ -724,7 +724,25 @@
   "allow_get_accident_report",
   "allow_list_accident_reports",
   "allow_get_wizard_definition",
-  "allow_list_wizard_definitions"
+  "allow_list_wizard_definitions",
+  "trade_section",
+  "trade_document_enforcement",
+  "allow_get_shipment",
+  "allow_list_shipments",
+  "allow_get_shipment_readiness",
+  "allow_get_trade_document",
+  "allow_list_trade_documents",
+  "allow_list_trade_document_templates",
+  "allow_get_destination_requirements",
+  "allow_create_shipment",
+  "allow_update_shipment_status",
+  "allow_create_trade_document",
+  "allow_update_trade_document",
+  "allow_approve_trade_document",
+  "allow_seal_trade_document",
+  "allow_generate_shipment_packet",
+  "allow_create_trade_document_template",
+  "allow_set_destination_requirements"
  ],
  "fields": [
   {
@@ -5478,6 +5496,130 @@
    "fieldname": "allow_list_wizard_definitions",
    "fieldtype": "Check",
    "label": "List Wizard Definitions"
+  },
+  {
+   "fieldname": "trade_section",
+   "fieldtype": "Section Break",
+   "label": "Trade Documentation"
+  },
+  {
+   "default": "0",
+   "description": "POLICY, not a tool switch. OFF (the default) means an incomplete document checklist is REPORTED and does not stop a shipment reaching Ready to Ship. ON means it holds the shipment until every required document is Approved or Sealed, unexpired, and carrying the reference its external filing returned — and releasing anyway needs a reason, which is written to the shipment. It ships off because a two-truck operation locked out of its own delivery by a certificate it will never need turns this module off entirely, and an operation that has turned it off gets no warnings either. One shipment can override this either way with its own Enforcement field.",
+   "fieldname": "trade_document_enforcement",
+   "fieldtype": "Check",
+   "label": "Enforce Trade Document Completeness"
+  },
+  {
+   "default": "1",
+   "description": "READ. One shipment in full: the load, the route, every document on it, and whether it is ready to move.",
+   "fieldname": "allow_get_shipment",
+   "fieldtype": "Check",
+   "label": "Get Shipment"
+  },
+  {
+   "default": "1",
+   "description": "READ. The shipping register, filterable by status, customer, tier, destination country and ship date.",
+   "fieldname": "allow_list_shipments",
+   "fieldtype": "Check",
+   "label": "List Shipments"
+  },
+  {
+   "default": "1",
+   "description": "READ. Required versus done for one shipment, and exactly what is holding it — naming expired documents and those still waiting on somebody else's filing system.",
+   "fieldname": "allow_get_shipment_readiness",
+   "fieldtype": "Check",
+   "label": "Get Shipment Readiness"
+  },
+  {
+   "default": "1",
+   "description": "READ. One trade document in full, with its template's schema, what is still unfilled, and whether its seal still verifies.",
+   "fieldname": "allow_get_trade_document",
+   "fieldtype": "Check",
+   "label": "Get Trade Document"
+  },
+  {
+   "default": "1",
+   "description": "READ. The document register, filterable by shipment, type and status. Names every document awaiting an external filing and every expired one.",
+   "fieldname": "allow_list_trade_documents",
+   "fieldtype": "Check",
+   "label": "List Trade Documents"
+  },
+  {
+   "default": "1",
+   "description": "READ. What kinds of trade document this site can issue, with their tiers, their schemas and whose system files them.",
+   "fieldname": "allow_list_trade_document_templates",
+   "fieldtype": "Check",
+   "label": "List Trade Document Templates"
+  },
+  {
+   "default": "1",
+   "description": "READ. What paperwork a destination asks for, before any shipment exists. A country's rules add to the tier's rather than replacing them.",
+   "fieldname": "allow_get_destination_requirements",
+   "fieldtype": "Check",
+   "label": "Get Destination Requirements"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Open a shipment and build its document checklist from the destination's own rules. The checklist is a snapshot and is never silently rebuilt.",
+   "fieldname": "allow_create_shipment",
+   "fieldtype": "Check",
+   "label": "Create Shipment"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Walk a shipment forward. The one gate in this module is on Ready to Ship, it is advisory unless trade_document_enforcement is on, and an override writes its reason to the shipment.",
+   "fieldname": "allow_update_shipment_status",
+   "fieldtype": "Check",
+   "label": "Update Shipment Status"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Start one document for a shipment, populated from the record it is about where the template says where to look.",
+   "fieldname": "allow_create_trade_document",
+   "fieldtype": "Check",
+   "label": "Create Trade Document"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Fill in a document's fields, its dates and the reference its external filing returned. Merges rather than replaces.",
+   "fieldname": "allow_update_trade_document",
+   "fieldtype": "Check",
+   "label": "Update Trade Document"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Approve a document, with a Signing Evidence attestation over its fingerprint where the template asks for a signature. Requires a trade role.",
+   "fieldname": "allow_approve_trade_document",
+   "fieldtype": "Check",
+   "label": "Approve Trade Document"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Fingerprint an approved document and close it to editing. A hash over a row anybody can still edit proves nothing.",
+   "fieldname": "allow_seal_trade_document",
+   "fieldtype": "Check",
+   "label": "Seal Trade Document"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Bundle a shipment's documents into one tamper-evident record. Refuses unsealed documents unless told otherwise, and names them rather than dropping them.",
+   "fieldname": "allow_generate_shipment_packet",
+   "fieldtype": "Check",
+   "label": "Generate Shipment Packet"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Add or amend a kind of trade document. A new document type is a row, not a release.",
+   "fieldname": "allow_create_trade_document_template",
+   "fieldtype": "Check",
+   "label": "Create Trade Document Template"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Configure what a destination asks for. A new export market is rows, not a release. Additive by default; replaced rules are disabled, never deleted.",
+   "fieldname": "allow_set_destination_requirements",
+   "fieldtype": "Check",
+   "label": "Set Destination Requirements"
   }
  ],
  "index_web_pages_for_search": 0,

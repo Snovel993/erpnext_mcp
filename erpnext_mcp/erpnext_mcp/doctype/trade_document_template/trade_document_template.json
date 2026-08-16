@@ -1,0 +1,233 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:template_name",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "The SHAPE of one kind of trade document, as data. A phytosanitary certificate and a delivery receipt are the same object to this app — a container with a type, a schema, a source to populate from, and a rule about who signs it — and the difference between them is a row here. That is the whole reason this doctype exists: a farm that starts shipping to a country it has never shipped to before needs a certificate it has never issued before, and adding it must not be a code release. THE SCHEMA IS NAMED, NOT ENFORCED AS COLUMNS. `required_fields` is a JSON list because a Bill of Lading and an AES filing share no columns at all, and a table wide enough for both would be a table that is mostly NULL for every row in it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "template_name",
+  "document_type",
+  "enabled",
+  "sequence",
+  "identity_col",
+  "label_en",
+  "label_es",
+  "standard_reference",
+  "description_section",
+  "description_en",
+  "description_es",
+  "schema_section",
+  "required_fields",
+  "auto_populate_from",
+  "auto_populate_map",
+  "handling_section",
+  "requires_signature",
+  "signature_role",
+  "handling_col",
+  "requires_external_filing",
+  "external_system",
+  "scope_section",
+  "applicable_tiers",
+  "notes",
+  "meta_section",
+  "shipped_default"
+ ],
+ "fields": [
+  {
+   "description": "THE DOCNAME IS THIS STRING, so a template an operator edits and a template a shipment points at are the same row. Short and stable — 'Commercial Invoice', 'Phytosanitary Certificate (ePhyto)'.",
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Template Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "What kind of paper this is. A CLOSED LIST because the type is what `get_destination_requirements` matches on and what a customs broker recognises; a free-text type would let two spellings of 'Certificate of Origin' both look required and neither be satisfied. Operators who need a type that is not here add it to this Select in the Desk — the list is customisable, the column is not free text.",
+   "fieldname": "document_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Document Type",
+   "options": "Scale Ticket Reference\nDelivery Receipt\nCommercial Invoice\nGrade Certificate\nUSDA Grade Certificate\nPacking List\nBill of Lading\nFSMA Food Safety Record\nCold Chain Record\nPhytosanitary Certificate (ePhyto)\nCertificate of Origin\nAES Export Declaration\nFumigation Certificate\nElectronic Bill of Lading (eBL)\nImport Permit Reference\nInsurance Certificate\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "1",
+   "description": "A disabled template is not offered and is not required of any new shipment. It is how a document type that a destination stopped asking for is withdrawn WITHOUT deleting a template that shipments already in transit still point at.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "50",
+   "description": "Display order in a checklist. Lower first. The default leaves room either side, so inserting a document between two existing ones does not mean renumbering the set.",
+   "fieldname": "sequence",
+   "fieldtype": "Int",
+   "label": "Sequence"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What the sales desk sees. Separate from `template_name` because the docname has to be stable and a label does not.",
+   "fieldname": "label_en",
+   "fieldtype": "Data",
+   "label": "Label (English)"
+  },
+  {
+   "description": "The Spanish label. EMPTY IS REPORTED RATHER THAN FILLED IN — the reads return the English with the gap listed in `untranslated`, the same contract `get_wizard_definition` has, so a missing string is visible to whoever maintains the template instead of invisible to whoever reads the screen.",
+   "fieldname": "label_es",
+   "fieldtype": "Data",
+   "label": "Label (Spanish)"
+  },
+  {
+   "description": "The standard this document's fields are named from — 'IPPC ISPM-12', 'DCSA eBL 3.0', 'AES/EEI 15 CFR 30', 'WCO Origin'. Recorded so somebody reconciling this app's field names against a broker's schema has the citation rather than a guess.",
+   "fieldname": "standard_reference",
+   "fieldtype": "Data",
+   "label": "Standard Reference"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What this document is for and who reads it, in a sentence the sales desk reads. On an ePhyto the difference between a certificate that clears and one that is held is largely written here.",
+   "fieldname": "description_en",
+   "fieldtype": "Small Text",
+   "label": "Description (English)"
+  },
+  {
+   "fieldname": "description_es",
+   "fieldtype": "Small Text",
+   "label": "Description (Spanish)"
+  },
+  {
+   "fieldname": "schema_section",
+   "fieldtype": "Section Break",
+   "label": "Schema"
+  },
+  {
+   "description": "The fields this document type carries, as a JSON list. Either plain strings, or objects with `fieldname`, `label_en`, `label_es`, `type`, `required` and `help` — the second where the field needs explaining, which on a phytosanitary treatment schedule it does. NAMED RATHER THAN ENFORCED AS COLUMNS: a Bill of Lading and an AES filing share no columns, and one table wide enough for both is a table that is mostly NULL.",
+   "fieldname": "required_fields",
+   "fieldtype": "Long Text",
+   "label": "Required Fields (JSON)"
+  },
+  {
+   "description": "The DocType a new document of this type draws its opening values from — Sales Invoice for a commercial invoice, Scale Ticket for a weight reference. THE POPULATION IS A STARTING POINT, NOT A BINDING: values are copied once at creation and the trade document owns them after that, because a certificate that silently changed when somebody edited the invoice behind it is a certificate whose seal proves nothing.",
+   "fieldname": "auto_populate_from",
+   "fieldtype": "Link",
+   "label": "Auto-populate From",
+   "options": "DocType"
+  },
+  {
+   "description": "How the source's columns map into this document's fields, as JSON: {\"invoice_number\": \"name\", \"invoice_total\": \"grand_total\"}. Keys are this document's field names, values are the source record's. Absent means the fields that share a name are copied and nothing else.",
+   "fieldname": "auto_populate_map",
+   "fieldtype": "Long Text",
+   "label": "Auto-populate Map (JSON)"
+  },
+  {
+   "fieldname": "handling_section",
+   "fieldtype": "Section Break",
+   "label": "Handling"
+  },
+  {
+   "default": "0",
+   "description": "Whether approving this document is an ATTESTATION rather than a tick. Where it is set, `approve_trade_document` writes a Signing Evidence row over the document's fingerprint — the same evidence chain a Form I-9 signature uses — so the question 'what exactly did they certify' has an answer that is not 'the record as it stands now'.",
+   "fieldname": "requires_signature",
+   "fieldtype": "Check",
+   "label": "Requires Signature"
+  },
+  {
+   "description": "The capacity the signature is given in. Closed list, and it matters legally: an inspector certifying a phytosanitary treatment and a shipper declaring a commercial invoice are different acts by different people.",
+   "fieldname": "signature_role",
+   "fieldtype": "Select",
+   "label": "Signature Role",
+   "options": "\nEmployer Representative\nOfficer\nInspector\nWitness\nPreparer or Translator\nEmployee"
+  },
+  {
+   "fieldname": "handling_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "Whether this document is not finished when this app says it is — an ePhyto is lodged in PCIT, an EEI is filed in AES, an eBL is issued on a DCSA platform. THIS APP DOES NOT FILE ANYTHING. Where this is set, the document carries the external reference somebody else's system issued, and a document that has none is reported as incomplete rather than quietly counted as done.",
+   "fieldname": "requires_external_filing",
+   "fieldtype": "Check",
+   "label": "Requires External Filing"
+  },
+  {
+   "description": "Whose system — PCIT, AES, ACE, DCSA, IPPC ePhyto Hub. A name rather than an integration: this app records that the filing happened and what reference came back.",
+   "fieldname": "external_system",
+   "fieldtype": "Data",
+   "label": "External System"
+  },
+  {
+   "fieldname": "scope_section",
+   "fieldtype": "Section Break",
+   "label": "Scope"
+  },
+  {
+   "description": "Which tiers this document can appear on, comma-separated from Local, Domestic and International. A COMMA-SEPARATED SET RATHER THAN A CHILD TABLE because it is a closed three-value enum and a whole doctype to hold three words would be table sprawl. Empty means every tier.",
+   "fieldname": "applicable_tiers",
+   "fieldtype": "Small Text",
+   "label": "Applicable Tiers"
+  },
+  {
+   "description": "Anything the sales desk needs to know that is not a field — lead times, who issues it, what holds it up.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "meta_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "Set on the templates this app seeds. A SHIPPED TEMPLATE IS NOT OVERWRITTEN once an operator has edited it — the seeder writes it if it is absent and leaves it alone after that, the same contract the wizard definitions have, because a template somebody tuned for their own broker being reset by a migration is what makes 'config not code' a lie.",
+   "fieldname": "shipped_default",
+   "fieldtype": "Check",
+   "label": "Shipped Default",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Trade Document Template",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "document_type,label_en,applicable_tiers",
+ "sort_field": "sequence",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The sixty-four methods the Farm Ops app calls, as whitelisted Frappe endpoints.
+"""The methods the Farm Ops app calls, as whitelisted Frappe endpoints.
 
     POST /api/method/erpnext_mcp.api.mobile.<method>
     Authorization: token <api_key>:<api_secret>
@@ -112,6 +112,7 @@ from ..tools import accidents as accident_tools
 from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
 from ..tools import universal_scan as universal_scan_tool
+from ..tools import shipments as shipment_tools
 from ..tools import wizards as wizard_tools
 from ..tools import wallet as wallet_tools
 from . import guard, rectify, shape
@@ -7560,3 +7561,131 @@ def list_wizard_definitions(user: str, category=None, language=None) -> dict:
 	if language:
 		inner["language"] = str(language).strip()
 	return wizard_tools.list_wizard_definitions(inner).data
+
+
+# ── 93. list_shipments ───────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_shipments", limit=guard.READ_LIMIT)
+def list_shipments(user: str, company=None, status=None, open_only=None, limit=None) -> dict:
+	"""What is going out, for the entities this caller may reach. v0.80.0.
+
+	Read-only and scoped like everything else here. A driver wants the loads that
+	have not arrived yet, which is what `open_only` answers.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+
+	inner = {}
+	if entity:
+		inner["company"] = entity
+	if status not in (None, ""):
+		inner["status"] = str(status).strip()
+	if open_only is not None:
+		inner["open_only"] = open_only
+	if limit is not None:
+		inner["limit"] = limit
+
+	data = shipment_tools.list_shipments(inner).data
+	data["shipments"] = guard.scoped(data.get("shipments") or [], allowed)
+	data["count"] = len(data["shipments"])
+	return data
+
+
+# ── 94. get_shipment ─────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_shipment", limit=guard.READ_LIMIT)
+def get_shipment(user: str, shipment=None) -> dict:
+	"""One shipment and its paperwork, in this caller's own language. v0.80.0."""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc("Trade Shipment", shipment, "shipment", allowed)
+	employee = _employee(user)
+	return shipment_tools.get_shipment({"shipment": name, "employee": employee, "user": user}).data
+
+
+# ── 95. get_shipment_readiness ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_shipment_readiness", limit=guard.READ_LIMIT)
+def get_shipment_readiness(user: str, shipment=None) -> dict:
+	"""What is still missing before this load can go. v0.80.0.
+
+	The question somebody standing next to a truck actually has, and the reason
+	this is on the handset at all.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc("Trade Shipment", shipment, "shipment", allowed)
+	return shipment_tools.get_shipment_readiness({"shipment": name}).data
+
+
+# ── 96. list_trade_documents ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_trade_documents", limit=guard.READ_LIMIT)
+def list_trade_documents(user: str, shipment=None, status=None, outstanding_only=None, limit=None) -> dict:
+	"""The paperwork on a load, or the paperwork outstanding across them. v0.80.0."""
+	allowed = guard.require_scope(user)
+
+	inner = {}
+	if shipment not in (None, ""):
+		inner["shipment"] = guard.require_scoped_doc("Trade Shipment", shipment, "shipment", allowed)
+	if status not in (None, ""):
+		inner["status"] = str(status).strip()
+	if outstanding_only is not None:
+		inner["outstanding_only"] = outstanding_only
+	if limit is not None:
+		inner["limit"] = limit
+
+	data = shipment_tools.list_trade_documents(inner).data
+	data["documents"] = guard.scoped(data.get("documents") or [], allowed)
+	data["count"] = len(data["documents"])
+	return data
+
+
+# ── 97. confirm_shipment_movement ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("confirm_shipment_movement", limit=guard.WRITE_LIMIT, mutating=True)
+def confirm_shipment_movement(user: str, shipment=None, movement=None, occurred_at=None, notes=None) -> dict:
+	"""A handset confirms a load LEFT or ARRIVED. Nothing else. v0.80.0.
+
+	NAMED FOR WHAT A PHONE DOES rather than after the tool it delegates to, and
+	the two are deliberately not the same shape. `update_shipment_status` can
+	release a shipment to Ready to Ship — which is the module's one gate — and can
+	cancel one, and can carry an `override_reason` that walks past an incomplete
+	document checklist. NONE OF THOSE IS FORWARDED.
+
+	The reason is the same one that keeps `cancel=true` off `reject_farm_task`: a
+	release is an assertion that the paperwork is in order, made by somebody with
+	a trade role at a desk, and an account that could make it from a phone in a
+	yard would make the gate worth nothing. A driver saying "I have left" and "I
+	have arrived" is a different act, it is one nobody needs a certificate to
+	perform, and it is the only one published here.
+
+	`departed` and `delivered` are the two words the app sends; they map to the
+	statuses the tool knows. A shipment that has not been released yet cannot be
+	departed, and the tool's own transition table is what refuses it — this
+	wrapper adds no rules of its own beyond the two it will not forward.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc("Trade Shipment", shipment, "shipment", allowed)
+
+	moves = {"departed": "In Transit", "in transit": "In Transit", "delivered": "Delivered", "arrived": "Delivered"}
+	wanted = moves.get(str(movement or "").strip().casefold())
+	if not wanted:
+		raise ToolError(
+			"movement is 'departed' or 'delivered'. A handset confirms that a load left and "
+			"that it arrived; releasing a shipment and cancelling one are desk acts with a "
+			"trade role behind them and are not reachable from here. Nothing was changed."
+		)
+
+	inner = {"shipment": name, "status": wanted}
+	if occurred_at not in (None, ""):
+		inner["departed_on" if wanted == "In Transit" else "delivered_on"] = str(occurred_at).strip()
+	if notes not in (None, ""):
+		inner["notes"] = str(notes).strip()
+
+	data = shipment_tools.update_shipment_status(inner).data
+	return {
+		"shipment": data.get("shipment"),
+		"status": data.get("status"),
+		"previous_status": data.get("previous_status"),
+		"movement": movement,
+		"changed": data.get("changed"),
+	}

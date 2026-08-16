@@ -1,0 +1,329 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One piece of shipping paperwork, whatever kind. A polymorphic container on purpose: a scale ticket reference, a phytosanitary certificate and an electronic bill of lading share a lifecycle (drafted, reviewed, approved, sealed), a home (a shipment), and an evidence requirement (who attested to what, over which version) — and share almost no fields at all. So the lifecycle is columns and the content is `document_data`, because the alternative is thirteen near-empty doctypes or one table that is ninety per cent NULL. THE SEAL IS THE POINT OF THE STATUSES. A sealed document carries a hash over its own content, so 'this is the certificate we presented' is a checkable claim rather than an assertion about a row anybody could have edited since.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "title",
+  "status",
+  "document_type",
+  "identity_col",
+  "shipment",
+  "template",
+  "company",
+  "required",
+  "content_section",
+  "document_data",
+  "source_section",
+  "source_doctype",
+  "source_name",
+  "source_col",
+  "issued_on",
+  "expires_on",
+  "external_section",
+  "requires_external_filing",
+  "external_system",
+  "external_col",
+  "external_reference",
+  "external_filed_on",
+  "review_section",
+  "reviewed_by",
+  "reviewed_on",
+  "review_col",
+  "approved_by",
+  "approved_on",
+  "approval_notes",
+  "seal_section",
+  "document_hash",
+  "hashed_fields",
+  "seal_col",
+  "sealed_by",
+  "sealed_at",
+  "signing_evidence",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "TDOC-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "options": "TDOC-.YYYY.-.####"
+  },
+  {
+   "description": "What this document is called on a checklist — usually the template's label, sometimes the certificate's own number once it has one.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title"
+  },
+  {
+   "default": "Draft",
+   "description": "Draft is a placeholder the checklist created or a document somebody is filling in. Pending Review means it is complete and waiting on somebody with the authority to approve it. Approved means that person has. Sealed means its content has been fingerprinted and the record is closed to further editing — which is what makes it evidence rather than a row. THE WALK IS ONE WAY: nothing returns to Draft from Approved, and nothing at all comes back from Sealed.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nPending Review\nApproved\nSealed\nVoid",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Copied from the template at creation so a register of documents can be filtered by kind without joining every row back to its template. The template remains authoritative for everything else about the type.",
+   "fieldname": "document_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Document Type",
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The shipment this is paperwork for.",
+   "fieldname": "shipment",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Shipment",
+   "options": "Trade Shipment",
+   "search_index": 1
+  },
+  {
+   "description": "The template this document was made from — its schema, its signature rule, and whether somebody else's system has to file it.",
+   "fieldname": "template",
+   "fieldtype": "Link",
+   "label": "Template",
+   "options": "Trade Document Template"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "Whether the shipment is held for this document. Copied from the Destination Document Requirement that put it on the checklist, and editable after that — a buyer who waives a document on one shipment has not changed the rule for the destination.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "label": "Required"
+  },
+  {
+   "fieldname": "content_section",
+   "fieldtype": "Section Break",
+   "label": "Content"
+  },
+  {
+   "description": "The document's own fields, as JSON, in the shape its template's `required_fields` declares. THIS IS WHERE A PHYTOSANITARY TREATMENT SCHEDULE AND A CONTAINER NUMBER BOTH LIVE, and the reason there is one doctype here rather than thirteen. Sealing fingerprints this column, so what a seal covers is exactly the content somebody approved.",
+   "fieldname": "document_data",
+   "fieldtype": "Long Text",
+   "label": "Document Data (JSON)"
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Source"
+  },
+  {
+   "description": "The record already on this site that this document is drawn from or refers to — a Sales Invoice behind a commercial invoice, a Scale Ticket behind a weight reference. THE REFERENCE IS THE POINT for a document type whose whole job is to point: a Scale Ticket Reference is not a copy of the ticket, it is the assertion that this shipment is that ticket's fruit.",
+   "fieldname": "source_doctype",
+   "fieldtype": "Link",
+   "label": "Source DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "source_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Source Document",
+   "options": "source_doctype"
+  },
+  {
+   "fieldname": "source_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When the document was issued by whoever issues it. Not the same as when this record was created, and it is the one a customs officer reads.",
+   "fieldname": "issued_on",
+   "fieldtype": "Date",
+   "label": "Issued On"
+  },
+  {
+   "description": "When it stops being good. A phytosanitary certificate and an import permit both expire, and a shipment that sails with an expired one is held at the other end — so `get_shipment_readiness` reports an expired document as NOT satisfied even though it is Approved.",
+   "fieldname": "expires_on",
+   "fieldtype": "Date",
+   "label": "Expires On"
+  },
+  {
+   "fieldname": "external_section",
+   "fieldtype": "Section Break",
+   "label": "External Filing"
+  },
+  {
+   "default": "0",
+   "description": "Copied from the template. Where it is set, this app records that somebody else's system was filed with and what reference came back — it does not file anything itself, and a document that claims otherwise would be the most dangerous row in this module.",
+   "fieldname": "requires_external_filing",
+   "fieldtype": "Check",
+   "label": "Requires External Filing",
+   "read_only": 1
+  },
+  {
+   "fieldname": "external_system",
+   "fieldtype": "Data",
+   "label": "External System"
+  },
+  {
+   "fieldname": "external_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What the external system issued — a PCIT certificate number, an AES Internal Transaction Number, a DCSA transport document reference. A document that requires a filing and has no reference is reported as incomplete, because that is exactly what it is.",
+   "fieldname": "external_reference",
+   "fieldtype": "Data",
+   "label": "External Reference"
+  },
+  {
+   "fieldname": "external_filed_on",
+   "fieldtype": "Datetime",
+   "label": "Filed On"
+  },
+  {
+   "fieldname": "review_section",
+   "fieldtype": "Section Break",
+   "label": "Review and Approval"
+  },
+  {
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Reviewed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reviewed_on",
+   "fieldtype": "Datetime",
+   "label": "Reviewed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "review_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On",
+   "read_only": 1
+  },
+  {
+   "description": "What the approver wanted on the record — a condition, a caveat, the broker they checked it with.",
+   "fieldname": "approval_notes",
+   "fieldtype": "Small Text",
+   "label": "Approval Notes"
+  },
+  {
+   "fieldname": "seal_section",
+   "fieldtype": "Section Break",
+   "label": "Seal"
+  },
+  {
+   "description": "`sha256:<hex>` over the document's content as it stood when it was sealed. NOT over the whole row: the columns the seal itself writes are excluded, because a hash that included them could never be recomputed to match.",
+   "fieldname": "document_hash",
+   "fieldtype": "Data",
+   "label": "Document Hash",
+   "read_only": 1
+  },
+  {
+   "description": "Which columns the hash covers, recorded because it cannot be re-derived later — the same argument Signing Evidence makes for storing its own field list. It also answers a question an auditor would otherwise take on trust: WHICH PARTS of this document does the seal vouch for.",
+   "fieldname": "hashed_fields",
+   "fieldtype": "Small Text",
+   "label": "Hashed Fields",
+   "read_only": 1
+  },
+  {
+   "fieldname": "seal_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "sealed_by",
+   "fieldtype": "Link",
+   "label": "Sealed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sealed_at",
+   "fieldtype": "Datetime",
+   "label": "Sealed At",
+   "read_only": 1
+  },
+  {
+   "description": "The attestation behind the approval, where the template asked for one. The same evidence chain a Form I-9 signature uses, so 'what exactly did they certify' has an answer that is not 'the record as it stands now'.",
+   "fieldname": "signing_evidence",
+   "fieldtype": "Link",
+   "label": "Signing Evidence",
+   "options": "Signing Evidence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Trade Document",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "title,document_type,status,shipment",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

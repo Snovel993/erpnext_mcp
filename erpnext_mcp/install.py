@@ -178,6 +178,49 @@ def after_migrate() -> None:
 	_bank_pairing_fields()
 	_receipt_intelligence_fields()
 	_wizard_definitions()
+	_trade_documents()
+
+
+def _trade_documents() -> None:
+	"""Seed the trade document templates and the three tiers' default requirements.
+
+	Same non-overwrite contract as the wizards, and one step more cautious for
+	the requirements: a rule is written only where none exists for that
+	destination and template AT ALL, enabled or disabled. An operator who turned
+	a document off did so on purpose, and a seeder that put it back would be
+	overruling them on every upgrade.
+
+	Runs on install and after every migrate, so a site upgrading from any earlier
+	version picks the templates up without a bespoke patch.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import shipments
+
+		report = shipments.install_trade_documents()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the trade documents were not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("templates_created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['templates_created'])} trade document template(s) "
+			f"and {len(report['requirements_created'])} destination requirement(s) — shipping "
+			"paperwork for local, domestic and international loads is now one register. "
+			"list_trade_document_templates has the kinds; get_destination_requirements has what "
+			"each destination asks for. A NEW EXPORT MARKET IS ROWS, NOT A RELEASE: nothing in "
+			"this app's code names a country. THE GATE SHIPS OFF — an incomplete checklist is "
+			"reported and does not hold a shipment until `trade_document_enforcement` is ticked."
+		)
+	elif report.get("requirements_created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['requirements_created'])} destination "
+			"requirement(s); the templates were already present and were left alone."
+		)
+	for failure in report.get("failed") or ():
+		target = failure.get("template") or failure.get("requirement")
+		print(f"erpnext_mcp: could not seed trade document {target} — {failure.get('reason')}")
 
 
 def _wizard_definitions() -> None:

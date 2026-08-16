@@ -194,6 +194,20 @@ def require_user_context() -> bool:
 	return as_bool(_value("require_user_context"))
 
 
+def trade_document_enforcement() -> bool:
+	"""Whether an incomplete document checklist HOLDS a shipment. Ships OFF.
+
+	Advisory by default, and the default is the load-bearing part. A two-truck
+	operation locked out of its own delivery by a phytosanitary certificate it
+	will never need turns this module off within a week — and an operation that
+	has turned the module off gets no warnings either, which is strictly worse
+	than an advisory one that reports the gaps and lets the truck go. An
+	operation big enough to want the gate turns it on here, or per shipment on
+	the shipment's own `enforcement` field.
+	"""
+	return as_bool(_value("trade_document_enforcement"))
+
+
 def effective_user() -> str:
 	"""The Frappe user mutations run as, and are attributed to in `owner`.
 

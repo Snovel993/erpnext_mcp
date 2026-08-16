@@ -3,6 +3,104 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.80.0 — 2026-08-16 — one desk, three tiers of paper
+
+Sixteen tools, five doctypes, five mobile routes. Shipping paperwork for local,
+domestic and international loads, run from one sales desk.
+
+### The mistake this prevents
+
+Fruit leaves a farm three ways: a truck to the packing house down the road, a
+truck across a state line, and a reefer on a vessel. The fruit is the same. The
+paperwork is not.
+
+A desk that keeps local deliveries in a spreadsheet, interstate freight in a
+folder and exports in a broker's portal is a desk where **the export paperwork is
+the only paperwork anybody checks** — because it is the only one that lives
+somewhere that looks like paperwork. Then a domestic load moves without a cold
+chain record and nobody notices until a buyer asks, by which time the truck
+arrived three weeks ago and the record cannot be made honestly.
+
+So the tier decides how much paper, not which system. One `Trade Shipment`, one
+checklist built from the destination's own rules, one register of documents.
+
+### A new export market is rows, not a release
+
+`Trade Document Template` is the SHAPE of a kind of paper. `Destination Document
+Requirement` says shipping HERE needs THAT. **Nothing in this app's code names a
+country** — a farm that lands a buyer in Vietnam adds the documents Vietnam asks
+for and the next shipment builds its own checklist. If that were a release, the
+release would be the bottleneck and the desk would go back to the portal.
+
+Sixteen templates ship seeded, and a shipped template is never overwritten once
+an operator has edited it. Thirteen document types are **one polymorphic
+doctype** rather than thirteen: they share a lifecycle, a home and an evidence
+requirement, and almost no fields.
+
+### Advisory by default, and the default is the load-bearing part
+
+`update_shipment_status` is the only gate, and it guards one transition: Ready to
+Ship. `trade_document_enforcement` **ships off**.
+
+A two-truck operation locked out of its own delivery by a phytosanitary
+certificate it will never need turns this module off within a week — and an
+operation that has turned it off gets no warnings either, which is strictly worse
+than an advisory gate that reports the gaps and lets the truck go. Advisory mode
+returns the identical readiness answer. Enforcement is per site or per shipment.
+
+**An override is recorded.** Releasing anyway needs `override_reason`, written to
+the shipment. A bypass nobody recorded is a bypass nobody can review.
+
+### Four ways a document that looks done is not
+
+Not approved; **voided**; **expired** — an ePhyto approved in June for a
+September sailing is one a border rejects; or awaiting an **external filing**.
+The last two are the ones a status column hides, and both are named.
+
+### This app files nothing
+
+An ePhyto is lodged in PCIT, an EEI in AES, an eBL on a DCSA platform. This app
+records that somebody filed and what reference came back — and a document that
+needs a filing and has no reference is reported outstanding however approved it
+looks. A module that implied it had transmitted a certificate would be the most
+dangerous thing in this repository.
+
+Field names follow the published data models — IPPC/ISPM-12, the DCSA data
+model, 15 CFR 30 EEI elements, WCO origin criteria — so a broker's schema and
+this app's can be reconciled by reading. Those are the standards' names, not an
+implementation of their transports.
+
+### The seal
+
+`seal_trade_document` fingerprints an approved document and closes it to editing.
+A seal over a row that can still change is a timestamp wearing a seal's clothes,
+so a sealed document refuses content edits; correcting one means voiding and
+reissuing, which is what happens to a real certificate that is withdrawn. The
+hash covers an allow-list stored beside it, and `get_trade_document` recomputes
+on every read — a row changed underneath its seal reports the seal as broken
+rather than looking intact.
+
+`generate_shipment_packet` bundles the lot, refuses unsealed documents by
+default, and names them at the front rather than dropping them when told to
+proceed anyway.
+
+### Two things reported and never applied
+
+The checklist is a **snapshot**: a rule changing in March does not silently
+appear on a February shipment that has already sailed — `requirement_drift`
+reports it. Removed requirements are **disabled, not deleted**, because a
+shipment is audited against what was asked for then.
+
+### The phone confirms movement and nothing else
+
+Five routes. `confirm_shipment_movement` takes `departed` or `delivered` and does
+not forward `override_reason`, cannot release a shipment and cannot cancel one. A
+release is an assertion that the paperwork is in order, made at a desk by
+somebody with a trade role; an account that could make it from a yard would make
+the gate worth nothing. Approving and sealing have no route at all and need one
+of System Manager, Farm Manager, Compliance Officer, Sales Manager or Accounts
+Manager.
+
 ## 0.79.0 — 2026-08-16 — the day as it actually happens
 
 Ten features, six new doctypes, twenty new tools and nineteen new mobile routes.

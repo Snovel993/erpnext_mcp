@@ -405,6 +405,26 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"register_asset",
 		"generate_asset_qr",
 		"attach_file_to_document",
+		# v0.80.0. Trade documentation: four reads a driver or a desk on a tablet
+		# wants — what is going out, one load in full, what is still missing, and
+		# the paperwork on it — plus the one write, which is a driver confirming a
+		# load left and arrived. The server side is the whole of it and
+		# `MobileAPI.swift` names none of them yet.
+		#
+		# `confirm_shipment_movement` is the interesting name on this list. It
+		# delegates to `update_shipment_status`, and it is NOT that tool: the tool
+		# can release a shipment to Ready to Ship — the module's one gate — can
+		# cancel one, and takes an `override_reason` that walks past an incomplete
+		# document checklist. None of the three is in this wrapper's signature, so
+		# none can be bound from a body. A release is an assertion that the
+		# paperwork is in order, made at a desk by somebody with a trade role; an
+		# account that could make it from a yard would make the gate worth
+		# nothing. Same argument that keeps `cancel=true` off `reject_farm_task`.
+		"list_shipments",
+		"get_shipment",
+		"get_shipment_readiness",
+		"list_trade_documents",
+		"confirm_shipment_movement",
 		# Sprint 9 (v0.79.0). Nineteen methods for the four things a day
 		# actually contains: being interrupted, finding that somebody else
 		# already raised your job, an investigation that runs for a week, and a
@@ -2652,3 +2672,95 @@ class TheTaskTimesSayWhichClock(MobileAPITestCase):
 		self.finish()
 		row = mobile_api.get_task(task=self.task)
 		self.assertRegex(row["completed_at_local"], r"\.\d{3}[+-]\d{2}:\d{2}$")
+
+
+class TheHandsetConfirmsMovementAndNothingElse(MobileAPITestCase):
+	"""v0.80.0. The five trade-documentation routes.
+
+	THE INTERESTING ONE IS WHAT IS NOT PUBLISHED. `update_shipment_status` can
+	release a shipment to Ready to Ship — the module's one gate — can cancel one,
+	and takes an `override_reason` that walks past an incomplete document
+	checklist. None of the three is reachable from a phone.
+
+	A release is an assertion that the paperwork is in order, made by somebody
+	with a trade role at a desk. An account that could make it from a yard would
+	make the gate worth nothing. A driver saying "I have left" and "I have
+	arrived" is a different act and it is the only one here — which is why the
+	wrapper is named `confirm_shipment_movement` rather than after the tool it
+	delegates to.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		from erpnext_mcp.tools import shipments
+
+		self.trade = shipments
+		shipments.install_trade_documents()
+		self.shipment = shipments.create_shipment(
+			{"destination_tier": "Local", "company": MAIN}
+		).data["shipment"]
+
+	def _released(self):
+		self.trade.update_shipment_status({"shipment": self.shipment, "status": "Ready to Ship"})
+
+	def test_a_driver_can_read_what_is_going_out(self):
+		self.be()
+		answer = mobile_api.list_shipments()
+		self.assertEqual(answer["count"], 1)
+		self.assertEqual(answer["shipments"][0]["name"], self.shipment)
+
+	def test_a_driver_can_read_what_is_still_missing(self):
+		"""The question somebody standing next to a truck actually has."""
+		self.be()
+		answer = mobile_api.get_shipment_readiness(shipment=self.shipment)
+		self.assertFalse(answer["ready"])
+		self.assertEqual(len(answer["blocking"]), 4)
+
+	def test_a_driver_can_read_the_paperwork_on_a_load(self):
+		self.be()
+		answer = mobile_api.list_trade_documents(shipment=self.shipment)
+		self.assertEqual(answer["count"], 0)
+
+	def test_departed_and_delivered_are_the_two_words_it_takes(self):
+		self._released()
+		self.be()
+		moved = mobile_api.confirm_shipment_movement(shipment=self.shipment, movement="departed")
+		self.assertEqual(moved["status"], "In Transit")
+		arrived = mobile_api.confirm_shipment_movement(shipment=self.shipment, movement="delivered")
+		self.assertEqual(arrived["status"], "Delivered")
+
+	def test_a_phone_cannot_release_a_shipment(self):
+		"""The gate would be worth nothing if a yard could open it."""
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.confirm_shipment_movement(shipment=self.shipment, movement="Ready to Ship")
+		self.assertIn("desk acts", str(caught.exception))
+
+	def test_a_phone_cannot_cancel_a_shipment(self):
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.confirm_shipment_movement(shipment=self.shipment, movement="cancelled")
+		self.assertIn("desk acts", str(caught.exception))
+
+	def test_an_override_reason_is_not_in_the_signature_so_it_cannot_be_sent(self):
+		"""Frappe binds body keys that match the signature; a key that is not
+		there cannot reach the tool."""
+		import inspect
+
+		signature = inspect.signature(mobile_api.confirm_shipment_movement)
+		self.assertNotIn("override_reason", signature.parameters)
+		self.assertNotIn("status", signature.parameters)
+
+	def test_another_entitys_shipment_is_not_reachable(self):
+		other = self.trade.create_shipment(
+			{"destination_tier": "Local", "company": OTHER}
+		).data["shipment"]
+		self.be()
+		with self.assertRaises(Exception):
+			mobile_api.get_shipment(shipment=other)
+
+	def test_the_register_is_scoped_to_what_this_caller_may_reach(self):
+		self.trade.create_shipment({"destination_tier": "Local", "company": OTHER})
+		self.be()
+		answer = mobile_api.list_shipments()
+		self.assertEqual([row["name"] for row in answer["shipments"]], [self.shipment])

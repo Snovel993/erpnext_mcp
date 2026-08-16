@@ -1,0 +1,88 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One line of a shipment's document checklist: which document the destination asks for, whether the shipment is held for it, and the Trade Document that answers it. THE TRADE DOCUMENT IS AUTHORITATIVE FOR STATUS. `status` here is a mirror the tools refresh so the Desk grid is readable at a glance; every readiness answer reads the Trade Document itself, because a denormalised status is a status that can be stale and a shipment released against a stale tick is the failure this whole module exists to prevent.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "template",
+  "document_type",
+  "required",
+  "trade_document",
+  "status",
+  "detail_col",
+  "sequence",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The kind of paper this line is about.",
+   "fieldname": "template",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Template",
+   "options": "Trade Document Template"
+  },
+  {
+   "fieldname": "document_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Document Type"
+  },
+  {
+   "default": "1",
+   "description": "Whether the shipment is held for this line where enforcement is on.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required"
+  },
+  {
+   "description": "The document that answers this line. Empty means the checklist knows what is wanted and nobody has started it.",
+   "fieldname": "trade_document",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Trade Document",
+   "options": "Trade Document"
+  },
+  {
+   "description": "A MIRROR, refreshed by the tools so the grid reads at a glance. The Trade Document is authoritative — nothing in this app decides anything from this column.",
+   "fieldname": "status",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "50",
+   "fieldname": "sequence",
+   "fieldtype": "Int",
+   "label": "Sequence"
+  },
+  {
+   "description": "Why this line is here and what it is waiting on — carried over from the destination rule that put it on the checklist, and editable after that.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Trade Shipment Document",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
