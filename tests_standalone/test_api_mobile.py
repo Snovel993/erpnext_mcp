@@ -405,6 +405,33 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"register_asset",
 		"generate_asset_qr",
 		"attach_file_to_document",
+		# Sprint 9 (v0.79.0). Nineteen methods for the four things a day
+		# actually contains: being interrupted, finding that somebody else
+		# already raised your job, an investigation that runs for a week, and a
+		# discipline chain. The server side is the whole of it; the iOS side is
+		# the same sprint's other half — the pause banner, the duplicate sheet,
+		# the investigation screen, and a wizard renderer that draws whatever
+		# `get_wizard_definition` returns. Listed here rather than in `MOBILE`
+		# so this file keeps claiming only what `MobileAPI.swift` names.
+		"pause_task_via_mobile",
+		"resume_task_via_mobile",
+		"link_tasks_via_mobile",
+		"merge_task_via_mobile",
+		"add_task_note_via_mobile",
+		"attach_audio_note",
+		"list_task_notes",
+		"create_discipline_record",
+		"acknowledge_discipline_record",
+		"get_discipline_record",
+		"list_discipline_history",
+		"get_discipline_report",
+		"create_accident_report",
+		"get_accident_report",
+		"update_accident_investigation",
+		"close_accident_investigation",
+		"list_accident_reports",
+		"get_wizard_definition",
+		"list_wizard_definitions",
 	}
 
 	def _whitelisted(self, module):

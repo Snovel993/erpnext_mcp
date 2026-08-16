@@ -43,6 +43,7 @@ from . import asset_tags, engine_hours, maintenance, spray_rei
 ASSET_REGISTER = asset_tags.ASSET_REGISTER
 ASSET_STATE_LOG = asset_tags.ASSET_STATE_LOG
 FARM_TASK = "Farm Task"
+FARM_TASK_ASSIGNMENT = "Farm Task Assignment"
 ALERT = "Compliance Alert"
 IRRIGATION_ZONE = "Irrigation Zone"
 
@@ -153,6 +154,87 @@ def _activity(asset_name: str, limit: int) -> list[dict]:
 					round(float(row["engine_hours"]), 1) if row.get("engine_hours") is not None else None
 				),
 				"hours_used": round(float(row["hours_used"]), 1) if row.get("hours_used") else None,
+			}
+		)
+	return out
+
+
+def paused_tasks_for(worker: str, limit: int = LINKED_CAP) -> list[dict]:
+	"""Every task this worker paused and has not come back to. Never raises.
+
+	ON A SCAN BECAUSE OF WHERE THE INTERRUPTION HAPPENS. A worker sets an
+	irrigation line, is called to a broken valve, fixes it, and scans the next
+	thing — and that scan is the moment they have forgotten the line. The
+	sentence they need is not on the screen of the job they walked away from; it
+	is on the screen in front of them now.
+
+	`paused_minutes_ago` is what makes it useful. "You have a paused task" is a
+	notification; "you paused Irrigate Block 3 twenty-two minutes ago" is a
+	worker turning round.
+	"""
+	from .. import compat as _compat
+
+	worker = str(worker or "").strip()
+	if not worker or not _compat.doctype_exists(FARM_TASK_ASSIGNMENT):
+		return []
+	try:
+		rows = (
+			frappe.db.get_all(
+				FARM_TASK_ASSIGNMENT,
+				filters={"assigned_to": worker, "state": "Paused"},
+				fields=compat.existing_fields(
+					FARM_TASK_ASSIGNMENT,
+					(
+						"name",
+						"task",
+						"task_name",
+						"paused_at",
+						"pause_reason",
+						"pause_count",
+						"auto_paused",
+						"actual_duration_minutes",
+					),
+				),
+				order_by="paused_at desc",
+				limit=limit,
+			)
+			or []
+		)
+	except Exception:  # pragma: no cover - a site shaping these columns differently
+		return []
+
+	now = _now()
+	out = []
+	for raw in rows:
+		row = dict(raw)
+		paused_at = str(row.get("paused_at") or "")
+		minutes = None
+		if paused_at:
+			try:
+				minutes = round(float(frappe.utils.time_diff_in_seconds(now, paused_at)) / 60.0)
+			except Exception:  # pragma: no cover - an unparseable stored timestamp
+				minutes = None
+		out.append(
+			{
+				"assignment": row.get("name"),
+				"task": row.get("task"),
+				"task_name": row.get("task_name") or row.get("task"),
+				"paused_at": paused_at or None,
+				"paused_minutes_ago": minutes,
+				"pause_reason": row.get("pause_reason") or None,
+				"pause_count": int(row.get("pause_count") or 0),
+				"auto_paused": bool(frappe.utils.cint(row.get("auto_paused"))),
+				"minutes_already_worked": int(row.get("actual_duration_minutes") or 0),
+				"message": (
+					f"You have a paused task: {row.get('task_name') or row.get('task')}"
+					+ (f" (paused {minutes} min ago)" if minutes is not None else "")
+					+ (
+						" — it was paused for you when you started something else."
+						if frappe.utils.cint(row.get("auto_paused"))
+						else ""
+					)
+				),
+				"message_key": "task.paused_reminder",
 			}
 		)
 	return out
@@ -436,6 +518,19 @@ def status_report(row: dict, args: dict | None = None) -> dict:
 	tasks = _section("open_tasks", lambda: _open_tasks(name), [])
 	alerts = _section("compliance_alerts", lambda: _alerts(name, today), [])
 
+	# v0.79.0. WHAT THE SCANNING WORKER WALKED AWAY FROM. Keyed on the caller
+	# rather than on the asset, because it is a fact about the person holding the
+	# phone and not about the machine they are pointing it at — and it belongs on
+	# a scan for the reason `paused_tasks_for` gives: the scan is the moment they
+	# have forgotten the irrigation line.
+	worker = _scanning_worker(args)
+	paused = _section("paused_tasks", lambda: paused_tasks_for(worker) if worker else [], [])
+
+	# Sub-tasks of any open investigation or multi-day job on this asset, so a
+	# scan of a machine an accident happened on shows what is still outstanding
+	# rather than one Farm Task with nothing under it.
+	children = _section("subtasks", lambda: _subtasks_for(tasks), {})
+
 	hours = _section(
 		"engine_hours",
 		lambda: engine_hours.summary_for(name, args) if engine_hours.is_metered(asset_type) else {},
@@ -501,6 +596,17 @@ def status_report(row: dict, args: dict | None = None) -> dict:
 	if parent.get("parent_blocking"):
 		warnings.append({"kind": "upstream", "severity": "Info", "message": parent["parent_note"]})
 
+	for entry in paused:
+		warnings.append(
+			{
+				"kind": "paused_task",
+				"severity": "Info",
+				"message": entry["message"],
+				"message_key": entry["message_key"],
+				"task": entry["task"],
+			}
+		)
+
 	return {
 		"status_report": True,
 		"asset_name": name,
@@ -530,6 +636,12 @@ def status_report(row: dict, args: dict | None = None) -> dict:
 		"overdue_alert_count": len(overdue_alerts),
 		"recent_activity": activity,
 		"recent_activity_count": len(activity),
+		# ── what this worker left running ────────────────────────────────────
+		"paused_tasks": paused,
+		"paused_task_count": len(paused),
+		# ── multi-day work under the tasks on this asset ─────────────────────
+		"subtasks_by_parent": children,
+		"open_subtask_count": sum(entry.get("open_subtask_count", 0) for entry in children.values()),
 		# ── restricted entry ─────────────────────────────────────────────────
 		"location_blocks": blocks,
 		"active_reis": location_reis,
@@ -546,6 +658,45 @@ def status_report(row: dict, args: dict | None = None) -> dict:
 		# sentences, and only one of them is a reason to call somebody.
 		"sections_unavailable": unavailable,
 	}
+
+
+def _scanning_worker(args: dict) -> str:
+	"""The Employee holding the phone, from whatever the caller sent. Never raises.
+
+	RESOLVED FROM `scanned_by` AS WELL AS FROM AN EXPLICIT EMPLOYEE, because
+	`scan_asset` has always taken a USER — a login — and the paused-task lookup
+	is keyed on an Employee. Making a handset send both would mean every client
+	learning the mapping this app already knows.
+	"""
+	explicit = str(args.get("worker") or args.get("employee") or "").strip()
+	if explicit:
+		return explicit
+	user = str(args.get("scanned_by") or args.get("user") or "").strip()
+	if not user:
+		return ""
+	try:
+		from . import fieldwork
+
+		return str(fieldwork._employee_for(user) or "")
+	except Exception:  # pragma: no cover - a site with no Employee register
+		return ""
+
+
+def _subtasks_for(tasks: list) -> dict:
+	"""`{parent task: its step summary}` for the open tasks that have steps.
+
+	ONLY THE PARENTS THAT HAVE CHILDREN. A scan already returns every open task
+	on the asset; adding an empty step summary to each of them would be noise on
+	the ordinary case, which is a job with no steps under it.
+	"""
+	from . import dispatch
+
+	out = {}
+	for task in tasks:
+		summary = dispatch.subtask_summary(str(task.get("name") or ""))
+		if summary.get("subtask_count"):
+			out[str(task["name"])] = summary
+	return out
 
 
 def _valve_types() -> tuple[str, ...]:

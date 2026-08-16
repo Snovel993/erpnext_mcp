@@ -356,6 +356,36 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/register_asset",
 		"/mobile/generate_asset_qr",
 		"/mobile/attach_file_to_document",
+		# Sprint 9 (v0.79.0). Nineteen routes in four groups, gated differently
+		# on purpose — see the block comment beside them in `routes.py`. The
+		# pause pair is a worker's own work; linking is an observation and
+		# merging is a decision; the five discipline routes carry an HR gate in
+		# their own bodies; and the accident group SPLITS, because the person
+		# who finds somebody on the ground is whoever finds them.
+		#
+		# `expire_discipline_record` is a tool with NO route here on purpose:
+		# ageing a step out of a chain is a policy decision made at a desk with
+		# the handbook open. The assertion below in the other direction is what
+		# keeps that a decision rather than an omission.
+		"/mobile/pause_task_via_mobile",
+		"/mobile/resume_task_via_mobile",
+		"/mobile/link_tasks_via_mobile",
+		"/mobile/merge_task_via_mobile",
+		"/mobile/add_task_note_via_mobile",
+		"/mobile/attach_audio_note",
+		"/mobile/list_task_notes",
+		"/mobile/create_discipline_record",
+		"/mobile/acknowledge_discipline_record",
+		"/mobile/get_discipline_record",
+		"/mobile/list_discipline_history",
+		"/mobile/get_discipline_report",
+		"/mobile/create_accident_report",
+		"/mobile/get_accident_report",
+		"/mobile/update_accident_investigation",
+		"/mobile/close_accident_investigation",
+		"/mobile/list_accident_reports",
+		"/mobile/get_wizard_definition",
+		"/mobile/list_wizard_definitions",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

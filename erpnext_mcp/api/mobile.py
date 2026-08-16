@@ -108,7 +108,11 @@ from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
 from ..tools import receipts as receipt_tools
 from ..tools import training as training_tools
+from ..tools import accidents as accident_tools
+from ..tools import discipline as discipline_tools
+from ..tools import narrative as narrative_tools
 from ..tools import universal_scan as universal_scan_tool
+from ..tools import wizards as wizard_tools
 from ..tools import wallet as wallet_tools
 from . import guard, rectify, shape
 
@@ -126,6 +130,8 @@ REGULATORY_FILING = "Regulatory Filing"
 COMPLIANCE_POLICY = "Compliance Policy"
 EXPENSE_RECEIPT = "Expense Receipt"
 DOCUMENT_VALIDATION = "Document Validation"
+DISCIPLINE_RECORD = "Discipline Record"
+ACCIDENT_REPORT = "Accident Report"
 FARM_TASK_TEMPLATE = template_tools.TEMPLATE
 
 #: The Farm Task Assignment state a completion lands in. Imported from the
@@ -660,6 +666,56 @@ def _previous_assignment(employee: str, allowed: list) -> dict | None:
 		"unavailable_reason": reason,
 		"housing_deduction_from_wages": row.get("housing_deduction_from_wages") or "Unknown",
 	}
+
+
+#: Which registers a handset may append narrative to, and the role each needs.
+#: `None` means any enrolled worker: a Farm Task's narrative is the account of
+#: work somebody did, and refusing a picker their own account of their own job
+#: would be refusing the thing this feature is for. The two personnel registers
+#: are HR's, and the accident register is open to write because the person who
+#: finds somebody on the ground is whoever finds them.
+NARRATIVE_TARGETS = {
+	FARM_TASK: None,
+	"Accident Report": None,
+	"Discipline Record": "hr",
+}
+
+
+def _narrative_target(user: str, doctype, name, task, allowed: list) -> tuple:
+	"""`(doctype, docname)` for a narrative call, scoped and role-checked.
+
+	THE ALLOWLIST IS SHORTER THAN THE TOOL'S. `tools/narrative.py` will append to
+	any of its three parents; this surface adds the role gate on the one that is
+	a personnel document, because a discipline record's narrative is the account
+	of a disciplinary meeting and a field credential has no business in it.
+	"""
+	target = str(doctype or "").strip()
+	docname = str(name or "").strip()
+	if not target and task:
+		target, docname = FARM_TASK, str(task).strip()
+	if target not in NARRATIVE_TARGETS:
+		frappe.throw(
+			f"{target or '(none)'} does not carry a narrative on this surface. The registers that "
+			f"do are: {', '.join(sorted(NARRATIVE_TARGETS))}.",
+			frappe.PermissionError,
+		)
+	if NARRATIVE_TARGETS[target] == "hr":
+		personnel.require_hr_role()
+	return target, guard.require_scoped_doc(target, docname, "name", allowed)
+
+
+def _caller_language(user: str, employee: str = "") -> str:
+	"""The language this person reads, or "". Never guessed from a device locale.
+
+	A phone set to English by whoever handed it over says nothing about who is
+	holding it now — see `Employee.preferred_language`, which this reads. An
+	empty answer is a real one and is left empty rather than defaulted, so a
+	narrative entry says "nobody told me" rather than "English".
+	"""
+	try:
+		return wizard_tools.preferred_language(user, employee)
+	except Exception:  # pragma: no cover - a site without the column
+		return ""
 
 
 def _unit_is_reachable(unit: str, allowed: list) -> bool:
@@ -6896,3 +6952,611 @@ def attach_file_to_document(
 		inner["dry_run"] = dry_run
 
 	return file_tools.attach_file_to_document(inner).data
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sprint 9 (v0.79.0) — interruption, investigation, discipline and wizards
+#
+# THE PAUSE PAIR IS THE ONE A FIELD WORKER USES MOST AND IS GATED LEAST. Pausing
+# a job you are holding is your own work, so `guard.FARM_OPS_ROLES` is the whole
+# gate — the same as `start_task` and `complete_task_via_mobile` above.
+#
+# THE DISCIPLINE METHODS ARE THE OPPOSITE. Every one of them carries
+# `personnel.require_hr_role` in its own body, because a discipline record is a
+# personnel document and a picker holding a perfectly good field credential has
+# no business writing or reading one. The tools underneath have no role check —
+# on the MCP transport the operator's enablement switch stands in front of them,
+# and a phone does not go through it.
+#
+# THE ACCIDENT METHODS SIT BETWEEN THE TWO, and the split is deliberate.
+# `create_accident_report` is open to ANY enrolled worker: the person who finds
+# somebody on the ground is whoever finds them, and a server that refused their
+# report because they are not a foreman would be a server people work around at
+# the exact moment that matters. Updating, closing and listing take the dispatch
+# role — those are the investigation, and an investigation is somebody's job.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+# ── 74. pause_task_via_mobile ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("pause_task_via_mobile", mutating=True, limit=guard.WRITE_LIMIT)
+def pause_task_via_mobile(user: str, task=None, task_assignment=None, reason=None) -> dict:
+	"""Stop the clock on a job this worker is coming back to.
+
+	SCOPED TO THE CALLER'S OWN WORK. `worker_id` is not on this signature, so
+	`routes.bind` cannot deliver it and the tool's own holder check runs against
+	the Employee this login resolves to — an account that could pause somebody
+	else's job could stop a stranger's clock from across the farm.
+	"""
+	guard.require_scope(user)
+	employee = _employee(user)
+
+	inner = {"worker_id": employee}
+	assignment = _assignment(task, task_assignment, [], "task")
+	if assignment:
+		inner["assignment"] = assignment
+	else:
+		inner["task"] = guard.require_docname(FARM_TASK, task, "task")
+	if reason:
+		inner["reason"] = str(reason).strip()
+
+	return dispatch.pause_farm_task(inner).data
+
+
+# ── 75. resume_task_via_mobile ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("resume_task_via_mobile", mutating=True, limit=guard.WRITE_LIMIT)
+def resume_task_via_mobile(user: str, task=None, task_assignment=None) -> dict:
+	"""Pick a paused job back up. Whatever else was running is stood down."""
+	guard.require_scope(user)
+	employee = _employee(user)
+
+	inner = {"worker_id": employee}
+	assignment = _assignment(task, task_assignment, [], "task")
+	if assignment:
+		inner["assignment"] = assignment
+	else:
+		inner["task"] = guard.require_docname(FARM_TASK, task, "task")
+
+	return dispatch.resume_farm_task(inner).data
+
+
+# ── 76. link_tasks_via_mobile ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("link_tasks_via_mobile", mutating=True, limit=guard.WRITE_LIMIT)
+def link_tasks_via_mobile(user: str, task=None, linked_task=None, relationship=None, note=None) -> dict:
+	"""Say that two jobs are the same thing, or are being worked together.
+
+	OPEN TO ANY ENROLLED WORKER, unlike the merge below. Noticing that your job
+	and somebody else's are the same valve is exactly the observation a worker in
+	a block makes and a foreman at a desk does not — and a link changes no state,
+	takes nothing off anybody's board and is undone by deleting a row.
+	"""
+	allowed = guard.require_scope(user)
+	first = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
+	second = guard.require_scoped_doc(FARM_TASK, linked_task, "linked_task", allowed)
+
+	inner = {"task": first, "linked_task": second, "linked_by": _employee(user)}
+	if relationship:
+		inner["relationship"] = str(relationship).strip()
+	if note:
+		inner["note"] = str(note).strip()
+
+	return dispatch.link_farm_tasks(inner).data
+
+
+# ── 77. merge_task_via_mobile ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("merge_task_via_mobile", mutating=True, limit=guard.WRITE_LIMIT)
+def merge_task_via_mobile(user: str, task=None, into=None, reason=None) -> dict:
+	"""Fold a duplicate into the job that is actually being worked.
+
+	FOREMAN AND ABOVE, and the asymmetry with `link_tasks_via_mobile` is the
+	whole point: a link is an observation and a merge is a decision. It takes one
+	worker's job off the board under somebody else's name, and `merge_farm_task`
+	requires a reason for exactly that reason. THE SYSTEM SURFACES AND THE HUMAN
+	DECIDES — `duplicate_hint` on a claim or a start is the surfacing; this is
+	the decision, and nothing on this surface makes it automatically.
+	"""
+	guard.require_dispatch_role(user, "Merging a duplicate task")
+	allowed = guard.require_scope(user)
+
+	inner = {
+		"task": guard.require_scoped_doc(FARM_TASK, task, "task", allowed),
+		"into": guard.require_scoped_doc(FARM_TASK, into, "into", allowed),
+		"reason": str(reason or "").strip(),
+		"merged_by": _employee(user),
+	}
+	if not inner["reason"]:
+		frappe.throw(
+			"reason is required. A merge takes one worker's job off the board under another "
+			"name, and the reason is what makes that reviewable six weeks later.",
+			frappe.ValidationError,
+		)
+
+	return dispatch.merge_farm_task(inner).data
+
+
+# ── 78. add_task_note_via_mobile ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("add_task_note_via_mobile", mutating=True, limit=guard.WRITE_LIMIT)
+def add_task_note_via_mobile(
+	user: str,
+	doctype=None,
+	name=None,
+	task=None,
+	narrative=None,
+	note_type=None,
+	source_language=None,
+) -> dict:
+	"""Append a written account to a task, an investigation or a discipline record."""
+	allowed = guard.require_scope(user)
+	employee = _employee(user)
+	target, docname = _narrative_target(user, doctype, name, task, allowed)
+
+	inner = {
+		"doctype": target,
+		"name": docname,
+		"narrative": str(narrative or "").strip(),
+		"author": employee,
+		"author_name": _employee_identity(employee).get("employee_name") or employee,
+	}
+	if note_type:
+		inner["note_type"] = str(note_type).strip()
+	inner["source_language"] = str(source_language or "").strip() or _caller_language(user, employee)
+
+	return narrative_tools.add_task_note(inner).data
+
+
+# ── 79. attach_audio_note ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("attach_audio_note", mutating=True, limit=guard.WRITE_LIMIT)
+def attach_audio_note(
+	user: str,
+	doctype=None,
+	name=None,
+	task=None,
+	transcription=None,
+	audio_file=None,
+	audio_duration_seconds=None,
+	note_type=None,
+	source_language=None,
+) -> dict:
+	"""File a voice note and the transcription the handset produced from it.
+
+	THE CALL THIS SURFACE EXISTS FOR, on the day somebody is on the ground. The
+	handset transcribes on-device — iOS's Speech framework runs locally, so a
+	foreman in a block with no signal still has text — and this stores what it
+	produced against the record.
+
+	`audio_file` IS A `File` DOCNAME, not bytes. Minutes of audio over a rural
+	cell is exactly what `stage_file_chunk` / `finalize_staged_file` exist for,
+	and they verify a SHA-256 on the way. The transcription is written first, so
+	a failed file link comes back as `audio_error` with the words already saved.
+
+	THE LANGUAGE DEFAULTS TO THE SPEAKER'S OWN. On a bilingual crew, a Spanish
+	account tagged as English is a translation nobody knows is needed — so where
+	the client sends nothing, the Employee's `preferred_language` is used, and
+	where that is empty the answer says the entry is untagged rather than
+	guessing.
+	"""
+	allowed = guard.require_scope(user)
+	employee = _employee(user)
+	target, docname = _narrative_target(user, doctype, name, task, allowed)
+
+	inner = {
+		"doctype": target,
+		"name": docname,
+		"transcription": str(transcription or "").strip(),
+		"author": employee,
+		"author_name": _employee_identity(employee).get("employee_name") or employee,
+	}
+	if audio_file:
+		inner["audio_file"] = str(audio_file).strip()
+	if audio_duration_seconds is not None:
+		inner["audio_duration_seconds"] = audio_duration_seconds
+	if note_type:
+		inner["note_type"] = str(note_type).strip()
+	inner["source_language"] = str(source_language or "").strip() or _caller_language(user, employee)
+
+	return narrative_tools.attach_audio_note(inner).data
+
+
+# ── 80. list_task_notes ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_task_notes", limit=guard.READ_LIMIT)
+def list_task_notes(user: str, doctype=None, name=None, task=None, limit=None) -> dict:
+	"""A record's accumulated narrative, oldest first."""
+	allowed = guard.require_scope(user)
+	target, docname = _narrative_target(user, doctype, name, task, allowed)
+
+	inner = {"doctype": target, "name": docname}
+	if limit is not None:
+		inner["limit"] = limit
+	return narrative_tools.list_task_notes(inner).data
+
+
+# ── 81. create_discipline_record ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_discipline_record", mutating=True, limit=guard.WRITE_LIMIT)
+def create_discipline_record(
+	user: str,
+	employee=None,
+	discipline_type=None,
+	incident_date=None,
+	incident_description=None,
+	expected_improvement=None,
+	followup_date=None,
+	policy_violated=None,
+	witnesses=None,
+	consequence_of_no_improvement=None,
+	supersedes_note=None,
+	employee_statement=None,
+	narrative=None,
+	suspension_start=None,
+	suspension_end=None,
+	company=None,
+) -> dict:
+	"""File one step of a progressive discipline chain, from a handset.
+
+	HR ROLE, NOT THE FIELD ROLE. A discipline record is a personnel document and
+	`employee.require_hr_role` is what stands in front of it — the tool
+	underneath has no check of its own, because on the MCP transport the
+	operator's enablement switch does that job and a phone does not go through
+	it.
+
+	`issued_by` IS NOT ON THIS SIGNATURE. It is the caller, resolved from the
+	authenticated session — an account that could name somebody else as the
+	issuing manager could put a supervisor's name on a warning they never gave,
+	which is the one forgery this record is most exposed to.
+	"""
+	personnel.require_hr_role()
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+	issuer = _employee(user)
+
+	inner = {
+		"employee": _employee_argument(employee, allowed, "employee"),
+		"discipline_type": str(discipline_type or "").strip(),
+		"issued_by": issuer,
+		"issued_by_name": _employee_identity(issuer).get("employee_name") or issuer,
+	}
+	if entity:
+		inner["company"] = entity
+	for key, value in (
+		("incident_date", incident_date),
+		("incident_description", incident_description),
+		("expected_improvement", expected_improvement),
+		("followup_date", followup_date),
+		("policy_violated", policy_violated),
+		("witnesses", witnesses),
+		("consequence_of_no_improvement", consequence_of_no_improvement),
+		("supersedes_note", supersedes_note),
+		("employee_statement", employee_statement),
+		("narrative", narrative),
+		("suspension_start", suspension_start),
+		("suspension_end", suspension_end),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	inner["source_language"] = _caller_language(user, issuer)
+
+	return discipline_tools.create_discipline_record(inner).data
+
+
+# ── 82. acknowledge_discipline_record ────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("acknowledge_discipline_record", mutating=True, limit=guard.WRITE_LIMIT)
+def acknowledge_discipline_record(
+	user: str,
+	record=None,
+	employee_signature=None,
+	declined_to_sign=None,
+	witnesses=None,
+	employee_statement=None,
+	manager_signature=None,
+) -> dict:
+	"""Record that the employee was told — or that they declined to sign."""
+	personnel.require_hr_role()
+	allowed = guard.require_scope(user)
+
+	inner = {"record": guard.require_scoped_doc(DISCIPLINE_RECORD, record, "record", allowed)}
+	if declined_to_sign is not None:
+		inner["declined_to_sign"] = declined_to_sign
+	for key, value in (
+		("employee_signature", employee_signature),
+		("witnesses", witnesses),
+		("employee_statement", employee_statement),
+		("manager_signature", manager_signature),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+
+	return discipline_tools.acknowledge_discipline_record(inner).data
+
+
+# ── 83. get_discipline_record ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_discipline_record", limit=guard.READ_LIMIT)
+def get_discipline_record(user: str, record=None) -> dict:
+	"""One step in full, with its narrative and the step before it."""
+	personnel.require_hr_role()
+	allowed = guard.require_scope(user)
+	return discipline_tools.get_discipline_record({
+		"record": guard.require_scoped_doc(DISCIPLINE_RECORD, record, "record", allowed)
+	}).data
+
+
+# ── 84. list_discipline_history ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_discipline_history", limit=guard.READ_LIMIT)
+def list_discipline_history(user: str, employee=None, include_inactive=None) -> dict:
+	"""One employee's whole chain, in order."""
+	personnel.require_hr_role()
+	allowed = guard.require_scope(user)
+	inner = {"employee": _employee_argument(employee, allowed, "employee")}
+	if include_inactive is not None:
+		inner["include_inactive"] = include_inactive
+	return discipline_tools.list_discipline_history(inner).data
+
+
+# ── 85. get_discipline_report ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_discipline_report", limit=guard.READ_LIMIT)
+def get_discipline_report(user: str, employee=None) -> dict:
+	"""The chain as a document for legal or HR review, including its gaps."""
+	personnel.require_hr_role()
+	allowed = guard.require_scope(user)
+	return discipline_tools.get_discipline_report({
+		"employee": _employee_argument(employee, allowed, "employee")
+	}).data
+
+
+# ── 86. create_accident_report ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_accident_report", mutating=True, limit=guard.WRITE_LIMIT)
+def create_accident_report(
+	user: str,
+	occurred_at=None,
+	incident_description=None,
+	severity=None,
+	injured_person=None,
+	injury_type=None,
+	body_part=None,
+	medical_treatment=None,
+	witnesses=None,
+	immediate_actions=None,
+	location_doctype=None,
+	location=None,
+	location_description=None,
+	asset=None,
+	narrative=None,
+	company=None,
+) -> dict:
+	"""Open an incident record at the scene.
+
+	OPEN TO ANY ENROLLED WORKER, AND THAT IS THE ONE DESIGN DECISION ON THIS
+	METHOD. The person who finds somebody on the ground is whoever finds them; a
+	server that refused their report because they are not a foreman would be a
+	server people work around at the exact moment that matters, and the account
+	written at the scene is worth many times the one written in an office that
+	evening. Everything AFTER the report — the investigation, the determination,
+	the closure — takes the dispatch role.
+
+	`reported_by` is the caller, not the body.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+	reporter = _employee(user)
+
+	inner = {
+		"occurred_at": str(occurred_at or "").strip(),
+		"incident_description": str(incident_description or "").strip(),
+		"reported_by": reporter,
+		"reported_by_name": _employee_identity(reporter).get("employee_name") or reporter,
+	}
+	if entity:
+		inner["company"] = entity
+	if injured_person:
+		inner["injured_person"] = _employee_argument(injured_person, allowed, "injured_person")
+	if witnesses is not None:
+		inner["witnesses"] = witnesses
+	for key, value in (
+		("severity", severity),
+		("injury_type", injury_type),
+		("body_part", body_part),
+		("medical_treatment", medical_treatment),
+		("immediate_actions", immediate_actions),
+		("location_doctype", location_doctype),
+		("location", location),
+		("location_description", location_description),
+		("asset", asset),
+		("narrative", narrative),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	inner["source_language"] = _caller_language(user, reporter)
+
+	return accident_tools.create_accident_report(inner).data
+
+
+# ── 87. update_accident_investigation ────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("update_accident_investigation", mutating=True, limit=guard.WRITE_LIMIT)
+def update_accident_investigation(
+	user: str,
+	report=None,
+	narrative=None,
+	note_type=None,
+	root_cause=None,
+	contributing_factors=None,
+	corrective_actions=None,
+	osha_recordable=None,
+	osha_determination_basis=None,
+	witnesses=None,
+	statement_taken_from=None,
+	followup_date=None,
+	days_away_from_work=None,
+	days_restricted_duty=None,
+	severity=None,
+	status=None,
+) -> dict:
+	"""Add what was learned. Called as many times as the investigation takes."""
+	guard.require_dispatch_role(user, "Updating an accident investigation")
+	allowed = guard.require_scope(user)
+	author = _employee(user)
+
+	inner = {
+		"report": guard.require_scoped_doc(ACCIDENT_REPORT, report, "report", allowed),
+		"author": author,
+		"author_name": _employee_identity(author).get("employee_name") or author,
+		"osha_determined_by": author,
+	}
+	if witnesses is not None:
+		inner["witnesses"] = witnesses
+	for key, value in (
+		("narrative", narrative),
+		("note_type", note_type),
+		("root_cause", root_cause),
+		("contributing_factors", contributing_factors),
+		("corrective_actions", corrective_actions),
+		("osha_recordable", osha_recordable),
+		("osha_determination_basis", osha_determination_basis),
+		("statement_taken_from", statement_taken_from),
+		("followup_date", followup_date),
+		("severity", severity),
+		("status", status),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	for key, value in (
+		("days_away_from_work", days_away_from_work),
+		("days_restricted_duty", days_restricted_duty),
+	):
+		if value is not None:
+			inner[key] = value
+	inner["source_language"] = _caller_language(user, author)
+
+	return accident_tools.update_accident_investigation(inner).data
+
+
+# ── 88. close_accident_investigation ─────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("close_accident_investigation", mutating=True, limit=guard.WRITE_LIMIT)
+def close_accident_investigation(
+	user: str,
+	report=None,
+	corrective_actions=None,
+	followup_date=None,
+	osha_recordable=None,
+	osha_determination_basis=None,
+	closure_summary=None,
+) -> dict:
+	"""Close an investigation, with everything closing one requires."""
+	guard.require_dispatch_role(user, "Closing an accident investigation")
+	allowed = guard.require_scope(user)
+	closer = _employee(user)
+
+	inner = {
+		"report": guard.require_scoped_doc(ACCIDENT_REPORT, report, "report", allowed),
+		"closed_by": closer,
+		"closed_by_name": _employee_identity(closer).get("employee_name") or closer,
+	}
+	for key, value in (
+		("corrective_actions", corrective_actions),
+		("followup_date", followup_date),
+		("osha_recordable", osha_recordable),
+		("osha_determination_basis", osha_determination_basis),
+		("closure_summary", closure_summary),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+
+	return accident_tools.close_accident_investigation(inner).data
+
+
+# ── 89. get_accident_report ──────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_accident_report", limit=guard.READ_LIMIT)
+def get_accident_report(user: str, report=None) -> dict:
+	"""One investigation in full: witnesses, narrative, steps, what is outstanding."""
+	allowed = guard.require_scope(user)
+	return accident_tools.get_accident_report({
+		"report": guard.require_scoped_doc(ACCIDENT_REPORT, report, "report", allowed)
+	}).data
+
+
+# ── 90. list_accident_reports ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_accident_reports", limit=guard.READ_LIMIT)
+def list_accident_reports(
+	user: str,
+	status=None,
+	open_only=None,
+	severity=None,
+	from_date=None,
+	to_date=None,
+	company=None,
+	limit=None,
+) -> dict:
+	"""The incident register, filterable."""
+	guard.require_dispatch_role(user, "Reading the accident register")
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+
+	inner = {}
+	if entity:
+		inner["company"] = entity
+	for key, value in (
+		("status", status),
+		("severity", severity),
+		("from_date", from_date),
+		("to_date", to_date),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	if open_only is not None:
+		inner["open_only"] = open_only
+	if limit is not None:
+		inner["limit"] = limit
+
+	data = accident_tools.list_accident_reports(inner).data
+	data["reports"] = guard.scoped(data.get("reports") or [], allowed)
+	data["report_count"] = len(data["reports"])
+	return data
+
+
+# ── 91. get_wizard_definition ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_wizard_definition", limit=guard.READ_LIMIT)
+def get_wizard_definition(user: str, wizard=None, language=None) -> dict:
+	"""One wizard's spec, in this worker's own language.
+
+	THE LANGUAGE IS THE CALLER'S AND IS NOT TAKEN FROM THE BODY BY DEFAULT. The
+	Employee record says which language this person reads — it is asked at hire
+	and it is a compliance field, because hazard communication has to be in a
+	language the worker understands. A `language` argument is still accepted, for
+	the case of a supervisor reading a flow in English to check it before their
+	crew sees it in Spanish.
+	"""
+	guard.require_scope(user)
+	employee = _employee(user)
+	inner = {"wizard": str(wizard or "").strip(), "employee": employee, "user": user}
+	if language:
+		inner["language"] = str(language).strip()
+	return wizard_tools.get_wizard_definition(inner).data
+
+
+# ── 92. list_wizard_definitions ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_wizard_definitions", limit=guard.READ_LIMIT)
+def list_wizard_definitions(user: str, category=None, language=None) -> dict:
+	"""What flows this handset can render, titled in the worker's language."""
+	guard.require_scope(user)
+	employee = _employee(user)
+	inner = {"employee": employee, "user": user}
+	if category:
+		inner["category"] = str(category).strip()
+	if language:
+		inner["language"] = str(language).strip()
+	return wizard_tools.list_wizard_definitions(inner).data

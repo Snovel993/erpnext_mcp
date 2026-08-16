@@ -421,6 +421,57 @@ ROUTES = (
 	Route("/mobile", mobile_api.register_asset),
 	Route("/mobile", mobile_api.generate_asset_qr),
 	Route("/mobile", mobile_api.attach_file_to_document),
+	# Sprint 9 (v0.79.0): what the day actually looks like. Nineteen routes in
+	# four groups, and the gate is different on each group for a stated reason.
+	#
+	# THE PAUSE PAIR IS A WORKER'S OWN WORK and is gated on nothing more than
+	# enrolment, like `start_task` above it. `worker_id` is not on either
+	# signature, so this table's argument filter is what stops an account
+	# stopping a stranger's clock from across the farm.
+	Route("/mobile", mobile_api.pause_task_via_mobile),
+	Route("/mobile", mobile_api.resume_task_via_mobile),
+	# LINKING IS AN OBSERVATION AND MERGING IS A DECISION, which is why they are
+	# gated differently. Noticing that your job and somebody else's are the same
+	# valve is what a worker in a block sees and a foreman at a desk does not;
+	# folding one away takes somebody's work off the board under another name,
+	# and that is Foreman-and-above.
+	Route("/mobile", mobile_api.link_tasks_via_mobile),
+	Route("/mobile", mobile_api.merge_task_via_mobile),
+	# The narrative trio. `attach_audio_note` is the one this sprint exists for:
+	# a foreman at an accident scene has a phone in one hand and somebody on the
+	# ground, and typing is not what happens next. The handset transcribes
+	# on-device and posts the words; the recording travels the chunked upload
+	# path and is linked here.
+	Route("/mobile", mobile_api.add_task_note_via_mobile),
+	Route("/mobile", mobile_api.attach_audio_note),
+	Route("/mobile", mobile_api.list_task_notes),
+	# THE FIVE DISCIPLINE ROUTES CARRY AN HR GATE IN THEIR OWN BODIES, not the
+	# field-role gate every route above them uses. A discipline record is a
+	# personnel document; a picker holding a perfectly good field credential has
+	# no business reading one, let alone writing one. `expire_discipline_record`
+	# is deliberately absent — ageing a step out of a chain is a policy decision
+	# made at a desk with the handbook open, and a method with no route 404s.
+	Route("/mobile", mobile_api.create_discipline_record),
+	Route("/mobile", mobile_api.acknowledge_discipline_record),
+	Route("/mobile", mobile_api.get_discipline_record),
+	Route("/mobile", mobile_api.list_discipline_history),
+	Route("/mobile", mobile_api.get_discipline_report),
+	# THE ACCIDENT ROUTES SPLIT, and this is the most deliberate gate on the
+	# table. `create_accident_report` and `get_accident_report` are open to any
+	# enrolled worker: the person who finds somebody on the ground is whoever
+	# finds them, and a server that refused their report because they are not a
+	# foreman is a server people work around at the exact moment that matters.
+	# Updating, closing and listing the register are the INVESTIGATION, and an
+	# investigation is somebody's job — those take the dispatch role.
+	Route("/mobile", mobile_api.create_accident_report),
+	Route("/mobile", mobile_api.get_accident_report),
+	Route("/mobile", mobile_api.update_accident_investigation),
+	Route("/mobile", mobile_api.close_accident_investigation),
+	Route("/mobile", mobile_api.list_accident_reports),
+	# The wizard registry. Both reads, both gated on enrolment alone, and both
+	# answer in the caller's own language off `Employee.preferred_language`.
+	Route("/mobile", mobile_api.get_wizard_definition),
+	Route("/mobile", mobile_api.list_wizard_definitions),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

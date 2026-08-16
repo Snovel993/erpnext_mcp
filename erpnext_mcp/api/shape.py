@@ -88,6 +88,25 @@ def _first(live: dict, row: dict, key: str):
 	return value if value not in (None, "") else None
 
 
+def _minutes_since(stamp):
+	"""Whole minutes between a stored timestamp and now, or None.
+
+	Used for the paused counter, where "twenty-two minutes ago" is the whole
+	value of the field: a worker who is told a task is paused shrugs, and a
+	worker who is told they paused it twenty-two minutes ago turns round.
+
+	Never raises. A stamp nothing can parse comes back as None, which the client
+	renders as "paused" without the number — losing a reminder over a clock is
+	the wrong trade.
+	"""
+	if not stamp:
+		return None
+	try:
+		return max(0, round(float(frappe.utils.time_diff_in_seconds(frappe.utils.now(), stamp)) / 60.0))
+	except Exception:  # pragma: no cover - an unparseable stored timestamp
+		return None
+
+
 def _minutes(value):
 	"""A duration as a whole number of minutes, or None.
 
@@ -154,6 +173,26 @@ def task(row: dict, assignment: dict | None = None, clock=None) -> dict:
 		"actual_duration_minutes": _minutes(_first(live, row, "actual_duration_minutes")),
 	}
 
+	# v0.79.0. WHICH TASKS ARE PAUSED, on every row that carries a state. A board
+	# that showed "In-Progress" against three tasks would be a board a worker
+	# cannot read, because they are on one of them — `state` already says Paused,
+	# and these three keys are what let a client sort, badge and count without
+	# string-matching a state name it would have to keep in step with the server.
+	#
+	# `paused_minutes_ago` is the one that changes behaviour. "You have a paused
+	# task" is a notification; "you paused Irrigate Block 3 twenty-two minutes
+	# ago" is a worker turning round.
+	out["paused"] = str(out["state"]) == "Paused"
+	out["paused_at"] = _first(live, row, "paused_at")
+	out["pause_reason"] = _first(live, row, "pause_reason")
+	out["pause_count"] = int(_first(live, row, "pause_count") or 0)
+	out["auto_paused"] = bool(_first(live, row, "auto_paused"))
+	out["paused_minutes_ago"] = _minutes_since(out["paused_at"]) if out["paused"] else None
+	# The step counters, so a handset can draw "3 of 5 done" on an investigation
+	# without a second call per row.
+	out["parent_task"] = row.get("parent_task") or None
+	out["merged_into"] = row.get("merged_into") or None
+
 	# v0.77.0. WHICH six o'clock a job was claimed, started and finished. The
 	# three existing keys are untouched and still naive — `FrappeDate.parse` on
 	# the handset reads them and would fail the whole row on a shape it has not
@@ -165,7 +204,9 @@ def task(row: dict, assignment: dict | None = None, clock=None) -> dict:
 	# repeating three keys on each of forty tasks is forty copies of it — the
 	# caller puts `clock.block()` at the top level once. `tasks()` below threads
 	# one renderer through the whole list so the site's zone is read once too.
-	(clock or timezones.Renderer()).add(out, "claimed_at", "started_at", "completed_at")
+	(clock or timezones.Renderer()).add(
+		out, "claimed_at", "started_at", "completed_at", "paused_at"
+	)
 
 	source = alert_row(row.get("source_alert"))
 	explanation = str(source.get("alert_message") or "").strip()
