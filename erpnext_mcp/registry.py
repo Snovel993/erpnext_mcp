@@ -44,6 +44,7 @@ from .tools import (
 	accounts,
 	advisory,
 	anchors,
+	asset_status,
 	asset_tags,
 	assets,
 	auditpacket,
@@ -60,6 +61,7 @@ from .tools import (
 	dispatch,
 	docvalidation,
 	employee,
+	engine_hours,
 	evidence,
 	expenses,
 	farm,
@@ -80,6 +82,7 @@ from .tools import (
 	irrigation,
 	kpi,
 	kpidefs,
+	maintenance,
 	masters,
 	meta,
 	ml_model,
@@ -106,6 +109,7 @@ from .tools import (
 	signed_documents,
 	signers,
 	signing_evidence,
+	spray_rei,
 	state_tax,
 	stock_inventory,
 	tasktemplates,
@@ -17422,6 +17426,392 @@ TOOLS = {
 		title="Get irrigation runtime",
 		available=_needs_doctype("Asset Register", "Asset State Log"),
 		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	# ── v0.78.0: what the water adds up to, rolled up and priced ────────────
+	"get_water_usage_report": _tool(
+		irrigation.get_water_usage_report,
+		"Valve runtime rolled up by zone, by block, by week, by month, by day "
+		"or by valve, over a date range — the report a water-rights filing and "
+		"a cost allocation are both written from. Read-only, and no new "
+		"record: every minute in it is a pair of Asset State Log rows.\n\n"
+		"THE MEASUREMENT IS get_irrigation_runtime's, REUSED. The same code "
+		"handles the four hard cases — a run that started before the window, "
+		"one that ended after it, one still open, and a close written by the "
+		"cascade when somebody shut a main — so two reports cannot disagree "
+		"about how long a gate was open.\n\n"
+		"GALLONS ARE PER-VALVE AND NEVER GUESSED. Each valve is priced at its "
+		"own Asset Register.irrigation_zone → Irrigation Zone.flow_rate_gpm. A "
+		"valve with no zone linked contributes its MINUTES to every total and "
+		"no gallons, and is named in `unpriced_valves` — a volume figure is "
+		"always the volume of a stated set of valves rather than a total that "
+		"quietly dropped what nobody had mapped. `flow_rate_gpm` prices every "
+		"valve at one rate, for a system with one pump and no zone records.\n\n"
+		"A RUN IS BILLED WHOLE TO THE PERIOD IT STARTED IN. A set opened on "
+		"Saturday night that ran into Sunday is Saturday's irrigation, which is "
+		"how the person who opened it would describe it and what makes the "
+		"report reconcilable against the valve log.",
+		{
+			"asset": _field(
+				_STRING,
+				"Optional. Measure at or below one node of the register tree — a valve, a "
+				"zone asset, a block. Omit for every valve on the farm, which is what a "
+				"water-rights filing is written from.",
+			),
+			"group_by": _field(
+				_STRING,
+				"zone (default), block, week, month, day or valve. `zone` and `block` are "
+				"where the water went; the rest are when.",
+			),
+			"from_date": _field(_STRING, "Start of the window, YYYY-MM-DD. Default 30 days before to_date."),
+			"to_date": _field(_STRING, "End of the window, YYYY-MM-DD, inclusive of the whole day. Default today."),
+			"field": _field(
+				_STRING,
+				"Optional Field docname. Narrows to the valves whose zone waters that block — "
+				"the link is Asset Register.irrigation_zone → Irrigation Zone.field.",
+			),
+			"irrigation_zone": _field(_STRING, "Optional. Only valves linked to this Irrigation Zone."),
+			"flow_rate_gpm": _field(
+				_NUMBER,
+				"Optional. Gallons per minute applied to EVERY valve, overriding each zone's "
+				"own rate. For a single-pump system with no zone records.",
+			),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		title="Get a water usage report",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	# ── v0.78.0: the whole picture for one asset, on one call ───────────────
+	"get_asset_status_report": _tool(
+		asset_status.get_asset_status_report,
+		"EVERYTHING ABOUT ONE ASSET, ON ONE CALL. What it is, what state it is "
+		"in, what it is due for service, what it has run, what work is open on "
+		"it, what compliance is late, the last ten things that happened to it, "
+		"and whether the ground it is standing on is closed to entry. "
+		"Read-only — this is the scan panel for a caller who is not scanning, "
+		"so it stamps no last_scan_at (scan_asset does that, because somebody "
+		"was standing there).\n\n"
+		"IT EXISTS BECAUSE THE ALTERNATIVE IS SEVEN ROUND TRIPS. Every fact "
+		"here already lived somewhere in this app; assembling it took seven "
+		"calls, and a handset at the end of a row on a rural cell makes about "
+		"two before somebody puts the phone away. scan_asset and universal_scan "
+		"return the same block under `status`.\n\n"
+		"SECTIONS DEGRADE, THE CALL DOES NOT FAIL. A section whose doctype has "
+		"not migrated or whose register will not answer comes back empty and is "
+		"NAMED in `sections_unavailable` — 'no open tasks' and 'the task "
+		"register would not answer' are different sentences and only one of "
+		"them is a reason to call somebody.\n\n"
+		"`warnings` IS ORDERED BY WHAT WOULD HURT SOMEBODY FIRST: a live "
+		"restricted-entry interval, then a machine overdue for service, then "
+		"late compliance, then a closed valve upstream of this one.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname, e.g. 'MC-Valve-05'."),
+			"company": _field(_STRING, "Narrow to one company."),
+			"history_limit": _field(_INTEGER, "State changes in the activity log. Default 10, capped at 50."),
+			"season_start": _field(
+				_STRING,
+				"YYYY-MM-DD. What 'this season' counts from for the engine-hours figures. "
+				"Default 1 January of the current year.",
+			),
+		},
+		required=("asset_name",),
+		title="Get an asset status report",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.78.0: engine hours ───────────────────────────────────────────────
+	"get_engine_hours_summary": _tool(
+		engine_hours.get_engine_hours_summary,
+		"What a tractor or a vehicle has run: the meter now, hours this "
+		"season, hours since the last service, and every checkout session "
+		"paired up with the hours on it. Read-only.\n\n"
+		"THE SERIES IS THE RECORD. Every figure is arithmetic over "
+		"Asset State Log.engine_hours — one reading per metered event in an "
+		"append-only table — and Asset Register.current_hours is only a cache "
+		"of the highest reading seen. Both are reported, so a cache that has "
+		"drifted is visible rather than authoritative.\n\n"
+		"READINGS ARRIVE ON A STATE CHANGE, not through a call of their own: "
+		"send `engine_hours` with log_asset_state_change's check_out or "
+		"check_in, because the moment somebody reads an hour meter is the "
+		"moment they are sitting in the machine.\n\n"
+		"HOURS PER SESSION ARE COMPUTED ONLY WHERE BOTH ENDS EXIST. A checkout "
+		"nobody metered leaves the session's hours empty rather than inventing "
+		"a length from the last reading of any kind. A machine still out is "
+		"reported as an OPEN session with a start and no length — nobody has "
+		"read the meter since it left the yard.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname — a Tractor or a Vehicle."),
+			"company": _field(_STRING, "Narrow to one company."),
+			"season_start": _field(
+				_STRING,
+				"YYYY-MM-DD. What 'this season' counts from. Default 1 January of the current "
+				"year — this app has no Season doctype and inventing one to hold a single date "
+				"would be a table for a preference.",
+			),
+			"limit": _field(_INTEGER, "Maximum sessions itemised. Totals are computed from everything."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		required=("asset_name",),
+		title="Get an engine hours summary",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	"record_service": _tool(
+		engine_hours.record_service,
+		"MUTATING (default OFF). Mark a service done: stamps last_service_date "
+		"and last_service_hours on the asset, so the next interval counts from "
+		"the right place.\n\n"
+		"THE OTHER HALF OF THE SCHEDULE. check_maintenance_due reads exactly "
+		"these two columns, and until something writes them every machine is "
+		"overdue from the day it was registered — which is the state that "
+		"trains people to ignore the alert. The meter reading defaults to what "
+		"the hours series already says the machine has run, so the ordinary "
+		"call is the asset's name and nothing else.",
+		{
+			"asset_name": _field(_STRING, "The Asset Register docname."),
+			"company": _field(_STRING, "Narrow to one company."),
+			"service_date": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"service_hours": _field(
+				_NUMBER,
+				"The hour meter at the service. Defaults to the highest reading in the log.",
+			),
+			"notes": _field(_STRING, "What was done, appended to the asset's description."),
+		},
+		required=("asset_name",),
+		mutating=True,
+		title="Record a service",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.78.0: the maintenance schedule ───────────────────────────────────
+	"check_maintenance_due": _tool(
+		maintenance.check_maintenance_due,
+		"Is this asset due for service — or, with no asset named, which ones "
+		"on the farm are. Read-only.\n\n"
+		"TWO INTERVALS, EITHER ALONE COMPLETE. A tractor is serviced every 250 "
+		"hours, a fire extinguisher every 365 days, and a pump on whichever "
+		"comes first. Both are computed, both are reported, and `due_on` names "
+		"the one that bit — telling somebody 'due in 265 days' because the "
+		"calendar was checked second is how a schedule stops being believed.\n\n"
+		"UNMEASURED IS NOT OVERDUE. A machine with an hours interval and no "
+		"meter reading ever recorded comes back not-due with the reason, "
+		"rather than filling a dispatch board with work nobody can verify on "
+		"the day an operator first sets an interval.\n\n"
+		"An asset with neither interval set is not on a schedule at all, which "
+		"is the right answer for most of a register and is said out loud.",
+		{
+			"asset_name": _field(
+				_STRING,
+				"Optional. One Asset Register docname. Omit to sweep the whole register.",
+			),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"asset_type": _field(_STRING, "Optional. Narrow the sweep to one asset type."),
+			"include_all": _field(
+				_BOOLEAN,
+				"Also return every scheduled asset, not just the due ones. Default false.",
+			),
+		},
+		title="Check maintenance due",
+		available=_needs_doctype("Asset Register"),
+		requires="the Asset Register DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"trigger_maintenance_tasks": _tool(
+		maintenance.trigger_maintenance_tasks,
+		"MUTATING (default OFF). Raise one Farm Task for every asset whose "
+		"service is due. Callable by hand and suitable for a scheduled job — "
+		"`erpnext_mcp.tools.maintenance.sweep_due_maintenance` is the bare "
+		"entry point, and it iterates every company.\n\n"
+		"`dry_run` DEFAULTS TO TRUE, unlike most write tools here. This raises "
+		"work for other people, and a tool whose first accidental call fills a "
+		"dispatch board is one an operator switches off rather than tunes. The "
+		"dry run lists exactly what a live call would create.\n\n"
+		"IT WILL NOT RAISE A SECOND TASK. An open service task against an "
+		"asset — through either the `asset` column or the location pair, and "
+		"whether raised by hand or by last night's sweep — means the work is "
+		"already on somebody's list, and a job that re-raised it nightly would "
+		"produce the exact backlog that teaches a crew to ignore the board.\n\n"
+		"ONE ASSET THAT WILL NOT RAISE DOES NOT STOP THE SWEEP: failures are "
+		"itemised and the rest of the register still gets its work.",
+		{
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"asset_name": _field(_STRING, "Optional. Consider only this asset."),
+			"asset_type": _field(_STRING, "Optional. Narrow to one asset type."),
+			"urgency": _field(_STRING, "Low, Normal, High or Critical. Default Normal."),
+			"dry_run": _field(
+				_BOOLEAN,
+				"Default TRUE — list what would be raised and create nothing. Send false to raise it.",
+			),
+			"limit": _field(_INTEGER, "Maximum assets considered. Capped at 500, and a cap is reported."),
+		},
+		mutating=True,
+		title="Trigger maintenance tasks",
+		available=_needs_doctype("Asset Register", "Farm Task"),
+		requires="the Asset Register and Farm Task DocTypes — run `bench migrate`",
+	),
+	# ── v0.78.0: restricted entry after a spray ─────────────────────────────
+	"record_spray_application": _tool(
+		spray_rei.record_spray_application,
+		"MUTATING (default OFF). File a completed spray and OPEN THE "
+		"RESTRICTED-ENTRY WINDOW it creates — one Spray REI record per block, "
+		"so 40 CFR §170.407 can be answered by asking about a block rather "
+		"than by scanning the task register.\n\n"
+		"ONE CALL, N RECORDS. A tank that went out over four blocks writes four "
+		"restrictions with the same product, start and expiry, because the four "
+		"clear together and each is asked about separately. It also ends the "
+		"spray on the machine's state machine and stamps each block's "
+		"last_spray_date.\n\n"
+		"THE LONGEST INTERVAL IN THE TANK WINS. A four-hour product and a "
+		"twenty-four-hour one together restrict the block for twenty-four "
+		"hours; the block does not become half-enterable at hour twelve. Every "
+		"product in the mix is stored beside the one that set the window, "
+		"because the question asked after somebody feels ill is about the mix.\n\n"
+		"A SPRAY WITH NO COMPUTABLE INTERVAL CREATES NOTHING AND SAYS SO. Where "
+		"nothing in the tank has rei_hours on its Item — or the site has no such "
+		"column — this REFUSES rather than writing a zero-hour window, because "
+		"a window of no hours reads as 'this block is clear', which is the one "
+		"wrong answer that puts somebody in a treated row. Pass `rei_hours` for "
+		"a state or certifier interval longer than the federal label.\n\n"
+		"THE STATE CHANGE IS ALLOWED TO FAIL AND THE RECORD IS NOT. A sprayer "
+		"that was never marked `in_use` still gets its restrictions written, "
+		"with the state machine's refusal returned as a warning: a compliance "
+		"record must not depend on somebody having pressed the right button "
+		"first.",
+		{
+			"blocks": _field(
+				_STRING_ARRAY,
+				"The blocks that were sprayed — Field docnames, or Asset Register names for "
+				"block-shaped tags. Resolved against both registers.",
+			),
+			"block_doctype": _field(
+				_STRING,
+				"'Field' or 'Asset Register'. Only needed where a name exists in both.",
+			),
+			"materials_used": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"item_code": _field(_STRING, "The product's Item code."),
+						"qty": _field(_NUMBER, "How much went in the tank."),
+						"uom": _field(_STRING, "Unit of measure."),
+					},
+					"required": ["item_code", "qty"],
+				},
+				"description": "The tank mix. Each Item's own rei_hours is what sets the window.",
+			},
+			"sprayer": _field(
+				_STRING,
+				"Optional Asset Register docname of the machine. Refused if it is not a Sprayer — "
+				"a window filed against a tractor is one nobody scanning the sprayer will see.",
+			),
+			"rei_hours": _field(
+				_NUMBER,
+				"Optional. State the interval outright, overriding every label in the tank. For a "
+				"product not yet in the register, or a state interval longer than the label.",
+			),
+			"completed_at": _field(
+				_STRING,
+				"YYYY-MM-DD HH:MM:SS. When the application FINISHED — the window runs from here "
+				"and not from when this was filed, so a handset out of signal for two hours does "
+				"not restrict a block for two hours longer than the label says. Default now.",
+			),
+			"source_task": _field(_STRING, "Optional Farm Task this spray closed."),
+			"applicator": _field(_STRING, "Who applied it. Defaults to the session user."),
+			"end_spray": _field(
+				_BOOLEAN,
+				"Also move the sprayer out of `in_use` on its state machine. Default true.",
+			),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"notes": _field(_STRING, "Anything else about the application."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		required=("blocks",),
+		mutating=True,
+		title="Record a spray and start its REI",
+		available=_needs_doctype("Spray REI"),
+		requires="the Spray REI DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_active_rei": _tool(
+		spray_rei.get_active_rei,
+		"Is this block closed to entry right now, and until when. Read-only, "
+		"and the question a worker at a gate is actually asking.\n\n"
+		"THE LONGEST LIVE WINDOW IS THE ANSWER, not the first or the most "
+		"recent spray. Two applications on one block a day apart leave two "
+		"records, and the block clears when the LAST of them does — a worker "
+		"told 'two hours' because that was the nearer window would walk in "
+		"under a live restriction.\n\n"
+		"`warning` is the one sentence a screen puts in front of somebody, and "
+		"it is the same sentence every other surface shows: a scan of the "
+		"block, a scan of a machine parked in it, and a task dispatched to it "
+		"all render this string, because a worker who reads one wording at a "
+		"gate and a different one on a work order has been given two rules.\n\n"
+		"EVERY READ SWEEPS EXPIRED WINDOWS CLOSED FIRST, so a bench whose "
+		"scheduler is wedged still answers correctly at a gate.",
+		{
+			"block": _field(_STRING, "The block — a Field docname, or an Asset Register block tag."),
+			"block_doctype": _field(_STRING, "'Field' or 'Asset Register'. Only needed where a name is in both."),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		required=("block",),
+		title="Get active REI for a block",
+		available=_needs_doctype("Spray REI"),
+		requires="the Spray REI DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_active_reis": _tool(
+		spray_rei.list_active_reis,
+		"Every block on the farm that is closed to entry right now — the board "
+		"a foreman reads before sending anybody anywhere. Read-only.\n\n"
+		"`include_expired` widens it to windows that have cleared in the last "
+		"day (or `expired_within_hours`), for the morning question 'what was "
+		"sprayed yesterday and when did it clear'. Every row says whether it is "
+		"still live, so one list serves both views.",
+		{
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"sprayer": _field(_STRING, "Optional. Only windows this machine opened."),
+			"product": _field(_STRING, "Optional Item code. Only windows this product set."),
+			"include_expired": _field(_BOOLEAN, "Also show recently cleared windows. Default false."),
+			"expired_within_hours": _field(_INTEGER, "How far back cleared windows reach. Default 24."),
+			"limit": _field(_INTEGER, "Maximum rows. Capped at 200."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		title="List active REIs",
+		available=_needs_doctype("Spray REI"),
+		requires="the Spray REI DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"cancel_spray_rei": _tool(
+		spray_rei.cancel_spray_rei,
+		"MUTATING (default OFF). Withdraw a restriction that was recorded "
+		"against the wrong block.\n\n"
+		"CANCELLED RATHER THAN DELETED, and the reason is required. A "
+		"restriction that was published to a crew and then lifted is itself "
+		"something an inspector may ask about — 'why did this block show as "
+		"closed on Tuesday morning' has an answer, and a deleted row has none.",
+		{
+			"rei": _field(_STRING, "The Spray REI docname."),
+			"reason": _field(_STRING, "Why it is being withdrawn. Required, and written onto the record."),
+		},
+		required=("rei", "reason"),
+		mutating=True,
+		title="Cancel a spray REI",
+		available=_needs_doctype("Spray REI"),
+		requires="the Spray REI DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── v0.77.0: the schedule an insurer asks for ───────────────────────────
 	"export_insurance_schedule": _tool(

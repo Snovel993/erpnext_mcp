@@ -315,9 +315,37 @@ scheduler_events = {
 		"0 4 * * *": [
 			"erpnext_mcp.services.regulation_feed.sweep_due_feeds",
 		],
+		#: v0.78.0. The maintenance sweep, at half past four — after the
+		#: regulation feed and before anybody is at a tailgate. It raises WORK
+		#: FOR OTHER PEOPLE, which is what puts it here rather than on `hourly`:
+		#: a service task is a day's job, and a machine that came due at 09:12
+		#: does not need telling before tomorrow morning's board is read.
+		#:
+		#: ONE ENTRY THAT ITERATES EVERY COMPANY, the same shape as the four
+		#: above it, so adding an entity adds no line to this file. It cannot
+		#: raise a second task against an asset that already has one open — see
+		#: `trigger_maintenance_tasks` — which is what makes a nightly job safe
+		#: to leave running rather than a nightly source of duplicates.
+		"30 4 * * *": [
+			"erpnext_mcp.tools.maintenance.sweep_due_maintenance",
+		],
 	},
 	"hourly": [
 		"erpnext_mcp.alerts.sweep",
+		#: v0.78.0. Close restricted-entry windows whose moment has passed.
+		#:
+		#: HOURLY BECAUSE AN REI IS MEASURED IN HOURS. A four-hour window that
+		#: cleared at 10:40 and is still reported Active at 11:00 keeps a crew
+		#: out of a block they may work, which is the same cost as the opposite
+		#: error in the other direction and happens far more often.
+		#:
+		#: IT IS BELT AND BRACES, NOT THE MECHANISM. Every read in
+		#: `tools/spray_rei.py` runs the same sweep before it answers, so a
+		#: bench whose scheduler is wedged still tells the truth at a gate. This
+		#: entry is what keeps the register tidy for a Desk report and for the
+		#: query behind `list_active_reis`; it is deliberately NOT the only thing
+		#: standing between a worker and a stale restriction.
+		"erpnext_mcp.tools.spray_rei.close_expired_reis",
 	],
 	"daily": [
 		"erpnext_mcp.tools.uploads.collect_expired_sessions",

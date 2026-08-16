@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 529 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 539 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 254 read tools are **on** by default and can be switched off individually. A
+All 260 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -13178,8 +13178,9 @@ button vocabulary.
 **Unbuilt actions are published, marked.** Publishing only the finished ones
 gives iOS no way to lay out a screen it will need next month; publishing them
 undifferentiated gives a worker a button that fails after they have walked to the
-machine. Today the unbuilt rows are engine hours, application rates, calibration
-records and the REI timer — each with a note saying what building it would take.
+machine. v0.78.0 built two of the four that were unbuilt here — engine hours and
+the REI timer — so the remaining unbuilt rows are application rates and
+calibration records, each with a note saying what building it would take.
 
 **Tractors and vehicles gained `check_out` / `check_in`.** Who has the machine is
 a different question from whether it runs. `start_maintenance` reaches from
@@ -13191,3 +13192,210 @@ has it.
 records that it is hitched and when; `update_registered_asset(parent_asset=…)`
 records what to. Duplicating the link inside a state blob would give one fact two
 homes.
+
+---
+
+## The machine, the water and the block (v0.78.0)
+
+Six features that finish what the asset register was for. The tag on a valve has
+been scannable since v0.25.0 and the state log has been filling up ever since;
+this release is what that accumulated log can finally answer.
+
+### The hole this closes
+
+A worker scanned a tractor and got a name, a state and a menu. Everything else
+they needed existed somewhere — the hours it had run, whether it was due for
+service, what was open against it, whether the block it was parked in was closed
+after a spray — and assembling it took seven calls. On a rural cell at the end of
+a row, nobody makes seven calls.
+
+And the one thing that could hurt somebody was not recorded at all.
+`stock_bridge.spray_windows` has computed a restricted-entry interval since
+v0.69.0 and stamped it on the Farm Task a spray closed, which is the right
+arithmetic in the wrong shape: keyed on the task rather than the block, one
+location per task where a tank goes out over four, nothing at all when the spray
+came off a state change rather than a task, and never closed — so "is this block
+clear right now" could not be asked.
+
+### `record_spray_application` — MUTATING, default off
+
+Files a completed spray and opens the window it creates: **one `Spray REI`
+record per block**, so 40 CFR §170.407 is answered by asking about a block.
+
+| Argument | Meaning |
+| --- | --- |
+| `blocks` | The blocks sprayed — `Field` docnames or `Asset Register` block tags, resolved against both |
+| `block_doctype` | `Field` or `Asset Register`. Only needed where a name is in both |
+| `materials_used` | The tank mix, `[{item_code, qty, uom}]` — the same shape a Farm Task stores |
+| `sprayer` | Optional. Refused if it is not a Sprayer |
+| `rei_hours` | State the interval outright, overriding every label in the tank |
+| `completed_at` | When the application **finished**. The window runs from here |
+| `source_task`, `applicator`, `end_spray`, `company`, `notes` | |
+
+**The longest interval in the tank wins.** A four-hour product and a
+twenty-four-hour one together restrict the block for twenty-four hours; it does
+not become half-enterable at hour twelve. Every product in the mix is stored
+beside the one that set the window, because the question asked after somebody
+feels ill is about the mix.
+
+**A spray with no computable interval creates nothing and says so.** Where
+nothing in the tank has `rei_hours` on its Item, this refuses rather than writing
+a zero-hour window — a window of no hours reads as *this block is clear*, which
+is the one wrong answer that puts somebody in a treated row.
+
+**The state change is allowed to fail and the record is not.** A sprayer never
+marked `in_use` still gets its restrictions written, with the state machine's
+refusal returned as a warning. A compliance record must not depend on somebody
+having pressed the right button first.
+
+### `get_active_rei` and `list_active_reis`
+
+One block, or the whole farm. **The longest live window is the answer** — two
+applications a day apart leave two records and the block clears when the last of
+them does.
+
+`warning` is one sentence and it is the same sentence everywhere:
+
+```
+REI active — Warrior II — 3.4 hours remaining — do not enter without PPE.
+Block Home-7 was sprayed at 2026-08-15 06:10:00; entry is permitted from
+2026-08-15 18:10:00.
+```
+
+A scan of the block, a scan of a machine parked in it, and a task dispatched to
+it all render that string. A worker who reads one wording at a gate and a
+different one on a work order has been given two rules.
+
+**Closing is an act, not a comparison.** `status` is a real column, so "every
+restriction on this farm right now" is one indexed query. `close_expired_reis`
+maintains it — scheduled hourly, *and* run by every read in the module, so a
+bench whose scheduler is wedged still answers correctly at a gate.
+
+A dispatch to a restricted block is **warned, not refused**: §170.607 permits
+early entry for specific tasks with the label's PPE, so a server refusing it
+would be inventing a rule stricter than the regulation and training foremen to
+route around this app.
+
+`cancel_spray_rei` withdraws one, with a required reason. Cancelled rather than
+deleted — *why did this block show as closed on Tuesday morning* has an answer,
+and a deleted row has none.
+
+### Engine hours
+
+`Asset State Log.engine_hours` is the **series**; `Asset Register.current_hours`
+is a **cache** of the highest reading seen. Every figure is computed from the
+series, so a wrong cache is cosmetic and the next reading corrects it.
+
+Readings arrive on a state change rather than through a call of their own —
+`log_asset_state_change(action="check_out", engine_hours=1240.5)` — because the
+moment somebody reads an hour meter is the moment they are sitting in the
+machine. A check-in with a reading at both ends also records `hours_used` for
+that session.
+
+**A meter only counts up.** A reading below the last on record is refused as a
+typo; `allow_meter_reset=true` says the instrument was swapped, and the
+discontinuity is recorded in the log row's notes.
+
+`get_engine_hours_summary` reads it back: the meter now, total recorded, hours
+this season (`season_start`, default 1 January), hours since the last service,
+and every session paired up. A machine still out is an **open** session with a
+start and no length — nobody has read the meter since it left the yard.
+
+### Maintenance scheduling
+
+`Asset Register` gained `service_interval_hours`, `service_interval_days`,
+`last_service_date` and `last_service_hours`. Both intervals are optional and
+either alone is a complete schedule: a tractor on hours, an extinguisher on the
+calendar, a pump on whichever comes first — and `due_on` names the one that bit.
+
+`check_maintenance_due` answers for one asset or sweeps the register.
+**Unmeasured is not overdue**: an hours interval with no reading ever recorded
+comes back not-due with the reason, rather than filling a board with work nobody
+can verify on the day an operator first sets an interval.
+
+`trigger_maintenance_tasks` raises one Farm Task per due asset through
+`create_farm_task`, so the work carries an evidence contract and lands on the
+same board as everything else. `dry_run` **defaults to true** — this raises work
+for other people. It will not raise a second task where one is already open
+against the asset, through either the `asset` column or the location pair; a job
+that re-raised it nightly would produce the exact backlog that teaches a crew to
+ignore the board. `erpnext_mcp.tools.maintenance.sweep_due_maintenance` is the
+bare scheduler entry point, and it iterates every company.
+
+`record_service` closes one out. Without it every machine is overdue from the day
+it was registered, which is the state that trains people to ignore the alert.
+
+### `get_water_usage_report`
+
+Valve runtime rolled up by `zone`, `block`, `week`, `month`, `day` or `valve`
+over a date range, with an optional `field` filter — the report a water-rights
+filing and a cost allocation are both written from.
+
+**The measurement is `get_irrigation_runtime`'s, reused.** The same code handles
+the four hard cases — a run that started before the window, one that ended after
+it, one still open, and a close written by the cascade when somebody shut a main
+— so two reports cannot disagree about how long a gate was open.
+
+**Gallons are per-valve and never guessed.** `Asset Register.irrigation_zone` is
+new: the one link out of the asset tree, because the tree could not carry it —
+an asset's parent is another asset, so a valve could name the zone-shaped *asset*
+above it and never the `Irrigation Zone` record that holds the flow rate, the
+water right and the block. A valve with the column empty contributes its
+**minutes** to every total and no gallons, and is named in `unpriced_valves`
+rather than quietly dropped from a figure somebody is about to file with a
+district. `flow_rate_gpm` prices every valve at one rate for a single-pump
+system.
+
+**A run is billed whole to the period it started in.** A set opened on Saturday
+night that ran into Sunday is Saturday's irrigation — which is how the person who
+opened it would describe it, and what makes the report reconcilable against the
+valve log.
+
+`get_irrigation_runtime` is deliberately untouched: its arguments mean exactly
+what they meant, because a report somebody has been running all season must not
+change its answer on an upgrade.
+
+### `get_asset_status_report`, and what a scan returns now
+
+`scan_asset` and `universal_scan` both return the whole picture under `status`,
+composed once in `tools/asset_status.py`. `get_asset_status_report` is the same
+block for a caller who is **not** scanning — so it stamps no `last_scan_at`,
+because nobody was standing there.
+
+| Key | What it carries |
+| --- | --- |
+| `state` | Current state, the type's default, last scan |
+| `maintenance` | Due on hours / days, by how much, next service date |
+| `engine_hours` | Meter now, this season, since service, sessions |
+| `runtime` | For a valve: minutes today, this week, this season, running now |
+| `parent_valve` | The valve above, and whether it is shutting off the water |
+| `open_tasks`, `compliance_alerts`, `recent_activity` | |
+| `active_reis` | Restrictions on the ground this asset stands on |
+| `applied_reis` | For a sprayer: what **it** closed |
+| `warnings` | Ordered by what would hurt somebody first |
+| `sections_unavailable` | Named, not silent |
+
+`active_reis` and `applied_reis` are kept apart deliberately. A screen that
+merged them would tell a worker they may not enter the tractor shed.
+
+**Sections degrade; the call does not fail.** A scan is the most
+latency-sensitive call this app makes and it is made by somebody standing in the
+sun. A section whose doctype has not migrated or whose register will not answer
+comes back empty and is **named** — "no open tasks" and "the task register would
+not answer" are different sentences, and only one of them is a reason to call
+somebody.
+
+`needs_attention` and `warnings` are hoisted to the top level of a scan, because
+they are what a screen colours the whole card on. The flat keys every shipped
+handset already decodes — `state`, `open_tasks`, `action_menu` — are untouched.
+
+### The three mobile routes iOS was blocked on
+
+`register_asset`, `generate_asset_qr` and `attach_file_to_document` are now on
+`/farmops/api/mobile/…`. Field registration is one flow: photograph the plate,
+register the asset, get the QR back to print, attach the photograph.
+
+`attach_file_to_document` is the general tool behind a **doctype allowlist** in
+the wrapper. The tool will attach to any document on the site; a phone may attach
+to the registers a field app actually writes into, and everything else is refused
+by name. `allow_cancelled` is not passed through at all.

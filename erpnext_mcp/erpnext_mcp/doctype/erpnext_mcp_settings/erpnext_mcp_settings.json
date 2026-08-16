@@ -640,9 +640,15 @@
   "allow_get_asset_history",
   "allow_list_asset_state_history",
   "allow_get_irrigation_runtime",
+  "allow_get_water_usage_report",
   "allow_export_insurance_schedule",
   "allow_generate_asset_qr",
   "allow_generate_asset_qr_sheet",
+  "allow_get_asset_status_report",
+  "allow_get_engine_hours_summary",
+  "allow_check_maintenance_due",
+  "allow_get_active_rei",
+  "allow_list_active_reis",
   "asset_tag_col",
   "allow_scan_asset",
   "allow_register_asset",
@@ -651,6 +657,10 @@
   "allow_log_asset_state_change",
   "allow_bulk_create_assets",
   "allow_universal_scan",
+  "allow_record_service",
+  "allow_trigger_maintenance_tasks",
+  "allow_record_spray_application",
+  "allow_cancel_spray_rei",
   "fill_pipeline_read_section",
   "allow_get_fill_determination",
   "allow_get_fill_thresholds",
@@ -4942,6 +4952,76 @@
    "fieldname": "allow_universal_scan",
    "fieldtype": "Check",
    "label": "Universal Scan"
+  },
+  {
+   "default": "1",
+   "description": "READ. Valve runtime rolled up by zone, block, week, month, day or valve over a date range, priced per valve at its own Irrigation Zone's flow rate. Valves with no zone linked contribute minutes and no gallons, and are named rather than dropped. The report a water-rights filing is written from.",
+   "fieldname": "allow_get_water_usage_report",
+   "fieldtype": "Check",
+   "label": "Get Water Usage Report"
+  },
+  {
+   "default": "1",
+   "description": "READ. Everything about one asset on one call: state, service status, engine hours, open tasks, compliance alerts, recent activity and any live restricted-entry interval on the ground it stands on. The same block scan_asset returns, for a caller who is not scanning — so it records no scan.",
+   "fieldname": "allow_get_asset_status_report",
+   "fieldtype": "Check",
+   "label": "Get Asset Status Report"
+  },
+  {
+   "default": "1",
+   "description": "READ. What a tractor or vehicle has run: the meter now, hours this season, hours since the last service, and every checkout session paired with the hours on it. Computed from the Asset State Log series, not from a single overwritten column.",
+   "fieldname": "allow_get_engine_hours_summary",
+   "fieldtype": "Check",
+   "label": "Get Engine Hours Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. Whether one asset — or every asset on the farm — is due for service, on hours, on the calendar, or on whichever comes first. A machine with an hours interval and no meter reading is reported as unmeasured rather than overdue.",
+   "fieldname": "allow_check_maintenance_due",
+   "fieldtype": "Check",
+   "label": "Check Maintenance Due"
+  },
+  {
+   "default": "1",
+   "description": "READ. COMPLIANCE-CRITICAL. Is one block closed to entry after a spray, and until when. The longest live window wins. Defaults ON deliberately: a restricted-entry answer that an operator has to switch on is one a worker does not get at a gate.",
+   "fieldname": "allow_get_active_rei",
+   "fieldtype": "Check",
+   "label": "Get Active REI"
+  },
+  {
+   "default": "1",
+   "description": "READ. COMPLIANCE-CRITICAL. Every block on the farm closed to entry right now — the board a foreman reads before sending anybody anywhere. Defaults ON for the same reason as Get Active REI.",
+   "fieldname": "allow_list_active_reis",
+   "fieldtype": "Check",
+   "label": "List Active REIs"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Mark a service done — stamps last_service_date and last_service_hours, so the next interval counts from the right place.",
+   "fieldname": "allow_record_service",
+   "fieldtype": "Check",
+   "label": "Record Service"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Raise a Farm Task for every asset whose service is due. Skips assets that already have an open service task. dry_run defaults to TRUE — this raises work for other people.",
+   "fieldname": "allow_trigger_maintenance_tasks",
+   "fieldtype": "Check",
+   "label": "Trigger Maintenance Tasks"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. COMPLIANCE-CRITICAL. File a completed spray and open the restricted-entry window it creates — one Spray REI per block, from the longest REI in the tank. Refuses rather than writing a zero-hour window when no interval can be computed.",
+   "fieldname": "allow_record_spray_application",
+   "fieldtype": "Check",
+   "label": "Record Spray Application"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Withdraw a restricted-entry window recorded against the wrong block. Cancelled rather than deleted, and the reason is required.",
+   "fieldname": "allow_cancel_spray_rei",
+   "fieldtype": "Check",
+   "label": "Cancel Spray REI"
   },
   {
    "fieldname": "fill_pipeline_read_section",

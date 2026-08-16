@@ -1031,10 +1031,32 @@ class Catalogue(SeededTestCase):
 		single-rule call can only see the rules that already exist.
 
 		NOTHING in the consolidation posts to the ledger either.
+
+		v0.78.0 adds ten, six read and four write, and they are the asset
+		register finally answering what its own state log has been accumulating
+		since v0.25.0. `get_asset_status_report` is the whole picture for one
+		machine on one call — the seven round trips a scan used to cost.
+		`get_engine_hours_summary` and `record_service` are the two ends of a
+		meter reading; `check_maintenance_due` and `trigger_maintenance_tasks`
+		are the schedule and the work it raises, and the second defaults to a
+		dry run because it makes work for other people.
+		`get_water_usage_report` rolls the valve log up by zone, block, week or
+		month and prices it per valve at that valve's own zone rate — never
+		guessed, and unpriced valves are NAMED rather than dropped from a figure
+		somebody files with a district.
+
+		THE FOUR REI TOOLS ARE THE COMPLIANCE-CRITICAL ONES.
+		`record_spray_application` opens one restricted-entry window PER BLOCK
+		rather than one per task, which is what makes `get_active_rei` a single
+		indexed query at a gate; `list_active_reis` is the board a foreman reads
+		before sending anybody anywhere; `cancel_spray_rei` withdraws one with a
+		required reason and never deletes it. The two reads default ON — a
+		restricted-entry answer an operator has to switch on is one a worker
+		does not get.
 		"""
-		self.assertEqual(len(registry.TOOLS), 529)
-		self.assertEqual(len(registry.READ_TOOLS), 254)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 275)
+		self.assertEqual(len(registry.TOOLS), 539)
+		self.assertEqual(len(registry.READ_TOOLS), 260)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 279)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

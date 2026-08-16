@@ -820,9 +820,14 @@ class ToolRegistration(unittest.TestCase):
 		# editing. `create_bank_categorization_rules` vets a whole book of
 		# rules as a set.
 		# Nothing in the consolidation posts to the ledger.
-		self.assertEqual(len(self.registry.TOOLS), 529)
-		self.assertEqual(len(self.registry.READ_TOOLS), 254)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 275)
+		# v0.78.0 adds ten more — six reads and four writes — turning the asset
+		# register's accumulated state log into answers: a whole status report
+		# per machine, engine hours, a service schedule, a water usage roll-up,
+		# and the four restricted-entry tools. See `test_protocol.Catalogue`,
+		# which carries the long version of the same three numbers.
+		self.assertEqual(len(self.registry.TOOLS), 539)
+		self.assertEqual(len(self.registry.READ_TOOLS), 260)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 279)
 
 
 if __name__ == "__main__":

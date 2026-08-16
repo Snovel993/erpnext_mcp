@@ -3,6 +3,89 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.78.0 — 2026-08-15 — what the register knew, and could not say
+
+**A worker scanned a tractor and got back a name, a state and a menu.** Every
+other fact they needed existed somewhere in this app and assembling it took seven
+calls; on a rural cell at the end of a row nobody makes seven calls. And the one
+fact that could hurt somebody — whether the block a machine is parked in is closed
+after this morning's spray — was not recorded at all.
+
+### Restricted entry is its own record, keyed on the block
+
+`stock_bridge.spray_windows` has computed REIs since v0.69.0 and stamped
+`rei_expires_at` on the Farm Task a spray closed. Right arithmetic, wrong shape:
+keyed on the task rather than the block, one location per task where a tank goes
+out over four, nothing at all when the spray came off a state change, and never
+closed — so "is this block clear right now" could not be asked.
+
+New `Spray REI` doctype. `record_spray_application` writes one window per block
+from the longest interval in the tank, ends the spray on the machine, and stamps
+each block's `last_spray_date`. `get_active_rei` is one indexed query;
+`list_active_reis` is the board a foreman reads before sending anybody anywhere;
+`cancel_spray_rei` withdraws one with a required reason, and never deletes it.
+
+**A tank whose products have no `rei_hours` creates nothing and says so.** A
+window of zero hours reads as "this block is clear", which is the one wrong
+answer that puts somebody in a treated row.
+
+**Closing is an act, not a comparison.** `status` is a real column so the query
+is possible; `close_expired_reis` runs hourly *and* on every read in the module,
+so a bench whose scheduler is wedged still tells the truth at a gate. A dispatch
+to a restricted block is warned, not refused — §170.607 permits early entry with
+the label's PPE, and a server stricter than the regulation trains foremen to
+route around it.
+
+### Engine hours, and a service schedule that counts from somewhere
+
+`Asset State Log.engine_hours` is the series; `Asset Register.current_hours` is a
+cache of it. Readings ride on `check_out` / `check_in` rather than a call of
+their own, because the moment somebody reads a meter is the moment they are
+sitting in the machine. A reading below the last on record is refused as a typo
+unless `allow_meter_reset=true`, and the refusal happens before the state change.
+
+`Asset Register` gained `service_interval_hours`, `service_interval_days`,
+`last_service_date` and `last_service_hours`. Either interval alone is a complete
+schedule and `due_on` names the one that bit. **Unmeasured is not overdue.**
+`trigger_maintenance_tasks` raises one Farm Task per due asset, defaults to a dry
+run, and will not raise a second against an asset that already has one open;
+`sweep_due_maintenance` runs it nightly at 04:30. `record_service` closes one out.
+
+### Water usage, priced per valve
+
+`get_water_usage_report` rolls the valve log up by zone, block, week, month, day
+or valve, reusing `get_irrigation_runtime`'s measurement so two reports cannot
+disagree. `Asset Register.irrigation_zone` is the new link out of the asset tree
+— an asset's parent is another asset, so a valve could never name the zone record
+holding its flow rate. A valve with no zone contributes its minutes and no
+gallons, and is **named** in `unpriced_valves` rather than dropped from a figure
+somebody files with a district. A run is billed whole to the period it started in.
+
+### The scan answers in one call
+
+`scan_asset` and `universal_scan` return the whole picture under `status`:
+state, service, hours, runtime, the valve upstream, open tasks, late compliance,
+recent activity, and any live restriction on the ground the asset stands on.
+`get_asset_status_report` is the same block for a desk, so it records no scan.
+Sections degrade to empty and are **named** in `sections_unavailable`; the flat
+keys every shipped handset already decodes are untouched.
+
+### Three routes iOS was blocked on
+
+`register_asset`, `generate_asset_qr` and `attach_file_to_document` are on
+`/farmops/api/mobile/…`, so field registration completes: photograph the plate,
+register, print the tag, file the photograph. `attach_file_to_document` sits
+behind a doctype allowlist — every entry carries a `company` column, because
+that is what `guard.require_scoped_doc` reads — and `allow_cancelled` is not on
+the signature at all.
+
+### Fixed
+
+`list_cost_centers`, `list_suppliers`, `list_expense_receipts` and
+`update_expense_receipt` shipped with routes and were on neither of the two iOS
+contract sets, leaving `test_api_mobile` and `test_ios_contract` failing on
+`main`. They are listed where they belong.
+
 ## 0.77.0 — 2026-08-15 — which six o'clock, and what the machine is worth
 
 **A worker turned a valve on at six in the morning and every endpoint answered

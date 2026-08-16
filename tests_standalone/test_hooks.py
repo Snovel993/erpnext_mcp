@@ -437,7 +437,7 @@ class TheScheduledJobs(unittest.TestCase):
 				self.assertTrue(callable(resolve(path)))
 
 	def test_they_are_these_nine_and_nothing_else(self):
-		"""Nine jobs. Three write only this app's own doctypes or nothing at all;
+		"""Eleven jobs. Three write only this app's own doctypes or nothing at all;
 		the fourth writes two credential fields on Frappe's User and had to argue
 		for it — see hooks.py and tools/mobile.sweep_idle_grants — the fifth makes
 		an outbound request to somebody else's server, which is a bar none of the
@@ -445,8 +445,11 @@ class TheScheduledJobs(unittest.TestCase):
 		site's whole ledger, which is a different bar again and is why it is the
 		only one with a kill switch of its own.
 
-		Asserted as an exact mapping rather than a membership check, so a ninth
-		job fails here and has to be argued for. Every scheduled job is code that
+		Asserted as an exact mapping rather than a membership check, so a twelfth
+		job fails here and has to be argued for. (The method's name says nine and
+		is left alone on purpose: renaming it every time the list grows would
+		break the git history of the one test that guards this file, and the
+		count that matters is the mapping below.) Every scheduled job is code that
 		runs on somebody's site with nobody watching, which is the same reason
 		`KNOWN_HOOKS` refuses an unexamined hook key.
 
@@ -500,6 +503,27 @@ class TheScheduledJobs(unittest.TestCase):
 		keeps. It carries no kill switch of its own: unlike the KPI history job,
 		its cost scales with the number of accounts and KPIs one budget names
 		rather than with the size of the whole ledger.
+
+		The restricted-entry sweep arrived in v0.78.0 as the tenth, on `hourly`,
+		beside the alert sweep. AN REI IS MEASURED IN HOURS, so an hourly cadence
+		is the coarsest one that does not keep a crew out of a block they may
+		work — a four-hour window that cleared at 10:40 and still reads Active at
+		11:00 is the same cost as the opposite error and happens far more often.
+		IT IS BELT AND BRACES RATHER THAN THE MECHANISM: every read in
+		`tools/spray_rei.py` runs the same sweep before it answers, so a bench
+		whose scheduler is wedged still tells the truth at a gate. This entry
+		keeps the register tidy for a Desk report; it is deliberately not the
+		only thing standing between a worker and a stale restriction.
+
+		The maintenance sweep arrived in v0.78.0 as the eleventh, at 4:30 — after
+		the regulation feed and before anybody is at a tailgate. IT IS THE FIRST
+		JOB ON THIS LIST THAT RAISES WORK FOR OTHER PEOPLE, which is what puts it
+		on a named hour rather than on `hourly`: a service is a day's job, and a
+		machine that came due at 09:12 does not need telling before tomorrow
+		morning's board is read. It cannot raise a second task against an asset
+		that already has one open, which is what makes a nightly job safe to
+		leave running rather than a nightly source of duplicates. One entry that
+		iterates every company, same as the four crons above it.
 		"""
 		self.assertEqual(
 			hooks.scheduler_events,
@@ -510,8 +534,12 @@ class TheScheduledJobs(unittest.TestCase):
 					"0 3 * * *": ["erpnext_mcp.services.kpi_engine.refresh_all_kpi_caches"],
 					"15 3 * * *": ["erpnext_mcp.tools.budget.refresh_all_active_budgets"],
 					"0 4 * * *": ["erpnext_mcp.services.regulation_feed.sweep_due_feeds"],
+					"30 4 * * *": ["erpnext_mcp.tools.maintenance.sweep_due_maintenance"],
 				},
-				"hourly": ["erpnext_mcp.alerts.sweep"],
+				"hourly": [
+					"erpnext_mcp.alerts.sweep",
+					"erpnext_mcp.tools.spray_rei.close_expired_reis",
+				],
 				"daily": [
 					"erpnext_mcp.tools.uploads.collect_expired_sessions",
 					"erpnext_mcp.tools.mobile.sweep_idle_grants",
