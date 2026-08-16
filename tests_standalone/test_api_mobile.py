@@ -55,7 +55,7 @@ import frappe
 
 from erpnext_mcp import audit, compat, roles, settings
 from erpnext_mcp.api import files as files_api
-from erpnext_mcp.api import guard
+from erpnext_mcp.api import guard, shape
 from erpnext_mcp.api import mobile as mobile_api
 from erpnext_mcp.tools import mobile as mobile_tools
 
@@ -2415,3 +2415,119 @@ class ReceiptCaptureFromAPhone(MobileAPITestCase):
 		for method in ("create_settlement_statement", "submit_settlement_statement"):
 			with self.subTest(method=method):
 				self.assertFalse(hasattr(mobile_api, method))
+
+
+# ── the timer the handset stops ─────────────────────────────────────────────
+class TheFinishingTimestampsReachThePhone(MobileAPITestCase):
+	"""v0.76.0. `FarmTask.completedAt` and `.actualDurationMinutes` were nil.
+
+	`complete_task_via_mobile` has written both onto the Farm Task Assignment
+	since v0.16.0 and `_describe_assignment` has reported them ever since, but
+	`shape.task` never carried them up onto the task — so `elapsedMinutes` on
+	the handset fell through to counting from `startedAt` to NOW. A job closed
+	at four in the afternoon read as eleven hours' work when somebody opened it
+	the next morning. The doctype had the answer the whole time.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.unit = self.a_camp()
+		# A contract of findings only, so these tests turn on the TIMESTAMPS
+		# rather than on filing a photograph and a signature — which
+		# `TheWholeFlowWorks` already covers end to end.
+		self.task = self.a_task(
+			evidence_required={"findings_text": True},
+			location_doctype="Housing Unit",
+			location=self.unit,
+		)
+
+	def finish(self, **overrides):
+		self.be()
+		claimed = mobile_api.claim_task(task=self.task)
+		mobile_api.start_task(task=self.task)
+		payload = {"task": self.task, "findings_text": "", "clean_pass": True}
+		payload.update(overrides)
+		mobile_api.complete_task_via_mobile(**payload)
+		return claimed
+
+	def test_a_completed_task_comes_back_with_both(self):
+		self.finish(actual_duration_minutes=22, completed_at="2026-07-24 16:00:00")
+		row = mobile_api.get_task(task=self.task)
+
+		self.assertEqual(row["actual_duration_minutes"], 22)
+		self.assertTrue(row["completed_at"], "the app has nothing to stop its timer against")
+		self.assertIn("2026-07-24 16:00:00", str(row["completed_at"]))
+
+	def test_the_keys_are_present_on_a_task_nobody_has_finished(self):
+		"""Always emitted, like `claimed_at` and `started_at`. A client that has
+		to test for the key before reading it has two paths where it needs one."""
+		self.be()
+		row = mobile_api.get_task(task=self.task)
+		self.assertIn("completed_at", row)
+		self.assertIn("actual_duration_minutes", row)
+		self.assertIsNone(row["completed_at"])
+		self.assertIsNone(row["actual_duration_minutes"])
+
+	def test_a_finished_task_still_carries_the_time_it_was_started(self):
+		"""`live_assignment` is Claimed-or-In-Progress by definition, so a
+		completed task used to come back with every assignment field null —
+		which is the same open-ended timer by another route."""
+		self.finish(actual_duration_minutes=22)
+		row = mobile_api.get_task(task=self.task)
+
+		self.assertTrue(row["started_at"])
+		self.assertTrue(row["claimed_at"])
+		self.assertTrue(row["assignment"])
+
+	def test_a_task_in_progress_is_still_shaped_against_the_live_assignment(self):
+		"""The live one wins. Only a task with none falls through to history."""
+		self.be()
+		claimed = mobile_api.claim_task(task=self.task)
+		mobile_api.start_task(task=self.task)
+		row = mobile_api.get_task(task=self.task)
+
+		self.assertEqual(row["assignment"], claimed["assignment"])
+		self.assertIsNone(row["completed_at"])
+
+	def test_a_rejected_assignment_is_not_used_to_shape_the_task(self):
+		"""A worker who handed the job back has a `started_at` and no
+		completion, and shaping against theirs is the open-ended timer again."""
+		self.be()
+		mobile_api.claim_task(task=self.task)
+		mobile_api.start_task(task=self.task)
+		mobile_api.reject_task(task=self.task, reason="the ladder is broken")
+		row = mobile_api.get_task(task=self.task)
+
+		self.assertIsNone(row["completed_at"])
+		self.assertIsNone(row["started_at"])
+
+	def test_my_tasks_is_shaped_by_the_same_function_and_so_carries_them_too(self):
+		"""One fix serves both reads, asserted rather than assumed.
+
+		`list_my_tasks` publishes what a worker is HOLDING — claimed and in
+		progress — so a finished task is not in it to assert against over the
+		transport. What both reads share is `shape.task`, and this drives it with
+		the assignment shape `list_my_tasks` passes it.
+		"""
+		rows = shape.tasks(
+			[{"name": self.task, "task_name": "Habitability walk"}],
+			{self.task: {"completed_at": "2026-07-24 16:00:00", "actual_duration_minutes": 22}},
+		)
+		self.assertEqual(rows[0]["completed_at"], "2026-07-24 16:00:00")
+		self.assertEqual(rows[0]["actual_duration_minutes"], 22)
+
+	def test_a_duration_the_handset_sent_as_a_string_still_decodes_as_a_number(self):
+		"""`API_CONTRACT.md` §"Client tolerance" runs both ways: a number that
+		arrived as text must not leave as text and land in an Int decoder."""
+		row = shape.task({}, {"actual_duration_minutes": "22"})
+		self.assertEqual(row["actual_duration_minutes"], 22)
+
+	def test_the_completion_is_the_one_the_handset_sent(self):
+		"""Not the row's creation time: a queued completion reaching the server
+		an hour late must not report the hour as work."""
+		self.finish(completed_at="2026-07-24 16:00:00", actual_duration_minutes=22)
+		row = mobile_api.get_task(task=self.task)
+		assignment = frappe.db.get_value(
+			"Farm Task Assignment", row["assignment"], "completed_at"
+		)
+		self.assertEqual(str(row["completed_at"]), str(assignment))

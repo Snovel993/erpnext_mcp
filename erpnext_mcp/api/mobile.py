@@ -90,6 +90,7 @@ import frappe
 
 from .. import bucket_bridge, compat, datetimes
 from .. import shifts as shift_records
+from ..erpnext_mcp.doctype.farm_task_assignment import farm_task_assignment as assignment_states
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
 from ..tools import tasktemplates as template_tools
@@ -126,6 +127,11 @@ COMPLIANCE_POLICY = "Compliance Policy"
 EXPENSE_RECEIPT = "Expense Receipt"
 DOCUMENT_VALIDATION = "Document Validation"
 FARM_TASK_TEMPLATE = template_tools.TEMPLATE
+
+#: The Farm Task Assignment state a completion lands in. Imported from the
+#: doctype's own controller rather than spelled here, so a vocabulary change
+#: cannot leave this module quietly matching a state that no longer exists.
+ASSIGNMENT_COMPLETED = assignment_states.COMPLETED
 
 #: Most crew members `list_dispatched_tasks` will read a board for in one call.
 #: `shifts.CREW_CAP` is what `start_shift` will roster and is read rather than
@@ -249,6 +255,27 @@ def _assignment(task: str, assignment, allowed: list) -> str:
 	if str(frappe.db.get_value(FARM_TASK_ASSIGNMENT, value, "task") or "") != task:
 		frappe.throw(f"task_assignment {value} does not belong to {task}.", frappe.ValidationError)
 	return value
+
+
+def _last_completed(history) -> dict:
+	"""The most recent COMPLETED assignment in a task's history, or `{}`.
+
+	v0.76.0, and it exists for one reason: `live_assignment` excludes the state
+	the app most needs the timestamps from. A completed assignment is not live —
+	correctly, nothing is waiting on it — but it is the one carrying
+	`completed_at` and `actual_duration_minutes`, which is what stops a handset
+	counting elapsed time forward from `started_at` forever.
+
+	REJECTED ASSIGNMENTS ARE NOT ELIGIBLE. A worker who handed the job back has a
+	`started_at` and no completion, and shaping the task against theirs would put
+	a start time on a task nobody finished — the same open-ended timer, with a
+	name against it. `get_farm_task` orders history newest-first, so the first
+	match is the latest completion.
+	"""
+	for entry in history or []:
+		if isinstance(entry, dict) and entry.get("state") == ASSIGNMENT_COMPLETED:
+			return entry
+	return {}
 
 
 def _evidence(raw) -> list:
@@ -748,13 +775,26 @@ def list_available_tasks(user: str, company=None) -> dict:
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("get_task", limit=guard.READ_LIMIT)
 def get_task(user: str, task=None) -> dict:
-	"""One task in full: the job, the contract, and why it exists."""
+	"""One task in full: the job, the contract, and why it exists.
+
+	v0.76.0. A FINISHED TASK IS SHAPED AGAINST THE ASSIGNMENT THAT FINISHED IT.
+	`live_assignment` is Claimed-or-In-Progress by definition, so a task that has
+	been completed has no live one and used to come back with every assignment
+	field null — no `started_at`, and no `completed_at` for the app to stop its
+	timer against. `FarmTask.elapsedMinutes` then counted from nothing to now,
+	and a job closed at four in the afternoon read as eleven hours' work when
+	somebody opened it the next morning. The completion is right there in the
+	history; this picks it up when there is no live assignment to prefer.
+	"""
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
 
 	result = fieldwork.get_task_with_evidence_contract({"task": name})
 	data = result.data
-	out = shape.task(data.get("task") or {}, data.get("live_assignment") or {})
+	out = shape.task(
+		data.get("task") or {},
+		data.get("live_assignment") or _last_completed(data.get("history")),
+	)
 	out["is_mine"] = data.get("is_mine")
 	out["evidence_contract"] = data.get("evidence_contract")
 	out["evidence_outstanding"] = data.get("evidence_outstanding")

@@ -74,6 +74,35 @@ _SEVERITY_TO_URGENCY = {"Critical": "Critical", "Warning": "High", "Info": "Norm
 
 
 # ── tasks ───────────────────────────────────────────────────────────────────
+def _first(live: dict, row: dict, key: str):
+	"""The assignment's value for `key`, or the task row's, or None.
+
+	Presence rather than truthiness on the FIRST source only: an assignment that
+	carries the key with an empty value has genuinely not got one, and falling
+	through to the task row is right; an assignment that answers 0 has answered.
+	"""
+	value = live.get(key)
+	if value not in (None, ""):
+		return value
+	value = row.get(key)
+	return value if value not in (None, "") else None
+
+
+def _minutes(value):
+	"""A duration as a whole number of minutes, or None.
+
+	Zero survives as zero. A task completed inside the same minute it started is
+	a real completion with a real duration, and folding it to None would put the
+	handset back on the counting-from-`startedAt` path this field exists to stop.
+	"""
+	if value in (None, ""):
+		return None
+	try:
+		return int(float(value))
+	except (TypeError, ValueError):
+		return None
+
+
 def task(row: dict, assignment: dict | None = None) -> dict:
 	"""One Farm Task in the shape `FarmOpsKit.FarmTask` decodes."""
 	row = dict(row or {})
@@ -102,6 +131,21 @@ def task(row: dict, assignment: dict | None = None) -> dict:
 		"assigned_to_name": live.get("assigned_to_name") or row.get("assigned_to_name"),
 		"claimed_at": live.get("claimed_at"),
 		"started_at": live.get("started_at"),
+		# v0.76.0. THE FINISHING TIMESTAMPS, WHICH THE APP DECODES AND THE SERVER
+		# WAS NOT SENDING. `complete_task_via_mobile` writes both onto the Farm
+		# Task Assignment and `_describe_assignment` has reported them since
+		# v0.16.0, but `shape.task` never carried them up onto the task — so
+		# `FarmTask.completedAt` and `.actualDurationMinutes` decoded as nil on
+		# every read, and `FarmTask.elapsedMinutes` fell through to counting from
+		# `startedAt` to NOW. A finished task re-opened the next morning showed a
+		# timer that had been running all night. The doctype had the answer the
+		# whole time; this is the line that returns it.
+		#
+		# Read from the assignment FIRST and the task row second: the assignment
+		# is where a completion is recorded, and the task row carries the same two
+		# columns for the tools that describe a task on its own.
+		"completed_at": _first(live, row, "completed_at"),
+		"actual_duration_minutes": _minutes(_first(live, row, "actual_duration_minutes")),
 	}
 
 	source = alert_row(row.get("source_alert"))
