@@ -361,3 +361,169 @@ class AllTypesCovered(StateTestCase):
                 len(data["available_actions"]) > 0,
                 f"{asset_type} has no available actions from default state",
             )
+
+
+# ── the cascade: a main valve shuts everything below it ───────────────────────
+class ClosingAMainValveCascades(StateTestCase):
+    """v0.76.0. Shutting an upstream valve shuts the line below it.
+
+    The register has to agree with the pipe. A worker sent to a line break shuts
+    the main at the turnout; every valve below it is dry from that moment, and a
+    register still reporting them `open` is the reading the next person acts on.
+    """
+
+    def a_line(self):
+        """A turnout with two laterals under it, and a valve under one of those.
+
+        Three levels rather than two on purpose: the cascade has to reach the
+        whole subtree, and a walk that only read direct children would pass a
+        two-level fixture.
+        """
+        self.an_asset(name="MC-Main-01")
+        self.an_asset(name="MC-Lateral-A", location="MC-Main-01")
+        self.an_asset(name="MC-Lateral-B", location="MC-Main-01")
+        self.an_asset(name="MC-Drop-A1", location="MC-Lateral-A")
+        for name in ("MC-Main-01", "MC-Lateral-A", "MC-Lateral-B", "MC-Drop-A1"):
+            self.do_action(name, "open_valve")
+
+    def state_of(self, name):
+        return self.tool_data("get_available_actions", {"asset_name": name})["current_state"]
+
+    def test_closing_the_main_closes_every_valve_below_it(self):
+        self.a_line()
+        data = self.do_action("MC-Main-01", "close_valve")
+
+        self.assertEqual(data["to_state"], "closed")
+        self.assertEqual(data["cascaded_count"], 3)
+        self.assertEqual(
+            sorted(entry["asset_name"] for entry in data["cascaded"]),
+            ["MC-Drop-A1", "MC-Lateral-A", "MC-Lateral-B"],
+        )
+        for name in ("MC-Lateral-A", "MC-Lateral-B", "MC-Drop-A1"):
+            self.assertEqual(self.state_of(name), "closed", f"{name} was left open")
+
+    def test_the_cascade_reaches_a_grandchild(self):
+        """The valve two levels down is the one a direct-children walk would miss."""
+        self.a_line()
+        data = self.do_action("MC-Main-01", "close_valve")
+        reached = [entry["asset_name"] for entry in data["cascaded"]]
+        self.assertIn("MC-Drop-A1", reached)
+
+    def test_opening_the_main_does_not_cascade(self):
+        """The asymmetry is physical: closing upstream stops the water, opening
+        it only makes water available to valves that are shut on their own."""
+        self.a_line()
+        self.do_action("MC-Main-01", "close_valve")
+        data = self.do_action("MC-Main-01", "open_valve")
+
+        self.assertEqual(data["cascaded_count"], 0)
+        for name in ("MC-Lateral-A", "MC-Lateral-B", "MC-Drop-A1"):
+            self.assertEqual(self.state_of(name), "closed")
+
+    def test_each_cascaded_valve_gets_its_own_log_entry(self):
+        self.a_line()
+        self.do_action("MC-Main-01", "close_valve")
+        history = self.tool_data("list_asset_state_history", {"asset_name": "MC-Lateral-B"})
+        closes = [event for event in history["events"] if event["action"] == "close_valve"]
+
+        self.assertEqual(len(closes), 1)
+        self.assertEqual(closes[0]["from_state"], "open")
+        self.assertEqual(closes[0]["to_state"], "closed")
+        self.assertTrue(closes[0]["performed_at"], "a cascaded close carries no timestamp")
+
+    def test_a_cascaded_close_names_the_valve_that_caused_it(self):
+        self.a_line()
+        self.do_action("MC-Main-01", "close_valve")
+        history = self.tool_data("list_asset_state_history", {"asset_name": "MC-Lateral-B"})
+        close = next(e for e in history["events"] if e["action"] == "close_valve")
+
+        self.assertEqual(close["cascaded_from"], "MC-Main-01")
+        self.assertTrue(close["cascaded"])
+        self.assertIn("MC-Main-01", close["notes"])
+
+    def test_a_hand_closed_valve_is_not_marked_as_cascaded(self):
+        self.a_line()
+        self.do_action("MC-Lateral-B", "close_valve")
+        history = self.tool_data("list_asset_state_history", {"asset_name": "MC-Lateral-B"})
+        close = next(e for e in history["events"] if e["action"] == "close_valve")
+
+        self.assertIsNone(close["cascaded_from"])
+        self.assertFalse(close["cascaded"])
+
+    def test_a_valve_already_closed_is_skipped_with_a_reason(self):
+        self.a_line()
+        self.do_action("MC-Lateral-B", "close_valve")
+        data = self.do_action("MC-Main-01", "close_valve")
+
+        self.assertEqual(data["cascaded_count"], 2)
+        skipped = {entry["asset_name"]: entry["reason"] for entry in data["cascade_skipped"]}
+        self.assertIn("MC-Lateral-B", skipped)
+        self.assertIn("closed", skipped["MC-Lateral-B"])
+
+    def test_a_child_that_is_not_a_valve_is_skipped_rather_than_forced(self):
+        """A pump or a sensor hung under a valve has no close_valve action, and
+        inventing one for it would be a state machine per convenience."""
+        self.an_asset(name="MC-Main-02")
+        self.an_asset(name="MC-Pump-01", asset_type="Tractor", location="MC-Main-02")
+        self.do_action("MC-Main-02", "open_valve")
+
+        data = self.do_action("MC-Main-02", "close_valve")
+        self.assertEqual(data["cascaded_count"], 0)
+        skipped = {entry["asset_name"]: entry["reason"] for entry in data["cascade_skipped"]}
+        self.assertIn("MC-Pump-01", skipped)
+        self.assertIn("close_valve", skipped["MC-Pump-01"])
+
+    def test_a_retired_valve_is_skipped(self):
+        self.an_asset(name="MC-Main-03")
+        self.an_asset(name="MC-Old-01", location="MC-Main-03")
+        self.do_action("MC-Main-03", "open_valve")
+        self.do_action("MC-Old-01", "open_valve")
+        self.tool_data("retire_asset", {"asset_name": "MC-Old-01"})
+
+        data = self.do_action("MC-Main-03", "close_valve")
+        self.assertEqual(data["cascaded_count"], 0)
+        self.assertEqual(
+            [entry["reason"] for entry in data["cascade_skipped"]], ["retired"]
+        )
+
+    def test_a_valve_with_nothing_under_it_cascades_to_nothing(self):
+        self.an_asset(name="MC-Lonely-01")
+        self.do_action("MC-Lonely-01", "open_valve")
+        data = self.do_action("MC-Lonely-01", "close_valve")
+
+        self.assertEqual(data["cascaded_count"], 0)
+        self.assertEqual(data["cascade_skipped"], [])
+        self.assertFalse(data["cascade_truncated"])
+
+    def test_a_parent_loop_does_not_hang_the_cascade(self):
+        """`Asset Register.validate` refuses an asset that is its own parent and
+        nothing refuses A → B → A. A walk that trusted the tree would spin."""
+        self.an_asset(name="MC-Loop-A")
+        self.an_asset(name="MC-Loop-B", location="MC-Loop-A")
+        STORE.tables["Asset Register"]["MC-Loop-A"]["location"] = "MC-Loop-B"
+        self.do_action("MC-Loop-A", "open_valve")
+        self.do_action("MC-Loop-B", "open_valve")
+
+        data = self.do_action("MC-Loop-A", "close_valve")
+        self.assertEqual([entry["asset_name"] for entry in data["cascaded"]], ["MC-Loop-B"])
+
+    def test_a_refused_action_changes_nothing_downstream(self):
+        """The transition is validated before anything is written, cascade
+        included: a close that cannot happen must not shut the line."""
+        self.a_line()
+        self.do_action("MC-Main-01", "close_valve")
+        error = self.tool_error(
+            "log_asset_state_change", {"asset_name": "MC-Main-01", "action": "close_valve"}
+        )
+        self.assertIn("Cannot", error)
+
+    def test_only_the_scanned_valve_carries_the_gps_fix(self):
+        """A fix taken at the turnout is not where the lateral is, and a cascaded
+        row must not claim somebody was standing at it."""
+        self.a_line()
+        self.do_action("MC-Main-01", "close_valve", gps_lat=46.6, gps_lon=-120.5)
+
+        main = self.tool_data("list_asset_state_history", {"asset_name": "MC-Main-01"})
+        lateral = self.tool_data("list_asset_state_history", {"asset_name": "MC-Lateral-A"})
+        self.assertEqual(main["events"][0]["gps_latitude"], 46.6)
+        self.assertIsNone(lateral["events"][0]["gps_latitude"])

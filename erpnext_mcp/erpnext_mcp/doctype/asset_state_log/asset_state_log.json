@@ -20,6 +20,7 @@
   "performed_at",
   "detail_col",
   "notes",
+  "cascaded_from",
   "location_section",
   "gps_latitude",
   "location_col",
@@ -95,6 +96,16 @@
    "fieldname": "notes",
    "fieldtype": "Small Text",
    "label": "Notes"
+  },
+  {
+   "description": "Set when this state change was not performed on this asset directly, but followed from one performed upstream — closing a main valve at a turnout closes every valve below it on the line. Names the asset whose change caused this one. Empty on a state change somebody made standing in front of this asset.",
+   "fieldname": "cascaded_from",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Cascaded From",
+   "options": "Asset Register",
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "fieldname": "location_section",

@@ -892,6 +892,210 @@ def _actions_for(asset_type: str, current: str) -> list[dict]:
     return result
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# The cascade: a state change that carries downhill
+# ══════════════════════════════════════════════════════════════════════════════
+
+#: Which actions carry to an asset's descendants, per asset type. Everything not
+#: named here changes exactly one record, which is what a state change was until
+#: now and what it stays for every type but one.
+#:
+#: WHY A VALVE IS THE EXCEPTION. A main valve at an irrigation turnout is
+#: physically upstream of every valve on its line: shut it and the laterals below
+#: it are dry, whether or not anybody walked out to them. Without the cascade the
+#: register says those valves are `open` while no water can reach them — and that
+#: is the reading a worker gets when they are sent out on a line break, which is
+#: exactly the moment the main gets shut. The rule is not a convenience; it is
+#: the register agreeing with the pipe.
+#:
+#: OPENING DOES NOT CASCADE, and the asymmetry is the physical one rather than a
+#: half-finished implementation. Closing upstream stops the water for certain;
+#: opening upstream only makes water AVAILABLE to whatever is below, each of
+#: which is open or shut on its own account. A cascade in that direction would
+#: report a whole line as running because somebody turned on the main — and
+#: `get_irrigation_runtime` sums exactly these events into the minutes that feed
+#: water usage, so the wrong `open` is not a cosmetic error on a screen, it is a
+#: billing figure.
+_CASCADING_ACTIONS: dict[str, tuple[str, ...]] = {
+    "Irrigation Valve": ("close_valve",),
+}
+
+#: How far down the `location` tree a cascade walks, and how many records it may
+#: touch. A turnout with more than five hundred valves under it, or a line nested
+#: twelve deep, is a data problem rather than a farm — and a worker shutting one
+#: valve is not where somebody should discover it. Both bounds are REPORTED when
+#: they bite (`cascade_truncated`), because a silent cap on this particular
+#: operation reads as "everything downstream is shut" when it is not.
+CASCADE_DEPTH = 12
+CASCADE_CAP = 500
+
+_CHILD_FIELDS = ("name", "asset_type", "company", "location", "current_state", "retired_at")
+
+
+def _descendants(asset_name: str) -> tuple[list[dict], bool]:
+    """Every asset below this one in the `location` tree, nearest first.
+
+    Breadth-first and CYCLE-SAFE. `Asset Register.validate` refuses an asset that
+    is its own parent and nothing refuses A → B → A, so a walk that trusted the
+    tree to be a tree would spin on a register somebody has miskeyed. `seen`
+    makes the second visit a no-op instead.
+
+    Returns the rows and whether either bound above stopped the walk early.
+    """
+    fields = compat.existing_fields(ASSET_REGISTER, _CHILD_FIELDS)
+    out: list[dict] = []
+    seen = {asset_name}
+    frontier = [asset_name]
+    truncated = False
+
+    for _ in range(CASCADE_DEPTH):
+        if not frontier:
+            break
+        rows = frappe.db.get_all(
+            ASSET_REGISTER,
+            filters={"location": ("in", frontier)},
+            fields=fields,
+            order_by="name asc",
+            limit=CASCADE_CAP + 1,
+        )
+        frontier = []
+        for row in rows or []:
+            name = str(row.get("name"))
+            if name in seen:
+                continue
+            seen.add(name)
+            if len(out) >= CASCADE_CAP:
+                truncated = True
+                break
+            out.append(dict(row))
+            frontier.append(name)
+        if truncated:
+            break
+    else:
+        truncated = truncated or bool(frontier)
+
+    return out, truncated
+
+
+def _write_state_change(row: dict, asset_type: str, action: str, from_state: str, to_state: str,
+                        args: dict, cascaded_from: str = "") -> str:
+    """Move one asset to `to_state` and file the log row that says so.
+
+    The primary action and every record the cascade reaches go through here, so a
+    valve shut by hand and a valve shut because the main above it closed leave
+    the same shape of evidence — same action name, same from/to pair, same
+    timestamp column. `get_irrigation_runtime` pairs on that shape, and a cascade
+    that filed a differently-named action would drop the closing half of every
+    run it touched and report the water still running.
+
+    WHAT SEPARATES THE TWO IS `cascaded_from`, a column rather than a wording:
+    the row names the asset whose closure caused it. The sentence goes in `notes`
+    as well, because a site that has not migrated the column would otherwise have
+    no trace at all of why a valve nobody visited changed state.
+    """
+    doc = frappe.get_doc(ASSET_REGISTER, row["name"])
+    doc.current_state = json.dumps({"state": to_state})
+    doc.save(ignore_permissions=True)
+
+    log = frappe.new_doc(ASSET_STATE_LOG)
+    log.asset_name = row["name"]
+    log.asset_type = asset_type
+    log.action = action
+    log.from_state = from_state
+    log.to_state = to_state
+    log.performed_by = as_str(args, "performed_by") or (
+        frappe.session.user if hasattr(frappe, "session") else None
+    )
+    log.performed_at = frappe.utils.now()
+
+    notes = as_str(args, "notes")
+    if cascaded_from:
+        origin = (
+            f"Closed automatically when {cascaded_from} was closed — this valve is downstream "
+            f"of it and no water can reach it."
+        )
+        notes = f"{origin} {notes}".strip() if notes else origin
+        if compat.has_field(ASSET_STATE_LOG, "cascaded_from"):
+            log.cascaded_from = cascaded_from
+    log.notes = notes
+
+    # GPS AND THE PHOTO STAY ON THE RECORD THE WORKER WAS STANDING AT. A fix
+    # taken at the turnout is not where the lateral three hundred yards away is,
+    # and a photograph of the main is not a photograph of it either. A cascaded
+    # row carries the time, the transition and its cause; it does not claim
+    # somebody was there.
+    if not cascaded_from:
+        gps_lat = args.get("gps_lat") or args.get("gps_latitude")
+        gps_lon = args.get("gps_lon") or args.get("gps_longitude")
+        if gps_lat is not None:
+            try:
+                log.gps_latitude = float(gps_lat)
+            except (TypeError, ValueError):
+                pass
+        if gps_lon is not None:
+            try:
+                log.gps_longitude = float(gps_lon)
+            except (TypeError, ValueError):
+                pass
+
+        photo = as_str(args, "photo_file_token")
+        if photo:
+            log.photo = photo
+
+    log.insert(ignore_permissions=True)
+    return log.name
+
+
+def _cascade(root: dict, action: str, args: dict) -> dict:
+    """Apply `action` to every descendant of `root` that can take it.
+
+    EVERY DESCENDANT IS ACCOUNTED FOR, applied or skipped with the reason. A
+    cascade that reported only what it changed would leave the interesting case
+    invisible: the valve that was already `winterized`, or retired, or is a
+    pump rather than a valve, is precisely the one somebody needs to know the
+    main did not shut — and "12 valves closed" out of fourteen children says
+    nothing about the other two.
+    """
+    descendants, truncated = _descendants(root["name"])
+    applied, skipped = [], []
+
+    for child in descendants:
+        child_type = child.get("asset_type") or "General"
+        entry = {"asset_name": child.get("name"), "asset_type": child_type}
+
+        if child.get("retired_at"):
+            skipped.append({**entry, "reason": "retired"})
+            continue
+
+        defn = _STATE_DEFINITIONS.get(child_type)
+        rule = (defn or {}).get("actions", {}).get(action)
+        if not rule:
+            skipped.append({**entry, "reason": f"{child_type!r} has no {action!r} action"})
+            continue
+
+        current = _current_state_value(child.get("current_state")) or defn["default"]
+        if current not in rule["from"]:
+            skipped.append({**entry, "reason": f"already {current!r}"})
+            continue
+
+        log_name = _write_state_change(
+            child, child_type, action, current, rule["to"], args, cascaded_from=root["name"]
+        )
+        applied.append({
+            **entry,
+            "from_state": current,
+            "to_state": rule["to"],
+            "log_name": log_name,
+        })
+
+    return {
+        "cascaded": applied,
+        "cascaded_count": len(applied),
+        "cascade_skipped": skipped,
+        "cascade_truncated": truncated,
+    }
+
+
 # ── get_available_actions ─────────────────────────────────────────────────
 def get_available_actions(args: dict) -> ToolResult:
     """What can be done to this asset right now, given its type and current state."""
@@ -928,6 +1132,16 @@ def log_asset_state_change(args: dict) -> ToolResult:
 
     Validates the transition, updates current_state on the Asset Register record,
     and writes an Asset State Log entry.
+
+    SOME ACTIONS REACH FURTHER THAN THE ASSET SCANNED. Closing an irrigation
+    valve closes every valve below it on the line, because that is what shutting
+    an upstream valve does to the water — see `_CASCADING_ACTIONS` for why this
+    one direction and no other. The cascade is reported in full (`cascaded`,
+    `cascade_skipped`) rather than summarised: a worker who shut a main to fix a
+    line break is owed the list of what went dry with it.
+
+    THE PRIMARY TRANSITION IS VALIDATED BEFORE ANYTHING IS WRITTEN, cascade
+    included. A refused action leaves the register exactly as it found it.
     """
     _require()
     compat.require_doctype(
@@ -962,38 +1176,20 @@ def log_asset_state_change(args: dict) -> ToolResult:
 
     to_state = action_def["to"]
 
-    doc = frappe.get_doc(ASSET_REGISTER, row["name"])
-    doc.current_state = json.dumps({"state": to_state})
-    doc.save(ignore_permissions=True)
+    log_name = _write_state_change(row, asset_type, action, effective, to_state, args)
+    log_row = frappe.db.get_value(
+        ASSET_STATE_LOG, log_name, ["performed_by", "performed_at"], as_dict=True
+    ) or {}
 
-    log = frappe.new_doc(ASSET_STATE_LOG)
-    log.asset_name = row["name"]
-    log.asset_type = asset_type
-    log.action = action
-    log.from_state = effective
-    log.to_state = to_state
-    log.performed_by = as_str(args, "performed_by") or (frappe.session.user if hasattr(frappe, "session") else None)
-    log.performed_at = frappe.utils.now()
-    log.notes = as_str(args, "notes")
+    cascade = (
+        _cascade(row, action, args)
+        if action in _CASCADING_ACTIONS.get(asset_type, ())
+        else {"cascaded": [], "cascaded_count": 0, "cascade_skipped": [], "cascade_truncated": False}
+    )
 
-    gps_lat = args.get("gps_lat") or args.get("gps_latitude")
-    gps_lon = args.get("gps_lon") or args.get("gps_longitude")
-    if gps_lat is not None:
-        try:
-            log.gps_latitude = float(gps_lat)
-        except (TypeError, ValueError):
-            pass
-    if gps_lon is not None:
-        try:
-            log.gps_longitude = float(gps_lon)
-        except (TypeError, ValueError):
-            pass
-
-    photo = as_str(args, "photo_file_token")
-    if photo:
-        log.photo = photo
-
-    log.insert(ignore_permissions=True)
+    summary = f"{row['name']}: {action} ({effective} → {to_state})"
+    if cascade["cascaded_count"]:
+        summary += f", cascaded to {cascade['cascaded_count']} downstream asset(s)"
 
     return ToolResult(
         data={
@@ -1002,11 +1198,12 @@ def log_asset_state_change(args: dict) -> ToolResult:
             "action": action,
             "from_state": effective,
             "to_state": to_state,
-            "log_name": log.name,
-            "performed_by": log.performed_by,
-            "performed_at": str(log.performed_at or ""),
+            "log_name": log_name,
+            "performed_by": log_row.get("performed_by"),
+            "performed_at": str(log_row.get("performed_at") or ""),
+            **cascade,
         },
-        summary=f"{row['name']}: {action} ({effective} → {to_state})",
+        summary=summary,
         docstatus_delta="0 → 0 (updated)",
     )
 
@@ -1028,7 +1225,8 @@ def list_asset_state_history(args: dict) -> ToolResult:
     fields = compat.existing_fields(
         ASSET_STATE_LOG,
         ("name", "action", "from_state", "to_state", "performed_by", "performed_at",
-         "notes", "gps_latitude", "gps_longitude", "photo", "asset_type", "creation"),
+         "notes", "cascaded_from", "gps_latitude", "gps_longitude", "photo", "asset_type",
+         "creation"),
     )
 
     rows = frappe.db.get_all(
@@ -1049,6 +1247,11 @@ def list_asset_state_history(args: dict) -> ToolResult:
             "performed_by": r.get("performed_by") or None,
             "performed_at": str(r.get("performed_at") or r.get("creation") or ""),
             "notes": r.get("notes") or None,
+            # Present on every event rather than only the cascaded ones: a reader
+            # working out whether somebody was actually at this valve needs the
+            # answer on each row, not the absence of a key on most of them.
+            "cascaded_from": r.get("cascaded_from") or None,
+            "cascaded": bool(r.get("cascaded_from")),
             "gps_latitude": round(float(r.get("gps_latitude") or 0), 7) or None,
             "gps_longitude": round(float(r.get("gps_longitude") or 0), 7) or None,
             "photo": r.get("photo") or None,
