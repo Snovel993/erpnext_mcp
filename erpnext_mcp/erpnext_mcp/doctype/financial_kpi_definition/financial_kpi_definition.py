@@ -255,6 +255,13 @@ class FinancialKPIDefinition(Document):
 
 	# ── the thresholds ──────────────────────────────────────────────────
 	def _require_thresholds_that_can_be_read(self) -> None:
+		# `thresholds_of` READS ALL FOUR AT ZERO AS NONE AT ALL, and this check
+		# depends on it rather than repeating the reasoning: a Frappe `Float` is
+		# `NOT NULL DEFAULT 0`, so a definition saved with no thresholds — the
+		# seeded one, and any created through the tool without them — arrives
+		# here as four zeros. Read literally that is a floor and a ceiling at
+		# the same number, which is what the last check below refuses, and it
+		# would refuse every definition that declined to draw a line.
 		limits = kpi_engine.thresholds_of(self.as_dict())
 		low_warning = limits["threshold_warning_low"]
 		low_critical = limits["threshold_critical_low"]

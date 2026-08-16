@@ -88,12 +88,9 @@ _INT_FIELDS = (
 	"display_order",
 )
 
-_FLOAT_FIELDS = (
-	"threshold_warning_low",
-	"threshold_critical_low",
-	"threshold_warning_high",
-	"threshold_critical_high",
-)
+#: The four thresholds, read off the engine rather than restated, so a line this
+#: tool can write and the engine does not check cannot exist.
+_FLOAT_FIELDS = kpi_engine.THRESHOLD_FIELDS
 
 _BOOL_FIELDS = (
 	"enabled",

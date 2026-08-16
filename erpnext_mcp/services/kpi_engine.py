@@ -192,6 +192,17 @@ STATUS_NO_THRESHOLDS = "No thresholds"
 
 STATUS_ORDER = (STATUS_CRITICAL, STATUS_WARNING, STATUS_OK, STATUS_UNKNOWN, STATUS_NO_THRESHOLDS)
 
+#: The four lines a definition may draw, in the order `threshold_status` reads
+#: them. Named once here rather than restated in each of the four places that
+#: walk them, because a threshold this app knew about in one place and not in
+#: another would be one that saves and is never checked.
+THRESHOLD_FIELDS = (
+	"threshold_warning_low",
+	"threshold_critical_low",
+	"threshold_warning_high",
+	"threshold_critical_high",
+)
+
 FIELDS = (
 	"name",
 	"kpi_id",
@@ -1055,16 +1066,36 @@ def thresholds_of(row: dict) -> dict:
 	`threshold_warning_low` means low is not bad for this KPI, and a zero there
 	means a negative value is a warning. On a cash-flow KPI those are two very
 	different operations.
+
+	ALL FOUR AT EXACTLY ZERO IS THE ONE EXCEPTION, AND IT IS FRAPPE'S FLOOR
+	RATHER THAN A FIFTH CLAIM. A Frappe `Float` column is `NOT NULL DEFAULT 0`
+	and `get_valid_dict` runs `flt()` over the value on the way in, so a
+	definition saved with NO thresholds — which is what `seed_kpi_definitions`
+	writes, deliberately, and what `create_financial_kpi_definition` writes for
+	any caller who omitted them — comes back out of the database with four
+	zeros in it. Read literally that is a floor at 0 AND a ceiling at 0, which
+	is every possible value breaching one of them: the KPI is permanently in
+	alert and the nightly job raises a Compliance Alert about it for ever. It
+	is also the state `_require_thresholds_that_can_be_read` refuses at save
+	time, which is what made the v0.39.0 seeder throw a ValidationError on the
+	v0.79.0 deploy — the seeder's own record could not pass the controller's
+	own check.
+
+	So the all-four-zero row is read as no thresholds at all. Nothing is lost
+	by it: an operation that genuinely wants a floor at zero and a ceiling at
+	zero cannot have one, because that pair can never be read the way it is
+	written and the controller refuses to save it either way. A SINGLE zero
+	beside a real number on the other side is untouched — `threshold_warning_low
+	= 0` with `threshold_warning_high = 100` is still a floor at zero, still
+	fires on a negative value, and is still the distinction this docstring
+	opens with.
 	"""
 	out = {}
-	for field in (
-		"threshold_warning_low",
-		"threshold_critical_low",
-		"threshold_warning_high",
-		"threshold_critical_high",
-	):
+	for field in THRESHOLD_FIELDS:
 		raw = row.get(field)
 		out[field] = None if raw in (None, "") else float(raw)
+	if all(out[field] == 0.0 for field in THRESHOLD_FIELDS):
+		out = {field: None for field in THRESHOLD_FIELDS}
 	out["has_any"] = any(value is not None for value in out.values())
 	return out
 

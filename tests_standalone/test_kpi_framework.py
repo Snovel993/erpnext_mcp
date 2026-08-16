@@ -545,6 +545,44 @@ class ADefinitionIsRefusedBeforeItLies(KPIFrameworkTestCase):
 		self.assertIsNone(kpi_engine.thresholds_of(row)["threshold_warning_low"])
 		self.assertFalse(kpi_engine.thresholds_of(row)["has_any"])
 
+	def test_the_shape_frappes_float_floor_produces_is_saved_rather_than_refused(self):
+		"""THE v0.79.0 DEPLOY FAILURE, AT THE LAYER THAT THREW IT.
+
+		A Frappe `Float` is `NOT NULL DEFAULT 0`, so a definition that draws no
+		lines at all reaches this controller as four zeros — a floor and a
+		ceiling at the same number, which the overlap check below refuses. The
+		seeder's own record could therefore not pass the app's own validation,
+		and `bench migrate` reported a ValidationError from the fourteenth
+		install job. `thresholds_of` reads that shape as no thresholds, which is
+		what it is.
+		"""
+		self.a_definition(
+			kpi_id="zero_floored",
+			title="Zero Floored",
+			threshold_warning_low=0,
+			threshold_critical_low=0,
+			threshold_warning_high=0,
+			threshold_critical_high=0,
+		)
+		row = kpi_engine.definition_row("zero_floored")
+		self.assertFalse(kpi_engine.thresholds_of(row)["has_any"])
+		self.assertEqual(kpi_engine.threshold_status(row, 2250.0)["status"], "No thresholds")
+
+	def test_a_real_pair_that_overlaps_is_still_refused(self):
+		"""The check the exception above must not have turned off: a floor at or
+		above the ceiling is every possible value breaching one of them."""
+		message = self.tool_error(
+			"create_financial_kpi_definition",
+			{
+				"kpi_id": "impossible",
+				"title": "Impossible",
+				"builtin_function": "revenue",
+				"threshold_warning_low": 500,
+				"threshold_warning_high": 100,
+			},
+		)
+		self.assertIn("permanently in alert", message)
+
 
 # ── 4 ───────────────────────────────────────────────────────────────────────
 class ComputingGoesThroughTheWindowStandard(KPIFrameworkTestCase):
@@ -689,6 +727,35 @@ class TheThresholdVerdict(KPIFrameworkTestCase):
 		verdict = kpi_engine.threshold_status(self.a_row(), 42)
 		self.assertEqual(verdict["status"], "No thresholds")
 		self.assertFalse(verdict["breached"])
+
+	def test_all_four_at_zero_is_frappes_floor_and_not_four_lines(self):
+		"""The v0.79.0 deploy failure, read at the level it actually happened.
+
+		A Frappe `Float` column is `NOT NULL DEFAULT 0` and `get_valid_dict`
+		runs `flt()` on the way in, so a definition saved with NO thresholds —
+		which is what the seeder writes on purpose — comes back with four zeros
+		in it. Read literally that is a floor at 0 and a ceiling at 0, every
+		possible value breaches one of them, and the KPI is permanently in
+		alert with a Compliance Alert raised nightly about it.
+		"""
+		row = self.a_row(
+			threshold_warning_low=0.0,
+			threshold_critical_low=0.0,
+			threshold_warning_high=0.0,
+			threshold_critical_high=0.0,
+		)
+		self.assertFalse(kpi_engine.thresholds_of(row)["has_any"])
+		verdict = kpi_engine.threshold_status(row, 2250.0)
+		self.assertEqual(verdict["status"], "No thresholds")
+		self.assertFalse(verdict["breached"])
+
+	def test_one_zero_beside_a_real_number_is_still_a_floor_at_zero(self):
+		"""EMPTY IS NOT ZERO survives the exception above, which is the point of
+		making it all four rather than any."""
+		row = self.a_row(threshold_warning_low=0.0, threshold_warning_high=100.0)
+		self.assertTrue(kpi_engine.thresholds_of(row)["has_any"])
+		self.assertEqual(kpi_engine.threshold_status(row, -5.0)["status"], "Warning")
+		self.assertEqual(kpi_engine.threshold_status(row, 50.0)["status"], "OK")
 
 	def test_a_null_value_is_unknown_rather_than_a_pass(self):
 		verdict = kpi_engine.threshold_status(self.a_row(threshold_warning_low=500), None)
